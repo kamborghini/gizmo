@@ -26486,6 +26486,23 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
 
 
+    @mcp.custom_route("/brand/logo.svg", methods=["GET"])
+    async def brand_logo(request: Request):
+        # Projected Image's wordmark, from projectedimage.com, at the top of the
+        # sidebar. Public static bytes like the font above. It has no script in
+        # it, and the response forbids any all the same, in case it is ever
+        # opened on its own rather than as an image.
+        if "logo" not in _font_cache:
+            try:
+                with open(os.path.join(os.path.dirname(__file__), "data", "brand",
+                                       "projected-image-logo.svg"), "rb") as fh:
+                    _font_cache["logo"] = fh.read()
+            except OSError:
+                return PlainTextResponse("Not found", status_code=404)
+        return Response(_font_cache["logo"], media_type="image/svg+xml",
+                        headers={**_API_HEADERS, "Cache-Control": "public, max-age=86400",
+                                 "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})
+
     @mcp.custom_route("/print/production-labels/sign", methods=["POST", "OPTIONS"])
     async def sign_label_doc(request: Request):
         """The print-action extension calls this with the merchant's id token and gets

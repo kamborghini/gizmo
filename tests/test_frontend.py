@@ -268,7 +268,10 @@ def t_the_type_scale_is_closed():
 
 @test
 def t_weights_radii_and_elevation_are_closed():
-    weights = {int(v) for v in _re.findall(r"font-weight: *([0-9]{3})", _SCREEN)}
+    # A typeface's own @font-face range ("font-weight: 200 800") says what the
+    # file can draw, not a weight anything is set in.
+    weights = {int(v) for v in _re.findall(r"font-weight: *([0-9]{3})",
+                                           _re.sub(r"@font-face \{[^}]*\}", "", _SCREEN))}
     ok(weights <= {400, 500, 600}, "weights outside the scale: " + str(sorted(weights - {400, 500, 600})))
     radii = {float(v) for v in _re.findall(r"border-radius: *([0-9.]+)px", _SCREEN)}
     # 2 is the chart legend's key. The reference escapes its own scale there too
@@ -573,7 +576,7 @@ def t_inbox_unread_filters_and_claude_reply():
     # says WHOSE the email is, so unread keeps the edge, the bold sender, the
     # accented age and the word "New" instead of the tint. Four signals, one of
     # them a word, which is more than it had reason to need.
-    ok("inset var(--bw-strong) 0 0 var(--action-primary)" in HTML, "unread keeps the edge down its left")
+    ok("inset var(--bw-strong) 0 0 var(--border-selected)" in HTML, "unread keeps the edge down its left")
     unread_rule = CSS.split(".mrow.unread {")[1].split("}")[0]
     ok("background:" not in unread_rule,
        "and not the background, which now belongs to whoever claimed it")
@@ -1151,10 +1154,13 @@ def t_muted_text_is_readable_on_every_ground_the_app_paints():
 
 @test
 def t_each_semantic_ink_is_readable_on_its_own_tint_and_on_the_page():
+    for ground in ("action-primary", "action-hover", "action-active"):
+        r = _contrast(_token("text-on-action"), _token(ground))
+        ok(r >= 4.5, "ink on the brand button's --%s is %.2f:1, under 4.5" % (ground, r))
     """A win/warn/danger chip is a colour pair. Retuning one half without the
     other is how a status chip becomes unreadable."""
     for ink, tint in [("error", "error-bg"), ("success", "success-bg"), ("warning", "warning-bg"),
-                      ("action-primary", "action-soft")]:
+                      ("text-brand", "action-soft"), ("text-brand", "action-selected")]:
         for ground in (tint, "surface-primary"):
             r = _contrast(_token(ink), _token(ground))
             ok(r >= 4.5, "--%s on --%s is %.2f:1, under 4.5" % (ink, ground, r))
@@ -1206,30 +1212,16 @@ def t_the_deal_board_can_be_worked_without_a_mouse():
 
 @test
 def t_a_thumb_inside_a_track_takes_the_track_radius_minus_the_gap():
-    """Concentric corners. A rounded thumb inside a rounded track has to take
-    the track's radius MINUS the gap, or the two curves are not parallel and
-    the thumb reads as a slightly wrong shape rattling in its slot.
-
-    Picking the inner radius off the token scale by eye is what goes stale:
-    these two tracks used the SAME 8px thumb with different padding, so .seg
-    was concentric by luck (10 - 2 = 8) and .lbl-seg was 2px out (10 - 4 wants
-    6). Deriving it means the thumb follows the track, so changing either the
-    radius or the padding cannot silently break the corner. SwiftUI ships a
-    shape for this (ConcentricRectangle); on the web it is one subtraction, as
-    long as it is written down instead of guessed."""
-    # Anchored at the start of the rule: ".seg {" is also a substring of
-    # ".lbl-seg {", which silently matched the wrong control.
-    for track, thumb in ((r"\.lbl-seg \{", r"\.lbl-segbtn \{"), (r"\.seg \{", r"\.seg button \{")):
-        tm = re.search(r"(?m)^\s*" + track + r"([^}]*)\}", CSS)
-        bm = re.search(r"(?m)^\s*" + thumb + r"([^}]*)\}", CSS)
-        ok(tm and bm, "both halves of the control are still one rule each")
-        ok("--track-r:" in tm.group(1) and "--track-pad:" in tm.group(1),
-           "the track names its own radius and gap: " + track)
-        ok("border-radius: var(--track-r)" in tm.group(1),
-           "and rounds itself with them: " + track)
-        ok("calc(var(--track-r) - var(--track-pad))" in bm.group(1),
-           "the thumb derives its radius from the track rather than picking one: " + thumb)
-
+    """The segmented control is the one track with a thumb in it (2026-10-05:
+    five tab families became tabStrip() and segmented()). Track and thumb are
+    both the brand's pill, so they stay concentric whatever the padding: the
+    rule this test used to enforce by arithmetic now holds by construction."""
+    track = re.findall(r"\n        \.segmented \{([^}]*)\}", CSS)
+    thumb = re.findall(r"\n        \.segmented > button \{([^}]*)\}", CSS)
+    ok(len(track) == 1 and len(thumb) == 1, "both halves of the control are still one rule each")
+    ok("border-radius: var(--radius-control)" in track[0] and "border-radius: var(--radius-control)" in thumb[0],
+       "track and thumb are both pills, so the corners stay concentric")
+    ok(_token_raw("radius-control") == "var(--radius-full)", "and the control radius is the pill")
 
 @test
 def t_beating_the_plan_is_not_something_worth_looking_at():
@@ -1384,7 +1376,7 @@ def t_the_dead_elevation_token_is_gone():
     # control in the app silently lost its selected state while the guard stayed
     # green. A marker has to be asserted by its EFFECT, never by the presence of
     # a token that may resolve to nothing.
-    for sel in (r"\.lbl-segbtn:is\(\.on, \[aria-pressed=\"true\"\]\)", r"\.seg button:is\(\.on, \[aria-pressed=\"true\"\]\)"):
+    for sel in (r"\.segmented > button:is\(\.on, \[aria-pressed=\"true\"\]\)",):
         rule = re.search(sel + r" \{[^}]*\}", HTML, re.S)
         ok(rule, "the %s rule is still there" % sel)
         shadow = re.search(r"box-shadow:\s*([^;}]+)", rule.group(0))
@@ -1545,7 +1537,7 @@ def t_the_inbox_crm_chip_is_the_accent_not_a_lookalike():
     accent trio, so the CRM link chip was a slightly different blue from every
     other accent-tinted chip in the app."""
     rule = re.search(r"\.mail-crmchip \{[^}]*\}", HTML, re.S).group(0)
-    for tok in ("var(--action-soft)", "var(--action-line)", "var(--action-primary)"):
+    for tok in ("var(--action-soft)", "var(--action-line)", "var(--text-brand)"):
         ok(tok in rule, ".mail-crmchip reads %s" % tok)
     for h in ("#eef4ff", "#c7d7fe", "#3538cd"):
         ok(h not in HTML, "the near-miss %s is gone" % h)
@@ -1560,10 +1552,10 @@ def t_a_heading_with_a_control_in_it_is_still_the_heading_component():
     ok("el('div', 'section-title')" in fn, "it uses the real component")
     ok("font-size:11px" not in fn and "font-weight" not in fn,
        "and sets no type of its own")
-    ok(re.search(r"\.section-title > \.seg \{[^}]*order: 1", HTML),
+    ok(re.search(r"\.section-title > \.segmented \{[^}]*order: 1", HTML),
        "the range control is ordered past the ::after hairline, which is "
        "always the last flex item")
-    ok(re.search(r"\.section-title > \.seg \{[^}]*letter-spacing: normal", HTML),
+    ok(re.search(r"\.section-title > \.segmented \{[^}]*letter-spacing: normal", HTML),
        "and the heading's tracking does not leak into the button labels")
     ok("el('div', 'disp-subhead', sec.h)" not in SCRIPT,
        "the Guide's on-screen headings are headings, not dispatch field labels")
@@ -1623,7 +1615,7 @@ def t_the_customers_switcher_is_the_house_control():
     ok(".secbar" not in HTML and ".secbtn" not in HTML,
        "the one-off pill component is retired")
     fn = re.search(r"function sectorBar.*?\n        \}", SCRIPT, re.S).group(0)
-    ok("el('div', 'lbl-seg')" in fn and "lbl-segbtn" in fn,
+    ok("segmented(segOptions()" in fn,
        "it is built on the same segmented control as every other tab")
     ok("box.append(hero, sectorBar())" in SCRIPT,
        "and the hero comes first, like every other tab")
@@ -1848,7 +1840,7 @@ def t_the_production_queue_links_its_order_numbers():
     ok('"admin_url": _admin_order_url(o.get("id")),' in
        open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read(),
        "and the label order payload carries the url, like every other order payload")
-    ok(re.search(r"\.lbl-num-link[^{]*\{[^}]*var\(--action-primary\)", HTML),
+    ok(re.search(r"\.lbl-num-link[^{]*\{[^}]*var\(--text-brand\)", HTML),
        "it reads as a link, while .lbl-num keeps the tabular column geometry")
 
 
@@ -2220,12 +2212,12 @@ def t_the_forecast_tab_exists_and_is_gated():
     ok("'forecast'" in keys, "the tab is in the permission list")
     ok("'forecast'" in re.search(r"const OPT_IN_TABS = \[[^\]]+\]", SCRIPT).group(0),
        "and nobody inherits it: it holds the cash flow plan")
-    ok("if (tabAllowed('forecast')) tab('forecast', 'Forecast');" in SCRIPT, "it sits in the Finance tab strip")
+    ok("tabAllowed('forecast') && tab('forecast', 'Forecast')" in SCRIPT, "it sits in the Finance tab strip")
     ok("if (v === 'forecast') showForecastView();" in SCRIPT, "and opening it loads the latest run")
     fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
     ok("api('/api/forecast', {})" in SCRIPT.split("async function refreshForecast()")[1][:200], "it reads the posted run")
     ok("forecastSetupCard(c)" in fn and "No forecast yet" in SCRIPT, "with no run it explains the setup instead of showing nothing")
-    ok("segControl(names.map(" in fn, "every scenario in the workbook can be chosen")
+    ok("segmented(names.map(" in fn, "every scenario in the workbook can be chosen")
     # "Cash in", not "Net sales": the forecast is denominated in the order
     # total, because that is what the cash flow plan and Shopify's own forecast
     # are both written in. And MONTH by month, not day by day: the daily line
@@ -2261,7 +2253,7 @@ def t_the_forecast_tab_exists_and_is_gated():
     # The graph is back, and the reader chooses the scale rather than being
     # locked into one: a day question and a year question are different questions.
     chart = SCRIPT.split("function fcChartCard(", 1)[1].split("\n        function ", 1)[0]
-    ok("filterTabs(FC_RANGES, range, setFcRange)" in chart, "the range is the reader's to pick")
+    ok("segmented(FC_RANGES, range, setFcRange)" in chart, "the range is the reader's to pick")
     for key in ("'today'", "'week'", "'month'", "'q'", "'year'", "'ahead'", "'custom'"):
         ok(key in SCRIPT, "range " + key + " is offered")
     ok("grain = 'month'" in chart and "dayRows" in chart,
@@ -2659,7 +2651,7 @@ def t_the_beta_tabs_say_so_everywhere_they_are_named():
     # Liability and gained and lost the tag as you moved between the four.
     ok("cTitle.append(el('span', 'beta-tag'" in SCRIPT, "the CRM heading carries it")
     ft = fn_src("function financeTabs(")
-    ok("if (BETA_TABS.indexOf(key) >= 0) b.append(el('span', 'beta-tag', 'Beta'));" in ft,
+    ok("extra: BETA_TABS.indexOf(key) >= 0 ? el('span', 'beta-tag', 'Beta') : null" in ft,
        "and each Finance tab in beta carries it on the tab")
     for t in ("rTitle", "hTitle"):
         ok(t + ".append(el('span', 'beta-tag'" not in SCRIPT, "not on the shared Finance heading (" + t + ")")
@@ -2812,13 +2804,14 @@ def t_a_tab_left_open_is_told_it_is_out_of_date():
 @test
 def t_a_table_sits_in_its_own_box_inside_the_card():
     """Measured off the reference's rendered page, not judged by eye: its table
-    lives in a second frame at the base 10px radius inside a 14px card, and that
+    lives in a second frame a step inside its card's corner, and that
     inset edge is most of what makes its lists read the way they do. This used to
     be stripped flat on the reasoning that a card is already a box."""
     rule = CSS.split(".card .ktable-wrap, .card-bleed .ktable-wrap {")[1].split("}")[0]
-    ok("border-radius: var(--radius-md)" in rule, "the table keeps its own radius inside a card")
+    ok("border-radius: var(--radius-inset)" in rule, "the table keeps its own radius inside a card")
     ok("border: 0" not in rule, "and its own border")
-    ok("--radius-md: 10px" in CSS, "at the base radius the reference builds everything from")
+    ok("--radius-inset: var(--radius-xs)" in CSS and "--radius-card: var(--radius-sm)" in CSS,
+       "a step under the card's corner, set once")
     # A table that deliberately touches the card edge still can.
     bleed = CSS.split("\n        .card-bleed .ktable-wrap {")[1].split("}")[0]
     ok("border: 0" in bleed, "a bleed table is still flat to the edge")
@@ -2855,7 +2848,7 @@ def t_the_table_toolbar_and_pager_match_the_reference():
     ok("min-height: var(--control-h-md)" in btn and "padding: 0 var(--sp-2-5)" in btn, "small buttons are 28px tall")
     step = CSS.split(".tbl-step {")[1].split("}")[0]
     ok("width: var(--control-h)" in step and "height: var(--control-h)" in step, "pager steps are 32px square")
-    ok("border-radius: var(--radius-md)" in step, "at the base radius, not the control radius")
+    ok("border-radius: var(--radius-control)" in step, "a pill, like everything else pressed")
     # The pager must never claim to be paging through more than it is.
     fn = SCRIPT.split("function tablePager(o) {")[1][:1600]
     ok("Math.ceil(total / size)" in fn, "the page count comes from the total it was given")
@@ -2878,7 +2871,7 @@ def t_the_production_toolbar_is_sorted_not_shortened():
     fn = fn[:fn.index("\n        function ")]
     ok("const qCard = el('div', 'card q-card')" in fn, "the queue is a card, header and all")
     ok("tableTools([findWrap, filtTabs]" in fn, "search and filters on the toolbar")
-    ok("filterTabs([['all'" in fn, "the filters are counted tabs, not a segmented control")
+    ok("segmented([['all'" in fn, "the filters are a counted segmented control: a choice of what the card shows")
     # The two page-level rails are unstyled holders now: their children are
     # taken out and placed, and neither is ever appended to the page.
     ok("const bar = el('div');" in fn and "const tools = el('div');" in fn,
@@ -2936,7 +2929,7 @@ def t_the_menu_and_tabs_are_the_reference_measurements():
     trigger carries a ::after of height 2px in the near-black, the width of the
     trigger itself. The pill is still the thing that must never come back."""
     panel = CSS.split(".dmenu {")[1].split("}")[0]
-    ok("border-radius: var(--radius-md)" in panel, "the panel is at the base radius")
+    ok("border-radius: var(--radius-card)" in panel, "the panel takes the card's corner")
     ok("padding: var(--sp-1)" in panel, "padded 4px")
     ok("var(--shadow-md)" in panel, "its edge is a ring, not a border")
     ok("border:" not in panel, "and it has no border at all")
@@ -2944,17 +2937,17 @@ def t_the_menu_and_tabs_are_the_reference_measurements():
     ok("height: 28px" in item, "items are 28px")
     ok("padding: var(--sp-1) var(--sp-7) var(--sp-1) var(--sp-1-5)" in item, "with room on the right for a tick")
     ok("border-radius: var(--radius-sm)" in item, "at the control radius")
-    tab = CSS.split(".ftab {")[1].split("}")[0]
+    tab = CSS.split("\n        .tab {")[1].split("}")[0]
     ok("height: var(--control-h-sm)" in tab and "padding: var(--sp-0-5) var(--sp-1-5)" in tab, "tabs are 24px")
     ok("background: none" in tab, "with no filled pill")
-    on = CSS.split(".ftab:is(.on, [aria-selected=\"true\"]) {")[1].split("}")[0]
+    on = CSS.split(".tab:is(.on, [aria-current=\"page\"], [aria-pressed=\"true\"]) {")[1].split("}")[0]
     ok("color: var(--text-primary)" in on and "background" not in on,
        "the live tab takes full ink and still no fill behind it")
-    rule = CSS.split(".ftab:is(.on, [aria-selected=\"true\"])::after {")[1].split("}")[0]
+    rule = CSS.split(".tab:is(.on, [aria-current=\"page\"], [aria-pressed=\"true\"])::after {")[1].split("}")[0]
     ok("height: 2px" in rule, "and a 2px rule under it")
-    ok("var(--action-primary)" in rule, "painted in the near-black, not a tint that may resolve to nothing")
+    ok("var(--fill-mark)" in rule, "painted in the brand's mark teal (3.85:1 on white), a colour that actually paints")
     ok("left: 0" in rule and "right: 0" in rule, "the width of the tab itself, as the reference draws it")
-    ok(any("position: relative" in b for b in re.findall(r"\.ftab \{([^}]*)\}", CSS)),
+    ok(any("position: relative" in b for b in re.findall(r"\n        \.tab \{([^}]*)\}", CSS)),
        "with the tab as the box it is positioned against, or it hangs off the page")
 
 
@@ -2986,22 +2979,22 @@ def t_the_finance_pages_share_the_reference_tab_strip():
     reads as a control you press rather than a place you are. A pill is still
     wrong; what the reference actually draws instead is a 2px rule under the
     live trigger, and colour on its own left three near-identical links."""
-    ok("const seg = el('div', 'ptabs')" in SCRIPT, "the strip is the page-level one")
-    ok("el('button', 'ptab'" in SCRIPT, "and its tabs are page tabs")
-    fn = SCRIPT.split("function financeTabs(active, updated, actions) {")[1][:900]
-    ok("lbl-segbtn" not in fn, "the segmented control is gone from it")
-    ok("aria-current" in fn, "and the live one says it is the current page")
-    tab = CSS.split(".ptab {")[1].split("}")[0]
-    ok("height: 25px" in tab and "padding: var(--sp-0-5) var(--sp-1-5)" in tab, "25px tall, as the reference draws it")
+    fn = SCRIPT.split("function financeTabs(active, updated, actions) {")[1][:1600]
+    ok("const seg = tabStrip([" in fn and "{ nav: true, label: 'Finance pages' }" in fn, "the strip is the shared tabs, as pages")
+    ok("el('button', kind === 'tabs' ? 'tab' : null)" in SCRIPT, "and its tabs are the one tab")
+    ok("segmented(" not in fn, "the segmented control is gone from it")
+    ok("opts.nav ? 'aria-current' : 'aria-pressed'" in SCRIPT, "and the live one says it is the current page")
+    tab = CSS.split("\n        .tab {")[1].split("}")[0]
+    ok("height: var(--control-h-sm)" in tab and "padding: var(--sp-0-5) var(--sp-1-5)" in tab, "the small control height, one size for every tab")
     ok("font-size: var(--text-sm)" in tab, "at 14px, bigger than a filter tab inside a card")
     ok("background: none" in tab, "with no pill")
-    on = CSS.split(".ptab:is(.on, [aria-current=\"page\"]) {")[1].split("}")[0]
+    on = CSS.split(".tab:is(.on, [aria-current=\"page\"], [aria-pressed=\"true\"]) {")[1].split("}")[0]
     ok("color: var(--text-primary)" in on and "background" not in on, "the live page takes full ink, with no pill")
-    rule = CSS.split(".ptab:is(.on, [aria-current=\"page\"])::after {")[1].split("}")[0]
+    rule = CSS.split(".tab:is(.on, [aria-current=\"page\"], [aria-pressed=\"true\"])::after {")[1].split("}")[0]
     ok("height: 2px" in rule, "and carries the reference's 2px rule under it")
-    ok("var(--action-primary)" in rule, "in the near-black, which is a colour that actually paints")
+    ok("var(--fill-mark)" in rule, "in the brand's mark teal, a colour that actually paints")
     ok("left: 0" in rule and "right: 0" in rule, "spanning the trigger's own width")
-    ok(any("position: relative" in b for b in re.findall(r"\.ptab \{([^}]*)\}", CSS)),
+    ok(any("position: relative" in b for b in re.findall(r"\n        \.tab \{([^}]*)\}", CSS)),
        "positioned against the tab, so the strip's metrics do not move")
 
 
@@ -3086,7 +3079,7 @@ def t_the_inbox_is_composed_like_the_reference():
        "the mailbox and its last sweep are the line under it")
     ok("mCard.append(tableTools([sWrap, states], [viewSeg]))" in fn,
        "search and states left, the view switch right")
-    ok("filterTabs([['open'" in fn, "the states are counted tabs")
+    ok("segmented([['open'" in fn, "the states are a counted segmented control")
     ok("el('div', 'lbl-toolbar')" not in fn, "the old jammed row is gone")
     # Who is on today became a card of its own rather than a bare strip.
     ok("el('h3', 'card-title', 'Who is on today')" in fn, "the team strip is a card")
@@ -3152,7 +3145,7 @@ def t_the_files_list_is_the_reference_measurement():
     """The control radius read as a large button rather than a frame around
     rows, and a 0.5px rule lands on a device pixel on some screens only."""
     lst = CSS.split(".files-list {")[1].split("}")[0]
-    ok("border-radius: var(--radius-md)" in lst, "the list box is at the base radius")
+    ok("border-radius: var(--radius-inset)" in lst, "the list box steps inside its card")
     ok("var(--bw-hairline) solid var(--border-default)" in lst, "in the border ink")
     row = CSS.split(".files-row { display: flex")[1].split("}")[0]
     ok("padding: var(--sp-3)" in row, "the shared row shell is padded 12px square")
@@ -3177,8 +3170,10 @@ def t_every_chart_line_comes_off_the_ramp():
     ok("'--chart-1', '--chart-2', '--chart-3', '--chart-4', '--chart-5'" in ramp
        and "].map(tokenValue)" in SCRIPT.split("const CH = [")[1][:120],
        "the ramp is read from the tokens, not carried as hex")
-    for i, hexv in enumerate(("#171717", "#525252", "#737373", "#a1a1a1", "#d4d4d4"), 1):
-        ok(_token("chart-%d" % i) == hexv, "--chart-%d still resolves to %s" % (i, hexv))
+    # The brand's order (2026-10-05): teal, dark teal, blue, grey, amber.
+    # The grey is the 500: the 400 was 2.6:1 on a card, under the 3:1 a line needs.
+    for i, hexv in enumerate(("#0F9097", "#08484C", "#334FB4", "#737373", "#b45309"), 1):
+        ok(_token("chart-%d" % i).lower() == hexv.lower(), "--chart-%d still resolves to %s" % (i, hexv))
     # Every series names a ramp slot.
     for m in _re.finditer(r"color: (CH\[\d\]|[A-Za-z_$][\w.$]*)", SCRIPT):
         ok(m.group(1).startswith("CH[") or not m.group(1).startswith("#"),
@@ -3441,9 +3436,9 @@ def t_touch_and_scroll_behave_like_an_app():
 
 @test
 def t_nested_boxes_step_their_radius_down():
-    """A 14px box inside a 14px box with 16px padding reads blocky at the inner
+    """A box inside a box with the same corner reads blocky at the inner
     corner. The tables already stepped down; these three shapes had not."""
-    ok(".card .insight, .card .empty, .chart-card .empty { border-radius: var(--radius-md); }" in CSS,
+    ok(".card .insight, .card .empty, .chart-card .empty { border-radius: var(--radius-inset); }" in CSS,
        "insight and empty boxes step down inside cards")
 
 
@@ -3497,7 +3492,7 @@ def t_the_connector_tab_is_fully_plumbed():
     ok("'connector']" in SCRIPT.split("const BETA_TABS = [")[1][:60], "it wears Beta")
     ok("connector: 'Xero sync'" in SCRIPT, "the topbar can name it")
     ok("if (v === 'connector') showConnectorView();" in SCRIPT, "and setView opens it")
-    ok("if (tabAllowed('connector')) tab('connector', 'Xero sync');" in SCRIPT,
+    ok("tabAllowed('connector') && tab('connector', 'Xero sync')" in SCRIPT,
        "it sits in the Finance strip, gated like Reconciliation")
 
 
@@ -3560,7 +3555,8 @@ def t_the_sidebar_does_not_dim_where_you_are_not():
     ok("font-weight: var(--weight-regular)" in item, "at normal weight")
     act = CSS.split(".nav-item:is(.active, [aria-current=\"page\"]) {")[1].split("}")[0]
     ok("font-weight: var(--weight-medium)" in act, "and the active one carries the weight")
-    ok("background: var(--surface-tertiary)" in act, "on the muted pill")
+    ok("background: var(--action-selected)" in act and "color: var(--text-brand)" in act,
+       "on the brand's teal wash, in legible teal")
     side = CSS.split(".sidebar {")[1].split("}")[0]
     ok("border-right: var(--bw-hairline) solid var(--border-default)" in side,
        "the sidebar wears the reference's hairline on its right edge (its 'sidebar' variant)")
@@ -3637,12 +3633,17 @@ def t_the_card_elevation_token_actually_paints():
     """The companion to the dead-token lesson above: asserting that fifteen card
     rules carry var(--shadow-sm) means nothing while the token itself resolves to
     `none`. The reference measures rgba(0,0,0,.05) 0 1px 2px 0 on every card."""
+    # Since 2026-10-05 the brand (projectedimage.com sets every shadow's
+    # opacity to 0) puts no shadow under anything that sits on the page, so
+    # --shadow-sm is "none" on purpose, said where it is defined. What must
+    # still paint is the lift of what genuinely floats: menus, dialogs, drawers.
     m = re.search(r"--shadow-sm:\s*([^;]+);", CSS)
     ok(m, "the token is still declared")
-    val = m.group(1).strip()
-    ok(val != "none", "and it paints rather than silently voiding every shadow list")
-    ok("0 1px 2px 0" in val and "5%" in val,
-       "at the reference's 5%% alpha, not a heavier invented lift")
+    ok(m.group(1).strip() == "none" and "the brand puts no shadow" in CSS.split("--shadow-sm:")[1][:120],
+       "a card's elevation is none by the brand's decision, and says so")
+    for tok in ("--shadow-md", "--shadow-lg"):
+        v = re.search(tok + r":\s*([^;]+);", CSS).group(1)
+        ok("none" not in v and "color-mix" in v, tok + " still paints: what floats is lifted")
 
 
 @test
@@ -4237,7 +4238,7 @@ def t_the_forecast_tab_shows_the_five_plain_models_and_what_they_scored():
     ok("'Source'" in fn, "the column is what it is: a source, not a model")
     # Twelve rows is a lot to land on someone who opened the page to read one
     # number. The choice of how much to show is remembered per person.
-    ok("filterTabs(FC_ROWS, mode, setFcRowsMode)" in fn, "the reader chooses how much to see")
+    ok("segmented(FC_ROWS, mode, setFcRowsMode)" in fn, "the reader chooses how much to see")
     ok("mode === 'one' ? ranked.slice(0, 1)" in fn and "ranked.slice(0, 3)" in fn,
        "one row, three rows, or all of them")
     ok("'Just the headline'" in SCRIPT and "'The three quoted'" in SCRIPT and "'Every source'" in SCRIPT,
@@ -5845,10 +5846,10 @@ def t_every_control_family_declares_its_states():
     families = {".btn": ("hover", "active", "disabled"), ".btn-primary": ("hover", "active", "disabled"),
                 ".btn-danger": ("hover", "active"), ".icon-btn": ("hover", "active", "disabled"),
                 ".nav-item": ("hover", "active"), ".chip": ("hover", "active", "disabled"),
-                ".lbl-segbtn": ("hover", "active", "disabled"), ".mail-claim": ("hover", "active", "disabled"),
+                ".segmented > button": ("hover", "active", "disabled"), ".mail-claim": ("hover", "active", "disabled"),
                 ".send": ("hover", "active", "disabled"), ".dmenu-item": ("hover", "active"),
                 ".convo": ("hover", "active"), ".mem-btn": ("hover", "active"), ".track-btn": ("hover", "active"),
-                ".ptab": ("hover", "active"), ".ftab": ("hover", "active"),
+                ".tab": ("hover", "active"),
                 ".wg-hide": ("hover", "active", "disabled")}
     for sel, states in families.items():
         for st in states:
@@ -5866,9 +5867,9 @@ def t_every_control_family_declares_its_states():
        "and cancelled")
     ok("function setBusy(" in SCRIPT and "function markInvalid(" in SCRIPT, "the script owns the two ARIA entry points")
     ok("setBusy(btn, true)" in SCRIPT and "markInvalid(reasonIn, true)" in SCRIPT, "and uses them")
-    for sel, attr in ((".nav-item", 'aria-current="page"'), (".btn", "aria-pressed"), (".ptab", "aria-current"),
-                      (".ftab", "aria-selected"), (".toggle", "aria-checked"), (".mrow", "aria-selected"),
-                      (".files-row", "aria-selected"), (".lbl-segbtn", "aria-pressed"), (".stat.stat-pick", "aria-pressed")):
+    for sel, attr in ((".nav-item", 'aria-current="page"'), (".btn", "aria-pressed"), (".tab", "aria-current"),
+                      (".tab", "aria-pressed"), (".toggle", "aria-checked"), (".mrow", "aria-selected"),
+                      (".files-row", "aria-selected"), (".segmented > button", "aria-pressed"), (".stat.stat-pick", "aria-pressed")):
         ok(re.search(re.escape(sel) + r":is\([^)]*" + attr, CSS), "%s's selected rule has its %s twin" % (sel, attr))
     ok("n.setAttribute('aria-current', 'page')" in SCRIPT, "and the nav actually sets aria-current")
 
@@ -5881,7 +5882,7 @@ def t_focus_is_declared_once_per_kind():
     ok(CSS.count("box-shadow: var(--focus-ring)") == 3,
        "the ring is read by the field rule and by the two composite fields that "
        "focus as a whole (the radio card, the composer box), and nowhere else")
-    ok(':is(input, textarea, select, [contenteditable="true"]):focus { outline: none; border-color: var(--action-primary); box-shadow: var(--focus-ring); }' in CSS,
+    ok(':is(input, textarea, select, [contenteditable="true"]):focus { outline: none; border-color: var(--border-selected); box-shadow: var(--focus-ring); }' in CSS,
        "one rule for every field, contenteditable included")
     ok(not re.search(r"\.[\w-]+:focus \{[^}]*(focus-ring|focus-outline)", CSS),
        "no component carries its own copy of either focus look")
@@ -6110,7 +6111,7 @@ def t_a_boxed_child_of_a_card_is_inset():
     ok("max-width: calc(100% - 2 * var(--sp-4))" in CSS.split("#view-connector .card > .lbl-row {")[1].split("}")[0],
        "a fit-content row counts its own inset, so it cannot hang out of the card at 375")
     ok(".ov-wrap > * + .run-gate { margin-top: 0; }" in CSS, "the run gate centres itself only when it is the whole page")
-    ok("line-height: var(--lh-control)" in CSS.split(".lbl-segbtn {")[1].split("}")[0], "segmented buttons are 24 tall in a 32 strip")
+    ok("line-height: var(--lh-control)" in CSS.split("\n        .segmented > button {")[1].split("}")[0], "segmented buttons are 24 tall in a 32 strip")
     ok("const label = a.metric || a.title || a.detail || 'A change was recorded without a description';" in SCRIPT,
        "an alert row shows whatever its record carries")
     ok("board.append(el('div', 'empty', 'No pipeline stages are set up yet.'))" in SCRIPT, "an empty pipeline says so")
@@ -8380,7 +8381,7 @@ def t_the_page_agrees_with_itself_after_a_run():
     ok("st.lastError !== tagErr && !boxSaysIt" in fn, "the chip does not repeat the tag section or the box")
     ok("op: 'quarantine'" not in fn and "connQuar" in fn, "the quarantine list is painted from what was read with the status")
     ok("connTagBusy === 'check' ? 'A tag check is in progress" in fn, "and the busy chip says what is running")
-    ok("connFocus = { sec: 'tag', on: 'tab' };" in fn and "sec.querySelector('.ftab.on')" in fn,
+    ok("connFocus = { sec: 'tag', on: 'tab' };" in fn and "sec.querySelector('.segmented > button.on')" in fn,
        "a filter click keeps focus on the filter")
 
 
@@ -8498,7 +8499,8 @@ def t_the_xero_page_uses_one_set_of_outcome_words():
     rc = fn_src("function cxReviewCounts(")
     ok("voided: n('voided'), keptPaid: n('updateBlocked')" in rc and "if (kind === 'creditNotes') {" in rc,
        "a void and an edit left as posted are counted, and a credit note shows no outcome it cannot have")
-    ok(".setup-steps li > .setup-code { white-space: nowrap; word-break: normal; }" in CSS, "a code word in a step never splits")
+    ok(".setup-steps li > .setup-code { word-break: normal; overflow-wrap: anywhere; }" in CSS,
+       "a code word in a step splits only when it is longer than the line")
 
 
 # ---- Workspace pages, 24 September 2026 -------------------------------------
@@ -9157,7 +9159,7 @@ def t_the_app_wide_layout_sweep_holds():
         "@container crmtable (max-width: 640px)": "CRM tables come in on a narrow card",
         "word-break: normal; overflow-wrap: anywhere; text-underline-offset: 2px;": "contact lines break between words",
         ".mown-slot { flex: 0 0 auto; min-width: 88px; max-width: 150px;": "owner chips show a short name whole",
-        ".lbl-seg > * { flex: 1 1 auto; }": "a phone tab strip that wraps fills its lines",
+        ".segmented > * { flex: 1 1 auto; justify-content: center; }": "a phone segmented strip that wraps fills its lines",
         "@media (max-width: 1100px) { .metrics.metrics-3 > :nth-child(3):last-child { grid-column: 1 / -1; } }": "a third tile takes the row",
         ".lbl-qrow .lbl-actions { justify-self: start; }": "queue buttons line up",
         # dashboards and finance
@@ -9284,6 +9286,93 @@ def t_the_chart_starts_at_the_month_the_reader_is_in():
        "This month and The months ahead start there: %s | %s" % (month.strip(), ahead.strip()))
     ok("r.date.slice(0, 7) === curMonth" in chart and "fcISO(asOf).slice(0, 7)" not in chart,
        "and the month's days are the reader's month, not the run's")
+
+
+@test
+def t_two_choosers_and_nothing_else():
+    """Five hand-built families did two jobs (Cameron, 2026-10-05: "uniformity
+    is key", "one source of truth"): page tabs, filter tabs, two segmented
+    tracks and the Guide's own. Now tabs move between sections and a segmented
+    control changes what a card shows, each built by one function and drawn by
+    one block, and nothing else may build or style either."""
+    for name in ("function chooser(kind, items, current, onPick, opts) {",
+                 "function tabStrip(items, current, onPick, opts) { return chooser('tabs'",
+                 "function segmented(items, current, onPick, opts) { return chooser('segmented'"):
+        ok(name in SCRIPT, "the builder is there: " + name[:40])
+    ok(not re.search(r"el\('div', '(tabs|segmented)", SCRIPT.replace("const bar = el('div', kind);", "")),
+       "no screen builds a strip by hand")
+    for gone in ("lbl-seg", "lbl-segbtn", "'ptab", "ptabs", "'ftab", "ftabs", "filterTabs(", "segControl(", "gseg"):
+        ok(gone not in SCRIPT, "the old family is gone from the script: " + gone)
+    for gone in (r"\.lbl-seg", r"\.ptab", r"\.ftab", r"\.seg \{", r"\.seg button"):
+        ok(not re.search(gone, CSS.replace("(.ptab, .ftab, .seg,\n           .lbl-seg", "")), "and from the sheet: " + gone)
+    for base in ("\n        .tabs {", "\n        .tab {", "\n        .segmented {", "\n        .segmented > button {"):
+        ok(CSS.count(base) == 1, "one base rule: " + base.strip())
+    ok(SCRIPT.count("tabStrip(") >= 7 and SCRIPT.count("segmented(") >= 15,
+       "every section strip and every in-card choice goes through them")
+
+
+@test
+def t_reactor_wears_projected_images_brand_from_one_place():
+    """The brand (projectedimage.com's own theme settings, 2026-10-05) is set
+    once, at the root, and every screen reads it."""
+    for tok, v in (("teal-500", "#13B7C0"), ("ink", "#121212"), ("off-white", "#F7F7F7"), ("brand-blue", "#334FB4")):
+        ok(_token_raw(tok).lower() == v.lower(), "--%s is the brand's %s" % (tok, v))
+    for tok, ref in (("action-primary", "var(--teal-500)"), ("text-on-action", "var(--ink)"), ("text-brand", "var(--teal-700)"),
+                     ("surface-page", "var(--off-white)"), ("radius-control", "var(--radius-full)")):
+        ok(_token_raw(tok) == ref, "--%s reads %s" % (tok, ref))
+    ok(_contrast(_token("teal-500"), "#ffffff") < 3, "the bright teal is too faint for text, which is why it is a fill")
+    ok(not re.search(r"(?<![-\w])color:\s*var\(--action-primary\)", CSS), "so nothing writes text in it")
+    ok("family=Inter:wght@400;500;600;700" in HTML and "family=Geist" not in HTML, "the interface face is Inter")
+    ok(CSS.count("@font-face { font-family: 'Bricolage Grotesque'") == 1, "the heading face is defined once")
+    ok(":is(.brand-name, .ov-hero h2, .section-title, .card-title, .run-gate h2, .empty-chat h2, .modal-head h3, .auth-card h2) {"
+       in CSS and "font-family: var(--font-display)" in CSS.split(".auth-card h2) {")[1][:80], "and every title is in it, from one list")
+    ok(CSS.count("font-family: var(--font-display)") == 1, "nowhere else sets a title face")
+    ok('<img class="brand-mark" src="/brand/logo.svg" alt="Projected Image"' in HTML, "the wordmark heads the sidebar")
+    ok("background: var(--surface-page)" in CSS.split("        body {")[1].split("}")[0], "on the brand's off-white page")
+
+
+@test
+def t_the_design_page_is_the_source_of_truth_made_visible():
+    """Design, in the Guide, is for admins and draws every part with the
+    builder the screens use, reading each colour from the tokens as the browser
+    has them. A gallery with its own copies would drift from the app the first
+    time either changed."""
+    segs = SCRIPT.split("const GUIDE_SEGS = [")[1].split("];")[0]
+    ok("['design', 'Design'," in segs and "'admin']" in segs, "Design is a Guide section, marked for admins")
+    ok("const guideSegs = () => GUIDE_SEGS.filter(s => s[3] !== 'admin' || guideAdmin());" in SCRIPT,
+       "and only an admin is offered it")
+    render = SCRIPT.split("function renderGuide() {")[1].split("\n        function ")[0]
+    ok("tabStrip(guideSegs()" in render and "tabStrip(GUIDE_SEGS" not in render, "the strip is built from the gated list")
+    ok("if (!guideSegs().some(s => s[0] === guideSeg)) guideSeg = 'guide';" in render,
+       "someone who is not an admin is never left on it")
+    seg = SCRIPT.split("function paintGuideSeg() {")[1].split("\n        function ")[0]
+    ok("if (guideSeg === 'design') { paintDesign(host); return; }" in seg, "it paints without fetching anything")
+    ok("box.querySelectorAll(':scope > .tabs > .tab')" in seg, "and the Guide's own tabs are told apart from the examples")
+    fn = SCRIPT.split("function paintDesign(host) {")[1].split("\n        function ")[0]
+    for part in ("tabStrip(", "segmented(", "metricsStrip(", "loadFailure(", "refreshBtn(", "'ktable-wrap'", "'ktable'",
+                 "'btn btn-primary'", "'chip'", "'empty'", "el('label', 'pfield')", "'field-help'", "'field-msg'",
+                 "toastOk(", "toastError("):
+        ok(part in fn, "the page draws %s with the real thing" % part)
+    block = SCRIPT.split("const DS_COLOURS = [")[1].split("function paintDesign(host) {")[0]
+    ok(not re.search(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b", block + fn), "no colour is written into the page, only token names")
+    ok("getComputedStyle(p).color" in block, "each is read as the browser resolves it")
+    for name in re.findall(r"'(--[a-z0-9-]*[a-z0-9])'", block):
+        ok(re.search(re.escape(name) + r":", CSS), "%s is a token the app defines" % name)
+    ok("'--chart-' + n" in block, "and the chart ramp is shown whole")
+    ds = "\n".join(l for l in CSS.split("\n") if l.strip().startswith(".ds-"))
+    ok(ds and not re.search(r"#[0-9a-fA-F]{3,6}\b|\d+px", ds), "the gallery's frame uses tokens only")
+
+
+@test
+def t_a_tab_strip_that_scrolls_on_a_phone_holds_its_underline():
+    """Found in the phone sweep: the live tab's underline hangs 3px under the
+    tab, and a strip that scrolls sideways counts that as overflow downwards
+    too, so every tab strip on a phone carried a vertical scrollbar 3px tall."""
+    ok("bottom: -3px; height: 2px;" in CSS.split(".tab:is(.on, [aria-current=\"page\"], [aria-pressed=\"true\"])::after {")[1][:200],
+       "the underline hangs 3px under the tab")
+    phone = CSS.split("@media (max-width: 900px) {\n            .tabs {")[1].split("}")[0]
+    ok("overflow-x: auto" in phone and "overflow-y: hidden" in phone, "the strip scrolls sideways only")
+    ok("padding-bottom: var(--sp-1)" in phone, "with room inside it for the 3px underline")
 
 
 if __name__ == "__main__":
