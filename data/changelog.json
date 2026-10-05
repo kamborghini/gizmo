@@ -21,6 +21,27 @@
      "text": "Cards, figures, tables and windows share one corner, and a box inside a card sits a step tighter than the card around it, instead of rounder."
     },
     {
+     "kind": "changed",
+     "text": "Every screen is spaced the same way. A page's tabs sit just under its heading, blocks on a page are one step apart, cards inside a card are another, and the controls in a toolbar are all one height, so nothing sits proud of the control beside it."
+    },
+    {
+     "kind": "changed",
+     "text": "Figures look the same on every page, with the same gap between the cards at every screen size, and every figure sits the same distance under its label so a row of them lines up."
+    },
+    {
+     "kind": "fixed",
+     "tab": "crm",
+     "text": "The CRM pipeline shows all five stages on a laptop screen. The fifth used to sit past the edge of the board, with nothing to say it was there."
+    },
+    {
+     "kind": "fixed",
+     "text": "On a phone or tablet the closed menu no longer casts a shadow over the left edge of every page, and a row of tabs that scrolls keeps the one you are on in view."
+    },
+    {
+     "kind": "changed",
+     "text": "The Guide's heading stays put as you move between its sections, and Print the guide sits beside its search."
+    },
+    {
      "kind": "fixed",
      "text": "The grey line on charts is darker. It was too faint to pick out against a card."
     },
