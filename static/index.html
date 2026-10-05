@@ -81,6 +81,7 @@
             --text-primary: var(--ink); --text-secondary: var(--neutral-600);
             --text-tertiary: var(--neutral-550); --text-disabled: var(--neutral-400);
             --text-on-action: var(--ink); --text-link: var(--teal-700); --text-brand: var(--teal-700);
+            --text-on-status: var(--white);   /* words and ticks on a status fill: ink on red-700 is 2.9:1, white 6.5:1 */
             /* Surfaces. Cards are white on the brand's off-white page, and
                keep their hairline: the brand draws no shadow under anything
                that sits on the page. The sidebar and top bar are white, like
@@ -144,7 +145,9 @@
             /* Elevation. A card is a hairline plus shadow-sm; only things that
                genuinely float get more. Rings are inset hairlines for things
                that cannot carry a border. */
-            --shadow-sm: none;   /* the brand puts no shadow under what sits on the page */
+            --shadow-sm: 0 0 0 0 transparent;   /* the brand puts no shadow under what sits on the page. Not
+               `none`: that is only valid alone, so `var(--shadow-sm), var(--shadow-lg)` became invalid
+               and the sign-in card lost the float it is meant to keep. */
             --shadow-md: 0 0 0 1px color-mix(in srgb, var(--neutral-950) 10%, transparent),
                          0 4px 6px -1px color-mix(in srgb, var(--black) 10%, transparent),
                          0 2px 4px -2px color-mix(in srgb, var(--black) 10%, transparent);
@@ -277,6 +280,9 @@
            labels and every figure stay in the interface face. */
         :is(.brand-name, .ov-hero h2, .section-title, .card-title, .run-gate h2, .empty-chat h2, .modal-head h3, .auth-card h2) {
             font-family: var(--font-display); }
+        /* A title's controls (a range, a switch and its label) stay in the
+           interface face: the buttons inherit their font, so they took the title's. */
+        :is(.section-title, .card-title, .ov-hero h2) :is(button, input, select, textarea, label, .segmented, .tabs) { font-family: var(--font-sans); }
         body { font-family: var(--font-sans); background: var(--surface-page); color: var(--text-primary);
             font-size: var(--text-sm); line-height: var(--lh-body); -webkit-font-smoothing: antialiased;
             letter-spacing: normal; font-variant-numeric: tabular-nums; color-scheme: light;
@@ -356,6 +362,9 @@
            for an account that cannot open it. */
         .page-tabs { display: flex; align-items: center; gap: var(--sp-3);
             flex-wrap: wrap; margin-bottom: var(--sp-6); }
+        /* The strip shares its row with the stamp and Refresh, centred: its own
+           space below would lift its labels 6px above them. */
+        .page-tabs > .tabs { margin-bottom: 0; }
         .page-tabs .spacer { flex: 1 1 auto; }
         .page-tabs-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-3); }
         .page-tabs .updated { font-size: var(--text-xs); color: var(--text-tertiary); }
@@ -1443,7 +1452,7 @@
            script puts straight into a card; the rig sweep finds new ones. */
         .card > :is(.lia-bar, .lbl-row, .ktable-wrap, .empty, .msg, .mail-sendwarn, .disp-warn, .mail-empty,
                     .cx-health, .fc-algo, .fc-alert, .know-body, .fc-drive-tot, .fc-split-bar, .mail-viewwarn,
-                    .rel, .req-row),
+                    .rel, .req-row, .segmented),
         .card-bleed > .empty {
             margin-left: var(--sp-4); margin-right: var(--sp-4);
             /* The inset is a MARGIN, so the width must not also be 100%:
@@ -1659,7 +1668,7 @@
            on the 21px first line of .action .text. */
         .action .check { width: var(--box-xs); height: var(--box-xs); border-radius: var(--radius-2xs); border: var(--bw-hairline) solid var(--border-emphasis); flex-shrink: 0; margin-top: var(--sp-0-5);
             display: grid; place-items: center; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
-        .action .check svg { width: var(--icon-xs); height: var(--icon-xs); opacity: 0; color: var(--text-on-action); }
+        .action .check svg { width: var(--icon-xs); height: var(--icon-xs); opacity: 0; color: var(--text-on-status); }
         .action.done .check { background: var(--success); border-color: var(--success); }
         .action.done .check svg { opacity: 1; }
         .action.done .text { color: var(--text-tertiary); text-decoration: line-through; }
@@ -3064,7 +3073,7 @@
         .crm-zone.won { border-color: var(--success); color: var(--success); }
         .crm-zone.lost { border-color: var(--error); color: var(--error); }
         .crm-zone.dragover { background: var(--surface-sunken); }
-        .crm-badge { background: var(--error); color: var(--text-on-action); border-radius: var(--radius-xs); font-size: var(--text-xs);
+        .crm-badge { background: var(--error); color: var(--text-on-status); border-radius: var(--radius-xs); font-size: var(--text-xs);
             font-weight: var(--weight-medium); padding: 0 var(--sp-1-5); margin-left: var(--sp-1-5); }
         .crm-new-dot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); background: var(--fill-mark); flex: none; }
         .crm-chev { display: flex; gap: var(--sp-0-5); margin: var(--sp-2) 0 var(--sp-1); }
@@ -3810,13 +3819,18 @@
         .tab .beta-tag { margin-left: 0; height: var(--sp-4); }
         /* On a phone a long strip scrolls rather than cutting off its last tab,
            and the Beta marks go (the sidebar still carries them). A strip that
-           scrolls sideways clips what hangs below it, so it holds the 3px
-           underline inside its own padding and never scrolls up and down: left
-           to itself it grew a scrollbar 3px tall beside every strip. */
+           scrolls sideways clips whatever hangs outside it, so it holds the 3px
+           underline and the 3px focus outline inside its own padding, taken
+           back by a negative margin so the tabs do not move, and never scrolls
+           up and down: left to itself it grew a scrollbar 3px tall beside
+           every strip. */
         @media (max-width: 900px) {
-            .tabs { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; padding-bottom: var(--sp-1); margin-bottom: var(--sp-2); }
+            .tabs { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; padding: var(--sp-1);
+                margin: calc(-1 * var(--sp-1)) calc(-1 * var(--sp-1)) var(--sp-1); max-width: calc(100% + 2 * var(--sp-1)); }
             .tab .beta-tag { display: none; } }
-        .segmented { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-0-5); max-width: 100%;
+        /* align-self: a card is a column flexbox, and stretched across it the
+           track ran from border to border with its choices bunched at one end. */
+        .segmented { display: inline-flex; flex-wrap: wrap; align-items: center; align-self: flex-start; gap: var(--sp-0-5); max-width: 100%;
             padding: var(--sp-0-5); background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default);
             border-radius: var(--radius-control); }
         .segmented > button { display: inline-flex; align-items: center; gap: var(--sp-1); height: var(--control-h-sm);
@@ -3831,8 +3845,12 @@
         .segmented > button .cdot { display: inline-grid; place-items: center; vertical-align: middle; color: var(--success); }
         .segmented > button .cdot svg { width: var(--icon-xs); height: var(--icon-xs); }
         /* On a phone a track that wraps fills each line, so a choice on a second
-           line reads as part of the control, not a stray. */
-        @media (max-width: 640px) { .segmented { display: flex; } .segmented > * { flex: 1 1 auto; justify-content: center; } }
+           line reads as part of the control, not a stray. Its corner is the
+           card's there: a pill two or three lines tall is a stadium, and the
+           choices at its ends poked out through the curve. */
+        @media (max-width: 640px) {
+            .segmented { display: flex; align-self: stretch; border-radius: var(--radius-card); }
+            .segmented > * { flex: 1 1 auto; justify-content: center; } }
         /* A 14px box inside a 14px box with 16px of padding reads blocky at
            the inner corner. The tables already step down to the base radius
            inside a card; these were the three shapes that had not. */
@@ -6932,6 +6950,11 @@ Projected Image UK"></textarea>
         function chooser(kind, items, current, onPick, opts) {
             opts = opts || {};
             const bar = el('div', kind);
+            /* What was last picked, kept apart from what is marked: a caller may
+               mark another choice for a while (CRM deals shows List while the
+               Board cannot draw a closed status), and pressing that one must
+               still be heard as a choice. */
+            let cur = current;
             if (opts.label) { bar.setAttribute('role', 'group'); bar.setAttribute('aria-label', opts.label); }
             const mark = (b, on) => {
                 b.classList.toggle('on', on);
@@ -6949,7 +6972,8 @@ Projected Image UK"></textarea>
                 if (o.disabled) b.disabled = true;
                 mark(b, o.key === current);
                 b.onclick = () => {
-                    if (b.classList.contains('on')) return;
+                    if (b.classList.contains('on') && o.key === cur) return;
+                    cur = o.key;
                     [].slice.call(bar.children).forEach(c => mark(c, c === b));
                     onPick(o.key);
                 };
@@ -18701,7 +18725,7 @@ Projected Image UK"></textarea>
                             const b = el('div', 'cov-note',
                                 'Already sent to the stock sheet at ' + londonHM(d.sent.sent_at)
                                 + (nm ? ' by ' + nm : '') + '. Sending again replaces that sheet.');
-                            b.style.color = 'var(--action-primary)';
+                            b.style.color = 'var(--text-brand)';
                             sheetHost.append(b);
                         }
                         const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = 'var(--sp-2-5)';
@@ -21594,6 +21618,9 @@ Projected Image UK"></textarea>
            app talking ABOUT itself.
            ================================================================== */
         let guideSeg = 'guide', updCache = null, updAt = 0;
+        /* Which paint of the Guide is the latest: a read for What's new that
+           lands after the reader moved to another section must not clear it. */
+        let guidePaintSeq = 0;
         const guideView = { q: '' };
         const reqView = { f: 'open', q: '', page: 1, size: 25, reply: null };
         const LS_SEEN_REL = 'sc_seen_release';   // the old per-browser date, read once for the first baseline
@@ -21668,7 +21695,7 @@ Projected Image UK"></textarea>
         const GUIDE_SEGS = [['guide', 'Guide', 'How the desk runs, and what to do when something goes wrong.'],
             ['new', 'What’s new', 'What changed in Reactor, newest first.'],
             ['requests', 'Requests', 'Ask for what the app does not do yet, and see what happened to it.'],
-            ['design', 'Design', 'Every colour, typeface and part Reactor is made of, drawn by the same code the screens use.', 'admin']];
+            ['design', 'Design', 'Every colour and typeface in Reactor, and the shared parts its screens are built from, drawn by the same code the screens use.', 'admin']];
         /* Design is for admins: it is how the app is built, not how to use it. */
         const guideSegs = () => GUIDE_SEGS.filter(s => s[3] !== 'admin' || guideAdmin());
         function renderGuide() {
@@ -21702,17 +21729,19 @@ Projected Image UK"></textarea>
             box.querySelectorAll(':scope > .tabs > .tab').forEach(b => { const on = b.dataset.k === guideSeg; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
             paintGuideDots();
             host.replaceChildren();
+            const ticket = ++guidePaintSeq;
             if (guideSeg === 'guide') { paintGuideBook(host); return; }
             if (guideSeg === 'design') { paintDesign(host); return; }
             const wait = el('div', 'thinking');
             wait.append(loader(), el('span', null, 'Reading…'));
             host.append(wait);
             loadUpdates().then(u => {
-                if ($('guide-host') !== host) return;
+                if ($('guide-host') !== host || ticket !== guidePaintSeq) return;
                 host.replaceChildren();
                 if (guideSeg === 'new') paintReleases(host, u);
                 else if (guideSeg === 'requests') paintRequests(host, u);
             }).catch(e => {
+                if ($('guide-host') !== host || ticket !== guidePaintSeq) return;
                 host.replaceChildren();
                 host.append(loadFailure('The updates could not be read. ' + (e.message || ''), () => { updCache = null; paintGuideSeg(); }));
             });
@@ -21750,6 +21779,28 @@ Projected Image UK"></textarea>
             return c;
         }
         const dsHex = (c) => '#' + c.map(v => Math.round(v).toString(16).padStart(2, '0')).join('').toUpperCase();
+        /* Every colour token the page defines that the curated groups do not
+           show, read from the :root rules themselves, so a colour added there
+           shows here without anyone remembering to list it. A role names
+           another token (or mixes them); a palette entry is a literal. */
+        function dsOtherColours(shown) {
+            const roots = [].slice.call(document.styleSheets).flatMap(sh => { try { return [].slice.call(sh.cssRules); } catch (e) { return []; } })
+                .filter(r => r.selectorText === ':root');
+            const cs = getComputedStyle(document.documentElement);
+            const roles = [], palette = [], seen = new Set(shown);
+            roots.forEach(r => {
+                for (let i = 0; i < r.style.length; i++) {
+                    const name = r.style[i];
+                    if (!name.startsWith('--') || seen.has(name)) continue;
+                    seen.add(name);
+                    const v = cs.getPropertyValue(name).trim();
+                    if (!v || !CSS.supports('color', v)) continue;
+                    (/^\s*(var|color-mix)\(/.test(r.style.getPropertyValue(name)) ? roles : palette).push(name);
+                }
+            });
+            const named = (t) => { const w = t.slice(2).replace(/-/g, ' '); return [w.charAt(0).toUpperCase() + w.slice(1), t, null, null]; };
+            return { roles: roles.map(named), palette: palette.map(named) };
+        }
         /* WCAG contrast between two colours, for the words under each swatch. */
         function dsContrast(a, b) {
             const lum = (c) => { const [r, g, bl] = c.map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * bl; };
@@ -21771,8 +21822,11 @@ Projected Image UK"></textarea>
             const page = el('div', 'ds-page');
             const white = dsColour('--surface-primary');
             /* Colours */
-            const colours = dsCard('Colours', 'Every colour in Reactor is one of these. A screen asks for a role, such as teal words or a mark, and never for a colour of its own.');
-            DS_COLOURS.forEach(([group, rows]) => {
+            const colours = dsCard('Colours', 'Every colour in Reactor is one of these, read from the one list at the top of the page. A screen asks for a role, such as teal words or a mark, and never for a colour of its own.');
+            const others = dsOtherColours(DS_COLOURS.flatMap(([, rows]) => rows.map(r => r[1])));
+            DS_COLOURS.concat([['Every other role a screen can ask for', others.roles],
+                ['The palette the roles are drawn from', others.palette]]).forEach(([group, rows]) => {
+                if (!rows.length) return;
                 const grid = el('div', 'ds-swatches');
                 rows.forEach(([name, token, use, on]) => {
                     const c = dsColour(token);
@@ -24940,7 +24994,7 @@ Projected Image UK"></textarea>
                             row.append(document.createTextNode(n + '. ' + text + ' '));
                             const a = el('a', null, linkText);
                             a.href = href; a.target = '_blank'; a.rel = 'noopener';
-                            a.style.color = 'var(--action-primary)';
+                            a.style.color = 'var(--text-link)';
                             row.append(a);
                             box2.append(row);
                             return row;

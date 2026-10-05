@@ -3635,12 +3635,17 @@ def t_the_card_elevation_token_actually_paints():
     `none`. The reference measures rgba(0,0,0,.05) 0 1px 2px 0 on every card."""
     # Since 2026-10-05 the brand (projectedimage.com sets every shadow's
     # opacity to 0) puts no shadow under anything that sits on the page, so
-    # --shadow-sm is "none" on purpose, said where it is defined. What must
+    # --shadow-sm paints nothing on purpose, said where it is defined. What must
     # still paint is the lift of what genuinely floats: menus, dialogs, drawers.
     m = re.search(r"--shadow-sm:\s*([^;]+);", CSS)
     ok(m, "the token is still declared")
-    ok(m.group(1).strip() == "none" and "the brand puts no shadow" in CSS.split("--shadow-sm:")[1][:120],
-       "a card's elevation is none by the brand's decision, and says so")
+    ok(m.group(1).strip() == "0 0 0 0 transparent" and "the brand puts no shadow" in CSS.split("--shadow-sm:")[1][:120],
+       "a card's elevation paints nothing by the brand's decision, and says so")
+    # Not `none`: a list holding `none` is invalid, so the sign-in card's
+    # `var(--shadow-sm), var(--shadow-lg)` silently lost its float.
+    ok(not re.search(r"--shadow-[a-z]+:\s*none", CSS), "no shadow token is `none`, which breaks every list it joins")
+    ok("box-shadow: var(--shadow-sm), var(--shadow-lg);" in CSS.split(".auth-card {")[1].split("}")[0],
+       "so the sign-in card keeps its float")
     for tok in ("--shadow-md", "--shadow-lg"):
         v = re.search(tok + r":\s*([^;]+);", CSS).group(1)
         ok("none" not in v and "color-mix" in v, tok + " still paints: what floats is lifted")
@@ -9372,7 +9377,81 @@ def t_a_tab_strip_that_scrolls_on_a_phone_holds_its_underline():
        "the underline hangs 3px under the tab")
     phone = CSS.split("@media (max-width: 900px) {\n            .tabs {")[1].split("}")[0]
     ok("overflow-x: auto" in phone and "overflow-y: hidden" in phone, "the strip scrolls sideways only")
-    ok("padding-bottom: var(--sp-1)" in phone, "with room inside it for the 3px underline")
+    ok("padding: var(--sp-1);" in phone, "with room inside it for the 3px underline")
+
+
+@test
+def t_the_brand_pilot_review_findings_stay_fixed():
+    """The review of the brand pilot (2026-10-05) found the teal and ink
+    changes had reached places the stylesheet guard could not see, and a
+    handful of layouts the new choosers broke. Each is held here."""
+    # Words and ticks on a status fill are white: ink on red-700 was 2.9:1.
+    ok(_token_raw("text-on-status") == "var(--white)", "a status fill carries white")
+    ok(_contrast(_token("text-on-status"), _token("error")) >= 4.5, "white on the error red reads at 4.5:1")
+    ok(_contrast(_token("text-on-status"), _token("success")) >= 4.5, "and on the success green")
+    ok("color: var(--text-on-status)" in CSS.split(".crm-badge {")[1].split("}")[0], "the count badges on tabs")
+    ok("color: var(--text-on-status)" in CSS.split(".action .check svg {")[1].split("}")[0], "and the done tick")
+    # The bright teal is never text, wherever the colour is set: the stylesheet,
+    # a style set from the script, or the composer's own injected rules.
+    for name, src in (("the page script", SCRIPT), ("composer.js", COMPOSER)):
+        ok(not re.search(r"(?<![-\w])color\s*[:=]\s*'?var\(--action-(primary|hover)\)", src),
+           "%s writes no words in the bright teal" % name)
+    ok("'.cmp-area a { color: var(--text-link); }'" in COMPOSER, "links in an email are the link teal")
+    ok("'.cmp-b:focus-visible { outline: var(--focus-outline); outline-offset: 1px; }'" in COMPOSER,
+       "and a focused formatting button shows the app's own outline, not a 1.2:1 glow")
+    ok("border-color: var(--border-selected)" in COMPOSER.split("'.cmp-area:focus {")[1].split("}")[0],
+       "and the editing area's focus edge is the selected edge every other field has")
+    # A segmented control is never stretched across a card, and keeps its gutter.
+    seg = CSS.split("        .segmented { display: inline-flex;")[1].split("}")[0]
+    ok("align-self: flex-start" in seg, "a column parent does not stretch the track")
+    inset = CSS.split("Those are inset by margin instead.")[1].split("{")[0]
+    ok(".segmented" in inset, "and a track put straight into a card is inset like every boxed child")
+    phone = CSS.split("@media (max-width: 640px) {\n            .segmented {")[1].split("}")[0]
+    ok("align-self: stretch" in phone and "border-radius: var(--radius-card)" in phone,
+       "on a phone it fills its line, with the card's corner so a wrapped track is not a stadium")
+    # The Finance strip lines up with the stamp beside it.
+    ok(".page-tabs > .tabs { margin-bottom: 0; }" in CSS, "the Finance strip carries no space below it in its row")
+    # On a phone a scrolling strip holds the focus outline as well as the underline.
+    strip = CSS.split("@media (max-width: 900px) {\n            .tabs {")[1].split("}")[0]
+    ok("padding: var(--sp-1);" in strip and "margin: calc(-1 * var(--sp-1)) calc(-1 * var(--sp-1)) var(--sp-1)" in strip,
+       "room on every side for the 3px outline, taken back so the tabs do not move")
+    # Controls inside a title stay in the interface face.
+    ok(":is(.section-title, .card-title, .ov-hero h2) :is(button, input, select, textarea, label, .segmented, .tabs) { font-family: var(--font-sans); }" in CSS,
+       "a range or switch in a section title is not set in the title face")
+    # Design shows every colour token, read from the stylesheet.
+    fn = fn_src("function dsOtherColours(")
+    ok("document.styleSheets" in fn and "selectorText === ':root'" in fn and "CSS.supports('color'" in fn,
+       "the colours a section does not name are read from the :root list itself")
+    ok("Every other role a screen can ask for" in SCRIPT and "The palette the roles are drawn from" in SCRIPT,
+       "and shown, roles and palette apart")
+    # A read for What's new that lands late does not clear the section now showing.
+    seg = SCRIPT.split("function paintGuideSeg() {")[1].split("\n        function ")[0]
+    ok("const ticket = ++guidePaintSeq;" in seg and seg.count("ticket !== guidePaintSeq") == 2,
+       "both the answer and the failure check they are still the latest paint")
+
+
+@test
+def t_a_chooser_hears_a_press_on_a_choice_it_was_told_to_show():
+    """CRM deals marks List while a closed status means the Board cannot draw,
+    and the chooser ignored a press on the choice already marked, so pressing
+    List there was lost and Open drew the Board again."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + fn_src("function chooser(") + r"""
+const picks = [];
+const bar = chooser('segmented', [['board', 'Board'], ['list', 'List']], 'board', (k) => picks.push(k));
+const [board, list] = bar.children;
+// the caller shows List for a while, as CRM deals does for a closed status
+board.classList.remove('on'); list.classList.add('on');
+list.click();                 // the reader keeps List: heard
+list.click();                 // pressed again: nothing new to hear
+board.click();                // back to Board: heard
+console.log(JSON.stringify({ picks, listOn: list.classList.contains('on'), boardOn: board.classList.contains('on') }));
+"""
+    got = _run_node(js)
+    eq(got["picks"], ["list", "board"], "the press on the shown choice counts once, and a repeat does not")
+    ok(got["boardOn"] and not got["listOn"], "and the marks follow the last press")
 
 
 if __name__ == "__main__":
