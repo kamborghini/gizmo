@@ -1,6 +1,37 @@
 {
  "releases": [
   {
+   "date": "2026-10-05",
+   "title": "Reactor in Projected Image's colours",
+   "items": [
+    {
+     "kind": "changed",
+     "text": "Reactor now wears Projected Image's own look: the website's teal for buttons and anything chosen, ink text on an off-white page, white cards with no shadow under them, and pill-shaped buttons, tabs and chips. Titles are set in the website's heading typeface and everything else in Inter, with figures that line up in columns."
+    },
+    {
+     "kind": "changed",
+     "text": "The Projected Image logo heads the sidebar beside Reactor. Pressing it takes you to the Overview."
+    },
+    {
+     "kind": "changed",
+     "text": "Every row of tabs and every set of choices is now drawn the same way on every screen. Tabs, underlined in teal, move between the sections of a screen; a white pill track, with the chosen one washed in teal, chooses within a card. There were five different kinds before."
+    },
+    {
+     "kind": "changed",
+     "text": "Cards, figures, tables and windows share one corner, and a box inside a card sits a step tighter than the card around it, instead of rounder."
+    },
+    {
+     "kind": "fixed",
+     "text": "The grey line on charts is darker. It was too faint to pick out against a card."
+    },
+    {
+     "kind": "added",
+     "tab": "guide",
+     "text": "Admins have a new Design section in the Guide: every colour, typeface and part Reactor is made of, drawn by the same code as the screens, with how readable each colour is. Every screen takes its look from the one place this shows, so they stay alike."
+    }
+   ]
+  },
+  {
    "date": "2026-10-02",
    "title": "The Forecast, checked against September",
    "items": [

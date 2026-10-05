@@ -13800,6 +13800,19 @@ def t_the_record_keeps_what_the_forecast_in_use_said():
 
 
 @test
+def t_the_brand_mark_is_served_and_can_never_run_anything():
+    """The sidebar's Projected Image wordmark is served by the app itself, like
+    the label typeface. It is an SVG, so the response forbids every script and
+    every fetch, in case it is ever opened on its own rather than as an image."""
+    r = client.get("/brand/logo.svg")
+    eq(r.status_code, 200)
+    eq(r.headers["content-type"], "image/svg+xml")
+    eq(r.headers["content-security-policy"], "default-src 'none'; style-src 'unsafe-inline'")
+    ok(r.content.startswith(b"<svg") and b"<script" not in r.content and b"#13B7C0" in r.content,
+       "the brand's own mark, in its teal, with nothing in it that runs")
+
+
+@test
 def t_the_forecast_hook_takes_only_its_token_and_the_tab_reads_the_run():
     """The nightly forecasting service has no account: a shared secret in the
     header is its whole authentication, and with no secret configured the
