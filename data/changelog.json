@@ -6,7 +6,7 @@
    "items": [
     {
      "kind": "changed",
-     "text": "Reactor now wears Projected Image's own look: the website's teal for buttons and anything chosen, ink text on an off-white page, white cards with no shadow under them, and pill-shaped buttons, tabs and chips. Titles are set in the website's heading typeface and everything else in Inter, with figures that line up in columns."
+     "text": "Reactor now wears Projected Image's own look: the website's teal for buttons and anything chosen, ink text on an off-white page, white cards with no shadow under them, and buttons, fields and choices with one small rounded corner. Titles are set in the website's heading typeface and everything else in Inter, with figures that line up in columns."
     },
     {
      "kind": "changed",
@@ -14,7 +14,27 @@
     },
     {
      "kind": "changed",
-     "text": "Every row of tabs and every set of choices is now drawn the same way on every screen. Tabs, underlined in teal, move between the sections of a screen; a white pill track, with the chosen one washed in teal, chooses within a card. There were five different kinds before."
+     "text": "No more rounded capsules: buttons, fields, choices and chips share one small corner, and labels such as Beta, a status or a count share another, smaller one. Only a switch, a progress bar and a dot stay round."
+    },
+    {
+     "kind": "changed",
+     "text": "One look for each thing everywhere: one text size for every button and field, one gap between an icon and its words, one way of showing what is chosen, one way of showing a link, and one style for every warning or note."
+    },
+    {
+     "kind": "changed",
+     "text": "Fewer boxes. Tables inside a card no longer draw a second frame, a card's empty list is a quiet first line rather than a floating box, warnings span their card, and Forecast's drawers are two cards of rows instead of nine small cards."
+    },
+    {
+     "kind": "changed",
+     "text": "Clearer ranks: a heading over a group of cards is a step larger than the card titles under it, chart titles match card titles, and long descriptions break at one comfortable line length everywhere."
+    },
+    {
+     "kind": "changed",
+     "text": "On a phone, a set of four or more choices wraps into even rows rather than hiding its last one off the edge. A card's header gives its buttons more room on wider screens, so they stay on one line. Forecast's Cash in range is a short list to pick from rather than seven buttons, and a table inside a card runs to the card's edges like a list."
+    },
+    {
+     "kind": "changed",
+     "text": "Every row of tabs and every set of choices is now drawn the same way on every screen. Tabs, underlined in teal, move between the sections of a screen; a grey track, with the chosen one on white in teal, chooses within a card. There were five different kinds before."
     },
     {
      "kind": "changed",

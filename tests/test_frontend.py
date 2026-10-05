@@ -1213,15 +1213,17 @@ def t_the_deal_board_can_be_worked_without_a_mouse():
 @test
 def t_a_thumb_inside_a_track_takes_the_track_radius_minus_the_gap():
     """The segmented control is the one track with a thumb in it (2026-10-05:
-    five tab families became tabStrip() and segmented()). Track and thumb are
-    both the brand's pill, so they stay concentric whatever the padding: the
-    rule this test used to enforce by arithmetic now holds by construction."""
+    five tab families became tabStrip() and segmented()). Since the pills went
+    (Cameron: "Do not use pill-shaped UI unnecessarily") the track has the
+    control's 6px corner and no edge, and the thumb that less the 2px inset, so
+    the two curves run parallel."""
     track = re.findall(r"\n        \.segmented \{([^}]*)\}", CSS)
     thumb = re.findall(r"\n        \.segmented > button \{([^}]*)\}", CSS)
     ok(len(track) == 1 and len(thumb) == 1, "both halves of the control are still one rule each")
-    ok("border-radius: var(--radius-control)" in track[0] and "border-radius: var(--radius-control)" in thumb[0],
-       "track and thumb are both pills, so the corners stay concentric")
-    ok(_token_raw("radius-control") == "var(--radius-full)", "and the control radius is the pill")
+    ok("border-radius: var(--radius-control)" in track[0] and "border: 0" in track[0],
+       "the track takes the control corner and has no edge of its own")
+    ok("border-radius: calc(var(--radius-control) - var(--sp-0-5))" in thumb[0], "and the thumb is concentric inside it")
+    ok(_token_raw("radius-control") == "var(--radius-xs)", "and the control corner is 6px, not a pill")
 
 @test
 def t_beating_the_plan_is_not_something_worth_looking_at():
@@ -1516,19 +1518,21 @@ def t_a_tick_box_that_is_a_div_still_answers_the_keyboard():
 @test
 def t_every_status_chip_has_the_same_geometry():
     """Chips split 6px against 12px roughly along tab lines, so the same kind of
-    label was a rounded rectangle in one tab and a capsule in the next. The
-    radius scale's own comment names the three steps card, control, chip, which
-    settles which of the two is the chip. Under the neutral system that shape is
-    a capsule, --radius-full, and it has to be the SAME capsule everywhere."""
-    chips = ["pill", "mail-order-stage", "lbl-chip", "fchip", "mail-owner",
-             "mcount", "mrule-tag", "g-badge", "mail-claim", "mail-crmchip"]
-    for c in chips:
+    label was a rounded rectangle in one tab and a capsule in the next. Since
+    2026-10-05 (no pills) a label that only displays is a tag, 4px, from one
+    recipe; a chip you press is a control, 6px."""
+    for c in ["pill", "mail-order-stage", "lbl-chip", "mcount", "g-badge", "mail-crmchip"]:
         rule = re.search(r"\." + c + r" \{[^}]*\}", HTML, re.S)
         ok(rule, "the .%s rule is still there" % c)
-        ok("border-radius: var(--radius-full)" in rule.group(0),
-           ".%s takes the chip radius from the token, not a literal" % c)
-    ok("border-radius: 12px" not in re.search(r"\.fchip \{[^}]*\}", HTML).group(0),
-       "and no chip keeps the control radius")
+        ok("border-radius: var(--radius-tag)" in rule.group(0), ".%s takes the tag corner" % c)
+    for c in ["fchip", "mail-owner", "mail-claim"]:
+        rule = re.search(r"\." + c + r" \{[^}]*\}", HTML, re.S)
+        ok("border-radius: var(--radius-control)" in rule.group(0), ".%s is pressed, so it takes the control corner" % c)
+    tags = CSS.split("ONE TAG.")[1].split("}")[0]
+    for prop in ("height: var(--tag-h)", "border-radius: var(--radius-tag)", "border: 0", "font-size: var(--text-xs)"):
+        ok(prop in tags, "the one tag recipe sets " + prop)
+    ok(not re.search(r"\.(pill|kbadge|lbl-chip|crm-prio|crm-chip|g-badge|kbadge) \{[^}]*height: 20px", CSS),
+       "and no tag carries its own raw height")
 
 
 @test
@@ -2069,10 +2073,8 @@ def t_prose_is_capped_to_a_reading_measure():
     """The whole point of the width work is that DATA gets the width and TEXT
     does not. A 1,640px line of 12px help text is worse than the crowding."""
     rule = re.search(r"\.setting-sub, \.field-help[\s\S]{0,900}?\}", CSS).group(0)
-    ok("52ch" in rule, "prose is capped in ch, not pixels")
-    ok("var(--" not in rule.split("max-width:")[1].split(";")[0],
-       "and the cap is written on the rule, not held in a root custom property "
-       "where ch would resolve against the root font size instead of the text's own")
+    # Since 2026-10-05 every prose cap is the one --measure token, in ch.
+    ok("max-width: var(--measure)" in rule and re.search(r"--measure:\s*\d+ch", CSS), "prose is capped in ch, not pixels, from one token")
 
 
 @test
@@ -2255,7 +2257,7 @@ def t_the_forecast_tab_exists_and_is_gated():
     # The graph is back, and the reader chooses the scale rather than being
     # locked into one: a day question and a year question are different questions.
     chart = SCRIPT.split("function fcChartCard(", 1)[1].split("\n        function ", 1)[0]
-    ok("segmented(FC_RANGES, range, setFcRange)" in chart, "the range is the reader's to pick")
+    ok("choiceSelect(FC_RANGES, range, setFcRange" in chart, "the range is the reader's to pick, from one compact list that never wraps")
     for key in ("'today'", "'week'", "'month'", "'q'", "'year'", "'ahead'", "'custom'"):
         ok(key in SCRIPT, "range " + key + " is offered")
     ok("grain = 'month'" in chart and "dayRows" in chart,
@@ -2653,8 +2655,9 @@ def t_the_beta_tabs_say_so_everywhere_they_are_named():
     # Liability and gained and lost the tag as you moved between the four.
     ok("cTitle.append(el('span', 'beta-tag'" in SCRIPT, "the CRM heading carries it")
     ft = fn_src("function financeTabs(")
-    ok("extra: BETA_TABS.indexOf(key) >= 0 ? el('span', 'beta-tag', 'Beta') : null" in ft,
-       "and each Finance tab in beta carries it on the tab")
+    # Since 2026-10-05 the Finance tabs carry no Beta: the sidebar and the top
+    # bar say it, and a Finance screen carried it seven times at once.
+    ok("beta-tag" not in ft, "and the Finance tabs do not repeat it")
     for t in ("rTitle", "hTitle"):
         ok(t + ".append(el('span', 'beta-tag'" not in SCRIPT, "not on the shared Finance heading (" + t + ")")
     ok("BETA_TABS.indexOf(v) >= 0" in SCRIPT, "and the topbar title does too")
@@ -2804,14 +2807,22 @@ def t_a_tab_left_open_is_told_it_is_out_of_date():
 
 
 @test
-def t_a_table_sits_in_its_own_box_inside_the_card():
-    """Measured off the reference's rendered page, not judged by eye: its table
-    lives in a second frame a step inside its card's corner, and that
-    inset edge is most of what makes its lists read the way they do. This used to
-    be stripped flat on the reasoning that a card is already a box."""
-    rule = CSS.split(".card .ktable-wrap, .card-bleed .ktable-wrap {")[1].split("}")[0]
-    ok("border-radius: var(--radius-inset)" in rule, "the table keeps its own radius inside a card")
-    ok("border: 0" not in rule, "and its own border")
+def t_a_table_inside_a_card_has_no_second_frame():
+    """The reference drew a table in a second frame a step inside its card. On
+    2026-10-05 Cameron's brief ruled the other way: "Avoid excessive borders,
+    containers ... use hierarchy and whitespace rather than wrapping everything
+    in a box". A border directly inside a border goes: the card is the frame,
+    the table keeps the card's gutter and its outer columns line up with the
+    card's text."""
+    ok(".card .ktable-wrap { border: 0; border-radius: 0; background: transparent; }" in CSS,
+       "a table inside a card draws no frame of its own")
+    ok(".card .ktable-wrap :is(th, td):first-child { padding-left: 0; }" in CSS
+       and ".card .ktable-wrap :is(th, td):last-child { padding-right: 0; }" in CSS,
+       "and its outer columns sit on the card's text edge")
+    ok(".card > .ktable-wrap { margin-left: 0; margin-right: 0; }" in CSS
+       and ".card > .ktable-wrap :is(th, td):first-child { padding-left: var(--sp-4); }" in CSS
+       and CSS.index(".card > .ktable-wrap { margin-left: 0;") > CSS.index(".card > :is(.lia-bar, .lbl-row, .ktable-wrap"),
+       "one straight inside a card runs to its edges like its list rows, words still on the text edge")
     ok("--radius-inset: var(--radius-xs)" in CSS and "--radius-card: var(--radius-sm)" in CSS,
        "a step under the card's corner, set once")
     # A table that deliberately touches the card edge still can.
@@ -2849,7 +2860,7 @@ def t_the_table_toolbar_and_pager_match_the_reference():
     btn = CSS.split(".btn-sm {")[1].split("}")[0]
     ok("min-height: var(--control-h-md)" in btn and "padding: 0 var(--sp-2-5)" in btn, "small buttons are 28px tall")
     step = CSS.split(".tbl-step {")[1].split("}")[0]
-    ok("width: var(--control-h)" in step and "height: var(--control-h)" in step, "pager steps are 32px square")
+    ok("width: var(--control-h-md)" in step and "height: var(--control-h-md)" in step, "pager steps are the table's 28 square")
     ok("border-radius: var(--radius-control)" in step, "a pill, like everything else pressed")
     # The pager must never claim to be paging through more than it is.
     fn = SCRIPT.split("function tablePager(o) {")[1][:1600]
@@ -2938,9 +2949,9 @@ def t_the_menu_and_tabs_are_the_reference_measurements():
     item = CSS.split(".dmenu-item {")[1].split("}")[0]
     ok("height: 28px" in item, "items are 28px")
     ok("padding: var(--sp-1) var(--sp-7) var(--sp-1) var(--sp-1-5)" in item, "with room on the right for a tick")
-    ok("border-radius: var(--radius-sm)" in item, "at the control radius")
+    ok("border-radius: calc(var(--radius-card) - var(--sp-1))" in item, "concentric inside the padded menu")
     tab = CSS.split("\n        .tab {")[1].split("}")[0]
-    ok("height: var(--control-h-sm)" in tab and "padding: var(--sp-0-5) var(--sp-1-5)" in tab, "tabs are 24px")
+    ok("height: var(--control-h-sm)" in tab and "padding: var(--sp-0-5) 0" in tab, "tabs are 24px and as wide as their label")
     ok("background: none" in tab, "with no filled pill")
     on = CSS.split(".tab:is(.on, [aria-current=\"page\"], [aria-pressed=\"true\"]) {")[1].split("}")[0]
     ok("color: var(--text-primary)" in on and "background" not in on,
@@ -2987,7 +2998,7 @@ def t_the_finance_pages_share_the_reference_tab_strip():
     ok("segmented(" not in fn, "the segmented control is gone from it")
     ok("opts.nav ? 'aria-current' : 'aria-pressed'" in SCRIPT, "and the live one says it is the current page")
     tab = CSS.split("\n        .tab {")[1].split("}")[0]
-    ok("height: var(--control-h-sm)" in tab and "padding: var(--sp-0-5) var(--sp-1-5)" in tab, "the small control height, one size for every tab")
+    ok("height: var(--control-h-sm)" in tab and "padding: var(--sp-0-5) 0" in tab, "the small control height, one size for every tab")
     ok("font-size: var(--text-sm)" in tab, "at 14px, bigger than a filter tab inside a card")
     ok("background: none" in tab, "with no pill")
     on = CSS.split(".tab:is(.on, [aria-current=\"page\"], [aria-pressed=\"true\"]) {")[1].split("}")[0]
@@ -3224,7 +3235,8 @@ def t_the_chart_legend_belongs_to_the_plot():
     sw = CSS.split(".chart-legend .sw {")[1].split("}")[0]
     ok("width: var(--dot-md)" in sw and "height: var(--dot-md)" in sw
        and _token_raw("dot-md") == "8px", "the key is an 8px square")
-    ok("border-radius: var(--radius-3xs)" in sw, "with a 2px corner, not the app's own radius")
+    ok("border-radius: var(--radius-swatch)" in sw and _token_raw("radius-swatch") == "var(--radius-3xs)",
+       "with the swatch role's 2px corner, not the app's own radius")
     item = CSS.split(".chart-legend .lg {")[1].split("}")[0]
     ok("gap: var(--sp-1-5)" in item, "6px between a key and its name")
     ok("color: var(--text-primary)" in item, "and the name in full ink, as the reference sets it")
@@ -3595,7 +3607,7 @@ def t_a_chip_is_exactly_twenty_pixels():
     """It inherited its height from a line box plus padding, which gave 21.5 -
     a hair taller than the reference's badge everywhere one appeared."""
     chip = CSS.split(".lbl-chip {")[1].split("}")[0]
-    ok("height: 20px" in chip, "set, not inherited")
+    ok("height: var(--tag-h)" in chip and re.search(r"--tag-h:\s*20px", CSS), "set from the one tag height, not inherited")
     ok("display: inline-flex" in chip and "align-items: center" in chip,
        "so its content is optically centred rather than sitting on a baseline")
 
@@ -6118,7 +6130,8 @@ def t_a_boxed_child_of_a_card_is_inset():
         b = rule.group(1)
         if re.search(r"(?<![\w-])(background|border)(?!-radius|-collapse)\s*:", b) and "transparent" not in b and "none" not in b.split("background")[-1][:12]:
             ok(c in inset, "." + c + " paints a box and is appended to a card, so it must be inset")
-    ok(".card > :is(.msg, .mail-sendwarn, .disp-warn) { max-width: 56rem; }" in CSS, "and a notice reads as prose, not a ribbon")
+    ok(".load-failed > div:first-child { max-width: var(--measure); }" in CSS and ".card > :is(.msg, .mail-sendwarn, .disp-warn) { max-width" not in CSS,
+       "and a notice spans its card while its words keep the reading measure")
     ok("max-width: calc(100% - 2 * var(--sp-4))" in CSS.split("#view-connector .card > .lbl-row {")[1].split("}")[0],
        "a fit-content row counts its own inset, so it cannot hang out of the card at 375")
     ok(".ov-wrap > * + .run-gate { margin-top: 0; }" in CSS, "the run gate centres itself only when it is the whole page")
@@ -8070,7 +8083,7 @@ def t_the_forecast_explains_itself_once_and_in_plain_lines():
     dr = SCRIPT.split("function fcDriversCard(", 1)[1].split("\n        function ", 1)[0]
     order = [dr.index("'fc-drive-key "), dr.index("'fc-drive-lbl'"), dr.index("'fc-drive-amt'")]
     ok(order == sorted(order), "key, then words, then the amount at the right of the measure")
-    ok("max-width: 52ch" in CSS.split(".fc-drive {")[1].split("}")[0], "the statement is measured")
+    ok("max-width: var(--measure)" in CSS.split(".fc-drive {")[1].split("}")[0], "the statement is measured")
     ok("The days left come from the source in use, " in dr, "and names the source it quotes")
     simple = open(os.path.join(ROOT, "forecast", "simple.py"), encoding="utf-8").read()
     ok("The Theta method again" not in simple, "every source description stands on its own")
@@ -9086,8 +9099,8 @@ def t_a_queue_row_never_squeezes_the_customer_name_to_nothing():
     narrow = CSS[CSS.index("@container queue (max-width: 559px) {\n"):][:400]
     ok(".lbl-qrow { flex-wrap: wrap; }" in narrow and ".lbl-qrow .lbl-actions { flex: 1 1 100%; justify-content: flex-start; }" in narrow,
        "a list as narrow as a phone's puts the buttons on their own line, whatever the window")
-    ok("@media (min-width: 641px) { .card-head { grid-template-columns: 1fr fit-content(50%); } }" in CSS
-       and ".q-card > .card-head" not in CSS, "every card's buttons wrap within half its header, the queue's included")
+    ok("@media (min-width: 641px) { .card-head { grid-template-columns: 1fr fit-content(max(50%, 100% - 18rem - var(--sp-4))); } }" in CSS
+       and ".q-card > .card-head" not in CSS, "every card's buttons wrap within the room the title leaves, the queue's included")
 
 
 @test
@@ -9099,7 +9112,7 @@ def t_a_stat_header_keeps_its_count_beside_its_buttons():
     to the title's row instead, the rail made every stat header 14px taller at
     every width, Xero sync's Connection included, and put the buttons above
     the title on a phone."""
-    general = CSS.index("@media (min-width: 641px) { .card-head { grid-template-columns: 1fr fit-content(50%); } }")
+    general = CSS.index("@media (min-width: 641px) { .card-head { grid-template-columns: 1fr fit-content(max(50%, 100% - 18rem - var(--sp-4))); } }")
     i = CSS.index("@media (min-width: 641px) {\n            .card-head-stat {")
     block = CSS[i:CSS.index("}\n        }", i) + 1]
     ok(general < i, "after the rule for every header, so a stat header's own wins")
@@ -9170,7 +9183,7 @@ def t_the_app_wide_layout_sweep_holds():
         "@container crmtable (max-width: 640px)": "CRM tables come in on a narrow card",
         "word-break: normal; overflow-wrap: anywhere; text-underline-offset: 2px;": "contact lines break between words",
         ".mown-slot { flex: 0 0 auto; min-width: 88px; max-width: 150px;": "owner chips show a short name whole",
-        ".segmented > * { flex: 1 1 auto; justify-content: center; }": "a phone segmented strip that wraps fills its lines",
+        ".segmented > * { flex: 1 0 auto; justify-content: center; }": "a phone segmented strip fills its line and scrolls rather than wraps",
         "@media (max-width: 1100px) { .metrics.metrics-3 > :nth-child(3):last-child { grid-column: 1 / -1; } }": "a third tile takes the row",
         ".lbl-qrow .lbl-actions { justify-self: start; }": "queue buttons line up",
         # dashboards and finance
@@ -9329,14 +9342,14 @@ def t_reactor_wears_projected_images_brand_from_one_place():
     for tok, v in (("teal-500", "#13B7C0"), ("ink", "#121212"), ("off-white", "#F7F7F7"), ("brand-blue", "#334FB4")):
         ok(_token_raw(tok).lower() == v.lower(), "--%s is the brand's %s" % (tok, v))
     for tok, ref in (("action-primary", "var(--teal-500)"), ("text-on-action", "var(--ink)"), ("text-brand", "var(--teal-700)"),
-                     ("surface-page", "var(--off-white)"), ("radius-control", "var(--radius-full)")):
+                     ("surface-page", "var(--off-white)"), ("radius-control", "var(--radius-xs)")):
         ok(_token_raw(tok) == ref, "--%s reads %s" % (tok, ref))
     ok(_contrast(_token("teal-500"), "#ffffff") < 3, "the bright teal is too faint for text, which is why it is a fill")
     ok(not re.search(r"(?<![-\w])color:\s*var\(--action-primary\)", CSS), "so nothing writes text in it")
     ok("family=Inter:wght@400;500;600;700" in HTML and "family=Geist" not in HTML, "the interface face is Inter")
     ok(CSS.count("@font-face { font-family: 'Bricolage Grotesque'") == 1, "the heading face is defined once")
-    ok(":is(.brand-name, .ov-hero h2, .section-title, .card-title, .run-gate h2, .empty-chat h2, .modal-head h3, .auth-card h2) {"
-       in CSS and "font-family: var(--font-display)" in CSS.split(".auth-card h2) {")[1][:80], "and every title is in it, from one list")
+    ok(":is(.brand-name, .ov-hero h2, .ds-type-page, .section-title, .card-title, .chart-head .ct, .run-gate h2, .empty-chat h2, .modal-head h3, .auth-card h2) {"
+       in CSS and "font-family: var(--font-display)" in CSS.split(".auth-card h2) {")[1][:80], "and every title is in it, chart titles too, from one list")
     ok(CSS.count("font-family: var(--font-display)") == 1, "nowhere else sets a title face")
     ok('<img class="brand-mark" src="/brand/logo.svg" alt="Projected Image"' in HTML, "the wordmark heads the sidebar")
     ok("background: var(--surface-page)" in CSS.split("        body {")[1].split("}")[0], "on the brand's off-white page")
@@ -9415,8 +9428,10 @@ def t_the_brand_pilot_review_findings_stay_fixed():
     phone = CSS.split("@media (max-width: 640px) {\n            .segmented {")[1].split("}")[0]
     ok("align-self: stretch" in phone and "flex: 1 1 100%" in phone,
        "on a phone it takes and fills a line of its own, in a column parent or a row")
-    ok(".segmented.wrapped { border-radius: var(--radius-card); }" in CSS and "segWrapWatch(bar)" in SCRIPT,
-       "and only a track that wraps takes the card's corner, so it is never a stadium")
+    # Since the pills went a 6px track that wraps needs no special corner, and
+    # on a phone a track never wraps: it scrolls like a tab strip.
+    ok("flex-wrap: nowrap; overflow-x: auto" in phone and ".wrapped" not in CSS and "segWrapWatch" not in SCRIPT,
+       "and on a phone it scrolls rather than leaving a choice alone on a second line")
     # The Finance strip lines up with the stamp beside it.
     ok(".page-tabs > .tabs { margin-bottom: 0; }" in CSS, "the Finance strip carries no space below it in its row")
     # On a phone a scrolling strip holds the focus outline as well as the underline.
@@ -9446,7 +9461,7 @@ def t_a_chooser_hears_a_press_on_a_choice_it_was_told_to_show():
     if not _node_ok():
         print("       (node unavailable, skipped)")
         return
-    js = MINIDOM + fn_src("function segWrapWatch(") + "\n" + fn_src("function chooser(") + r"""
+    js = MINIDOM + fn_src("function chooser(") + r"""
 const picks = [];
 const bar = chooser('segmented', [['board', 'Board'], ['list', 'List']], 'board', (k) => picks.push(k));
 const [board, list] = bar.children;
@@ -9468,9 +9483,11 @@ def t_every_field_takes_the_field_corner():
     box inside a card (6) when the corners got roles, beside fields at 8. A
     field is a field wherever it sits."""
     for sel in (".lbl-size {", ".disp-num {", ".disp-text {", ".psel {", ".tm-field {", ".sk-input, .sk-textarea {",
-                ".pf-input {", ".pchat-ta {", ".tm-role-fixed {"):
+                ".pf-input {", ".pchat-ta {"):
         rule = CSS.split("\n        " + sel)[1].split("}")[0]
         ok("border-radius: var(--radius-field)" in rule, sel + " has the field corner")
+    # A role that cannot be changed is a label (2026-10-05), so it is a tag.
+    ok("border-radius: var(--radius-tag)" in CSS.split("\n        .tm-role-fixed {")[1].split("}")[0], "a fixed role is a tag, not a field")
 
 
 @test
@@ -9480,7 +9497,7 @@ def t_the_spacing_pass_holds():
     five sizes and three reviewers found these; each is held here."""
     ok(".ov-hero:has(+ .tabs) { margin-bottom: var(--sp-4); }" in CSS, "a tab strip sits 16 under its header on every screen")
     ok("min-height: 60px" not in CSS.split(".ov-hero:has(+ .page-tabs)")[1][:600], "Finance intros reserve no empty line")
-    ok("--segment-h: calc(var(--control-h-md) - 2 * var(--sp-0-5) - 2 * var(--bw-hairline));" in CSS
+    ok("--segment-h: calc(var(--control-h-md) - 2 * var(--sp-0-5));" in CSS
        and "height: var(--segment-h);" in CSS.split("\n        .segmented > button {")[1].split("}")[0],
        "a segmented track is a small control's 28, level with the field beside it")
     ok("flex: 1 1 auto;" in CSS.split("\n        .segmented > button {")[1].split("}")[0], "and a wrapped track fills its lines")
@@ -9493,7 +9510,8 @@ def t_the_spacing_pass_holds():
     ok(".metrics-strip .stat-row { container-type: inline-size;" in CSS
        and not re.search(r"\.metrics-strip > \.stat \{[^}]*container-type", CSS),
        "the narrow-tile check is on the figure line, so the tile can still share rows")
-    ok(".tbl-tools-r:has(> .segmented) { flex: 1 1 100%; }" in CSS, "a phone toolbar's segmented track fills its line")
+    ok(".tbl-tools-l, .tbl-tools-r { display: contents; }" in CSS and ".tbl-tools .tbl-search { flex: 1 1 100%; }" in CSS,
+       "a phone toolbar flows as one row: the search and a track take a line, short controls pair up")
     ok(".ov-wrap > .tabs { min-height: var(--control-h-md); }" in CSS, "every page's strip sits in Finance's 28 row")
     ok("metrics-finance" not in CSS, "one figure card, not a Finance size of it")
     ok("@media (min-width: 641px) { .crm-pipeline > .crm-col { flex: 1 1 0; min-width: calc(var(--sp-8) * 4); } }" in CSS,
@@ -9514,6 +9532,38 @@ def t_the_spacing_pass_holds():
     mail = SCRIPT.split("function renderMail() {")[1][:6000]
     ok("el('h3', 'card-title', 'Connect the shared mailbox')" in mail and "'setting-title'" not in mail and ".style.cssText" not in mail,
        "the Inbox setup card is built from the shared parts, with no sizes of its own")
+
+
+@test
+def t_every_corner_is_a_role():
+    """2026-10-05, Cameron: "Establish a single source of truth ... Avoid one-off
+    styling" and "Do not use pill-shaped UI unnecessarily". Outside the token
+    block a corner names its role (control, field, row, card, inset, tag,
+    swatch, full, circle), never a raw size, so changing a role changes every
+    thing that plays it. The exceptions are named: the printed sheets
+    (physical output with their own paper values), the scrollbar thumb, and
+    the sign-in card, a surface standing alone on an empty page."""
+    body = CSS[CSS.index("\n        }", CSS.index(":root {")):]
+    bad = []
+    for m in re.finditer(r"border-radius:([^;}]*)", body):
+        v = m.group(1)
+        if re.search(r"--radius-(sm|xs|2xs|3xs|md|lg|xl)\b", v) or re.search(r"\d+px", v):
+            st = body.rfind("}", 0, m.start())
+            sel = body[st + 1:m.start()].split("{")[0].strip().split("\n")[-1]
+            if not re.search(r"label-sheet|day-sheet|scrollbar|\.auth-card", sel):
+                bad.append(sel[:50])
+    ok(not bad, "corners that name a size instead of a role: %s" % bad[:6])
+    for role, prim in (("control", "var(--radius-xs)"), ("field", "var(--radius-control)"), ("card", "var(--radius-sm)"),
+                       ("inset", "var(--radius-xs)"), ("tag", "var(--radius-2xs)"), ("row", "var(--radius-control)")):
+        ok(_token_raw("radius-" + role) == prim, "--radius-%s is %s" % (role, prim))
+    # Round only where the shape means something.
+    rounds = []
+    for m in re.finditer(r"border-radius:\s*var\(--radius-full\)", body):
+        st = body.rfind("}", 0, m.start())
+        rounds.append(body[st + 1:m.start()].split("{")[0].strip().split("\n")[-1])
+    for sel in rounds:
+        ok(re.search(r"bar|\.sw\b|toggle|\.tab:is|track|fill|meter|seo-score|::after", sel),
+           "a round shape with a purpose (a bar, a switch, the tab underline): " + sel[:50])
 
 
 if __name__ == "__main__":
