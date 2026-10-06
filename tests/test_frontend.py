@@ -4425,7 +4425,7 @@ def t_the_owner_tint_did_not_quietly_take_unreads_signal():
     ok(".mrow.unread .mfrom" in CSS and "var(--weight-semibold)" in
        CSS.split(".mrow.unread .mfrom {")[1].split("}")[0],
        "and unread keeps the 600 sender, which is what Gmail leans on anyway")
-    ok("background: var(--teal-500)" in CSS.split(".munread::before {")[1].split("}")[0], "and the teal dot at the row's start")
+    ok("background: var(--fill-mark)" in CSS.split(".munread::before {")[1].split("}")[0], "and the teal mark dot at the row's start")
 
 
 @test
@@ -7472,7 +7472,7 @@ async function uiConfirm() { return true; }
 async function refreshMailQuiet() {}
 function toastError(m) { toasts.push('error: ' + m); } function toastOk(m) { toasts.push('ok: ' + m); }
 function paintMailBody() {}
-""" + fn_src("function paintMailBulk(rows)") + "\n" + fn_src("function mailOfferUndo(") + r"""
+""" + fn_src("function mailTick(cb)") + "\n" + fn_src("function paintMailBulk(rows)") + "\n" + fn_src("function mailOfferUndo(") + r"""
 const findBtn = (host, text) => { const walk = (n) => { if (n.tagName === 'BUTTON' && n.textContent === text) return n;
   for (const c of n.children || []) { const f = walk(c); if (f) return f; } return null; }; return walk(host); };
 (async () => {
@@ -11165,7 +11165,7 @@ def t_the_size_list_and_loan_units_wear_the_mix():
                  "'ready to go'", "nothing past its date", "Longest out first.", "Every loan unit the shop owns.",
                  "start tracking it", "worth a chase", "A loan with no due date turns amber"):
         ok(gone not in SCRIPT, "cut: " + gone)
-    for new in ("'Nothing is out.'", "'No loan units yet.'", "'No due date'", "'Turns amber after this many days without a due date.'"):
+    for new in ("'Nothing is out.'", "'No loan units yet.'", "'no due date'", "'Turns amber after this many days without a due date.'"):
         ok(new in SCRIPT, "says: " + new)
 
 
@@ -11266,7 +11266,8 @@ def t_the_inbox_list_is_hairline_rows_and_an_upload_row_has_no_box():
     mu = rule(".munread")
     ok("width: var(--dot-md);" in mu and "height: var(--dot-md);" in mu and "order: -1;" in mu,
        "the unread mark is an 8 dot at the row's start, its word kept for a screen reader")
-    ok("background: var(--teal-500)" in rule(".munread::before") and "border-radius: var(--radius-circle)" in rule(".munread::before"), "and it is teal")
+    ok("background: var(--fill-mark)" in rule(".munread::before") and "border-radius: var(--radius-circle)" in rule(".munread::before"), "and it is the teal mark")
+    ok(_contrast(_token("fill-mark"), "#ffffff") >= 3, "which is at least 3:1 on white (a non-text mark)")
     ok(".mrow.own-red" not in CSS, "the row is not tinted by its owner")
     tag = rule(".mail-owner")
     ok("height: var(--tag-h);" in tag and "border: 0;" in tag and "border-radius: var(--radius-tag);" in tag, "the owner is a 20 tag")
@@ -11302,6 +11303,103 @@ def t_team_memory_and_skills_wear_the_mix():
                  "Learning the store is an AI run", "Reactor keeps a note when something", "Reactor does not read it yet",
                  "older than the newest", "Instructions and playbooks Reactor follows", "None yet: answers name", "Ideas: a brand voice"):
         ok(gone not in SCRIPT, "cut: " + gone)
+
+
+@test
+def t_a_waiting_note_says_who_wrote_it_and_that_it_is_not_read():
+    """Fix round 1 (Task 42 review). A note waiting for an admin used to say 'Waiting for an admin to keep it,
+    from Dee Pugh. Reactor does not read it yet': what an admin acts on. As tags it lost the author and the fact
+    that it is not read. Both are kept, VISIBLE (a title cannot be reached by touch or keyboard): the author in
+    the note's meta line ('From Dee Pugh', existing words) and the 'Not read with answers' tag on a waiting note as
+    well as on a note past the newest 40 of its kind. Run the real row in node."""
+    ok("function memRow(m, sent) {" in SCRIPT and "function memSentIds() {" in SCRIPT, "memRow and memSentIds exist")
+    ok("if (waiting && m.by) bits.push('from ' + m.by);" in fn_src("function memRow(m, sent) {"), "the author goes in the meta line")
+    # Three tags and a meta line must not break the phone's stacked row (found in the rig: the table ran 142 past the screen).
+    ok("\n            .ktable.mem-table td { display: block; border: 0; padding: 0; height: auto; }" in CSS,
+       "a stacked cell is as tall as what it holds, not the column row's fixed height")
+    ok('grid-template-areas: "kind kind acts" "note note note";' in CSS, "the kind area has the free column")
+    ok("td.mem-kind { grid-area: kind; display: flex; flex-wrap: wrap;" in CSS and "white-space: normal; }" in CSS.split("td.mem-kind { grid-area: kind;")[1][:200],
+       "and its tags wrap rather than widen the row")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+const cap = s => { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); };
+const MEM_WORDS = { fact: 'Fact', decision: 'Decision', followup: 'Follow-up', preference: 'Preference', insight: 'Learning' };
+const MEM_FROM = { chat: 'Chat', merchant: 'Added here', 'tracked change': 'Tracked change' };
+const fmtDate = (d) => '5 Oct'; const ico = () => el('span'); const I = new Proxy({}, { get: () => '' });
+const canEditInstructions = () => true; const memOp = () => {}; const memGuard = () => true; const uiConfirm = async () => true;
+let memInject = 40; let memories = [];
+""" + fn_src("function memSentIds()") + "\n" + fn_src("function memRow(m, sent)") + r"""
+const kinds = (tr) => tr.children[0].children.map(c => c.textContent);
+const meta = (tr) => { const c = tr.children[1].children.find(x => x.className === 'mem-meta'); return c ? c.textContent : null; };
+const row = (m) => { memories = [m]; return memRow(m, memSentIds()); };
+const waitingPref = row({ id: 'a', type: 'preference', text: 'Trade accounts reorder.', source: 'chat', status: 'pending', by: 'Dee Pugh', created: 'x' });
+const waitingFollow = row({ id: 'b', type: 'followup', text: 'Chase Acme.', source: 'chat', status: 'pending', by: 'Dee Pugh', created: 'x' });
+const waitingNoBy = row({ id: 'c', type: 'fact', text: 'A fact.', source: 'chat', status: 'pending', created: 'x' });
+const live = row({ id: 'd', type: 'preference', text: 'Quote in working days.', source: 'chat', status: 'active', created: 'x' });
+const closed = row({ id: 'e', type: 'followup', text: 'Done thing.', source: 'chat', status: 'done', created: 'x' });
+console.log(JSON.stringify({ wp: kinds(waitingPref), wpMeta: meta(waitingPref), wf: kinds(waitingFollow), wfMeta: meta(waitingFollow), wn: kinds(waitingNoBy), wnMeta: meta(waitingNoBy),
+  live: kinds(live), liveMeta: meta(live), closed: kinds(closed) }));
+"""
+    got = _run_node(js)
+    ok(got["wp"] == ["Preference", "Waiting for an admin", "Not read with answers"], got["wp"])
+    ok(got["wpMeta"] == "From Dee Pugh", got["wpMeta"])
+    ok(got["wf"] == ["Follow-up", "Waiting for an admin", "Not read with answers"], "a waiting follow-up is not read either: %s" % got["wf"])
+    ok(got["wfMeta"] == "From Dee Pugh", got["wfMeta"])
+    ok(got["wn"] == ["Fact", "Waiting for an admin", "Not read with answers"] and got["wnMeta"] is None,
+       "a waiting note with no author says only that it waits: %s %s" % (got["wn"], got["wnMeta"]))
+    ok(got["live"] == ["Preference"] and got["liveMeta"] is None, "a note that is read carries neither tag")
+    ok(got["closed"] == ["Follow-up"], "and a closed follow-up still carries no 'not read' tag: %s" % got["closed"])
+
+
+@test
+def t_the_inbox_tick_and_claim_have_a_40_square_on_a_phone():
+    """Fix round 1 (Task 41 review): at 640 and under the row's tick was 16 (24 on touch) and Claim 24. Each
+    keeps its look and gets an invisible 40 square (the ::after pattern of the other small controls). A bare
+    checkbox cannot carry a pseudo-element, so every tick is wrapped in a label (a tap on the label's square
+    ticks the input, and stops there: it must not open the thread). Claim leans on its own ::after."""
+    ok("function mailTick(cb) {" in SCRIPT, "one helper wraps a tick")
+    tick = fn_src("function mailTick(cb) {")
+    ok("el('label', 'mail-tick')" in tick and "lab.onclick = (e) => e.stopPropagation();" in tick and "lab.append(cb);" in tick,
+       "in a label that keeps the tap off the row")
+    ok("row.append(mailTick(cb));" in SCRIPT and "bar.append(mailTick(all));" in SCRIPT, "the row's tick and the bulk bar's both use it")
+    ok("cb.type = 'checkbox'; cb.className = 'mail-check';" in SCRIPT, "and the input itself is unchanged")
+    i = CSS.index("\n            .mail-tick::after { left: 50%; top: 50%;") if "\n            .mail-tick::after { left: 50%; top: 50%;" in CSS else -1
+    ok(i > 0, "the tick's square is a rule inside the phone block")
+    block = CSS[:i]
+    ok(block.rindex("@media (max-width: 640px) {") > block.rindex("\n        }"), "inside the 640 block, not outside it")
+    ok("\n            .mail-tick::after { left: 50%; top: 50%; width: var(--control-h-lg); margin: calc(var(--control-h-lg) / -2) 0 0 calc(var(--control-h-lg) / -2); }" in CSS,
+       "40 wide and 40 high, centred on the tick")
+    ok("\n            .mail-claim::after { left: 0; right: 0; top: 50%; margin-top: calc(var(--control-h-lg) / -2); }" in CSS,
+       "Claim's is its own width and 40 high, centred on it")
+    ok("\n            .mail-tick::after, .mail-claim::after { content: \"\"; position: absolute; height: var(--control-h-lg); }" in CSS, "both are invisible")
+    ok(re.search(r"\n        \.mail-tick \{[^}]*position: relative;[^}]*\}", CSS) is not None, "the label is the square's anchor")
+
+
+@test
+def t_the_inbox_presence_row_is_names_not_boxes():
+    """Fix round 1 (Task 41 review, spec 3): 'Who is on today' was a row of bordered capsules. Each person is
+    now a plain group (colour dot, presence ring, name, the presence choice for you, the load), people 32 apart
+    on a desktop and hairline 44 rows on a phone. Nothing is dropped and every action stays."""
+    def rule(sel, indent=8):
+        m = re.search(r"\n" + " " * indent + re.escape(sel) + r" \{([^}]*)\}", CSS)
+        ok(m is not None, sel + " is a rule at indent %d" % indent)
+        return m.group(1) if m else ""
+    card = rule(".mail-who-card")
+    ok("border: 0;" in card and "background: none;" in card and "border-radius: 0;" in card and "padding: 0;" in card
+       and "border: var(--bw-hairline)" not in card, "a person has no box")
+    ok("gap: var(--sp-2) var(--sp-8);" in rule(".mail-who"), "people sit 32 apart")
+    phone = rule(".mail-who-card", 12)
+    ok("box-shadow: var(--rule-b-soft);" in phone and "min-height: var(--row-h);" in phone and "padding: 0;" in phone and "38px" not in phone,
+       "on a phone each is a hairline 44 row")
+    ok("\n            .mail-who { gap: 0; }" in CSS, "with no gap between rows but the hairline")
+    ok("\n            .mail-who-card .mail-presence-pick { height: var(--control-h-lg); min-height: var(--control-h-lg); }" in CSS,
+       "and your presence choice is a 40 target there")
+    mw = fn_src("function renderMail() {")
+    for kept in ("'mail-who-card'", "'who-dot' + ownClass(m.colour)", "'mail-presence ' + (m.presence || 'office')", "'mail-who-name', m.name + ' (you)'",
+                 "pick.className = 'mail-presence-pick';", "api('/api/mail/presence'", "el('span', 'mail-who-load',"):
+        ok(kept in mw, "kept: " + kept)
 
 
 if __name__ == "__main__":
