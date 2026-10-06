@@ -2665,7 +2665,9 @@ def t_the_beta_tabs_say_so_everywhere_they_are_named():
     ok("beta-tag" not in ft, "and the Finance tabs do not repeat it")
     for t in ("rTitle", "hTitle"):
         ok(t + ".append(el('span', 'beta-tag'" not in SCRIPT, "not on the shared Finance heading (" + t + ")")
-    ok("BETA_TABS.indexOf(v) >= 0" in SCRIPT, "and the topbar title does too")
+    # Since the mix (2026-10-06) the top bar is crumbs, which say where you are
+    # and nothing else; Beta sits beside the page title (Task 7's pageHead).
+    ok("$('view-title').append(" not in SCRIPT, "the crumbs carry no Beta")
     ok(".beta-tag {" in CSS, "the badge is styled")
 
 
@@ -5927,7 +5929,9 @@ def t_the_header_is_one_implementation_with_one_collapse_point():
     """Measured 2026-09-07: one .topbar, 48px on every view at 375, 640, 760,
     761, 900 and 1200, no overflow, no overlap. The one defect was a long
     conversation title wrapping to 63px inside the 48px bar."""
-    ok(HTML.count('class="topbar"') == 1 and CSS.count(".topbar {") == 1, "one header, one rule")
+    # The mix (2026-10-06): the phone's ink bar restyles the bar inside its own
+    # breakpoint, so the one base rule is the one at the stylesheet's indent.
+    ok(HTML.count('class="topbar"') == 1 and CSS.count("\n        .topbar {") == 1, "one header, one base rule")
     ok(".topbar { height: var(--topbar-h);" in CSS and "--topbar-h: 48px" in CSS, "at the shell's height token")
     h1 = CSS.split(".topbar h1 {")[1].split("}")[0]
     for prop in ("min-width: 0", "overflow: hidden", "text-overflow: ellipsis", "white-space: nowrap"):
@@ -9782,6 +9786,34 @@ def t_the_page_is_one_sheet_in_an_ink_frame():
     ok("font-size: var(--text-micro)" in beta and "background: none" in beta, "Beta is a micro word, not a box")
     ok(".beta-tag" not in CSS.split("ONE TAG.")[1].split("{")[0], "and has left the one tag recipe")
     ok('<meta name="theme-color" content="#121212" />' in HTML, "a phone's own bar is ink too")
+
+
+@test
+def t_the_top_bar_says_where_you_are_and_finds_anything():
+    """Spec 5: the top bar sits inside the sheet with crumbs on the left
+    (section, chevron, page) and search on the right (a 32 well, 232 wide, the
+    shortcut in a key cap). On a phone or tablet it is the ink frame: the
+    menu, the section, search; the sheet rises under it with 12 corners."""
+    ok('<div class="crumbs"><span id="view-crumb"></span><span class="crumb-chev" id="crumb-chev" aria-hidden="true"></span><h1 id="view-title">Overview</h1></div>' in HTML,
+       "the crumbs are the section, a chevron and the page")
+    ok("topbar-sep" not in HTML, "the hairline after the trigger is gone")
+    ok("function setViewCrumb(v) {" in SCRIPT, "the section is read from the sidebar's own groups")
+    sv = SCRIPT.split("function setView(v) {")[1][:1600]
+    ok("setViewCrumb(v);" in sv and "document.body.dataset.view = v;" in sv, "and set with the page on every move")
+    ok("$('view-title').append(" not in SCRIPT, "the crumbs carry no Beta: the page title does")
+    bar = CSS.split("\n        .topbar {")[1].split("}")[0]
+    ok("border-bottom" not in bar and "padding: 0 var(--wrap-pad)" in bar, "no rule under the bar, on the page's gutter")
+    find = CSS.split("\n        .topbar-search {")[1].split("}")[0]
+    for prop in ("height: var(--control-h)", "width: var(--find-w)", "background: var(--surface-tertiary)",
+                 "border-radius: var(--radius-control)"):
+        ok(prop in find, "search: " + prop)
+    eq(_token_raw("find-w"), "232px", "--find-w")
+    kbd = CSS.split("\n        .topbar-search kbd {")[1].split("}")[0]
+    ok("height: var(--tag-h)" in kbd and "font-size: var(--text-micro)" in kbd and "box-shadow: var(--ring-default)" in kbd,
+       "the shortcut is a 20 key cap in micro type")
+    phone = CSS.split("@media screen and (max-width: 900px) {")
+    ok(len(phone) > 1 and ".view.active { background: var(--surface-primary); border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;" in phone[1],
+       "on a phone the sheet rises under an ink bar")
 
 
 if __name__ == "__main__":
