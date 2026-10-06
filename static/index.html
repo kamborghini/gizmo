@@ -345,6 +345,7 @@
             --chevron-room: calc(var(--sp-3) + var(--icon-md) + var(--sp-2));   /* a select's chevron: 12 in, 16 wide, 8 clear */
             --search-w: 280px;      /* a list's search field */
             --pop-w: 360px;         /* a popover's width (the window's, less 16 a side, on a phone) */
+            --qc-w: 184px;          /* a queue counter */
             --icon-col: 34px;       /* the file list's icon column: 16px glyph, 18px gutter */
             /* The widget grid. Four columns when four cells of --wgrid-cell fit
                the content column, else two, one on a phone. Its gap is the
@@ -765,6 +766,9 @@
         .ov-wrap > .ov-hero { margin-bottom: var(--sp-7); }
         /* A page's tab row sits 32 above the body. */
         .ov-wrap > :is(.tabs, .page-tabs, .seg-row) { margin-bottom: var(--sp-7); }
+        /* Queue counters sit 20 under the header and 20 over the list. */
+        .ov-hero:has(+ .queues) { margin-bottom: var(--sp-5); }
+        .ov-wrap > .queues { margin-bottom: var(--sp-5); }
         .ov-wrap > *:last-child { margin-bottom: 0; }
         /* A Run gate with more of the page after it (Customers' trade radar)
            keeps the page rhythm under it rather than touching the next card. */
@@ -1373,6 +1377,8 @@
         /* In the grid a tab row still runs edge to edge, and its 32 to the body
            is taken out of the grid's gap. */
         .ov-wrap.wgrid > :is(.tabs, .page-tabs) { margin-inline: calc(-1 * var(--wrap-pad)); margin-bottom: calc(var(--sp-7) - var(--page-rhythm)); }
+        .ov-wrap.wgrid > .ov-hero + .queues { margin-top: calc(var(--sp-5) - var(--page-rhythm)); }
+        .ov-wrap.wgrid > .queues { margin-bottom: calc(var(--sp-5) - var(--page-rhythm)); }
         /* A block with no box of its own (the page chat, a structured block,
            a plain wrapper marked widget-bare) let its first child's top margin
            and its last child's bottom margin fall into the page rhythm in the
@@ -4286,6 +4292,37 @@
            a menu row): caption at 500 in ink-3, tabular, 8 after the word. */
         .cnt { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary);
             font-variant-numeric: tabular-nums; }
+        /* QUEUE COUNTERS (the mix, spec 6): the flow's queues as big tiles, the
+           label above a 36 figure, a small chevron between; the chosen one a
+           teal fill with the focal glow and ink words. The other queues are
+           tabs beside them on the chosen recipe: wash, teal ring, ink words. */
+        .queues { display: flex; align-items: stretch; gap: var(--control-gap); }
+        .qc { width: var(--qc-w); padding: var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius-tile); background: var(--surface-tertiary);
+            display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); font: inherit; color: var(--text-primary); text-align: left; cursor: pointer; }
+        .qc-l { font-weight: var(--weight-medium); color: var(--text-secondary); white-space: nowrap; }
+        .qc-n { font-size: var(--fig-l); font-weight: var(--weight-semibold); line-height: var(--lh-none); letter-spacing: var(--tr-fig); font-variant-numeric: tabular-nums; }
+        .qc.on { background: var(--action-primary); box-shadow: var(--shadow-focal); }
+        .qc.on .qc-l { color: var(--text-on-action); }
+        .qc:not(.on):hover { background: var(--surface-sunken); }
+        .qc:not(.on):active { background: var(--press-fill); }
+        .qsep { align-self: center; color: var(--border-emphasis); display: grid; place-items: center; }
+        .qsep svg { width: var(--icon-sm); height: var(--icon-sm); stroke-width: var(--icon-stroke-s); }
+        .qrest { margin-left: var(--sp-4); align-self: flex-end; display: flex; gap: var(--control-gap); }
+        .qt { height: var(--control-h); padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-control); background: none; display: flex; align-items: center;
+            gap: var(--control-gap); font: inherit; font-weight: var(--weight-medium); color: var(--text-secondary); white-space: nowrap; cursor: pointer; }
+        .qt .ic { color: var(--text-tertiary); }
+        .qt.on { background: var(--action-selected); color: var(--text-primary); box-shadow: var(--ring-chosen); }
+        .qt.on .ic { color: var(--text-brand); }
+        .qt:not(.on):hover { background: var(--surface-tertiary); }
+        .qt:not(.on):active { background: var(--press); }
+        @media (max-width: 640px) {
+            .queues { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .queues > .qsep { display: none; }
+            .qc { width: auto; padding: var(--sp-3); }
+            .qc-l { font-size: var(--text-sm); line-height: var(--lh-control); }
+            .qc-n { font-size: var(--fig-m); }
+            .qrest { grid-column: 1 / -1; margin: 0 calc(-1 * var(--sp-2)); align-self: auto; }
+        }
         /* On a phone the Beta marks go from the tabs: the sidebar still carries them. */
         @media (max-width: 900px) {
             .tab .beta-tag { display: none; } }
@@ -6484,6 +6521,29 @@ Projected Image UK"></textarea>
             box.append(t, el('p', 'empty-line', o.text));
             if (o.action) box.append(o.action);
             return box;
+        }
+        /* Queue counters (the mix, spec 6): the queues that make a flow as big
+           tiles in flow order, a chevron between, the chosen one a teal fill
+           with the focal glow; the other queues as tabs beside them. flow:
+           [[key, label, count]]; rest: [[key, label, icon]]. A count not known
+           yet keeps its line with a space. */
+        function queueCounters(flow, rest, current, onPick, label) {
+            const nav = el('nav', 'queues'); nav.setAttribute('aria-label', label || 'Queues');
+            const mark = (b, k) => {
+                b.type = 'button'; b.dataset.k = k;
+                if (k === current) { b.classList.add('on'); b.setAttribute('aria-current', 'page'); }
+                b.onclick = () => { if (k !== current) onPick(k); };
+            };
+            flow.forEach(([k, l, n], i) => {
+                if (i) { const s = el('span', 'qsep'); s.setAttribute('aria-hidden', 'true'); s.append(ico(I.chev)); nav.append(s); }
+                const b = el('button', 'qc'); mark(b, k);
+                b.append(el('span', 'qc-l', l), el('b', 'qc-n', n == null ? ' ' : String(n)));
+                nav.append(b);
+            });
+            const r = el('div', 'qrest');
+            rest.forEach(([k, l, icon]) => { const b = el('button', 'qt'); mark(b, k); b.append(ico(icon), document.createTextNode(l)); r.append(b); });
+            nav.append(r);
+            return nav;
         }
         function statCard(m, i) {
             const c = el('div', 'stat' + (m.tone === 'warn' ? ' warn' : ''));
