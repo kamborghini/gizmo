@@ -10849,10 +10849,33 @@ def t_the_queue_still_holds_and_does_what_it_did():
     for t in ("'Print all (' + printable.length + ')'", "'Print shipping labels (' + shipLabels.length + ')'",
               "labelsOldest ? 'Oldest first' : 'Newest first'", "(k === savedSize ? '  (default)' : '')"):
         ok(t in fn, "the toolbar still says " + t)
+    ok("more.onclick = () => dropMenu(more, [" in fn, "More still opens the menu")
     menu = fn[fn.index("more.onclick = () => dropMenu(more, ["):]
-    at = [menu.index("label: '" + m + "'") for m in ("Size check", "Day sheet", "Dispatch manifest", "Stock usage", "Margins",
-                                                       "Size rules", "Update size list", "Shipping settings")]
+    items = ("Size check", "Day sheet", "Dispatch manifest", "Stock usage", "Margins", "Size rules", "Update size list", "Shipping settings")
+    for m in items:
+        ok("label: '" + m + "'" in menu, "More still has " + m)
+    at = [menu.index("label: '" + m + "'") for m in items]
     ok(at == sorted(at), "More keeps its items in their order")
+
+    # ORDER, not only presence: a later task that moved a button, a cell, a chip or a filter would still have
+    # every string above. Each list is today's order in the source, which is the order on the bench.
+    def in_order(parts, what):
+        for part in parts:
+            ok(part in fn, what + ": still there: " + part)
+        at = [fn.index(part) for part in parts]
+        ok(at == sorted(at) and len(set(at)) == len(at), what + ", in this order: " + " < ".join(parts))
+    in_order(["acts.append(pv);", "acts.append(ed);", "acts.append(pf);", "acts.append(pr);", "acts.append(rd);",
+              "acts.append(db);", "acts.append(mk);"],
+             "the row's buttons run Preview, Edit, Proof, Print, Ready to make or Dispatch, Mark made")
+    in_order(["row.append(orderA(orderNo(o)", "row.append(who);", "row.append(el('div', 'lbl-meta', fmtDate(o.created_at)));", "row.append(acts);"],
+             "the row's cells run the number, who, the date, the buttons")
+    in_order(["nameLine.append(el('span', 'lbl-name', o.display_name));", "nameLine.append(el('span', 'lbl-chip bad', cap(staleStatus)));",
+              "'Due ' + (o.due_label || '')", "ageDays(o.created_at) + 'd'", "el('span', 'lbl-chip note', 'Note')", "nameLine.append(dc);",
+              "nameLine.append(tc);", "nameLine.append(el('span', 'lbl-chip made', 'Made'))", "nameLine.append(pc);"],
+             "the name line runs the name, the status, Due, the age, Note, the courier, No terms, Made or Printed")
+    in_order(["who.append(nameLine);", "who.append(el('span', 'sub',"], "under the name line comes the Company line")
+    in_order(["key: 'all'", "key: 'unprinted'", "key: 'unmade'"], "the filters run All, Unprinted, Not made")
+    in_order(["[pnBtn, coll, newShip, more].filter(Boolean).forEach(b => heroActs.append(b));"], "the page's actions keep their order")
     for t in ("'Actual size preview: '", "'% so the whole order fits one label.'", "' - some rows would be cut off the printed label. '",
               "'Choose a larger stock size before printing.'", "'Print this label'", "histLine(o)"):
         ok(t in fn, "the preview still says " + t)
