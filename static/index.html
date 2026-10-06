@@ -4892,7 +4892,6 @@
            field rule's own ring on the textarea inside it made two. */
         #input:focus { box-shadow: none; }
         /* No keys on a touch screen, so no keyboard hint either. */
-        @media (hover: none) { .composer .hint { display: none; } }
         .send { width: var(--box-xl); height: var(--box-xl); border-radius: var(--radius-control); border: 0; background: var(--action-primary); color: var(--text-on-action); display: grid; place-items: center; flex-shrink: 0; transition: background var(--dur) var(--ease); }
         @media (hover: hover) { .send:hover { background: var(--action-hover); } } .send:active { background: var(--action-active); } .send:disabled { background: var(--surface-tertiary); color: var(--text-disabled); cursor: not-allowed; }
         .send svg { width: var(--icon-md); height: var(--icon-md); }
@@ -4921,7 +4920,6 @@
         .toggle:is(.on, [aria-checked="true"]) .sw::after { transform: translateX(calc(var(--switch-w) - var(--switch-h))); background: var(--surface-primary); }
         @media (hover: hover) { .toggle:hover .sw { background: var(--text-tertiary); } }
         @media (hover: hover) { .toggle:is(.on, [aria-checked="true"]):hover .sw { background: var(--text-brand); } }
-        .composer .hint { margin-left: auto; font-size: var(--text-xs); color: var(--text-tertiary); }
         /* Deep analysis is a real switch now, so it drops the button's own box. */
         #deep-toggle { border: 0; background: none; padding: 0; font: inherit; font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-secondary); }
         .deep-note { font-size: var(--text-xs); color: var(--text-tertiary); flex: 1 1 14rem; }
@@ -5802,13 +5800,12 @@
                         <div class="composer-skills" id="composer-skills" hidden></div>
                         <div class="box">
                             <textarea id="input" rows="1" placeholder="Ask about your store…" aria-label="Ask Reactor"></textarea>
-                            <button class="send" id="send" title="Send" aria-label="Send" disabled></button>
+                            <button class="send" id="send" title="Enter to send · Shift+Enter for a new line" aria-label="Send" disabled></button>
                         </div>
                         <div class="row">
                             <button type="button" class="toggle" id="deep-toggle" role="switch" aria-checked="false" aria-describedby="deep-note" title="Reactor thinks for longer before it answers: slower, and costs more. For questions that need several reports at once."><span class="sw"></span> Deep analysis</button>
                             <span class="deep-note" id="deep-note" hidden>Slower, and costs more. Kept for this conversation.</span>
                             <button type="button" class="btn btn-sm skill-pick" id="skill-pick" aria-haspopup="menu"></button>
-                            <span class="hint">Enter to send · Shift+Enter for a new line</span>
                         </div>
                     </div>
                 </div>
@@ -9667,7 +9664,7 @@ Projected Image UK"></textarea>
             const w = el('div', 'empty-chat');
             const big = el('div', 'big'); big.innerHTML = I.spark;
             w.append(big, el('h2', null, 'Ask Reactor'),
-                el('p', null, 'Ask about your products, orders, customers and stock. Reactor reads your live figures and answers with findings and next steps, following your skills where they fit.'));
+                el('p', null, 'Ask about products, orders, customers and stock.'));
             /* Earlier conversations first: after a reload, and on a phone, the
                list is far out of sight under the whole menu. */
             const recent = convos.filter(x => x.turns.length).slice(0, 3);
@@ -23014,16 +23011,10 @@ Projected Image UK"></textarea>
             box.dataset.built = '1';
             box.innerHTML = '';
             box.classList.toggle('no-intro', !firstPaint('guide'));
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.book;
-            const ht = el('div');
-            /* One header for the whole set, the same on every tab: a sentence
-               swapped per tab (one line on some, two on Design) and a Print
-               button shown on one tab only moved the strip under the pointer
-               on every click. Print sits with the Guide's own search. */
-            ht.append(el('h2', null, 'Guide'), el('p', 'guide-desc',
-                'How the desk runs, what changed in Reactor, and what the team has asked for.'));
-            hero.append(badge, ht);
-            box.append(hero);
+            /* One header for the whole set, the same on every tab, and no line:
+               the tabs under it say what the Guide holds (copy plan, Guide #1).
+               Print sits with the Guide's own search. */
+            box.append(pageHead({ view: 'guide', title: 'Guide' }));
             /* A row of tabs that says which is showing, and keeps focus where
                it was pressed: the whole page was rebuilt and focus fell away. */
             if (!guideSegs().some(s => s[0] === guideSeg)) guideSeg = 'guide';
@@ -23137,11 +23128,14 @@ Projected Image UK"></textarea>
             const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
             return (hi + 0.05) / (lo + 0.05);
         }
+        /* Each section's explanation is its title's info button (copy plan,
+           Design #1 to #8): the samples under it show the rest. */
         function dsCard(title, desc, ...kids) {
             const c = el('section', 'card');
             const h = el('div', 'card-head');
-            h.append(el('h3', 'card-title', title));
-            if (desc) h.append(el('p', 'card-desc', desc));
+            const t = el('h3', 'card-title', title);
+            if (desc) t.append(infoButton(title, { title: title, body: desc }));
+            h.append(t);
             c.append(h, ...kids.filter(Boolean));
             return c;
         }
@@ -23180,6 +23174,25 @@ Projected Image UK"></textarea>
                 colours.append(dsLabel(group), grid);
             });
             page.append(colours);
+            /* The mix's own tokens (spec 4), each with the value the browser
+               reads for it now: a swatch for a colour, the figure for the rest. */
+            const mix = dsCard('Tokens', null);
+            MIX_TOKENS.forEach(([group, names]) => {
+                const grid = el('div', 'ds-swatches');
+                names.forEach(t => {
+                    const v = getComputedStyle(document.documentElement).getPropertyValue(t).trim();
+                    const sw = el('div', 'ds-swatch');
+                    if (v && CSS.supports('color', v)) {
+                        const chip = el('span', 'ds-chip'); chip.style.background = 'var(' + t + ')';
+                        chip.setAttribute('aria-hidden', 'true'); sw.append(chip);
+                    }
+                    const facts = el('div', 'ds-facts');
+                    facts.append(el('div', 'ds-name', t), el('div', 'ds-val', v));
+                    sw.append(facts); grid.append(sw);
+                });
+                mix.append(dsLabel(group), grid);
+            });
+            page.append(mix);
             /* Type: the ranks, each drawn by the class the screens use */
             const ranks = [
                 ['ds-type-page', 'Page title'],
@@ -23235,7 +23248,7 @@ Projected Image UK"></textarea>
                 dsRow(segmented([['m', 'Month'], ['q', 'Quarter'], ['y', 'Year']], 'm', () => {}, { label: 'Example period' })),
                 dsLabel('Chips turn things on and off, any number at once'), chips));
             /* Figures */
-            page.append(dsCard('Figures', 'The strip of headline figures at the top of a report.',
+            page.append(dsCard('Figures', null,
                 metricsStrip([{ label: 'Sales', value: money(12480, 'GBP'), delta: '8.2%', trend: 'up' },
                     { label: 'Orders', value: '214', delta: '3.1%', trend: 'down' },
                     { label: 'Average order', value: money(58.32, 'GBP', 2) }])));
@@ -23272,8 +23285,8 @@ Projected Image UK"></textarea>
                 field('Note', area, 'For more than a line.'), field('Email', wrong, null, 'This needs to be an email address.'));
             page.append(dsCard('Fields', 'Labels above, help under, and what is wrong said in words beside the field.', fields));
             /* Messages */
-            page.append(dsCard('Messages', 'What a screen says when there is nothing to show, when something failed, and when something happened.',
-                el('div', 'empty', 'Nothing to list yet. When there is, it shows here.'),
+            page.append(dsCard('Messages', null,
+                el('div', 'empty', 'Nothing here yet.'),
                 loadFailure('The report could not be read.', () => toastOk('Nothing to try: this is an example.')),
                 dsRow(Object.assign(dsButton('btn btn-sm', 'Show a done note'), { onclick: () => toastOk('Saved.') }),
                     Object.assign(dsButton('btn btn-sm', 'Show a problem note'), { onclick: () => toastError('That did not work.') }))));
@@ -23332,7 +23345,7 @@ Projected Image UK"></textarea>
                     card.hidden = !n; shown += n;
                 });
                 none.hidden = !!shown;
-                none.textContent = 'Nothing in the guide mentions "' + guideView.q + '". Ask for a feature if something is missing.';
+                none.textContent = 'Nothing in the guide mentions \u201c' + guideView.q + '\u201d.';
             };
             filterBook();
         }
@@ -23395,10 +23408,13 @@ Projected Image UK"></textarea>
         function paintRequests(host, u) {
             const card = el('div', 'card');
             const head = el('div', 'card-head');
-            head.append(el('h3', 'card-title', 'Feature requests'));
-            head.append(el('p', 'card-desc', u.can_triage
-                ? 'What the team has asked for. Set each one Planned, Shipped or Declined with a reply, and the person who asked sees it here.'
-                : 'Anything the app cannot do yet, or does awkwardly. Short and specific beats polished. An admin answers each one here.'));
+            /* An admin's how-to is the title's info button; a member keeps one
+               line (copy plan, Guide #3 and #4). */
+            const ft = el('h3', 'card-title', 'Feature requests');
+            if (u.can_triage) ft.append(infoButton('About requests', { title: 'Feature requests',
+                body: 'What the team has asked for. Set each one Planned, Shipped or Declined with a reply, and the person who asked sees it here.' }));
+            head.append(ft);
+            if (!u.can_triage) head.append(el('p', 'card-desc', 'Ask for what the app cannot do yet.'));
             const act = el('div', 'card-act');
             const add = el('button', 'btn btn-sm btn-primary'); add.type = 'button';
             add.append(ico(I.plus), document.createTextNode('Ask for a feature'));
@@ -23518,8 +23534,7 @@ Projected Image UK"></textarea>
                moment worth capturing, not later from a different tab. */
             const m = crmModal('Ask for a feature');
             const form = el('div', 'stack-form');
-            form.append(el('p', 'card-sub', 'What should the app do that it does not do yet, or what gets in the way? '
-                + 'It goes on Guide, Requests, where an admin answers it.'));
+            form.append(el('p', 'card-sub', 'What should the app do that it cannot yet?'));
             const t = crmText('', 'One line');
             t.maxLength = 140; t.id = 'af-title';
             const tMsg = el('div', 'field-msg'); tMsg.hidden = true; tMsg.id = 'af-title-msg'; t.setAttribute('aria-describedby', tMsg.id);
