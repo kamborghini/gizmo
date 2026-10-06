@@ -10329,6 +10329,31 @@ def t_a_section_shows_its_edge_only_while_it_is_being_moved():
     ok("box-shadow: var(--shadow-pop)" in hide and "width: var(--control-h-sm)" in hide, "the hide button is a 24 square on the pop shadow")
 
 
+@test
+def t_every_target_on_a_phone_fits_a_finger():
+    """Spec principle 6 and 4.3: on a phone every target is 40 and every
+    control and row title is 14; the gutter is 16 and sections are 32 apart.
+    Keyed on the width (640), which is what the 390 audit measures. An info
+    button keeps its 24 look; its 40 target grows away from its words."""
+    blocks = [b for p, b in css_blocks(CSS) if p.endswith("@media (max-width: 640px)") and "THE PHONE" in p]
+    ok(len(blocks) == 1, "one phone block for the parts")
+    b = blocks[0]
+    for sel in (".btn", ".icon-btn", ".chip", ".toggle", ".qt", ".dmenu-item", ".rlist-row", ".nav-item", ".tbl-search", "select"):
+        ok(sel in b, sel + " is in the 40 rule")
+    ok("min-height: var(--control-h-lg)" in b and "font-size: var(--text-sm)" in b, "40 tall, 14 words")
+    ok(".segmented > button { height: calc(var(--control-h-lg) - 2 * var(--sp-0-5)); }" in b, "a segment fills a 40 track")
+    ok("padding-right: calc(var(--control-h-lg) - var(--control-h-sm))" in b, "an info button's target grows away from its words")
+    for sel in (".sidebar .icon-btn", ".brand", ".mem-btn", ".crm-ticon", ".crm-col-add", ".sizes-open", ".files-name", ".guide-toc-link", ".miss-open", ".action-link", "details summary"):
+        ok(sel in b.split("The rest of what a finger meets")[1] if "The rest of what a finger meets" in b else False, sel + " is a 40 target too")
+    ok(".guide-tools { grid-template-columns: minmax(0, 1fr); }" in b, "the Guide's search row shrinks to its track")
+    ok(".az button { flex: none; height: var(--control-h-lg); min-width: var(--control-h-lg); }" in b, "the Size list's A to Z is a swipeable line of 40 squares")
+    ok(".chart-expand { width: var(--control-h-lg); height: var(--control-h-lg); }" in b and ".ktable tr.ktable-grp th { height: var(--control-h-lg); }" in b,
+       "and so are the chart's expand square and a maker's band")
+    ok(re.search(r":root \{ --wrap-pad: var\(--sp-4\); \}", CSS), "the gutter is 16")
+    ok("@media (pointer: coarse) { input:not([type=checkbox]):not([type=radio]), textarea, select { font-size: var(--text-md); } }" in CSS,
+       "and a real field under a finger keeps 16 so iOS does not zoom into it")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
