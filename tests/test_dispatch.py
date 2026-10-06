@@ -3880,6 +3880,29 @@ def t_a_tag_write_retires_the_snapshot_immediately():
         copilot._tool_json = saved
 
 @test
+def t_the_queue_counts_ride_along_from_the_same_sweep():
+    # The mix (2026-10-06): the Production Manager shows the size of every flow
+    # queue at once, as counters. They come back with whichever queue was asked
+    # for, from the sweep that load already made: no second Shopify call.
+    orders = QUEUE_ORDERS + [
+        {"id": 999, "order_number": 3, "name": "#3", "created_at": "2026-08-12T09:00:00Z",
+         "tags": "Unprocessed", "line_items": [], "customer": {}, "shipping_address": {}},
+        {"id": 1000, "order_number": 4, "name": "#4", "created_at": "2026-08-12T09:00:00Z",
+         "tags": "IP, Rush", "line_items": [], "customer": {}, "shipping_address": {}},
+    ]
+    calls, tools = sweep_counter(orders)
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        res = with_cache(lambda: run(copilot.run_production_labels({}, tag="PC")))
+        eq(res.get("counts"), {"unprocessed": 1, "make": 2, "ship": 1}, "every flow queue is counted")
+        eq([o["id"] for o in res["orders"]], [888], "the queue asked for is unchanged")
+        eq(calls["n"], 1, "from the one sweep")
+        one = run(copilot.run_production_labels({}, order_id=12345))
+        ok("counts" not in one, "the one-order deep link swept nothing, so it counts nothing")
+    finally:
+        copilot._tool_json = saved
+
+@test
 def t_a_tag_write_through_the_real_path_busts_the_snapshot():
     # Not the helper: the actual writer call site inside _sync_order_tags.
     calls, tools = sweep_counter()
@@ -26471,7 +26494,7 @@ def t_a_long_header_is_read_in_linear_time_and_the_index_holds_a_bounded_amount(
     finally:
         copilot._SKILL_INDEX.clear(); copilot._SKILL_INDEX.update(saved[0]); copilot._SKILL_INDEX_CHARS = saved[1]
 
-for fn in TESTS:
+for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a
     # handful, which is what LOGIN_MAX_PER_MIN is sized for. The ceiling has
