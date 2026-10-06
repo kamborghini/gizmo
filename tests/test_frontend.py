@@ -1416,8 +1416,8 @@ def t_one_component_per_role_across_tabs():
     ok("cardOf('Recent sessions'" in SCRIPT and "cardOf('On the clock now')" in SCRIPT
        and "cardOf('Hours per person'" in SCRIPT, "and all three of its headings moved together")
     banner = re.search(r"\.alerts-banner \{[^}]*\}", HTML).group(0)
-    ok("var(--bw-hairline) solid var(--border-default)" in banner,
-       "the alerts banner wears the hairline every other tinted notice wears")
+    ok("border" not in banner and "var(--warning-bg)" in banner,
+       "the alerts banner is the tint every other notice is: no border (the notice recipe, since the mix)")
     lia = re.search(r"\.lia-name \{[^}]*\}", HTML).group(0)
     ok("text-overflow: ellipsis" in lia,
        "and a long account name truncates like every other child of its row")
@@ -11469,6 +11469,35 @@ def t_windows_sign_in_and_settings_wear_the_mix():
     ok("border: 0" in toast and "padding: var(--pop-pad)" in toast and "box-shadow: var(--shadow-pop)" in toast,
        "a toast floats the same way, 16 inside, its status still the bar at its left")
     ok(not re.search(r"--radius-(sm|xl)\s*:", CSS) and "var(--radius-sm)" not in SCRIPT + CSS + COMPOSER, "the old corners are gone")
+
+
+@test
+def t_the_last_boxes_inside_windows_and_notices_have_no_edge():
+    """Carried from the Phase 4 reviews (spec 3 and 6): inside a floating layer what is boxed is a section or a
+    tinted well with no edge (the dispatch window's destination, customs and technical details, and the code
+    block in the last); a warning notice is a tint with no border (the alerts banner and the missing-tag strip: their
+    old border declarations were dead under the notice recipe, and are gone); the Inbox's bulk bar has no border and
+    keeps its actions; and the dispatch window's controls are the field height (32)."""
+    def rule(sel, nth=0):
+        ms = list(re.finditer(r"\n        " + re.escape(sel) + r" \{([^}]*)\}", CSS))
+        ok(len(ms) > nth, sel + " is a rule at the stylesheet's own indent")
+        return ms[nth].group(1) if len(ms) > nth else ""
+    for sel in (".disp-dest", ".disp-customs", ".disp-tech", ".disp-tech-pre"):
+        r = rule(sel)
+        ok("border: 0;" in r and "border: var(--bw-hairline)" not in r, sel + " has no edge")
+    ok(len(re.findall(r"\n        \.disp-customs \{", CSS)) == 1, ".disp-customs is one rule, not two that disagree")
+    for sel in (".alerts-banner", ".miss-strip"):
+        r = rule(sel)
+        ok("border" not in r and "var(--warning-bg)" in r, sel + " is the tint, its dead border gone (the notice recipe gives it none)")
+    ok(".alerts-banner" in CSS.split("ONE NOTICE.")[1].split("}")[0] and ".miss-strip" in CSS.split("ONE NOTICE.")[1].split("}")[0]
+       and "border: 0;" in CSS.split("ONE NOTICE.")[1].split("}")[0], "and both are on the notice recipe, which has no border")
+    bar = rule(".mail-bulkbar")
+    ok("border: 0;" in bar and "border: var(--bw-hairline)" not in bar, "the Inbox's bulk bar has no border")
+    armed = rule(".mail-bulkbar.armed")
+    ok("border-color" not in armed and "background: var(--action-soft)" in armed, "armed it is the teal tint, still no border")
+    ok("width: var(--control-h); height: var(--control-h);" in rule(".disp-boxedit .icon-btn"), "the box row's icon button is the 32 of the fields beside it")
+    ins = rule(".disp-insure input[type=number]")
+    ok("height: var(--control-h);" in ins and "36px" not in ins, "and the insure field takes the field height token")
 
 
 if __name__ == "__main__":

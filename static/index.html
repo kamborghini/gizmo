@@ -2289,7 +2289,8 @@
         .changes-head { font-size: var(--text-xs); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-tertiary); display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
         .changes-head svg { width: var(--icon-sm); height: var(--icon-sm); }
         /* scheduled-change alerts */
-        .alerts-banner { background: var(--warning-bg); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-5); }
+        /* A warning notice: the tint, and the rest from the notice recipe (ONE NOTICE, below): no border. */
+        .alerts-banner { background: var(--warning-bg); margin-bottom: var(--sp-5); }
         .alerts-head { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--warning); margin-bottom: var(--sp-2); }
         .alerts-head svg { width: var(--icon-md); height: var(--icon-md); }
         .alerts-clear { margin-left: auto; background: transparent; border: 0; color: var(--text-tertiary); font: inherit; font-size: var(--text-xs); font-weight: var(--weight-medium); cursor: pointer; }
@@ -2928,20 +2929,21 @@
            SwiftUI has a shape for this, ConcentricRectangle; on the web it is
            one subtraction, as long as it is written down rather than guessed. */
         .modal.disp-modal { max-width: 720px; width: 94vw; }
-        .disp-dest { padding: var(--sp-3) var(--sp-3); background: var(--surface-secondary); border: var(--bw-hairline) solid var(--border-strong);
+        /* Inside a window a group is a tinted well with no edge (the mix, spec 3): the window is boxed as a whole. */
+        .disp-dest { padding: var(--sp-3) var(--sp-3); background: var(--surface-secondary); border: 0;
             border-radius: var(--radius-inset); margin-bottom: var(--sp-4); }
         /* One rhythm down the form, and one height for every control in a row. */
         .disp-modal .field-help { margin: var(--sp-2) 0 0; }
         .disp-boxedit { display: flex; gap: var(--sp-2); align-items: center; margin-bottom: var(--sp-2); }
         .disp-boxedit > select, .disp-boxedit > input { height: var(--control-h); box-sizing: border-box; }
         .disp-boxedit > select.psel { min-width: 168px; }
-        .disp-boxedit .icon-btn { width: var(--box-lg); height: var(--box-lg); flex: none; }
+        .disp-boxedit .icon-btn { width: var(--control-h); height: var(--control-h); flex: none; }
         .disp-boxedit > input.disp-boxdef { width: var(--box-xs); height: var(--box-xs); flex: none;
             accent-color: var(--control-accent); cursor: pointer; margin: 0; }
         .disp-addbox { margin-top: var(--sp-2); }
         .disp-insure { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-5) 0 0;
             font-size: var(--text-xs); color: var(--text-secondary); cursor: pointer; }
-        .disp-insure input[type=number] { height: 36px; width: 112px; box-sizing: border-box; margin: 0; }
+        .disp-insure input[type=number] { height: var(--control-h); width: 112px; box-sizing: border-box; margin: 0; }
         .disp-quote { margin-top: var(--sp-4); }
         .disp-dest-name { font-weight: var(--weight-medium); font-size: var(--text-body); }
         .disp-boxrow { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
@@ -2975,8 +2977,8 @@
             padding: var(--sp-2-5) 0; border-bottom: var(--bw-hairline) solid var(--border-default); }
         .disp-recent:last-child { border-bottom: 0; }
         .disp-recent-t { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); }
-        .disp-customs { margin: var(--sp-3) 0; padding: var(--sp-3); border: var(--bw-hairline) solid var(--border-default);
-            border-radius: var(--radius-inset); background: var(--surface-tertiary, transparent); }
+        .disp-customs { margin: var(--sp-3) 0; padding: var(--sp-3); border: 0;
+            border-radius: var(--radius-inset); background: var(--surface-secondary); }
         .disp-customs .disp-boxrow > .disp-text { flex: 1 1 auto; min-width: 120px; }
         .disp-customs .disp-boxrow > .disp-num { width: 88px; flex: none; }
         /* Chase desk: the composed chasing email under an expanded account. */
@@ -3457,7 +3459,7 @@
            each side and the two borders, with room to spare. */
         .mail-bulkbar { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
             min-height: var(--row-h);
-            padding: var(--sp-1) var(--sp-3); margin-bottom: var(--sp-2); border: var(--bw-hairline) solid var(--border-default);
+            padding: var(--sp-1) var(--sp-3); margin-bottom: var(--sp-2); border: 0;
             border-radius: var(--radius-inset); background: var(--surface-tertiary); font-size: var(--text-xs); }
         .mail-bulkbar .btn { min-height: var(--control-h); padding: 0 var(--sp-3); font-size: var(--text-body); }
         /* The 44 above only holds if everything in the bar is one height: the
@@ -3465,7 +3467,7 @@
            it, with their edge and weight. */
         .mail-bulkbar .mail-presence-pick { height: var(--control-h); min-height: var(--control-h); box-sizing: border-box;
             border-radius: var(--radius-field); border-color: var(--border-default); font-weight: var(--weight-medium); }
-        .mail-bulkbar.armed { border-color: var(--action-line); background: var(--action-soft);
+        .mail-bulkbar.armed { background: var(--action-soft);
             color: var(--text-brand); }
         .mail-bulk-hint { color: inherit; flex: 1 1 0; min-width: 7rem; }
         .mail-files { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-3);
@@ -3820,14 +3822,14 @@
         .disp-pick { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2);
             margin: 0 0 var(--sp-2-5); padding-bottom: var(--sp-2-5); border-bottom: var(--bw-hairline) solid var(--border-default); }
         .disp-pick-name { font-weight: var(--weight-medium); color: var(--text-primary); }
-        .disp-tech { margin-top: var(--sp-3); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset);
+        .disp-tech { margin-top: var(--sp-3); border: 0; border-radius: var(--radius-inset);
             padding: var(--sp-2) var(--sp-3); background: var(--surface-tertiary); }
         .disp-tech > summary { cursor: pointer; font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--text-secondary); }
         .disp-tech-bar { display: flex; gap: var(--sp-2); margin: var(--sp-2) 0 0; }
         .disp-tech-h { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--text-tertiary);
             text-transform: none; letter-spacing: normal; margin: var(--sp-3) 0 var(--sp-1); }
         .disp-tech-pre { margin: 0; padding: var(--sp-2) var(--sp-2); border-radius: var(--radius-inset); background: var(--surface-primary);
-            border: var(--bw-hairline) solid var(--border-default); font-size: var(--text-xs); line-height: var(--lh-caption);
+            border: 0; font-size: var(--text-xs); line-height: var(--lh-caption);
             white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto;
             font-family: var(--font-mono); color: var(--text-secondary); }
         .disp-pick-when { font-size: var(--text-xs); color: var(--text-tertiary); }
@@ -3909,14 +3911,11 @@
         .disp-boxedit { display: flex; gap: var(--sp-1); align-items: center; margin-bottom: var(--sp-1); }
         .disp-boxname { flex: 1 1 auto; }
         .disp-boxdim { width: 62px; flex: none; }
-        .disp-customs { border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-secondary);
-            border-radius: var(--radius-inset); padding: var(--sp-3) var(--sp-3); margin: var(--sp-2-5) 0; }
         .disp-breakdown { font-size: var(--text-xs); margin-top: var(--sp-1); }
         .disp-breakdown summary { cursor: pointer; color: var(--text-tertiary); font-weight: var(--weight-medium); }
         .disp-breakdown[open] summary { color: var(--text-secondary); }
         @media (max-width: 640px) { .disp-dims { grid-template-columns: repeat(2, 1fr); } .disp-origin { grid-template-columns: 1fr; } }
-        .miss-strip { border: var(--bw-hairline) solid var(--border-default); background: var(--warning-bg);
-            border-radius: var(--radius-inset); padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-3); }
+        .miss-strip { background: var(--warning-bg); margin-bottom: var(--sp-3); }
         .miss-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--text-body); }
         .miss-head svg { width: var(--icon-md); height: var(--icon-md); color: var(--warning); flex: none; }
         .miss-sub { color: var(--text-secondary); font-size: var(--text-xs); }
