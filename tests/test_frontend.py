@@ -2840,17 +2840,16 @@ def t_the_table_is_built_to_the_reference_measurements():
     """Every number here was read off the reference with getComputedStyle. They
     are asserted because the last pass at this drifted by eye: 16px cell padding
     against its 12px, and body text a shade grey against its foreground."""
+    # The mix (2026-10-06, spec 6): a 32 head in caption type, 44 rows.
     th = CSS.split(".ktable th {")[1].split("}")[0]
     td = CSS.split(".ktable td {")[1].split("}")[0]
-    ok("padding: var(--sp-3)" in th and "padding: var(--sp-3)" in td,
-       "cells are padded 12px square, header and body alike")
-    ok("height: 44px" in th, "the header row is 44px")
-    ok("line-height: var(--lh-control)" in th and "line-height: var(--lh-control)" in td, "20px line box in both")
+    ok("padding: 0 var(--sp-3)" in th and "padding: 0 var(--sp-3)" in td, "cells are 12 in, header and body alike")
+    ok("height: var(--control-h)" in th and "height: var(--row-h)" in td, "the head row is 32, a body row 44")
+    ok("line-height: var(--lh-caption)" in th and "line-height: var(--lh-control)" in td, "each on its step's one line height")
     ok("color: var(--text-primary)" in td and "var(--text-secondary)" not in td,
        "body cells are foreground, not a muted grey")
     hover = CSS.split(".ktable tbody tr:hover td {")[1].split("}")[0]
-    ok("var(--surface-secondary)" in hover,
-       "the hover is half-strength muted; a full one reads as selected")
+    ok("var(--surface-secondary)" in hover, "the hover is the fill")
 
 
 @test
@@ -3163,16 +3162,16 @@ def t_the_files_list_is_the_reference_measurement():
     """The control radius read as a large button rather than a frame around
     rows, and a 0.5px rule lands on a device pixel on some screens only."""
     lst = CSS.split(".files-list {")[1].split("}")[0]
-    ok("border-radius: var(--radius-inset)" in lst, "the list box steps inside its card")
-    ok("var(--bw-hairline) solid var(--border-default)" in lst, "in the border ink")
+    ok("border: 0" in lst and "border-radius: 0" in lst and "background: none" in lst,
+       "the list has no box of its own (the mix, and the ruling that rows sit on the section's text edge)")
     row = CSS.split(".files-row { display: flex")[1].split("}")[0]
-    ok("padding: var(--sp-3)" in row, "the shared row shell is padded 12px square")
+    ok("padding: var(--sp-3) 0" in row, "the shared row shell is 12 above and below and none at the sides")
     ok("border-top: var(--bw-hairline) solid var(--border-default)" in row and "0.5px" not in row,
        "with a full hairline, not a half-pixel one")
     # The Files list itself is denser than the shell it borrows: 8 + a 28px
     # action button + 8 + the hairline is the reference's 45px row. The Team
     # and Work rows keep the 12px square, so the density is scoped to the tab.
-    ok(re.search(r"#files-content \.files-row \{ padding: var\(--sp-2\) var\(--sp-3\); \}", CSS),
+    ok(re.search(r"#files-content \.files-row \{ padding: var\(--sp-2\) 0; \}", CSS),
        "and the Files rows sit at the reference's own density")
 
 
@@ -9051,7 +9050,7 @@ def t_the_app_wide_layout_sweep_holds():
         ".lbl-qrow .lbl-actions { justify-self: start; }": "queue buttons line up",
         # dashboards and finance
         "details.sect .body .ktable :is(th, td) { overflow-wrap: normal; }": "a figure in a drawer stays whole",
-        ".ktable { width: 100%; border-collapse: collapse; font-size: var(--text-sm); background: var(--surface-primary); min-width: min(460px, 100%); }": "a table fits a narrow card",
+        ".ktable { width: 100%; border-collapse: collapse; font-size: var(--text-body); background: none; min-width: min(460px, 100%); }": "a table fits a narrow card",
         ".ktable td.num { white-space: nowrap; }": "figures keep one line",
         "@container sizes (max-width: 1000px) { .ktable.sizes-table th { white-space: normal; } }": "the size list's headings wrap only in a narrow card",
         "@container cxcard (max-width: 560px) {\n            .ktable.cx-docs { min-width: 0; display: block; }": "Xero results stack by the card's width",
@@ -10026,6 +10025,87 @@ def t_the_feature_band_draws_the_main_question():
     eq(out[2], {"min": 20000, "max": 70000}, "one scale across the mini bars")
     eq(out[3], "42.7%", "a mini bar's low end")
     eq([out[4], out[5]], ["0.0%", "100.0%"], "a mark never leaves its track")
+
+
+@test
+def t_lists_are_rows_split_by_hairlines():
+    """Spec 3 and 6: lists are rows split by hairlines, no box. A table is a 32
+    head in caption type and 44 rows, line framing it (top, under the head,
+    bottom) and line-soft between rows, numbers right and tabular. A list row
+    is 44: a 16 icon 12 from its words, a count and a chevron at its end; two
+    columns read down where there is room. A drawer is a row, not a box."""
+    wrap = CSS.split("\n        .ktable-wrap {")[1].split("}")[0]
+    ok("border: 0" in wrap and "background: none" in wrap and "box-shadow: var(--rule-t), var(--rule-b)" in wrap,
+       "a table has no box: a line above and below")
+    th = CSS.split(".ktable th {")[1].split("}")[0]
+    for prop in ("height: var(--control-h)", "font-size: var(--text-xs)", "color: var(--text-tertiary)", "padding: 0 var(--sp-3)",
+                 "box-shadow: var(--rule-b)"):
+        ok(prop in th, "th: " + prop)
+    td = CSS.split(".ktable td {")[1].split("}")[0]
+    ok("height: var(--row-h)" in td and "solid var(--border-soft)" in td and "padding: 0 var(--sp-3)" in td, "a 44 row on a soft divider")
+    ok(".ktable :is(th, td):first-child { padding-left: 0; }" in CSS and ".ktable :is(th, td):last-child { padding-right: 0; }" in CSS,
+       "the outer columns sit on the text edge")
+    ok("function listRows(items, opts) {" in SCRIPT, "the list row builder exists")
+    fn = fn_src("function listRows(items, opts) {")
+    for part in ("el('nav', 'rlist'", "el('button', 'rlist-row')", "el('span', 'cnt'", "el('span', 'sr-only', ' ' + it.unit)", "ico(I.chev)"):
+        ok(part in fn, "listRows: " + part)
+    row = CSS.split("\n        .rlist-row {")[1].split("}")[0]
+    ok("min-height: var(--row-h)" in row and "gap: var(--gap-row-icon)" in row, "a list row is 44 with its icon 12 from its words")
+    ok(".rlist.cols-2 { grid-auto-flow: column;" in CSS, "two columns read down")
+    sect = CSS.split("\n        details.sect {")[1].split("}")[0]
+    ok("border: 0" in sect and "box-shadow: var(--rule-b-soft)" in sect, "a drawer is a hairline row")
+
+
+@test
+def t_every_row_family_sits_on_the_sections_text_edge():
+    """Ruling on Task 16 (6 October 2026): since Task 11 a section has no gutter,
+    so a row that carries its own side padding sits that far in from the
+    section's title. Every row family that stands straight in a section has no
+    side padding: its words start where the title's do and its hairlines run the
+    text column. Left as they are, by design: a boxed list (the Inbox list, whose
+    rows carry owner tints and an unread bar inside the box), the Production
+    Manager queue rows (Task 33 rebuilds them), and a filled band or panel (the
+    Size list's group band and detail panel), whose fill is their box."""
+    def side(body):
+        left = right = None
+        mm = re.search(r"(?<![-\w])padding:\s*([^;}]+)", body)
+        if mm:
+            v = mm.group(1).split()
+            if len(v) == 1: left = right = v[0]
+            elif len(v) in (2, 3): left, right = v[1], v[1]
+            elif len(v) == 4: left, right = v[3], v[1]
+        mm = re.search(r"padding-inline:\s*([^;}\s]+)", body)
+        if mm: left = right = mm.group(1)
+        mm = re.search(r"padding-left:\s*([^;}\s]+)", body)
+        if mm: left = mm.group(1)
+        mm = re.search(r"padding-right:\s*([^;}\s]+)", body)
+        if mm: right = mm.group(1)
+        return left, right
+    anchored = [".files-row", "#files-content .files-row", ".files-empty", ".guide-rows > .guide-row", ".sk-item", ".impact-row",
+                ".action", ".prod-row", ".card-bleed.prod-rows > .prod-row", ".card-bleed.crm-lead-list > .lbl-row",
+                ".mem-table tr", ".ktable.sizes-table tr.sizes-row", ".cx-docs tr"]
+    for sel in anchored:
+        mm = re.search(r"\n\s*" + re.escape(sel) + r" \{([^}]*)\}", CSS)
+        ok(mm is not None, sel + " is still a rule")
+        if not mm: continue
+        l, r = side(mm.group(1))
+        ok(l in ("0", "0px") and r in ("0", "0px"), sel + " has no side padding (left %s, right %s)" % (l, r))
+    inline = ["\.card-bleed > \.insights > \.insight, \.card-bleed \.block > \.insights > \.insight \\{",
+              "\.card-bleed\.crm-act-list > \.crm-sub \\{",
+              "\.scan-card \.card-bleed > \.summary, \.scan-card \.card-bleed \.block > \.section-title \\{"]
+    for pat in inline:
+        mm = re.search(pat + r"([^}]*)\}", CSS)
+        ok(mm is not None, pat.replace("\\", "") + " is still a rule")
+        if not mm: continue
+        l, r = side(mm.group(1))
+        ok(l in ("0", "0px") and r in ("0", "0px"), pat.replace("\\", "")[:60] + " has no side padding")
+    ok(re.search(r"\n\s*\.tm-day \{ background: none; \}", CSS) is not None, "a day label in the activity list is a plain row, not a filled band")
+    ok(".files-list { border: 0; border-radius: 0; background: none; overflow: visible; }" in CSS, "a list of files has no box")
+    mk = "\n        .card .ktable-wrap, .card-bleed .ktable-wrap {"
+    ok(mk in CSS, "the section table rule is still there")
+    if mk in CSS:
+        ok("box-shadow" not in CSS.split(mk)[1].split("}")[0],
+           "and it no longer switches off the lines above and below a table that the table rule draws (a table in a section was left unframed)")
 
 
 if __name__ == "__main__":
