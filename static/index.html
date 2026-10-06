@@ -365,16 +365,13 @@
             font-stretch: 75% 100%; font-display: swap; src: url('/fonts/bricolage.woff2') format('woff2'); }
         * { box-sizing: border-box; }
         html, body { height: 100%; margin: 0; }
-        /* Every title is in the brand's heading face, and this is the one list
-           of what counts as a title: a page's, a section's and a card's, a run
-           gate's, an empty chat's, a window's, the sign-in card's, and the
-           product's own name beside the wordmark. Body text,
-           labels and every figure stay in the interface face. */
-        :is(.brand-name, .ov-hero h2, .ds-type-page, .section-title, .card-title, .chart-head .ct, .run-gate h2, .empty-chat h2, .modal-head h3, .auth-card h2) {
+        /* The brand's heading face sets two things only (the mix, 4.2): the
+           wordmark and a page's title, and the Design section's sample of one.
+           Section heads, windows, run gates and every figure are Inter. */
+        :is(.brand-name, .ov-hero h2, .ds-type-page) {
             font-family: var(--font-display); }
-        /* A title's controls (a range, a switch and its label) stay in the
-           interface face: the buttons inherit their font, so they took the title's. */
-        :is(.section-title, .card-title, .ov-hero h2) :is(button, input, select, textarea, label, .segmented, .tabs) { font-family: var(--font-sans); }
+        /* What sits beside a title (Beta, a control) stays in the interface face. */
+        .ov-hero h2 :is(button, input, select, textarea, label, .segmented, .tabs, .beta-tag) { font-family: var(--font-sans); }
         body { font-family: var(--font-sans); background: var(--surface-page); color: var(--text-primary);
             font-size: var(--text-sm); line-height: var(--lh-body); -webkit-font-smoothing: antialiased;
             letter-spacing: normal; font-variant-numeric: tabular-nums; color-scheme: light;
@@ -686,8 +683,8 @@
            busy, not inactive), cannot be pressed twice, and its icon turns.
            setBusy() in the script sets aria-busy; any control may carry it. ---- */
         [aria-busy="true"] { cursor: progress; }
-        :is(.btn, .icon-btn, .send)[aria-busy="true"] { pointer-events: none; }
-        :is(.btn, .icon-btn)[aria-busy="true"] svg { animation: navspin 1s linear infinite; }
+        :is(.btn, .icon-btn, .send, .info)[aria-busy="true"] { pointer-events: none; }
+        :is(.btn, .icon-btn, .info)[aria-busy="true"] svg { animation: navspin 1s linear infinite; }
         .confirm-danger .confirm-msg { border-left: var(--bw-marker) solid var(--error); padding-left: var(--sp-2-5); }
 
         .view { flex: 1; min-height: 0; display: none; flex-direction: column; }
@@ -723,7 +720,7 @@
             /* 24px, the reference's content inset, on the two edges you
                see on load. The bottom keeps 40 so a long scroll does not
                end flush against the viewport. */
-            padding: var(--sp-6) var(--wrap-pad) var(--sp-8);
+            padding: var(--sp-3) var(--wrap-pad) var(--sp-9);
             /* The gap between blocks, 16 on a phone. A property the phone
                query re-points, not a second margin rule: a later rule of the
                same weight beat every exception below at 640px and under, so
@@ -743,6 +740,8 @@
            it rather than sitting midway between two. */
         .ov-wrap > *:not(.run-gate) { margin-top: 0; margin-bottom: var(--page-rhythm); }
         .ov-wrap > .section-title { margin-bottom: var(--sp-3); }
+        /* The page header sits 32 above the body, or 20 above its tabs (below). */
+        .ov-wrap > .ov-hero { margin-bottom: var(--sp-7); }
         .ov-wrap > *:last-child { margin-bottom: 0; }
         /* A Run gate with more of the page after it (Customers' trade radar)
            keeps the page rhythm under it rather than touching the next card. */
@@ -775,15 +774,15 @@
         /* An insight or action is a flex row with an icon, so cap the text
            block rather than the row, which owns the card's background. */
         .insight > div:not(.ico), .action > div:not(.ico) { min-width: 0; }
-        .ov-hero { display: flex; align-items: flex-start; gap: var(--sp-4); margin-bottom: var(--sp-6); }
+        .ov-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-6); margin-bottom: var(--sp-7); }
         /* A tab strip belongs TO the header above it, so it sits at the
            header's internal 16px rather than the 24px that separates one
            section from the next. */
-        .ov-hero:has(+ .page-tabs) { margin-bottom: var(--sp-4); }
+        .ov-hero:has(+ .page-tabs) { margin-bottom: var(--sp-5); }
         /* Every screen's section tabs, not only Finance's: CRM, Production
            Manager, Team and the Guide sat 24 under their header, Finance 16. */
-        .ov-hero:has(+ .tabs) { margin-bottom: var(--sp-4); }
-        .ov-hero:has(+ .seg-row) { margin-bottom: var(--sp-4); }
+        .ov-hero:has(+ .tabs) { margin-bottom: var(--sp-5); }
+        .ov-hero:has(+ .seg-row) { margin-bottom: var(--sp-5); }
         /* The Finance paragraph no longer holds a three-line box. It was meant
            to land the strip at one y on all four pages, but Forecast's intro
            runs to four lines, so it never did, and a two-line intro (Xero
@@ -791,9 +790,6 @@
            every other page had 16. */
         /* No icon beside a page title: the reference does not have one on any
            of its pages, and at 30px the title carries the page on its own. */
-        .ov-hero .badge { width: var(--box-xl); height: var(--box-xl); border-radius: var(--radius-inset); background: var(--surface-tertiary); color: var(--text-secondary);
-            display: grid; place-items: center; flex-shrink: 0; box-shadow: var(--ring-line); }
-        .ov-hero .badge svg { width: var(--icon-lg); height: var(--icon-lg); }
         /* No icon beside a page title. The reference does not have one on any
            of its pages, and at 30px the title carries the page by itself. The
            rule above is left intact so the treatment is one edit away if it is
@@ -805,16 +801,40 @@
            page are set the same way. Untracked, this was the one 30px text in
            the app that stood outside its own system: .stat .value directly
            under it and .empty-chat h2 both carry -0.025em. */
-        .ov-hero h2 { font-size: var(--text-3xl); margin: 0 0 var(--sp-1); font-weight: var(--weight-regular);
-            letter-spacing: -.025em; line-height: var(--lh-tight); }
-        .ov-hero p { margin: 0; color: var(--text-tertiary); font-size: var(--text-sm); line-height: var(--lh-control); max-width: var(--measure); }
+        /* The title: Bricolage 600 at 26/32, tracked -0.02em; Beta follows on
+           its baseline, 8 apart. One short line sits 4 under it. */
+        .ov-hero h2 { font-size: var(--text-title); line-height: var(--lh-title); font-weight: var(--weight-semibold); letter-spacing: var(--tr-title); margin: 0;
+            display: flex; align-items: baseline; gap: var(--sp-2); white-space: nowrap; }
+        .ov-hero p { margin: var(--sp-1) 0 0; color: var(--text-tertiary); font-size: var(--text-body); line-height: var(--lh-control); max-width: var(--measure); }
         .ov-updated { font-size: var(--text-xs); color: var(--text-tertiary); margin-left: auto; white-space: nowrap; padding-top: var(--sp-1-5); }
-        .ov-hero-act { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); flex: none; padding-top: var(--sp-1); }
+        .ov-hero-act { margin-left: auto; display: flex; align-items: center; gap: var(--control-gap); flex: none; padding-top: 0; }
         /* Filled later or never (a page not yet set up), or holding only a
            hidden button (Guide's Print on its other tabs): it takes no line,
            which on a phone added 12 of dead air under the intro. */
         .ov-hero-act:not(:has(> :not([hidden]))) { display: none; }
         .ov-hero-act .ov-updated { margin-left: 0; padding-top: 0; }
+        /* The status line: words split by a 4 dot, or a live dot with its halo,
+           the stamp and a 24 Refresh. */
+        .ph-sub { margin-top: var(--sp-1); display: flex; align-items: center; gap: var(--sp-2); color: var(--text-tertiary);
+            font-size: var(--text-body); line-height: var(--lh-control); white-space: nowrap; }
+        .ph-sub .ov-updated { font-size: inherit; margin: 0; padding: 0; color: inherit; }
+        .live-dot { width: var(--dot-md); height: var(--dot-md); margin-left: var(--sp-0-5); border-radius: var(--radius-circle);
+            background: var(--live-dot); box-shadow: var(--ring-live); flex: none; }
+        .dot-sep { width: var(--sp-1); height: var(--sp-1); border-radius: var(--radius-circle); background: var(--border-emphasis); flex: none; }
+        /* A 24 icon button inside a line of text: Refresh here, the info button
+           beside a heading (Task 12). It never grows its line: its fill and its
+           focus ring are drawn on ::before, so a phone grows the target without
+           growing what you see. Pulled 4 toward its words, as a count is. */
+        .info { position: relative; isolation: isolate; width: var(--control-h-sm); height: var(--control-h-sm);
+            margin-block: calc((var(--lh-control) - var(--control-h-sm)) / 2); margin-left: calc((var(--icon-md) - var(--control-h-sm)) / 2);
+            padding: 0; border: 0; background: none; display: inline-grid; place-items: center; color: var(--text-tertiary); flex: none; cursor: pointer; }
+        .info::before { content: ""; position: absolute; z-index: -1; inset: 0; border-radius: var(--radius-tag); }
+        .info svg { width: var(--icon-md); height: var(--icon-md); }
+        .info:hover, .info[aria-expanded="true"] { color: var(--text-primary); }
+        .info:hover::before, .info[aria-expanded="true"]::before { background: var(--surface-tertiary); }
+        .info:active::before { background: var(--press); }
+        .info:focus-visible { outline: 0; }
+        .info:focus-visible::before { outline: var(--focus-outline); outline-offset: calc(-1 * var(--bw-strong)); }
         /* Above a phone the rail kept its full width and the page's intro
            gave way: at 768 on a tablet Overview's sentence was a column 122px
            wide, SEO's 71px and Size list's 56px, and the rail's last button
@@ -835,8 +855,11 @@
            takes its own line instead, and the text gets the width. */
         @media (max-width: 640px) {
             /* 32px gutters spend 64px of a 390px screen on nothing. */
-            .ov-wrap { padding: var(--sp-4) var(--sp-4) calc(var(--sp-8) + var(--sp-4)); --page-rhythm: var(--sp-4); }
-            .ov-hero { flex-wrap: wrap; gap: var(--sp-3); }
+            .ov-wrap { padding: var(--sp-5) var(--sp-4) var(--sp-7); --page-rhythm: var(--sp-4); }
+            .ov-hero { flex-wrap: wrap; gap: var(--sp-4); }
+            .ov-hero h2 { font-size: var(--text-2xl); }
+            /* The actions take a row of their own under the title, sharing it. */
+            .ov-hero-act > .btn:not(.btn-icon) { flex: 1 1 auto; }
             .ov-hero > div:not(.badge):not(.ov-hero-act) { flex: 1 1 200px; min-width: 0; }
             .ov-hero > .ov-hero-act { flex: 1 1 100%; }
             /* The stamp takes its own line; the buttons stay together under it. */
@@ -1219,8 +1242,8 @@
         /* A tab strip belongs to the header above it, so it keeps the
            header's internal 16 there rather than the gap between two blocks,
            as .ov-hero:has(+ .page-tabs) gives it in the flow. */
-        .ov-wrap.wgrid > .ov-hero + .page-tabs { margin-top: calc(var(--sp-4) - var(--page-rhythm)); }
-        .ov-wrap.wgrid > .ov-hero + .tabs { margin-top: calc(var(--sp-4) - var(--page-rhythm)); }
+        .ov-wrap.wgrid > .ov-hero + .page-tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm)); }
+        .ov-wrap.wgrid > .ov-hero + .tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm)); }
         /* A segment bar is as wide as its buttons in the flow; a grid item
            would stretch its track across the whole row. */
         .ov-wrap.wgrid > :is(.tabs, .segmented) { justify-self: start; }
@@ -5580,6 +5603,36 @@ Projected Image UK"></textarea>
             b.title = label || 'Refresh'; b.setAttribute('aria-label', label || 'Refresh');
             b.onclick = () => { setBusy(b, true); Promise.resolve().then(onClick).finally(() => setBusy(b, false)); };
             return b;
+        }
+        /* The page header (the mix, spec 5): a Bricolage title, Beta beside it
+           on the pages BETA_TABS names, at most one short line under it or a
+           status line, and the page's actions on the right.
+           o: { view, title, line, status: [words, ...], live: a time in ms,
+           onRefresh, refreshLabel, actions: [nodes] }. The names .ov-hero and
+           .ov-hero-act stay: the widget grid puts Customise in the rail by
+           them, and a printed report hides the rail by them. */
+        function pageHead(o) {
+            const hero = el('div', 'ov-hero');
+            const text = el('div', 'ph-text');
+            const h = el('h2', null, o.title);
+            if (o.view && BETA_TABS.indexOf(o.view) >= 0) h.append(el('span', 'beta-tag', 'Beta'));
+            text.append(h);
+            if (o.live != null) {
+                const sub = el('div', 'ph-sub');
+                const dot = el('span', 'live-dot'); dot.setAttribute('aria-hidden', 'true');
+                sub.append(dot, el('span', 'ov-updated', freshLabel(o.live)));
+                if (o.onRefresh) { const r = refreshBtn(o.onRefresh, o.refreshLabel); r.className = 'info'; sub.append(r); }
+                text.append(sub);
+            } else if (o.status && o.status.length) {
+                const sub = el('div', 'ph-sub');
+                o.status.forEach((t, i) => {
+                    if (i) { const s = el('span', 'dot-sep'); s.setAttribute('aria-hidden', 'true'); sub.append(s); }
+                    sub.append(el('span', null, t));
+                });
+                text.append(sub);
+            } else if (o.line) text.append(el('p', null, o.line));
+            hero.append(text, heroAct('', ...(o.actions || [])));
+            return hero;
         }
         // static icon wiring
         $('nav-overview').append(ico(I.grid), document.createTextNode('Overview'));
