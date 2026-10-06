@@ -1375,10 +1375,13 @@ def t_the_dead_elevation_token_is_gone():
     # is a second frame.
     # A card is a section with no box since the mix (2026-10-06); what is still
     # boxed keeps the house elevation.
-    for cls in ("lia-card", "auth-card"):
+    for cls in ("lia-card",):
         rule = re.search(r"\." + cls + r" \{[^}]*\}", HTML, re.S)
         ok(rule and "var(--shadow-sm)" in rule.group(0),
            ".%s carries the house card elevation like every other card" % cls)
+    # The sign-in card floats like every window since the mix (2026-10-06).
+    auth = re.search(r"\.auth-card \{[^}]*\}", HTML, re.S)
+    ok(auth and "box-shadow: var(--shadow-pop)" in auth.group(0), ".auth-card carries the pop shadow, a live elevation")
     # This used to assert the rule carried var(--shadow-sm), and it went on passing
     # after --shadow-sm became `none` under the neutral palette - so every segmented
     # control in the app silently lost its selected state while the guard stayed
@@ -3651,8 +3654,8 @@ def t_the_card_elevation_token_actually_paints():
     # Not `none`: a list holding `none` is invalid, so the sign-in card's
     # `var(--shadow-sm), var(--shadow-lg)` silently lost its float.
     ok(not re.search(r"--shadow-[a-z]+:\s*none", CSS), "no shadow token is `none`, which breaks every list it joins")
-    ok("box-shadow: var(--shadow-sm), var(--shadow-lg);" in CSS.split(".auth-card {")[1].split("}")[0],
-       "so the sign-in card keeps its float")
+    ok("box-shadow: var(--shadow-pop);" in CSS.split(".auth-card {")[1].split("}")[0],
+       "so the sign-in card keeps its float, the pop shadow every window wears")
     # Since the mix (2026-10-06) everything that floats shares the one pop shadow.
     for tok in ("--shadow-lg",):
         v = re.search(tok + r":\s*([^;]+);", CSS).group(1)
@@ -4355,7 +4358,7 @@ def t_the_login_screen_knows_a_password_is_not_always_enough():
     step = step[:step.index("\n            async function finish")]
     ok("/api/auth/mfa-verify" in step, "which finishes against the verify route")
     ok("one-time-code" in step, "with the autocomplete that lets a phone fill it")
-    ok("recovery codes" in step, "and says what to do with a lost phone")
+    ok("recovery code" in step, "and says what to do with a lost phone: a recovery code works too")
 
 
 @test
@@ -7060,8 +7063,10 @@ def t_the_sign_in_card_is_the_clean_minimal_design():
     there is no Google, Facebook or Apple sign-in, and the image policy would
     block the logos anyway."""
     card = re.search(r"\.auth-card \{[^}]*\}", CSS, re.S).group(0)
+    # Since the mix (2026-10-06) it floats like every window: the 10 corner and
+    # the pop shadow, its sky tint kept.
     for want in ("linear-gradient(to bottom, var(--auth-card-top), var(--surface-primary))",
-                 "border-radius: var(--radius-xl)", "var(--shadow-lg)", "var(--auth-card-line)"):
+                 "border-radius: var(--radius-pop)", "var(--shadow-pop)", "var(--auth-card-line)"):
         ok(want in card, "the card carries " + want)
     ok("background: linear-gradient(to bottom, var(--auth-go-top), var(--action-primary))" in CSS,
        "the button darkens toward its foot")
@@ -11431,6 +11436,39 @@ def t_chat_the_guide_and_design_wear_the_mix():
     ph = ph[1][:700] if len(ph) == 2 else ""
     ok(".cmp-sel { height: var(--control-h-lg); }" in ph, "and its selects")
     ok(".cmp-x::after {" in ph and "width: var(--control-h-lg); height: var(--control-h-lg);" in ph, "and the remove square, as an invisible 40 square round it (the chip does not grow)")
+
+
+@test
+def t_windows_sign_in_and_settings_wear_the_mix():
+    """Spec 8.3 (Floating) and the copy plan (Sign-in, Settings window, Other
+    dialogs): the sign-in card on the floating corner and shadow; every window's
+    help one short line or its title's info button, warnings kept; no setting
+    or hosting name on a connection line; no header anywhere built by hand; the
+    old corner and badge rules gone."""
+    for new in ("'Your own account, not Shopify’s. No account? Ask an admin.'", "'Code from your authenticator app, or a recovery code.'",
+                "'Create the master admin account. You need the setup code.'", "'Set your own password before carrying on.'",
+                "'Not encrypted: secrets are stored in plain text.'", "'Not set up yet. Steps in the Guide.'",
+                "'Weigh the packed box: couriers re-weigh and bill it.'", "'Collections booked in their portal do not show.'",
+                "'Its labels print no size from now on.'", "Keep these recovery codes somewhere safe: '"):
+        ok(new in SCRIPT, "says: " + new)
+    for gone in ("TOKEN_ENCRYPTION_KEY", "set APP_URL in Railway", "GA4_PROPERTY_ID", "GSC_SITE_URL", "RESEND_API_KEY", "ZETA_URL and ZETA",
+                 "GOOGLE_OAUTH_CLIENT_ID / SECRET", "Add your API key to start dispatching", "insurer wins",
+                 "somewhere safe - ", "applied to every chat and every report as authoritative"):
+        ok(gone not in SCRIPT + HTML, "cut: " + gone)
+    ok(SCRIPT.count("el('div', 'ov-hero')") == 1 and "el('div', 'ov-hero')" in fn_src("function pageHead(o) {")
+       and "el('div', 'badge')" not in SCRIPT, "every page header is pageHead's, the one place that builds one")
+    ok(".ov-hero .badge" not in CSS, "so the badge's rules are gone")
+    card = re.search(r"\.auth-card \{[^}]*\}", CSS, re.S).group(0)
+    ok("border-radius: var(--radius-pop)" in card and "box-shadow: var(--shadow-pop)" in card, "the sign-in card floats like every window")
+    modal = CSS.split("\n        .modal {")[1].split("}")[0]
+    ok("border: 0" in modal and "border-radius: var(--radius-pop)" in modal and "box-shadow: var(--shadow-pop)" in modal,
+       "a dialog floats like every window: the 10 corner and the pop shadow, its edge the shadow's own ring")
+    h3 = CSS.split("\n        .modal-head h3 {")[1].split("}")[0]
+    ok("font-weight: var(--weight-semibold)" in h3 and "line-height: var(--lh-control)" in h3, "and its title is the head step")
+    toast = CSS.split("\n        .toast {")[1].split("}")[0]
+    ok("border: 0" in toast and "padding: var(--pop-pad)" in toast and "box-shadow: var(--shadow-pop)" in toast,
+       "a toast floats the same way, 16 inside, its status still the bar at its left")
+    ok(not re.search(r"--radius-(sm|xl)\s*:", CSS) and "var(--radius-sm)" not in SCRIPT + CSS + COMPOSER, "the old corners are gone")
 
 
 if __name__ == "__main__":

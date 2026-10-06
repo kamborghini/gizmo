@@ -241,8 +241,7 @@
             --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-7: 32px; --sp-8: 40px; --sp-9: 48px; --sp-10: 64px;
             /* Radii. The brand's cards and fields are 8px; a box inside one steps
                down to 6. What each role takes is set once, in the component tier. */
-            --radius-3xs: 2px; --radius-2xs: 4px; --radius-xs: 6px; --radius-sm: 8px; --radius-md: 10px; --radius-lg: 12px;
-            --radius-xl: 24px;   /* a surface standing alone on an empty page: the sign-in card */
+            --radius-3xs: 2px; --radius-2xs: 4px; --radius-xs: 6px; --radius-md: 10px; --radius-lg: 12px;
             /* Icon glyph sizes. Fifty-four svg rules carried a raw pixel size
                between them, in TWELVE different values - 13, 14, 15, 16 and 17
                all appeared, which is nobody's design decision, it is what a
@@ -427,7 +426,7 @@
 
         ::-webkit-scrollbar { width: 11px; height: 11px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--radius-sm); border: var(--bw-marker) solid transparent; background-clip: padding-box; }
+        ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--radius-full); border: var(--bw-marker) solid transparent; background-clip: padding-box; }
         @media (hover: hover) { ::-webkit-scrollbar-thumb:hover { background: var(--border-emphasis); background-clip: padding-box; } }
 
         #app { position: relative; z-index: 1; display: flex; height: 100%; overflow-x: clip; }
@@ -841,13 +840,6 @@
            runs to four lines, so it never did, and a two-line intro (Xero
            sync) carried an empty line under it: 40px of header gap where
            every other page had 16. */
-        /* No icon beside a page title: the reference does not have one on any
-           of its pages, and at 30px the title carries the page on its own. */
-        /* No icon beside a page title. The reference does not have one on any
-           of its pages, and at 30px the title carries the page by itself. The
-           rule above is left intact so the treatment is one edit away if it is
-           ever wanted back. */
-        .ov-hero .badge { display: none; }
         /* The reference sets its page title at 30/400 on a 36px line box and
            tracks it -0.75px, which is -0.025em at this size. Measured on its
            h1 and on its 30px KPI figures alike, so the two largest things on a
@@ -5054,12 +5046,12 @@
         .modal-overlay { display: none; position: fixed; inset: 0; background: var(--overlay-modal); z-index: 50;
             align-items: center; justify-content: center; padding: var(--sp-5); backdrop-filter: blur(4px); }
         .modal-overlay.show { display: flex; }
-        .modal { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-card); box-shadow: var(--shadow-lg); width: 100%; max-width: 520px;
+        .modal { background: var(--surface-primary); border: 0; border-radius: var(--radius-pop); box-shadow: var(--shadow-pop); width: 100%; max-width: 520px;
             max-height: 90vh; display: flex; flex-direction: column; animation: fadeUp .22s ease; }
         /* Wide variant for the data tables that do not fit the reading-width default. */
         .modal.wide { max-width: 900px; }
         .modal-head { display: flex; align-items: center; padding: var(--sp-4); border-bottom: var(--bw-hairline) solid var(--border-default); }
-        .modal-head h3 { margin: 0; font-size: var(--text-head); font-weight: var(--weight-medium); line-height: var(--lh-none); flex: 1; letter-spacing: normal; }
+        .modal-head h3 { margin: 0; font-size: var(--text-head); font-weight: var(--weight-semibold); line-height: var(--lh-control); flex: 1; letter-spacing: normal; }
         .modal-body { padding: var(--sp-4); overflow-y: auto; }
         /* Under the top bar, not over it: the stack covered Search and New
            chat, the controls a person reaches for after reading it. */
@@ -5129,9 +5121,9 @@
         .auth-card { width: min(384px, 100%); box-sizing: border-box; margin: auto;
             display: flex; flex-direction: column;
             background: linear-gradient(to bottom, var(--auth-card-top), var(--surface-primary));
-            border: var(--bw-hairline) solid var(--auth-card-line); border-radius: var(--radius-xl);
+            border: var(--bw-hairline) solid var(--auth-card-line); border-radius: var(--radius-pop);
             padding: var(--sp-7); color: var(--text-primary);
-            box-shadow: var(--shadow-sm), var(--shadow-lg); }
+            box-shadow: var(--shadow-pop); }
         .auth-brand { width: var(--box-3xl); height: var(--box-3xl); border-radius: var(--radius-card);
             margin: 0 auto var(--sp-6); flex: none;
             background: var(--surface-primary); color: var(--text-primary); box-shadow: var(--shadow-lg);
@@ -5404,8 +5396,8 @@
                 justify-content: flex-start; margin-left: var(--icon-col); }
         }
         .toast { display: flex; gap: var(--sp-2); align-items: flex-start; background: var(--surface-primary);
-            border: var(--bw-hairline) solid var(--border-default); border-left: var(--bw-marker) solid var(--border-selected); border-radius: var(--radius-card);
-            padding: var(--sp-3) var(--sp-3); box-shadow: var(--shadow-lg); font-size: var(--text-body); color: var(--text-primary);
+            border: 0; border-left: var(--bw-marker) solid var(--border-selected); border-radius: var(--radius-pop);
+            padding: var(--pop-pad); box-shadow: var(--shadow-pop); font-size: var(--text-body); color: var(--text-primary);
             animation: toastin .18s ease-out; }
         .toast.bad { border-left-color: var(--error); }
         .toast.good { border-left-color: var(--success); }
@@ -5824,7 +5816,7 @@
             </div>
             <div class="modal-body">
                 <div class="section-title" style="margin: 0 0 var(--sp-2);">Store profile</div>
-                <p class="field-help" style="margin-top:0">Saved to your store and applied to every chat and every report as authoritative context.</p>
+                <p class="field-help" style="margin-top:0">Reactor reads this with every chat and report.</p>
 
                 <label class="field-label" for="pf-voice">Brand voice</label>
                 <textarea id="pf-voice" class="pf-input" rows="2" placeholder="e.g. Plain and friendly. We talk to lighting technicians, venues and event planners."></textarea>
@@ -5852,7 +5844,7 @@
 
                 <div id="signoff-row" style="display:none">
                     <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">Your sign-off</div>
-                    <p class="field-help" style="margin-top:0">Put on the end of email you send from the Inbox, above the shop footer. Up to four lines: your name, and whatever you want under it.</p>
+                    <p class="field-help" style="margin-top:0">Ends every email you send from the Inbox.</p>
                     <textarea id="signoff-text" class="pf-input" rows="4" placeholder="e.g. Cameron
 Projected Image UK"></textarea>
                     <div class="mail-statebar">
@@ -5881,11 +5873,11 @@ Projected Image UK"></textarea>
                 </div>
                 <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">Automatic refresh</div>
                 <div class="setting-row">
-                    <div><div class="setting-title">Auto-refresh reports</div><div class="setting-sub">Re-run your audits on a schedule so they stay fresh, and flag big changes as alerts. Off by default; uses AI credits on each run.</div></div>
+                    <div><div class="setting-title">Auto-refresh reports</div><div class="setting-sub">Re-run audits on a schedule. Uses AI credits each run.</div></div>
                     <div class="toggle" id="sched-toggle"><span class="sw"></span></div>
                 </div>
                 <div class="setting-row" id="sched-freq-row">
-                    <div><div class="setting-title">Frequency</div><div class="setting-sub">How often to refresh and check for notable changes.</div></div>
+                    <div><div class="setting-title">Frequency</div></div>
                     <select id="sched-freq" class="psel" style="max-width:160px">
                         <option value="24">Daily</option>
                         <option value="72">Every 3 days</option>
@@ -14317,9 +14309,7 @@ Projected Image UK"></textarea>
             crmField(grid, 'Due back', dueIn);
             const noteIn = crmText('', 'What went with it, condition, anything to remember');
             crmField(grid, 'Note', noteIn);
-            m.body.append(el('p', 'field-help',
-                'A due date is optional. Without one this loan is never called late; '
-                + 'it turns amber once it has been out longer than the chase threshold.'));
+            m.body.append(el('p', 'field-help', 'Optional. Without one, it turns amber at the chase limit.'));
             const go = el('button', 'btn btn-primary', 'Loan it out');
             go.onclick = async () => {
                 if (!whoIn.value.trim()) { toastError('Say who it is going to.'); return; }
@@ -19401,7 +19391,8 @@ Projected Image UK"></textarea>
             const overlay = el('div', 'modal-overlay show');
             const modal = el('div', 'modal');
             const head = el('div', 'modal-head');
-            head.append(el('h3', null, 'Size rules'));
+            const srT = el('h3', null, 'Size rules');
+            head.append(srT);
             const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close';
             x.setAttribute('aria-label', 'Close');
             x.onclick = () => overlay.remove();
@@ -19429,10 +19420,10 @@ Projected Image UK"></textarea>
                         'No rules yet. They are made from Resolve on a flagged model in the size check.'));
                     return;
                 }
-                body.append(el('p', 'field-help',
+                if (!srT.querySelector('.info')) srT.append(infoButton('About size rules', { title: 'Size rules', body:
                     'These sit on top of the size list and survive replacing it. '
                     + (canEdit ? 'Removing one puts the model back to whatever the sheet says.'
-                               : 'An admin can grant you access to change them on the Team tab.')));
+                               : 'An admin can grant you access to change them on the Team tab.') }));
 
                 const section = (title, rows, kind) => {
                     if (!rows.length) return;
@@ -19530,10 +19521,7 @@ Projected Image UK"></textarea>
                 domIn = el('input', 'psel'); domIn.type = 'text';
                 domIn.placeholder = 'their email domain, e.g. acme.co.uk';
                 f2.append(domIn); pane.append(f2);
-                pane.append(el('div', 'field-help',
-                    'Leave the customer blank and this size applies to every order. '
-                    + 'Fill it in and it applies only to that customer, with the general '
-                    + 'size still used for everyone else.'));
+                pane.append(el('div', 'field-help', 'Leave the customer blank to apply it to every order.'));
             });
 
             // 2. Another name for something already on the sheet.
@@ -19575,10 +19563,13 @@ Projected Image UK"></textarea>
 
             // 3. Not a gobo at all.
             opt('exclude', 'It is not a gobo, stop reporting it', (pane) => {
-                pane.append(el('div', 'field-help',
+                /* The consequence stays as the line (copy plan, Other dialogs #20). */
+                const ng = el('div', 'field-help', 'Its labels print no size from now on.');
+                ng.append(infoButton('What this changes', { title: 'Not a gobo', body:
                     'Items on this model stop counting towards size-list coverage, so it '
                     + 'will not be reported again, and their labels print no size and no CHECK. '
-                    + 'It does not change anything already printed.'));
+                    + 'It does not change anything already printed.' }));
+                pane.append(ng);
             });
 
             choose('set');
@@ -20738,7 +20729,8 @@ Projected Image UK"></textarea>
             einp.type = 'email'; einp.className = 'disp-num'; einp.value = cur.email || '';
             ew.append(einp); f.email = einp; cgrid.append(ew);
             body.append(cgrid);
-            body.append(el('div', 'section-title', 'Order note'));
+            const onT = el('div', 'section-title', 'Order note');
+            body.append(onT);
             const note = document.createElement('textarea');
             note.className = 'disp-paste'; note.rows = 4;
             /* Prefilled from the LIVE note, not the queue's copy: that one has the
@@ -20747,10 +20739,10 @@ Projected Image UK"></textarea>
                round-trips byte for byte. */
             note.value = live.note || '';
             body.append(note);
-            body.append(el('div', 'cov-note', 'This is the order note exactly as Shopify holds it, '
+            onT.append(infoButton('About the order note', { title: 'Order note', body: 'This is the order note exactly as Shopify holds it, '
                 + 'including the proposal link if there is one. The order tags are not editable '
                 + 'here: the production queues and the chase list are both driven by them, so they '
-                + 'are changed by the queue buttons instead.'));
+                + 'are changed by the queue buttons instead.' }));
 
             const err = el('div'); body.append(err);
             const foot = el('div', 'modal-foot');
@@ -20842,7 +20834,7 @@ Projected Image UK"></textarea>
             if (!cfg.available) { body.append(el('div', 'empty', 'Shipping is not available on this server.')); return; }
             if (!cfg.connected) {
                 const m = el('div', 'disp-notice');
-                m.append(el('p', null, 'World Options is not connected yet. Add your API key to start dispatching couriers.'));
+                m.append(el('p', null, 'World Options is not connected yet.'));
                 const b = el('button', 'btn btn-primary'); b.append(ico(I.truck), document.createTextNode('Open shipping settings'));
                 b.onclick = () => { close(); openShippingSettings(); };
                 m.append(b); body.append(m); return;
@@ -20919,7 +20911,7 @@ Projected Image UK"></textarea>
                 boxHostD.append(rowb);
             }
             addBoxRow(defaultPreset);
-            const sizeHelp = el('p', 'field-help', 'Sizes in cm, weight in kg. Weigh the packed box: couriers re-weigh on collection and bill the difference.');
+            const sizeHelp = el('p', 'field-help', 'Weigh the packed box: couriers re-weigh and bill it.');
             const addBoxBtn = el('button', 'btn disp-addbox'); addBoxBtn.append(ico(I.plus), document.createTextNode('Add a box'));
             addBoxBtn.title = 'Multi-parcel shipment: every box travels on the same booking';
             addBoxBtn.onclick = () => { addBoxRow(defaultPreset); staleQuote(); };
@@ -21021,7 +21013,7 @@ Projected Image UK"></textarea>
                 if (!quote.has_eori) {
                     card.append(el('div', 'disp-warn', 'Your EORI number is missing. Add it under Shipping settings, International, then re-quote. International bookings cannot go without it.'));
                 }
-                card.append(el('p', 'field-help', 'What is in the parcel, for the customs paperwork. World Options generates the commercial invoice from these lines.'));
+                card.append(el('p', 'field-help', 'What is in the parcel, for customs.'));
                 const linesHost = el('div');
                 customsLines.length = 0;
                 function addLine(pre) {
@@ -21683,10 +21675,14 @@ Projected Image UK"></textarea>
         }
         async function openBookCollection() {
             const body = el('div');
-            body.append(el('p', 'field-help',
+            /* The gap stays as the line; the rest is its info button (copy
+               plan, Other dialogs #7). */
+            const ch = el('p', 'field-help', 'Collections booked in their portal do not show.');
+            ch.append(infoButton('About collections', { title: 'Collections', body:
                 'What is coming today, and from whom, by World Options\u2019 own collection '
                 + 'reference from the booking. Their service cannot be asked what is scheduled, so '
-                + 'a collection booked in their portal rather than here will not show.'));
+                + 'a collection booked in their portal rather than here will not show.' }));
+            body.append(ch);
             const host = el('div'); body.append(host);
             host.append(el('div', 'empty', 'Loading\u2026'));
             const dlg = uiConfirm(body, { title: 'Collections', okText: 'Done', hideCancel: true });
@@ -21854,8 +21850,7 @@ Projected Image UK"></textarea>
             const contentsIn = metaField('Contents', 'e.g. Replacement gobo');
             const valueIn = metaField('Value (£)', 'What it is worth', 'number');
             body.append(meta);
-            body.append(el('p', 'field-help', 'The value is declared to the courier. Insuring a parcel '
-                + 'declared at zero is an argument the insurer wins, so it is worth getting right.'));
+            body.append(el('p', 'field-help', 'Declared to the courier. A zero value cannot be insured.'));
 
             // ---- boxes ----
             body.append(el('div', 'disp-subhead', 'Parcel'));
@@ -21891,7 +21886,7 @@ Projected Image UK"></textarea>
             addBoxBtn.append(ico(I.plus), document.createTextNode('Add a box'));
             addBoxBtn.onclick = () => { addBoxRow(); staleQuote(); };
             body.append(addBoxBtn);
-            body.append(el('p', 'field-help', 'Sizes in cm, weight in kg. Weigh the packed box: couriers re-weigh on collection and bill the difference.'));
+            body.append(el('p', 'field-help', 'Weigh the packed box: couriers re-weigh and bill it.'));
 
             // ---- insurance ----
             const insWrap = el('label', 'disp-insure');
@@ -22030,8 +22025,7 @@ Projected Image UK"></textarea>
             function customsCard() {
                 const card = el('div', 'disp-customs');
                 card.append(el('div', 'disp-subhead', 'Customs declaration'));
-                card.append(el('p', 'field-help', 'Going outside the UK, so the courier needs to know '
-                    + 'what is in the parcel and what it is worth. This travels with the shipment.'));
+                card.append(el('p', 'field-help', 'Outside the UK: list what is in the parcel.'));
                 if (!quote.has_eori) {
                     card.append(el('div', 'msg error', 'Add your EORI number under Settings, Shipping. '
                         + 'International shipments cannot be booked without it.'));
@@ -22350,7 +22344,7 @@ Projected Image UK"></textarea>
                 ? ('Connected' + (cfg.meter_last4 ? ' (meter ending ' + cfg.meter_last4 + ')' : ''))
                 : 'Not connected yet. Enter the details World Options gave you.';
             body.append(cstat);
-            body.append(el('p', 'field-help', 'From your World Options web service setup. The Meter Number is required; add the Key and Password if you were given them.'));
+            body.append(el('p', 'field-help', 'The Meter Number is required; Key and Password optional.'));
             const credIn = {};
             [['meter_number', 'Meter Number', 'text', cfg.connected ? 'Saved' : 'e.g. 1234567'],
              ['key', 'Key', 'password', cfg.has_key ? 'Saved (enter to replace)' : 'Web service key'],
@@ -22394,7 +22388,7 @@ Projected Image UK"></textarea>
 
             // Origin address
             body.append(el('div', 'section-title', 'Dispatch (origin) address'));
-            body.append(el('p', 'field-help', 'Where parcels ship from. Left blank, your Shopify store address is used.'));
+            body.append(el('p', 'field-help', 'Left blank, your Shopify store address is used.'));
             const o = cfg.origin || {};
             const of = {};
             const originGrid = el('div', 'disp-origin');
@@ -22412,7 +22406,7 @@ Projected Image UK"></textarea>
             const notifyCb = document.createElement('input'); notifyCb.type = 'checkbox'; notifyCb.checked = cfg.notify_customer !== false;
             notifyWrap.append(notifyCb, el('span', null, ' Email the customer tracking when an order is dispatched (default)'));
             body.append(notifyWrap);
-            body.append(el('p', 'field-help', 'Collection window: when the courier can pick up from you. Sent with every booking.'));
+            body.append(el('p', 'field-help', 'When the courier can collect. Sent with every booking.'));
             const timeGrid = el('div', 'disp-dims'); timeGrid.style.gridTemplateColumns = '1fr 1fr';
             const readyF = el('label', 'disp-fld');
             readyF.append(el('span', 'disp-fld-lab', 'Ready from'));
@@ -22448,10 +22442,11 @@ Projected Image UK"></textarea>
             // Two printers, two stocks. Set once here rather than chosen at every
             // print: the stock in each printer does not change from day to day,
             // and the select beside the print button is only ever a one-off.
-            body.append(el('div', 'section-title', 'Label printers'));
-            body.append(el('p', 'field-help', 'What each printer is loaded with. '
+            const lpT = el('div', 'section-title', 'Label printers');
+            lpT.append(infoButton('About the label printers', { title: 'Label printers', body: 'What each printer is loaded with. '
                 + 'Production labels are the gobo labels from the Production Manager; '
-                + 'courier labels are the shipping labels that come back from a booking.'));
+                + 'courier labels are the shipping labels that come back from a booking.' }));
+            body.append(lpT);
             const sizeIn = {};
             const labelWarn = el('div', 'setting-sub');
             [['label_size_production', 'Production label stock', '4x4'],
@@ -22481,7 +22476,7 @@ Projected Image UK"></textarea>
             paintLabelWarn();
             body.append(labelWarn);
             body.append(el('div', 'section-title', 'International (customs)'));
-            body.append(el('p', 'field-help', 'Used automatically when an order ships outside the UK. Your EORI number is required for exports; get one at gov.uk if you do not have one.'));
+            body.append(el('p', 'field-help', 'Required for exports. Get one at gov.uk.'));
             const intlIn = {};
             [['eori', 'EORI number (e.g. GB123456789000)'], ['vat_number', 'VAT number (optional)'],
              ['default_hs_code', 'Default HS / commodity code (optional, e.g. 70200080)'], ['trade_term', 'Trade term (optional, e.g. DAP)']].forEach(([k, lab]) => {
@@ -22520,9 +22515,7 @@ Projected Image UK"></textarea>
                holds it. It sits with the customs settings because that is where
                someone already is when a business customer sends one over. */
             body.append(el('div', 'section-title', 'Check a customer’s EORI'));
-            body.append(el('p', 'field-help',
-                'Ask the EU database whether a business customer’s EORI number is real before '
-                + 'you put it on an export. Nothing here is saved: it is a lookup.'));
+            body.append(el('p', 'field-help', 'Checks a customer’s EORI number. Nothing is saved.'));
             const eoriRow = el('div', 'eori-row');
             const eoriIn = document.createElement('input');
             eoriIn.type = 'text'; eoriIn.spellcheck = false; eoriIn.className = 'disp-num';
@@ -22545,11 +22538,12 @@ Projected Image UK"></textarea>
                when that courier is picked, and what the booking asks the
                courier for. Anything left on "Use the setting above" falls back
                to it, so a courier you rarely use needs no rule. */
-            body.append(el('div', 'section-title', 'Collections by courier'));
-            body.append(el('p', 'field-help',
+            const cbT = el('div', 'section-title', 'Collections by courier');
+            cbT.append(infoButton('About collections by courier', { title: 'Collections by courier', body:
                 'A collection is arranged with the parcel, so this is what each courier is asked '
                 + 'for when you book with them. Set the ones you have an arrangement with; the '
-                + 'rest use the setting above.'));
+                + 'rest use the setting above.' }));
+            body.append(cbT);
             const collByCarrier = Object.assign({}, cfg.collection_by_carrier || {});
             const carriers = (cfg.carriers && cfg.carriers.length) ? cfg.carriers
                 : [{ code: 'UPS', label: 'UPS' }, { code: 'DHL', label: 'DHL' },
@@ -22588,9 +22582,7 @@ Projected Image UK"></textarea>
 
             // Box presets
             body.append(el('div', 'section-title', 'Box presets'));
-            body.append(el('p', 'field-help', 'The parcel sizes you offer when dispatching. Dimensions in cm, '
-                + 'weight in kg. Tick one to have the dispatch panel open on it; leave them all '
-                + 'unticked and it opens on the first.'));
+            body.append(el('p', 'field-help', 'Parcel sizes in cm and kg. Tick the default.'));
             const boxHost = el('div'); body.append(boxHost);
             let boxes = (cfg.boxes || []).map(b => Object.assign({}, b));
             /* A box with no id cannot be pointed at: older configs predate them,
@@ -22691,9 +22683,8 @@ Projected Image UK"></textarea>
         let printSeq = 0;
         async function printFromAdminLink(orderId) {
             const box = $('labels-content'); box.innerHTML = '';
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.printer;
-            const ht = el('div'); ht.append(el('h2', null, 'Production Manager'), el('p', null, 'Preparing the label for this order\u2026'));
-            hero.append(badge, ht); box.append(hero);
+            const hero = pageHead({ view: 'labels', title: 'Production Manager', line: 'Preparing the label for this order\u2026' });
+            box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = 'var(--sp-2)'; t.append(loader(), el('span', null, 'Fetching the order\u2026')); box.append(t);
             labelsLoading = true;
             try {
@@ -22711,9 +22702,8 @@ Projected Image UK"></textarea>
         }
         async function dispatchFromAdminLink(orderId) {
             const box = $('labels-content'); box.innerHTML = '';
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.printer;
-            const ht = el('div'); ht.append(el('h2', null, 'Production Manager'), el('p', null, 'Opening dispatch for this order\u2026'));
-            hero.append(badge, ht); box.append(hero);
+            const hero = pageHead({ view: 'labels', title: 'Production Manager', line: 'Opening dispatch for this order\u2026' });
+            box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = 'var(--sp-2)'; t.append(loader(), el('span', null, 'Fetching the order\u2026')); box.append(t);
             labelsLoading = true;
             try {
@@ -24653,8 +24643,7 @@ Projected Image UK"></textarea>
 
         function crmLostPrompt(dealId) {
             const m = crmModal('Mark as lost');
-            m.body.append(el('p', 'field-help', 'Lost is an outcome, not a deletion: the deal keeps its '
-                + 'history and the reason feeds the Insights view.'));
+            m.body.append(el('p', 'field-help', 'The deal keeps its history; the reason feeds Insights.'));
             const sel = el('select', 'disp-text');
             crmCache.lost_reasons.forEach(r => sel.append(new Option(r, r)));
             const grid = el('div', 'disp-addr-grid'); m.body.append(grid);
@@ -24984,9 +24973,7 @@ Projected Image UK"></textarea>
             const editing = preset.id ? crmCache.activities[preset.id] : null;
             const m = crmModal(editing ? 'Edit activity'
                 : preset.followup ? 'Schedule the next activity' : 'Schedule activity');
-            if (preset.followup) m.body.append(el('p', 'field-help',
-                'That was the last open activity on this deal. A deal without a next step goes quiet, '
-                + 'so schedule the next one now, or close this window if the deal is done with.'));
+            if (preset.followup) m.body.append(el('p', 'field-help', 'That was the last open activity. Schedule the next one?'));
             let type = editing ? editing.type : 'call';
             const row = el('div', 'lbl-toolbar');
             const subjIn = crmText(editing ? editing.subject : 'Call', '');
@@ -25922,9 +25909,10 @@ Projected Image UK"></textarea>
         function crmStageEditor() {
             const m = crmModal('Pipeline');
             const sb = el('div', 'crm-focus');
-            sb.append(el('div', 'disp-subhead', 'Stages'));
-            sb.append(el('p', 'field-help', 'Rename the stages to your own process. Probability '
-                + 'weights the pipeline value; rotting turns a deal red after sitting untouched that many days.'));
+            const stT = el('div', 'disp-subhead', 'Stages');
+            stT.append(infoButton('About stages', { title: 'Stages', body: 'Rename the stages to your own process. Probability '
+                + 'weights the pipeline value; rotting turns a deal red after sitting untouched that many days.' }));
+            sb.append(stT);
             const rows = el('div'); sb.append(rows);
             const working = crmCache.stages.map(s => ({ ...s }));
             function paint() {
@@ -27052,10 +27040,13 @@ Projected Image UK"></textarea>
         function paintMailRules(m, data) {
             const lead = data.lead;
             m.body.innerHTML = '';
-            m.body.append(el('div', 'setting-sub',
+            /* How filters work, word for word, behind the window title's info
+               button (copy plan, Other dialogs #27). */
+            const fh = m.overlay.querySelector('.modal-head h3');
+            if (fh && !fh.querySelector('.info')) fh.append(infoButton('How filters work', { title: 'Filters', body:
                 'Filters act on email as it arrives. A conversation someone is already '
                 + 'holding is never re-filed underneath them. The first filter that '
-                + 'matches wins, so the order here is the order they are tried.'));
+                + 'matches wins, so the order here is the order they are tried.' }));
             const reload = async (r) => {
                 if (r && r.rules) { paintMailRules(m, { rules: r.rules, lead: lead }); }
                 refreshMailQuiet();
@@ -27150,12 +27141,13 @@ Projected Image UK"></textarea>
             try { d = await api('/api/mail/settings', { op: 'get' }); }
             catch (e) { return; }        /* the filters above still work without it */
             const lead = !!d.lead;
-            host.append(el('div', 'section-title', 'Email'));
-            host.append(el('p', 'field-help',
+            const emT = el('div', 'section-title', 'Email');
+            emT.append(infoButton('About the footer and saved replies', { title: 'Email', body:
                 'The footer goes on the end of every email sent from here, under the sender’s '
                 + 'own sign-off. Fill in the lines this shop wants on it and leave the rest '
                 + 'empty; each one takes up to 200 characters. Saved replies are the '
-                + 'paragraphs this shop types over and over.'));
+                + 'paragraphs this shop types over and over.' }));
+            host.append(emT);
             /* Six named lines rather than one free-text box: the footer that
                signs every email this business sends is a form, and a form can
                be rendered into a table that Outlook draws the same way Gmail
@@ -27416,9 +27408,7 @@ Projected Image UK"></textarea>
             const paintArch = () => { archL.style.display = folder.value.trim() ? '' : 'none'; };
             paintArch();
             m.body.append(archL);
-            m.body.append(el('div', 'setting-sub',
-                'A folder is a Gmail label, so it appears down the side in Gmail like any '
-                + 'other. Use a slash for a folder inside a folder.'));
+            m.body.append(el('div', 'setting-sub', 'A folder is a Gmail label. Use / to nest.'));
             const doneL = el('label', 'tm-tabpick');
             const doneCb = document.createElement('input');
             doneCb.type = 'checkbox'; doneCb.checked = !!r.done;
@@ -27798,8 +27788,7 @@ Projected Image UK"></textarea>
                               mailComposerPayload(cmp)),
                 [send],
                 () => { overlay.remove(); refreshMailQuiet(); });
-            bodyL.append(el('span', 'field-help', 'Formatting, files and pictures go out as they look here, '
-                + 'with your sign-off and the shop footer under them.'));
+            bodyL.append(el('span', 'field-help', 'Sent as shown, with your sign-off and the footer.'));
             bar.append(send);
             body.append(bar);
         }
@@ -29445,8 +29434,7 @@ Projected Image UK"></textarea>
                 if (!card) return;
                 card.innerHTML = '';
                 card.append(authBrand('key'), el('h2', null, 'One more step'),
-                    el('p', 'auth-sub', 'Type the six-digit code from your authenticator app. '
-                        + 'If you have lost your phone, one of your recovery codes works here too.'));
+                    el('p', 'auth-sub', 'Code from your authenticator app, or a recovery code.'));
                 const [fc, inCode] = authField('Six-digit code', 'text', 'au-mfa');
                 inCode.inputMode = 'numeric'; inCode.autocomplete = 'one-time-code';
                 /* auth-error, the class the other steps use: this one was
@@ -29494,9 +29482,7 @@ Projected Image UK"></textarea>
             }
             if (mode === 'setup') {
                 card.append(el('h2', null, 'Set up Reactor'),
-                    el('p', 'auth-sub', 'The app keeps its own accounts. Create the master '
-                        + 'admin account first: it controls everything, including the other accounts. '
-                        + 'You need the one-time setup code from whoever runs the server.'));
+                    el('p', 'auth-sub', 'Create the master admin account. You need the setup code.'));
                 /* Setup opens whenever the accounts are gone, so a Shopify login
                    alone is not enough to become master: the code is set on the
                    server, where only whoever runs it can see it. */
@@ -29519,8 +29505,7 @@ Projected Image UK"></textarea>
                 card.append(fcode, fn, fu, fp, err, go);
             } else if (mode === 'change') {
                 card.append(el('h2', null, 'Choose your own password'),
-                    el('p', 'auth-sub', 'The starter password was only for getting in. Set your '
-                        + 'own before carrying on; nobody else ever sees it.'));
+                    el('p', 'auth-sub', 'Set your own password before carrying on.'));
                 const [fc, inCur] = authField('Current password', 'password', 'au-cur');
                 const [fp, inNew] = authField('New password (8 characters or more)', 'password', 'au-new');
                 inNew.autocomplete = 'new-password'; inNew.name = 'new-password';
@@ -29549,8 +29534,7 @@ Projected Image UK"></textarea>
                     if (st.setup) { ov.dataset.mode = ''; authShow('setup'); }
                 }).catch(() => {});
                 card.append(el('h2', null, 'Sign in'),
-                    el('p', 'auth-sub', 'Your own account, not Shopify\'s. Ask an admin if you '
-                        + 'do not have one yet.'));
+                    el('p', 'auth-sub', 'Your own account, not Shopify’s. No account? Ask an admin.'));
                 const [fu, inUser] = authField('Username', 'text', 'au-user');
                 const [fp, inPw] = authField('Password', 'password', 'au-pw');
                 const go = el('button', 'btn btn-primary auth-go', 'Sign in');
@@ -30621,8 +30605,7 @@ Projected Image UK"></textarea>
             const tv = s.token_vault || {};
             if (!tv.enabled) {
                 host.append(connRow('Secrets on the volume', 'off',
-                    'Not encrypted. The refresh tokens and sign-in code secrets are stored '
-                    + 'in plain text. Set TOKEN_ENCRYPTION_KEY in Railway.', CR_SEAL));
+                    'Not encrypted: secrets are stored in plain text.', CR_SEAL));
             } else if ((tv.plaintext || []).length) {
                 host.append(connRow('Secrets on the volume', 'mid',
                     'Mostly encrypted, but these are still in plain text: '
@@ -30672,20 +30655,19 @@ Projected Image UK"></textarea>
             host.append(connRow('Live updates', wh.ok ? 'on' : 'mid',
                 wh.ok ? ('Shopify pushes order changes to the app as they happen (' + evAge(wh.last_event_at)
                          + (wh.version ? ', Shopify version ' + wh.version : '') + ').')
-                      : ('Not receiving order events yet'
-                         + (wh.detail ? (/unset/i.test(wh.detail) ? ': the app does not know its own public address (set APP_URL in Railway).' : ': ' + wh.detail + '.') : '.')
-                         + ' The app falls back to refreshing on a short timer, which still works.'), ['Receiving', 'Not yet', 'Off']));
+                      : ('No live order events' + (wh.detail && !/unset/i.test(wh.detail) ? ': ' + wh.detail : '')
+                         + '. Refreshing on a timer instead.'), ['Receiving', 'Not yet', 'Off']));
             // The shared mailbox behind the Inbox tab.
             const gm = s.gmail || {};
             host.append(connRow('Shared mailbox', gm.connected ? 'on' : gm.client ? 'mid' : 'off',
                 gm.connected ? ((gm.address || 'Connected') + '. The Inbox tab tracks who owns each email.')
                 : gm.client ? 'Ready to connect: open the Inbox tab for the connect link.'
-                : 'Set GOOGLE_OAUTH_CLIENT_ID / SECRET and enable the Gmail API to use the Inbox tab.'));
+                : 'Not set up yet. Steps in the Guide.'));
             // The stock bridge: whether Mark made is reaching the stock app.
             const sb = s.stock_bridge || {};
             if (sb.configured || sb.pending) {
                 host.append(connRow('Stock app', sb.configured && !sb.pending ? 'on' : 'mid',
-                    !sb.configured ? 'ZETA_URL and ZETA_SYNC_TOKEN are not set, so made glass is not booked against stock.'
+                    !sb.configured ? 'Not set up: made glass is not booked against stock.'
                     : sb.pending ? (sb.pending + ' booking(s) waiting to reach the stock app'
                         + (sb.error ? ' (' + sb.error + ')' : '') + '. The app retries on its own.')
                     : 'Made orders book their glass at the stock app automatically.'));
@@ -30724,14 +30706,14 @@ Projected Image UK"></textarea>
                 g.ga4_ready ? 'on' : (g.connected || g.oauth_client) ? 'mid' : 'off',
                 g.ga4_ready ? ('Connected' + (g.ga4_property ? ' (property ' + g.ga4_property + ')' : '')) :
                     (g.granted && g.granted.ga4 === false) ? 'Connected without permission to read Analytics. Connect Google again and leave Analytics ticked.' :
-                    g.connected ? 'Connected, but set GA4_PROPERTY_ID to pull traffic data.' :
+                    g.connected ? 'Connected, but no Analytics property is chosen.' :
                         g.oauth_client ? 'Connect Google via the one-time setup link.' : 'Set up the Google connection to add traffic and revenue data.'));
             // Search Console
             host.append(connRow('Google Search Console',
                 g.gsc_ready ? 'on' : (g.connected || g.oauth_client) ? 'mid' : 'off',
                 g.gsc_ready ? ('Connected' + (g.gsc_site ? ' (' + g.gsc_site + ')' : '')) :
                     (g.granted && g.granted.gsc === false) ? 'Connected without permission to read Search Console. Connect Google again and leave Search Console ticked.' :
-                    g.connected ? 'Connected, but set GSC_SITE_URL to pull search data.' :
+                    g.connected ? 'Connected, but no Search Console site is chosen.' :
                         g.oauth_client ? 'Connect Google via the one-time setup link.' : 'Set up the Google connection to add keyword and search data.'));
             // Google Ads (CPC) rides on GA4
             host.append(connRow('Google Ads (CPC)', g.ga4_ready ? 'mid' : 'off',
@@ -30756,7 +30738,7 @@ Projected Image UK"></textarea>
             // Email alerts
             host.append(connRow('Email alerts', s.email_alerts && s.email_alerts.ok ? 'on' : 'mid',
                 s.email_alerts && s.email_alerts.ok ? 'Alerts and failures also reach your inbox.'
-                    : 'Only shown inside the app. Set RESEND_API_KEY and ALERT_EMAIL_TO on Railway to get them by email.', ['On', 'In app only', 'Off']));
+                    : 'Only shown inside the app.', ['On', 'In app only', 'Off']));
             // Shipping (World Options)
             const sh = s.shipping || {};
             const shRow = connRow('Shipping (World Options)', sh.ok ? 'on' : sh.available ? 'mid' : 'off',
@@ -30994,7 +30976,7 @@ Projected Image UK"></textarea>
                     + 'shows to prove it works. It is not on until you do.'));
                 const code = el('div', 'evidence'); code.textContent = st.secret;
                 code.style.cssText = 'font-family:var(--font-mono);padding:var(--sp-2-5) var(--sp-3);'
-                    + 'background:var(--surface-tertiary);border-radius:var(--radius-sm);word-break:break-all';
+                    + 'background:var(--surface-tertiary);border-radius:var(--radius-control);word-break:break-all';
                 body.append(code);
                 const f = el('label', 'pfield');
                 f.append(el('span', null, 'The code from your app'));
@@ -31011,12 +30993,12 @@ Projected Image UK"></textarea>
                     catch (e) { toastError(e.message); go.disabled = false; return; }
                     body.innerHTML = '';
                     body.append(el('p', 'field-help',
-                        'Two-step sign-in is on. Keep these recovery codes somewhere safe - '
+                        'Two-step sign-in is on. Keep these recovery codes somewhere safe: '
                         + 'each one gets you in once if you lose your phone, and this is the '
                         + 'only time they are shown.'));
                     const list = el('div', 'evidence');
                     list.style.cssText = 'font-family:var(--font-mono);line-height:var(--lh-prose);'
-                        + 'padding:10px 12px;background:var(--surface-tertiary);border-radius:var(--radius-sm)';
+                        + 'padding:var(--sp-2-5) var(--sp-3);background:var(--surface-tertiary);border-radius:var(--radius-control)';
                     (r.recovery || []).forEach(c => list.append(el('div', null, c)));
                     body.append(list);
                     foot.innerHTML = '';
@@ -31089,8 +31071,12 @@ Projected Image UK"></textarea>
             const box = $('privacy-reqs'); if (!box) return;
             box.replaceChildren();
             const held = (d && d.held) || [], asks = (d && d.data_requests) || [];
-            box.append(el('div', 'setting-sub', 'When you erase a customer in Shopify, Shopify asks Reactor to erase what it holds about them too. '
-                + 'Each request waits here for an admin to erase it, or to stop one nobody here asked for. Shopify allows thirty days from when it arrives.'));
+            /* How the requests work, word for word, behind the section title's
+               info button (copy plan, Settings #8). */
+            const pt = box.previousElementSibling;
+            if (pt && pt.classList.contains('section-title') && !pt.querySelector('.info'))
+                pt.append(infoButton('About privacy requests', { title: 'Privacy requests', body: 'When you erase a customer in Shopify, Shopify asks Reactor to erase what it holds about them too. '
+                    + 'Each request waits here for an admin to erase it, or to stop one nobody here asked for. Shopify allows thirty days from when it arrives.' }));
             if (!held.length && !asks.length) { box.append(el('div', 'setting-sub', 'Nothing waiting.')); return; }
             /* A flood of erasure requests nobody asked for means the app's
                secret is out: one click stops them all, each recorded. */
