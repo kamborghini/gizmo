@@ -352,6 +352,7 @@
             --search-w: 280px;      /* a list's search field */
             --pop-w: 360px;         /* a popover's width (the window's, less 16 a side, on a phone) */
             --qc-w: 184px;          /* a queue counter */
+            --ono-w: 100px;         /* an order row's number column */
             --icon-col: 34px;       /* the file list's icon column: 16px glyph, 18px gutter */
             /* The widget grid. Four columns when four cells of --wgrid-cell fit
                the content column, else two, one on a phone. Its gap is the
@@ -2660,7 +2661,7 @@
            the rows around it. Up to 860px the name ellipsises, which is the
            part that can afford to give; from there it wraps instead. */
         @container queue (min-width: 560px) {
-            .lbl-grid { display: grid; grid-template-columns: 100px minmax(0, 1fr) max-content max-content;
+            .lbl-grid { display: grid; grid-template-columns: var(--ono-w) minmax(0, 1fr) max-content max-content;
                 column-gap: var(--sp-2-5); }
             .lbl-grid > * { grid-column: 1 / -1; }
             .lbl-qrow { display: grid; grid-template-columns: subgrid; align-items: center; }
@@ -2697,12 +2698,53 @@
            rather than two stacked lines with a growing void beside them. The
            width buys information, which is the only thing it is worth buying. */
         @container queue (min-width: 1200px) {
-            .lbl-grid { grid-template-columns: 100px minmax(220px, 1fr) minmax(0, 210px) max-content max-content; }
+            .lbl-grid { grid-template-columns: var(--ono-w) minmax(220px, 1fr) minmax(0, 210px) max-content max-content; }
             .lbl-qrow .lbl-who { display: contents; }
             .lbl-qrow .lbl-who .sub { align-self: center; font-size: var(--text-xs); overflow: hidden;
                 text-overflow: ellipsis; white-space: nowrap; }
         }
         .lbl-actions { display: flex; gap: var(--sp-2); align-items: center; flex: 0 1 auto; min-width: 0; justify-content: flex-end; }
+        /* THE ORDER ROW (the mix, spec 6 and 8.2): a hairline between orders
+           instead of a box round each, 64 tall; the open row and its preview
+           one block in the teal wash with the teal bar; Preview and Hide one
+           width; a state change starts its own group. The queue's content and
+           actions are its own and do not change. The words sit on the section's
+           text edge (the row-family ruling, 6 October 2026): the wash and the
+           hover bleed 8 past the column with box-shadow, the open order's bar is
+           drawn on the bleed's outer edge. */
+        .lbl-grid { box-shadow: var(--rule-t); }
+        .lbl-qrow { min-height: var(--order-row-h); padding: var(--sp-2) 0; margin-bottom: 0; border: 0; border-radius: 0;
+            background: none; box-shadow: var(--rule-b-soft); }
+        @media (hover: hover) { .lbl-qrow:hover { background: var(--surface-secondary); box-shadow: var(--rule-b-soft), calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); } }
+        .lbl-qrow:is(.on, [aria-selected="true"]) { background: var(--action-selected);
+            box-shadow: var(--rule-b-soft), calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected), calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected); }
+        .lbl-qrow .lbl-name { font-size: var(--text-sm); font-weight: var(--weight-medium); }
+        .lbl-actions .grp { margin-left: calc(var(--gap-cluster) - var(--control-gap)); }
+        .swap { display: inline-grid; }
+        .swap > span { grid-area: 1 / 1; }
+        .swap > .gone { visibility: hidden; }
+        .lbl-grid > .lbl-preview { padding: 0 0 var(--sp-6); background: var(--action-selected);
+            box-shadow: var(--rule-b-soft), calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected), calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected); }
+        @container queue (min-width: 560px) {
+            .lbl-grid > .lbl-preview { padding-left: calc(var(--ono-w) + var(--sp-2-5)); }
+        }
+        .lbl-pane > .lbl-preview { padding: var(--sp-4); border-radius: var(--radius-tile); background: var(--action-selected); }
+        .lbl-preview > .lbl-hist { margin: 0 0 var(--sp-3); }
+        .lbl-preview > .lbl-toolbar { margin: var(--sp-3) 0 0; }
+        .lbl-frame { margin: 0; width: fit-content; max-width: 100%; border-radius: var(--radius-control); box-shadow: var(--shadow-label); }
+        /* A list as narrow as a phone's: worded 40 buttons in a grid, three on
+           the first line and two on the second (the mix, spec 8.2); the label
+           is scaled there, so its frame draws no shadow. */
+        @container queue (max-width: 559px) {
+            .lbl-qrow { padding: var(--sp-3) 0; row-gap: var(--sp-3); }
+            .lbl-qrow .lbl-actions { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--control-gap); }
+            .lbl-qrow .lbl-actions > .btn { grid-column: span 2; padding: 0 var(--sp-2); justify-content: center; }
+            .lbl-qrow .lbl-actions > .btn:nth-child(n+4) { grid-column: span 3; }
+            .lbl-qrow .lbl-actions > .grp { margin-left: 0; }
+            .lbl-qrow .lbl-actions .lbl-btn-txt { display: inline; }
+            .lbl-qrow .lbl-actions .lbl-btn-txt.swap { display: inline-grid; }
+            .lbl-frame { box-shadow: none; }
+        }
         /* The label is sized to the real label stock and shares the print document's
            line-height and font stack exactly, so the preview is what prints.
            All internal sizes are in em, so shrink-to-fit only has to change one
@@ -3698,6 +3740,7 @@
                spilled past the card and pushed the page sideways. On a phone
                they wrap onto a second line instead, and the floors relax. */
             .lbl-row { flex-wrap: wrap; padding: var(--sp-3); }
+            .lbl-qrow { padding-inline: 0; }   /* the queue's rows keep their words on the text edge */
             .lbl-num { min-width: 0; }
             .lbl-who { min-width: 0; flex: 1 1 100%; }
             .lbl-actions { flex: 1 1 100%; justify-content: flex-start; }
@@ -5863,6 +5906,7 @@ Projected Image UK"></textarea>
             up: SV('<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline>'),
             down: SV('<polyline points="23 18 13.5 8.5 8.5 13.5 1 6"></polyline><polyline points="17 18 23 18 23 12"></polyline>'),
             check: SV('<polyline points="20 6 9 17 4 12"></polyline>'),
+            eyeOff: SV('<path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"></path><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"></path><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"></path><path d="m2 2 20 20"></path>'),
             win: SV('<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>'),
             warning: SV('<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>'),
             opportunity: SV('<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline>'),
@@ -19065,7 +19109,15 @@ Projected Image UK"></textarea>
                 row.append(who);
                 row.append(el('div', 'lbl-meta', fmtDate(o.created_at)));
                 const acts = el('div', 'lbl-actions');
-                const pv = el('button', 'btn btn-sm'); pv.title = labelSel === o.id ? 'Hide label preview' : 'Preview label'; pv.append(ico(I.eye), el('span', 'lbl-btn-txt', labelSel === o.id ? 'Hide' : 'Preview'));
+                const pv = el('button', 'btn btn-sm'); pv.title = labelSel === o.id ? 'Hide label preview' : 'Preview label';
+                /* Preview and Hide hold one width (the mix, spec 6), so no column
+                   moves when a row opens: both words lie in one cell and the one
+                   not in use is hidden. */
+                const pvOn = labelSel === o.id;
+                const pvTxt = el('span', 'lbl-btn-txt swap');
+                pvTxt.append(el('span', pvOn ? 'gone' : null, 'Preview'), el('span', pvOn ? null : 'gone', 'Hide'));
+                pv.append(ico(pvOn ? I.eyeOff : I.eye), pvTxt);
+                pv.setAttribute('aria-expanded', pvOn ? 'true' : 'false');
                 pv.onclick = (e) => { e.stopPropagation(); labelSel = (labelSel === o.id ? null : o.id); renderLabels(); };
                 acts.append(pv);
                 if (canEditOrders() && o.status !== 'cancelled') {
@@ -19081,6 +19133,10 @@ Projected Image UK"></textarea>
                     acts.append(pf);
                 }
                 const pr = el('button', 'btn btn-sm'); pr.title = 'Print label'; pr.append(ico(I.printer), el('span', 'lbl-btn-txt', 'Print'));
+                /* The open order's Print is the screen's one primary action (the
+                   mix, spec 8.2), unless its row has its own: To ship's Dispatch,
+                   Unprocessed's Ready to make. */
+                if (pvOn && !unproc && !shipMode) pr.classList.add('btn-primary');
                 pr.onclick = (e) => { e.stopPropagation(); printLabels([o]); };
                 acts.append(pr);
                 if (unproc) {
@@ -19091,6 +19147,7 @@ Projected Image UK"></textarea>
                         rd.title = 'Remove the Unprocessed tag and add IP, so this order joins To make';
                         rd.append(ico(I.check), el('span', 'lbl-btn-txt', 'Ready to make'));
                         rd.onclick = (e) => { e.stopPropagation(); readyToMake(o, rd); };
+                        rd.classList.add('grp');   /* a state change starts its own group */
                         acts.append(rd);
                     }
                 } else {
@@ -19100,6 +19157,7 @@ Projected Image UK"></textarea>
                     db.title = dispatched ? 'View shipment / reprint label' : 'Dispatch a courier for this order';
                     db.append(ico(I.truck), el('span', 'lbl-btn-txt', dispatched ? 'Shipment' : 'Dispatch'));
                     db.onclick = (e) => { e.stopPropagation(); openDispatch(o); };
+                    db.classList.add('grp');   /* a state change starts its own group */
                     acts.append(db);
                 }
                 if (!o.status) {
@@ -19115,16 +19173,18 @@ Projected Image UK"></textarea>
                 list.append(row);
                 if (labelSel === o.id) {
                     const wrap = el('div', 'lbl-preview');
-                    /* On the page, below the queue card. No top margin: in the
-                       flow the card's own 24 swallowed it, and in the widget grid
-                       it would add to the gap. */
-                    if (!pane) wrap.style.margin = '0 0 var(--sp-4)';
+                    /* The open row and its preview are one block (the mix, spec
+                       8.2): the teal wash and the teal bar run on under the row. */
                     if (o.customer_id) wrap.append(histLine(o));
                     const sheet = labelSheet(o);
-                    wrap.append(sheet);
+                    /* The label in a frame with its own shadow. The sheet inside
+                       is the print's, untouched. */
+                    const frame = el('figure', 'lbl-frame'); frame.append(sheet);
+                    wrap.append(frame);
                     const note = el('div', 'lbl-preview-note'); wrap.append(note);
-                    const act = el('div', 'lbl-toolbar'); act.style.marginTop = 'var(--sp-3)';
-                    const p2 = el('button', 'btn btn-primary'); p2.append(ico(I.printer), document.createTextNode('Print this label'));
+                    const act = el('div', 'lbl-toolbar');
+                    /* Not a second primary: the open row's Print is the one. */
+                    const p2 = el('button', 'btn'); p2.append(ico(I.printer), document.createTextNode('Print this label'));
                     p2.onclick = () => printLabels([o]);
                     act.append(p2); wrap.append(act);
                     /* Beside the queue from 1500px; below that under its own row,

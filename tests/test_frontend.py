@@ -10084,9 +10084,10 @@ def t_every_row_family_sits_on_the_sections_text_edge():
     section's title. Every row family that stands straight in a section has no
     side padding: its words start where the title's do and its hairlines run the
     text column. Left as they are, by design: a boxed list (the Inbox list, whose
-    rows carry owner tints and an unread bar inside the box), the Production
-    Manager queue rows (Task 33 rebuilds them), and a filled band or panel (the
-    Size list's group band and detail panel), whose fill is their box."""
+    rows carry owner tints and an unread bar inside the box) and a filled band or
+    panel (the Size list's group band and detail panel), whose fill is their box.
+    The Production Manager queue rows (Task 33) are on the edge too: their wash
+    and hover bleed 8 past the column instead of padding the words in."""
     def side(body):
         left = right = None
         mm = re.search(r"(?<![-\w])padding:\s*([^;}]+)", body)
@@ -10111,6 +10112,14 @@ def t_every_row_family_sits_on_the_sections_text_edge():
         if not mm: continue
         l, r = side(mm.group(1))
         ok(l in ("0", "0px") and r in ("0", "0px"), sel + " has no side padding (left %s, right %s)" % (l, r))
+    # The Production Manager's order row: its own rule is the one at the stylesheet's 8-space indent
+    # (the container queries above it carry deeper ones), and its wash and hover bleed past the column.
+    mm = re.search(r"\n        \.lbl-qrow \{([^}]*)\}", CSS)
+    ok(mm is not None, ".lbl-qrow is a rule")
+    l, r = side(mm.group(1)) if mm else (None, None)
+    ok(l in ("0", "0px") and r in ("0", "0px"), ".lbl-qrow has no side padding (left %s, right %s)" % (l, r))
+    ok("calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected)" in CSS.split('\n        .lbl-qrow:is(.on, [aria-selected="true"]) {')[1].split("}")[0],
+       "and the open order's wash is a bleed of 8, not padding")
     inline = ["\.card-bleed > \.insights > \.insight, \.card-bleed \.block > \.insights > \.insight \\{",
               "\.card-bleed\.crm-act-list > \.crm-sub \\{",
               "\.scan-card \.card-bleed > \.summary, \.scan-card \.card-bleed \.block > \.section-title \\{"]
@@ -10764,6 +10773,52 @@ def t_the_production_manager_is_the_mix_page():
        "the counters are built straight after the header, the partial-sweep notice after them")
     ok(".ov-hero-act:has(> .btn + .btn + .btn) > .btn:not(.btn-icon) { flex: none; }" in CSS and "padding-top: 0; flex-wrap: wrap; }" in CSS,
        "a phone rail of three words wraps, each at its own width, instead of running past the gutter")
+
+
+@test
+def t_an_order_row_is_a_hairline_row_and_the_open_one_is_one_block():
+    """Spec 6 and 8.2: order rows are 64 tall with a hairline between them; the
+    Preview / Hide toggle keeps one width so no column moves; the open row and
+    its preview are one block in the teal wash with the teal bar; the open
+    order's Print is the screen's one primary; the label sits in a frame with
+    its own shadow; on a phone the buttons keep their words, three then two.
+    What the rows hold and do is the queue's own and does not change. By the
+    row-family ruling (6 October 2026) the row's words sit on the section's text
+    edge: the wash and the hover bleed 8 past the column with box-shadow, and the
+    open order's teal bar is drawn on the bleed's outer edge."""
+    fn = fn_src("function renderLabels() {")
+    for part in ("const pv = el('button', 'btn btn-sm');", "el('span', 'lbl-btn-txt swap')", "ico(pvOn ? I.eyeOff : I.eye)",
+                 "if (pvOn && !unproc && !shipMode) pr.classList.add('btn-primary');", "el('figure', 'lbl-frame')",
+                 "const p2 = el('button', 'btn');", "db.classList.add('grp');", "rd.classList.add('grp');"):
+        ok(part in fn, "renderLabels: " + part)
+    ok("wrap.style.margin" not in fn and "act.style.marginTop" not in fn, "no inline spacing in the preview")
+    ok("eyeOff: SV(" in SCRIPT, "Hide has its own glyph")
+    row = CSS.split("\n        .lbl-qrow {")[1].split("}")[0]
+    ok("min-height: var(--order-row-h)" in row and "box-shadow: var(--rule-b-soft)" in row and "border: 0" in row,
+       "a 64 row on a hairline, no box")
+    ok("padding: var(--sp-2) 0;" in row, "its words start on the text edge: no side padding")
+    bleed = "calc(-1 * var(--sp-2)) 0 0 %s, var(--sp-2) 0 0 %s"
+    on = CSS.split('\n        .lbl-qrow:is(.on, [aria-selected="true"]) {')[1].split("}")[0]
+    ok("background: var(--action-selected)" in on and bleed % (("var(--action-selected)",) * 2) in on,
+       "the open row is the teal wash, bleeding 8 past the column on each side")
+    ok("calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected)" in on, "and the teal bar is on the bleed's outer edge")
+    hov = CSS.split("@media (hover: hover) { .lbl-qrow:hover {")[1].split("} }")[0]
+    ok("background: var(--surface-secondary)" in hov and bleed % (("var(--surface-secondary)",) * 2) in hov,
+       "the hover fill bleeds the same 8")
+    pv = CSS.split("\n        .lbl-grid > .lbl-preview {")[1].split("}")[0]
+    ok("background: var(--action-selected)" in pv and bleed % (("var(--action-selected)",) * 2) in pv
+       and "calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected)" in pv and "padding: 0 0 var(--sp-6)" in pv,
+       "and its preview carries on the same block, on the same edges")
+    ok(".swap > .gone { visibility: hidden; }" in CSS, "the toggle's other word holds its width")
+    frame = CSS.split("\n        .lbl-frame {")[1].split("}")[0]
+    ok("box-shadow: var(--shadow-label)" in frame and "border-radius: var(--radius-control)" in frame, "the label's frame")
+    phone = CSS[CSS.index("/* A list as narrow as a phone's: worded 40 buttons"):][:1100]
+    ok("grid-template-columns: repeat(6, minmax(0, 1fr))" in phone and ".lbl-qrow .lbl-actions .lbl-btn-txt { display: inline; }" in phone
+       and ".lbl-qrow { padding: var(--sp-3) 0;" in phone,
+       "on a phone the buttons keep their words in a grid, three then two, and the words stay on the text edge")
+    ok(".lbl-row { flex-wrap: wrap; padding: var(--sp-3); }\n            .lbl-qrow { padding-inline: 0; }" in CSS,
+       "the shared phone rule that pads every .lbl-row 12 in does not pad the queue's (found in the rig at 390)")
+    eq(_token_raw("ono-w"), "100px", "--ono-w")
 
 
 if __name__ == "__main__":
