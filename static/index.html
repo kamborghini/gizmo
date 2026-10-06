@@ -1254,10 +1254,14 @@
            as .ov-hero:has(+ .page-tabs) gives it in the flow. */
         .ov-wrap.wgrid > .ov-hero + .page-tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm)); }
         .ov-wrap.wgrid > .ov-hero + .tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm)); }
-        /* Whatever else follows the header sits 32 under it, as on a plain page:
-           the grid zeroes every child's margin and spaces them by one gap, which
-           is less. */
-        .ov-wrap.wgrid > .ov-hero + :not(.tabs, .page-tabs) { margin-top: calc(var(--sp-7) - var(--page-rhythm)); }
+        /* The header sits 32 above what follows it, as on a plain page: the grid
+           zeroes every child's margin and spaces them by one gap, which is less.
+           The offset is on the header, which is alone in its full-width row; on
+           whatever follows it would move one tile, since a KPI tile can be the
+           first thing after it, and a hidden block would take the margin with
+           it. A tab strip has its own 20 (above), and the queue counters
+           (.queues) get their own offset, so neither is given this one too. */
+        .ov-wrap.wgrid > .ov-hero:not(:has(+ :is(.tabs, .page-tabs, .queues))) { margin-bottom: calc(var(--sp-7) - var(--page-rhythm)); }
         /* A segment bar is as wide as its buttons in the flow; a grid item
            would stretch its track across the whole row. */
         .ov-wrap.wgrid > :is(.tabs, .segmented) { justify-self: start; }
