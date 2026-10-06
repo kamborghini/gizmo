@@ -3683,6 +3683,15 @@ def t_a_rising_number_is_not_congratulated_in_green():
     for sel in (r"\.prod-chip \.cmp\.up",):
         rule = re.search(sel + r" \{[^}]*\}", CSS)
         ok(rule and "var(--success)" not in rule.group(0), "the product comparison chip spends no green on direction either")
+    # Review (6 October 2026): a report's and a chat answer's metrics can be labelled anything, so colour only a
+    # label whose meaning is KNOWN; any other label gets the neutral chip, with its arrow and its hidden word.
+    ok("const RISE_IS_GOOD_FIRST = [" in SCRIPT and "const RISE_IS_GOOD = [" in SCRIPT and "function changeChip(" in SCRIPT,
+       "the tone lists and the chip builder are there")
+    words = SCRIPT.split("const RISE_IS_BAD = [")[1].split("]")[0]
+    for k in ("'refund'", "'return'", "'cancel'", "'churn'", "'bounce'", "'abandon'", "'cost'", "'complaint'", "'chargeback'", "'dispute'"):
+        ok(k in words, "a rise in " + k + " is bad news")
+    ok(".chat-metrics .delta:is(.good, .bad)" in CSS, "no chip in a chat answer is coloured, whatever its direction")
+    ok(".delta.flat:not(.up):not(.down) { padding-left: var(--sp-2); }" in CSS, "and a neutral chip that has an arrow keeps the arrow's 4")
 
 
 @test
@@ -10162,6 +10171,62 @@ def t_a_figure_row_never_asks_more_gap_than_a_phone_has():
     ok(re.search(r"\.metrics\.metrics-strip \{ grid-template-columns: repeat\(12, minmax\(0, 1fr\)\); \}", CSS) is not None,
        "the strip is still 12 tracks (the reason the gap has to shrink)")
     ok(".chat-metrics .metrics > .stat::before { left: calc(-0.5 * var(--sp-3)); }" in CSS, "a chat answer's figure row moves its hairline to its own 12 gap")
+
+
+@test
+def t_the_figure_and_table_review_fixes_hold():
+    """Review of Tasks 14 to 16 (6 October 2026): (1) a grid page's figures carry
+    no per-tile hairline and no side padding, so every row's first figure starts
+    on the text edge; (2) the open or pick mark sits at the tile's corner on the
+    label's line; (3) chips on the feature band have a white ground (the later
+    tone rules were beating the band's); (4) the CRM tables are 44 rows with their
+    outer columns on the text edge; (5) the Size list's band and detail
+    panel keep their words on the text edge and bleed their fill 8 past it."""
+    ok(".ov-wrap.wgrid > .stat[data-widget] { box-shadow: inset" not in CSS, "no hairline on a grid tile")
+    ok(not re.search(r"\.ov-wrap\.wgrid > \.stat\[data-widget\] \{[^}]*padding-left", CSS), "and no side padding")
+    act = CSS.split("\n        .stat-act {")[1].split("}")[0] if "\n        .stat-act {" in CSS else ""
+    ok("top: calc((var(--lh-control) - var(--box-xs)) / 2)" in act and "right: 0" in act and "var(--sp-4)" not in act.split("width")[0],
+       "the mark sits at the corner on the label's first line, not 16 in")
+    ok(".fband .delta:is(.good, .bad, .flat) { background: var(--surface-primary); }" in CSS, "a chip on the band has a white ground")
+    ok(".ktable.crm-table td { padding: var(--sp-4); }" not in CSS and ".ktable.crm-table th { padding: 0 var(--sp-4); }" not in CSS,
+       "the CRM tables have no 16px cell of their own")
+    ok(".ktable.crm-table :is(th, td) { padding: 0 var(--sp-3); }" in CSS
+       and ".ktable.crm-table :is(th, td):first-child { padding-left: 0; }" in CSS
+       and ".ktable.crm-table :is(th, td):last-child { padding-right: 0; }" in CSS, "they are 44 rows with their outer columns on the text edge")
+    ok(".ktable-wrap:has(> .sizes-table) { overflow: visible; }" in CSS, "the Size list's wrapper lets a fill bleed")
+    band = CSS.split("\n        .ktable tr.ktable-grp th {")[1].split("}")[0] if "\n        .ktable tr.ktable-grp th {" in CSS else ""
+    ok("padding: var(--sp-2) 0" in band and "calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary)" in band,
+       "a maker's band keeps its words on the text edge and bleeds its fill 8 each side")
+    det = CSS.split("\n        .ktable tr.sizes-detail > td {")[1].split("}")[0] if "\n        .ktable tr.sizes-detail > td {" in CSS else ""
+    ok("calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary)" in det, "so does the detail panel")
+    ok(".ktable tr.sizes-row.open td:first-child { box-shadow" not in CSS,
+       "the open row stays flush: its notes cell ends in an ellipsis, which clips its own shadow, so a bleed on one side only would leave a notch")
+
+
+@test
+def t_an_unknown_or_bad_rising_label_is_never_green():
+    """Review of Task 14 (6 October 2026): the tone of a change chip is worked
+    out from its label, run here through node. A label the app knows is coloured
+    by what the move means; a label on neither list ("Refund rate" and "Churn"
+    are on the bad list; "Something odd" and "Products" are on neither) is
+    neutral, and never green when it rises."""
+    if not _node_ok():
+        print("       (node unavailable, harness skipped)")
+        return
+    a, b = "        const RISE_IS_GOOD_FIRST = [", "        function changeChip("
+    ok(a in SCRIPT and b in SCRIPT, "the tone block can be lifted")
+    cases = [["Refund rate", "up"], ["Returns", "up"], ["Cancelled orders", "up"], ["Churn", "up"], ["Bounce rate", "up"],
+             ["Cart abandonment", "up"], ["Revenue (7d)", "up"], ["Revenue (7d)", "down"], ["Orders (7d)", "up"],
+             ["Unfulfilled (7d)", "up"], ["Unfulfilled (7d)", "down"], ["Return on ad spend", "up"], ["Returning customers", "up"],
+             ["At risk", "up"], ["Something odd", "up"], ["Something odd", "down"], ["Products", "up"], ["Late orders", "up"],
+             ["Avg Google position", "up"], ["Ad spend (90d)", "up"], ["Refund rate", "down"], ["Whatever", "flat"]]
+    got = _run_node(SCRIPT[SCRIPT.index(a):SCRIPT.index(b)] + "\nconsole.log(JSON.stringify(%s.map(c => deltaTone(c[0], c[1]))));" % json.dumps(cases))
+    want = ["bad", "bad", "bad", "bad", "bad", "bad", "good", "bad", "good", "bad", "good", "good", "good", "bad", "flat", "flat", "flat",
+            "bad", "bad", "bad", "good", "flat"]
+    for c, g, w in zip(cases, got, want):
+        ok(g == w, "%s %s is %s (got %s)" % (c[0], c[1], w, g))
+    ok(all(g != "good" for c, g in zip(cases, got) if c[0] in ("Something odd", "Products", "Refund rate", "Churn", "Bounce rate", "Returns")
+           and c[1] == "up"), "an unknown or bad-rising label is never green")
 
 
 if __name__ == "__main__":

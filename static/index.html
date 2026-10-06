@@ -961,9 +961,10 @@
             padding: 0; box-shadow: none; animation: fadeUp .4s ease backwards;
             display: flex; flex-direction: column; align-items: stretch; gap: var(--gap-fig);
             min-height: 0; justify-content: flex-start; }
-        /* A figure the widget grid places on its own (Overview's) leads with
-           the hairline it would have drawn in a row. */
-        .ov-wrap.wgrid > .stat[data-widget] { box-shadow: inset var(--bw-hairline) 0 0 var(--border-default); padding-left: var(--sp-4); }
+        /* A figure the widget grid places on its own (Overview's) carries no
+           hairline and no padding: the grid's gap separates the figures, so each
+           row's first figure starts on the text edge. A .metrics strip keeps its
+           hairline-split row. */
         /* The sparkline sinks to the bottom so every card's NUMBER lines up
            with its neighbours, whatever length of label or note sits above. */
         /* 8px of air over a 30px line: at 34px the svg hung 4px out of its own
@@ -1051,7 +1052,7 @@
         .fb-tile svg { width: var(--icon-md); height: var(--icon-md); }
         .fb-label { font-weight: var(--weight-medium); color: var(--text-secondary); white-space: nowrap; }
         .fb-note { color: var(--text-secondary); white-space: nowrap; font-variant-numeric: tabular-nums; }
-        .fband .delta { background: var(--surface-primary); }
+        .fband .delta:is(.good, .bad, .flat) { background: var(--surface-primary); }
         .fband .info:hover::before { background: var(--surface-primary); }
         .fb-fig { font-weight: var(--weight-semibold); line-height: var(--lh-none); letter-spacing: var(--tr-fig); font-variant-numeric: tabular-nums; }
         .fb-hero { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-fig); margin: var(--gap-fig) 0 var(--sp-6); }
@@ -1124,8 +1125,14 @@
             .ktable.sizes-table :is(th, td) { padding-inline: var(--sp-2); }
             .ktable.sizes-table thead th:nth-last-child(2), .ktable.sizes-table td.sizes-under { display: none; }
         }
-        .ktable tr.ktable-grp th { background: var(--surface-secondary); color: var(--text-primary); font-weight: var(--weight-medium); font-size: var(--text-sm); padding: var(--sp-2) var(--sp-4); cursor: pointer; }
-        .ktable tr.ktable-grp:hover th { background: var(--surface-tertiary); }
+        /* The fills in the Size list (a maker's band, an open model's detail panel) bleed 8 past the
+           column on each side, so the words stay on the text edge and never touch the fill's edge; the
+           list's wrapper lets them show. The open row itself stays flush: its last cell (the notes,
+           which ends in an ellipsis and so clips) would cut a bleed on its right. */
+        .ktable-wrap:has(> .sizes-table) { overflow: visible; }
+        .ktable tr.ktable-grp th { background: var(--surface-secondary); color: var(--text-primary); font-weight: var(--weight-medium); font-size: var(--text-sm); padding: var(--sp-2) 0; cursor: pointer;
+            box-shadow: var(--rule-b), calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); }
+        .ktable tr.ktable-grp:hover th { background: var(--surface-tertiary); box-shadow: var(--rule-b), calc(-1 * var(--sp-2)) 0 0 var(--surface-tertiary), var(--sp-2) 0 0 var(--surface-tertiary); }
         .ktable tr.ktable-grp .grp-n { color: var(--text-tertiary); font-weight: var(--weight-regular); margin-left: var(--sp-2); }
         /* A model's row opens in place. The model is its button, with a caret
            that turns as a maker row's does, and the words a search matched
@@ -1143,7 +1150,7 @@
             font-weight: var(--weight-regular); color: var(--text-secondary); }
         .sizes-model .sizes-labeltag { display: table; margin-left: calc(var(--icon-sm) + var(--sp-1)); margin-top: var(--sp-1); }
         .ktable tr.sizes-row.open td { background: var(--surface-secondary); border-bottom-color: transparent; }
-        .ktable tr.sizes-detail > td { background: var(--surface-secondary);
+        .ktable tr.sizes-detail > td { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary);
             padding: 0 var(--sp-4) var(--sp-4) calc(var(--sp-3) + var(--icon-sm) + var(--sp-1)); }
         .ktable tbody tr.sizes-detail:hover td { background: var(--surface-secondary); }
         .sizes-dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--sp-1) var(--sp-4);
@@ -1176,7 +1183,7 @@
             .ktable.sizes-table tr.sizes-row { display: grid; grid-template-columns: minmax(0, 1fr) auto;
                 grid-template-areas: "model fig" "maker fig" "status fig"; column-gap: var(--sp-3); row-gap: var(--sp-1);
                 padding: var(--sp-3) 0; border-bottom: var(--bw-hairline) solid var(--border-default); }
-            .ktable.sizes-table tr.sizes-row:hover, .ktable.sizes-table tr.sizes-row.open { background: var(--surface-secondary); }
+            .ktable.sizes-table tr.sizes-row:hover, .ktable.sizes-table tr.sizes-row.open { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); }
             .ktable.sizes-table tr.sizes-row.open { border-bottom-color: transparent; }
             .ktable.sizes-table tr.sizes-row > td { display: block; min-width: 0; padding: 0; border: 0; background: none; }
             .ktable.sizes-table td.sizes-model { grid-area: model; }
@@ -1186,7 +1193,7 @@
             .ktable.sizes-table td.sizes-fig { grid-area: fig; align-self: center; font-size: var(--text-lg); }
             .ktable.sizes-table td.sizes-fig .sizes-unit { display: inline; font-size: var(--text-sm); color: var(--text-secondary); }
             .ktable.sizes-table tr.sizes-row > :is(td.sizes-glass, td.sizes-image, td.sizes-under, td.sizes-notes) { display: none; }
-            .ktable.sizes-table tr.sizes-detail > td { padding: 0 var(--sp-4) var(--sp-4); }
+            .ktable.sizes-table tr.sizes-detail > td { padding: 0 0 var(--sp-4); }
             .sizes-dl { grid-template-columns: minmax(0, 1fr); gap: 0; }
             .sizes-dl dd + dt { margin-top: var(--sp-2); }
         }
@@ -1287,7 +1294,7 @@
            carries a ring that fills with a tick when it is the filter set. */
         .stat.stat-open { cursor: pointer; }
         .stat.stat-open:hover .label, .stat.stat-pick:hover .label { color: var(--text-primary); }
-        .stat-act { position: absolute; top: var(--sp-4); right: var(--sp-4); width: var(--box-xs); height: var(--box-xs); display: grid; place-items: center; color: var(--text-tertiary); transition: color var(--dur) var(--ease), background var(--dur) var(--ease); }
+        .stat-act { position: absolute; top: calc((var(--lh-control) - var(--box-xs)) / 2); right: 0; width: var(--box-xs); height: var(--box-xs); display: grid; place-items: center; color: var(--text-tertiary); transition: color var(--dur) var(--ease), background var(--dur) var(--ease); }
         .stat-act svg { width: var(--icon-md); height: var(--icon-md); display: block; }
         .stat:hover > .stat-act, .stat:focus-visible > .stat-act { color: var(--text-primary); }
         .stat:has(> .stat-act) > .label { padding-right: var(--sp-6); }
@@ -3968,15 +3975,13 @@
         .ktable :is(th, td):first-child { padding-left: 0; }
         .ktable :is(th, td):last-child { padding-right: 0; }
         .ktable tr:last-child td { border-bottom: 0; }
-        /* The CRM's two tables to the reference's own cell metric: 16px, which
-           puts a body row at 53px against the header's 44 - the reference's
-           relationship, where the row is the taller of the two. The 12px pair
-           had been tuned on the header alone, so the two came out 44.5 and 46
-           and the table read as a header with a slightly thicker header under
-           it. Scoped, because the file browser's rows are built to their own
-           reference at a deliberately denser 45px. */
-        .ktable.crm-table th { padding: 0 var(--sp-4); }
-        .ktable.crm-table td { padding: var(--sp-4); }
+        /* The CRM's two tables are the house table: a 32 head and 44 rows, 12
+           between columns, the outer columns on the text edge. (They carried a
+           16px cell of their own, which made a 53px row and beat the outer-column
+           rule, so the first word sat 16 in from the text.) */
+        .ktable.crm-table :is(th, td) { padding: 0 var(--sp-3); }
+        .ktable.crm-table :is(th, td):first-child { padding-left: 0; }
+        .ktable.crm-table :is(th, td):last-child { padding-right: 0; }
         .ktable.crm-table td:is(.crm-email, .crm-web) { overflow-wrap: anywhere; }
         .ktable.crm-table td.crm-phone { white-space: nowrap; }
         /* One unbroken email set a 400px column and every other went to its
@@ -3984,8 +3989,7 @@
            the table scrolled its last columns out of the card. */
         .ktable-wrap:has(> .crm-table) { container: crmtable / inline-size; }
         @container crmtable (max-width: 640px) {
-            .ktable.crm-table th { padding: 0 var(--sp-2); }
-            .ktable.crm-table td { padding: var(--sp-2-5) var(--sp-2); }
+            .ktable.crm-table :is(th, td) { padding: 0 var(--sp-2); }
             .ktable.crm-deals-table :is(th, td):nth-child(5), .ktable.crm-deals-table :is(th, td):nth-child(6) { display: none; }
             .ktable.crm-contact-table :is(.crm-deals, .crm-label) { display: none; }
         }
@@ -4726,7 +4730,9 @@
         .chat-metrics .stat-ic { display: none; }
         .chat-metrics .stat .value { font-size: var(--text-xl); }
         .chat-metrics .stat-row { flex-wrap: wrap; row-gap: var(--sp-1); }
-        .chat-metrics .delta.down, .chat-metrics .stat.warn .delta.down { color: var(--text-primary); background: var(--surface-sunken); }
+        /* A chat answer's figures are written by the model, so no chip under it is coloured, whatever its
+           direction: the arrow and the hidden word carry it. */
+        .chat-metrics .delta:is(.good, .bad), .chat-metrics .stat.warn .delta.bad { color: var(--text-tertiary); background: var(--surface-tertiary); }
         .chat-thinking .thinking { flex-wrap: wrap; }
         .th-secs { font-size: var(--text-xs); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
         .th-stop { margin-left: auto; }
@@ -5246,7 +5252,8 @@
         .delta:is(.up, .down, .flat) { gap: var(--sp-0-5); padding: 0 var(--sp-2) 0 var(--sp-1); font-weight: var(--weight-semibold);
             line-height: var(--lh-caption); font-variant-numeric: tabular-nums; }
         .delta:is(.up, .down, .flat) svg { width: var(--icon-sm); height: var(--icon-sm); stroke-width: var(--icon-stroke-s); }
-        .delta.flat { padding-left: var(--sp-2); color: var(--text-tertiary); background: var(--surface-tertiary); }
+        .delta.flat { color: var(--text-tertiary); background: var(--surface-tertiary); }
+        .delta.flat:not(.up):not(.down) { padding-left: var(--sp-2); }
         .delta.good { color: var(--success); background: var(--success-bg); }
         .delta.bad { color: var(--error); background: var(--error-bg); }
         .chart-head .delta { margin-left: var(--sp-2); }
@@ -6302,15 +6309,32 @@ Projected Image UK"></textarea>
             for (const [k, v] of METRIC_ICON) if (l.includes(k)) return v;
             return 'grid';
         };
-        /* A change is coloured by what it means, not by its direction (the
-           mix, spec 6, keeping the 2026-09 rule that a rising number is not
-           congratulated by reflex): green when the move is good for the shop,
-           red when it is bad. A rise is bad news for these. */
-        const RISE_IS_BAD = ['unfulfilled', 'low stock', 'at risk', 'position', 'cpc', 'ad spend', 'overdue', 'failed', 'quarantined', 'owed', 'outstanding'];
+        /* A change is coloured by what it MEANS, and only when the label's
+           meaning is known (the mix, spec 6, keeping the 2026-09 rule that a
+           rising number is not congratulated by reflex): green when the move is
+           good for the shop, red when it is bad, and the neutral chip, still with
+           its arrow and its hidden "up" or "down", for a label on neither list.
+           A report's or an answer's metrics can be labelled anything, so an
+           unknown label is never green. The three lists are read in this order:
+           the phrases that contain a bad word but are good ("Returning customers",
+           "Return on ad spend"), then what is bad when it rises, then what is good. */
+        const RISE_IS_GOOD_FIRST = ['returning', 'return on', 'roas', 'repeat'];
+        const RISE_IS_BAD = ['unfulfilled', 'low stock', 'at risk', 'position', 'cpc', 'ad spend', 'overdue', 'failed', 'quarantined', 'owed', 'outstanding',
+            'refund', 'return', 'cancel', 'churn', 'bounce', 'abandon', 'cost', 'complaint', 'chargeback', 'dispute', 'unpaid', 'debt', 'backlog', 'delay',
+            'waiting', 'pending', 'error', 'loss', 'lost', 'discrepanc', 'unmatched', 'missed', 'late order', 'late deliver', 'late payment', 'slow',
+            'out of stock', 'stockout', 'unread', 'unassigned', 'spam', 'fraud', 'declined', 'damaged', 'defect'];
+        const RISE_IS_GOOD = ['revenue', 'sales', 'orders', 'sessions', 'visitors', 'traffic', 'conversion', 'customers', 'profit', 'margin', 'average order',
+            'aov', 'basket', 'clicks', 'impressions', 'ctr', 'lifetime value', 'ltv', 'units sold', 'subscribers', 'leads', 'taken'];
         function deltaTone(label, trend, better) {
             if (trend !== 'up' && trend !== 'down') return 'flat';
             const l = String(label || '').toLowerCase();
-            const riseBad = better === 'down' || (better !== 'up' && RISE_IS_BAD.some(k => l.includes(k)));
+            let riseBad = null;
+            if (better === 'down') riseBad = true;
+            else if (better === 'up') riseBad = false;
+            else if (RISE_IS_GOOD_FIRST.some(k => l.includes(k))) riseBad = false;
+            else if (RISE_IS_BAD.some(k => l.includes(k))) riseBad = true;
+            else if (RISE_IS_GOOD.some(k => l.includes(k))) riseBad = false;
+            if (riseBad === null) return 'flat';
             return (trend === 'up') !== riseBad ? 'good' : 'bad';
         }
         function changeChip(trend, text, tone) {
