@@ -2659,7 +2659,8 @@ def t_the_beta_tabs_say_so_everywhere_they_are_named():
     # On the page: CRM's own heading carries it; the three Finance tabs carry
     # it on their own tab, because the 'Finance' heading is shared with
     # Liability and gained and lost the tag as you moved between the four.
-    ok("cTitle.append(el('span', 'beta-tag'" in SCRIPT, "the CRM heading carries it")
+    ok("pageHead({ view: 'crm'" in SCRIPT and "BETA_TABS.indexOf(o.view) >= 0" in fn_src("function pageHead(o) {"),
+       "the CRM heading carries it, from the one header builder")
     ft = fn_src("function financeTabs(")
     # Since 2026-10-05 the Finance tabs carry no Beta: the sidebar and the top
     # bar say it, and a Finance screen carried it seven times at once.
@@ -8032,8 +8033,8 @@ def t_the_reviewers_last_findings_stay_closed():
     ok(".tm-sign-save { margin-top: var(--sp-2); }" in CSS, "and Save sign-off stands off its field")
     # CRM Insights: each empty chart says what fills it.
     ok("function bars(title, desc, rows, fmt, empty) {" in SCRIPT
-       and "'No activity was marked done in the last 30 days.'" in SCRIPT
-       and "'No open deal has an expected close date from this month on.'" in SCRIPT,
+       and "'Nothing done in the last 30 days.'" in SCRIPT
+       and "'No expected close dates ahead.'" in SCRIPT,
        "each chart's empty line is its own")
     # The queue shares its tracks from the width the date appears at.
     ok("@container queue (min-width: 560px) {\n            .lbl-grid { display: grid;" in CSS, "a refunded row's date stays in line on a tablet")
@@ -11175,6 +11176,50 @@ def t_the_size_list_and_loan_units_wear_the_mix():
         ok(gone not in SCRIPT, "cut: " + gone)
     for new in ("'Nothing is out.'", "'No loan units yet.'", "'No due date'", "'Turns amber after this many days without a due date.'"):
         ok(new in SCRIPT, "says: " + new)
+
+
+@test
+def t_the_crm_wears_the_mix():
+    """Spec 8.3 (Desk) and the copy plan (CRM): the one header with Beta and one
+    line, the amber and red key behind its info button, what a lead is and the
+    funnel's counting rule behind theirs, descriptions that restated a title
+    gone, and one-line empty states."""
+    ok("function renderCRM() {" in SCRIPT, "renderCRM exists")
+    fn = fn_src("function renderCRM() {")
+    ok("pageHead({ view: 'crm', title: 'CRM', line: 'Deals, activities and contacts for the sales desk.'" in fn
+       and "el('div', 'ov-hero')" not in fn, "the one header and its line")
+    ok("infoButton('About the CRM'" in fn and "infoButton('What a lead is'" in SCRIPT, "the key and the definition wait behind info buttons")
+    ok("if (desc) bt.append(infoButton(title, { title: title, body: desc }))" in SCRIPT, "an Insights rule is its title's info button")
+    ok("emptyState({ icon: I.briefcase, text: 'No deals yet.', action: acts })" in SCRIPT, "an empty pipeline is one line and its two ways on")
+    for gone in ("Everything the desk is working on", "An empty pipeline is a fresh start", "The calls, emails and meetings the desk owes",
+                 "Everyone the desk deals with", "Tick rows to delete", "What closed, summed into the month", "This fills in",
+                 "they are expected to land", "What the desk actually got done", "cannot be forecast"):
+        ok(gone not in SCRIPT, "cut: " + gone)
+    for new in ("'No deals won yet.'", "'No expected close dates ahead.'", "'No pipeline stages yet.'", "'Nothing done in the last 30 days.'"):
+        ok(new in SCRIPT, "says: " + new)
+
+
+@test
+def t_the_crm_board_lanes_cards_and_focus_panels_have_no_box():
+    """Carried from the Phase 3 review (spec 3 and 8.3): a CRM lane is a tint with no outline, a
+    deal card a white tile on it with no border (the fill difference separates them; a drop still lights the
+    lane, hover and the red 'untouched too long' edge are drawn as shadows), and .crm-focus has no box."""
+    def rule(sel):
+        m = re.search(r"\n        " + re.escape(sel) + r" \{([^}]*)\}", CSS)
+        ok(m is not None, sel + " is a rule at the stylesheet's own indent")
+        return m.group(1) if m else ""
+    col = rule(".crm-col")
+    ok("background: var(--surface-secondary)" in col and "border: 0;" in col and "border: var(--bw-hairline)" not in col, "a lane is a tint with no outline")
+    ok(".card .crm-col { border-color: transparent; }" not in CSS, "and no rule is left holding a transparent outline")
+    ok("box-shadow: inset 0 0 0 var(--bw-strong) var(--border-selected)" in rule(".crm-col.dragover"), "a lane still lights when a deal is dragged over it")
+    card = rule(".crm-card")
+    ok("background: var(--surface-primary)" in card and "border: 0;" in card and "box-shadow: none;" in card, "a deal card is a white tile with no border or shadow")
+    ok("box-shadow: inset 0 0 0 var(--bw-hairline) var(--border-emphasis)" in CSS.split("@media (hover: hover) { .crm-card:hover {")[1].split("}")[0],
+       "its hover is a ring, inside hover: hover")
+    ok("box-shadow: inset var(--bw-marker) 0 0 var(--error)" in rule(".crm-card.rotten") and "border-left" not in rule(".crm-card.rotten"),
+       "a deal untouched too long keeps its red edge, drawn inside the tile")
+    foc = rule(".crm-focus")
+    ok("border: 0;" in foc and "border-radius: 0;" in foc and "padding: 0;" in foc and "border: var(--bw-hairline)" not in foc, ".crm-focus has no box")
 
 
 if __name__ == "__main__":
