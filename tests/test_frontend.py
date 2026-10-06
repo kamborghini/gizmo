@@ -2687,10 +2687,10 @@ def t_every_tab_shares_one_page_wrapper():
 
 @test
 def t_the_sidebar_keeps_one_inset():
-    """Every block in the sidebar sits 8px from each edge, the reference's
-    p-2 on its header, each group and its footer. The ask button used to be
-    width:100% with no horizontal margin, so it alone ran the full width and
-    broke the line the whole column keeps."""
+    """Every block in the sidebar sits 12px from each edge (an item's own 8 puts
+    its words 20 from the frame): the brand row, the nav, the conversations and
+    the footer. The ask button used to be width:100% with no horizontal margin,
+    so it alone ran the full width and broke the line the whole column keeps."""
     for sel, why in ((r"\.side-head \{[^}]*\}", "the brand row"),
                      (r"\.nav \{[^}]*\}", "the nav list"),
                      (r"\.convos \{[^}]*\}", "the conversation list"),
@@ -3651,7 +3651,7 @@ def t_the_card_elevation_token_actually_paints():
     # still paint is the lift of what genuinely floats: menus, dialogs, drawers.
     m = re.search(r"--shadow-sm:\s*([^;]+);", CSS)
     ok(m, "the token is still declared")
-    ok(m.group(1).strip() == "0 0 0 0 transparent" and "the brand puts no shadow" in CSS.split("--shadow-sm:")[1][:120],
+    ok(m.group(1).strip() == "0 0 0 0 transparent" and "the mix puts no shadow" in CSS.split("--shadow-sm:")[1][:120],
        "a card's elevation paints nothing by the brand's decision, and says so")
     # Not `none`: a list holding `none` is invalid, so the sign-in card's
     # `var(--shadow-sm), var(--shadow-lg)` silently lost its float.
@@ -6939,12 +6939,12 @@ def t_a_held_card_scrolls_the_page_near_its_edge_and_stops_when_the_drag_ends():
 
 
 @test
-def t_a_header_keeps_its_tabs_at_16_in_the_grid():
-    """A tab strip belongs to the page header above it, so it sits 16 below it
-    rather than at the 24 between blocks: the flow does that with a margin, and
+def t_a_header_keeps_its_tabs_at_20_in_the_grid():
+    """A tab strip belongs to the page header above it, so it sits 20 below it
+    rather than at the 48 between sections: the flow does that with a margin, and
     in the grid, where every margin is zero and the gap is the rhythm, a
     negative top margin worked out from the two tokens takes the gap back to
-    16. On a phone the gap is 16 already and the margin is nothing."""
+    20. (On a phone the rhythm is 32, so the margin is smaller there.)"""
     ok(".ov-hero:has(+ .page-tabs) { margin-bottom: var(--sp-5); }" in CSS, "the flow's rule: 20 above the tabs (the mix, 4.4)")
     ok(".ov-wrap.wgrid > .ov-hero + .page-tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm)); }" in CSS,
        "and the grid's reads the same two tokens")
@@ -9508,6 +9508,9 @@ def t_the_printed_sheets_do_not_change():
                       ("weight-semibold", "600"), ("bw-hairline", "1px"), ("bw-strong", "2px"), ("bw-marker", "3px"),
                       ("sp-2", "8px"), ("radius-xs", "6px"), ("lh-body", "1.5")):
         eq(_token_raw(tok), want, "--" + tok + " (print reads it)")
+    # --border-strong is deliberately not in this list. It is a screen token the mix moved (to --line-ctl),
+    # and the one printed thing that drew with it, the label sheet, cancels it with `border: 0 !important`
+    # under body.printing-label; the on-screen preview's edge is the label frame's own --paper-edge.
     body = CSS.split("\n        body {")[1].split("}")[0]
     ok("font-size: var(--text-sm); line-height: var(--lh-body);" in body,
        "the A4 sheets still inherit 14px on a 1.5 line from body")
@@ -10704,7 +10707,7 @@ def t_worth_and_why_stack_at_12_and_cash_warnings_do_not_pile_up():
     further months; Show all is a 40 target on a phone."""
     bar = CSS.split("\n        .fc-split-bar {")[1].split("}")[0]
     ok("margin-top" not in bar, "the bar has no offset of its own")
-    ok("@container fcpair (min-width: 1001px) { .fc-split-bar { margin-top: calc((var(--control-h) - var(--sp-2)) / 2); } }" in CSS,
+    ok("@container fcpair (not (max-width: 1000px)) { .fc-split-bar { margin-top: calc((var(--control-h) - var(--sp-2)) / 2); } }" in CSS,
        "the offset is for the side-by-side layout only")
     wc = fn_src("function fcWorthCard(latest, sc, al) {")
     ok("cash.length > 1" in wc and "' more month'" in wc and "cash.slice(1)" not in wc and wc.count("'msg error'") == 1,
@@ -11555,6 +11558,29 @@ def t_a_standalone_link_is_a_40_target_on_a_phone():
     ok(CSS.index(rule) > CSS.index("\n        .link { display: inline-flex;"), "after its base rule")
     ok(".fc-worth .sec-tools > .link { min-height: var(--control-h-lg); }" in CSS, "and Show all keeps its own")
     ok("el('button', 'link', 'More in the Guide')" in SCRIPT, "the popover's Guide link is a .link")
+
+
+@test
+def t_no_comment_or_rule_still_describes_the_old_look():
+    """Task 44's last-old-rules sweep. A comment that says 24, 16, 18, 28 or off-white
+    where the mix is 48, 20, 15, 32 or white sends the next change the wrong way, and a
+    rule nothing can match is weight. None of these phrases may come back, the dead rules
+    stay gone, the header's spec path is on one line, and the Forecast pair's two
+    container queries meet with no gap between them."""
+    stale = ("off-white page", "14px workhorse", "LARGE and LIGHT", "track 28", "cards are 8", "24 on a tablet",
+             "Ranks: page 30", "a panel 12", "The caveat under the KPI", "a raised knob", "internal 16",
+             "the 8px inset", "the reference's content inset", "the reference's first group", "NavUser",
+             "reference sets its page title", "an INACTIVE item is full-strength", "gap-6")
+    for phrase in stale:
+        ok(phrase not in CSS, "the old wording is gone from the stylesheet: " + phrase)
+    ok("#view-title .beta-tag" not in CSS, "the top bar's title is set with textContent, so no Beta can be inside it")
+    ok("setViewTitle(text) { const h = $('view-title'); h.textContent = text;" in SCRIPT, "which is why that rule was dead")
+    ok(".crm-focus.plain" not in CSS and "crm-focus plain" not in SCRIPT, "the no-op .plain variant and its class are gone")
+    ok("\n           docs/superpowers/specs/2026-10-06-reactor-mix-design.md." in HTML[:4000], "the spec path sits whole on one line")
+    ok("@container fcpair (max-width: 1000px) { .fc-cols { grid-template-columns: minmax(0, 1fr); } }" in CSS,
+       "stacked at 1000 and under")
+    ok("@container fcpair (not (max-width: 1000px)) { .fc-split-bar {" in CSS and "fcpair (min-width: 1001px)" not in CSS,
+       "and the side-by-side offset is the exact complement, so a width between 1000 and 1001 is one or the other")
 
 
 if __name__ == "__main__":

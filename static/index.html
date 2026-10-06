@@ -16,12 +16,13 @@
            paddings and 15 radii, which is what made it feel like a set of
            separate screens rather than one product.
 
-           The look is "the mix" (docs/superpowers/specs/2026-10-06-reactor-
-           mix-design.md; Cameron, 2026-10-05: "i like the mix", "go with the
-           dark sidebar"): one white sheet in an ink frame, one grey ramp,
-           Projected Image's teal for what is chosen and the one primary
-           action, Inter in five steps with Bricolage Grotesque for the
-           wordmark and page titles only, figures first and words on request.
+           The look is "the mix" (Cameron, 2026-10-05: "i like the mix", "go with
+           the dark sidebar"). Its spec is
+           docs/superpowers/specs/2026-10-06-reactor-mix-design.md. One white
+           sheet in an ink frame, one grey ramp, Projected Image's teal for what
+           is chosen and the one primary action, Inter in five steps with
+           Bricolage Grotesque for the wordmark and page titles only, figures
+           first and words on request.
            This block is the only place any of it is defined, and the Guide's
            Design section draws it.
            ------------------------------------------------------------------ */
@@ -171,16 +172,18 @@
                field and as an outline for everything else. */
             --focus-ring: 0 0 0 var(--bw-strong) var(--white), 0 0 0 calc(2 * var(--bw-strong)) var(--teal-650);
             --focus-outline: var(--bw-strong) solid var(--teal-650);
+            /* What sits behind a floating layer: the drawer's scrim and a dialog's wash. */
             --overlay-scrim: color-mix(in srgb, var(--ink) 32%, transparent);
             --overlay-modal: color-mix(in srgb, var(--black) 10%, transparent);
-            /* Elevation. A card is a hairline plus shadow-sm; only things that
-               genuinely float get more. Rings are inset hairlines for things
-               that cannot carry a border. */
-            --shadow-sm: 0 0 0 0 transparent;   /* the brand puts no shadow under what sits on the page. Not
-               `none`: that is only valid alone, so `var(--shadow-sm), var(--shadow-lg)` became invalid
-               and the sign-in card lost the float it is meant to keep. */
-            /* The mix's five shadows: a control's 1px lift, a raised knob, what
-               floats (menus, popovers, the tooltip, dialogs, toasts, the drawer),
+            /* Elevation. Only things that genuinely float get a shadow (--shadow-pop);
+               a few boxed things keep --shadow-sm. Rings are inset hairlines for
+               things that cannot carry a border. */
+            --shadow-sm: 0 0 0 0 transparent;   /* the mix puts no shadow under what sits on the page. Not
+               `none`: that is only valid alone, so a list that reads it, `var(--shadow-sm), var(--ring-default)`,
+               would be invalid. */
+            /* The mix's five shadows: a control's 1px lift, a raise for a white thing
+               sitting in a fill (the spec's chosen segment; here the switch's knob),
+               what floats (menus, popovers, the tooltip, dialogs, toasts, the drawer),
                the chosen counter's teal glow, and the label preview. */
             --shadow-control: 0 1px 1px color-mix(in srgb, var(--ink) 4%, transparent);
             --shadow-raise: 0 1px 2px color-mix(in srgb, var(--ink) 8%, transparent),
@@ -215,10 +218,10 @@
             /* The label preview's own edge, frozen with the label: it was the shared strong border (#D4D4D4)
                until that grey moved to #DADCE0, and the frame hands it back to the label (.lbl-frame). */
             --paper-edge: #D4D4D4;
-            /* Type. 14px is the workhorse size; page titles are LARGE and LIGHT
-               with tight tracking rather than small and bold. Weights: three.
-               Line heights: four ratios and the fixed 20px every 32px control
-               and table row is built on. */
+            /* Type (the mix, 4.2): Inter in five steps (micro 11, caption 12, body 13,
+               body-l 14, head 15) with Bricolage Grotesque for page titles and the
+               wordmark. Weights: three, 400, 500 and 600. Line heights: four ratios
+               and the fixed 20px every 32px control and table row is built on. */
             --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             --font-display: 'Bricolage Grotesque', var(--font-sans);   /* titles: the brand's heading face */
             --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -239,8 +242,8 @@
             /* Spacing: a 4pt grid with three half steps. */
             --sp-px: 1px; --sp-0-5: 2px; --sp-1: 4px; --sp-1-5: 6px; --sp-2: 8px; --sp-2-5: 10px; --sp-3: 12px;
             --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-7: 32px; --sp-8: 40px; --sp-9: 48px; --sp-10: 64px;
-            /* Radii. The brand's cards and fields are 8px; a box inside one steps
-               down to 6. What each role takes is set once, in the component tier. */
+            /* Radii (the mix, 4.5): 2, 4, 6, 10 and 12. What each role takes is set
+               once, in the component tier. */
             --radius-3xs: 2px; --radius-2xs: 4px; --radius-xs: 6px; --radius-md: 10px; --radius-lg: 12px;
             /* Icon glyph sizes. Fifty-four svg rules carried a raw pixel size
                between them, in TWELVE different values - 13, 14, 15, 16 and 17
@@ -315,7 +318,7 @@
             --pop-offset: var(--sp-2); --pop-pad: var(--sp-4); --tip-pad: var(--sp-3); --menu-pad: var(--sp-1);
             /* Shape, one value per role (Cameron, 5 Oct: "Do not use pill-shaped UI
                unnecessarily"). A control and the field beside it share a 6px corner,
-               anything that holds content takes 8, a label 4. Round only where the
+               what floats takes 10 and the sheet 12, a label 4. Round only where the
                shape means something: a switch, a progress bar, a dot, an avatar. */
             --radius-control: var(--radius-xs); --radius-field: var(--radius-control);
             /* The mix (4.5): 10 for what floats and for a queue counter, 12 for
@@ -339,8 +342,8 @@
                so a field beside a small button could not be matched to it. */
             --control-h-md: 28px;
             /* A choice inside a segmented track: the track (a 2px inset, no edge)
-               then stands at a small control's 28, level with the search field
-               and small buttons it shares a toolbar with. */
+               is a control's 32, so its 28 choice sits level with the small
+               controls it shares a toolbar with. */
             --segment-h: calc(var(--control-h) - 2 * var(--sp-0-5));   /* a 28 choice in a 32 track */
             --control-pad-y: 5px;   /* (32 - 20 line - 2 hairlines) / 2 */
             /* The sign-in card: a sky tint fading to white, a blue hairline,
@@ -464,11 +467,9 @@
         /* Hide sidebar: the brand row's 28 ghost square. The top bar's menu
            button brings the sidebar back, and opens the drawer on a phone. */
         .side-hide { flex: none; }
-        /* The reference's first group: one primary button, full width, with
-           the same 8px inset as everything else in the column. */
+        /* The nav column: 12 in from each edge (an item's own 8 puts its words 20
+           from the frame) and 16 above the first group. */
         .nav { padding: var(--sp-4) var(--sp-3) 0; display: flex; flex-direction: column; gap: 0; }
-        /* 12px medium in muted ink, 32px tall with the same 8px inset as an
-           item, so the label sits on the item grid rather than beside it. */
         /* The reference's Finance page puts Dashboard / Accounts / Transactions
            in one strip under the title, so the parts of the money area read as
            one place rather than separate destinations. Liability and
@@ -524,9 +525,7 @@
         .coll-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: var(--sp-2) var(--sp-4); margin-top: var(--sp-2); }
         @media (max-width: 900px) { .coll-grid { grid-template-columns: 1fr; } }
-        /* Foreground at 70% over the sidebar, which lands on this palette's
-           --text-secondary. It was a step lighter, which let the groups fade out. */
-        /* A group head is a caption in muted white, 16 between groups and 4
+        /* A group head is a caption in muted white (--nav-muted), 16 between groups and 4
            above its first row. It stays the fold toggle Cameron asked for: the
            whole row, a caret that turns, the choice remembered. */
         .nav-group { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--nav-muted);
@@ -543,10 +542,9 @@
         .nav-group .nav-caret svg { width: var(--icon-sm); height: var(--icon-sm); display: block; stroke-width: var(--icon-stroke-s); }
         .nav-group[aria-expanded="true"] .nav-caret { transform: rotate(90deg); }
         .nav-sect[hidden] { display: none; }
-        /* 32px, and an INACTIVE item is full-strength ink at normal weight -
-           the reference does not dim the places you are not. Position is marked
-           by the pill and the weight, not by greying everything else out, which
-           is what made this sidebar read washed out beside the reference's. */
+        /* 32 tall. An item is the sidebar's text colour (--nav-text) at medium weight;
+           the chosen one is marked by the teal wash and white words, not by greying
+           the places you are not. */
         .nav-item { display: flex; align-items: center; gap: var(--gap-row-icon); height: var(--control-h); padding: 0 var(--sp-2);
             border-radius: var(--radius-row); border: 0; background: transparent; color: var(--nav-text);
             font-size: var(--text-body); line-height: var(--lh-control); font-weight: var(--weight-medium); width: 100%; text-align: left; white-space: nowrap;
@@ -601,11 +599,9 @@
         @media (hover: none) { .convo .del { opacity: .65; } }
         @media (hover: hover) { .convo .del:hover { opacity: 1; color: var(--error); background: var(--error-bg); } }
         .convo-empty { color: var(--nav-muted); font-size: var(--text-xs); line-height: var(--lh-caption); padding: var(--sp-2) var(--sp-2); }
-        /* The account row: a 48px button, the reference's NavUser. Avatar tile,
-           name over role, a menu glyph on the right; the menu holds what were
-           three loose buttons in the old footer strip. */
-        /* The account: a 44 row, a 24 round initial on the chrome fill, the
-           name in white over the role in muted white, and the menu glyph. */
+        /* The account: a 44 row, a 24 round initial on the chrome fill, the name
+           in white over the role in muted white, and the menu glyph; the menu holds
+           what were three loose buttons in the old footer strip. */
         .side-user { display: flex; align-items: center; gap: var(--control-gap); width: 100%; height: var(--row-h); padding: 0 var(--sp-0-5) 0 var(--sp-1);
             border: 0; border-radius: var(--radius-row); background: transparent; color: var(--text-on-chrome);
             font: inherit; text-align: left; cursor: pointer; transition: background var(--dur) var(--ease); }
@@ -757,34 +753,34 @@
            1500px, so paper keeps the 1120 measure it was designed against. */
         /* The reference's default content layout is CENTERED: the dashboard
            layout gives every page max-w-screen-2xl (1536px) and mx-auto, with
-           24px of padding inside it, and the cards grow to fill that column.
+           the page gutter inside it, and the cards grow to fill that column.
            (Its "Full width" preference drops the cap; the default is what a
            merchant sees.) An earlier reading of a demo had it full bleed, and
            on a 2000px screen that stretched a KPI strip and a pair of charts
            past anything the reference draws. --wrap is the one page-width
            token; print and a handful of narrow panels also read it. */
         .ov-wrap { max-width: var(--wrap); margin: 0 auto; width: 100%;
-            /* 24px, the reference's content inset, on the two edges you
-               see on load. The bottom keeps 40 so a long scroll does not
+            /* The page gutter (--wrap-pad: 40, 16 on a phone) on each side and 12
+               under the top bar. The bottom keeps 48 so a long scroll does not
                end flush against the viewport. */
             padding: var(--sp-3) var(--wrap-pad) var(--sp-9);
-            /* The gap between blocks, 16 on a phone. A property the phone
-               query re-points, not a second margin rule: a later rule of the
-               same weight beat every exception below at 640px and under, so
-               headings sat 16 above their blocks and the last block added 16
-               to the wrap's own bottom padding. */
+            /* The gap between sections, 48 (32 on a phone: the mix, 4.4). A property
+               the phone query re-points, not a second margin rule: a later rule of
+               the same weight beat every exception below at 640px and under, so
+               headings sat the wrong distance above their blocks and the last block
+               added a gap to the wrap's own bottom padding. */
             --page-rhythm: var(--sp-9); }
-        /* ONE RHYTHM DOWN THE PAGE. The reference stacks its content in a single
-           flex column at gap-6, so every block on a page is separated by exactly
-           24px. gizmo's blocks each carried their own bottom margin and arrived
-           at 4, 12, 14, 16, 20 and 24 - six values doing one job, which is what
-           makes a page look unconsidered even when nothing is obviously wrong.
+        /* ONE RHYTHM DOWN THE PAGE (the mix, 4.4). Every block on a page is
+           separated by exactly one gap, --page-rhythm: 48, 32 on a phone. The
+           blocks each carried their own bottom margin and arrived at six values
+           doing one job, which is what makes a page look unconsidered even when
+           nothing is obviously wrong.
 
            :not(.run-gate) lifts this above the single-class component rules so
            it actually wins, and spares the centred empty state its 7vh.
-           A .section-title keeps its asymmetry deliberately: 24 above from the
-           block before it, 12 below, because a label belongs to the thing under
-           it rather than sitting midway between two. */
+           A .section-title keeps its asymmetry deliberately: the full gap above
+           from the block before it, 12 below, because a label belongs to the
+           thing under it rather than sitting midway between two. */
         .ov-wrap > *:not(.run-gate) { margin-top: 0; margin-bottom: var(--page-rhythm); }
         .ov-wrap > .section-title { margin-bottom: var(--sp-3); }
         /* The page header sits 32 above the body, or 20 above its tabs (below). */
@@ -827,25 +823,17 @@
            block rather than the row, which owns the card's background. */
         .insight > div:not(.ico), .action > div:not(.ico) { min-width: 0; }
         .ov-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-6); margin-bottom: var(--sp-7); }
-        /* A tab strip belongs TO the header above it, so it sits at the
-           header's internal 16px rather than the 24px that separates one
-           section from the next. */
+        /* A tab strip belongs TO the header above it, so it sits 20 under it
+           rather than the section gap that separates one section from the next. */
         .ov-hero:has(+ .page-tabs) { margin-bottom: var(--sp-5); }
         /* Every screen's section tabs, not only Finance's: CRM, Production
-           Manager, Team and the Guide sat 24 under their header, Finance 16. */
+           Manager, Team and the Guide each sat at a different distance under
+           their header; every one is 20. */
         .ov-hero:has(+ .tabs) { margin-bottom: var(--sp-5); }
         .ov-hero:has(+ .seg-row) { margin-bottom: var(--sp-5); }
-        /* The Finance paragraph no longer holds a three-line box. It was meant
-           to land the strip at one y on all four pages, but Forecast's intro
-           runs to four lines, so it never did, and a two-line intro (Xero
-           sync) carried an empty line under it: 40px of header gap where
-           every other page had 16. */
-        /* The reference sets its page title at 30/400 on a 36px line box and
-           tracks it -0.75px, which is -0.025em at this size. Measured on its
-           h1 and on its 30px KPI figures alike, so the two largest things on a
-           page are set the same way. Untracked, this was the one 30px text in
-           the app that stood outside its own system: .stat .value directly
-           under it and .empty-chat h2 both carry -0.025em. */
+        /* The Finance paragraph does not hold a three-line box: Forecast's intro
+           runs to four lines and a two-line intro (Xero sync) would carry an empty
+           line under it, so each page's header is as tall as its own words. */
         /* The title: Bricolage 600 at 26/32, tracked -0.02em; Beta follows on
            its baseline, 8 apart. One short line sits 4 under it. A title can be
            data (a product's name, "X sector"), so it wraps, breaks a word longer
@@ -1430,9 +1418,9 @@
         @media (max-width: 640px) {
             .ov-wrap.wgrid > .stat[data-widget]:has(.stat-spark) { grid-column: 1 / -1; }
         }
-        /* A tab strip belongs to the header above it, so it keeps the
-           header's internal 16 there rather than the gap between two blocks,
-           as .ov-hero:has(+ .page-tabs) gives it in the flow. */
+        /* A tab strip belongs to the header above it, so it keeps the 20 under it
+           there rather than the gap between two blocks, as
+           .ov-hero:has(+ .page-tabs) gives it in the flow. */
         .ov-wrap.wgrid > .ov-hero + .page-tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm)); }
         .ov-wrap.wgrid > .ov-hero + .tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm)); }
         /* The header sits 32 above what follows it, as on a plain page: the grid
@@ -1536,11 +1524,11 @@
         /* No rule across the page. The reference separates sections with the
            gap between cards and nothing else. */
         .section-title::after { content: ""; flex: 1; }
-        /* A heading that stays on the page labels a group of cards, so it is a
-           step above the 16px card titles under it: 18, everywhere, not only
+        /* A heading that stays on the page is a section head: the head step, 15/20
+           at 600, the same as a card's title (the mix, spec 6), everywhere, not only
            where a renderer remembered to mark the group. A heading folded into
-           a card becomes that card's title instead. Ranks: page 30, section 18,
-           card 16, label 14. */
+           a card becomes that card's title instead. Ranks: page 26 (Bricolage),
+           section and card 15, label 13. */
         /* ::after is always the last flex item, so a control inside the heading has
            to be ordered past it to leave the hairline in between. The heading
            tracking would otherwise inherit and stretch the button labels. */
@@ -3034,9 +3022,6 @@
             border: 0; padding: 0; }
         .nav-item:is(.active, [aria-current="page"]) .beta-tag { color: var(--nav-text); }
         .ov-hero .beta-tag { margin-left: 0; color: var(--text-tertiary); }
-        /* In the top bar and on a Finance tab it follows the name with a gap:
-           margin-left:auto is 0 in inline flow, so it read 'CRMBeta'. */
-        #view-title .beta-tag { margin-left: var(--sp-2); color: var(--text-tertiary); }
         /* A release is a section: its title a heading, the date quiet beside
            it, the notes under it. The headline was 12px grey beside a bolder
            date, and every release ever sat open in one 30,000px card. */
@@ -3458,8 +3443,8 @@
             font-size: var(--text-body); color: var(--text-tertiary); }
         /* Idle and armed have to measure the same, or ticking one row drops the
            whole list and the row you just ticked slides out from under the
-           pointer. 44 (a row) is the armed height: a 32 button, 4 of padding
-           each side and the two borders, with room to spare. */
+           pointer. 44 (a row) is the armed height: a 32 button and 4 of padding
+           each side, with room to spare. The bar has no edge, only its tint. */
         .mail-bulkbar { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
             min-height: var(--row-h);
             padding: var(--sp-1) var(--sp-3); margin-bottom: var(--sp-2); border: 0;
@@ -3467,7 +3452,7 @@
         .mail-bulkbar .btn { min-height: var(--control-h); padding: 0 var(--sp-3); font-size: var(--text-body); }
         /* The 44 above only holds if everything in the bar is one height: the
            Assign select (only a lead sees it) is the 32 of the buttons beside
-           it, with their edge and weight. */
+           it, with their weight. */
         .mail-bulkbar .mail-presence-pick { height: var(--control-h); min-height: var(--control-h); box-sizing: border-box;
             border-radius: var(--radius-field); border-color: var(--border-default); font-weight: var(--weight-medium); }
         .mail-bulkbar.armed { background: var(--action-soft);
@@ -3678,7 +3663,6 @@
         .crm-bar-val { width: 90px; flex: none; font-weight: var(--weight-medium); }
         /* A group inside a CRM window has no box of its own (the mix, spec 3): a window is boxed as a whole. */
         .crm-focus { border: 0; border-radius: 0; padding: 0; margin: var(--sp-3) 0; }
-        .crm-focus.plain { border: 0; padding: 0; }
         .crm-hist-row { padding: var(--sp-2) 0; border-bottom: var(--bw-hairline) solid var(--border-default); font-size: var(--text-body); overflow-wrap: anywhere; }
         .crm-hist-row:last-child { border-bottom: 0; }
         .crm-hist-row.pinned { background: var(--surface-tertiary); border-radius: var(--radius-inset); padding: var(--sp-2); }
@@ -3789,17 +3773,12 @@
                line and the list came out 80px, 80px, 108px. min-width stays 0,
                so it can still shrink out of the way under real pressure. */
             .mfrom { min-width: 0; flex: 1 1 56px; }
-            /* The presence chip is built round a select and will not shrink,
-               so on a phone the widest one crossed the card's own right
-               border. Full width inside the card's gutters instead.
-               Full width also puts each card on its own flex LINE, which is
-               where the strip lost the one height it has at 1600: stretch
-               only equalises cards sharing a line. The card carrying the
-               select overflowed 298px by 4 and wrapped BOTH its name and its
-               load to a second line, so the stack came out 50 / 32 / 32. The
-               two strings ellipsise instead, the gutters come in to --sp-2 to
-               give them back most of what they lost, and the floor is the
-               same 38 the three of them measure on a desktop. */
+            /* The presence chip is built round a select and will not shrink, so on
+               a phone each person takes the full width as a 44 hairline row.
+               Full width puts each row on its own flex LINE, which is where the
+               strip kept one height: stretch only equalises cards sharing a line.
+               The two strings ellipsise rather than wrap, so every row measures
+               the same, and the select is a 40 target. */
             .mail-who { gap: 0; }
             .mail-who-card { flex: 1 1 100%; min-width: 0; min-height: var(--row-h); padding: 0; box-shadow: var(--rule-b-soft); }
             .mail-who-card .mail-presence-pick { height: var(--control-h-lg); min-height: var(--control-h-lg); }
@@ -4333,10 +4312,10 @@
         }
         /* ---------- dropdown menu, to the reference's measurements ----------
            The panel carries no border: its edge is the same 1px ring the cards
-           use, over a two-layer shadow. Items are 28px at the control radius,
+           use, over a two-layer shadow. Items are 32px at the control radius,
            padded 32px on the right so a tick has somewhere to sit. */
         /* WHAT FLOATS (the mix, spec 6): a menu, a panel and a popover share a
-           10 corner, the pop shadow and 4 inside (a panel 12, a popover 16). */
+           10 corner and the pop shadow; a menu has 4 inside, a panel and a popover 16. */
         .dmenu { position: fixed; z-index: 70; min-width: 128px; padding: var(--menu-pad);
             background: var(--surface-primary); border-radius: var(--radius-pop);
             box-shadow: var(--shadow-pop);
@@ -4499,11 +4478,11 @@
             .tab .beta-tag { display: none; } }
         /* align-self: a card is a column flexbox, and stretched across it the
            track ran from border to border with its choices bunched at one end. */
-        /* The track is a quiet grey well (the sunken step, which reads on the
-           off-white page and on a white card alike) with no edge of its own, and the chosen
-           choice sits in it on white with teal ink: one line, not a teal ring 2px
-           inside a hairline. Its corner is the control's, the choices' that less
-           the 2px inset, so the two curves run parallel. */
+        /* The track is a quiet grey well (the fill, which reads on the white sheet
+           and on a white card alike) with no edge of its own, and the chosen
+           choice sits in it on white with ink words and a teal-line ring (below).
+           Its corner is the control's, the choices' that less the 2px inset, so
+           the two curves run parallel. */
         .segmented { display: inline-flex; flex-wrap: wrap; align-items: center; align-self: flex-start; gap: var(--sp-0-5); max-width: 100%;
             padding: var(--sp-0-5); background: var(--surface-tertiary); border: 0;
             border-radius: var(--radius-control); }
@@ -4674,10 +4653,6 @@
         .chart-split { stroke: var(--border-emphasis); stroke-width: 1; stroke-dasharray: 3 3;
             vector-effect: non-scaling-stroke; }
 
-        /* The caveat under the KPI blocks. One quiet line, not a second
-           frame competing with the numbers it qualifies: the Bank of England
-           finding that carries over to a single series is that a range is
-           understood where a point estimate is simply believed. */
         /* The scenarios come from the cash flow workbook and are named
            "Algorithm 1..3" in it. Unlabelled beside a page that has just said
            nobody picks an algorithm, the strip reads as exactly the picker
@@ -4714,7 +4689,7 @@
            12 rather than collapsing into it. Stacked, the bar sits 12 under its head. */
         .fc-why { display: flex; flex-direction: column; }
         .fc-split-bar { display: flex; gap: var(--sp-0-5); height: var(--sp-2); max-width: var(--measure); }
-        @container fcpair (min-width: 1001px) { .fc-split-bar { margin-top: calc((var(--control-h) - var(--sp-2)) / 2); } }
+        @container fcpair (not (max-width: 1000px)) { .fc-split-bar { margin-top: calc((var(--control-h) - var(--sp-2)) / 2); } }
         .fc-split-bar > i { border-radius: var(--radius-full); }
         .fc-split-bar > .taken { width: var(--w); background: var(--c-taken); }
         .fc-split-bar > .still { flex: 1; background: var(--c-still); }
@@ -5004,8 +4979,7 @@
         .crr-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .crr-at { font-size: var(--text-xs); color: var(--text-tertiary); flex: none; }
         @media (max-width: 900px) {
-            /* The page gutter token: 24 on a tablet, 16 on a phone, as every
-               other screen and the top bar have it. */
+            /* The page gutter token, as every other screen and the top bar have it. */
             .chat-inner { padding-inline: var(--wrap-pad); }
             .composer-wrap { padding-inline: var(--wrap-pad); }
         }
@@ -24780,7 +24754,7 @@ Projected Image UK"></textarea>
                the caller back out to the Contacts tab mid-call. */
             const p = crmPerson(x.person_id), o = crmOrg(x.org_id);
             if (p || o) {
-                const cc = el('div', 'crm-focus plain');
+                const cc = el('div', 'crm-focus');
                 const nameRow = el('div', 'crm-cline');
                 nameRow.append(ico(I.users));
                 const pa = actionLink('miss-open', [p && p.name, o && o.name].filter(Boolean).join(' · '));
@@ -25450,7 +25424,7 @@ Projected Image UK"></textarea>
                 top.append(merge);
                 m.body.append(top);
                 /* Ways to reach them, all live links. */
-                const reach = el('div', 'crm-focus plain');
+                const reach = el('div', 'crm-focus');
                 let any = false;
                 (cc.phones || []).forEach((ph, i) => {
                     any = true;
