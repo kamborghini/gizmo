@@ -668,7 +668,7 @@
         .btn svg { width: var(--icon-md); height: var(--icon-md); }
         .btn .ic { color: var(--text-secondary); }
         /* A button that is not ink (disabled, danger) carries its own colour to its icon. */
-        .btn:is([disabled], :disabled, [aria-disabled="true"], .btn-danger) .ic { color: inherit; }
+        .btn:is([disabled], :disabled, [aria-disabled="true"], .btn-danger, .btn.ghost[disabled], .btn.ghost[aria-disabled="true"]) .ic { color: inherit; }
         .btn:hover { background: var(--surface-tertiary); }
         .btn:active { background: var(--press); }
         .btn[aria-expanded="true"] { background: var(--surface-tertiary); }
@@ -4076,12 +4076,19 @@
            opened by a .btn-sm filter chip; at 14 the label grew two steps
            between the button and its own list, so the control changed scale the
            moment it opened. The 28px item height is unaffected - it is set. */
-        .dmenu-item { display: flex; align-items: center; gap: var(--sp-1-5); width: 100%;
-            height: 28px; padding: var(--sp-1) var(--sp-7) var(--sp-1) var(--sp-1-5); border: 0; background: none;
-            border-radius: calc(var(--radius-card) - var(--sp-1)); font: inherit; font-size: var(--text-sm);
+        /* A menu row is a nav row (the mix, spec 6): 32 tall, a 6 corner, a 16
+           icon in ink-3 12 from its words, a count at its end; 32 clear on the
+           right for a tick, so a list of choices does not jump when one is made. */
+        .dmenu-item { display: flex; align-items: center; gap: var(--gap-row-icon); width: 100%;
+            min-height: var(--control-h); padding: 0 var(--sp-7) 0 var(--sp-2); border: 0; background: none;
+            border-radius: var(--radius-row); font: inherit; font-size: var(--text-body); line-height: var(--lh-control);
             color: var(--text-primary); text-align: left; cursor: pointer; white-space: nowrap; }
         .dmenu-item:hover { background: var(--surface-tertiary); }
-        .dmenu-item:active { background: var(--surface-sunken); }
+        .dmenu-item:active { background: var(--press); }
+        .dmenu-item .cnt { margin-left: auto; padding-left: var(--sp-2); }
+        .dmenu-link { color: var(--text-link); }
+        .dmenu-item.dmenu-link .ic { color: inherit; }
+        .dmenu-item.dmenu-link svg { width: var(--icon-sm); height: var(--icon-sm); stroke-width: var(--icon-stroke-s); }
         /* NOT grouped with hover: a grouped rule's outline:none outranks the
            global :focus-visible baseline on specificity, which left keyboard
            focus a 1.1:1 background tint nobody can see. Inset, so the ring is
@@ -4092,8 +4099,8 @@
         .chip:disabled { color: var(--text-disabled); cursor: not-allowed; }
         .dmenu-item svg { width: var(--icon-md); height: var(--icon-md); flex: none; }
         .dmenu-item .ic { color: var(--text-tertiary); }
-        .dmenu-sep { height: 1px; background: var(--border-default); margin: var(--sp-1) var(--sp-1-5); }
-        .dmenu-label { padding: var(--sp-1-5) var(--sp-1-5) var(--sp-0-5); font-size: var(--text-xs); color: var(--text-tertiary); }
+        .dmenu-sep { height: 1px; background: var(--border-default); margin: var(--sp-1) var(--sp-2); }
+        .dmenu-label { padding: var(--sp-2) var(--sp-2) var(--sp-1); font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
         .dmenu-tick { margin-left: auto; margin-right: calc(-1 * var(--sp-6)); color: var(--text-tertiary);
             display: inline-flex; }
         .dmenu-tick svg { width: var(--icon-sm); height: var(--icon-sm); }
@@ -5699,6 +5706,18 @@ Projected Image UK"></textarea>
                     }
                 });
             };
+            return b;
+        }
+        /* How it works (the mix, spec 6): one header button holding a screen's
+           method pages as a menu, the Guide's link last after a rule. items:
+           [{ icon, label, n, onClick }]; guide: { label, at: [section id, search] }. */
+        function howItWorks(items, guide) {
+            const b = el('button', 'btn');
+            b.type = 'button';
+            b.append(ico(I.helpCircle), document.createTextNode('How it works'));
+            b.setAttribute('aria-haspopup', 'menu'); b.setAttribute('aria-expanded', 'false');
+            b.onclick = () => dropMenu(b, items.concat(guide ? ['-', { label: guide.label, link: true,
+                onClick: () => openGuideAt(guide.at[0], guide.at[1] || '') }] : []));
             return b;
         }
         // static icon wiring
@@ -7328,7 +7347,8 @@ Projected Image UK"></textarea>
         /* ---------- one dropdown menu, for the whole app ----------
            Items are {label, icon, onClick, disabled, danger, checked}, the
            string '-' is a separator, and {label, heading:true} is a group
-           label. Opening one closes any other: two open menus is a state
+           label. An item may also carry n (a count at the row's end) and link
+           (a teal row with an arrow, for "... in the Guide"). Opening one closes any other: two open menus is a state
            nobody meant and nobody can get out of by clicking. */
         let dmenuOpen = null;
         function closeDMenu() {
@@ -7363,6 +7383,8 @@ Projected Image UK"></textarea>
                 else b.setAttribute('role', 'menuitem');
                 if (it.icon) b.append(ico(it.icon));
                 b.append(el('span', null, it.label));
+                if (it.n != null) b.append(el('span', 'cnt', String(it.n)));
+                if (it.link) { b.classList.add('dmenu-link'); b.append(ico(I.arrowRight)); }
                 /* The tick sits in the 32px the reference reserves on the right,
                    so a list of choices does not jump sideways when one is made. */
                 if (it.checked) { const t = el('span', 'dmenu-tick'); t.append(ico(I.check)); b.append(t); }
