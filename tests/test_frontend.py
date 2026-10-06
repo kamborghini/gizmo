@@ -10108,6 +10108,17 @@ def t_every_row_family_sits_on_the_sections_text_edge():
            "and it no longer switches off the lines above and below a table that the table rule draws (a table in a section was left unframed)")
 
 
+@test
+def t_a_tag_is_twenty_tall_in_caption_type():
+    """Spec 6 and 4.5: a tag is 20 tall with a 4 corner, caption type on its
+    one 16 line, 8 in, a tint and no border. Status is shown by colour and
+    shape (a dot, a tag, a bar), not a sentence."""
+    tags = CSS.split("ONE TAG.")[1].split("}")[0]
+    for prop in ("height: var(--tag-h)", "padding: 0 var(--sp-2)", "font-size: var(--text-xs)", "line-height: var(--lh-caption)",
+                 "font-weight: var(--weight-medium)", "border: 0", "border-radius: var(--radius-tag)"):
+        ok(prop in tags, "a tag: " + prop)
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
