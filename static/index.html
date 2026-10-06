@@ -523,7 +523,7 @@
         .convo-head { display: flex; align-items: center; justify-content: space-between; height: var(--control-h); padding: 0 var(--sp-2); margin: var(--sp-4) var(--sp-3) 0; }
         .convo-head span { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--nav-muted); }
         .icon-btn { border: 0; background: transparent; color: var(--text-tertiary); padding: var(--sp-1); border-radius: var(--radius-control);
-            min-width: var(--control-h-md); min-height: var(--control-h-md); display: grid; place-items: center; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+            min-width: var(--control-h); min-height: var(--control-h); display: grid; place-items: center; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
         .icon-btn:hover { background: var(--surface-tertiary); color: var(--text-primary); }
         .icon-btn:active { background: var(--surface-sunken); }
         /* Conversations' + on the column the group chevrons and the account dots share. */
@@ -643,17 +643,19 @@
             border-radius: 0; padding: var(--sp-1) var(--sp-2); }
         .dpanel-search input:focus { box-shadow: none; border-color: var(--border-default); }
         .dsearch-list { display: flex; flex-direction: column; max-height: 60vh; overflow-y: auto; }
-        .btn { border: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary); color: var(--text-primary); border-radius: var(--radius-control);
-            /* 5px, not 6: the 1px border counts toward the box, and 6+20+6+2
-               made every button 34 where the reference's is 32. */
-            padding: var(--control-pad-y) var(--sp-2-5); font-size: var(--text-sm); font-weight: var(--weight-medium); line-height: var(--lh-control); white-space: nowrap;
-            display: inline-flex; align-items: center; justify-content: center; gap: var(--control-gap);
+        /* THE BUTTON (the mix, spec 6): 32 tall, 12 in, a 6 corner, a line-ctl
+           hairline and a 1px lift; 13/20 at 500; a 16 icon in ink-2, 8 from its
+           word. The label is centred in the 32 by the flexbox, so a label that
+           wraps grows the button rather than spilling out of it. */
+        .btn { border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-primary); color: var(--text-primary); border-radius: var(--radius-control);
+            padding: 0 var(--sp-3); font-size: var(--text-body); font-weight: var(--weight-medium); line-height: var(--lh-control); white-space: nowrap;
+            display: inline-flex; align-items: center; justify-content: center; gap: var(--control-gap); box-shadow: var(--shadow-control);
             transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease); min-height: var(--control-h); }
-        /* An icon that leads a label sits 8px in, as the source's inline-start icon does. */
-        .btn:not(.btn-sm):has(> .ic:first-child) { padding-left: var(--sp-2); }
         .btn svg { width: var(--icon-md); height: var(--icon-md); }
+        .btn .ic { color: var(--text-secondary); }
         .btn:hover { background: var(--surface-tertiary); }
-        .btn:active { background: var(--surface-sunken); transform: translateY(var(--sp-px)); }
+        .btn:active { background: var(--press); }
+        .btn[aria-expanded="true"] { background: var(--surface-tertiary); }
         /* ---- Disabled. One recipe for a control (muted fill, disabled ink,
            not-allowed) and one for a field (muted fill, but the VALUE stays
            readable, because a locked address is still an address). Nothing
@@ -672,6 +674,7 @@
         .ic { display: inline-flex; align-items: center; vertical-align: middle; }
         .ic svg { display: block; }
         .btn-primary { background: var(--action-primary); border-color: var(--border-selected); color: var(--text-on-action); }
+        .btn-primary .ic { color: var(--text-on-action); }
         .btn-primary:hover { background: var(--action-hover); border-color: var(--action-hover); }
         .btn-primary:active { background: var(--action-active); border-color: var(--action-active); }
         .btn-primary[aria-disabled="true"], .btn-primary[disabled], .btn-primary:disabled { background: var(--surface-tertiary); border-color: var(--border-default); color: var(--text-disabled); }
@@ -859,7 +862,7 @@
             .ov-hero-act > .ov-updated { white-space: normal; text-align: right; }
         }
         /* An icon-only small button is the reference's icon-sm: a 28px square. */
-        .btn-sm.btn-icon { width: var(--control-h-md); padding: 0; justify-content: center; }
+        .btn-sm.btn-icon { width: var(--control-h); padding: 0; justify-content: center; }
         /* On a phone the badge, the gaps and this stamp left the heading and
            its sentence 138px of a 300px row - a four-line ribbon. The stamp
            takes its own line instead, and the text gets the width. */
@@ -1555,7 +1558,9 @@
         /* .psel's padding shorthand beat the select rule's room for the
            caret, so a .psel select drew its caret over its own words. */
         select.psel { cursor: pointer; padding-right: var(--chevron-room); } .pnum { width: 110px; }
-        .btn:is(.on, [aria-pressed="true"]) { background: var(--action-selected); border-color: var(--border-selected); color: var(--text-brand); font-weight: var(--weight-medium); }
+        /* A button that is on (a filter that is set) wears the chosen recipe:
+           the teal wash and edge, with ink words. */
+        .btn:is(.on, [aria-pressed="true"]) { background: var(--action-selected); border-color: var(--border-selected); color: var(--text-primary); font-weight: var(--weight-medium); }
         .btn.ghost:hover { background: var(--surface-tertiary); }
         .pfilters { display: none; flex-wrap: wrap; gap: var(--sp-3) var(--sp-3); padding: var(--sp-4) var(--sp-4); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); background: var(--surface-secondary); }
         .pfilters.show { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
@@ -1694,7 +1699,7 @@
         .setup-steps li > .setup-code { word-break: normal; overflow-wrap: anywhere; }
         /* A value standing in a row with its Copy button is as tall as the
            button; a value inside a sentence stays inline text. */
-        .act-row > .setup-code { display: inline-flex; align-items: center; min-height: var(--control-h-md); padding-inline: var(--sp-2-5); }
+        .act-row > .setup-code { display: inline-flex; align-items: center; min-height: var(--control-h); padding-inline: var(--sp-3); }
         /* One algorithm explained: a name, what it does, what it suits and how
            right it has been. A list of these is reference material, so it is
            quiet - separated by a hairline rather than boxed, because a stack of
@@ -1945,11 +1950,11 @@
         }
 
         .followups { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
-        .chip { border: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary); border-radius: var(--radius-control); padding: 0 var(--sp-2-5); font-size: var(--text-sm);
+        .chip { border: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary); border-radius: var(--radius-control); padding: 0 var(--sp-3); font-size: var(--text-body);
             font-weight: var(--weight-medium); color: var(--text-primary); display: inline-flex; align-items: center; gap: var(--control-gap); transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); cursor: pointer;
             /* A floor, not a height: on a phone a suggestion wraps to two lines,
                and a fixed 28px pill spilled them over its own border. */
-            min-height: var(--control-h-md); padding-block: var(--sp-1); text-align: start; }
+            min-height: var(--control-h); padding-block: var(--sp-1); text-align: start; }
         .chip:hover { background: var(--surface-tertiary); border-color: var(--border-default); color: var(--text-primary); }
         .chip:active { background: var(--surface-sunken); }
         /* A chip that is a toggle (the Forecast's compare set) shows it is on the
@@ -2003,7 +2008,8 @@
         .sk-spacer { flex: 1; }
         .sk-count { font-size: var(--text-xs); color: var(--text-tertiary); white-space: nowrap; font-variant-numeric: tabular-nums; }
         .sk-count.over { color: var(--error); }
-        .btn.ghost { background: transparent; }
+        .btn.ghost { background: transparent; border-color: transparent; box-shadow: none; }
+        .btn.ghost .ic { color: var(--text-tertiary); }
         .sk-head { display: flex; align-items: flex-start; gap: var(--sp-2); }
         .sk-title { font-size: var(--text-sm); font-weight: var(--weight-medium); flex: 1; min-width: 0; overflow-wrap: anywhere; line-height: var(--lh-control); margin: 0; padding-top: var(--sp-0-5); }
         .sk-acts { display: flex; align-items: center; gap: var(--sp-1); flex-shrink: 0; }
@@ -3192,21 +3198,17 @@
             font-size: var(--text-sm); color: var(--text-tertiary); }
         /* Idle and armed have to measure the same, or ticking one row drops the
            whole list and the row you just ticked slides out from under the
-           pointer. 44 is the armed height: a 28px button, 7px of padding each
-           side and the two borders. The buttons take .btn-sm, the scale the
-           card's own header and the row controls use, not the 32px default. */
+           pointer. 44 (a row) is the armed height: a 32 button, 4 of padding
+           each side and the two borders, with room to spare. */
         .mail-bulkbar { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
-            min-height: 44px;
-            padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-2); border: var(--bw-hairline) solid var(--border-default);
+            min-height: var(--row-h);
+            padding: var(--sp-1) var(--sp-3); margin-bottom: var(--sp-2); border: var(--bw-hairline) solid var(--border-default);
             border-radius: var(--radius-inset); background: var(--surface-tertiary); font-size: var(--text-xs); }
-        .mail-bulkbar .btn { min-height: var(--control-h-md); padding: 0 var(--sp-2-5); font-size: var(--text-xs); }
-        /* The 44 above only holds if everything in the bar is 28. The Assign
-           select is built from the base 32px class, so the armed bar came out
-           48 and ticking the first row dropped the list 4px - the row under
-           the pointer moved as it was clicked. Only a lead sees this select,
-           which is why the bar measured 44 idle and 44 armed for everyone
-           else. Same 28 / --radius-sm / --border-default / 500 as the buttons beside it. */
-        .mail-bulkbar .mail-presence-pick { height: var(--control-h-md); min-height: var(--control-h-md); box-sizing: border-box;
+        .mail-bulkbar .btn { min-height: var(--control-h); padding: 0 var(--sp-3); font-size: var(--text-body); }
+        /* The 44 above only holds if everything in the bar is one height: the
+           Assign select (only a lead sees it) is the 32 of the buttons beside
+           it, with their edge and weight. */
+        .mail-bulkbar .mail-presence-pick { height: var(--control-h); min-height: var(--control-h); box-sizing: border-box;
             border-radius: var(--radius-field); border-color: var(--border-default); font-weight: var(--weight-medium); }
         .mail-bulkbar.armed { border-color: var(--action-line); background: var(--action-soft);
             color: var(--text-brand); }
@@ -4006,8 +4008,10 @@
            one. Setting the token keeps the corner concentric for free. */
         /* The small button. The reference builds its card actions, its table
            filters and its pager from this one size, which is why they line up. */
-        .btn-sm { min-height: var(--control-h-md); padding: 0 var(--sp-2-5); font-size: var(--text-sm); gap: var(--control-gap); border-radius: var(--radius-control); }
-        .btn-sm svg { width: var(--icon-sm); height: var(--icon-sm); }
+        /* The mix has no 28 text button: btn-sm is the same 32 button, kept as
+           a name so its call sites need no change. */
+        .btn-sm { min-height: var(--control-h); padding: 0 var(--sp-3); font-size: var(--text-body); gap: var(--control-gap); border-radius: var(--radius-control); }
+        .btn-sm svg { width: var(--icon-md); height: var(--icon-md); }
         /* A field that sits beside small buttons takes their height, not the
            32px of a form field: 'Save' at 28 beside an input at 32 was on the
            Loans chasing row, the size editor and the reconciliation reason. */
@@ -4043,7 +4047,7 @@
         .tbl-steps { display: flex; align-items: center; gap: var(--sp-2); }
         /* Square, and at the base radius rather than the control radius: the
            reference's pager steps are 32px boxes, not small buttons. */
-        .tbl-step { width: var(--control-h-md); height: var(--control-h-md); min-height: var(--control-h-md); padding: 0; border-radius: var(--radius-control); }
+        .tbl-step { width: var(--control-h); height: var(--control-h); min-height: var(--control-h); padding: 0; border-radius: var(--radius-control); }
         .tbl-step svg { width: var(--icon-md); height: var(--icon-md); }
         @media (max-width: 900px) {
             .tbl-foot { flex-wrap: wrap; }

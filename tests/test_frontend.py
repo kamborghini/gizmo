@@ -1195,8 +1195,8 @@ def t_the_targets_a_finger_has_to_hit_are_big_enough():
 def t_icon_only_buttons_clear_the_minimum():
     """An icon button was the 16px glyph plus 4px of padding: 24px, on the line."""
     rule = re.search(r"\.icon-btn \{.*?\}", HTML, re.S).group(0)
-    ok("min-width: var(--control-h-md)" in rule and "min-height: var(--control-h-md)" in rule,
-       "icon buttons carry an explicit floor rather than inheriting one from their glyph")
+    ok("min-width: var(--control-h)" in rule and "min-height: var(--control-h)" in rule,
+       "icon buttons carry an explicit 32 floor rather than inheriting one from their glyph")
     ok(re.search(r"\.toast-x \{ min-width: var\(--control-h-sm\); min-height: var\(--control-h-sm\)", HTML),
        "so does the toast dismiss, which sits on its own over the page")
 
@@ -2865,9 +2865,9 @@ def t_the_table_toolbar_and_pager_match_the_reference():
     ok(re.search(r"--control-h-md:\s*28px", CSS), "the small control token is the reference's 28")
     ok("padding: var(--sp-1) var(--sp-2-5) var(--sp-1) var(--sp-7)" in srch, "with room for the icon on the left")
     btn = CSS.split(".btn-sm {")[1].split("}")[0]
-    ok("min-height: var(--control-h-md)" in btn and "padding: 0 var(--sp-2-5)" in btn, "small buttons are 28px tall")
+    ok("min-height: var(--control-h)" in btn and "padding: 0 var(--sp-3)" in btn, "toolbar buttons are the one 32 button")
     step = CSS.split(".tbl-step {")[1].split("}")[0]
-    ok("width: var(--control-h-md)" in step and "height: var(--control-h-md)" in step, "pager steps are the table's 28 square")
+    ok("width: var(--control-h)" in step and "height: var(--control-h)" in step, "pager steps are 32 squares")
     ok("border-radius: var(--radius-control)" in step, "a pill, like everything else pressed")
     # The pager must never claim to be paging through more than it is.
     fn = SCRIPT.split("function tablePager(o) {")[1][:1600]
@@ -3562,7 +3562,7 @@ def t_every_control_is_the_same_height_as_every_other():
     ok("input[type=date], input[type=time] { height: var(--control-h); }" in CSS,
        "and a native date control is pinned, since it carries its own height")
     sm = CSS.split(".btn-sm {")[1].split("}")[0]
-    ok("min-height: var(--control-h-md)" in sm and re.search(r"--control-h-md:\s*28px", CSS), "the small button stays 28")
+    ok("min-height: var(--control-h)" in sm, "and the small button is the same 32: the mix has no 28 text button")
 
 
 @test
@@ -9899,6 +9899,34 @@ def t_the_page_header_wraps_sits_right_in_the_grid_stays_off_paper_and_syncs():
     ok(menu in SCRIPT, "the boot code still sets the menu button's state")
     ok(boot in SCRIPT, "and sets Hide sidebar's too")
     ok(SCRIPT.index(boot) > SCRIPT.index(menu), "after the menu button's, so it reports what the menu button reports and a sidebar restored as folded is not called open")
+
+
+@test
+def t_a_button_is_the_mix_button():
+    """Spec 6: a button is 32 tall with a 6 corner, a line-ctl hairline and a
+    1px lift, 13/20 at 500, a 16 icon 8 from its word. Primary is the teal fill
+    with ink words. There is no 28 text button any more: btn-sm is the same 32,
+    so every control in a row lines up. Pressed is one step darker than hover
+    and nothing jumps; an open menu's button keeps the fill."""
+    b = CSS.split("\n        .btn {")[1].split("}")[0]
+    for prop in ("min-height: var(--control-h)", "padding: 0 var(--sp-3)", "border-radius: var(--radius-control)",
+                 "font-size: var(--text-body)", "font-weight: var(--weight-medium)", "gap: var(--control-gap)",
+                 "box-shadow: var(--shadow-control)", "solid var(--border-strong)"):
+        ok(prop in b, ".btn: " + prop)
+    act = CSS.split("\n        .btn:active {")[1].split("}")[0]
+    ok("background: var(--press)" in act and "translateY" not in act, "pressed is one step darker and does not move")
+    sm = CSS.split(".btn-sm {")[1].split("}")[0]
+    ok("min-height: var(--control-h)" in sm and "padding: 0 var(--sp-3)" in sm and "font-size: var(--text-body)" in sm,
+       "btn-sm is the same 32 button")
+    ok(".btn-sm.btn-icon { width: var(--control-h);" in CSS, "an icon button is a 32 square")
+    ok(re.search(r"\.icon-btn \{[^}]*min-width: var\(--control-h\); min-height: var\(--control-h\)", CSS),
+       "and so is a ghost icon button")
+    p = CSS.split(".btn-primary {")[1].split("}")[0]
+    ok("background: var(--action-primary)" in p and "color: var(--text-on-action)" in p, "primary is teal with ink words")
+    ok('.btn[aria-expanded="true"] { background: var(--surface-tertiary); }' in CSS, "an open menu's button keeps the fill")
+    ok(".btn:not(.btn-sm):has(> .ic:first-child)" not in CSS, "an icon does not pull a button's edge in")
+    ghost = CSS.split("\n        .btn.ghost {")[1].split("}")[0]
+    ok("border-color: transparent" in ghost and "box-shadow: none" in ghost, "a ghost button has no edge and no lift")
 
 
 if __name__ == "__main__":
