@@ -1756,7 +1756,7 @@ def t_the_charts_are_drawn_to_the_reference_spec():
     ok("stroke: var(--border-default)" in grid and "stroke-opacity: .5" in grid,
        "the grid is the border colour at half opacity, one step lighter than "
        "the card's own edge: " + grid)
-    ok(_token("border-default") == "#e5e5e5", "and that token still resolves to #e5e5e5")
+    ok(_token("border-default").lower() == "#e6e7ea", "and that token resolves to the ramp's line, #E6E7EA")
     ok("dasharray" not in grid, "and solid, not dashed")
     line = re.search(r"\.chart-line \{[^}]*\}", css).group(0)
     # The weight is a token now, so check the token resolves to the reference
@@ -1769,7 +1769,7 @@ def t_the_charts_are_drawn_to_the_reference_spec():
     # off the reference, which was the only string in the app painted from a
     # hex instead of a token and sat three units off --text-tertiary.
     ok("fill: var(--text-tertiary)" in axis and "#" not in axis, "dates are muted grey from the token: " + axis)
-    ok(_token("text-tertiary") == "#696969", "and that token still resolves to a grey (#696969)")
+    ok(_token("text-tertiary").lower() == "#5f6368", "and that token resolves to ink-3, #5F6368")
     ok(".axis-y text" in axis and "var(--text-xs)" in axis,
        "and the y numbers are painted by the same 12px rule: " + axis)
     # The frame draws the rules from the axis to the card edge and labels both axes.
@@ -3189,8 +3189,8 @@ def t_every_chart_line_comes_off_the_ramp():
        and "].map(tokenValue)" in SCRIPT.split("const CH = [")[1][:120],
        "the ramp is read from the tokens, not carried as hex")
     # The brand's order (2026-10-05): teal, dark teal, blue, grey, amber.
-    # The grey is the 500: the 400 was 2.6:1 on a card, under the 3:1 a line needs.
-    for i, hexv in enumerate(("#0F9097", "#08484C", "#334FB4", "#737373", "#b45309"), 1):
+    # The grey is ink-3, the ramp's lightest text grey: a line needs 3:1.
+    for i, hexv in enumerate(("#0F9097", "#08484C", "#334FB4", "#5F6368", "#b45309"), 1):
         ok(_token("chart-%d" % i).lower() == hexv.lower(), "--chart-%d still resolves to %s" % (i, hexv))
     # Every series names a ramp slot.
     for m in _re.finditer(r"color: (CH\[\d\]|[A-Za-z_$][\w.$]*)", SCRIPT):
@@ -9344,20 +9344,21 @@ def t_two_choosers_and_nothing_else():
 def t_reactor_wears_projected_images_brand_from_one_place():
     """The brand (projectedimage.com's own theme settings, 2026-10-05) is set
     once, at the root, and every screen reads it."""
-    for tok, v in (("teal-500", "#13B7C0"), ("ink", "#121212"), ("off-white", "#F7F7F7"), ("brand-blue", "#334FB4")):
+    for tok, v in (("teal-500", "#13B7C0"), ("ink", "#121212"), ("brand-blue", "#334FB4")):
         ok(_token_raw(tok).lower() == v.lower(), "--%s is the brand's %s" % (tok, v))
     for tok, ref in (("action-primary", "var(--teal-500)"), ("text-on-action", "var(--ink)"), ("text-brand", "var(--teal-700)"),
-                     ("surface-page", "var(--off-white)"), ("radius-control", "var(--radius-xs)")):
+                     ("surface-page", "var(--white)"), ("radius-control", "var(--radius-xs)")):
         ok(_token_raw(tok) == ref, "--%s reads %s" % (tok, ref))
     ok(_contrast(_token("teal-500"), "#ffffff") < 3, "the bright teal is too faint for text, which is why it is a fill")
     ok(not re.search(r"(?<![-\w])color:\s*var\(--action-primary\)", CSS), "so nothing writes text in it")
-    ok("family=Inter:wght@400;500;600;700" in HTML and "family=Geist" not in HTML, "the interface face is Inter")
+    ok("family=Inter:opsz,wght@14..32,400..700" in HTML and "family=Geist" not in HTML,
+       "the interface face is Inter, with the optical sizes the figures were measured in")
     ok(CSS.count("@font-face { font-family: 'Bricolage Grotesque'") == 1, "the heading face is defined once")
     ok(":is(.brand-name, .ov-hero h2, .ds-type-page, .section-title, .card-title, .chart-head .ct, .run-gate h2, .empty-chat h2, .modal-head h3, .auth-card h2) {"
        in CSS and "font-family: var(--font-display)" in CSS.split(".auth-card h2) {")[1][:80], "and every title is in it, chart titles too, from one list")
     ok(CSS.count("font-family: var(--font-display)") == 1, "nowhere else sets a title face")
     ok('<img class="brand-mark" src="/brand/logo.svg" alt="Projected Image"' in HTML, "the wordmark heads the sidebar")
-    ok("background: var(--surface-page)" in CSS.split("        body {")[1].split("}")[0], "on the brand's off-white page")
+    ok("background: var(--surface-page)" in CSS.split("        body {")[1].split("}")[0], "on the white page")
 
 
 @test
@@ -9632,6 +9633,36 @@ def t_the_printed_sheets_do_not_change():
     eq(h(py[a:b]), "61376908bdf445b7", "the server's print document is unchanged")
     i = py.index("_LABEL_LOGO_SVG = ")
     eq(h(py[i:py.index("\n", i)]), "5cda691da0ce3b1e", "and so is the logo it prints")
+
+
+@test
+def t_the_mix_greys_are_one_ramp():
+    """The mix (spec 2026-10-06, 4.1): one grey ramp, every grey on screen is
+    one of its steps, and the semantic tier reads them. Outside the token block
+    no rule writes a colour of its own."""
+    for tok, v in (("ink", "#121212"), ("ink-2", "#3C4043"), ("ink-3", "#5F6368"), ("ink-4", "#8A9096"),
+                   ("line-ctl", "#DADCE0"), ("line", "#E6E7EA"), ("line-soft", "#EEEFF1"), ("fill", "#F3F4F5"),
+                   ("white", "#ffffff"), ("teal-500", "#13B7C0"), ("teal-600", "#11A6AF"), ("teal-650", "#0F9097"),
+                   ("teal-700", "#0B6B71"), ("teal-900", "#08484C"), ("teal-50", "#F1FBFB"), ("teal-200", "#B8E9EC"),
+                   ("brand-blue", "#334FB4"), ("green-700", "#15803D"), ("green-50", "#F0FDF4"),
+                   ("amber-700", "#B45309"), ("amber-50", "#FFFBEB"), ("red-700", "#B91C1C"), ("red-50", "#FEF2F2")):
+        eq(_token_raw(tok).lower(), v.lower(), "--" + tok)
+    for tok, ref in (("text-secondary", "var(--ink-2)"), ("text-tertiary", "var(--ink-3)"),
+                     ("text-disabled", "var(--ink-4)"), ("surface-page", "var(--white)"),
+                     ("surface-secondary", "var(--fill)"), ("surface-tertiary", "var(--fill)"),
+                     ("surface-sunken", "var(--line)"), ("border-default", "var(--line)"),
+                     ("border-strong", "var(--line-ctl)"), ("border-emphasis", "var(--ink-4)"),
+                     ("action-soft", "var(--fill)"), ("action-line", "var(--line)")):
+        eq(_token_raw(tok), ref, "--" + tok)
+    ok(not re.search(r"--neutral-\d+\s*:", CSS) and "--off-white" not in CSS,
+       "the old neutral scale and the off-white page are gone")
+    for ground in ("white", "fill", "line"):
+        ok(_contrast(_token("ink-3"), _token(ground)) >= 4.5, "ink-3, the lightest text, reads on --" + ground)
+    rest = re.sub(r"/\*.*?\*/", "", CSS[CSS.index("\n        }", CSS.index(":root {")):], flags=re.S)
+    ok(not re.search(r"(?<![\w-])#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(", rest), "no rule outside the block writes a colour")
+    enc = set(m.lower() for m in re.findall(r"%23([0-9a-fA-F]{6})", rest))
+    ok(enc <= {"5f6368", "ffffff"}, "a drawn glyph's colour is a ramp step too: %s" % sorted(enc))
+    ok("const MIX_TOKENS = [" in SCRIPT, "the Design section's list of the mix's tokens exists")
 
 
 if __name__ == "__main__":

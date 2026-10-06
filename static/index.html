@@ -8,7 +8,7 @@
     <title>Reactor</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet" />
     <style>
         /* ------------------------------------------------------------------
            Design tokens. One scale per dimension, and every component reads
@@ -16,18 +16,14 @@
            paddings and 15 radii, which is what made it feel like a set of
            separate screens rather than one product.
 
-           Light, because the app is embedded inside the Shopify admin and a
-           dark panel inside a light admin reads as a foreign object.
-
-           The look is Projected Image's own (2026-10-05, Cameron: "uniformity
-           is key", "one source of truth"): the brand's teal, ink and off-white,
-           Bricolage Grotesque for titles and Inter for everything else, 8px
-           cards and no shadows on what sits on the page, taken from
-           projectedimage.com's own theme settings; then the polish pass
-           (Cameron: "Do not use pill-shaped UI unnecessarily"): 6px controls,
-           4px tags, one control height per row, one text size for controls,
-           one reading measure. This block is the only place any of it is
-           defined, and the Guide's Design section draws it.
+           The look is "the mix" (docs/superpowers/specs/2026-10-06-reactor-
+           mix-design.md; Cameron, 2026-10-05: "i like the mix", "go with the
+           dark sidebar"): one white sheet in an ink frame, one grey ramp,
+           Projected Image's teal for what is chosen and the one primary
+           action, Inter in five steps with Bricolage Grotesque for the
+           wordmark and page titles only, figures first and words on request.
+           This block is the only place any of it is defined, and the Guide's
+           Design section draws it.
            ------------------------------------------------------------------ */
         :root {
             /* ==================================================================
@@ -44,28 +40,27 @@
                ================================================================== */
 
             /* ---- Tier 1: primitives. Projected Image's brand (teal #13B7C0,
-               ink #121212, charcoal #2F2F2F, off-white #F7F7F7, blue #334FB4,
-               from projectedimage.com) on the shadcn/ui "neutral" scale and the
-               Tailwind status families. The bright teal is 2.45:1 on white, too
-               faint for text: it is a FILL with ink on it (7.64:1), and text in
-               teal is --teal-700 (6.26:1). Two custom neutral steps are marked. ---- */
+               ink #121212, blue #334FB4, from projectedimage.com), one grey
+               ramp (the mix, 4.1) and the Tailwind status families. The bright
+               teal is 2.45:1 on white, too faint for text: it is a FILL with ink
+               on it (7.64:1), and text in teal is --teal-700 (6.26:1). ---- */
             --white: #ffffff; --black: #000000;
-            --ink: #121212; --off-white: #F7F7F7; --brand-blue: #334FB4;
-            --teal-50: #F1FBFB;    /* 6% teal on white: a selected row or nav item */
-            --teal-200: #B8E9EC;   /* 30%: the focus glow */
+            /* One grey ramp: ink for words, three lighter inks, three rules and
+               one fill. ink-3 is the lightest text there is (6.05:1 on white,
+               4.89:1 on --line); ink-4 (3.23:1) is a mark, never words. */
+            --ink: #121212; --ink-2: #3C4043; --ink-3: #5F6368; --ink-4: #8A9096;
+            --line-ctl: #DADCE0;   /* control borders, the chart axis */
+            --line: #E6E7EA;       /* list frames, header rules */
+            --line-soft: #EEEFF1;  /* row dividers, the chart grid */
+            --fill: #F3F4F5;       /* wells, counters, open and hover states */
+            --brand-blue: #334FB4;
+            --teal-50: #F1FBFB;    /* the teal wash: the open row */
+            --teal-200: #B8E9EC;   /* the teal glow: a likely range drawn as a bar */
             --teal-500: #13B7C0;   /* the brand teal: a fill, never text on white */
             --teal-600: #11A6AF;   /* hover; ink on it 6.33:1 */
             --teal-650: #0F9097;   /* pressed, and the chart's lead line (3.85:1 on white); ink on it 4.87:1 */
-            --teal-700: #0B6B71;   /* teal text and links, the focus outline: 6.26:1 on white */
-            --teal-900: #08484C;   /* the brand's dark teal */
-            --neutral-50: #fafafa; --neutral-100: #f5f5f5;
-            --neutral-150: #ebebeb;   /* custom: a third fill step that still reads as one */
-            --neutral-200: #e5e5e5; --neutral-300: #d4d4d4; --neutral-400: #a1a1a1;
-            --neutral-500: #737373;
-            --neutral-550: #696969;   /* custom: the reference's #737373 is 4.35:1 on --neutral-100.
-                                         This clears 4.5:1 on every ground a quiet label sits on;
-                                         the binding one is --neutral-150 at 4.61. */
-            --neutral-600: #525252; --neutral-900: #171717; --neutral-950: #0a0a0a;
+            --teal-700: #0B6B71;   /* teal text and links: 6.26:1 on white */
+            --teal-900: #08484C;   /* the brand's dark teal: money already taken */
             --red-50: #fef2f2; --red-300: #fca5a5; --red-500: #ef4444;
             --red-700: #b91c1c; --red-900: #7f1d1d;
             --orange-700: #c2410c;
@@ -81,25 +76,24 @@
 
             /* ---- Tier 2: semantic. What a component reads. ---- */
             /* Text: primary, secondary, tertiary (every quiet label), disabled. */
-            --text-primary: var(--ink); --text-secondary: var(--neutral-600);
-            --text-tertiary: var(--neutral-550); --text-disabled: var(--neutral-400);
+            --text-primary: var(--ink); --text-secondary: var(--ink-2);
+            --text-tertiary: var(--ink-3); --text-disabled: var(--ink-4);
             --text-on-action: var(--ink); --text-link: var(--teal-700); --text-brand: var(--teal-700);
             --text-on-status: var(--white);   /* words and ticks on a status fill: ink on red-700 is 2.9:1, white 6.5:1 */
-            /* Surfaces. Cards are white on the brand's off-white page, and
-               keep their hairline: the brand draws no shadow under anything
-               that sits on the page. The sidebar and top bar are white, like
-               the website's header. */
-            --surface-page: var(--off-white);
-            --surface-primary: var(--white); --surface-secondary: var(--neutral-50);
-            --surface-tertiary: var(--neutral-100); --surface-sunken: var(--neutral-150);
-            --border-default: var(--neutral-200); --border-strong: var(--neutral-300);
-            --border-emphasis: var(--neutral-400);
+            /* Surfaces. The page is one white sheet; a well, a counter, a hover
+               is the one fill; what is pressed on a fill is a line. Sunken text
+               sits on --line, so it is never --line-ctl (ink-3 is 4.41 there). */
+            --surface-page: var(--white);
+            --surface-primary: var(--white); --surface-secondary: var(--fill);
+            --surface-tertiary: var(--fill); --surface-sunken: var(--line);
+            --border-default: var(--line); --border-strong: var(--line-ctl);
+            --border-emphasis: var(--ink-4);
             /* Action. Primary is the brand teal with ink on it, as on the
                website's buttons; hover and pressed step deeper while ink stays
                legible (6.33:1 and 4.87:1). Selected things carry a teal wash. */
             --action-primary: var(--teal-500); --action-hover: var(--teal-600);
             --action-active: var(--teal-650);
-            --action-soft: var(--neutral-100); --action-line: var(--neutral-200);
+            --action-soft: var(--fill); --action-line: var(--line);
             --action-selected: var(--teal-50);
             /* A selected border, a ring, a checkbox and the small marks (an unread
                dot, a progress bar, an active tab's underline, a switch that is on)
@@ -125,13 +119,13 @@
                white, which is exactly what the eight hand-picked tints were. */
             /* Charts, in the brand's order: teal, dark teal, blue, grey, amber. */
             --chart-1: var(--teal-650); --chart-2: var(--teal-900); --chart-3: var(--brand-blue);
-            --chart-4: var(--neutral-500);   /* 4.7:1 on a card; the 400 grey was 2.6:1, under the 3:1 a line needs */ --chart-5: var(--amber-700);
+            --chart-4: var(--ink-3);   /* the ramp's lightest text grey, 6.05:1: a comparison line reads at 3:1 and more */ --chart-5: var(--amber-700);
             --ageing-1: var(--red-300); --ageing-2: var(--red-500);
             --ageing-3: var(--red-700); --ageing-4: var(--red-900);
             --owner-red: var(--red-700); --owner-orange: var(--orange-700); --owner-yellow: var(--amber-700);
             --owner-green: var(--green-700); --owner-blue: var(--blue-700); --owner-purple: var(--purple-700);
             --owner-pink: var(--pink-700); --owner-brown: var(--amber-900);
-            --owner-gray: var(--neutral-500); --owner-dark-gray: var(--neutral-600);
+            --owner-gray: var(--ink-3); --owner-dark-gray: var(--ink-2);
             --owner-red-bg: color-mix(in srgb, var(--owner-red) 10%, var(--white));
             --owner-orange-bg: color-mix(in srgb, var(--owner-orange) 10%, var(--white));
             --owner-yellow-bg: color-mix(in srgb, var(--owner-yellow) 10%, var(--white));
@@ -143,7 +137,7 @@
             /* Focus and overlays. */
             --focus-ring: 0 0 0 3px var(--teal-200);
             --focus-outline: var(--bw-strong) solid var(--teal-700);
-            --overlay-scrim: color-mix(in srgb, var(--neutral-900) 32%, transparent);
+            --overlay-scrim: color-mix(in srgb, var(--ink) 32%, transparent);
             --overlay-modal: color-mix(in srgb, var(--black) 10%, transparent);
             /* Elevation. A card is a hairline plus shadow-sm; only things that
                genuinely float get more. Rings are inset hairlines for things
@@ -151,7 +145,7 @@
             --shadow-sm: 0 0 0 0 transparent;   /* the brand puts no shadow under what sits on the page. Not
                `none`: that is only valid alone, so `var(--shadow-sm), var(--shadow-lg)` became invalid
                and the sign-in card lost the float it is meant to keep. */
-            --shadow-md: 0 0 0 1px color-mix(in srgb, var(--neutral-950) 10%, transparent),
+            --shadow-md: 0 0 0 1px color-mix(in srgb, var(--ink) 10%, transparent),
                          0 4px 6px -1px color-mix(in srgb, var(--black) 10%, transparent),
                          0 2px 4px -2px color-mix(in srgb, var(--black) 10%, transparent);
             --shadow-lg: 0 10px 15px -3px color-mix(in srgb, var(--black) 10%, transparent),
@@ -1717,7 +1711,7 @@
            field in the same row. Pinned. */
         input[type=date], input[type=time] { height: var(--control-h); }
         select { appearance: none; -webkit-appearance: none; padding-right: var(--chevron-room);
-            background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23616161' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+            background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235F6368' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
             background-repeat: no-repeat; background-position: right 9px center; }
         details.sect { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-card); background: var(--surface-primary); margin-bottom: var(--sp-2); overflow: hidden; box-shadow: var(--shadow-sm); }
         /* A group of drawers is one card with divided rows: nine small cards
@@ -22080,6 +22074,13 @@ Projected Image UK"></textarea>
                 ['Needs a look', '--warning', 'Due soon, running low', null],
                 ['Wrong', '--error', 'Failed, overdue, refused', null]]],
             ['Charts, in the order lines are drawn', [1, 2, 3, 4, 5].map(n => ['Series ' + n, '--chart-' + n, null, null])],
+        ];
+        /* The mix's tokens by role (spec 2026-10-06, section 4), for the Design
+           section to draw. Each group is a row of samples; each is read from the
+           stylesheet as the browser has it, never copied here. Later parts add
+           their groups below. */
+        const MIX_TOKENS = [
+            ['Greys', ['--ink', '--ink-2', '--ink-3', '--ink-4', '--line-ctl', '--line', '--line-soft', '--fill', '--white']],
         ];
         /* A token as the browser resolves it, as [r, g, b]. */
         function dsColour(token) {

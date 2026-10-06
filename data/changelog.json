@@ -1,73 +1,12 @@
 {
  "releases": [
   {
-   "date": "2026-10-05",
-   "title": "Reactor in Projected Image's colours",
+   "date": "2026-10-06",
+   "title": "Reactor's new look",
    "items": [
     {
      "kind": "changed",
-     "text": "Reactor now wears Projected Image's own look: the website's teal for buttons and anything chosen, ink text on an off-white page, white cards with no shadow under them, and buttons, fields and choices with one small rounded corner. Titles are set in the website's heading typeface and everything else in Inter, with figures that line up in columns."
-    },
-    {
-     "kind": "changed",
-     "text": "The Projected Image logo heads the sidebar beside Reactor. Pressing it takes you to the Overview."
-    },
-    {
-     "kind": "changed",
-     "text": "No more rounded capsules: buttons, fields, choices and chips share one small corner, and labels such as Beta, a status or a count share another, smaller one. Only a switch, a progress bar and a dot stay round."
-    },
-    {
-     "kind": "changed",
-     "text": "One look for each thing everywhere: one text size for every button and field, one gap between an icon and its words, one way of showing what is chosen, one way of showing a link, and one style for every warning or note."
-    },
-    {
-     "kind": "changed",
-     "text": "Fewer boxes. Tables inside a card no longer draw a second frame, a card's empty list is a quiet first line rather than a floating box, warnings span their card, and Forecast's drawers are two cards of rows instead of nine small cards."
-    },
-    {
-     "kind": "changed",
-     "text": "Clearer ranks: a heading over a group of cards is a step larger than the card titles under it, chart titles match card titles, and long descriptions break at one comfortable line length everywhere."
-    },
-    {
-     "kind": "changed",
-     "text": "On a phone, a set of four or more choices wraps into even rows rather than hiding its last one off the edge. A card's header gives its buttons more room on wider screens, so they stay on one line. Forecast's Cash in range is a short list to pick from rather than seven buttons, and a table inside a card runs to the card's edges like a list."
-    },
-    {
-     "kind": "changed",
-     "text": "Every row of tabs and every set of choices is now drawn the same way on every screen. Tabs, underlined in teal, move between the sections of a screen; a grey track, with the chosen one on white in teal, chooses within a card. There were five different kinds before."
-    },
-    {
-     "kind": "changed",
-     "text": "Cards, figures, tables and windows share one corner, and a box inside a card sits a step tighter than the card around it, instead of rounder."
-    },
-    {
-     "kind": "changed",
-     "text": "Every screen is spaced the same way. A page's tabs sit just under its heading, blocks on a page are one step apart, cards inside a card are another, and the controls in a toolbar are all one height, so nothing sits proud of the control beside it."
-    },
-    {
-     "kind": "changed",
-     "text": "Figures look the same on every page, with the same gap between the cards at every screen size, and every figure sits the same distance under its label so a row of them lines up."
-    },
-    {
-     "kind": "fixed",
-     "tab": "crm",
-     "text": "The CRM pipeline shows all five stages on a laptop screen. The fifth used to sit past the edge of the board, with nothing to say it was there."
-    },
-    {
-     "kind": "fixed",
-     "text": "On a phone or tablet the closed menu no longer casts a shadow over the left edge of every page, and a row of tabs that scrolls keeps the one you are on in view."
-    },
-    {
-     "kind": "changed",
-     "text": "The Guide's heading stays put as you move between its sections, and Print the guide sits beside its search."
-    },
-    {
-     "kind": "fixed",
-     "text": "The grey line on charts is darker. It was too faint to pick out against a card."
-    },
-    {
-     "kind": "added",
-     "text": "Admins have a new Design section in the Guide: every colour and typeface in Reactor and the shared parts its screens are built from, drawn by the same code as the screens, with how readable each colour is. Every screen takes its look from the one place this shows, so they stay alike."
+     "text": "Reactor has a new look: one white page in a dark frame, one set of greys, and Projected Image's teal for what is chosen and for the one main button on each screen."
     }
    ]
   },
