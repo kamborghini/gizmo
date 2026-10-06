@@ -4533,11 +4533,25 @@
            "Algorithm 1..3" in it. Unlabelled beside a page that has just said
            nobody picks an algorithm, the strip reads as exactly the picker
            that was removed. */
-        /* Ordered past the heading's spacer WITH its control. At order 0 it
-           stayed beside the heading, where it read as a subtitle, while the
-           strip it names sat the width of the page away. */
-        .fc-seg-lbl { order: 1; font-size: var(--text-body); color: var(--text-tertiary);
-            font-weight: var(--weight-regular); }
+        /* "Plan" names the chooser after it, at the tab row's right (the mix). */
+        .fc-seg-lbl { font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-tertiary);
+            font-weight: var(--weight-medium); }
+        /* Once the Finance row wraps (1100 and under) the strip keeps its line and
+           its rule, and the Plan chooser takes the line under it with its label
+           beside it: at the right on a tablet, across the width on a phone, as
+           the mockup has it. The row's rule is drawn at the strip's foot (it
+           would be under both lines otherwise). */
+        @media (max-width: 1100px) {
+            .page-tabs:has(> .page-tabs-end > .fc-seg-lbl) { box-shadow: none; row-gap: var(--sp-4);
+                background: linear-gradient(var(--border-default), var(--border-default)) 0 calc(var(--row-h) - var(--bw-hairline)) / 100% var(--bw-hairline) no-repeat; }
+            .page-tabs-end:has(> .fc-seg-lbl) { order: 0; flex-wrap: nowrap; justify-content: flex-end; }
+        }
+        @media (max-width: 640px) {
+            .page-tabs-end:has(> .fc-seg-lbl) { justify-content: flex-start; }
+            .page-tabs-end > .fc-seg-lbl { font-size: var(--text-sm); }
+            .page-tabs-end > .fc-seg-lbl + .segmented { flex: 1 1 auto; }
+            .ov-wrap.wgrid > .page-tabs:has(> .page-tabs-end > .fc-seg-lbl) { margin-bottom: calc(var(--sp-4) - var(--page-rhythm)); }
+        }
         .fc-conf { margin: var(--sp-3) 0 0; font-size: var(--text-body); color: var(--text-secondary); }
         .fc-conf b { font-weight: var(--weight-medium); color: var(--text-primary); }
 
@@ -5819,6 +5833,9 @@ Projected Image UK"></textarea>
             arrowRight: SV('<path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path>'),
             arrowDownRight: SV('<path d="m7 7 10 10"></path><path d="M17 7v10H7"></path>'),
             wallet: SV('<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"></path><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"></path>'),
+            compass: SV('<circle cx="12" cy="12" r="10"></circle><path d="m16.24 7.76-2.12 6.36-6.36 2.12 2.12-6.36z"></path>'),
+            target: SV('<circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle>'),
+            shield: SV('<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path><path d="m9 12 2 2 4-4"></path>'),
             card: SV('<rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line>'),
             logOut: SV('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line>'),
             logIn: SV('<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line>'),
@@ -6132,6 +6149,7 @@ Projected Image UK"></textarea>
         function firstPaint(view) { if (_viewPainted[view]) return false; _viewPainted[view] = true; return true; }
         const RANGE_OPTS = [{ label: '3M', value: 3 }, { label: '6M', value: 6 }, { label: '12M', value: 12 }, { label: '24M', value: 24 }];
         const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
         const monthLabel = (ym) => { const m = /^(\d{4})-(\d{2})$/.exec(ym || ''); return m ? (MONTH_ABBR[+m[2] - 1] + (m[2] === '01' ? " '" + m[1].slice(2) : '')) : (ym || ''); };
         const readConvos = () => { try { const v = JSON.parse(localStorage.getItem(LS) || '[]'); return Array.isArray(v) ? v.filter(c => c && c.id && Array.isArray(c.turns)) : []; } catch (e) { return []; } };
         convos = readConvos().filter(c => c.turns.length);
@@ -15427,6 +15445,7 @@ Projected Image UK"></textarea>
         const fcMoney = (v) => (v == null || isNaN(v)) ? 'n/a' : money(v, 'GBP', 0);
         const fcPct = (v) => (v == null || isNaN(v)) ? 'n/a' : ((v > 0 ? '+' : '') + (v * 100).toFixed(1) + '%');
         const fcMonth = (m) => m ? (MONTH_ABBR[(+m.slice(5, 7)) - 1] + ' ' + m.slice(0, 4)) : '';
+        const fcMonthName = (m) => m ? MONTH_NAMES[(+m.slice(5, 7)) - 1] : '';
         const fcDay = (iso) => { const d = new Date(iso); return d.getDate() + ' ' + MONTH_ABBR[d.getMonth()]; };
         /* Sentence case, like every other chip in the app: the run's words
            ('in use', 'below buffer') arrive lower case. */
@@ -15462,7 +15481,7 @@ Projected Image UK"></textarea>
             tbl.append(tb); wrap.append(tbl); return wrap;
         }
         function forecastUploadButton() {
-            const b = el('button', 'btn btn-sm', 'Upload cash flow workbook'); b.prepend(ico(I.upload));
+            const b = el('button', 'btn', 'Upload workbook'); b.prepend(ico(I.upload));
             const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.xlsx'; inp.style.display = 'none';
             inp.onchange = async () => {
                 const f = inp.files && inp.files[0]; if (!f) return;
@@ -16198,6 +16217,59 @@ Projected Image UK"></textarea>
             return box;
         }
 
+        /* A method page in a window: wide, for the tables some of them hold. */
+        function fcPage(title, build) { const m = sheetModal(title); m.modal.classList.add('wide'); m.body.append(build()); return m; }
+        /* How much to trust it: prose when the plain models are running, the
+           M5 backtest table when that build is. */
+        function fcTrust(latest) {
+            const bt = latest.metrics || [];
+            const bc = el('div');
+            if (!bt.length) {
+                bc.append(el('p', 'card-sub', 'Each source was fitted to earlier months and marked against '
+                    + 'what actually happened, three times over. Typical error is how far out it usually was; '
+                    + 'bias is whether it leaned high or low every month, which matters more, because a model '
+                    + 'that leans high quietly turns a plan green. The leading model\u2019s own error is the '
+                    + 'band on the chart, so the forecast never claims to be more certain than it has earned.'));
+                if (latest.basis) bc.append(el('p', 'card-sub', 'Figures are ' + latest.basis + '.'));
+                return bc;
+            }
+            bc.append(el('p', 'card-sub', 'Five backtests of 28 days each, ending at the run date. WRMSSE is the M5 competition score: under 1 beats a naive forecast scaled to each series, and lower is better. Bias is how far the total ran hot or cold.'));
+            const levels = ['total', 'category', 'segment', 'product', 'variant', 'bottom'];
+            bc.append(fcTable(['Level', 'Blend', 'Seasonal baseline', 'Bias'],
+                levels.map(l => { const b = bt.find(m => (m.model === 'blend+mint' || m.model === 'blend') && m.level === l); const s = bt.find(m => m.model === 'seasonal_level' && m.level === l);
+                    return [l === 'bottom' ? 'variant x segment' : l, b ? Number(b.wrmsse).toFixed(2) : 'n/a', s ? Number(s.wrmsse).toFixed(2) : 'n/a', b ? fcPct(b.bias_pct) : 'n/a']; }),
+                [0, 1, 1, 1]));
+            const w = latest.weights && latest.weights.total;
+            if (w) bc.append(el('p', 'card-sub', 'Who earned the top line: ' + Object.keys(w).filter(k => w[k] > 0.005).map(k => k + ' ' + Math.round(w[k] * 100) + '%').join(', ') + '.'));
+            return bc;
+        }
+        /* The plan it is judged against: provenance, for somebody checking the work. */
+        function fcPlanJudged(c, latest) {
+            const wb = c.workbook || {};
+            const names = latest.scenarios || [];
+            const rc = el('div');
+            rc.append(el('p', 'card-sub', wb.name ? (wb.name + ', uploaded ' + fmtDate(wb.uploaded_at) + (wb.by ? ' by ' + wb.by : '')
+                    + '. Every scenario in it is a plan the forecast is measured against; the page opens on '
+                    + (latest.scenario_feature || names[0] || 'the first') + '.')
+                : 'No workbook on file: the run used what the service had.'));
+            if (c.runs && c.runs.length) rc.append(el('p', 'card-sub', 'Recent runs: ' + c.runs.slice(-7).map(r => fmtDate(r.as_of)).join(', ') + '.'));
+            return rc;
+        }
+        /* How it works (the mix, spec 8.1): the four method pages, each in a
+           window, then the Forecast in the Guide. They were four drawers at the
+           foot of the page. */
+        function fcHowItWorks(c, latest, sc) {
+            const nsrc = ((latest.sanity || {}).models || []).length;
+            return howItWorks([
+                { icon: I.compass, label: 'Which method is running, and why',
+                  onClick: () => fcPage('Which method is running, and why', () => fcUntitled(fcOptimisedCard(latest))) },
+                { icon: I.target, label: 'How each one works, and how right it has been', n: nsrc || null,
+                  onClick: () => fcPage('How each one works, and how right it has been', () => fcUntitled(fcAlgorithmsCard(latest))) },
+                { icon: I.shield, label: 'How much to trust it', onClick: () => fcPage('How much to trust it', () => fcTrust(latest)) },
+                { icon: I.fileSheet, label: 'The plan it is judged against', onClick: () => fcPage('The plan it is judged against', () => fcPlanJudged(c, latest)) },
+            ], { label: 'The Forecast in the Guide', at: ['money', 'Forecast'] });
+        }
+
         /* ---------- the standing record ----------
            What every source SAID about a month while that month was still
            ahead, marked when the month closed. It is the honest test, and the
@@ -16375,20 +16447,22 @@ Projected Image UK"></textarea>
             const box = $('forecast-content'); box.innerHTML = '';
             const c = forecastCache; const painting = !!c && !c.error;
             box.classList.toggle('no-intro', !(painting && firstPaint('forecast')));
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.insight;
-            const ht = el('div'); const title = el('h2', null, 'Forecast');
-            /* The top of the page is about MONEY, not about method. How the
-               forecast is produced used to be the second sentence a reader
-               met, before they had been told where the business stands; it is
-               a good answer to a question nobody has asked yet, and it now
-               lives at the bottom under How this forecast works. */
-            ht.append(title, el('p', null, 'What the shop has taken, where the coming months are heading, and how '
-                + 'that compares with the cash flow plan. Figures are cash in; what is still to come is a range, '
-                + 'never a promise.'));
-            hero.append(badge, ht); box.append(hero);
             const latest = c && c.latest;
-            const stamp = latest ? ('Run as of ' + fmtDate(latest.as_of)) : (c && !c.error ? 'No run yet' : '');
-            box.append(financeTabs('forecast', stamp, [c && c.can_upload ? forecastUploadButton() : null]));
+            const names = (latest && latest.scenarios) || [];
+            if (!forecastScenario || names.indexOf(forecastScenario) < 0) forecastScenario = names[0] || '';
+            const sc = forecastScenario;
+            /* The header (the mix, spec 8.1): Forecast with Beta, a status line
+               saying the month the reader is in and which run this is, then How
+               it works and Upload workbook. No paragraph: the page is money. */
+            const cm = latest ? fcCurrentMonth(latest) : '';
+            box.append(pageHead({ view: 'forecast', title: 'Forecast',
+                status: latest ? [fcMonthName(cm) + ' ' + cm.slice(0, 4), 'Run as of ' + fmtDate(latest.as_of)] : null,
+                actions: [latest ? fcHowItWorks(c, latest, sc) : null, c && c.can_upload ? forecastUploadButton() : null] }));
+            /* The Finance tabs, with the plan the page is judged against chosen
+               at the row's right: it governs everything under it. */
+            const plan = latest && names.length > 1 ? [el('span', 'fc-seg-lbl', 'Plan'),
+                segmented(names.map(n => ({ label: n, value: n })), sc, (v) => { forecastScenario = v; renderForecast(); }, { label: 'Plan' })] : [];
+            box.append(financeTabs('forecast', '', plan));
             if (!c) { box.append(el('div', 'empty', 'Loading…')); return; }
             if (c.error) { box.append(loadFailure('The forecast could not be read. ' + c.error, refreshForecast)); return; }
             if (!latest) { box.append(forecastSetupCard(c)); return; }
@@ -16402,11 +16476,7 @@ Projected Image UK"></textarea>
                widget-bare; a heading that stood beside its block on the page is
                grouped with it here in a widget-group, which keeps 12 under the
                heading as the flow did. */
-            hero.append(heroAct(''));
             if (c.last_error) box.append(fcFailedRunCard(c.last_error, latest.as_of));
-            const names = latest.scenarios || [];
-            if (!forecastScenario || names.indexOf(forecastScenario) < 0) forecastScenario = names[0] || '';
-            const sc = forecastScenario;
             const rows = latest.monthly || [];
             const cur = rows.find(r => (r.method || '').indexOf('actual_to_date') === 0) || rows.find(r => r.method === 'forecast') || rows[0];
             const year = latest.year || {}; const yt = (year.targets || {})[sc];
@@ -16425,14 +16495,6 @@ Projected Image UK"></textarea>
                it rides with the overview rather than being dropped into the
                middle of the page next to a table it also governs. */
             const ov = fcOverviewCard(latest, sc);
-            if (names.length > 1) {
-                const t0 = ov.querySelector('.section-title');
-                if (t0) {
-                    t0.append(el('span', 'fc-seg-lbl', 'Plan scenario'));
-                    t0.append(segmented(names.map(n => ({ label: n, value: n })), sc,
-                        (v) => { forecastScenario = v; renderForecast(); }));
-                }
-            }
             ov.classList.add('widget-bare');
             box.append(widget(ov, 'standing', 'full', 'Where things stand'));
 
@@ -16532,20 +16594,6 @@ Projected Image UK"></textarea>
             }));
             numbers.append(detail);
 
-            /* 5. HOW IT WORKS. Last, and shut. A director signing off a number
-               does not need to read about Theta to trust it; the person who
-               wants to can open one drawer and find all of it. */
-            const method = widget(el('div', 'widget-group'), 'method', 'full', 'How this forecast works');
-            method.append(el('div', 'section-title', 'How this forecast works'));
-            box.append(method);
-            const how = el('div', 'widget-bare sect-group');
-            how.append(fcDrawer('Which approach is running, and why', function () {
-                return fcUntitled(fcOptimisedCard(latest));
-            }));
-            how.append(fcDrawer('How each one works, and how right it has been' + (nsrc ? ' (' + nsrc + ')' : ''), function () {
-                return fcUntitled(fcAlgorithmsCard(latest));
-            }));
-            method.append(how);
             /* The by-category and by-segment tables came from the per-variant
                model, which no longer runs: it forecast October at a quarter of
                what October has ever been. They stay guarded rather than
@@ -16566,43 +16614,6 @@ Projected Image UK"></textarea>
                         .map(n => [n].concat(months.map(m => fcMoney(byName[n][m])))), [0, 1, 1, 1]));
                 byLevel.append(lc);
             });
-            /* How much to trust it: prose when the plain models are running,
-               the M5 backtest table when that build is. Either way it belongs
-               under How this forecast works, not as another section dealt onto
-               a page whose first job is to answer three questions. */
-            const bt = latest.metrics || [];
-            const bc = el('div');
-            if (!bt.length) {
-                bc.append(el('p', 'card-sub', 'Each source was fitted to earlier months and marked against '
-                    + 'what actually happened, three times over. Typical error is how far out it usually was; '
-                    + 'bias is whether it leaned high or low every month, which matters more, because a model '
-                    + 'that leans high quietly turns a plan green. The leading model\u2019s own error is the '
-                    + 'band on the chart, so the forecast never claims to be more certain than it has earned.'));
-                if (latest.basis) bc.append(el('p', 'card-sub', 'Figures are ' + latest.basis + '.'));
-            } else {
-            bc.append(el('p', 'card-sub', 'Five backtests of 28 days each, ending at the run date. WRMSSE is the M5 competition score: under 1 beats a naive forecast scaled to each series, and lower is better. Bias is how far the total ran hot or cold.'));
-            const levels = ['total', 'category', 'segment', 'product', 'variant', 'bottom'];
-            bc.append(fcTable(['Level', 'Blend', 'Seasonal baseline', 'Bias'],
-                levels.map(l => { const b = bt.find(m => (m.model === 'blend+mint' || m.model === 'blend') && m.level === l); const s = bt.find(m => m.model === 'seasonal_level' && m.level === l);
-                    return [l === 'bottom' ? 'variant x segment' : l, b ? Number(b.wrmsse).toFixed(2) : 'n/a', s ? Number(s.wrmsse).toFixed(2) : 'n/a', b ? fcPct(b.bias_pct) : 'n/a']; }),
-                [0, 1, 1, 1]));
-            const w = latest.weights && latest.weights.total;
-            if (w) bc.append(el('p', 'card-sub', 'Who earned the top line: ' + Object.keys(w).filter(k => w[k] > 0.005).map(k => k + ' ' + Math.round(w[k] * 100) + '%').join(', ') + '.'));
-            }
-            how.append(fcDrawer('How much to trust it', function () { return bc; }));
-            /* What the forecast was measured against. Provenance, not a
-               finding: it belongs at the bottom of the detail, where somebody
-               checking the work will look for it. */
-            how.append(fcDrawer('The plan it is judged against', function () {
-                const wb = c.workbook || {};
-                const rc = el('div');
-                rc.append(el('p', 'card-sub', wb.name ? (wb.name + ', uploaded ' + fmtDate(wb.uploaded_at) + (wb.by ? ' by ' + wb.by : '')
-                        + '. Every scenario in it is a plan the forecast is measured against; the page opens on '
-                        + (latest.scenario_feature || names[0] || 'the first') + '.')
-                    : 'No workbook on file: the run used what the service had.'));
-                if (c.runs && c.runs.length) rc.append(el('p', 'card-sub', 'Recent runs: ' + c.runs.slice(-7).map(r => fmtDate(r.as_of)).join(', ') + '.'));
-                return rc;
-            }));
         }
         /* ---------- Size list tab ----------
            The sheet the label lookup reads, every row, as a data table the
