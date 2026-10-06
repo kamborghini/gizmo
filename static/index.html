@@ -943,6 +943,9 @@
                against nothing, while the title and the sentence started at the
                page inset. */
             .ov-updated { margin-left: 0; padding-top: 0; flex-basis: 100%; white-space: normal; }
+            /* A status line's stamp is its own width, so Refresh sits beside it: the full-width basis above is for
+               a stamp alone in a rail, and pushed this line's Refresh to the far end of the row. */
+            .ph-sub > .ov-updated { flex: none; white-space: nowrap; }
             .ov-hero-act { margin-left: 0; flex-basis: 100%; padding-top: 0; }
             /* A rail of three words or more wraps rather than running past the gutter, each button at its
                own width. A stamp and a Refresh stay on one line. */
@@ -1576,8 +1579,10 @@
            thing the eye tracks down. The bottom margin is gone as well: the
            page rhythm rule already spaces this block, so the component's own
            20px was a second value doing that job. */
-        .seo-score { display: flex; align-items: center; gap: var(--sp-4); background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default);
-            border-radius: var(--radius-card); padding: var(--sp-4); box-shadow: var(--shadow-sm); position: relative; overflow: hidden; }
+        /* The score is a figure with its meter, on the figure recipe (the mix, spec 3 and 8.3):
+           no box, so it sits on the text edge like the figure row beside it. */
+        .seo-score { display: flex; align-items: center; gap: var(--sp-4); background: none; border: 0;
+            border-radius: 0; padding: 0; box-shadow: none; position: relative; overflow: visible; }
         .seo-score .num { font-size: var(--fig-m); font-weight: var(--weight-semibold); letter-spacing: var(--tr-fig); line-height: var(--lh-none); }
         .seo-score .out { color: var(--text-secondary); font-size: var(--text-body); margin-top: 0; }
         .seo-score .bar { flex: 1; height: var(--sp-1); border-radius: var(--radius-full); background: var(--surface-tertiary); overflow: hidden; min-width: 90px; }
@@ -1597,7 +1602,9 @@
         /* The bar is the number drawn, so it takes the number's colour: a red
            47 sat over a black bar. */
         .seo-score.stat-open { cursor: pointer; position: relative; padding-right: var(--sp-8); }
-        @media (hover: hover) { .seo-score.stat-open:hover { border-color: var(--border-strong); background: var(--surface-secondary); } }
+        /* Its hover fill bleeds 8 past the column, as every row's does. */
+        @media (hover: hover) { .seo-score.stat-open:hover { background: var(--surface-secondary);
+            box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); } }
         .seo-score.good .bar > i { background: var(--success); }
         .seo-score.mid .bar > i { background: var(--warning); }
         .seo-score.low .bar > i { background: var(--error); }
@@ -2339,10 +2346,12 @@
            a container for the purpose, not by the window, and with no floor
            a narrow card could not hold. The tiles stretch to one height. */
         .cx-card { container: cxcard / inline-size; }
-        .cx-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); align-items: stretch; margin-top: var(--sp-4); }
+        .cx-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4) var(--sp-8); align-items: stretch; margin-top: var(--sp-4); }
         @container cxcard (min-width: 900px) { .cx-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
         .cx-card > .cx-grid { padding-top: var(--sp-4); border-top: var(--bw-hairline) solid var(--border-default); }
-        .cx-tile { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
+        /* A tile is a small form on the card's grid, no box of its own (the mix, spec 3): its title and
+           controls sit on the same text edge as the rest of the card. */
+        .cx-tile { border: 0; border-radius: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
         .cx-tile-title { font-size: var(--text-body); font-weight: var(--weight-medium); }
         /* Inside a tile the row is a plain flex row: the label-row frame it
            inherits drew a box within the tile, and its grid kept a tile from
@@ -2353,14 +2362,14 @@
            ('Check', 'Send', 'Write notes'), so they fit any tile; wrapping
            stays as the safety net, never the layout. */
         .cx-tile .cx-row { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: auto; }
-        /* The three tiles share three row tracks (title, hint, controls), so
-           the controls sit at one height across all three whatever the hint's
-           length. The ONE column is minmax(0, 1fr): a grid's implicit column
+        /* The three tiles share two row tracks (title, controls), so
+           the controls sit at one height across all three whatever their
+           titles' length. The ONE column is minmax(0, 1fr): a grid's implicit column
            is auto, which grows to its widest content, and a result listed in
            a tile once pushed that column 450px past the tile and the card.
            Without subgrid the flex column stands. */
         @supports (grid-template-rows: subgrid) {
-            .cx-tile { display: grid; grid-row: span 3; grid-template-rows: subgrid; grid-template-columns: minmax(0, 1fr); align-content: start; }
+            .cx-tile { display: grid; grid-row: span 2; grid-template-rows: subgrid; grid-template-columns: minmax(0, 1fr); align-content: start; }
             .cx-tile .cx-row { margin-top: 0; align-self: end; }
         }
         /* What the checks found, under the tiles and the width of the card:
@@ -5509,6 +5518,12 @@
             /* That target reaches 10 under its title's line, so a line under the
                title sits 12 below it (the card's 4 left a 6 overlap). */
             .card-head:has(> .card-title > .info) { row-gap: var(--sp-3); }
+            /* The status line's Refresh leans its target DOWN: 4 up reaches the title's own box and no further (the line's
+               margin-top), the rest below it into the 16 above the actions, so the title is never covered; the glyph stays
+               on the line's centre. */
+            .ph-sub > .info { margin-block: calc(-1 * var(--sp-1)) calc(var(--lh-control) - var(--control-h-lg) + var(--sp-1));
+                align-content: start; padding-top: calc(var(--sp-1) + (var(--lh-control) - var(--icon-md)) / 2); }
+            .ph-sub > .info::before { top: calc(var(--sp-1) + var(--lh-control) / 2); }
             /* The rest of what a finger meets: the drawer's own icon buttons and brand row, an icon button in a row, a row's
                name button, a standalone link, a summary, a maker's band and the chart's expand square. */
             :is(.sidebar .icon-btn, .brand, .mem-btn, .crm-ticon, .crm-col-add, .sizes-open, .files-name, .guide-toc-link, .miss-open, .action-link, details summary) { min-height: var(--control-h-lg); }
@@ -10192,7 +10207,7 @@ Projected Image UK"></textarea>
         function showProductsView() {
             if (productPlanRun) return;   // a plan is being built: coming back keeps its loading screen
             if (productList) { renderProductList(); return; }
-            renderRunGate('products-content', { icon: I.box, title: 'Products', desc: 'Your catalogue with up to 24 months of sales.', cta: 'Load products', note: 'Pulls live Shopify data.', onRun: () => loadProducts(true) });
+            renderRunGate('products-content', { icon: I.box, title: 'Products', desc: 'Your catalogue with up to 24 months of sales.', cta: 'Load products', note: 'Pulls live Shopify data. No AI credits used.', onRun: () => loadProducts(true) });
         }
         async function loadOverview(force) {
             const box = $('ov-content');
@@ -10328,10 +10343,13 @@ Projected Image UK"></textarea>
             { const ab = alertsBanner(); if (ab) box.append(ab); }
             box.append(pageHead({ view: 'overview', title: 'Overview', live: cache.at, onRefresh: () => loadOverview(true),
                 actions: [refreshAllBtn()] }));
-            /* The AI summary is the page's first section (the mix, spec 8.3). */
+            /* The changes strip is a fixed block with no id, so it comes BEFORE
+               the first card the grid can move: one between two cards would take
+               the arrangement (and Customise) down. The AI summary is that first
+               card, the page's first section (the mix, spec 8.3). */
+            { const cs = changesStrip(data.changes, data.changes_since); if (cs) box.append(cs); }
             { const sum = summarySection(data.structured && data.structured.summary, followedNote(data.structured));
               if (sum) box.append(widget(sum, 'summary', 'full', 'Summary')); }
-            { const cs = changesStrip(data.changes, data.changes_since); if (cs) box.append(cs); }
             const ofu = memories.filter(m => m.type === 'followup' && m.status === 'open');
             /* Every block from here to the page chat is a card the grid can
                move. The alerts banner, the header and the changes strip above
@@ -10412,8 +10430,10 @@ Projected Image UK"></textarea>
             const intro = firstPaint('seo'); box.classList.toggle('no-intro', !intro);
             const s = data.structured || {};
             box.append(pageHead({ view: 'seo', title: 'SEO', live: cache.at, onRefresh: () => loadSEO(true), actions: [refreshAllBtn()] }));
-            { const sum = summarySection(s.summary, followedNote(s)); if (sum) box.append(widget(sum, 'summary', 'full', 'Summary')); }
+            /* The fixed strip first, then the first card the grid can move (a
+               fixed block between two cards would take Customise down). */
             { const cs = changesStrip(data.changes, data.changes_since); if (cs) box.append(cs); }
+            { const sum = summarySection(s.summary, followedNote(s)); if (sum) box.append(widget(sum, 'summary', 'full', 'Summary')); }
             /* Every block from the score to the page chat is a card the grid can
                move; the header and the changes strip stay fixed at the top and
                the page chat at the foot. Each spans the row, as it always has. */
@@ -10576,7 +10596,6 @@ Projected Image UK"></textarea>
             const row = el('div', 'act-row');
             /* What to paste is the field's own hint (copy plan, Keywords #4). */
             const inp = el('input', 'scan-url'); inp.placeholder = 'A competitor or blog post address'; inp.type = 'url';
-            inp.setAttribute('aria-label', 'A competitor or blog post address');
             inp.setAttribute('aria-label', 'Page to scan');
             const btn = el('button', 'btn btn-primary'); btn.append(ico(I.search), document.createTextNode('Scan'));
             row.append(inp, btn); card.append(row);
@@ -10598,8 +10617,10 @@ Projected Image UK"></textarea>
             const data = cache.data; const box = $('keywords-content'); box.innerHTML = '';
             const s = data.structured || {}; const cur = data.currency || '';
             box.append(pageHead({ view: 'keywords', title: 'Keywords', live: cache.at, onRefresh: () => loadKeywords(true), actions: [refreshAllBtn()] }));
-            { const sum = summarySection(s.summary, followedNote(s)); if (sum) box.append(widget(sum, 'summary', 'full', 'Summary')); }
+            /* The fixed strip first, then the first card the grid can move (a
+               fixed block between two cards would take Customise down). */
             { const cs = changesStrip(data.changes, data.changes_since); if (cs) box.append(cs); }
+            { const sum = summarySection(s.summary, followedNote(s)); if (sum) box.append(widget(sum, 'summary', 'full', 'Summary')); }
             /* From the scan card to Details every block is a card the grid can
                move, each spanning the row; the header and the changes strip stay
                at the top and the page chat at the foot. */
@@ -10751,6 +10772,8 @@ Projected Image UK"></textarea>
             const card = el('div', 'card');
             const head = el('div', 'card-head');
             head.append(el('h3', 'card-title', 'Trade radar'));
+            /* The cost note is kept (a cost is never dropped): the one fact of the old line that is not in the title. */
+            head.append(el('p', 'card-desc', 'No AI credits used.'));
             card.append(head);
             const table = (cols, rows) => {
                 const bleed = el('div', 'card-bleed');
