@@ -2238,20 +2238,17 @@ def t_the_forecast_tab_exists_and_is_gated():
     # the page answers three questions in a reader's own words - where am I,
     # where am I expected to be, is that good - and the tables that used to be
     # dealt onto the screen all at once now wait behind drawers.
-    ov = SCRIPT.split("function fcOverviewCard(", 1)[1].split("\n        function ", 1)[0]
-    for q in ("'Where I am now'", "'Where I am expected to be'", "'Where the year lands'"):
-        ok(q in ov, "the overview asks " + q)
-    # Each answer is its OWN block. The joined multi-column frame was retired
-    # on purpose and must not come back, here or anywhere.
-    ok("metricsStrip(mets)" in ov and "fc-now" not in SCRIPT,
-       "each answer is a house KPI block, not three columns welded into one card")
-    # Good or bad is the change pill ON the number it judges, which is where
-    # the reference puts it, not a fourth abstract box.
-    ok("delta:" in ov and "trend:" in ov,
-       "the verdict rides on the figure it qualifies")
+    # Since the mix (2026-10-06) the three questions are one feature band, its
+    # labels two to four words (spec 4.2 and 8.1).
+    ov = fn_src("function fcBand(latest, sc) {")
+    for q in ("'Taken so far'", "'Expected this month'", "'Year lands at'"):
+        ok(q in ov, "the band answers " + q)
+    ok("featureBand({" in ov and "fc-now" not in SCRIPT, "in one band, the screen's one focal point")
+    # Good or bad is the change chip ON the number it judges.
+    ok("chip: chip(gap)" in ov and "chip: chip(yg)" in ov, "the verdict rides on the figure it qualifies")
     ok("8 times out of 10" in ov and "not a commitment" in ov,
        "and says how wide the range is, in money, rather than printing P10 and P90")
-    order = [fn.index("fcOverviewCard(latest, sc)"), fn.index("fcChartCard("),
+    order = [fn.index("fcBand(latest, sc)"), fn.index("fcChartCard("),
              fn.index("fcDriversCard(latest, sc)"), fn.index("'The numbers behind it'")]
     ok(order == sorted(order),
        "overview, then the picture, then why, then the numbers")
@@ -4022,8 +4019,8 @@ def t_the_forecast_page_never_dresses_an_estimate_as_a_banked_figure():
     """Never make predicted money look like confirmed money. The overview
     separates the two in the reader's own words and says out loud that the
     forward figure is an expectation."""
-    ov = SCRIPT.split("function fcOverviewCard(", 1)[1].split("\n        function ", 1)[0]
-    ok("taken so far in" in ov, "what is banked is labelled as taken")
+    ov = fn_src("function fcBand(latest, sc) {")
+    ok("'Taken so far'" in ov, "what is banked is labelled as taken")
     ok("It is an expectation, not a commitment." in ov,
        "and what is forward is labelled as an expectation")
     dr = SCRIPT.split("function fcDriversCard(", 1)[1].split("\n        function ", 1)[0]
@@ -7923,9 +7920,9 @@ console.log(JSON.stringify([
 def t_the_month_pill_is_worked_out_from_the_figures_beside_it():
     """The pill said +72.0% and the alert under it +72.3% for the same month
     against the same plan: the run's gap_pct arrives rounded to two places."""
-    ov = SCRIPT.split("function fcOverviewCard(", 1)[1].split("\n        function ", 1)[0]
+    ov = fn_src("function fcBand(latest, sc) {")
     ok("(p50 - target) / target" in ov and "(cur.gap_pct || {})[sc]" not in ov,
-       "the overview works its percentage out from the money it prints")
+       "the band works its percentage out from the money it prints")
     fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
     ok("r.gap_pct" not in fn and "(r.p50 - t) / t" in fn, "and so does the month table")
     ok("FC_VERDICT_WORDS[v]" in fn and "FC_BASIS[r.method]" in fn,
@@ -7952,9 +7949,10 @@ def t_the_forecast_explains_itself_once_and_in_plain_lines():
     key was stranded at the card edge with the amounts in a column of their
     own between it and the words; and the sentence under it quoted a source
     description that began "The Theta method again"."""
-    ov = SCRIPT.split("function fcOverviewCard(", 1)[1].split("\n        function ", 1)[0]
+    ov = fn_src("function fcBand(latest, sc) {")
     tail = ov.split("const half = ", 1)[1]
-    ok("el('div', 'card')" not in tail and "box.append(conf)" in tail, "the caveat is a line, not a card")
+    ok("el('div', 'card')" not in tail and "infoButton('How sure this is'" in ov,
+       "the caveat waits behind an info button on the figure it qualifies (the mix), not in a card")
     dr = SCRIPT.split("function fcDriversCard(", 1)[1].split("\n        function ", 1)[0]
     order = [dr.index("'fc-drive-key "), dr.index("'fc-drive-lbl'"), dr.index("'fc-drive-amt'")]
     ok(order == sorted(order), "key, then words, then the amount at the right of the measure")
@@ -10467,6 +10465,25 @@ def t_the_forecast_header_is_the_mix_header():
     ok("fcPage(" in how and "function fcPage(title, build) {" in SCRIPT, "each opens in a window")
     ok("'Upload workbook'" in fn_src("function forecastUploadButton()"), "the upload button says Upload workbook")
     ok("const MONTH_NAMES = ['January'," in SCRIPT, "the status line says the month in full")
+
+
+@test
+def t_forecast_leads_with_the_month_in_a_band():
+    """Spec 8.1: the feature band answers the screen's main question. Expected
+    this month at 44 with its chip and "against plan", its likely range drawn
+    as one bar with the plan as a blue tick, "How sure this is" behind an info
+    button word for word; beside it Taken so far (Day N of M, a meter) and Year
+    lands at (its chip, the plan, a meter)."""
+    ok("function fcBand(latest, sc) {" in SCRIPT and "function fcOverviewCard(" not in SCRIPT, "the band replaced the three tiles")
+    fb = fn_src("function fcBand(latest, sc) {")
+    for part in ("label: 'Expected this month'", "label: 'Taken so far'", "label: 'Year lands at'", "'against plan'",
+                 "infoButton('How sure this is'", "8 times out of 10. It is an expectation, not a commitment.",
+                 "never a promise.", "rangeBar({", "midLabel: 'Likely range'", "'Day ' + fcDaysSoFar(latest) + ' of ' + fcDaysInMonth(latest)",
+                 "'Plan ' + fcMoney(yt)", "meter({"):
+        ok(part in fb, "fcBand: " + part)
+    fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
+    ok("const band = fcBand(latest, sc);" in fn, "the page draws it first")
+    ok(".fc-conf" not in CSS, "the old caveat line is gone")
 
 
 if __name__ == "__main__":
