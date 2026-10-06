@@ -7270,6 +7270,11 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
                     if tag.strip().lower() == DISPATCHED_TAG.strip().lower() else [])
     tagged = [o for o in orders if any(_has_tag(o, t) for t in want)]
     tagged.sort(key=lambda o: str(o.get("created_at") or ""), reverse=True)
+    # The flow's three queues counted from the same snapshot (the mix's queue
+    # counters, 2026-10-06), so the bench sees every queue's size at once
+    # without another Shopify call.
+    counts = {key: sum(1 for o in orders if _has_tag(o, qtag))
+              for key, qtag in (("unprocessed", UNPROCESSED_TAG), ("make", PRODUCTION_TAG), ("ship", MADE_TAG))}
 
     names = await _product_option_names(
         registry,
@@ -7291,7 +7296,7 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
         partial = ("Shopify did not answer for the whole window, so this list may be "
                    "missing orders. Press Refresh in a moment.")
     return {"tag": tag, "days": days, "count": len(tagged), "orders": shaped,
-            "partial_note": partial,
+            "partial_note": partial, "counts": counts,
             "state": {str(s["id"]): state[str(s["id"])] for s in shaped if str(s["id"]) in state},
             "dispatch": _dispatch_with_live_labels(
                 {str(s["id"]): disp[str(s["id"])] for s in shaped if str(s["id"]) in disp})}
