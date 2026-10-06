@@ -1513,28 +1513,14 @@
         /* A card head's own buttons move clear of the hide button, which sat
            over Store knowledge's Delete. */
         .ov-wrap.wg-editing > .card[data-widget] > .card-head { padding-right: calc(var(--sp-4) + var(--sp-8)); }
-        /* The cue waits to be asked for. Painted at rest on all four cards it
-           turned the metric row into a row of links, and it was promising an
-           explanation to a pointer only, so the element takes focus too and
-           the underline answers that as well. */
-        /* Anywhere a word needs a sentence behind it: a dotted underline that
-           only appears on hover or focus, so the page is not speckled, and
-           focusable so a keyboard reaches the same explanation a pointer does. */
-        .has-help { cursor: help; text-decoration: underline dotted transparent;
-            text-underline-offset: 3px; transition: text-decoration-color var(--dur) var(--ease); }
-        .has-help:focus-visible { text-decoration-color: var(--border-emphasis); }
-        @media (hover: hover) { .has-help:hover { text-decoration-color: var(--border-emphasis); } }
-        .stat .label.has-help { cursor: help; text-decoration: underline dotted transparent;
-            text-underline-offset: 3px; transition: text-decoration-color var(--dur) var(--ease); }
-        .stat .label.has-help:focus-visible { text-decoration-color: var(--border-emphasis); }
-        @media (hover: hover) { .stat .label.has-help:hover { text-decoration-color: var(--border-emphasis); } }
-        /* chat drill-down: show the data behind this */
-        .data-drill { margin-top: var(--sp-3); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); background: var(--surface-primary); overflow: hidden; }
-        .data-drill summary { padding: var(--sp-3) var(--sp-3); cursor: pointer; list-style: none; display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-xs); color: var(--text-secondary); font-weight: var(--weight-medium); }
+        /* chat drill-down: show the data behind this. A hairline row on the
+           text edge, not a box (the mix, spec 3): the row is a 32 control (40 on
+           a phone, where --control-h is 40), and what it opens sits under it. */
+        .data-drill { margin-top: var(--sp-3); border: 0; border-top: var(--bw-hairline) solid var(--border-default); border-radius: 0; background: none; overflow: visible; }
+        .data-drill summary { padding: 0; min-height: var(--control-h); cursor: pointer; list-style: none; display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-xs); color: var(--text-secondary); font-weight: var(--weight-medium); }
         .data-drill summary::-webkit-details-marker { display: none; }
         .data-drill summary > span { display: grid; place-items: center; } .data-drill summary svg { width: var(--icon-sm); height: var(--icon-sm); color: var(--text-tertiary); }
-        .data-drill[open] summary { border-bottom: var(--bw-hairline) solid var(--border-default); }
-        .data-drill-body { padding: var(--sp-1) var(--sp-3) var(--sp-3); max-height: 320px; overflow: auto; }
+        .data-drill-body { padding: 0 0 var(--sp-3); max-height: 320px; overflow: auto; }
         .data-src { margin-top: var(--sp-3); }
         .data-src-label { font-size: var(--text-xs); text-transform: none; letter-spacing: normal; color: var(--text-tertiary); font-weight: var(--weight-medium); margin-bottom: var(--sp-1); }
         .data-src-pre { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; background: var(--surface-sunken); border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-2); line-height: var(--lh-caption); }
@@ -1781,14 +1767,16 @@
         @media (max-width: 640px) { .barrow { grid-template-columns: 1fr 80px; } .barrow .bn { grid-column: 1 / -1; } }
 
         /* ---------- Structured response components ---------- */
-        .insights { display: flex; flex-direction: column; gap: var(--sp-2); }
-        .insight { display: flex; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: var(--radius-card); border: var(--bw-hairline) solid var(--border-default);
-            background: var(--surface-primary); box-shadow: var(--shadow-sm); animation: fadeUp .4s ease backwards; }
+        .insights { display: flex; flex-direction: column; gap: 0; }
+        /* An insight is a row of a list, in a card or not (the mix, spec 3):
+           no box of its own, a hairline between neighbours, words on the text edge. */
+        .insight { display: flex; gap: var(--sp-3); padding: var(--sp-3) 0; border: 0; border-radius: 0;
+            background: none; box-shadow: none; animation: fadeUp .4s ease backwards; }
+        .insights > .insight + .insight { border-top: var(--bw-hairline) solid var(--border-default); }
         .insight .ico { width: var(--box-lg); height: var(--box-lg); border-radius: var(--radius-inset); display: grid; place-items: center; flex-shrink: 0; margin-top: 0; }
         .insight .ico svg { width: var(--icon-sm); height: var(--icon-sm); }
         .insight .t { font-weight: var(--weight-medium); font-size: var(--text-body); margin: var(--sp-px) 0 var(--sp-1); }
         .insight .d { color: var(--text-secondary); font-size: var(--text-body); line-height: var(--lh-control); }
-        @media (hover: hover) { .insight:hover { border-color: var(--border-strong); } }
         .insight .ico { background: var(--info-bg); color: var(--info); }  /* generic first: .insight.insight would match EVERY card and clobber the typed colors below */
         .insight.win .ico { background: var(--success-bg); color: var(--success); }
         .insight.warning .ico { background: var(--warning-bg); color: var(--warning); }
@@ -4571,7 +4559,7 @@
         .impact-acts { display: flex; gap: var(--sp-1); flex: none; }
         .impact-sub { font-size: var(--text-xs); color: var(--text-tertiary); margin: var(--sp-2) 0 var(--sp-2-5); }
         .impact-deltas { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: var(--sp-2); }
-        .idelta { display: flex; flex-direction: column; gap: 0; background: var(--surface-tertiary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-3); min-width: 86px; }
+        .idelta { display: flex; flex-direction: column; gap: 0; background: var(--surface-tertiary); border: 0; border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-3); min-width: 86px; }
         .idelta .il { font-size: var(--text-xs); text-transform: none; letter-spacing: normal; color: var(--text-tertiary); font-weight: var(--weight-medium); }
         .idelta .iv { font-size: var(--text-body); font-weight: var(--weight-medium); }
         .idelta.up .iv { color: var(--success); } .idelta.down .iv { color: var(--error); } .idelta.flat .iv { color: var(--text-secondary); }
@@ -4962,10 +4950,17 @@
         .followed { display: block; font-size: var(--text-xs); color: var(--text-tertiary); margin: var(--sp-3) 0 0; line-height: var(--lh-caption); }
         .followed > * { vertical-align: middle; }
         .followed > .ic { display: inline-grid; }
-        .followed > .ic { display: grid; place-items: center; margin-right: var(--sp-0-5); }
+        .followed > .ic { place-items: center; margin-right: var(--sp-0-5); }
         .followed > .ic svg { width: var(--icon-xs); height: var(--icon-xs); display: block; }
         .followed-link { color: var(--text-secondary); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); cursor: pointer; }
-        .ov-hero .followed { margin-top: var(--sp-2); }
+        /* The AI summary, a section of its own (the mix, spec 8.3): body copy at
+           the reading measure, the skills it followed 8 under it. */
+        .ai-summary-text { margin: 0; color: var(--text-secondary); max-width: var(--measure); }
+        .ai-summary .followed { margin-top: var(--sp-2); }
+        /* An info button inside a title that is not a flex row sits 8 from its
+           words and centred on the line, as it does in one. */
+        :is(.card-title, .stat .label, .chart-head .ct, .cx-tile-title, .disp-subhead, .modal-head h3) > .info {
+            vertical-align: middle; margin-left: calc(var(--sp-2) + (var(--icon-md) - var(--control-h-sm)) / 2); }
         .prose { font-size: var(--text-body); line-height: var(--lh-prose); color: var(--text-secondary); margin: calc(-1 * var(--sp-2)) 0 var(--sp-4); max-width: var(--measure); }
         .prose p { margin: 0 0 var(--sp-2); } .prose ul, .prose ol { margin: 0 0 var(--sp-2); padding-left: var(--sp-5); } .prose li { margin: var(--sp-1) 0; }
         .prose .prose-h { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); margin: var(--sp-4) 0 var(--sp-1); }
@@ -6840,7 +6835,9 @@ Projected Image UK"></textarea>
             /* A title on a div is a pointer-only affordance: focusable, it is
                read as the label's description and the hover cue can answer a
                keyboard as well. */
-            if (help) { labelEl.title = help; labelEl.classList.add('has-help'); labelEl.tabIndex = 0; }
+            /* Its explanation is an info button beside it (the mix, spec 7): a
+               tap and the keyboard open it as well as a pointer. */
+            if (help) labelEl.append(infoButton(m.label, { title: m.label, body: help }));
             c.append(labelEl);
             /* Number and change on ONE line, as the reference has them: the
                change is a small pill beside the figure, not a tinted bar
@@ -8461,15 +8458,27 @@ Projected Image UK"></textarea>
         function followedNote(s) {
             const names = (s && Array.isArray(s.skills_applied)) ? s.skills_applied.filter(Boolean) : [];
             if (!names.length) return null;
+            /* A small row, not a sentence (copy plan, shared #3). */
             const p = el('p', 'followed');
-            p.append(ico(I.book), document.createTextNode(names.length === 1 ? 'Followed your skill ' : 'Followed your skills '));
+            p.append(ico(I.book), document.createTextNode('Followed: '));
             names.forEach((n, k) => {
                 const a = tabAllowed('skills') ? actionLink('followed-link', n) : el('span', 'followed-name', n);
                 if (tabAllowed('skills')) a.onclick = () => setView('skills');
-                if (k) p.append(document.createTextNode(k === names.length - 1 ? ' and ' : ', '));
+                if (k) p.append(document.createTextNode(', '));
                 p.append(a);
             });
             return p;
+        }
+        /* The AI summary (the mix, spec 8.3): a section of its own at the top
+           of a report, out of the header, with the skills it followed under it.
+           Nothing when the run gave neither. */
+        function summarySection(text, followed) {
+            if (!text && !followed) return null;
+            const sec = el('section', 'ai-summary widget-bare');
+            sec.append(el('div', 'section-title', 'Summary'));
+            if (text) sec.append(el('p', 'ai-summary-text', text));
+            if (followed) sec.append(followed);
+            return sec;
         }
         /* ---------- Markdown ----------
            One renderer for a skill, an answer written as prose and what
@@ -8774,7 +8783,13 @@ Projected Image UK"></textarea>
             /* Title, then the card's own number, then where it came from. The
                source line used to sit between them, so the figure ranked below
                its own provenance and read as an orphan under a caption. */
-            if (opts.title) htxt.append(el('div', 'ct', opts.title));
+            /* A chart's explanation is an info button beside its title (the
+               mix, spec 7), not a line under the plot. */
+            if (opts.title) {
+                const ct = el('div', 'ct', opts.title);
+                if (opts.help) ct.append(infoButton(opts.title, { title: opts.title, body: opts.help }));
+                htxt.append(ct);
+            }
             if (opts.value != null) {
                 const v = el('div', 'cv'); v.append(document.createTextNode(opts.value));
                 if (opts.delta) v.append(changeChip(opts.trend, opts.delta, deltaTone(opts.title, opts.trend, opts.better)));
@@ -8792,7 +8807,7 @@ Projected Image UK"></textarea>
                it was the same black as both lines. */
             if (opts.source) {
                 const cs = el('div', 'cs');
-                cs.append(document.createTextNode('Source: ' + opts.source + (opts.period ? ' \u00b7' : '')));
+                cs.append(document.createTextNode(opts.source + (opts.period ? ' \u00b7' : '')));
                 if (opts.period) cs.append(el('span', 'cs-period', opts.period));
                 htxt.append(cs);
             }
@@ -8947,12 +8962,13 @@ Projected Image UK"></textarea>
                 const uid = 'cg' + (++_chartSeq);
                 const defs = svgEl('defs'); const grad = svgEl('linearGradient', { id: uid, x1: 0, y1: 0, x2: 0, y2: 1 });
                 /* The wash under a single line is that line's own colour, faded from
-                   36% to 4% down the plot: a hint of the measure, not a block. It
-                   was the ramp's fifth step, which is amber since the ramp became
-                   the brand's, and put amber under every teal trend line. */
+                   15% (the strength of --c-area, the mix's area tint) to 2% down
+                   the plot: a hint of the measure, not a block. It was the ramp's
+                   fifth step, which is amber since the ramp became the brand's,
+                   and put amber under every teal trend line. */
                 const washColor = (series[0] && series[0].color) || CH[0];
-                grad.append(svgEl('stop', { offset: '5%', 'stop-color': washColor, 'stop-opacity': '0.36' }));
-                grad.append(svgEl('stop', { offset: '95%', 'stop-color': washColor, 'stop-opacity': '0.04' }));
+                grad.append(svgEl('stop', { offset: '5%', 'stop-color': washColor, 'stop-opacity': '0.15' }));
+                grad.append(svgEl('stop', { offset: '95%', 'stop-color': washColor, 'stop-opacity': '0.02' }));
                 defs.append(grad); svg.append(defs);
                 /* A gap in a series is a GAP, not a zero. Y(null) is Y(0), so
                    every series used to be drawn down to the floor wherever it
@@ -9294,6 +9310,8 @@ Projected Image UK"></textarea>
            showing rather than leaving two different unlabelled figures for the
            same metric on one screen. */
         const rangeLabel = (r) => 'last ' + r + ' months';
+        /* Said once for both position charts (copy plan, pattern 15). */
+        const POSITION_HELP = 'Lower is better. Position 1 is the top of search results.';
         function renderTrendsBlock(box, trends, currency, range, onRange, intro, id) {
             const has = (k) => trends && trends[k] && trends[k].length;
             const bare = !trends || !(has('revenue') || has('orders') || has('sessions') || has('clicks'));
@@ -9305,7 +9323,13 @@ Projected Image UK"></textarea>
             /* A month with no orders has no average: a gap, not a zero. */
             const Vgap = (a) => a.map(p => (p.value == null ? null : +p.value));
             const paint = (host, months, noIntro) => {
-                if (bare) { host.append(el('div', 'empty', 'Trends populate after you run the overview, as orders accrue and Google is connected. Up to 24 months of history are shown here.')); return; }
+                if (bare) {
+                    /* One line and the way on (copy plan, Overview #6). */
+                    let go = null;
+                    if (guideAdmin()) { go = el('button', 'btn'); go.type = 'button'; go.append(ico(I.settings), document.createTextNode('Connect Google')); go.onclick = openSettings; }
+                    host.append(emptyState({ icon: I.trendUp, text: 'No trends yet. Connect Google to add traffic.', action: go }));
+                    return;
+                }
                 const S = (k) => tail(trends[k], months);
                 /* 320 under the full-width hero and 280 in the grid, the depth the
                    reference draws its own plot at. At 220 the WIDEST card on the
@@ -9343,7 +9367,7 @@ Projected Image UK"></textarea>
                    a taller neighbour instead of stretching to 237px of white. */
                 if (has('channels')) {
                     const span = Math.min(24, Math.max(1, ...['sessions', 'revenue', 'orders'].map(k => (trends[k] || []).length)));
-                    const cb = catBars(ga({ title: 'Traffic by channel', source: 'Google Analytics 4', period: rangeLabel(span) + ', whatever the range above', color: CH[0], items: trends.channels, format: fmtCompact }));
+                    const cb = catBars(ga({ title: 'Traffic by channel', source: 'Google Analytics 4', period: rangeLabel(span), color: CH[0], items: trends.channels, format: fmtCompact }));
                     cb.classList.add('chart-top'); g.append(cb);
                 }
 
@@ -9351,7 +9375,7 @@ Projected Image UK"></textarea>
                 if (has('clicks')) { const a = S('clicks'); g.append(trendChart(gsc({ title: 'Search clicks', yUnit: 'Clicks', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Clicks', color: CH[0], values: V(a) }], format: fmtCompact }))); }
                 if (has('impressions')) { const a = S('impressions'); g.append(trendChart(gsc({ title: 'Impressions', yUnit: 'Impressions', value: fmtCompact(sumv(a)), labels: L(a), series: [{ name: 'Impressions', color: CH[0], values: V(a) }], format: fmtCompact }))); }
                 if (has('ctr')) { const a = S('ctr'); g.append(trendChart(gsc({ title: 'Search click-through rate', yUnit: 'CTR %', value: pct(_avg(V(a))), labels: L(a), series: [{ name: 'CTR', color: CH[0], values: V(a) }], format: pct, fitY: true, annotate: false }))); }
-                if (has('position')) { const a = S('position'); g.append(trendChart(gsc({ title: 'Average Google position', yUnit: 'Position', value: num1(_avg(V(a))), labels: L(a), series: [{ name: 'Position', color: CH[0], values: V(a) }], format: num1, fitY: true, area: false, annotate: false, note: 'Lower is better. Position 1 is the top of search results.' }))); }
+                if (has('position')) { const a = S('position'); g.append(trendChart(gsc({ title: 'Average Google position', yUnit: 'Position', value: num1(_avg(V(a))), labels: L(a), series: [{ name: 'Position', color: CH[0], values: V(a) }], format: num1, fitY: true, area: false, annotate: false, help: POSITION_HELP }))); }
                 if (g.children.length) host.append(g);
             };
             /* The heading and every chart under it are one block on the page,
@@ -9371,7 +9395,7 @@ Projected Image UK"></textarea>
             const pct = (n) => (Math.round((+n || 0) * 10) / 10) + '%', num1 = (n) => String(Math.round((+n || 0) * 10) / 10);
             const L = (a) => a.map(p => monthLabel(p.label)), V = (a) => a.map(p => +p.value || 0);
             const paint = (host, months, noIntro) => {
-                if (bare) { host.append(el('div', 'empty', 'Connect Google Search Console to chart search trends. Google provides up to 16 months of history.')); return; }
+                if (bare) { host.append(el('div', 'empty', 'Connect Search Console to see search trends.')); return; }
                 const S = (k) => tail(trends[k], months);
                 const gsc = (o) => Object.assign({ source: 'Google Search Console', period: rangeLabel(months), noIntro: noIntro, height: 280 }, o);
                 const g1 = el('div', 'charts-grid');
@@ -9380,7 +9404,7 @@ Projected Image UK"></textarea>
                 host.append(g1);
                 const g2 = el('div', 'charts-grid');
                 if (has('ctr')) { const a = S('ctr'); g2.append(trendChart(gsc({ title: 'Click-through rate', yUnit: 'CTR %', value: pct(_avg(V(a))), labels: L(a), series: [{ name: 'CTR', color: CH[0], values: V(a) }], format: pct, fitY: true, annotate: false }))); }
-                if (has('position')) { const a = S('position'); g2.append(trendChart(gsc({ title: 'Average position', yUnit: 'Position', value: num1(_avg(V(a))), labels: L(a), series: [{ name: 'Position', color: CH[0], values: V(a) }], format: num1, fitY: true, area: false, annotate: false, note: 'Lower is better. Position 1 is the top of search results.' }))); }
+                if (has('position')) { const a = S('position'); g2.append(trendChart(gsc({ title: 'Average position', yUnit: 'Position', value: num1(_avg(V(a))), labels: L(a), series: [{ name: 'Position', color: CH[0], values: V(a) }], format: num1, fitY: true, area: false, annotate: false, help: POSITION_HELP }))); }
                 if (g2.children.length) host.append(g2);
             };
             /* One block on the page, heading and both chart grids, built here
@@ -9966,8 +9990,7 @@ Projected Image UK"></textarea>
             const items = pageThreads[threadKey(page)] || [];
             if (!items.length) {
                 const sugg = ((data.structured && data.structured.followups) || []).slice(0, 4);
-                if (sugg.length) { thread.append(el('div', 'pchat-hint', 'Suggested questions from this report')); thread.append(followupChips(sugg, q => pageAsk(page, q, data))); }
-                else thread.append(el('div', 'pchat-hint', 'Ask anything about the numbers and recommendations on this page.'));
+                if (sugg.length) { thread.append(el('div', 'pchat-hint', 'Suggested questions')); thread.append(followupChips(sugg, q => pageAsk(page, q, data))); }
                 return;
             }
             items.forEach((t, i) => {
@@ -10146,12 +10169,12 @@ Projected Image UK"></textarea>
         function showOverviewView() {
             if (reportRuns.overview) return;
             if (overviewCache) { renderOverview(overviewCache); return; }
-            renderRunGate('ov-content', { icon: I.grid, title: 'Overview', desc: 'Compute live KPIs and an AI executive summary from your latest orders, customers and traffic.', cta: 'Run overview', note: 'Uses AI credits only when you run it.', onRun: () => loadOverview(true) });
+            renderRunGate('ov-content', { icon: I.grid, title: 'Overview', desc: 'Live figures and an AI summary of the store.', cta: 'Run overview', note: 'Uses AI credits only when you run it.', onRun: () => loadOverview(true) });
         }
         function showSeoView() {
             if (reportRuns.seo) return;
             if (seoCache) { renderSEO(seoCache); return; }
-            renderRunGate('seo-content', { icon: I.search, title: 'SEO', desc: 'Crawl your storefront and fuse Search Console, Analytics and Shopify sales into a money-ranked plan.', cta: 'Run SEO audit', note: 'Uses AI credits only when you run it. Can take up to a minute.', onRun: () => loadSEO(true) });
+            renderRunGate('seo-content', { icon: I.search, title: 'SEO', desc: 'Crawl the store and rank fixes by revenue.', cta: 'Run SEO audit', note: 'Uses AI credits. Takes up to a minute.', onRun: () => loadSEO(true) });
         }
         function showProductsView() {
             if (productPlanRun) return;   // a plan is being built: coming back keeps its loading screen
@@ -10166,11 +10189,8 @@ Projected Image UK"></textarea>
         }
         async function runOverview(box, force) {
             box.innerHTML = '';
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.grid;
-            /* The page's own line from the start, so the header is the same
-               height loading, failed or loaded and nothing below it jumps. */
-            const htext = el('div'); htext.append(el('h2', null, 'Overview'), el('p', null, 'Here’s how your store is doing.'));
-            hero.append(badge, htext); box.append(hero);
+            /* The header alone while it runs: the loader says what is happening. */
+            const hero = pageHead({ view: 'overview', title: 'Overview' }); box.append(hero);
             const t = el('div', 'thinking'); const orb = loader(); t.append(orb, el('span', null, 'Working out live metrics and insights.')); box.append(t);
             try {
                 const data = await api('/api/overview', { fresh: !!force });
@@ -10212,7 +10232,7 @@ Projected Image UK"></textarea>
             const fresh = (alerts || []).filter(a => a.status === 'new');
             if (!fresh.length) return null;
             const wrap = el('div', 'alerts-banner');
-            const head = el('div', 'alerts-head'); head.append(ico(I.warning), document.createTextNode(fresh.length + ' notable change' + (fresh.length > 1 ? 's' : '') + ' since the last scheduled refresh'));
+            const head = el('div', 'alerts-head'); head.append(ico(I.warning), document.createTextNode(fresh.length + ' change' + (fresh.length > 1 ? 's' : '') + ' since the last refresh'));
             const clear = el('button', 'alerts-clear'); clear.textContent = 'Dismiss all'; clear.onclick = () => alertOp({ op: 'clear' });
             head.append(clear); wrap.append(head);
             fresh.slice(0, 8).forEach(a => {
@@ -10293,12 +10313,11 @@ Projected Image UK"></textarea>
                animation starts at all rather than one being cut off part way. */
             const intro = firstPaint('overview'); box.classList.toggle('no-intro', !intro);
             { const ab = alertsBanner(); if (ab) box.append(ab); }
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.grid;
-            const htext = el('div'); htext.append(el('h2', null, 'Overview'), el('p', null, data.structured && data.structured.summary ? data.structured.summary : 'Here’s how your store is doing.'));
-            { const f = followedNote(data.structured); if (f) htext.append(f); }
-            hero.append(badge, htext);
-            hero.append(heroAct(freshLabel(cache.at), refreshBtn(() => loadOverview(true)), refreshAllBtn()));
-            box.append(hero);
+            box.append(pageHead({ view: 'overview', title: 'Overview', live: cache.at, onRefresh: () => loadOverview(true),
+                actions: [refreshAllBtn()] }));
+            /* The AI summary is the page's first section (the mix, spec 8.3). */
+            { const sum = summarySection(data.structured && data.structured.summary, followedNote(data.structured));
+              if (sum) box.append(widget(sum, 'summary', 'full', 'Summary')); }
             { const cs = changesStrip(data.changes, data.changes_since); if (cs) box.append(cs); }
             const ofu = memories.filter(m => m.type === 'followup' && m.status === 'open');
             /* Every block from here to the page chat is a card the grid can
@@ -10330,8 +10349,7 @@ Projected Image UK"></textarea>
                 withSparks(data.metrics, data.trends).forEach((m, i) => box.append(widget(statCard(m, i), wgKpiId(m.label), 'sm', m.label)));
             }
             if (Array.isArray(data.sector_sales) && data.sector_sales.length) {
-                box.append(widget(cardSection('Sales by sector',
-                    'Revenue, orders and average order value by the sector each customer trades in.',
+                box.append(widget(cardSection('Sales by sector', null,
                     sectorSalesTable(data.sector_sales, data.currency)), 'sectors'));
             }
             renderTrendsBlock(box, data.trends, data.currency, ovRange, (v) => { ovRange = v; }, intro, 'trends');
@@ -10366,10 +10384,7 @@ Projected Image UK"></textarea>
         }
         async function runSEO(box) {
             box.innerHTML = '';
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.search;
-            const htext = el('div'); htext.append(el('h2', null, 'SEO'),
-                el('p', null, 'How your store performs across search, traffic and sales, and where to grow revenue.'));
-            hero.append(badge, htext); box.append(hero);
+            const hero = pageHead({ view: 'seo', title: 'SEO' }); box.append(hero);
             const t = el('div', 'thinking');
             t.append(loader(), el('span', null, 'Crawling pages: indexation, structured data, metadata and alt text.'));
             box.append(t);
@@ -10383,13 +10398,8 @@ Projected Image UK"></textarea>
             const data = cache.data; const box = $('seo-content'); box.innerHTML = '';
             const intro = firstPaint('seo'); box.classList.toggle('no-intro', !intro);
             const s = data.structured || {};
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.search;
-            const htext = el('div'); htext.append(el('h2', null, 'SEO'),
-                el('p', null, s.summary || 'How your store performs across search, traffic and sales, and where to grow revenue.'));
-            { const f = followedNote(s); if (f) htext.append(f); }
-            hero.append(badge, htext);
-            hero.append(heroAct(freshLabel(cache.at), refreshBtn(() => loadSEO(true)), refreshAllBtn()));
-            box.append(hero);
+            box.append(pageHead({ view: 'seo', title: 'SEO', live: cache.at, onRefresh: () => loadSEO(true), actions: [refreshAllBtn()] }));
+            { const sum = summarySection(s.summary, followedNote(s)); if (sum) box.append(widget(sum, 'summary', 'full', 'Summary')); }
             { const cs = changesStrip(data.changes, data.changes_since); if (cs) box.append(cs); }
             /* Every block from the score to the page chat is a card the grid can
                move; the header and the changes strip stay fixed at the top and
@@ -10403,7 +10413,7 @@ Projected Image UK"></textarea>
                 const sc = el('div', 'seo-score' + tier);
                 const left = el('div');
                 left.append(el('div', 'num', scored ? String(data.score) : 'n/a'),
-                            el('div', 'out', scored ? 'out of 100, optimisation health score' : data.score_note));
+                            el('div', 'out', scored ? 'out of 100' : data.score_note));
                 sc.append(left);
                 if (scored) {
                     const bar = el('div', 'bar'); const fill = el('i');
