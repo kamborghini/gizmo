@@ -577,17 +577,14 @@ def t_inbox_unread_filters_and_claude_reply():
     ok("rows.sort((a, b) => (b.unread ? 1 : 0) - (a.unread ? 1 : 0))" in SCRIPT,
        "unread rises to the top of the list")
     # The requirement is unchanged - unread must be unmistakable, not a
-    # 100-weight difference. What carries it changed: the row background now
-    # says WHOSE the email is, so unread keeps the edge, the bold sender, the
-    # accented age and the word "New" instead of the tint. Four signals, one of
-    # them a word, which is more than it had reason to need.
-    ok("inset var(--bw-strong) 0 0 var(--border-selected)" in HTML, "unread keeps the edge down its left")
-    unread_rule = CSS.split(".mrow.unread {")[1].split("}")[0]
-    ok("background:" not in unread_rule,
-       "and not the background, which now belongs to whoever claimed it")
-    ok("var(--weight-medium)" in CSS.split(".mrow.unread .mfrom {")[1].split("}")[0],
-       "the sender stays bold")
-    ok("'munread', 'New'" in SCRIPT, "with a word, for anyone who cannot see the tint")
+    # 100-weight difference. Since the mix (spec 8.3) it is carried by the
+    # sender at 600, an 8px teal dot at the row's start, the accented age and
+    # the word "New" for a screen reader; the row is not tinted by its owner.
+    ok("\n        .mrow.unread {" not in CSS, "unread no longer draws a bar down the row's left")
+    ok("var(--weight-semibold)" in CSS.split(".mrow.unread .mfrom {")[1].split("}")[0],
+       "the sender is 600")
+    ok("width: var(--dot-md);" in CSS.split("\n        .munread {")[1].split("}")[0], "with an 8px dot")
+    ok("const u = el('span', 'munread'); u.append(el('span', 'sr-only', 'New'));" in SCRIPT, "and a word, for anyone who cannot see the dot")
     ok("if (mailFilter === 'unread') {" in SCRIPT and "if (!t.unread) return false;" in SCRIPT,
        "unread ignores state: a done email marked unread in Gmail is still findable")
     ok("'/api/mail/read'" in SCRIPT, "read state can be changed from here")
@@ -1530,11 +1527,11 @@ def t_every_status_chip_has_the_same_geometry():
     label was a rounded rectangle in one tab and a capsule in the next. Since
     2026-10-05 (no pills) a label that only displays is a tag, 4px, from one
     recipe; a chip you press is a control, 6px."""
-    for c in ["pill", "mail-order-stage", "lbl-chip", "mcount", "g-badge", "mail-crmchip"]:
+    for c in ["pill", "mail-order-stage", "lbl-chip", "mcount", "g-badge", "mail-crmchip", "mail-owner"]:
         rule = re.search(r"\." + c + r" \{[^}]*\}", HTML, re.S)
         ok(rule, "the .%s rule is still there" % c)
         ok("border-radius: var(--radius-tag)" in rule.group(0), ".%s takes the tag corner" % c)
-    for c in ["fchip", "mail-owner", "mail-claim"]:
+    for c in ["fchip", "mail-claim"]:
         rule = re.search(r"\." + c + r" \{[^}]*\}", HTML, re.S)
         ok("border-radius: var(--radius-control)" in rule.group(0), ".%s is pressed, so it takes the control corner" % c)
     tags = CSS.split("ONE TAG.")[1].split("}")[0]
@@ -3118,8 +3115,8 @@ def t_the_mail_row_is_the_reference_measurement():
     with the card's own padding, and a 0.5px rule, which lands on a device pixel
     on some screens and disappears on others."""
     row = CSS.split(".mrow {")[1].split("}")[0]
-    ok("padding: var(--sp-3)" in row, "12px on every side")
-    ok("border-top: var(--bw-hairline) solid var(--border-default)" in row, "a full hairline in the border ink")
+    ok("padding: var(--sp-2) 0" in row and "min-height: var(--row-h)" in row, "a 44 row, 8 above and below, words on the text edge (the mix)")
+    ok("box-shadow: var(--rule-b-soft)" in row and "border: 0" in row, "a full hairline under it, drawn as a shadow")
     ok("0.5px" not in row, "and not a half-pixel one")
 
 
@@ -3153,7 +3150,7 @@ def t_the_files_card_counts_what_is_actually_there():
     ok("(f.folder_id || '') === filesFolder" in seg, "it counts the files in this folder")
     ok("(f.parent_id || '') === filesFolder" in seg, "and the folders inside it")
     ok("' files match'" in seg, "a search counts its matches instead")
-    ok("Searching every folder" in seg, "and says that is what it is doing")
+    ok("'Results from every folder.'" in seg, "and says that is what it is doing")
     # A crumb trail of one step is the same word the title already carries.
     cr = fn[fn.index("function paintCrumbs() {"):][:1200]
     ok("if (!chain.length) return;" in cr, "no crumb trail at the root")
@@ -4403,10 +4400,10 @@ def t_every_owner_tint_keeps_its_text_readable():
 
     inks = {k: _token(k) for k in ("text-primary", "text-secondary", "text-tertiary")}
     for name in TEAM_TINTS:
-        # .mrow specifically: the same name also styles the 8px presence dot,
-        # which takes the SOLID colour and carries no text, so a contrast floor
-        # does not apply to it.
-        m = re.search(r"\.mrow\.own-" + name + r"\s*\{[^}]*background:\s*var\(--owner-" + name + r"-bg\)", CSS)
+        # The owner TAG specifically (the mix: the row is no longer washed in the owner's tint): the same
+        # name also styles the 8px presence dot, which takes the SOLID colour and carries no text, so a
+        # contrast floor does not apply to it.
+        m = re.search(r"\.mail-owner\.own-" + name + r"\s*\{[^}]*background:\s*var\(--owner-" + name + r"-bg\)", CSS)
         ok(m, "there is a tint for " + name)
         # The tint is DERIVED: the hue at 10% over white. Compute the same mix
         # the browser will, and measure the inks against that.
@@ -4424,24 +4421,19 @@ def t_the_owner_tint_did_not_quietly_take_unreads_signal():
     """Handing the row background to the owner costs unread one of its four
     signals. It has to keep the other three, or a claimed unread email stops
     looking unread - which on a shared inbox means a customer waits."""
-    unread = CSS.split(".mrow.unread {")[1].split("}")[0]
-    ok("background:" not in unread,
-       "unread no longer claims the background: the owner has it")
-    ok("inset var(--bw-strong) 0 0" in unread, "but keeps the bar down its left")
-    ok(".mrow.unread .mfrom" in CSS and "var(--weight-medium)" in
+    ok("\n        .mrow.unread {" not in CSS, "the row is washed in nobody's tint now: the owner is a tag at its end")
+    ok(".mrow.unread .mfrom" in CSS and "var(--weight-semibold)" in
        CSS.split(".mrow.unread .mfrom {")[1].split("}")[0],
-       "and the bold sender, which is what Gmail leans on anyway")
+       "and unread keeps the 600 sender, which is what Gmail leans on anyway")
+    ok("background: var(--teal-500)" in CSS.split(".munread::before {")[1].split("}")[0], "and the teal dot at the row's start")
 
 
 @test
 def t_a_selected_row_still_reads_as_selected_over_a_tint():
     """Selection is transient and deliberate - you are about to act on those
     rows - so it wins over whose they are."""
-    idx_sel = CSS.index(".mrow:is(.selected")
-    idx_own = CSS.index(".own-red")
-    ok(idx_own < idx_sel,
-       "the selected rule comes after the tints, so it overrides rather than "
-       "losing to whichever was written last")
+    ok(".mrow.own-red" not in CSS, "the row itself has no owner tint to lose to (the tint is the owner tag's)")
+    ok(".mrow:is(.selected" in CSS, "and the selected rule is there, a teal wash with its edge")
 
 
 @test
@@ -6892,7 +6884,7 @@ def t_every_report_view_with_several_blocks_names_its_cards():
         if view == "overview":
             ids += ["kpi-*"] if "wgKpiId(m.label)" in src else []
         ok(len(set(ids)) >= 2, "%s names %d cards: %r" % (view, len(set(ids)), ids))
-        ok("heroAct(" in src or "pageHead({" in src or (view == "mail" and "hero.append(heroAct(''))" in src),
+        ok("heroAct(" in src or "pageHead({" in src or (view == "mail" and "mailHero(box)" in src),
            "the %s header has the action slot Customize goes in (pageHead builds it since the mix)" % view)
     ok(len(ov_ids) >= 5, "and the Overview still names its own")
 
@@ -11220,6 +11212,73 @@ def t_the_crm_board_lanes_cards_and_focus_panels_have_no_box():
        "a deal untouched too long keeps its red edge, drawn inside the tile")
     foc = rule(".crm-focus")
     ok("border: 0;" in foc and "border-radius: 0;" in foc and "padding: 0;" in foc and "border: var(--bw-hairline)" not in foc, ".crm-focus has no box")
+
+
+@test
+def t_the_inbox_and_files_wear_the_mix():
+    """Spec 8.3 (Desk) and the copy plan (Inbox, Files): one line under each
+    title, the amber and red rule and the setup behind info buttons, the
+    warning that matters kept as the setup card's line, the address to copy on
+    the card, counts in the card's line, and one-line empty states."""
+    ok("function mailHero(box) {" in SCRIPT and "function renderFiles() {" in SCRIPT and "function renderMail() {" in SCRIPT, "the three functions exist")
+    ok("pageHead({ view: 'mail', title: 'Inbox', line: 'The shared mailbox, with an owner on every email.'" in fn_src("function mailHero(box) {"),
+       "the Inbox header")
+    ok("pageHead({ view: 'files', title: 'Files', line: 'The office file server, from anywhere.' })" in fn_src("function renderFiles() {"),
+       "the Files header")
+    m = fn_src("function renderMail() {")
+    ok("infoButton('Connecting the mailbox'" in m and "'Choose the shared mailbox, not your own account.'" in m and "card.append(r2);" in m,
+       "the setup waits behind its info button, the warning and the address stay")
+    ok("hero.append(heroAct(''))" not in m, "pageHead gave the header its slot")
+    for gone in ("Where each person is working", "Tick a few to claim", "'Every email has an owner. Good.'",
+                 "reachable from anywhere", "Uploads may fail until the R2 keys", "Drag files in to store them, or onto",
+                 "Searching every folder for", "Dragging files in needs a folder", "Nothing here yet. Drag files in",
+                 "Nothing deleted in the last 30 days", "Ask an admin to connect the shared mailbox."):
+        ok(gone not in SCRIPT, "cut: " + gone.strip())
+    for new in ("'An admin needs to connect the shared mailbox.'", "'Results from every folder.'", "'Clear the search to upload here.'",
+                "'No files here yet.'", "'Deleted for good after 30 days.'", "'Storage is not set up yet.'"):
+        ok(new in SCRIPT, "says: " + new)
+
+
+@test
+def t_the_inbox_list_is_hairline_rows_and_an_upload_row_has_no_box():
+    """Carried from the Phase 3 review (spec 3 and 8.3). The Inbox list is hairline rows on the text edge
+    with all their information: the selected row is the teal wash with a 2px teal-line edge (as the open
+    order is), an unread row has its sender at 600 and an 8px teal dot, the owner tint is an owner tag
+    (a 20 tag), and hover and selected fills bleed 8 past the column with box-shadow. A file upload row has no box."""
+    def rule(sel):
+        m = re.search(r"\n        " + re.escape(sel) + r" \{([^}]*)\}", CSS)
+        ok(m is not None, sel + " is a rule at the stylesheet's own indent")
+        return m.group(1) if m else ""
+    ml = rule(".mlist")
+    ok("border: 0;" in ml and "background: none;" in ml and "overflow: visible;" in ml and "container: mlist / inline-size;" in ml,
+       "the list has no box, clips nothing (the bleed is a shadow) and is still the container its rows are laid out by")
+    row = rule(".mrow")
+    ok("padding: var(--sp-2) 0;" in row and "min-height: var(--row-h);" in row and "box-shadow: var(--rule-b-soft);" in row
+       and "border: 0;" in row and "border-top" not in row, "a row is a 44 hairline row on the text edge")
+    bleed = "calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary)"
+    ok(bleed in CSS.split("@media (hover: hover) { .mrow:hover {")[1].split("}")[0], "hover is a fill that bleeds 8 past the column")
+    ok(".mrow:hover::after" not in CSS, "and not a wash laid over the row (the tints it was for are gone)")
+    sel = rule(".mrow:is(.selected, [aria-selected=\"true\"])")
+    ok("background: var(--action-selected);" in sel and "calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected)" in sel
+       and "calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected)" in sel,
+       "selected is the teal wash, bleeding 8, with a 2px teal-line edge, as the open order is")
+    ok("\n        .mrow.unread {" not in CSS, "an unread row no longer carries a bar down its edge")
+    ok("font-weight: var(--weight-semibold)" in rule(".mrow.unread .mfrom"), "an unread sender is 600")
+    mu = rule(".munread")
+    ok("width: var(--dot-md);" in mu and "height: var(--dot-md);" in mu and "order: -1;" in mu,
+       "the unread mark is an 8 dot at the row's start, its word kept for a screen reader")
+    ok("background: var(--teal-500)" in rule(".munread::before") and "border-radius: var(--radius-circle)" in rule(".munread::before"), "and it is teal")
+    ok(".mrow.own-red" not in CSS, "the row is not tinted by its owner")
+    tag = rule(".mail-owner")
+    ok("height: var(--tag-h);" in tag and "border: 0;" in tag and "border-radius: var(--radius-tag);" in tag, "the owner is a 20 tag")
+    for name in ("red", "orange", "yellow", "green", "blue", "purple", "pink", "brown"):
+        ok(re.search(r"\.mail-owner\.own-%s\s*\{ background: var\(--owner-%s-bg\); \}" % (name, name), CSS), "the owner tag takes " + name + "'s tint")
+    ok("function mailOwnerChip(t) {" in SCRIPT, "mailOwnerChip exists")
+    ok("el('span', 'mail-owner' + ownClass(mailColour(t.owner)))" in fn_src("function mailOwnerChip(t) {"), "the tag is built with its owner's class")
+    ok("min-height: var(--control-h-sm);" in rule(".mown-slot"), "the owner column holds one height, whether it shows a 20 tag or the 24 Claim button")
+    up = rule(".files-up")
+    ok("border: 0;" in up and "background: none;" in up and "border-radius: 0;" in up and "box-shadow: var(--rule-b-soft);" in up, "an upload row is a hairline row, no box")
+    ok("box-shadow: inset 0 calc(-1 * var(--bw-hairline)) 0 var(--error);" in rule(".files-up.failed"), "a failed one has a red rule")
 
 
 if __name__ == "__main__":

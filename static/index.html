@@ -3293,9 +3293,19 @@
            the chip under 4:1. So the EDGE carries the shape, the same
            1px --border-strong the Claim button beside it already reads on every
            tint with. Padding drops 1px to hold the measured width. */
-        .mail-owner { display: inline-flex; align-items: center; height: var(--control-h-sm); max-width: 100%;
-            gap: var(--sp-1); font-size: var(--text-xs); border: var(--bw-hairline) solid var(--border-strong);
-            background: var(--surface-sunken); border-radius: var(--radius-control); padding: var(--sp-0-5) var(--sp-2); color: var(--text-secondary); }
+        /* The owner is a TAG (the mix, spec 6): 20 tall, the tag corner, no border, tinted by the owner's
+           team colour (the same tint the row used to be washed in) with the colour's dot beside the name. */
+        .mail-owner { display: inline-flex; align-items: center; height: var(--tag-h); max-width: 100%;
+            gap: var(--sp-1); font-size: var(--text-xs); border: 0;
+            background: var(--surface-sunken); border-radius: var(--radius-tag); padding: 0 var(--sp-2); color: var(--text-secondary); }
+        .mail-owner.own-red    { background: var(--owner-red-bg); }
+        .mail-owner.own-orange { background: var(--owner-orange-bg); }
+        .mail-owner.own-yellow { background: var(--owner-yellow-bg); }
+        .mail-owner.own-green  { background: var(--owner-green-bg); }
+        .mail-owner.own-blue   { background: var(--owner-blue-bg); }
+        .mail-owner.own-purple { background: var(--owner-purple-bg); }
+        .mail-owner.own-pink   { background: var(--owner-pink-bg); }
+        .mail-owner.own-brown  { background: var(--owner-brown-bg); }
         .mail-owner-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .mail-claim { display: inline-flex; align-items: center; justify-content: center; height: var(--control-h-sm);
             border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-primary); color: var(--text-brand);
@@ -3332,19 +3342,17 @@
         .mail-statebar { display: flex; gap: var(--sp-1-5); flex-wrap: wrap; margin: var(--sp-2-5) 0; align-items: center; }
         .mail-labelerr { font-size: var(--text-xs); color: var(--warning); }
         /* ---- the list: an inbox reads as rows, not columns ---- */
-        .mlist { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); background: var(--surface-primary); overflow: hidden;
+        /* The list is hairline rows on the section's text edge, no box (the mix, spec 3 and 8.3). It
+           clips nothing: a hover or selected fill bleeds 8 past the column as a shadow. */
+        .mlist { border: 0; border-radius: 0; background: none; overflow: visible;
             container: mlist / inline-size; }
-        /* The reference's mail row: 12px on every side, a full hairline rather
-           than the half-pixel one (which lands on a device pixel on some
-           screens and vanishes on others), and the row's own text at 14px. */
-        .mrow { display: flex; align-items: center; gap: var(--sp-2-5); padding: var(--sp-3);
-            border-top: var(--bw-hairline) solid var(--border-default); font-size: var(--text-body); cursor: pointer;
+        /* A row is the spec's 44 with a full hairline under it (a box-shadow, not a half-pixel
+           border, which lands on a device pixel on some screens and vanishes on others), its words
+           on the text edge, and its own text at 14px. */
+        .mrow { display: flex; align-items: center; gap: var(--sp-2-5); padding: var(--sp-2) 0; min-height: var(--row-h);
+            border: 0; box-shadow: var(--rule-b-soft); font-size: var(--text-body); cursor: pointer;
             position: relative; }
-        .mrow:first-child { border-top: 0; }
-        .mrow.cursor { box-shadow: var(--ring-action-2); }
-        /* .mlist clips its overflow and the rows fill it edge to edge, so the
-           house ring has to be drawn inside the row or its left and right
-           sides are cut away. */
+        /* The keyboard ring is drawn inside the row, so it is never cut away. */
         .mrow:focus-visible { outline-offset: -2px; }
         /* 16, the size every other tick in the app is drawn at (.fslot input,
            .tm-tabpick input, .sr-opt input). Two areas were a pixel either
@@ -3393,49 +3401,33 @@
         .who-dot.own-purple { background: var(--owner-purple); }
         .who-dot.own-pink   { background: var(--owner-pink); }
         .who-dot.own-brown  { background: var(--owner-brown); }
-        .mrow.own-red    { background: var(--owner-red-bg); }
-        .mrow.own-orange { background: var(--owner-orange-bg); }
-        .mrow.own-yellow { background: var(--owner-yellow-bg); }
-        .mrow.own-green  { background: var(--owner-green-bg); }
-        .mrow.own-blue   { background: var(--owner-blue-bg); }
-        .mrow.own-purple { background: var(--owner-purple-bg); }
-        .mrow.own-pink   { background: var(--owner-pink-bg); }
-        .mrow.own-brown  { background: var(--owner-brown-bg); }
-        /* After the tints on purpose: you are about to act on these rows, so
-           what is selected matters more than whose it is. */
-        .mrow:is(.selected, [aria-selected="true"]) { background: var(--action-selected); }
-        @media (hover: hover) { .mrow:is(.selected, [aria-selected="true"]):hover { background: var(--action-selected); } }
-        /* Hover cannot be a background here. The background says whose the
-           email is, and every tint rule beat the hover, so two thirds of the
-           list answered the pointer with nothing. The wash goes OVER the row
-           instead, which darkens each tint by the same step the reference
-           uses on white and needs no per-tint value. It falls on the ink as
-           well as the ground, and that is what holds the floor: the tightest
-           pair in the row, --text-tertiary on a .mcount chip, reads 4.53:1 hovered
-           against 4.61:1 at rest. Darkening the ground alone would drop it
-           under 4.5. */
-        @media (hover: hover) { .mrow:hover::after { content: ''; position: absolute; inset: 0;
-            background: var(--text-primary); opacity: .025; pointer-events: none; } }
-        /* Unread gave up the background to the owner and keeps the other three
-           signals it always had: the bar, the bold sender, the accented age.
-           The bold sender is what Gmail leans on anyway. */
-        .mrow.unread { box-shadow: inset var(--bw-strong) 0 0 var(--border-selected); }
-        .mrow.unread .mfrom { color: var(--text-primary); font-weight: var(--weight-medium); }
+        /* Whose an email is, is the owner TAG at the row's end (.mail-owner, tinted by the same eight
+           team colours); the row itself is never tinted. Hover and selected are fills that bleed 8
+           past the column with box-shadow, as the order rows' do, and the selected one is the teal
+           wash with its 2px teal-line edge on the outer edge of the bleed, like the open order. */
+        @media (hover: hover) { .mrow:hover { background: var(--surface-secondary);
+            box-shadow: var(--rule-b-soft), calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); } }
+        .mrow:is(.selected, [aria-selected="true"]) { background: var(--action-selected);
+            box-shadow: var(--rule-b-soft), calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected), calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected); }
+        @media (hover: hover) { .mrow:is(.selected, [aria-selected="true"]):hover { background: var(--action-selected);
+            box-shadow: var(--rule-b-soft), calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected), calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected); } }
+        /* The keyboard cursor (j and k) is a ring inside the row, and it wins over the rest. */
+        .mrow.cursor, .mrow.unread.cursor { box-shadow: var(--ring-action-2); }
+        @media (hover: hover) { .mrow.cursor:hover { box-shadow: var(--ring-action-2); } }
+        /* Unread: the sender at 600 and an 8 teal dot at the row's start (the .munread mark), the age
+           accented. The bold sender is what Gmail leans on anyway. */
+        .mrow.unread .mfrom { color: var(--text-primary); font-weight: var(--weight-semibold); }
         .mrow.unread .msubj { color: var(--text-secondary); }
         .mrow.unread .msubj b { font-weight: var(--weight-medium); color: var(--text-secondary); }
         .mrow.unread .mage { color: var(--text-brand); font-weight: var(--weight-medium); }
-        /* Both the cursor ring and the unread bar are single inset shadows on
-           the row, so the one written later won outright and the ring lost.
-           It has to survive: paintMailBody sorts unread to the top, so the
-           first rows j and k reach are exactly these. The ring's left edge is
-           the same 2px accent the bar was, so nothing is given up. */
-        .mrow.unread.cursor { box-shadow: var(--ring-action-2); }
         /* Stale outranks unread on the age. Unclaimed mail is nearly always
            unread, so without this the red the hero paragraph promises, and
            that the Board already paints, could never actually appear here. */
         .mrow.unread .mage.hot { color: var(--error); }
-        .munread { flex: none; font-size: var(--text-xs); font-weight: var(--weight-medium); letter-spacing: normal;
-            color: var(--text-brand); }
+        /* The unread mark is an 8 teal dot at the row's start, ahead of the tick (the mix, spec 8.3).
+           Its word stays in the page for a screen reader (the .sr-only span inside) and is not drawn. */
+        .munread { order: -1; position: relative; flex: none; width: var(--dot-md); height: var(--dot-md); }
+        .munread::before { content: ''; position: absolute; inset: 0; border-radius: var(--radius-circle); background: var(--teal-500); }
         /* The badge is on every row and only blanked when the mail has been
            read: a slot that exists on some rows and not others pushed the
            sender and the subject of every unread row 36px right of every read
@@ -3450,7 +3442,7 @@
            and the Claim button are different widths and a row carries one or
            neither, so the last thing before the age wandered down the list and
            dragged the subject's truncation edge 16px with it. */
-        .mown-slot { flex: 0 0 auto; min-width: 88px; max-width: 150px; display: flex; align-items: center; }
+        .mown-slot { flex: 0 0 auto; min-width: 88px; max-width: 150px; min-height: var(--control-h-sm); display: flex; align-items: center; }
         .mage { flex: 0 0 46px; text-align: right; font-size: var(--text-xs); color: var(--text-tertiary); }
         .mage.hot { color: var(--error); font-weight: var(--weight-medium); }
         .mage.warm { color: var(--warning); font-weight: var(--weight-medium); }
@@ -3587,7 +3579,7 @@
                it costs 22px where the name costs 83. The name is still read
                out, by the technique .disp-opt-sr uses. The board's cards have
                the room, so they keep theirs. */
-            .mrow .mail-owner { padding: var(--sp-0-5) var(--sp-1-5); }
+            .mrow .mail-owner { padding: 0 var(--sp-1-5); }
             .mrow .mail-owner-name { position: absolute; width: 1px; height: 1px;
                 overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
         }
@@ -5283,11 +5275,13 @@
            the toolbar are, and the card's 16px gap is the rhythm: its own 8px
            on top of that made the one gap in the card that was 24. */
         #files-content .files-hint { margin-top: 0; }
-        .files-up { display: flex; align-items: center; gap: var(--sp-2-5); padding: var(--sp-2) var(--sp-4); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); background: var(--surface-primary); margin-bottom: var(--sp-2); font-size: var(--text-body); }
+        /* An upload in progress is a hairline row on the text edge, no box (the mix, spec 3). */
+        .files-up { display: flex; align-items: center; gap: var(--sp-2-5); padding: var(--sp-2) 0; border: 0; border-radius: 0; background: none;
+            box-shadow: var(--rule-b-soft); margin-bottom: 0; font-size: var(--text-body); }
         .files-up .upname { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .files-up .bar { flex: 1 1 60px; height: 5px; border-radius: var(--radius-full); background: var(--surface-sunken); overflow: hidden; }
         .files-up .bar i { display: block; height: 100%; background: var(--fill-mark); border-radius: var(--radius-full); }
-        .files-up.failed { border-color: var(--error); }
+        .files-up.failed { box-shadow: inset 0 calc(-1 * var(--bw-hairline)) 0 var(--error); }
         .files-up .upstate { color: var(--text-tertiary); font-size: var(--text-xs); white-space: nowrap; }
         .files-up.failed .upstate { color: var(--error); white-space: normal; }
         /* A name field is a field, not a row: at flex: 1 1 auto it ran from the
@@ -26234,15 +26228,13 @@ Projected Image UK"></textarea>
             await refreshMailQuiet();
             return r;
         }
+        /* One line; claiming and amber then red wait behind the title's info
+           button, word for word (copy plan, Inbox #1). */
         function mailHero(box) {
-            const hero = el('div', 'ov-hero');
-            const badge = el('div', 'badge'); badge.innerHTML = I.mail;
-            const ht = el('div');
-            ht.append(el('h2', null, 'Inbox'),
-                el('p', null, 'The shared mailbox with an owner on every email. Claim what you are '
+            const hero = pageHead({ view: 'mail', title: 'Inbox', line: 'The shared mailbox, with an owner on every email.',
+                info: infoButton('About the Inbox', { title: 'Inbox', body: 'Claim what you are '
                     + 'dealing with, and reply from Gmail as usual. Unclaimed emails go amber, '
-                    + 'then red.'));
-            hero.append(badge, ht);
+                    + 'then red.' }) });
             box.append(hero);
             return hero;
         }
@@ -26258,7 +26250,12 @@ Projected Image UK"></textarea>
                    its own sizes inline. */
                 const card = el('div', 'card');
                 const head = el('div', 'card-head');
-                head.append(el('h3', 'card-title', 'Connect the shared mailbox'));
+                /* The setup, word for word, behind the title's info button; the
+                   warning that matters stays as the line, and the address to
+                   copy stays on the card (the mix, spec 8.3). */
+                const mct = el('h3', 'card-title', 'Connect the shared mailbox');
+                const mHelp = [];
+                head.append(mct);
                 card.append(head);
                 /* Master OR not-yet-known, as with Restore in Settings: the
                    board can paint before authBoot resolves, and telling the
@@ -26266,12 +26263,14 @@ Projected Image UK"></textarea>
                    it. The server refuses anyone else regardless. */
                 if (!teamMe || teamMe.role === 'master') {
                     head.append(el('p', 'card-desc', d.client
+                        ? 'Choose the shared mailbox, not your own account.' : 'Google sign-in needs setting up first.'));
+                    mHelp.push(d.client
                         ? 'Connect the mailbox whose email the team answers. Google will ask which '
                           + 'account to use: choose the shared mailbox, not your own account. Whichever '
                           + 'account you pick is the one this board reads. Google opens in a new tab, '
                           + 'and nothing is stored until you approve it there.'
                         : 'The server needs GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET set first, '
-                          + 'with the Gmail API enabled in the same Google Cloud project.'));
+                          + 'with the Gmail API enabled in the same Google Cloud project.');
                     if (d.client) {
                         const row = el('div', 'act-row');
                         const go = el('button', 'btn btn-primary btn-sm');
@@ -26305,12 +26304,11 @@ Projected Image UK"></textarea>
                        convenience for the deep links. A client id the parser
                        cannot read must not take the address down with it. */
                     if (d.client && su.redirect_uri) {
-                        card.append(el('div', 'radar-h', 'First time? Two switches in Google'));
-                        card.append(el('p', 'card-sub', su.project
+                        mHelp.push('First time? Two switches in Google.', su.project
                             ? 'These open the Google project this app already uses (project '
                               + su.project + '), so nothing you have already set up changes.'
                             : 'Do these in the Google project this app already uses, so nothing '
-                              + 'you have already set up changes.'));
+                              + 'you have already set up changes.');
                         const proj = su.project ? '?project=' + encodeURIComponent(su.project) : '';
                         const link = (href, text) => { const a = el('a', 'action-link', text); a.href = href; a.target = '_blank'; a.rel = 'noopener'; return a; };
                         const steps = el('ol', 'setup-steps');
@@ -26330,20 +26328,20 @@ Projected Image UK"></textarea>
                             catch (e) { toastError('Select the address and copy it.'); }
                         };
                         r2.append(cp, link('https://console.cloud.google.com/auth/clients' + proj, 'Open your clients'));
-                        s2.append(r2);
                         steps.append(s1, s2);
-                        card.append(steps);
+                        mHelp.push(steps);
+                        /* The address and its Copy stay on the card. */
+                        card.append(r2);
                     }
+                    mct.append(infoButton('Connecting the mailbox', { title: 'Connect the shared mailbox', body: mHelp }));
                 } else {
-                    head.append(el('p', 'card-desc', 'Ask an admin to connect the shared mailbox. '
-                        + 'Once it is linked, every email shows up here with an owner.'));
+                    head.append(el('p', 'card-desc', 'An admin needs to connect the shared mailbox.'));
                 }
                 box.append(card);
                 return;
             }
             /* Connected, the page is cards the grid can move, each spanning the
-               row, so the header gets the action slot Customize goes in. */
-            hero.append(heroAct(''));
+               row; pageHead gave the header the action slot Customize goes in. */
             /* A sync that is failing is not a footnote. It stays a row of its
                own, above everything, in the colour that means stop. It used to
                come after Who is on today, which would leave a fixed block
@@ -26400,7 +26398,6 @@ Projected Image UK"></textarea>
                 const wcard = el('div', 'card');
                 const whead = el('div', 'card-head');
                 whead.append(el('h3', 'card-title', 'Who is on today'));
-                whead.append(el('p', 'card-desc', 'Where each person is working, and how much they are carrying.'));
                 wcard.append(whead, who);
                 box.append(widget(wcard, 'who'));
             }
@@ -26520,8 +26517,7 @@ Projected Image UK"></textarea>
             bar.append(all);
             if (!mailSel.size) {
                 bar.append(el('span', 'mail-bulk-hint',
-                    rows.length + (rows.length === 1 ? ' email' : ' emails')
-                    + '. Tick a few to claim or close them together.'));
+                    rows.length + (rows.length === 1 ? ' email' : ' emails')));
                 host.append(bar);
                 return;
             }
@@ -26676,7 +26672,7 @@ Projected Image UK"></textarea>
                 empty.textContent = mailQ ? 'Nothing matches that search.'
                     : mailFilter === 'done' ? 'Nothing has been marked done yet.'
                     : mailFilter === 'mine' ? 'You are not holding any email right now.'
-                    : mailFilter === 'unassigned' ? 'Every email has an owner. Good.'
+                    : mailFilter === 'unassigned' ? 'Every email has an owner.'
                     : hidden.length ? 'Nothing open. The unread ones are above.'
                     : 'This inbox is clear.';
                 host.append(empty);
@@ -26752,7 +26748,7 @@ Projected Image UK"></textarea>
            message count and the folder tag. Class, never a value: the colour
            comes from the team record and goes through ownClass. */
         function mailOwnerChip(t) {
-            const o = el('span', 'mail-owner');
+            const o = el('span', 'mail-owner' + ownClass(mailColour(t.owner)));
             o.append(el('span', 'who-dot' + ownClass(mailColour(t.owner))),
                      el('span', 'mail-owner-name', t.owner_name || 'Someone'));
             o.title = 'Claimed by ' + (t.owner_name || 'someone on the team');
@@ -26791,7 +26787,7 @@ Projected Image UK"></textarea>
             /* Built on every row and blanked when the mail has been read, so
                the sender and subject columns start at the same x all the way
                down. See .munread.seen. */
-            const u = el('span', 'munread', 'New');
+            const u = el('span', 'munread'); u.append(el('span', 'sr-only', 'New'));
             if (t.unread) u.title = 'Nobody has opened this yet';
             else u.classList.add('seen');
             row.append(u);
@@ -28501,20 +28497,11 @@ Projected Image UK"></textarea>
         function renderFiles() {
             const box = $('files-content'); box.innerHTML = '';
             const d = filesCache;
-            const hero = el('div', 'ov-hero');
-            const badge = el('div', 'badge'); badge.innerHTML = I.folder;
-            const ht = el('div');
-            ht.append(el('h2', null, 'Files'),
-                el('p', null, 'The office file server, reachable from anywhere. Drag files in to '
-                    + 'store them; click a picture or PDF to preview it right here, anything else '
-                    + 'to download. Everything deleted waits in the trash for 30 days before it '
-                    + 'is gone.'));
-            hero.append(badge, ht);
-            /* The two things that change the folder sit on the right of the
-               page header, as the reference's file manager puts them; the
-               browser fills the slot when it builds them. */
-            filesHeroAct = heroAct('');
-            hero.append(filesHeroAct);
+            /* One line (copy plan, Files #1); the trash keeps its 30 days on the
+               Trash tab. The actions that change the folder sit in the header's
+               slot, which the browser fills when it builds them. */
+            const hero = pageHead({ view: 'files', title: 'Files', line: 'The office file server, from anywhere.' });
+            filesHeroAct = hero.querySelector('.ov-hero-act');
             box.append(hero);
             if (!d.configured) {
                 /* No meter for storage that does not exist yet ('0 B of 50 GB
@@ -28522,10 +28509,13 @@ Projected Image UK"></textarea>
                    a settings row's title over an inline-styled 12px paragraph. */
                 const card = el('div', 'card');
                 const head = el('div', 'card-head');
-                head.append(el('h3', 'card-title', 'Connect the storage'));
-                head.append(el('p', 'card-desc', 'Files keeps its storage in a Cloudflare R2 bucket: durable, '
+                const st = el('h3', 'card-title', 'Connect the storage');
+                st.append(infoButton('About the storage', { title: 'Connect the storage', guide: ['files', ''],
+                    body: 'Files keeps its storage in a Cloudflare R2 bucket: durable, '
                     + 'priced in pennies, and the app signs every transfer so nothing is public. '
-                    + 'Three keys in Railway switch it on; the Guide tab has the exact steps.'));
+                    + 'Three keys in Railway switch it on; the Guide tab has the exact steps.' }));
+                head.append(st);
+                head.append(el('p', 'card-desc', 'Storage is not set up yet.'));
                 card.append(head);
                 if (d.setup_error) card.append(el('div', 'msg error', 'Storage answered with an error: ' + d.setup_error));
                 box.append(card);
@@ -28537,8 +28527,8 @@ Projected Image UK"></textarea>
             const bar = el('div', 'bar'); const fill = el('i'); fill.style.width = pct + '%'; bar.append(fill);
             meter.append(bar, el('span', null, fmtBytes(d.used) + ' of ' + fmtBytes(d.quota) + ' used'));
             box.append(meter);
-            if (d.setup_error) box.append(el('div', 'msg error', 'Storage answered with an error: ' + d.setup_error
-                + '. Uploads may fail until the R2 keys in Railway are right.'));
+            if (d.setup_error) box.append(el('div', 'msg error', 'Storage error: ' + d.setup_error
+                + '. Uploads may fail until it is fixed.'));
             box.append(tabStrip([['files', 'Files'], { key: 'trash', label: 'Trash', extra: d.trash.length ? el('span', 'crm-badge', String(d.trash.length)) : null }],
                                 filesSeg, (k) => { filesSeg = k; renderFiles(); }, { label: 'Files sections' }));
             const host = el('div'); box.append(host);
@@ -28555,13 +28545,15 @@ Projected Image UK"></textarea>
                so the list jumped 17px left and lost its border on the way. */
             const tCard = el('div', 'card');
             const tHead = el('div', 'card-head');
-            tHead.append(el('h3', 'card-title', 'Trash'));
-            tHead.append(el('p', 'card-desc', rows.length
-                ? (rows.length === 1 ? '1 file' : rows.length + ' files') + ' (' + fmtBytes(total)
+            /* The consequence stays as the line; the rest is the title's info
+               button, word for word (copy plan, Files #10 and #11). */
+            const tt = el('h3', 'card-title', 'Trash');
+            if (rows.length) tt.append(infoButton('About the trash', { title: 'Trash',
+                body: (rows.length === 1 ? '1 file' : rows.length + ' files') + ' (' + fmtBytes(total)
                     + ') waiting here. Everything is emptied for good 30 days after it was '
-                    + 'deleted; put a file back to keep it, or delete it now to free its space.'
-                : 'Nothing deleted in the last 30 days. Files deleted from the browser wait '
-                    + 'here for that long, so a mistake can be undone.'));
+                    + 'deleted; put a file back to keep it, or delete it now to free its space.' }));
+            tHead.append(tt);
+            if (rows.length) tHead.append(el('p', 'card-desc', 'Deleted for good after 30 days.'));
             if (rows.length) {
                 const tAct = el('div', 'card-act');
                 const emp = el('button', 'btn btn-sm'); emp.append(ico(I.trash), document.createTextNode('Empty the trash'));
@@ -28727,7 +28719,13 @@ Projected Image UK"></textarea>
                card's title carries only the search and the sort. */
             const fCard = el('div', 'card');
             const fHead = el('div', 'card-head');
-            const fTitleEl = el('h3', 'card-title', 'Files');
+            /* The title's words change with the folder and the search; its info
+               button holds how dragging works (copy plan, Files #5). */
+            const fTitleEl = el('h3', 'card-title');
+            const fTitleText = el('span', null, 'Files');
+            fTitleEl.append(fTitleText, infoButton('Moving and uploading files', { title: 'Files', guide: ['files', ''],
+                body: 'Drag files, or whole folders, anywhere on the list to upload them here. '
+                    + 'Drag a file onto a folder, or onto a step of the path above, to move it.' }));
             const fDescEl = el('p', 'card-desc', '');
             fHead.append(fTitleEl, fDescEl);
             const up = el('button', 'btn btn-primary'); up.append(ico(I.upload), document.createTextNode('Upload'));
@@ -29003,28 +29001,23 @@ Projected Image UK"></textarea>
                 if (filesQ) {
                     const ql = filesQ.toLowerCase();
                     const n = Object.values(filesCache.files).filter(f => f.name.toLowerCase().includes(ql)).length;
-                    fTitleEl.textContent = n + (n === 1 ? ' file matches' : ' files match');
-                    fDescEl.textContent = 'Searching every folder for \u201c' + filesQ + '\u201d. '
-                        + 'Clear the search to go back to browsing.';
+                    fTitleText.textContent = n + (n === 1 ? ' file matches' : ' files match');
+                    fDescEl.textContent = 'Results from every folder.';
                 } else {
                     const name = filesFolder && filesCache.folders[filesFolder]
                         ? filesCache.folders[filesFolder].name : 'All files';
-                    fTitleEl.textContent = name;
+                    fTitleText.textContent = name;
                     fDescEl.textContent = (here === 1 ? '1 file' : here + ' files')
-                        + (subs ? ' and ' + (subs === 1 ? '1 folder' : subs + ' folders') : '')
-                        + ' here. Drag files in to store them, or onto a folder to move them.';
+                        + (subs ? ', ' + (subs === 1 ? '1 folder' : subs + ' folders') : '');
                 }
                 /* The sentence under the list describes what is drawn above
                    it. At the root there is no path to drop onto (paintCrumbs
                    draws no trail there), and in a search there is no folder
                    for an upload to land in, so a drop is refused. */
-                const dropTargets = [];
-                if (subs) dropTargets.push('onto a folder');
-                if (filesFolder) dropTargets.push('onto a step of the path above');
-                hintEl.textContent = filesQ
-                    ? 'Dragging files in needs a folder to land in: clear the search to upload here.'
-                    : 'Drag files, or whole folders, anywhere on the list to upload them here.'
-                        + (dropTargets.length ? ' Drag a file ' + dropTargets.join(', or ') + ' to move it.' : '');
+                /* Only a search needs a line: there is no folder for a drop to
+                   land in. How dragging works is the title's info button. */
+                hintEl.textContent = filesQ ? 'Clear the search to upload here.' : '';
+                hintEl.hidden = !filesQ;
                 dragFileId = null;   // a repaint may remove the row being dragged; its dragend never fires
                 // Selection can only reference what is on screen.
                 const live = new Set(Object.keys(filesCache.files));
@@ -29093,7 +29086,9 @@ Projected Image UK"></textarea>
                 folders.forEach(([fid, f]) => list.append(folderRow(fid, f)));
                 files.forEach(([fid, f]) => list.append(fileRow(fid, f, false)));
                 if (!folders.length && !files.length && !filesNewFolder)
-                    list.append(el('div', 'files-empty', 'Nothing here yet. Drag files in, or press Upload.'));
+                    list.append(emptyState({ icon: I.folder, text: 'No files here yet.', action: (() => {
+                        const u = el('button', 'btn'); u.type = 'button'; u.append(ico(I.upload), document.createTextNode('Upload'));
+                        u.onclick = () => fi.click(); return u; })() }));
                 listHost.append(list);
             }
 
