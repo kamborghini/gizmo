@@ -3172,7 +3172,8 @@
            ran past the 380px floor. Equal-height lanes put every one of them
            back on one line, whatever each column holds. */
         .crm-pipeline { align-items: stretch; }
-        .crm-col { min-width: 256px; flex: 1 0 256px; background: var(--surface-secondary); border: var(--bw-hairline) solid var(--border-default);
+        /* A lane is a tint with no outline (the mix, spec 8.3): the fill alone says where it is. */
+        .crm-col { min-width: 256px; flex: 1 0 256px; background: var(--surface-secondary); border: 0;
             border-radius: var(--radius-inset); padding: 0 0 var(--sp-3); min-height: 380px; display: flex; flex-direction: column; }
         .crm-col .crm-col-add { margin-top: auto; }
         /* Above a phone the pipeline's lanes share the board: at 256px each and
@@ -3183,10 +3184,8 @@
         /* Where five lanes (nearly) fit, the board keeps no extra room under
            them for a scrollbar: a lane's own 12px foot takes an overlay bar. */
         @media (min-width: 1101px) { .crm-pipeline { padding-bottom: 0; } }
-        /* Inside a card a lane is told apart by its tint: a hairline round
-           each of five lanes was a box on a box. A drag still lights its edge. */
-        .card .crm-col { border-color: transparent; }
-        .crm-col.dragover { border-color: var(--border-selected); background: var(--surface-sunken); }
+        /* A drag over a lane still lights its edge, as a ring inside it (a lane has no border to recolour). */
+        .crm-col.dragover { box-shadow: inset 0 0 0 var(--bw-strong) var(--border-selected); background: var(--surface-sunken); }
         .crm-col-name { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); line-height: var(--lh-control); padding: var(--sp-3) var(--sp-3) 0;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         /* Two lines' room, so a stage name that wraps at a narrow lane does not
@@ -3207,10 +3206,13 @@
             min-height: var(--control-h-md); padding: 0; line-height: var(--lh-control); }
         .crm-col-add svg { width: var(--icon-sm); height: var(--icon-sm); }
         @media (hover: hover) { .crm-col-add:hover { color: var(--text-primary); background: var(--surface-tertiary); } }
-        .crm-card { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset);
-            padding: var(--sp-4); margin: 0 var(--sp-3) var(--sp-3); box-shadow: var(--shadow-sm); cursor: grab; }
-        @media (hover: hover) { .crm-card:hover { border-color: var(--border-emphasis); } }
-        .crm-card.rotten { background: var(--error-bg); border-color: var(--border-strong); }
+        /* A deal is a white tile on its lane's tint with no border (the mix, spec 8.3): the fill
+           difference separates them. Hover is a ring inside it and the red edge a shadow, so the
+           tile never changes size. */
+        .crm-card { background: var(--surface-primary); border: 0; border-radius: var(--radius-inset);
+            padding: var(--sp-4); margin: 0 var(--sp-3) var(--sp-3); box-shadow: none; cursor: grab; }
+        @media (hover: hover) { .crm-card:hover { box-shadow: inset 0 0 0 var(--bw-hairline) var(--border-emphasis); } }
+        .crm-card.rotten { background: var(--error-bg); box-shadow: inset var(--bw-marker) 0 0 var(--error); }
         .crm-card-t { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); overflow-wrap: anywhere; }
         .crm-card-who { font-size: var(--text-body); color: var(--text-tertiary); margin-top: var(--sp-px); }
         .crm-card-bot { display: flex; align-items: center; gap: var(--sp-1-5); margin-top: var(--sp-2); font-size: var(--text-body); }
@@ -3677,7 +3679,8 @@
         .crm-bar-track { flex: 1; background: var(--surface-sunken); border-radius: var(--radius-full); height: 16px; }
         .crm-bar-fill { height: 100%; border-radius: var(--radius-full); background: var(--fill-mark); min-width: 2px; }
         .crm-bar-val { width: 90px; flex: none; font-weight: var(--weight-medium); }
-        .crm-focus { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); padding: var(--sp-3); margin: var(--sp-3) 0; }
+        /* A group inside a CRM window has no box of its own (the mix, spec 3): a window is boxed as a whole. */
+        .crm-focus { border: 0; border-radius: 0; padding: 0; margin: var(--sp-3) 0; }
         .crm-focus.plain { border: 0; padding: 0; }
         .crm-hist-row { padding: var(--sp-2) 0; border-bottom: var(--bw-hairline) solid var(--border-default); font-size: var(--text-body); overflow-wrap: anywhere; }
         .crm-hist-row:last-child { border-bottom: 0; }
@@ -3689,9 +3692,8 @@
            tabbed row was focusable with nothing to show for it. Drawn INSIDE
            the row instead, the way the inbox's keyboard cursor already is. */
         .crm-list-row:focus-visible { outline: none; box-shadow: var(--ring-action-2); }
-        /* Rotting is its own signal: a red left edge on the whole card, never
+        /* Rotting is its own signal: a red left edge on the whole card (the rule above), never
            to be confused with an overdue activity's red icon or a red label dot. */
-        .crm-card.rotten { border-left: var(--bw-marker) solid var(--error); }
         /* Tinted, not white-on-colour: an amber or grey label must still read. */
         .crm-chip { display: inline-flex; align-items: center; height: var(--tag-h); font-size: var(--text-xs);
             font-weight: var(--weight-medium); border-radius: var(--radius-tag); padding: 0 var(--sp-2);
@@ -3724,14 +3726,10 @@
            twice. */
         /* The empty pipeline's welcome is words on the card, not a box inside it:
            the in-card label over a line of prose, then the board. */
-        .crm-onboard { margin: 0 0 var(--sp-4); text-align: left; max-width: var(--measure); }
-        .crm-onboard h3 { margin: 0 0 var(--sp-1); font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); }
-        .crm-onboard p { margin: 0; font-size: var(--text-body); color: var(--text-secondary); line-height: var(--lh-control); }
         /* Idle and armed measure the same, so ticking a row never moves the
            table under the pointer: 28px is the armed height, the small button
            the card header and the toolbar above it are both built from. */
         .crm-selbar { min-height: var(--control-h-md); }
-        .crm-selbar-hint { font-size: var(--text-xs); color: var(--text-tertiary); }
         .crm-act-row .crm-mid { flex: 1; min-width: 0; cursor: pointer; }
         /* The contacts table's tick is the same gesture as the activity row's,
            so it is drawn here rather than hand-sized at the call site. Both are
@@ -23720,17 +23718,13 @@ Projected Image UK"></textarea>
             const d = crmCache;
             // The house header every other tab wears: without it the segment bar
             // sat flush under the top bar and the whole tab read as unfinished.
-            const hero = el('div', 'ov-hero');
-            const badge = el('div', 'badge'); badge.innerHTML = I.briefcase;
-            const ht = el('div');
-            const cTitle = el('h2', null, 'CRM');
-            cTitle.append(el('span', 'beta-tag', 'Beta'));
-            ht.append(cTitle,
-                el('p', null, 'Deals, activities and contacts for the sales desk. Every open deal '
+            /* One line; the amber and red key waits behind the title's info
+               button, word for word (copy plan, CRM #1). pageHead puts Beta by
+               the title, as for every tab in BETA_TABS. */
+            box.append(pageHead({ view: 'crm', title: 'CRM', line: 'Deals, activities and contacts for the sales desk.',
+                info: infoButton('About the CRM', { title: 'CRM', body: 'Every open deal '
                     + 'should carry a next activity; cards wearing the amber warning are the ones '
-                    + 'with nothing scheduled, and a red edge means a deal has sat untouched too long.'));
-            hero.append(badge, ht);
-            box.append(hero);
+                    + 'with nothing scheduled, and a red edge means a deal has sat untouched too long.' }) }));
             const count = (n) => n > 0 ? el('span', 'crm-badge', String(n)) : null;
             const seg = tabStrip([{ key: 'leads', label: 'Leads', extra: count(d.new_leads) }, ['deals', 'Deals'],
                                   { key: 'activities', label: 'Activities', extra: count(d.badge) },
@@ -24054,8 +24048,6 @@ Projected Image UK"></textarea>
                 dealsTitle.textContent = n.toLocaleString() + ' ' + noun + (n === 1 ? '' : 's');
             };
             head.append(dealsTitle);
-            head.append(el('p', 'card-desc', 'Everything the desk is working on. The board groups '
-                + 'the open ones by stage; the list ranks them by what moved last.'));
             const act = el('div', 'card-act');
             const add = el('button', 'btn btn-sm btn-primary'); add.append(ico(I.plus), document.createTextNode('Deal'));
             add.onclick = () => crmDealForm();
@@ -24199,17 +24191,15 @@ Projected Image UK"></textarea>
             });
             if (!deals.length && !crmQ && !crmLabelF && !crmOwnerF) {
                 /* A brand-new desk gets its bearings before five empty columns. */
-                const ob = el('div', 'crm-onboard');
-                ob.append(el('h3', null, 'An empty pipeline is a fresh start'));
-                const p = el('p');
-                p.append(document.createTextNode('Add your first deal, convert an enquiry from the '
-                    + 'Leads inbox, or rename the stages to your own process under '));
-                const pl = actionLink('miss-open', 'Pipeline');
+                /* One line and the two ways on (copy plan, CRM #5). Neither is a
+                   second primary: the card head's '+ Deal' is the one. */
+                const acts = el('div', 'act-row');
+                const nd = el('button', 'btn'); nd.type = 'button'; nd.append(ico(I.plus), document.createTextNode('Deal'));
+                nd.onclick = () => crmDealForm();
+                const pl = el('button', 'btn'); pl.type = 'button'; pl.append(ico(I.settings), document.createTextNode('Pipeline'));
                 pl.onclick = crmStageEditor;
-                p.append(pl, document.createTextNode('.'));
-                ob.append(p);
-                /* No second 'add' button: the card head's '+ Deal' is the one primary. */
-                host.append(ob);
+                acts.append(nd, pl);
+                host.append(emptyState({ icon: I.briefcase, text: 'No deals yet.', action: acts }));
             }
             host.append(board);
             if (!deals.length && (crmQ || crmLabelF || crmOwnerF)) {
@@ -25073,8 +25063,6 @@ Projected Image UK"></textarea>
             const total = Object.keys(crmCache.activities || {}).length;
             head.append(el('h3', 'card-title',
                 total.toLocaleString() + (total === 1 ? ' activity' : ' activities')));
-            head.append(el('p', 'card-desc', 'The calls, emails and meetings the desk owes. '
-                + 'Overdue first; ticking one off takes it out of the list and into Done.'));
             const cAct = el('div', 'card-act');
             const add = el('button', 'btn btn-sm btn-primary'); add.append(ico(I.plus), document.createTextNode('Activity'));
             add.onclick = () => crmActivityForm({}, renderCRM);
@@ -25215,9 +25203,6 @@ Projected Image UK"></textarea>
             const total = Object.keys(people ? crmCache.persons : crmCache.orgs).length;
             head.append(el('h3', 'card-title',
                 total.toLocaleString() + (people ? (total === 1 ? ' person' : ' people') : (total === 1 ? ' organisation' : ' organisations'))));
-            head.append(el('p', 'card-desc', people
-                ? 'Everyone the desk deals with: their organisation, how to reach them, and how much is open.'
-                : 'The companies behind the people, with where they are and how much is open.'));
             const act = el('div', 'card-act');
             [...bar.children].forEach(n => act.append(n));
             head.append(act);
@@ -25259,11 +25244,6 @@ Projected Image UK"></textarea>
                    Now it is always on the page and only its CONTENTS change. */
                 const bar2 = master ? el('div', 'lbl-toolbar crm-selbar') : null;
                 if (bar2) list.append(bar2);
-                if (bar2 && !crmContactSel.size) {
-                    bar2.append(el('span', 'crm-selbar-hint',
-                        'Tick rows to delete ' + (people ? 'people' : 'organisations')
-                        + ' together.'));
-                }
                 if (bar2 && crmContactSel.size) {
                     const del = el('button', 'btn btn-sm');
                     del.append(ico(I.trash), document.createTextNode(
@@ -25723,10 +25703,11 @@ Projected Image UK"></textarea>
             const card = el('div', 'card');
             const head = el('div', 'card-head');
             const total = Object.keys(crmCache.leads || {}).length;
-            head.append(el('h3', 'card-title',
-                total.toLocaleString() + (total === 1 ? ' lead' : ' leads')));
-            head.append(el('p', 'card-desc', 'A lead is an enquiry that is not yet a deal: it waits '
-                + 'here so the pipeline holds only real, qualified work. Convert it when it firms up.'));
+            /* A definition, so the title's info button (copy plan, CRM #2). */
+            const lt = el('h3', 'card-title', total.toLocaleString() + (total === 1 ? ' lead' : ' leads'));
+            lt.append(infoButton('What a lead is', { title: 'Leads', body: 'A lead is an enquiry that is not yet a deal: it waits '
+                + 'here so the pipeline holds only real, qualified work. Convert it when it firms up.' }));
+            head.append(lt);
             const act = el('div', 'card-act');
             const add = el('button', 'btn btn-sm btn-primary'); add.append(ico(I.plus), document.createTextNode('Lead'));
             add.onclick = () => crmLeadForm();
@@ -26058,8 +26039,11 @@ Projected Image UK"></textarea>
             function bars(title, desc, rows, fmt, empty) {
                 const box2 = el('div', 'card');
                 const bh = el('div', 'card-head');
-                bh.append(el('h3', 'card-title', title));
-                bh.append(el('p', 'card-desc', desc));
+                /* A counting rule is the title's info button; descriptions that
+                   restated the title went (copy plan, CRM #11 to #15). */
+                const bt = el('h3', 'card-title', title);
+                if (desc) bt.append(infoButton(title, { title: title, body: desc }));
+                bh.append(bt);
                 /* The bars go in a body of their own rather than straight into
                    the card: the card's 16px gap is the rhythm between its
                    BLOCKS, and applied to twelve bar rows it turned a chart into
@@ -26079,7 +26063,7 @@ Projected Image UK"></textarea>
                 });
                 /* Each chart says what fills it: wins, close dates, stages,
                    losses or done activities are not the same wait. */
-                if (!rows.length) body.append(el('div', 'empty', empty || 'Nothing to chart yet. This fills in as deals are won and lost.'));
+                if (!rows.length) body.append(el('div', 'empty', empty || 'Nothing to chart yet.'));
                 charts.append(box2);
                 /* The BODY, so a caller's footnote lands under the bars it is
                    about rather than in the card's block rhythm. */
@@ -26090,9 +26074,9 @@ Projected Image UK"></textarea>
             /* Deals won over time: the classic monthly view. */
             const byMonth = {};
             won.forEach(x => { const k = (x.won_at || '').slice(0, 7); if (k) byMonth[k] = (byMonth[k] || 0) + (x.value || 0); });
-            bars('Won by month', 'What closed, summed into the month it was won.',
+            bars('Won by month', null,
                 Object.keys(byMonth).sort().slice(-12).map(k => [niceMonth(k), Math.round(byMonth[k])]), crmMoney,
-                'Nothing won yet. This fills in as deals are marked won.');
+                'No deals won yet.');
             /* The forecast Pipedrive sells separately: open deals by their
                expected close month, both the raw sum and the weighted one. */
             const fc = {};
@@ -26104,13 +26088,13 @@ Projected Image UK"></textarea>
                 }
             });
             const noDate = open.filter(x => !x.expected_close).length;
-            const fcBox = bars('Expected to close', 'Open deals, in the month they are expected to land.',
+            const fcBox = bars('Expected to close', null,
                 Object.keys(fc).sort().slice(0, 8)
                 .map(k => [niceMonth(k), Math.round(fc[k][0])]), crmMoney,
-                'No open deal has an expected close date from this month on.');
+                'No expected close dates ahead.');
             if (noDate) fcBox.append(el('div', 'crm-sub',
                 noDate + ' open ' + (noDate === 1 ? 'deal has' : 'deals have')
-                + ' no expected close date, so ' + (noDate === 1 ? 'it' : 'they') + ' cannot be forecast.'));
+                + ' no close date.'));
             /* Funnel: a won deal counts as having completed every stage. */
             const idx = {}; d.stages.forEach((s, i) => idx[s.id] = i);
             const funnel = d.stages.map((s, i) => {
@@ -26119,19 +26103,19 @@ Projected Image UK"></textarea>
                 return [s.name, reached];
             });
             bars('How far deals get', 'How many deals have reached each stage. A win counts as every stage.', funnel,
-                null, 'No pipeline stages yet. This fills in once the pipeline has stages.');
+                null, 'No pipeline stages yet.');
             const reasons = {};
             lost.forEach(x => { const k = x.lost_reason || 'No reason given'; reasons[k] = (reasons[k] || 0) + 1; });
-            bars('Why deals are lost', 'The reason recorded when each deal was marked lost.',
+            bars('Why deals are lost', null,
                 Object.entries(reasons).sort((a, b) => b[1] - a[1]), null,
                 'No deal has been marked lost yet.');
             const cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
             const doneCounts = {};
             Object.values(d.activities).filter(a => a.done && (a.done_at || '') >= cutoff)
                 .forEach(a => { doneCounts[a.type] = (doneCounts[a.type] || 0) + 1; });
-            bars('Activities completed, last 30 days', 'What the desk actually got done, by kind.',
+            bars('Activities completed, last 30 days', null,
                 CRM_TYPES.map(([k, lab]) => [lab, doneCounts[k] || 0]).filter(r => r[1] > 0), null,
-                'No activity was marked done in the last 30 days.');
+                'Nothing done in the last 30 days.');
         }
 
         /* ==================================================================
