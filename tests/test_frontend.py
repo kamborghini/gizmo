@@ -4733,8 +4733,12 @@ def t_escape_closes_the_dropdown_and_never_the_modal_behind_it():
 @test
 def t_the_keyboard_highlight_looks_exactly_like_the_mouse_one():
     """Two highlights that differ by a shade read as two different states."""
-    ok(re.search(r"\.crm-ta-drop button:hover[^{]*\.crm-ta-drop button\.on[^{]*\{", CSS),
-       "the keyboard highlight shares the hover rule rather than inventing a colour")
+    # Since the mix (2026-10-06) a hover lives in @media (hover: hover), so the
+    # two are two rules; they must still paint exactly the same thing.
+    on = re.search(r"\.crm-ta-drop button\.hot, \.crm-ta-drop button\.on \{([^}]*)\}", CSS)
+    hov = re.search(r"\.crm-ta-drop button:hover \{([^}]*)\}", CSS)
+    ok(on and hov and on.group(1).strip() == hov.group(1).strip(),
+       "the keyboard highlight paints exactly what the hover paints rather than inventing a colour")
 
 
 @test
@@ -10294,6 +10298,22 @@ def t_a_switch_is_a_track_and_its_word():
     ok("function switchBtn(label, on, onToggle) {" in SCRIPT, "a switch can be built in the script")
     fn = fn_src("function switchBtn(label, on, onToggle) {")
     ok("setAttribute('role', 'switch')" in fn and "setAttribute('aria-checked'" in fn and "el('span', 'sw')" in fn, "and says its state")
+
+
+@test
+def t_hover_is_only_for_a_pointer_that_hovers():
+    """Spec 4.6 and principle 6: a touch screen keeps :hover after a tap, so a
+    tapped row or button stayed lit. Every hover rule lives inside
+    @media (hover: hover); pressed is one step darker than hover on every
+    device; focus is a 2px teal-line ring 2 off the edge."""
+    outside = [s for s, b in _rules(CSS) if ":hover" in s and "@media (hover: hover)" not in s]
+    ok(not outside, "%d hover rules outside @media (hover: hover): %s" % (len(outside), outside[:5]))
+    ok(CSS.count("@media (hover: hover)") >= 80, "and they are all still there, gated")
+    g = CSS.split(":is(button, select, input, textarea, summary, [role=\"button\"], .toggle,\n            [tabindex], .convos):focus-visible {")[1].split("}")[0]
+    ok("outline: var(--focus-outline); outline-offset: var(--sp-0-5);" in g, "focus sits 2 off the edge")
+    for sel, want in ((".btn:active {", "var(--press)"), (".dmenu-item:active {", "var(--press)"), (".nav-item:active {", "var(--chrome-press)"),
+                      (".topbar-search:active {", "var(--press-fill)"), (".btn-primary:active {", "var(--action-active)")):
+        ok(want in CSS.split(sel)[1].split("}")[0], sel + " presses to " + want)
 
 
 if __name__ == "__main__":
