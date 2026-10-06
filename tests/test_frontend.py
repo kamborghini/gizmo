@@ -9875,7 +9875,12 @@ def t_an_explanation_waits_behind_an_info_button():
     for part in ("el('button', 'info')", "b.setAttribute('aria-label', label)", "b.setAttribute('aria-haspopup', 'dialog')",
                  "dropPanel(b, (box) => {", "box.classList.add('ipop')", "'More in the Guide'", "openGuideAt(o.guide[0], o.guide[1] || '')"):
         ok(part in fn, "infoButton: " + part)
-    ok("if (o.info) h.append(o.info);" in fn_src("function pageHead(o) {"), "a page title can carry one")
+    ok("function pageHead(o) {" in SCRIPT, "the page header builder exists")
+    ph = fn_src("function pageHead(o) {")
+    ok("row.append(h, o.info)" in ph and "h.append(o.info)" not in ph,
+       "a page title can carry one, beside the heading and not inside it: the heading's name stays its title, not 'Liability Beta About Liability'")
+    ok("\n        .ph-title { display: flex;" in CSS and "\n        .ph-title > .info {" in CSS,
+       "and a rule keeps the glyph on the title's first line, 8 after the title and its Beta")
     pop = CSS.split("\n        .dpanel.ipop {")[1].split("}")[0]
     ok("padding: var(--pop-pad)" in pop and "width: var(--pop-w)" in pop, "the popover is 16 inside, one width")
     eq(_token_raw("pop-w"), "360px", "--pop-w")
@@ -9890,6 +9895,65 @@ def t_an_explanation_waits_behind_an_info_button():
     base = CSS.split("\n        .info {")[1].split("}")[0]
     ok("display: none" in base and "@media screen { .info { display: inline-grid; } }" in CSS,
        "an info button shows on a screen only, so a report printed to PDF never carries one beside its title")
+
+
+@test
+def t_a_tab_row_keeps_its_rule_and_its_gutter_at_every_width():
+    """Review of the shared parts (6 October 2026, fix round 1). Three faults in
+    the first cut of the tab rows: (1) on a phone the Finance strip shared one
+    nowrap line with its stamp and Refresh and was squeezed to about 156 wide,
+    cutting "Reconciliation"; (2) the strip's own box runs 8 past the text for
+    the focus box, so a strip in a section drew its hairline 8 past the text at
+    each end and CRM's admin row (tabs plus a link) drew a rule only as wide as
+    its strip; (3) the Finance strip took its 8 back with no padding, so the
+    focus box was clipped on the first and last tab."""
+    # (1) the phone row: the stamp and buttons first, the strip on the line under with the row's rule beneath it
+    ok("@media (max-width: 640px) {\n            .page-tabs { flex-wrap: wrap; row-gap: var(--sp-2); }" in CSS,
+       "at 640 and under the Finance row wraps")
+    ok(".page-tabs-end { order: -1; flex: 1 1 100%; margin-left: 0; justify-content: space-between; }" in CSS,
+       "with the stamp and buttons on the first line")
+    ok(".page-tabs > .tabs { flex: 1 1 100%; min-height: var(--row-h); }" in CSS,
+       "and the strip alone on the line under them, a 44 line, so the rule sits under the tabs")
+    # (3) the Finance strip's focus room
+    ok("\n        .page-tabs > .tabs { margin: 0 calc(-1 * var(--sp-2)); padding: 0 var(--sp-2); max-width: none;" in CSS,
+       "the Finance strip keeps 8 of room at each end for the focus box and takes it back, so the words stay on the gutter")
+    # (2) a strip in a section, and CRM's admin row
+    strip = ".card > .tabs { max-width: none; box-shadow: none;"
+    ok(strip in CSS, "a strip in a section draws no box-shadow rule along its wider box")
+    ok("center bottom / calc(100% - 2 * var(--sp-2)) var(--bw-hairline) no-repeat" in CSS.split(strip)[1].split("}")[0]
+       if strip in CSS else False, "its hairline runs from the text edge to the text edge, 8 in from each end of the box")
+    seg = ".ov-wrap > .seg-row:has(> .tabs) { flex-wrap: nowrap; gap: var(--sp-6); min-height: var(--row-h); box-shadow: var(--rule-b);"
+    ok(seg in CSS, "CRM's tab row with its link is the same 44 row on a full-width rule as the Finance row")
+    ok("margin-inline: calc(-1 * var(--wrap-pad)); padding-inline: var(--wrap-pad); }" in CSS.split(seg)[1][:200]
+       if seg in CSS else False, "running edge to edge with its words on the gutter")
+    ok(".seg-row > .tabs { margin: 0 calc(-1 * var(--sp-2)); padding: 0 var(--sp-2); max-width: none; box-shadow: none;" in CSS,
+       "its strip gives up its own rule")
+    ok(".seg-row:has(> .tabs) > :not(.tabs) { order: -1; flex: none; margin-left: auto; }" in CSS
+       and ".ov-wrap > .seg-row:has(> .tabs) { flex-wrap: wrap; row-gap: var(--sp-2); }" in CSS,
+       "and on a phone its link takes the first line at the right, as the Finance stamp does")
+
+
+@test
+def t_a_disabled_or_danger_button_keeps_one_colour_and_the_old_fields_are_on_the_recipe():
+    """Review of the shared parts (6 October 2026, fix round 1). The 16 icon
+    inherits ink-2 from `.btn .ic`, which beat the button's own colour, so a
+    disabled or danger button showed a mismatched icon. And `.psel` (Products'
+    selects) and `.sk-input` / `.sk-textarea` (the Skills and Memory editors) still
+    wore the old 14px field with a --border-default edge and no lift."""
+    base = ".btn .ic { color: var(--text-secondary); }"
+    fix = '.btn:is([disabled], :disabled, [aria-disabled="true"], .btn-danger) .ic { color: inherit; }'
+    ok(base in CSS and fix in CSS, "a disabled or danger button hands its own colour to its icon")
+    ok(CSS.index(fix) > CSS.index(base), "after the rule it overrides")
+    ok("\n        .psel { border-radius: var(--radius-field); padding: var(--control-pad-y) var(--sp-3); font-size: var(--text-body); min-height: var(--control-h); }" in CSS,
+       "a Products select is the 13/20 32 field with 12 each side")
+    ok(re.search(r"\n        \.sk-input, \.sk-textarea \{[^}]*\}", CSS) is not None, "the editor field rule is there")
+    rule = re.search(r"\n        \.sk-input, \.sk-textarea \{[^}]*\}", CSS).group(0) if re.search(r"\n        \.sk-input, \.sk-textarea \{[^}]*\}", CSS) else ""
+    ok("border-default" not in rule and "border:" not in rule and "--text-sm" not in rule and "background" not in rule,
+       "an editor field carries no edge, ink or size of its own: the one recipe (line-ctl edge, 13, lift, the focus ring) applies")
+    ok("min-height: var(--control-h)" in rule and "padding: var(--control-pad-y) var(--sp-3)" in rule, "and it is 32 tall with 12 each side")
+    ok(".disp-boxedit > select, .disp-boxedit > input { height: var(--control-h); box-sizing: border-box; }" in CSS
+       and "\n        .disp-boxedit > select.psel { min-width: 168px; }" in CSS,
+       "the dispatch box select is a 32 field with its own chevron room, not a 36 with 8 each side")
 
 
 if __name__ == "__main__":

@@ -460,13 +460,22 @@
             min-height: var(--row-h); box-shadow: var(--rule-b);
             margin: 0 calc(-1 * var(--wrap-pad)) var(--sp-7); padding: 0 var(--wrap-pad); }
         .page-tabs > .tabs { margin-bottom: 0; }
-        .page-tabs > .tabs { margin: 0; padding: 0; box-shadow: none; align-self: stretch; min-height: 0; }
+        /* The strip's own box runs 8 past the gutter at each end, so the focus
+           box drawn round a word has room and scrolling does not clip it on the
+           first and last tab: its padding takes the 8 back, so the words stay
+           on the gutter. */
+        .page-tabs > .tabs { margin: 0 calc(-1 * var(--sp-2)); padding: 0 var(--sp-2); max-width: none; box-shadow: none; align-self: stretch; min-height: 0; }
         .page-tabs .spacer { flex: 1 1 auto; }
         .page-tabs-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--control-gap); }
-        /* On a phone, when the stamp and its buttons take a line of their own,
-           the stamp starts at the page edge and the buttons sit at the right:
-           the layout the page header's own rail has there. */
-        @media (max-width: 640px) { .page-tabs-end { flex: 1 1 100%; margin-left: 0; justify-content: space-between; } }
+        /* On a phone the stamp and its buttons take the row's first line (the
+           stamp at the page edge, the buttons at the right: the layout the page
+           header's own rail has there) and the strip keeps the line under them,
+           the whole row's rule beneath the tabs. In one nowrap row the strip
+           was squeezed to about 156 wide and cut "Reconciliation". */
+        @media (max-width: 640px) {
+            .page-tabs { flex-wrap: wrap; row-gap: var(--sp-2); }
+            .page-tabs-end { order: -1; flex: 1 1 100%; margin-left: 0; justify-content: space-between; }
+            .page-tabs > .tabs { flex: 1 1 100%; min-height: var(--row-h); } }
         .page-tabs .updated { font-size: var(--text-xs); color: var(--text-tertiary); }
         /* One courier per row, two across where there is room: fourteen
            carriers in a single column is a scroll, and in four columns the
@@ -655,6 +664,8 @@
             transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease); min-height: var(--control-h); }
         .btn svg { width: var(--icon-md); height: var(--icon-md); }
         .btn .ic { color: var(--text-secondary); }
+        /* A button that is not ink (disabled, danger) carries its own colour to its icon. */
+        .btn:is([disabled], :disabled, [aria-disabled="true"], .btn-danger) .ic { color: inherit; }
         .btn:hover { background: var(--surface-tertiary); }
         .btn:active { background: var(--press); }
         .btn[aria-expanded="true"] { background: var(--surface-tertiary); }
@@ -855,6 +866,12 @@
         /* A button that opens words is for a screen: a report printed to PDF
            carries none, wherever the builder put it (a title, a section head). */
         @media screen { .info { display: inline-grid; } }
+        /* A title with its info button: the glyph sits on the title's first line,
+           8 after the title and its Beta. The button is not inside the heading,
+           so the heading's name stays its title. */
+        .ph-title { display: flex; align-items: flex-start; gap: var(--sp-2); }
+        .ph-title > h2 { min-width: 0; }
+        .ph-title > .info { margin-block: calc((var(--lh-title) - var(--control-h-sm)) / 2) 0; }
         /* Above a phone the rail kept its full width and the page's intro
            gave way: at 768 on a tablet Overview's sentence was a column 122px
            wide, SEO's 71px and Size list's 56px, and the rail's last button
@@ -1568,7 +1585,7 @@
         .ptools { display: flex; flex-direction: column; gap: var(--sp-3); margin-bottom: var(--sp-3); }
         .ptools .row1 { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
         .ptools .grow { flex: 1; min-width: 200px; }
-        .psel { border-radius: var(--radius-field); padding: var(--control-pad-y) var(--sp-2-5); font-size: var(--text-sm); min-height: var(--control-h); }
+        .psel { border-radius: var(--radius-field); padding: var(--control-pad-y) var(--sp-3); font-size: var(--text-body); min-height: var(--control-h); }
         /* .psel's padding shorthand beat the select rule's room for the
            caret, so a .psel select drew its caret over its own words. */
         select.psel { cursor: pointer; padding-right: var(--chevron-room); } .pnum { width: 110px; }
@@ -1971,7 +1988,9 @@
         .sk-form-title { font-size: var(--text-sm); font-weight: var(--weight-medium); margin: 0 0 var(--sp-2); }
         .sk-field { display: block; margin-bottom: var(--sp-3); }
         .sk-field > span { display: block; font-size: var(--text-sm); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-primary); margin-bottom: var(--sp-1); }
-        .sk-input, .sk-textarea { width: 100%; background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-field); color: var(--text-primary); font: inherit; font-size: var(--text-sm); padding: var(--control-pad-y) var(--sp-2-5); min-height: var(--control-h); line-height: var(--lh-control); transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+        /* On the one field recipe (edge, ink, 13, lift and the focus ring come from
+           it): this only sets what a skill or note editor adds, its width and corner. */
+        .sk-input, .sk-textarea { width: 100%; border-radius: var(--radius-field); padding: var(--control-pad-y) var(--sp-3); min-height: var(--control-h); line-height: var(--lh-control); }
         /* Room to write a playbook: twelve lines to start, growing with it
            to most of the screen (autoGrow), then scrolling. */
         .sk-textarea { resize: vertical; min-height: calc(var(--lh-body) * 1em * 12); line-height: var(--lh-body); }
@@ -2661,8 +2680,8 @@
         /* One rhythm down the form, and one height for every control in a row. */
         .disp-modal .field-help { margin: var(--sp-2) 0 0; }
         .disp-boxedit { display: flex; gap: var(--sp-2); align-items: center; margin-bottom: var(--sp-2); }
-        .disp-boxedit > select, .disp-boxedit > input { height: 36px; box-sizing: border-box; }
-        .disp-boxedit > select.psel { min-width: 168px; padding: var(--sp-2) var(--sp-2); font-size: var(--text-sm); }
+        .disp-boxedit > select, .disp-boxedit > input { height: var(--control-h); box-sizing: border-box; }
+        .disp-boxedit > select.psel { min-width: 168px; }
         .disp-boxedit .icon-btn { width: var(--box-lg); height: var(--box-lg); flex: none; }
         .disp-boxedit > input.disp-boxdef { width: var(--box-xs); height: var(--box-xs); flex: none;
             accent-color: var(--control-accent); cursor: pointer; margin: 0; }
@@ -2816,6 +2835,18 @@
         /* A segmented control with something quiet on its right. */
         .seg-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
         .seg-row > :is(.tabs, .segmented) { margin-bottom: 0; }
+        /* The CRM's tab row with its quiet link at the right is a page's tab
+           row: the same 44 on one full-width rule as .page-tabs, the strip's own
+           rule given up, its words on the gutter. */
+        .ov-wrap > .seg-row:has(> .tabs) { flex-wrap: nowrap; gap: var(--sp-6); min-height: var(--row-h); box-shadow: var(--rule-b);
+            margin-inline: calc(-1 * var(--wrap-pad)); padding-inline: var(--wrap-pad); }
+        .seg-row > .tabs { margin: 0 calc(-1 * var(--sp-2)); padding: 0 var(--sp-2); max-width: none; box-shadow: none; align-self: stretch; min-height: 0; }
+        /* On a phone the link takes the first line at the right and the strip
+           keeps the line under it, as in the Finance row. */
+        @media (max-width: 640px) {
+            .ov-wrap > .seg-row:has(> .tabs) { flex-wrap: wrap; row-gap: var(--sp-2); }
+            .seg-row:has(> .tabs) > :not(.tabs) { order: -1; flex: none; margin-left: auto; }
+            .seg-row > .tabs { flex: 1 1 100%; min-height: var(--row-h); } }
         .guide-rows { margin: 0; }
         .guide-rows > .guide-row { padding: var(--sp-3) var(--sp-4); border-top: var(--bw-hairline) solid var(--border-default); }
         /* The card head is never divided from its body: the first row sits on the card's 16 gap. */
@@ -4113,6 +4144,12 @@
             padding-inline: var(--sp-2); margin: 0 calc(-1 * var(--sp-2)) var(--sp-7); }
         .tabs::-webkit-scrollbar { display: none; }
         .card > .tabs { margin-bottom: 0; }
+        /* A strip inside a section keeps its rule on the section's text column,
+           from the text edge to the text edge. The box still runs 8 past the
+           text at each end (room for the focus box round a word), so the
+           hairline is drawn between its padding edges rather than along the box. */
+        .card > .tabs { max-width: none; box-shadow: none;
+            background: linear-gradient(var(--border-default), var(--border-default)) center bottom / calc(100% - 2 * var(--sp-2)) var(--bw-hairline) no-repeat; }
         /* A page's own strip runs edge to edge across the sheet, its first tab on the gutter. */
         .ov-wrap > .tabs { margin-inline: calc(-1 * var(--wrap-pad)); padding-inline: var(--wrap-pad); max-width: none; }
         .tab { position: relative; display: inline-flex; align-items: center; gap: var(--control-gap); flex: none;
@@ -5613,8 +5650,8 @@ Projected Image UK"></textarea>
             const text = el('div', 'ph-text');
             const h = el('h2', null, o.title);
             if (o.view && BETA_TABS.indexOf(o.view) >= 0) h.append(el('span', 'beta-tag', 'Beta'));
-            if (o.info) h.append(o.info);
-            text.append(h);
+            /* The info button sits beside the heading, not in it, so the heading's name stays its title. */
+            if (o.info) { const row = el('div', 'ph-title'); row.append(h, o.info); text.append(row); } else text.append(h);
             if (o.live != null) {
                 const sub = el('div', 'ph-sub');
                 const dot = el('span', 'live-dot'); dot.setAttribute('aria-hidden', 'true');
