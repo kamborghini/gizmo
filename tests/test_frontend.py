@@ -2254,8 +2254,8 @@ def t_the_forecast_tab_exists_and_is_gated():
              fn.index("fcDriversCard(latest, sc)"), fn.index("'The numbers behind it'")]
     ok(order == sorted(order),
        "overview, then the picture, then why, then the numbers")
-    for t in ("Month by month against ", "Every source, side by side"):
-        ok("fcDrawer('" + t in fn, "'" + t + "' is a drawer, not dealt onto the screen")
+    for t in ("Month by month against ", "Every method, side by side"):
+        ok("label: '" + t in fn, "'" + t + "' is a list row that opens a window, not dealt onto the screen")
     ok("'How each one works, and how right it has been'" in fn_src("function fcHowItWorks(c, latest, sc) {"),
        "and how each method works is a page under How it works (the mix)")
     # The graph is back, and the reader chooses the scale rather than being
@@ -4133,17 +4133,17 @@ def t_the_forecast_tab_shows_the_five_plain_models_and_what_they_scored():
        "the plan's own target sits beside them for comparison")
     ok(".sort(" in fn and "mape" in fn, "ordered by what each scored, best first")
     # Directors read this table, and none of these names explains itself.
-    ok("name.title = m.about" in fn and "has-help" in fn and "name.tabIndex = 0" in fn,
-       "every source says on hover what it does, what it assumes and when it misleads")
+    ok("name.append(infoButton(m.name, { title: m.name, body: m.about }))" in fn,
+       "every method says behind an info button what it does, what it assumes and when it misleads")
     ok("helpHead('Typical error'" in fn and "helpHead('Bias'" in fn,
        "and so do the two columns nobody can be expected to read cold")
-    ok("'Source'" in fn, "the column is what it is: a source, not a model")
+    ok("'Method'" in fn, "the column is what it is: a method (Cameron's word), not a model")
     # Twelve rows is a lot to land on someone who opened the page to read one
     # number. The choice of how much to show is remembered per person.
     ok("segmented(FC_ROWS, mode, setFcRowsMode)" in fn, "the reader chooses how much to see")
     ok("mode === 'one' ? ranked.slice(0, 1)" in fn and "ranked.slice(0, 3)" in fn,
        "one row, three rows, or all of them")
-    ok("'Just the headline'" in SCRIPT and "'The three quoted'" in SCRIPT and "'Every source'" in SCRIPT,
+    ok("'Just the headline'" in SCRIPT and "'The three quoted'" in SCRIPT and "'Every method'" in SCRIPT,
        "named so the choice explains itself")
     ok("localStorage.setItem(LS_FCROWS" in SCRIPT and "return FC_ROWS.some(r => r[0] === v) ? v : 'three'" in SCRIPT,
        "remembered, defaulting to the three that are quoted, and a junk value falls back rather than breaking")
@@ -4221,10 +4221,10 @@ def t_the_forecast_tab_shows_the_five_plain_models_and_what_they_scored():
     ok("!sn || !sn.available" in fn and "sn.reason" in fn,
        "a run with too little history says so instead of drawing an empty table")
     ok("fcSanityCard(latest, sc)" in SCRIPT, "and the tab actually calls it")
-    # It is a sanity CHECK: it belongs above the month table it is checking.
-    ok(SCRIPT.index("fcSanityCard(latest, sc)")
-       < SCRIPT.index("'Month by month against ' + sc"),
-       "the check is read before the thing it checks")
+    # Since the mix (2026-10-06) the four tables are list rows in the mockup's
+    # order, each opening a window; the check sits beside what it checks.
+    ok(SCRIPT.index("label: 'Month by month against ' + sc") < SCRIPT.index("label: 'Every method, side by side'"),
+       "the month table, then every method beside it")
 
 
 # --- Web Interface Guidelines pass ------------------------------------------
@@ -10551,6 +10551,40 @@ def t_worth_looking_at_sits_beside_why():
     eq(_token_raw("fc-wl-cols"), "76px 72px 72px 84px minmax(96px, 1fr) 96px", "--fc-wl-cols")
     # Found in the rig: the bar's top margin collapsed into the head's 12 and the bar sat 12 above the table's head row.
     ok(".fc-why { display: flex; flex-direction: column; }" in CSS, "Why is a flex column, so the bar's margin lines it up with the table's head row")
+
+
+@test
+def t_the_numbers_behind_it_are_four_rows_and_a_method_is_a_method():
+    """Spec 8.1 item 6 and Cameron's words: the numbers behind the forecast are
+    four list rows in two columns, each opening its table in a window, and the
+    forecast calls each model a method, never a source."""
+    fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
+    ok("listRows([" in fn and "{ cols: 2, label: 'The numbers behind it' }" in fn, "four list rows in two columns")
+    labels = ["'Month by month against ' + sc", "'Cash under ' + sc", "'Every method, side by side'",
+              "'What each method said, and what came in'"]
+    at = [fn.find("label: " + l) for l in labels]
+    ok(-1 not in at and at == sorted(at), "in the mockup's order: %s" % at)
+    ok("fcDrawer(" not in SCRIPT and "LS_FCOPEN" not in SCRIPT and "fcSourceName" not in SCRIPT,
+       "the drawers and their memory are gone, and so is the source picker nothing called")
+    for name in ("fcOptimisedCard", "fcAlgorithmsCard", "fcRecordCard", "fcSanityCard", "fcTrust", "fcPlanJudged",
+                 "fcDriversCard", "fcChartCard", "fcWorthCard", "fcBand", "fcHowItWorks"):
+        # Its own strings only: comments go, and so does FC_BEST_AT (the
+        # service's own words), which sits after fcOptimisedCard.
+        body = re.sub(r"/\*.*?\*/", "", fn_src("function " + name + "(").split("const FC_BEST_AT")[0], flags=re.S)
+        words = " ".join(re.findall(r"'((?:[^'\\]|\\.)*)'", body))
+        ok(not re.search(r"\b[Ss]ources?\b(?!:)", words), name + " says method, not source: %s"
+           % re.findall(r"[^.]*\b[Ss]ources?\b(?!:)[^.]*", words)[:2])
+    ok("'Every method'" in SCRIPT and "'Every source'" not in SCRIPT, "the sanity table's chooser says method")
+    tb = fn_src("function fcTable(head, rows, right) {")
+    ok("th.classList.add('num')" in tb and "style.textAlign" not in tb, "a number column is the table's own class, not an inline style")
+    setup = fn_src("function forecastSetupCard(c) {")
+    ok("'The first run lands after 03:00.'" in setup and "'No cash flow workbook yet. Upload one above.'" in setup,
+       "the setup lines are short")
+    ok("infoButton('Setting up the forecast'" in setup, "and the setup steps wait behind an info button")
+    # Found in the rig: the show-how-many chooser lives inside the Every method window, and the page behind it is
+    # not the window, so a choice there changed nothing until the window was opened again.
+    ok("fcRepaintPage();" in fn_src("function setFcRowsMode(v) {") and "lp.m.body.replaceChildren(lp.build())" in fn_src("function fcRepaintPage() {"),
+       "a choice made inside a method window repaints that window")
 
 
 if __name__ == "__main__":
