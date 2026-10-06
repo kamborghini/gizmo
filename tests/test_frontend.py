@@ -9994,6 +9994,40 @@ def t_figures_stand_in_a_row_split_by_hairlines():
     ok(".card .metrics-strip > .stat { border-color: transparent;" not in CSS, "no tinted tile inside a section")
 
 
+@test
+def t_the_feature_band_draws_the_main_question():
+    """Spec 6: one per screen at most, for its main question (Forecast:
+    expected this month). A soft teal gradient with a 12 corner: the hero
+    figure at 44 with its chip, the likely range as one bar with the plan as a
+    blue tick, and side figures stacked, each a 28 tile, a figure and a meter.
+    Bar positions are data percentages, the one style the markup carries; the
+    domain is the round span around the values (the mockup's 30,000 to 70,000)."""
+    for name in ("function bandDomain(vals) {", "function rangeBar(r) {", "function meter(m) {", "function featureBand(o) {"):
+        ok(name in SCRIPT, "the builder exists: " + name)
+    band = CSS.split("\n        .fband {")[1].split("}")[0]
+    ok("background: var(--band-bg)" in band and "border-radius: var(--radius-band)" in band, "the band is the teal gradient, 12 round")
+    ok("font-size: var(--fig-xl)" in CSS.split("\n        .fb-hero .fb-fig {")[1].split("}")[0], "the hero figure is 44")
+    fill = CSS.split("\n        .fb-fill {")[1].split("}")[0]
+    ok("background: var(--c-range)" in fill and "inset 0 0 0 var(--bw-hairline) var(--c-range-edge)" in fill, "the range is teal-glow with a teal-line edge")
+    ok("background: var(--c-plan)" in CSS.split("\n        .fb-plan {")[1].split("}")[0], "the plan is a blue tick")
+    ok("background: var(--c-exp)" in CSS.split("\n        .fb-exp {")[1].split("}")[0], "the expected point is an ink dot")
+    fr = fn_src("function rangeBar(r) {")
+    ok("style.setProperty('--at-lo', bandPct(r.lo, r.d))" in fr and ".style.left" not in fr, "positions are percentages in custom properties")
+    if not _node_ok():
+        print("       (node unavailable, harness skipped)")
+        return
+    js = "\n".join((SCRIPT[SCRIPT.index("        function bandDomain(vals) {"):SCRIPT.index("        function rangeBar(r) {")],
+                    "const d = bandDomain([41327, 66054, 53691, 37566]);",
+                    "const m = bandDomain([41327, 66054, 37566, 53691, 24180, 39960, 38750, 34690, 55980, 35860]);",
+                    "console.log(JSON.stringify([d, ['lo', 41327, 'hi', 66054, 'exp', 53691, 'plan', 37566].filter((x, i) => i % 2).map(v => bandPct(v, d)), m, bandPct(41327, m), bandPct(-5, d), bandPct(1e9, d)]));"))
+    out = _run_node(js)
+    eq(out[0], {"min": 30000, "max": 70000}, "the band's domain")
+    eq(out[1], ["28.3%", "90.1%", "59.2%", "18.9%"], "where the bar's marks fall (the mockup's own)")
+    eq(out[2], {"min": 20000, "max": 70000}, "one scale across the mini bars")
+    eq(out[3], "42.7%", "a mini bar's low end")
+    eq([out[4], out[5]], ["0.0%", "100.0%"], "a mark never leaves its track")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

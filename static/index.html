@@ -1029,6 +1029,63 @@
         .metrics-strip > .stat { min-height: 0; }
         .metrics-strip .stat-ic { display: none; }
         .metrics-strip .stat .value.unknown { font-size: var(--text-body); }
+        /* THE FEATURE BAND (the mix, spec 6): one per screen at most, for its
+           main question. A soft teal gradient with the band's 12 corner; the
+           main figure and its range on the left, a 1px rule, the side figures
+           stacked on the right. Bar positions arrive as percentages in custom
+           properties (--at-lo, --at-hi, --at-exp, --at-plan, --at, --w). */
+        .fband { border-radius: var(--radius-band); background: var(--band-bg); padding: var(--sp-6) var(--sp-7);
+            display: grid; grid-template-columns: minmax(0, 1.6fr) var(--bw-hairline) minmax(0, 1fr); gap: var(--sp-7); }
+        .fband > .fb-rule { background: var(--band-rule); }
+        .fb-main, .fb-sides { display: flex; flex-direction: column; min-width: 0; }
+        .fb-sides { justify-content: space-between; }
+        .fb-head { display: flex; align-items: center; gap: var(--control-gap); min-height: var(--control-h-md); }
+        .fb-tile { width: var(--control-h-md); height: var(--control-h-md); border-radius: var(--radius-control); background: var(--surface-primary);
+            color: var(--text-brand); display: grid; place-items: center; flex: none; box-shadow: var(--shadow-control); }
+        .fb-tile svg { width: var(--icon-md); height: var(--icon-md); }
+        .fb-label { font-weight: var(--weight-medium); color: var(--text-secondary); white-space: nowrap; }
+        .fb-note { color: var(--text-secondary); white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .fband .delta { background: var(--surface-primary); }
+        .fband .info:hover::before { background: var(--surface-primary); }
+        .fb-fig { font-weight: var(--weight-semibold); line-height: var(--lh-none); letter-spacing: var(--tr-fig); font-variant-numeric: tabular-nums; }
+        .fb-hero { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-fig); margin: var(--gap-fig) 0 var(--sp-6); }
+        .fb-hero .fb-fig { font-size: var(--fig-xl); }
+        .fb-range { margin-top: auto; position: relative; padding: calc(var(--lh-caption) + var(--sp-3)) 0; }
+        .fb-track { position: relative; height: var(--sp-3); border-radius: var(--radius-full); background: var(--surface-primary); }
+        .fb-fill { position: absolute; top: 0; bottom: 0; left: var(--at-lo); width: calc(var(--at-hi) - var(--at-lo)); border-radius: var(--radius-full);
+            background: var(--c-range); box-shadow: inset 0 0 0 var(--bw-hairline) var(--c-range-edge); }
+        .fb-exp { position: absolute; top: 50%; left: var(--at-exp); width: var(--box-xs); height: var(--box-xs);
+            margin: calc(var(--box-xs) / -2) 0 0 calc(var(--box-xs) / -2); border-radius: var(--radius-circle);
+            background: var(--c-exp); box-shadow: 0 0 0 var(--bw-strong) var(--surface-primary); }
+        .fb-plan { position: absolute; left: var(--at-plan); top: calc(var(--sp-1) - var(--lh-caption) - var(--sp-3)); bottom: calc(-1 * var(--sp-1));
+            width: var(--bw-strong); margin-left: calc(var(--bw-strong) / -2); border-radius: var(--radius-swatch); background: var(--c-plan); }
+        .fb-rl { position: absolute; font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-secondary);
+            white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .fb-rl.t { top: 0; left: calc(var(--at-plan) + var(--sp-2)); color: var(--text-primary); }
+        .fb-rl.b { bottom: 0; left: var(--at); transform: translateX(-50%); }
+        .fb-rl.mid { color: var(--text-tertiary); }
+        .fb-side + .fb-side { margin-top: var(--sp-4); padding-top: var(--sp-4); box-shadow: var(--rule-t-band); }
+        .fb-num { display: flex; align-items: center; gap: var(--gap-fig); margin-top: var(--gap-fig); }
+        .fb-num .fb-fig { font-size: var(--fig-m); }
+        .fb-num .fb-note { margin-left: auto; }
+        .fb-meter { position: relative; height: var(--sp-1); border-radius: var(--radius-full); background: var(--band-rule); margin-top: var(--sp-3); }
+        .fb-meter i { position: absolute; top: 0; bottom: 0; border-radius: var(--radius-full); }
+        .fb-meter .taken { left: 0; width: var(--w); background: var(--c-taken); }
+        .fb-meter .still { left: calc(var(--at) + var(--sp-0-5)); width: calc(100% - var(--at) - var(--sp-0-5)); background: var(--c-still); }
+        .fb-meter .plan { left: var(--at-plan); top: calc(-1 * var(--sp-1)); bottom: calc(-1 * var(--sp-1)); width: var(--bw-strong);
+            margin-left: calc(var(--bw-strong) / -2); background: var(--c-plan); }
+        /* Under 1100 the side figures go under the main one, as on a phone. */
+        @media (max-width: 1100px) {
+            .fband { grid-template-columns: minmax(0, 1fr); gap: 0; }
+            .fband > .fb-rule { display: none; }
+            .fb-sides { margin-top: var(--sp-4); padding-top: var(--sp-4); box-shadow: var(--rule-t-band); }
+        }
+        @media (max-width: 640px) {
+            .fband { padding: var(--sp-4); }
+            .fb-hero { margin-bottom: var(--sp-4); }
+            .fb-hero .fb-fig { font-size: var(--fig-l); }
+            .fb-num .fb-fig { font-size: var(--fig-s); }
+        }
         .fc-alert { display: flex; align-items: baseline; gap: var(--sp-2); font-size: var(--text-sm);
             padding-block: var(--sp-2); padding-inline: 0; }
         .fc-alert + .fc-alert { border-top: var(--bw-hairline) solid var(--border-default); }
@@ -5566,6 +5623,7 @@ Projected Image UK"></textarea>
             info: SV('<circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path>'),
             arrowRight: SV('<path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path>'),
             arrowDownRight: SV('<path d="m7 7 10 10"></path><path d="M17 7v10H7"></path>'),
+            wallet: SV('<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"></path><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"></path>'),
             card: SV('<rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line>'),
             logOut: SV('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line>'),
             logIn: SV('<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line>'),
@@ -6223,6 +6281,90 @@ Projected Image UK"></textarea>
             if (t !== 'flat') d.append(el('span', 'sr-only', t === 'up' ? 'up ' : 'down '));
             d.append(document.createTextNode(text));
             return d;
+        }
+        /* A bar's domain: the round span around every value it shows, in steps
+           of the largest power of ten under the top value (41,327 to 66,054
+           with a plan of 37,566 is drawn on 30,000 to 70,000). */
+        function bandDomain(vals) {
+            const v = vals.filter(x => x != null && isFinite(x)).map(Number);
+            if (!v.length) return { min: 0, max: 1 };
+            const top = Math.max.apply(null, v), bot = Math.min.apply(null, v);
+            const step = Math.pow(10, Math.floor(Math.log10(Math.max(1, Math.abs(top)))));
+            const min = Math.floor(bot / step) * step, max = Math.ceil(top / step) * step;
+            return { min, max: max > min ? max : min + step };
+        }
+        const bandPct = (v, d) => Math.max(0, Math.min(100, (v - d.min) / (d.max - d.min) * 100)).toFixed(1) + '%';
+        /* The likely range as one bar (the mix, spec 6): a teal-glow fill with
+           a teal-line edge from low to high, an ink dot at the expected figure,
+           the plan as a blue tick with its label above, the ends and "Likely
+           range" under. r: { lo, hi, exp, plan, d, planLabel, loLabel, hiLabel, midLabel } */
+        function rangeBar(r) {
+            const w = el('div', 'fb-range');
+            w.style.setProperty('--at-lo', bandPct(r.lo, r.d)); w.style.setProperty('--at-hi', bandPct(r.hi, r.d));
+            w.style.setProperty('--at-exp', bandPct(r.exp, r.d));
+            if (r.plan != null) w.style.setProperty('--at-plan', bandPct(r.plan, r.d));
+            const track = el('div', 'fb-track');
+            track.append(el('div', 'fb-fill'));
+            if (r.plan != null) track.append(el('div', 'fb-plan'));
+            track.append(el('div', 'fb-exp'));
+            if (r.plan != null && r.planLabel) w.append(el('span', 'fb-rl t', r.planLabel));
+            w.append(track);
+            [[r.lo, r.loLabel, ''], [r.exp, r.midLabel, ' mid'], [r.hi, r.hiLabel, '']].forEach(([v, t, c]) => {
+                if (!t) return;
+                const s = el('span', 'fb-rl b' + c, t); s.style.setProperty('--at', bandPct(v, r.d)); w.append(s);
+            });
+            return w;
+        }
+        /* A meter: what is taken in the measure's dark teal, what is still
+           expected after it at 45%, the plan as a blue tick. m: { taken, plan }
+           in percent of the bar. */
+        function meter(m) {
+            const w = el('div', 'fb-meter');
+            const t = Math.max(0, Math.min(100, m.taken || 0)).toFixed(1) + '%';
+            w.style.setProperty('--w', t); w.style.setProperty('--at', t);
+            w.append(el('i', 'taken'), el('i', 'still'));
+            if (m.plan != null) { w.style.setProperty('--at-plan', Math.max(0, Math.min(100, m.plan)).toFixed(1) + '%'); w.append(el('i', 'plan')); }
+            w.setAttribute('aria-hidden', 'true');
+            return w;
+        }
+        /* The feature band (the mix, spec 6): one per screen at most, for its
+           main question. o: { main: { icon, label, info, value, chip, note,
+           range }, sides: [{ icon, label, value, chip, note, meter }] }. */
+        function featureBand(o) {
+            const band = el('section', 'fband');
+            const head = (f) => {
+                const h = el('div', 'fb-head');
+                const t = el('span', 'fb-tile'); t.setAttribute('aria-hidden', 'true'); t.append(ico(f.icon)); h.append(t);
+                h.append(el('span', 'fb-label', f.label));
+                if (f.info) h.append(f.info);
+                return h;
+            };
+            const main = el('div', 'fb-main');
+            main.append(head(o.main));
+            const hero = el('div', 'fb-hero');
+            hero.append(el('b', 'fb-fig', o.main.value));
+            if (o.main.chip) hero.append(o.main.chip);
+            if (o.main.note) hero.append(el('span', 'fb-note', o.main.note));
+            main.append(hero);
+            if (o.main.range) main.append(o.main.range);
+            band.append(main);
+            if (o.sides && o.sides.length) {
+                const rule = el('div', 'fb-rule'); rule.setAttribute('aria-hidden', 'true'); band.append(rule);
+                const sides = el('div', 'fb-sides');
+                o.sides.forEach(s => {
+                    const box = el('div', 'fb-side');
+                    box.append(head(s));
+                    const num = el('div', 'fb-num');
+                    num.append(el('b', 'fb-fig', s.value));
+                    if (s.chip) num.append(s.chip);
+                    if (s.note) num.append(el('span', 'fb-note', s.note));
+                    box.append(num);
+                    if (s.meter) box.append(s.meter);
+                    sides.append(box);
+                });
+                band.append(sides);
+            }
+            return band;
         }
         function statCard(m, i) {
             const c = el('div', 'stat' + (m.tone === 'warn' ? ' warn' : ''));
