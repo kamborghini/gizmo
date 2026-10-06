@@ -10821,6 +10821,43 @@ def t_an_order_row_is_a_hairline_row_and_the_open_one_is_one_block():
     eq(_token_raw("ono-w"), "100px", "--ono-w")
 
 
+@test
+def t_the_queue_still_holds_and_does_what_it_did():
+    """House rule (2026-10-06): the mix changes the look around the Production
+    Manager queue, never its content or its actions. The row's cells and chips,
+    every button with its title and what it does, the toolbar's items in their
+    order, the More menu's items in their order and the preview's wording."""
+    fn = fn_src("function renderLabels() {")
+    for part in ("orderA(orderNo(o), o.admin_url, 'lbl-num lbl-num-link')", "el('span', 'lbl-name', o.display_name)",
+                 "(o.is_company ? 'Company' : 'Customer') + '  \u00b7  '", "el('div', 'lbl-meta', fmtDate(o.created_at))",
+                 "'Due ' + (o.due_label || '')", "ageDays(o.created_at) + 'd'", "el('span', 'lbl-chip note', 'Note')",
+                 "dsp.canceled ? 'Cancelled' : booked ? 'Booked' : 'Dispatched'", "el('span', 'lbl-chip bad', 'No terms')",
+                 "el('span', 'lbl-chip made', 'Made')", "el('span', 'lbl-chip note', 'Printed')"):
+        ok(part in fn, "the row still shows: " + part)
+    for title, handler in (("'Hide label preview' : 'Preview label'", "labelSel = (labelSel === o.id ? null : o.id); renderLabels();"),
+                           ("'Change the delivery address or contact details'", "openOrderEdit(o)"),
+                           ("'Preview the proposal proof'", "openProposal(o)"),
+                           ("pr.title = 'Print label'", "printLabels([o])"),
+                           ("'Remove the Unprocessed tag and add IP, so this order joins To make'", "readyToMake(o, rd)"),
+                           ("'View shipment / reprint label' : 'Dispatch a courier for this order'", "openDispatch(o)"),
+                           ("'Mark this order as made'", "toggleMade(o)")):
+        ok(title in fn and handler in fn, "the row still offers " + title)
+    for word in ("'Proof'", "'Print'", "'Ready to make'", "'Shipment' : 'Dispatch'", "'Made' : 'Mark made'", "'Edit'", "'Preview'", "'Hide'"):
+        ok(word in fn, "a button still says " + word)
+    ok("tableTools([findWrap, filtTabs]," in fn and "[allBtn, slBtn, oldf, sizeSel].filter(Boolean)" in fn
+       and "tableSearch('Find order, customer or tracking'" in fn, "the toolbar's items, in their order")
+    for t in ("'Print all (' + printable.length + ')'", "'Print shipping labels (' + shipLabels.length + ')'",
+              "labelsOldest ? 'Oldest first' : 'Newest first'", "(k === savedSize ? '  (default)' : '')"):
+        ok(t in fn, "the toolbar still says " + t)
+    menu = fn[fn.index("more.onclick = () => dropMenu(more, ["):]
+    at = [menu.index("label: '" + m + "'") for m in ("Size check", "Day sheet", "Dispatch manifest", "Stock usage", "Margins",
+                                                       "Size rules", "Update size list", "Shipping settings")]
+    ok(at == sorted(at), "More keeps its items in their order")
+    for t in ("'Actual size preview: '", "'% so the whole order fits one label.'", "' - some rows would be cut off the printed label. '",
+              "'Choose a larger stock size before printing.'", "'Print this label'", "histLine(o)"):
+        ok(t in fn, "the preview still says " + t)
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
