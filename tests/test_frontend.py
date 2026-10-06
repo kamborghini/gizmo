@@ -2828,7 +2828,7 @@ def t_a_table_inside_a_card_has_no_second_frame():
        and ".card > .ktable-wrap :is(th, td):first-child { padding-left: var(--sp-4); }" in CSS
        and CSS.index(".card > .ktable-wrap { margin-left: 0;") > CSS.index(".card > :is(.lia-bar, .lbl-row, .ktable-wrap"),
        "one straight inside a card runs to its edges like its list rows, words still on the text edge")
-    ok("--radius-inset: var(--radius-xs)" in CSS and "--radius-card: var(--radius-sm)" in CSS,
+    ok("--radius-inset: var(--radius-xs)" in CSS and "--radius-card: var(--radius-pop)" in CSS,
        "a step under the card's corner, set once")
     # A table that deliberately touches the card edge still can.
     bleed = CSS.split("\n        .card-bleed .ktable-wrap {")[1].split("}")[0]
@@ -9506,9 +9506,9 @@ def t_the_spacing_pass_holds():
     five sizes and three reviewers found these; each is held here."""
     ok(".ov-hero:has(+ .tabs) { margin-bottom: var(--sp-4); }" in CSS, "a tab strip sits 16 under its header on every screen")
     ok("min-height: 60px" not in CSS.split(".ov-hero:has(+ .page-tabs)")[1][:600], "Finance intros reserve no empty line")
-    ok("--segment-h: calc(var(--control-h-md) - 2 * var(--sp-0-5));" in CSS
+    ok("--segment-h: calc(var(--control-h) - 2 * var(--sp-0-5));" in CSS
        and "height: var(--segment-h);" in CSS.split("\n        .segmented > button {")[1].split("}")[0],
-       "a segmented track is a small control's 28, level with the field beside it")
+       "a segmented track is a control's 32, level with the field beside it, its choice 28 inside")
     ok("flex: 1 1 auto;" in CSS.split("\n        .segmented > button {")[1].split("}")[0], "and a wrapped track fills its lines")
     ok(".metrics.metrics-strip { grid-template-columns: repeat(12, minmax(0, 1fr)); }" in CSS
        and "calc(100% / 60)" not in CSS, "figures keep a 16 gap both ways at every width")
@@ -9562,8 +9562,9 @@ def t_every_corner_is_a_role():
             if not re.search(r"label-sheet|day-sheet|scrollbar|\.auth-card", sel):
                 bad.append(sel[:50])
     ok(not bad, "corners that name a size instead of a role: %s" % bad[:6])
-    for role, prim in (("control", "var(--radius-xs)"), ("field", "var(--radius-control)"), ("card", "var(--radius-sm)"),
-                       ("inset", "var(--radius-xs)"), ("tag", "var(--radius-2xs)"), ("row", "var(--radius-control)")):
+    for role, prim in (("control", "var(--radius-xs)"), ("field", "var(--radius-control)"), ("card", "var(--radius-pop)"),
+                       ("inset", "var(--radius-xs)"), ("tag", "var(--radius-2xs)"), ("row", "var(--radius-control)"),
+                       ("pop", "var(--radius-md)"), ("tile", "var(--radius-md)"), ("sheet", "var(--radius-lg)")):
         ok(_token_raw("radius-" + role) == prim, "--radius-%s is %s" % (role, prim))
     # Round only where the shape means something.
     rounds = []
@@ -9712,6 +9713,35 @@ def t_the_ink_frame_the_measures_and_the_shadows_are_tokens():
     ok(_contrast(_token("ink"), _token("teal-500")) >= 4.5, "ink on the teal fill reads at 4.5:1")
     tokens = SCRIPT.split("const MIX_TOKENS = [")[1].split("];")[0]
     for group in ("'The ink frame'", "'One colour per measure'", "'Shadows and rules'"):
+        ok(group in tokens, "the Design section lists " + group)
+
+
+@test
+def t_the_mix_type_sizes_space_and_corners_are_tokens():
+    """Spec 4.2 to 4.5: five Inter steps with one line height each, Bricolage's
+    two sizes, four figure sizes, the control and row heights, the 4px scale's
+    roles and one corner per role. Each is set once here."""
+    for tok, v in (("text-micro", "11px"), ("text-xs", "12px"), ("text-body", "13px"), ("text-sm", "14px"),
+                   ("text-head", "15px"), ("text-md", "16px"), ("text-2xl", "24px"), ("text-title", "26px"),
+                   ("fig-xl", "44px"), ("fig-l", "36px"), ("fig-m", "28px"), ("fig-s", "var(--text-2xl)"),
+                   ("tr-title", "-0.02em"), ("tr-fig", "-0.03em"), ("lh-caption", "16px"), ("lh-control", "20px"),
+                   ("lh-title", "32px"), ("lh-none", "1"),
+                   ("tag-h", "20px"), ("control-h-sm", "24px"), ("control-h-md", "28px"), ("control-h", "32px"),
+                   ("control-h-lg", "40px"), ("row-h", "44px"), ("row-h-2", "60px"), ("order-row-h", "64px"),
+                   ("box-2xl", "40px"), ("icon-md", "16px"), ("icon-sm", "14px"), ("icon-stroke", "1.75"),
+                   ("icon-stroke-s", "2"), ("topbar-h", "48px"), ("sidebar-w", "236px"), ("frame-inset", "var(--sp-2)"),
+                   ("wrap-pad", "var(--sp-8)"), ("sp-9", "48px"), ("sp-10", "64px"),
+                   ("control-gap", "var(--sp-2)"), ("gap-row-icon", "var(--sp-3)"), ("gap-cluster", "var(--sp-4)"),
+                   ("gap-fig", "var(--sp-3)"), ("gap-cols", "var(--sp-10)"), ("pop-offset", "var(--sp-2)"),
+                   ("pop-pad", "var(--sp-4)"), ("tip-pad", "var(--sp-3)"), ("menu-pad", "var(--sp-1)"),
+                   ("radius-3xs", "2px"), ("radius-2xs", "4px"), ("radius-xs", "6px"), ("radius-md", "10px"),
+                   ("radius-lg", "12px"), ("radius-pop", "var(--radius-md)"), ("radius-tile", "var(--radius-md)"),
+                   ("radius-sheet", "var(--radius-lg)"), ("radius-band", "var(--radius-sheet)"),
+                   ("radius-card", "var(--radius-pop)"), ("switch-w", "28px"), ("switch-h", "16px"),
+                   ("switch-inset", "2px"), ("segment-h", "calc(var(--control-h) - 2 * var(--sp-0-5))")):
+        eq(_token_raw(tok), v, "--" + tok)
+    tokens = SCRIPT.split("const MIX_TOKENS = [")[1].split("];")[0]
+    for group in ("'Type'", "'Sizes'", "'Space'", "'Corners'"):
         ok(group in tokens, "the Design section lists " + group)
 
 

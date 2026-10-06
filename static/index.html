@@ -219,15 +219,26 @@
             --font-display: 'Bricolage Grotesque', var(--font-sans);   /* titles: the brand's heading face */
             --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
             --font-print: 'Bricolage Grotesque', -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
-            --text-xs: 12px; --text-sm: 14px; --text-md: 16px; --text-lg: 18px; --text-xl: 20px; --text-2xl: 24px; --text-3xl: 30px;
+            /* The mix (4.2): five Inter steps, each with one line height: micro
+               11/16, caption 12/16 (--text-xs), body 13/20, body-l 14/20
+               (--text-sm, for order names, and every control and row title on a
+               phone), head 15/20. --text-md is the wordmark's 16, --text-title
+               the page title's 26 (24 on a phone, --text-2xl). Figures are Inter
+               600 at 44, 36, 28 and 24, tabular, on a line of 1. --text-lg,
+               --text-xl and --text-3xl leave in the type sweep (Task 25). */
+            --text-micro: 11px; --text-xs: 12px; --text-body: 13px; --text-sm: 14px; --text-head: 15px; --text-md: 16px;
+            --text-lg: 18px; --text-xl: 20px; --text-2xl: 24px; --text-title: 26px; --text-3xl: 30px;
+            --fig-xl: 44px; --fig-l: 36px; --fig-m: 28px; --fig-s: var(--text-2xl);
+            --tr-title: -0.02em; --tr-fig: -0.03em;
             --weight-regular: 400; --weight-medium: 500; --weight-semibold: 600;
-            --lh-none: 1; --lh-tight: 1.15; --lh-snug: 1.35; --lh-body: 1.5; --lh-prose: 1.6; --lh-control: 20px;
+            --lh-none: 1; --lh-tight: 1.15; --lh-snug: 1.35; --lh-body: 1.5; --lh-prose: 1.6;
+            --lh-caption: 16px; --lh-control: 20px; --lh-title: 32px;
             /* Spacing: a 4pt grid with three half steps. */
             --sp-px: 1px; --sp-0-5: 2px; --sp-1: 4px; --sp-1-5: 6px; --sp-2: 8px; --sp-2-5: 10px; --sp-3: 12px;
-            --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-7: 32px; --sp-8: 40px;
+            --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-7: 32px; --sp-8: 40px; --sp-9: 48px; --sp-10: 64px;
             /* Radii. The brand's cards and fields are 8px; a box inside one steps
                down to 6. What each role takes is set once, in the component tier. */
-            --radius-3xs: 2px; --radius-2xs: 4px; --radius-xs: 6px; --radius-sm: 8px;
+            --radius-3xs: 2px; --radius-2xs: 4px; --radius-xs: 6px; --radius-sm: 8px; --radius-md: 10px; --radius-lg: 12px;
             --radius-xl: 24px;   /* a surface standing alone on an empty page: the sign-in card */
             /* Icon glyph sizes. Fifty-four svg rules carried a raw pixel size
                between them, in TWELVE different values - 13, 14, 15, 16 and 17
@@ -245,7 +256,7 @@
             --box-xl: 36px; --box-2xl: 40px; --box-3xl: 56px;
             --dot-md: 8px; --dot-lg: 10px;
             /* A switch is a track with a knob derived from it. */
-            --switch-w: 32px; --switch-h: 18px; --switch-inset: 2px;
+            --switch-w: 28px; --switch-h: 16px; --switch-inset: 2px;   /* a 28 by 16 track, a 12 knob */
             /* Field widths. An input sized to what it holds is a real need - a
                two-letter country code should not be as wide as a description -
                but it was being met by writing a pixel into eight screens, in
@@ -266,11 +277,14 @@
             --chart-h: 220px; --chart-h-tall: 300px;
             --chart-dot-r: 3.5px; --chart-stroke: 1.4px;
             --icon-xs: 12px; --icon-sm: 14px; --icon-md: 16px; --icon-lg: 18px; --icon-xl: 20px;
+            /* 16 at 1.75 in every control, row, tile and nav item; 14 at 2 only
+               for inline glyphs (crumb, link and list chevrons, chip arrows). */
+            --icon-stroke: 1.75; --icon-stroke-s: 2;
             --icon-2xl: 28px;   /* the mark in the sign-in card's tile, half of --box-3xl */
             /* The content column, moved here from a second :root block that sat
                three hundred lines further down: a global value must have one
                place to be looked up. */
-            --wrap: 1536px; --wrap-pad: 24px;
+            --wrap: 1536px; --wrap-pad: var(--sp-8);   /* the gutter: 40 on a desktop, 16 on a phone (re-pointed at 640) */
             --radius-full: 999px;    /* round ends: only a switch, a progress bar, a dot */
             --radius-circle: 50%;    /* a dot or avatar: a square made round */
             --bw-hairline: 1px; --bw-strong: 2px; --bw-marker: 3px;
@@ -279,11 +293,26 @@
 
             /* ---- Tier 3: component. Derived from the tiers above. ---- */
             --control-h: 32px; --control-h-sm: 24px; --control-h-lg: 40px;
+            /* Rows (the mix, 4.3): a one-line row and the tab strip 44, a
+               two-line phone row 60, an order row 64. */
+            --row-h: 44px; --row-h-2: 60px; --order-row-h: 64px;
+            /* Gaps by role (4.4): icon to label is --control-gap; a leading
+               icon in a row 12; group to group 16; figure label to figure and
+               figure to chip 12; the page's two-column split 64; a popover 8
+               from its trigger with 16 inside; a tooltip 12 inside; a menu 4. */
+            --gap-row-icon: var(--sp-3); --gap-cluster: var(--sp-4); --gap-fig: var(--sp-3); --gap-cols: var(--sp-10);
+            --pop-offset: var(--sp-2); --pop-pad: var(--sp-4); --tip-pad: var(--sp-3); --menu-pad: var(--sp-1);
             /* Shape, one value per role (Cameron, 5 Oct: "Do not use pill-shaped UI
                unnecessarily"). A control and the field beside it share a 6px corner,
                anything that holds content takes 8, a label 4. Round only where the
                shape means something: a switch, a progress bar, a dot, an avatar. */
-            --radius-control: var(--radius-xs); --radius-card: var(--radius-sm); --radius-field: var(--radius-control);
+            --radius-control: var(--radius-xs); --radius-field: var(--radius-control);
+            /* The mix (4.5): 10 for what floats and for a queue counter, 12 for
+               the sheet and the feature band. A card has no box any more; the
+               name stays for the few boxed things that read it, at the pop corner. */
+            --radius-pop: var(--radius-md); --radius-tile: var(--radius-md);
+            --radius-sheet: var(--radius-lg); --radius-band: var(--radius-sheet);
+            --radius-card: var(--radius-pop);
             --radius-row: var(--radius-control);   /* a highlighted row: nav item, menu item, conversation */
             --radius-tag: var(--radius-2xs);       /* a label that only displays: status, Beta, a count, a change */
             --tag-h: 20px;                          /* every tag, one height */
@@ -291,7 +320,7 @@
                notes, help. ch is the width of a zero; Inter's is about 0.62em, so
                62 of them is about 75 average characters, the measure wanted. */
             --measure: 62ch;
-            --control-gap: var(--sp-1-5);           /* icon to text inside any control */
+            --control-gap: var(--sp-2);             /* icon to text inside any control, label to its count */
             --radius-swatch: var(--radius-3xs);     /* a series key in a legend or tooltip */
             --radius-inset: var(--radius-xs);   /* a box inside a card: a step under the card's corner, never over it */
             /* The small button, the table search and the table select: the
@@ -301,14 +330,14 @@
             /* A choice inside a segmented track: the track (a 2px inset, no edge)
                then stands at a small control's 28, level with the search field
                and small buttons it shares a toolbar with. */
-            --segment-h: calc(var(--control-h-md) - 2 * var(--sp-0-5));
+            --segment-h: calc(var(--control-h) - 2 * var(--sp-0-5));   /* a 28 choice in a 32 track */
             --control-pad-y: 5px;   /* (32 - 20 line - 2 hairlines) / 2 */
             /* The sign-in card: a sky tint fading to white, a blue hairline,
                and a button that darkens toward its foot. */
             --auth-card-top: color-mix(in srgb, var(--info-bg) 60%, var(--surface-primary));
             --auth-card-line: color-mix(in srgb, var(--info) 14%, var(--surface-primary));
             --auth-go-top: color-mix(in srgb, var(--action-primary) 80%, var(--surface-primary));
-            --sidebar-w: 272px; --topbar-h: 48px;
+            --sidebar-w: 236px; --topbar-h: 48px; --frame-inset: var(--sp-2);   /* the sheet sits 8 inside the ink frame */
             --chevron-room: 30px;   /* right padding a select keeps clear for its chevron */
             --icon-col: 34px;       /* the file list's icon column: 16px glyph, 18px gutter */
             /* The widget grid. Four columns when four cells of --wgrid-cell fit
@@ -22137,6 +22166,10 @@ Projected Image UK"></textarea>
             ['The feature band', ['--band-bg', '--band-rule', '--teal-band-1', '--teal-band-2', '--teal-band-3', '--teal-band-4']],
             ['Shadows and rules', ['--shadow-control', '--shadow-raise', '--shadow-pop', '--shadow-focal', '--shadow-label', '--ring-chosen', '--ring-live', '--ring-selected', '--rule-t', '--rule-b', '--rule-t-soft', '--rule-b-soft', '--rule-t-band']],
             ['States', ['--press', '--press-fill', '--link-underline', '--live-dot', '--live-halo', '--live-green', '--border-soft']],
+            ['Type', ['--text-micro', '--text-xs', '--text-body', '--text-sm', '--text-head', '--text-md', '--text-title', '--fig-xl', '--fig-l', '--fig-m', '--fig-s', '--lh-caption', '--lh-control', '--lh-title', '--tr-title', '--tr-fig']],
+            ['Sizes', ['--tag-h', '--control-h-sm', '--control-h-md', '--control-h', '--row-h', '--row-h-2', '--order-row-h', '--control-h-lg', '--box-2xl', '--icon-md', '--icon-sm', '--icon-stroke', '--icon-stroke-s', '--topbar-h', '--sidebar-w', '--frame-inset', '--wrap-pad']],
+            ['Space', ['--sp-1', '--sp-2', '--sp-3', '--sp-4', '--sp-5', '--sp-6', '--sp-7', '--sp-8', '--sp-9', '--sp-10', '--control-gap', '--gap-row-icon', '--gap-cluster', '--gap-fig', '--gap-cols', '--pop-offset', '--pop-pad', '--tip-pad', '--menu-pad']],
+            ['Corners', ['--radius-swatch', '--radius-tag', '--radius-control', '--radius-pop', '--radius-tile', '--radius-sheet', '--radius-band', '--radius-full']],
         ];
         /* A token as the browser resolves it, as [r, g, b]. */
         function dsColour(token) {
