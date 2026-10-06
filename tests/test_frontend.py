@@ -10278,6 +10278,24 @@ def t_queue_counters_read_across_the_bench():
     eq(_token_raw("qc-w"), "184px", "--qc-w")
 
 
+@test
+def t_a_switch_is_a_track_and_its_word():
+    """Spec 6 Switch: a 28 by 16 track, ink-4 when off and teal when on, a 12
+    knob, its word beside it; the control 32 tall. Forecast's Compare methods
+    is one, built in the script."""
+    t = CSS.split("\n        .toggle {")[1].split("}")[0]
+    ok("min-height: var(--control-h)" in t and "font-size: var(--text-body)" in t and "font-weight: var(--weight-medium)" in t,
+       "the control is 32 and its word 13 at 500")
+    sw = CSS.split("\n        .toggle .sw {")[1].split("}")[0]
+    ok("background: var(--border-emphasis)" in sw, "off is ink-4")
+    knob = CSS.split("\n        .toggle .sw::after {")[1].split("}")[0]
+    ok("box-shadow: var(--shadow-raise)" in knob, "the knob is raised")
+    ok('.toggle:is(.on, [aria-checked="true"]) .sw { background: var(--fill-mark); }' in CSS, "on is the teal mark")
+    ok("function switchBtn(label, on, onToggle) {" in SCRIPT, "a switch can be built in the script")
+    fn = fn_src("function switchBtn(label, on, onToggle) {")
+    ok("setAttribute('role', 'switch')" in fn and "setAttribute('aria-checked'" in fn and "el('span', 'sw')" in fn, "and says its state")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
