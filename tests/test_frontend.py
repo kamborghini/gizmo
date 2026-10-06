@@ -7580,6 +7580,7 @@ def t_a_paid_report_run_is_one_run_and_stays_on_screen():
 const byId = {}; const $ = (id) => byId[id] || (byId[id] = Object.assign(el('div'), { id }));
 const I = {}; function loader() { return el('span'); }
 function pageHead(o) { const h = el('div', 'ov-hero'); h.append(el('h2', null, o.title || '')); return h; }
+const RUN_COST = 'x';
 const reportRuns = {};
 let overviewCache = null, seoCache = null, keywordsCache = null;
 let calls = 0, release; const answer = new Promise(r => { release = r; });
@@ -10171,8 +10172,8 @@ def t_an_empty_space_is_a_tile_a_line_and_its_action():
     st = CSS.split("\n        .empty-state {")[1].split("}")[0]
     ok("align-items: center" in st and "text-align: center" in st and "border" not in st and "background" not in st, "centred, no box")
     gate = fn_src("function renderRunGate(boxId, o) {")
-    ok("pageHead({ view: o.view, title: o.title, line: o.desc })" in gate and "emptyState({ icon: o.icon, text: o.note, action: btn, cls: 'run-gate' })" in gate,
-       "a run gate is the header and an empty state")
+    ok("pageHead({ view: o.view, title: o.title, line: o.desc," in gate and "emptyState({ icon: o.icon, text: o.note, action: btn, cls: 'run-gate' })" in gate,
+       "a run gate is the header (with its extra words behind an info button) and an empty state")
     ok("rg-ic" not in gate and "illustration" not in gate, "no drawn tile of its own")
     e = CSS.split("\n        .empty {")[1].split("}")[0]
     ok("text-align: center" in e and "font-size: var(--text-body)" in e and "border: 0" in e, "a list that matched nothing says so quietly")
@@ -10953,7 +10954,7 @@ def t_the_report_pages_wear_the_mix():
                  "Followed your skill", "'Source: ' + opts.source", "Compute live KPIs", "Crawl your storefront and fuse"):
         ok(gone not in SCRIPT, "cut: " + gone)
     for new in ("'Live figures and an AI summary of the store.'", "'Crawl the store and rank fixes by revenue.'",
-                "'Uses AI credits. Takes up to a minute.'", "'No trends yet. Connect Google to add traffic.'",
+                "more: 'Takes up to a minute.'", "'No trends yet. Connect Google to add traffic.'",
                 "'Connect Search Console to see search trends.'", "'Suggested questions'", "'Followed: '"):
         ok(new in SCRIPT, "says: " + new)
 
@@ -11010,8 +11011,8 @@ def t_keywords_products_and_customers_wear_the_mix():
         ok("el('div', 'ov-hero')" not in fn, fname + ": none built by hand")
     ok("function customerGate(seg) {" in SCRIPT, "the Customers gate exists")
     gate = fn_src("function customerGate(seg) {")
-    ok("emptyState({ icon: I.users, text: 'Uses AI credits. Reads Shopify customers and orders.', action: btn, cls: 'run-gate' })" in gate,
-       "the Customers gate is the run gate's empty state")
+    ok("emptyState({ icon: I.users, text: RUN_COST, action: btn, cls: 'run-gate' })" in gate,
+       "the Customers gate is the run gate's empty state, its cost in the words every gate uses")
     ok("'rg-ic'" not in SCRIPT and "'rg-note'" not in SCRIPT, "no run gate draws its own tile or note")
     ok("infoButton('The two Google sources'" in SCRIPT and "infoButton('Linking Google Ads'" in SCRIPT, "the Google steps wait behind info buttons")
     ok("function cardifySections(root) {" in SCRIPT, "cardifySections exists")
@@ -11132,6 +11133,29 @@ def t_fix_round_one_reports_and_the_phone_header():
     ok("border: 0;" in ss and "background: none;" in ss and "box-shadow: none;" in ss and "padding: 0;" in ss, "the SEO score has no box")
     ok("border: 0;" in tl and "border-radius: 0;" in tl and "padding: 0;" in tl, "a Xero sync tile has no box")
     ok("gap: var(--sp-4) var(--sp-8)" in rule(".cx-grid"), "and the three forms sit 32 apart in their columns")
+
+
+@test
+def t_the_four_run_gates_word_their_cost_the_same():
+    """Ruling after the Tasks 35 to 38 review: Overview, SEO, Keywords and Customers each ask for a run that
+    uses AI credits, so each says so in the SAME words (one constant, in an empty-state line of 8 words or
+    fewer). What a gate used to add to its cost line (SEO's minute, what Keywords and Customers read) is not
+    dropped: it sits behind the title's info button, word for word."""
+    m = re.search(r"const RUN_COST = '([^']*)';", SCRIPT)
+    ok(m is not None, "one constant words the cost")
+    cost = m.group(1) if m else ""
+    ok("AI credits" in cost and "only when you run it" in cost, "it says AI credits, and only when you run it")
+    ok(len(cost.split()) <= 8, "and it is an empty state's line: 8 words or fewer")
+    for fname, needle in (("function showOverviewView() {", "note: RUN_COST"), ("function showSeoView() {", "note: RUN_COST"),
+                          ("function showKeywordsView() {", "note: RUN_COST"), ("function customerGate(seg) {", "text: RUN_COST")):
+        ok(fname in SCRIPT, fname + " exists")
+        ok(needle in fn_src(fname), fname + " says it through the constant")
+    ok("Uses AI credits" not in SCRIPT.replace(cost, "").replace("' again. Uses AI credits.'", ""),
+       "and no gate words its own: the constant is the only gate cost line")
+    for more in ("more: 'Takes up to a minute.'", "more: 'Reads Search Console and Analytics.'", "'Reads Shopify customers and orders.'"):
+        ok(more in SCRIPT, "kept behind the info button: " + more)
+    ok("info: o.more ? infoButton('About this run', { title: o.title, body: o.more }) : null" in fn_src("function renderRunGate(boxId, o) {"),
+       "a gate's extra words sit behind its title's info button")
 
 
 if __name__ == "__main__":

@@ -10184,10 +10184,15 @@ Projected Image UK"></textarea>
         /* A report that has not run yet (the mix, spec 8.3): its page header
            with the one line saying what it is, then an empty state holding the
            cost and Run. Nothing fetches or spends until Run is pressed. */
+        /* The cost of a run that uses AI, said in the same words on every gate that has one (Overview,
+           SEO, Keywords, Customers): an empty state's line, 8 words. What a gate used to add to it sits
+           behind its title's info button (o.more), word for word. */
+        const RUN_COST = 'Uses AI credits only when you run it.';
         function renderRunGate(boxId, o) {
             const box = $(boxId); box.innerHTML = '';
             const btn = el('button', 'btn btn-primary rg-btn'); btn.textContent = o.cta; btn.onclick = o.onRun;
-            box.append(pageHead({ view: o.view, title: o.title, line: o.desc }),
+            box.append(pageHead({ view: o.view, title: o.title, line: o.desc,
+                info: o.more ? infoButton('About this run', { title: o.title, body: o.more }) : null }),
                 emptyState({ icon: o.icon, text: o.note, action: btn, cls: 'run-gate' }));
         }
         /* A paid report run in flight, by report. While one runs, its tab keeps
@@ -10197,12 +10202,12 @@ Projected Image UK"></textarea>
         function showOverviewView() {
             if (reportRuns.overview) return;
             if (overviewCache) { renderOverview(overviewCache); return; }
-            renderRunGate('ov-content', { icon: I.grid, title: 'Overview', desc: 'Live figures and an AI summary of the store.', cta: 'Run overview', note: 'Uses AI credits only when you run it.', onRun: () => loadOverview(true) });
+            renderRunGate('ov-content', { icon: I.grid, title: 'Overview', desc: 'Live figures and an AI summary of the store.', cta: 'Run overview', note: RUN_COST, onRun: () => loadOverview(true) });
         }
         function showSeoView() {
             if (reportRuns.seo) return;
             if (seoCache) { renderSEO(seoCache); return; }
-            renderRunGate('seo-content', { icon: I.search, title: 'SEO', desc: 'Crawl the store and rank fixes by revenue.', cta: 'Run SEO audit', note: 'Uses AI credits. Takes up to a minute.', onRun: () => loadSEO(true) });
+            renderRunGate('seo-content', { icon: I.search, title: 'SEO', desc: 'Crawl the store and rank fixes by revenue.', cta: 'Run SEO audit', note: RUN_COST, more: 'Takes up to a minute.', onRun: () => loadSEO(true) });
         }
         function showProductsView() {
             if (productPlanRun) return;   // a plan is being built: coming back keeps its loading screen
@@ -10488,7 +10493,7 @@ Projected Image UK"></textarea>
             if (keywordsCache) { renderKeywords(keywordsCache); return; }
             renderRunGate('keywords-content', { icon: I.tag, title: 'Keywords',
                 desc: 'Your keywords and ad spend, with a ranked plan.',
-                cta: 'Run keyword analysis', note: 'Uses AI credits. Reads Search Console and Analytics.',
+                cta: 'Run keyword analysis', note: RUN_COST, more: 'Reads Search Console and Analytics.',
                 onRun: () => loadKeywords(true) });
         }
         async function loadKeywords(force) {
@@ -10709,15 +10714,17 @@ Projected Image UK"></textarea>
            state every run gate is (renderRunGate), with the sector bar between. */
         function customerGateHead(seg) {
             const comp = seg === SEG_ALL;
-            return pageHead({ view: 'customers', title: comp ? 'Customers' : (seg + ' sector'), line: comp
+            const title = comp ? 'Customers' : (seg + ' sector');
+            return pageHead({ view: 'customers', title: title, line: comp
                 ? 'Customers and sectors by retention, value and revenue.'
-                : ('The ' + seg + ' sector on its own, with a ranked plan.') });
+                : ('The ' + seg + ' sector on its own, with a ranked plan.'),
+                info: infoButton('About this run', { title: title, body: 'Reads Shopify customers and orders.' }) });
         }
         function customerGate(seg) {
             const comp = seg === SEG_ALL;
             const btn = el('button', 'btn btn-primary'); btn.type = 'button';
             btn.textContent = comp ? 'Run comprehensive audit' : ('Run ' + seg + ' audit'); btn.onclick = () => loadCustomers(true, seg);
-            return emptyState({ icon: I.users, text: 'Uses AI credits. Reads Shopify customers and orders.', action: btn, cls: 'run-gate' });
+            return emptyState({ icon: I.users, text: RUN_COST, action: btn, cls: 'run-gate' });
         }
         function sectorComparisonTable(rows, cur) {
             const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
