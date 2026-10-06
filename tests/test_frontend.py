@@ -10119,6 +10119,33 @@ def t_a_tag_is_twenty_tall_in_caption_type():
         ok(prop in tags, "a tag: " + prop)
 
 
+@test
+def t_an_empty_space_is_a_tile_a_line_and_its_action():
+    """Spec 6 and 7 (Cameron: "i hate the stupid projector thing"): an empty
+    state is a 40 icon tile with the screen's own icon on the fill, one line of
+    8 words or fewer in the head step, and its action, centred in its space.
+    No illustration, no box. A report's run gate is one: the page header with
+    its one line, then the tile, the cost and Run."""
+    ok("function emptyState(o) {" in SCRIPT, "the builder exists")
+    fn = fn_src("function emptyState(o) {")
+    for part in ("el('div', 'empty-state'", "el('span', 'empty-ic')", "ico(o.icon", "el('p', 'empty-line', o.text)", "if (o.action) box.append(o.action);"):
+        ok(part in fn, "emptyState: " + part)
+    tile = CSS.split("\n        .empty-ic {")[1].split("}")[0]
+    ok("width: var(--box-2xl)" in tile and "height: var(--box-2xl)" in tile and "background: var(--surface-tertiary)" in tile
+       and "border-radius: var(--radius-control)" in tile, "a 40 tile on the fill with a 6 corner")
+    line = CSS.split("\n        .empty-line {")[1].split("}")[0]
+    ok("font-size: var(--text-head)" in line and "font-weight: var(--weight-semibold)" in line, "one line in the head step")
+    st = CSS.split("\n        .empty-state {")[1].split("}")[0]
+    ok("align-items: center" in st and "text-align: center" in st and "border" not in st and "background" not in st, "centred, no box")
+    gate = fn_src("function renderRunGate(boxId, o) {")
+    ok("pageHead({ view: o.view, title: o.title, line: o.desc })" in gate and "emptyState({ icon: o.icon, text: o.note, action: btn, cls: 'run-gate' })" in gate,
+       "a run gate is the header and an empty state")
+    ok("rg-ic" not in gate and "illustration" not in gate, "no drawn tile of its own")
+    e = CSS.split("\n        .empty {")[1].split("}")[0]
+    ok("text-align: center" in e and "font-size: var(--text-body)" in e and "border: 0" in e, "a list that matched nothing says so quietly")
+    ok(".ov-wrap > .empty, .ov-wrap > .widget-group > .empty, .card-grid > .empty { background" not in CSS, "with no box round it")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

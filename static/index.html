@@ -2025,18 +2025,21 @@
            off the box and onto the text, as padding: both sides compute the
            same value, so a long sentence still breaks near 52ch and stays
            centred, and the frame still spans its container. */
+        /* A list that matched nothing (a search, a filter): one quiet line,
+           centred where its rows would be. A space with nothing in it at all is
+           the empty state below. */
         .empty { background: transparent; border: 0; border-radius: 0; padding: var(--sp-6) max(var(--sp-4), calc((100% - var(--measure)) / 2));
-            color: var(--text-tertiary); font-size: var(--text-sm); line-height: var(--lh-prose); text-align: center; }
-        /* ...unless it stands alone on the page or in a grid of cards, where it
-           needs the card's own edge or it floats. A widget group is still the
-           page: its heading and empty state are the same two blocks, grouped
-           so the grid moves them together. */
-        .ov-wrap > .empty, .ov-wrap > .widget-group > .empty, .card-grid > .empty { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-card); }
-        /* Inside a card an empty state is the first line of the list it stands
-           in for: left-aligned on the card's gutter and spaced by the card's own
-           16 gap. Centred with 24 above and below, it floated 40 to 50px from
-           everything around it and 500px from its own title. */
-        .card > .empty, .card-bleed > .empty, .card > div > .empty:only-child { text-align: left; padding: 0; max-width: var(--measure); }
+            color: var(--text-tertiary); font-size: var(--text-body); line-height: var(--lh-control); text-align: center; }
+        /* THE EMPTY STATE (the mix, spec 6): a 40 tile with the screen's own
+           icon on the fill, one line in the head step, its action; centred in
+           its space, 16 apart. No illustration and no box. */
+        .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-4);
+            text-align: center; padding: var(--sp-10) 0; }
+        .empty-ic { width: var(--box-2xl); height: var(--box-2xl); border-radius: var(--radius-control); background: var(--surface-tertiary);
+            color: var(--text-tertiary); display: grid; place-items: center; flex: none; }
+        .empty-ic svg { width: var(--icon-md); height: var(--icon-md); }
+        .empty-line { margin: 0; font-size: var(--text-head); line-height: var(--lh-control); font-weight: var(--weight-semibold);
+            color: var(--text-primary); max-width: var(--measure); }
         /* skills
            One card, the skills a list inside it, each separated by a rule;
            the editor opens in place of the one being changed, or at the top
@@ -3892,7 +3895,9 @@
             .lbl-pane { position: static !important; }
         }
         /* run-task gate (tabs stay idle until the user starts the task) */
-        .run-gate { max-width: 480px; margin: 7vh auto 0; text-align: center; display: flex; flex-direction: column; align-items: center; background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-card); padding: var(--sp-8) var(--sp-7); box-shadow: var(--shadow-sm); animation: fadeUp .4s ease backwards; }
+        /* A run gate is an empty state under its page's header (renderRunGate).
+           Customers builds its own until Task 36 moves it onto the same builder. */
+        .run-gate { text-align: center; display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); padding: var(--sp-10) 0; }
         /* 7vh is for a page that is only the gate. Under a card it is stacked
            on the card's own margin, which measured 65 to 71px of nothing. */
         .ov-wrap > * + .run-gate { margin-top: 0; }
@@ -3908,7 +3913,9 @@
            reference whose largest button is also 32. The reference makes a
            primary action loud by filling it, never by growing it. */
         /* The reference's lg button keeps the 10px inset of every other size. */
-        .run-gate .rg-btn { font-size: var(--text-sm); padding: var(--control-pad-y) var(--sp-2-5); }
+        .run-gate .rg-btn { font-size: var(--text-body); padding: var(--control-pad-y) var(--sp-3); }
+        /* The gate's one line is the empty state's, not the old paragraph's (Customers' own gate keeps those). */
+        .run-gate .empty-line { color: var(--text-primary); font-size: var(--text-head); line-height: var(--lh-control); margin: 0; max-width: var(--measure); }
         .run-gate .rg-btn svg { width: var(--icon-md); height: var(--icon-md); }
         .run-gate .rg-note { margin-top: var(--sp-3); font-size: var(--text-xs); color: var(--text-tertiary); }
         /* ---------- Keywords tab ---------- */
@@ -6416,6 +6423,16 @@ Projected Image UK"></textarea>
                 nav.append(b);
             });
             return nav;
+        }
+        /* The empty state (the mix, spec 6): a 40 tile with the screen's own
+           icon on the fill, one line in the head step, then its action, centred
+           in its space. No illustration and no box. o: { icon, text, action, cls } */
+        function emptyState(o) {
+            const box = el('div', 'empty-state' + (o.cls ? ' ' + o.cls : ''));
+            const t = el('span', 'empty-ic'); t.setAttribute('aria-hidden', 'true'); t.append(ico(o.icon || I.grid));
+            box.append(t, el('p', 'empty-line', o.text));
+            if (o.action) box.append(o.action);
+            return box;
         }
         function statCard(m, i) {
             const c = el('div', 'stat' + (m.tone === 'warn' ? ' warn' : ''));
@@ -9676,15 +9693,14 @@ Projected Image UK"></textarea>
 
         /* ---------- overview ---------- */
         // Tabs stay idle until the user explicitly runs the task (no tokens/data on click).
+        /* A report that has not run yet (the mix, spec 8.3): its page header
+           with the one line saying what it is, then an empty state holding the
+           cost and Run. Nothing fetches or spends until Run is pressed. */
         function renderRunGate(boxId, o) {
             const box = $(boxId); box.innerHTML = '';
-            const card = el('div', 'run-gate');
-            const ic = el('div', 'rg-ic'); ic.innerHTML = o.icon; card.append(ic);
-            card.append(el('h2', null, o.title), el('p', null, o.desc));
             const btn = el('button', 'btn btn-primary rg-btn'); btn.textContent = o.cta; btn.onclick = o.onRun;
-            card.append(btn);
-            if (o.note) card.append(el('div', 'rg-note', o.note));
-            box.append(card);
+            box.append(pageHead({ view: o.view, title: o.title, line: o.desc }),
+                emptyState({ icon: o.icon, text: o.note, action: btn, cls: 'run-gate' }));
         }
         /* A paid report run in flight, by report. While one runs, its tab keeps
            the loading screen when you come back to it, and Run or Refresh
