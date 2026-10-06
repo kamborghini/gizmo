@@ -251,19 +251,19 @@ def _trimmed(m: np.ndarray) -> np.ndarray:
 
 
 COMBINERS = (
-    ("Average of every source", _mean, "the plain mean of every other source",
-     "It is the straight average of every other source. Averaging several forecasts usually beats "
+    ("Average of every source", _mean, "the plain mean of every other method",
+     "It is the straight average of every other method. Averaging several forecasts usually beats "
      "most single ones, because their individual mistakes partly cancel out. It cannot correct "
      "a mistake they all share, which is why it is scored here rather than trusted.",
      "Best at: when no single approach is clearly right for the period ahead."),
     ("Middle of every source", _median, "the middle one, so an outlier cannot carry it",
-     "It takes the middle value of all the sources, ignoring how far out the extremes are, so a single "
+     "It takes the middle value of all the methods, ignoring how far out the extremes are, so a single "
      "wild forecast cannot pull the answer towards it.",
-     "Best at: when one source is prone to extreme answers."),
+     "Best at: when one method is prone to extreme answers."),
     ("Average, extremes removed", _trimmed, "highest and lowest dropped, then averaged",
-     "It drops the highest and the lowest source, then averages what is left. That keeps most of the "
+     "It drops the highest and the lowest method, then averages what is left. That keeps most of the "
      "benefit of averaging while stopping one outlier from carrying the answer.",
-     "Best at: when most sources agree and one or two are far out."),
+     "Best at: when most methods agree and one or two are far out."),
 )
 
 
@@ -460,8 +460,8 @@ def sanity_forecasts(monthly: pd.Series, horizon: int = DEFAULT_HORIZON,
         if tot > 0:
             vals = sum(stack[idx[n]] * (w / tot) for n, w in usable.items())
             out.append({"name": "Weighted by track record", "kind": "combination",
-                        "note": "each source weighted by how right it has been",
-                        "about": "It weights every source by how close it has actually come on the months "
+                        "note": "each method weighted by how right it has been",
+                        "about": "It weights every method by how close it has actually come on the months "
                                  "that have closed since this started running, not by a backtest. The "
                                  "more months there are, the more this reflects what works for this "
                                  "business rather than what works in general.",
