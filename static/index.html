@@ -338,6 +338,7 @@
             --auth-card-line: color-mix(in srgb, var(--info) 14%, var(--surface-primary));
             --auth-go-top: color-mix(in srgb, var(--action-primary) 80%, var(--surface-primary));
             --sidebar-w: 236px; --topbar-h: 48px; --frame-inset: var(--sp-2);   /* the sheet sits 8 inside the ink frame */
+            --find-w: 232px;        /* the top bar's search */
             --chevron-room: 30px;   /* right padding a select keeps clear for its chevron */
             --icon-col: 34px;       /* the file list's icon column: 16px glyph, 18px gutter */
             /* The widget grid. Four columns when four cells of --wgrid-cell fit
@@ -593,15 +594,19 @@
         }
         /* With the sidebar folded away the frame closes round the sheet's left edge too. */
         @media screen and (min-width: 901px) { body.sidebar-collapsed .main { margin-left: var(--frame-inset); } }
-        .topbar { height: var(--topbar-h); flex-shrink: 0; border-bottom: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary);
-            display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--wrap-pad); position: relative; z-index: 5; }
+        .topbar { height: var(--topbar-h); flex-shrink: 0; background: var(--surface-primary);
+            display: flex; align-items: center; gap: var(--control-gap); padding: 0 var(--wrap-pad); position: relative; z-index: 5; }
+        /* Where you are: the section in ink-3, a 14 chevron, the page in ink. */
+        .crumbs { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-1); color: var(--text-tertiary);
+            font-size: var(--text-body); line-height: var(--lh-control); }
+        .crumb-chev { display: grid; place-items: center; flex: none; }
+        .crumb-chev svg { width: var(--icon-sm); height: var(--icon-sm); stroke-width: var(--icon-stroke-s); }
         /* One line, always. A conversation title is user-written and can run to
            sixty characters; at 375px that wrapped to three lines inside a
            48px bar and spilled over its border. min-width:0 lets the flex item
            shrink past its text; the full title rides in the tooltip. */
-        .topbar h1 { font-size: var(--text-sm); font-weight: var(--weight-medium); margin: 0; letter-spacing: normal;
+        .topbar h1 { font-size: var(--text-body); line-height: var(--lh-control); font-weight: var(--weight-medium); color: var(--text-primary); margin: 0; letter-spacing: normal;
             min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .topbar .spacer { flex: 1; }
         .menu-btn { display: inline-grid; }
         /* On a desk the sidebar's own Hide sidebar is in view, so the top bar's
            trigger steps aside until the sidebar is folded away. On a phone it
@@ -609,21 +614,20 @@
         @media (min-width: 901px) { body:not(.sidebar-collapsed) .menu-btn { display: none; } }
         /* Its glyph, not its box, sits on the page's text edge, as the
            Conversations + does on the sidebar's icon column. */
-        .topbar .menu-btn { margin-left: calc(-1 * var(--sp-1-5)); }
-        .topbar.search-last .topbar-search { margin-right: calc(-1 * var(--sp-1)); }
-        /* The hairline between the trigger and the page, as the reference draws it. */
-        .topbar-sep { width: var(--bw-hairline); height: var(--sp-4); background: var(--border-default); margin: 0 var(--sp-2); flex: none; }
-        /* The reference's search trigger: muted text, a glyph, and the shortcut
-           in a small key cap. It opens a list of every page you can go to. */
-        .topbar-search { display: inline-flex; align-items: center; gap: var(--sp-1-5); height: var(--control-h); padding: 0 var(--sp-1);
-            border: 0; border-radius: var(--radius-row); background: none; color: var(--text-tertiary); font: inherit; font-size: var(--text-sm);
+        .topbar .menu-btn { margin-left: calc(-1 * var(--sp-1)); }
+        /* Search: a 32 well 232 wide, the glyph 8 from its word, the shortcut
+           in a key cap. It opens a list of every page you can go to. */
+        .topbar-search { display: inline-flex; align-items: center; gap: var(--control-gap); height: var(--control-h); width: var(--find-w); flex: none;
+            padding: 0 var(--sp-2) 0 var(--sp-3); border: 0; border-radius: var(--radius-control); background: var(--surface-tertiary);
+            color: var(--text-tertiary); font: inherit; font-size: var(--text-body); line-height: var(--lh-control); text-align: start;
             cursor: pointer; transition: color var(--dur) var(--ease), background var(--dur) var(--ease); }
-        .topbar-search:hover { color: var(--text-primary); }
-        .topbar-search:active { background: var(--surface-tertiary); }
+        .topbar-search:hover { background: var(--surface-sunken); }
+        .topbar-search:active { background: var(--press-fill); }
         .topbar-search svg { width: var(--icon-md); height: var(--icon-md); }
-        .topbar-search kbd { display: inline-flex; align-items: center; height: 20px; padding: 0 var(--sp-1-5);
-            border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-tag); background: var(--surface-tertiary);
-            font-family: inherit; font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--text-tertiary); }
+        .topbar-search .ts-label { flex: 1; }
+        .topbar-search kbd { display: inline-grid; place-items: center; height: var(--tag-h); min-width: var(--tag-h); padding: 0 var(--sp-1);
+            border: 0; border-radius: var(--radius-tag); background: var(--surface-primary); box-shadow: var(--ring-default);
+            font-family: inherit; font-size: var(--text-micro); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary); }
         @media (max-width: 640px) { .topbar-search .ts-label, .topbar-search kbd { display: none; }
             /* The page's gutter steps down on a phone, and the top bar, which
                takes the same token, steps with it, so its controls line up
@@ -4598,6 +4602,24 @@
             .sidebar.open { margin-left: 0; box-shadow: var(--shadow-lg); }
             .backdrop.show { display: block; position: fixed; inset: 0; background: var(--overlay-scrim); z-index: 20; }
         }
+        /* With the sidebar a drawer (900 and under) the frame is the ink top
+           bar: the menu, the section, search. The sheet rises under it with its
+           12 corners, edge to edge. Chat has no page header, so its bar keeps
+           the page's own name. */
+        @media screen and (max-width: 900px) {
+            .main { margin: 0; border-radius: 0; background: transparent; overflow: visible; }
+            .view.active { background: var(--surface-primary); border-radius: var(--radius-sheet) var(--radius-sheet) 0 0; overflow: hidden; }
+            .topbar { background: transparent; padding: 0 var(--sp-1); }
+            .crumbs { color: var(--nav-text); font-size: var(--text-sm); }
+            .topbar h1 { color: var(--nav-text); font-size: var(--text-sm); }
+            body:not([data-view="chat"]) :is(#crumb-chev, #view-title) { display: none; }
+            body[data-view="chat"] :is(#view-crumb, #crumb-chev) { display: none; }
+            .topbar :is(.icon-btn, .topbar-search) { color: var(--nav-text); background: transparent; }
+            .topbar-search { width: var(--control-h); padding: 0; justify-content: center; }
+            .topbar-search :is(.ts-label, kbd) { display: none; }
+            .topbar :is(.icon-btn, .topbar-search):hover { background: var(--chrome-fill); color: var(--text-on-chrome); }
+            .topbar :is(.icon-btn, .topbar-search):active { background: var(--chrome-press); }
+        }
 
         /* ---------- Settings modal ---------- */
         .modal-overlay { display: none; position: fixed; inset: 0; background: var(--overlay-modal); z-index: 50;
@@ -5158,12 +5180,11 @@
 
         <main class="main" id="main" tabindex="-1">
             <div class="topbar">
-                <!-- The reference's header: a sidebar trigger, a hairline, then the
-                     page; on the right the search and the page's own button. -->
+                <!-- The mix: where you are (the section, then the page) on the left,
+                     search on the right. The menu button opens the phone's drawer,
+                     and on a desk brings back a sidebar folded away. -->
                 <button class="icon-btn menu-btn" id="menu-btn" title="Toggle sidebar" aria-label="Toggle sidebar" aria-keyshortcuts="Meta+B" aria-controls="sidebar" aria-expanded="true"></button>
-                <span class="topbar-sep" aria-hidden="true"></span>
-                <h1 id="view-title">Overview</h1>
-                <div class="spacer"></div>
+                <div class="crumbs"><span id="view-crumb"></span><span class="crumb-chev" id="crumb-chev" aria-hidden="true"></span><h1 id="view-title">Overview</h1></div>
                 <button class="topbar-search" id="topbar-search" type="button" aria-keyshortcuts="Meta+J" aria-label="Search pages and the guide"></button>
                 <button class="icon-btn" id="print-btn" title="Download as PDF" aria-label="Download as PDF"></button>
                 <button class="btn btn-sm" id="topbar-action"></button>
@@ -5589,6 +5610,7 @@ Projected Image UK"></textarea>
         $('new-convo').innerHTML = I.plus;
         $('menu-btn').innerHTML = I.panelLeft;
         $('side-hide').innerHTML = I.panelLeft;
+        $('crumb-chev').innerHTML = I.chev;
         $('side-user-more').innerHTML = I.moreV;
         $('side-user').onclick = userMenu;
         $('topbar-search').append(ico(I.search), el('span', 'ts-label', 'Search'),
@@ -29272,6 +29294,13 @@ Projected Image UK"></textarea>
         }
         /* The bar shows one line of it; the tooltip carries all of it. */
         function setViewTitle(text) { const h = $('view-title'); h.textContent = text; h.title = text; }
+        /* The section a page sits in, as the sidebar groups it: the crumb
+           before the page's name. */
+        function setViewCrumb(v) {
+            const n = $('nav-' + v), sect = n && n.closest('.nav-sect');
+            const g = sect && document.querySelector('.nav-group[aria-controls="' + sect.id + '"]');
+            $('view-crumb').textContent = g ? g.textContent.trim() : '';
+        }
         function currentView() {
             const n = document.querySelector('.nav-item.active');
             return (n && n.dataset.view) || '';
@@ -29338,18 +29367,13 @@ Projected Image UK"></textarea>
             APP_VIEWS.forEach(name => $('view-' + name).classList.toggle('active', v === name));
             const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', recon: 'Reconciliation', forecast: 'Forecast', sizes: 'Size list', connector: 'Xero sync', crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
             setViewTitle(titles[v] || 'Chat');
-            /* Beta rides the topbar title as well: it is the only label still
-               on screen once the page is scrolled. */
-            if (BETA_TABS.indexOf(v) >= 0) $('view-title').append(el('span', 'beta-tag', 'Beta'));
+            setViewCrumb(v);
+            document.body.dataset.view = v;
             const act = $('topbar-action'); act.innerHTML = '';
             if (v === 'guide') renderGuide();
             // Only offer the PDF when there is actually a report to print: the print
             // stylesheet hides the Run gate, so printing an un-run tab yields a blank page.
             $('print-btn').style.display = (['overview', 'seo', 'keywords', 'products', 'customers', 'chat'].indexOf(v) >= 0 && printableCache(v)) ? '' : 'none';
-            /* With nothing after the search, its glyph (not its padding) ends on
-               the page's text edge, as the menu button starts on it. */
-            requestAnimationFrame(() => { const tb = document.querySelector('.topbar');
-                if (tb) tb.classList.toggle('search-last', !act.childNodes.length && $('print-btn').style.display === 'none'); });
             /* The app's header carries only what is global, as the reference's
                does: each report's Refresh sits in its own page header now,
                beside the stamp it renews (heroAct). Chat's New chat stays. */
