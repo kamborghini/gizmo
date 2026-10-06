@@ -9044,7 +9044,7 @@ def t_the_app_wide_layout_sweep_holds():
         ".ktable.crm-table td.crm-phone { white-space: nowrap; }": "a phone number is never split",
         ".crm-focus .disp-boxrow > .disp-text { flex: 1 1 8rem; min-width: 7rem; }": "a stage's name keeps 7rem",
         ".followed > .ic { display: inline-grid; }": "the book icon leads its line",
-        ".lia-name { font-size: var(--text-sm); font-weight: var(--weight-medium); flex: 0 0 clamp(150px, 30%, 320px);": "one name width per list",
+        ".lia-name { font-size: var(--text-body); font-weight: var(--weight-medium); flex: 0 0 clamp(150px, 30%, 320px);": "one name width per list",
         "body:has(#view-chat.active) .build-bar { bottom: auto; top: calc(var(--topbar-h) + 12px); }": "the update bar is clear of the composer on Chat",
         "#team-content .card + .card { margin-top: var(--page-rhythm); }": "Team's cards are spaced at the page rhythm",
         # operations
@@ -10352,6 +10352,40 @@ def t_every_target_on_a_phone_fits_a_finger():
     ok(re.search(r":root \{ --wrap-pad: var\(--sp-4\); \}", CSS), "the gutter is 16")
     ok("@media (pointer: coarse) { input:not([type=checkbox]):not([type=radio]), textarea, select { font-size: var(--text-md); } }" in CSS,
        "and a real field under a finger keeps 16 so iOS does not zoom into it")
+
+
+@test
+def t_text_comes_in_the_five_steps():
+    """Spec 4.2: Inter at 11/16, 12/16, 13/20, 14/20 and 15/20; Bricolage at the
+    wordmark's 16/20 and a page title's 26/32 (24 on a phone); figures at 44,
+    36, 28 and 24 on a line of 1. Every screen rule's size and line height is
+    one of them, from the token block. Print keeps its own, untouched."""
+    # The print guard's own list, and the report's print-only header, which
+    # is paper too: neither is screen type.
+    pr = re.compile(r"label-sheet|day-sheet|loan-sticker|guide-print-row|#label-print|printing-label|@media print|@page|print-head")
+    sizes = {"var(--text-micro)", "var(--text-xs)", "var(--text-body)", "var(--text-sm)", "var(--text-head)", "var(--text-md)",
+             "var(--text-title)", "var(--text-2xl)", "var(--fig-xl)", "var(--fig-l)", "var(--fig-m)", "var(--fig-s)", "inherit"}
+    lhs = {"var(--lh-caption)", "var(--lh-control)", "var(--lh-title)", "var(--lh-none)", "var(--lh-prose)", "inherit", "normal"}
+    bad = []
+    for sel, body in _rules(CSS):
+        if pr.search(sel) or sel.strip() == "body":
+            continue
+        for m in re.finditer(r"(?<![\w-])font-size\s*:\s*([^;}]+)", body):
+            if m.group(1).strip() not in sizes: bad.append(sel[:50] + " size " + m.group(1).strip())
+        for m in re.finditer(r"(?<![\w-])line-height\s*:\s*([^;}]+)", body):
+            if m.group(1).strip() not in lhs: bad.append(sel[:50] + " line " + m.group(1).strip())
+    ok(not bad, "%d off the five steps: %s" % (len(bad), bad[:6]))
+    track = [sel[:50] + " " + m.group(1).strip() for sel, body in _rules(CSS) if not pr.search(sel)
+             for m in re.finditer(r"(?<![\w-])letter-spacing\s*:\s*([^;}]+)", body)
+             if m.group(1).strip() not in ("normal", "0", "var(--tr-title)", "var(--tr-fig)")]
+    ok(not track, "tracking only on titles and figures, from the token block: %s" % track[:6])
+    md = [s for s, b in _rules(CSS) if not pr.search(s) and "font-size: var(--text-md)" in b]
+    ok(all(".brand-name" in s or "pointer: coarse" in s for s in md), "16 is the wordmark's, and a phone field's: %s" % md)
+    for gone in ("--text-lg", "--text-xl", "--text-3xl", "--lh-tight", "--lh-snug"):
+        ok(gone + ":" not in CSS, gone + " has left the token block")
+    ok('body > :where(:not([id="label-print"])) { font-size: var(--text-body); line-height: var(--lh-control); }' in CSS,
+       "the app's own text is 13/20, and the print staging area keeps body's own")
+    ok('@media screen { :where(svg[stroke-width="2"]) { stroke-width: var(--icon-stroke); } }' in CSS, "every interface icon is drawn at 1.75")
 
 
 if __name__ == "__main__":
