@@ -2197,8 +2197,8 @@ def t_a_kpi_with_a_list_behind_it_opens_it():
     ok("stat.append(statAct(I.check));" in SCRIPT and SCRIPT.count("stat.append(statAct(I.check));") == 2,
        "both filter strips carry the ring")
     ok(".stat.stat-open { cursor: pointer; }" in CSS, "an opener shows a pointer")
-    ok(".stat.stat-open:hover, .stat.stat-pick:hover { border-color: var(--border-strong); background: var(--surface-secondary); }" in CSS,
-       "and the reference's row hover")
+    ok(".stat.stat-open:hover .label, .stat.stat-pick:hover .label { color: var(--text-primary); }" in CSS,
+       "and under the pointer its label darkens (the mix: a figure has no box to tint)")
     ok(".stat-pick:is(.on, [aria-pressed=\"true\"]) > .stat-act { background: var(--action-primary);" in CSS,
        "a set filter fills its ring")
     ok(".chart-expand, .stat-act, .wg-hide, [data-wg-control]" in CSS, "the cue is screen furniture, hidden in print")
@@ -3616,16 +3616,16 @@ def t_the_kpi_card_keeps_the_hierarchy_the_reference_measures():
     all four KPI cards on the reference's Default dashboard AND its CRM one:
     both agree the label is 14px muted, and Default - the page this one maps to
     - puts the value at 30px/500. Pinned here so it is not "corrected" again."""
+    # The mix (2026-10-06, spec 4.2 and 6): the label is 13 at 500 in ink-2,
+    # the figure Inter 600 at 28 on a line of 1, the note a caption.
     lab = CSS.split(".stat .label {")[1].split("}")[0]
-    ok("font-size: var(--text-sm)" in lab, "the label is the 14px one")
-    ok("color: var(--text-tertiary)" in lab, "and muted, not full-strength")
+    ok("font-size: var(--text-body)" in lab, "the label is the body's 13")
+    ok("color: var(--text-secondary)" in lab, "in ink-2, a step under the figure")
     val = CSS.split(".stat .value {")[1].split("}")[0]
-    ok("font-size: var(--text-3xl)" in val, "the number is 30px (the scale gained the reference's 24px step as --text-2xl, so 30 is --text-3xl)")
-    ok("font-weight: var(--weight-medium)" in val, "at 500, as the Default card draws it")
-    # Anchored on the line start: ".stat .stat-note {" also contains the
-    # shorter string, and matching that one reads the wrong rule.
+    ok("font-size: var(--fig-m)" in val, "the number is the 28 figure")
+    ok("font-weight: var(--weight-semibold)" in val, "at 600")
     note = re.search(r"^\s*\.stat-note \{([^}]*)\}", CSS, re.M).group(1)
-    ok("font-size: var(--text-sm)" in note, "and the sub-line matches the label at 14px")
+    ok("font-size: var(--text-xs)" in note, "and the sub-line is a caption")
 
 
 @test
@@ -3667,34 +3667,23 @@ def t_the_card_elevation_token_actually_paints():
 @test
 def t_a_rising_number_is_not_congratulated_in_green():
     """gizmo paints metrics where a rise is bad news - unfulfilled orders,
-    at-risk customers - so a green "up" reads as approval of a number the
-    merchant needs to worry about. Nothing here spends colour on direction.
-
-    The KPI chip has since been demoted a second time: a solid near-black pill
-    made the CHANGE the loudest mark on a card whose subject is the figure, so
-    the up chip is a neutral tint under the value's own weight. The rule that
-    matters is unchanged - no green, and the tinted down chip is the only mark
-    in the row that pulls the eye."""
-    up = re.search(r"\.delta\.up \{[^}]*\}", CSS)
-    ok(up, "the .delta.up rule is still there")
-    ok("var(--surface-sunken)" in up.group(0) and "var(--text-primary)" in up.group(0),
-       "the up chip is a neutral tint carrying full ink, not a fill: " + up.group(0)[:70])
-    ok("var(--action-primary)" not in up.group(0),
-       "and no longer outweighs the 30px figure it annotates")
-    for sel in (r"\.delta\.up", r"\.prod-chip \.cmp\.up"):
+    at-risk customers - so a green "up" there reads as approval of a number the
+    merchant needs to worry about. Since the mix (2026-10-06, spec 6) a change
+    chip is green or red, but by what the change MEANS, never by its direction
+    alone: the arrow and a hidden word carry the direction."""
+    ok("function deltaTone(label, trend, better) {" in SCRIPT, "a change's tone is worked out, not read off its direction")
+    bad = SCRIPT.split("const RISE_IS_BAD = [")[1].split("]")[0]
+    for k in ("'unfulfilled'", "'at risk'", "'position'", "'overdue'"):
+        ok(k in bad, "a rise in " + k + " is bad news, so it is not green")
+    ok("changeChip(m.trend, m.delta, deltaTone(m.label, m.trend, m.better))" in SCRIPT, "the KPI chip asks")
+    ok(not re.search(r"\.delta\.up \{[^}]*var\(--success\)", CSS), "no rule paints a rise green because it is a rise")
+    good = CSS.split("\n        .delta.good {")[1].split("}")[0]
+    ok("color: var(--success)" in good and "background: var(--success-bg)" in good, "a good change is the green pair")
+    worse = CSS.split("\n        .delta.bad {")[1].split("}")[0]
+    ok("color: var(--error)" in worse and "background: var(--error-bg)" in worse, "a bad one the red pair")
+    for sel in (r"\.prod-chip \.cmp\.up",):
         rule = re.search(sel + r" \{[^}]*\}", CSS)
-        ok(rule, "the %s rule is still there" % sel)
-        ok("var(--success)" not in rule.group(0), "and %s spends no green on direction alone" % sel)
-    # The product list's compare chip is the same kind of mark, so it wears the
-    # same neutral tint: as a filled black pill it was the heaviest thing on
-    # every product row and read as a button (2026-09-23 design sweep).
-    cmp_up = re.search(r"\.prod-chip \.cmp\.up \{[^}]*\}", CSS)
-    ok("var(--surface-sunken)" in cmp_up.group(0) and "var(--action-primary)" not in cmp_up.group(0),
-       "the product comparison chip matches the KPI change chip")
-    # The tinted half of the pair stays, because red IS the reference's one tint.
-    down = re.search(r"\.delta\.down \{[^}]*\}", CSS)
-    ok(down and "var(--error)" in down.group(0),
-       "while a falling number keeps the reference's red")
+        ok(rule and "var(--success)" not in rule.group(0), "the product comparison chip spends no green on direction either")
 
 
 @test
@@ -9979,6 +9968,30 @@ def t_a_screens_method_pages_sit_in_one_how_it_works_menu():
     ok(".dmenu-link { color: var(--text-link); }" in CSS, "the Guide's row is teal words")
     ok(".dmenu-item.dmenu-link .ic { color: inherit; }" in CSS and ".dmenu-item.dmenu-link svg {" in CSS,
        "and its arrow is teal and 14: qualified by .dmenu-item, which is later than .dmenu-link and set the arrow in ink-3 at 16 when it was not")
+
+
+@test
+def t_figures_stand_in_a_row_split_by_hairlines():
+    """Spec 6 and 4.2: figures in one row split by hairlines, no box: the label
+    above (13 at 500 in ink-2), the figure (Inter 600 at 28, tabular, tracked
+    -0.03em, on a line of 1), the change chip 12 beside it, a note under it.
+    The first figure of each row starts on the text edge."""
+    st = CSS.split("\n        .stat {")[1].split("}")[0]
+    for prop in ("background: none", "border: 0", "padding: 0", "gap: var(--gap-fig)"):
+        ok(prop in st, ".stat: " + prop)
+    lab = CSS.split(".stat .label {")[1].split("}")[0]
+    ok("font-size: var(--text-body)" in lab and "color: var(--text-secondary)" in lab and "font-weight: var(--weight-medium)" in lab,
+       "the label is 13 at 500 in ink-2")
+    val = CSS.split(".stat .value {")[1].split("}")[0]
+    for prop in ("font-size: var(--fig-m)", "font-weight: var(--weight-semibold)", "letter-spacing: var(--tr-fig)",
+                 "line-height: var(--lh-none)", "font-variant-numeric: tabular-nums"):
+        ok(prop in val, "the figure: " + prop)
+    row = CSS.split("\n        .metrics {")[1].split("}")[0]
+    ok("overflow: clip" in row and "column-gap: var(--sp-8)" in row, "a row clips the hairline its first figure draws outside it")
+    rule = CSS.split("\n        .metrics > .stat::before {")[1].split("}")[0]
+    ok("left: calc(-0.5 * var(--sp-8))" in rule and "background: var(--border-default)" in rule and "width: var(--bw-hairline)" in rule,
+       "each figure draws its hairline in the middle of the gap before it")
+    ok(".card .metrics-strip > .stat { border-color: transparent;" not in CSS, "no tinted tile inside a section")
 
 
 if __name__ == "__main__":
