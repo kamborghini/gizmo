@@ -2261,7 +2261,7 @@ def t_the_forecast_tab_exists_and_is_gated():
     # The graph is back, and the reader chooses the scale rather than being
     # locked into one: a day question and a year question are different questions.
     chart = SCRIPT.split("function fcChartCard(", 1)[1].split("\n        function ", 1)[0]
-    ok("choiceSelect(FC_RANGES, range, setFcRange" in chart, "the range is the reader's to pick, from one compact list that never wraps")
+    ok("choiceSelect(FC_RANGES, range, setFcRange" in chart, "the range is the reader's to pick: seven segments on a desktop, one compact list on a phone")
     for key in ("'today'", "'week'", "'month'", "'q'", "'year'", "'ahead'", "'custom'"):
         ok(key in SCRIPT, "range " + key + " is offered")
     ok("grain = 'month'" in chart and "dayRows" in chart,
@@ -9975,7 +9975,7 @@ def t_a_screens_method_pages_sit_in_one_how_it_works_menu():
     for part in ("el('button', 'btn')", "ico(I.helpCircle)", "'How it works'", "dropMenu(b, ", "'-'", "link: true"):
         ok(part in fn, "howItWorks: " + part)
     dm = fn_src("function dropMenu(")
-    ok("if (it.n != null) b.append(el('span', 'cnt', String(it.n)));" in dm, "a menu row can carry a count")
+    ok("if (it.n != null) { const c = el('span', 'cnt', String(it.n));" in dm and "b.append(c); }" in dm, "a menu row can carry a count (and a unit for a screen reader)")
     ok("if (it.link) { b.classList.add('dmenu-link'); b.append(ico(I.arrowRight)); }" in dm, "and the Guide's row is a link")
     item = CSS.split("\n        .dmenu-item {")[1].split("}")[0]
     for prop in ("min-height: var(--control-h)", "gap: var(--gap-row-icon)", "border-radius: var(--radius-row)", "font-size: var(--text-body)"):
@@ -10484,7 +10484,7 @@ def t_forecast_leads_with_the_month_in_a_band():
     for part in ("label: 'Expected this month'", "label: 'Taken so far'", "label: 'Year lands at'", "'against plan'",
                  "infoButton('How sure this is'", "8 times out of 10. It is an expectation, not a commitment.",
                  "never a promise.", "rangeBar({", "midLabel: 'Likely range'", "'Day ' + fcDaysSoFar(latest) + ' of ' + fcDaysInMonth(latest)",
-                 "'Plan ' + fcMoney(yt)", "meter({"):
+                 "'Plan ' + fcMoney(yt)", "fcSideMeter("):
         ok(part in fb, "fcBand: " + part)
     fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
     ok("const band = fcBand(latest, sc);" in fn, "the page draws it first")
@@ -10540,7 +10540,7 @@ def t_worth_looking_at_sits_beside_why():
         ok(part in wt, "the table: " + part)
     wc = fn_src("function fcWorthCard(latest, sc, al) {")
     ok("el('span', 'cnt'" in wc and "'Show all'" in wc and "fcPage('Worth looking at'" in wc, "a count, and Show all opens every month")
-    ok("el('div', 'msg error'" in wc and "fcAlertText(a)" in wc, "a cash warning stays a sentence")
+    ok("el('div', 'msg error'" in wc and "fcAlertText(worst)" in wc, "a cash warning stays a sentence")
     ok(".slice(0, 3)" in wc, "three months on the page")
     dr = fn_src("function fcDriversCard(latest, sc) {")
     for part in ("'Why ' + fcMoney(cur.p50)", "infoButton('How this is worked out'", "'It misleads when'",
@@ -10585,6 +10585,144 @@ def t_the_numbers_behind_it_are_four_rows_and_a_method_is_a_method():
     # not the window, so a choice there changed nothing until the window was opened again.
     ok("fcRepaintPage();" in fn_src("function setFcRowsMode(v) {") and "lp.m.body.replaceChildren(lp.build())" in fn_src("function fcRepaintPage() {"),
        "a choice made inside a method window repaints that window")
+
+
+@test
+def t_every_known_risk_reads_in_the_three_approved_outlooks():
+    """The service raises an alert for every month whose risk is high whatever
+    its verdict (forecast/variance.py), so a high-risk month that the run calls
+    "on track" read "On track" beside a neutral chip. For the risk codes the
+    service produces the only statuses are Safely ahead, Likely ahead and
+    Likely behind; a code the run might add later falls back on the verdict's
+    words."""
+    ok("function fcOutlook(a) {" in SCRIPT, "fcOutlook is there")
+    src = fn_src("function fcOutlook(a) {")
+    ok("if (a.risk === 'high') return 'Likely behind';" in src, "a high-risk month is behind")
+    if not any(os.access(os.path.join(p, "node"), os.X_OK) for p in os.environ.get("PATH", "").split(os.pathsep)):
+        print("       (node unavailable, the behaviour half skipped)")
+        return
+    js = ("const FC_VERDICT_WORDS = { 'on track': 'On track', underrun: 'Under plan', overrun: 'Over plan' };\n"
+          "const fcSentence = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';\n" + src + "\n"
+          "const out = [];\n"
+          "for (const risk of ['secure', 'watch', 'high']) for (const verdict of ['on track', 'underrun', 'overrun'])\n"
+          "  for (const [projected, target] of [[10, 20], [20, 10]]) out.push(fcOutlook({ risk, verdict, projected, target }));\n"
+          "out.push(fcOutlook({ risk: 'later-code', verdict: 'underrun' }));\n"
+          "console.log(JSON.stringify(out));")
+    r = subprocess.run(["node", "-e", js], capture_output=True, text=True)
+    ok(r.returncode == 0, "the outlook ran: " + (r.stderr or "")[:200])
+    got = json.loads(r.stdout)
+    ok(set(got[:-1]) == {"Safely ahead", "Likely ahead", "Likely behind"},
+       "the known risk codes read only in the approved words: %s" % sorted(set(got[:-1])))
+    ok(got[-1] == "Under plan", "an unknown code falls back on the verdict's words")
+
+
+@test
+def t_forecast_controls_that_only_work_on_a_screen_do_not_print():
+    """The Plan label and the Compare methods switch printed on a Forecast
+    report (their chooser and the range did not). The frozen print block is
+    not touched: they are hidden by default and shown inside @media screen, as
+    the info button is. The Plan label is regular weight, as in the mockup."""
+    lbl = CSS.split("\n        .fc-seg-lbl {")[1].split("}")[0]
+    ok("font-weight: var(--weight-regular)" in lbl and "weight-medium" not in lbl, "the Plan label is regular weight")
+    ok("\n        .page-tabs-end > .fc-seg-lbl { display: none; }" in CSS
+       and "@media screen { .page-tabs-end > .fc-seg-lbl { display: inline-block; } }" in CSS,
+       "the Plan label is for a screen")
+    ok("\n        .fc-cash .sec-tools > .toggle { display: none; }" in CSS
+       and "@media screen { .fc-cash .sec-tools > .toggle { display: inline-flex; } }" in CSS,
+       "so is the Compare methods switch")
+    ok("\n        .fc-worth > .section-title > .sec-tools { display: none; }" in CSS
+       and "@media screen { .fc-worth > .section-title > .sec-tools { display: flex; } }" in CSS,
+       "and Show all (one more class than the head's own rule, which comes later in the sheet)")
+    for blk in re.findall(r"@media print \{.*?\n        \}", CSS, re.S):
+        ok("fc-seg-lbl" not in blk and "fc-cash" not in blk and "fc-worth" not in blk, "the frozen print block is as it was")
+
+
+@test
+def t_the_side_meters_put_the_plan_tick_where_it_is():
+    """The plan tick was clamped to the end of a meter drawn to the expected
+    figure, so a plan above expectation (Algorithm 2: 124.7% and 135.9%) sat at
+    the end and read as on plan. Each meter is drawn to the larger of expected
+    and plan, so the tick is where it really is and the light bar stops at the
+    expected figure."""
+    ok("function fcSideMeter(taken, exp, plan) {" in SCRIPT, "one helper draws both meters")
+    ok("meter({ taken: " not in fn_src("function fcBand(latest, sc) {") and "fcSideMeter(" in fn_src("function fcBand(latest, sc) {"),
+       "and the band uses it")
+    ok("--end" in fn_src("function meter(m) {"), "a meter can end short of its track")
+    ok("width: calc(var(--end, 100%) - var(--at) - var(--sp-0-5))" in CSS.split("\n        .fb-meter .still {")[1].split("}")[0],
+       "the light bar runs to that end")
+    if not _node_ok():
+        print("       (node unavailable, the behaviour half skipped)")
+        return
+    js = "\n".join(("const meter = (m) => m;", fn_src("function fcSideMeter(taken, exp, plan) {"),
+                    "console.log(JSON.stringify([fcSideMeter(5116, 53691, 66931), fcSideMeter(5116, 53691, 37566), fcSideMeter(5116, 53691, null), fcSideMeter(0, 0, null)]));"))
+    a, b, c, z = _run_node(js)
+    ok(a["plan"] == 100 and abs(a["end"] - 80.2) < 0.1 and abs(a["taken"] - 7.6) < 0.1, "a plan above expected is the end of the track: %s" % a)
+    ok(abs(b["plan"] - 70.0) < 0.1 and b["end"] == 100 and abs(b["taken"] - 9.5) < 0.1, "a plan below it is a tick inside the bar: %s" % b)
+    ok(c["plan"] is None and c["end"] == 100, "no plan, no tick: %s" % c)
+    ok(z["taken"] == 0, "nothing expected is an empty meter: %s" % z)
+
+
+@test
+def t_cash_in_phone_range_looks_like_the_mockups_button():
+    """The phone's range is still a real select (for assistive tech and the
+    keyboard) but wears the mockup's button: a calendar icon, the chosen range
+    and a chevron, 40 tall. The clear button under the compare chips has its
+    text on the text edge, not 12 in."""
+    chart = fn_src("function fcChartCard(")
+    ok("el('span', 'fc-range-pick')" in chart and "ico(I.cal)" in chart and "choiceSelect(FC_RANGES, range, setFcRange" in chart,
+       "a calendar icon beside the real select")
+    ok("\n        .fc-range-pick { display: none; }" in CSS and ".fc-cash .sec-tools > .choice-select" not in CSS,
+       "shown only on a phone")
+    pick = CSS.split("\n        .fc-range-pick > select {")[1].split("}")[0]
+    ok("padding-left: calc(var(--sp-3) + var(--icon-md) + var(--sp-2))" in pick and "var(--shadow-control)" in pick, "room for the icon, a button's look")
+    ok(".fc-range-pick > .ic svg { width: var(--icon-md); height: var(--icon-md); }" in CSS, "the icon has a size (a bare svg here is 0 by 0)")
+    ok("\n        .fc-cmp-box > .btn.ghost { margin-left: calc(-1 * (var(--sp-3) + var(--bw-hairline))); }" in CSS, "Clear starts on the text edge")
+
+
+@test
+def t_worth_and_why_stack_at_12_and_cash_warnings_do_not_pile_up():
+    """Stacked (1000 and under, phones) Why's bar sits 12 under its head, as in
+    the phone mockup; the 24 that centres it on the table's head row beside it
+    applies only side by side. A cash warning is said once, with the number of
+    further months; Show all is a 40 target on a phone."""
+    bar = CSS.split("\n        .fc-split-bar {")[1].split("}")[0]
+    ok("margin-top" not in bar, "the bar has no offset of its own")
+    ok("@container fcpair (min-width: 1001px) { .fc-split-bar { margin-top: calc((var(--control-h) - var(--sp-2)) / 2); } }" in CSS,
+       "the offset is for the side-by-side layout only")
+    wc = fn_src("function fcWorthCard(latest, sc, al) {")
+    ok("cash.length > 1" in wc and "' more month'" in wc and "cash.slice(1)" not in wc and wc.count("'msg error'") == 1,
+       "one warning, then the count of further months")
+    ok(".fc-worth .sec-tools > .link { min-height: var(--control-h-lg); }" in CSS, "Show all is 40 on a phone")
+
+
+@test
+def t_forecast_window_and_setup_details():
+    """No upload button, no instruction to use it; a window's chooser keeps the
+    keyboard's place when it repaints; the unread .sect-group rules are gone;
+    the How it works count says what it counts to a screen reader."""
+    setup = fn_src("function forecastSetupCard(c) {")
+    ok("c.can_upload ? 'No cash flow workbook yet. Upload one above.' : 'No cash flow workbook yet.'" in setup,
+       "the upload line is for people who can upload")
+    rp = fn_src("function fcRepaintPage() {")
+    ok("segmented > button.on" in rp and ".focus()" in rp, "the chooser's pressed button takes focus again")
+    ok(".sect-group" not in CSS and "sect-group" not in SCRIPT, "no reader, no rule")
+    dm = fn_src("function dropMenu(anchor, items) {")
+    ok("it.unit" in dm and "'sr-only'" in dm, "a menu count can carry a unit for a screen reader")
+    ok("unit: 'methods'" in fn_src("function fcHowItWorks(c, latest, sc) {"), "and How it works says methods")
+
+
+@test
+def t_a_single_series_wash_is_the_series_own_colour():
+    """trendChart washed the area under a single series in CH[4], which is
+    amber since the ramp changed, so every single-series chart (Overview and
+    SEO trends, the product revenue chart) had an amber wash under its teal
+    line. It takes the series' own colour at the low opacity it always had.
+    Cash in still draws none: its one area is the likely range."""
+    tc = SCRIPT.split("function trendChart(", 1)[1].split("\n        function ", 1)[0]
+    ok("'stop-color': CH[4]" not in tc, "no amber wash")
+    ok("const washColor = (series[0] && series[0].color) || CH[0];" in tc
+       and tc.count("'stop-color': washColor") == 2, "the series' own colour, both ends of the ramp")
+    ok("area: false," in fn_src("function fcChartCard("), "Cash in has no wash")
 
 
 if __name__ == "__main__":

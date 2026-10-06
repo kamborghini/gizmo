@@ -1101,7 +1101,7 @@
         .fb-meter { position: relative; height: var(--sp-1); border-radius: var(--radius-full); background: var(--band-rule); margin-top: var(--sp-3); }
         .fb-meter i { position: absolute; top: 0; bottom: 0; border-radius: var(--radius-full); }
         .fb-meter .taken { left: 0; width: var(--w); background: var(--c-taken); }
-        .fb-meter .still { left: calc(var(--at) + var(--sp-0-5)); width: calc(100% - var(--at) - var(--sp-0-5)); background: var(--c-still); }
+        .fb-meter .still { left: calc(var(--at) + var(--sp-0-5)); width: calc(var(--end, 100%) - var(--at) - var(--sp-0-5)); background: var(--c-still); }
         .fb-meter .plan { left: var(--at-plan); top: calc(-1 * var(--sp-1)); bottom: calc(-1 * var(--sp-1)); width: var(--bw-strong);
             margin-left: calc(var(--bw-strong) / -2); background: var(--c-plan); }
         /* Under 1100 the side figures go under the main one, as on a phone. */
@@ -1125,6 +1125,10 @@
         .fc-cols > section > .section-title:first-child { margin-top: 0; }
         @container fcpair (max-width: 1000px) { .fc-cols { grid-template-columns: minmax(0, 1fr); } }
         .fc-worth > .msg { margin-bottom: var(--sp-3); }
+        /* Show all opens a window: for a screen, and a 40 target under a finger. */
+        .fc-worth > .section-title > .sec-tools { display: none; }
+        @media screen { .fc-worth > .section-title > .sec-tools { display: flex; } }
+        @media (max-width: 640px) { .fc-worth .sec-tools > .link { min-height: var(--control-h-lg); } }
         .fc-wl-wrap { container: fcwl / inline-size; }
         .fc-wl > [role="row"] { display: grid; grid-template-columns: var(--fc-wl-cols); grid-template-areas: "mo v plan chip rg ol";
             column-gap: var(--sp-4); align-items: center; }
@@ -1900,11 +1904,24 @@
            the range is one list and the switch moves under the chart. */
         .fc-cmp-box { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); }
         .fc-cmp-note { margin: 0; flex: 1 1 100%; color: var(--text-tertiary); max-width: var(--measure); }
-        .fc-cash .sec-tools > .choice-select, .fc-cash > .fc-cmp-phone { display: none; }
+        /* Clear's words start on the text edge, not 12 in. */
+        .fc-cmp-box > .btn.ghost { margin-left: calc(-1 * (var(--sp-3) + var(--bw-hairline))); }
+        .fc-range-pick { display: none; }
+        .fc-cash > .fc-cmp-phone { display: none; }
+        /* The switch is for a screen (it changes a chart, and a printed one cannot be changed). */
+        .fc-cash .sec-tools > .toggle { display: none; }
+        @media screen { .fc-cash .sec-tools > .toggle { display: inline-flex; } }
+        /* The phone's range: the mockup's button (a calendar, the range, a chevron, 40 tall)
+           drawn on the real select, so it keeps the keyboard and the screen reader. */
+        .fc-range-pick > .ic { position: absolute; left: var(--sp-3); top: 50%; margin-top: calc(var(--icon-md) / -2);
+            color: var(--text-secondary); pointer-events: none; }
+        .fc-range-pick > .ic svg { width: var(--icon-md); height: var(--icon-md); }
+        .fc-range-pick > select { padding-left: calc(var(--sp-3) + var(--icon-md) + var(--sp-2)); font-weight: var(--weight-medium);
+            color: var(--text-primary); border-color: var(--border-strong); box-shadow: var(--shadow-control); }
         .ov-wrap .fc-cash.widget-bare > .chart-card:not(:last-child) { margin-bottom: 0; }
         @media (max-width: 640px) {
             .fc-cash .sec-tools > :is(.toggle, .segmented) { display: none; }
-            .fc-cash .sec-tools > .choice-select { display: inline-block; }
+            .fc-range-pick { display: inline-block; position: relative; }
             .fc-cash > .fc-cmp-phone { display: inline-flex; margin-top: var(--sp-3); }
         }
         /* A notice spans its card, so it ends on the card's gutter like everything
@@ -2021,10 +2038,8 @@
             background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235F6368' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
             background-repeat: no-repeat; background-position: right var(--sp-3) center; }
         /* A drawer is a row (the mix): a 44 summary over a soft hairline, its
-           body opening under it; a group of them is a list framed by a line. */
+           body opening under it. */
         details.sect { border: 0; border-radius: 0; background: none; margin-bottom: 0; overflow: visible; box-shadow: var(--rule-b-soft); }
-        .sect-group { background: none; border: 0; border-radius: 0; box-shadow: var(--rule-t), var(--rule-b); }
-        .sect-group > details.sect { border: 0; border-radius: 0; margin: 0; }
         details.sect summary { min-height: var(--row-h); padding: 0; font-weight: var(--weight-medium); font-size: var(--text-body); line-height: var(--lh-control); cursor: pointer; list-style: none;
             display: flex; align-items: center; gap: var(--gap-row-icon); }
         details.sect summary::-webkit-details-marker { display: none; }
@@ -4591,7 +4606,11 @@
            that was removed. */
         /* "Plan" names the chooser after it, at the tab row's right (the mix). */
         .fc-seg-lbl { font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-tertiary);
-            font-weight: var(--weight-medium); }
+            font-weight: var(--weight-regular); }
+        /* It names a chooser that does not print, so it does not print either:
+           hidden here and shown for a screen, as the info button is. */
+        .page-tabs-end > .fc-seg-lbl { display: none; }
+        @media screen { .page-tabs-end > .fc-seg-lbl { display: inline-block; } }
         /* Once the Finance row wraps (1100 and under) the strip keeps its line and
            its rule, and the Plan chooser takes the line under it with its label
            beside it: at the right on a tablet, across the width on a phone, as
@@ -4613,15 +4632,15 @@
            The bar centres on the Worth table's head row beside it; the rows are
            44 on hairlines, the total under the stronger rule, the method in a
            caption under them. */
-        /* A flex column, so the bar's own top margin adds to the head's 12 rather than
-           collapsing into it. */
+        /* A flex column, so the bar's own top margin (side by side) adds to the head's
+           12 rather than collapsing into it. Stacked, the bar sits 12 under its head. */
         .fc-why { display: flex; flex-direction: column; }
-        .fc-split-bar { display: flex; gap: var(--sp-0-5); height: var(--sp-2); max-width: var(--measure);
-            margin-top: calc((var(--control-h) - var(--sp-2)) / 2); }
+        .fc-split-bar { display: flex; gap: var(--sp-0-5); height: var(--sp-2); max-width: var(--measure); }
+        @container fcpair (min-width: 1001px) { .fc-split-bar { margin-top: calc((var(--control-h) - var(--sp-2)) / 2); } }
         .fc-split-bar > i { border-radius: var(--radius-full); }
         .fc-split-bar > .taken { width: var(--w); background: var(--c-taken); }
         .fc-split-bar > .still { flex: 1; background: var(--c-still); }
-        .fc-drive { max-width: var(--measure); margin-top: calc((var(--control-h) - var(--sp-2)) / 2); }
+        .fc-drive { max-width: var(--measure); margin-top: var(--sp-3); }
         .fc-drive-row { display: flex; align-items: center; gap: var(--control-gap); height: var(--row-h); box-shadow: var(--rule-b-soft); }
         .fc-drive-row:nth-last-child(-n+2) { box-shadow: var(--rule-b); }
         .fc-drive-key { flex: none; width: var(--icon-xs); height: var(--dot-md); border-radius: var(--radius-swatch); }
@@ -6601,12 +6620,14 @@ Projected Image UK"></textarea>
             return w;
         }
         /* A meter: what is taken in the measure's dark teal, what is still
-           expected after it at 45%, the plan as a blue tick. m: { taken, plan }
-           in percent of the bar. */
+           expected after it at 45%, the plan as a blue tick. m: { taken, plan,
+           end } in percent of the track; the light part runs to end (the track's
+           own end when there is none). */
         function meter(m) {
             const w = el('div', 'fb-meter');
             const t = Math.max(0, Math.min(100, m.taken || 0)).toFixed(1) + '%';
             w.style.setProperty('--w', t); w.style.setProperty('--at', t);
+            if (m.end != null) w.style.setProperty('--end', Math.max(0, Math.min(100, m.end)).toFixed(1) + '%');
             w.append(el('i', 'taken'), el('i', 'still'));
             if (m.plan != null) { w.style.setProperty('--at-plan', Math.max(0, Math.min(100, m.plan)).toFixed(1) + '%'); w.append(el('i', 'plan')); }
             w.setAttribute('aria-hidden', 'true');
@@ -7908,7 +7929,7 @@ Projected Image UK"></textarea>
                 else b.setAttribute('role', 'menuitem');
                 if (it.icon) b.append(ico(it.icon));
                 b.append(el('span', null, it.label));
-                if (it.n != null) b.append(el('span', 'cnt', String(it.n)));
+                if (it.n != null) { const c = el('span', 'cnt', String(it.n)); if (it.unit) c.append(el('span', 'sr-only', ' ' + it.unit)); b.append(c); }
                 if (it.link) { b.classList.add('dmenu-link'); b.append(ico(I.arrowRight)); }
                 /* The tick sits in the 32px the reference reserves on the right,
                    so a list of choices does not jump sideways when one is made. */
@@ -8843,12 +8864,13 @@ Projected Image UK"></textarea>
                 const { X, Y } = drawFrame(svg, { W, H, padL, padR, padT, padB, n, labels, minV, maxV, fmt, tickFmt: opts.tickFormat || fmt, yTicks: true });
                 const uid = 'cg' + (++_chartSeq);
                 const defs = svgEl('defs'); const grad = svgEl('linearGradient', { id: uid, x1: 0, y1: 0, x2: 0, y2: 1 });
-                /* The wash under the line is the LIGHT end of the ramp, not the
-                   line's own colour. The reference fills its area with chart-1
-                   (#d4d4d4) and draws the line over it; filling with the line's
-                   near-black at 36% gives a solid grey block instead of a hint. */
-                grad.append(svgEl('stop', { offset: '5%', 'stop-color': CH[4], 'stop-opacity': '0.36' }));
-                grad.append(svgEl('stop', { offset: '95%', 'stop-color': CH[4], 'stop-opacity': '0.04' }));
+                /* The wash under a single line is that line's own colour, faded from
+                   36% to 4% down the plot: a hint of the measure, not a block. It
+                   was the ramp's fifth step, which is amber since the ramp became
+                   the brand's, and put amber under every teal trend line. */
+                const washColor = (series[0] && series[0].color) || CH[0];
+                grad.append(svgEl('stop', { offset: '5%', 'stop-color': washColor, 'stop-opacity': '0.36' }));
+                grad.append(svgEl('stop', { offset: '95%', 'stop-color': washColor, 'stop-opacity': '0.04' }));
                 defs.append(grad); svg.append(defs);
                 /* A gap in a series is a GAP, not a zero. Y(null) is Y(0), so
                    every series used to be drawn down to the floor wherever it
@@ -15586,7 +15608,7 @@ Projected Image UK"></textarea>
                 + ', did not finish. What the service reported: ' + String(c.last_error.error).slice(0, 300)));
             const wb = c.workbook || {};
             card.append(el('p', 'card-sub', wb.name ? ('Workbook on file: ' + wb.name + ', uploaded ' + fmtDate(wb.uploaded_at) + (wb.by ? ' by ' + wb.by : '') + '.')
-                : 'No cash flow workbook yet. Upload one above.'));
+                : (c.can_upload ? 'No cash flow workbook yet. Upload one above.' : 'No cash flow workbook yet.')));
             return card;
         }
         /* How much of the method table to put on screen. Twelve rows of models
@@ -15733,6 +15755,9 @@ Projected Image UK"></textarea>
         function fcOutlook(a) {
             if (a.risk === 'secure') return 'Safely ahead';
             if (a.risk === 'watch') return (a.projected || 0) >= (a.target || 0) ? 'Likely ahead' : 'Likely behind';
+            /* The service raises an alert for every high-risk month whatever its
+               verdict, so a high one is behind: its codes are not words. */
+            if (a.risk === 'high') return 'Likely behind';
             return FC_VERDICT_WORDS[a.verdict] || fcSentence(a.verdict || '');
         }
         function fcWorthTable(latest, list) {
@@ -15785,7 +15810,13 @@ Projected Image UK"></textarea>
                 tools.append(all); head.append(tools);
             }
             box.append(head);
-            cash.forEach(a => box.append(el('div', 'msg error', fcMonth(a.month) + ': ' + fcAlertText(a))));
+            /* A warning is a sentence, said once, with how many more months: the
+               worst first (below zero before below the buffer), then the soonest. */
+            if (cash.length) {
+                const worst = cash.slice().sort((a, b) => (b.verdict === 'negative working capital') - (a.verdict === 'negative working capital') || (a.month < b.month ? -1 : 1))[0];
+                const more = cash.length > 1 ? ', and ' + (cash.length - 1) + ' more month' + (cash.length > 2 ? 's' : '') : '';
+                box.append(el('div', 'msg error', fcMonth(worst.month) + ': ' + fcAlertText(worst).replace(/\.$/, '') + more + '.'));
+            }
             if (!sales.length) { if (!cash.length) box.append(el('div', 'empty', 'Nothing to flag under ' + sc + '.')); return box; }
             /* The three that matter most (fcAlertWeight), read in month order. */
             const top = sales.slice().sort((a, b) => fcAlertWeight(b) - fcAlertWeight(a)).slice(0, 3)
@@ -15825,16 +15856,25 @@ Projected Image UK"></textarea>
             const d = bandDomain([p10, p90, p50, target]);
             const sides = [{ icon: I.wallet, label: 'Taken so far', value: fcMoney(banked),
                 note: 'Day ' + fcDaysSoFar(latest) + ' of ' + fcDaysInMonth(latest),
-                meter: meter({ taken: p50 ? banked / p50 * 100 : 0, plan: (p50 && target != null) ? target / p50 * 100 : null }) }];
+                meter: fcSideMeter(banked, p50, target) }];
             if (year.p50 != null) sides.push({ icon: I.flag, label: 'Year lands at', value: fcMoney(year.p50), chip: chip(yg),
                 note: yt != null ? 'Plan ' + fcMoney(yt) : null,
-                meter: meter({ taken: year.p50 ? fcYearTaken(latest) / year.p50 * 100 : 0,
-                               plan: (year.p50 && yt != null) ? yt / year.p50 * 100 : null }) });
+                meter: fcSideMeter(fcYearTaken(latest), year.p50, yt) });
             return featureBand({ main: { icon: I.trendUp, label: 'Expected this month', info: sure, value: fcMoney(p50),
                 chip: chip(gap), note: target != null ? 'against plan' : null,
                 range: (p10 != null && p90 != null) ? rangeBar({ lo: p10, hi: p90, exp: p50, plan: target, d,
                     planLabel: target != null ? 'Plan ' + fcMoney(target) : null, loLabel: fcMoney(p10), hiLabel: fcMoney(p90),
                     midLabel: 'Likely range' }) : null }, sides });
+        }
+        /* A side meter, drawn to the larger of what is expected and the plan, so the
+           plan's tick is where it really is: a plan above the expectation is the
+           end of the track, and the light bar stops short of it at the expected
+           figure. (Drawn to the expected figure alone the tick was clamped to the
+           end and read as on plan.) */
+        function fcSideMeter(taken, exp, plan) {
+            const top = Math.max(exp || 0, plan || 0) || 1;
+            return meter({ taken: (taken || 0) / top * 100, end: (exp || 0) / top * 100,
+                           plan: plan != null ? plan / top * 100 : null });
         }
         /* What the plan year has taken so far: its closed months as the run
            counts them, and this month's takings. */
@@ -15977,7 +16017,9 @@ Projected Image UK"></textarea>
                 range, setFcRange, { label: 'Range' }));
             /* A phone has no room for seven segments: the same choice as one
                compact list, which the phone rules show in their place. */
-            tools.append(choiceSelect(FC_RANGES, range, setFcRange, { label: 'Range' }));
+            const pick = el('span', 'fc-range-pick');
+            pick.append(ico(I.cal), choiceSelect(FC_RANGES, range, setFcRange, { label: 'Range' }));
+            tools.append(pick);
             head.append(tools);
             card.append(head);
             /* The dates belong under the tab that asked for them, not in a
@@ -16182,8 +16224,8 @@ Projected Image UK"></textarea>
             'Auto-fitted trend and smoothing': 'a steady direction of travel, found without being told what to look for',
             'Auto-fitted complex smoothing': 'a season whose shape shifts from one year to the next',
             'Average of every source': 'when no single approach is clearly right for the period ahead',
-            'Middle of every source': 'when one source is prone to extreme answers',
-            'Average, extremes removed': 'when most sources agree and one or two are far out',
+            'Middle of every source': 'when one method is prone to extreme answers',
+            'Average, extremes removed': 'when most methods agree and one or two are far out',
         };
 
         function fcBestAt(m) {
@@ -16264,7 +16306,11 @@ Projected Image UK"></textarea>
         }
         function fcRepaintPage() {
             const lp = fcLivePage;
-            if (lp && lp.m.overlay.isConnected) lp.m.body.replaceChildren(lp.build());
+            if (!lp || !lp.m.overlay.isConnected) return;
+            lp.m.body.replaceChildren(lp.build());
+            /* The pressed button was replaced: keyboard focus goes to its successor, not to the page. */
+            const on = lp.m.body.querySelector('.segmented > button.on');
+            if (on) on.focus();
         }
         /* How much to trust it: prose when the plain models are running, the
            M5 backtest table when that build is. */
@@ -16310,7 +16356,7 @@ Projected Image UK"></textarea>
             return howItWorks([
                 { icon: I.compass, label: 'Which method is running, and why',
                   onClick: () => fcPage('Which method is running, and why', () => fcUntitled(fcOptimisedCard(latest))) },
-                { icon: I.target, label: 'How each one works, and how right it has been', n: nsrc || null,
+                { icon: I.target, label: 'How each one works, and how right it has been', n: nsrc || null, unit: 'methods',
                   onClick: () => fcPage('How each one works, and how right it has been', () => fcUntitled(fcAlgorithmsCard(latest))) },
                 { icon: I.shield, label: 'How much to trust it', onClick: () => fcPage('How much to trust it', () => fcTrust(latest)) },
                 { icon: I.fileSheet, label: 'The plan it is judged against', onClick: () => fcPage('The plan it is judged against', () => fcPlanJudged(c, latest)) },
