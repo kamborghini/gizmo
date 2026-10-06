@@ -9846,6 +9846,51 @@ def t_a_page_header_is_one_builder():
     ok(re.search(r"\.ov-wrap \{[^}]*padding: var\(--sp-3\) var\(--wrap-pad\) var\(--sp-9\)", CSS), "12 under the top bar")
 
 
+@test
+def t_the_page_header_wraps_sits_right_in_the_grid_stays_off_paper_and_syncs():
+    """Review of the page header (6 October 2026, fix round 1). Five things the
+    first cut got wrong: (1) a page title that is DATA (a product's name, "X
+    sector") never wrapped, so a long one pushed the phone page sideways;
+    (2) a Customise page's header sat one grid gap above its first block, not
+    the 32 a plain page gives it; (3) at 900 and under the grid's tabs sat 16
+    under the header where plain pages have 20; (4) the live dot and the
+    refresh glyph would print on a report's PDF with no stamp beside them;
+    (5) Hide sidebar never reported whether the sidebar was in view."""
+    h2 = CSS.split("\n        .ov-hero h2 {")[1].split("}")[0]
+    ok("white-space: nowrap" not in h2, "a page title may wrap: nowrap pushed a long product name off the phone's column")
+    ok("flex-wrap: wrap" in h2 and "overflow-wrap: anywhere" in h2,
+       "it wraps, breaks a word longer than the column, and Beta follows it onto the next line")
+    # (2)
+    gap = ".ov-wrap.wgrid > .ov-hero + :not(.tabs, .page-tabs) { margin-top: calc(var(--sp-7) - var(--page-rhythm)); }"
+    ok(gap in CSS, "a Customise page puts its first block 32 under the header, as a plain page does")
+    ok(CSS.index(gap) > CSS.index("\n        .ov-wrap.wgrid > * { margin: 0; }"),
+       "after the grid zeroes its children's margins, so it is not undone")
+    # (3)
+    ok(".ov-wrap.wgrid > .ov-hero + .tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm) - var(--sp-1)); }" in CSS
+       and "calc(var(--sp-4) - var(--page-rhythm) - var(--sp-1))" not in CSS,
+       "at 900 and under the grid's tabs are 20 under the header too (the strip's own 4px comes out of it)")
+    # (4)
+    hide = "\n        .ph-sub > :is(.live-dot, .info) { display: none; }"
+    ok(hide in CSS, "the live dot and the refresh glyph are hidden unless something says otherwise")
+    after = CSS[CSS.index(hide):]
+    m = re.search(r"@media screen \{", after)
+    ok(m is not None, "and shown again inside a screen-only block")
+    depth, i = 1, m.end()
+    while i < len(after) and depth:
+        depth += {"{": 1, "}": -1}.get(after[i], 0); i += 1
+    scr = after[m.end():i]
+    ok(".ph-sub > .live-dot { display: block; }" in scr and ".ph-sub > .info { display: inline-grid; }" in scr,
+       "the screen block shows both, after the hiding rule, so a printed report never carries them")
+    # (5)
+    ok("$('side-hide').setAttribute('aria-expanded', 'true')" in fn_src("function openSidebar() {"),
+       "opening the drawer tells Hide sidebar the sidebar is in view")
+    ok("$('side-hide').setAttribute('aria-expanded', 'false')" in fn_src("function closeSidebar() {"),
+       "closing it tells Hide sidebar it is not")
+    boot = "$('side-hide').setAttribute('aria-expanded', $('menu-btn').getAttribute('aria-expanded'));"
+    ok(boot in SCRIPT and SCRIPT.index(boot) > SCRIPT.index("$('menu-btn').setAttribute('aria-expanded', String(!(document.body.classList.contains('sidebar-collapsed')"),
+       "and at boot it reports what the menu button reports, so a sidebar restored as folded is not called open")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

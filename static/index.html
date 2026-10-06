@@ -802,9 +802,12 @@
            the app that stood outside its own system: .stat .value directly
            under it and .empty-chat h2 both carry -0.025em. */
         /* The title: Bricolage 600 at 26/32, tracked -0.02em; Beta follows on
-           its baseline, 8 apart. One short line sits 4 under it. */
+           its baseline, 8 apart. One short line sits 4 under it. A title can be
+           data (a product's name, "X sector"), so it wraps, breaks a word longer
+           than the column, and Beta follows it onto the next line: a page never
+           scrolls sideways for a long name. */
         .ov-hero h2 { font-size: var(--text-title); line-height: var(--lh-title); font-weight: var(--weight-semibold); letter-spacing: var(--tr-title); margin: 0;
-            display: flex; align-items: baseline; gap: var(--sp-2); white-space: nowrap; }
+            display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; overflow-wrap: anywhere; }
         .ov-hero p { margin: var(--sp-1) 0 0; color: var(--text-tertiary); font-size: var(--text-body); line-height: var(--lh-control); max-width: var(--measure); }
         .ov-updated { font-size: var(--text-xs); color: var(--text-tertiary); margin-left: auto; white-space: nowrap; padding-top: var(--sp-1-5); }
         .ov-hero-act { margin-left: auto; display: flex; align-items: center; gap: var(--control-gap); flex: none; padding-top: 0; }
@@ -818,6 +821,13 @@
         .ph-sub { margin-top: var(--sp-1); display: flex; align-items: center; gap: var(--sp-2); color: var(--text-tertiary);
             font-size: var(--text-body); line-height: var(--lh-control); white-space: nowrap; }
         .ph-sub .ov-updated { font-size: inherit; margin: 0; padding: 0; color: inherit; }
+        /* The live dot and the refresh glyph are for a screen: a report printed
+           to PDF has no stamp for them to sit beside. Hidden here, shown below. */
+        .ph-sub > :is(.live-dot, .info) { display: none; }
+        @media screen {
+            .ph-sub > .live-dot { display: block; }
+            .ph-sub > .info { display: inline-grid; }
+        }
         .live-dot { width: var(--dot-md); height: var(--dot-md); margin-left: var(--sp-0-5); border-radius: var(--radius-circle);
             background: var(--live-dot); box-shadow: var(--ring-live); flex: none; }
         .dot-sep { width: var(--sp-1); height: var(--sp-1); border-radius: var(--radius-circle); background: var(--border-emphasis); flex: none; }
@@ -1244,6 +1254,10 @@
            as .ov-hero:has(+ .page-tabs) gives it in the flow. */
         .ov-wrap.wgrid > .ov-hero + .page-tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm)); }
         .ov-wrap.wgrid > .ov-hero + .tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm)); }
+        /* Whatever else follows the header sits 32 under it, as on a plain page:
+           the grid zeroes every child's margin and spaces them by one gap, which
+           is less. */
+        .ov-wrap.wgrid > .ov-hero + :not(.tabs, .page-tabs) { margin-top: calc(var(--sp-7) - var(--page-rhythm)); }
         /* A segment bar is as wide as its buttons in the flow; a grid item
            would stretch its track across the whole row. */
         .ov-wrap.wgrid > :is(.tabs, .segmented) { justify-self: start; }
@@ -4140,7 +4154,7 @@
                (Finance) the strip's 4px top and bottom come out of the row. */
             .ov-wrap:not(.wgrid) > .tabs { margin-top: calc(-1 * var(--sp-1)); margin-bottom: calc(var(--page-rhythm) - var(--sp-1)); }
             .ov-wrap > .tabs { min-height: calc(var(--control-h-md) + 2 * var(--sp-1)); }
-            .ov-wrap.wgrid > .ov-hero + .tabs { margin-top: calc(var(--sp-4) - var(--page-rhythm) - var(--sp-1)); }
+            .ov-wrap.wgrid > .ov-hero + .tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm) - var(--sp-1)); }
             .page-tabs > .tabs { margin-block: calc(-1 * var(--sp-1)); } }
         /* align-self: a card is a column flexbox, and stretched across it the
            track ran from border to border with its choices bunched at one end. */
@@ -29497,7 +29511,7 @@ Projected Image UK"></textarea>
            behind the backdrop, and the page you were on sat under the fold. */
         function openSidebar() {
             $('sidebar').classList.add('open'); $('backdrop').classList.add('show');
-            $('main').inert = true; $('menu-btn').setAttribute('aria-expanded', 'true');
+            $('main').inert = true; $('menu-btn').setAttribute('aria-expanded', 'true'); $('side-hide').setAttribute('aria-expanded', 'true');
             const cur = document.querySelector('.nav-item.active') || document.querySelector('.nav-item');
             if (cur) { cur.scrollIntoView({ block: 'nearest' }); cur.focus({ preventScroll: true }); }
         }
@@ -29505,7 +29519,7 @@ Projected Image UK"></textarea>
             const was = $('sidebar').classList.contains('open');
             $('sidebar').classList.remove('open'); $('backdrop').classList.remove('show');
             $('main').inert = false;
-            if (window.matchMedia('(max-width: 900px)').matches) $('menu-btn').setAttribute('aria-expanded', 'false');
+            if (window.matchMedia('(max-width: 900px)').matches) { $('menu-btn').setAttribute('aria-expanded', 'false'); $('side-hide').setAttribute('aria-expanded', 'false'); }
             if (was && $('sidebar').contains(document.activeElement)) $('menu-btn').focus({ preventScroll: true });
         }
         document.addEventListener('keydown', (e) => {
@@ -29741,6 +29755,7 @@ Projected Image UK"></textarea>
         $('side-hide').onclick = toggleSidebar;
         try { if (localStorage.getItem(LS_SIDEBAR) === 'closed') document.body.classList.add('sidebar-collapsed'); } catch (e) {}
         $('menu-btn').setAttribute('aria-expanded', String(!(document.body.classList.contains('sidebar-collapsed') || window.matchMedia('(max-width: 900px)').matches)));
+        $('side-hide').setAttribute('aria-expanded', $('menu-btn').getAttribute('aria-expanded'));
         document.querySelector('.side-body').addEventListener('scroll', syncSideFade, { passive: true });
         window.addEventListener('resize', syncSideFade);
         if (window.ResizeObserver) new ResizeObserver(syncSideFade).observe(document.querySelector('.nav'));
