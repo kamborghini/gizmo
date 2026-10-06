@@ -10219,10 +10219,11 @@ def t_an_unknown_or_bad_rising_label_is_never_green():
              ["Cart abandonment", "up"], ["Revenue (7d)", "up"], ["Revenue (7d)", "down"], ["Orders (7d)", "up"],
              ["Unfulfilled (7d)", "up"], ["Unfulfilled (7d)", "down"], ["Return on ad spend", "up"], ["Returning customers", "up"],
              ["At risk", "up"], ["Something odd", "up"], ["Something odd", "down"], ["Products", "up"], ["Late orders", "up"],
-             ["Avg Google position", "up"], ["Ad spend (90d)", "up"], ["Refund rate", "down"], ["Whatever", "flat"]]
+             ["Avg Google position", "up"], ["Ad spend (90d)", "up"], ["Refund rate", "down"], ["Whatever", "flat"],
+             ["expected", "up"], ["Expected this month", "up"], ["Expected refunds", "up"]]
     got = _run_node(SCRIPT[SCRIPT.index(a):SCRIPT.index(b)] + "\nconsole.log(JSON.stringify(%s.map(c => deltaTone(c[0], c[1]))));" % json.dumps(cases))
     want = ["bad", "bad", "bad", "bad", "bad", "bad", "good", "bad", "good", "bad", "good", "good", "good", "bad", "flat", "flat", "flat",
-            "bad", "bad", "bad", "good", "flat"]
+            "bad", "bad", "bad", "good", "flat", "good", "good", "bad"]
     for c, g, w in zip(cases, got, want):
         ok(g == w, "%s %s is %s (got %s)" % (c[0], c[1], w, g))
     ok(all(g != "good" for c, g in zip(cases, got) if c[0] in ("Something odd", "Products", "Refund rate", "Churn", "Bounce rate", "Returns")
