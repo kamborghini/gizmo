@@ -1755,16 +1755,15 @@ def t_the_charts_are_drawn_to_the_reference_spec():
     reference labels its own y axis at x=18 in a mid grey."""
     css = CSS
     grid = re.search(r"\.chart-wrap \.gridline \{[^}]*\}", css).group(0)
-    ok("stroke: var(--border-default)" in grid and "stroke-opacity: .5" in grid,
-       "the grid is the border colour at half opacity, one step lighter than "
-       "the card's own edge: " + grid)
-    ok(_token("border-default").lower() == "#e6e7ea", "and that token resolves to the ramp's line, #E6E7EA")
+    ok("stroke: var(--border-soft)" in grid and "opacity" not in grid,
+       "the grid is line-soft, solid (the mix): " + grid)
+    ok(_token("border-soft").lower() == "#eeeff1", "and that token resolves to the ramp's line-soft, #EEEFF1")
     ok("dasharray" not in grid, "and solid, not dashed")
     line = re.search(r"\.chart-line \{[^}]*\}", css).group(0)
     # The weight is a token now, so check the token resolves to the reference
     # value rather than checking the rule spells it out.
     ok("stroke-width: var(--chart-stroke)" in line, "the line weight comes from the token: " + line)
-    ok(_token_raw("chart-stroke") == "1.4px", "and that token is still 1.4, not a marker pen")
+    ok(_token_raw("chart-stroke") == "var(--bw-strong)", "and that token is the mix's 2px series line")
     axis = re.search(r"\.chart-wrap \.axis-x text[^{]*\{[^}]*\}", css).group(0)
     # Same requirement, re-anchored: the dates are the app's muted grey rather
     # than the near-black body ink. It used to be the #666666 literal measured
@@ -3203,7 +3202,7 @@ def t_the_chart_legend_belongs_to_the_plot():
     top of its own plot for it, so a multi-series chart carried a band of
     nothing across the top and named its lines somewhere else."""
     ok("function chartLegend(series, band) {" in SCRIPT, "the legend is its own piece")
-    ok("if ((multi && series.length > 1) || bandOpt || series.some(s => s.dash)) {" in SCRIPT
+    ok("if (opts.legend || (multi && series.length > 1) || bandOpt || series.some(s => s.dash)) {" in SCRIPT
        and "if (lg.children.length > 1 || lg.querySelector('.dash, .band')) card.append(lg);" in SCRIPT,
        "drawn between the header and the plot, whenever there are marks to tell apart: two lines, "
        "a dashed line or a shaded range, and never for one plain line")
@@ -3213,8 +3212,9 @@ def t_the_chart_legend_belongs_to_the_plot():
     ok("(sr.dash || (i > 0 && !sr.lead)) ? 'dash' : ''" in lg and "if (band && " in lg,
        "a dashed or comparison series is keyed dashed, and a band gets a key of its own")
     ok(".filter(v => v != null).length > 1" in lg, "and only a series that draws something gets a key")
-    ok(".chart-legend .sw.dash {" in CSS and "repeating-linear-gradient" in CSS.split(".chart-legend .sw.dash {")[1].split("}")[0],
-       "painted as a dashed stroke, not a dashed border (the drop-target signal)")
+    dash = ".chart-legend .sw.dash, .chart-tip .sw.dash {"
+    ok(dash in CSS and "repeating-linear-gradient" in CSS.split(dash)[1].split("}")[0],
+       "painted as a dashed stroke, not a dashed border (the drop-target signal), in the legend and the tooltip alike")
     # The source line is provenance, not a key: its dot was painted in the
     # first series' colour and read as a third swatch.
     ok("src-dot" not in SCRIPT and "src-dot" not in CSS, "the source line carries no coloured dot")
@@ -3232,18 +3232,16 @@ def t_the_chart_legend_belongs_to_the_plot():
     ok(SCRIPT.count("opts.height || CHART.h") == 2,
        "both charts default to the same height instead of 220 in one and 230 in the other")
     lg = CSS.split(".chart-legend {")[1].split("}")[0]
-    ok("justify-content: flex-end" in lg, "right-aligned, as the reference aligns it")
+    ok("justify-content: flex-start" in lg, "on its own row from the left (the mix)")
     ok("gap: var(--sp-4)" in lg, "16px between keys")
-    ok("padding-bottom: var(--sp-3)" in lg and "margin-bottom: var(--sp-5)" in lg,
-       "12 then 20 before the first gridline")
-    sw = CSS.split(".chart-legend .sw {")[1].split("}")[0]
-    ok("width: var(--dot-md)" in sw and "height: var(--dot-md)" in sw
-       and _token_raw("dot-md") == "8px", "the key is an 8px square")
+    ok("margin-bottom: var(--sp-2)" in lg, "8 before the plot")
+    sw = CSS.split(".chart-legend .sw, .chart-tip .sw {")[1].split("}")[0]
+    ok("width: var(--sp-3)" in sw and "height: var(--bw-strong)" in sw, "a series is keyed as a 12 line")
     ok("border-radius: var(--radius-swatch)" in sw and _token_raw("radius-swatch") == "var(--radius-3xs)",
-       "with the swatch role's 2px corner, not the app's own radius")
+       "with the swatch role's 2px corner")
     item = CSS.split(".chart-legend .lg {")[1].split("}")[0]
-    ok("gap: var(--sp-1-5)" in item, "6px between a key and its name")
-    ok("color: var(--text-primary)" in item, "and the name in full ink, as the reference sets it")
+    ok("gap: var(--control-gap)" in item, "8px between a key and its name")
+    ok("color: var(--text-tertiary)" in item, "and the name in ink-3, a caption")
 
 
 @test
@@ -5779,11 +5777,11 @@ def t_focus_is_declared_once_per_kind():
        "one rule for every field, contenteditable included")
     ok(not re.search(r"\.[\w-]+:focus \{[^}]*(focus-ring|focus-outline)", CSS),
        "no component carries its own copy of either focus look")
-    ok(CSS.count("outline: var(--focus-outline)") == 5,
-       "the outline is read by the control rule and by four deliberate variants (the "
+    ok(CSS.count("outline: var(--focus-outline)") == 6,
+       "the outline is read by the control rule and by five deliberate variants (the "
        "custom-drawn checkbox, the menu item which insets it, a widget card just dropped "
        "in Customize mode, which borrows it for --dur-landed, and the info button, which "
-       "draws it on its 24 face so a phone's 40 target never shows), and nowhere else")
+       "draws it on its 24 face so a phone's 40 target never shows, and a chart's plot, one stop for the arrow keys), and nowhere else")
 
 
 @test
@@ -10228,6 +10226,34 @@ def t_an_unknown_or_bad_rising_label_is_never_green():
         ok(g == w, "%s %s is %s (got %s)" % (c[0], c[1], w, g))
     ok(all(g != "good" for c, g in zip(cases, got) if c[0] in ("Something odd", "Products", "Refund rate", "Churn", "Bounce rate", "Returns")
            and c[1] == "up"), "an unknown or bad-rising label is never green")
+
+
+@test
+def t_a_chart_reads_out_the_day_it_is_on():
+    """Spec 6 Chart: the legend on its own row; hover, a finger dragging or the
+    arrow keys show the day; on a desktop a tooltip sits beside the point, on a
+    phone the legend row reads the day out instead so nothing is covered; a
+    status line tells a screen reader when the day changes. The grid is
+    line-soft, the floor line-ctl, the series line 2px."""
+    tc = SCRIPT.split("function trendChart(", 1)[1].split("\n        function ", 1)[0]
+    for part in ("if (!opts.headless) card.append(chartHead(opts, series, 'trend'));",
+                 "wrap.setAttribute('role', 'group'); wrap.setAttribute('aria-roledescription', 'chart');",
+                 "live.setAttribute('role', 'status');", "wrap.onkeydown = (e) => {", "e.key === 'ArrowLeft' || e.key === 'ArrowRight'",
+                 "svg.onpointermove = (e) => at(e.clientX);", "svg.setPointerCapture(e.pointerId)",
+                 "window.matchMedia('(max-width: 640px)').matches", "legendEl.classList.add('reading')", "wrap._rest = rest;"):
+        ok(part in tc, "trendChart: " + part)
+    ok("touchstart" not in tc and "mousemove" not in tc, "one pointer path for a mouse, a pen and a finger")
+    ok(".chart-wrap" in SCRIPT.split("function autoPlot(")[0][-1200:] or "document.addEventListener('pointerdown', (e) => document.querySelectorAll('.chart-wrap')" in SCRIPT,
+       "a tap anywhere else puts a chart back to rest")
+    grid = CSS.split("\n        .chart-wrap .gridline {")[1].split("}")[0]
+    ok("stroke: var(--border-soft)" in grid and "opacity" not in grid, "the grid is line-soft, solid")
+    ok(".chart-wrap .gridline.axis0 { stroke: var(--border-strong); }" in CSS, "the floor is line-ctl")
+    eq(_token_raw("chart-stroke"), "var(--bw-strong)", "--chart-stroke")
+    tip = CSS.split("\n        .chart-tip {")[1].split("}")[0]
+    for prop in ("width: var(--tip-w)", "padding: var(--tip-pad)", "border-radius: var(--radius-pop)", "box-shadow: var(--shadow-pop)"):
+        ok(prop in tip, "the tooltip: " + prop)
+    lg = CSS.split("\n        .chart-legend {")[1].split("}")[0]
+    ok("justify-content: flex-start" in lg and "margin-bottom: var(--sp-2)" in lg, "the legend is its own row, 8 over the plot")
 
 
 if __name__ == "__main__":
