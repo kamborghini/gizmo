@@ -5359,9 +5359,19 @@
                hit area: no visible change, nothing moved). Reaching them on a touch screen is what a 390 scan without touch
                emulation cannot show. */
             :is(.convo .del, .toast-x, .tbl-search .tbl-clear, .alert-x, .sk-chip-x, .fchip button) { position: relative; }
-            :is(.convo .del, .toast-x, .tbl-search .tbl-clear, .alert-x, .sk-chip-x, .fchip button, .ov-wrap.wg-editing > [data-widget] > .wg-hide)::after {
-                content: ""; position: absolute; left: 50%; top: 50%; width: var(--control-h-lg); height: var(--control-h-lg);
-                margin: calc(var(--control-h-lg) / -2) 0 0 calc(var(--control-h-lg) / -2); }
+            :is(.toast-x, .alert-x, .sk-chip-x, .fchip button)::after,
+            :is(.convo .del, .tbl-search .tbl-clear, .ov-wrap.wg-editing > [data-widget] > .wg-hide)::after {
+                content: ""; position: absolute; height: var(--control-h-lg); }
+            :is(.toast-x, .alert-x, .sk-chip-x, .fchip button)::after {
+                left: 50%; top: 50%; width: var(--control-h-lg); margin: calc(var(--control-h-lg) / -2) 0 0 calc(var(--control-h-lg) / -2); }
+            /* A button with a neighbour on one side leans its square away from it: it never covers the search's input, the
+               conversation's title or a chart's expand square. The clear button's square starts at the button's left edge
+               and runs right to the field's own edge (29 wide for a 20 button, 40 for a 32 one), the delete's runs right (40),
+               and the Customise hide button's runs up and right as far as the page's gutter lets it (the button's own width
+               plus 4, by 40). All three are centred on the button's height or sit on its foot, so none is lower than 40. */
+            .tbl-search .tbl-clear::after { left: 0; top: 50%; margin: calc(var(--control-h-lg) / -2) 0 0; width: min(var(--control-h-lg), calc(100% + var(--sp-2) + var(--bw-hairline))); }
+            .convo .del::after { left: 0; top: 50%; width: var(--control-h-lg); margin: calc(var(--control-h-lg) / -2) 0 0; }
+            .ov-wrap.wg-editing > [data-widget] > .wg-hide::after { left: 0; bottom: 0; width: min(var(--control-h-lg), calc(100% + var(--sp-1))); }
             /* The Size list's A to Z is one swipeable line of 40 squares rather than four rows of them. */
             .az { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; margin-inline: calc(-1 * var(--sp-1)); padding-inline: var(--sp-1); }
             .az::-webkit-scrollbar { display: none; }

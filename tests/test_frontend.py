@@ -10404,9 +10404,19 @@ def t_the_phone_and_chart_review_fixes_hold():
     ok("#input { min-height: var(--control-h-lg); }" in b, "and the input is at least 40 tall (its auto-grow sets only a taller height)")
     ok(":is(.convo .del, .toast-x, .tbl-search .tbl-clear, .alert-x, .sk-chip-x, .fchip button) { position: relative; }" in b,
        "the small glyph buttons are the containing block for their hit area")
-    hit = ".ov-wrap.wg-editing > [data-widget] > .wg-hide)::after {"
-    ok(hit in b and "width: var(--control-h-lg); height: var(--control-h-lg);" in b.split(hit)[1][:260] if hit in b else False,
-       "each has a 40 square centred on it (the Customise hide button, which is already positioned, included)")
+    shared = ".ov-wrap.wg-editing > [data-widget] > .wg-hide)::after {"
+    ok(shared in b, "the hit-area rule is there")
+    sbody = b.split(shared)[1].split("}")[0] if shared in b else ""
+    ok('content: ""; position: absolute; height: var(--control-h-lg);' in sbody and "width" not in sbody and "left" not in sbody,
+       "the rule shared by the squares sets only their height (a shared width or left would out-rank each one's own, since its list carries the hide button's long selector)")
+    ok(":is(.toast-x, .alert-x, .sk-chip-x, .fchip button)::after {\n                left: 50%; top: 50%; width: var(--control-h-lg);" in b,
+       "a button with no neighbour on a side has a 40 square centred on it")
+    ok(".tbl-search .tbl-clear::after { left: 0; top: 50%; margin: calc(var(--control-h-lg) / -2) 0 0; width: min(var(--control-h-lg), calc(100% + var(--sp-2) + var(--bw-hairline))); }" in b,
+       "the clear button's square starts at its left edge, never over the input, and runs right to the field's own edge")
+    ok(".convo .del::after { left: 0; top: 50%; width: var(--control-h-lg); margin: calc(var(--control-h-lg) / -2) 0 0; }" in b,
+       "the conversation delete's square starts at its left edge, never over the title, and runs right")
+    ok(".ov-wrap.wg-editing > [data-widget] > .wg-hide::after { left: 0; bottom: 0; width: min(var(--control-h-lg), calc(100% + var(--sp-1))); }" in b,
+       "the Customise hide button's square sits on its foot and runs up and right only, as far as the gutter lets it")
     ok(".wg-hide)::after" in b and ".wg-hide) { position: relative; }" not in b, "and the hide button stays absolutely positioned")
     for sel in (".seg-card .seg-n {", ".card-head-stat .card-desc {"):
         ok(sel in CSS, sel + " is a rule")
