@@ -2860,10 +2860,9 @@ def t_the_table_toolbar_and_pager_match_the_reference():
     """The chrome around a table: a 28px search 320px wide with the icon inset
     32px, 28px filter and action buttons, and 32px square pager steps at the base
     radius. All four numbers are the reference's own."""
-    srch = CSS.split(".tbl-search input {")[1].split("}")[0]
-    ok("height: var(--control-h-md)" in srch and "width: 320px" in srch, "the search field is 28 by 320")
-    ok(re.search(r"--control-h-md:\s*28px", CSS), "the small control token is the reference's 28")
-    ok("padding: var(--sp-1) var(--sp-2-5) var(--sp-1) var(--sp-7)" in srch, "with room for the icon on the left")
+    srch = CSS.split("\n        .tbl-search {")[1].split("}")[0]
+    ok("height: var(--control-h)" in srch and "width: var(--search-w)" in srch, "the search field is 32 by 280 (the mix)")
+    ok("padding: 0 var(--sp-3)" in srch and "gap: var(--control-gap)" in srch, "its glyph 12 in and 8 from the words")
     btn = CSS.split(".btn-sm {")[1].split("}")[0]
     ok("min-height: var(--control-h)" in btn and "padding: 0 var(--sp-3)" in btn, "toolbar buttons are the one 32 button")
     step = CSS.split(".tbl-step {")[1].split("}")[0]
@@ -5911,10 +5910,10 @@ def t_focus_is_declared_once_per_kind():
     """Controls draw the outline, fields draw the ring, each written once. The
     field rule had been copied nine times, once per component, and one copy
     drew the outline instead."""
-    ok(CSS.count("box-shadow: var(--focus-ring)") == 3,
-       "the ring is read by the field rule and by the two composite fields that "
-       "focus as a whole (the radio card, the composer box), and nowhere else")
-    ok(':is(input, textarea, select, [contenteditable="true"]):focus { outline: none; border-color: var(--border-selected); box-shadow: var(--focus-ring); }' in CSS,
+    ok(CSS.count("box-shadow: var(--focus-ring)") == 4,
+       "the ring is read by the field rule and by the three composite fields that "
+       "focus as a whole (the radio card, the composer box, the search field), and nowhere else")
+    ok(':is(input, textarea, select, [contenteditable="true"]):focus { outline: none; box-shadow: var(--focus-ring); }' in CSS,
        "one rule for every field, contenteditable included")
     ok(not re.search(r"\.[\w-]+:focus \{[^}]*(focus-ring|focus-outline)", CSS),
        "no component carries its own copy of either focus look")
@@ -9927,6 +9926,34 @@ def t_a_button_is_the_mix_button():
     ok(".btn:not(.btn-sm):has(> .ic:first-child)" not in CSS, "an icon does not pull a button's edge in")
     ghost = CSS.split("\n        .btn.ghost {")[1].split("}")[0]
     ok("border-color: transparent" in ghost and "box-shadow: none" in ghost, "a ghost button has no edge and no lift")
+
+
+@test
+def t_a_field_is_the_mix_field():
+    """Spec 6: real inputs, 32 tall, 13/20, a line-ctl hairline, the focus ring
+    on the field (a 2px teal-line ring 2 off its edge, not a glow). A search is
+    one 280 field with its glyph in flow, ringed as a whole while its input has
+    focus; a select's chevron is a 16 glyph 12 from the edge in ink-3."""
+    f = CSS.split("input[type=email], input[type=password], input[type=url], input[type=tel], input:not([type]), textarea, select {")[1].split("}")[0]
+    for prop in ("solid var(--border-strong)", "font-size: var(--text-body)", "padding: var(--control-pad-y) var(--sp-3)",
+                 "min-height: var(--control-h)", "box-shadow: var(--shadow-control)"):
+        ok(prop in f, "field: " + prop)
+    ok(':is(input, textarea, select, [contenteditable="true"]):focus { outline: none; box-shadow: var(--focus-ring); }' in CSS,
+       "a field's focus is the one ring, and its edge does not change colour under it")
+    s = CSS.split("\n        .tbl-search {")[1].split("}")[0]
+    for prop in ("height: var(--control-h)", "width: var(--search-w)", "gap: var(--control-gap)", "padding: 0 var(--sp-3)",
+                 "solid var(--border-strong)"):
+        ok(prop in s, "search: " + prop)
+    eq(_token_raw("search-w"), "280px", "--search-w")
+    ok(".tbl-search:focus-within { box-shadow: var(--focus-ring); }" in CSS and ".tbl-search input:focus { box-shadow: none; }" in CSS,
+       "the search is ringed as one field, not its input inside it")
+    ok("position: absolute" not in CSS.split("\n        .tbl-search .ic {")[1].split("}")[0], "its glyph sits in flow")
+    sel = CSS.split("\n        select { appearance: none;")[1].split("}")[0]
+    ok("stroke='%235F6368'" in sel and "stroke-width='1.75'" in sel and "right var(--sp-3) center" in sel,
+       "the chevron is a 16 glyph at 1.75 in ink-3, 12 from the edge")
+    for rule in (".tbl-tools select {", "input.field-sm, select.field-sm {", ".tbl-rows select {", ".dpanel input, .dpanel select {"):
+        ok("var(--control-h)" in CSS.split(rule)[1].split("}")[0] and "28px" not in CSS.split(rule)[1].split("}")[0]
+           and "var(--control-h-md)" not in CSS.split(rule)[1].split("}")[0], rule + " is 32")
 
 
 if __name__ == "__main__":
