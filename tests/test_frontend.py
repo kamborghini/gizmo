@@ -5918,10 +5918,11 @@ def t_focus_is_declared_once_per_kind():
        "one rule for every field, contenteditable included")
     ok(not re.search(r"\.[\w-]+:focus \{[^}]*(focus-ring|focus-outline)", CSS),
        "no component carries its own copy of either focus look")
-    ok(CSS.count("outline: var(--focus-outline)") == 4,
-       "the outline is read by the control rule and by three deliberate variants (the "
-       "custom-drawn checkbox, the menu item which insets it, and a widget card just dropped "
-       "in Customize mode, which borrows it for --dur-landed), and nowhere else")
+    ok(CSS.count("outline: var(--focus-outline)") == 5,
+       "the outline is read by the control rule and by four deliberate variants (the "
+       "custom-drawn checkbox, the menu item which insets it, a widget card just dropped "
+       "in Customize mode, which borrows it for --dur-landed, and the info button, which "
+       "draws it on its 24 face so a phone's 40 target never shows), and nowhere else")
 
 
 @test
@@ -7090,8 +7091,8 @@ def t_a_header_keeps_its_tabs_at_16_in_the_grid():
     in the grid, where every margin is zero and the gap is the rhythm, a
     negative top margin worked out from the two tokens takes the gap back to
     16. On a phone the gap is 16 already and the margin is nothing."""
-    ok(".ov-hero:has(+ .page-tabs) { margin-bottom: var(--sp-4); }" in CSS, "the flow's rule is still there")
-    ok(".ov-wrap.wgrid > .ov-hero + .page-tabs { margin-top: calc(var(--sp-4) - var(--page-rhythm)); }" in CSS,
+    ok(".ov-hero:has(+ .page-tabs) { margin-bottom: var(--sp-5); }" in CSS, "the flow's rule: 20 above the tabs (the mix, 4.4)")
+    ok(".ov-wrap.wgrid > .ov-hero + .page-tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm)); }" in CSS,
        "and the grid's reads the same two tokens")
 
 
@@ -9370,8 +9371,9 @@ def t_reactor_wears_projected_images_brand_from_one_place():
     ok("family=Inter:opsz,wght@14..32,400..700" in HTML and "family=Geist" not in HTML,
        "the interface face is Inter, with the optical sizes the figures were measured in")
     ok(CSS.count("@font-face { font-family: 'Bricolage Grotesque'") == 1, "the heading face is defined once")
-    ok(":is(.brand-name, .ov-hero h2, .ds-type-page, .section-title, .card-title, .chart-head .ct, .run-gate h2, .empty-chat h2, .modal-head h3, .auth-card h2) {"
-       in CSS and "font-family: var(--font-display)" in CSS.split(".auth-card h2) {")[1][:80], "and every title is in it, chart titles too, from one list")
+    ok(":is(.brand-name, .ov-hero h2, .ds-type-page) {" in CSS
+       and "font-family: var(--font-display)" in CSS.split(".ds-type-page) {")[1][:80],
+       "Bricolage sets the wordmark and the page titles, from one list, and nothing else (the mix, 4.2)")
     ok(CSS.count("font-family: var(--font-display)") == 1, "nowhere else sets a title face")
     ok('<span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Reactor</span>' in HTML,
        "the teal mark and the wordmark head the sidebar (the mix: the ink logo would vanish on the ink frame)")
@@ -9462,8 +9464,8 @@ def t_the_brand_pilot_review_findings_stay_fixed():
     ok("padding: var(--sp-1);" in strip and "margin: calc(-1 * var(--sp-1)) calc(-1 * var(--sp-1)) var(--sp-1)" in strip,
        "room on every side for the 3px outline, taken back so the tabs do not move")
     # Controls inside a title stay in the interface face.
-    ok(":is(.section-title, .card-title, .ov-hero h2) :is(button, input, select, textarea, label, .segmented, .tabs) { font-family: var(--font-sans); }" in CSS,
-       "a range or switch in a section title is not set in the title face")
+    ok(".ov-hero h2 :is(button, input, select, textarea, label, .segmented, .tabs, .beta-tag) { font-family: var(--font-sans); }" in CSS,
+       "Beta or a control beside a page title is not set in the title face")
     # Design shows every colour token, read from the stylesheet.
     fn = fn_src("function dsOtherColours(")
     ok("document.styleSheets" in fn and "selectorText === ':root'" in fn and "CSS.supports('color'" in fn,
@@ -9518,7 +9520,7 @@ def t_the_spacing_pass_holds():
     """2026-10-05, Cameron: "it needs to all be beautifully spaced, no overlaps or
     elements pushing other elements out the way". An audit of every screen at
     five sizes and three reviewers found these; each is held here."""
-    ok(".ov-hero:has(+ .tabs) { margin-bottom: var(--sp-4); }" in CSS, "a tab strip sits 16 under its header on every screen")
+    ok(".ov-hero:has(+ .tabs) { margin-bottom: var(--sp-5); }" in CSS, "a tab strip sits 20 under its header on every screen")
     ok("min-height: 60px" not in CSS.split(".ov-hero:has(+ .page-tabs)")[1][:600], "Finance intros reserve no empty line")
     ok("--segment-h: calc(var(--control-h) - 2 * var(--sp-0-5));" in CSS
        and "height: var(--segment-h);" in CSS.split("\n        .segmented > button {")[1].split("}")[0],
@@ -9814,6 +9816,34 @@ def t_the_top_bar_says_where_you_are_and_finds_anything():
     phone = CSS.split("@media screen and (max-width: 900px) {")
     ok(len(phone) > 1 and ".view.active { background: var(--surface-primary); border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;" in phone[1],
        "on a phone the sheet rises under an ink bar")
+
+
+@test
+def t_a_page_header_is_one_builder():
+    """Spec 5 and 4.4: a Bricolage title at 26/32 (24 on a phone) with Beta
+    beside it where it applies; at most one short line or a status line under
+    it (a live dot, the stamp and a 24 Refresh, or words split by a dot); the
+    page's actions on the right. 12 from the top bar, 20 above the tabs, 32
+    above the body. Bricolage is for the wordmark and page titles only."""
+    ok("function pageHead(o) {" in SCRIPT, "the builder exists")
+    fn = fn_src("function pageHead(o) {")
+    for part in ("el('div', 'ov-hero')", "BETA_TABS.indexOf(o.view) >= 0", "el('span', 'live-dot')", "freshLabel(o.live)",
+                 "r.className = 'info'", "el('span', 'dot-sep')", "el('p', null, o.line)", "heroAct('', ...(o.actions || []))"):
+        ok(part in fn, "pageHead: " + part)
+    h2 = CSS.split("\n        .ov-hero h2 {")[1].split("}")[0]
+    for prop in ("font-size: var(--text-title)", "line-height: var(--lh-title)", "font-weight: var(--weight-semibold)",
+                 "letter-spacing: var(--tr-title)"):
+        ok(prop in h2, "the page title: " + prop)
+    ok(":is(.brand-name, .ov-hero h2, .ds-type-page) {" in CSS, "Bricolage is for the wordmark and page titles only")
+    sub = CSS.split("\n        .ph-sub {")[1].split("}")[0]
+    ok("margin-top: var(--sp-1)" in sub and "color: var(--text-tertiary)" in sub, "the line sits 4 under the title in ink-3")
+    dot = CSS.split("\n        .live-dot {")[1].split("}")[0]
+    ok("background: var(--live-dot)" in dot and "box-shadow: var(--ring-live)" in dot, "the live dot wears its halo")
+    info = CSS.split("\n        .info {")[1].split("}")[0]
+    ok("width: var(--control-h-sm)" in info and "height: var(--control-h-sm)" in info, "Refresh is a 24 icon button in the line")
+    ok(".ov-wrap > .ov-hero { margin-bottom: var(--sp-7); }" in CSS and ".ov-hero:has(+ .tabs) { margin-bottom: var(--sp-5); }" in CSS,
+       "32 above the body, 20 above the tabs")
+    ok(re.search(r"\.ov-wrap \{[^}]*padding: var\(--sp-3\) var\(--wrap-pad\) var\(--sp-9\)", CSS), "12 under the top bar")
 
 
 if __name__ == "__main__":
