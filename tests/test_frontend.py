@@ -10146,6 +10146,24 @@ def t_an_empty_space_is_a_tile_a_line_and_its_action():
     ok(".ov-wrap > .empty, .ov-wrap > .widget-group > .empty, .card-grid > .empty { background" not in CSS, "with no box round it")
 
 
+@test
+def t_a_figure_row_never_asks_more_gap_than_a_phone_has():
+    """Found in the rig audit after the figure row landed (Task 14): a KPI strip
+    is a 12-track grid, so its column gap is paid eleven times. At the desktop's
+    40 that is 440, more than a phone's 347 content width, so every track was 0
+    wide and the second figure of each row was cut off by the row's clip. On a
+    phone the gap is 16 (176 in all) and the hairline sits in the middle of it."""
+    mk = "@media (max-width: 640px) {\n            .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }"
+    ok(mk in CSS, "the phone figure-row block is there")
+    if mk in CSS:
+        blk = CSS.split(mk)[1][:900]
+        ok(".metrics { column-gap: var(--sp-4); }" in blk, "a phone figure row has a 16 gap")
+        ok(".metrics > .stat::before { left: calc(-0.5 * var(--sp-4)); }" in blk, "and its hairline is half of it before the figure")
+    ok(re.search(r"\.metrics\.metrics-strip \{ grid-template-columns: repeat\(12, minmax\(0, 1fr\)\); \}", CSS) is not None,
+       "the strip is still 12 tracks (the reason the gap has to shrink)")
+    ok(".chat-metrics .metrics > .stat::before { left: calc(-0.5 * var(--sp-3)); }" in CSS, "a chat answer's figure row moves its hairline to its own 12 gap")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

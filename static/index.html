@@ -948,6 +948,12 @@
            and a tile with no sparkline is as tall as what it holds. */
         @media (max-width: 640px) {
             .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            /* A strip is a 12-track grid, so its gap is paid eleven times: at 40
+               that is 440, more than a phone's 347, and the second figure of
+               every row was cut off. 16 is 176, and the hairline moves to the
+               middle of the smaller gap. */
+            .metrics { column-gap: var(--sp-4); }
+            .metrics > .stat::before { left: calc(-0.5 * var(--sp-4)); }
             .metrics > .stat:has(.stat-spark) { grid-column: 1 / -1; }
             .stat:not(:has(.stat-spark)) { min-height: 0; }
         }
@@ -4714,6 +4720,7 @@
            in refunds painted red was a judgement nobody made. */
         .msg.assistant { container-type: inline-size; }
         .chat-metrics .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 0; gap: var(--sp-3); }
+        .chat-metrics .metrics > .stat::before { left: calc(-0.5 * var(--sp-3)); }
         @container (min-width: 600px) { .chat-metrics .metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
         .chat-metrics .stat { min-height: 0; padding: var(--sp-3); }
         .chat-metrics .stat-ic { display: none; }
