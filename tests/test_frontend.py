@@ -9848,23 +9848,30 @@ def t_a_page_header_is_one_builder():
 
 @test
 def t_the_page_header_wraps_sits_right_in_the_grid_stays_off_paper_and_syncs():
-    """Review of the page header (6 October 2026, fix round 1). Five things the
-    first cut got wrong: (1) a page title that is DATA (a product's name, "X
-    sector") never wrapped, so a long one pushed the phone page sideways;
-    (2) a Customise page's header sat one grid gap above its first block, not
-    the 32 a plain page gives it; (3) at 900 and under the grid's tabs sat 16
-    under the header where plain pages have 20; (4) the live dot and the
-    refresh glyph would print on a report's PDF with no stamp beside them;
-    (5) Hide sidebar never reported whether the sidebar was in view."""
+    """Review of the page header (6 October 2026, fix rounds 1 and 2). Five
+    things the first cut got wrong: (1) a page title that is DATA (a product's
+    name, "X sector") never wrapped, so a long one pushed the phone page
+    sideways; (2) a Customise page's header sat one grid gap above its first
+    block, not the 32 a plain page gives it, and the first cure (a margin on
+    whatever follows) pushed a lone one-column KPI tile down out of its row,
+    so the offset is on the header, which is alone in its full-width row;
+    (3) at 900 and under the grid's tabs sat 16 under the header where plain
+    pages have 20; (4) the live dot and the refresh glyph would print on a
+    report's PDF with no stamp beside them; (5) Hide sidebar never reported
+    whether the sidebar was in view."""
+    ok("\n        .ov-hero h2 {" in CSS, "the page title rule exists")
     h2 = CSS.split("\n        .ov-hero h2 {")[1].split("}")[0]
     ok("white-space: nowrap" not in h2, "a page title may wrap: nowrap pushed a long product name off the phone's column")
     ok("flex-wrap: wrap" in h2 and "overflow-wrap: anywhere" in h2,
        "it wraps, breaks a word longer than the column, and Beta follows it onto the next line")
     # (2)
-    gap = ".ov-wrap.wgrid > .ov-hero + :not(.tabs, .page-tabs) { margin-top: calc(var(--sp-7) - var(--page-rhythm)); }"
-    ok(gap in CSS, "a Customise page puts its first block 32 under the header, as a plain page does")
-    ok(CSS.index(gap) > CSS.index("\n        .ov-wrap.wgrid > * { margin: 0; }"),
-       "after the grid zeroes its children's margins, so it is not undone")
+    zeroed = "\n        .ov-wrap.wgrid > * { margin: 0; }"
+    ok(zeroed in CSS, "the grid still zeroes its children's margins")
+    gap = ".ov-wrap.wgrid > .ov-hero:not(:has(+ :is(.tabs, .page-tabs, .queues))) { margin-bottom: calc(var(--sp-7) - var(--page-rhythm)); }"
+    ok(gap in CSS, "a Customise page's header sits 32 above what follows it, as on a plain page, unless tabs follow (they have their own 20)")
+    ok(CSS.index(gap) > CSS.index(zeroed), "after the grid zeroes its children's margins, so it is not undone")
+    ok(".ov-hero + :not(.tabs, .page-tabs)" not in CSS,
+       "and the offset is not on whatever follows the header: that can be a one-column tile (it would sit lower than its row) or a hidden block")
     # (3)
     ok(".ov-wrap.wgrid > .ov-hero + .tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm) - var(--sp-1)); }" in CSS
        and "calc(var(--sp-4) - var(--page-rhythm) - var(--sp-1))" not in CSS,
@@ -9882,13 +9889,16 @@ def t_the_page_header_wraps_sits_right_in_the_grid_stays_off_paper_and_syncs():
     ok(".ph-sub > .live-dot { display: block; }" in scr and ".ph-sub > .info { display: inline-grid; }" in scr,
        "the screen block shows both, after the hiding rule, so a printed report never carries them")
     # (5)
+    ok("function openSidebar() {" in SCRIPT and "function closeSidebar() {" in SCRIPT, "the drawer's two functions exist")
     ok("$('side-hide').setAttribute('aria-expanded', 'true')" in fn_src("function openSidebar() {"),
        "opening the drawer tells Hide sidebar the sidebar is in view")
     ok("$('side-hide').setAttribute('aria-expanded', 'false')" in fn_src("function closeSidebar() {"),
        "closing it tells Hide sidebar it is not")
+    menu = "$('menu-btn').setAttribute('aria-expanded', String(!(document.body.classList.contains('sidebar-collapsed')"
     boot = "$('side-hide').setAttribute('aria-expanded', $('menu-btn').getAttribute('aria-expanded'));"
-    ok(boot in SCRIPT and SCRIPT.index(boot) > SCRIPT.index("$('menu-btn').setAttribute('aria-expanded', String(!(document.body.classList.contains('sidebar-collapsed')"),
-       "and at boot it reports what the menu button reports, so a sidebar restored as folded is not called open")
+    ok(menu in SCRIPT, "the boot code still sets the menu button's state")
+    ok(boot in SCRIPT, "and sets Hide sidebar's too")
+    ok(SCRIPT.index(boot) > SCRIPT.index(menu), "after the menu button's, so it reports what the menu button reports and a sidebar restored as folded is not called open")
 
 
 if __name__ == "__main__":
