@@ -1220,8 +1220,8 @@ def t_a_thumb_inside_a_track_takes_the_track_radius_minus_the_gap():
     control's 6px corner and no edge, and the thumb that less the 2px inset, so
     the two curves run parallel."""
     track = re.findall(r"\n        \.segmented \{([^}]*)\}", CSS)
-    thumb = re.findall(r"\n        \.segmented > button \{([^}]*)\}", CSS)
-    ok(len(track) == 1 and len(thumb) == 1, "both halves of the control are still one rule each")
+    thumb = re.findall(r"\n        \.segmented > button::before \{([^}]*)\}", CSS)
+    ok(len(track) == 1 and len(thumb) == 1, "both halves of the control are still one rule each (the thumb is drawn on the segment's ::before, Task 45)")
     ok("border-radius: var(--radius-control)" in track[0] and "border: 0" in track[0],
        "the track takes the control corner and has no edge of its own")
     ok("border-radius: calc(var(--radius-control) - var(--sp-0-5))" in thumb[0], "and the thumb is concentric inside it")
@@ -1387,7 +1387,7 @@ def t_the_dead_elevation_token_is_gone():
     # control in the app silently lost its selected state while the guard stayed
     # green. A marker has to be asserted by its EFFECT, never by the presence of
     # a token that may resolve to nothing.
-    for sel in (r"\.segmented > button:is\(\.on, \[aria-pressed=\"true\"\]\)",):
+    for sel in (r"\.segmented > button:is\(\.on, \[aria-pressed=\"true\"\]\)::before",):
         rule = re.search(sel + r" \{[^}]*\}", HTML, re.S)
         ok(rule, "the %s rule is still there" % sel)
         shadow = re.search(r"box-shadow:\s*([^;}]+)", rule.group(0))
@@ -5782,11 +5782,12 @@ def t_focus_is_declared_once_per_kind():
        "one rule for every field, contenteditable included")
     ok(not re.search(r"\.[\w-]+:focus \{[^}]*(focus-ring|focus-outline)", CSS),
        "no component carries its own copy of either focus look")
-    ok(CSS.count("outline: var(--focus-outline)") == 6,
-       "the outline is read by the control rule and by five deliberate variants (the "
+    ok(CSS.count("outline: var(--focus-outline)") == 7,
+       "the outline is read by the control rule and by six deliberate variants (the "
        "custom-drawn checkbox, the menu item which insets it, a widget card just dropped "
        "in Customize mode, which borrows it for --dur-landed, and the info button, which "
-       "draws it on its 24 face so a phone's 40 target never shows, and a chart's plot, one stop for the arrow keys), and nowhere else")
+       "draws it on its 24 face so a phone's 40 target never shows, a chart's plot, one stop for the arrow keys, "
+       "and a segmented choice, which draws it on the choice it shows rather than on the 40 target round it), and nowhere else")
 
 
 @test
@@ -9066,7 +9067,7 @@ def t_the_app_wide_layout_sweep_holds():
         "@container loans (max-width: 620px)": "loan rows by the card's width",
         "@container mlist (max-width: 560px)": "Inbox rows by the list's width",
         ".mail-bulk-hint { color: inherit; flex: 1 1 0; min-width: 7rem; }": "the bulk hint gives way before the buttons wrap",
-        ".ktable td.sizes-notes { color: var(--text-tertiary); font-size: var(--text-xs); max-width: 0; width: 100%;": "size notes take what is left",
+        ".ktable td.sizes-notes { color: var(--text-tertiary); font-size: var(--text-xs); line-height: var(--lh-caption); max-width: 0; width: 100%;": "size notes take what is left",
         "@container crmtable (max-width: 640px)": "CRM tables come in on a narrow card",
         "word-break: normal; overflow-wrap: anywhere; text-underline-offset: 2px;": "contact lines break between words",
         ".mown-slot { flex: 0 0 auto; min-width: 88px; max-width: 150px;": "owner chips show a short name whole",
@@ -9386,9 +9387,9 @@ def t_the_spacing_pass_holds():
     five sizes and three reviewers found these; each is held here."""
     ok(".ov-hero:has(+ .tabs) { margin-bottom: var(--sp-5); }" in CSS, "a tab strip sits 20 under its header on every screen")
     ok("min-height: 60px" not in CSS.split(".ov-hero:has(+ .page-tabs)")[1][:600], "Finance intros reserve no empty line")
-    ok("--segment-h: calc(var(--control-h) - 2 * var(--sp-0-5));" in CSS
-       and "height: var(--segment-h);" in CSS.split("\n        .segmented > button {")[1].split("}")[0],
-       "a segmented track is a control's 32, level with the field beside it, its choice 28 inside")
+    ok("--segment-h" not in CSS
+       and "height: var(--control-h);" in CSS.split("\n        .segmented > button {")[1].split("}")[0],
+       "a segmented track is a control's 32, level with the field beside it (its choice, 28, is drawn inside it)")
     ok("flex: 1 1 auto;" in CSS.split("\n        .segmented > button {")[1].split("}")[0], "and a wrapped track fills its lines")
     ok(".metrics.metrics-strip { grid-template-columns: repeat(12, minmax(0, 1fr)); }" in CSS
        and "calc(100% / 60)" not in CSS, "figures keep a 16 gap both ways at every width")
@@ -9621,7 +9622,7 @@ def t_the_mix_type_sizes_space_and_corners_are_tokens():
                    ("radius-lg", "12px"), ("radius-pop", "var(--radius-md)"), ("radius-tile", "var(--radius-md)"),
                    ("radius-sheet", "var(--radius-lg)"), ("radius-band", "var(--radius-sheet)"),
                    ("radius-card", "var(--radius-pop)"), ("switch-w", "28px"), ("switch-h", "16px"),
-                   ("switch-inset", "2px"), ("segment-h", "calc(var(--control-h) - 2 * var(--sp-0-5))")):
+                   ("switch-inset", "2px")):
         eq(_token_raw(tok), v, "--" + tok)
     tokens = SCRIPT.split("const MIX_TOKENS = [")[1].split("];")[0]
     for group in ("'Type'", "'Sizes'", "'Space'", "'Corners'"):
@@ -9847,10 +9848,11 @@ def t_tabs_sit_on_a_rule_and_the_chosen_segment_is_white():
     pt = CSS.split("\n        .page-tabs {")[1].split("}")[0]
     ok("min-height: var(--row-h)" in pt and "box-shadow: var(--rule-b)" in pt, "a tab row with a chooser on its right is the same 44 on a rule")
     seg = CSS.split("\n        .segmented {")[1].split("}")[0]
-    ok("background: var(--surface-tertiary)" in seg and "padding: var(--sp-0-5)" in seg, "the track is the fill, 2 in")
+    ok("background: var(--surface-tertiary)" in seg and "padding: 0 var(--sp-0-5)" in seg, "the track is the fill, 2 in at its sides (its choices are its full height)")
     on = CSS.split('.segmented > button:is(.on, [aria-pressed="true"]) {')[1].split("}")[0]
-    ok("background: var(--surface-primary)" in on and "color: var(--text-primary)" in on and "box-shadow: var(--ring-chosen)" in on,
-       "the chosen segment is white, ink, with the teal-line ring")
+    drawn = CSS.split('.segmented > button:is(.on, [aria-pressed="true"])::before {')[1].split("}")[0]
+    ok("color: var(--text-primary)" in on and "background: var(--surface-primary)" in drawn and "box-shadow: var(--ring-chosen)" in drawn,
+       "the chosen segment is white, ink, with the teal-line ring (drawn inset on ::before)")
     cnt = CSS.split("\n        .cnt {")[1].split("}")[0]
     ok("font-size: var(--text-xs)" in cnt and "color: var(--text-tertiary)" in cnt and "tabular-nums" in cnt, "a count is caption, ink-3, tabular")
     fn = fn_src("function chooser(")
@@ -10223,7 +10225,7 @@ def t_the_figure_and_table_review_fixes_hold():
        and ".ktable.crm-table :is(th, td):last-child { padding-right: 0; }" in CSS, "they are 44 rows with their outer columns on the text edge")
     ok(".ktable-wrap:has(> .sizes-table) { overflow: visible; }" in CSS, "the Size list's wrapper lets a fill bleed")
     band = CSS.split("\n        .ktable tr.ktable-grp th {")[1].split("}")[0] if "\n        .ktable tr.ktable-grp th {" in CSS else ""
-    ok("padding: var(--sp-2) 0" in band and "calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary)" in band,
+    ok("padding: var(--sp-1-5) 0" in band and "calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary)" in band,
        "a maker's band keeps its words on the text edge and bleeds its fill 8 each side")
     det = CSS.split("\n        .ktable tr.sizes-detail > td {")[1].split("}")[0] if "\n        .ktable tr.sizes-detail > td {" in CSS else ""
     ok("calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary)" in det, "so does the detail panel")
@@ -10367,7 +10369,16 @@ def t_every_target_on_a_phone_fits_a_finger():
     for sel in (".btn", ".icon-btn", ".chip", ".toggle", ".qt", ".dmenu-item", ".rlist-row", ".nav-item", ".tbl-search", "select"):
         ok(sel in b, sel + " is in the 40 rule")
     ok("min-height: var(--control-h-lg)" in b and "font-size: var(--text-sm)" in b, "40 tall, 14 words")
-    ok(".segmented > button { height: calc(var(--control-h-lg) - 2 * var(--sp-0-5)); }" in b, "a segment fills a 40 track")
+    ok(".segmented > button { height: var(--control-h-lg); }" in b, "a segment is the track's full 40: the target is the track, as in the mockup")
+    seg = CSS.split("\n        .segmented > button {")[1].split("}")[0]
+    ok("position: relative; isolation: isolate;" in seg and "height: var(--control-h);" in seg and "border-radius: 0;" in seg,
+       "a segment is the track's whole height, and draws nothing itself")
+    ok("\n        .segmented > button::before { content: \"\"; position: absolute; inset: var(--sp-0-5) 0; z-index: -1;" in CSS
+       and '.segmented > button:is(.on, [aria-pressed="true"])::before { background: var(--surface-primary); box-shadow: var(--ring-chosen); }' in CSS,
+       "the chosen segment is drawn inset by the track's 2 on ::before, which is what keeps the target 40 and the look 36")
+    ok(":is(.tab, .tbl-step, .guide-toc-link, .toggle) { min-width: var(--control-h-lg); }" in b and ".tbl-step { width: var(--control-h-lg); }" in b
+       and ".toggle:has(> .sw:only-child) { justify-content: flex-end; }" in b,
+       "a short tab, a pager step, a contents link and a switch with no word are 40 wide too, the switch's track staying at the end (Task 45: found by the app measure)")
     ok("padding-right: calc(var(--control-h-lg) - var(--control-h-sm))" in b, "an info button's target grows away from its words")
     for sel in (".sidebar .icon-btn", ".brand", ".mem-btn", ".crm-ticon", ".crm-col-add", ".sizes-open", ".files-name", ".guide-toc-link", ".miss-open", ".action-link", "details summary"):
         ok(sel in b.split("The rest of what a finger meets")[1] if "The rest of what a finger meets" in b else False, sel + " is a 40 target too")
@@ -11659,8 +11670,12 @@ def t_the_pre_measure_fold_is_in():
     ok("'Not set up yet. Steps on the Inbox tab.'" in SCRIPT and "Steps in the Guide" not in SCRIPT, "the mailbox line names the Inbox tab")
     ok(".cmp-sel { height: var(--control-h);" in COMPOSER and ".cmp-chip { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--control-h);" in COMPOSER
        and "32px" not in COMPOSER, "the composer's select and chip are the control height, so a touch bar is 40 all along")
-    ok(SCRIPT.count("inp.placeholder = ph === 'kg' ? ph : ph + ' cm';") == 2 and "inp.placeholder = ph;" not in SCRIPT,
-       "W, L and D carry their unit, kg already does, in both parcel editors")
+    ok(SCRIPT.count("inp.placeholder = ph === 'kg' ? ph : ph + ' cm';") == 2 and "inp.placeholder = ph;" not in SCRIPT
+       and "i.placeholder = k === 'weight' ? 'kg' : k.slice(0, 1).toUpperCase() + k.slice(1) + ' cm';" in SCRIPT,
+       "W, L and D carry their unit, kg already does, in the dispatch window, the custom shipment and the parcel presets")
+    ok(".disp-boxrow:has(> .disp-sel) { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }" in CSS
+       and ".disp-boxrow > .disp-sel { grid-column: 1 / 4; min-width: 0; }" in CSS,
+       "and on a phone the custom shipment's parcel row is a preset and the remove square, then four equal measures (they were 26 wide)")
     def rule(sel):
         ms = list(re.finditer(r"\n        " + re.escape(sel) + r" \{([^}]*)\}", CSS))
         ok(len(ms) == 1, sel + " is one rule at the stylesheet's indent")
@@ -11671,6 +11686,66 @@ def t_the_pre_measure_fold_is_in():
        "Show all reads the global 40 link rule")
     cm = rule(".chart-modal .modal-body")
     ok("padding: var(--sp-4) var(--sp-4) var(--sp-6);" in cm, "the chart window pads 16 at its sides")
+
+
+@test
+def t_a_type_size_and_its_line_height_come_as_a_pair():
+    """Task 45 (the measure tool's text styles, spec 4.2): a caption is 12/16 and a micro label 11/16, so a rule that
+    sets one of those sizes sets the caption line height too; it used to inherit the body's 20 and print as 12/20, a
+    style off the list, in 158 rules. Where a rule names both, the pair is one the spec lists: caption and micro with
+    --lh-caption, body and the 14 step with --lh-control (or --lh-prose for running text), the head step and the
+    wordmark's 16 with --lh-control, a figure with --lh-none."""
+    frozen = re.compile(r"label-sheet|day-sheet|loan-sticker|guide-print-row|#label-print|printing-label|@media print|@page")
+    pairs = {"--text-micro": {"--lh-caption"}, "--text-xs": {"--lh-caption"},
+             "--text-body": {"--lh-control", "--lh-prose"}, "--text-sm": {"--lh-control", "--lh-prose"},
+             "--text-head": {"--lh-control"}, "--text-md": {"--lh-control"},
+             "--fig-xl": {"--lh-none"}, "--fig-l": {"--lh-none"}, "--fig-m": {"--lh-none"}, "--fig-s": {"--lh-none"}}
+    missing, wrong = [], []
+    for sel, body in _rules(CSS):
+        if frozen.search(sel) or sel.strip().startswith(":root") or sel.strip() in ("body", ".print-head"):
+            continue    # body and the print head are what the A4 sheets inherit: frozen with the print
+        fs = re.search(r"(?<![\w-])font-size:\s*var\((--[\w-]+)\)", body)
+        if not fs or fs.group(1) not in pairs:
+            continue
+        tok = fs.group(1)
+        lh = re.search(r"(?<![\w-])line-height:\s*([^;]+);", body)
+        shorthand = re.search(r"(?<![\w-])font:\s*[^;]*/", body)
+        if not lh and not shorthand:
+            if tok in ("--text-micro", "--text-xs"):
+                missing.append(sel.strip()[:70])
+            continue
+        if lh:
+            m = re.match(r"var\((--[\w-]+)\)", lh.group(1).strip())
+            if m and m.group(1) not in pairs[tok]:
+                wrong.append("%s: %s with %s" % (sel.strip()[:60], tok, m.group(1)))
+    ok(not missing, "%d caption or micro rules without their line height: %s" % (len(missing), missing[:12]))
+    ok(not wrong, "type sizes paired with a line height the spec does not list: %s" % wrong[:12])
+
+
+@test
+def t_what_the_app_measure_found_stays_fixed():
+    """Task 45 (the measure tool pointed at the app, and the 165-screen audit): each cause it found is fixed where the
+    value comes from. The browser's own bold (700, or 900 inside a 600) is 600 on screen; a chip's line is the 20 of its
+    step, not the buttons' 'normal'; a maker's band and a unit read the step's own line; the scopes list is code, not
+    a monospace list; an empty line centres by max-width, so no padding is a fraction; a visually hidden paragraph has
+    no margin; and a field's vertical padding is the even 4 (its 32 is the min-height's)."""
+    ok("@media screen { b, strong { font-weight: var(--weight-semibold); } }" in CSS, "bold is 600 on screen")
+    chip = CSS.split("\n        .chip {")[1].split("}")[0]
+    ok("line-height: var(--lh-control)" in chip, "a chip has its step's line height, not a button's normal")
+    grp = CSS.split("\n        .ktable tr.ktable-grp th {")[1].split("}")[0]
+    ok("line-height: var(--lh-control)" in grp and "padding: var(--sp-1-5) 0" in grp, "a maker's band reads 13/20 and stays 32 tall")
+    ok("font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }" in CSS.split(".sizes-unit { display: inline;")[1][:160],
+       "a unit beside a figure has the body line, not the figure's 1")
+    crm = CSS.split("\n        .crm-col-sum {")[1].split("}")[0]
+    ok("line-height: var(--lh-control)" in crm and "line-height: var(--lh-none)" not in crm, "a pipeline column's sum is 13/20")
+    ok("li.append(el('code', 'setup-code', x))" in SCRIPT and "font-family" not in CSS.split("\n        .setup-scopes {")[1].split("}")[0],
+       "the permission scopes are code in a list, not a list set in monospace")
+    e = CSS.split("\n        .empty {")[1].split("}")[0]
+    ok("calc((100%" not in e and "margin-inline: auto" in e and "max-width: calc(var(--measure) + 2 * var(--sp-4))" in e and "padding: var(--sp-6) var(--sp-4)" in e,
+       "an empty line centres by width, its padding the 16 gutter")
+    ok("margin: 0; overflow: hidden; clip: rect(0 0 0 0)" in CSS.split("\n        .sr-only {")[1].split("}")[0], "hidden text has no margin of its own")
+    ok(_token_raw("control-pad-y") == "var(--sp-1)", "a field's vertical padding is 4: its 32 is the min-height's and the line centres in it")
+    ok(CSS.count("calc((100% - var(--measure)) / 2)") == 0, "and no rule pads by a share of its container")
 
 
 if __name__ == "__main__":
