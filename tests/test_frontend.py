@@ -1411,7 +1411,7 @@ def t_one_component_per_role_across_tabs():
     # Since 2026-09-23 each of the Work tab's three lists is a titled card, as
     # the People tab's is.
     ok("cardOf('Recent sessions'" in SCRIPT and "cardOf('On the clock now')" in SCRIPT
-       and "cardOf('Hours per person')" in SCRIPT, "and all three of its headings moved together")
+       and "cardOf('Hours per person'" in SCRIPT, "and all three of its headings moved together")
     banner = re.search(r"\.alerts-banner \{[^}]*\}", HTML).group(0)
     ok("var(--bw-hairline) solid var(--border-default)" in banner,
        "the alerts banner wears the hairline every other tinted notice wears")
@@ -11143,8 +11143,7 @@ def t_the_four_run_gates_word_their_cost_the_same():
                           ("function showKeywordsView() {", "note: RUN_COST"), ("function customerGate(seg) {", "text: RUN_COST")):
         ok(fname in SCRIPT, fname + " exists")
         ok(needle in fn_src(fname), fname + " says it through the constant")
-    ok("Uses AI credits" not in SCRIPT.replace(cost, "").replace("' again. Uses AI credits.'", ""),
-       "and no gate words its own: the constant is the only gate cost line")
+        ok("Uses AI credits" not in fn_src(fname), fname + " words no cost of its own")
     for more in ("more: 'Takes up to a minute.'", "more: 'Reads Search Console and Analytics.'", "'Reads Shopify customers and orders.'"):
         ok(more in SCRIPT, "kept behind the info button: " + more)
     ok("info: o.more ? infoButton('About this run', { title: o.title, body: o.more }) : null" in fn_src("function renderRunGate(boxId, o) {"),
@@ -11279,6 +11278,30 @@ def t_the_inbox_list_is_hairline_rows_and_an_upload_row_has_no_box():
     up = rule(".files-up")
     ok("border: 0;" in up and "background: none;" in up and "border-radius: 0;" in up and "box-shadow: var(--rule-b-soft);" in up, "an upload row is a hairline row, no box")
     ok("box-shadow: inset 0 calc(-1 * var(--bw-hairline)) 0 var(--error);" in rule(".files-up.failed"), "a failed one has a red rule")
+
+
+@test
+def t_team_memory_and_skills_wear_the_mix():
+    """Spec 8.3 (Workspace) and the copy plan (Team, Memory, Skills): one line
+    under each title; security notes, retention rules and how things are read
+    behind info buttons beside their titles, word for word; the cost warning
+    kept as a short line; statuses as tags; one-line empty states."""
+    for fname, line in (("function renderTeam() {", "'Who can sign in, and what everyone has done.'"),
+                        ("function renderMemory() {", "'What Reactor remembers with every answer.'"),
+                        ("function renderSkills() {", "'Playbooks Reactor follows in chat, reports and email drafts.'")):
+        ok(fname in SCRIPT, fname + " exists")
+        fn = fn_src(fname)
+        ok("line: " + line in fn and "el('div', 'ov-hero')" not in fn, fname + ": the one header and its line")
+    for part in ("infoButton('About accounts'", "infoButton('How much is kept'", "infoButton('About store knowledge'",
+                 "infoButton('About notes'", "infoButton('About tracked changes'", "infoButton('How skills are used'",
+                 "infoButton('About skills'", "'Uses AI credits. Reads up to 12 pages, once.'",
+                 "el('span', 'lbl-chip warn', 'Waiting for an admin')", "el('span', 'lbl-chip note', 'Not read with answers')",
+                 "emptyState({ icon: I.bookmark, text: 'No notes yet.', action: first })", "emptyState({ icon: I.book, text: 'No skills yet.' })"):
+        ok(part in SCRIPT, "says: " + part)
+    for gone in ("'tm-foot'", "Who can sign in, what each may open", "No part-time accounts yet. Set", "keeps in mind with every answer",
+                 "Learning the store is an AI run", "Reactor keeps a note when something", "Reactor does not read it yet",
+                 "older than the newest", "Instructions and playbooks Reactor follows", "None yet: answers name", "Ideas: a brand voice"):
+        ok(gone not in SCRIPT, "cut: " + gone)
 
 
 if __name__ == "__main__":
