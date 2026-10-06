@@ -4709,21 +4709,28 @@
         .composer .toggle { font-size: var(--text-sm); }
         .composer .row { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); padding: 0;
             flex-wrap: wrap; row-gap: var(--sp-1); }
-        .toggle { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--control-h-md); font-size: var(--text-xs); color: var(--text-secondary); cursor: pointer; user-select: none; }
+        /* THE SWITCH (the mix, spec 6): a 28 by 16 track, ink-4 off and the
+           teal mark on, a 12 white knob; its word 8 beside it at 13 and 500 in
+           ink-2; the whole control 32 tall. */
+        .toggle { display: inline-flex; align-items: center; gap: var(--control-gap); min-height: var(--control-h); font-size: var(--text-body); line-height: var(--lh-control);
+            font-weight: var(--weight-medium); color: var(--text-secondary); cursor: pointer; user-select: none; }
         /* The knob is not a box on the box scale: its size is DECIDED by the
            track it slides in (track height, less the inset on each side). It
            was written as a raw 14px, which happened to be right, and snapping
            it to the nearest box step made it 16 inside an 18px track - two
            pixels of knob hanging out of the slot. Derived, it cannot drift:
            change the track and the knob follows. */
-        .toggle .sw { width: var(--switch-w); height: var(--switch-h); border-radius: var(--radius-full); background: var(--border-default); position: relative; transition: background var(--dur) var(--ease); }
+        .toggle .sw { width: var(--switch-w); height: var(--switch-h); border-radius: var(--radius-full); background: var(--border-emphasis); position: relative; transition: background var(--dur) var(--ease); }
         .toggle .sw::after { content: ""; position: absolute; top: var(--switch-inset); left: var(--switch-inset);
             width: calc(var(--switch-h) - 2 * var(--switch-inset)); height: calc(var(--switch-h) - 2 * var(--switch-inset));
-            border-radius: var(--radius-circle); background: var(--surface-primary); transition: transform .18s; }
-        .toggle:is(.on, [aria-checked="true"]) .sw { background: var(--fill-mark); } .toggle:is(.on, [aria-checked="true"]) .sw::after { transform: translateX(calc(var(--switch-w) - var(--switch-h))); background: var(--surface-primary); }
+            border-radius: var(--radius-circle); background: var(--surface-primary); box-shadow: var(--shadow-raise); transition: transform .18s; }
+        .toggle:is(.on, [aria-checked="true"]) .sw { background: var(--fill-mark); }
+        .toggle:is(.on, [aria-checked="true"]) .sw::after { transform: translateX(calc(var(--switch-w) - var(--switch-h))); background: var(--surface-primary); }
+        .toggle:hover .sw { background: var(--text-tertiary); }
+        .toggle:is(.on, [aria-checked="true"]):hover .sw { background: var(--text-brand); }
         .composer .hint { margin-left: auto; font-size: var(--text-xs); color: var(--text-tertiary); }
         /* Deep analysis is a real switch now, so it drops the button's own box. */
-        #deep-toggle { border: 0; background: none; padding: 0; font: inherit; font-size: var(--text-xs); color: var(--text-secondary); }
+        #deep-toggle { border: 0; background: none; padding: 0; font: inherit; font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-secondary); }
         .deep-note { font-size: var(--text-xs); color: var(--text-tertiary); flex: 1 1 14rem; }
         /* Squeezed as a flex item, the switch's track went from 32px to 23
            and its knob stood out past the end; the label broke in two. */
@@ -6544,6 +6551,19 @@ Projected Image UK"></textarea>
             rest.forEach(([k, l, icon]) => { const b = el('button', 'qt'); mark(b, k); b.append(ico(icon), document.createTextNode(l)); r.append(b); });
             nav.append(r);
             return nav;
+        }
+        /* A switch built in the script (the static ones in the markup are
+           wired by syncToggles). It flips on a press and says its state. */
+        function switchBtn(label, on, onToggle) {
+            const b = el('button', 'toggle' + (on ? ' on' : ''));
+            b.type = 'button'; b.setAttribute('role', 'switch'); b.setAttribute('aria-checked', String(!!on));
+            b.append(el('span', 'sw'), document.createTextNode(label));
+            b.onclick = () => {
+                const now = b.getAttribute('aria-checked') !== 'true';
+                b.setAttribute('aria-checked', String(now)); b.classList.toggle('on', now);
+                onToggle(now);
+            };
+            return b;
         }
         function statCard(m, i) {
             const c = el('div', 'stat' + (m.tone === 'warn' ? ' warn' : ''));
