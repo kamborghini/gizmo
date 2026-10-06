@@ -1616,8 +1616,10 @@ def t_the_custom_shipment_queue_speaks_its_own_tab_s_language():
         ok(own in fn, "it uses the tab's own .%s" % own)
     # And the page around the list is the other four tabs' page: a card with a
     # counted title, its actions in the head and the house search (2026-09-23).
-    ok("tableSearch('Search reference, name or tracking'" in fn and "el('div', 'card-head')" in fn
-       and "heroAct(" in fn, "the list sits in a card like the order queues' own")
+    # Since the mix (2026-10-06) its page is the order queues' own: the same
+    # header, the same counters and tabs, the house search, no card title.
+    ok("tableSearch('Search reference, name or tracking'" in fn and "pageHead({ view: 'labels'" in fn
+       and "prodQueues(" in fn, "the list sits on the same page as the order queues' own")
     ok("margin-left:auto" not in fn, "and the inline one-off layout is gone")
 
 
@@ -2884,7 +2886,8 @@ def t_the_production_toolbar_is_sorted_not_shortened():
     fn = fn[:fn.index("\n        function ")]
     ok("const qCard = el('div', 'card q-card')" in fn, "the queue is a card, header and all")
     ok("tableTools([findWrap, filtTabs]" in fn, "search and filters on the toolbar")
-    ok("segmented([['all'" in fn, "the filters are a counted segmented control: a choice of what the card shows")
+    ok("segmented([{ key: 'all', label: 'All', n: orders.length }" in fn,
+       "the filters are a segmented control with counts: a choice of what the list shows")
     # The two page-level rails are unstyled holders now: their children are
     # taken out and placed, and neither is ever appended to the page.
     ok("const bar = el('div');" in fn and "const tools = el('div');" in fn,
@@ -2904,7 +2907,8 @@ def t_the_production_toolbar_is_sorted_not_shortened():
     ok("qCard.append(fileIn)" in fn, "the size-list picker is still in the page")
     # And the page does not print the same sentence twice.
     ok(fn.count("el('p', null, heroCopy)") == 0, "the hero no longer repeats the queue's own line")
-    ok("el('p', 'card-desc', data.single" in fn, "which the card carries instead")
+    ok("infoButton('About this queue'" in fn and "el('p', 'card-desc'" not in fn,
+       "the queue's rule waits behind the header's info button (the mix), not under a card title")
 
 
 @test
@@ -8955,7 +8959,7 @@ def t_a_queue_row_keeps_its_buttons_in_the_last_column():
     ok(".lbl-qrow > .lbl-meta { grid-row: 1; grid-column: -3 / -2; }" in CSS
        and ".lbl-qrow > .lbl-actions { grid-row: 1; grid-column: -2 / -1; }" in CSS,
        "the date and the buttons are pinned to the last two columns of the first line")
-    i = SCRIPT.index("No shipments booked to a pasted address yet.")
+    i = SCRIPT.index("'No custom shipments yet.'")
     body = SCRIPT[i:i + 4000]
     ok("if (sh.contents) who.append(el('span', 'sub', sh.contents));" not in body
        and body.count("el('span', 'sub')") == 1 and "'sub-line'" in body,
@@ -10723,6 +10727,43 @@ def t_a_single_series_wash_is_the_series_own_colour():
     ok("const washColor = (series[0] && series[0].color) || CH[0];" in tc
        and tc.count("'stop-color': washColor") == 2, "the series' own colour, both ends of the ramp")
     ok("area: false," in fn_src("function fcChartCard("), "Cash in has no wash")
+
+
+@test
+def t_the_production_manager_is_the_mix_page():
+    """Spec 8.2: the header with the live line and Refresh, then Collections,
+    New shipment and More; counters for Unprocessed, To make and To ship with
+    Complete and Custom shipments as tabs beside them; the toolbar exactly as it
+    was, its filters counted; the two queue rules worth keeping behind an info
+    button; an empty queue one line and the way on (copy plan, Production
+    Manager #1 to #16)."""
+    ok("function prodQueues(onPick) {" in SCRIPT, "one builder draws the queues for both renderers")
+    fn = fn_src("function renderLabels() {")
+    for part in ("pageHead({ view: 'labels', title: 'Production Manager', live: labelsCache.at",
+                 "infoButton('About this queue'", "box.append(prodQueues(",
+                 "[pnBtn, coll, newShip, more].filter(Boolean).forEach(b => heroActs.append(b));",
+                 "{ key: 'all', label: 'All', n: orders.length }", "tableTools([findWrap, filtTabs],",
+                 "[allBtn, slBtn, oldf, sizeSel].filter(Boolean)", "if (data.counts) labelsCounts = data.counts;",
+                 "'Nothing on the bench.'", "'Go to Unprocessed'", "'One order, opened from Shopify. Refresh for all.'",
+                 "'First ' + lm.checked + ' open orders checked: none missing the tag.'"):
+        ok(part in fn, "renderLabels: " + part)
+    ok("tabStrip(QUEUE" not in SCRIPT and "el('div', 'card-head')" not in fn and "'The bench queue, from" not in SCRIPT,
+       "no strip of queue tabs, no queue card title, no intro")
+    pq = fn_src("function prodQueues(onPick) {")
+    ok("queueCounters(QUEUE.slice(0, 3)" in pq and "I.check" in pq and "I.box" in pq, "three counters, two tabs")
+    cq = fn_src("async function renderCustomQueue(box) {")
+    ok("pageHead({ view: 'labels'" in cq and "prodQueues(" in cq and "'No custom shipments yet.'" in cq,
+       "Custom shipments is the same page")
+    ld = fn_src("async function loadLabels(force, fresh) {")
+    ok("pageHead({ view: 'labels', title: 'Production Manager', line: 'Finding orders tagged" in ld, "and so is the loading state")
+    # The widget grid's 20 under a header applies when the counters are its very next sibling
+    # (:has(+ .queues) is not re-worked for one inserted later), so both are built in one pass and
+    # the partial-sweep notice follows the counters.
+    ok("box.append(hero);" in fn and "box.append(prodQueues(" in fn and "if (data.partial_note)" in fn
+       and fn.index("box.append(hero);") < fn.index("box.append(prodQueues(") < fn.index("if (data.partial_note)"),
+       "the counters are built straight after the header, the partial-sweep notice after them")
+    ok(".ov-hero-act:has(> .btn + .btn + .btn) > .btn:not(.btn-icon) { flex: none; }" in CSS and "padding-top: 0; flex-wrap: wrap; }" in CSS,
+       "a phone rail of three words wraps, each at its own width, instead of running past the gutter")
 
 
 if __name__ == "__main__":
