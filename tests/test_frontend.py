@@ -2690,7 +2690,7 @@ def t_the_sidebar_keeps_one_inset():
                      (r"\.convos \{[^}]*\}", "the conversation list"),
                      (r"\.side-foot \{[^}]*\}", "the footer")):
         block = re.search(sel, CSS).group(0)
-        ok("var(--sp-2)" in block, why + " shares the 8px inset: " + block[:90])
+        ok("var(--sp-3)" in block, why + " shares the sidebar's 12px inset: " + block[:90])
     # Refresh all spends AI credits and runs four reports, so it sits in those
     # reports' headers; the support card took a sixth of every sidebar, and its
     # link lives in the account menu (Cameron's call, 24 Sep 2026).
@@ -3565,22 +3565,21 @@ def t_every_control_is_the_same_height_as_every_other():
 
 @test
 def t_the_sidebar_does_not_dim_where_you_are_not():
-    """The reference marks position with a pill and a weight, and leaves every
-    other label at full strength. This one greyed the inactive items to --text-secondary,
-    which is what made the whole sidebar read washed out beside it."""
+    """The reference marks position with a fill and a weight, and leaves every
+    other label at full strength. Since the mix (2026-10-06) the sidebar is
+    the ink frame: every row is white at 72%, and where you are is teal at 18%
+    with white words and a teal icon. Nothing else is dimmed."""
     item = CSS.split(".nav-item {")[1].split("}")[0]
-    ok("height: var(--control-h)" in item, "nav items are 32px, as the reference draws them")
-    ok("color: var(--text-primary)" in item, "an inactive item is full-strength ink")
-    ok("font-weight: var(--weight-regular)" in item, "at normal weight")
+    ok("height: var(--control-h)" in item, "nav items are 32px")
+    ok("color: var(--nav-text)" in item, "an inactive item is the frame's 72% white")
+    ok("font-weight: var(--weight-medium)" in item, "at the nav's one weight")
     act = CSS.split(".nav-item:is(.active, [aria-current=\"page\"]) {")[1].split("}")[0]
-    ok("font-weight: var(--weight-medium)" in act, "and the active one carries the weight")
-    ok("background: var(--action-selected)" in act and "color: var(--text-brand)" in act,
-       "on the brand's teal wash, in legible teal")
+    ok("background: var(--nav-on-bg)" in act and "color: var(--text-on-chrome)" in act,
+       "the active one is teal at 18% with white words")
     side = CSS.split(".sidebar {")[1].split("}")[0]
-    ok("border-right: var(--bw-hairline) solid var(--border-default)" in side,
-       "the sidebar wears the reference's hairline on its right edge (its 'sidebar' variant)")
+    ok("background: var(--surface-chrome)" in side and "border-right" not in side, "the sidebar is the ink frame, with no edge")
     grp = CSS.split(".nav-group {")[1].split("}")[0]
-    ok("color: var(--text-secondary)" in grp, "group labels sit at the reference's 70% foreground")
+    ok("color: var(--nav-muted)" in grp, "group labels are the frame's muted white")
 
 
 @test
@@ -5939,12 +5938,22 @@ def t_the_header_is_one_implementation_with_one_collapse_point():
     # The trigger is always there, as the reference's is: on a phone it opens
     # the drawer, on a desk it folds the sidebar away. The drawer itself still
     # happens at exactly one width.
-    ok(".menu-btn { display: inline-grid; }" in CSS, "the trigger is always shown")
+    # The mix (2026-10-06): on a desk the brand row's Hide sidebar folds the
+    # sidebar and the top bar's trigger brings it back; on a phone that trigger
+    # opens the drawer. One rule says which, by whether the sidebar is shown.
+    ok(".menu-btn { display: inline-grid; }" in CSS, "the top bar's trigger exists")
+    hits = []
     for m in re.finditer(r"@media[^{]*\{", CSS):
         depth, i = 1, m.end()
         while i < len(CSS) and depth:
             depth += {"{": 1, "}": -1}.get(CSS[i], 0); i += 1
-        ok(".menu-btn" not in CSS[m.end():i], "and no breakpoint hides or reveals it: " + m.group(0))
+        if ".menu-btn" in CSS[m.end():i]:
+            hits.append(CSS[m.start():i])
+    # (ok, not eq: this test sits above the line that defines eq, and the
+    # harness runs each test as it is declared.)
+    ok(hits == ["@media (min-width: 901px) { body:not(.sidebar-collapsed) .menu-btn { display: none; } }"],
+       "one breakpoint rule shows or hides it, by whether the sidebar is in view: %r" % hits)
+    ok("$('side-hide').onclick = toggleSidebar;" in SCRIPT, "and Hide sidebar is the same toggle")
     ok(re.search(r"@media \(max-width: 900px\)[^@]*?\.sidebar \{ position: fixed;", CSS),
        "the sidebar leaves the flow at 900 and only there (every portrait iPad gets the whole width)")
     ok("@media (min-width: 901px) { body.sidebar-collapsed .sidebar { margin-left: calc(-1 * var(--sidebar-w)); } }" in CSS,
@@ -9360,7 +9369,8 @@ def t_reactor_wears_projected_images_brand_from_one_place():
     ok(":is(.brand-name, .ov-hero h2, .ds-type-page, .section-title, .card-title, .chart-head .ct, .run-gate h2, .empty-chat h2, .modal-head h3, .auth-card h2) {"
        in CSS and "font-family: var(--font-display)" in CSS.split(".auth-card h2) {")[1][:80], "and every title is in it, chart titles too, from one list")
     ok(CSS.count("font-family: var(--font-display)") == 1, "nowhere else sets a title face")
-    ok('<img class="brand-mark" src="/brand/logo.svg" alt="Projected Image"' in HTML, "the wordmark heads the sidebar")
+    ok('<span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Reactor</span>' in HTML,
+       "the teal mark and the wordmark head the sidebar (the mix: the ink logo would vanish on the ink frame)")
     ok("background: var(--surface-page)" in CSS.split("        body {")[1].split("}")[0], "on the white page")
 
 
@@ -9743,6 +9753,35 @@ def t_the_mix_type_sizes_space_and_corners_are_tokens():
     tokens = SCRIPT.split("const MIX_TOKENS = [")[1].split("];")[0]
     for group in ("'Type'", "'Sizes'", "'Space'", "'Corners'"):
         ok(group in tokens, "the Design section lists " + group)
+
+
+@test
+def t_the_page_is_one_sheet_in_an_ink_frame():
+    """Spec 5 (Cameron, 2026-10-05: "go with the dark sidebar"): the chrome is
+    ink, the page is one white sheet 8 inside it with a 12 corner and no edge
+    or shadow, and the sidebar is the frame itself: its words white at 72%,
+    the chosen page teal at 18% with white words and a teal icon."""
+    ok("@media screen {\n            #app { background: var(--surface-chrome); }" in CSS, "the frame is ink, on screen only")
+    sheet = CSS.split("\n            .main { margin: var(--frame-inset) var(--frame-inset) var(--frame-inset) 0;")
+    ok(len(sheet) == 2 and "border-radius: var(--radius-sheet)" in sheet[1].split("}")[0]
+       and "background: var(--surface-primary)" in sheet[1].split("}")[0], "the page is one white sheet, 8 in, 12 round")
+    ok(CSS.index("@media screen {\n            #app {") > CSS.index("\n        .main {"), "set after the base .main rule")
+    side = CSS.split("\n        .sidebar {")[1].split("}")[0]
+    ok("background: var(--surface-chrome)" in side and "border-right" not in side, "the sidebar is the ink, with no edge")
+    item = CSS.split("\n        .nav-item {")[1].split("}")[0]
+    ok("color: var(--nav-text)" in item and "height: var(--control-h)" in item and "gap: var(--gap-row-icon)" in item,
+       "a nav row is 32, white at 72%, its icon 12 from its words")
+    on = CSS.split('.nav-item:is(.active, [aria-current="page"]) {')[1].split("}")[0]
+    ok("background: var(--nav-on-bg)" in on and "color: var(--text-on-chrome)" in on,
+       "the chosen one is teal at 18% with white words")
+    ok('.nav-item:is(.active, [aria-current="page"]) svg { color: var(--nav-on-icon); }' in CSS, "and a teal icon")
+    ok('<span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Reactor</span>' in HTML,
+       "the brand row is the teal mark and the wordmark")
+    ok('id="side-hide"' in HTML and "$('side-hide').onclick = toggleSidebar;" in SCRIPT, "with Hide sidebar beside it")
+    beta = CSS.split("\n        .beta-tag {")[1].split("}")[0]
+    ok("font-size: var(--text-micro)" in beta and "background: none" in beta, "Beta is a micro word, not a box")
+    ok(".beta-tag" not in CSS.split("ONE TAG.")[1].split("{")[0], "and has left the one tag recipe")
+    ok('<meta name="theme-color" content="#121212" />' in HTML, "a phone's own bar is ink too")
 
 
 if __name__ == "__main__":
