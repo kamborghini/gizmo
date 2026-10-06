@@ -8177,7 +8177,7 @@ def t_a_check_lists_what_it_found_under_the_tiles_not_inside_one():
     tile = re.search(r"@supports \(grid-template-rows: subgrid\) \{\s*\.cx-tile \{([^}]*)\}", CSS)
     ok(tile and "grid-template-columns: minmax(0, 1fr)" in tile.group(1),
        "a tile's one column can never be wider than the tile")
-    ok(tile and "grid-row: span 3" in tile.group(1), "and it spans title, hint and controls, with no result row")
+    ok(tile and "grid-row: span 2" in tile.group(1), "and it spans title and controls, with no result row (its hint is behind the title's info button since the mix)")
     fn = fn_src("function renderConnector(")
     ok("const cxTile = (title, hint, row) => {" in fn, "a tile takes no result")
     ok(fn.count("grid.append(cxTile(") == 3 and "Out))" not in fn, "and none of the three is handed one")
@@ -11018,8 +11018,9 @@ def t_keywords_products_and_customers_wear_the_mix():
     ok("c.nodeType === 1 && !c.classList.contains('info') && (c.classList.contains('segmented')" in fn_src("function cardifySections(root) {"),
        "a heading folded into a card keeps its info button beside its words, not in the card's action slot")
     ok("inp.placeholder = 'A competitor or blog post address'" in SCRIPT, "what to scan is the field's own hint")
+    # "Pulls live Shopify data. No AI credits used." is a cost note and stays (fix round 1): it is no longer in this list.
     for gone in ("Pull the keywords you rank for", "Paste any public page", "Two Google sources fill", "No paid search data yet. Link",
-                 "Load your catalogue with up to", "Pulls live Shopify data. No AI", "Filter, sort and compare your catalogue",
+                 "Load your catalogue with up to", "Filter, sort and compare your catalogue",
                  "The plan for this product.", "that earned most, ", "Analyse all customers", "From your orders and customer list",
                  "Who your best customers are", "Nobody with a reorder rhythm"):
         ok(gone not in SCRIPT, "cut: " + gone)
@@ -11093,6 +11094,44 @@ def t_xero_sync_wears_the_mix():
     for gone in ("invoices, credit notes and contacts in Xero", "did not write; retry once", "held back rather than written",
                  "Reviews and sends alike", "An admin links it in Railway.", "'cx-tile-hint'", "Nothing runs on its own"):
         ok(gone not in SCRIPT, "cut: " + gone)
+
+
+@test
+def t_fix_round_one_reports_and_the_phone_header():
+    """Fix round 1 for the report pages. (1) The changes strip is a fixed block with no id: after the
+    first card the grid can move it would take Customise down, so on every report it comes BEFORE the
+    Summary widget. (2) A cost note is never dropped: the Products gate and the Trade radar still say
+    no AI credits are used. (3) A status line's stamp keeps its own width, so Refresh sits beside it and its 40
+    target leans down, never over the title. (4) The SEO score and the Xero sync tiles have no box.
+    (5) The scan field has one aria-label."""
+    for fname in ("function renderOverview(cache) {", "function renderSEO(cache) {", "function renderKeywords(cache) {", "function renderCustomers(seg) {"):
+        ok(fname in SCRIPT, fname + " exists")
+        fn = fn_src(fname)
+        ok("changesStrip(" in fn and "summarySection(" in fn, fname + ": it builds both")
+        ok(fn.index("changesStrip(") < fn.index("summarySection("), fname + ": the fixed strip comes before the first movable card")
+    ok("note: 'Pulls live Shopify data. No AI credits used.'" in SCRIPT, "the Products gate keeps its cost note")
+    ok("function radarCard(d) {" in SCRIPT, "radarCard exists")
+    rc = fn_src("function radarCard(d) {")
+    ok("head.append(el('h3', 'card-title', 'Trade radar'));" in rc and "el('p', 'card-desc', 'No AI credits used.')" in rc
+       and rc.index("'Trade radar'") < rc.index("'No AI credits used.'"), "the Trade radar keeps its cost note")
+    ok("function keywordScanCard() {" in SCRIPT, "keywordScanCard exists")
+    kc = fn_src("function keywordScanCard() {")
+    ok(kc.count("setAttribute('aria-label'") == 1 and "inp.setAttribute('aria-label', 'Page to scan');" in kc, "the scan field is named once")
+    ph = "\n            .ov-updated { margin-left: 0; padding-top: 0; flex-basis: 100%; white-space: normal; }\n"
+    ok(ph in CSS and ".ph-sub > .ov-updated { flex: none; white-space: nowrap; }" in CSS.split(ph)[1][:600],
+       "on a phone a status line's stamp is its own width, so Refresh sits beside it")
+    ok(".ph-sub > .info { margin-block: calc(-1 * var(--sp-1)) calc(var(--lh-control) - var(--control-h-lg) + var(--sp-1));" in CSS
+       and "align-content: start;" in CSS.split(".ph-sub > .info { margin-block")[1][:300]
+       and CSS.index(".ph-sub > .info { margin-block") > CSS.index("\n            .info::before { inset: auto; left: 0;"),
+       "its 40 target leans down, after the phone .info rules, and never up over the title")
+    def rule(sel):
+        m = re.search(r"\n        " + re.escape(sel) + r" \{([^}]*)\}", CSS)
+        ok(m is not None, sel + " is a rule at the stylesheet's own indent")
+        return m.group(1) if m else ""
+    ss, tl = rule(".seo-score"), rule(".cx-tile")
+    ok("border: 0;" in ss and "background: none;" in ss and "box-shadow: none;" in ss and "padding: 0;" in ss, "the SEO score has no box")
+    ok("border: 0;" in tl and "border-radius: 0;" in tl and "padding: 0;" in tl, "a Xero sync tile has no box")
+    ok("gap: var(--sp-4) var(--sp-8)" in rule(".cx-grid"), "and the three forms sit 32 apart in their columns")
 
 
 if __name__ == "__main__":
