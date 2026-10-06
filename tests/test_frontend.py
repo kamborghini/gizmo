@@ -10256,6 +10256,28 @@ def t_a_chart_reads_out_the_day_it_is_on():
     ok("justify-content: flex-start" in lg and "margin-bottom: var(--sp-2)" in lg, "the legend is its own row, 8 over the plot")
 
 
+@test
+def t_queue_counters_read_across_the_bench():
+    """Spec 6: the queues that make a flow are big tiles in flow order with
+    small chevrons between, the label above a 36 figure (28 on a phone), a 10
+    corner on the fill; the chosen counter is a teal fill with the focal glow.
+    The rest of the queues are tabs beside them on the chosen recipe."""
+    ok("function queueCounters(flow, rest, current, onPick, label) {" in SCRIPT, "the builder exists")
+    fn = fn_src("function queueCounters(flow, rest, current, onPick, label) {")
+    for part in ("el('nav', 'queues')", "el('button', 'qc'", "el('span', 'qc-l', l)", "el('b', 'qc-n'", "el('span', 'qsep')",
+                 "el('div', 'qrest')", "el('button', 'qt'", "setAttribute('aria-current', 'page')"):
+        ok(part in fn, "queueCounters: " + part)
+    qc = CSS.split("\n        .qc {")[1].split("}")[0]
+    ok("border-radius: var(--radius-tile)" in qc and "background: var(--surface-tertiary)" in qc and "width: var(--qc-w)" in qc,
+       "a counter is a tile on the fill with the 10 corner")
+    ok("font-size: var(--fig-l)" in CSS.split("\n        .qc-n {")[1].split("}")[0], "its figure is 36")
+    on = CSS.split("\n        .qc.on {")[1].split("}")[0]
+    ok("background: var(--action-primary)" in on and "box-shadow: var(--shadow-focal)" in on, "the chosen one is teal with the focal glow")
+    qt = CSS.split("\n        .qt.on {")[1].split("}")[0]
+    ok("box-shadow: var(--ring-chosen)" in qt and "background: var(--action-selected)" in qt, "a queue tab is chosen on the segment recipe")
+    eq(_token_raw("qc-w"), "184px", "--qc-w")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
