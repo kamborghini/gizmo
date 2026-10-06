@@ -467,12 +467,15 @@
         .page-tabs > .tabs { margin: 0 calc(-1 * var(--sp-2)); padding: 0 var(--sp-2); max-width: none; box-shadow: none; align-self: stretch; min-height: 0; }
         .page-tabs .spacer { flex: 1 1 auto; }
         .page-tabs-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--control-gap); }
-        /* On a phone the stamp and its buttons take the row's first line (the
-           stamp at the page edge, the buttons at the right: the layout the page
-           header's own rail has there) and the strip keeps the line under them,
-           the whole row's rule beneath the tabs. In one nowrap row the strip
-           was squeezed to about 156 wide and cut "Reconciliation". */
-        @media (max-width: 640px) {
+        /* On a phone and a tablet (900 and under, where the sidebar is a drawer)
+           the stamp and its buttons take the row's first line (the stamp at the
+           page edge, the buttons at the right: the layout the page header's own
+           rail has there) and the strip keeps the line under them, the whole
+           row's rule beneath the tabs. In one nowrap row the strip was squeezed
+           to about 156 wide on a phone and cut "Reconciliation", and on a tablet
+           Forecast's wider end (its stamp and the upload button) squeezed it
+           below about 745. */
+        @media (max-width: 900px) {
             .page-tabs { flex-wrap: wrap; row-gap: var(--sp-2); }
             .page-tabs-end { order: -1; flex: 1 1 100%; margin-left: 0; justify-content: space-between; }
             .page-tabs > .tabs { flex: 1 1 100%; min-height: var(--row-h); } }

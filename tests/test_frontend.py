@@ -9907,9 +9907,10 @@ def t_a_tab_row_keeps_its_rule_and_its_gutter_at_every_width():
     each end and CRM's admin row (tabs plus a link) drew a rule only as wide as
     its strip; (3) the Finance strip took its 8 back with no padding, so the
     focus box was clipped on the first and last tab."""
-    # (1) the phone row: the stamp and buttons first, the strip on the line under with the row's rule beneath it
-    ok("@media (max-width: 640px) {\n            .page-tabs { flex-wrap: wrap; row-gap: var(--sp-2); }" in CSS,
-       "at 640 and under the Finance row wraps")
+    # (1) the phone and tablet row: the stamp and buttons first, the strip on the line under with the row's rule beneath it
+    ok("@media (max-width: 900px) {\n            .page-tabs { flex-wrap: wrap; row-gap: var(--sp-2); }" in CSS,
+       "at 900 and under the Finance row wraps (Forecast's wide end squeezed the strip on a tablet as well as on a phone)")
+    ok("@media (max-width: 640px) {\n            .page-tabs { flex-wrap: wrap;" not in CSS, "and the rules are not repeated at 640")
     ok(".page-tabs-end { order: -1; flex: 1 1 100%; margin-left: 0; justify-content: space-between; }" in CSS,
        "with the stamp and buttons on the first line")
     ok(".page-tabs > .tabs { flex: 1 1 100%; min-height: var(--row-h); }" in CSS,
