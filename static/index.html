@@ -515,9 +515,7 @@
            layout because .disp-opt is a two-column grid built for a courier and
            a price, and a third child there lands in the wrong cell. */
         .coll-row { display: flex; flex-direction: column; gap: var(--sp-1);
-            padding: var(--sp-3) var(--sp-4); border: var(--bw-hairline) solid var(--border-default);
-            border-radius: var(--radius-inset); background: var(--surface-primary); }
-        .coll-row + .coll-row { margin-top: var(--sp-2); }
+            padding: var(--sp-3) 0; box-shadow: var(--rule-b-soft); }
         .coll-row-top { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
         .coll-row-name { font-weight: var(--weight-medium); }
         .coll-row-sub { color: var(--text-tertiary); font-size: var(--text-xs); }
@@ -902,7 +900,7 @@
             .ov-hero-act { max-width: 100%; flex-wrap: wrap; justify-content: flex-end; }
             .ov-hero-act > .ov-updated { white-space: normal; text-align: right; }
         }
-        /* An icon-only small button is the reference's icon-sm: a 28px square. */
+        /* An icon-only small button is one control wide: a square at the control height (32; 40 on touch). */
         .btn-sm.btn-icon { width: var(--control-h); padding: 0; justify-content: center; }
         /* On a phone the badge, the gaps and this stamp left the heading and
            its sentence 138px of a 300px row - a four-line ribbon. The stamp
@@ -988,19 +986,9 @@
         /* 8px of air over a 30px line: at 34px the svg hung 4px out of its own
            box and left 12px under it against the card's 16px padding. */
         .stat .stat-spark { margin-top: auto; padding-top: var(--sp-2); height: 38px; }
-        /* No corner glow: on a light card it reads as a stain behind the number. */
-        /* 16px in full ink, over a 400-weight number. The reference builds its
-           KPI cards that way round; this had the hierarchy inverted - a small
-           muted label under a heavy figure - which is why the numbers shouted
-           and the cards read cheaper than the reference's. */
-        /* The reference opens every KPI card with a 28px bordered tile holding
-           a 16px glyph, then the label, then the number: the mark says WHAT the
-           card counts before the words do, and it is the only thing that gives
-           a row of four cards a left edge to read down. The card's own 4px gap
-           is the reference's own icon-to-label step, so the tile sets no margin
-           of its own. --surface-tertiary under --text-tertiary keeps it quieter than anything
-           it introduces. */
-        /* No icon tile on a figure (the mix): the label names it. */
+        /* A figure reads label first, then number: the label is the body step in secondary ink at
+           medium weight, the number under it the figure step at 600. No icon tile on a figure (the
+           mix): the label names it. */
         .stat-ic { display: none; }
         .stat-ic svg { width: var(--icon-md); height: var(--icon-md); display: block; }
         .stat .label { font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; margin-bottom: 0; position: relative; }
@@ -1123,7 +1111,6 @@
         /* Show all opens a window: for a screen, and a 40 target under a finger. */
         .fc-worth > .section-title > .sec-tools { display: none; }
         @media screen { .fc-worth > .section-title > .sec-tools { display: flex; } }
-        @media (max-width: 640px) { .fc-worth .sec-tools > .link { min-height: var(--control-h-lg); } }
         .fc-wl-wrap { container: fcwl / inline-size; }
         .fc-wl > [role="row"] { display: grid; grid-template-columns: var(--fc-wl-cols); grid-template-areas: "mo v plan chip rg ol";
             column-gap: var(--sp-4); align-items: center; }
@@ -1959,6 +1946,9 @@
             gap: var(--sp-1) var(--sp-4); min-height: var(--control-h); }
         .card-title { font-size: var(--text-head); font-weight: var(--weight-semibold);
             line-height: var(--lh-control); margin: 0; display: flex; align-items: center; gap: var(--sp-2); }
+        /* A title with its info button (titleInfo): the heading and the button side by side in a
+           row, the heading's name staying its words. */
+        .title-row { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
         .card-desc { grid-column: 1; font-size: var(--text-body); color: var(--text-tertiary);
             line-height: var(--lh-control); margin: 0; max-width: var(--measure); }
         /* The reference's orders card head: a quiet title, a big counted line,
@@ -3458,7 +3448,7 @@
         .mail-bulkbar.armed { background: var(--action-soft);
             color: var(--text-brand); }
         .mail-bulk-hint { color: inherit; flex: 1 1 0; min-width: 7rem; }
-        .mail-files { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-3);
+        .mail-files { border: 0; border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-3);
             margin: var(--sp-3) 0; background: var(--surface-tertiary); }
         .mail-file { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-xs);
             border-top: var(--bw-hairline) solid var(--border-default); padding: var(--sp-1-5) 0 var(--sp-1); }
@@ -3884,9 +3874,7 @@
         .eori-line.bad { color: var(--error); }
         .eori-line.muted { color: var(--text-secondary); }
         .eori-line a { color: inherit; text-decoration: underline; }
-        .disp-await { font-size: var(--text-xs); color: var(--text-secondary); background: var(--surface-secondary);
-            border: var(--bw-hairline) solid var(--border-strong); border-left: var(--bw-marker) solid var(--border-selected);
-            border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-3); margin: var(--sp-2) 0; }
+        .disp-await { color: var(--text-secondary); background: var(--surface-secondary); margin: var(--sp-2) 0; }
         .disp-notice { text-align: center; padding: var(--sp-4) 0; }
         .disp-notice p { color: var(--text-secondary); margin-bottom: var(--sp-3); }
         .disp-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-top: var(--sp-3); }
@@ -4246,12 +4234,12 @@
         /* The rule above sets display, which beats the browser's [hidden]:
            the clear button showed in every empty search box. */
         .tbl-search .tbl-clear[hidden] { display: none; }
-        /* A toolbar row is ONE height, the 28px the card actions above it are.
+        /* A toolbar row is ONE height, the 32 the card actions above it are.
            Two controls arrive carrying their own: a select has the 32px floor
            every field has, and the segmented track has the 12px bottom margin
            it needs when it stands alone, which sat it half a step above the
            search beside it. Both are re-cut to the row here. */
-        /* 28 on the right, not 10: the base rule draws its 16px caret at
+        /* The chevron's room on the right, not 10: the base rule draws its 16px caret at
            `right 9px center`, so a symmetric padding put the label under it. */
         .tbl-tools select { font-weight: var(--weight-regular); height: var(--control-h); min-height: var(--control-h); padding: 0 var(--chevron-room) 0 var(--sp-3);
             border-radius: var(--radius-field); font-size: var(--text-body); line-height: var(--lh-control); }
@@ -4751,24 +4739,22 @@
            single-class .cmodal lost to it on source order and the expand button
            opened the chart at the SAME width it already had. */
         .modal.cmodal { max-width: 980px; }
-        .chart-modal .modal-body { padding: var(--sp-4) var(--sp-5) var(--sp-6); }
+        .chart-modal .modal-body { padding: var(--sp-4) var(--sp-4) var(--sp-6); }
         /* The modal already IS the card. Re-using the chart builder inside it
            drew a second bordered, shadowed white box on a white modal 20px
            further in, which reads as a rendering fault rather than depth. */
         .chart-modal .modal-body > .chart-card { border: 0; box-shadow: none; border-radius: 0; padding: 0; margin-bottom: 0; }
         .chart-modal .modal-body > .chart-card .chart-head { padding-right: 0; }
-        /* 16px between cards, which is the gap the reference sets on its own
-           chart grid - and, once the grid collapses to one column on a phone,
-           the same 16px the page puts between every other block. */
+        /* 16 between two cards sitting side by side, the gap the reference sets on its own
+           chart grid. */
         /* Two up only while a column can still hold a plot at 1:1. autoPlot
            draws no narrower than 240 and a card spends 34 on border and padding,
            so a column under 274 gets a 240-wide svg squeezed by CSS, which puts
            the axis dates back under 12px. Below that the pair folds to one. */
-        /* Two chart cards stacked are two blocks, and the page sets 24 between
-           blocks: at a flat 16 the gap under the full-width hero was 24 and the
-           gap between the grid's own rows was 16, so one column of charts had
-           two rhythms in it. The 16 stays where it is a GUTTER, between the two
-           cards sitting side by side. */
+        /* Two chart cards stacked are two rows of one grid, 24 apart, so one column of charts
+           keeps one rhythm: a flat 16 between its rows left them closer than the gap under the
+           full-width hero. The 16 stays where it is a GUTTER, between the two cards sitting
+           side by side. */
         .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(max(274px, calc(50% - var(--sp-2))), 1fr)); row-gap: var(--sp-6); column-gap: var(--sp-4); margin-bottom: var(--sp-3); }
         /* A grid row already carries the page's own gap under it. The card's own
            bottom margin, meant for the standalone case, added a phantom 16px
@@ -4946,7 +4932,7 @@
         .ai-summary .followed { margin-top: var(--sp-2); }
         /* An info button inside a title that is not a flex row sits 8 from its
            words and centred on the line, as it does in one. */
-        :is(.card-title, .stat .label, .chart-head .ct, .cx-tile-title, .disp-subhead, .modal-head h3) > .info {
+        :is(.card-title, .stat .label, .chart-head .ct, .cx-tile-title, .disp-subhead) > .info {
             vertical-align: middle; margin-left: calc(var(--sp-2) + (var(--icon-md) - var(--control-h-sm)) / 2); }
         .prose { font-size: var(--text-body); line-height: var(--lh-prose); color: var(--text-secondary); margin: calc(-1 * var(--sp-2)) 0 var(--sp-4); max-width: var(--measure); }
         .prose p { margin: 0 0 var(--sp-2); } .prose ul, .prose ol { margin: 0 0 var(--sp-2); padding-left: var(--sp-5); } .prose li { margin: var(--sp-1) 0; }
@@ -4969,11 +4955,11 @@
         .chat-thinking .thinking { flex-wrap: wrap; }
         .th-secs { font-size: var(--text-xs); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
         .th-stop { margin-left: auto; }
-        .chat-recent { width: 100%; max-width: 480px; margin: 0 0 var(--sp-5); text-align: left; display: grid; gap: var(--sp-1);
+        .chat-recent { width: 100%; max-width: 480px; margin: 0 0 var(--sp-5); text-align: left; display: grid; gap: 0;
             grid-template-columns: minmax(0, 1fr); }
         .chat-recent-h { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--text-secondary); padding: 0 var(--sp-2); }
-        .chat-recent-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; border: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary);
-            border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-3); font: inherit; font-size: var(--text-body); color: var(--text-primary); text-align: left; }
+        .chat-recent-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: var(--row-h); border: 0; background: transparent;
+            border-radius: 0; box-shadow: var(--rule-b-soft); padding: 0 var(--sp-2); font: inherit; font-size: var(--text-body); color: var(--text-primary); text-align: left; cursor: pointer; }
         @media (hover: hover) { .chat-recent-row:hover { background: var(--surface-secondary); } }
         .chat-recent-row .ic svg { width: var(--icon-sm); height: var(--icon-sm); display: block; color: var(--text-tertiary); }
         .crr-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -5030,6 +5016,8 @@
         .modal.wide { max-width: 900px; }
         .modal-head { display: flex; align-items: center; padding: var(--sp-4); border-bottom: var(--bw-hairline) solid var(--border-default); }
         .modal-head h3 { margin: 0; font-size: var(--text-head); font-weight: var(--weight-semibold); line-height: var(--lh-control); flex: 1; letter-spacing: normal; }
+        .modal-head > .title-row { flex: 1; }
+        .modal-head .title-row > h3 { flex: 0 1 auto; }
         .modal-body { padding: var(--sp-4); overflow-y: auto; }
         /* Under the top bar, not over it: the stack covered Search and New
            chat, the controls a person reaches for after reading it. */
@@ -5486,7 +5474,7 @@
             .info::before { inset: auto; left: 0; top: 50%; width: var(--control-h-sm); height: var(--control-h-sm); margin-top: calc(var(--control-h-sm) / -2); }
             /* That target reaches 10 under its title's line, so a line under the
                title sits 12 below it (the card's 4 left a 6 overlap). */
-            .card-head:has(> .card-title > .info) { row-gap: var(--sp-3); }
+            .card-head:has(> :is(.card-title, .title-row) > .info) { row-gap: var(--sp-3); }
             /* The status line's Refresh leans its target DOWN: 4 up reaches the title's own box and no further (the line's
                margin-top), the rest below it into the 16 above the actions, so the title is never covered; the glyph stays
                on the line's centre. */
@@ -5573,7 +5561,7 @@
            classes did this job with three corners, four paddings, two text sizes
            and borders on some but not others. */
         :is(.msg.error:not(:has(.bubble)), .cx-health, .alerts-banner, .mail-viewwarn, .mail-sendwarn, .disp-warn,
-            .miss-strip, .mail-note, .mail-hidden-note, .resp-note) {
+            .miss-strip, .mail-note, .mail-hidden-note, .resp-note, .disp-await) {
             border: 0; border-radius: var(--radius-inset); padding: var(--sp-3) var(--sp-4);
             font-size: var(--text-body); line-height: var(--lh-control); }
         .resp-note { background: var(--surface-secondary); }
@@ -6141,6 +6129,16 @@ Projected Image UK"></textarea>
                 });
             };
             return b;
+        }
+        /* A heading with its info button: the button sits beside the heading in a row (as the page
+           header's does), never inside it, so the heading's name is its words and the button is its
+           own control, named About <title>. A heading already in its head is replaced by the row in
+           place; one not yet placed comes back as the row to append. */
+        function titleInfo(h, info) {
+            const row = el('div', 'title-row'), at = h.parentNode;
+            if (at) at.insertBefore(row, h);
+            row.append(h, info);
+            return row;
         }
         /* How it works (the mix, spec 6): one header button holding a screen's
            method pages as a menu, the Guide's link last after a rule. items:
@@ -7262,7 +7260,7 @@ Projected Image UK"></textarea>
            label its renderer gave it, its first heading, or its id. */
         function wgName(n) {
             const text = (x) => (x ? x.textContent : '').replace(/\s+/g, ' ').trim();
-            const title = text(n.querySelector(':scope > .card-head > .card-title'));
+            const title = text(n.querySelector(':scope > .card-head .card-title'));
             if (title) return title;
             if (n.getAttribute('data-widget-label')) return n.getAttribute('data-widget-label');
             return text(n.querySelector('h2, h3, h4, .section-title, .ct')) || n.getAttribute('data-widget');
@@ -10630,8 +10628,7 @@ Projected Image UK"></textarea>
                 ul.append(el('li', null, 'Google Ads, linked to your GA4 property (GA4 Admin, then Product links, then Google Ads links), '
                     + 'for your spend, cost per click, conversions and ROAS.'));
                 const nt = el('h3', 'card-title', 'Search data is not connected yet');
-                nt.append(infoButton('The two Google sources', { title: 'Search data', body: [ul] }));
-                nh.append(nt);
+                nh.append(titleInfo(nt, infoButton('The two Google sources', { title: 'Search data', body: [ul] })));
                 const na = el('div', 'card-act');
                 const go = el('button', 'btn btn-sm'); go.append(ico(I.settings), document.createTextNode('Open connections'));
                 go.onclick = () => openSettings(); na.append(go); nh.append(na);
@@ -11506,8 +11503,7 @@ Projected Image UK"></textarea>
             if (host.hidden) return;
             const head = el('div', 'card-head');
             const tt = el('h3', 'card-title', 'Tracked changes');
-            tt.append(infoButton('About tracked changes', { title: 'Tracked changes', body: 'Actions you pressed Track on in an answer, measured by your headline figures from that day.' }));
-            head.append(tt);
+            head.append(titleInfo(tt, infoButton('About tracked changes', { title: 'Tracked changes', body: 'Actions you pressed Track on in an answer, measured by your headline figures from that day.' })));
             host.append(head);
             if (impactErr) { host.append(loadFailure('Your tracked changes could not be measured just now. ' + impactErr, () => loadMemory())); return; }
             const list = el('ul', 'impact-list');
@@ -11618,7 +11614,7 @@ Projected Image UK"></textarea>
             /* What learning the store is, word for word, behind the title's
                info button (copy plan, Memory #2). */
             const kt = head.querySelector('.card-title');
-            if (kt) kt.append(infoButton('About store knowledge', { title: 'Store knowledge',
+            if (kt) titleInfo(kt, infoButton('About store knowledge', { title: 'Store knowledge',
                 body: 'Reactor can read your homepage, pages and blog and keep what it learns about the business. It reads it with every answer until you delete it.' }));
             if (!canEditInstructions()) desc += (desc ? ' ' : '') + 'Only an admin can change it.';
             if (desc) head.append(el('p', 'card-desc', desc));
@@ -11734,12 +11730,12 @@ Projected Image UK"></textarea>
             /* What notes are and who keeps them, word for word, behind the
                title's info button (copy plan, Memory #6). */
             const nt = el('h3', 'card-title', 'Notes' + (memories.length ? ' (' + memories.length + ')' : ''));
-            nt.append(infoButton('About notes', { title: 'Notes', body: 'What Reactor keeps from chat, and what ' + (canEditInstructions() ? 'you add' : 'an admin adds') + ' here. It reads the newest ' + memInject
+            const ntInfo = infoButton('About notes', { title: 'Notes', body: 'What Reactor keeps from chat, and what ' + (canEditInstructions() ? 'you add' : 'an admin adds') + ' here. It reads the newest ' + memInject
                     + ' of each kind with every answer. Rules for how to work belong in Skills.'
                     + (canEditInstructions()
                         ? (waitingN ? ' ' + (waitingN === 1 ? 'One note from a member waits' : waitingN + ' notes from members wait') + ' under Waiting until you keep ' + (waitingN === 1 ? 'it.' : 'them.') : '')
-                        : ' Only an admin can add, correct or delete a note, and a note from your chats or tracked changes waits for an admin to keep it.') }));
-            head.append(nt);
+                        : ' Only an admin can add, correct or delete a note, and a note from your chats or tracked changes waits for an admin to keep it.') });
+            head.append(titleInfo(nt, ntInfo));
             const acts = el('div', 'card-act');
             if (!memoryLoadErr && canEditInstructions()) {
                 const add = el('button', 'btn btn-sm btn-primary'); add.append(ico(I.plus), document.createTextNode('Add a note'));
@@ -12193,7 +12189,7 @@ Projected Image UK"></textarea>
                 fact('Not read by Reactor', unread.slice(0, 5).map(x => x.title).join(', ') + (unread.length > 5 ? ' and ' + (unread.length - 5) + ' more' : ''));
                 uHelp.push('Having it read shows you what Reactor will do with each, and gives it a short version to use when a skill is too long to show in full.');
             }
-            ut.append(infoButton('How skills are used', { title: 'How they are used', body: uHelp }));
+            titleInfo(ut, infoButton('How skills are used', { title: 'How they are used', body: uHelp }));
             card.append(facts);
         }
         function skillsDirty() {
@@ -12212,10 +12208,10 @@ Projected Image UK"></textarea>
             card.replaceChildren();
             const head = el('div', 'card-head');
             const yt = el('h3', 'card-title', 'Your skills' + (skills.length ? ' (' + skills.length + ')' : ''));
-            yt.append(infoButton('About skills', { title: 'Your skills', body: 'Rules and playbooks, each with a title and a note of when it applies.'
+            const ytInfo = infoButton('About skills', { title: 'Your skills', body: 'Rules and playbooks, each with a title and a note of when it applies.'
                     + (skillCaps.upload ? ' Drop Markdown files here to add them.' : '')
-                    + (canEditInstructions() ? '' : ' Only an admin can add, change or delete a skill.') }));
-            head.append(yt);
+                    + (canEditInstructions() ? '' : ' Only an admin can add, change or delete a skill.') });
+            head.append(titleInfo(yt, ytInfo));
             const acts = el('div', 'card-act');
             const up = el('button', 'btn btn-sm'); up.type = 'button';
             up.append(ico(I.upload), document.createTextNode('Upload Markdown'));
@@ -14734,7 +14730,7 @@ Projected Image UK"></textarea>
                 linkHelp.push('The connector runs as its own service (shopify-xero-connector) with its own '
                     + 'ledger and failsafes. Reactor only drives it: credentials stay on that '
                     + 'service, and its token stays on this server.');
-                lt.append(infoButton('Linking the connector', { title: 'Link the connector service', body: linkHelp }));
+                titleInfo(lt, infoButton('Linking the connector', { title: 'Link the connector service', body: linkHelp }));
                 box.append(card); return;
             }
             if (connCache.error) {
@@ -14920,10 +14916,10 @@ Projected Image UK"></textarea>
             const rCard = el('div', 'card cx-card');
             const rHead = el('div', 'card-head');
             const rTitle = el('h3', 'card-title', 'Review and send');
-            rTitle.append(infoButton('About review and send', { title: 'Review and send', body:
+            const rTitleInfo = infoButton('About review and send', { title: 'Review and send', body:
                 'A review is a dry run: the service maps every eligible order and writes '
-                + 'nothing. ' + (connIsAdmin() ? 'Send does exactly what the review showed.' : 'An admin sends exactly what it showed.') }));
-            rHead.append(rTitle);
+                + 'nothing. ' + (connIsAdmin() ? 'Send does exactly what the review showed.' : 'An admin sends exactly what it showed.') });
+            rHead.append(titleInfo(rTitle, rTitleInfo));
             const rAct = el('div', 'card-act');
             const rev = el('button', 'btn btn-sm');
             rev.append(ico(I.eye), document.createTextNode('Run review'));
@@ -15443,10 +15439,10 @@ Projected Image UK"></textarea>
                 /* The security note, word for word, behind the title (copy plan,
                    Xero sync #19). */
                 const xt = el('h3', 'card-title', 'Settings');
-                xt.append(infoButton('About these settings', { title: 'Settings', body:
+                const xtInfo = infoButton('About these settings', { title: 'Settings', body:
                     'How it behaves. Credentials are not on this form: they stay on the '
-                    + 'service, and the server will not accept them from here.' }));
-                xHead.append(xt);
+                    + 'service, and the server will not accept them from here.' });
+                xHead.append(titleInfo(xt, xtInfo));
                 const toggle = el('button', 'btn btn-sm',
                                   connSettingsOpen ? 'Hide settings' : 'Change settings');
                 toggle.onclick = () => { connSettingsOpen = !connSettingsOpen; renderConnector(); };
@@ -17772,7 +17768,7 @@ Projected Image UK"></textarea>
                    mix, spec 8.3); the address to copy and the Connect action
                    stay on the card. */
                 const mt = el('h3', 'card-title', 'Connect the accounts mailbox');
-                mt.append(infoButton('Connecting the accounts mailbox', { title: 'Connect the accounts mailbox', body: [
+                const mtInfo = infoButton('Connecting the accounts mailbox', { title: 'Connect the accounts mailbox', body: [
                     'Reconciliation reads remittances, supplier invoices and statements from '
                     + 'the accounts mailbox. That is a different Google account from the one '
                     + 'behind the Inbox tab'
@@ -17785,8 +17781,8 @@ Projected Image UK"></textarea>
                     'The address is required: it is what makes Google open the right account '
                     + 'rather than the one this browser is already signed into.',
                     'If a different mailbox is connected anyway, nothing is saved and the page '
-                    + 'says which one it got, so try again in a private window.'] }));
-                mh.append(mt);
+                    + 'says which one it got, so try again in a private window.'] });
+                mh.append(titleInfo(mt, mtInfo));
                 mc.append(mh);
                 /* The step everyone trips on: Google answers an unregistered
                    callback with "Access blocked: This app's request is
@@ -17900,7 +17896,7 @@ Projected Image UK"></textarea>
                     'XERO_CLIENT_ID and XERO_CLIENT_SECRET', ' (never anywhere else), then redeploy.');
                 if (!st.setup.configured) s3.append(document.createTextNode(
                     ' The Connect button appears here once the server has them.'));
-                xt.append(infoButton('Setting up Xero', { title: 'Connect Xero', body: ['A one-time setup of about five minutes. Xero is connected '
+                titleInfo(xt, infoButton('Setting up Xero', { title: 'Connect Xero', body: ['A one-time setup of about five minutes. Xero is connected '
                     + 'read-only: the app can read the books and has no way to change them.', steps] }));
                 /* The address to type in Xero stays on the card, beside a Copy. */
                 if (st.setup.redirect_uri) {
@@ -19406,7 +19402,7 @@ Projected Image UK"></textarea>
                         'No rules yet. They are made from Resolve on a flagged model in the size check.'));
                     return;
                 }
-                if (!srT.querySelector('.info')) srT.append(infoButton('About size rules', { title: 'Size rules', body:
+                if (!srT.parentNode.classList.contains('title-row')) titleInfo(srT, infoButton('About size rules', { title: 'Size rules', body:
                     'These sit on top of the size list and survive replacing it. '
                     + (canEdit ? 'Removing one puts the model back to whatever the sheet says.'
                                : 'An admin can grant you access to change them on the Team tab.') }));
@@ -20870,7 +20866,7 @@ Projected Image UK"></textarea>
                 let weightTouched = false;
                 [['width', 'W'], ['length', 'L'], ['depth', 'D'], ['weight', 'kg']].forEach(([k, ph]) => {
                     const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.step = '0.1';
-                    inp.className = 'disp-num disp-boxdim'; inp.placeholder = ph; inp.title = ph === 'kg' ? 'Weight (kg)' : ph + ' (cm)';
+                    inp.className = 'disp-num disp-boxdim'; inp.placeholder = ph === 'kg' ? ph : ph + ' cm'; inp.title = ph === 'kg' ? 'Weight (kg)' : ph + ' (cm)';
                     inp.oninput = staleQuote;
                     ins[k] = inp;
                 });
@@ -22593,7 +22589,7 @@ Projected Image UK"></textarea>
                     nm.oninput = () => b.name = nm.value;
                     rowb.append(nm);
                     [['width', 'W'], ['length', 'L'], ['depth', 'D'], ['weight', 'kg']].forEach(([k, ph]) => {
-                        const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.step = '0.1'; inp.className = 'disp-num disp-boxdim'; inp.value = b[k]; inp.placeholder = ph;
+                        const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.step = '0.1'; inp.className = 'disp-num disp-boxdim'; inp.value = b[k]; inp.placeholder = ph === 'kg' ? ph : ph + ' cm';
                         inp.oninput = () => b[k] = parseFloat(inp.value) || 0;
                         rowb.append(inp);
                     });
@@ -23110,8 +23106,7 @@ Projected Image UK"></textarea>
             const c = el('section', 'card');
             const h = el('div', 'card-head');
             const t = el('h3', 'card-title', title);
-            if (desc) t.append(infoButton(title, { title: title, body: desc }));
-            h.append(t);
+            h.append(desc ? titleInfo(t, infoButton('About ' + title, { title: title, body: desc })) : t);
             c.append(h, ...kids.filter(Boolean));
             return c;
         }
@@ -23387,9 +23382,8 @@ Projected Image UK"></textarea>
             /* An admin's how-to is the title's info button; a member keeps one
                line (copy plan, Guide #3 and #4). */
             const ft = el('h3', 'card-title', 'Feature requests');
-            if (u.can_triage) ft.append(infoButton('About requests', { title: 'Feature requests',
-                body: 'What the team has asked for. Set each one Planned, Shipped or Declined with a reply, and the person who asked sees it here.' }));
-            head.append(ft);
+            head.append(u.can_triage ? titleInfo(ft, infoButton('About feature requests', { title: 'Feature requests',
+                body: 'What the team has asked for. Set each one Planned, Shipped or Declined with a reply, and the person who asked sees it here.' })) : ft);
             if (!u.can_triage) head.append(el('p', 'card-desc', 'Ask for what the app cannot do yet.'));
             const act = el('div', 'card-act');
             const add = el('button', 'btn btn-sm btn-primary'); add.type = 'button';
@@ -25725,9 +25719,9 @@ Projected Image UK"></textarea>
             const total = Object.keys(crmCache.leads || {}).length;
             /* A definition, so the title's info button (copy plan, CRM #2). */
             const lt = el('h3', 'card-title', total.toLocaleString() + (total === 1 ? ' lead' : ' leads'));
-            lt.append(infoButton('What a lead is', { title: 'Leads', body: 'A lead is an enquiry that is not yet a deal: it waits '
-                + 'here so the pipeline holds only real, qualified work. Convert it when it firms up.' }));
-            head.append(lt);
+            const ltInfo = infoButton('What a lead is', { title: 'Leads', body: 'A lead is an enquiry that is not yet a deal: it waits '
+                + 'here so the pipeline holds only real, qualified work. Convert it when it firms up.' });
+            head.append(titleInfo(lt, ltInfo));
             const act = el('div', 'card-act');
             const add = el('button', 'btn btn-sm btn-primary'); add.append(ico(I.plus), document.createTextNode('Lead'));
             add.onclick = () => crmLeadForm();
@@ -26063,8 +26057,7 @@ Projected Image UK"></textarea>
                 /* A counting rule is the title's info button; descriptions that
                    restated the title went (copy plan, CRM #11 to #15). */
                 const bt = el('h3', 'card-title', title);
-                if (desc) bt.append(infoButton(title, { title: title, body: desc }));
-                bh.append(bt);
+                bh.append(desc ? titleInfo(bt, infoButton('About ' + title, { title: title, body: desc })) : bt);
                 /* The bars go in a body of their own rather than straight into
                    the card: the card's 16px gap is the rhythm between its
                    BLOCKS, and applied to twelve bar rows it turned a chart into
@@ -26360,7 +26353,7 @@ Projected Image UK"></textarea>
                         /* The address and its Copy stay on the card. */
                         card.append(r2);
                     }
-                    mct.append(infoButton('Connecting the mailbox', { title: 'Connect the shared mailbox', body: mHelp }));
+                    titleInfo(mct, infoButton('About connecting the shared mailbox', { title: 'Connect the shared mailbox', body: mHelp }));
                 } else {
                     head.append(el('p', 'card-desc', 'An admin needs to connect the shared mailbox.'));
                 }
@@ -27029,7 +27022,7 @@ Projected Image UK"></textarea>
             /* How filters work, word for word, behind the window title's info
                button (copy plan, Other dialogs #27). */
             const fh = m.overlay.querySelector('.modal-head h3');
-            if (fh && !fh.querySelector('.info')) fh.append(infoButton('How filters work', { title: 'Filters', body:
+            if (fh && !fh.parentNode.classList.contains('title-row')) titleInfo(fh, infoButton('About filters', { title: 'Filters', body:
                 'Filters act on email as it arrives. A conversation someone is already '
                 + 'holding is never re-filed underneath them. The first filter that '
                 + 'matches wins, so the order here is the order they are tried.' }));
@@ -28546,11 +28539,11 @@ Projected Image UK"></textarea>
                 const card = el('div', 'card');
                 const head = el('div', 'card-head');
                 const st = el('h3', 'card-title', 'Connect the storage');
-                st.append(infoButton('About the storage', { title: 'Connect the storage', guide: ['files', ''],
+                const stInfo = infoButton('About the storage', { title: 'Connect the storage', guide: ['files', ''],
                     body: 'Files keeps its storage in a Cloudflare R2 bucket: durable, '
                     + 'priced in pennies, and the app signs every transfer so nothing is public. '
-                    + 'Three keys in Railway switch it on; the Guide tab has the exact steps.' }));
-                head.append(st);
+                    + 'Three keys in Railway switch it on; the Guide tab has the exact steps.' });
+                head.append(titleInfo(st, stInfo));
                 head.append(el('p', 'card-desc', 'Storage is not set up yet.'));
                 card.append(head);
                 if (d.setup_error) card.append(el('div', 'msg error', 'Storage answered with an error: ' + d.setup_error));
@@ -28584,11 +28577,11 @@ Projected Image UK"></textarea>
             /* The consequence stays as the line; the rest is the title's info
                button, word for word (copy plan, Files #10 and #11). */
             const tt = el('h3', 'card-title', 'Trash');
-            if (rows.length) tt.append(infoButton('About the trash', { title: 'Trash',
+            const ttInfo = rows.length && infoButton('About the trash', { title: 'Trash',
                 body: (rows.length === 1 ? '1 file' : rows.length + ' files') + ' (' + fmtBytes(total)
                     + ') waiting here. Everything is emptied for good 30 days after it was '
-                    + 'deleted; put a file back to keep it, or delete it now to free its space.' }));
-            tHead.append(tt);
+                    + 'deleted; put a file back to keep it, or delete it now to free its space.' });
+            tHead.append(ttInfo ? titleInfo(tt, ttInfo) : tt);
             if (rows.length) tHead.append(el('p', 'card-desc', 'Deleted for good after 30 days.'));
             if (rows.length) {
                 const tAct = el('div', 'card-act');
@@ -28759,11 +28752,12 @@ Projected Image UK"></textarea>
                button holds how dragging works (copy plan, Files #5). */
             const fTitleEl = el('h3', 'card-title');
             const fTitleText = el('span', null, 'Files');
-            fTitleEl.append(fTitleText, infoButton('Moving and uploading files', { title: 'Files', guide: ['files', ''],
+            fTitleEl.append(fTitleText);
+            const fInfo = infoButton('Moving and uploading files', { title: 'Files', guide: ['files', ''],
                 body: 'Drag files, or whole folders, anywhere on the list to upload them here. '
-                    + 'Drag a file onto a folder, or onto a step of the path above, to move it.' }));
+                    + 'Drag a file onto a folder, or onto a step of the path above, to move it.' });
             const fDescEl = el('p', 'card-desc', '');
-            fHead.append(fTitleEl, fDescEl);
+            fHead.append(titleInfo(fTitleEl, fInfo), fDescEl);
             const up = el('button', 'btn btn-primary'); up.append(ico(I.upload), document.createTextNode('Upload'));
             const fi = document.createElement('input');
             fi.type = 'file'; fi.multiple = true; fi.style.display = 'none';
@@ -29666,12 +29660,12 @@ Projected Image UK"></textarea>
             /* The security note, word for word, behind the title (copy plan,
                Team #2 and #3). */
             const pt = el('h3', 'card-title', 'People (' + d.users.length + ')');
-            pt.append(infoButton('About accounts', { title: 'People', body:
+            const ptInfo = infoButton('About accounts', { title: 'People', body:
                 'Accounts belong to the app, not Shopify. New accounts get a starter password '
                 + 'shown once; everyone chooses their own on first sign-in. Tabs controls which '
                 + 'parts of the app an account can open; it is enforced by the server, not '
-                + 'just hidden.' }));
-            head.append(pt);
+                + 'just hidden.' });
+            head.append(titleInfo(pt, ptInfo));
             const act = el('div', 'card-act');
             const add = el('button', 'btn btn-sm btn-primary'); add.append(ico(I.plus), document.createTextNode('New account'));
             add.onclick = () => { teamNewOpen = !teamNewOpen; renderTeam(); };
@@ -30004,8 +29998,7 @@ Projected Image UK"></textarea>
                     const c = el('div', 'card');
                     const h = el('div', 'card-head');
                     const ct = el('h3', 'card-title', title);
-                    if (desc) ct.append(infoButton(title, { title: title, body: desc }));
-                    h.append(ct);
+                    h.append(desc ? titleInfo(ct, infoButton('About ' + title, { title: title, body: desc })) : ct);
                     if (act) { const a2 = el('div', 'card-act'); a2.append(act); h.append(a2); }
                     c.append(h); wrap.append(c); return c;
                 };
@@ -30104,8 +30097,8 @@ Projected Image UK"></textarea>
             const card = el('div', 'card');
             const head = el('div', 'card-head');
             const at = el('h3', 'card-title', 'Activity');
-            at.append(infoButton('How much is kept', { title: 'Activity', body: 'Newest first. The feed shows the last 600 actions; the full ledger keeps 8,000 and is in every backup.' }));
-            head.append(at);
+            const atInfo = infoButton('How much is kept', { title: 'Activity', body: 'Newest first. The feed shows the last 600 actions; the full ledger keeps 8,000 and is in every backup.' });
+            head.append(titleInfo(at, atInfo));
             card.append(head, tableTools([whoSel, areaSel], []));
             host.append(card);
             const rows = (d.events || []).filter(e =>
@@ -30648,7 +30641,7 @@ Projected Image UK"></textarea>
             host.append(connRow('Shared mailbox', gm.connected ? 'on' : gm.client ? 'mid' : 'off',
                 gm.connected ? ((gm.address || 'Connected') + '. The Inbox tab tracks who owns each email.')
                 : gm.client ? 'Ready to connect: open the Inbox tab for the connect link.'
-                : 'Not set up yet. Steps in the Guide.'));
+                : 'Not set up yet. Steps on the Inbox tab.'));
             // The stock bridge: whether Mark made is reaching the stock app.
             const sb = s.stock_bridge || {};
             if (sb.configured || sb.pending) {

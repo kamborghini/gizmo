@@ -10712,7 +10712,8 @@ def t_worth_and_why_stack_at_12_and_cash_warnings_do_not_pile_up():
     wc = fn_src("function fcWorthCard(latest, sc, al) {")
     ok("cash.length > 1" in wc and "' more month'" in wc and "cash.slice(1)" not in wc and wc.count("'msg error'") == 1,
        "one warning, then the count of further months")
-    ok(".fc-worth .sec-tools > .link { min-height: var(--control-h-lg); }" in CSS, "Show all is 40 on a phone")
+    ok("@media (max-width: 640px) { .link { min-height: var(--control-h-lg); } }" in CSS and ".fc-worth .sec-tools > .link" not in CSS,
+       "Show all is 40 on a phone, from the global link rule (its own copy was the same rule, measured: 40 tall at 390, 20 at 1440, unchanged)")
 
 
 @test
@@ -11067,8 +11068,8 @@ def t_the_finance_row_prints_nothing_and_the_chase_panel_has_no_box():
        "the Finance tab row is hidden by default and shown for a screen")
     ok("\n        .page-tabs { display: none;" in CSS and CSS.index("\n        .page-tabs { display: none;") < CSS.index("@media screen { .page-tabs { display: flex; } }"),
        "and the screen rule follows its base rule")
-    ok("\n            .card-head:has(> .card-title > .info) { row-gap: var(--sp-3); }" in CSS
-       and CSS.index(".card-head:has(> .card-title > .info) { row-gap: var(--sp-3); }") > CSS.index("\n            .info::before { inset: auto; left: 0;"),
+    ok("\n            .card-head:has(> :is(.card-title, .title-row) > .info) { row-gap: var(--sp-3); }" in CSS
+       and CSS.index(".card-head:has(> :is(.card-title, .title-row) > .info) { row-gap: var(--sp-3); }") > CSS.index("\n            .info::before { inset: auto; left: 0;"),
        "on a phone a line under a title with an info button sits 12 below it, clear of the 40 target")
     m = re.search(r"\n        \.lia-chase \{([^}]*)\}", CSS)
     ok(m is not None, ".lia-chase is a rule at the stylesheet's own indent")
@@ -11190,7 +11191,7 @@ def t_the_crm_wears_the_mix():
     ok("pageHead({ view: 'crm', title: 'CRM', line: 'Deals, activities and contacts for the sales desk.'" in fn
        and "el('div', 'ov-hero')" not in fn, "the one header and its line")
     ok("infoButton('About the CRM'" in fn and "infoButton('What a lead is'" in SCRIPT, "the key and the definition wait behind info buttons")
-    ok("if (desc) bt.append(infoButton(title, { title: title, body: desc }))" in SCRIPT, "an Insights rule is its title's info button")
+    ok("bh.append(desc ? titleInfo(bt, infoButton('About ' + title, { title: title, body: desc })) : bt)" in SCRIPT, "an Insights rule is its title's info button, beside it")
     ok("emptyState({ icon: I.briefcase, text: 'No deals yet.', action: acts })" in SCRIPT, "an empty pipeline is one line and its two ways on")
     for gone in ("Everything the desk is working on", "An empty pipeline is a fresh start", "The calls, emails and meetings the desk owes",
                  "Everyone the desk deals with", "Tick rows to delete", "What closed, summed into the month", "This fills in",
@@ -11235,7 +11236,7 @@ def t_the_inbox_and_files_wear_the_mix():
     ok("pageHead({ view: 'files', title: 'Files', line: 'The office file server, from anywhere.' })" in fn_src("function renderFiles() {"),
        "the Files header")
     m = fn_src("function renderMail() {")
-    ok("infoButton('Connecting the mailbox'" in m and "'Choose the shared mailbox, not your own account.'" in m and "card.append(r2);" in m,
+    ok("infoButton('About connecting the shared mailbox'" in m and "'Choose the shared mailbox, not your own account.'" in m and "card.append(r2);" in m,
        "the setup waits behind its info button, the warning and the address stay")
     ok("hero.append(heroAct(''))" not in m, "pageHead gave the header its slot")
     for gone in ("Where each person is working", "Tick a few to claim", "'Every email has an owner. Good.'",
@@ -11424,8 +11425,8 @@ def t_chat_the_guide_and_design_wear_the_mix():
     ok("function renderGuide() {" in SCRIPT and "function dsCard(title, desc, ...kids) {" in SCRIPT and "function paintDesign(host) {" in SCRIPT,
        "renderGuide, dsCard and paintDesign exist")
     ok("pageHead({ view: 'guide', title: 'Guide' })" in fn_src("function renderGuide() {"), "the Guide's header")
-    ok("if (desc) t.append(infoButton(title, { title: title, body: desc }))" in fn_src("function dsCard(title, desc, ...kids) {"),
-       "a Design section's explanation is its title's info button")
+    ok("titleInfo(t, infoButton('About ' + title, { title: title, body: desc }))" in fn_src("function dsCard(title, desc, ...kids) {"),
+       "a Design section's explanation is its title's info button, beside it")
     ok("MIX_TOKENS.forEach(([group, names]) =>" in fn_src("function paintDesign(host) {"), "the Design page draws the mix's tokens")
     for gone in ("How the desk runs, what changed", "Short and specific beats polished", "Ask for a feature if something is missing",
                  "It goes on Guide, Requests", "The strip of headline figures", "What a screen says when there is nothing",
@@ -11452,7 +11453,7 @@ def t_windows_sign_in_and_settings_wear_the_mix():
     old corner and badge rules gone."""
     for new in ("'Your own account, not Shopify’s. No account? Ask an admin.'", "'Code from your authenticator app, or a recovery code.'",
                 "'Create the master admin account. You need the setup code.'", "'Set your own password before carrying on.'",
-                "'Not encrypted: secrets are stored in plain text.'", "'Not set up yet. Steps in the Guide.'",
+                "'Not encrypted: secrets are stored in plain text.'", "'Not set up yet. Steps on the Inbox tab.'",
                 "'Weigh the packed box: couriers re-weigh and bill it.'", "'Collections booked in their portal do not show.'",
                 "'Its labels print no size from now on.'", "Keep these recovery codes somewhere safe: '"):
         ok(new in SCRIPT, "says: " + new)
@@ -11482,7 +11483,9 @@ def t_the_last_boxes_inside_windows_and_notices_have_no_edge():
     tinted well with no edge (the dispatch window's destination, customs and technical details, and the code
     block in the last); a warning notice is a tint with no border (the alerts banner and the missing-tag strip: their
     old border declarations were dead under the notice recipe, and are gone); the Inbox's bulk bar has no border and
-    keeps its actions; and the dispatch window's controls are the field height (32)."""
+    keeps its actions; the dispatch window's controls are the field height (32); and the last four bordered boxes
+    (the await notice, a Collections row, the email reader's files, a recent chat) are a notice, a hairline row, a well
+    and a hairline row."""
     def rule(sel, nth=0):
         ms = list(re.finditer(r"\n        " + re.escape(sel) + r" \{([^}]*)\}", CSS))
         ok(len(ms) > nth, sel + " is a rule at the stylesheet's own indent")
@@ -11503,6 +11506,17 @@ def t_the_last_boxes_inside_windows_and_notices_have_no_edge():
     ok("width: var(--control-h); height: var(--control-h);" in rule(".disp-boxedit .icon-btn"), "the box row's icon button is the 32 of the fields beside it")
     ins = rule(".disp-insure input[type=number]")
     ok("height: var(--control-h);" in ins and "36px" not in ins, "and the insure field takes the field height token")
+    # Pre-measure fold: the last four bordered boxes (spec 3).
+    aw = rule(".disp-await")
+    ok("border" not in aw and "var(--surface-secondary)" in aw, ".disp-await is a tint with no edge and no marker")
+    ok(".disp-await" in CSS.split("ONE NOTICE.")[1].split("}")[0], "on the notice recipe, like every other notice")
+    cr = rule(".coll-row")
+    ok("border:" not in cr and "box-shadow: var(--rule-b-soft)" in cr and "border-radius" not in cr and "background" not in cr,
+       "a Collections row is a hairline row")
+    mf = rule(".mail-files")
+    ok("border: 0;" in mf and "background: var(--surface-tertiary)" in mf, "the email reader's files are a well with no edge")
+    rr = rule(".chat-recent-row")
+    ok("border: 0;" in rr and "box-shadow: var(--rule-b-soft)" in rr and "border-radius: 0" in rr, "a recent chat is a hairline row")
 
 
 @test
@@ -11556,7 +11570,7 @@ def t_a_standalone_link_is_a_40_target_on_a_phone():
     rule = "@media (max-width: 640px) { .link { min-height: var(--control-h-lg); } }"
     ok(rule in CSS, "a standalone link is 40 tall at 640 and under")
     ok(CSS.index(rule) > CSS.index("\n        .link { display: inline-flex;"), "after its base rule")
-    ok(".fc-worth .sec-tools > .link { min-height: var(--control-h-lg); }" in CSS, "and Show all keeps its own")
+    ok(".fc-worth .sec-tools > .link" not in CSS, "and Show all, a .link in a section's tools, needs no rule of its own")
     ok("el('button', 'link', 'More in the Guide')" in SCRIPT, "the popover's Guide link is a .link")
 
 
@@ -11581,6 +11595,82 @@ def t_no_comment_or_rule_still_describes_the_old_look():
        "stacked at 1000 and under")
     ok("@container fcpair (not (max-width: 1000px)) { .fc-split-bar {" in CSS and "fcpair (min-width: 1001px)" not in CSS,
        "and the side-by-side offset is the exact complement, so a width between 1000 and 1001 is one or the other")
+
+
+@test
+def t_an_info_button_sits_beside_its_heading_not_in_it():
+    """Pre-measure fold (the review of Tasks 43 and 44): an info button inside an h3 put its label into the heading's
+    accessible name ('Notes About notes'). It sits beside the heading in a title row, as the page header's does
+    (.ph-title), so a heading's name is its words and the button is its own control named About <title>. Every
+    h3 that carried one is built through titleInfo; the helper is run in node for a heading already in its head and one
+    not yet placed."""
+    ok("function titleInfo(h, info) {" in SCRIPT, "the helper exists")
+    ok("\n        .title-row { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }" in CSS, "and the row is a flex line")
+    lines = SCRIPT.split("\n")
+    bad = []
+    for i, l in enumerate(lines):
+        m = re.search(r"\b(\w+)\.append\([^;\n]*infoButton\(", l)
+        if not m:
+            continue
+        host = m.group(1)
+        for j in range(i, max(0, i - 60), -1):
+            d = re.search(r"(?:const|let|var)\s+%s\s*=\s*(.*)" % host, lines[j])
+            if d:
+                if re.search(r"el\('h[1-6]'|querySelector\('\.modal-head h3'\)|querySelector\('\.card-title'\)", d.group(1)):
+                    bad.append((i + 1, host))
+                break
+    ok(not bad, "no info button is appended into a heading: %s" % bad)
+    ok("infoButton('About ' + title, " in fn_src("function dsCard(title, desc, ...kids) {"), "a Design section's button is About <title>")
+    ok("infoButton('About feature requests'" in SCRIPT and "infoButton('About filters'" in SCRIPT
+       and "infoButton('About connecting the shared mailbox'" in SCRIPT and "infoButton('About size rules'" in SCRIPT,
+       "and so are Feature requests, the Filters window, the Inbox connect card and Size rules")
+    ok(".card-head:has(> :is(.card-title, .title-row) > .info) { row-gap: var(--sp-3); }" in CSS, "the phone's gap under a title with a button reads the row too")
+    ok("':scope > .card-head .card-title'" in SCRIPT, "the customise list still finds a widget's title")
+    if not _node_ok():
+        return
+    js = MINIDOM + r"""
+""" + fn_src("function titleInfo(h, info) {") + r"""
+const head = el('div', 'card-head');
+const h = el('h3', 'card-title', 'Notes');
+head.append(h, el('div', 'card-act'));
+const b = el('button', 'info');
+const row = titleInfo(h, b);
+const a = { placed: head.children[0] === row && head.children.length === 2, order: row.children[0] === h && row.children[1] === b,
+  name: h.textContent, rowClass: row.className, inHeading: h.contains(b) };
+const h2 = el('h3', 'card-title', 'Trash'); const b2 = el('button', 'info');
+const row2 = titleInfo(h2, b2);
+const head2 = el('div', 'card-head'); head2.append(row2);
+const c = { unplaced: row2.parentNode === head2 && row2.children.length === 2, name: h2.textContent, inHeading: h2.contains(b2) };
+console.log(JSON.stringify({ a, c }));
+"""
+    res = _run_node(js)
+    a, b = res["a"], res["c"]
+    ok(a["placed"] and a["order"] and a["name"] == "Notes" and a["rowClass"] == "title-row" and not a["inHeading"],
+       "a heading already in its head is replaced by the row, button after it: %s" % a)
+    ok(b["unplaced"] and b["name"] == "Trash" and not b["inHeading"], "one not yet placed comes back as the row to append: %s" % b)
+
+
+@test
+def t_the_pre_measure_fold_is_in():
+    """Pre-measure fold (the review of Tasks 43 and 44): the Settings mailbox line points where the steps are; the
+    composer's select and file chip read the control height like its buttons; the dispatch boxes' W, L and D say cm;
+    the comments that said 28 and 24 say 32 and 48; the Forecast 'Show all' reads the global
+    link rule; and the chart window pads 16 at its sides like every window."""
+    ok("'Not set up yet. Steps on the Inbox tab.'" in SCRIPT and "Steps in the Guide" not in SCRIPT, "the mailbox line names the Inbox tab")
+    ok(".cmp-sel { height: var(--control-h);" in COMPOSER and ".cmp-chip { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--control-h);" in COMPOSER
+       and "32px" not in COMPOSER, "the composer's select and chip are the control height, so a touch bar is 40 all along")
+    ok(SCRIPT.count("inp.placeholder = ph === 'kg' ? ph : ph + ' cm';") == 2 and "inp.placeholder = ph;" not in SCRIPT,
+       "W, L and D carry their unit, kg already does, in both parcel editors")
+    def rule(sel):
+        ms = list(re.finditer(r"\n        " + re.escape(sel) + r" \{([^}]*)\}", CSS))
+        ok(len(ms) == 1, sel + " is one rule at the stylesheet's indent")
+        return ms[0].group(1) if ms else ""
+    for stale in ("a 28px square", "28px bordered tile", "the 28px the card actions above it are", "the page sets 24 between"):
+        ok(stale not in CSS, "stale comment gone: " + stale)
+    ok(".fc-worth .sec-tools > .link" not in CSS and "@media (max-width: 640px) { .link { min-height: var(--control-h-lg); } }" in CSS,
+       "Show all reads the global 40 link rule")
+    cm = rule(".chart-modal .modal-body")
+    ok("padding: var(--sp-4) var(--sp-4) var(--sp-6);" in cm, "the chart window pads 16 at its sides")
 
 
 if __name__ == "__main__":

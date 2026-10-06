@@ -67,7 +67,7 @@
         '.cmp-b.undr { text-decoration: underline; }',
         /* background-color, not the shorthand: the shorthand wiped the page's
            select caret, so Font and Size read as text boxes. And room for it. */
-        '.cmp-sel { height: 32px; border: 1px solid var(--border-default); background-color: var(--surface-primary);',
+        '.cmp-sel { height: var(--control-h); border: 1px solid var(--border-default); background-color: var(--surface-primary);',
         '    color: var(--text-primary); border-radius: var(--radius-field); font: inherit; font-size: var(--text-body);',
         '    padding: 0 var(--chevron-room) 0 var(--sp-1); max-width: 120px; }',
         '.cmp-sep { width: 1px; height: 20px; background: var(--border-default); margin: 0 var(--sp-1); }',
@@ -93,7 +93,7 @@
         '.cmp-area a { color: var(--text-link); }',
         '.cmp-files { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2);',
         '    margin-top: var(--sp-2); }',
-        '.cmp-chip { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 32px;',
+        '.cmp-chip { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--control-h);',
         '    padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border-default); border-radius: var(--radius-tag);',
         '    background: var(--surface-primary); font-size: var(--text-xs); max-width: 100%; }',
         '.cmp-chip-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }',
