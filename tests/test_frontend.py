@@ -5629,8 +5629,8 @@ def t_auto_run_shows_the_services_state_not_what_this_tab_last_clicked():
     ok("connAuto.enabled" in seg, "and reads the service's own flag")
     ok("'Auto Run on'" in seg and "'Auto Run off'" in seg,
        "which is spelled out, not left to a toggle's position")
-    ok("Nothing runs on its own" in seg,
-       "and OFF says what off means, rather than only being unlit")
+    ok("'Orders go only when '" in seg,
+       "and OFF says what off means, rather than only being unlit (one line since the mix)")
 
 
 @test
@@ -8299,7 +8299,7 @@ def t_the_xero_page_keeps_the_details_the_last_check_found():
     one line that holds it."""
     fn = fn_src("function renderConnector(")
     ok(".ktable.cx-docs td { vertical-align: top; }" in CSS, "rows are top-aligned; the bare .cx-docs td rule lost to .ktable td")
-    ok("'Nothing has run yet: no review and no send.'" in fn, "no run is not a green box")
+    ok("'Nothing has run yet.'" in fn, "no run is not a green box")
     ok("((connHealth && connHealth.guards) || {}).reconcileTolerance" in fn, "the tolerance comes from the health guards")
     ok("connTagPending" in fn and "connTagPending = '';" in fn_src("function connStartWatch("),
        "the tag in flight names the busy section and is cleared when collected")
@@ -8400,9 +8400,10 @@ def t_the_xero_page_uses_one_set_of_outcome_words():
     rc = fn_src("function cxReviewCounts(")
     ok("n('skippedSynced') + n('skippedInXero')" in rc and "n('skippedTest') + n('skippedCancelled')" in rc,
        "from the connector's own counters")
-    ok("An admin links it in Railway." in fn and "el('ol', 'setup-steps')" in fn,
-       "the unlinked page gives an admin the steps and a member the one fact")
-    ok("(!connAuto ? ''" in fn, "and the header makes no promise when Auto Run's state is unknown")
+    ok("'An admin needs to link this.'" in fn and "el('ol', 'setup-steps')" in fn and "linkHelp.push(steps)" in fn,
+       "the unlinked page gives an admin the steps, behind the card's info button, and a member the one fact")
+    ok("Auto Run is on, so new orders go" not in fn and "Nothing is written until a review" not in fn,
+       "and the header makes no promise about Auto Run at all: its one line says what the page does (the mix)")
     ok(".modal-body .section-title + * > .setting-row:first-child { border-top: 0; }" in CSS,
        "Settings draws no rule straight under a heading, in any section, Connections included")
     rc = fn_src("function cxReviewCounts(")
@@ -11068,6 +11069,30 @@ def t_the_finance_row_prints_nothing_and_the_chase_panel_has_no_box():
     ok(m is not None, ".lia-chase is a rule at the stylesheet's own indent")
     r = m.group(1) if m else ""
     ok("border: 0;" in r and "background: none;" in r and "padding: 0;" in r and "border-radius: 0;" in r, "the chase panel has no box")
+
+
+@test
+def t_xero_sync_wears_the_mix():
+    """Spec 8.3 (Finance) and the copy plan (Xero sync): one line under the
+    title; the link steps and the security note behind the setup card's info
+    button; Xero linked as a tag; the review rule, each tile's how-to and the
+    settings note behind their titles' info buttons; the shorter lines."""
+    ok("function renderConnector() {" in SCRIPT, "renderConnector exists")
+    fn = fn_src("function renderConnector() {")
+    ok("pageHead({ view: 'connector', title: 'Xero sync', line: 'Shopify orders, refunds and customers, sent into Xero.' })" in fn,
+       "the one header and its line")
+    ok("el('div', 'ov-hero')" not in fn and "hero.append(heroAct(''))" not in fn, "nothing built by hand")
+    for part in ("infoButton('Linking the connector'", "infoButton('About review and send'", "infoButton('About these settings'",
+                 "if (hint) t.append(infoButton(title, { title: title, body: hint }))", "'An admin needs to link this.'",
+                 "el('span', 'lbl-chip ' + (cfg.dryOnly ? 'note' : cfg.shop ? 'made' : 'warn')", "'Nothing has run yet.'",
+                 "'No review yet.'", "'Held back for bad data. Fix the cause, then retry.'", "'Empty now. Refresh to update the count.'"):
+        ok(part in fn, "Xero sync: " + part)
+    ok("\n        .card-head > .lbl-chip { justify-self: start; }" in CSS
+       and CSS.index("\n        .card-head > .lbl-chip { justify-self: start; }") > CSS.index("\n        .lbl-chip.warn {"),
+       "a state tag in a card's head is its own width, not the grid column's")
+    for gone in ("invoices, credit notes and contacts in Xero", "did not write; retry once", "held back rather than written",
+                 "Reviews and sends alike", "An admin links it in Railway.", "'cx-tile-hint'", "Nothing runs on its own"):
+        ok(gone not in SCRIPT, "cut: " + gone)
 
 
 if __name__ == "__main__":
