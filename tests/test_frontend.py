@@ -4009,8 +4009,9 @@ def t_a_forecast_is_drawn_as_a_range_not_as_three_competing_lines():
     # already reads forecast charts, and this page is read by directors. Said
     # ONCE, in the chart's own legend: a second key under the plot repeated it
     # while the legend above showed two identical squares.
-    ok("name: 'Taken'" in fc and "name: 'Expected'" in fc and "'Likely range, 8 times in 10'" in fc,
-       "and the legend says in words what its three treatments mean")
+    ok("name: 'Taken'" in fc and "name: 'Expected'" in fc and "name: 'Likely range'" in fc
+       and "'Likely range, 8 times in 10.'" in fc,
+       "the legend says in words what its three treatments mean, and About this chart how often the range holds")
     ok("fc-key" not in SCRIPT and "fc-key" not in CSS, "in one key, not two")
 
 
@@ -10484,6 +10485,36 @@ def t_forecast_leads_with_the_month_in_a_band():
     fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
     ok("const band = fcBand(latest, sc);" in fn, "the page draws it first")
     ok(".fc-conf" not in CSS, "the old caveat line is gone")
+
+
+@test
+def t_cash_in_is_the_mix_chart_section():
+    """Spec 8.1 item 4: Cash in with About this chart beside it, the legend on
+    its own row, Compare methods and the range chooser (Today, Week, Month, 3
+    months, 12 months, Months ahead, and Custom as a calendar icon). The head's
+    old source line moved into the info button word for word."""
+    ranges = SCRIPT.split("const FC_RANGES = [")[1].split("];")[0]
+    for k, label in (("today", "Today"), ("week", "Week"), ("month", "Month"), ("q", "3 months"),
+                     ("year", "12 months"), ("ahead", "Months ahead"), ("custom", "Custom range")):
+        ok("['%s', '%s']" % (k, label) in ranges, "the range %s is called %s" % (k, label))
+    chart = fn_src("function fcChartCard(")
+    for part in ("infoButton('About this chart'", "'Source: Shopify orders and the nightly forecast \\u00b7 ' + period + '.'",
+                 "switchBtn('Compare methods', cmpOn, setFcCompareOn)", "segmented(FC_RANGES.map(", "icon: I.cal",
+                 "headless: true", "legend: true", "key: 'dot'", "name: 'Likely range'", "tokenValue('--c-taken')",
+                 "tokenValue('--c-exp-line')", "tokenValue('--c-area')", "const cmp = cmpOn ? fcCompare() : [];",
+                 "'Pick a start and an end date.'", "'Nothing to draw for this range yet.'"):
+        ok(part in chart, "Cash in: " + part)
+    ok("Compare sources on the chart" not in SCRIPT and "the leading source" not in chart,
+       "the compare card's title is the switch's word, and a source is a method")
+    ok("const LS_FCCMPON = 'sc_fc_cmp_on_v1';" in SCRIPT and "function setFcCompareOn(v) {" in SCRIPT,
+       "the switch is remembered per person")
+    tools = CSS.split("\n        .section-title > .sec-tools {")[1].split("}")[0]
+    ok("order: 1" in tools and "margin-left: auto" in tools, "a section's tools sit at its right, past the spacer")
+    ok(".chart-band { stroke: none; fill: var(--c-area); }" in CSS, "the likely range is the area colour, at full strength")
+    # Found drawing the section in the rig: the first button-made switch had the browser's own box, and a
+    # line chart washes the area under its first series in the amber chart colour unless told not to.
+    ok("button.toggle { border: 0; background: none; padding: 0;" in CSS, "a switch built as a button has no box of its own")
+    ok("area: false," in chart, "Cash in draws no wash under Taken: the likely range is its one area")
 
 
 if __name__ == "__main__":

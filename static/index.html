@@ -1501,6 +1501,11 @@
            tracking would otherwise inherit and stretch the button labels. */
         .section-title > .segmented { order: 1; letter-spacing: normal; }
         .section-title > .choice-select { order: 1; letter-spacing: normal; font-weight: var(--weight-regular); }
+        /* A section's tools (the mix, spec 6): one group at the head's right,
+           past the spacer, wrapping as a group. On a phone the spacer goes and
+           the margin keeps them right. */
+        .section-title > .sec-tools { order: 1; margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end;
+            gap: var(--gap-cluster); font-size: var(--text-body); font-weight: var(--weight-regular); letter-spacing: normal; }
         /* On a phone the row cannot hold both. Unwrapped, "Search performance
            over time" took 129 of 332px and broke over three lines while the
            186px range control sat beside it; the heading block was 84px tall
@@ -1848,7 +1853,18 @@
         .fc-drawer-body { display: flex; flex-direction: column; gap: var(--sp-3); }
         .ktable th .fc-th-wrap { display: inline-block; white-space: normal; min-width: calc(var(--sp-8) * 3); max-width: calc(var(--sp-8) * 4); }
         .fc-date { width: calc(var(--sp-8) * 5); }
-        .fc-cmp { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2-5); }
+        .fc-cmp { display: flex; flex-wrap: wrap; gap: var(--sp-2); flex: 1 1 100%; }
+        /* Cash in: the methods to compare sit 16 under the chart; on a phone
+           the range is one list and the switch moves under the chart. */
+        .fc-cmp-box { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); }
+        .fc-cmp-note { margin: 0; flex: 1 1 100%; color: var(--text-tertiary); max-width: var(--measure); }
+        .fc-cash .sec-tools > .choice-select, .fc-cash > .fc-cmp-phone { display: none; }
+        .ov-wrap .fc-cash.widget-bare > .chart-card:not(:last-child) { margin-bottom: 0; }
+        @media (max-width: 640px) {
+            .fc-cash .sec-tools > :is(.toggle, .segmented) { display: none; }
+            .fc-cash .sec-tools > .choice-select { display: inline-block; }
+            .fc-cash > .fc-cmp-phone { display: inline-flex; margin-top: var(--sp-3); }
+        }
         /* A notice spans its card, so it ends on the card's gutter like everything
            else in it; its words keep the reading measure. Capped at 56rem, the
            box stopped short of the card and looked unfinished. */
@@ -4517,6 +4533,7 @@
            is context for the line, and a heavy band buries the number the
            reader came for. Two p10/p90 STROKES were the old picture, and three
            lines read as three competing predictions rather than one range. */
+        /* The likely range is the area colour (the mix), already a 15% tint. */
         .chart-band { stroke: none; fill: var(--c-area); }
         /* Where what happened stops and what is expected begins. */
         .chart-split { stroke: var(--border-emphasis); stroke-width: 1; stroke-dasharray: 3 3;
@@ -4750,6 +4767,9 @@
            ink-2; the whole control 32 tall. */
         .toggle { display: inline-flex; align-items: center; gap: var(--control-gap); min-height: var(--control-h); font-size: var(--text-body); line-height: var(--lh-control);
             font-weight: var(--weight-medium); color: var(--text-secondary); cursor: pointer; user-select: none; }
+        /* A switch built as a button (switchBtn) drops the button's own box, as the
+           composer's Deep analysis does by its id: the track is the only thing drawn. */
+        button.toggle { border: 0; background: none; padding: 0; text-align: left; }
         /* The knob is not a box on the box scale: its size is DECIDED by the
            track it slides in (track height, less the inset on each side). It
            was written as a raw 14px, which happened to be right, and snapping
@@ -15585,11 +15605,20 @@ Projected Image UK"></textarea>
             renderForecast();
         }
         function clearFcCompare() { try { localStorage.removeItem(LS_FCCMP); } catch (e) {} renderForecast(); }
+        /* Compare methods (the mix): a switch, off unless the reader has turned
+           it on. The picks above are kept while it is off. */
+        const LS_FCCMPON = 'sc_fc_cmp_on_v1';
+        function fcCompareOn() { try { return localStorage.getItem(LS_FCCMPON) === '1'; } catch (e) { return false; } }
+        function setFcCompareOn(v) {
+            try { if (v) localStorage.setItem(LS_FCCMPON, '1'); else localStorage.removeItem(LS_FCCMPON); } catch (e) {}
+            renderForecast();
+        }
         const LS_FCRANGE = 'sc_fc_range_v1';
         const LS_FCFROM = 'sc_fc_from_v1', LS_FCTO = 'sc_fc_to_v1';
-        const FC_RANGES = [['today', 'Today'], ['week', 'This week'], ['month', 'This month'],
-                           ['q', 'Last 3 months'], ['year', 'Last 12 months'],
-                           ['ahead', 'The months ahead'], ['custom', 'Custom range']];
+        /* The words Cameron approved for the ranges (the mix, 2026-10-06). */
+        const FC_RANGES = [['today', 'Today'], ['week', 'Week'], ['month', 'Month'],
+                           ['q', '3 months'], ['year', '12 months'],
+                           ['ahead', 'Months ahead'], ['custom', 'Custom range']];
         function fcRange() {
             try { const v = localStorage.getItem(LS_FCRANGE); return FC_RANGES.some(r => r[0] === v) ? v : 'month'; }
             catch (e) { return 'month'; }
@@ -15855,6 +15884,7 @@ Projected Image UK"></textarea>
 
         function fcChartCard(latest, ledger, sanity) {
             const range = fcRange();
+            const cmpOn = fcCompareOn();
             const asOf = new Date((latest.as_of || fcISO(new Date())) + 'T00:00:00');
             const days = (latest.daily || {});
             const dayRows = (days.history || []).map(r => ({ date: r.date, actual: r.actual, p50: null, p10: null, p90: null }))
@@ -15873,7 +15903,7 @@ Projected Image UK"></textarea>
             else if (range === 'month') { from = curMonth + '-01'; to = ''; title = 'This month, day by day'; period = 'taken so far, then the rest of the month forecast'; }
             else if (range === 'q') { from = shift(91); to = fcISO(asOf); title = 'The last three months'; period = 'day by day'; }
             else if (range === 'year') { grain = 'month'; from = ''; to = ''; title = 'The last twelve months'; period = 'month by month, with what was predicted at the time'; }
-            else if (range === 'ahead') { grain = 'month'; from = curMonth; to = ''; title = 'The months ahead'; period = 'the leading source, with its own measured error as the band'; }
+            else if (range === 'ahead') { grain = 'month'; from = curMonth; to = ''; title = 'The months ahead'; period = 'the leading method, with its own measured error as the band'; }
             else { from = cf; to = ct; title = 'The range you chose'; period = 'day by day'; }
 
             let rows;
@@ -15887,12 +15917,22 @@ Projected Image UK"></textarea>
                 rows = dayRows.filter(r => (!from || r.date >= from) && (!to || r.date <= to));
                 if (range === 'month') rows = rows.filter(r => r.date.slice(0, 7) === curMonth);
             }
-            /* The range strip rides in the section title, where this page already
-               puts the scenario control, rather than inside the chart card,
-               which takes no header of its own. */
-            const card = el('div');
+            /* Cash in (the mix, spec 8.1): About this chart beside the title,
+               Compare methods and the range at its right, the legend on the
+               chart's own row. What the head said (its title, the source and
+               the period) is the info button's, word for word. */
+            const card = el('div', 'fc-cash');
             const head = el('div', 'section-title', 'Cash in');
-            head.append(choiceSelect(FC_RANGES, range, setFcRange, { label: 'Range' }));
+            head.append(infoButton('About this chart', { title: title, guide: ['money', 'Forecast'],
+                body: ['Source: Shopify orders and the nightly forecast \u00b7 ' + period + '.', 'Likely range, 8 times in 10.'] }));
+            const tools = el('div', 'sec-tools');
+            tools.append(switchBtn('Compare methods', cmpOn, setFcCompareOn));
+            tools.append(segmented(FC_RANGES.map(([k, l]) => k === 'custom' ? { key: k, label: l, icon: I.cal } : { key: k, label: l }),
+                range, setFcRange, { label: 'Range' }));
+            /* A phone has no room for seven segments: the same choice as one
+               compact list, which the phone rules show in their place. */
+            tools.append(choiceSelect(FC_RANGES, range, setFcRange, { label: 'Range' }));
+            head.append(tools);
             card.append(head);
             /* The dates belong under the tab that asked for them, not in a
                third card below the chart and the source list. And until both
@@ -15909,17 +15949,9 @@ Projected Image UK"></textarea>
                 row.append(mk(cf, 'From', (e) => { a = e.target.value; setFcCustom(a, b); }));
                 row.append(mk(ct, 'To', (e) => { b = e.target.value; setFcCustom(a, b); }));
                 card.append(row);
-                if (!cf || !ct) {
-                    const c = el('div', 'card');
-                    c.append(el('p', 'card-sub', 'Pick a start and an end date to draw that range.'));
-                    card.append(c); return card;
-                }
+                if (!cf || !ct) { card.append(el('div', 'empty', 'Pick a start and an end date.')); return card; }
             }
-            if (!rows.length) {
-                const c = el('div', 'card');
-                c.append(el('p', 'card-sub', 'Nothing to draw for that range yet. Pick another above.'));
-                card.append(c); return card;
-            }
+            if (!rows.length) { card.append(el('div', 'empty', 'Nothing to draw for this range yet.')); return card; }
             const labels = rows.map(r => grain === 'month' ? fcMonth(r.month) : fcDay(r.date));
             /* ACTUAL -> FORECAST -> UNCERTAINTY, in that visual order.
                The old picture drew four equal lines: taken, forecast, P90, P10.
@@ -15937,13 +15969,14 @@ Projected Image UK"></textarea>
             const joins = (i, v) => (i === handover ? rows[i].actual : v);
             /* The legend says in words what each treatment is, because a
                shaded band explains itself only to somebody who already reads
-               forecast charts. It used to take a second key under the plot,
-               while the house legend above it showed two identical squares. */
-            const series = [{ name: 'Taken', color: CH[0], values: actualVals },
-                            { name: 'Expected', color: CH[0], dash: true, lead: true,
+               forecast charts. One colour per measure (the mix): taken in the
+               dark teal, keyed as a dot; expected as the teal line, dashed; the
+               likely range as the teal area. */
+            const series = [{ name: 'Taken', color: tokenValue('--c-taken'), key: 'dot', values: actualVals },
+                            { name: 'Expected', color: tokenValue('--c-exp-line'), dash: true, lead: true,
                               values: rows.map((r, i) => joins(i, r.p50)) }];
             const band = rows.some(r => r.p10 != null && r.p90 != null)
-                ? { name: 'Likely range, 8 times in 10', color: CH[0],
+                ? { name: 'Likely range', color: tokenValue('--c-area'),
                     lo: rows.map((r, i) => joins(i, r.p10)),
                     hi: rows.map((r, i) => joins(i, r.p90)) }
                 : null;
@@ -15964,11 +15997,12 @@ Projected Image UK"></textarea>
                                   values: rows.map(r => said[r.month] == null ? null : said[r.month]) });
                 }
             }
-            /* Every source the reader has asked to see, drawn against the
-               leader and against what actually came in. Monthly grain only:
-               a source forecasts a MONTH, and spreading it over days here
-               would be inventing a shape it never claimed. */
-            const cmp = fcCompare();
+            /* Every method the reader has asked to see, drawn against the
+               leader and against what actually came in, while Compare methods
+               is on. Monthly grain only: a method forecasts a MONTH, and
+               spreading it over days here would be inventing a shape it never
+               claimed. */
+            const cmp = cmpOn ? fcCompare() : [];
             if (grain === 'month' && cmp.length) {
                 const by = {};
                 ((sanity || {}).models || []).forEach(m => { if (cmp.indexOf(m.name) >= 0) by[m.name] = m.months || {}; });
@@ -15979,67 +16013,53 @@ Projected Image UK"></textarea>
                                   values: rows.map(r => (by[n][r.month] == null ? null : by[n][r.month])) });
                 });
             }
-            const total = rows.reduce((a, r) => a + (r.actual != null ? r.actual : (r.p50 || 0)), 0);
-            /* Today is one day: its figure against the six before it. It drew
-               the same seven days and the same total as This week. */
-            let headVal = total, headDelta = null, headTrend = null;
-            if (range === 'today' && rows.length > 1) {
-                const val = (r) => (r.actual != null ? r.actual : (r.p50 || 0));
-                const tv = val(rows[rows.length - 1]);
-                const prev = rows.slice(0, -1).map(val);
-                const avg = prev.reduce((a, b) => a + b, 0) / prev.length;
-                headVal = tv;
-                if (avg) { const g = (tv - avg) / avg; headDelta = fcPct(g); headTrend = g >= 0 ? 'up' : 'down'; }
-            }
-            const chart = trendChart({ title: title, source: 'Shopify orders and the nightly forecast', period: period,
-                yUnit: 'GBP', value: money(headVal, 'GBP', 0), delta: headDelta, trend: headTrend, labels: labels, series: series,
+            const chart = trendChart({ headless: true, legend: true, label: 'Cash in, ' + title, title: title,
+                source: 'Shopify orders and the nightly forecast', period: period, yUnit: 'GBP', labels: labels, series: series,
                 band: band, splitAt: handover > 0 && handover < rows.length - 1 ? handover : null,
-                format: (n) => money(n, 'GBP', 0), tickFormat: fmtCompact, height: 300, annotate: false });
+                format: (n) => money(n, 'GBP', 0), tickFormat: fmtCompact, area: false,
+                height: window.matchMedia('(max-width: 640px)').matches ? 200 : 268, annotate: false });
             card.append(chart);
-            /* The comparison row. Obvious, not buried: a chip per source, tap to
-               add its line. Capped at six, because a chart with fourteen lines
-               is a chart nobody reads. */
+            /* On a phone the switch sits under the chart, where a thumb finds
+               it; the head's copy is hidden there. */
+            const phoneSw = switchBtn('Compare methods', cmpOn, setFcCompareOn);
+            phoneSw.classList.add('fc-cmp-phone');
+            card.append(phoneSw);
+            /* The methods to draw, while Compare methods is on: a chip per
+               method, tap to add its line. Capped at six, because a chart with
+               fourteen lines is a chart nobody reads. */
             const srcs = ((sanity || {}).models || []).filter(m => m.months);
-            if (srcs.length) {
-                const c3 = el('div', 'card');
-                const h3 = el('div', 'card-head');
-                h3.append(el('h3', 'card-title', 'Compare sources on the chart'));
-                if (grain === 'month' && cmp.length) {
-                    const act = el('div', 'card-act');
-                    const clr = el('button', 'btn btn-sm', 'Clear'); clr.onclick = clearFcCompare; act.append(clr); h3.append(act);
-                }
-                c3.append(h3);
+            if (cmpOn && srcs.length) {
+                const box = el('div', 'fc-cmp-box');
                 if (grain !== 'month') {
-                    /* Thirteen chips greyed out is a wall of dead controls
-                       under the chart. A source forecasts a MONTH, so on a
-                       daily range the honest thing is one line saying so and a
-                       button that gets the reader to a range where it works -
-                       not the whole set, disabled, for them to click at. */
-                    /* The line is the card's description, title + 4 + line
-                       like every card head, not a block 16 under it. */
-                    h3.append(el('p', 'card-desc', 'Each source forecasts a month, so they can be compared on a '
+                    /* A method forecasts a MONTH, so on a daily range the honest
+                       thing is one line saying so and the way to a range where
+                       it works, not the whole set disabled. */
+                    box.append(el('p', 'fc-cmp-note', 'Each method forecasts a month, so they can be compared on a '
                         + 'monthly range rather than day by day.'));
-                    const row = el('div', 'fc-more-row');
-                    const go = el('button', 'btn btn-sm', 'Show the last twelve months');
+                    const go = el('button', 'btn', 'Show the last twelve months');
                     go.type = 'button'; go.onclick = () => setFcRange('year');
-                    row.append(go);
-                    c3.append(row);
+                    box.append(go);
                 } else {
                     const chips = el('div', 'fc-cmp');
                     srcs.forEach(m => {
-                        const on = cmp.indexOf(m.name) >= 0;
-                        const b = el('button', 'chip' + (on ? ' on' : ''), m.name);
+                        const picked = cmp.indexOf(m.name) >= 0;
+                        const b = el('button', 'chip' + (picked ? ' on' : ''), m.name);
                         b.type = 'button';
-                        b.disabled = !on && cmp.length >= 6;
+                        b.disabled = !picked && cmp.length >= 6;
                         if (b.disabled) b.title = 'Six lines at most: take one off to add another';
-                        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+                        b.setAttribute('aria-pressed', picked ? 'true' : 'false');
                         if (m.name === (sanity || {}).best) b.append(document.createTextNode(' '), fcChip('made', 'in use'));
                         b.onclick = () => toggleFcCompare(m.name);
                         chips.append(b);
                     });
-                    c3.append(chips);
+                    box.append(chips);
+                    if (cmp.length) {
+                        const clr = el('button', 'btn ghost', 'Clear');
+                        clr.type = 'button'; clr.onclick = clearFcCompare;
+                        box.append(clr);
+                    }
                 }
-                card.append(c3);
+                card.append(box);
             }
             return card;
         }
