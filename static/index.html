@@ -5311,6 +5311,40 @@
         .g-badge.off { background: var(--surface-sunken); color: var(--text-tertiary); }
         .g-badge.mid { background: var(--warning-bg); color: var(--warning); }
 
+        /* THE PHONE (the mix, spec principle 6 and 4.3): every target is 40 and
+           every control and row title 14. The 16 gutter and the 32 between
+           sections are set where those live. A real field under a finger keeps
+           16 (the pointer: coarse rule), or iOS zooms into it. */
+        @media (max-width: 640px) {
+            :is(.btn, .btn-sm, .icon-btn, .chip, .toggle, .qt, .dmenu-item, .rlist-row, .nav-item, .nav-group, .convo, .tbl-search, .topbar-search,
+                input[type=text], input[type=number], input[type=date], input[type=search], input[type=email], input[type=password],
+                input[type=url], input[type=tel], input:not([type]), select, details.sect summary) { min-height: var(--control-h-lg); }
+            .tbl-search { height: var(--control-h-lg); }
+            .segmented > button { height: calc(var(--control-h-lg) - 2 * var(--sp-0-5)); }
+            :is(.btn, .btn-sm, .segmented > button, .tab, .chip, .toggle, .qt, .dmenu-item, .nav-item, .convo, .rlist-row, details.sect summary) { font-size: var(--text-sm); }
+            :is(.icon-btn, .btn-sm.btn-icon, .topbar .icon-btn, .topbar-search) { min-width: var(--control-h-lg); }
+            .btn-sm.btn-icon { width: var(--control-h-lg); }
+            .section-title, .card-head { min-height: var(--control-h-lg); }
+            /* An info button keeps its 24 look; its 40 target grows up, down
+               and away from its words, so it never covers them. */
+            .info { width: var(--control-h-lg); height: var(--control-h-lg); padding-right: calc(var(--control-h-lg) - var(--control-h-sm));
+                margin-block: calc((var(--lh-control) - var(--control-h-lg)) / 2); margin-right: calc(var(--control-h-sm) - var(--control-h-lg)); }
+            .info::before { inset: auto; left: 0; top: 50%; width: var(--control-h-sm); height: var(--control-h-sm); margin-top: calc(var(--control-h-sm) / -2); }
+            /* The rest of what a finger meets: the drawer's own icon buttons and brand row, an icon button in a row, a row's
+               name button, a standalone link, a summary, a maker's band and the chart's expand square. */
+            :is(.sidebar .icon-btn, .brand, .mem-btn, .crm-ticon, .crm-col-add, .sizes-open, .files-name, .guide-toc-link, .miss-open, .action-link, details summary) { min-height: var(--control-h-lg); }
+            .ktable tr.ktable-grp th { height: var(--control-h-lg); }
+            :is(.sidebar .icon-btn, .mem-btn, .crm-ticon) { min-width: var(--control-h-lg); }
+            .chart-expand { width: var(--control-h-lg); height: var(--control-h-lg); }
+            :is(.guide-toc-link, .miss-open, .action-link) { display: inline-flex; align-items: center; }
+            :is(.sizes-open, .files-name) { align-items: center; }
+            /* The Guide's search row sized its grid track by the search's own width, which the 14px Print button pushed 7 past the screen. */
+            .guide-tools { grid-template-columns: minmax(0, 1fr); }
+            /* The Size list's A to Z is one swipeable line of 40 squares rather than four rows of them. */
+            .az { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; margin-inline: calc(-1 * var(--sp-1)); padding-inline: var(--sp-1); }
+            .az::-webkit-scrollbar { display: none; }
+            .az button { flex: none; height: var(--control-h-lg); min-width: var(--control-h-lg); }
+        }
         /* ONE TAG. Every small label that only displays something (a status, a
            count, Beta, a change, a priority, a stage) has one shape: 20 tall, a
            4px corner, 12/16 medium text 8 in, a tinted fill and no border (the mix, spec 6). Seventeen
