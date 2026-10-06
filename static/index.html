@@ -957,9 +957,6 @@
             grid-template-columns: repeat(4, minmax(0, 1fr)); overflow: clip; overflow-clip-margin: var(--sp-1); }
         .metrics > .stat::before { content: ""; position: absolute; top: 0; bottom: 0; left: calc(-0.5 * var(--sp-8));
             width: var(--bw-hairline); background: var(--border-default); }
-        /* The caveat that qualifies a row of figures sits at its own 12 under
-           them, not 24 away and as near the next section as its own. */
-        .metrics:has(+ .fc-conf) { margin-bottom: 0; }
         /* A row of figures inside a card: the card's 16 gap, not the page's 24 on top. */
         .card > .metrics { margin-bottom: 0; }
         @media (max-width: 1100px) { .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -4552,8 +4549,6 @@
             .page-tabs-end > .fc-seg-lbl + .segmented { flex: 1 1 auto; }
             .ov-wrap.wgrid > .page-tabs:has(> .page-tabs-end > .fc-seg-lbl) { margin-bottom: calc(var(--sp-4) - var(--page-rhythm)); }
         }
-        .fc-conf { margin: var(--sp-3) 0 0; font-size: var(--text-body); color: var(--text-secondary); }
-        .fc-conf b { font-weight: var(--weight-medium); color: var(--text-primary); }
 
         /* ---- what is driving the number ----
            One bar showing how the month splits, then the parts, then the
@@ -15710,77 +15705,52 @@ Projected Image UK"></textarea>
             return risk + Math.abs(gap);
         }
 
-        /* ---------- 1. OVERVIEW: understood in about five seconds ----------
-           Shneiderman's overview comes first and answers three questions in
-           the reader's own words: where am I now, where am I expected to end
-           up, and is that good or bad. Everything else on this page is a way
-           of interrogating these three sentences, which is why they carry no
-           method, no algorithm and no statistics. */
-        function fcOverviewCard(latest, sc) {
-            const rows = latest.monthly || [];
+        /* ---------- 1. EXPECTED THIS MONTH: the feature band ----------
+           The screen's main question (the mix, spec 8.1), answered first: what
+           this month is expected to come to against the plan, how sure that is
+           (behind the info button, word for word), the likely range as one bar
+           with the plan as a tick; beside it what is taken so far and where
+           the year lands. */
+        function fcBand(latest, sc) {
             const cur = fcCurrentRow(latest);
-            const box = el('div');
-            box.append(el('div', 'section-title', 'Where things stand'));
-            if (!cur) { const c = el('div', 'card'); c.append(el('div', 'empty', 'No run to summarise yet.')); box.append(c); return box; }
+            if (!cur || cur.p50 == null) return null;
             const banked = fcBankedThisMonth(latest);
             const p50 = cur.p50, p10 = cur.p10, p90 = cur.p90;
             const target = (cur.targets || {})[sc];
-            /* Worked out from the two figures printed beside it. The run's
-               gap_pct arrives rounded to two places (0.72), so the pill said
-               +72.0% while the alert list under it, working from the same
-               money, said +72.3%. */
+            /* Worked out from the two figures printed beside it: the run's
+               gap_pct arrives rounded to two places. */
             const gap = (target && p50 != null) ? (p50 - target) / target : null;
             const year = latest.year || {}; const yt = (year.targets || {})[sc];
-            /* Three questions, three BLOCKS - the house KPI card, one number
-               per box, which is the reference's own and what this app uses on
-               every other report. They were briefly a single joined frame with
-               three columns in it; that frame was retired on purpose and does
-               not come back.
-               "Is that good or bad" is not a fourth box: it is the change pill
-               ON the number it judges, which is where the reference puts it and
-               where it can be read without a second glance. */
+            const yg = (yt && year.p50 != null) ? (year.p50 - yt) / yt : null;
+            /* Within 10% of plan is on track: the chip is the quiet fill. */
             const fcTrend = (g) => g == null ? null : Math.abs(g) <= 0.10 ? 'flat' : (g > 0 ? 'up' : 'down');
-            const mets = [];
-            mets.push({ label: 'Where I am now', value: fcMoney(banked),
-                        note: 'taken so far in ' + fcMonth(cur.month) + ', '
-                              + fcDaysSoFar(latest) + ' of ' + fcDaysInMonth(latest) + ' days in' });
-            mets.push({ label: 'Where I am expected to be', value: fcMoney(p50),
-                        /* The pill makes the same call as the figure and the
-                           month table: within 10% of plan is on track, so it
-                           is neutral, not red. */
-                        delta: gap != null ? fcPct(gap) : null,
-                        trend: fcTrend(gap),
-                        tone: (cur.verdict || {})[sc] === 'underrun' ? 'warn' : null,
-                        note: ((p10 != null && p90 != null)
-                                ? ('likely ' + fcMoney(p10) + ' to ' + fcMoney(p90))
-                                : ('by the end of ' + fcMonth(cur.month)))
-                              + (target != null ? ' \u00b7 plan ' + fcMoney(target) : '') });
-            if (year.p50 != null) {
-                const yg = (yt != null && yt) ? (year.p50 - yt) / yt : null;
-                mets.push({ label: 'Where the year lands', value: fcMoney(year.p50),
-                            delta: yg != null ? fcPct(yg) : null,
-                            trend: fcTrend(yg),
-                            tone: (yt != null && year.p50 < yt * 0.9) ? 'warn' : null,
-                            note: yt != null ? ('plan ' + fcMoney(yt)) : 'across the plan year' });
-            }
-            box.append(metricsStrip(mets));
-            /* The caveat, on its own quiet line under the numbers rather than
-               crowded into the same box as them. Said as a WIDTH in money:
-               "P10 28,513 / P90 32,921" is a statistic, "about 2,200 either
-               side" is something a person can act on. */
-            if (p10 != null && p90 != null && p50) {
+            const chip = (g) => g == null ? null : changeChip(fcTrend(g), Math.abs(g * 100).toFixed(1) + '%', deltaTone('expected', fcTrend(g)));
+            let sure = null;
+            if (p10 != null && p90 != null) {
                 const half = Math.round((p90 - p10) / 2);
-                /* A line, not a card: a full-width frame around one sentence
-                   was the second frame this comment always said it was not. */
-                const conf = el('p', 'fc-conf');
-                conf.append(document.createTextNode('How certain is that? ' + fcMonth(cur.month)
-                    + ' should land within about '));
-                conf.append(el('b', null, fcMoney(half)));
-                conf.append(document.createTextNode(' either side of ' + fcMoney(p50)
-                    + ', 8 times out of 10. It is an expectation, not a commitment.'));
-                box.append(conf);
+                sure = infoButton('How sure this is', { title: 'How sure this is', guide: ['money', 'Forecast'], body: [
+                    'How certain is that? ' + fcMonth(cur.month) + ' should land within about ' + fcMoney(half)
+                        + ' either side of ' + fcMoney(p50) + ', 8 times out of 10. It is an expectation, not a commitment.',
+                    'Figures are cash in; what is still to come is a range, never a promise.'] });
             }
-            return box;
+            const d = bandDomain([p10, p90, p50, target]);
+            const sides = [{ icon: I.wallet, label: 'Taken so far', value: fcMoney(banked),
+                note: 'Day ' + fcDaysSoFar(latest) + ' of ' + fcDaysInMonth(latest),
+                meter: meter({ taken: p50 ? banked / p50 * 100 : 0, plan: (p50 && target != null) ? target / p50 * 100 : null }) }];
+            if (year.p50 != null) sides.push({ icon: I.flag, label: 'Year lands at', value: fcMoney(year.p50), chip: chip(yg),
+                note: yt != null ? 'Plan ' + fcMoney(yt) : null,
+                meter: meter({ taken: year.p50 ? fcYearTaken(latest) / year.p50 * 100 : 0,
+                               plan: (year.p50 && yt != null) ? yt / year.p50 * 100 : null }) });
+            return featureBand({ main: { icon: I.trendUp, label: 'Expected this month', info: sure, value: fcMoney(p50),
+                chip: chip(gap), note: target != null ? 'against plan' : null,
+                range: (p10 != null && p90 != null) ? rangeBar({ lo: p10, hi: p90, exp: p50, plan: target, d,
+                    planLabel: target != null ? 'Plan ' + fcMoney(target) : null, loLabel: fcMoney(p10), hiLabel: fcMoney(p90),
+                    midLabel: 'Likely range' }) : null }, sides });
+        }
+        /* What the plan year has taken so far: its closed months as the run
+           counts them, and this month's takings. */
+        function fcYearTaken(latest) {
+            return (Number((latest.sanity || {}).year_banked) || 0) + fcBankedThisMonth(latest);
         }
 
         /* Money already in the till this month. The run marks the current month
@@ -16491,12 +16461,9 @@ Projected Image UK"></textarea>
                says so in "How this forecast works" for anyone who asks.
                --------------------------------------------------------------- */
 
-            /* 1. OVERVIEW. The scenario is a FILTER on everything under it, so
-               it rides with the overview rather than being dropped into the
-               middle of the page next to a table it also governs. */
-            const ov = fcOverviewCard(latest, sc);
-            ov.classList.add('widget-bare');
-            box.append(widget(ov, 'standing', 'full', 'Where things stand'));
+            /* 1. EXPECTED THIS MONTH: the feature band. */
+            const band = fcBand(latest, sc);
+            if (band) box.append(widget(band, 'standing', 'full', 'Expected this month'));
 
             /* Exceptions, and only the ones that are genuinely exceptional. An
                alert on every month is wallpaper: the two worst are surfaced
