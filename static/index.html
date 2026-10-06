@@ -1609,6 +1609,8 @@
             .mem-btn { min-width: var(--control-h); min-height: var(--control-h); }
             .mem-acts, .sk-acts { gap: var(--sp-2); }
         }
+        /* A skill's icon actions sit beside its Use in chat button, so they are that button's 32 (not the 24 a row of icons alone keeps). */
+        .sk-acts .mem-btn { min-width: var(--control-h); min-height: var(--control-h); }
         @media (hover: hover) { .mem-btn:hover { background: var(--surface-tertiary); color: var(--text-primary); } }
         .mem-btn:active { background: var(--surface-sunken); }
         @media (hover: hover) { .mem-btn.ok:hover { color: var(--success); background: var(--success-bg); } }
@@ -5263,6 +5265,8 @@
         .files-up .bar { flex: 1 1 60px; height: 5px; border-radius: var(--radius-full); background: var(--surface-sunken); overflow: hidden; }
         .files-up .bar i { display: block; height: 100%; background: var(--fill-mark); border-radius: var(--radius-full); }
         .files-up.failed { box-shadow: inset 0 calc(-1 * var(--bw-hairline)) 0 var(--error); }
+        /* A failed upload has no progress to show: its empty track only squeezed the name and the reason beside it. */
+        .files-up.failed .bar { display: none; }
         .files-up .upstate { color: var(--text-tertiary); font-size: var(--text-xs); line-height: var(--lh-caption); white-space: nowrap; }
         .files-up.failed .upstate { color: var(--error); white-space: normal; }
         /* A name field is a field, not a row: at flex: 1 1 auto it ran from the
@@ -5484,6 +5488,8 @@
             .toggle:has(> .sw:only-child) { justify-content: flex-end; }
             .tbl-step { width: var(--control-h-lg); }
             .tab { justify-content: center; }
+            .mail-bulkbar .btn { min-height: var(--control-h-lg); }
+            .mail-bulkbar { min-height: calc(var(--control-h-lg) + 2 * var(--sp-1)); }
             .btn-sm.btn-icon { width: var(--control-h-lg); }
             .section-title, .card-head { min-height: var(--control-h-lg); }
             /* An info button keeps its 24 look; its 40 target grows up, down
@@ -23642,7 +23648,7 @@ Projected Image UK"></textarea>
             /* A Pipedrive label is typed by a person: render it as they typed it. */
             const s = el('span', 'crm-chip', String(name || ''));
             const c = crmLabelColor(name);
-            if (/^#/.test(c)) { s.style.background = c + '22'; s.style.color = c; }
+            if (/^#/.test(c)) { s.style.background = c + '22'; s.style.color = 'color-mix(in srgb, ' + c + ' 80%, var(--ink))'; }
             else { s.style.background = 'var(--surface-sunken)'; s.style.color = 'var(--text-secondary)'; }
             return s;
         }
@@ -26986,8 +26992,10 @@ Projected Image UK"></textarea>
                 else if (h > 4) card.classList.add('overdue-soft');
             }
             card.append(el('div', 'crm-card-t', t.subject));
-            card.append(el('div', 'mail-card-sub', (t.from_name || t.from_email || '') +
-                (t.snippet ? ' · ' + t.snippet : '')));
+            const cardSub = el('div', 'mail-card-sub', (t.from_name || t.from_email || '') +
+                (t.snippet ? ' · ' + t.snippet : ''));
+            cardSub.title = cardSub.textContent;
+            card.append(cardSub);
             const bot = el('div', 'crm-card-bot');
             if (t.owner) {
                 bot.append(mailOwnerChip(t));

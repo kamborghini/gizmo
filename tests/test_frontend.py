@@ -11746,6 +11746,15 @@ def t_what_the_app_measure_found_stays_fixed():
     ok("margin: 0; overflow: hidden; clip: rect(0 0 0 0)" in CSS.split("\n        .sr-only {")[1].split("}")[0], "hidden text has no margin of its own")
     ok(_token_raw("control-pad-y") == "var(--sp-1)", "a field's vertical padding is 4: its 32 is the min-height's and the line centres in it")
     ok(CSS.count("calc((100% - var(--measure)) / 2)") == 0, "and no rule pads by a share of its container")
+    # Found in the data-filled states (the Inbox, Files, Skills and the CRM board, seeded in the page).
+    ok(".sk-acts .mem-btn { min-width: var(--control-h); min-height: var(--control-h); }" in CSS,
+       "a skill's icon actions are the 32 of the Use in chat button beside them, not a 24 beside a 32")
+    ok("s.style.color = 'color-mix(in srgb, ' + c + ' 80%, var(--ink))'" in fn_src("function crmChip(name) {"),
+       "a label chip's words are its colour darkened toward ink, so amber, orange and green clear 4.5 on their tint")
+    ok(".mail-bulkbar .btn { min-height: var(--control-h-lg); }" in CSS.split("THE PHONE")[1] and "min-height: calc(var(--control-h-lg) + 2 * var(--sp-1))" in CSS.split("THE PHONE")[1],
+       "the Inbox's bulk-bar buttons are 40 on a phone, the bar the 48 that holds them")
+    ok(".files-up.failed .bar { display: none; }" in CSS, "a failed upload has no empty progress track squeezing its name and reason")
+    ok("cardSub.title = cardSub.textContent;" in SCRIPT, "a board card's sender and snippet line, which ends in an ellipsis, carries its full text")
 
 
 if __name__ == "__main__":
