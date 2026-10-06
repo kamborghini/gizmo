@@ -1373,6 +1373,9 @@
         .stat:focus-visible > .stat-act { color: var(--text-primary); }
         @media (hover: hover) { .stat:hover > .stat-act { color: var(--text-primary); } }
         .stat:has(> .stat-act) > .label { padding-right: var(--sp-6); }
+        /* The opener's corner mark is a real button (see statOpens): the mark's look and a button's reset; the house focus ring is the control rule's. */
+        .stat-open-btn { padding: 0; border: 0; background: none; font: inherit; cursor: pointer; }
+        @media (hover: hover) { .stat-open-btn:hover { color: var(--text-primary); } }
         .stat-pick > .stat-act { border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-circle); color: transparent; background: var(--surface-primary); }
         .stat-pick > .stat-act svg { width: var(--icon-xs); height: var(--icon-xs); }
         @media (hover: hover) { .stat-pick:hover > .stat-act { color: var(--text-tertiary); } }
@@ -4400,6 +4403,8 @@
         .link svg { width: var(--icon-sm); height: var(--icon-sm); stroke-width: var(--icon-stroke-s); }
         .link:active { color: var(--text-link-hover); }
         @media (hover: hover) { .link:hover { color: var(--text-link-hover); } }
+        /* On a phone a standalone link is a 40 target (a link inside a sentence is not a .link). */
+        @media (max-width: 640px) { .link { min-height: var(--control-h-lg); } }
         .drive-title { margin: 0; font-size: var(--text-body); font-weight: var(--weight-medium); }
         .drive-p, .drive-note { margin: 0; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }
         .drive-p b { color: var(--text-primary); font-weight: var(--weight-medium); overflow-wrap: anywhere; }
@@ -5547,6 +5552,9 @@
             /* The Inbox's tick and Claim keep their look and get an invisible 40 square: the tick's is centred on it (12 to
                each side, in the row's own gap, clear of the sender), Claim's is its own width, so neither covers the other
                nor the sender, and both sit inside the 44 row. */
+            /* A figure's open button (the corner arrow) keeps its look and gets the same invisible 40 square, centred on it. */
+            .stat-open-btn::after { content: ""; position: absolute; left: 50%; top: 50%; width: var(--control-h-lg); height: var(--control-h-lg);
+                margin: calc(var(--control-h-lg) / -2) 0 0 calc(var(--control-h-lg) / -2); }
             .mail-claim { position: relative; }
             .mail-tick::after, .mail-claim::after { content: ""; position: absolute; height: var(--control-h-lg); }
             .mail-tick::after { left: 50%; top: 50%; width: var(--control-h-lg); margin: calc(var(--control-h-lg) / -2) 0 0 calc(var(--control-h-lg) / -2); }
@@ -6895,13 +6903,18 @@ Projected Image UK"></textarea>
            Reconciliation) carries a ring instead, which fills with a tick when
            it is the filter that is set. */
         function statAct(svg) { const a = el('span', 'stat-act'); a.innerHTML = svg || ''; a.setAttribute('aria-hidden', 'true'); return a; }
+        /* A figure that opens the list behind it. The tile is not itself a button: its label holds an info
+           button, and a button cannot hold one (a screen reader could not reach it). A real button in the
+           tile's corner is the keyboard and screen-reader way in, with the tile's old name; a click anywhere on
+           the tile still opens it, as before (an info button's own click stops short of the tile, and this
+           button's bubbles to it, so the list opens once). Focus returns to the button. */
         function statOpens(c, m) {
             c.classList.add('stat-open');
-            c.setAttribute('role', 'button'); c.tabIndex = 0; c.setAttribute('aria-haspopup', 'dialog');
-            c.setAttribute('aria-label', m.label + ': ' + m.value + '. Open the list behind it');
-            c.append(statAct(I.arrowUpRight));
-            c.addEventListener('keydown', (ev) => { if (ev.target !== c) return; if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); c.click(); } });
-            c.addEventListener('click', () => openStatDetail(m, c));
+            const b = el('button', 'stat-act stat-open-btn'); b.type = 'button'; b.innerHTML = I.arrowUpRight;
+            b.setAttribute('aria-haspopup', 'dialog');
+            b.setAttribute('aria-label', m.label + ': ' + m.value + '. Open the list behind it');
+            c.append(b);
+            c.addEventListener('click', () => openStatDetail(m, b));
         }
         function openStatDetail(m, opener) {
             const d = m.detail || {};
