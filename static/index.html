@@ -935,7 +935,9 @@
                against nothing, while the title and the sentence started at the
                page inset. */
             .ov-updated { margin-left: 0; padding-top: 0; flex-basis: 100%; white-space: normal; }
-            .ov-hero-act { margin-left: 0; flex-basis: 100%; padding-top: 0; }
+            /* A rail of three words wraps rather than running past the gutter, each button at its own width (the Production Manager's). */
+            .ov-hero-act { margin-left: 0; flex-basis: 100%; padding-top: 0; flex-wrap: wrap; }
+            .ov-hero-act:has(> .btn + .btn + .btn) > .btn:not(.btn-icon) { flex: none; }
             /* With the widget grid's Customize beside Refresh the row is
                fuller than the stamp's full-width basis leaves room for, and the
                icon button was squeezed to 18px wide under its 28px height. On
@@ -2311,6 +2313,8 @@
         .lbl-tools .btn svg { opacity: .7; }
         .lbl-tools .lbl-count { margin-left: auto; }
         .lbl-count { font-size: var(--text-xs); color: var(--text-tertiary); }
+        /* One order opened from Shopify says so over the toolbar. */
+        .q-note { margin: 0 0 var(--sp-3); color: var(--text-tertiary); }
         .lbl-row { display: flex; align-items: center; gap: var(--sp-2-5); padding: var(--sp-2-5) var(--sp-3); background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default);
             border-radius: var(--radius-inset); margin-bottom: var(--sp-2); cursor: pointer; transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease); text-align: left; width: 100%; }
         @media (hover: hover) { .lbl-row:hover { background: var(--surface-secondary); border-color: var(--border-strong); } }
@@ -13205,6 +13209,16 @@ Projected Image UK"></textarea>
         const QUEUE = [['unprocessed', 'Unprocessed', 'Unprocessed'], ['make', 'To make', 'IP'], ['ship', 'To ship', 'PC'], ['dispatched', 'Complete', 'Complete'], ['shipments', 'Custom shipments', 'Custom Shipments']];
         let queueMode = 'make';
         function queueTag() { const q = QUEUE.find(x => x[0] === queueMode); return q ? q[2] : LABEL_TAG; }
+        /* The queues (the mix, spec 8.2): the flow's three as counters with the
+           sizes the server last sent, Complete and Custom shipments as tabs
+           beside them. Kept here so Custom shipments, which loads no orders,
+           still shows the counts. */
+        let labelsCounts = null;
+        function prodQueues(onPick) {
+            const n = labelsCounts || {};
+            return queueCounters(QUEUE.slice(0, 3).map(q => [q[0], q[1], n[q[0]]]),
+                [[QUEUE[3][0], QUEUE[3][1], I.check], [QUEUE[4][0], QUEUE[4][1], I.box]], queueMode, onPick, 'Queues');
+        }
         function dispatchStateOf(o) {
             const d = labelsCache && labelsCache.data && labelsCache.data.dispatch;
             return (d && d[String(o.id)]) || {};
@@ -18170,9 +18184,8 @@ Projected Image UK"></textarea>
             if (queueMode === 'shipments') { renderCustomQueue(box); return; }
             if (labelsCache && !force) { renderLabels(); return; }
             box.innerHTML = '';
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.printer;
-            const ht = el('div'); ht.append(el('h2', null, 'Production Manager'), el('p', null, 'Finding orders tagged "' + queueTag() + '"…'));
-            hero.append(badge, ht); box.append(hero);
+            const hero = pageHead({ view: 'labels', title: 'Production Manager', line: 'Finding orders tagged "' + queueTag() + '"…' });
+            box.append(hero);
             const t = el('div', 'thinking'); t.style.marginTop = 'var(--sp-2)'; t.append(loader(), el('span', null, 'Reading your Shopify orders…')); box.append(t);
             labelsLoading = true;
             const rq = ++labelsReq;   // only the newest fetch may commit its result
@@ -18619,31 +18632,16 @@ Projected Image UK"></textarea>
                way back to one was to reopen the booking window: a button that
                reads like "spend money again". */
             box.innerHTML = '';
-            /* The same page as the other four queue tabs: the same heading and
-               description, Refresh beside its stamp, and the list in a card
-               with a counted title, its actions and the house search. It was
-               built from an older kit, with a bare 190px search whose own
-               placeholder did not fit. */
-            const hero = el('div', 'ov-hero');
-            const badge = el('div', 'badge'); badge.innerHTML = I.printer;
-            const ht = el('div');
-            ht.append(el('h2', null, 'Production Manager'),
-                el('p', null, 'The bench queue, from a new order through to a booked courier. '
-                    + 'Pick a queue below, then an order to work on.'));
-            hero.append(badge, ht, heroAct(freshLabel(Date.now()), refreshBtn(() => renderCustomQueue(box))));
-            box.append(hero);
-            box.append(tabStrip(QUEUE, queueMode, (k) => { queueMode = k; labelsCache = null; labelSel = null; loadLabels(true); }, { label: 'Queues' }));
-            const card = el('div', 'card');
-            const head = el('div', 'card-head');
-            const title = el('h3', 'card-title', 'Shipments');
-            head.append(title, el('p', 'card-desc', 'Booked to an address you pasted in, with no Shopify order behind them. '
-                + 'Reprint a label or check a tracking number here.'));
-            const act = el('div', 'card-act');
+            /* The same page as the other queues (the mix): the same header with
+               its live line and Refresh, the same counters and tabs, then the
+               house search and the list. */
             const newShip = el('button', 'btn btn-sm');
             newShip.append(ico(I.plus), document.createTextNode('New shipment'));
             newShip.onclick = openCustomShip;
-            act.append(newShip); head.append(act);
-            card.append(head);
+            box.append(pageHead({ view: 'labels', title: 'Production Manager', live: Date.now(),
+                onRefresh: () => renderCustomQueue(box), refreshLabel: 'Refresh', actions: [newShip] }));
+            box.append(prodQueues((k) => { queueMode = k; labelsCache = null; labelSel = null; loadLabels(true); }));
+            const card = el('div', 'card');
             let paint = () => {};
             const findWrap = tableSearch('Search reference, name or tracking', customQ, null);
             const find = findWrap.input;
@@ -18658,11 +18656,12 @@ Projected Image UK"></textarea>
                 const shown = !q ? rows : rows.filter(sh =>
                     ((sh.reference || '') + ' ' + (sh.customer || '') + ' '
                      + (sh.tracking || '') + ' ' + (sh.carrier || '')).toLowerCase().indexOf(q) >= 0);
-                title.textContent = rows.length + (rows.length === 1 ? ' shipment' : ' shipments');
                 if (!shown.length) {
-                    host.append(el('div', 'empty', rows.length
-                        ? 'Nothing matches that.'
-                        : 'No shipments booked to a pasted address yet. Press New shipment to book one.'));
+                    if (rows.length) { host.append(el('div', 'empty', 'Nothing matches that.')); return; }
+                    const again = el('button', 'btn'); again.type = 'button';
+                    again.append(ico(I.plus), document.createTextNode('New shipment'));
+                    again.onclick = openCustomShip;
+                    host.append(emptyState({ icon: I.box, text: 'No custom shipments yet.', action: again }));
                     return;
                 }
                 /* The tab's own queue row, not the Files browser's. */
@@ -18768,30 +18767,28 @@ Projected Image UK"></textarea>
             // already listed when Dispatch is opened. Free, and never blocking.
             if (shipMode) prefetchQuotes(shown);
             else prefetchRun++;                 // left the queue: stop any run in flight
-            const heroCopy = dispatched ? 'Orders already dispatched. Select one to reprint its label or view tracking.'
-                : shipMode ? 'Orders marked made and ready to ship. Select one to dispatch a courier.'
-                : unproc ? 'New orders not yet released to the workbench. Press Ready to make when one should join the To make queue.'
-                : 'Orders released to the bench (tagged "' + (data.tag || LABEL_TAG) + '" in Shopify). Select one to preview its label, then print.';
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.printer;
-            /* The page says what the page is; the queue card below says what
-               THIS queue is. Printing heroCopy in both put the same sentence on
-               the screen twice, six lines apart. */
-            const ht = el('div'); ht.append(el('h2', null, 'Production Manager'),
-                el('p', null, 'The bench queue, from a new order through to a booked courier. '
-                    + 'Pick a queue below, then an order to work on.'));
-            hero.append(badge, ht);
-            /* The stamp and the Refresh that renews it, side by side in the
-               header, as heroAct is for: Refresh sat in the queue card's rail
-               175px below the stamp it updates. */
-            hero.append(heroAct(freshLabel(labelsCache.at), refreshBtn(() => loadLabels(true, true))));
+            /* The header (the mix, spec 8.2): the live line with Refresh, and the
+               page's actions at the right (added below, where they are built).
+               The rule of the two queues worth explaining waits behind the info
+               button, word for word; the counters say the rest. */
+            const queueRule = unproc ? 'New orders not yet released to the workbench. Press Ready to make when one should join the To make queue.'
+                : queueMode === 'make' ? 'Orders released to the bench (tagged "' + (data.tag || LABEL_TAG) + '" in Shopify). Select one to preview its label, then print.'
+                : '';
+            const hero = pageHead({ view: 'labels', title: 'Production Manager', live: labelsCache.at,
+                onRefresh: () => loadLabels(true, true), refreshLabel: 'Refresh',
+                info: queueRule ? infoButton('About this queue', { title: unproc ? 'Unprocessed' : 'To make', body: queueRule }) : null });
             box.append(hero);
+            const heroActs = hero.querySelector('.ov-hero-act');
+            /* The counters sit straight under the header, built in the same pass:
+               the header's 32 gives way to 20 only for a counters row that is its
+               very next sibling, which is not re-worked if one arrives later. */
+            // Lifecycle queue: Unprocessed -> To make -> To ship, then Complete.
+            if (data.counts) labelsCounts = data.counts;
+            box.append(prodQueues((k) => { queueMode = k; labelsCache = null; labelSel = null; labelsFilter = 'all'; loadLabels(true); }));
             // A sweep that Shopify cut short renders as a SHORT list, which is
             // indistinguishable from a quiet day. Say so rather than let the
             // bench work from a queue that is quietly missing orders.
             if (data.partial_note) box.append(el('div', 'msg error', data.partial_note));
-
-            // Lifecycle queue: To make -> To ship -> Complete.
-            box.append(tabStrip(QUEUE, queueMode, (k) => { queueMode = k; labelsCache = null; labelSel = null; labelsFilter = 'all'; loadLabels(true); }, { label: 'Queues' }));
 
             /* Two holding rails. Everything below still builds into them so the
                construction reads as it always has; the composition at the end
@@ -18842,10 +18839,10 @@ Projected Image UK"></textarea>
                the To ship queue holds only made orders, so 'Not made' there
                could only ever be empty. */
             if (!dispatched) {
-                filtTabs = segmented([['all', 'All (' + orders.length + ')'],
-                                       ['unprinted', 'Unprinted (' + unprinted.length + ')']]
-                                      .concat(shipMode ? [] : [['unmade', 'Not made (' + unmade.length + ')']]),
-                                      labelsFilter, (k) => { labelsFilter = k; renderLabels(); });
+                filtTabs = segmented([{ key: 'all', label: 'All', n: orders.length },
+                                       { key: 'unprinted', label: 'Unprinted', n: unprinted.length }]
+                                      .concat(shipMode ? [] : [{ key: 'unmade', label: 'Not made', n: unmade.length }]),
+                                      labelsFilter, (k) => { labelsFilter = k; renderLabels(); }, { label: 'Show' });
             }
             const findWrap = tableSearch('Find order, customer or tracking', labelsSearch, null);
             const find = findWrap.input;
@@ -18938,8 +18935,7 @@ Projected Image UK"></textarea>
                it found nothing: silence there reads as "none are missing". */
             const lm = labelsMissing && labelsMissing.data;
             const missNote = lm && !(lm.missing || []).length && lm.truncated
-                ? el('div', 'cov-note', 'Only the first ' + lm.checked + ' open orders could be checked for a missing "'
-                    + (lm.tag || LABEL_TAG) + '" tag, and none of those is missing it.') : null;
+                ? el('div', 'cov-note', 'First ' + lm.checked + ' open orders checked: none missing the tag.') : null;
             if (lm && ((lm.missing || []).length || missNote)) box.append(widget(missNote || missingStrip(), 'missing', 'full', 'Possibly missing from production'));
             if (labelsCoverage) box.append(widget(coverageCard(), 'size-check', 'full', 'Size list coverage'));
 
@@ -18952,16 +18948,9 @@ Projected Image UK"></textarea>
                order at all: everything looked equally important, so nothing
                did. Nothing has been taken away, only sorted. */
             const qCard = el('div', 'card q-card');
-            const qHead = el('div', 'card-head');
-            qHead.append(el('h3', 'card-title', data.single
-                ? 'One order'
-                : orders.length + (orders.length === 1 ? ' order' : ' orders')
-                  + (dispatched ? ' dispatched' : shipMode ? ' ready to ship'
-                     : unproc ? ' waiting' : ' in production')));
-            qHead.append(el('p', 'card-desc', data.single
-                ? 'Opened from the order page. Refresh shows the full production list.'
-                : heroCopy));
-            const qAct = el('div', 'card-act');
+            /* No title: the counters carry the count it gave. One order opened
+               from Shopify says so. */
+            if (data.single) qCard.append(el('p', 'q-note', 'One order, opened from Shopify. Refresh for all.'));
             const more = el('button', 'btn btn-sm');
             /* The house menu trigger: its name, then the caret, like Manage and
                the filters. A grid icon read as a view switch. */
@@ -18980,25 +18969,28 @@ Projected Image UK"></textarea>
                 { label: 'Update size list', icon: I.upload, title: upBtn.title, onClick: () => fileIn.click() },
                 { label: 'Shipping settings', icon: I.settings, title: shipBtn.title, onClick: openShippingSettings },
             ]);
-            [pnBtn, coll, newShip, more].filter(Boolean).forEach(b => qAct.append(b));
-            qHead.append(qAct);
-            qCard.append(qHead);
+            /* The page's own actions ride in its header (the mix, spec 8.2), in
+               the order they always had. */
+            [pnBtn, coll, newShip, more].filter(Boolean).forEach(b => heroActs.append(b));
             qCard.append(tableTools([findWrap, filtTabs],
                                     [allBtn, slBtn, oldf, sizeSel].filter(Boolean)));
             qCard.append(fileIn);          // the hidden picker More reaches for
             box.append(widget(qCard, 'queue'));
 
             if (!orders.length) {
-                const emptyCopy = dispatched ? 'No orders have been dispatched yet. Dispatch one from the "To ship" queue.'
-                    : queueMode === 'ship' ? 'Nothing is ready to ship. Mark orders made in "To make" to move them here.'
-                    : unproc ? 'Nothing is waiting. New orders tagged "Unprocessed" in Shopify will appear here for release.'
-                    : 'Nothing is on the bench. Release an order from Unprocessed, or tag one "' + (data.tag || LABEL_TAG) + '" in Shopify and refresh.';
-                qCard.append(el('div', 'empty', emptyCopy));
+                /* One line and the way on (the mix, spec 6 and 7). */
+                const goUnproc = el('button', 'btn'); goUnproc.type = 'button';
+                goUnproc.append(ico(I.clock), document.createTextNode('Go to Unprocessed'));
+                goUnproc.onclick = () => { queueMode = 'unprocessed'; labelsCache = null; labelSel = null; labelsFilter = 'all'; loadLabels(true); };
+                qCard.append(emptyState(dispatched ? { icon: I.check, text: 'Nothing dispatched yet.' }
+                    : shipMode ? { icon: I.truck, text: 'Nothing ready to ship.' }
+                    : unproc ? { icon: I.clock, text: 'Nothing waiting to be released.' }
+                    : { icon: I.printer, text: 'Nothing on the bench.', action: goUnproc }));
                 return;
             }
             if (!shown.length) {
                 qCard.append(el('div', 'empty', labelsSearch
-                    ? ('Nothing in this queue matches "' + labelsSearch + '". Clear the search, or check another queue tab.')
+                    ? ('Nothing in this queue matches \u201c' + labelsSearch + '\u201d.')
                     : (labelsFilter === 'unprinted' ? 'Every live order has been printed.' : 'Every live order is marked made.')));
                 return;
             }
