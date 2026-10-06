@@ -5349,7 +5349,6 @@
         /* Stacked on a phone, the two fields start at one x; side by side each
            label keeps its own width. */
         @media (max-width: 640px) { .tm-date > span { min-width: var(--sp-7); } }
-        .tm-foot { max-width: var(--measure); }
         .tm-panel { display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-4);
             background: var(--surface-secondary); border-top: var(--bw-hairline) solid var(--border-default); }
         .tm-group { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
@@ -11514,8 +11513,9 @@ Projected Image UK"></textarea>
             host.hidden = !impact.length && !impactErr;
             if (host.hidden) return;
             const head = el('div', 'card-head');
-            head.append(el('h3', 'card-title', 'Tracked changes'),
-                el('p', 'card-desc', 'Actions you pressed Track on in an answer, measured by your headline figures from that day.'));
+            const tt = el('h3', 'card-title', 'Tracked changes');
+            tt.append(infoButton('About tracked changes', { title: 'Tracked changes', body: 'Actions you pressed Track on in an answer, measured by your headline figures from that day.' }));
+            head.append(tt);
             host.append(head);
             if (impactErr) { host.append(loadFailure('Your tracked changes could not be measured just now. ' + impactErr, () => loadMemory())); return; }
             const list = el('ul', 'impact-list');
@@ -11618,13 +11618,18 @@ Projected Image UK"></textarea>
             else if (knowledgeErr) desc = 'What Reactor has learned could not be checked just now. ' + knowledgeErr;
             else if (learned) {
                 const n = (knowledge.sources || []).length;
-                desc = 'Learned' + (knowledge.learned_at ? ' on ' + fmtDate(knowledge.learned_at) : '')
-                    + (n ? ' from ' + n + ' page' + (n > 1 ? 's' : '') + ' of your website' : '')
+                desc = 'Learned' + (knowledge.learned_at ? ' ' + fmtDate(knowledge.learned_at) : '')
+                    + (n ? ' from ' + n + ' page' + (n > 1 ? 's' : '') : '')
                     + (knowledge.edited_at ? ', corrected' + (knowledge.edited_by ? ' by ' + knowledge.edited_by : '') + ' on ' + fmtDate(knowledge.edited_at) : '')
-                    + '. Reactor reads it with every answer.';
-            } else desc = 'Reactor can read your homepage, pages and blog and keep what it learns about the business. It reads it with every answer until you delete it.';
-            if (!canEditInstructions()) desc += ' Only an admin can change it.';
-            head.append(el('p', 'card-desc', desc));
+                    + '.';
+            } else desc = '';
+            /* What learning the store is, word for word, behind the title's
+               info button (copy plan, Memory #2). */
+            const kt = head.querySelector('.card-title');
+            if (kt) kt.append(infoButton('About store knowledge', { title: 'Store knowledge',
+                body: 'Reactor can read your homepage, pages and blog and keep what it learns about the business. It reads it with every answer until you delete it.' }));
+            if (!canEditInstructions()) desc += (desc ? ' ' : '') + 'Only an admin can change it.';
+            if (desc) head.append(el('p', 'card-desc', desc));
             const acts = el('div', 'card-act');
             if (learning) {
                 const b = el('button', 'btn btn-sm'); b.textContent = 'Learning'; setBusy(b, true); acts.append(b);
@@ -11646,7 +11651,7 @@ Projected Image UK"></textarea>
                 b.title = 'Reads up to 12 pages of your website. An AI run.'; b.onclick = () => learnStore(b); acts.append(b);
             }
             head.append(acts); out.push(head);
-            if (!learned && !learning && !knowledgeErr && knowledgeRead) out.push(el('p', 'card-sub', 'Learning the store is an AI run: it reads up to 12 pages of your website once, and uses AI credits.'));
+            if (!learned && !learning && !knowledgeErr && knowledgeRead) out.push(el('p', 'card-sub', 'Uses AI credits. Reads up to 12 pages, once.'));
             if (learned && knowEditing) {
                 const f = el('div', 'know-edit');
                 const ta = el('textarea', 'sk-textarea'); ta.value = knowledge.knowledge || ''; ta.dataset.initial = ta.value;
@@ -11734,12 +11739,15 @@ Projected Image UK"></textarea>
             host.replaceChildren();
             const waitingN = memories.filter(m => m.status === 'pending').length;
             const head = el('div', 'card-head');
-            head.append(el('h3', 'card-title', 'Notes' + (memories.length ? ' (' + memories.length + ')' : '')),
-                el('p', 'card-desc', 'What Reactor keeps from chat, and what ' + (canEditInstructions() ? 'you add' : 'an admin adds') + ' here. It reads the newest ' + memInject
+            /* What notes are and who keeps them, word for word, behind the
+               title's info button (copy plan, Memory #6). */
+            const nt = el('h3', 'card-title', 'Notes' + (memories.length ? ' (' + memories.length + ')' : ''));
+            nt.append(infoButton('About notes', { title: 'Notes', body: 'What Reactor keeps from chat, and what ' + (canEditInstructions() ? 'you add' : 'an admin adds') + ' here. It reads the newest ' + memInject
                     + ' of each kind with every answer. Rules for how to work belong in Skills.'
                     + (canEditInstructions()
                         ? (waitingN ? ' ' + (waitingN === 1 ? 'One note from a member waits' : waitingN + ' notes from members wait') + ' under Waiting until you keep ' + (waitingN === 1 ? 'it.' : 'them.') : '')
-                        : ' Only an admin can add, correct or delete a note, and a note from your chats or tracked changes waits for an admin to keep it.')));
+                        : ' Only an admin can add, correct or delete a note, and a note from your chats or tracked changes waits for an admin to keep it.') }));
+            head.append(nt);
             const acts = el('div', 'card-act');
             if (!memoryLoadErr && canEditInstructions()) {
                 const add = el('button', 'btn btn-sm btn-primary'); add.append(ico(I.plus), document.createTextNode('Add a note'));
@@ -11750,8 +11758,14 @@ Projected Image UK"></textarea>
             if (memoryLoadErr) { host.append(loadFailure('Your notes could not be loaded, so they cannot be shown yet. ' + memoryLoadErr, () => loadMemory('notes'))); return; }
             if (memView.adding) host.append(memEditor(null));
             if (!memories.length) {
-                if (!memView.adding) host.append(el('div', 'empty', 'No notes yet. Reactor keeps a note when something in a chat is worth remembering'
-                    + (canEditInstructions() ? ', and you can add one here.' : '.')));
+                if (!memView.adding) {
+                    let first = null;
+                    if (canEditInstructions()) {
+                        first = el('button', 'btn'); first.type = 'button'; first.append(ico(I.plus), document.createTextNode('Add a note'));
+                        first.onclick = () => { memView.adding = true; memView.editId = null; paintNotes(); };
+                    }
+                    host.append(emptyState({ icon: I.bookmark, text: 'No notes yet.', action: first }));
+                }
                 return;
             }
             const groups = { all: memories.length, pending: 0, followup: 0, preference: 0, insight: 0, fact: 0, decision: 0, closed: 0 };
@@ -11806,10 +11820,11 @@ Projected Image UK"></textarea>
             const t = el('td', 'mem-note');
             const tx = el('div', 'mem-text', m.text || ''); tx.id = 'mem-' + m.id; t.append(tx);
             const bits = [];
-            if (waiting) bits.push('Waiting for an admin to keep it' + (m.by ? ', from ' + m.by : '') + '. Reactor does not read it yet');
+            /* Two states as tags, not sentences (copy plan, Memory #10 and #11). */
+            if (waiting) k.append(el('span', 'lbl-chip warn', 'Waiting for an admin'));
             if (m.type === 'followup' && m.status !== 'open' && !waiting) bits.push((m.status === 'done' ? 'Done' : 'Dismissed') + ' ' + fmtDate(m.updated || m.created) + (m.closed_by === 'chat' ? ' in chat' : ''));
             if (m.edited) bits.push('corrected');
-            if (!waiting && !sent.has(m.id) && !(m.type === 'followup' && m.status !== 'open')) bits.push('not read with answers: older than the newest ' + memInject + ' of its kind');
+            if (!waiting && !sent.has(m.id) && !(m.type === 'followup' && m.status !== 'open')) k.append(el('span', 'lbl-chip note', 'Not read with answers'));
             if (m.status === 'dismissed' && m.type !== 'followup') bits.push('dismissed');
             if (bits.length) t.append(el('div', 'mem-meta', cap(bits.join(' · '))));
             const fromWord = MEM_FROM[m.source] || (m.source ? cap(m.source) : 'Added here');
@@ -11908,13 +11923,9 @@ Projected Image UK"></textarea>
         function renderMemory() {
             const box = $('memory-content'); box.innerHTML = '';
             box.classList.toggle('no-intro', !firstPaint('memory'));
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.bookmark;
-            const htext = el('div'); htext.append(el('h2', null, 'Memory'),
-                el('p', null, 'What Reactor keeps in mind with every answer: what it learned from your website, and the notes it keeps from chat or that '
-                    + (canEditInstructions() ? 'you add here. Correct or remove anything.' : 'an admin adds here.')));
             /* Under the header every block is a card the grid can move, each
-               spanning the row; the empty action slot is where Customize goes. */
-            hero.append(badge, htext, heroAct('')); box.append(hero);
+               spanning the row; the header's action slot is where Customize goes. */
+            box.append(pageHead({ view: 'memory', title: 'Memory', line: 'What Reactor remembers with every answer.' }));
             memHost.knowledge = widget(el('div', 'card know'), 'knowledge', 'full', 'Store knowledge');
             memHost.impact = widget(el('div', 'card impact-card'), 'impact', 'full', 'Tracked changes');
             memHost.notes = widget(el('div', 'card mem-card-list'), 'notes', 'full', 'Notes');
@@ -12135,11 +12146,8 @@ Projected Image UK"></textarea>
         function renderSkills() {
             const box = $('skills-content'); box.innerHTML = '';
             box.classList.toggle('no-intro', !firstPaint('skills'));
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.book;
-            const ht = el('div'); ht.append(el('h2', null, 'Skills'),
-                el('p', null, 'Instructions and playbooks Reactor follows: a brand voice, a discount policy, how to answer a trade enquiry. ' + (canEditInstructions() ? 'Write one here' + (skillCaps.upload ? ' or upload a Markdown file' : '') + '. ' : 'An admin writes them here. ') + 'Reactor picks the ones that fit each question, in chat, in reports and in email drafts, and says under each answer which it followed.'));
-            /* The empty action slot is where Customize goes. */
-            hero.append(badge, ht, heroAct('')); box.append(hero);
+            /* The header's action slot is where Customize goes. */
+            box.append(pageHead({ view: 'skills', title: 'Skills', line: 'Playbooks Reactor follows in chat, reports and email drafts.' }));
             skHost.card = widget(el('div', 'card sk-card'), 'saved', 'full', 'Skills');
             skHost.use = widget(el('div', 'card sk-use'), 'usage', 'full', 'How they are used');
             box.append(skHost.card, skHost.use);
@@ -12167,20 +12175,28 @@ Projected Image UK"></textarea>
             if (card.hidden) return;
             const head = el('div', 'card-head');
             const chars = skills.reduce((n, x) => n + String(x.content || '').length, 0);
-            head.append(el('h3', 'card-title', 'How they are used'),
-                el('p', 'card-desc', 'With each question Reactor reads in full the skills that fit it best, up to ' + nf(skillCaps.inject)
-                    + ' characters in all, and any marked for every answer. A skill too long for that is given as what it asks, its headings and the parts that fit: in chat Reactor reads the section it needs, and reports and email drafts get the parts that match. The titles of the rest are there for chat to open when one fits. Yours come to ' + nf(chars) + ' characters.'));
+            /* How skills are read, and the two lines of advice, word for word
+               behind the title's info button (copy plan, Skills #4, #6, #7). */
+            const ut = el('h3', 'card-title', 'How they are used');
+            const uHelp = ['With each question Reactor reads in full the skills that fit it best, up to ' + nf(skillCaps.inject)
+                    + ' characters in all, and any marked for every answer. A skill too long for that is given as what it asks, its headings and the parts that fit: in chat Reactor reads the section it needs, and reports and email drafts get the parts that match. The titles of the rest are there for chat to open when one fits. Yours come to ' + nf(chars) + ' characters.'];
+            head.append(ut);
             card.append(head);
             const used = skills.filter(x => Number(x.used || 0) > 0).sort((a, b) => (b.used || 0) - (a.used || 0));
             const never = skills.filter(x => !Number(x.used || 0));
             const unread = skills.filter(x => !x.reading || x.reading.stale);
             const facts = el('dl', 'sk-facts');
             const fact = (k, v) => { facts.append(el('dt', null, k), el('dd', null, v)); };
-            fact('Followed most', used.length ? used.slice(0, 3).map(x => x.title + ' (' + x.used + ')').join(', ') : 'None yet: answers name the skills they follow from now on.');
-            if (never.length && used.length) fact('Not followed yet', never.slice(0, 5).map(x => x.title).join(', ') + (never.length > 5 ? ' and ' + (never.length - 5) + ' more' : '')
-                + '. A clear note of when each applies helps Reactor see where one fits, or pick it with Skills when you ask.');
-            if (unread.length) fact('Not read by Reactor', unread.slice(0, 5).map(x => x.title).join(', ') + (unread.length > 5 ? ' and ' + (unread.length - 5) + ' more' : '')
-                + '. Having it read shows you what Reactor will do with each, and gives it a short version to use when a skill is too long to show in full.');
+            fact('Followed most', used.length ? used.slice(0, 3).map(x => x.title + ' (' + x.used + ')').join(', ') : 'None yet');
+            if (never.length && used.length) {
+                fact('Not followed yet', never.slice(0, 5).map(x => x.title).join(', ') + (never.length > 5 ? ' and ' + (never.length - 5) + ' more' : ''));
+                uHelp.push('A clear note of when each applies helps Reactor see where one fits, or pick it with Skills when you ask.');
+            }
+            if (unread.length) {
+                fact('Not read by Reactor', unread.slice(0, 5).map(x => x.title).join(', ') + (unread.length > 5 ? ' and ' + (unread.length - 5) + ' more' : ''));
+                uHelp.push('Having it read shows you what Reactor will do with each, and gives it a short version to use when a skill is too long to show in full.');
+            }
+            ut.append(infoButton('How skills are used', { title: 'How they are used', body: uHelp }));
             card.append(facts);
         }
         function skillsDirty() {
@@ -12198,10 +12214,11 @@ Projected Image UK"></textarea>
             const card = skHost.card; if (!card) return;
             card.replaceChildren();
             const head = el('div', 'card-head');
-            head.append(el('h3', 'card-title', 'Your skills' + (skills.length ? ' (' + skills.length + ')' : '')),
-                el('p', 'card-desc', 'Rules and playbooks, each with a title and a note of when it applies.'
+            const yt = el('h3', 'card-title', 'Your skills' + (skills.length ? ' (' + skills.length + ')' : ''));
+            yt.append(infoButton('About skills', { title: 'Your skills', body: 'Rules and playbooks, each with a title and a note of when it applies.'
                     + (skillCaps.upload ? ' Drop Markdown files here to add them.' : '')
-                    + (canEditInstructions() ? '' : ' Only an admin can add, change or delete a skill.')));
+                    + (canEditInstructions() ? '' : ' Only an admin can add, change or delete a skill.') }));
+            head.append(yt);
             const acts = el('div', 'card-act');
             const up = el('button', 'btn btn-sm'); up.type = 'button';
             up.append(ico(I.upload), document.createTextNode('Upload Markdown'));
@@ -12229,9 +12246,8 @@ Projected Image UK"></textarea>
             if (skView.uploads) card.append(skillUploads());
             if (skView.adding) card.append(skillEditor(null));
             if (!skills.length) {
-                if (!skView.adding && !skView.uploads) card.append(el('div', 'empty', canEditInstructions()
-                    ? 'No skills yet. Write one' + (skillCaps.upload ? ', or upload a Markdown file' : '') + '. Ideas: a brand voice guide, a discounting policy, an SEO checklist, or how to answer a trade enquiry.'
-                    : 'No skills yet. An admin can write one: a brand voice guide, a discounting policy, or how to answer a trade enquiry.'));
+                /* One line; New skill and Upload are the card head's (copy plan, Skills #3). */
+                if (!skView.adding && !skView.uploads) card.append(emptyState({ icon: I.book, text: 'No skills yet.' }));
                 return;
             }
             if (skills.length > 4) {
@@ -29580,8 +29596,7 @@ Projected Image UK"></textarea>
                    to try again: it was a bare red strip and nothing else. */
                 if (teamCache) { renderTeam(); toastError('The team could not be refreshed. ' + (e.message || '')); return; }
                 box.innerHTML = '';
-                const hero = el('div', 'ov-hero'); const ht = el('div'); ht.append(el('h2', null, 'Team')); hero.append(ht);
-                box.append(hero, loadFailure('The team could not be read. ' + (e.message || ''), loadTeam));
+                box.append(pageHead({ view: 'team', title: 'Team' }), loadFailure('The team could not be read. ' + (e.message || ''), loadTeam));
             }
         }
         const TEAM_AREAS = [['production', 'Production'], ['dispatch', 'Dispatch'], ['files', 'Files'],
@@ -29590,15 +29605,7 @@ Projected Image UK"></textarea>
         function renderTeam() {
             const box = $('team-content'); box.innerHTML = '';
             const d = teamCache;
-            const hero = el('div', 'ov-hero');
-            const badge = el('div', 'badge'); badge.innerHTML = I.userCheck;
-            const ht = el('div');
-            ht.append(el('h2', null, 'Team'),
-                el('p', null, 'The app\'s own accounts, and what everyone has been doing. Each '
-                    + 'person signs in with their own username and password; their actions are '
-                    + 'recorded under their name.'));
-            hero.append(badge, ht);
-            box.append(hero);
+            box.append(pageHead({ view: 'team', title: 'Team', line: 'Who can sign in, and what everyone has done.' }));
             box.append(tabStrip([['people', 'People'], ['work', 'Work'], ['activity', 'Activity']], teamSeg,
                                 (k) => { teamSeg = k; renderTeam(); }, { label: 'Team sections' }));
             const host = el('div'); box.append(host);
@@ -29641,8 +29648,15 @@ Projected Image UK"></textarea>
                the one action on the right, and the rows edge to edge. */
             const card = el('div', 'card');
             const head = el('div', 'card-head');
-            head.append(el('h3', 'card-title', 'People (' + d.users.length + ')'));
-            head.append(el('p', 'card-desc', 'Who can sign in, what each may open, and what they have been doing.'));
+            /* The security note, word for word, behind the title (copy plan,
+               Team #2 and #3). */
+            const pt = el('h3', 'card-title', 'People (' + d.users.length + ')');
+            pt.append(infoButton('About accounts', { title: 'People', body:
+                'Accounts belong to the app, not Shopify. New accounts get a starter password '
+                + 'shown once; everyone chooses their own on first sign-in. Tabs controls which '
+                + 'parts of the app an account can open; it is enforced by the server, not '
+                + 'just hidden.' }));
+            head.append(pt);
             const act = el('div', 'card-act');
             const add = el('button', 'btn btn-sm btn-primary'); add.append(ico(I.plus), document.createTextNode('New account'));
             add.onclick = () => { teamNewOpen = !teamNewOpen; renderTeam(); };
@@ -29954,13 +29968,6 @@ Projected Image UK"></textarea>
                 }
             });
             card.append(list);
-            /* The note belongs to the card, under its list and at the prose
-               measure: outside it ran as one 1,300px line of 12px text. */
-            card.append(el('p', 'card-sub tm-foot',
-                'Accounts belong to the app, not Shopify. New accounts get a starter password '
-                + 'shown once; everyone chooses their own on first sign-in. Tabs controls which '
-                + 'parts of the app an account can open; it is enforced by the server, not '
-                + 'just hidden.'));
             host.append(card);
         }
         function renderTeamWork(host) {
@@ -29977,11 +29984,13 @@ Projected Image UK"></textarea>
                 /* Cards, as the People tab is: a titled head over each list,
                    hours as a table rather than one run-on line, and the payroll
                    export in the sessions card's own head with its dates named. */
+                /* A card's rule is its title's info button (copy plan, Team #6). */
                 const cardOf = (title, desc, act) => {
                     const c = el('div', 'card');
                     const h = el('div', 'card-head');
-                    h.append(el('h3', 'card-title', title));
-                    if (desc) h.append(el('p', 'card-desc', desc));
+                    const ct = el('h3', 'card-title', title);
+                    if (desc) ct.append(infoButton(title, { title: title, body: desc }));
+                    h.append(ct);
                     if (act) { const a2 = el('div', 'card-act'); a2.append(act); h.append(a2); }
                     c.append(h); wrap.append(c); return c;
                 };
@@ -30007,11 +30016,10 @@ Projected Image UK"></textarea>
                     openList.append(row);
                 });
                 c1.append(openList);
-                const c2 = cardOf('Hours per person');
+                const c2 = cardOf('Hours per person', 'Set someone\'s role to Part-time and the clock '
+                    + 'appears for them the next time they open the app.');
                 const uids = Object.keys(d.totals);
-                if (!uids.length) c2.append(el('div', 'empty',
-                    'No part-time accounts yet. Set someone\'s role to Part-time and the clock '
-                    + 'appears for them the next time they open the app.'));
+                if (!uids.length) c2.append(el('div', 'empty', 'No part-time accounts yet.'));
                 else {
                     const bleed = el('div', 'card-bleed');
                     bleed.append(fcTable(['Person', 'Today', 'This week', 'This month', 'Sessions', 'Average'],
@@ -30080,8 +30088,9 @@ Projected Image UK"></textarea>
                toolbar, the note as its description, then the feed. */
             const card = el('div', 'card');
             const head = el('div', 'card-head');
-            head.append(el('h3', 'card-title', 'Activity'));
-            head.append(el('p', 'card-desc', 'Newest first. The feed shows the last 600 actions; the full ledger keeps 8,000 and is in every backup.'));
+            const at = el('h3', 'card-title', 'Activity');
+            at.append(infoButton('How much is kept', { title: 'Activity', body: 'Newest first. The feed shows the last 600 actions; the full ledger keeps 8,000 and is in every backup.' }));
+            head.append(at);
             card.append(head, tableTools([whoSel, areaSel], []));
             host.append(card);
             const rows = (d.events || []).filter(e =>
