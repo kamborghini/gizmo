@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#ffffff" />
+    <meta name="theme-color" content="#121212" />
     <!--APPBRIDGE-->
     <title>Reactor</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -410,15 +410,15 @@
 
         /* ---------- Sidebar ---------- */
         .sidebar { width: var(--sidebar-w); flex-shrink: 0; position: relative; z-index: 2;
-            /* The reference's sidebar variant: one step darker than the page and
-               a hairline on its right edge. Folded away (Cmd+B, or the trigger)
-               it slides off by its own width and the page takes the room. */
-            background: var(--surface-primary); border-right: var(--bw-hairline) solid var(--border-default);
+            /* The mix: the sidebar is the ink frame itself, its words white at
+               72%, no edge. Folded away (Cmd+B, or Hide sidebar) it slides off
+               by its own width and the sheet takes the room. */
+            background: var(--surface-chrome); color: var(--nav-text);
             display: flex; flex-direction: column; transition: margin-left .2s ease; }
         @media (min-width: 901px) { body.sidebar-collapsed .sidebar { margin-left: calc(-1 * var(--sidebar-w)); } }
         /* Header, body, footer. The body is the one scroller, so a long list of
            conversations scrolls under a brand row and an account row that stay. */
-        .side-head { padding: var(--sp-2); flex: none; }
+        .side-head { padding: var(--sp-3) var(--sp-3) 0; flex: none; display: flex; align-items: center; gap: var(--control-gap); }
         .side-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
         .side-body { scrollbar-width: none; }
         /* More below the fold says so: with the scrollbar hidden, the menu
@@ -428,20 +428,22 @@
         /* A phone zooms the page into any field under 16px when it is tapped. */
         @media (pointer: coarse) { input:not([type=checkbox]):not([type=radio]), textarea, select { font-size: var(--text-md); } }
         .side-body::-webkit-scrollbar { display: none; }
-        .side-foot { padding: var(--sp-2); flex: none; display: flex; flex-direction: column; gap: var(--sp-2); }
-        .brand { display: flex; align-items: center; gap: var(--sp-2); width: 100%; height: var(--control-h); padding: 0 var(--sp-2);
-            border: 0; border-radius: var(--radius-row); background: transparent; color: var(--text-primary); text-align: left;
-            font-family: inherit; font-weight: var(--weight-medium); font-size: var(--text-md); letter-spacing: normal; cursor: pointer;
-            transition: background var(--dur) var(--ease); }
-        .brand:hover { background: var(--surface-tertiary); }
-        .brand:active { background: var(--surface-sunken); }
-        /* Projected Image's wordmark, then the product's own name after a
-           hairline: the company's tool, said once, at the top of every page. */
-        .brand .brand-mark { height: var(--box-md); width: auto; flex: none; display: block; }
-        .brand .brand-sep { width: var(--bw-hairline); align-self: stretch; margin: var(--sp-1-5) 0; background: var(--border-default); flex: none; }
+        .side-foot { padding: 0 var(--sp-3) var(--sp-3); flex: none; display: flex; flex-direction: column; gap: var(--sp-2); }
+        .brand { display: flex; align-items: center; gap: var(--control-gap); flex: 1; min-width: 0; height: var(--control-h); padding: 0 var(--sp-1);
+            border: 0; border-radius: var(--radius-row); background: transparent; color: var(--text-on-chrome); text-align: left;
+            font-family: inherit; cursor: pointer; transition: background var(--dur) var(--ease); }
+        .brand:hover { background: var(--chrome-fill); }
+        .brand:active { background: var(--chrome-press); }
+        /* The mix's mark: a 24 teal tile with a 4 corner, then the product's
+           name in the wordmark's Bricolage 600 at 16/20, white on the ink. */
+        .brand .brand-mark { width: var(--box-md); height: var(--box-md); flex: none; border-radius: var(--radius-tag); background: var(--action-primary); }
+        .brand-name { font-size: var(--text-md); line-height: var(--lh-control); font-weight: var(--weight-semibold); letter-spacing: var(--tr-title); }
+        /* Hide sidebar: the brand row's 28 ghost square. The top bar's menu
+           button brings the sidebar back, and opens the drawer on a phone. */
+        .side-hide { flex: none; }
         /* The reference's first group: one primary button, full width, with
            the same 8px inset as everything else in the column. */
-        .nav { padding: var(--sp-2); display: flex; flex-direction: column; gap: 0; }
+        .nav { padding: var(--sp-4) var(--sp-3) 0; display: flex; flex-direction: column; gap: 0; }
         /* 12px medium in muted ink, 32px tall with the same 8px inset as an
            item, so the label sits on the item grid rather than beside it. */
         /* The reference's Finance page puts Dashboard / Accounts / Transactions
@@ -486,40 +488,42 @@
         @media (max-width: 900px) { .coll-grid { grid-template-columns: 1fr; } }
         /* Foreground at 70% over the sidebar, which lands on this palette's
            --text-secondary. It was a step lighter, which let the groups fade out. */
-        .nav-group { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--text-secondary);
-            height: var(--control-h); display: flex; align-items: center; padding: 0 var(--sp-2);
-            /* Two groups' 8px paddings meet between them in the reference: 16. */
-            margin-top: var(--sp-4);
-            /* A toggle, as the reference's collapsible group label is: the
-               whole row, the group's own type, a muted pill under the pointer. */
+        /* A group head is a caption in muted white, 16 between groups and 4
+           above its first row. It stays the fold toggle Cameron asked for: the
+           whole row, a caret that turns, the choice remembered. */
+        .nav-group { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--nav-muted);
+            height: var(--control-h-sm); display: flex; align-items: center; padding: 0 var(--sp-2);
+            margin-top: var(--sp-4); margin-bottom: var(--sp-1);
             width: 100%; background: none; border: 0; border-radius: var(--radius-row); text-align: left;
             font-family: inherit; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease); }
-        .nav-group:hover { background: var(--surface-tertiary); color: var(--text-primary); }
+        .nav-group:hover { background: var(--chrome-fill); color: var(--text-on-chrome); }
         .nav-group:first-child { margin-top: 0; }
         /* The chevron points right when the group is folded and turns to
-           point down when it is open, the reference's own cue. */
-        .nav-group .nav-caret { margin-left: auto; display: grid; place-items: center; color: var(--text-tertiary);
+           point down when it is open: a 14 inline glyph at stroke 2. */
+        .nav-group .nav-caret { margin-left: auto; display: grid; place-items: center; color: var(--nav-muted);
             transition: transform var(--dur) var(--ease); }
-        .nav-group .nav-caret svg { width: var(--sp-4); height: var(--sp-4); display: block; }
+        .nav-group .nav-caret svg { width: var(--icon-sm); height: var(--icon-sm); display: block; stroke-width: var(--icon-stroke-s); }
         .nav-group[aria-expanded="true"] .nav-caret { transform: rotate(90deg); }
         .nav-sect[hidden] { display: none; }
         /* 32px, and an INACTIVE item is full-strength ink at normal weight -
            the reference does not dim the places you are not. Position is marked
            by the pill and the weight, not by greying everything else out, which
            is what made this sidebar read washed out beside the reference's. */
-        .nav-item { display: flex; align-items: center; gap: var(--sp-2); height: var(--control-h); padding: 0 var(--sp-2);
-            border-radius: var(--radius-row); border: 0; background: transparent; color: var(--text-primary);
-            font-size: var(--text-sm); font-weight: var(--weight-regular); width: 100%; text-align: left;
+        .nav-item { display: flex; align-items: center; gap: var(--gap-row-icon); height: var(--control-h); padding: 0 var(--sp-2);
+            border-radius: var(--radius-row); border: 0; background: transparent; color: var(--nav-text);
+            font-size: var(--text-body); line-height: var(--lh-control); font-weight: var(--weight-medium); width: 100%; text-align: left; white-space: nowrap;
             /* Brought into view clear of the sidebar's fade below. */
             scroll-margin-block: var(--sp-8);
             transition: background var(--dur) var(--ease), color var(--dur) var(--ease); }
-        .nav-item:hover { background: var(--surface-tertiary); color: var(--text-primary); }
-        .nav-item:active { background: var(--surface-sunken); }
-        .nav-item:is(.active, [aria-current="page"]) { background: var(--action-selected); color: var(--text-brand); font-weight: var(--weight-medium); box-shadow: none; }
-        .nav-item svg { width: var(--icon-md); height: var(--icon-md); flex-shrink: 0; opacity: 1; }
-        .nav-item:is(.active, [aria-current="page"]) svg { color: var(--text-brand); }
-        .convo-head { display: flex; align-items: center; justify-content: space-between; height: var(--control-h); padding: 0 var(--sp-2); margin: var(--sp-4) var(--sp-2) 0; }
-        .convo-head span { font-size: var(--text-xs); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-secondary); }
+        .nav-item:hover { background: var(--chrome-fill); color: var(--text-on-chrome); }
+        .nav-item:active { background: var(--chrome-press); }
+        /* Where you are: teal at 18% on the ink, white words, a teal icon.
+           Every other row keeps its 72% white; nothing else is dimmed. */
+        .nav-item:is(.active, [aria-current="page"]) { background: var(--nav-on-bg); color: var(--text-on-chrome); font-weight: var(--weight-medium); box-shadow: none; }
+        .nav-item svg { width: var(--icon-md); height: var(--icon-md); flex-shrink: 0; opacity: 1; color: var(--nav-muted); }
+        .nav-item:is(.active, [aria-current="page"]) svg { color: var(--nav-on-icon); }
+        .convo-head { display: flex; align-items: center; justify-content: space-between; height: var(--control-h); padding: 0 var(--sp-2); margin: var(--sp-4) var(--sp-3) 0; }
+        .convo-head span { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--nav-muted); }
         .icon-btn { border: 0; background: transparent; color: var(--text-tertiary); padding: var(--sp-1); border-radius: var(--radius-control);
             min-width: var(--control-h-md); min-height: var(--control-h-md); display: grid; place-items: center; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
         .icon-btn:hover { background: var(--surface-tertiary); color: var(--text-primary); }
@@ -528,50 +532,67 @@
         .convo-head .icon-btn { margin-right: calc(-1 * var(--sp-1-5)); }
         .icon-btn[aria-disabled="true"], .icon-btn:disabled { background: transparent; color: var(--text-disabled); cursor: not-allowed; }
         .icon-btn svg { width: var(--icon-md); height: var(--icon-md); }
-        .convos { flex: none; padding: 0 var(--sp-2) var(--sp-2); display: flex; flex-direction: column; gap: 0; }
+        /* On the ink a sidebar icon button is a 28 ghost square in muted
+           white, white under the pointer. */
+        .sidebar .icon-btn { min-width: var(--control-h-md); min-height: var(--control-h-md); color: var(--nav-muted); }
+        .sidebar .icon-btn:hover { background: var(--chrome-fill); color: var(--text-on-chrome); }
+        .sidebar .icon-btn:active { background: var(--chrome-press); }
+        .convos { flex: none; padding: 0 var(--sp-3) var(--sp-3); display: flex; flex-direction: column; gap: 0; }
         .convo-head[hidden], .convos[hidden] { display: none; }
         .convo-rows { display: flex; flex-direction: column; }
         .convo-filter { margin: var(--sp-1) 0 var(--sp-2); width: 100%; }
-        .convo-band { font-size: var(--text-xs); color: var(--text-tertiary); padding: var(--sp-2) var(--sp-2) var(--sp-1); }
+        .convo-band { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--nav-muted); padding: var(--sp-2) var(--sp-2) var(--sp-1); }
         .convo-busy { display: grid; place-items: center; flex: none; }
-        .convo-dot { width: var(--sp-2); height: var(--sp-2); border-radius: var(--radius-circle); background: var(--fill-mark); flex: none; }
-        .convo { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-2); border-radius: var(--radius-row); color: var(--text-secondary);
-            font-size: var(--text-sm); cursor: pointer; border: 0; background: transparent; width: 100%; text-align: left; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
-        .convo:hover { background: var(--surface-tertiary); color: var(--text-primary); }
-        .convo:active { background: var(--surface-sunken); }
-        .convo:is(.active, [aria-current="true"]) { background: var(--action-selected); color: var(--text-brand); font-weight: var(--weight-medium); }
+        .convo-dot { width: var(--sp-2); height: var(--sp-2); border-radius: var(--radius-circle); background: var(--nav-on-icon); flex: none; }
+        .convo { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--control-h); padding: 0 var(--sp-2); border-radius: var(--radius-row); color: var(--nav-text);
+            font-size: var(--text-body); line-height: var(--lh-control); cursor: pointer; border: 0; background: transparent; width: 100%; text-align: left; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
+        .convo:hover { background: var(--chrome-fill); color: var(--text-on-chrome); }
+        .convo:active { background: var(--chrome-press); }
+        .convo:is(.active, [aria-current="true"]) { background: var(--nav-on-bg); color: var(--text-on-chrome); font-weight: var(--weight-medium); }
         .convo .title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
             border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
             /* The padding is the hit area the whole-row button used to give;
                the negative margin cancels its effect on the row height. */
             padding: var(--sp-2); margin: calc(-1 * var(--sp-2)) 0 calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2)); }
-        .convo .del { opacity: 0; color: var(--text-tertiary); padding: var(--sp-1); border-radius: var(--radius-control); display: grid; place-items: center; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease);
+        .convo .del { opacity: 0; color: var(--nav-muted); padding: var(--sp-1); border-radius: var(--radius-control); display: grid; place-items: center; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease);
             border: 0; background: transparent; min-width: var(--control-h-sm); min-height: var(--control-h-sm); }
         .convo .del svg { width: var(--icon-sm); height: var(--icon-sm); }
         .convo:hover .del, .convo:focus-within .del { opacity: .65; }
         /* Hover-reveal alone leaves the trash invisible but still tappable. */
         @media (hover: none) { .convo .del { opacity: .65; } }
         .convo .del:hover { opacity: 1; color: var(--error); background: var(--error-bg); }
-        .convo-empty { color: var(--text-tertiary); font-size: var(--text-xs); padding: var(--sp-2) var(--sp-2); }
+        .convo-empty { color: var(--nav-muted); font-size: var(--text-xs); line-height: var(--lh-caption); padding: var(--sp-2) var(--sp-2); }
         /* The account row: a 48px button, the reference's NavUser. Avatar tile,
            name over role, a menu glyph on the right; the menu holds what were
            three loose buttons in the old footer strip. */
-        .side-user { display: flex; align-items: center; gap: var(--sp-2); width: 100%; height: 48px; padding: var(--sp-2);
-            border: 0; border-radius: var(--radius-row); background: transparent; color: var(--text-primary);
+        /* The account: a 44 row, a 24 round initial on the chrome fill, the
+           name in white over the role in muted white, and the menu glyph. */
+        .side-user { display: flex; align-items: center; gap: var(--control-gap); width: 100%; height: var(--row-h); padding: 0 var(--sp-0-5) 0 var(--sp-1);
+            border: 0; border-radius: var(--radius-row); background: transparent; color: var(--text-on-chrome);
             font: inherit; text-align: left; cursor: pointer; transition: background var(--dur) var(--ease); }
-        .side-user:hover, .side-user[aria-expanded="true"] { background: var(--surface-tertiary); }
-        .side-user:active { background: var(--surface-sunken); }
-        .side-avatar { width: var(--control-h); height: var(--control-h); flex: none; border-radius: var(--radius-circle);
-            background: var(--surface-sunken); color: var(--text-secondary); display: grid; place-items: center;
-            font-size: var(--text-sm); font-weight: var(--weight-medium); }
-        .side-user-text { flex: 1; min-width: 0; display: grid; gap: var(--sp-0-5); line-height: var(--lh-tight); }
-        .side-user-name { font-size: var(--text-sm); font-weight: var(--weight-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .side-user-role { font-size: var(--text-xs); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .side-user-more { margin-left: auto; color: var(--text-tertiary); display: grid; place-items: center; flex: none; }
+        .side-user:hover, .side-user[aria-expanded="true"] { background: var(--chrome-fill); }
+        .side-user:active { background: var(--chrome-press); }
+        .side-avatar { width: var(--box-md); height: var(--box-md); flex: none; border-radius: var(--radius-circle);
+            background: var(--chrome-fill); color: var(--text-on-chrome); display: grid; place-items: center;
+            font-size: var(--text-micro); line-height: var(--lh-caption); font-weight: var(--weight-medium); }
+        .side-user-text { flex: 1; min-width: 0; display: grid; gap: 0; }
+        .side-user-name { font-size: var(--text-body); line-height: var(--lh-control); font-weight: var(--weight-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .side-user-role { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--nav-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .side-user-more { margin-left: auto; color: var(--nav-muted); display: grid; place-items: center; flex: none; width: var(--control-h-md); height: var(--control-h-md); }
         .side-user-more svg { width: var(--icon-md); height: var(--icon-md); }
 
         /* ---------- Main ---------- */
         .main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+        /* THE INK FRAME (the mix, spec 5). The chrome is ink; the page is one
+           white sheet 8 inside it with a 12 corner, no edge and no shadow.
+           Screen only: a report printed to PDF keeps its plain white page. */
+        @media screen {
+            #app { background: var(--surface-chrome); }
+            .main { margin: var(--frame-inset) var(--frame-inset) var(--frame-inset) 0; border-radius: var(--radius-sheet);
+                background: var(--surface-primary); overflow: hidden; }
+        }
+        /* With the sidebar folded away the frame closes round the sheet's left edge too. */
+        @media screen and (min-width: 901px) { body.sidebar-collapsed .main { margin-left: var(--frame-inset); } }
         .topbar { height: var(--topbar-h); flex-shrink: 0; border-bottom: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary);
             display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--wrap-pad); position: relative; z-index: 5; }
         /* One line, always. A conversation title is user-written and can run to
@@ -582,6 +603,10 @@
             min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .topbar .spacer { flex: 1; }
         .menu-btn { display: inline-grid; }
+        /* On a desk the sidebar's own Hide sidebar is in view, so the top bar's
+           trigger steps aside until the sidebar is folded away. On a phone it
+           is the drawer's only door. */
+        @media (min-width: 901px) { body:not(.sidebar-collapsed) .menu-btn { display: none; } }
         /* Its glyph, not its box, sits on the page's text edge, as the
            Conversations + does on the sidebar's icon column. */
         .topbar .menu-btn { margin-left: calc(-1 * var(--sp-1-5)); }
@@ -2679,7 +2704,7 @@
         /* Updates: release notes and the request box. */
         /* The sidebar's one inset, 12px from each edge, is kept by .nav,
            .convos and both buttons above. */
-        .nav-new-dot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); background: var(--fill-mark);
+        .nav-new-dot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); background: var(--nav-on-icon);
             flex: none; margin-left: auto; }
         /* Beta: quieter than a warning, louder than nothing. It sits where the
            unread dot sits, so the nav keeps one right-hand column. */
@@ -2703,15 +2728,16 @@
             font-weight: var(--weight-medium); text-decoration: none; box-shadow: var(--shadow-lg); }
         .skip-link:focus { transform: translateY(0); }
         #main:focus { outline: none; }
-        .beta-tag { margin-left: auto; flex: none; height: var(--tag-h); display: inline-flex; align-items: center; font-size: var(--text-xs); font-weight: var(--weight-medium);
-            letter-spacing: normal; text-transform: none; color: var(--text-secondary); background: var(--surface-sunken);
-            border: 0; border-radius: var(--radius-tag); padding: 0 var(--sp-1-5); line-height: var(--lh-none); }
-        .nav-item:is(.active, [aria-current="page"]) .beta-tag { color: var(--text-brand); background: var(--surface-primary); }
-        /* In a page heading it sits on the baseline of the title, not above it. */
-        .ov-hero .beta-tag { margin-left: var(--sp-2); vertical-align: middle; position: relative; top: -2px; }
+        /* Beta is a word, not a box (the mix, spec 5): micro type after the
+           name, muted white in the sidebar, ink-3 beside a page title. */
+        .beta-tag { margin-left: auto; flex: none; display: inline; font-family: var(--font-sans); font-size: var(--text-micro); line-height: var(--lh-caption);
+            font-weight: var(--weight-medium); letter-spacing: normal; text-transform: none; color: var(--nav-muted); background: none;
+            border: 0; padding: 0; }
+        .nav-item:is(.active, [aria-current="page"]) .beta-tag { color: var(--nav-text); }
+        .ov-hero .beta-tag { margin-left: 0; color: var(--text-tertiary); }
         /* In the top bar and on a Finance tab it follows the name with a gap:
            margin-left:auto is 0 in inline flow, so it read 'CRMBeta'. */
-        #view-title .beta-tag { margin-left: var(--sp-2); vertical-align: middle; }
+        #view-title .beta-tag { margin-left: var(--sp-2); color: var(--text-tertiary); }
         /* A release is a section: its title a heading, the date quiet beside
            it, the notes under it. The headline was 12px grey beside a bolder
            date, and every release ever sat open in one 30,000px card. */
@@ -5020,7 +5046,7 @@
            classes did this job at five heights with four edge styles; each keeps
            its own tint below, and nothing else. The owner chip on a tinted inbox
            row keeps its hairline, which is what carries its contrast there. */
-        :is(.pill, .kbadge, .lbl-chip, .beta-tag, .crm-prio, .crm-chip, .mail-order-stage, .g-badge,
+        :is(.pill, .kbadge, .lbl-chip, .crm-prio, .crm-chip, .mail-order-stage, .g-badge,
             .mcount, .mail-crmchip, .crm-badge, .resp-head .tag, .stat .delta, .prod-chip .cmp, .chart-head .cd) {
             display: inline-flex; align-items: center; gap: var(--sp-1); height: var(--tag-h); padding: 0 var(--sp-1-5);
             font-size: var(--text-xs); font-weight: var(--weight-medium); line-height: var(--lh-none); letter-spacing: normal;
@@ -5064,7 +5090,8 @@
             <!-- Header, scrolling body, footer: the three parts of the reference's
                  sidebar. The brand is a button like its logo row, and it goes home. -->
             <div class="side-head">
-                <button class="brand" id="brand-home" type="button" aria-label="Reactor, by Projected Image: go to the Overview"><img class="brand-mark" src="/brand/logo.svg" alt="Projected Image" width="144" height="40" /><span class="brand-sep" aria-hidden="true"></span><span class="brand-name">Reactor</span></button>
+                <button class="brand" id="brand-home" type="button" aria-label="Reactor, by Projected Image: go to the Overview"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Reactor</span></button>
+                <button class="icon-btn side-hide" id="side-hide" type="button" title="Hide sidebar" aria-label="Hide sidebar" aria-keyshortcuts="Meta+B" aria-controls="sidebar" aria-expanded="true"></button>
             </div>
             <div class="side-body">
                 <div class="nav" role="navigation" aria-label="Sections">
@@ -5561,6 +5588,7 @@ Projected Image UK"></textarea>
         $('brand-home').onclick = () => setView('overview');
         $('new-convo').innerHTML = I.plus;
         $('menu-btn').innerHTML = I.panelLeft;
+        $('side-hide').innerHTML = I.panelLeft;
         $('side-user-more').innerHTML = I.moreV;
         $('side-user').onclick = userMenu;
         $('topbar-search').append(ico(I.search), el('span', 'ts-label', 'Search'),
@@ -29421,6 +29449,11 @@ Projected Image UK"></textarea>
             }
             const closed = document.body.classList.toggle('sidebar-collapsed');
             $('menu-btn').setAttribute('aria-expanded', String(!closed));
+            $('side-hide').setAttribute('aria-expanded', String(!closed));
+            /* The button just pressed leaves the screen: focus follows to the
+               one that brings the sidebar back, or to Hide sidebar again. */
+            if (closed && document.activeElement === $('side-hide')) $('menu-btn').focus({ preventScroll: true });
+            if (!closed && document.activeElement === $('menu-btn')) $('side-hide').focus({ preventScroll: true });
             try { localStorage.setItem(LS_SIDEBAR, closed ? 'closed' : 'open'); } catch (e) {}
         }
         function inEditable(t) { return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable); }
@@ -29628,6 +29661,7 @@ Projected Image UK"></textarea>
             document.body.append(host);
         })();
         $('menu-btn').onclick = toggleSidebar; $('backdrop').onclick = closeSidebar;
+        $('side-hide').onclick = toggleSidebar;
         try { if (localStorage.getItem(LS_SIDEBAR) === 'closed') document.body.classList.add('sidebar-collapsed'); } catch (e) {}
         $('menu-btn').setAttribute('aria-expanded', String(!(document.body.classList.contains('sidebar-collapsed') || window.matchMedia('(max-width: 900px)').matches)));
         document.querySelector('.side-body').addEventListener('scroll', syncSideFade, { passive: true });
