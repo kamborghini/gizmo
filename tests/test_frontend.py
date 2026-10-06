@@ -2957,13 +2957,13 @@ def t_the_menu_and_tabs_are_the_reference_measurements():
     ok("padding: var(--sp-1) var(--sp-7) var(--sp-1) var(--sp-1-5)" in item, "with room on the right for a tick")
     ok("border-radius: calc(var(--radius-card) - var(--sp-1))" in item, "concentric inside the padded menu")
     tab = CSS.split("\n        .tab {")[1].split("}")[0]
-    ok("height: var(--control-h-sm)" in tab and "padding: var(--sp-0-5) 0" in tab, "tabs are 24px and as wide as their label")
+    ok("height: auto" in tab and "padding: 0" in tab, "a tab fills its 44 strip and is as wide as its label (the mix)")
     ok("background: none" in tab, "with no filled pill")
     on = CSS.split(".tab:is(.on, [aria-current=\"page\"], [aria-pressed=\"true\"]) {")[1].split("}")[0]
     ok("color: var(--text-primary)" in on and "background" not in on,
        "the live tab takes full ink and still no fill behind it")
     rule = CSS.split(".tab:is(.on, [aria-current=\"page\"], [aria-pressed=\"true\"])::after {")[1].split("}")[0]
-    ok("height: 2px" in rule, "and a 2px rule under it")
+    ok("height: var(--bw-strong)" in rule and "bottom: 0" in rule, "and a 2px rule under it, on the strip's own rule")
     ok("var(--fill-mark)" in rule, "painted in the brand's mark teal (3.85:1 on white), a colour that actually paints")
     ok("left: 0" in rule and "right: 0" in rule, "the width of the tab itself, as the reference draws it")
     ok(any("position: relative" in b for b in re.findall(r"\n        \.tab \{([^}]*)\}", CSS)),
@@ -3004,13 +3004,13 @@ def t_the_finance_pages_share_the_reference_tab_strip():
     ok("segmented(" not in fn, "the segmented control is gone from it")
     ok("opts.nav ? 'aria-current' : 'aria-pressed'" in SCRIPT, "and the live one says it is the current page")
     tab = CSS.split("\n        .tab {")[1].split("}")[0]
-    ok("height: var(--control-h-sm)" in tab and "padding: var(--sp-0-5) 0" in tab, "the small control height, one size for every tab")
-    ok("font-size: var(--text-sm)" in tab, "at 14px, bigger than a filter tab inside a card")
+    ok("height: auto" in tab and "padding: 0" in tab, "one 44 strip for every tab row (the mix)")
+    ok("font-size: var(--text-body)" in tab, "at the body's 13")
     ok("background: none" in tab, "with no pill")
     on = CSS.split(".tab:is(.on, [aria-current=\"page\"], [aria-pressed=\"true\"]) {")[1].split("}")[0]
     ok("color: var(--text-primary)" in on and "background" not in on, "the live page takes full ink, with no pill")
     rule = CSS.split(".tab:is(.on, [aria-current=\"page\"], [aria-pressed=\"true\"])::after {")[1].split("}")[0]
-    ok("height: 2px" in rule, "and carries the reference's 2px rule under it")
+    ok("height: var(--bw-strong)" in rule, "and carries a 2px rule under it")
     ok("var(--fill-mark)" in rule, "in the brand's mark teal, a colour that actually paints")
     ok("left: 0" in rule and "right: 0" in rule, "spanning the trigger's own width")
     ok(any("position: relative" in b for b in re.findall(r"\n        \.tab \{([^}]*)\}", CSS)),
@@ -9416,11 +9416,10 @@ def t_a_tab_strip_that_scrolls_on_a_phone_holds_its_underline():
     """Found in the phone sweep: the live tab's underline hangs 3px under the
     tab, and a strip that scrolls sideways counts that as overflow downwards
     too, so every tab strip on a phone carried a vertical scrollbar 3px tall."""
-    ok("bottom: -3px; height: 2px;" in CSS.split(".tab:is(.on, [aria-current=\"page\"], [aria-pressed=\"true\"])::after {")[1][:200],
-       "the underline hangs 3px under the tab")
-    phone = CSS.split("@media (max-width: 900px) {\n            .tabs {")[1].split("}")[0]
-    ok("overflow-x: auto" in phone and "overflow-y: hidden" in phone, "the strip scrolls sideways only")
-    ok("padding: var(--sp-1);" in phone, "with room inside it for the 3px underline")
+    rule = CSS.split(".tab:is(.on, [aria-current=\"page\"], [aria-pressed=\"true\"])::after {")[1][:240]
+    ok("bottom: 0; height: var(--bw-strong);" in rule, "the underline sits inside the strip (the mix), so nothing hangs under it")
+    tabs = CSS.split("\n        .tabs {")[1].split("}")[0]
+    ok("overflow-x: auto" in tabs and "overflow-y: hidden" in tabs, "the strip scrolls sideways only, on every screen")
 
 
 @test
@@ -9456,12 +9455,11 @@ def t_the_brand_pilot_review_findings_stay_fixed():
     # on a phone a track never wraps: it scrolls like a tab strip.
     ok("flex-wrap: nowrap; overflow-x: auto" in phone and ".wrapped" not in CSS and "segWrapWatch" not in SCRIPT,
        "and on a phone it scrolls rather than leaving a choice alone on a second line")
-    # The Finance strip lines up with the stamp beside it.
+    # The Finance strip lines up with the chooser beside it.
     ok(".page-tabs > .tabs { margin-bottom: 0; }" in CSS, "the Finance strip carries no space below it in its row")
-    # On a phone a scrolling strip holds the focus outline as well as the underline.
-    strip = CSS.split("@media (max-width: 900px) {\n            .tabs {")[1].split("}")[0]
-    ok("padding: var(--sp-1);" in strip and "margin: calc(-1 * var(--sp-1)) calc(-1 * var(--sp-1)) var(--sp-1)" in strip,
-       "room on every side for the 3px outline, taken back so the tabs do not move")
+    # A scrolling strip keeps the focus ring inside itself (the mix: drawn on ::before).
+    ok(".tab:focus-visible::before {" in CSS and "padding-inline: var(--sp-2); margin: 0 calc(-1 * var(--sp-2)) var(--sp-7);"
+       in CSS.split("\n        .tabs {")[1].split("}")[0], "room at each end for the focus ring, taken back so the tabs do not move")
     # Controls inside a title stay in the interface face.
     ok(".ov-hero h2 :is(button, input, select, textarea, label, .segmented, .tabs, .beta-tag) { font-family: var(--font-sans); }" in CSS,
        "Beta or a control beside a page title is not set in the title face")
@@ -9536,7 +9534,7 @@ def t_the_spacing_pass_holds():
        "the narrow-tile check is on the figure line, so the tile can still share rows")
     ok(".tbl-tools-l, .tbl-tools-r { display: contents; }" in CSS and ".tbl-tools .tbl-search { flex: 1 1 100%; }" in CSS,
        "a phone toolbar flows as one row: the search and a track take a line, short controls pair up")
-    ok(".ov-wrap > .tabs { min-height: var(--control-h-md); }" in CSS, "every page's strip sits in Finance's 28 row")
+    ok("min-height: var(--row-h)" in CSS.split("\n        .tabs {")[1].split("}")[0], "every page's strip is the one 44 row")
     ok("metrics-finance" not in CSS, "one figure card, not a Finance size of it")
     ok("@media (min-width: 641px) { .crm-pipeline > .crm-col { flex: 1 1 0; min-width: calc(var(--sp-8) * 4); } }" in CSS,
        "the pipeline's stages share the board instead of one sitting past its edge")
@@ -9872,9 +9870,10 @@ def t_the_page_header_wraps_sits_right_in_the_grid_stays_off_paper_and_syncs():
     ok(".ov-hero + :not(.tabs, .page-tabs)" not in CSS,
        "and the offset is not on whatever follows the header: that can be a one-column tile (it would sit lower than its row) or a hidden block")
     # (3)
-    ok(".ov-wrap.wgrid > .ov-hero + .tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm) - var(--sp-1)); }" in CSS
+    ok(".ov-wrap.wgrid > .ov-hero + .tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm)); }" in CSS
+       and "calc(var(--sp-5) - var(--page-rhythm) - var(--sp-1))" not in CSS
        and "calc(var(--sp-4) - var(--page-rhythm) - var(--sp-1))" not in CSS,
-       "at 900 and under the grid's tabs are 20 under the header too (the strip's own 4px comes out of it)")
+       "at 900 and under the grid's tabs are 20 under the header too: since the mix the strip carries no 4px padding to take back, so the one base rule serves every width")
     # (4)
     hide = "\n        .ph-sub > :is(.live-dot, .info) { display: none; }"
     ok(hide in CSS, "the live dot and the refresh glyph are hidden unless something says otherwise")
@@ -9954,6 +9953,39 @@ def t_a_field_is_the_mix_field():
     for rule in (".tbl-tools select {", "input.field-sm, select.field-sm {", ".tbl-rows select {", ".dpanel input, .dpanel select {"):
         ok("var(--control-h)" in CSS.split(rule)[1].split("}")[0] and "28px" not in CSS.split(rule)[1].split("}")[0]
            and "var(--control-h-md)" not in CSS.split(rule)[1].split("}")[0], rule + " is 32")
+
+
+@test
+def t_tabs_sit_on_a_rule_and_the_chosen_segment_is_white():
+    """Spec 5 and 6: tabs that move between sections sit on a full-width rule,
+    44 tall, as wide as their words and 24 apart, the live one in ink with a
+    2px teal-line underline. A segmented chooser is a 32 fill track whose chosen
+    segment is white with a teal-line ring and ink words. A count sits 8 after
+    its word; an icon-only choice still says its name."""
+    tabs = CSS.split("\n        .tabs {")[1].split("}")[0]
+    for prop in ("min-height: var(--row-h)", "box-shadow: var(--rule-b)", "gap: 0 var(--sp-6)", "align-items: stretch"):
+        ok(prop in tabs, ".tabs: " + prop)
+    tab = CSS.split("\n        .tab {")[1].split("}")[0]
+    ok("font-size: var(--text-body)" in tab and "color: var(--text-tertiary)" in tab and "padding: 0" in tab,
+       "a tab is its word, 13 at 500 in ink-3")
+    rule = CSS.split('.tab:is(.on, [aria-current="page"], [aria-pressed="true"])::after {')[1].split("}")[0]
+    ok("bottom: 0" in rule and "height: var(--bw-strong)" in rule and "var(--fill-mark)" in rule
+       and "border-radius: var(--radius-swatch) var(--radius-swatch) 0 0" in rule, "the underline sits on the rule, 2px, teal-line")
+    ok(".ov-wrap > .tabs { margin-inline: calc(-1 * var(--wrap-pad)); padding-inline: var(--wrap-pad); max-width: none; }" in CSS,
+       "a page's own strip runs edge to edge across the sheet")
+    ok(".ov-wrap > :is(.tabs, .page-tabs, .seg-row) { margin-bottom: var(--sp-7); }" in CSS, "and sits 32 above the body")
+    pt = CSS.split("\n        .page-tabs {")[1].split("}")[0]
+    ok("min-height: var(--row-h)" in pt and "box-shadow: var(--rule-b)" in pt, "a tab row with a chooser on its right is the same 44 on a rule")
+    seg = CSS.split("\n        .segmented {")[1].split("}")[0]
+    ok("background: var(--surface-tertiary)" in seg and "padding: var(--sp-0-5)" in seg, "the track is the fill, 2 in")
+    on = CSS.split('.segmented > button:is(.on, [aria-pressed="true"]) {')[1].split("}")[0]
+    ok("background: var(--surface-primary)" in on and "color: var(--text-primary)" in on and "box-shadow: var(--ring-chosen)" in on,
+       "the chosen segment is white, ink, with the teal-line ring")
+    cnt = CSS.split("\n        .cnt {")[1].split("}")[0]
+    ok("font-size: var(--text-xs)" in cnt and "color: var(--text-tertiary)" in cnt and "tabular-nums" in cnt, "a count is caption, ink-3, tabular")
+    fn = fn_src("function chooser(")
+    ok("if (o.n != null) b.append(el('span', 'cnt', String(o.n)));" in fn, "a choice can carry its count")
+    ok("if (o.icon) { b.append(ico(o.icon)); b.setAttribute('aria-label', o.label);" in fn, "and an icon-only choice keeps its name")
 
 
 if __name__ == "__main__":

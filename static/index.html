@@ -452,16 +452,15 @@
            them. Each still routes to its own view, so the permission that
            gates Reconciliation keeps working - the tab simply is not built
            for an account that cannot open it. */
-        .page-tabs { display: flex; align-items: center; gap: var(--sp-3);
-            flex-wrap: wrap; margin-bottom: var(--sp-6);
-            /* One height whether or not the row carries a button, so the
-               underline and the first block do not jump between tabs. */
-            min-height: var(--control-h-md); }
-        /* The strip shares its row with the stamp and Refresh, centred: its own
-           space below would lift its labels 6px above them. */
+        /* A tab row with the page's own chooser at its right (Forecast's Plan):
+           one 44 row on one full-width rule, the strip's own rule given up. */
+        .page-tabs { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6);
+            min-height: var(--row-h); box-shadow: var(--rule-b);
+            margin: 0 calc(-1 * var(--wrap-pad)) var(--sp-7); padding: 0 var(--wrap-pad); }
         .page-tabs > .tabs { margin-bottom: 0; }
+        .page-tabs > .tabs { margin: 0; padding: 0; box-shadow: none; align-self: stretch; min-height: 0; }
         .page-tabs .spacer { flex: 1 1 auto; }
-        .page-tabs-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); }
+        .page-tabs-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--control-gap); }
         /* On a phone, when the stamp and its buttons take a line of their own,
            the stamp starts at the page edge and the buttons sit at the right:
            the layout the page header's own rail has there. */
@@ -746,6 +745,8 @@
         .ov-wrap > .section-title { margin-bottom: var(--sp-3); }
         /* The page header sits 32 above the body, or 20 above its tabs (below). */
         .ov-wrap > .ov-hero { margin-bottom: var(--sp-7); }
+        /* A page's tab row sits 32 above the body. */
+        .ov-wrap > :is(.tabs, .page-tabs, .seg-row) { margin-bottom: var(--sp-7); }
         .ov-wrap > *:last-child { margin-bottom: 0; }
         /* A Run gate with more of the page after it (Customers' trade radar)
            keeps the page rhythm under it rather than touching the next card. */
@@ -1268,7 +1269,10 @@
         .ov-wrap.wgrid > .ov-hero:not(:has(+ :is(.tabs, .page-tabs, .queues))) { margin-bottom: calc(var(--sp-7) - var(--page-rhythm)); }
         /* A segment bar is as wide as its buttons in the flow; a grid item
            would stretch its track across the whole row. */
-        .ov-wrap.wgrid > :is(.tabs, .segmented) { justify-self: start; }
+        .ov-wrap.wgrid > .segmented { justify-self: start; }
+        /* In the grid a tab row still runs edge to edge, and its 32 to the body
+           is taken out of the grid's gap. */
+        .ov-wrap.wgrid > :is(.tabs, .page-tabs) { margin-inline: calc(-1 * var(--wrap-pad)); margin-bottom: calc(var(--sp-7) - var(--page-rhythm)); }
         /* A block with no box of its own (the page chat, a structured block,
            a plain wrapper marked widget-bare) let its first child's top margin
            and its last child's bottom margin fall into the page rhythm in the
@@ -4124,15 +4128,21 @@
         /* A tab is as wide as its label: the first starts on the page's text
            edge and the underline sits exactly under the word. The space between
            tabs is the strip's gap, not each tab's own padding. */
-        .tabs { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1) var(--sp-6); max-width: 100%; margin-bottom: var(--sp-3); }
-        /* In a card the card's own 16 gap spaces it, as it does a toolbar. */
+        /* THE TAB STRIP (the mix, spec 5): 44 tall on a full-width hairline, the
+           tabs as wide as their words and 24 apart, the live one in ink with a
+           2px teal-line underline sitting on the rule. It never wraps: on a
+           narrow screen it scrolls sideways, and the underline and the focus
+           ring are drawn inside it, so it never scrolls up and down. */
+        .tabs { display: flex; align-items: stretch; flex-wrap: nowrap; gap: 0 var(--sp-6); max-width: 100%; min-height: var(--row-h);
+            box-shadow: var(--rule-b); overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+            padding-inline: var(--sp-2); margin: 0 calc(-1 * var(--sp-2)) var(--sp-7); }
+        .tabs::-webkit-scrollbar { display: none; }
         .card > .tabs { margin-bottom: 0; }
-        /* The 28 row the Finance strip sits in, for every page's strip, so the
-           underline lands at one distance under every header. */
-        .ov-wrap > .tabs { min-height: var(--control-h-md); }
-        .tab { position: relative; display: inline-flex; align-items: center; gap: var(--control-gap);
-            height: var(--control-h-sm); padding: var(--sp-0-5) 0; border: 0; background: none;
-            border-radius: var(--radius-tag); font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium);
+        /* A page's own strip runs edge to edge across the sheet, its first tab on the gutter. */
+        .ov-wrap > .tabs { margin-inline: calc(-1 * var(--wrap-pad)); padding-inline: var(--wrap-pad); max-width: none; }
+        .tab { position: relative; display: inline-flex; align-items: center; gap: var(--control-gap); flex: none;
+            height: auto; padding: 0; border: 0; background: none;
+            border-radius: 0; font: inherit; font-size: var(--text-body); font-weight: var(--weight-medium);
             line-height: var(--lh-control); color: var(--text-tertiary); cursor: pointer; white-space: nowrap;
             transition: color var(--dur) var(--ease); }
         /* Hover is the ink alone: a grey box behind an underlined tab mixed two
@@ -4140,32 +4150,19 @@
         .tab:hover, .tab:active { color: var(--text-primary); }
         .tab:is(.on, [aria-current="page"], [aria-pressed="true"]) { color: var(--text-primary); }
         .tab:is(.on, [aria-current="page"], [aria-pressed="true"])::after { content: ""; position: absolute; left: 0; right: 0;
-            bottom: -3px; height: 2px; border-radius: var(--radius-full); background: var(--fill-mark); }
+            bottom: 0; height: var(--bw-strong); border-radius: var(--radius-swatch) var(--radius-swatch) 0 0; background: var(--fill-mark); }
+        /* Focus is a rounded box round the word, inside the strip. */
+        .tab:focus-visible { outline: 0; }
+        .tab:focus-visible::before { content: ""; position: absolute; inset: var(--sp-1) calc(-1 * var(--sp-2)); border-radius: var(--radius-control);
+            box-shadow: inset 0 0 0 var(--bw-strong) var(--fill-mark); pointer-events: none; }
         .tab .beta-tag { margin-left: 0; }
-        /* On a phone a long strip scrolls rather than cutting off its last tab,
-           and the Beta marks go (the sidebar still carries them). A strip that
-           scrolls sideways clips whatever hangs outside it, so it holds the 3px
-           underline and the 3px focus outline inside its own padding, taken
-           back by a negative margin so the tabs do not move, and never scrolls
-           up and down: left to itself it grew a scrollbar 3px tall beside
-           every strip. */
+        /* A count beside its word (a tab, a segment, a section head, a list row,
+           a menu row): caption at 500 in ink-3, tabular, 8 after the word. */
+        .cnt { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary);
+            font-variant-numeric: tabular-nums; }
+        /* On a phone the Beta marks go from the tabs: the sidebar still carries them. */
         @media (max-width: 900px) {
-            .tabs { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; padding: var(--sp-1);
-                margin: calc(-1 * var(--sp-1)) calc(-1 * var(--sp-1)) var(--sp-1); max-width: calc(100% + 2 * var(--sp-1)); }
-            .tab .beta-tag { display: none; }
-            .tabs { column-gap: var(--sp-4); }
-            /* A strip inside a card keeps the card's 16 gutter: its 4px padding,
-               which holds the outline, comes out of the gutter, not the border. */
-            .card > .tabs { margin: calc(-1 * var(--sp-1)) calc(var(--sp-4) - var(--sp-1));
-                max-width: calc(100% - 2 * (var(--sp-4) - var(--sp-1))); }
-            /* The page's own rhythm rule outranks the take-back above, so the
-               4px is taken back here too: the labels land where they do on a
-               desktop, and the first block the rhythm under them. In a row
-               (Finance) the strip's 4px top and bottom come out of the row. */
-            .ov-wrap:not(.wgrid) > .tabs { margin-top: calc(-1 * var(--sp-1)); margin-bottom: calc(var(--page-rhythm) - var(--sp-1)); }
-            .ov-wrap > .tabs { min-height: calc(var(--control-h-md) + 2 * var(--sp-1)); }
-            .ov-wrap.wgrid > .ov-hero + .tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm) - var(--sp-1)); }
-            .page-tabs > .tabs { margin-block: calc(-1 * var(--sp-1)); } }
+            .tab .beta-tag { display: none; } }
         /* align-self: a card is a column flexbox, and stretched across it the
            track ran from border to border with its choices bunched at one end. */
         /* The track is a quiet grey well (the sunken step, which reads on the
@@ -4174,20 +4171,22 @@
            inside a hairline. Its corner is the control's, the choices' that less
            the 2px inset, so the two curves run parallel. */
         .segmented { display: inline-flex; flex-wrap: wrap; align-items: center; align-self: flex-start; gap: var(--sp-0-5); max-width: 100%;
-            padding: var(--sp-0-5); background: var(--surface-sunken); border: 0;
+            padding: var(--sp-0-5); background: var(--surface-tertiary); border: 0;
             border-radius: var(--radius-control); }
         /* flex: 1 1 auto shares out the spare room of a line, which a track
            only has once it wraps: a wrapped track fills its lines rather than
            stranding one choice at the left of the second. On one line the track
            is as wide as its choices, so nothing grows. */
         .segmented > button { flex: 1 1 auto; justify-content: center; display: inline-flex; align-items: center; gap: var(--control-gap); height: var(--segment-h);
-            padding: 0 var(--sp-2-5); border: 0; background: transparent; border-radius: calc(var(--radius-control) - var(--sp-0-5));
-            font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium); line-height: var(--lh-control);
-            color: var(--text-secondary); cursor: pointer; white-space: nowrap;
+            padding: 0 var(--sp-3); border: 0; background: transparent; border-radius: calc(var(--radius-control) - var(--sp-0-5));
+            font: inherit; font-size: var(--text-body); font-weight: var(--weight-medium); line-height: var(--lh-control);
+            color: var(--text-tertiary); cursor: pointer; white-space: nowrap;
             transition: background var(--dur) var(--ease), color var(--dur) var(--ease); }
         .segmented > button:hover { color: var(--text-primary); }
-        .segmented > button:active { background: var(--surface-sunken); }
-        .segmented > button:is(.on, [aria-pressed="true"]) { background: var(--surface-primary); color: var(--text-brand); box-shadow: var(--ring-default); }
+        .segmented > button:active { background: var(--press); }
+        /* Chosen (the mix, 4.6): white with a teal-line ring and ink words. */
+        .segmented > button:is(.on, [aria-pressed="true"]) { background: var(--surface-primary); color: var(--text-primary); box-shadow: var(--ring-chosen); }
+        .segmented > button svg { width: var(--icon-md); height: var(--icon-md); }
         .segmented > button:disabled { color: var(--text-disabled); background: transparent; cursor: not-allowed; }
         .segmented > button .cdot { display: inline-grid; place-items: center; vertical-align: middle; color: var(--success); }
         .segmented > button .cdot svg { width: var(--icon-xs); height: var(--icon-xs); }
@@ -7410,9 +7409,11 @@ Projected Image UK"></textarea>
            and nothing else: the look is the .tabs / .segmented block, and five
            hand-built families did these two jobs before (2026-10-05).
 
-           items: [key, label] pairs, or {key | value, label, extra, title,
-           disabled}, where extra is a node shown after the label (a count, a
-           tick, a Beta mark). opts.nav: the tabs are pages, so the live one is
+           items: [key, label] pairs, or {key | value, label, n, icon, extra,
+           title, disabled}: n is a count drawn after the label, icon makes the
+           choice icon-only (label becomes its name), extra is a node shown after
+           the label (a tick, a Beta mark). opts.nav: the tabs are pages, so the
+           live one is
            aria-current="page" rather than pressed. opts.label: the group's name
            for a screen reader. Picking the live choice again does nothing;
            picking another marks it at once, so a screen that switches in place
@@ -7434,12 +7435,16 @@ Projected Image UK"></textarea>
             (items || []).forEach(it => {
                 if (!it) return;
                 const o = Array.isArray(it) ? { key: it[0], label: it[1] }
-                    : { key: it.key !== undefined ? it.key : it.value, label: it.label, extra: it.extra, title: it.title, disabled: it.disabled };
+                    : { key: it.key !== undefined ? it.key : it.value, label: it.label, extra: it.extra, title: it.title, disabled: it.disabled, n: it.n, icon: it.icon };
                 const b = el('button', kind === 'tabs' ? 'tab' : null);
                 b.type = 'button'; b.dataset.k = String(o.key);
-                b.append(document.createTextNode(o.label));
+                /* An icon-only choice (Forecast's Custom range) says its name to
+                   a screen reader and on hover; a count sits 8 after its word. */
+                if (o.icon) { b.append(ico(o.icon)); b.setAttribute('aria-label', o.label); b.title = o.title || o.label; }
+                else b.append(document.createTextNode(o.label));
+                if (o.n != null) b.append(el('span', 'cnt', String(o.n)));
                 if (o.extra) b.append(o.extra);
-                if (o.title) b.title = o.title;
+                if (o.title && !o.icon) b.title = o.title;
                 if (o.disabled) b.disabled = true;
                 mark(b, o.key === current);
                 b.onclick = () => {
