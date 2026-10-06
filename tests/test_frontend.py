@@ -2946,9 +2946,9 @@ def t_the_menu_and_tabs_are_the_reference_measurements():
     trigger carries a ::after of height 2px in the near-black, the width of the
     trigger itself. The pill is still the thing that must never come back."""
     panel = CSS.split(".dmenu {")[1].split("}")[0]
-    ok("border-radius: var(--radius-card)" in panel, "the panel takes the card's corner")
-    ok("padding: var(--sp-1)" in panel, "padded 4px")
-    ok("var(--shadow-md)" in panel, "its edge is a ring, not a border")
+    ok("border-radius: var(--radius-pop)" in panel, "the panel takes the floating corner (the mix: 10)")
+    ok("padding: var(--menu-pad)" in panel, "padded 4px")
+    ok("var(--shadow-pop)" in panel, "its edge is the pop shadow's ring, not a border")
     ok("border:" not in panel, "and it has no border at all")
     item = CSS.split(".dmenu-item {")[1].split("}")[0]
     ok("height: 28px" in item, "items are 28px")
@@ -3656,7 +3656,7 @@ def t_the_card_elevation_token_actually_paints():
     ok("box-shadow: var(--shadow-sm), var(--shadow-lg);" in CSS.split(".auth-card {")[1].split("}")[0],
        "so the sign-in card keeps its float")
     # Since the mix (2026-10-06) everything that floats shares the one pop shadow.
-    for tok in ("--shadow-md", "--shadow-lg"):
+    for tok in ("--shadow-lg",):
         v = re.search(tok + r":\s*([^;]+);", CSS).group(1)
         ok(v.strip() == "var(--shadow-pop)", tok + " is the one pop shadow")
     pop = re.search(r"--shadow-pop:\s*([^;]+);", CSS).group(1)
@@ -9568,7 +9568,7 @@ def t_the_ink_frame_the_measures_and_the_shadows_are_tokens():
         "rule-t-band": "inset 0 var(--bw-hairline) 0 var(--band-rule)",
         "focus-ring": "0 0 0 var(--bw-strong) var(--white), 0 0 0 calc(2 * var(--bw-strong)) var(--teal-650)",
         "focus-outline": "var(--bw-strong) solid var(--teal-650)",
-        "shadow-md": "var(--shadow-pop)", "shadow-lg": "var(--shadow-pop)",
+        "shadow-lg": "var(--shadow-pop)",
     }
     for tok, v in want.items():
         eq(_token_raw(tok), v, "--" + tok)
@@ -9860,6 +9860,36 @@ def t_a_section_is_a_title_and_space():
     ok(re.search(r"\.ov-wrap \{[^}]*--page-rhythm: var\(--sp-9\)", CSS), "48 between sections")
     chart = CSS.split("\n        .chart-card {")[1].split("}")[0]
     ok("border: 0" in chart and "padding: 0" in chart and "background: none" in chart, "a chart has no frame of its own")
+
+
+@test
+def t_an_explanation_waits_behind_an_info_button():
+    """Spec 3, 6 and 7: numbers first, words on request. An explanation moves
+    word for word behind a 24 info button beside its heading or figure label;
+    the button opens a popover (10 corner, the pop shadow, 16 inside, 8 from
+    its trigger) with the words and "More in the Guide". It opens on a tap and
+    from the keyboard, unlike the old hover-only title text."""
+    ok("info: SV(" in SCRIPT and "arrowRight: SV(" in SCRIPT, "the info glyph and the link arrow are icons like the rest")
+    ok("function infoButton(label, o) {" in SCRIPT, "the builder exists")
+    fn = fn_src("function infoButton(label, o) {")
+    for part in ("el('button', 'info')", "b.setAttribute('aria-label', label)", "b.setAttribute('aria-haspopup', 'dialog')",
+                 "dropPanel(b, (box) => {", "box.classList.add('ipop')", "'More in the Guide'", "openGuideAt(o.guide[0], o.guide[1] || '')"):
+        ok(part in fn, "infoButton: " + part)
+    ok("if (o.info) h.append(o.info);" in fn_src("function pageHead(o) {"), "a page title can carry one")
+    pop = CSS.split("\n        .dpanel.ipop {")[1].split("}")[0]
+    ok("padding: var(--pop-pad)" in pop and "width: var(--pop-w)" in pop, "the popover is 16 inside, one width")
+    eq(_token_raw("pop-w"), "360px", "--pop-w")
+    menu = CSS.split("\n        .dmenu {")[1].split("}")[0]
+    ok("border-radius: var(--radius-pop)" in menu and "box-shadow: var(--shadow-pop)" in menu, "on the floating corner and shadow")
+    for fname in ("function dropMenu(", "function dropPanel("):
+        f = fn_src(fname)
+        ok("tokenNum('--pop-offset')" in f and "r.bottom + 4" not in f, fname + " opens 8 from its trigger")
+    link = CSS.split("\n        .link {")[1].split("}")[0]
+    ok("color: var(--text-link)" in link and "font-weight: var(--weight-medium)" in link and "text-decoration: none" in link,
+       "a standalone link is teal words at 500 with an arrow, not underlined")
+    base = CSS.split("\n        .info {")[1].split("}")[0]
+    ok("display: none" in base and "@media screen { .info { display: inline-grid; } }" in CSS,
+       "an info button shows on a screen only, so a report printed to PDF never carries one beside its title")
 
 
 if __name__ == "__main__":
