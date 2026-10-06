@@ -3665,9 +3665,12 @@ def t_the_card_elevation_token_actually_paints():
     ok(not re.search(r"--shadow-[a-z]+:\s*none", CSS), "no shadow token is `none`, which breaks every list it joins")
     ok("box-shadow: var(--shadow-sm), var(--shadow-lg);" in CSS.split(".auth-card {")[1].split("}")[0],
        "so the sign-in card keeps its float")
+    # Since the mix (2026-10-06) everything that floats shares the one pop shadow.
     for tok in ("--shadow-md", "--shadow-lg"):
         v = re.search(tok + r":\s*([^;]+);", CSS).group(1)
-        ok("none" not in v and "color-mix" in v, tok + " still paints: what floats is lifted")
+        ok(v.strip() == "var(--shadow-pop)", tok + " is the one pop shadow")
+    pop = re.search(r"--shadow-pop:\s*([^;]+);", CSS).group(1)
+    ok("none" not in pop and "color-mix" in pop, "and it still paints: what floats is lifted")
 
 
 @test
@@ -9663,6 +9666,53 @@ def t_the_mix_greys_are_one_ramp():
     enc = set(m.lower() for m in re.findall(r"%23([0-9a-fA-F]{6})", rest))
     ok(enc <= {"5f6368", "ffffff"}, "a drawn glyph's colour is a ramp step too: %s" % sorted(enc))
     ok("const MIX_TOKENS = [" in SCRIPT, "the Design section's list of the mix's tokens exists")
+
+
+@test
+def t_the_ink_frame_the_measures_and_the_shadows_are_tokens():
+    """Spec 4.1 and 4.6: the ink frame, one colour per measure on every screen,
+    the feature band, five shadows, hairlines drawn as inset shadows, and one
+    focus ring. Each is set once here and only read elsewhere."""
+    want = {
+        "teal-band-1": "#D3F1F3", "teal-band-2": "#DDF4F5", "teal-band-3": "#EBF8F9", "teal-band-4": "#F2FBFB",
+        "live-green": "#22A55A",
+        "surface-chrome": "var(--ink)", "text-on-chrome": "var(--white)",
+        "nav-text": "color-mix(in srgb, var(--white) 72%, transparent)",
+        "nav-muted": "color-mix(in srgb, var(--white) 50%, transparent)",
+        "chrome-fill": "color-mix(in srgb, var(--white) 12%, transparent)",
+        "chrome-press": "color-mix(in srgb, var(--white) 18%, transparent)",
+        "nav-on-bg": "color-mix(in srgb, var(--teal-500) 18%, transparent)", "nav-on-icon": "var(--teal-500)",
+        "link-underline": "color-mix(in srgb, var(--teal-700) 35%, transparent)",
+        "live-dot": "var(--live-green)", "live-halo": "color-mix(in srgb, var(--live-green) 15%, transparent)",
+        "press": "var(--line)", "press-fill": "var(--line-ctl)",
+        "c-taken": "var(--teal-900)", "c-still": "color-mix(in srgb, var(--teal-500) 45%, transparent)",
+        "c-exp": "var(--ink)", "c-exp-line": "var(--teal-650)", "c-range": "var(--teal-200)",
+        "c-range-edge": "var(--teal-650)", "c-area": "color-mix(in srgb, var(--teal-500) 15%, transparent)",
+        "c-area-edge": "color-mix(in srgb, var(--teal-650) 35%, transparent)", "c-plan": "var(--brand-blue)",
+        "band-rule": "color-mix(in srgb, var(--teal-900) 12%, transparent)", "border-soft": "var(--line-soft)",
+        "shadow-control": "0 1px 1px color-mix(in srgb, var(--ink) 4%, transparent)",
+        "ring-chosen": "var(--shadow-control), inset 0 0 0 var(--bw-hairline) var(--teal-650)",
+        "ring-live": "0 0 0 var(--sp-0-5) var(--live-halo)",
+        "ring-selected": "inset var(--bw-strong) 0 0 var(--teal-650)",
+        "rule-t": "inset 0 var(--bw-hairline) 0 var(--border-default)",
+        "rule-b": "inset 0 calc(-1 * var(--bw-hairline)) 0 var(--border-default)",
+        "rule-t-soft": "inset 0 var(--bw-hairline) 0 var(--border-soft)",
+        "rule-b-soft": "inset 0 calc(-1 * var(--bw-hairline)) 0 var(--border-soft)",
+        "rule-t-band": "inset 0 var(--bw-hairline) 0 var(--band-rule)",
+        "focus-ring": "0 0 0 var(--bw-strong) var(--white), 0 0 0 calc(2 * var(--bw-strong)) var(--teal-650)",
+        "focus-outline": "var(--bw-strong) solid var(--teal-650)",
+        "shadow-md": "var(--shadow-pop)", "shadow-lg": "var(--shadow-pop)",
+    }
+    for tok, v in want.items():
+        eq(_token_raw(tok), v, "--" + tok)
+    for tok in ("band-bg", "shadow-raise", "shadow-pop", "shadow-focal", "shadow-label"):
+        v = _token_raw(tok)
+        ok("color-mix" in v or "var(--teal-band-" in v, "--%s is drawn from the palette: %s" % (tok, v[:60]))
+    ok(all("var(--teal-band-%d)" % n in _token_raw("band-bg") for n in (1, 2, 3, 4)), "the band runs through its four stops")
+    ok(_contrast(_token("ink"), _token("teal-500")) >= 4.5, "ink on the teal fill reads at 4.5:1")
+    tokens = SCRIPT.split("const MIX_TOKENS = [")[1].split("];")[0]
+    for group in ("'The ink frame'", "'One colour per measure'", "'Shadows and rules'"):
+        ok(group in tokens, "the Design section lists " + group)
 
 
 if __name__ == "__main__":
