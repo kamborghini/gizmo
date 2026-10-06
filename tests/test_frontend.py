@@ -2189,8 +2189,10 @@ def t_a_kpi_with_a_list_behind_it_opens_it():
     ok("if (m.detail && typeof m.detail === 'object') statOpens(c, m);" in SCRIPT,
        "a metric with a detail becomes an opener; one without stays a plain card")
     fn = re.search(r"function statOpens\(c, m\) \{(.*?)\n        \}", SCRIPT, re.S).group(1)
-    for need in ("stat-open", "setAttribute('role', 'button')", "tabIndex = 0", "aria-haspopup",
-                 "ev.key === 'Enter' || ev.key === ' '", "I.arrowUpRight", "openStatDetail(m, c)"):
+    # Since the Task 44 accessibility pass the tile is not itself a button (it holds an info button): a real
+    # button in its corner opens the list, and a click anywhere on the tile still does.
+    for need in ("stat-open", "el('button', 'stat-act stat-open-btn')", "aria-haspopup", "I.arrowUpRight",
+                 "c.addEventListener('click', () => openStatDetail(m, b))"):
         ok(need in fn, "the opener carries %s" % need)
     ok("arrowUpRight: SV(" in SCRIPT, "the icon exists")
     md = re.search(r"function openStatDetail\(m, opener\) \{(.*?)\n        \}", SCRIPT, re.S).group(1)
@@ -11498,6 +11500,61 @@ def t_the_last_boxes_inside_windows_and_notices_have_no_edge():
     ok("width: var(--control-h); height: var(--control-h);" in rule(".disp-boxedit .icon-btn"), "the box row's icon button is the 32 of the fields beside it")
     ins = rule(".disp-insure input[type=number]")
     ok("height: var(--control-h);" in ins and "36px" not in ins, "and the insure field takes the field height token")
+
+
+@test
+def t_a_kpi_that_opens_a_list_does_not_nest_its_info_button():
+    """Task 44 (accessibility): a figure tile that opens its breakdown was role=button and held an info
+    <button> in its label, so a screen reader could not reach the info button and the controls were
+    nested. The tile is no longer a button: a real button in its corner opens the list (the keyboard and
+    screen-reader way, carrying the tile's old label), and a click anywhere on the tile still opens it, exactly as
+    before. The info button's own click stops short of the tile. Run in node."""
+    ok("function statOpens(c, m) {" in SCRIPT and "function infoButton(label, o) {" in SCRIPT, "statOpens and infoButton exist")
+    so = fn_src("function statOpens(c, m) {")
+    ok("setAttribute('role', 'button')" not in so and "tabIndex" not in so and "c.setAttribute('aria-label'" not in so, "the tile carries no button role, tab stop or name")
+    ok("e.stopPropagation();" in fn_src("function infoButton(label, o) {"), "an info button's click stops short of what it sits in")
+    ok("\n        .stat-open-btn {" in CSS, "the corner button has its own reset")
+    ok("\n            .stat-open-btn::after { content: \"\"; position: absolute; left: 50%; top: 50%; width: var(--control-h-lg); height: var(--control-h-lg);" in CSS,
+       "and on a phone an invisible 40 square")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+const I = { arrowUpRight: '<svg></svg>' };
+const opened = [];
+function openStatDetail(m, opener) { opened.push(m.label + '|' + opener.tagName); }
+function infoButton(label) { const b = el('button', 'info'); b.type = 'button'; b.onclick = (e) => { e.stopPropagation(); }; return b; }
+""" + fn_src("function statOpens(c, m)") + r"""
+const tile = el('div', 'stat'); const lab = el('div', 'label', 'Revenue'); const ib = infoButton('Revenue'); lab.append(ib); tile.append(lab);
+statOpens(tile, { label: 'Revenue', value: '£1,200', detail: {} });
+const btns = []; const walk = (n) => { for (const c of n.children || []) { if (c.tagName === 'BUTTON') btns.push(c); walk(c); } }; walk(tile);
+const own = btns.filter(b => b !== ib);
+const out = { role: tile.getAttribute('role'), tab: tile.attrs.tabindex === undefined && tile.tabIndex === undefined, ownCount: own.length,
+  ownLabel: own[0] && own[0].getAttribute('aria-label'), ownPopup: own[0] && own[0].getAttribute('aria-haspopup'), nestedInOpener: own[0] ? own[0].parentNode === tile : null };
+tile.click(); out.afterTile = opened.slice();
+opened.length = 0; own[0].click(); out.afterOwn = opened.slice();
+opened.length = 0; ib.click(); out.afterInfo = opened.slice();
+console.log(JSON.stringify(out));
+"""
+    got = _run_node(js)
+    ok(got["role"] is None and got["tab"] is True, "the tile is not a button and not a tab stop: %s" % got)
+    ok(got["ownCount"] == 1 and got["nestedInOpener"] is True, "one real button opens it, a child of the tile")
+    ok(got["ownLabel"] == "Revenue: £1,200. Open the list behind it" and got["ownPopup"] == "dialog", "and it carries the tile's old name: %s" % got["ownLabel"])
+    ok(got["afterTile"] == ["Revenue|BUTTON"], "a click anywhere on the tile still opens it, once: %s" % got["afterTile"])
+    ok(got["afterOwn"] == ["Revenue|BUTTON"], "so does the button, once (its click bubbles to the tile): %s" % got["afterOwn"])
+    ok(got["afterInfo"] == [], "and the info button opens nothing but its own help: %s" % got["afterInfo"])
+
+
+@test
+def t_a_standalone_link_is_a_40_target_on_a_phone():
+    """Carried from the Phase 3 review: the shared .link ('More in the Guide' in every popover, 'Show all') was
+    under 40 tall on a phone outside the one place that sized it. At 640 and under it is 40 tall everywhere; an
+    inline link inside a sentence is not a .link and is unchanged."""
+    rule = "@media (max-width: 640px) { .link { min-height: var(--control-h-lg); } }"
+    ok(rule in CSS, "a standalone link is 40 tall at 640 and under")
+    ok(CSS.index(rule) > CSS.index("\n        .link { display: inline-flex;"), "after its base rule")
+    ok(".fc-worth .sec-tools > .link { min-height: var(--control-h-lg); }" in CSS, "and Show all keeps its own")
+    ok("el('button', 'link', 'More in the Guide')" in SCRIPT, "the popover's Guide link is a .link")
 
 
 if __name__ == "__main__":
