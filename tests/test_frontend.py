@@ -10316,6 +10316,19 @@ def t_hover_is_only_for_a_pointer_that_hovers():
         ok(want in CSS.split(sel)[1].split("}")[0], sel + " presses to " + want)
 
 
+@test
+def t_a_section_shows_its_edge_only_while_it_is_being_moved():
+    """Spec 8.3 Report: Customize keeps its drag; outlines show only in
+    Customize mode. With no boxes at rest, an unboxed section needs room round
+    its dashed edge, and its hide button floats on the pop shadow."""
+    edit = CSS.split(".ov-wrap.wg-editing > [data-widget]:not(:focus-visible) {")[1].split("}")[0]
+    ok("dashed var(--border-emphasis)" in edit and "outline-offset: var(--sp-2)" in edit, "a dashed edge 8 outside the content, in Customize mode")
+    rest = [s for s, b in _rules(CSS) if "[data-widget]" in s and "wg-editing" not in s and re.search(r"outline:|border:", b)]
+    ok(not rest, "and none at rest: %s" % rest[:3])
+    hide = CSS.split(".ov-wrap.wg-editing > [data-widget] > .wg-hide {")[1].split("}")[0]
+    ok("box-shadow: var(--shadow-pop)" in hide and "width: var(--control-h-sm)" in hide, "the hide button is a 24 square on the pop shadow")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
