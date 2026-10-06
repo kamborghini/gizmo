@@ -1374,7 +1374,9 @@ def t_the_dead_elevation_token_is_gone():
     # .pfilters left this list when Products became a card: it is a panel
     # INSIDE that card now, on the muted ground, and a shadow inside a card
     # is a second frame.
-    for cls in ("card", "lia-card", "auth-card"):
+    # A card is a section with no box since the mix (2026-10-06); what is still
+    # boxed keeps the house elevation.
+    for cls in ("lia-card", "auth-card"):
         rule = re.search(r"\." + cls + r" \{[^}]*\}", HTML, re.S)
         ok(rule and "var(--shadow-sm)" in rule.group(0),
            ".%s carries the house card elevation like every other card" % cls)
@@ -2822,19 +2824,15 @@ def t_a_table_inside_a_card_has_no_second_frame():
     the table keeps the card's gutter and its outer columns line up with the
     card's text."""
     ok(".card .ktable-wrap { border: 0; border-radius: 0; background: transparent; }" in CSS,
-       "a table inside a card draws no frame of its own")
+       "a table inside a section draws no frame of its own")
     ok(".card .ktable-wrap :is(th, td):first-child { padding-left: 0; }" in CSS
        and ".card .ktable-wrap :is(th, td):last-child { padding-right: 0; }" in CSS,
-       "and its outer columns sit on the card's text edge")
-    ok(".card > .ktable-wrap { margin-left: 0; margin-right: 0; }" in CSS
-       and ".card > .ktable-wrap :is(th, td):first-child { padding-left: var(--sp-4); }" in CSS
-       and CSS.index(".card > .ktable-wrap { margin-left: 0;") > CSS.index(".card > :is(.lia-bar, .lbl-row, .ktable-wrap"),
-       "one straight inside a card runs to its edges like its list rows, words still on the text edge")
-    ok("--radius-inset: var(--radius-xs)" in CSS and "--radius-card: var(--radius-pop)" in CSS,
-       "a step under the card's corner, set once")
-    # A table that deliberately touches the card edge still can.
+       "and its outer columns sit on the page's text edge")
+    ok(".card > .ktable-wrap :is(th, td):first-child" not in CSS,
+       "no table straight in a section is pushed back in by a gutter (the mix: there is none)")
+    ok("--radius-inset: var(--radius-xs)" in CSS and "--radius-card: var(--radius-pop)" in CSS, "corners set once")
     bleed = CSS.split("\n        .card-bleed .ktable-wrap {")[1].split("}")[0]
-    ok("border: 0" in bleed, "a bleed table is still flat to the edge")
+    ok("border: 0" in bleed, "a bleed table is still flat")
 
 
 @test
@@ -3455,14 +3453,6 @@ def t_touch_and_scroll_behave_like_an_app():
 
 
 @test
-def t_nested_boxes_step_their_radius_down():
-    """A box inside a box with the same corner reads blocky at the inner
-    corner. The tables already stepped down; these three shapes had not."""
-    ok(".card .insight, .card .empty, .chart-card .empty { border-radius: var(--radius-inset); }" in CSS,
-       "insight and empty boxes step down inside cards")
-
-
-@test
 def t_a_rows_keydown_never_steals_an_inner_controls_keypress():
     """Found by the adversarial verify pass: Space on the checkbox inside a CRM
     contact row bubbled to the row, whose preventDefault cancelled the tick and
@@ -3850,49 +3840,6 @@ def t_both_charts_curve_through_one_function():
 
 
 @test
-def t_nothing_that_draws_an_edge_sits_on_the_cards_edge():
-    """Cameron photographed two of these: the aged-debt bar running into the
-    card's border, and the SEO insight cards - white, bordered - flush inside a
-    white bordered card.
-
-    One cause. `.card > *` hands every child the 16px inset as PADDING, which
-    is right for a table or a composer bar that should meet the card's edge
-    with only its content inset. Padding sits INSIDE the border box, so a child
-    with a border of its own still spans the full width and its border lands
-    exactly on the card's. Those take the inset as MARGIN instead."""
-    rule = re.search(r"\.card > :is\(\.lia-bar, \.lbl-row, \.ktable-wrap, \.empty[^)]*\),\s*\n\s*"
-                     r"\.card-bleed > \.empty \{([^}]*)\}", CSS)
-    ok(rule, "the gutter exception is still there")
-    body = rule.group(1)
-    ok("margin-left: var(--sp-4)" in body and "margin-right: var(--sp-4)" in body,
-       "and it insets by margin, which is outside the border box")
-    bar = re.search(r"\.card > \.lia-bar, \.card > \.ktable-wrap \{([^}]*)\}", CSS)
-    ok(bar and "padding-left: 0" in bar.group(1),
-       "and the two with no padding of their own drop what they were given, "
-       "or they inset twice")
-    # The insight rows used to be bordered cards, and .insights held the gutter
-    # as padding to inset them. They are hairline ROWS on the card now, so the
-    # same requirement - a bleed child is inset by 16, and never by a mechanism
-    # that puts two borders on one line - is met a step lower down: the row
-    # sheds its frame and carries the gutter in its own padding, the way an
-    # .action row already does. The rule between two rows has to reach the
-    # card's edge, so the wrapper hands out nothing.
-    rows = re.search(r"\.card-bleed > \.insights > \.insight,[\s\S]{0,220}?\{([^}]*)\}", CSS)
-    ok(rows and "border: 0" in rows.group(1),
-       "a list already inside a card draws no second frame of its own")
-    ok(re.search(r"\.card-bleed > \.insights > \.insight \+ \.insight,[\s\S]{0,260}?"
-                 r"\{[^}]*border-top: var\(--bw-hairline\) solid var\(--border-default\)", CSS),
-       "the rows are separated by one hairline instead")
-    ins = re.search(r"^\s*\.insight \{([^}]*)\}", CSS, re.M)
-    ok(ins and "padding: var(--sp-3) var(--sp-4)" in ins.group(1),
-       "and the 16px gutter comes from the row's own padding, so the hairline "
-       "between two rows reaches the card's edge")
-    # The bleed wrapper must still do its actual job for tables.
-    ok(".card-bleed .ktable-wrap { border: 0" in CSS,
-       "and a table still runs to the card edge with no second frame")
-
-
-@test
 def t_a_block_with_its_own_heading_is_not_swallowed_by_the_one_above():
     """The page-chat panel is a section-title plus its own .card. cardifySections
     collected everything after a heading until the next DIRECT-child heading, and
@@ -3915,8 +3862,8 @@ def t_one_rhythm_down_the_page():
     rule = re.search(r"\.ov-wrap > \*:not\(\.run-gate\) \{([^}]*)\}", CSS)
     ok(rule, "the page rhythm rule is still there")
     ok("margin-bottom: var(--page-rhythm)" in rule.group(1)
-       and re.search(r"\.ov-wrap \{[^}]*--page-rhythm: var\(--sp-6\)", CSS),
-       "and it is the reference's 24px")
+       and re.search(r"\.ov-wrap \{[^}]*--page-rhythm: var\(--sp-9\)", CSS),
+       "and it is the mix's 48 between sections")
     ok("margin-top: 0" in rule.group(1),
        "with stray top margins zeroed, or the two stack up")
     head = re.search(r"\.ov-wrap > \.section-title \{([^}]*)\}", CSS)
@@ -3944,8 +3891,8 @@ def t_a_heading_keeps_its_12px_on_a_phone():
        "and both exceptions come after it")
     phone = [b for b in re.findall(r"@media \(max-width: 640px\) \{((?:[^{}]|\{[^{}]*\})*)\}", CSS)
              if re.search(r"(?<![\w-])\.ov-wrap \{", b)]
-    ok(phone and re.search(r"\.ov-wrap \{[^}]*--page-rhythm: var\(--sp-4\)", phone[0]),
-       "the phone gap is the property re-pointed to 16, not a margin rule")
+    ok(phone and re.search(r"\.ov-wrap \{[^}]*--page-rhythm: var\(--sp-7\)", phone[0]),
+       "the phone gap is the property re-pointed to 32, not a margin rule")
 
 
 @test
@@ -4019,20 +3966,6 @@ def t_the_resolve_button_is_hidden_when_the_server_would_refuse_it():
 
 
 @test
-def t_a_table_in_a_card_is_inset_rather_than_welded_to_it():
-    """The rule's own comment says the table gets "its OWN box, inset by the
-    card's padding" - a 10px frame inside a 14px card. It was not inset: as a
-    direct card child it took the gutter as PADDING, which sits inside its own
-    border box, so its border landed on the card's and its text floated 30px in
-    while the line sat at 1px. Measured on Xero sync and the size check."""
-    rule = re.search(r"\.card > \.lia-bar, \.card > \.ktable-wrap \{([^}]*)\}", CSS)
-    ok(rule and "padding-left: 0" in rule.group(1),
-       "the wrap drops the padding it was handed")
-    ok(re.search(r"\.card > :is\(\.lia-bar, \.lbl-row, \.ktable-wrap", CSS),
-       "and takes the inset as margin instead, like the other boxed children")
-
-
-@test
 def t_no_borderless_strip_is_sliced_by_someone_elses_border():
     """The presence strip on the Inbox was a non-wrapping flex row with
     overflow-x: auto, running full-bleed to the card's own border - so the third
@@ -4048,59 +3981,6 @@ def t_no_borderless_strip_is_sliced_by_someone_elses_border():
        "the strip no longer scrolls under the card's border")
     ok("flex-wrap: wrap" in who,
        "it wraps, so every person is whole and nothing meets an edge it should not")
-
-
-@test
-def t_a_box_painted_inside_a_card_sits_inside_its_gutter():
-    """The card hands its 16px gutter to every child as PADDING. That is right
-    for prose and for a table that meets the card's edge, and wrong for
-    anything that paints its own box: padding sits inside the box, so the box
-    still spans the full card and its colour lands on the card's border. The
-    Xero sync last-run notice went out that way twice - red touching the frame
-    on both sides - and each time the measurement was read as "inside the
-    padding" because 1px from the border IS the padded child's edge.
-
-    The CSS keeps one list of the boxed classes the script puts straight into
-    a card; those take the gutter as MARGIN. Every class that paints a box in
-    a card must be on it, and the notice must still be one of them."""
-    m = re.search(r"\.card > :is\(([^)]*)\),\s*\.card-bleed > \.empty \{([^}]*)\}", CSS)
-    ok(m is not None, "the margin-inset list for boxed children of a card is still one rule")
-    listed = {c.strip() for c in m.group(1).split(",")}
-    body = m.group(2)
-    ok("margin-left: var(--sp-4)" in body and "margin-right: var(--sp-4)" in body
-       and "width: auto" in body,
-       "the listed classes take the gutter as margin and let auto width fill it")
-    for cls in (".cx-health", ".msg", ".mail-sendwarn", ".disp-warn", ".empty", ".mail-empty",
-                ".lbl-row", ".lia-bar", ".ktable-wrap",
-                # A RULE between rows is an edge too, and these three shipped
-                # without it. .fc-algo put every source name, every line of
-                # prose and both ends of every divider 1px from the card's
-                # border, because its padding shorthand's 0 had quietly
-                # overridden the card's 16px gutter.
-                ".fc-algo", ".fc-alert", ".know-body", ".fc-drive-tot", ".fc-split-bar"):
-        ok(cls in listed, cls + " is inset by margin, not welded to the card's border")
-    # The inset must not be taken TWICE. A child that paints a filled box keeps
-    # its own padding, because that padding sits inside the box it draws. A
-    # child that only draws a RULE has no box to pad, so the card's gutter
-    # lands on top of the margin and pushes its text 32px in against a
-    # card-sub at 16px - which is what happened the moment .fc-algo was first
-    # moved onto this list.
-    _ZEROED_BY_THE_CARD_RULE = (".lia-bar", ".ktable-wrap")
-    for cls in sorted(listed):
-        own = " ".join(re.findall(r"(?:^|\})\s*" + re.escape(cls) + r"\s*\{([^}]*)\}", CSS, re.M))
-        paints_fill = re.search(re.escape(cls) + r"[^{]*\{[^}]*background", CSS) is not None
-        draws_rule = "border-top:" in own or "border-bottom:" in own
-        if draws_rule and not paints_fill:
-            ok("padding-inline: 0" in own or cls in _ZEROED_BY_THE_CARD_RULE,
-               cls + " draws a rule, so its horizontal padding is 0 and the margin "
-                     "alone insets it, or its text sits 32px in from a 16px card")
-    notice = CSS.split(".cx-health {")[1].split("}")[0]
-    ok("padding:" in notice, "the notice keeps its own padding inside its box")
-    ok(".cx-health.bad { background:" in CSS and ".cx-health.ok { background:" in CSS,
-       "the notice paints a box, which is why it has to be on the list")
-    ok("el('div', 'cx-health bad')" in SCRIPT and "el('div', 'cx-health ok')" in SCRIPT
-       and "sCard.append(h)" in SCRIPT,
-       "the script still puts the notice straight into the Connection card")
 
 
 @test
@@ -5492,22 +5372,6 @@ def t_the_serial_sticker_prints_on_the_production_printer_with_its_codes():
 
 
 @test
-def t_a_row_inset_by_a_margin_is_not_also_a_full_width_row():
-    """.lbl-row carries width:100% so button rows fill their container. Inside a
-    card it ALSO takes a 16px margin each side, and 100% plus two margins is 32px
-    wider than the card: every row in every card hung its right border out past
-    the frame. Whichever half is removed, the two must never coexist."""
-    m = re.search(r"\.card > :is\(\.lia-bar, \.lbl-row.*?\{(.*?)\}", CSS, re.S)
-    ok(m is not None, "the rule that insets card rows by a margin is still there")
-    inset = m.group(1)
-    ok("margin-left" in inset, "and it is still a margin that does the insetting")
-    row = re.search(r"\n\s*\.lbl-row \{(.*?)\}", CSS, re.S)
-    ok(row is not None, ".lbl-row is still declared")
-    ok("width: auto" in inset or "width: 100%" not in row.group(1),
-       "an inset row must either reset its width or not claim 100% in the first place")
-
-
-@test
 def t_the_topbar_button_hides_itself_rather_than_naming_the_tabs_that_want_it():
     """The corner button was hidden by a list of view names, so every tab added
     after that list - Loan units - arrived with an empty 26px button in the
@@ -6134,27 +5998,15 @@ def t_the_script_paints_from_tokens_only():
 
 @test
 def t_a_boxed_child_of_a_card_is_inset():
-    """Sweep, 2026-09-07: the Xero run banner (.msg) and the Mail send warning
-    sat flush against their card's border on both sides. A card pads its
-    children, so a child that paints its own box has to take the inset as a
-    margin instead, and the list of those is derived here: every painted class
-    the script appends straight into a card must be in it."""
-    m = re.search(r"\.card > :is\(([^)]*)\)", CSS)
-    ok(m, "the inset list exists")
-    inset = {c.strip().lstrip(".") for c in m.group(1).split(",")}
-    for c in ("msg", "mail-sendwarn", "disp-warn", "mail-empty", "lbl-row", "ktable-wrap", "lia-bar", "empty"):
-        ok(c in inset, "." + c + " is inset")
-    appended = set(re.findall(r"(?:sCard|card|box|host|wrap)\.append\(el\('div', '([a-z0-9-]+)[' ]", SCRIPT))
-    for c in sorted(appended):
-        rule = re.search(r"(?<![\w-])\." + re.escape(c) + r"(?![\w-])\s*\{([^}]*)\}", CSS)
-        if not rule: continue
-        b = rule.group(1)
-        if re.search(r"(?<![\w-])(background|border)(?!-radius|-collapse)\s*:", b) and "transparent" not in b and "none" not in b.split("background")[-1][:12]:
-            ok(c in inset, "." + c + " paints a box and is appended to a card, so it must be inset")
+    """Sweep, 2026-09-07: boxed notices sat flush against their card's border.
+    Since the mix (2026-10-06) a section has no border to sit against: its
+    content runs on the page's text edge, so a notice spans its section and
+    its words keep the reading measure. The sweep's other lessons stay."""
+    ok(not re.search(r"\.card > :is\(", CSS), "no list of children taking a gutter back as a margin")
     ok(".load-failed > div:first-child { max-width: var(--measure); }" in CSS and ".card > :is(.msg, .mail-sendwarn, .disp-warn) { max-width" not in CSS,
        "and a notice spans its card while its words keep the reading measure")
-    ok("max-width: calc(100% - 2 * var(--sp-4))" in CSS.split("#view-connector .card > .lbl-row {")[1].split("}")[0],
-       "a fit-content row counts its own inset, so it cannot hang out of the card at 375")
+    ok("max-width: 100%" in CSS.split("#view-connector .card > .lbl-row {")[1].split("}")[0],
+       "a fit-content row never runs past its section at 375")
     ok(".ov-wrap > * + .run-gate { margin-top: 0; }" in CSS, "the run gate centres itself only when it is the whole page")
     ok("line-height: var(--lh-control)" in CSS.split("\n        .segmented > button {")[1].split("}")[0], "segmented buttons are 24 tall in a 32 strip")
     ok("const label = a.metric || a.title || a.detail || 'A change was recorded without a description';" in SCRIPT,
@@ -9446,8 +9298,9 @@ def t_the_brand_pilot_review_findings_stay_fixed():
     # A segmented control is never stretched across a card, and keeps its gutter.
     seg = CSS.split("        .segmented { display: inline-flex;")[1].split("}")[0]
     ok("align-self: flex-start" in seg, "a column parent does not stretch the track")
-    inset = CSS.split("Those are inset by margin instead.")[1].split("{")[0]
-    ok(".segmented" in inset, "and a track put straight into a card is inset like every boxed child")
+    # Since the mix (2026-10-06) a section has no gutter for a track to be
+    # inset from: it sits on the page's text edge like the rest of its section.
+    ok("Those are inset by margin instead." not in CSS, "and no list of boxed children takes a gutter back")
     phone = CSS.split("@media (max-width: 640px) {\n            .segmented {")[1].split("}")[0]
     ok("align-self: stretch" in phone and "flex: 1 1 100%" in phone,
        "on a phone it takes and fills a line of its own, in a column parent or a row")
@@ -9986,6 +9839,27 @@ def t_tabs_sit_on_a_rule_and_the_chosen_segment_is_white():
     fn = fn_src("function chooser(")
     ok("if (o.n != null) b.append(el('span', 'cnt', String(o.n)));" in fn, "a choice can carry its count")
     ok("if (o.icon) { b.append(ico(o.icon)); b.setAttribute('aria-label', o.label);" in fn, "and an icon-only choice keeps its name")
+
+
+@test
+def t_a_section_is_a_title_and_space():
+    """Spec 3 and 6 (Cameron: "it still all looks very dated and text heavy"):
+    one sheet, few boxes. A section is a 15/20 600 head, then its content 12
+    under it, 48 from the next (32 on a phone); no edge, no fill, no padding,
+    so its content runs on the page's own text edge. A chart sits in its
+    section without a frame either."""
+    card = CSS.split("\n        .card {")[1].split("}")[0]
+    for prop in ("background: none", "border: 0", "box-shadow: none", "padding: 0", "gap: var(--sp-3)"):
+        ok(prop in card, ".card: " + prop)
+    ok("\n        .card > * { padding-left" not in CSS, "children are not handed a gutter any more")
+    ok(not re.search(r"\.card > :is\(\.lia-bar, \.lbl-row", CSS), "so nothing has to take one back as a margin")
+    for sel in ("\n        .card-title {", "\n        .section-title {"):
+        r = CSS.split(sel)[1].split("}")[0]
+        ok("font-size: var(--text-head)" in r and "font-weight: var(--weight-semibold)" in r and "line-height: var(--lh-control)" in r,
+           sel.strip() + " is the head step, 15/20 at 600")
+    ok(re.search(r"\.ov-wrap \{[^}]*--page-rhythm: var\(--sp-9\)", CSS), "48 between sections")
+    chart = CSS.split("\n        .chart-card {")[1].split("}")[0]
+    ok("border: 0" in chart and "padding: 0" in chart and "background: none" in chart, "a chart has no frame of its own")
 
 
 if __name__ == "__main__":
