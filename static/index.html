@@ -479,9 +479,13 @@
            for an account that cannot open it. */
         /* A tab row with the page's own chooser at its right (Forecast's Plan):
            one 44 row on one full-width rule, the strip's own rule given up. */
-        .page-tabs { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6);
+        .page-tabs { display: none; align-items: center; justify-content: space-between; gap: var(--sp-6);
             min-height: var(--row-h); box-shadow: var(--rule-b);
             margin: 0 calc(-1 * var(--wrap-pad)) var(--sp-7); padding: 0 var(--wrap-pad); }
+        /* Its tabs and its chooser do not print, so the row does not either: a
+           printed Finance page carried an empty 44 band on a rule. Hidden here
+           and shown for a screen, as the info button is. */
+        @media screen { .page-tabs { display: flex; } }
         .page-tabs > .tabs { margin-bottom: 0; }
         /* The strip's own box runs 8 past the gutter at each end, so the focus
            box drawn round a word has room and scrolling does not clip it on the
@@ -2970,11 +2974,10 @@
         .disp-customs .disp-boxrow > .disp-text { flex: 1 1 auto; min-width: 120px; }
         .disp-customs .disp-boxrow > .disp-num { width: 88px; flex: none; }
         /* Chase desk: the composed chasing email under an expanded account. */
-        /* Stepped to the inner radius, like .card .ktable-wrap directly above
-           it and .card .insight: a 14px corner inside an identical 14px corner
-           is the one nested box in the drill-down that did not step down. */
-        .lia-chase { margin: 0 0 var(--sp-4); padding: var(--sp-3); border: var(--bw-hairline) solid var(--border-default);
-            border-radius: var(--radius-inset); background: var(--surface-primary); display: flex;
+        /* No box round it (the mix, spec 3): the head, the email field and its
+           buttons sit on the drill-down's own text edge. The field keeps its
+           edge, as every field does. */
+        .lia-chase { margin: 0 0 var(--sp-4); padding: 0; border: 0; border-radius: 0; background: none; display: flex;
             flex-direction: column; gap: var(--sp-2); }
         .lia-chase-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
         .lia-chase-head .sub { min-width: 0; overflow-wrap: anywhere; }
@@ -5501,6 +5504,9 @@
             .info { width: var(--control-h-lg); height: var(--control-h-lg); padding-right: calc(var(--control-h-lg) - var(--control-h-sm));
                 margin-block: calc((var(--lh-control) - var(--control-h-lg)) / 2); margin-right: calc(var(--control-h-sm) - var(--control-h-lg)); }
             .info::before { inset: auto; left: 0; top: 50%; width: var(--control-h-sm); height: var(--control-h-sm); margin-top: calc(var(--control-h-sm) / -2); }
+            /* That target reaches 10 under its title's line, so a line under the
+               title sits 12 below it (the card's 4 left a 6 overlap). */
+            .card-head:has(> .card-title > .info) { row-gap: var(--sp-3); }
             /* The rest of what a finger meets: the drawer's own icon buttons and brand row, an icon button in a row, a row's
                name button, a standalone link, a summary, a maker's band and the chart's expand square. */
             :is(.sidebar .icon-btn, .brand, .mem-btn, .crm-ticon, .crm-col-add, .sizes-open, .files-name, .guide-toc-link, .miss-open, .action-link, details summary) { min-height: var(--control-h-lg); }
@@ -12797,10 +12803,8 @@ Projected Image UK"></textarea>
             /* The same heading and tabs the loaded page has, so the page does
                not change its name and grow a tab strip when the data lands, as
                Reconciliation and Forecast already do. */
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.spark;
-            const ht = el('div'); ht.append(el('h2', null, 'Liability'),
-                el('p', null, 'Credit extended to customers, from their unpaid orders.'));
-            hero.append(badge, ht); box.append(hero);
+            const hero = pageHead({ view: 'liability', title: 'Liability', line: 'What customers owe on unpaid orders.' });
+            box.append(hero);
             box.append(financeTabs('liability', ''));
             const t = el('div', 'thinking');
             t.append(loader(), el('span', null, 'Reading up to two years of unpaid orders. No AI credits used.'));
@@ -12908,19 +12912,15 @@ Projected Image UK"></textarea>
             box.classList.toggle('no-intro', !firstPaint('liability'));
             const d = liabilityCache.data;
             const cur = d.currency;
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.spark;
-            /* Each page is called what the sidebar and the topbar call it: all
-               four Finance pages were headed 'Finance', so one page had two
-               names. The Finance tabs under the heading say which group. */
-            const ht = el('div'); ht.append(el('h2', null, 'Liability'),
-                el('p', null, 'Credit extended to customers, from orders tagged '
+            /* Each page is called what the sidebar and the topbar call it. The
+               one line says what the page is; which tags count and how terms are
+               worked out wait behind the title's info button, word for word
+               (copy plan, Liability #1). The stamp and Refresh live on the tabs. */
+            box.append(pageHead({ view: 'liability', title: 'Liability', line: 'What customers owe on unpaid orders.',
+                info: infoButton('About Liability', { title: 'Liability', body: 'Credit extended to customers, from orders tagged '
                     + (d.tags || []).map(t => '"' + t + '"').join(', ')
                     + '. Terms come from the order itself, then a Net tag on the customer, otherwise Net '
-                    + d.default_terms + ' is assumed and marked.'));
-            /* The stamp and Refresh live on the tabs; the header's own action
-               slot is where the widget grid puts Customize. */
-            hero.append(badge, ht, heroAct(''));
-            box.append(hero);
+                    + d.default_terms + ' is assumed and marked.' }) }));
             box.append(financeTabs('liability', freshLabel(liabilityCache.at), [refreshBtn(() => loadLiability(true, true))]));
             /* Under the header and its tabs every block is a card the grid can
                move, each spanning the row. */
@@ -13002,8 +13002,6 @@ Projected Image UK"></textarea>
                 const bcard = el('div', 'card');
                 const bhead = el('div', 'card-head');
                 bhead.append(el('h3', 'card-title', 'Aged debt'));
-                bhead.append(el('p', 'card-desc', 'Every unpaid order by how late it is, as a share of '
-                    + liaMoney(d.total, cur, 0) + ' outstanding.'));
                 bcard.append(bhead, bar, leg);
                 box.append(widget(bcard, 'aged-debt'));
             }
@@ -13115,11 +13113,9 @@ Projected Image UK"></textarea>
                card says the one true thing instead. */
             if (!(d.customers || []).length) {
                 hTitle.textContent = 'Customers owing';
-                lCard.append(lHead, el('div', 'empty', 'No orders currently carry an unpaid tag. Nothing is owed.'));
+                lCard.append(lHead, el('div', 'empty', 'Nothing is owed.'));
                 return;
             }
-            lHead.append(el('p', 'card-desc', 'Open one to see the orders behind the figure, '
-                + 'when each is due, and what has been paid against it.'));
             lCard.append(lHead);
             lCard.append(tableTools(left, right));
             const host = el('div', 'lbl-rows'); lCard.append(host);
@@ -13149,7 +13145,7 @@ Projected Image UK"></textarea>
                 }
                 if (!custs.length) {
                     host.append(el('div', 'empty', d.total > 0 ? 'Nothing matches these filters.'
-                        : 'No orders currently carry an unpaid tag. Nothing is owed.'));
+                        : 'Nothing is owed.'));
                     return;
                 }
                 custs.forEach(({ c, rows }) => {
@@ -17626,13 +17622,9 @@ Projected Image UK"></textarea>
                spend the entrance the first real paint is owed. */
             const rPainting = !!reconCache && !reconCache.error;
             box.classList.toggle('no-intro', !(rPainting && firstPaint('recon')));
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.check;
-            const ht = el('div');
-            const rTitle = el('h2', null, 'Reconciliation');
-            ht.append(rTitle,
-                el('p', null, 'Checks that Shopify, Xero and the inbox agree: every sale in the books, every '
-                    + 'payout in the bank, every document accounted for. It reads all three and changes none.'));
-            hero.append(badge, ht); box.append(hero);
+            /* "Read only" is the safety point and stays in the line (copy plan,
+               Reconciliation #1). */
+            box.append(pageHead({ view: 'recon', title: 'Reconciliation', line: 'Checks Shopify, Xero and the inbox agree. Read only.' }));
             /* Freshness is stated in the tabs slot and nowhere else, as the
                Liability tab states it: the connection card printed the same
                sentence again 78px below this one. */
@@ -17645,7 +17637,6 @@ Projected Image UK"></textarea>
                can move, each spanning the row, so the header gets the action
                slot Customize goes in. Added here rather than with the header,
                so a page that is only a loading line keeps its header as it was. */
-            hero.append(heroAct(''));
             const st = reconCache.st || {};
             /* Connection + sweep card. What is connected on the left, what can
                be done on the right, and the last sweep's notes as a list under
@@ -17747,13 +17738,25 @@ Projected Image UK"></textarea>
                    width of the card. */
                 const mc = el('div', 'card');
                 const mh = el('div', 'card-head');
-                mh.append(el('h3', 'card-title', 'Connect the accounts mailbox'));
-                mh.append(el('p', 'card-desc',
+                /* The setup, word for word, behind the title's info button (the
+                   mix, spec 8.3); the address to copy and the Connect action
+                   stay on the card. */
+                const mt = el('h3', 'card-title', 'Connect the accounts mailbox');
+                mt.append(infoButton('Connecting the accounts mailbox', { title: 'Connect the accounts mailbox', body: [
                     'Reconciliation reads remittances, supplier invoices and statements from '
                     + 'the accounts mailbox. That is a different Google account from the one '
                     + 'behind the Inbox tab'
                     + (mb.sales_address ? ' (' + mb.sales_address + ')' : '')
-                    + ', and it will not appear there.'));
+                    + ', and it will not appear there.',
+                    'Add this callback URL to your Google OAuth client, beside the one the Inbox tab '
+                    + 'already uses (APIs and Services, Credentials, your OAuth client, Authorised '
+                    + 'redirect URIs). Until it is there Google refuses the sign-in with "Access '
+                    + 'blocked: this app\u2019s request is invalid".',
+                    'The address is required: it is what makes Google open the right account '
+                    + 'rather than the one this browser is already signed into.',
+                    'If a different mailbox is connected anyway, nothing is saved and the page '
+                    + 'says which one it got, so try again in a private window.'] }));
+                mh.append(mt);
                 mc.append(mh);
                 /* The step everyone trips on: Google answers an unregistered
                    callback with "Access blocked: This app's request is
@@ -17761,11 +17764,7 @@ Projected Image UK"></textarea>
                    copyable, rather than described. */
                 const steps = el('ol', 'setup-steps');
                 const s1 = el('li');
-                s1.append(document.createTextNode(
-                    'Add this callback URL to your Google OAuth client, beside the one the Inbox tab '
-                    + 'already uses (APIs and Services, Credentials, your OAuth client, Authorised '
-                    + 'redirect URIs). Until it is there Google refuses the sign-in with "Access '
-                    + 'blocked: this app\u2019s request is invalid".'));
+                s1.append(document.createTextNode('Add this callback URL to your Google OAuth client.'));
                 const uriRow = el('div', 'act-row');
                 uriRow.append(el('code', 'setup-code', mb.redirect_uri || ''));
                 const cp = el('button', 'btn btn-sm');
@@ -17790,9 +17789,7 @@ Projected Image UK"></textarea>
                        into, and the callback can check it got what was asked
                        for rather than accepting whatever turns up. */
                     const s2 = el('li');
-                    s2.append(document.createTextNode('Type the accounts mailbox address and connect it. '
-                        + 'The address is required: it is what makes Google open the right account '
-                        + 'rather than the one this browser is already signed into.'));
+                    s2.append(document.createTextNode('Type the accounts mailbox address, then connect.'));
                     const row = el('div', 'act-row');
                     const who = el('input', 'field-sm setup-field');
                     who.placeholder = 'accounts@yourdomain.com'; who.type = 'email'; who.setAttribute('aria-label', 'Accounts mailbox address'); who.spellcheck = false;
@@ -17842,9 +17839,6 @@ Projected Image UK"></textarea>
                     row.append(who, go);
                     s2.append(row);
                     steps.append(s2);
-                    mc.append(el('p', 'card-sub',
-                        'If a different mailbox is connected anyway, nothing is saved and the page '
-                        + 'says which one it got, so try again in a private window.'));
                 } else {
                     mc.append(el('p', 'card-sub', 'Ask the master account to connect it.'));
                 }
@@ -17854,9 +17848,11 @@ Projected Image UK"></textarea>
             if (!xs.connected && st.setup && st.setup.env_needed) {
                 const su = el('div', 'card');
                 const sh = el('div', 'card-head');
-                sh.append(el('h3', 'card-title', 'Connect Xero'));
-                sh.append(el('p', 'card-desc', 'A one-time setup of about five minutes. Xero is connected '
-                    + 'read-only: the app can read the books and has no way to change them.'));
+                /* The security point stays as the card's line; the setup is the
+                   title's info button, word for word (copy plan, Reconciliation #8). */
+                const xt = el('h3', 'card-title', 'Connect Xero');
+                sh.append(xt);
+                sh.append(el('p', 'card-desc', 'Read only: Reactor cannot change your books.'));
                 su.append(sh);
                 /* Built as nodes, not innerHTML: the redirect URI is server
                    data and goes in as TEXT, whatever it contains. */
@@ -17874,7 +17870,20 @@ Projected Image UK"></textarea>
                     'XERO_CLIENT_ID and XERO_CLIENT_SECRET', ' (never anywhere else), then redeploy.');
                 if (!st.setup.configured) s3.append(document.createTextNode(
                     ' The Connect button appears here once the server has them.'));
-                su.append(steps);
+                xt.append(infoButton('Setting up Xero', { title: 'Connect Xero', body: ['A one-time setup of about five minutes. Xero is connected '
+                    + 'read-only: the app can read the books and has no way to change them.', steps] }));
+                /* The address to type in Xero stays on the card, beside a Copy. */
+                if (st.setup.redirect_uri) {
+                    const ur = el('div', 'act-row');
+                    ur.append(el('code', 'setup-code', st.setup.redirect_uri));
+                    const ucp = el('button', 'btn btn-sm'); ucp.type = 'button';
+                    ucp.append(ico(I.copy), document.createTextNode('Copy'));
+                    ucp.onclick = async () => {
+                        try { await navigator.clipboard.writeText(st.setup.redirect_uri); toastOk('Redirect URI copied.'); }
+                        catch (e) { toastError('Select the address above and copy it.'); }
+                    };
+                    ur.append(ucp); su.append(ur);
+                }
                 if ((st.setup.scopes || []).length) {
                     /* Xero refuses the WHOLE authorization if the app was not
                        assigned one of these, and never says which. Showing
@@ -17957,8 +17966,6 @@ Projected Image UK"></textarea>
             rHead.append(el('h3', 'card-title', ex.length
                 + (ex.length === 1 ? ' discrepancy' : ' discrepancies')
                 + (ex.length && exOpen < ex.length ? ', ' + exOpen + ' open' : '')));
-            rHead.append(el('p', 'card-desc', 'Where Shopify, Xero and the inbox disagree. '
-                + 'Open one to see both sides and say what it was.'));
             /* On the toolbar, not in the card header: the same class of
                control sits on the toolbar one tab away, and a header action
                here left the other tab's header with an empty action track. */
@@ -17982,7 +17989,7 @@ Projected Image UK"></textarea>
             box.append(widget(list, 'discrepancies', 'full', 'Discrepancies'));
             if (!ex.length) {
                 list.append(el('div', 'empty', xs.connected
-                    ? 'Nothing needs attention with these filters. That is the goal state.'
+                    ? 'Nothing needs attention.'
                     : 'Connect Xero above, then run the first sweep.'));
                 return;
             }

@@ -11029,6 +11029,47 @@ def t_keywords_products_and_customers_wear_the_mix():
         ok(new in SCRIPT, "says: " + new)
 
 
+@test
+def t_liability_and_reconciliation_wear_the_mix():
+    """Spec 8.3 (Finance) and the copy plan (Liability, Reconciliation): the one
+    header with a short line, the rule and the setup behind info buttons beside
+    their titles, the address to copy and the Connect action kept on the card,
+    "Read only" kept as the safety point, and the shorter empty lines."""
+    for fname in ("function renderLiability() {", "async function loadLiability(force, fresh) {", "function renderRecon() {"):
+        ok(fname in SCRIPT, fname + " exists")
+        fn = fn_src(fname)
+        ok("pageHead({" in fn and "el('div', 'ov-hero')" not in fn, fname + ": the one header")
+    ok("line: 'What customers owe on unpaid orders.'" in SCRIPT and "infoButton('About Liability'" in SCRIPT, "Liability's line and its rule")
+    rc = fn_src("function renderRecon() {")
+    ok("line: 'Checks Shopify, Xero and the inbox agree. Read only.'" in rc, "Reconciliation's line keeps Read only")
+    ok("infoButton('Connecting the accounts mailbox'" in rc and "infoButton('Setting up Xero'" in rc, "both setups wait behind info buttons")
+    ok("'Read only: Reactor cannot change your books.'" in rc and "ucp.append(ico(I.copy)" in rc, "the security line and the address to copy stay")
+    for gone in ("Every unpaid order by how late it is", "Open one to see the orders behind the figure", "No orders currently carry an unpaid tag",
+                 "Where Shopify, Xero and the inbox disagree", "That is the goal state."):
+        ok(gone not in SCRIPT, "cut: " + gone)
+    ok(SCRIPT.count("'Nothing is owed.'") == 2 and "'Nothing needs attention.'" in SCRIPT, "the empty lines are short")
+
+
+@test
+def t_the_finance_row_prints_nothing_and_the_chase_panel_has_no_box():
+    """Carried from the Phase 3 and 4 reviews. The Finance tab row prints as an
+    empty 44 band on a rule, because its tabs and chooser do not print: the
+    @media print block is frozen, so the row is for a screen by its own rules
+    (hidden, then shown under @media screen, as the info button is). And the
+    Liability chase panel is no bordered box (spec 3)."""
+    ok("\n        .page-tabs { display: none;" in CSS and "\n        @media screen { .page-tabs { display: flex; } }" in CSS,
+       "the Finance tab row is hidden by default and shown for a screen")
+    ok("\n        .page-tabs { display: none;" in CSS and CSS.index("\n        .page-tabs { display: none;") < CSS.index("@media screen { .page-tabs { display: flex; } }"),
+       "and the screen rule follows its base rule")
+    ok("\n            .card-head:has(> .card-title > .info) { row-gap: var(--sp-3); }" in CSS
+       and CSS.index(".card-head:has(> .card-title > .info) { row-gap: var(--sp-3); }") > CSS.index("\n            .info::before { inset: auto; left: 0;"),
+       "on a phone a line under a title with an info button sits 12 below it, clear of the 40 target")
+    m = re.search(r"\n        \.lia-chase \{([^}]*)\}", CSS)
+    ok(m is not None, ".lia-chase is a rule at the stylesheet's own indent")
+    r = m.group(1) if m else ""
+    ok("border: 0;" in r and "background: none;" in r and "padding: 0;" in r and "border-radius: 0;" in r, "the chase panel has no box")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
