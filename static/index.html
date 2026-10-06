@@ -277,7 +277,8 @@
             --chart-h: 220px; --chart-h-tall: 300px;
             --chart-dot-r: 3.5px; --chart-stroke: var(--bw-strong);   /* the mix: a series is a 2px line */
             --chart-pt-r: 4px;      /* a single point drawn as a dot (8 across, its white ring outside) */
-            --tip-w: 232px;         /* the chart's tooltip */
+            --tip-w: 232px;         /* the chart's tooltip, at least this wide */
+            --tip-max: 360px;       /* and at most this, or the plot's width less 16 */
             --icon-xs: 12px; --icon-sm: 14px; --icon-md: 16px; --icon-lg: 18px; --icon-xl: 20px;
             /* 16 at 1.75 in every control, row, tile and nav item; 14 at 2 only
                for inline glyphs (crumb, link and list chevrons, chip arrows). */
@@ -1210,7 +1211,7 @@
             .ktable.sizes-table td.sizes-maker { grid-area: maker; color: var(--text-secondary); font-size: var(--text-xs); }
             .ktable.sizes-table td.sizes-status { grid-area: status; white-space: normal; }
             .ktable.sizes-table tr.sizes-row > td.sizes-status:empty { display: none; }
-            .ktable.sizes-table td.sizes-fig { grid-area: fig; align-self: center; font-size: var(--text-head); }
+            .ktable.sizes-table td.sizes-fig { grid-area: fig; align-self: center; font-size: var(--fig-s); font-weight: var(--weight-semibold); letter-spacing: var(--tr-fig); line-height: var(--lh-none); }
             .ktable.sizes-table td.sizes-fig .sizes-unit { display: inline; font-size: var(--text-body); color: var(--text-secondary); }
             .ktable.sizes-table tr.sizes-row > :is(td.sizes-glass, td.sizes-image, td.sizes-under, td.sizes-notes) { display: none; }
             .ktable.sizes-table tr.sizes-detail > td { padding: 0 0 var(--sp-4); }
@@ -1896,7 +1897,7 @@
         /* The reference's orders card head: a quiet title, a big counted line,
            and a muted line under it. */
         .card-head-stat .card-title { font-size: var(--text-body); font-weight: var(--weight-regular); color: var(--text-tertiary); }
-        .card-head-stat .card-desc { font-size: var(--text-head); color: var(--text-primary); line-height: var(--lh-none); letter-spacing: normal; }
+        .card-head-stat .card-desc { font-size: var(--fig-s); font-weight: var(--weight-semibold); color: var(--text-primary); line-height: var(--lh-none); letter-spacing: var(--tr-fig); }
         .card-sub { grid-column: 1; margin: 0; font-size: var(--text-body); color: var(--text-tertiary); line-height: var(--lh-control); max-width: var(--measure); }
         .card-sub b { color: var(--text-primary); font-weight: var(--weight-medium); }
         .card-act { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center;
@@ -3898,7 +3899,7 @@
             body.printing-label .label-sheet:last-child { break-after: auto; page-break-after: auto; }
         }
         /* PDF export (print) */
-        .print-head { display: none; align-items: center; justify-content: space-between; padding: 0 0 var(--sp-4); margin-bottom: var(--sp-3); border-bottom: var(--bw-hairline) solid var(--border-strong); }
+        .print-head { font-size: var(--text-sm); line-height: var(--lh-body); display: none; align-items: center; justify-content: space-between; padding: 0 0 var(--sp-4); margin-bottom: var(--sp-3); border-bottom: var(--bw-hairline) solid var(--border-strong); }
         .print-head .ph-brand { font-weight: var(--weight-semibold); font-size: var(--text-md); letter-spacing: -.02em; }
         .print-head .ph-meta { font-size: var(--text-xs); color: var(--text-secondary); }
         @media print {
@@ -4438,7 +4439,7 @@
         @container segs (max-width: 519.98px) { .segs:has(> :nth-child(6):last-child) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (min-width: 1800px) { .segs { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); } }
         .seg-card { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); padding: var(--sp-4); box-shadow: var(--shadow-sm); }
-        .seg-card .seg-n { font-size: var(--text-head); font-weight: var(--weight-semibold); letter-spacing: normal; }
+        .seg-card .seg-n { font-size: var(--fig-s); font-weight: var(--weight-semibold); letter-spacing: var(--tr-fig); line-height: var(--lh-none); }
         .seg-card .seg-name { font-size: var(--text-body); font-weight: var(--weight-medium); margin-top: 0; }
         .seg-card .seg-desc { font-size: var(--text-xs); color: var(--text-tertiary); margin-top: var(--sp-1); line-height: var(--lh-caption); }
         .seg-card .seg-rev { font-size: var(--text-xs); color: var(--text-secondary); margin-top: var(--sp-2); }
@@ -4574,13 +4575,15 @@
         /* The tooltip beside the point: 232 wide, 12 inside, the floating corner
            and shadow; the day in ink at 600, then one 20 row per measure. */
         .chart-tip { position: absolute; pointer-events: none; background: var(--surface-primary); border: 0; border-radius: var(--radius-pop);
-            padding: var(--tip-pad); width: var(--tip-w); font-size: var(--text-xs); line-height: var(--lh-caption); box-shadow: var(--shadow-pop);
+            padding: var(--tip-pad); width: max-content; min-width: var(--tip-w); max-width: min(var(--tip-max), calc(100% - var(--sp-4))); font-size: var(--text-xs); line-height: var(--lh-caption); box-shadow: var(--shadow-pop);
             opacity: 0; transition: opacity var(--dur) var(--ease); z-index: 4; }
         .chart-tip .tl { color: var(--text-primary); font-weight: var(--weight-semibold); margin-bottom: var(--sp-1); }
         .chart-tip .tr { display: flex; align-items: center; gap: var(--control-gap); height: var(--lh-control); color: var(--text-secondary); }
         .chart-tip b { margin-left: auto; font-weight: var(--weight-medium); color: var(--text-primary); font-variant-numeric: tabular-nums; }
         /* A row is one 20 line: a range ("£26,000 to £30,000") would otherwise wrap into the row under it. */
         .chart-tip .tr > span, .chart-tip b { white-space: nowrap; }
+        /* A name too long for the box ends in an ellipsis; the figure after it never does. */
+        .chart-tip .tr > span:not(.sw) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
         /* 14, like every other card description on the page: at 12 the header
            read 16 -> 20 -> 12 and the line that says where a number came from
            was the smallest type on the page outside the axis. */
@@ -4816,7 +4819,7 @@
         @container (min-width: 600px) { .chat-metrics .metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
         .chat-metrics .stat { min-height: 0; padding: var(--sp-3); }
         .chat-metrics .stat-ic { display: none; }
-        .chat-metrics .stat .value { font-size: var(--text-head); }
+        .chat-metrics .stat .value { font-size: var(--fig-s); }
         .chat-metrics .stat-row { flex-wrap: wrap; row-gap: var(--sp-1); }
         /* A chat answer's figures are written by the model, so no chip under it is coloured, whatever its
            direction: the arrow and the hidden word carry it. */
@@ -4964,7 +4967,7 @@
             display: flex; align-items: center; justify-content: center; }
         .auth-brand svg { width: var(--icon-2xl); height: var(--icon-2xl); }
         .auth-card h2 { margin: 0 0 var(--sp-2); font-size: var(--fig-s); font-weight: var(--weight-semibold);
-            letter-spacing: var(--tr-fig); text-align: center; }
+            letter-spacing: var(--tr-title); text-align: center; }
         .auth-sub { margin: 0 0 var(--sp-6); font-size: var(--text-body); color: var(--text-tertiary);
             line-height: var(--lh-control); text-align: center; }
         /* The name sits in the field as its placeholder, beside an icon; the
@@ -5349,6 +5352,16 @@
             :is(.sizes-open, .files-name) { align-items: center; }
             /* The Guide's search row sized its grid track by the search's own width, which the 14px Print button pushed 7 past the screen. */
             .guide-tools { grid-template-columns: minmax(0, 1fr); }
+            /* The chat's own controls (the composer's script and rules are Task 43's, so this is index.html only). */
+            .send { width: var(--control-h-lg); height: var(--control-h-lg); }
+            #input { min-height: var(--control-h-lg); }
+            /* A small close or clear glyph keeps its look, and its target grows to a 40 square centred on it (an invisible
+               hit area: no visible change, nothing moved). Reaching them on a touch screen is what a 390 scan without touch
+               emulation cannot show. */
+            :is(.convo .del, .toast-x, .tbl-search .tbl-clear, .alert-x, .sk-chip-x, .fchip button) { position: relative; }
+            :is(.convo .del, .toast-x, .tbl-search .tbl-clear, .alert-x, .sk-chip-x, .fchip button, .ov-wrap.wg-editing > [data-widget] > .wg-hide)::after {
+                content: ""; position: absolute; left: 50%; top: 50%; width: var(--control-h-lg); height: var(--control-h-lg);
+                margin: calc(var(--control-h-lg) / -2) 0 0 calc(var(--control-h-lg) / -2); }
             /* The Size list's A to Z is one swipeable line of 40 squares rather than four rows of them. */
             .az { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; margin-inline: calc(-1 * var(--sp-1)); padding-inline: var(--sp-1); }
             .az::-webkit-scrollbar { display: none; }
@@ -8836,8 +8849,15 @@ Projected Image UK"></textarea>
                 const TIP = { beside: tokenNum('--sp-4'), off: tokenNum('--pop-offset'),
                     lift: tokenNum('--tip-pad') + tokenNum('--lh-caption') + tokenNum('--sp-1') + tokenNum('--lh-control') / 2 };
                 const swatch = (cls, color) => { const s = el('span', 'sw' + (cls ? ' ' + cls : '')); if (color) s.style.setProperty('--sw', color); return s; };
-                let cur = -1;
-                const show = (i) => {
+                let cur = -1, liveT = 0;
+                /* The status line speaks on an arrow-key step at once, and for a pointer only once it has rested on one point
+                   (about 600ms): updating on every move made a screen reader read each point the pointer crossed. */
+                const say = (text, now) => {
+                    clearTimeout(liveT);
+                    if (now) { if (live.textContent !== text) live.textContent = text; return; }
+                    liveT = setTimeout(() => { if (live.textContent !== text) live.textContent = text; }, 600);
+                };
+                const show = (i, announce) => {
                     i = Math.max(0, Math.min(n - 1, i)); cur = i;
                     hoverLine.setAttribute('x1', X(i)); hoverLine.setAttribute('x2', X(i)); hoverLine.setAttribute('opacity', 1);
                     dots.forEach((c, si) => { const v = series[si].values[i];
@@ -8848,7 +8868,7 @@ Projected Image UK"></textarea>
                     if (bandOpt && bandOpt.lo[i] != null && bandOpt.hi[i] != null)
                         rows.push([swatch('band', bandOpt.color || CH[2]), bandOpt.name || 'Range', fmt(bandOpt.lo[i]) + ' to ' + fmt(bandOpt.hi[i])]);
                     const said = labels[i] + ', ' + rows.map(r => r[1] + ' ' + r[2]).join(', ');
-                    if (live.textContent !== said) live.textContent = said;
+                    say(said, announce);
                     if (legendEl && window.matchMedia('(max-width: 640px)').matches) {
                         if (!legendEl._rest) legendEl._rest = [].slice.call(legendEl.childNodes);
                         const read = [el('b', null, labels[i])];
@@ -8869,7 +8889,7 @@ Projected Image UK"></textarea>
                     tip.style.left = Math.round(left) + 'px'; tip.style.top = Math.round(top) + 'px'; tip.style.opacity = 1;
                 };
                 const rest = () => {
-                    cur = -1; hoverLine.setAttribute('opacity', 0); dots.forEach(c => c.setAttribute('opacity', 0)); tip.style.opacity = 0;
+                    cur = -1; clearTimeout(liveT); hoverLine.setAttribute('opacity', 0); dots.forEach(c => c.setAttribute('opacity', 0)); tip.style.opacity = 0;
                     if (legendEl && legendEl._rest) { legendEl.replaceChildren(...legendEl._rest); legendEl.classList.remove('reading'); }
                 };
                 wrap._rest = rest;
@@ -8882,7 +8902,7 @@ Projected Image UK"></textarea>
                 svg.onpointerdown = (e) => { at(e.clientX); if (e.pointerType !== 'mouse' && svg.setPointerCapture) svg.setPointerCapture(e.pointerId); };
                 svg.onpointerleave = (e) => { if (e.pointerType === 'mouse') rest(); };
                 wrap.onkeydown = (e) => {
-                    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); show((cur < 0 ? n - 1 : cur) + (e.key === 'ArrowRight' ? 1 : -1)); }
+                    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); show((cur < 0 ? n - 1 : cur) + (e.key === 'ArrowRight' ? 1 : -1), true); }
                     else if (e.key === 'Escape') rest();
                 };
                 wrap.append(svg);

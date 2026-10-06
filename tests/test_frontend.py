@@ -10388,6 +10388,51 @@ def t_text_comes_in_the_five_steps():
     ok('@media screen { :where(svg[stroke-width="2"]) { stroke-width: var(--icon-stroke); } }' in CSS, "every interface icon is drawn at 1.75")
 
 
+@test
+def t_the_phone_and_chart_review_fixes_hold():
+    """Review of Tasks 19, 24 and 25 (6 October 2026): (1) the chat's Send and
+    input are 40 on a phone; (2) a small close or clear glyph has a 40 hit area
+    centred on it; (3) the four figures the type sweep shrank are on the figure
+    scale again and the sign-in title has the title tracking; (4) the report's
+    print-only header keeps body's 14 on 1.5; (5) the chart tooltip grows to
+    its content inside the plot; (6) the chart's status line speaks on an arrow
+    step, or after the pointer rests on one point, not on every move."""
+    blocks = [b for p, b in css_blocks(CSS) if p.endswith("@media (max-width: 640px)") and "THE PHONE" in p]
+    ok(len(blocks) == 1, "the phone block is there")
+    b = blocks[0] if blocks else ""
+    ok(".send { width: var(--control-h-lg); height: var(--control-h-lg); }" in b, "Send is 40 by 40 on a phone")
+    ok("#input { min-height: var(--control-h-lg); }" in b, "and the input is at least 40 tall (its auto-grow sets only a taller height)")
+    ok(":is(.convo .del, .toast-x, .tbl-search .tbl-clear, .alert-x, .sk-chip-x, .fchip button) { position: relative; }" in b,
+       "the small glyph buttons are the containing block for their hit area")
+    hit = ".ov-wrap.wg-editing > [data-widget] > .wg-hide)::after {"
+    ok(hit in b and "width: var(--control-h-lg); height: var(--control-h-lg);" in b.split(hit)[1][:260] if hit in b else False,
+       "each has a 40 square centred on it (the Customise hide button, which is already positioned, included)")
+    ok(".wg-hide)::after" in b and ".wg-hide) { position: relative; }" not in b, "and the hide button stays absolutely positioned")
+    for sel in (".seg-card .seg-n {", ".card-head-stat .card-desc {"):
+        ok(sel in CSS, sel + " is a rule")
+        r = CSS.split("\n        " + sel)[1].split("}")[0] if ("\n        " + sel) in CSS else ""
+        ok("font-size: var(--fig-s)" in r and "letter-spacing: var(--tr-fig)" in r, sel + " is on the figure scale")
+    ok("td.sizes-fig { grid-area: fig; align-self: center; font-size: var(--fig-s);" in CSS and "letter-spacing: var(--tr-fig)" in CSS.split("td.sizes-fig { grid-area: fig;")[1].split("}")[0],
+       "a Size list card's figure is on the figure scale")
+    ok(".chat-metrics .stat .value { font-size: var(--fig-s); }" in CSS, "and a chat answer's figures")
+    ok("letter-spacing: var(--tr-title)" in CSS.split("\n        .auth-card h2 {")[1].split("}")[0] if "\n        .auth-card h2 {" in CSS else False,
+       "the sign-in title has the title tracking, not a figure's")
+    ph = CSS.split("\n        .print-head {")[1].split("}")[0] if "\n        .print-head {" in CSS else ""
+    ok("font-size: var(--text-sm)" in ph and "line-height: var(--lh-body)" in ph, "the print header keeps body's 14 on 1.5")
+    tip = CSS.split("\n        .chart-tip {")[1].split("}")[0] if "\n        .chart-tip {" in CSS else ""
+    ok("width: max-content" in tip and "min-width: var(--tip-w)" in tip and "max-width: min(var(--tip-max), calc(100% - var(--sp-4)))" in tip,
+       "the tooltip is as wide as its content, at least the token, at most 360 or the plot less 16")
+    eq(_token_raw("tip-max"), "360px", "--tip-max")
+    ok(".chart-tip .tr > span:not(.sw) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }" in CSS, "a name too long ends in an ellipsis")
+    ok("function trendChart(" in SCRIPT, "the chart builder is there")
+    tc = SCRIPT.split("function trendChart(", 1)[1].split("\n        function ", 1)[0]
+    ok("say(said, announce);" in tc and "setTimeout(() => { if (live.textContent !== text) live.textContent = text; }, 600)" in tc,
+       "the status line is said at once only when told to, and otherwise after 600ms at rest")
+    ok("(e.key === 'ArrowRight' ? 1 : -1), true); }" in tc, "an arrow step announces at once")
+    ok("svg.onpointermove = (e) => at(e.clientX);" in tc and "show(Math.round(" in tc and "(n - 1)));" in tc, "a pointer move does not")
+    ok("clearTimeout(liveT); hoverLine" in tc, "and resting the chart cancels a pending announcement")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
