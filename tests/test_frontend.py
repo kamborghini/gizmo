@@ -2917,7 +2917,8 @@ def t_a_dropdown_menu_can_always_be_got_out_of():
     on Escape, on a click anywhere else, on a second press of its own trigger and
     on scrolling the page under it, and hands focus back each time. Verified in a
     browser as well as here; the suite can only read the source."""
-    fn = SCRIPT.split("function dropMenu(anchor, items) {")[1][:3800]
+    ok("function dropMenu(anchor, items) {" in SCRIPT, "the menu builder exists")
+    fn = fn_src("function dropMenu(anchor, items) {")
     close = SCRIPT.split("function closeDMenu() {")[1][:1200]
     ok("dmenuOpen.anchor === anchor" in fn, "a second press of the trigger closes it")
     ok("e.key === 'Escape'" in fn, "Escape closes it")
@@ -2951,9 +2952,9 @@ def t_the_menu_and_tabs_are_the_reference_measurements():
     ok("var(--shadow-pop)" in panel, "its edge is the pop shadow's ring, not a border")
     ok("border:" not in panel, "and it has no border at all")
     item = CSS.split(".dmenu-item {")[1].split("}")[0]
-    ok("height: 28px" in item, "items are 28px")
-    ok("padding: var(--sp-1) var(--sp-7) var(--sp-1) var(--sp-1-5)" in item, "with room on the right for a tick")
-    ok("border-radius: calc(var(--radius-card) - var(--sp-1))" in item, "concentric inside the padded menu")
+    ok("min-height: var(--control-h)" in item, "items are 32px, a nav row")
+    ok("padding: 0 var(--sp-7) 0 var(--sp-2)" in item, "with room on the right for a tick")
+    ok("border-radius: var(--radius-row)" in item, "at the row corner, 6 inside the 10 with its 4 padding")
     tab = CSS.split("\n        .tab {")[1].split("}")[0]
     ok("height: auto" in tab and "padding: 0" in tab, "a tab fills its 44 strip and is as wide as its label (the mix)")
     ok("background: none" in tab, "with no filled pill")
@@ -9943,7 +9944,7 @@ def t_a_disabled_or_danger_button_keeps_one_colour_and_the_old_fields_are_on_the
     selects) and `.sk-input` / `.sk-textarea` (the Skills and Memory editors) still
     wore the old 14px field with a --border-default edge and no lift."""
     base = ".btn .ic { color: var(--text-secondary); }"
-    fix = '.btn:is([disabled], :disabled, [aria-disabled="true"], .btn-danger) .ic { color: inherit; }'
+    fix = '.btn:is([disabled], :disabled, [aria-disabled="true"], .btn-danger, .btn.ghost[disabled], .btn.ghost[aria-disabled="true"]) .ic { color: inherit; }'
     ok(base in CSS and fix in CSS, "a disabled or danger button hands its own colour to its icon")
     ok(CSS.index(fix) > CSS.index(base), "after the rule it overrides")
     ok("\n        .psel { border-radius: var(--radius-field); padding: var(--control-pad-y) var(--sp-3); font-size: var(--text-body); min-height: var(--control-h); }" in CSS,
@@ -9956,6 +9957,28 @@ def t_a_disabled_or_danger_button_keeps_one_colour_and_the_old_fields_are_on_the
     ok(".disp-boxedit > select, .disp-boxedit > input { height: var(--control-h); box-sizing: border-box; }" in CSS
        and "\n        .disp-boxedit > select.psel { min-width: 168px; }" in CSS,
        "the dispatch box select is a 32 field with its own chevron room, not a 36 with 8 each side")
+
+
+@test
+def t_a_screens_method_pages_sit_in_one_how_it_works_menu():
+    """Spec 6: one header button holds a screen's method pages as a menu; it
+    replaces Forecast's "How this forecast works" section. A menu row is 32
+    with a 6 corner, a 16 icon 12 from its words and a count at its end; the
+    last row, after a rule, is the Guide's link."""
+    ok("function howItWorks(items, guide) {" in SCRIPT, "the builder exists")
+    fn = fn_src("function howItWorks(items, guide) {")
+    for part in ("el('button', 'btn')", "ico(I.helpCircle)", "'How it works'", "dropMenu(b, ", "'-'", "link: true"):
+        ok(part in fn, "howItWorks: " + part)
+    dm = fn_src("function dropMenu(")
+    ok("if (it.n != null) b.append(el('span', 'cnt', String(it.n)));" in dm, "a menu row can carry a count")
+    ok("if (it.link) { b.classList.add('dmenu-link'); b.append(ico(I.arrowRight)); }" in dm, "and the Guide's row is a link")
+    item = CSS.split("\n        .dmenu-item {")[1].split("}")[0]
+    for prop in ("min-height: var(--control-h)", "gap: var(--gap-row-icon)", "border-radius: var(--radius-row)", "font-size: var(--text-body)"):
+        ok(prop in item, ".dmenu-item: " + prop)
+    ok(".dmenu-item .cnt { margin-left: auto; padding-left: var(--sp-2); }" in CSS, "the count sits at the row's end")
+    ok(".dmenu-link { color: var(--text-link); }" in CSS, "the Guide's row is teal words")
+    ok(".dmenu-item.dmenu-link .ic { color: inherit; }" in CSS and ".dmenu-item.dmenu-link svg {" in CSS,
+       "and its arrow is teal and 14: qualified by .dmenu-item, which is later than .dmenu-link and set the arrow in ink-3 at 16 when it was not")
 
 
 if __name__ == "__main__":
