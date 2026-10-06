@@ -18,10 +18,15 @@ CSS = max(re.findall(r"<style>(.*?)</style>", HTML, re.S), key=len)
 COMPOSER = open(os.path.join(ROOT, "static", "composer.js"), encoding="utf-8").read()
 
 _passed, _failed = 0, []
+# ONLY=<part of a name> runs just the matching tests: the whole page suite takes
+# about two minutes, which is too long to wait for one red test.
+_ONLY = os.environ.get("ONLY", "")
 
 
 def test(fn):
     global _passed
+    if _ONLY and _ONLY not in fn.__name__:
+        return fn
     try:
         fn()
         _passed += 1
@@ -9564,6 +9569,69 @@ def t_every_corner_is_a_role():
     for sel in rounds:
         ok(re.search(r"bar|\.sw\b|toggle|\.tab:is|track|fill|meter|seo-score|::after", sel),
            "a round shape with a purpose (a bar, a switch, the tab underline): " + sel[:50])
+
+
+# ---- The mix, 6 October 2026 -------------------------------------------------
+
+@test
+def t_the_printed_sheets_do_not_change():
+    """2026-10-05, Cameron: "i dont like how you have changed my production
+    lables". The production label, the serial sticker, the courier labels and
+    the A4 sheets (day sheet, dispatch manifest, stock usage, the printed Guide)
+    are paper. The mix restyles the screen only, so every print function, the
+    print CSS, the tokens and body type print inherits, the label face and the
+    server's own print document are pinned to their bytes at 9a8c442. A failure
+    here is a change to paper: undo it, or ask Cameron first."""
+    import hashlib
+    h = lambda t: hashlib.sha256(t.encode("utf-8")).hexdigest()[:16]
+    funcs = {
+        "function prodSize(": "c8b194be336787e3", "function carrierDims(": "560211cb05b49d72",
+        "function stickerDims(": "b65799c062e28ec8", "function labelFontReady(": "e90e9106a39a03f4",
+        "function labelDims(": "a3e5c994043b70d4", "function labelPrintCss(": "061bc8a8862da9f0",
+        "function fitLabel(": "b8bebb1841f753aa", "function loanStickerSheet(": "4e84233802eb448d",
+        "async function loanPrintSticker(": "d7705852736415ca", "function labelSheet(": "68217ade25de37e2",
+        "function printDispatchManifest(": "7298fb528556d1bb", "function printStockUsage(": "87dcb3552a1cd72e",
+        "function printDaySheet(": "59667d1651a03de6", "function printShippingLabelsFor(": "1574f28f689be7a0",
+        "function printLabelImages(": "b5f3da205c85e60b", "function printLabels(": "4f2e020a18b82af7",
+        "function printGuide(": "d169080c58a6a3f6", "const LABEL_SIZES = {": "aaba502d9fc95f0f",
+    }
+    for sig, want in funcs.items():
+        ok(sig in SCRIPT, "the print code is still there: " + sig)
+        eq(h(_body_of(sig)), want, sig + " is byte for byte what prints today")
+    for pre, want in (("        const LABEL_LOGO = ", "215e8bea15a6faf4"),
+                      ("        const PRINT_LAYS_LABELS = ", "4a6515c3bd7492f9")):
+        ok(pre in SCRIPT, "the print constant is still there: " + pre.strip())
+        i = SCRIPT.index(pre)
+        eq(h(SCRIPT[i:SCRIPT.index("\n", i)]), want, pre.strip() + " is unchanged")
+    pr = re.compile(r"label-sheet|day-sheet|loan-sticker|guide-print-row|#label-print|printing-label|@media print|@page")
+    rules = [s + "{" + re.sub(r"\s+", " ", b).strip() + "}" for s, b in _rules(CSS) if pr.search(s)]
+    eq(len(rules), 80, "the print rules are the same eighty")
+    eq(h("\n".join(rules)), "dd6dd5eed001305b", "and each is unchanged, in order")
+    ok('<div id="label-print"></div>' in HTML, "the print staging area is still a child of the page")
+    ff = re.search(r"@font-face \{ font-family: 'Bricolage Grotesque';[^}]*\}", CSS)
+    ok(ff, "the label face is still declared")
+    eq(h(ff.group(0)), "b3eb4de40583f995", "and declared exactly as before")
+    # What print reads from the token block, and what the A4 sheets inherit from body.
+    for tok, want in (("white", "#ffffff"), ("black", "#000000"), ("print-black-1", "#111111"),
+                      ("print-black-2", "#222222"), ("print-black-3", "#333333"), ("print-grey-1", "#bbbbbb"),
+                      ("print-grey-2", "#dddddd"), ("paper", "var(--white)"), ("paper-ink", "var(--black)"),
+                      ("paper-ink-2", "var(--print-black-1)"), ("paper-ink-3", "var(--print-black-2)"),
+                      ("paper-ink-4", "var(--print-black-3)"), ("paper-rule", "var(--print-grey-2)"),
+                      ("paper-rule-2", "var(--print-grey-1)"), ("paper-rule-strong", "var(--print-black-1)"),
+                      ("font-print", "'Bricolage Grotesque', -apple-system, 'Segoe UI', Roboto, Arial, sans-serif"),
+                      ("text-xs", "12px"), ("text-sm", "14px"), ("text-md", "16px"), ("weight-medium", "500"),
+                      ("weight-semibold", "600"), ("bw-hairline", "1px"), ("bw-strong", "2px"), ("bw-marker", "3px"),
+                      ("sp-2", "8px"), ("radius-xs", "6px"), ("lh-body", "1.5")):
+        eq(_token_raw(tok), want, "--" + tok + " (print reads it)")
+    body = CSS.split("\n        body {")[1].split("}")[0]
+    ok("font-size: var(--text-sm); line-height: var(--lh-body);" in body,
+       "the A4 sheets still inherit 14px on a 1.5 line from body")
+    py = open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()
+    a = py.index('    @mcp.custom_route("/print/production-labels", methods=["GET", "OPTIONS"])')
+    b = py.index("return HTMLResponse(doc, headers=doc_headers)", a)
+    eq(h(py[a:b]), "61376908bdf445b7", "the server's print document is unchanged")
+    i = py.index("_LABEL_LOGO_SVG = ")
+    eq(h(py[i:py.index("\n", i)]), "5cda691da0ce3b1e", "and so is the logo it prints")
 
 
 if __name__ == "__main__":
