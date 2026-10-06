@@ -14507,22 +14507,17 @@ Projected Image UK"></textarea>
         }
         function renderLoans() {
             const d = loansCache || {}; const box = $('loans-content'); box.innerHTML = '';
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
-            const htext = el('div');
-            htext.append(el('h2', null, 'Loan units'),
-                el('p', null, 'The projectors that go out to customers, where each one is, '
-                    + 'and how long it has been gone.'));
             /* Under the header every block is a card the grid can move, each
-               spanning the row; the empty action slot is where Customize goes. */
-            hero.append(badge, htext, heroAct('')); box.append(hero);
+               spanning the row; the header's action slot is where Customize goes. */
+            box.append(pageHead({ view: 'loans', title: 'Loan units', line: 'Projectors out on loan, and for how long.' }));
             const counts = d.counts || { out: 0, in: 0, late: 0 };
             /* Three stats, three columns: on the shared four-column grid the
                empty fourth cell read as a KPI that had failed to load. */
             const mgrid = metricsStrip([
-                { label: 'Out now', value: String(counts.out), note: 'with customers' },
-                { label: 'On the shelf', value: String(counts.in), note: 'ready to go' },
+                { label: 'Out now', value: String(counts.out) },
+                { label: 'On the shelf', value: String(counts.in) },
                 { label: 'Overdue', value: String(counts.late),
-                  note: counts.late ? 'past the date agreed' : 'nothing past its date',
+                  note: counts.late ? 'past the date agreed' : null,
                   trend: counts.late ? 'down' : '' }]);
             box.append(widget(mgrid, 'counts', 'full', 'Loan counts'));
 
@@ -14530,14 +14525,13 @@ Projected Image UK"></textarea>
             const oCard = el('div', 'card');
             const oHead = el('div', 'card-head');
             oHead.append(el('h3', 'card-title', 'Out now'));
-            oHead.append(el('p', 'card-desc', 'Longest out first.'));
             oCard.append(oHead);
             const out = d.out || [];
             if (!out.length) {
                 /* 'Everything is on the shelf' beside 'On the shelf 0' when there
                    is nothing in the register at all. */
                 oCard.append(el('div', 'empty', (d.units || []).length
-                    ? 'Everything is on the shelf.' : 'Nothing is out: no units are in the register yet.'));
+                    ? 'Everything is on the shelf.' : 'Nothing is out.'));
             } else {
                 out.forEach(r => {
                     const row = el('div', 'lbl-row loan-row' + (r.state === 'late' ? ' is-late'
@@ -14552,7 +14546,7 @@ Projected Image UK"></textarea>
                     when.append(el('div', 'lbl-meta', r.due_at
                         ? (r.state === 'late' ? 'due back ' + fmtDate(r.due_at) + ', overdue'
                             : 'due back ' + fmtDate(r.due_at))
-                        : (r.state === 'due' ? 'no date set, worth a chase' : 'no date set')));
+                        : 'No due date'));
                     row.append(when);
                     const back = el('button', 'btn btn-sm', 'Book back in');
                     back.onclick = async () => {
@@ -14575,7 +14569,6 @@ Projected Image UK"></textarea>
             const rCard = el('div', 'card');
             const rHead = el('div', 'card-head');
             rHead.append(el('h3', 'card-title', 'The register'));
-            rHead.append(el('p', 'card-desc', 'Every loan unit the shop owns.'));
             if (d.can_manage) {
                 const add = el('button', 'btn btn-sm');
                 add.append(ico(I.plus), document.createTextNode('Add a unit'));
@@ -14585,9 +14578,12 @@ Projected Image UK"></textarea>
             rCard.append(rHead);
             const units = d.units || [];
             if (!units.length) {
-                rCard.append(el('div', 'empty', d.can_manage
-                    ? 'No units yet. Add the first projector to start tracking it.'
-                    : 'No units in the register yet.'));
+                if (d.can_manage) {
+                    const first = el('button', 'btn'); first.type = 'button';
+                    first.append(ico(I.plus), document.createTextNode('Add a unit'));
+                    first.onclick = () => loanUnitModal(null);
+                    rCard.append(emptyState({ icon: I.box, text: 'No loan units yet.', action: first }));
+                } else rCard.append(el('div', 'empty', 'No units in the register yet.'));
             } else {
                 units.forEach(u => {
                     const row = el('div', 'lbl-row loan-row');
@@ -14656,8 +14652,7 @@ Projected Image UK"></textarea>
                 const sCard = el('div', 'card');
                 const sHead = el('div', 'card-head');
                 sHead.append(el('h3', 'card-title', 'Chasing'));
-                sHead.append(el('p', 'card-desc',
-                    'A loan with no due date turns amber once it has been out this long.'));
+                sHead.append(el('p', 'card-desc', 'Turns amber after this many days without a due date.'));
                 sCard.append(sHead);
                 const wrap = el('div', 'act-row');
                 const days = document.createElement('input');
@@ -17328,16 +17323,14 @@ Projected Image UK"></textarea>
             const box = $('sizes-content'); box.innerHTML = ''; sizesPane = null;
             const c = sizesCache; const st = sizesState; const painting = !!c && !c.error;
             box.classList.toggle('no-intro', !(painting && firstPaint('sizes')));
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.check;
-            const ht = el('div');
-            ht.append(el('h2', null, 'Size list'),
-                el('p', null, 'Every fixture on the size sheet with the glass it takes: the holder, the image, and the size the bench cuts. '
-                    + 'A ruling made in the app shows over the sheet’s own answer, and the label reads the same list.'));
-            hero.append(badge, ht);
             const sheet = (c && c.sheet) || {};
-            const stamp = sheet.updated ? ('Sheet updated ' + fmtDate(sheet.updated) + (sheet.live ? '' : ' · the copy that came with the app')) : '';
-            hero.append(heroAct(stamp, refreshBtn(refreshSizes)));
-            box.append(hero);
+            const stamp = sheet.updated ? ('Sheet updated ' + fmtDate(sheet.updated) + (sheet.live ? '' : ' · built-in copy')) : '';
+            /* One line; that a ruling wins over the sheet waits behind the
+               title's info button, word for word (copy plan, Size list #1). */
+            box.append(pageHead({ view: 'sizes', title: 'Size list', line: 'The glass size the bench cuts for every fixture.',
+                info: infoButton('About the size list', { title: 'Size list',
+                    body: 'A ruling made in the app shows over the sheet’s own answer, and the label reads the same list.' }),
+                actions: [stamp ? el('span', 'ov-updated', stamp) : null, refreshBtn(refreshSizes)] }));
             if (!c) { box.append(el('div', 'empty', 'Loading…')); return; }
             if (c.error) { box.append(loadFailure('The size list could not be read. ' + c.error, refreshSizes), null); return; }
             const all = c.rows || [];
@@ -17398,7 +17391,7 @@ Projected Image UK"></textarea>
             if (n == null) { box.textContent = st.q ? 'No model matches “' + st.q + '”.' : 'Nothing matches those filters.'; return box; }
             const cut = Array.from(new Set((sizesCache.rows || []).map(r => r.ruling === 'exclude' ? null : sizesNum(sizesEff(r))).filter(v => v != null))).sort((a, b) => a - b);
             const near = [cut.filter(v => v < n).pop(), cut.find(v => v > n)].filter(v => v != null);
-            box.append('Nothing is cut at ' + n + ' mm, and no holder takes ' + n + ' mm glass.');
+            box.append('Nothing is cut at ' + n + ' mm.');
             if (near.length) {
                 box.append(' The nearest ' + (near.length > 1 ? 'sizes' : 'size') + ' the bench cuts: ');
                 near.forEach((v, k) => {

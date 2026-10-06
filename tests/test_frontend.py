@@ -2396,7 +2396,7 @@ def t_the_size_list_finds_a_fixture_however_it_is_written():
     ok("'Nothing has ' + said + ', so these are the models with ' + meant + '.'" in paint, "and the list says it put it right")
     ok("const told = sizesLast.fixed.filter(f => !f[0].startsWith(f[1]));" in paint, "but not for a word still being typed ('clayp')")
     none = SCRIPT.split("function sizesNone(toks)")[1][:1600]
-    ok("'Nothing is cut at ' + n + ' mm, and no holder takes ' + n + ' mm glass.'" in none and "st.q = v + 'mm';" in none,
+    ok("'Nothing is cut at ' + n + ' mm.'" in none and "st.q = v + 'mm';" in none,
        "a size the bench does not cut names the nearest it does, each a search")
     ok("const SIZES_QSORTS = [['match', 'Best match']].concat(SIZES_SORTS);" in SCRIPT, "Best match is offered while searching")
     ok("defs.push(['Search: ' + st.q" not in SCRIPT, "the search is in its box, not repeated as a chip")
@@ -11156,6 +11156,25 @@ def t_the_four_run_gates_word_their_cost_the_same():
         ok(more in SCRIPT, "kept behind the info button: " + more)
     ok("info: o.more ? infoButton('About this run', { title: o.title, body: o.more }) : null" in fn_src("function renderRunGate(boxId, o) {"),
        "a gate's extra words sit behind its title's info button")
+
+
+@test
+def t_the_size_list_and_loan_units_wear_the_mix():
+    """Spec 8.3 (Queue) and the copy plan (Size list, Loan units): one line under
+    each title, the ruling rule behind the Size list's info button, figures
+    whose labels say it all, and the shorter empty and status lines."""
+    for fname, line in (("function renderSizes() {", "line: 'The glass size the bench cuts for every fixture.'"),
+                        ("function renderLoans() {", "line: 'Projectors out on loan, and for how long.'")):
+        ok(fname in SCRIPT, fname + " exists")
+        fn = fn_src(fname)
+        ok(line in fn and "el('div', 'ov-hero')" not in fn, fname + ": the one header and its line")
+    ok("infoButton('About the size list'" in SCRIPT and "' · built-in copy'" in SCRIPT, "the ruling rule and the short stamp")
+    for gone in ("Every fixture on the size sheet", "the copy that came with the app", "and no holder takes", "'with customers'",
+                 "'ready to go'", "nothing past its date", "Longest out first.", "Every loan unit the shop owns.",
+                 "start tracking it", "worth a chase", "A loan with no due date turns amber"):
+        ok(gone not in SCRIPT, "cut: " + gone)
+    for new in ("'Nothing is out.'", "'No loan units yet.'", "'No due date'", "'Turns amber after this many days without a due date.'"):
+        ok(new in SCRIPT, "says: " + new)
 
 
 if __name__ == "__main__":
