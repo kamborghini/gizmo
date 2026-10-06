@@ -1744,7 +1744,9 @@
            the teal wash and edge, with ink words. */
         .btn:is(.on, [aria-pressed="true"]) { background: var(--action-selected); border-color: var(--border-selected); color: var(--text-primary); font-weight: var(--weight-medium); }
         @media (hover: hover) { .btn.ghost:hover { background: var(--surface-tertiary); } }
-        .pfilters { display: none; flex-wrap: wrap; gap: var(--sp-3) var(--sp-3); padding: var(--sp-4) var(--sp-4); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); background: var(--surface-secondary); }
+        /* The filter fields are a row of controls on the section, not a panel
+           round them (the mix, spec 3): no box, and on the text edge. */
+        .pfilters { display: none; flex-wrap: wrap; gap: var(--sp-3) var(--sp-3); padding: 0; border: 0; border-radius: 0; background: none; }
         .pfilters.show { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
         .pfield { display: flex; flex-direction: column; gap: var(--sp-1); }
         /* The wrapper IS the label now (implicit association); caption is a span. */
@@ -4572,7 +4574,9 @@
         @container segs (min-width: 520px) and (max-width: 1039.98px) { .segs:has(> :nth-child(6):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
         @container segs (max-width: 519.98px) { .segs:has(> :nth-child(6):last-child) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (min-width: 1800px) { .segs { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); } }
-        .seg-card { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); padding: var(--sp-4); box-shadow: var(--shadow-sm); }
+        /* A segment is a figure and its words in a grid, like a KPI tile: no box
+           and no hairline of its own (the mix, spec 3 and the figure row). */
+        .seg-card { background: none; border: 0; border-radius: 0; padding: 0; box-shadow: none; }
         .seg-card .seg-n { font-size: var(--fig-s); font-weight: var(--weight-semibold); letter-spacing: var(--tr-fig); line-height: var(--lh-none); }
         .seg-card .seg-name { font-size: var(--text-body); font-weight: var(--weight-medium); margin-top: 0; }
         .seg-card .seg-desc { font-size: var(--text-xs); color: var(--text-tertiary); margin-top: var(--sp-1); line-height: var(--lh-caption); }
@@ -8340,9 +8344,10 @@ Projected Image UK"></textarea>
                 });
                 var head = el('div', 'card-head');
                 var title = el('h3', 'card-title');
-                // A control that lived in the heading becomes the card's action.
+                // A control that lived in the heading becomes the card's action. An
+                // info button is not one: it belongs to the words, so it stays in the title.
                 [].slice.call(node.childNodes).forEach(function (c) {
-                    if (c.nodeType === 1 && (c.classList.contains('segmented') || c.tagName === 'BUTTON'
+                    if (c.nodeType === 1 && !c.classList.contains('info') && (c.classList.contains('segmented') || c.tagName === 'BUTTON'
                         || c.classList.contains('tabs'))) {
                         var act = head.querySelector('.card-act') || el('div', 'card-act');
                         act.append(c); if (!act.parentNode) head.append(act);
@@ -10179,7 +10184,7 @@ Projected Image UK"></textarea>
         function showProductsView() {
             if (productPlanRun) return;   // a plan is being built: coming back keeps its loading screen
             if (productList) { renderProductList(); return; }
-            renderRunGate('products-content', { icon: I.box, title: 'Products', desc: 'Load your catalogue with up to 24 months of sales so you can filter, sort, compare periods and export.', cta: 'Load products', note: 'Pulls live Shopify data. No AI credits used.', onRun: () => loadProducts(true) });
+            renderRunGate('products-content', { icon: I.box, title: 'Products', desc: 'Your catalogue with up to 24 months of sales.', cta: 'Load products', note: 'Pulls live Shopify data.', onRun: () => loadProducts(true) });
         }
         async function loadOverview(force) {
             const box = $('ov-content');
@@ -10454,8 +10459,8 @@ Projected Image UK"></textarea>
             if (reportRuns.keywords) return;
             if (keywordsCache) { renderKeywords(keywordsCache); return; }
             renderRunGate('keywords-content', { icon: I.tag, title: 'Keywords',
-                desc: 'Pull the keywords you rank for from Search Console and your paid spend, CPC and ROAS from Google Ads (via GA4), then get a money-ranked plan. You can also scan any public URL for the keywords it targets.',
-                cta: 'Run keyword analysis', note: 'Uses AI credits only when you run it. Reads Search Console and GA4.',
+                desc: 'Your keywords and ad spend, with a ranked plan.',
+                cta: 'Run keyword analysis', note: 'Uses AI credits. Reads Search Console and Analytics.',
                 onRun: () => loadKeywords(true) });
         }
         async function loadKeywords(force) {
@@ -10466,10 +10471,7 @@ Projected Image UK"></textarea>
         }
         async function runKeywords(box) {
             box.innerHTML = '';
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.tag;
-            const ht = el('div'); ht.append(el('h2', null, 'Keywords'),
-                el('p', null, 'Your ranking keywords, paid performance, and where to win more profitable search traffic.'));
-            hero.append(badge, ht); box.append(hero);
+            const hero = pageHead({ view: 'keywords', title: 'Keywords' }); box.append(hero);
             const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Combining Search Console keywords with Google Ads. This can take up to a minute.')); box.append(t);
             try { const data = await api('/api/keywords', {}); keywordsCache = { data, at: Date.now() }; renderKeywords(keywordsCache); }
             catch (e) {
@@ -10499,7 +10501,7 @@ Projected Image UK"></textarea>
         }
         function renderCPC(ads, cur) {
             if (!ads || !ads.totals || !ads.has_ads) {
-                return el('div', 'empty', 'No paid search data yet. Link Google Ads to your GA4 property (GA4 Admin, then Product links, then Google Ads links), and your spend, CPC, conversions and ROAS will appear here.');
+                return el('div', 'empty', 'No paid search data yet.');
             }
             const frag = document.createDocumentFragment(); const t = ads.totals;
             const cpcFmt = (n) => money(n, cur, 2);
@@ -10562,10 +10564,11 @@ Projected Image UK"></textarea>
             const card = el('div', 'card scan-card');
             const head = el('div', 'card-head');
             head.append(el('h3', 'card-title', 'Scan a URL for keywords'));
-            head.append(el('p', 'card-desc', 'Paste any public page (a competitor, a blog post) to extract the keywords and topics it targets, with ideas to compete.'));
             card.append(head);
             const row = el('div', 'act-row');
-            const inp = el('input', 'scan-url'); inp.placeholder = 'https://example.com/page'; inp.type = 'url';
+            /* What to paste is the field's own hint (copy plan, Keywords #4). */
+            const inp = el('input', 'scan-url'); inp.placeholder = 'A competitor or blog post address'; inp.type = 'url';
+            inp.setAttribute('aria-label', 'A competitor or blog post address');
             inp.setAttribute('aria-label', 'Page to scan');
             const btn = el('button', 'btn btn-primary'); btn.append(ico(I.search), document.createTextNode('Scan'));
             row.append(inp, btn); card.append(row);
@@ -10586,13 +10589,8 @@ Projected Image UK"></textarea>
         function renderKeywords(cache) {
             const data = cache.data; const box = $('keywords-content'); box.innerHTML = '';
             const s = data.structured || {}; const cur = data.currency || '';
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.tag;
-            const ht = el('div'); ht.append(el('h2', null, 'Keywords'),
-                el('p', null, s.summary || 'Your ranking keywords, paid performance, and where to win more profitable search traffic.'));
-            { const f = followedNote(s); if (f) ht.append(f); }
-            hero.append(badge, ht);
-            hero.append(heroAct(freshLabel(cache.at), refreshBtn(() => loadKeywords(true)), refreshAllBtn()));
-            box.append(hero);
+            box.append(pageHead({ view: 'keywords', title: 'Keywords', live: cache.at, onRefresh: () => loadKeywords(true), actions: [refreshAllBtn()] }));
+            { const sum = summarySection(s.summary, followedNote(s)); if (sum) box.append(widget(sum, 'summary', 'full', 'Summary')); }
             { const cs = changesStrip(data.changes, data.changes_since); if (cs) box.append(cs); }
             /* From the scan card to Details every block is a card the grid can
                move, each spanning the row; the header and the changes strip stay
@@ -10608,28 +10606,35 @@ Projected Image UK"></textarea>
                    says where to connect them, not two cards of one sentence. */
                 const n = el('div', 'card');
                 const nh = el('div', 'card-head');
-                nh.append(el('h3', 'card-title', 'Search data is not connected yet'));
-                nh.append(el('p', 'card-desc', 'Two Google sources fill the rest of this page.'));
+                /* The two sources, word for word, behind the title's info button
+                   (the mix, spec 8.3: setup steps wait there, with the action). */
+                const ul = el('ol', 'setup-steps');
+                ul.append(el('li', null, 'Google Search Console, for the keywords you rank for and the clicks they bring.'));
+                ul.append(el('li', null, 'Google Ads, linked to your GA4 property (GA4 Admin, then Product links, then Google Ads links), '
+                    + 'for your spend, cost per click, conversions and ROAS.'));
+                const nt = el('h3', 'card-title', 'Search data is not connected yet');
+                nt.append(infoButton('The two Google sources', { title: 'Search data', body: [ul] }));
+                nh.append(nt);
                 const na = el('div', 'card-act');
                 const go = el('button', 'btn btn-sm'); go.append(ico(I.settings), document.createTextNode('Open connections'));
                 go.onclick = () => openSettings(); na.append(go); nh.append(na);
                 n.append(nh);
-                const ul = el('ul', 'setup-steps');
-                ul.append(el('li', null, 'Google Search Console, for the keywords you rank for and the clicks they bring.'));
-                ul.append(el('li', null, 'Google Ads, linked to your GA4 property (GA4 Admin, then Product links, then Google Ads links), '
-                    + 'for your spend, cost per click, conversions and ROAS.'));
-                n.append(ul);
                 box.append(widget(n, 'search-data', 'full', 'Search data'));
             } else {
                 box.append(widget(el('div', 'section-title', ranked ? 'Your keywords (Search Console, 90 days)' : 'Your keywords'), 'keywords'));
                 box.append(ranked ? keywordTable(data.keywords)
-                    : el('div', 'empty', data.gsc_connected ? 'No Search Console queries in this range yet.' : 'Connect Google Search Console to see the keywords you rank for.'));
+                    : el('div', 'empty', data.gsc_connected ? 'No Search Console queries in this range yet.' : 'Connect Search Console to see your keywords.'));
                 /* The paid search heading labels a figures grid and a table, which
                    the page's cardifySections would leave as a bare label over two
                    loose blocks, so the heading and both are one group built here. */
                 const paid = widget(el('div', 'widget-group'), 'paid-search', 'full', 'Paid search (cost per click)');
                 box.append(paid);
-                paid.append(el('div', 'section-title', 'Paid search (cost per click)'), renderCPC(data.ads, cur));
+                const paidHead = el('div', 'section-title', 'Paid search (cost per click)');
+                /* How to link Google Ads, word for word, behind the title's info
+                   button while there is nothing to show (copy plan, Keywords #8). */
+                if (noAds) paidHead.append(infoButton('Linking Google Ads', { title: 'Paid search',
+                    body: 'Link Google Ads to your GA4 property (GA4 Admin, then Product links, then Google Ads links), and your spend, CPC, conversions and ROAS will appear here.' }));
+                paid.append(paidHead, renderCPC(data.ads, cur));
                 cardifySections(paid);
             }
             if (Array.isArray(s.sections) && s.sections.length) { box.append(widget(el('div', 'section-title', 'Details'), 'details')); s.sections.forEach(sec => box.append(sectionCard(sec))); }
@@ -10671,18 +10676,19 @@ Projected Image UK"></textarea>
                              customersSeg, pickSector, { label: 'Customer sector' });
         }
         function pickSector(seg) { customersSeg = seg; renderCustomers(seg); }
+        /* The Customers run gate: the page's header and line, then the empty
+           state every run gate is (renderRunGate), with the sector bar between. */
+        function customerGateHead(seg) {
+            const comp = seg === SEG_ALL;
+            return pageHead({ view: 'customers', title: comp ? 'Customers' : (seg + ' sector'), line: comp
+                ? 'Customers and sectors by retention, value and revenue.'
+                : ('The ' + seg + ' sector on its own, with a ranked plan.') });
+        }
         function customerGate(seg) {
             const comp = seg === SEG_ALL;
-            const card = el('div', 'run-gate');
-            const ic = el('div', 'rg-ic'); ic.innerHTML = I.users; card.append(ic);
-            card.append(el('h2', null, comp ? 'Customers' : (seg + ' sector')),
-                el('p', null, comp
-                    ? 'Analyse all customers and compare your sectors by retention, lifetime value and revenue, with a money-ranked plan.'
-                    : ('Analyse the ' + seg + ' sector on its own: retention, lifetime value, segments, and a money-ranked plan for these customers.')));
-            const btn = el('button', 'btn btn-primary rg-btn'); btn.textContent = comp ? 'Run comprehensive audit' : ('Run ' + seg + ' audit'); btn.onclick = () => loadCustomers(true, seg);
-            card.append(btn);
-            card.append(el('div', 'rg-note', 'Uses AI credits only when you run it. Reads your Shopify customers and orders.'));
-            return card;
+            const btn = el('button', 'btn btn-primary'); btn.type = 'button';
+            btn.textContent = comp ? 'Run comprehensive audit' : ('Run ' + seg + ' audit'); btn.onclick = () => loadCustomers(true, seg);
+            return emptyState({ icon: I.users, text: 'Uses AI credits. Reads Shopify customers and orders.', action: btn, cls: 'run-gate' });
         }
         function sectorComparisonTable(rows, cur) {
             const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
@@ -10737,7 +10743,6 @@ Projected Image UK"></textarea>
             const card = el('div', 'card');
             const head = el('div', 'card-head');
             head.append(el('h3', 'card-title', 'Trade radar'));
-            head.append(el('p', 'card-desc', 'From your orders and customer list. No AI credits used.'));
             card.append(head);
             const table = (cols, rows) => {
                 const bleed = el('div', 'card-bleed');
@@ -10752,7 +10757,7 @@ Projected Image UK"></textarea>
             const od = d.overdue || [];
             card.append(el('div', 'radar-h', 'Overdue repeat accounts (' + od.length + ')'));
             if (!od.length) {
-                card.append(el('p', 'card-sub', 'Nobody with a reorder rhythm is overdue right now.'));
+                card.append(el('p', 'card-sub', 'No repeat accounts overdue.'));
             } else {
                 card.append(table([['Account'], ['Orders', 1], ['Usually every', 1], ['Last order'], ['Overdue by', 1], ['Last bought'], ['']],
                     od.map(r => {
@@ -10777,9 +10782,9 @@ Projected Image UK"></textarea>
             const bb = d.untagged_b2b || [];
             card.append(el('div', 'radar-h', 'Untagged likely-trade customers (' + bb.length + ')'));
             if (!bb.length) {
-                card.append(el('p', 'card-sub', 'Every likely-trade customer already carries a sector tag.'));
+                card.append(el('p', 'card-sub', 'Every trade customer is tagged.'));
             } else {
-                card.append(el('p', 'card-sub', 'Tag these in Shopify and the sector analytics will see the whole trade side.'));
+                card.append(el('p', 'card-sub', 'Tag these in Shopify to count them as trade.'));
                 card.append(table([['Customer'], ['Orders', 1], ['Lifetime spend', 1], ['Why flagged']],
                     bb.map(r => {
                         const tr = el('tr');
@@ -10799,10 +10804,8 @@ Projected Image UK"></textarea>
         function customersBusy(seg) {
             const comp = seg === SEG_ALL;
             const box = $('customers-content'); box.innerHTML = '';
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.users;
-            const ht = el('div'); ht.append(el('h2', null, comp ? 'Customers' : (seg + ' sector')),
-                el('p', null, comp ? 'Who your best customers are, how well you retain them, and where to grow lifetime value.' : ('Retention and lifetime value for your ' + seg + ' customers.')));
-            hero.append(badge, ht); box.append(hero);
+            const hero = pageHead({ view: 'customers', title: comp ? 'Customers' : (seg + ' sector') }); box.append(hero);
+            const ht = hero;
             const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Analysing ' + (comp ? 'your customers and sectors' : ('the ' + seg + ' sector'))
                 + ' from 12 months of orders. This can take up to a minute.')); box.append(t);
             return { box, hero, ht };
@@ -10872,15 +10875,11 @@ Projected Image UK"></textarea>
             const cached = customersCache[seg];
             /* The Run gate before the radar, so its button is above the fold
                like every other report's; the radar follows it. */
-            if (!cached) { box.append(sectorBar(), customerGate(seg), rslot); paintRadar(); return; }
+            if (!cached) { box.append(customerGateHead(seg), sectorBar(), customerGate(seg), rslot); paintRadar(); return; }
             const data = cached.data; const s = data.structured || {}; const cur = data.currency || '';
             const comp = seg === SEG_ALL;
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.users;
-            const ht = el('div'); ht.append(el('h2', null, comp ? 'Customers' : (seg + ' sector')),
-                el('p', null, s.summary || (comp ? 'Who your best customers are, how well you retain them, and where to grow lifetime value.' : ('Retention and lifetime value for your ' + seg + ' customers.'))));
-            { const f = followedNote(s); if (f) ht.append(f); }
-            hero.append(badge, ht);
-            hero.append(heroAct(freshLabel(cached.at), refreshBtn(() => loadCustomers(true)), refreshAllBtn()));
+            const hero = pageHead({ view: 'customers', title: comp ? 'Customers' : (seg + ' sector'), live: cached.at,
+                onRefresh: () => loadCustomers(true), actions: [refreshAllBtn()] });
             /* The header, the sector bar and the changes strip stay fixed at
                the top and the page chat at the foot; from the trade radar to
                Details every block is a card the grid can move, each spanning
@@ -10888,6 +10887,7 @@ Projected Image UK"></textarea>
                leave a fixed block between two cards, so it now comes first. */
             box.append(hero, sectorBar());
             { const cs = changesStrip(data.changes, data.changes_since); if (cs) box.append(cs); }
+            { const sum = summarySection(s.summary, followedNote(s)); if (sum) box.append(widget(sum, 'summary', 'full', 'Summary')); }
             box.append(rslot); paintRadar();
             if (Array.isArray(data.metrics) && data.metrics.length) box.append(widget(metricsStrip(data.metrics), 'kpis', 'full', 'Customer figures'));
             if (comp && Array.isArray(data.sector_comparison) && data.sector_comparison.length) {
@@ -10986,9 +10986,7 @@ Projected Image UK"></textarea>
             const box = $('products-content');
             if (productList && !force) { renderProductList(); return; }
             box.innerHTML = '';
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
-            const ht = el('div'); ht.append(el('h2', null, 'Products'));
-            hero.append(badge, ht); box.append(hero);
+            const hero = pageHead({ view: 'products', title: 'Products' }); box.append(hero);
             const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Loading products and up to 24 months of sales.')); box.append(t);
             try { productList = await api('/api/products', { months: 24, fresh: !!force }); productListAt = Date.now(); renderProductList(); }
             catch (e) {
@@ -11102,12 +11100,9 @@ Projected Image UK"></textarea>
         function renderProductList() {
             productSeq++; productPlanRun = false;     // whatever plan was coming is not what is on screen now
             const box = $('products-content'); box.innerHTML = '';
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
-            const ht = el('div'); ht.append(el('h2', null, 'Products'),
-                el('p', null, 'Filter, sort and compare your catalogue by revenue, sales, stock and more. Open a product for a full optimisation plan.'));
-            hero.append(badge, ht);
-            hero.append(heroAct(productListAt ? freshLabel(productListAt) : '', refreshBtn(() => loadProducts(true))));
-            box.append(hero);
+            /* The page's one line, with Refresh among its actions. */
+            box.append(pageHead({ view: 'products', title: 'Products', line: 'Open a product for its optimisation plan.',
+                actions: [refreshBtn(() => loadProducts(true), 'Refresh products')] }));
             const cur = (productList && productList.currency) || '';
             if (!((productList && productList.products) || []).length) { box.append(el('div', 'empty', 'No products found.')); return; }
             const rerender = renderProductList;
@@ -11187,9 +11182,10 @@ Projected Image UK"></textarea>
                 const s2 = el('span'); s2.append(el('b', null, fmtMoney(totRev, cur)), document.createTextNode(' revenue · ' + totUnits.toLocaleString() + ' units · ' + pPeriodLabel())); summary.append(s2);
                 footHost.innerHTML = '';
                 const foot = el('div', 'tbl-foot');
-                foot.append(el('div', 'tbl-count', 'Viewing ' + rows.length + ' of ' + all + ' product' + (all === 1 ? '' : 's')
-                    + (rows.length > P_ROWS_MAX ? '. The first ' + P_ROWS_MAX + ' are drawn: search or filter to reach the rest' : '')
-                    + (productList && productList.truncated ? '. The catalogue is larger than one read carries, so some products are not listed' : '')));
+                foot.append(el('div', 'tbl-count', (rows.length > P_ROWS_MAX
+                        ? 'Showing ' + P_ROWS_MAX + ' of ' + rows.length + '. Search or filter for more.'
+                        : 'Showing ' + rows.length + ' of ' + all + ' product' + (all === 1 ? '' : 's'))
+                    + (productList && productList.truncated ? ' Some products are missing: the catalogue is too large.' : '')));
                 footHost.append(foot);
                 topHost.innerHTML = '';
                 const top = rows.filter(r => r.revenue > 0).slice(0, 6);
@@ -11201,10 +11197,10 @@ Projected Image UK"></textarea>
                 const narrowed = rows.length < all;
                 if (top.length > 1 || narrowed) {
                     const tc = el('div', 'card'), th2 = el('div', 'card-head');
-                    const nWords = ['', 'one', 'two', 'three', 'four', 'five', 'six'];
-                    th2.append(el('h3', 'card-title', 'Top products by revenue'), el('p', 'card-desc', top.length > 1
-                        ? 'The ' + (nWords[top.length] || top.length) + ' that earned most, ' + pPeriodLabel() + '.'
-                        : 'Fewer than two of these products earned anything (' + pPeriodLabel() + '), so there is nothing to rank.'));
+                    th2.append(el('h3', 'card-title', 'Top products by revenue'));
+                    /* The title and the period chooser say what it is; only an
+                       empty ranking says why (copy plan, Products #4 and #5). */
+                    if (top.length < 2) th2.append(el('p', 'card-desc', 'Nothing to rank for this period.'));
                     tc.append(th2);
                     if (top.length > 1) {
                         const bl = el('div', 'barlist'); const max = top[0].revenue || 1;
@@ -11249,9 +11245,7 @@ Projected Image UK"></textarea>
             const my = ++productSeq; productPlanRun = true;
             const box = $('products-content'); box.innerHTML = '';
             box.append(productBack());
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
-            const ht = el('div'); ht.append(el('h2', null, title || 'Product'));
-            hero.append(badge, ht); box.append(hero);
+            box.append(pageHead({ view: 'products', title: title || 'Product' }));
             const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Reading search, traffic, sales and on-page SEO to build the plan. This can take up to a minute.')); box.append(t);
             try {
                 const d = await api('/api/product', { product_id: id });
@@ -11268,10 +11262,8 @@ Projected Image UK"></textarea>
         function renderProductDetail(d, id, title) {
             const box = $('products-content'); box.innerHTML = ''; box.append(productBack());
             const s = d.structured || {};
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.box;
-            const ht = el('div'); ht.append(el('h2', null, (d.product && d.product.title) || 'Product'),
-                el('p', null, s.summary || 'The plan for this product.'));
-            hero.append(badge, ht);
+            /* The plan's header, then its summary as a section of its own (the
+               mix, spec 8.3). */
             /* Built the way every other report is: a stamp and Refresh in the
                header, the KPIs as the one strip, charts that name their window,
                and the lists folded into titled cards by cardifySections. It was
@@ -11279,8 +11271,9 @@ Projected Image UK"></textarea>
             /* The plan payload carries no product id, so the one it was opened
                with is passed through; without it there was no Refresh at all. */
             const pid = id || (d.product && d.product.id), ptitle = (d.product && d.product.title) || title;
-            if (pid) hero.append(heroAct(freshLabel(Date.now()), refreshBtn(() => openProduct(pid, ptitle))));
-            box.append(hero);
+            box.append(pageHead({ view: 'products', title: ptitle || 'Product', live: pid ? Date.now() : null,
+                onRefresh: pid ? () => openProduct(pid, ptitle) : null }));
+            { const sum = summarySection(s.summary, null); if (sum) box.append(sum); }
             if (Array.isArray(d.metrics) && d.metrics.length) box.append(metricsStrip(d.metrics));
             if (d.trend && ((d.trend.revenue && d.trend.revenue.length) || (d.trend.units && d.trend.units.length))) {
                 box.append(el('div', 'section-title', 'Performance over time'));
