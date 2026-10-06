@@ -339,7 +339,8 @@
             --auth-go-top: color-mix(in srgb, var(--action-primary) 80%, var(--surface-primary));
             --sidebar-w: 236px; --topbar-h: 48px; --frame-inset: var(--sp-2);   /* the sheet sits 8 inside the ink frame */
             --find-w: 232px;        /* the top bar's search */
-            --chevron-room: 30px;   /* right padding a select keeps clear for its chevron */
+            --chevron-room: calc(var(--sp-3) + var(--icon-md) + var(--sp-2));   /* a select's chevron: 12 in, 16 wide, 8 clear */
+            --search-w: 280px;      /* a list's search field */
             --icon-col: 34px;       /* the file list's icon column: 16px glyph, 18px gutter */
             /* The widget grid. Four columns when four cells of --wgrid-cell fit
                the content column, else two, one on a phone. Its gap is the
@@ -1842,11 +1843,10 @@
            border beside every styled field on the page. */
         input[type=text], input[type=number], input[type=date], input[type=search],
         input[type=email], input[type=password], input[type=url], input[type=tel], input:not([type]), textarea, select {
-            background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-field);
-            color: var(--text-primary); font: inherit; font-size: var(--text-sm); line-height: var(--lh-control); padding: var(--control-pad-y) var(--sp-2-5);
-            /* 32px like every other control. At 36 an input beside a button did
-               not even line up with it, let alone with the reference. */
-            min-height: var(--control-h);
+            background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-field);
+            color: var(--text-primary); font: inherit; font-size: var(--text-body); line-height: var(--lh-control); padding: var(--control-pad-y) var(--sp-3);
+            /* 32px like every other control (the mix, spec 6), with a control's 1px lift. */
+            min-height: var(--control-h); box-shadow: var(--shadow-control);
             transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
         input:hover:not(:disabled), textarea:hover:not(:disabled), select:hover:not(:disabled) {
             border-color: var(--border-emphasis); }
@@ -1854,20 +1854,21 @@
            (the :focus-visible rule above), fields draw the ring. A field's rule
            used to be copied nine times, once per component, with one copy
            drawing the outline instead. ---- */
-        :is(input, textarea, select, [contenteditable="true"]):focus { outline: none; border-color: var(--border-selected); box-shadow: var(--focus-ring); }
+        :is(input, textarea, select, [contenteditable="true"]):focus { outline: none; box-shadow: var(--focus-ring); }
         input:disabled, textarea:disabled, select:disabled { background: var(--surface-tertiary); color: var(--text-tertiary); cursor: not-allowed; }
         /* ---- Invalid. A field the app has rejected says so on its own edge, and
            its focus ring takes the error tint so the two cannot be confused.
            markInvalid() in the script sets aria-invalid. ---- */
         :is(input, textarea, select, [contenteditable="true"])[aria-invalid="true"] { border-color: var(--error); }
-        :is(input, textarea, select, [contenteditable="true"])[aria-invalid="true"]:focus { border-color: var(--error); box-shadow: 0 0 0 3px var(--error-bg); }
+        :is(input, textarea, select, [contenteditable="true"])[aria-invalid="true"]:focus { border-color: var(--error);
+            box-shadow: 0 0 0 var(--bw-strong) var(--white), 0 0 0 calc(2 * var(--bw-strong)) var(--error); }
         /* A native date/time control carries its own intrinsic content height,
            so it ignores the shared line box and lands 2px proud of every other
            field in the same row. Pinned. */
         input[type=date], input[type=time] { height: var(--control-h); }
         select { appearance: none; -webkit-appearance: none; padding-right: var(--chevron-room);
-            background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235F6368' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
-            background-repeat: no-repeat; background-position: right 9px center; }
+            background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235F6368' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: right var(--sp-3) center; }
         details.sect { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-card); background: var(--surface-primary); margin-bottom: var(--sp-2); overflow: hidden; box-shadow: var(--shadow-sm); }
         /* A group of drawers is one card with divided rows: nine small cards
            stacked 8px apart read as nine objects, not two lists. */
@@ -3953,19 +3954,24 @@
             .tbl-tools { gap: var(--sp-2); }
             .tbl-tools-l, .tbl-tools-r { display: contents; }
             .tbl-tools .tbl-search { flex: 1 1 100%; } }
-        .tbl-search { position: relative; display: flex; min-width: 0; max-width: 100%; }
-        /* The declared 28 has to beat the 32px min-height every field carries,
-           or the search sits 4px proud of the 28px card actions above it. */
-        .tbl-search input { height: var(--control-h-md); min-height: var(--control-h-md); width: 320px; max-width: 100%;
-            padding: var(--sp-1) var(--sp-2-5) var(--sp-1) var(--sp-7); border-radius: var(--radius-field);
-            font-size: var(--text-sm); line-height: var(--lh-control); }
+        /* THE SEARCH FIELD (the mix, spec 6): one 32 well, 280 wide, its 16
+           glyph 12 in and 8 from the words, the clear button at its end. The
+           input fills the field and runs under its two hairlines, so the whole
+           field is the target; the field is ringed as one while it has focus. */
+        .tbl-search { position: relative; display: flex; align-items: center; gap: var(--control-gap); height: var(--control-h); width: var(--search-w);
+            min-width: 0; max-width: 100%; padding: 0 var(--sp-3); border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-field);
+            background: var(--surface-primary); box-shadow: var(--shadow-control); color: var(--text-tertiary); }
+        .tbl-search input { flex: 1; min-width: 0; height: calc(100% + 2 * var(--bw-hairline)); min-height: 0; width: auto; max-width: none;
+            padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none;
+            font-size: var(--text-body); line-height: var(--lh-control); }
+        .tbl-search:focus-within { box-shadow: var(--focus-ring); }
+        .tbl-search input:focus { box-shadow: none; }
         /* On a phone the search gives way so Print stays beside it. */
         @media (max-width: 640px) {
             .guide-tools > .act-row { flex-wrap: nowrap; }
             .guide-tools > .act-row > .tbl-search { flex: 1 1 0; }
-            .guide-tools > .act-row > .tbl-search input { width: 100%; } }
-        .tbl-search .ic { position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
-            color: var(--text-tertiary); pointer-events: none; }
+            .guide-tools > .act-row > .tbl-search { width: auto; } }
+        .tbl-search .ic { flex: none; color: var(--text-tertiary); pointer-events: none; }
         .tbl-search .ic svg { width: var(--icon-md); height: var(--icon-md); }
         /* Chromium paints its own saturated-blue x inside a type=search field.
            It was the only chromatic accent on either finance tab, on a palette
@@ -3979,7 +3985,7 @@
         input[type=search]::-webkit-search-cancel-button,
         input[type=search]::-webkit-search-decoration {
             -webkit-appearance: none; appearance: none; }
-        .tbl-search .tbl-clear { position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+        .tbl-search .tbl-clear { flex: none; margin-right: calc(-1 * var(--sp-1));
             width: var(--box-sm); height: var(--box-sm); min-height: 0; padding: 0; border: 0; background: none;
             border-radius: var(--radius-tag); color: var(--text-tertiary); display: grid; place-items: center; }
         .tbl-search .tbl-clear:hover { color: var(--text-primary); background: var(--surface-sunken); }
@@ -3987,9 +3993,6 @@
         /* The rule above sets display, which beats the browser's [hidden]:
            the clear button showed in every empty search box. */
         .tbl-search .tbl-clear[hidden] { display: none; }
-        /* Only while there is something to clear, so the field keeps its full
-           measure the rest of the time. */
-        .tbl-search.has-q input { padding-right: var(--sp-6); }
         /* A toolbar row is ONE height, the 28px the card actions above it are.
            Two controls arrive carrying their own: a select has the 32px floor
            every field has, and the segmented track has the 12px bottom margin
@@ -3997,8 +4000,8 @@
            search beside it. Both are re-cut to the row here. */
         /* 28 on the right, not 10: the base rule draws its 16px caret at
            `right 9px center`, so a symmetric padding put the label under it. */
-        .tbl-tools select { font-weight: var(--weight-regular); height: var(--control-h-md); min-height: var(--control-h-md); padding: var(--sp-1) var(--chevron-room) var(--sp-1) var(--sp-2-5);
-            border-radius: var(--radius-field); font-size: var(--text-sm); line-height: var(--lh-control); }
+        .tbl-tools select { font-weight: var(--weight-regular); height: var(--control-h); min-height: var(--control-h); padding: 0 var(--chevron-room) 0 var(--sp-3);
+            border-radius: var(--radius-field); font-size: var(--text-body); line-height: var(--lh-control); }
         /* On a phone each line of selects fills to the card's gutter rather
            than ending wherever its words do. */
         @media (max-width: 640px) { .tbl-tools-l > select, .tbl-tools-r > select { flex: 1 1 calc(var(--sp-8) * 3); } }
@@ -4028,8 +4031,8 @@
             .action .check { position: relative; }
             .action .check::after { content: ""; position: absolute; inset: calc(-1 * var(--sp-2)); }
         }
-        input.field-sm, select.field-sm { height: var(--control-h-md); min-height: var(--control-h-md);
-            padding-block: var(--sp-1); font-size: var(--text-sm); line-height: var(--lh-control); border-radius: var(--radius-field); }
+        input.field-sm, select.field-sm { height: var(--control-h); min-height: var(--control-h);
+            padding-block: 0; font-size: var(--text-body); line-height: var(--lh-control); border-radius: var(--radius-field); }
         .tbl-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }
         /* The pager is a sibling of the table inside a plain host div, so the
            card's own 16px gap never reaches between them and the steps sat on
@@ -4040,9 +4043,8 @@
         .tbl-pager { display: flex; align-items: center; gap: var(--sp-7); }
         .tbl-rows { display: flex; align-items: center; gap: var(--sp-2);
             font-size: var(--text-sm); font-weight: var(--weight-medium); white-space: nowrap; }
-        .tbl-rows select { height: var(--control-h-md); min-height: var(--control-h-md); width: var(--field-w-sm); padding: 0 var(--sp-2) 0 var(--sp-2-5);
-            border-radius: var(--radius-field); font-size: var(--text-sm); line-height: var(--lh-control);
-            background-position: right 6px center; }
+        .tbl-rows select { height: var(--control-h); min-height: var(--control-h); width: var(--field-w-sm); padding: 0 var(--chevron-room) 0 var(--sp-3);
+            border-radius: var(--radius-field); font-size: var(--text-body); line-height: var(--lh-control); }
         .tbl-page { font-size: var(--text-sm); font-weight: var(--weight-medium); white-space: nowrap; }
         .tbl-steps { display: flex; align-items: center; gap: var(--sp-2); }
         /* Square, and at the base radius rather than the control radius: the
@@ -4109,8 +4111,8 @@
         .drive-pw { display: flex; align-items: center; gap: var(--sp-2); }
         .drive-pw code { flex: 1 1 auto; min-width: 0; padding: var(--sp-1-5) var(--sp-2); border: var(--bw-hairline) solid var(--border-default);
             border-radius: var(--radius-inset); background: var(--surface-secondary); font-size: var(--text-sm); overflow-wrap: anywhere; user-select: all; }
-        .dpanel input, .dpanel select { height: 28px; padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-field);
-            font-size: var(--text-sm); line-height: var(--lh-control); }
+        .dpanel input, .dpanel select { height: var(--control-h); padding: 0 var(--sp-3); border-radius: var(--radius-field);
+            font-size: var(--text-body); line-height: var(--lh-control); }
         .dpanel select { padding-right: var(--chevron-room); }
         /* ---------- The two choosers. ONE block each, and nothing else styles them.
            Tabs move you between sections of a page: ink, and a 2px underline in
