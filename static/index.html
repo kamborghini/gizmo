@@ -212,6 +212,9 @@
             --paper: var(--white); --paper-ink: var(--black);
             --paper-ink-2: var(--print-black-1); --paper-ink-3: var(--print-black-2); --paper-ink-4: var(--print-black-3);
             --paper-rule: var(--print-grey-2); --paper-rule-2: var(--print-grey-1); --paper-rule-strong: var(--print-black-1);
+            /* The label preview's own edge, frozen with the label: it was the shared strong border (#D4D4D4)
+               until that grey moved to #DADCE0, and the frame hands it back to the label (.lbl-frame). */
+            --paper-edge: #D4D4D4;
             /* Type. 14px is the workhorse size; page titles are LARGE and LIGHT
                with tight tracking rather than small and bold. Weights: three.
                Line heights: four ratios and the fixed 20px every 32px control
@@ -936,8 +939,10 @@
                against nothing, while the title and the sentence started at the
                page inset. */
             .ov-updated { margin-left: 0; padding-top: 0; flex-basis: 100%; white-space: normal; }
-            /* A rail of three words wraps rather than running past the gutter, each button at its own width (the Production Manager's). */
-            .ov-hero-act { margin-left: 0; flex-basis: 100%; padding-top: 0; flex-wrap: wrap; }
+            .ov-hero-act { margin-left: 0; flex-basis: 100%; padding-top: 0; }
+            /* A rail of three words or more wraps rather than running past the gutter, each button at its
+               own width. A stamp and a Refresh stay on one line. */
+            .ov-hero-act:has(> .btn + .btn + .btn) { flex-wrap: wrap; }
             .ov-hero-act:has(> .btn + .btn + .btn) > .btn:not(.btn-icon) { flex: none; }
             /* With the widget grid's Customize beside Refresh the row is
                fuller than the stamp's full-width basis leaves room for, and the
@@ -2315,7 +2320,7 @@
         .lbl-tools .lbl-count { margin-left: auto; }
         .lbl-count { font-size: var(--text-xs); color: var(--text-tertiary); }
         /* One order opened from Shopify says so over the toolbar. */
-        .q-note { margin: 0 0 var(--sp-3); color: var(--text-tertiary); }
+        .q-note { margin: 0; color: var(--text-tertiary); }
         .lbl-row { display: flex; align-items: center; gap: var(--sp-2-5); padding: var(--sp-2-5) var(--sp-3); background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default);
             border-radius: var(--radius-inset); margin-bottom: var(--sp-2); cursor: pointer; transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease); text-align: left; width: 100%; }
         @media (hover: hover) { .lbl-row:hover { background: var(--surface-secondary); border-color: var(--border-strong); } }
@@ -2718,10 +2723,13 @@
         @media (hover: hover) { .lbl-qrow:hover { background: var(--surface-secondary); box-shadow: var(--rule-b-soft), calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); } }
         .lbl-qrow:is(.on, [aria-selected="true"]) { background: var(--action-selected);
             box-shadow: var(--rule-b-soft), calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected), calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected); }
+        /* Where its preview follows, the open row and the preview are one block: no hairline through it. */
+        .lbl-qrow:is(.on, [aria-selected="true"]):has(+ .lbl-preview) {
+            box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected), calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected); }
         .lbl-qrow .lbl-name { font-size: var(--text-sm); font-weight: var(--weight-medium); }
         .lbl-actions .grp { margin-left: calc(var(--gap-cluster) - var(--control-gap)); }
         .swap { display: inline-grid; }
-        .swap > span { grid-area: 1 / 1; }
+        .swap > span { grid-area: 1 / 1; text-align: center; }
         .swap > .gone { visibility: hidden; }
         .lbl-grid > .lbl-preview { padding: 0 0 var(--sp-6); background: var(--action-selected);
             box-shadow: var(--rule-b-soft), calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected), calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected); }
@@ -2732,6 +2740,9 @@
         .lbl-preview > .lbl-hist { margin: 0 0 var(--sp-3); }
         .lbl-preview > .lbl-toolbar { margin: var(--sp-3) 0 0; }
         .lbl-frame { margin: 0; width: fit-content; max-width: 100%; border-radius: var(--radius-control); box-shadow: var(--shadow-label); }
+        /* The label draws its edge from --border-strong (a frozen rule). Whatever that shared grey becomes,
+           the label inside its frame keeps the edge it had. */
+        .lbl-frame { --border-strong: var(--paper-edge); }
         /* A list as narrow as a phone's: worded 40 buttons in a grid, three on
            the first line and two on the second (the mix, spec 8.2); the label
            is scaled there, so its frame draws no shadow. */
@@ -2744,6 +2755,24 @@
             .lbl-qrow .lbl-actions .lbl-btn-txt { display: inline; }
             .lbl-qrow .lbl-actions .lbl-btn-txt.swap { display: inline-grid; }
             .lbl-frame { box-shadow: none; }
+        }
+        /* THE PRODUCTION MANAGER'S PHONE HEADER (the mockup's): the title with its live line and Refresh, and
+           More as three dots beside it (its name stays "More", its menu and its handler are the same);
+           Print new, when there is one, on a full row; Collections and New shipment sharing one row at equal
+           widths. The rail's buttons are the head's own grid items, in the markup's order, so no button
+           stands alone beside empty space. */
+        .more-btn > .ic:nth-child(3) { display: none; }
+        @media (max-width: 640px) {
+            .ov-hero.pm-head { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--control-gap); align-items: start; }
+            .ov-hero.pm-head > .ph-text { grid-column: 1 / -1; grid-row: 1; margin-bottom: var(--control-gap);
+                padding-right: calc(var(--control-h-lg) + var(--control-gap) + var(--sp-2)); }
+            .ov-hero.pm-head > .ov-hero-act { display: contents; }
+            .ov-hero.pm-head > .ov-hero-act > .btn { margin: 0; }
+            .ov-hero.pm-head > .ov-hero-act > .btn-primary { grid-column: 1 / -1; }
+            .ov-hero.pm-head .more-btn { grid-column: 2; grid-row: 1; justify-self: end; align-self: end; margin-bottom: var(--control-gap);
+                width: var(--control-h-lg); min-width: var(--control-h-lg); padding: 0; }
+            .pm-head .more-txt, .pm-head .more-btn > .ic:nth-child(2) { display: none; }
+            .pm-head .more-btn > .ic:nth-child(3) { display: inline-flex; }
         }
         /* The label is sized to the real label stock and shares the print document's
            line-height and font stack exactly, so the preview is what prints.
@@ -5894,6 +5923,7 @@ Projected Image UK"></textarea>
             plus: SV('<line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line>'),
             menu: SV('<line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line>'),
             panelLeft: SV('<rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path>'),
+            moreH: SV('<circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle>'),
             moreV: SV('<circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle>'),
             loader: SV('<path d="M21 12a9 9 0 1 1-6.219-8.56"></path>'),
             refresh: SV('<polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>'),
@@ -6775,7 +6805,11 @@ Projected Image UK"></textarea>
                 nav.append(b);
             });
             const r = el('div', 'qrest');
-            rest.forEach(([k, l, icon]) => { const b = el('button', 'qt'); mark(b, k); b.append(ico(icon), document.createTextNode(l)); r.append(b); });
+            rest.forEach(([k, l, icon, n, unit]) => {
+                const b = el('button', 'qt'); mark(b, k); b.append(ico(icon), document.createTextNode(l));
+                if (n != null) { const c = el('span', 'cnt', String(n)); if (unit) c.append(el('span', 'sr-only', ' ' + unit)); b.append(c); }
+                r.append(b);
+            });
             nav.append(r);
             return nav;
         }
@@ -13258,10 +13292,17 @@ Projected Image UK"></textarea>
            beside them. Kept here so Custom shipments, which loads no orders,
            still shows the counts. */
         let labelsCounts = null;
-        function prodQueues(onPick) {
+        function prodQueues(onPick, tabCounts) {
             const n = labelsCounts || {};
             return queueCounters(QUEUE.slice(0, 3).map(q => [q[0], q[1], n[q[0]]]),
-                [[QUEUE[3][0], QUEUE[3][1], I.check], [QUEUE[4][0], QUEUE[4][1], I.box]], queueMode, onPick, 'Queues');
+                [[QUEUE[3][0], QUEUE[3][1], I.check, tabCounts && tabCounts.dispatched, 'orders'], [QUEUE[4][0], QUEUE[4][1], I.box]], queueMode, onPick, 'Queues');
+        }
+        /* The count of a loaded list on a tab, in the tabs' own .cnt (Complete and Custom shipments lost the
+           one their card titles carried; the server's counts cover the flow's three queues only). */
+        function tabCount(box, key, n, unit) {
+            const b = box.querySelector('.qt[data-k="' + key + '"]'); if (!b) return;
+            const old = b.querySelector('.cnt'); if (old) old.remove();
+            const c = el('span', 'cnt', String(n)); if (unit) c.append(el('span', 'sr-only', ' ' + unit)); b.append(c);
         }
         function dispatchStateOf(o) {
             const d = labelsCache && labelsCache.data && labelsCache.data.dispatch;
@@ -18770,6 +18811,7 @@ Projected Image UK"></textarea>
             try {
                 const r = await api('/api/custom/list', { limit: 200 });
                 rows = r.shipments || [];
+                tabCount(box, 'shipments', rows.length, 'shipments');
             } catch (e) {
                 host.innerHTML = '';
                 host.append(loadFailure('The shipments could not be read. ' + (e.message || ''), () => renderCustomQueue(box)));
@@ -18821,6 +18863,7 @@ Projected Image UK"></textarea>
             const hero = pageHead({ view: 'labels', title: 'Production Manager', live: labelsCache.at,
                 onRefresh: () => loadLabels(true, true), refreshLabel: 'Refresh',
                 info: queueRule ? infoButton('About this queue', { title: unproc ? 'Unprocessed' : 'To make', body: queueRule }) : null });
+            hero.classList.add('pm-head');
             box.append(hero);
             const heroActs = hero.querySelector('.ov-hero-act');
             /* The counters sit straight under the header, built in the same pass:
@@ -18828,7 +18871,7 @@ Projected Image UK"></textarea>
                very next sibling, which is not re-worked if one arrives later. */
             // Lifecycle queue: Unprocessed -> To make -> To ship, then Complete.
             if (data.counts) labelsCounts = data.counts;
-            box.append(prodQueues((k) => { queueMode = k; labelsCache = null; labelSel = null; labelsFilter = 'all'; loadLabels(true); }));
+            box.append(prodQueues((k) => { queueMode = k; labelsCache = null; labelSel = null; labelsFilter = 'all'; loadLabels(true); }, dispatched ? { dispatched: orders.length } : null));
             // A sweep that Shopify cut short renders as a SHORT list, which is
             // indistinguishable from a quiet day. Say so rather than let the
             // bench work from a queue that is quietly missing orders.
@@ -18998,7 +19041,8 @@ Projected Image UK"></textarea>
             const more = el('button', 'btn btn-sm');
             /* The house menu trigger: its name, then the caret, like Manage and
                the filters. A grid icon read as a view switch. */
-            more.append(document.createTextNode('More'), ico(I.chevDown));
+            more.classList.add('more-btn'); more.setAttribute('aria-label', 'More');
+            more.append(el('span', 'more-txt', 'More'), ico(I.chevDown), ico(I.moreH));
             more.title = 'Reports and setup';
             more.onclick = () => dropMenu(more, [
                 { label: 'Size check', icon: I.ruler, title: cov.title, onClick: runCoverage },
