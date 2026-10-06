@@ -82,6 +82,7 @@
             --text-primary: var(--ink); --text-secondary: var(--ink-2);
             --text-tertiary: var(--ink-3); --text-disabled: var(--ink-4);
             --text-on-action: var(--ink); --text-link: var(--teal-700); --text-brand: var(--teal-700);
+            --text-link-hover: var(--teal-900);   /* a link under the pointer or pressed: the dark teal */
             --text-on-status: var(--white);   /* words and ticks on a status fill: ink on red-700 is 2.9:1, white 6.5:1 */
             /* Surfaces. The page is one white sheet; a well, a counter, a hover
                is the one fill; what is pressed on a fill is a line. Sunken text
@@ -190,7 +191,7 @@
             --shadow-focal: 0 1px 2px color-mix(in srgb, var(--teal-900) 18%, transparent),
                             0 8px 20px -10px color-mix(in srgb, var(--teal-500) 70%, transparent);
             --shadow-label: 0 2px 6px -2px color-mix(in srgb, var(--ink) 12%, transparent);
-            --shadow-md: var(--shadow-pop); --shadow-lg: var(--shadow-pop);
+            --shadow-lg: var(--shadow-pop);
             /* The chosen segment (a lift and a teal hairline), the live dot's
                halo, the open row's 2px teal edge. */
             --ring-chosen: var(--shadow-control), inset 0 0 0 var(--bw-hairline) var(--teal-650);
@@ -341,6 +342,7 @@
             --find-w: 232px;        /* the top bar's search */
             --chevron-room: calc(var(--sp-3) + var(--icon-md) + var(--sp-2));   /* a select's chevron: 12 in, 16 wide, 8 clear */
             --search-w: 280px;      /* a list's search field */
+            --pop-w: 360px;         /* a popover's width (the window's, less 16 a side, on a phone) */
             --icon-col: 34px;       /* the file list's icon column: 16px glyph, 18px gutter */
             /* The widget grid. Four columns when four cells of --wgrid-cell fit
                the content column, else two, one on a phone. Its gap is the
@@ -842,7 +844,7 @@
            growing what you see. Pulled 4 toward its words, as a count is. */
         .info { position: relative; isolation: isolate; width: var(--control-h-sm); height: var(--control-h-sm);
             margin-block: calc((var(--lh-control) - var(--control-h-sm)) / 2); margin-left: calc((var(--icon-md) - var(--control-h-sm)) / 2);
-            padding: 0; border: 0; background: none; display: inline-grid; place-items: center; color: var(--text-tertiary); flex: none; cursor: pointer; }
+            padding: 0; border: 0; background: none; display: none; place-items: center; color: var(--text-tertiary); flex: none; cursor: pointer; }
         .info::before { content: ""; position: absolute; z-index: -1; inset: 0; border-radius: var(--radius-tag); }
         .info svg { width: var(--icon-md); height: var(--icon-md); }
         .info:hover, .info[aria-expanded="true"] { color: var(--text-primary); }
@@ -850,6 +852,9 @@
         .info:active::before { background: var(--press); }
         .info:focus-visible { outline: 0; }
         .info:focus-visible::before { outline: var(--focus-outline); outline-offset: calc(-1 * var(--bw-strong)); }
+        /* A button that opens words is for a screen: a report printed to PDF
+           carries none, wherever the builder put it (a title, a section head). */
+        @media screen { .info { display: inline-grid; } }
         /* Above a phone the rail kept its full width and the page's intro
            gave way: at 768 on a tablet Overview's sentence was a column 122px
            wide, SEO's 71px and Size list's 56px, and the rail's last button
@@ -4019,9 +4024,11 @@
            The panel carries no border: its edge is the same 1px ring the cards
            use, over a two-layer shadow. Items are 28px at the control radius,
            padded 32px on the right so a tick has somewhere to sit. */
-        .dmenu { position: fixed; z-index: 70; min-width: 128px; padding: var(--sp-1);
-            background: var(--surface-primary); border-radius: var(--radius-card);
-            box-shadow: var(--shadow-md);
+        /* WHAT FLOATS (the mix, spec 6): a menu, a panel and a popover share a
+           10 corner, the pop shadow and 4 inside (a panel 12, a popover 16). */
+        .dmenu { position: fixed; z-index: 70; min-width: 128px; padding: var(--menu-pad);
+            background: var(--surface-primary); border-radius: var(--radius-pop);
+            box-shadow: var(--shadow-pop);
             max-height: 70vh; overflow-y: auto; }
         /* A menu is as wide as its longest item, up to the window: the Skills
            picker grew to 666px for one long title, over the conversation list,
@@ -4058,11 +4065,25 @@
         .dmenu-tick svg { width: var(--icon-sm); height: var(--icon-sm); }
         /* A panel hung off a button rather than a list of items: the same box
            and the same way out, holding a small form instead. */
-        .dpanel { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3);
+        /* A panel is padded once: the menu box round it gives up its own 4. */
+        .dpanel { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--pop-pad);
             min-width: 240px; }
+        .dmenu:has(> .dpanel) { padding: 0; }
         .dpanel-row { display: flex; align-items: center; gap: var(--sp-2); }
         .dpanel-row > span { flex: 1 1 auto; font-size: var(--text-xs); color: var(--text-tertiary); }
         .dpanel.drive-panel { width: min(360px, calc(100vw - 16px)); }
+        /* A popover: the explanation an info button holds, then the Guide link. */
+        .dpanel.ipop { width: var(--pop-w); max-width: calc(100vw - 2 * var(--sp-4)); min-width: 0; padding: var(--pop-pad); gap: var(--sp-2); }
+        .ipop h3 { margin: 0; font-size: var(--text-body); line-height: var(--lh-control); font-weight: var(--weight-semibold); color: var(--text-primary); }
+        .ipop p { margin: 0; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }
+        .ipop .link { align-self: flex-start; margin-top: var(--sp-1); }
+        /* A standalone link ("Show all", "More in the Guide"): teal words at
+           500 with a 14 arrow 2 after them. Not underlined: it stands alone, so
+           the arrow carries what an underline does in running text. */
+        .link { display: inline-flex; align-items: center; gap: var(--sp-0-5); padding: 0; border: 0; background: none;
+            font: inherit; font-weight: var(--weight-medium); color: var(--text-link); text-decoration: none; cursor: pointer; border-radius: var(--radius-tag); }
+        .link svg { width: var(--icon-sm); height: var(--icon-sm); stroke-width: var(--icon-stroke-s); }
+        .link:hover, .link:active { color: var(--text-link-hover); }
         .drive-title { margin: 0; font-size: var(--text-sm); font-weight: var(--weight-medium); }
         .drive-p, .drive-note { margin: 0; font-size: var(--text-sm); line-height: var(--lh-body); color: var(--text-secondary); }
         .drive-p b { color: var(--text-primary); font-weight: var(--weight-medium); overflow-wrap: anywhere; }
@@ -5484,6 +5505,8 @@ Projected Image UK"></textarea>
             briefcase: SV('<rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>'),
             userCheck: SV('<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><polyline points="17 11 19 13 23 9"></polyline>'),
             helpCircle: SV('<circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line>'),
+            info: SV('<circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path>'),
+            arrowRight: SV('<path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path>'),
             card: SV('<rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line>'),
             logOut: SV('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line>'),
             logIn: SV('<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line>'),
@@ -5581,7 +5604,7 @@ Projected Image UK"></textarea>
         /* The page header (the mix, spec 5): a Bricolage title, Beta beside it
            on the pages BETA_TABS names, at most one short line under it or a
            status line, and the page's actions on the right.
-           o: { view, title, line, status: [words, ...], live: a time in ms,
+           o: { view, title, info: an infoButton, line, status: [words, ...], live: a time in ms,
            onRefresh, refreshLabel, actions: [nodes] }. The names .ov-hero and
            .ov-hero-act stay: the widget grid puts Customise in the rail by
            them, and a printed report hides the rail by them. */
@@ -5590,6 +5613,7 @@ Projected Image UK"></textarea>
             const text = el('div', 'ph-text');
             const h = el('h2', null, o.title);
             if (o.view && BETA_TABS.indexOf(o.view) >= 0) h.append(el('span', 'beta-tag', 'Beta'));
+            if (o.info) h.append(o.info);
             text.append(h);
             if (o.live != null) {
                 const sub = el('div', 'ph-sub');
@@ -5607,6 +5631,35 @@ Projected Image UK"></textarea>
             } else if (o.line) text.append(el('p', null, o.line));
             hero.append(text, heroAct('', ...(o.actions || [])));
             return hero;
+        }
+        /* An explanation on request (the mix, spec 6 and 7): a 24 info glyph
+           beside a heading or a figure label, opening a popover with the words
+           that used to sit under the title, moved word for word, and a link to
+           the Guide. A tap and the keyboard open it as well as a click, which
+           the old title text on hover never did. o: { title, body: a string or
+           [strings and nodes], guide: [section id, search] } */
+        function infoButton(label, o) {
+            const b = el('button', 'info');
+            b.type = 'button'; b.title = label;
+            b.setAttribute('aria-label', label);
+            b.setAttribute('aria-haspopup', 'dialog');
+            b.setAttribute('aria-expanded', 'false');
+            b.append(ico(I.info));
+            b.onclick = (e) => {
+                e.stopPropagation();
+                dropPanel(b, (box) => {
+                    box.classList.add('ipop');
+                    if (o.title) box.append(el('h3', null, o.title));
+                    [].concat(o.body || []).filter(Boolean).forEach(t => box.append(typeof t === 'string' ? el('p', null, t) : t));
+                    if (o.guide) {
+                        const a = el('button', 'link', 'More in the Guide');
+                        a.type = 'button'; a.append(ico(I.arrowRight));
+                        a.onclick = () => { closeDMenu(); openGuideAt(o.guide[0], o.guide[1] || ''); };
+                        box.append(a);
+                    }
+                });
+            };
+            return b;
         }
         // static icon wiring
         $('nav-overview').append(ico(I.grid), document.createTextNode('Overview'));
@@ -7286,8 +7339,9 @@ Projected Image UK"></textarea>
                screen, and flipped above when there is no room below. */
             let left = r.left;
             if (left + pw > window.innerWidth - 8) left = Math.max(8, r.right - pw);
-            let top = r.bottom + 4;
-            if (top + ph > window.innerHeight - 8) top = Math.max(8, r.top - ph - 4);
+            const off = tokenNum('--pop-offset');
+            let top = r.bottom + off;
+            if (top + ph > window.innerHeight - 8) top = Math.max(8, r.top - ph - off);
             panel.style.left = Math.round(left) + 'px';
             panel.style.top = Math.round(top) + 'px';
             const buttons = () => [...panel.querySelectorAll('.dmenu-item:not([disabled])')];
@@ -7330,8 +7384,9 @@ Projected Image UK"></textarea>
             const pw = panel.offsetWidth, ph = panel.offsetHeight;
             let left = r.left;
             if (left + pw > window.innerWidth - 8) left = Math.max(8, r.right - pw);
-            let top = r.bottom + 4;
-            if (top + ph > window.innerHeight - 8) top = Math.max(8, r.top - ph - 4);
+            const off = tokenNum('--pop-offset');
+            let top = r.bottom + off;
+            if (top + ph > window.innerHeight - 8) top = Math.max(8, r.top - ph - off);
             panel.style.left = Math.round(left) + 'px';
             panel.style.top = Math.round(top) + 'px';
             const first = panel.querySelector('input, select, button');
