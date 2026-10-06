@@ -1892,6 +1892,8 @@
         .fc-err { display: block; white-space: pre-wrap; margin-top: var(--sp-2); }
         .fc-drawer-body { display: flex; flex-direction: column; gap: var(--sp-3); }
         .ktable th .fc-th-wrap { display: inline-block; white-space: normal; min-width: calc(var(--sp-8) * 3); max-width: calc(var(--sp-8) * 4); }
+        /* A column head with its info button beside it. */
+        .fc-th { display: inline-flex; align-items: center; gap: var(--sp-1); }
         .fc-date { width: calc(var(--sp-8) * 5); }
         .fc-cmp { display: flex; flex-wrap: wrap; gap: var(--sp-2); flex: 1 1 100%; }
         /* Cash in: the methods to compare sit 16 under the chart; on a phone
@@ -5885,6 +5887,10 @@ Projected Image UK"></textarea>
             compass: SV('<circle cx="12" cy="12" r="10"></circle><path d="m16.24 7.76-2.12 6.36-6.36 2.12 2.12-6.36z"></path>'),
             target: SV('<circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle>'),
             shield: SV('<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path><path d="m9 12 2 2 4-4"></path>'),
+            table: SV('<path d="M12 3v18"></path><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M3 9h18"></path><path d="M3 15h18"></path>'),
+            cash: SV('<rect width="20" height="12" x="2" y="6" rx="2"></rect><circle cx="12" cy="12" r="2"></circle><path d="M6 12h.01M18 12h.01"></path>'),
+            columns: SV('<rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path><path d="M15 3v18"></path>'),
+            compare: SV('<circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><path d="M11 18H8a2 2 0 0 1-2-2V9"></path>'),
             card: SV('<rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line>'),
             logOut: SV('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line>'),
             logIn: SV('<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line>'),
@@ -15513,7 +15519,7 @@ Projected Image UK"></textarea>
             head.forEach((h, i) => {
                 const th = el('th');
                 if (h instanceof Node) th.append(h); else th.textContent = h == null ? '' : String(h);
-                if (right && right[i]) th.style.textAlign = 'right'; hr.append(th);
+                if (right && right[i]) th.classList.add('num'); hr.append(th);
             });
             thead.append(hr); tbl.append(thead);
             const tb = el('tbody');
@@ -15522,7 +15528,7 @@ Projected Image UK"></textarea>
                 cells.forEach((c, i) => {
                     const td = el('td');
                     if (c instanceof Node) td.append(c); else td.textContent = c == null ? '' : String(c);
-                    if (right && right[i]) td.style.textAlign = 'right';
+                    if (right && right[i]) td.classList.add('num');
                     tr.append(td);
                 });
                 tb.append(tr);
@@ -15569,41 +15575,34 @@ Projected Image UK"></textarea>
         }
         function forecastSetupCard(c) {
             const card = el('div', 'card');
-            card.append(el('div', 'card-title', 'No forecast yet'));
-            card.append(el('p', 'card-sub', c.hook_configured
-                ? 'The hook is configured. The nightly service has not posted a run yet: it runs at 03:00 and needs the workbook below.'
-                : 'Set FORECAST_INGEST_TOKEN on Reactor and, with the same value, on the forecasting service; the service then posts here each night. The setup is in forecast/README.md.'));
+            const head = el('div', 'card-title', 'No forecast yet');
+            /* The steps name a setting and a file, so they wait behind the info
+               button for the admin who needs them, word for word (the mix, 8.3). */
+            if (!c.hook_configured) head.append(infoButton('Setting up the forecast', { title: 'Setting up the forecast',
+                body: 'Set FORECAST_INGEST_TOKEN on Reactor and, with the same value, on the forecasting service; the service then posts here each night. The setup is in forecast/README.md.' }));
+            card.append(head);
+            if (c.hook_configured) card.append(el('p', 'card-sub', 'The first run lands after 03:00.'));
             if (c.last_error) card.append(el('p', 'card-sub', 'The last run, on ' + fmtDate(c.last_error.at)
                 + ', did not finish. What the service reported: ' + String(c.last_error.error).slice(0, 300)));
             const wb = c.workbook || {};
             card.append(el('p', 'card-sub', wb.name ? ('Workbook on file: ' + wb.name + ', uploaded ' + fmtDate(wb.uploaded_at) + (wb.by ? ' by ' + wb.by : '') + '.')
-                : 'No workbook uploaded yet. An admin uploads the cash flow workbook with the button above; the nightly run reads it.'));
+                : 'No cash flow workbook yet. Upload one above.'));
             return card;
         }
-        /* How much of the source table to put on screen. Twelve rows of models
+        /* How much of the method table to put on screen. Twelve rows of models
            is a lot to land on someone who opened the page to read one number,
            so the default is the three that are quoted, and the choice is
            remembered per person. "Just the headline" is a single row: the
-           source that leads, with the plan beside it. */
-        /* Which source the three headline boxes speak for. Empty means the one
-           that leads, which is what the month table and the cash path are
-           built from; picking another answers "and what would THIS one say
-           about the year" without pretending the rest of the page moved. */
-        const LS_FCSRC = 'sc_fc_source_v1';
-        function fcSourceName() { try { return localStorage.getItem(LS_FCSRC) || ''; } catch (e) { return ''; } }
-        function setFcSourceName(v) {
-            try { if (v) localStorage.setItem(LS_FCSRC, v); else localStorage.removeItem(LS_FCSRC); } catch (e) {}
-            renderForecast();
-        }
+           method that leads, with the plan beside it. */
         const LS_FCROWS = 'sc_fc_rows_v1';
-        const FC_ROWS = [['one', 'Just the headline'], ['three', 'The three quoted'], ['all', 'Every source']];
+        const FC_ROWS = [['one', 'Just the headline'], ['three', 'The three quoted'], ['all', 'Every method']];
         function fcRowsMode() {
             try { const v = localStorage.getItem(LS_FCROWS); return FC_ROWS.some(r => r[0] === v) ? v : 'three'; }
             catch (e) { return 'three'; }
         }
         function setFcRowsMode(v) {
             try { localStorage.setItem(LS_FCROWS, v); } catch (e) {}
-            renderForecast();
+            renderForecast(); fcRepaintPage();
         }
         /* ---------- the sanity panel ----------
            Five plain forecasts of the monthly total, beside the big model.
@@ -15672,45 +15671,15 @@ Projected Image UK"></textarea>
            the 1st showed last month. */
         const fcISO = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
             + '-' + String(d.getDate()).padStart(2, '0');
-        /* Details on demand, remembered per person. Shut by default: the whole
-           point of the layer below the picture is that a reader who does not
-           want it never has to scroll past it, and a reader who does opens one
-           and finds everything. The body is built LAZILY, on first open, so
-           five closed drawers cost five summaries rather than five tables. */
-        const LS_FCOPEN = 'sc_fcopen_v1';
-        function fcOpenSet() {
-            try { const v = JSON.parse(localStorage.getItem(LS_FCOPEN) || '[]'); return Array.isArray(v) ? v : []; }
-            catch (e) { return []; }
-        }
-        function setFcOpen(key, on) {
-            try {
-                const set = fcOpenSet().filter(k => k !== key);
-                if (on) set.push(key);
-                localStorage.setItem(LS_FCOPEN, JSON.stringify(set.slice(-12)));
-            } catch (e) {}
-        }
-        function fcDrawer(title, build) {
-            const key = title.replace(/\s*\(\d+\)\s*$/, '');
-            const d = el('details', 'sect');
-            const sum = el('summary'); sum.append(document.createTextNode(title));
-            const chev = el('span', 'chev'); chev.innerHTML = I.chev; sum.append(chev);
-            const body = el('div', 'body');
-            d.append(sum, body);
-            let built = false;
-            const fill = () => { if (built) return; built = true; body.append(build()); };
-            if (fcOpenSet().indexOf(key) >= 0) { d.open = true; fill(); }
-            d.addEventListener('toggle', () => { if (d.open) fill(); setFcOpen(key, d.open); });
-            return d;
-        }
         /* These cards each carry their own section title, which is right when
-           they sit on the page and wrong inside a drawer whose summary already
+           they sit on the page and wrong inside a window whose title already
            says it. Reuse the card, drop the duplicated heading. */
         function fcUntitled(node) {
             const t = node.querySelector(':scope > .section-title');
             if (t) t.remove();
-            /* And drop the card's own frame: inside a drawer it made three
-               nested boxes (drawer, card, table), while the Month by month
-               and Cash drawers beside it hold their table directly. */
+            /* And drop the card's own frame: inside a window it made three
+               nested boxes (window, card, table), while the Month by month
+               and Cash windows beside it hold their table directly. */
             node.querySelectorAll(':scope > .card').forEach(c => {
                 const body = el('div', 'fc-drawer-body');
                 while (c.firstChild) body.append(c.firstChild);
@@ -16159,7 +16128,7 @@ Projected Image UK"></textarea>
                 ? a.live - b.live : ((a.back == null ? 9 : a.back) - (b.back == null ? 9 : b.back)));
             const lead = ranked[0], next = ranked[1];
             if (!lead) {
-                card.append(el('p', 'card-sub', 'No source has been scored yet.'));
+                card.append(el('p', 'card-sub', 'No method has been scored yet.'));
                 box.append(card); return box;
             }
             const head = el('div', 'card-head card-head-stat');
@@ -16184,7 +16153,7 @@ Projected Image UK"></textarea>
             card.append(head);
             card.append(el('p', 'card-sub', onRecord
                 ? 'It is judged on months it could not see: the first figure it gave for each month, against '
-                  + 'what came in. At the end of every month every source is marked again, and if another '
+                  + 'what came in. At the end of every month every method is marked again, and if another '
                   + 'starts coming closer, it takes over without anyone changing a setting.'
                 : 'Once three months have closed, the choice moves onto that record instead, which is the '
                   + 'harder test: a backtest refits a model to a period the code already knows the shape of.'));
@@ -16229,11 +16198,11 @@ Projected Image UK"></textarea>
             box.append(el('div', 'section-title', 'How each one works'));
             const card = el('div', 'card');
             if (!list.length) {
-                card.append(el('p', 'card-sub', 'The sources arrive with the next run.'));
+                card.append(el('p', 'card-sub', 'The methods arrive with the next run.'));
                 box.append(card); return box;
             }
             card.append(el('p', 'card-sub',
-                'Every approach the system runs each night. It tries all of them, marks all of them, '
+                'Every method the system runs each night. It tries all of them, marks all of them, '
                 + 'and uses whichever has been closest. Nothing here needs choosing.'));
             const onRecord = sn.ranked_on === 'record';
             const rows = list.slice().sort((a, b) => {
@@ -16284,15 +16253,26 @@ Projected Image UK"></textarea>
             return box;
         }
 
-        /* A method page in a window: wide, for the tables some of them hold. */
-        function fcPage(title, build) { const m = sheetModal(title); m.modal.classList.add('wide'); m.body.append(build()); return m; }
+        /* A method page in a window: wide, for the tables some of them hold. The
+           last one opened is kept, so a choice made inside it (how many methods
+           to show) repaints it in place: the page behind is not the window. */
+        let fcLivePage = null;
+        function fcPage(title, build) {
+            const m = sheetModal(title); m.modal.classList.add('wide'); m.body.append(build());
+            fcLivePage = { m: m, build: build };
+            return m;
+        }
+        function fcRepaintPage() {
+            const lp = fcLivePage;
+            if (lp && lp.m.overlay.isConnected) lp.m.body.replaceChildren(lp.build());
+        }
         /* How much to trust it: prose when the plain models are running, the
            M5 backtest table when that build is. */
         function fcTrust(latest) {
             const bt = latest.metrics || [];
             const bc = el('div');
             if (!bt.length) {
-                bc.append(el('p', 'card-sub', 'Each source was fitted to earlier months and marked against '
+                bc.append(el('p', 'card-sub', 'Each method was fitted to earlier months and marked against '
                     + 'what actually happened, three times over. Typical error is how far out it usually was; '
                     + 'bias is whether it leaned high or low every month, which matters more, because a model '
                     + 'that leans high quietly turns a plan green. The leading model\u2019s own error is the '
@@ -16355,7 +16335,7 @@ Projected Image UK"></textarea>
             const card = el('div', 'card');
             if (!res.length) {
                 card.append(el('p', 'card-sub',
-                    'Nothing has closed yet. From the end of this month, every source\u2019s prediction is '
+                    'Nothing has closed yet. From the end of this month, every method\u2019s prediction is '
                     + 'marked against what actually came in, and the one that keeps coming closest starts '
                     + 'leading the forecast. Until then the ranking is the backtest above.'
                     + ((led.open || []).length ? ' Months being watched: ' + led.open.join(', ') + '.' : '')));
@@ -16388,9 +16368,9 @@ Projected Image UK"></textarea>
                             : (u.inside ? ', inside' : ', outside') + ' its likely range of '
                               + fcMoney(u.p10) + ' to ' + fcMoney(u.p90) + '.')
                         + (u.reconstructed ? ' Worked out afterwards from the forecast\u2019s own code, because '
-                            + 'the record did not yet keep the source in use.' : '');
+                            + 'the record did not yet keep the method in use.' : '');
                 } else {
-                    line = ' Which source the page was using is not on record for this month.';
+                    line = ' Which method the page was using is not on record for this month.';
                 }
                 const w = (r.by_source || {})[r.winner];
                 if (w) line += ' Closest: ' + r.winner + ', ' + fcMoney(w.predicted) + ' (' + fcPct(w.error) + ').';
@@ -16398,7 +16378,7 @@ Projected Image UK"></textarea>
                 card.append(p);
             });
             card.append(el('p', 'card-sub',
-                'Below, how far out each source\u2019s first figure for the month was. '
+                'Below, how far out each method\u2019s first figure for the month was. '
                 + (sn.ranked_on === 'record'
                     ? 'With ' + (sn.closed_months || res.length) + ' closed months on record, this is what the '
                       + 'forecast is now ranked on rather than the backtest.'
@@ -16415,7 +16395,7 @@ Projected Image UK"></textarea>
                     if (r.winner === n) { cell.append(document.createTextNode(' ')); cell.append(fcChip('made', 'closest')); }
                     return cell;
                 }))), [0, 1].concat(names.map(() => 1))));
-            card.append(fcTable(['Source', 'Months', 'Average error', 'Closest'],
+            card.append(fcTable(['Method', 'Months', 'Average error', 'Closest'],
                 names.map(n => [n, tally[n].n, (tally[n].abs / tally[n].n * 100).toFixed(1) + '%',
                                 tally[n].wins + ' of ' + tally[n].n]), [0, 1, 1, 1]));
             box.append(card);
@@ -16447,7 +16427,7 @@ Projected Image UK"></textarea>
                     ? 'The next ' + months.length + ' months are shown; Plan year covers all '
                       + allMonths.length + '. ' : '') +
                 (mode === 'one'
-                ? 'The source that has been most right on this shop\u2019s own history, with what '
+                ? 'The method that has been most right on this shop\u2019s own history, with what '
                   + 'the plan expects beside it. Show more above to see whether the others agree. '
                 : 'The top one drives the month table, the cash path and the alerts; the next two '
                   + 'stand beside it so you can see whether they agree. Rows marked as an average '
@@ -16471,10 +16451,10 @@ Projected Image UK"></textarea>
                    ranked like one, but it is worth being able to see at a
                    glance which rows are combinations rather than sources. */
                 if (m.kind === 'combination') name.append(document.createTextNode(' '), fcChip('', 'average'));
-                /* Directors read this table. Every source carries a sentence
+                /* Directors read this table. Every method carries a sentence
                    saying what it does, what it assumes and when it misleads,
-                   on hover and on keyboard focus. */
-                if (m.about) { name.title = m.about; name.classList.add('has-help'); name.tabIndex = 0; }
+                   behind an info button a tap and the keyboard open too. */
+                if (m.about) name.append(infoButton(m.name, { title: m.name, body: m.about }));
                 const sc2 = m.score || {};
                 const yr = m.year == null ? 'n/a' : fcMoney(m.year) + (m.year_partial ? '*' : '');
                 return [name].concat(months.map(k => m.error ? 'n/a' : fcMoney((m.months || {})[k])))
@@ -16490,19 +16470,19 @@ Projected Image UK"></textarea>
                 return fcMoney(r ? (r.targets || {})[sc] : null);
             })).concat([fcMoney(planYear), '', '', '']);
             const helpHead = (text, about) => {
-                const sp = el('span', 'has-help', text); sp.title = about; sp.tabIndex = 0; return sp;
+                const sp = el('span', 'fc-th', text); sp.append(infoButton(text, { title: text, body: about })); return sp;
             };
-            card.append(fcTable(['Source'].concat(months.map(fcMonth)).concat([
+            card.append(fcTable(['Method'].concat(months.map(fcMonth)).concat([
                     helpHead('Plan year', 'What the whole of the plan\u2019s year comes to if you believe '
-                        + 'this source: the months already banked, which are the same whichever source you '
-                        + 'believe, plus this one\u2019s forecast for the rest. A star means the source does '
+                        + 'this method: the months already banked, which are the same whichever method you '
+                        + 'believe, plus this one\u2019s forecast for the rest. A star means the method does '
                         + 'not reach the end of the plan, so the figure covers only part of the year.'),
-                    helpHead('Typical error', 'How far out this source usually was. Each was fitted to '
+                    helpHead('Typical error', 'How far out this method usually was. Each was fitted to '
                         + 'earlier months and marked against what actually happened, three times over. '
                         + 'Lower is better. Around a quarter is close to the floor for this business, '
                         + 'because a single large order can be a tenth of a month.'),
                     helpHead('Bias', 'Whether it leaned high or low on average, rather than how far out it was. '
-                        + 'This matters more than the error: a source that leans high every single month '
+                        + 'This matters more than the error: a method that leans high every single month '
                         + 'quietly makes a plan look safer than it is.'),
                     'How it works']),
                 rows.concat([plan]),
@@ -16545,23 +16525,21 @@ Projected Image UK"></textarea>
                heading as the flow did. */
             if (c.last_error) box.append(fcFailedRunCard(c.last_error, latest.as_of));
             const rows = latest.monthly || [];
-            const cur = rows.find(r => (r.method || '').indexOf('actual_to_date') === 0) || rows.find(r => r.method === 'forecast') || rows[0];
-            const year = latest.year || {}; const yt = (year.targets || {})[sc];
             const al = (latest.alerts || []).filter(a => a.scenario === sc);
 
             /* ---------------------------------------------------------------
                OVERVIEW FIRST, then zoom and filter, then details on demand.
                The page is built in that order and nothing below the fold is
-               opened for the reader: 1 where things stand, 2 the picture,
-               3 why, 4 the numbers behind it, 5 how the thing works at all.
-               No source picker anywhere - the system picks on evidence, and
-               says so in "How this forecast works" for anyone who asks.
+               opened for the reader: 1 the month in a band, 2 the picture,
+               3 the months worth looking at beside why, 4 the numbers behind
+               it. How the thing works at all is the header's How it works.
+               No method picker anywhere - the system picks on evidence, and
+               says so there for anyone who asks.
                --------------------------------------------------------------- */
 
             /* 1. EXPECTED THIS MONTH: the feature band. */
             const band = fcBand(latest, sc);
             if (band) box.append(widget(band, 'standing', 'full', 'Expected this month'));
-
 
             /* 2. THE PICTURE. Actual, forecast and uncertainty, with the time
                control on it. This is the largest thing on the page. */
@@ -16579,13 +16557,13 @@ Projected Image UK"></textarea>
             pair.append(cols);
             box.append(widget(pair, 'worth', 'full', 'Worth looking at, and why'));
 
-            /* 4. DETAILS ON DEMAND. Tables carry precise money; the chart above
-               carries the pattern. All shut until asked for. */
+            /* 4. THE NUMBERS BEHIND IT (the mix, spec 8.1 item 6): four list
+               rows in two columns, each opening its table in a window. Tables
+               carry precise money; the chart above carries the pattern. */
             const numbers = widget(el('div', 'widget-group'), 'numbers', 'full', 'The numbers behind it');
             numbers.append(el('div', 'section-title', 'The numbers behind it'));
             box.append(numbers);
-            const detail = el('div', 'widget-bare sect-group');
-            detail.append(fcDrawer('Month by month against ' + sc + ' (' + rows.length + ')', function () {
+            const monthTable = () => {
                 const mc = el('div');
                 /* fc-months: a month and its basis stay on one line each; the
                    table scrolls sideways on a phone rather than stacking
@@ -16602,9 +16580,9 @@ Projected Image UK"></textarea>
                     [0, 0, 1, 1, 1, 1, 1, 0, 0]));
                 mc.lastChild.classList.add('fc-months');
                 return mc;
-            }));
+            };
             const cash = (latest.cash || {})[sc] || [];
-            if (cash.length) detail.append(fcDrawer('Cash under ' + sc + ' (' + cash.length + ')', function () {
+            const cashTable = () => {
                 const cc = el('div');
                 cc.append(el('p', 'card-sub', 'The projected sales pushed through the scenario\u2019s own mechanics: its overheads and cost lines, the Shopify Capital remittance on gross, stopping when the loan is repaid.'));
                 cc.append(fcTable(['Month', 'Gross sales', 'Repayment', 'Net cash', 'Working capital', 'Loan left'],
@@ -16613,15 +16591,18 @@ Projected Image UK"></textarea>
                         return [fcMonth(r.month), fcMoney(r.gross_sales), fcMoney(r.repayment), fcMoney(r.net_cash), wc, fcMoney(r.loan_end)]; }),
                     [0, 1, 1, 1, 1, 1]));
                 return cc;
-            }));
+            };
             const nsrc = ((latest.sanity || {}).models || []).length;
-            detail.append(fcDrawer('Every source, side by side' + (nsrc ? ' (' + nsrc + ')' : ''), function () {
-                return fcUntitled(fcSanityCard(latest, sc));
-            }));
-            detail.append(fcDrawer('What each source said, and what came in', function () {
-                return fcUntitled(fcRecordCard(c));
-            }));
-            numbers.append(detail);
+            numbers.append(listRows([
+                { icon: I.table, label: 'Month by month against ' + sc, n: rows.length, unit: 'months',
+                  onClick: () => fcPage('Month by month against ' + sc, monthTable) },
+                cash.length ? { icon: I.cash, label: 'Cash under ' + sc, n: cash.length, unit: 'months',
+                  onClick: () => fcPage('Cash under ' + sc, cashTable) } : null,
+                { icon: I.columns, label: 'Every method, side by side', n: nsrc || null, unit: 'methods',
+                  onClick: () => fcPage('Every method, side by side', () => fcUntitled(fcSanityCard(latest, sc))) },
+                { icon: I.compare, label: 'What each method said, and what came in',
+                  onClick: () => fcPage('What each method said, and what came in', () => fcUntitled(fcRecordCard(c))) },
+            ], { cols: 2, label: 'The numbers behind it' }));
 
             /* The by-category and by-segment tables came from the per-variant
                model, which no longer runs: it forecast October at a quarter of
