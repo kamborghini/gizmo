@@ -519,7 +519,7 @@ def t_every_source_blurb_stands_as_its_own_sentence():
         ok(b.startswith(("It ", "The textbook")), "a subject first: %r" % b[:40])
         ok(not b.startswith("The same"), "and no pointer to a neighbour: %r" % b[:40])
     src = inspect.getsource(fs)
-    ok('"about": "It weights every source' in src, "the track-record source too")
+    ok('"about": "It weights every method' in src, "the track-record method too")
 
 
 @test
@@ -628,6 +628,29 @@ def t_the_run_tells_the_record_which_source_is_in_use():
     ok("2026-12" not in got["months"] and "2027-01" not in got["months"], "a month it cannot give is left out, never NaN")
     import json
     json.loads(json.dumps(got, allow_nan=False))
+
+
+@test
+def t_the_words_a_model_shows_on_the_page_say_method_not_source():
+    """Cameron approved "method" on the Forecast screen. The combination
+    models' own sentences (the Why caption and popover, the Every method
+    window) said "source": reworded, while the keys and the model names, which
+    are the service's own and key the page, are untouched."""
+    import re
+    import inspect
+    import forecast.simple as fs
+    word = re.compile(r"\b[Ss]ources?\b")
+    shown = [fs.BIG_ORDERS_ABOUT, fs.BIG_ORDERS_BEST_AT]
+    for m in fs.MODELS:
+        shown += [m[2]]
+    for c in fs.COMBINERS:
+        shown += [c[2], c[3], c[4]]          # note, about, best at: not c[0], the model's name
+    for t in shown:
+        ok(not word.search(t), "says method: %r" % t[:70])
+    src = inspect.getsource(fs)
+    ok('"note": "each method weighted' in src and '"about": "It weights every method' in src, "the track-record model too")
+    ok(tuple(c[0] for c in fs.COMBINERS) == ("Average of every source", "Middle of every source", "Average, extremes removed"),
+       "and the model names are as they were")
 
 
 if __name__ == "__main__":
