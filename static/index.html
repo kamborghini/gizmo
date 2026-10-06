@@ -1421,8 +1421,10 @@
         .ov-wrap.wg-editing > [data-widget] { position: relative; cursor: grab; user-select: none;
             -webkit-user-select: none; -webkit-touch-callout: none;
             transition: outline-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease), scale var(--dur) var(--ease); }
+        /* A section has no box at rest (the mix), so its dashed edge in
+           Customize mode stands 8 clear of its content. */
         .ov-wrap.wg-editing > [data-widget]:not(:focus-visible) {
-            outline: var(--bw-hairline) dashed var(--border-emphasis); outline-offset: var(--sp-0-5); }
+            outline: var(--bw-hairline) dashed var(--border-emphasis); outline-offset: var(--sp-2); }
         /* The held card follows the pointer by an inline translate the script
            writes, and floats: the large shadow, above its neighbours, and a
            step bigger unless motion is reduced (the script adds wg-lifted only
@@ -1434,7 +1436,8 @@
            the control's corner, and carries its own ground because it sits over
            whatever the card draws there. */
         .ov-wrap.wg-editing > [data-widget] > .wg-hide { position: absolute; top: calc(-1 * var(--sp-3)); right: calc(-1 * var(--sp-3)); z-index: 1;
-            margin: 0; padding: var(--sp-1); background: var(--surface-primary); box-shadow: var(--ring-default);
+            margin: 0; padding: 0; width: var(--control-h-sm); height: var(--control-h-sm); min-width: 0; min-height: 0;
+            background: var(--surface-primary); box-shadow: var(--shadow-pop);
             border-radius: var(--radius-control); cursor: pointer; }
         /* A widget with no padding of its own (a chart group, a row of tiles)
            had its corner control under the hide button: Overview's 24M, the
