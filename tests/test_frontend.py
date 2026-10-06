@@ -9298,7 +9298,7 @@ def t_the_brand_pilot_review_findings_stay_fixed():
         ok(not re.search(r"(?<![-\w])color\s*[:=]\s*'?var\(--action-(primary|hover)\)", src),
            "%s writes no words in the bright teal" % name)
     ok("'.cmp-area a { color: var(--text-link); }'" in COMPOSER, "links in an email are the link teal")
-    ok("'.cmp-b:focus-visible { outline: var(--focus-outline); outline-offset: 1px; }'" in COMPOSER,
+    ok("'.cmp-b:focus-visible { outline: var(--focus-outline); outline-offset: var(--sp-0-5); }'" in COMPOSER,
        "and a focused formatting button shows the app's own outline, not a 1.2:1 glow")
     ok("border-color: var(--border-selected)" in COMPOSER.split("'.cmp-area:focus {")[1].split("}")[0],
        "and the editing area's focus edge is the selected edge every other field has")
@@ -11400,6 +11400,37 @@ def t_the_inbox_presence_row_is_names_not_boxes():
     for kept in ("'mail-who-card'", "'who-dot' + ownClass(m.colour)", "'mail-presence ' + (m.presence || 'office')", "'mail-who-name', m.name + ' (you)'",
                  "pick.className = 'mail-presence-pick';", "api('/api/mail/presence'", "el('span', 'mail-who-load',"):
         ok(kept in mw, "kept: " + kept)
+
+
+@test
+def t_chat_the_guide_and_design_wear_the_mix():
+    """Spec 8.3 (Workspace) and the copy plan (Chat, Guide, Design): the empty
+    chat's one line, Enter and Shift+Enter on Send's own tooltip, the Guide's
+    header with no line (its tabs say it), each Design section's explanation
+    behind its title, the mix's tokens drawn on the Design page, and the
+    composer on the same corners, type and focus as the page."""
+    ok("'Ask about products, orders, customers and stock.'" in SCRIPT, "the empty chat's line")
+    ok('title="Enter to send · Shift+Enter for a new line"' in HTML and '<span class="hint">' not in HTML, "the keys are Send's tooltip")
+    ok("function renderGuide() {" in SCRIPT and "function dsCard(title, desc, ...kids) {" in SCRIPT and "function paintDesign(host) {" in SCRIPT,
+       "renderGuide, dsCard and paintDesign exist")
+    ok("pageHead({ view: 'guide', title: 'Guide' })" in fn_src("function renderGuide() {"), "the Guide's header")
+    ok("if (desc) t.append(infoButton(title, { title: title, body: desc }))" in fn_src("function dsCard(title, desc, ...kids) {"),
+       "a Design section's explanation is its title's info button")
+    ok("MIX_TOKENS.forEach(([group, names]) =>" in fn_src("function paintDesign(host) {"), "the Design page draws the mix's tokens")
+    for gone in ("How the desk runs, what changed", "Short and specific beats polished", "Ask for a feature if something is missing",
+                 "It goes on Guide, Requests", "The strip of headline figures", "What a screen says when there is nothing",
+                 "When there is, it shows here.", "Reactor reads your live figures and answers"):
+        ok(gone not in SCRIPT, "cut: " + gone)
+    for bad in ("var(--radius-sm)", "var(--radius-xs)", "outline-offset: 1px", "line-height: 20px", "line-height: 1.5"):
+        ok(bad not in COMPOSER, "the composer reads the roles: " + bad)
+    ok("@media (hover: hover) { .cmp-b:hover" in COMPOSER, "and hovers only where there is a pointer")
+    ok("@media (hover: hover) { .cmp-x:hover" in COMPOSER, "the file chip's remove square too")
+    # Carried from the Phase 3 review: on a phone every control is a 40 target.
+    ph = COMPOSER.split("'@media (max-width: 640px) { .cmp-b { min-height: var(--control-h-lg); min-width: var(--control-h-lg); }',")
+    ok(len(ph) == 2, "the composer has a 640 rule that makes its buttons 40")
+    ph = ph[1][:700] if len(ph) == 2 else ""
+    ok(".cmp-sel { height: var(--control-h-lg); }" in ph, "and its selects")
+    ok(".cmp-x::after {" in ph and "width: var(--control-h-lg); height: var(--control-h-lg);" in ph, "and the remove square, as an invisible 40 square round it (the chip does not grow)")
 
 
 if __name__ == "__main__":
