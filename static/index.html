@@ -2344,7 +2344,6 @@
         .cx-card > .cx-grid { padding-top: var(--sp-4); border-top: var(--bw-hairline) solid var(--border-default); }
         .cx-tile { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
         .cx-tile-title { font-size: var(--text-body); font-weight: var(--weight-medium); }
-        .cx-tile-hint { font-size: var(--text-xs); color: var(--text-tertiary); line-height: var(--lh-caption); margin: 0; }
         /* Inside a tile the row is a plain flex row: the label-row frame it
            inherits drew a box within the tile, and its grid kept a tile from
            shrinking below the sum of its box and both buttons. */
@@ -2868,6 +2867,9 @@
            over white the ring was the only thing making it a chip at all. */
         .lbl-chip.bad { background: var(--error-bg); color: var(--error); border: var(--bw-hairline) solid transparent; }
         .lbl-chip.warn { background: var(--warning-bg); color: var(--warning); border: var(--bw-hairline) solid transparent; }
+        /* A tag in a card's head (Xero sync's Connection state) is its own width,
+           not the head's grid column. */
+        .card-head > .lbl-chip { justify-self: start; }
         /* ---- Cancelled. Muted and struck through: a name, a line or a label for
            something that will not now happen. ---- */
         .is-cancelled, [data-status="cancelled"] { color: var(--text-tertiary); text-decoration: line-through; }
@@ -14652,18 +14654,9 @@ Projected Image UK"></textarea>
         const CX_MODE = { warn: 'Send it and report the difference', strict: 'Hold it back', off: 'Do not check' };
         function renderConnector() {
             const box = $('connector-content'); box.innerHTML = '';
-            const hero = el('div', 'ov-hero'); const badge = el('div', 'badge'); badge.innerHTML = I.send;
-            const ht = el('div');
-            const hTitle = el('h2', null, 'Xero sync');
-            /* The promise follows Auto Run: with it on, new orders go without
-               a review, and the header said the opposite. */
-            ht.append(hTitle, el('p', null,
-                'Sends Shopify orders into Xero as invoices, refunds as credit notes, and new '
-                + 'customers as contacts. ' + (!connAuto ? ''
-                    : connAuto.enabled
-                    ? 'Auto Run is on, so new orders go every ' + (connAuto.intervalMinutes || 10) + ' minutes without a review.'
-                    : 'Nothing is written until a review has shown you exactly what will be sent.')));
-            hero.append(badge, ht); box.append(hero);
+            /* One line (copy plan, Xero sync #1). Whether Auto Run is on is the
+               Connection card's tag, and with it on that tag says so. */
+            box.append(pageHead({ view: 'connector', title: 'Xero sync', line: 'Shopify orders, refunds and customers, sent into Xero.' }));
             const lastRun = (connRuns || [])[0];
             box.append(financeTabs('connector',
                 lastRun ? ('Last run ' + fmtDate(lastRun.finishedAt)) : ''));
@@ -14678,8 +14671,13 @@ Projected Image UK"></textarea>
                    is given them. */
                 const card = el('div', 'card');
                 const head = el('div', 'card-head');
-                head.append(el('h3', 'card-title', 'Link the connector service'));
-                head.append(el('p', 'card-desc', 'Reactor is not linked to the Xero connector yet, so nothing can be reviewed or sent from here.'));
+                /* The steps and the security note, word for word, behind the
+                   title's info button (the mix, spec 8.3). They name the hosting
+                   and its settings, so an admin sees them only on asking. */
+                const lt = el('h3', 'card-title', 'Link the connector service');
+                const linkHelp = [];
+                head.append(lt);
+                head.append(el('p', 'card-desc', 'Not linked to the Xero connector yet.'));
                 card.append(head);
                 if (connIsAdmin()) {
                     const steps = el('ol', 'setup-steps');
@@ -14701,25 +14699,20 @@ Projected Image UK"></textarea>
                          'CONNECTOR_URL', 'http://<its private domain>:<its port>');
                     step(['Set the token: the same value as the connector service\u2019s own ', 'DASHBOARD_TOKEN', '.'], 'CONNECTOR_TOKEN');
                     step(['Let the app redeploy, then come back to this page.']);
-                    card.append(steps);
+                    linkHelp.push(steps);
                 } else {
-                    card.append(el('p', 'card-sub', 'An admin links it in Railway.'));
+                    card.append(el('p', 'card-sub', 'An admin needs to link this.'));
                 }
-                card.append(el('p', 'card-sub',
-                    'The connector runs as its own service (shopify-xero-connector) with its own '
+                linkHelp.push('The connector runs as its own service (shopify-xero-connector) with its own '
                     + 'ledger and failsafes. Reactor only drives it: credentials stay on that '
-                    + 'service, and its token stays on this server.'));
+                    + 'service, and its token stays on this server.');
+                lt.append(infoButton('Linking the connector', { title: 'Link the connector service', body: linkHelp }));
                 box.append(card); return;
             }
             if (connCache.error) {
                 box.append(loadFailure('The connector could not be reached. ' + cxDetail(connCache.error), refreshConnector));
                 return;
             }
-            /* Past the loading, unlinked and failure states the page is cards
-               the grid can move, each spanning the row, so the header gets the
-               action slot Customize goes in; the states above keep their
-               header as it was. */
-            hero.append(heroAct(''));
             const st = connCache.data || {};
             const cfg = st.config || {};
             const running = !!st.running;
@@ -14732,9 +14725,11 @@ Projected Image UK"></textarea>
                 if (led0[key] == null) return;
                 kpis.push({ label: label, value: String(led0[key]), note: note, tone: (warnWhen && led0[key] > 0) ? 'warn' : null });
             };
-            kpi('Synced', 'synced', 'invoices, credit notes and contacts in Xero');
-            kpi('Failed', 'failed', 'did not write; retry once the cause is fixed', true);
-            kpi('Quarantined', 'quarantined', 'held back rather than written with bad data', true);
+            /* The labels say it; the notes that repeated them went (copy plan,
+               Xero sync #6 to #8). */
+            kpi('Synced', 'synced', null);
+            kpi('Failed', 'failed', null, true);
+            kpi('Quarantined', 'quarantined', null, true);
             /* No 'Blocked' tile: the connector's ledger counts synced, failed
                and quarantined documents only, so the tile could never show
                and its word disagreed with 'Left alone' in the tables. */
@@ -14744,7 +14739,9 @@ Projected Image UK"></textarea>
             const sCard = el('div', 'card');
             const sHead = el('div', 'card-head card-head-stat');
             sHead.append(el('div', 'card-title', 'Connection'));
-            sHead.append(el('div', 'card-desc', cfg.dryOnly ? 'Reviews only' : (cfg.shop ? 'Xero linked' : 'Not configured')));
+            /* A state, so a tag (copy plan, Xero sync #9). */
+            sHead.append(el('span', 'lbl-chip ' + (cfg.dryOnly ? 'note' : cfg.shop ? 'made' : 'warn'),
+                cfg.dryOnly ? 'Reviews only' : (cfg.shop ? 'Xero linked' : 'Not configured')));
             const sAct = el('div', 'card-act');
             const rf = el('button', 'btn btn-sm'); rf.append(ico(I.refresh), document.createTextNode('Refresh'));
             rf.onclick = () => { rf.disabled = true; refreshConnector().finally(() => { rf.disabled = false; }); };
@@ -14782,7 +14779,7 @@ Projected Image UK"></textarea>
                 line.append(document.createTextNode('  ' + (on
                     ? 'Checking for new orders every '
                       + (connAuto.intervalMinutes || 10) + ' minutes and sending them to Xero.'
-                    : 'Nothing runs on its own. Orders go to Xero only when ' + (connIsAdmin() ? 'you send' : 'an admin sends') + ' them.')));
+                    : 'Orders go only when ' + (connIsAdmin() ? 'you send' : 'an admin sends') + ' them.')));
                 w.append(line);
                 const bits = [];
                 if (connAuto.lastTickAt) bits.push('last check ' + fmtWhen(connAuto.lastTickAt));
@@ -14872,7 +14869,7 @@ Projected Image UK"></textarea>
                 sCard.append(h);
             } else if (connHealth) {
                 /* No run yet is not a success: no green box for it. */
-                sCard.append(el('p', 'card-sub', 'Nothing has run yet: no review and no send.'));
+                sCard.append(el('p', 'card-sub', 'Nothing has run yet.'));
             }
             const chipRow = el('div', 'cx-chips');
             if (st.quarantineCount) chipRow.append(el('span', 'lbl-chip warn', st.quarantineCount + ' in quarantine'));
@@ -14894,10 +14891,11 @@ Projected Image UK"></textarea>
             const admin = connIsAdmin();
             const rCard = el('div', 'card cx-card');
             const rHead = el('div', 'card-head');
-            rHead.append(el('h3', 'card-title', 'Review and send'));
-            rHead.append(el('p', 'card-desc',
+            const rTitle = el('h3', 'card-title', 'Review and send');
+            rTitle.append(infoButton('About review and send', { title: 'Review and send', body:
                 'A review is a dry run: the service maps every eligible order and writes '
-                + 'nothing. ' + (connIsAdmin() ? 'Send does exactly what the review showed.' : 'An admin sends exactly what it showed.')));
+                + 'nothing. ' + (connIsAdmin() ? 'Send does exactly what the review showed.' : 'An admin sends exactly what it showed.') }));
+            rHead.append(rTitle);
             const rAct = el('div', 'card-act');
             const rev = el('button', 'btn btn-sm');
             rev.append(ico(I.eye), document.createTextNode('Run review'));
@@ -15023,7 +15021,7 @@ Projected Image UK"></textarea>
                       + ' and ' + cn.created + (cn.created === 1 ? ' credit note were' : ' credit notes were') + ' written.'));
                 sec.append(el('p', 'cx-res-sum', 'No review since. Run one to see what a new send would do.'));
             } else {
-                cxSection(rCard, 'review', 'Latest review', 'None yet. Run a review to see what would be sent.');
+                cxSection(rCard, 'review', 'Latest review', 'No review yet.');
             }
 
             /* The three narrower ways in sit side by side as tiles, each with
@@ -15035,9 +15033,13 @@ Projected Image UK"></textarea>
                of the card, one section per check that has run. */
             const grid = el('div', 'cx-grid');
             const results = el('div', 'cx-results');
+            /* A tile's how-to is its title's info button (copy plan, Xero sync
+               #15 to #17): the Check then Send buttons carry the sequence. */
             const cxTile = (title, hint, row) => {
                 const tile = el('div', 'cx-tile');
-                tile.append(el('div', 'cx-tile-title', title), el('p', 'cx-tile-hint', hint), row);
+                const t = el('div', 'cx-tile-title', title);
+                if (hint) t.append(infoButton(title, { title: title, body: hint }));
+                tile.append(t, row);
                 return tile;
             };
             /* Enter in a box runs its check, as it would in a form. */
@@ -15410,10 +15412,13 @@ Projected Image UK"></textarea>
             const xCard = el('div', 'card');
             if (connSettings && connIsAdmin()) {
                 const xHead = el('div', 'card-head');
-                xHead.append(el('h3', 'card-title', 'Settings'));
-                xHead.append(el('p', 'card-desc',
+                /* The security note, word for word, behind the title (copy plan,
+                   Xero sync #19). */
+                const xt = el('h3', 'card-title', 'Settings');
+                xt.append(infoButton('About these settings', { title: 'Settings', body:
                     'How it behaves. Credentials are not on this form: they stay on the '
-                    + 'service, and the server will not accept them from here.'));
+                    + 'service, and the server will not accept them from here.' }));
+                xHead.append(xt);
                 const toggle = el('button', 'btn btn-sm',
                                   connSettingsOpen ? 'Hide settings' : 'Change settings');
                 toggle.onclick = () => { connSettingsOpen = !connSettingsOpen; renderConnector(); };
@@ -15502,7 +15507,6 @@ Projected Image UK"></textarea>
                 const hHead = el('div', 'card-head');
                 hHead.append(el('h3', 'card-title', connRuns.length
                     + (connRuns.length === 1 ? ' run kept' : ' runs kept')));
-                hHead.append(el('p', 'card-desc', 'Reviews and sends alike, newest first.'));
                 hCard.append(hHead);
                 const wrapT = el('div', 'ktable-wrap');
                 const tb = el('table', 'ktable');
@@ -15538,7 +15542,7 @@ Projected Image UK"></textarea>
                 qHead.append(el('h3', 'card-title', st.quarantineCount
                     + (st.quarantineCount === 1 ? ' document quarantined' : ' documents quarantined')));
                 qHead.append(el('p', 'card-desc',
-                    'Held back rather than pushed with bad data. Fix the cause, then retry.'));
+                    'Held back for bad data. Fix the cause, then retry.'));
                 if (connIsAdmin()) {
                     const qAct = el('div', 'card-act');
                     const rt = el('button', 'btn btn-sm');
@@ -15557,7 +15561,7 @@ Projected Image UK"></textarea>
                 qCard.append(qHead);
                 const qHost = el('div'); qCard.append(qHost);
                 if (connQuar === false) qHost.append(el('div', 'sub', 'The quarantine list could not be read.'));
-                else if (connQuar && !connQuar.length) qHost.append(el('div', 'sub', 'The list is empty now. Refresh to update the count.'));
+                else if (connQuar && !connQuar.length) qHost.append(el('div', 'sub', 'Empty now. Refresh to update the count.'));
                 else if (connQuar) {
                     const rows = connQuar;
                     const wrapT = el('div', 'ktable-wrap');
