@@ -1244,9 +1244,11 @@ def t_beating_the_plan_is_not_something_worth_looking_at():
     fn = SCRIPT.split("function fcAlertWeight(", 1)[1].split("\n        }", 1)[0]
     ok("if (gap > 0) return 0;" in fn, "a month over its plan carries no weight")
     ok("a.risk === 'watch' ? 50" in fn, "and a watch still outranks a quiet shortfall")
-    row = SCRIPT.split("function fcAlertRow(", 1)[1].split("\n        }", 1)[0]
-    ok("FC_VERDICT[a.verdict]" in row,
-       "the alert tone comes from the map the month table uses, not a second opinion")
+    # Since the mix (2026-10-06) a month's standing is its outlook, worked out
+    # from the run's own codes in the words Cameron approved.
+    row = fn_src("function fcOutlook(a) {")
+    ok("FC_VERDICT_WORDS[a.verdict]" in row,
+       "the outlook falls back on the words the month table uses, not a second opinion")
     ok("'warn'" not in row, "so nothing that beat its plan arrives in warning amber")
 
     # The ranking itself, on the two rows that exposed it plus the shortfall
@@ -4025,7 +4027,7 @@ def t_the_forecast_page_never_dresses_an_estimate_as_a_banked_figure():
     ok("It is an expectation, not a commitment." in ov,
        "and what is forward is labelled as an expectation")
     dr = SCRIPT.split("function fcDriversCard(", 1)[1].split("\n        function ", 1)[0]
-    ok("Already taken" in dr and "Still expected" in dr,
+    ok("'Taken so far'" in dr and "'Still expected'" in dr,
        "the driver breakdown splits the month the same way")
     # The honest decomposition. This model forecasts the shop's takings from the
     # shop's own history: there is no invoice ledger behind it, so it must not
@@ -5910,8 +5912,10 @@ def t_an_icon_size_comes_from_the_scale_and_not_from_the_rule():
         if v <= 1 or "rg-ic" in s2: continue
         boxes.append(s2[:44] + " { %spx }" % int(v))
     ok(not boxes, "%d square boxes bypass the scale: %s" % (len(boxes), boxes[:5]))
+    # The mix (2026-10-06) draws every dot at the one 8px step: --dot-lg left
+    # with its last reader, the old Why key.
     for t in ("--box-xs", "--box-sm", "--box-md", "--box-lg", "--box-xl", "--box-2xl",
-              "--dot-md", "--dot-lg"):
+              "--dot-md"):
         ok(t + ":" in CSS, "the box and dot scales still define " + t)
 
     # A knob inside a switch is DERIVED from its track, like a thumb in a
@@ -7958,7 +7962,7 @@ def t_the_forecast_explains_itself_once_and_in_plain_lines():
     order = [dr.index("'fc-drive-key "), dr.index("'fc-drive-lbl'"), dr.index("'fc-drive-amt'")]
     ok(order == sorted(order), "key, then words, then the amount at the right of the measure")
     ok("max-width: var(--measure)" in CSS.split(".fc-drive {")[1].split("}")[0], "the statement is measured")
-    ok("The days left come from the source in use, " in dr, "and names the source it quotes")
+    ok("' forecast by the '" in dr and "' method.'" in dr, "and names the method it quotes, in a caption under the rows")
     simple = open(os.path.join(ROOT, "forecast", "simple.py"), encoding="utf-8").read()
     ok("The Theta method again" not in simple, "every source description stands on its own")
 
@@ -10515,6 +10519,38 @@ def t_cash_in_is_the_mix_chart_section():
     # line chart washes the area under its first series in the amber chart colour unless told not to.
     ok("button.toggle { border: 0; background: none; padding: 0;" in CSS, "a switch built as a button has no box of its own")
     ok("area: false," in chart, "Cash in draws no wash under Taken: the likely range is its one area")
+
+
+@test
+def t_worth_looking_at_sits_beside_why():
+    """Spec 8.1 item 5: Worth looking at (a table with mini range bars and the
+    approved outlooks: Safely ahead, Likely ahead, Likely behind) beside Why
+    \u00a353,691 (a split bar and three rows, the method in a caption under them and
+    how it works behind an info button). A cash warning stays a sentence."""
+    fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
+    ok("const pair = el('div', 'fc-pair');" in fn and "fcWorthCard(latest, sc, al)" in fn, "the two sit in one pair")
+    ok("function fcAlertRow(" not in SCRIPT and "fc-alert" not in SCRIPT + CSS, "the old alert rows are gone")
+    ol = fn_src("function fcOutlook(a) {")
+    for w in ("'Safely ahead'", "'Likely ahead'", "'Likely behind'", "FC_VERDICT_WORDS[a.verdict]"):
+        ok(w in ol, "the outlook says " + w)
+    ok("'warn'" not in ol, "and nothing that beat its plan arrives in warning amber")
+    wt = fn_src("function fcWorthTable(latest, list) {")
+    for part in ("t.setAttribute('role', 'table')", "'Against plan'", "'Likely range'", "'Outlook'", "el('span', 'rg')",
+                 "changeChip(tr,", "bandDomain([].concat(", "'rg-fill'", "'rg-plan'", "'rg-exp'"):
+        ok(part in wt, "the table: " + part)
+    wc = fn_src("function fcWorthCard(latest, sc, al) {")
+    ok("el('span', 'cnt'" in wc and "'Show all'" in wc and "fcPage('Worth looking at'" in wc, "a count, and Show all opens every month")
+    ok("el('div', 'msg error'" in wc and "fcAlertText(a)" in wc, "a cash warning stays a sentence")
+    ok(".slice(0, 3)" in wc, "three months on the page")
+    dr = fn_src("function fcDriversCard(latest, sc) {")
+    for part in ("'Why ' + fcMoney(cur.p50)", "infoButton('How this is worked out'", "'It misleads when'",
+                 "'Taken so far'", "'Still expected'", "'Expected this month'", "' method.'"):
+        ok(part in dr, "Why: " + part)
+    ok("@container fcpair (max-width: 1000px)" in CSS and "@container fcwl (max-width: 560px)" in CSS,
+       "side by side while there is room, and the phone's three columns by the table's own width")
+    eq(_token_raw("fc-wl-cols"), "76px 72px 72px 84px minmax(96px, 1fr) 96px", "--fc-wl-cols")
+    # Found in the rig: the bar's top margin collapsed into the head's 12 and the bar sat 12 above the table's head row.
+    ok(".fc-why { display: flex; flex-direction: column; }" in CSS, "Why is a flex column, so the bar's margin lines it up with the table's head row")
 
 
 if __name__ == "__main__":

@@ -254,7 +254,7 @@
                and keep their values. */
             --box-xs: 16px; --box-sm: 20px; --box-md: 24px; --box-lg: 28px;
             --box-xl: 36px; --box-2xl: 40px; --box-3xl: 56px;
-            --dot-md: 8px; --dot-lg: 10px;
+            --dot-md: 8px;
             /* A switch is a track with a knob derived from it. */
             --switch-w: 28px; --switch-h: 16px; --switch-inset: 2px;   /* a 28 by 16 track, a 12 knob */
             /* Field widths. An input sized to what it holds is a real need - a
@@ -278,6 +278,12 @@
             --chart-dot-r: 3.5px; --chart-stroke: var(--bw-strong);   /* the mix: a series is a 2px line */
             --chart-pt-r: 4px;      /* a single point drawn as a dot (8 across, its white ring outside) */
             --tip-w: 232px;         /* the chart's tooltip, at least this wide */
+            /* Worth looking at's columns (month, expected, plan, chip, range,
+               outlook), the phone's three (month, range, expected), and a mini
+               range bar's height and band. */
+            --fc-wl-cols: 76px 72px 72px 84px minmax(96px, 1fr) 96px;
+            --fc-wl-cols-m: 84px minmax(0, 1fr) 92px;
+            --rg-h: 12px; --rg-band: 6px;
             --tip-max: 360px;       /* and at most this, or the plot's width less 16 */
             --icon-xs: 12px; --icon-sm: 14px; --icon-md: 16px; --icon-lg: 18px; --icon-xl: 20px;
             /* 16 at 1.75 in every control, row, tile and nav item; 14 at 2 only
@@ -1110,9 +1116,48 @@
             .fb-hero .fb-fig { font-size: var(--fig-l); }
             .fb-num .fb-fig { font-size: var(--fig-s); }
         }
-        .fc-alert { display: flex; align-items: baseline; gap: var(--sp-2); font-size: var(--text-body);
-            padding-block: var(--sp-2); padding-inline: 0; }
-        .fc-alert + .fc-alert { border-top: var(--bw-hairline) solid var(--border-default); }
+        /* WORTH LOOKING AT, AND WHY (the mix, spec 8.1 item 5): side by side at
+           7 to 5 while the pair is wide enough for the table, one under the
+           other when it is not. Laid out by the pair's own width. */
+        .fc-pair { container: fcpair / inline-size; }
+        .fc-cols { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); column-gap: var(--gap-cols);
+            row-gap: var(--page-rhythm); align-items: start; }
+        .fc-cols > section > .section-title:first-child { margin-top: 0; }
+        @container fcpair (max-width: 1000px) { .fc-cols { grid-template-columns: minmax(0, 1fr); } }
+        .fc-worth > .msg { margin-bottom: var(--sp-3); }
+        .fc-wl-wrap { container: fcwl / inline-size; }
+        .fc-wl > [role="row"] { display: grid; grid-template-columns: var(--fc-wl-cols); grid-template-areas: "mo v plan chip rg ol";
+            column-gap: var(--sp-4); align-items: center; }
+        .fc-wl > .h { height: var(--control-h); box-shadow: var(--rule-b); font-size: var(--text-xs); line-height: var(--lh-caption);
+            font-weight: var(--weight-medium); color: var(--text-tertiary); }
+        .fc-wl > .r { height: var(--row-h); box-shadow: var(--rule-b-soft); }
+        .fc-wl > .r:last-child { box-shadow: var(--rule-b); }
+        .fc-wl > [role="row"] > span { display: flex; align-items: center; min-width: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .fc-wl .c-mo { grid-area: mo; } .fc-wl .c-v { grid-area: v; } .fc-wl .c-plan { grid-area: plan; }
+        .fc-wl .c-chip { grid-area: chip; } .fc-wl .c-rg { grid-area: rg; } .fc-wl .c-ol { grid-area: ol; }
+        .fc-wl .ra { justify-content: flex-end; }
+        .fc-wl > .r > :is(.c-mo, .c-v) { font-weight: var(--weight-medium); }
+        .fc-wl > .r > :is(.c-plan, .c-ol) { color: var(--text-tertiary); }
+        /* The likely range drawn small: a hairline track, the range as a band,
+           the plan as a blue tick, the expected figure as an ink dot. */
+        .rg { position: relative; width: 100%; height: var(--rg-h); }
+        .rg::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: var(--bw-strong); margin-top: calc(var(--bw-strong) / -2);
+            border-radius: var(--radius-full); background: var(--border-soft); }
+        .rg > i { position: absolute; z-index: 1; }
+        .rg > .rg-fill { top: calc((var(--rg-h) - var(--rg-band)) / 2); height: var(--rg-band); left: var(--at-lo); width: calc(var(--at-hi) - var(--at-lo));
+            border-radius: var(--radius-full); background: var(--c-range); box-shadow: inset 0 0 0 var(--bw-hairline) var(--c-range-edge); }
+        .rg > .rg-plan { top: 0; bottom: 0; left: var(--at-plan); width: var(--bw-strong); margin-left: calc(var(--bw-strong) / -2);
+            border-radius: var(--radius-swatch); background: var(--c-plan); }
+        .rg > .rg-exp { top: 50%; left: var(--at-exp); width: var(--dot-md); height: var(--dot-md); margin: calc(var(--dot-md) / -2) 0 0 calc(var(--dot-md) / -2);
+            border-radius: var(--radius-circle); background: var(--c-exp); box-shadow: 0 0 0 var(--bw-strong) var(--surface-primary); }
+        /* By the table's own width (a phone, or Show all's window on one):
+           month over its outlook, the range, the figure over its chip, in 60 rows. */
+        @container fcwl (max-width: 560px) {
+            .fc-wl > [role="row"] { grid-template-columns: var(--fc-wl-cols-m); grid-template-areas: "mo rg v" "ol rg chip"; }
+            .fc-wl > .h { grid-template-areas: "mo rg v"; }
+            .fc-wl > .h > :is(.c-plan, .c-chip, .c-ol), .fc-wl > .r > .c-plan { display: none; }
+            .fc-wl > .r { height: var(--row-h-2); row-gap: var(--sp-1); align-content: center; }
+        }
         /* An inline size: the ruling is typed where the sheet's answer sat. */
         .sizes-inp { width: calc(var(--sp-8) * 2.5); text-align: right; }
         /* Chips wrap under each other when the column is pressed, rather than
@@ -1517,7 +1562,7 @@
            control to the right edge of the second line. */
         @media (max-width: 640px) {
             .section-title { flex-wrap: wrap; }
-            .section-title > span { flex: 1 1 100%; }
+            .section-title > span:not(.cnt) { flex: 1 1 100%; }
             .section-title::after { content: none; }
         }
         /* Up to 1100 a heading's controls may wrap under it: 'Cash in' broke
@@ -1791,12 +1836,7 @@
         .recon-priv { display: flex; flex-direction: column; gap: var(--sp-2); }
         /* Its own padding-inline: 0 is declared above the card rule and lost
            to it, so it took the gutter twice: margin and padding, 32px in. */
-        .card > .know-body, .card > .fc-alert { padding-inline: 0; }
-        /* In a card the card's 16 gap spaces the rows, so a row adds nothing
-           above it but the 16 below the hairline that divides it from the last:
-           16 either side of the rule, like every other divided list. */
-        .card > .fc-alert { padding-block: 0; }
-        .card > .fc-alert + .fc-alert { padding-top: var(--sp-4); }
+        .card > .know-body { padding-inline: 0; }
         /* A setting's name or an address inside a step's sentence stays whole:
            .setup-code breaks anywhere, which is right for a long URL on its
            own line and wrong for '.railway.internal' mid-sentence. It moves to
@@ -4567,35 +4607,29 @@
             .ov-wrap.wgrid > .page-tabs:has(> .page-tabs-end > .fc-seg-lbl) { margin-bottom: calc(var(--sp-4) - var(--page-rhythm)); }
         }
 
-        /* ---- what is driving the number ----
-           One bar showing how the month splits, then the parts, then the
-           total - every amount in the same right-aligned column so the sum
-           reads as a sum. */
-        /* Paints a filled strip inside a card, so the inset is a MARGIN (the
-           list above) and it carries no horizontal padding of its own: the two
-           segments fill it edge to edge and are the whole point of it. */
-        .fc-split-bar { display: flex; height: 10px; border-radius: var(--radius-full);
-            overflow: hidden; background: var(--surface-secondary);
-            padding-inline: 0; font-size: var(--text-body); max-width: var(--measure); }
-        .fc-split-seg { height: 100%; }
-        .fc-split-seg.taken { background: var(--chart-1); }
-        .fc-split-seg.due { background: var(--chart-1); opacity: .3; }
-        /* Measured like prose, because it is read like a receipt: at the full
-           card width the amounts would sit a screen away from their names. */
-        .fc-drive { display: flex; flex-direction: column; gap: var(--sp-3); font-size: var(--text-body); max-width: var(--measure); }
-        .fc-drive-row { display: flex; align-items: baseline; gap: var(--sp-3); }
-        .fc-drive-key { flex: none; width: var(--dot-lg); height: var(--dot-lg); border-radius: var(--radius-swatch);
-            background: var(--chart-1); align-self: center; }
-        .fc-drive-key.due { opacity: .3; }
-        .fc-drive-key.blank { background: none; }
-        .fc-drive-amt { flex: none; margin-left: auto; text-align: right;
-            font-variant-numeric: tabular-nums; color: var(--text-primary); }
-        .fc-drive-lbl { color: var(--text-secondary); }
-        /* The total: under a rule that spans the list's own measure, in the
-           primary ink, so it reads as the sum of the two lines above it. */
-        .fc-drive-tot { margin-top: 0; padding-block-start: var(--sp-3); padding-inline: 0;
-            border-top: var(--bw-hairline) solid var(--border-default); }
-        .fc-drive-tot .fc-drive-lbl, .fc-drive-tot .fc-drive-amt { color: var(--text-primary); font-weight: var(--weight-medium); }
+        /* ---- Why: the split bar and its statement (the mix) ----
+           The bar centres on the Worth table's head row beside it; the rows are
+           44 on hairlines, the total under the stronger rule, the method in a
+           caption under them. */
+        /* A flex column, so the bar's own top margin adds to the head's 12 rather than
+           collapsing into it. */
+        .fc-why { display: flex; flex-direction: column; }
+        .fc-split-bar { display: flex; gap: var(--sp-0-5); height: var(--sp-2); max-width: var(--measure);
+            margin-top: calc((var(--control-h) - var(--sp-2)) / 2); }
+        .fc-split-bar > i { border-radius: var(--radius-full); }
+        .fc-split-bar > .taken { width: var(--w); background: var(--c-taken); }
+        .fc-split-bar > .still { flex: 1; background: var(--c-still); }
+        .fc-drive { max-width: var(--measure); margin-top: calc((var(--control-h) - var(--sp-2)) / 2); }
+        .fc-drive-row { display: flex; align-items: center; gap: var(--control-gap); height: var(--row-h); box-shadow: var(--rule-b-soft); }
+        .fc-drive-row:nth-last-child(-n+2) { box-shadow: var(--rule-b); }
+        .fc-drive-key { flex: none; width: var(--icon-xs); height: var(--dot-md); border-radius: var(--radius-swatch); }
+        .fc-drive-key.taken { background: var(--c-taken); }
+        .fc-drive-key.still { background: var(--c-still); }
+        .fc-drive-lbl { flex: 1; color: var(--text-secondary); }
+        .fc-drive-amt { flex: none; font-variant-numeric: tabular-nums; font-weight: var(--weight-medium); color: var(--text-primary); }
+        .fc-drive-tot :is(.fc-drive-lbl, .fc-drive-amt) { color: var(--text-primary); font-weight: var(--weight-semibold); }
+        .fc-foot { margin: var(--sp-3) 0 0; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .fc-foot b { font-weight: var(--weight-medium); color: var(--text-secondary); white-space: nowrap; }
         .chart-dot { stroke: var(--surface-primary); stroke-width: 2; }
         .chart-hover-line { stroke: var(--text-tertiary); stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
         /* The tooltip beside the point: 232 wide, 12 inside, the floating corner
@@ -15684,19 +15718,6 @@ Projected Image UK"></textarea>
             });
             return node;
         }
-        /* One alert, said as a fact and then a reason. */
-        function fcAlertRow(a) {
-            const row = el('div', 'fc-alert');
-            /* The tone comes from the SAME map the month table uses, not from a
-               second opinion invented here. The bespoke version painted
-               anything that was not cash or high-risk amber, so a month
-               beating its plan by 71% arrived wearing a warning. An overrun is
-               'note' in this app, and has been all along. */
-            row.append(fcChip(a.kind === 'cash' ? 'bad' : (FC_VERDICT[a.verdict] || 'note'),
-                              fcMonth(a.month)));
-            row.append(el('span', null, fcAlertText(a)));
-            return row;
-        }
         /* The run's own words are codes: "underrun by -11.2%" said the miss
            twice, "overrun by +72.3%" the sign twice, and "risk watch" or "risk
            secure" put an enum on the screen. Said here as a sentence: what is
@@ -15732,6 +15753,76 @@ Projected Image UK"></textarea>
             if (gap > 0) return 0;                       // over plan: not a problem
             const risk = a.risk === 'high' ? 100 : a.risk === 'watch' ? 50 : 0;
             return risk + Math.abs(gap);
+        }
+
+        /* ---------- WORTH LOOKING AT ----------
+           The months that matter (the mix, spec 8.1 item 5): a table of the
+           month, what is expected, the plan, the change chip, the likely range
+           drawn small with the plan as a tick, and the outlook in the words
+           Cameron approved. Cash alerts stay sentences above it: they are
+           warnings, and a warning is never cut to a code. */
+        function fcOutlook(a) {
+            if (a.risk === 'secure') return 'Safely ahead';
+            if (a.risk === 'watch') return (a.projected || 0) >= (a.target || 0) ? 'Likely ahead' : 'Likely behind';
+            return FC_VERDICT_WORDS[a.verdict] || fcSentence(a.verdict || '');
+        }
+        function fcWorthTable(latest, list) {
+            const wrap = el('div', 'fc-wl-wrap');
+            const t = el('div', 'fc-wl');
+            t.setAttribute('role', 'table'); t.setAttribute('aria-label', 'Worth looking at');
+            const rowOf = (cells, head) => {
+                const r = el('div', head ? 'h' : 'r'); r.setAttribute('role', 'row');
+                cells.forEach(([c, cls]) => {
+                    const s = el('span', cls); s.setAttribute('role', head ? 'columnheader' : 'cell');
+                    if (c instanceof Node) s.append(c); else s.textContent = c == null ? '' : String(c);
+                    r.append(s);
+                });
+                return r;
+            };
+            t.append(rowOf([['Month', 'c-mo'], ['Expected', 'c-v ra'], ['Plan', 'c-plan ra'], ['Against plan', 'c-chip ra'],
+                            ['Likely range', 'c-rg'], ['Outlook', 'c-ol']], true));
+            const monthOf = (a) => (latest.monthly || []).find(x => x.month === a.month) || {};
+            /* One scale for every row, so the bars can be read against each other. */
+            const d = bandDomain([].concat(...list.map(a => { const m = monthOf(a); return [m.p10, m.p90, a.projected, a.target]; })));
+            list.forEach(a => {
+                const m = monthOf(a);
+                const gap = (a.target && a.projected != null) ? (a.projected - a.target) / a.target : null;
+                const tr = gap == null ? null : Math.abs(gap) <= 0.10 ? 'flat' : (gap > 0 ? 'up' : 'down');
+                const chip = gap == null ? '' : changeChip(tr, Math.abs(gap * 100).toFixed(1) + '%', deltaTone('expected', tr));
+                const rg = el('span', 'rg'); rg.setAttribute('role', 'img');
+                rg.setAttribute('aria-label', 'Likely ' + fcMoney(m.p10) + ' to ' + fcMoney(m.p90) + ', plan ' + fcMoney(a.target));
+                if (m.p10 != null && m.p90 != null) {
+                    rg.style.setProperty('--at-lo', bandPct(m.p10, d)); rg.style.setProperty('--at-hi', bandPct(m.p90, d));
+                    rg.append(el('i', 'rg-fill'));
+                }
+                if (a.target != null) { rg.style.setProperty('--at-plan', bandPct(a.target, d)); rg.append(el('i', 'rg-plan')); }
+                if (a.projected != null) { rg.style.setProperty('--at-exp', bandPct(a.projected, d)); rg.append(el('i', 'rg-exp')); }
+                t.append(rowOf([[fcMonth(a.month), 'c-mo'], [fcMoney(a.projected), 'c-v ra'], [fcMoney(a.target), 'c-plan ra'],
+                                [chip, 'c-chip ra'], [rg, 'c-rg'], [fcOutlook(a), 'c-ol']]));
+            });
+            wrap.append(t);
+            return wrap;
+        }
+        function fcWorthCard(latest, sc, al) {
+            const box = el('section', 'fc-worth');
+            const sales = al.filter(a => a.kind !== 'cash');
+            const cash = al.filter(a => a.kind === 'cash');
+            const head = el('div', 'section-title', 'Worth looking at');
+            if (sales.length) { const n = el('span', 'cnt', String(sales.length)); n.append(el('span', 'sr-only', sales.length === 1 ? ' month' : ' months')); head.append(n); }
+            if (sales.length > 3) {
+                const tools = el('div', 'sec-tools');
+                const all = el('button', 'link', 'Show all'); all.type = 'button'; all.append(ico(I.arrowRight));
+                all.onclick = () => fcPage('Worth looking at', () => fcWorthTable(latest, sales.slice().sort((a, b) => a.month < b.month ? -1 : 1)));
+                tools.append(all); head.append(tools);
+            }
+            box.append(head);
+            cash.forEach(a => box.append(el('div', 'msg error', fcMonth(a.month) + ': ' + fcAlertText(a))));
+            if (!sales.length) { if (!cash.length) box.append(el('div', 'empty', 'Nothing to flag under ' + sc + '.')); return box; }
+            /* The three that matter most (fcAlertWeight), read in month order. */
+            const top = sales.slice().sort((a, b) => fcAlertWeight(b) - fcAlertWeight(a)).slice(0, 3)
+                .sort((a, b) => a.month < b.month ? -1 : 1);
+            box.append(fcWorthTable(latest, top));
+            return box;
         }
 
         /* ---------- 1. EXPECTED THIS MONTH: the feature band ----------
@@ -15810,66 +15901,52 @@ Projected Image UK"></textarea>
                 || rows.find(r => r.method === 'forecast') || rows[0];
         }
 
-        /* ---------- 5. WHY: what is driving the number ----------
-           The honest decomposition, which is not the same as the one a cash
-           flow tool gives. This model forecasts the shop's own takings from
-           the shop's own history: it has no invoice ledger, so it cannot say
-           "12,600 of expected invoices". What it CAN say, and what actually
-           drives the figure, is how much is already banked, how much is still
-           expected, and what the leading source keyed that expectation off. */
+        /* ---------- WHY: what is driving the number ----------
+           The honest decomposition (the mix, spec 8.1 item 5): money already
+           taken and what is still expected, as one split bar and three rows,
+           then which method expects it. How that method works is the info
+           button's, in its own words. This model forecasts the shop's own
+           takings from the shop's own history: it has no invoice ledger, so it
+           never claims invoice-level drivers. */
         function fcDriversCard(latest, sc) {
             const cur = fcCurrentRow(latest);
             if (!cur || cur.p50 == null) return null;
-            const box = el('div');
-            box.append(el('div', 'section-title', 'Why the forecast is what it is'));
-            const card = el('div', 'card');
             const banked = fcBankedThisMonth(latest);
             const rest = Math.max(0, cur.p50 - banked);
-            card.append(el('p', 'card-sub', 'The figure for ' + fcMonth(cur.month) + ' is money already taken plus '
-                + 'what the leading source expects for the days left. Nothing else is added to it.'));
-            /* ONE stacked bar, not two mini-bars. Two separate 96px bars with
-               no shared scale said nothing a reader could use; the split of a
-               single figure into two parts is exactly what a stacked bar is
-               for, and it sums to the total sitting under it. */
+            const sn = latest.sanity || {};
+            const best = (sn.models || []).find(m => m.name === sn.best);
+            const box = el('section', 'fc-why');
+            const head = el('div', 'section-title', 'Why ' + fcMoney(cur.p50));
+            if (best && best.about) {
+                const cut = best.about.indexOf('It misleads when');
+                head.append(infoButton('How this is worked out', { title: best.name, guide: ['money', 'Forecast'],
+                    body: cut > 0 ? [best.about.slice(0, cut).trim(), best.about.slice(cut)] : [best.about] }));
+            }
+            box.append(head);
+            /* ONE split bar: the two parts of one figure, on one scale. */
             const whole = (banked + rest) || 1;
-            const bar = el('div', 'fc-split-bar');
-            const seg1 = el('div', 'fc-split-seg taken');
-            seg1.style.width = (banked / whole * 100).toFixed(1) + '%';
-            const seg2 = el('div', 'fc-split-seg due');
-            seg2.style.width = (rest / whole * 100).toFixed(1) + '%';
-            bar.append(seg1, seg2);
-            card.append(bar);
-            /* Read as a statement: each part's key and name on the left, its
-               amount at the right edge of the same measured column, and the
-               total under a rule that spans exactly that column. The amounts
-               used to sit in a wide right-aligned column of their own between
-               the key and the words, which left the key stranded at the card
-               edge with a hole after it. */
+            const bar = el('div', 'fc-split-bar'); bar.setAttribute('aria-hidden', 'true');
+            bar.style.setProperty('--w', (banked / whole * 100).toFixed(1) + '%');
+            bar.append(el('i', 'taken'), el('i', 'still'));
+            box.append(bar);
+            /* Read as a statement: each part's key and name, its amount at the
+               right of the same measure, and the total under a stronger rule. */
             const list = el('div', 'fc-drive');
             const row = (amt, label, cls) => {
                 const r = el('div', 'fc-drive-row' + (cls ? '' : ' fc-drive-tot'));
-                r.append(el('span', 'fc-drive-key ' + (cls || 'blank')));
+                if (cls) r.append(el('span', 'fc-drive-key ' + cls));
                 r.append(el('span', 'fc-drive-lbl', label));
                 r.append(el('span', 'fc-drive-amt', fcMoney(amt)));
                 return r;
             };
-            list.append(row(banked, 'Already taken, ' + fcDaysSoFar(latest) + ' of ' + fcDaysInMonth(latest) + ' days in', 'taken'));
-            list.append(row(rest, 'Still expected over the rest of the month', 'due'));
-            list.append(row(cur.p50, 'Expected for the month', ''));
-            card.append(list);
-            /* And WHY that remainder: which source, and how it works in its own
-               plain-words description. */
-            const sn = latest.sanity || {};
-            const best = (sn.models || []).find(m => m.name === sn.best);
+            list.append(row(banked, 'Taken so far', 'taken'), row(rest, 'Still expected', 'still'), row(cur.p50, 'Expected this month', ''));
+            box.append(list);
             if (best) {
-                /* The card's own body copy, so both paragraphs in it share one
-                   measure (they were 1,395px and 631px wide). */
-                const p = el('p', 'card-sub');
-                p.append(document.createTextNode('The days left come from the source in use, '),
-                         el('b', null, best.name), document.createTextNode('. ' + (best.about || '')));
-                card.append(p);
+                const p = el('p', 'fc-foot');
+                p.append(document.createTextNode('Rest of ' + fcMonthName(cur.month) + ' forecast by the '),
+                         el('b', null, best.name), document.createTextNode(' method.'));
+                box.append(p);
             }
-            box.append(card);
             return box;
         }
         function fcDaysSoFar(latest) {
@@ -16485,41 +16562,6 @@ Projected Image UK"></textarea>
             const band = fcBand(latest, sc);
             if (band) box.append(widget(band, 'standing', 'full', 'Expected this month'));
 
-            /* Exceptions, and only the ones that are genuinely exceptional. An
-               alert on every month is wallpaper: the two worst are surfaced
-               here with their reason, and the rest wait in the detail below. */
-            if (al.length) {
-                const worst = al.slice().sort((a, b) => fcAlertWeight(b) - fcAlertWeight(a));
-                /* A heading, because a card of red chips floating between the
-                   numbers and the chart reads as an error the page has hit
-                   rather than as the two months worth looking at. */
-                const alerts = widget(el('div', 'widget-group'), 'alerts', 'full', 'Worth looking at');
-                alerts.append(el('div', 'section-title', 'Worth looking at'));
-                box.append(alerts);
-                const ac0 = el('div', 'card');
-                worst.slice(0, 2).forEach(a => ac0.append(fcAlertRow(a)));
-                if (al.length > 2) {
-                    /* The overflow is a BUTTON that opens the drawer holding
-                       them, not a sentence telling the reader to go and find
-                       it themselves. */
-                    const more = el('button', 'btn btn-sm fc-more',
-                        'See all ' + al.length + ' in the detail below');
-                    more.type = 'button';
-                    more.onclick = () => {
-                        const d = [...document.querySelectorAll('details.sect')]
-                            .find(x => /^Worth looking at/.test(x.querySelector('summary').textContent));
-                        if (!d) return;
-                        if (!d.open) { d.open = true; d.dispatchEvent(new Event('toggle')); }
-                        d.scrollIntoView({ block: 'start', behavior: REDUCE_MOTION ? 'auto' : 'smooth' });
-                    };
-                    /* A button dropped straight into a card sets its own
-                       padding, which overrides the card's gutter and welds it
-                       to the frame. It rides in a row, like every other
-                       control in a card here. */
-                    const mrow = el('div', 'fc-more-row'); mrow.append(more); ac0.append(mrow);
-                }
-                alerts.append(ac0);
-            }
 
             /* 2. THE PICTURE. Actual, forecast and uncertainty, with the time
                control on it. This is the largest thing on the page. */
@@ -16527,9 +16569,15 @@ Projected Image UK"></textarea>
             chart.classList.add('widget-bare');
             box.append(widget(chart, 'cash-in', 'full', 'Cash in'));
 
-            /* 3. WHY. */
+            /* 3. WORTH LOOKING AT, AND WHY (the mix): the months that matter
+               beside what drives this one, 7 to 5, one block in Customize. */
+            const pair = el('div', 'fc-pair');
+            const cols = el('div', 'fc-cols');
+            cols.append(fcWorthCard(latest, sc, al));
             const drv = fcDriversCard(latest, sc);
-            if (drv) { drv.classList.add('widget-bare'); box.append(widget(drv, 'drivers', 'full', 'Why the forecast is what it is')); }
+            if (drv) cols.append(drv);
+            pair.append(cols);
+            box.append(widget(pair, 'worth', 'full', 'Worth looking at, and why'));
 
             /* 4. DETAILS ON DEMAND. Tables carry precise money; the chart above
                carries the pattern. All shut until asked for. */
@@ -16565,12 +16613,6 @@ Projected Image UK"></textarea>
                         return [fcMonth(r.month), fcMoney(r.gross_sales), fcMoney(r.repayment), fcMoney(r.net_cash), wc, fcMoney(r.loan_end)]; }),
                     [0, 1, 1, 1, 1, 1]));
                 return cc;
-            }));
-            detail.append(fcDrawer('Worth looking at' + (al.length ? ' (' + al.length + ')' : ''), function () {
-                const ac = el('div');
-                if (!al.length) ac.append(el('div', 'empty', 'Nothing to flag under ' + sc + '.'));
-                al.forEach(a => ac.append(fcAlertRow(a)));
-                return ac;
             }));
             const nsrc = ((latest.sanity || {}).models || []).length;
             detail.append(fcDrawer('Every source, side by side' + (nsrc ? ' (' + nsrc + ')' : ''), function () {
