@@ -7578,6 +7578,7 @@ def t_a_paid_report_run_is_one_run_and_stays_on_screen():
     js = MINIDOM + r"""
 const byId = {}; const $ = (id) => byId[id] || (byId[id] = Object.assign(el('div'), { id }));
 const I = {}; function loader() { return el('span'); }
+function pageHead(o) { const h = el('div', 'ov-hero'); h.append(el('h2', null, o.title || '')); return h; }
 const reportRuns = {};
 let overviewCache = null, seoCache = null, keywordsCache = null;
 let calls = 0, release; const answer = new Promise(r => { release = r; });
@@ -10921,6 +10922,69 @@ def t_the_production_manager_fix_round_one():
     cq = fn_src("async function renderCustomQueue(box) {")
     ok("tabCount(box, 'shipments', rows.length, 'shipments')" in cq, "Custom shipments shows its loaded list's length once it is read")
     ok("function tabCount(box, key, n, unit) {" in SCRIPT, "one helper puts the count on a tab")
+
+
+@test
+def t_the_report_pages_wear_the_mix():
+    """Spec 8.3 (Report) and the copy plan (Overview, SEO, shared report parts):
+    the header is the one builder with its live line and Refresh all; the AI
+    summary is a Summary section of its own with the skills it followed as a
+    small row; a figure's and a chart's explanation is an info button; the run
+    gate says what the report is and what it costs in a few words."""
+    for fname, view in (("function renderOverview(cache) {", "overview"), ("function renderSEO(cache) {", "seo")):
+        ok(fname in SCRIPT, fname + " exists")
+        fn = fn_src(fname)
+        ok("pageHead({ view: '" + view + "'" in fn and "live: cache.at" in fn and "summarySection(" in fn,
+           view + ": the one header, and the Summary section")
+        ok("el('div', 'ov-hero')" not in fn and "'badge'" not in fn, view + ": no header built by hand")
+    ok("function summarySection(text, followed) {" in SCRIPT, "one Summary builder")
+    ok("labelEl.append(infoButton(m.label, { title: m.label, body: help }))" in fn_src("function statCard(m, i) {"),
+       "a figure's help is an info button")
+    ok("if (opts.help) ct.append(infoButton(" in fn_src("function chartHead(opts, series, kind) {"), "and so is a chart's")
+    ok("const POSITION_HELP = 'Lower is better. Position 1 is the top of search results.';" in SCRIPT
+       and SCRIPT.count("Lower is better. Position 1") == 1, "said once, for both position charts")
+    ok("has-help" not in SCRIPT + CSS, "no help is left that only a pointer can reach")
+    ok("\n        .followed > .ic { place-items: center; margin-right: var(--sp-0-5); }" in CSS
+       and ".followed > .ic { display: grid" not in CSS, "the book icon stays inline at the head of its row")
+    for gone in ("Here\u2019s how your store is doing.", "Ask anything about the numbers and recommendations on this page.",
+                 "Trends populate after you run", "notable change", "whatever the range above", "optimisation health score",
+                 "Followed your skill", "'Source: ' + opts.source", "Compute live KPIs", "Crawl your storefront and fuse"):
+        ok(gone not in SCRIPT, "cut: " + gone)
+    for new in ("'Live figures and an AI summary of the store.'", "'Crawl the store and rank fixes by revenue.'",
+                "'Uses AI credits. Takes up to a minute.'", "'No trends yet. Connect Google to add traffic.'",
+                "'Connect Search Console to see search trends.'", "'Suggested questions'", "'Followed: '"):
+        ok(new in SCRIPT, "says: " + new)
+
+
+@test
+def t_a_single_series_wash_is_the_area_strength():
+    """The mix's area tint is teal at 15% (--c-area). The wash under a single
+    trend line starts at that strength, not the 36% it had, and Cash in has none."""
+    ok("--c-area: color-mix(in srgb, var(--teal-500) 15%, transparent);" in CSS, "the area token is teal at 15%")
+    ok("'stop-color': washColor, 'stop-opacity': '0.15'" in SCRIPT and "'0.36'" not in SCRIPT, "the wash starts at the area strength")
+    ok("format: (n) => money(n, 'GBP', 0), tickFormat: fmtCompact, area: false," in SCRIPT, "Cash in keeps no wash")
+
+
+@test
+def t_the_boxed_report_panels_lose_their_box():
+    """Spec 3: only four things are boxed. The chat drill-down, an insight and an
+    impact chip were each a bordered box inside the sheet (carried from the Phase 3
+    review): the drill-down and the insight are hairline rows on the text edge, the
+    chip a tinted well with no edge."""
+    def rule(sel):
+        m = re.search(r"\n        " + re.escape(sel) + r" \{([^}]*)\}", CSS)
+        ok(m is not None, sel + " is a rule at the stylesheet's own indent")
+        return m.group(1) if m else ""
+    dd = rule(".data-drill")
+    ok("border: 0;" in dd and "border-radius: 0;" in dd and "background: none;" in dd, "the drill-down has no box")
+    ok("min-height: var(--control-h)" in rule(".data-drill summary"), "its row is a control tall, 40 on a phone")
+    ok(".data-drill[open] summary" not in CSS, "an open drill-down draws no rule under its row")
+    ins = rule(".insight")
+    ok("border: 0;" in ins and "border-radius: 0;" in ins and "background: none;" in ins and "box-shadow: none;" in ins
+       and "padding: var(--sp-3) 0;" in ins, "an insight has no box and sits on the text edge")
+    ok("\n        .insights > .insight + .insight { border-top: var(--bw-hairline) solid var(--border-default); }" in CSS, "a hairline between neighbours")
+    ok(".insight:hover { border-color" not in CSS, "and no hover edge")
+    ok("border: 0;" in rule(".idelta") and "var(--surface-tertiary)" in rule(".idelta"), "an impact chip is a well with no edge")
 
 
 if __name__ == "__main__":
