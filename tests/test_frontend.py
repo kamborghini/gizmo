@@ -7184,7 +7184,8 @@ def t_the_products_page_searches_everything_and_draws_a_bounded_list():
     catalogue on every filter change."""
     ok("const P_ROWS_MAX = 300;" in SCRIPT, "a bound on rows drawn")
     ok("rows.slice(0, P_ROWS_MAX).forEach(r => {" in SCRIPT, "the list draws within it")
-    ok("rows.length > P_ROWS_MAX ? '. The first ' + P_ROWS_MAX" in SCRIPT, "and says when it stopped")
+    ok("'Showing ' + P_ROWS_MAX + ' of ' + rows.length + '. Search or filter for more.'" in SCRIPT,
+       "and says when it stopped, in a line (the mix's copy plan, Products #6)")
 
 
 @test
@@ -7608,7 +7609,7 @@ function renderRunGate(id) { painted.push('gate'); $(id).innerHTML = ''; $(id).a
     # the tab let a second sector's run take it, and the first was run again.
     js = MINIDOM + r"""
 const byId = {}; const $ = (id) => byId[id] || (byId[id] = Object.assign(el('div'), { id }));
-const I = {}; function loader() { return el('span'); } function sectorBar() { return el('div'); }
+const I = {}; function loader() { return el('span'); } function sectorBar() { return el('div'); } function pageHead(o) { const h = el('div', 'ov-hero'); h.append(el('h2', null, o.title || '')); return h; }
 const SEG_ALL = '__all__'; const customersCache = {}; let customersSeg = SEG_ALL;
 const customersRuns = new Set();
 const painted = []; function renderCustomers(seg) { painted.push(seg); }
@@ -7702,7 +7703,7 @@ def t_a_late_product_plan_does_not_replace_the_one_on_screen():
     ok(head.startswith("productSeq++; productPlanRun = false;"), head)
     js = MINIDOM + r"""
 const byId = {}; const $ = (id) => byId[id] || (byId[id] = Object.assign(el('div'), { id }));
-const I = {}; function loader() { return el('span'); } function ico() { return el('span'); }
+const I = {}; function loader() { return el('span'); } function ico() { return el('span'); } function pageHead(o) { const h = el('div', 'ov-hero'); h.append(el('h2', null, o.title || '')); return h; }
 function renderRunGate() { shown.push('gate'); }
 let productSeq = 0, productPlanRun = false, productList = [];
 function renderProductList() { """ + head + r""" shown.push('list'); }
@@ -8373,7 +8374,7 @@ def t_a_search_does_not_take_customise_away():
     fn = fn_src("function renderProductList(")
     ok("const narrowed = rows.length < all;" in fn and "if (top.length > 1 || narrowed) {" in fn,
        "a narrowed list keeps the card")
-    ok("so there is nothing to rank." in fn, "and the card says why it has no bars")
+    ok("'Nothing to rank for this period.'" in fn, "and the card says why it has no bars")
 
 
 @test
@@ -10967,10 +10968,11 @@ def t_a_single_series_wash_is_the_area_strength():
 
 @test
 def t_the_boxed_report_panels_lose_their_box():
-    """Spec 3: only four things are boxed. The chat drill-down, an insight and an
-    impact chip were each a bordered box inside the sheet (carried from the Phase 3
-    review): the drill-down and the insight are hairline rows on the text edge, the
-    chip a tinted well with no edge."""
+    """Spec 3: only four things are boxed. The chat drill-down, an insight, an
+    impact chip, a customer segment and the Products filters were each a bordered
+    box inside the sheet (carried from the Phase 3 review): the drill-down and the
+    insight are hairline rows on the text edge, the chip a tinted well with no
+    edge, a segment a figure in a grid and the filters a row of fields."""
     def rule(sel):
         m = re.search(r"\n        " + re.escape(sel) + r" \{([^}]*)\}", CSS)
         ok(m is not None, sel + " is a rule at the stylesheet's own indent")
@@ -10985,6 +10987,46 @@ def t_the_boxed_report_panels_lose_their_box():
     ok("\n        .insights > .insight + .insight { border-top: var(--bw-hairline) solid var(--border-default); }" in CSS, "a hairline between neighbours")
     ok(".insight:hover { border-color" not in CSS, "and no hover edge")
     ok("border: 0;" in rule(".idelta") and "var(--surface-tertiary)" in rule(".idelta"), "an impact chip is a well with no edge")
+    sc, pf = rule(".seg-card"), rule(".pfilters")
+    ok("border: 0;" in sc and "background: none;" in sc and "box-shadow: none;" in sc and "padding: 0;" in sc,
+       "a customer segment is a figure in a grid with no box")
+    ok("border: 0;" in pf and "background: none;" in pf and "padding: 0;" in pf and "border-radius: 0;" in pf,
+       "the Products filters are a row of fields with no panel round them")
+
+
+@test
+def t_keywords_products_and_customers_wear_the_mix():
+    """Spec 8.3 (Report) and the copy plan (Keywords, Products, Customers): one
+    header builder on every state, the AI summary as a section, setup steps and
+    definitions behind info buttons, the Customers run gate the same empty state
+    every report's is, and the shorter lines."""
+    for fname in ("function renderKeywords(cache) {", "async function runKeywords(box) {", "function renderProductList() {",
+                  "async function loadProducts(force) {", "async function openProduct(id, title) {",
+                  "function renderProductDetail(d, id, title) {", "function customersBusy(seg) {", "function renderCustomers(seg) {"):
+        ok(fname in SCRIPT, fname + " exists")
+        fn = fn_src(fname)
+        ok("pageHead({" in fn or "customerGateHead(seg)" in fn, fname + ": the one header")
+        ok("el('div', 'ov-hero')" not in fn, fname + ": none built by hand")
+    ok("function customerGate(seg) {" in SCRIPT, "the Customers gate exists")
+    gate = fn_src("function customerGate(seg) {")
+    ok("emptyState({ icon: I.users, text: 'Uses AI credits. Reads Shopify customers and orders.', action: btn, cls: 'run-gate' })" in gate,
+       "the Customers gate is the run gate's empty state")
+    ok("'rg-ic'" not in SCRIPT and "'rg-note'" not in SCRIPT, "no run gate draws its own tile or note")
+    ok("infoButton('The two Google sources'" in SCRIPT and "infoButton('Linking Google Ads'" in SCRIPT, "the Google steps wait behind info buttons")
+    ok("function cardifySections(root) {" in SCRIPT, "cardifySections exists")
+    ok("c.nodeType === 1 && !c.classList.contains('info') && (c.classList.contains('segmented')" in fn_src("function cardifySections(root) {"),
+       "a heading folded into a card keeps its info button beside its words, not in the card's action slot")
+    ok("inp.placeholder = 'A competitor or blog post address'" in SCRIPT, "what to scan is the field's own hint")
+    for gone in ("Pull the keywords you rank for", "Paste any public page", "Two Google sources fill", "No paid search data yet. Link",
+                 "Load your catalogue with up to", "Pulls live Shopify data. No AI", "Filter, sort and compare your catalogue",
+                 "The plan for this product.", "that earned most, ", "Analyse all customers", "From your orders and customer list",
+                 "Who your best customers are", "Nobody with a reorder rhythm"):
+        ok(gone not in SCRIPT, "cut: " + gone)
+    for new in ("'Your keywords and ad spend, with a ranked plan.'", "'Your catalogue with up to 24 months of sales.'",
+                "'Open a product for its optimisation plan.'", "'Nothing to rank for this period.'",
+                "'Customers and sectors by retention, value and revenue.'", "'No repeat accounts overdue.'",
+                "'Tag these in Shopify to count them as trade.'", "' Some products are missing: the catalogue is too large.'"):
+        ok(new in SCRIPT, "says: " + new)
 
 
 if __name__ == "__main__":
