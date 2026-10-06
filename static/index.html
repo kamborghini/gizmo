@@ -1169,7 +1169,7 @@
             .ktable.sizes-table tr.sizes-detail, .ktable.sizes-table tr.sizes-detail > td { display: block; }
             .ktable.sizes-table tr.sizes-row { display: grid; grid-template-columns: minmax(0, 1fr) auto;
                 grid-template-areas: "model fig" "maker fig" "status fig"; column-gap: var(--sp-3); row-gap: var(--sp-1);
-                padding: var(--sp-3) var(--sp-4); border-bottom: var(--bw-hairline) solid var(--border-default); }
+                padding: var(--sp-3) 0; border-bottom: var(--bw-hairline) solid var(--border-default); }
             .ktable.sizes-table tr.sizes-row:hover, .ktable.sizes-table tr.sizes-row.open { background: var(--surface-secondary); }
             .ktable.sizes-table tr.sizes-row.open { border-bottom-color: transparent; }
             .ktable.sizes-table tr.sizes-row > td { display: block; min-width: 0; padding: 0; border: 0; background: none; }
@@ -1570,7 +1570,7 @@
             .ktable.mem-table { min-width: 0; }
             .mem-table tr { display: grid; grid-template-columns: auto 1fr auto; column-gap: var(--sp-2);
                 grid-template-areas: "kind . acts" "note note note";
-                padding: var(--sp-2) var(--sp-3); border-bottom: var(--bw-hairline) solid var(--border-default); align-items: center; }
+                padding: var(--sp-2) 0; border-bottom: var(--bw-hairline) solid var(--border-default); align-items: center; }
             .mem-table tr:last-child { border-bottom: 0; }
             .ktable.mem-table td { display: block; border: 0; padding: 0; }
             .ktable.mem-table td.mem-kind { grid-area: kind; }
@@ -1607,9 +1607,10 @@
         .roas-flag { display: block; font-size: var(--text-xs); font-weight: var(--weight-medium); letter-spacing: normal;
             text-transform: none; color: var(--error); }
         .prod-search { width: 100%; border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-field); padding: var(--sp-2) var(--sp-3); font: inherit; font-size: var(--text-sm); outline: none; margin-bottom: var(--sp-3); background: var(--surface-sunken); color: var(--text-primary); }
-        .prod-row { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2-5) var(--sp-3); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset);
-            background: var(--surface-primary); box-shadow: var(--shadow-sm); margin-bottom: var(--sp-2); cursor: pointer; text-align: left; width: 100%; font: inherit; color: var(--text-primary); transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
-        .prod-row:hover { border-color: var(--action-line); background: var(--surface-tertiary); }
+        .prod-row { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2-5) 0; border: 0; border-radius: 0;
+            background: none; box-shadow: none; margin-bottom: 0; cursor: pointer; text-align: left; width: 100%; font: inherit; color: var(--text-primary); transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
+        .prod-row + .prod-row { border-top: var(--bw-hairline) solid var(--border-soft); }
+        .prod-row:hover { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); }
         .prod-thumb { width: var(--box-2xl); height: var(--box-2xl); border-radius: var(--radius-inset); object-fit: cover; background: var(--surface-sunken); flex-shrink: 0; }
         .prod-main { flex: 1; min-width: 0; }
         .prod-name { font-weight: var(--weight-medium); font-size: var(--text-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1620,7 +1621,7 @@
         /* Inside the products card the rows run edge to edge with a hairline
            between them, the way the reference's orders table does. */
         .card-bleed.prod-rows > .prod-row { border: 0; border-radius: 0; box-shadow: none; margin: 0;
-            border-top: var(--bw-hairline) solid var(--border-default); padding: var(--sp-3) var(--sp-4); }
+            border-top: var(--bw-hairline) solid var(--border-default); padding: var(--sp-3) 0; }
         .card-bleed.prod-rows > .prod-row:hover { background: var(--surface-secondary); }
         .card > .ptools { margin-bottom: 0; }
         .back-btn { margin-bottom: var(--sp-4); }
@@ -1834,6 +1835,8 @@
         .card-bleed > .insights > .insight + .insight, .card-bleed .block > .insights > .insight + .insight,
         .card-bleed > details.sect + details.sect, .card-bleed .block > details.sect + details.sect {
             border-top: var(--bw-hairline) solid var(--border-default); }
+        /* ...and on the section's text edge: no side padding of their own. */
+        .card-bleed > .insights > .insight, .card-bleed .block > .insights > .insight { padding-inline: 0; }
         /* ...and 16 UNDER it, not the standalone 8 it carries elsewhere: inside
            a card the gap between a toolbar and the table below it is the card's
            own 16, and 8 was the last of three different gaps in one card. */
@@ -1920,15 +1923,13 @@
         select { appearance: none; -webkit-appearance: none; padding-right: var(--chevron-room);
             background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235F6368' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
             background-repeat: no-repeat; background-position: right var(--sp-3) center; }
-        details.sect { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-card); background: var(--surface-primary); margin-bottom: var(--sp-2); overflow: hidden; box-shadow: var(--shadow-sm); }
-        /* A group of drawers is one card with divided rows: nine small cards
-           stacked 8px apart read as nine objects, not two lists. */
-        .sect-group { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default);
-            border-radius: var(--radius-card); overflow: hidden; }
-        .sect-group > details.sect { border: 0; border-radius: 0; margin: 0; box-shadow: none; }
-        .sect-group > details.sect + details.sect { border-top: var(--bw-hairline) solid var(--border-default); }
-        details.sect summary { padding: var(--sp-3) var(--sp-4); font-weight: var(--weight-medium); font-size: var(--text-sm); cursor: pointer; list-style: none;
-            display: flex; align-items: center; gap: var(--sp-2); }
+        /* A drawer is a row (the mix): a 44 summary over a soft hairline, its
+           body opening under it; a group of them is a list framed by a line. */
+        details.sect { border: 0; border-radius: 0; background: none; margin-bottom: 0; overflow: visible; box-shadow: var(--rule-b-soft); }
+        .sect-group { background: none; border: 0; border-radius: 0; box-shadow: var(--rule-t), var(--rule-b); }
+        .sect-group > details.sect { border: 0; border-radius: 0; margin: 0; }
+        details.sect summary { min-height: var(--row-h); padding: 0; font-weight: var(--weight-medium); font-size: var(--text-body); line-height: var(--lh-control); cursor: pointer; list-style: none;
+            display: flex; align-items: center; gap: var(--gap-row-icon); }
         details.sect summary::-webkit-details-marker { display: none; }
         /* SV() emits its icons with no width or height attribute, so every
            icon site in the file has to size its own svg. This one never did:
@@ -1937,8 +1938,7 @@
         details.sect summary .chev { margin-left: auto; transition: transform var(--dur) var(--ease); color: var(--text-tertiary); display: grid; }
         details.sect summary .chev svg { width: var(--icon-md); height: var(--icon-md); display: block; }
         details.sect[open] summary .chev { transform: rotate(90deg); }
-        details.sect[open] summary { border-bottom: var(--bw-hairline) solid var(--border-default); }
-        details.sect .body { padding: var(--sp-3) var(--sp-4) var(--sp-4); color: var(--text-secondary); font-size: var(--text-sm); line-height: var(--lh-prose); }
+        details.sect .body { padding: 0 0 var(--sp-4); color: var(--text-secondary); font-size: var(--text-body); line-height: var(--lh-control); }
         details.sect .body p { margin: 0 0 var(--sp-2); }
         details.sect .body ul { margin: 0; padding-left: var(--sp-5); } details.sect .body li { margin: var(--sp-1) 0; }
 
@@ -1950,10 +1950,10 @@
            and the 16px flex gap goes with the 4px: a row hover that stopped
            short of the row above left a stripe of card between two highlights,
            where the reference's rows share one edge. */
-        .actions { padding: 0; gap: 0; overflow: hidden; }
-        .action { display: flex; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); }
+        .actions { padding: 0; gap: 0; overflow: visible; }
+        .action { display: flex; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-3) 0; }
         .action + .action { border-top: var(--bw-hairline) solid var(--border-default); }
-        .action:hover { background: var(--surface-secondary); }
+        .action:hover { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); }
         /* 16px on a 4px corner, the one checkbox this app draws: the CRM ticks
            and the inbox's are already 16, and this was the odd 20 - on the page
            the merchant is actually meant to work through. 4px rather than the
@@ -2043,7 +2043,7 @@
            for a new one, and grows with what is typed. */
         .sk-list { list-style: none; margin: 0; padding: 0; }
         .card > .sk-list { padding-inline: 0; }
-        .sk-item { padding: var(--sp-4); border-top: var(--bw-hairline) solid var(--border-default); }
+        .sk-item { padding: var(--sp-4) 0; border-top: var(--bw-hairline) solid var(--border-default); }
         .sk-item:first-child { border-top: 0; padding-top: 0; }
         .sk-item:last-child { padding-bottom: 0; }
         .sk-list > .empty { list-style: none; }
@@ -2284,7 +2284,7 @@
             .cx-docs tbody { display: block; }
             .cx-docs thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
             .cx-docs tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--sp-3); row-gap: var(--sp-1);
-                padding: var(--sp-3); border-bottom: var(--bw-hairline) solid var(--border-default); }
+                padding: var(--sp-3) 0; border-bottom: var(--bw-hairline) solid var(--border-default); }
             .cx-docs tr:last-child { border-bottom: 0; }
             .cx-docs tr:has(+ tr.cx-more) { border-bottom-color: transparent; }
             .cx-docs tr.cx-more { padding-top: 0; }
@@ -2911,7 +2911,7 @@
             .seg-row:has(> .tabs) > :not(.tabs) { order: -1; flex: none; margin-left: auto; }
             .seg-row > .tabs { flex: 1 1 100%; min-height: var(--row-h); } }
         .guide-rows { margin: 0; }
-        .guide-rows > .guide-row { padding: var(--sp-3) var(--sp-4); border-top: var(--bw-hairline) solid var(--border-default); }
+        .guide-rows > .guide-row { padding: var(--sp-3) 0; border-top: var(--bw-hairline) solid var(--border-default); }
         /* The card head is never divided from its body: the first row sits on the card's 16 gap. */
         .guide-rows > .guide-row:first-child { border-top: 0; padding-top: 0; }
         .guide-rows > .guide-row[hidden] { display: none; }
@@ -3431,23 +3431,23 @@
             border-radius: var(--radius-card); padding: 0 var(--sp-3); }
         /* ...and inside the activities card it sheds that frame: a bordered box
            17px inside the card's identical border is one frame drawn twice. The
-           rows take the 16px gutter from their own padding instead, so the rule
-           between two of them reaches the card's edge the way a table's does. */
+           rows sit on the section's text edge (no side padding of their own), so
+           the rule between two of them runs the text column the way a table's does. */
         .card-bleed.crm-act-list { border: 0; border-radius: 0; padding: 0; background: transparent; }
         .card-bleed.crm-act-list > .crm-act-row,
         .card-bleed.crm-act-list > .crm-group,
         .card-bleed.crm-act-list > .crm-sub {
-            padding-left: var(--sp-4); padding-right: var(--sp-4); }
+            padding-left: 0; padding-right: 0; }
         .crm-act-list .crm-group { margin: var(--sp-3) 0 0; }
         /* The same swap for the leads list: rows on a card, not a stack of
            bordered boxes inside a bordered box. */
         .crm-lead-list .lbl-who .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .card-bleed.crm-lead-list > .lbl-row { border: 0; border-radius: 0; margin-bottom: 0;
+        .card-bleed.crm-lead-list > .lbl-row { border: 0; border-radius: 0; margin-bottom: 0; padding-inline: 0;
             border-bottom: var(--bw-hairline) solid var(--border-default); }
         .card-bleed.crm-lead-list > .lbl-row:last-child { border-bottom: 0; }
         /* One hover shade across the whole tab: the tables under it use --surface-secondary,
            and --surface-tertiary now means SELECTED on the contacts table. */
-        .card-bleed.crm-lead-list > .lbl-row:hover { background: var(--surface-secondary); }
+        .card-bleed.crm-lead-list > .lbl-row:hover { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); }
         .crm-act-row { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) 0;
             border-bottom: var(--bw-hairline) solid var(--border-default); font-size: var(--text-sm); }
         .crm-act-row:last-child { border-bottom: 0; }
@@ -3916,15 +3916,18 @@
            and runs edge to edge within it. This wrapper IS that card: the
            header above it is a .section-title, and the rows meet the card
            border rather than floating inside a second inset box. */
-        .ktable-wrap { overflow-x: auto; border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-card);
-            box-shadow: var(--shadow-sm); background: var(--surface-primary); margin-bottom: var(--sp-6); }
+        /* A TABLE (the mix, spec 6): no box. A line above it and below it, one
+           under its head, a soft one between rows; it scrolls sideways when it
+           must, and its outer columns sit on the text edge. */
+        .ktable-wrap { overflow-x: auto; border: 0; border-radius: 0;
+            box-shadow: var(--rule-t), var(--rule-b); background: none; margin-bottom: var(--sp-6); }
         /* Inside a card the table gets its OWN box, inset by the card's padding.
            This used to be stripped flat on the reasoning that a card is already a
            box; measuring the reference says otherwise - its table sits in a
            second frame at the base 10px radius inside a 14px card, and that inset
            edge is most of what makes its tables read the way they do. */
         .card .ktable-wrap, .card-bleed .ktable-wrap { border-radius: var(--radius-inset);
-            box-shadow: none; margin-bottom: 0; }
+            margin-bottom: 0; }
         /* Since 2026-10-05 the card is the table's frame: a second box 16px inside
            it was a border directly inside a border. The table keeps the card's
            gutter and its outer columns line up with the card's text; a table that
@@ -3937,7 +3940,7 @@
         .card-bleed .ktable th:last-child, .card-bleed .ktable td:last-child { padding-right: 0; }
         .ktable-wrap .ktable tr:last-child td { border-bottom: 0; }
         .ktable-wrap .ktable:not(:has(tbody tr)) th { border-bottom: 0; }
-        .ktable { width: 100%; border-collapse: collapse; font-size: var(--text-sm); background: var(--surface-primary); min-width: min(460px, 100%); }
+        .ktable { width: 100%; border-collapse: collapse; font-size: var(--text-body); background: none; min-width: min(460px, 100%); }
         /* A figure is never split, the name column keeps 10ch, and an email
            under a name wraps: in a 435px card on an iPad the numbers were cut
            mid-figure at the card's edge ('£1,00', '12.') while the names were
@@ -3947,8 +3950,10 @@
         .ktable td.kw .prod-sub { overflow-wrap: anywhere; }
         /* 12px on every side, header and body alike: the reference pads its cells
            square, and the row height comes from the content rather than the cell. */
-        .ktable th { text-align: left; font-size: var(--text-sm); text-transform: none; letter-spacing: normal; color: var(--text-primary); font-weight: var(--weight-medium); padding: var(--sp-3); line-height: var(--lh-control); border-bottom: var(--bw-hairline) solid var(--border-default); white-space: nowrap; height: 44px; }
-        .ktable td { padding: var(--sp-3); border-bottom: var(--bw-hairline) solid var(--border-default); color: var(--text-primary); font-size: var(--text-sm); line-height: var(--lh-control); vertical-align: middle; }
+        .ktable th { text-align: left; font-size: var(--text-xs); text-transform: none; letter-spacing: normal; color: var(--text-tertiary); font-weight: var(--weight-medium); padding: 0 var(--sp-3); line-height: var(--lh-caption); border-bottom: 0; box-shadow: var(--rule-b); white-space: nowrap; height: var(--control-h); }
+        .ktable td { padding: 0 var(--sp-3); height: var(--row-h); border-bottom: var(--bw-hairline) solid var(--border-soft); color: var(--text-primary); font-size: var(--text-body); line-height: var(--lh-control); vertical-align: middle; }
+        .ktable :is(th, td):first-child { padding-left: 0; }
+        .ktable :is(th, td):last-child { padding-right: 0; }
         .ktable tr:last-child td { border-bottom: 0; }
         /* The CRM's two tables to the reference's own cell metric: 16px, which
            puts a body row at 53px against the header's 44 - the reference's
@@ -3984,6 +3989,26 @@
         .crm-contact-table tbody tr.sel td { background: var(--action-selected); }
         .ktable td.kw { color: var(--text-primary); font-weight: var(--weight-medium); }
         .ktable .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        /* A LIST OF ROWS (the mix, spec 6): 44 tall, a 16 icon in ink-3 12 from
+           its words, a count and a 14 chevron at the end; a line frames it and
+           a soft line divides it. Two columns read down where there is room,
+           so a phone's single column keeps the same order. */
+        .rlist { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: var(--gap-cols); }
+        .rlist.cols-2 { grid-auto-flow: column; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(var(--rows, 2), auto); }
+        .rlist-row { position: relative; display: flex; align-items: center; gap: var(--gap-row-icon); min-height: var(--row-h); width: 100%;
+            padding: 0; border: 0; background: none; font: inherit; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-primary);
+            text-align: left; cursor: pointer; box-shadow: var(--rule-t-soft); }
+        .rlist-row .ic { color: var(--text-tertiary); }
+        .rlist-row .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .rlist-row > .ic:last-child svg { width: var(--icon-sm); height: var(--icon-sm); stroke-width: var(--icon-stroke-s); }
+        .rlist-row:hover, .rlist-row:hover :is(.ic, .cnt) { color: var(--text-link); }
+        .rlist-row:active, .rlist-row:active :is(.ic, .cnt) { color: var(--text-link-hover); }
+        .rlist-row:focus-visible { outline: 0; }
+        .rlist-row:focus-visible::before { content: ""; position: absolute; inset: var(--sp-0-5) calc(-1 * var(--sp-2)); border-radius: var(--radius-control);
+            box-shadow: inset 0 0 0 var(--bw-strong) var(--fill-mark); pointer-events: none; }
+        .rlist > .rlist-row:first-child, .rlist.cols-2 > .rlist-row:nth-child(odd) { box-shadow: var(--rule-t); }
+        .rlist { box-shadow: var(--rule-b); }
+        @media (max-width: 900px) { .rlist.cols-2 { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; } }
         /* ---------- the table card, to the reference's own measurements ----------
            A toolbar above the table box and a pager below it, both sitting in
            the card's 16px padding with the card's own 16px gap between them.
@@ -4293,7 +4318,7 @@
         .scan-out:empty { display: none; }
         /* The findings bleed to the card's edges as rows; the summary and the
            actions heading keep the gutter, at the card's own body sizes. */
-        .scan-card .card-bleed > .summary, .scan-card .card-bleed .block > .section-title { padding-inline: var(--sp-4); }
+        .scan-card .card-bleed > .summary, .scan-card .card-bleed .block > .section-title { padding-inline: 0; }
         .scan-card .card-bleed > .summary { font-size: var(--text-sm); }
         .scan-card .card-bleed .block > .section-title { font-size: var(--text-sm); margin: var(--sp-3) 0 var(--sp-2); }
         .scan-row { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
@@ -4311,7 +4336,7 @@
         /* Each tracked change a row of the card, separated by a rule. */
         .impact-list { list-style: none; margin: 0; padding: 0; }
         .card > .impact-list { padding-inline: 0; }
-        .impact-row { padding: var(--sp-3) var(--sp-4); border-top: var(--bw-hairline) solid var(--border-default); }
+        .impact-row { padding: var(--sp-3) 0; border-top: var(--bw-hairline) solid var(--border-default); }
         .impact-row:first-child { border-top: 0; padding-top: 0; }
         .impact-row.done .impact-text { color: var(--text-secondary); }
         .impact-top { display: flex; align-items: flex-start; gap: var(--sp-3); }
@@ -4795,7 +4820,8 @@
         /* Hover is drawn later in this sheet and used to win at equal weight,
            so pointing at the row you are about to act on made it the palest
            row in the list. Selection outranks a hover on the same row. */
-        .files-row:is(.selected, [aria-selected="true"]), .files-row:is(.selected, [aria-selected="true"]):hover { background: var(--action-selected); }
+        .files-row:is(.selected, [aria-selected="true"]), .files-row:is(.selected, [aria-selected="true"]):hover { background: var(--action-selected);
+            box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected); }
         /* The bar is a block of the card now, so the card's own 16px gap sets
            its distance from the list; a margin here added to that gap. */
         .files-bulk { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4);
@@ -4887,20 +4913,19 @@
         /* The crumbs and the upload queue are always-present hosts, and an
            empty one still took a 16px gap from the card either side of it. */
         .files-slot:empty { display: none; }
-        /* The base radius, as the reference boxes a list: the control radius
-           read as a large button rather than as a frame around rows. */
-        .files-list { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset);
-            background: var(--surface-primary); overflow: hidden; }
-        .card-bleed.files-list { border: 0; border-radius: 0; }
-        .card-bleed.files-list > .files-row { padding: var(--sp-3) var(--sp-4); }
+        /* A list of files (and a team's people and activity) is rows on the
+           section's text edge, no box: a row's words start where the section
+           title's do, and its hairline runs the text column. The hover fill is
+           drawn 8 past the column each side, so the words never touch it. */
+        .files-list { border: 0; border-radius: 0; background: none; overflow: visible; }
         .files-list.drag { outline: 2px dashed var(--border-selected); outline-offset: -2px; background: var(--action-soft); }
         /* 12px on every side and a full hairline, like every other list in the
            app now. The 0.5px rule lands on a device pixel on some screens and
            disappears on others. */
-        .files-row { display: flex; align-items: center; gap: var(--sp-2-5); padding: var(--sp-3);
+        .files-row { display: flex; align-items: center; gap: var(--sp-2-5); padding: var(--sp-3) 0;
             border-top: var(--bw-hairline) solid var(--border-default); font-size: var(--text-sm); }
         .files-row:first-child { border-top: 0; }
-        .files-row:hover { background: var(--surface-secondary); }
+        .files-row:hover { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); }
         .files-row.dropok { background: var(--action-soft); }
         .files-row > svg, .files-row > span:first-child svg { width: var(--icon-md); height: var(--icon-md); color: var(--text-tertiary); flex: none; display: block; }
         .files-row.is-folder > span:first-child svg { color: var(--text-brand); }
@@ -4941,11 +4966,11 @@
             align-items: center; font-size: var(--text-sm); color: var(--text-tertiary); }
         .files-cols span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .files-cols .size { text-align: right; }
-        .files-head:hover { background: transparent; }
+        .files-head:hover { background: transparent; box-shadow: none; }
         .files-head .files-cols { color: var(--text-primary); font-weight: var(--weight-medium); }
         /* The Files list only: the same .files-row shell carries the Team and
            Work rows, which hold wrapping sentences rather than table cells. */
-        #files-content .files-row { padding: var(--sp-2) var(--sp-3); }
+        #files-content .files-row { padding: var(--sp-2) 0; }
         /* A file row offers four buttons and a folder row two. Reserving the
            four on both is what stops the folders' figures sitting 60px right
            of every file's. The trash answers with two text buttons instead,
@@ -4966,7 +4991,7 @@
             .files-cols { grid-template-columns: minmax(0, 96px) minmax(0, 88px); }
             .files-cols .who { display: none; }
         }
-        .files-empty { padding: var(--sp-3) var(--sp-4); text-align: left; color: var(--text-tertiary); font-size: var(--text-sm); }
+        .files-empty { padding: var(--sp-3) 0; text-align: left; color: var(--text-tertiary); font-size: var(--text-sm); }
         .card > .card-bleed.files-list > .files-empty:only-child { padding-block: 0; }
         .files-hint { margin-top: var(--sp-2); font-size: var(--text-xs); color: var(--text-tertiary); }
         /* In the Files card the hint is a block of the card like the list and
@@ -5040,7 +5065,7 @@
             border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-field); }
         .starter-pw { width: 100%; font-family: var(--font-mono); }
         .tm-date { flex-direction: row; align-items: center; gap: var(--sp-2); }
-        .tm-day { background: var(--surface-secondary); }
+        .tm-day { background: none; }
         .tm-date > span { font-size: var(--text-xs); font-weight: var(--weight-regular); color: var(--text-secondary); }
         /* Stacked on a phone, the two fields start at one x; side by side each
            label keeps its own width. */
@@ -6365,6 +6390,32 @@ Projected Image UK"></textarea>
                 band.append(sides);
             }
             return band;
+        }
+        /* A list of rows (the mix, spec 6). items: [{ icon, label, n, unit,
+           onClick }]; opts: { label, cols }. With cols 2 the rows read down the
+           first column, then the second, so a phone's one column keeps that order. */
+        function listRows(items, opts) {
+            opts = opts || {};
+            /* A caller may leave a row out by passing null in its place. */
+            const list = items.filter(Boolean);
+            const nav = el('nav', 'rlist' + (opts.cols === 2 ? ' cols-2' : ''));
+            if (opts.label) nav.setAttribute('aria-label', opts.label);
+            if (opts.cols === 2) nav.style.setProperty('--rows', String(Math.ceil(list.length / 2)));
+            list.forEach(it => {
+                const b = el('button', 'rlist-row');
+                b.type = 'button';
+                if (it.icon) b.append(ico(it.icon));
+                b.append(el('span', 'lbl', it.label));
+                if (it.n != null) {
+                    const c = el('span', 'cnt', String(it.n));
+                    if (it.unit) c.append(el('span', 'sr-only', ' ' + it.unit));
+                    b.append(c);
+                }
+                b.append(ico(I.chev));
+                b.onclick = it.onClick;
+                nav.append(b);
+            });
+            return nav;
         }
         function statCard(m, i) {
             const c = el('div', 'stat' + (m.tone === 'warn' ? ' warn' : ''));
