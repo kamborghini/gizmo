@@ -2252,14 +2252,13 @@ def t_the_forecast_tab_exists_and_is_gated():
     ok("8 times out of 10" in ov and "not a commitment" in ov,
        "and says how wide the range is, in money, rather than printing P10 and P90")
     order = [fn.index("fcOverviewCard(latest, sc)"), fn.index("fcChartCard("),
-             fn.index("fcDriversCard(latest, sc)"), fn.index("'The numbers behind it'"),
-             fn.index("'How this forecast works'")]
+             fn.index("fcDriversCard(latest, sc)"), fn.index("'The numbers behind it'")]
     ok(order == sorted(order),
-       "overview, then the picture, then why, then the numbers, then how it works")
-    for t in ("Month by month against ", "Every source, side by side",
-              "How each one works, and how right it has been"):
-        ok("fcDrawer('" + t in fn or 'fcDrawer(\'' + t in fn or ("fcDrawer('" + t) in fn,
-           "'" + t + "' is a drawer, not dealt onto the screen")
+       "overview, then the picture, then why, then the numbers")
+    for t in ("Month by month against ", "Every source, side by side"):
+        ok("fcDrawer('" + t in fn, "'" + t + "' is a drawer, not dealt onto the screen")
+    ok("'How each one works, and how right it has been'" in fn_src("function fcHowItWorks(c, latest, sc) {"),
+       "and how each method works is a page under How it works (the mix)")
     # The graph is back, and the reader chooses the scale rather than being
     # locked into one: a day question and a year question are different questions.
     chart = SCRIPT.split("function fcChartCard(", 1)[1].split("\n        function ", 1)[0]
@@ -4216,9 +4215,9 @@ def t_the_forecast_tab_shows_the_five_plain_models_and_what_they_scored():
     # does not have to read about Theta to trust it; the reader who wants to
     # opens one drawer and finds all of it.
     ok("fcUntitled(fcOptimisedCard(latest))" in SCRIPT and "fcUntitled(fcAlgorithmsCard(latest))" in SCRIPT,
-       "the tab draws both, under How this forecast works")
-    ok(SCRIPT.index("'How this forecast works'") > SCRIPT.index("fcDriversCard(latest, sc)"),
-       "and it sits below the money, never above it")
+       "the tab draws both, as pages under How it works")
+    ok("fcHowItWorks(c, latest, sc)" in SCRIPT.split("function renderForecast()")[1][:3000],
+       "and they wait behind the header's button, never dealt above the money")
     ok("!sn || !sn.available" in fn and "sn.reason" in fn,
        "a run with too little history says so instead of drawing an empty table")
     ok("fcSanityCard(latest, sc)" in SCRIPT, "and the tab actually calls it")
@@ -6886,8 +6885,8 @@ def t_every_report_view_with_several_blocks_names_its_cards():
         if view == "overview":
             ids += ["kpi-*"] if "wgKpiId(m.label)" in src else []
         ok(len(set(ids)) >= 2, "%s names %d cards: %r" % (view, len(set(ids)), ids))
-        ok("heroAct(" in src or (view == "mail" and "hero.append(heroAct(''))" in src),
-           "the %s header has the action slot Customize goes in" % view)
+        ok("heroAct(" in src or "pageHead({" in src or (view == "mail" and "hero.append(heroAct(''))" in src),
+           "the %s header has the action slot Customize goes in (pageHead builds it since the mix)" % view)
     ok(len(ov_ids) >= 5, "and the Overview still names its own")
 
 
@@ -7940,7 +7939,10 @@ def t_the_scenario_label_sits_with_its_control():
     ::after that grows, so the label has to be ordered past it with the
     control. And the scenarios are called what the workbook calls them."""
     rule = CSS.split(".fc-seg-lbl {")[1].split("}")[0]
-    ok("order: 1" in rule and "margin-left: auto" not in rule, "the label moves with the control")
+    ok("order" not in rule and "margin-left: auto" not in rule, "the label keeps its place before the control")
+    fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
+    ok("[el('span', 'fc-seg-lbl', 'Plan'),\n                segmented(" in fn,
+       "and both ride in the tab row's end group, label first (the mix)")
     ok("'Algo '" not in SCRIPT, "Algorithm 1 is not abbreviated to Algo 1")
 
 
@@ -8342,7 +8344,8 @@ def t_a_page_is_called_what_the_sidebar_calls_it():
     for view, name in (("overview", "Overview"), ("seo", "SEO"), ("keywords", "Keywords"), ("memory", "Memory"),
                        ("liability", "Liability"), ("recon", "Reconciliation"), ("forecast", "Forecast"), ("connector", "Xero sync")):
         ok(view + ": '" + name + "'" in titles, "the topbar calls " + view + " " + name)
-        ok("el('h2', null, '" + name + "')" in SCRIPT, "and so does its page heading: " + name)
+        ok("el('h2', null, '" + name + "')" in SCRIPT or "title: '" + name + "'" in SCRIPT,
+           "and so does its page heading: " + name)
     ok("comp ? 'Customers' : (seg + ' sector')" in SCRIPT, "Customers too")
     for old in ("'Store overview'", "'SEO and optimisation'", "'Keyword and CPC intelligence'",
                 "'Memory and knowledge'", "'Finance'"):
@@ -10441,6 +10444,29 @@ def t_the_phone_and_chart_review_fixes_hold():
     ok("(e.key === 'ArrowRight' ? 1 : -1), true); }" in tc, "an arrow step announces at once")
     ok("svg.onpointermove = (e) => at(e.clientX);" in tc and "show(Math.round(" in tc and "(n - 1)));" in tc, "a pointer move does not")
     ok("clearTimeout(liveT); hoverLine" in tc, "and resting the chart cancels a pending announcement")
+
+
+@test
+def t_the_forecast_header_is_the_mix_header():
+    """Spec 8.1: Forecast with Beta; a status line saying the month the reader
+    is in and which run this is; How it works (the four method pages, each in
+    a window) and Upload workbook; the Finance tabs with the Plan chooser at
+    the row's right. The intro paragraph and the How this forecast works
+    section are gone from the page."""
+    fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
+    ok("pageHead({ view: 'forecast', title: 'Forecast'," in fn and "'Run as of ' + fmtDate(latest.as_of)" in fn,
+       "the header is the one builder, with its status line")
+    ok("fcHowItWorks(c, latest, sc)" in fn and "financeTabs('forecast', '', plan)" in fn,
+       "How it works is in the header and the Plan chooser on the tab row")
+    ok("el('span', 'fc-seg-lbl', 'Plan')" in fn, "the chooser is labelled Plan")
+    ok("'How this forecast works'" not in SCRIPT and "never a promise.'" not in fn, "the method section and the intro are gone")
+    how = fn_src("function fcHowItWorks(c, latest, sc) {")
+    for t in ("'Which method is running, and why'", "'How each one works, and how right it has been'", "'How much to trust it'",
+              "'The plan it is judged against'", "'The Forecast in the Guide'"):
+        ok(t in how, "How it works holds " + t)
+    ok("fcPage(" in how and "function fcPage(title, build) {" in SCRIPT, "each opens in a window")
+    ok("'Upload workbook'" in fn_src("function forecastUploadButton()"), "the upload button says Upload workbook")
+    ok("const MONTH_NAMES = ['January'," in SCRIPT, "the status line says the month in full")
 
 
 if __name__ == "__main__":
