@@ -10746,7 +10746,7 @@ def t_the_production_manager_is_the_mix_page():
     was, its filters counted; the two queue rules worth keeping behind an info
     button; an empty queue one line and the way on (copy plan, Production
     Manager #1 to #16)."""
-    ok("function prodQueues(onPick) {" in SCRIPT, "one builder draws the queues for both renderers")
+    ok("function prodQueues(onPick, tabCounts) {" in SCRIPT, "one builder draws the queues for both renderers")
     fn = fn_src("function renderLabels() {")
     for part in ("pageHead({ view: 'labels', title: 'Production Manager', live: labelsCache.at",
                  "infoButton('About this queue'", "box.append(prodQueues(",
@@ -10758,7 +10758,7 @@ def t_the_production_manager_is_the_mix_page():
         ok(part in fn, "renderLabels: " + part)
     ok("tabStrip(QUEUE" not in SCRIPT and "el('div', 'card-head')" not in fn and "'The bench queue, from" not in SCRIPT,
        "no strip of queue tabs, no queue card title, no intro")
-    pq = fn_src("function prodQueues(onPick) {")
+    pq = fn_src("function prodQueues(onPick, tabCounts) {")
     ok("queueCounters(QUEUE.slice(0, 3)" in pq and "I.check" in pq and "I.box" in pq, "three counters, two tabs")
     cq = fn_src("async function renderCustomQueue(box) {")
     ok("pageHead({ view: 'labels'" in cq and "prodQueues(" in cq and "'No custom shipments yet.'" in cq,
@@ -10771,7 +10771,7 @@ def t_the_production_manager_is_the_mix_page():
     ok("box.append(hero);" in fn and "box.append(prodQueues(" in fn and "if (data.partial_note)" in fn
        and fn.index("box.append(hero);") < fn.index("box.append(prodQueues(") < fn.index("if (data.partial_note)"),
        "the counters are built straight after the header, the partial-sweep notice after them")
-    ok(".ov-hero-act:has(> .btn + .btn + .btn) > .btn:not(.btn-icon) { flex: none; }" in CSS and "padding-top: 0; flex-wrap: wrap; }" in CSS,
+    ok(".ov-hero-act:has(> .btn + .btn + .btn) > .btn:not(.btn-icon) { flex: none; }" in CSS and ".ov-hero-act:has(> .btn + .btn + .btn) { flex-wrap: wrap; }" in CSS,
        "a phone rail of three words wraps, each at its own width, instead of running past the gutter")
 
 
@@ -10879,6 +10879,48 @@ def t_the_queue_still_holds_and_does_what_it_did():
     for t in ("'Actual size preview: '", "'% so the whole order fits one label.'", "' - some rows would be cut off the printed label. '",
               "'Choose a larger stock size before printing.'", "'Print this label'", "histLine(o)"):
         ok(t in fn, "the preview still says " + t)
+
+
+@test
+def t_the_production_manager_fix_round_one():
+    """Review of Tasks 31 to 34: the label preview's own outline (not a shared
+    grey), a phone header laid out as the mockup has it, the open order with no
+    seam through it, Hide centred where Preview was, no extra gap under the
+    single-order line, and a count for the two tabs that lost theirs."""
+    # The label's edge is frozen with the label: the preview draws it from its own token.
+    eq(_token_raw("paper-edge"), "#D4D4D4", "--paper-edge")
+    ok("\n        .lbl-frame { --border-strong: var(--paper-edge); }" in CSS,
+       "the frame hands the label the edge it always had, whatever --border-strong became (the frozen rule is untouched)")
+    # The wrap is for rails of three or more buttons, so a stamp and Refresh stay on one line.
+    ok("\n            .ov-hero-act:has(> .btn + .btn + .btn) { flex-wrap: wrap; }" in CSS
+       and "\n            .ov-hero-act { margin-left: 0; flex-basis: 100%; padding-top: 0; }" in CSS,
+       "the phone rail wraps only with three buttons or more")
+    # The phone header: Refresh and an icon-only More in the head, Collections and New shipment sharing a row.
+    fn = fn_src("function renderLabels() {")
+    ok("more.classList.add('more-btn');" in fn and "more.setAttribute('aria-label', 'More');" in fn and "el('span', 'more-txt', 'More')" in fn
+       and "ico(I.moreH)" in fn and "hero.classList.add('pm-head');" in fn, "More keeps its word and its name; a phone shows it as dots")
+    ok("moreH: SV(" in SCRIPT, "the dots glyph")
+    ph = CSS[CSS.index("/* THE PRODUCTION MANAGER'S PHONE HEADER"):][:2600]
+    ok(".ov-hero.pm-head { display: grid;" in ph and ".ov-hero.pm-head > .ov-hero-act { display: contents; }" in ph
+       and ".ov-hero.pm-head .more-btn {" in ph and "grid-column: 1 / -1;" in ph and "grid-column: 2; grid-row: 1;" in ph,
+       "the head is a grid: the text and More on the first row, Print new on a full row, then two equal buttons")
+    ok(".pm-head .more-txt, .pm-head .more-btn > .ic:nth-child(2) { display: none; }" in ph, "the word and the caret give way to the dots")
+    # Small things.
+    ok("\n        .q-note { margin: 0; color: var(--text-tertiary); }" in CSS, "the single-order line adds no gap of its own to the card's 12")
+    ok('\n        .lbl-qrow:is(.on, [aria-selected="true"]):has(+ .lbl-preview) {' in CSS
+       and "var(--rule-b-soft)" not in CSS.split('\n        .lbl-qrow:is(.on, [aria-selected="true"]):has(+ .lbl-preview) {')[1].split("}")[0],
+       "no hairline through the open order where its preview follows")
+    ok(".swap > span { grid-area: 1 / 1; text-align: center; }" in CSS, "Hide is centred in the width Preview reserves")
+    # Counts on the tabs that had one in their card titles.
+    qc = fn_src("function queueCounters(")
+    ok("if (n != null) { const c = el('span', 'cnt', String(n));" in qc and "[k, l, icon, n, unit]" in qc, "a tab can carry a count")
+    pq = fn_src("function prodQueues(onPick, tabCounts) {")
+    ok("[QUEUE[3][0], QUEUE[3][1], I.check, tabCounts && tabCounts.dispatched, 'orders']" in pq, "Complete's count is the loaded list's")
+    ok("prodQueues((k) => { queueMode = k; labelsCache = null; labelSel = null; labelsFilter = 'all'; loadLabels(true); }, dispatched ? { dispatched: orders.length } : null)" in fn,
+       "the queue page passes it when Complete is open")
+    cq = fn_src("async function renderCustomQueue(box) {")
+    ok("tabCount(box, 'shipments', rows.length, 'shipments')" in cq, "Custom shipments shows its loaded list's length once it is read")
+    ok("function tabCount(box, key, n, unit) {" in SCRIPT, "one helper puts the count on a tab")
 
 
 if __name__ == "__main__":
