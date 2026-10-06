@@ -1667,11 +1667,14 @@
             /* The table's 460px floor is for columns; stacked rows have none. */
             .ktable.mem-table { min-width: 0; }
             .mem-table tr { display: grid; grid-template-columns: auto 1fr auto; column-gap: var(--sp-2);
-                grid-template-areas: "kind . acts" "note note note";
+                grid-template-areas: "kind kind acts" "note note note";
                 padding: var(--sp-2) 0; border-bottom: var(--bw-hairline) solid var(--border-default); align-items: center; }
             .mem-table tr:last-child { border-bottom: 0; }
-            .ktable.mem-table td { display: block; border: 0; padding: 0; }
-            .ktable.mem-table td.mem-kind { grid-area: kind; }
+            /* A stacked cell is as tall as what it holds (the table's fixed row height is for columns). */
+            .ktable.mem-table td { display: block; border: 0; padding: 0; height: auto; }
+            /* A note can carry its kind and two state tags (Waiting for an admin, Not read with answers): they wrap
+               here rather than widen the row past the screen. */
+            .ktable.mem-table td.mem-kind { grid-area: kind; display: flex; flex-wrap: wrap; align-content: center; gap: var(--sp-1); white-space: normal; }
             .ktable.mem-table td.mem-acts-cell { grid-area: acts; width: auto; padding: 0; }
             .ktable.mem-table td.mem-note { grid-area: note; padding-block: var(--sp-1) var(--sp-1-5); min-width: 0; }
             /* When and from are one quiet line under the note. */
@@ -3244,10 +3247,13 @@
            that line - a bordered card cut in half at the card edge, with a
            scrollbar under it. A team is a handful of cards; wrapping shows
            all of them and nothing meets an edge it should not. */
-        .mail-who { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-        .mail-who-card { flex: 0 0 auto; display: flex; align-items: center; gap: var(--sp-2);
-            background: var(--surface-tertiary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-card);
-            padding: var(--sp-1-5) var(--sp-3); font-size: var(--text-xs); }
+        /* Who is on today: each person is a plain group, no capsule (the mix, spec 3): the colour dot, where they
+           are working, their name, your own presence choice and their load, people 32 apart. On a phone each is a
+           hairline row (below). */
+        .mail-who { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-8); }
+        .mail-who-card { flex: 0 0 auto; display: flex; align-items: center; gap: var(--sp-2); min-height: var(--control-h);
+            background: none; border: 0; border-radius: 0;
+            padding: 0; font-size: var(--text-xs); }
         .mail-who-card { max-width: 100%; min-width: 0; }
         .mail-who-card .mail-who-name, .mail-who-card .mail-who-load { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .mail-who-name { font-weight: var(--weight-medium); color: var(--text-primary); }
@@ -3361,6 +3367,8 @@
         /* A 15px tick is a miss under a finger, and this one selects the email
            a bulk action is about to run on. */
         @media (hover: none) { .mail-check { width: var(--box-md); height: var(--box-md); } }
+        /* The tick's label: its own size, and the anchor of the phone's 40 square (below). */
+        .mail-tick { position: relative; display: inline-flex; flex: none; }
         .mdot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); flex: none; background: var(--border-emphasis); }
         .mdot.unassigned { background: var(--warning); }
         .mdot.assigned { background: var(--fill-mark); }
@@ -3424,10 +3432,10 @@
            unread, so without this the red the hero paragraph promises, and
            that the Board already paints, could never actually appear here. */
         .mrow.unread .mage.hot { color: var(--error); }
-        /* The unread mark is an 8 teal dot at the row's start, ahead of the tick (the mix, spec 8.3).
+        /* The unread mark is an 8 teal dot (--fill-mark, the semantic mark teal: 3.85:1 on white) at the row's start, ahead of the tick (the mix, spec 8.3).
            Its word stays in the page for a screen reader (the .sr-only span inside) and is not drawn. */
         .munread { order: -1; position: relative; flex: none; width: var(--dot-md); height: var(--dot-md); }
-        .munread::before { content: ''; position: absolute; inset: 0; border-radius: var(--radius-circle); background: var(--teal-500); }
+        .munread::before { content: ''; position: absolute; inset: 0; border-radius: var(--radius-circle); background: var(--fill-mark); }
         /* The badge is on every row and only blanked when the mail has been
            read: a slot that exists on some rows and not others pushed the
            sender and the subject of every unread row 36px right of every read
@@ -3795,7 +3803,9 @@
                two strings ellipsise instead, the gutters come in to --sp-2 to
                give them back most of what they lost, and the floor is the
                same 38 the three of them measure on a desktop. */
-            .mail-who-card { flex: 1 1 100%; min-width: 0; min-height: 38px; padding: var(--sp-1-5) var(--sp-2); }
+            .mail-who { gap: 0; }
+            .mail-who-card { flex: 1 1 100%; min-width: 0; min-height: var(--row-h); padding: 0; box-shadow: var(--rule-b-soft); }
+            .mail-who-card .mail-presence-pick { height: var(--control-h-lg); min-height: var(--control-h-lg); }
             .mail-who-card .mail-who-name, .mail-who-card .mail-who-load {
                 min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         }
@@ -5545,6 +5555,13 @@
             .tbl-search .tbl-clear::after { left: 0; top: 50%; margin: calc(var(--control-h-lg) / -2) 0 0; width: min(var(--control-h-lg), calc(100% + var(--sp-2) + var(--bw-hairline))); }
             .convo .del::after { left: 0; top: 50%; width: var(--control-h-lg); margin: calc(var(--control-h-lg) / -2) 0 0; }
             .ov-wrap.wg-editing > [data-widget] > .wg-hide::after { left: 0; bottom: 0; width: min(var(--control-h-lg), calc(100% + var(--sp-1))); }
+            /* The Inbox's tick and Claim keep their look and get an invisible 40 square: the tick's is centred on it (12 to
+               each side, in the row's own gap, clear of the sender), Claim's is its own width, so neither covers the other
+               nor the sender, and both sit inside the 44 row. */
+            .mail-claim { position: relative; }
+            .mail-tick::after, .mail-claim::after { content: ""; position: absolute; height: var(--control-h-lg); }
+            .mail-tick::after { left: 50%; top: 50%; width: var(--control-h-lg); margin: calc(var(--control-h-lg) / -2) 0 0 calc(var(--control-h-lg) / -2); }
+            .mail-claim::after { left: 0; right: 0; top: 50%; margin-top: calc(var(--control-h-lg) / -2); }
             /* The Size list's A to Z is one swipeable line of 40 squares rather than four rows of them. */
             .az { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; margin-inline: calc(-1 * var(--sp-1)); padding-inline: var(--sp-1); }
             .az::-webkit-scrollbar { display: none; }
@@ -5554,8 +5571,8 @@
            count, Beta, a change, a priority, a stage) has one shape: 20 tall, a
            4px corner, 12/16 medium text 8 in, a tinted fill and no border (the mix, spec 6). Seventeen
            classes did this job at five heights with four edge styles; each keeps
-           its own tint below, and nothing else. The owner chip on a tinted inbox
-           row keeps its hairline, which is what carries its contrast there. */
+           its own tint below, and nothing else. The Inbox's owner tag is one too
+           (.mail-owner, tinted by the owner's team colour). */
         :is(.pill, .kbadge, .lbl-chip, .crm-prio, .crm-chip, .mail-order-stage, .g-badge,
             .mcount, .mail-crmchip, .crm-badge, .resp-head .tag, .delta, .prod-chip .cmp) {
             display: inline-flex; align-items: center; gap: var(--sp-1); height: var(--tag-h); padding: 0 var(--sp-2);
@@ -11820,11 +11837,16 @@ Projected Image UK"></textarea>
             const t = el('td', 'mem-note');
             const tx = el('div', 'mem-text', m.text || ''); tx.id = 'mem-' + m.id; t.append(tx);
             const bits = [];
-            /* Two states as tags, not sentences (copy plan, Memory #10 and #11). */
+            /* Two states as tags, not sentences (copy plan, Memory #10 and #11). A waiting note also says,
+               visibly, who it is from (what an admin acts on) and, with the tag below, that it is not read. */
             if (waiting) k.append(el('span', 'lbl-chip warn', 'Waiting for an admin'));
+            if (waiting && m.by) bits.push('from ' + m.by);
             if (m.type === 'followup' && m.status !== 'open' && !waiting) bits.push((m.status === 'done' ? 'Done' : 'Dismissed') + ' ' + fmtDate(m.updated || m.created) + (m.closed_by === 'chat' ? ' in chat' : ''));
             if (m.edited) bits.push('corrected');
-            if (!waiting && !sent.has(m.id) && !(m.type === 'followup' && m.status !== 'open')) k.append(el('span', 'lbl-chip note', 'Not read with answers'));
+            /* A waiting note is not read (memSentIds leaves it out), so it carries the tag too; a follow-up that is
+               done or dismissed is closed work and never was. */
+            const closedFollowup = m.type === 'followup' && m.status !== 'open' && !waiting;
+            if (!sent.has(m.id) && !closedFollowup) k.append(el('span', 'lbl-chip note', 'Not read with answers'));
             if (m.status === 'dismissed' && m.type !== 'followup') bits.push('dismissed');
             if (bits.length) t.append(el('div', 'mem-meta', cap(bits.join(' · '))));
             const fromWord = MEM_FROM[m.source] || (m.source ? cap(m.source) : 'Added here');
@@ -14554,7 +14576,7 @@ Projected Image UK"></textarea>
                     when.append(el('div', 'lbl-meta', r.due_at
                         ? (r.state === 'late' ? 'due back ' + fmtDate(r.due_at) + ', overdue'
                             : 'due back ' + fmtDate(r.due_at))
-                        : 'No due date'));
+                        : 'no due date'));
                     row.append(when);
                     const back = el('button', 'btn btn-sm', 'Book back in');
                     back.onclick = async () => {
@@ -26530,7 +26552,7 @@ Projected Image UK"></textarea>
                 rows.forEach(t => all.checked ? mailSel.add(t.id) : mailSel.delete(t.id));
                 paintMailBody();
             };
-            bar.append(all);
+            bar.append(mailTick(all));
             if (!mailSel.size) {
                 bar.append(el('span', 'mail-bulk-hint',
                     rows.length + (rows.length === 1 ? ' email' : ' emails')));
@@ -26770,6 +26792,14 @@ Projected Image UK"></textarea>
             o.title = 'Claimed by ' + (t.owner_name || 'someone on the team');
             return o;
         }
+        /* A tick in a label, so a phone can give it a 40 hit square (an input cannot carry a pseudo-element). A tap
+           on the label ticks the input and goes no further: it must not open the thread under it. */
+        function mailTick(cb) {
+            const lab = el('label', 'mail-tick');
+            lab.onclick = (e) => e.stopPropagation();
+            lab.append(cb);
+            return lab;
+        }
         function mailRow(t) {
             const d = mailCache;
             const row = el('div', 'mrow'
@@ -26794,7 +26824,7 @@ Projected Image UK"></textarea>
                 row.classList.toggle('selected', cb.checked);
                 if (!mailFound) paintMailBulk((mailCache.threads || []).filter(mailCardMatches));
             };
-            row.append(cb);
+            row.append(mailTick(cb));
             const dot = el('span', 'mdot ' + t.state);
             dot.title = { unassigned: 'Nobody has this yet', assigned: 'Assigned',
                           progress: 'In progress', waiting: 'Waiting on the customer',
