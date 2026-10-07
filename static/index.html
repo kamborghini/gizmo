@@ -19579,7 +19579,7 @@ Projected Image UK"></textarea>
 
             body.append(el('p', 'field-help',
                 (row.manufacturer ? row.manufacturer + ' · ' : '') + (row.model || '')
-                + (row.reason ? ' - ' + row.reason : '')));
+                + (row.reason ? ': ' + row.reason : '')));
 
             let pick = 'set';
             const panes = {};
@@ -19646,7 +19646,7 @@ Projected Image UK"></textarea>
                         b.onclick = () => {
                             target = m;
                             targetLine.textContent = 'Will read as: ' + m.model
-                                + (m.size ? ' - ' + m.size + ' mm' : '');
+                                + (m.size ? ', ' + m.size + ' mm' : '');
                             [...hits.children].forEach(c => c.classList.remove('on'));
                             b.classList.add('on');
                         };
@@ -24010,7 +24010,7 @@ Projected Image UK"></textarea>
                     + ', leads ' + c.leads + ', archived leads ' + c.archived_leads
                     + (c.archived_leads_complete ? '' : '+') + ', pipelines ' + c.pipelines
                     + ', users ' + c.users);
-                (r.pipelines || []).forEach(p => L.push('Pipeline: ' + p.name + ' - '
+                (r.pipelines || []).forEach(p => L.push('Pipeline: ' + p.name + ', '
                     + p.deals + ' deals, ' + p.stages + ' stages'));
                 ((r.custom_fields || {}).deals || []).filter(f => f.used_on).forEach(f =>
                     L.push('Deal field: ' + f.name + ' (' + f.type + ') on ' + f.used_on + ' deals'));
@@ -24019,7 +24019,7 @@ Projected Image UK"></textarea>
                 (r.activity_types || []).filter(t => t.used).forEach(t =>
                     L.push('Activity type: ' + t.name + ' x' + t.used));
                 (r.users || []).filter(u => u.deals).forEach(u =>
-                    L.push('Owner: ' + u.name + ' - ' + u.deals + ' deals'));
+                    L.push('Owner: ' + u.name + ', ' + u.deals + ' deals'));
                 cur.forEach(([k, v]) => L.push('Currency: ' + k + ' x' + v));
                 st.forEach(([k, v]) => L.push('Status: ' + k + ' x' + v));
                 (r.warnings || []).forEach(w => L.push('Warning: ' + w));
@@ -24395,7 +24395,7 @@ Projected Image UK"></textarea>
                     const id = e.dataTransfer.getData('text/deal');
                     if (!id) return;
                     try {
-                        if (k === 'won') { await crmOp('/api/crm/deal', { op: 'won', id: id }); toastOk('Deal won - ' + crmMoney((crmCache.deals[id] || {}).value) + '.'); }
+                        if (k === 'won') { await crmOp('/api/crm/deal', { op: 'won', id: id }); toastOk('Deal won: ' + crmMoney((crmCache.deals[id] || {}).value) + '.'); }
                         else if (k === 'lost') { crmLostPrompt(id); return; }
                         else {
                             if (!await uiConfirm('Delete this deal? It can be restored for 30 days.', { title: 'Delete deal', okText: 'Delete' })) { renderCRM(); return; }
@@ -24788,7 +24788,7 @@ Projected Image UK"></textarea>
                 won.onclick = async () => {
                     try {
                         await crmOp('/api/crm/deal', { op: 'won', id: dealId });
-                        toastOk('Deal won - ' + crmMoney(x.value) + '.');
+                        toastOk('Deal won: ' + crmMoney(x.value) + '.');
                         paintDealFresh(m, dealId);
                     } catch (e) { toastError(e.message); }
                 };
