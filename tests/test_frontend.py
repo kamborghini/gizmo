@@ -11793,9 +11793,9 @@ def t_the_forecast_chart_and_lists_match_the_mockup():
        "the label is caption, 600, ink")
     wc = fn_src("function fcWorthCard(latest, sc, al) {")
     ok("all.append(ico(I.chev))" in wc and "I.arrowRight" not in wc, "Show all ends in the chevron, not an arrow")
-    ok("@media (max-width: 1100px) { .rlist.cols-2 { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; } }" in CSS
-       and "@media (max-width: 900px) { .rlist.cols-2" not in CSS,
-       "and the list stacks under 1100, where its 5 is too narrow for a row's words (the audit found one ending in an ellipsis at 1024)")
+    ok("@container fcnumbers (max-width: 1000px) { .rlist.cols-2 { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; } }" in CSS
+       and "@media (max-width: 1100px) { .rlist.cols-2" not in CSS and "@media (max-width: 900px) { .rlist.cols-2" not in CSS,
+       "and the list stacks with the pair above it, by its own width (1000), where its 5 is too narrow for a row's words (the audit found one ending in an ellipsis at 1024)")
 
 
 def _winner(selector, prop):
@@ -11966,6 +11966,22 @@ def t_the_queue_band_is_one_treatment_at_every_width():
        "and so does every order's wash")
     ok(_exact(".q-card .lbl-list > .lbl-grid > :is(.lbl-qrow:is(.on, [aria-selected=\"true\"]), .lbl-preview)::before", "box-shadow") == "var(--ring-selected)",
        "the open order's wash keeps its 2px teal edge beside the pane")
+
+
+@test
+def t_the_numbers_behind_it_stack_with_the_pair_above_it():
+    """Re-review NEW-7 (F7). Worth looking at and Why stack by their own container at 1000; The numbers behind it stacked by
+    the viewport at 1100, so beside an open sidebar the two could disagree (the pair stacked and the list not, or the
+    other way about). The numbers widget is now a container of its own and its list stacks by that, at the same 1000 as the
+    pair: the widgets are the same width in the grid, so both stack together and both are 7 to 5 together."""
+    ok(re.search(r"\.fc-numbers \{ container: fcnumbers / inline-size; \}", CSS), "the numbers widget is the list's container")
+    ok("el('div', 'widget-group fc-numbers'), 'numbers', 'full', 'The numbers behind it'" in SCRIPT, "and the forecast's numbers block carries it")
+    stack = re.search(r"@container fcnumbers \(max-width: (\d+)px\) \{ \.rlist\.cols-2 \{ grid-auto-flow: row; grid-template-columns: minmax\(0, 1fr\); grid-template-rows: none; \} \}", CSS)
+    pair = re.search(r"@container fcpair \(max-width: (\d+)px\) \{ \.fc-cols \{ grid-template-columns: minmax\(0, 1fr\); \} \}", CSS)
+    ok(stack and pair and stack.group(1) == pair.group(1) == "1000", "the list stacks at the same measure as the pair: 1000")
+    ok(CSS.index(".rlist.cols-2 { grid-auto-flow: column;") < stack.start(), "after its base rule")
+    ok("@media (max-width: 1100px) { .rlist.cols-2" not in CSS, "and no viewport rule stacks it any more")
+    ok(CSS.count("rlist.cols-2 {") == 2 and "cols: 2" in SCRIPT and SCRIPT.count("cols: 2") == 1, "only the forecast's numbers use the two-column list")
 
 
 @test

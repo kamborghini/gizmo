@@ -4241,8 +4241,11 @@
             box-shadow: inset 0 0 0 var(--bw-strong) var(--fill-mark); pointer-events: none; }
         .rlist > .rlist-row:first-child, .rlist.cols-2 > .rlist-row:nth-child(odd) { box-shadow: var(--rule-t); }
         .rlist { box-shadow: var(--rule-b); }
-        /* The 5 of the 7 to 5 split is too narrow for a row's words under 1100, so the list stacks there (its labels end in no ellipsis). */
-        @media (max-width: 1100px) { .rlist.cols-2 { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; } }
+        /* The 5 of the 7 to 5 split is too narrow for a row's words under 1000 of the list's own width, so the list stacks there
+           (its labels end in no ellipsis). The forecast's numbers block is the container, at the same measure as the pair
+           above it (.fc-pair), so the two stack together whatever the sidebar takes of the viewport. */
+        .fc-numbers { container: fcnumbers / inline-size; }
+        @container fcnumbers (max-width: 1000px) { .rlist.cols-2 { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; } }
         /* ---------- the table card, to the reference's own measurements ----------
            A toolbar above the table box and a pager below it, both sitting in
            the card's 16px padding with the card's own 16px gap between them.
@@ -16865,7 +16868,7 @@ Projected Image UK"></textarea>
             /* 4. THE NUMBERS BEHIND IT (the mix, spec 8.1 item 6): four list
                rows in two columns, each opening its table in a window. Tables
                carry precise money; the chart above carries the pattern. */
-            const numbers = widget(el('div', 'widget-group'), 'numbers', 'full', 'The numbers behind it');
+            const numbers = widget(el('div', 'widget-group fc-numbers'), 'numbers', 'full', 'The numbers behind it');
             numbers.append(el('div', 'section-title', 'The numbers behind it'));
             box.append(numbers);
             const monthTable = () => {
