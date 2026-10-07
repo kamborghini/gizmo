@@ -1806,7 +1806,9 @@ def t_a_link_is_still_identifiable_without_colour():
         i = style.find("\n        " + sel + " {")
         ok(i >= 0, "the %s rule is still there" % sel)
         body = style[i:style.index("}", i)]
-        ok("text-decoration: underline" in body,
+        # underlined by its own rule or as a member of the ONE LINK recipe (its :is() list carries the underline for them all)
+        recipe = style.split("ONE LINK.")[1][:900].split("{")[0]
+        ok("text-decoration: underline" in body or all(c.strip() in recipe for c in sel.split(",")),
            "%s is underlined, since colour can no longer mark it" % sel)
         ok("text-decoration: none" not in body,
            "%s does not then turn the underline back off" % sel)
@@ -9072,7 +9074,7 @@ def t_the_app_wide_layout_sweep_holds():
         ".mail-bulk-hint { color: inherit; flex: 1 1 0; min-width: 7rem; }": "the bulk hint gives way before the buttons wrap",
         ".ktable td.sizes-notes { color: var(--text-tertiary); font-size: var(--text-xs); line-height: var(--lh-caption); max-width: 0; width: 100%;": "size notes take what is left",
         "@container crmtable (max-width: 640px)": "CRM tables come in on a narrow card",
-        "word-break: normal; overflow-wrap: anywhere; text-underline-offset: 2px;": "contact lines break between words",
+        "word-break: normal; overflow-wrap: anywhere; text-underline-offset: var(--sp-1);": "contact lines break between words",
         ".mown-slot { flex: 0 0 auto; min-width: 88px; max-width: 150px;": "owner chips show a short name whole",
         ".segmented > * { flex: 1 0 auto; justify-content: center; }": "a phone segmented strip fills its line and scrolls rather than wraps",
         "@media (max-width: 1100px) { .metrics.metrics-3 > :nth-child(3):last-child { grid-column: 1 / -1; } }": "a third tile takes the row",
@@ -11982,6 +11984,34 @@ def t_the_numbers_behind_it_stack_with_the_pair_above_it():
     ok(CSS.index(".rlist.cols-2 { grid-auto-flow: column;") < stack.start(), "after its base rule")
     ok("@media (max-width: 1100px) { .rlist.cols-2" not in CSS, "and no viewport rule stacks it any more")
     ok(CSS.count("rlist.cols-2 {") == 2 and "cols: 2" in SCRIPT and SCRIPT.count("cols: 2") == 1, "only the forecast's numbers use the two-column list")
+
+
+@test
+def t_every_link_has_the_one_underline():
+    """Re-review NEW-6 (P8). The ONE LINK recipe is a teal underline in the 35% line at offset 4. The recipe moved some
+    links and left others on the grey underline at offset 2, so the screens held two link styles (Skills' more, a section's
+    link, the proof's open, a mail order's name, a CRM contact line). Now no rule outside the recipe sets an underline
+    colour or an offset of its own: an offset is the recipe's 4 and a colour is the recipe's line, the hover's own colour
+    or none; and the four single-class links are members of the recipe, the CRM contact link carries its tokens."""
+    paper = re.compile(r"label-sheet|day-sheet|loan-sticker|@page|@font-face")
+    bad = []
+    for sel, body in _rules(CSS):
+        if paper.search(sel): continue
+        for m in re.finditer(r"(?<![\w-])text-underline-offset\s*:\s*([^;}]+)", body):
+            if m.group(1).strip() != "var(--sp-1)": bad.append(sel.split("{")[-1].strip()[-50:] + " offset " + m.group(1).strip())
+        for m in re.finditer(r"(?<![\w-])text-decoration-color\s*:\s*([^;}]+)", body):
+            if m.group(1).strip() not in ("var(--link-underline)", "currentColor", "transparent"):
+                bad.append(sel.split("{")[-1].strip()[-50:] + " colour " + m.group(1).strip())
+    ok(not bad, "links with an underline of their own: " + "; ".join(bad))
+    rec = CSS.split("ONE LINK.")[1][:900]
+    ok(":is(.linkish, .miss-open, .lbl-num-link, .modal-order-link, .action-link, .rel-open, .md-a, .followed-link, .sk-more, .seclink, .proof-ext, .mail-order-name) {" in rec
+       and ":is(.linkish, .miss-open, .lbl-num-link, .modal-order-link, .action-link, .rel-open, .md-a, .followed-link, .sk-more, .seclink, .proof-ext, .mail-order-name):hover {" in rec,
+       "Skills' more, a section's link, the proof's open and a mail order's name are in the recipe, hover and all")
+    for sel in (".sk-more", ".seclink", ".proof-ext", ".mail-order-name"):
+        ok(not re.search(r"\n\s*(@media \(hover: hover\) \{ )?" + re.escape(sel) + r"(:hover)? \{[^}]*text-decoration", CSS), sel + " keeps no underline rule of its own")
+    crm = _winner(".crm-cline a", "text-decoration-color")
+    ok(crm == "var(--link-underline)" and _winner(".crm-cline a", "text-underline-offset") == "var(--sp-1)", "the CRM contact link carries the recipe's tokens")
+    ok("@media (hover: hover) { .crm-cline a:hover { text-decoration-color: currentColor; } }" in CSS, "and turns teal under the pointer like the rest")
 
 
 @test
