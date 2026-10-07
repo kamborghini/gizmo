@@ -10832,9 +10832,9 @@ def t_an_order_row_is_a_hairline_row_and_the_open_one_is_one_block():
     ok(".swap > .gone { visibility: hidden; }" in CSS, "the toggle's other word holds its width")
     frame = CSS.split("\n        .lbl-frame {")[1].split("}")[0]
     ok("box-shadow: var(--shadow-label)" in frame and "border-radius: var(--radius-control)" in frame, "the label's frame")
-    phone = CSS[CSS.index("/* A list as narrow as a phone's: worded 40 buttons"):][:1100]
+    phone = CSS[CSS.index("/* A list as narrow as a phone's: worded 40 buttons"):][:2200]
     ok("grid-template-columns: repeat(6, minmax(0, 1fr))" in phone and ".lbl-qrow .lbl-actions .lbl-btn-txt { display: inline; }" in phone
-       and ".lbl-qrow { padding: var(--sp-3) 0;" in phone,
+       and "padding: var(--sp-3) 0; row-gap: var(--sp-1); }" in phone,
        "on a phone the buttons keep their words in a grid, three then two, and the words stay on the text edge")
     ok(".lbl-row { flex-wrap: wrap; padding: var(--sp-3); }\n            .lbl-qrow { padding-inline: 0; }" in CSS,
        "the shared phone rule that pads every .lbl-row 12 in does not pad the queue's (found in the rig at 390)")
@@ -10935,7 +10935,7 @@ def t_the_production_manager_fix_round_one():
     qc = fn_src("function queueCounters(")
     ok("if (n != null) { const c = el('span', 'cnt', String(n));" in qc and "[k, l, icon, n, unit]" in qc, "a tab can carry a count")
     pq = fn_src("function prodQueues(onPick, tabCounts) {")
-    ok("[QUEUE[3][0], QUEUE[3][1], I.check, tabCounts && tabCounts.dispatched, 'orders']" in pq, "Complete's count is the loaded list's")
+    ok("[QUEUE[3][0], QUEUE[3][1], I.checkCircle, tabCounts && tabCounts.dispatched, 'orders']" in pq, "Complete's count is the loaded list's")
     ok("prodQueues((k) => { queueMode = k; labelsCache = null; labelSel = null; labelsFilter = 'all'; loadLabels(true); }, dispatched ? { dispatched: orders.length } : null)" in fn,
        "the queue page passes it when Complete is open")
     cq = fn_src("async function renderCustomQueue(box) {")
@@ -11786,6 +11786,52 @@ def t_the_forecast_chart_and_lists_match_the_mockup():
        "the label is caption, 600, ink")
     wc = fn_src("function fcWorthCard(latest, sc, al) {")
     ok("all.append(ico(I.chev))" in wc and "I.arrowRight" not in wc, "Show all ends in the chevron, not an arrow")
+
+
+@test
+def t_the_production_manager_and_its_phone_head_match_the_mockup():
+    """Final review P1 to P8 and F8 (the mockup's Production Manager and Forecast phone head). Only the look moves: the
+    queue's rows, words, buttons and order are the queue guards' business. The queue runs edge to edge of the sheet with a
+    rule above the toolbar and above the list, a rule under each order and the open order's wash and 2px teal edge across
+    the sheet; Newest first has the sort glyph; the toolbar's two buttons are an equal pair on a phone; the date shows on a
+    phone at the right of the number's line, the name 4 under it and the buttons 12 under that; Refresh and More are two
+    squares at the title's right; Complete's icon is circled; the order number's underline is the link underline at
+    offset 4 and its date is body; and the Customise control is a 40 icon button, named Customise, at a phone's title."""
+    ok(".q-card { position: relative; padding-top: var(--sp-4); }" in CSS, "the queue card holds the rule above its toolbar")
+    ok(".q-card::before, .q-card > .lbl-list > .lbl-grid::before { content: \"\"; position: absolute; top: 0; inset-inline: calc(-1 * var(--wrap-pad));" in CSS,
+       "a rule above the toolbar and another above the list, each the sheet's width")
+    ok("::after { content: \"\"; position: absolute; bottom: 0; inset-inline: calc(-1 * var(--wrap-pad));" in CSS, "a rule under every order across the sheet")
+    ok(".q-card > .lbl-list > .lbl-grid > :last-child::after { background: var(--border-default); }" in CSS, "the last one a little stronger")
+    ok("{ background: var(--action-selected); box-shadow: var(--ring-selected); }" in CSS.split(".q-card > .lbl-list > .lbl-grid > :is(.lbl-qrow:is(.on")[1][:260],
+       "the open order's wash spans the sheet with the 2px teal edge from --ring-selected")
+    ok("inset: 0 calc(-1 * var(--wrap-pad))" in CSS, "and its band is drawn past the text edge by the gutter, so the words stay on it")
+    oldf = fn_src("function renderLabels() {") if "function renderLabels() {" in SCRIPT else SCRIPT
+    ok("oldf.append(ico(I.sort), document.createTextNode(labelsOldest ? 'Oldest first' : 'Newest first'));" in oldf, "Newest first has the sort glyph, its words unchanged")
+    ok("I.checkCircle, tabCounts && tabCounts.dispatched, 'orders']" in SCRIPT, "Complete's icon is the circled check")
+    ok(".q-card .tbl-tools-r > .btn { flex: 1 1 0; min-width: 0; }" in CSS and ".q-card .tbl-tools-r > select { flex: 1 1 100%; }" in CSS,
+       "on a phone the two toolbar buttons are an equal pair and the size choice a line of its own")
+    qc = CSS.split("@container queue (max-width: 559px) { .lbl-qrow .lbl-actions { min-width: max-content; } }")[0]
+    ok(".lbl-qrow .lbl-meta { display: none; }" not in CSS, "the date is no longer hidden on a phone")
+    ok(".lbl-qrow > .lbl-meta { grid-area: 1 / 2; justify-self: end;" in CSS and ".lbl-qrow > .lbl-num { grid-area: 1 / 1; justify-self: start; min-width: 0; }" in CSS,
+       "the number is left on the first line and the date right")
+    ok("align-items: center; padding: var(--sp-3) 0; row-gap: var(--sp-1); }" in CSS and ".lbl-qrow > .lbl-actions { grid-column: 1 / -1; margin-top: var(--sp-2); }" in CSS,
+       "the name is 4 under the number and the buttons 12 under the name (4 and 8)")
+    ok(".lbl-qrow .lbl-meta { font-size: var(--text-body); line-height: var(--lh-control);" in CSS, "an order's date reads as body")
+    ok("text-underline-offset: var(--sp-1); text-decoration-color: var(--link-underline); }" in CSS.split("ONE LINK.")[1][:700], "the link recipe's underline is the teal 35% at offset 4")
+    ok(".lbl-num-link, .modal-order-link, .action-link { color: var(--text-brand); text-decoration: underline; text-underline-offset: var(--sp-1); text-decoration-color: var(--link-underline); }" in CSS,
+       "and so is the order number's own")
+    ok(".ov-hero.pm-head > .ph-text { padding-right: calc(2 * var(--control-h-lg) + var(--control-gap) + var(--sp-2)); }" in CSS
+       and ".pm-head .ph-sub > .info { position: absolute; top: calc((var(--lh-title) - var(--control-h-lg)) / 2); right: calc(var(--control-h-lg) + var(--control-gap));" in CSS,
+       "Refresh is a 40 square beside More at the title's right, left in the status line in the markup so the tab order is the same")
+    ok("margin-top: calc((var(--lh-title) - var(--control-h-lg)) / 2);" in CSS.split(".ov-hero.pm-head .more-btn {")[1][:300] and "align-self: start" in CSS.split(".ov-hero.pm-head .more-btn {")[1][:300],
+       "and More is level with the title, not a line lower")
+    ok("hero.querySelector('.ov-hero-act')" in SCRIPT and "[pnBtn, coll, newShip, more].filter(Boolean).forEach(b => heroActs.append(b));" in SCRIPT,
+       "the header's buttons are still added in their order")
+    # Forecast's phone head and every widget grid's Customise
+    ok("b.append(el('span', 'wg-txt', text));" in SCRIPT and "cust.setAttribute('aria-label', 'Customise');" in SCRIPT, "Customise keeps its name when its word is hidden")
+    ok("[data-wg-customize] { position: absolute; top: calc((var(--lh-title) - var(--control-h-lg)) / 2); right: 0;" in CSS and "[data-wg-customize] .wg-txt { display: none; }" in CSS,
+       "on a phone it is a 40 icon button at the title's right")
+    ok("#view-forecast .ov-hero-act > .btn:not([data-wg-customize]) { flex: 1 1 0; min-width: 0; }" in CSS, "and Forecast's How it works and Upload workbook are an equal pair")
 
 
 @test

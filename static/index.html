@@ -942,6 +942,14 @@
             .ov-hero-act:has(> [data-wg-control]) { flex-wrap: wrap; }
             .ov-hero-act:has(> [data-wg-control]) > .ov-updated { flex: 1 1 100%; }
             .ov-hero-act:has(> [data-wg-control]) > .btn { flex: none; }
+            /* The widget grid's Customise is a 40 icon button at the title's right on a phone (named Customise by its
+               aria-label), as More is on the Production Manager; Forecast's two words are an equal pair (the mockup's .m-acts). */
+            .ov-hero:has(> .ov-hero-act > [data-wg-customize]) { position: relative; }
+            .ov-hero:has(> .ov-hero-act > [data-wg-customize]) > .ph-text { padding-right: calc(var(--control-h-lg) + var(--sp-2)); }
+            [data-wg-customize] { position: absolute; top: calc((var(--lh-title) - var(--control-h-lg)) / 2); right: 0; margin: 0; padding: 0;
+                width: var(--control-h-lg); min-width: var(--control-h-lg); justify-content: center; }
+            [data-wg-customize] .wg-txt { display: none; }
+            #view-forecast .ov-hero-act > .btn:not([data-wg-customize]) { flex: 1 1 0; min-width: 0; }
         }
         /* KPI cards: uppercase micro-label + large figure + colored delta */
         /* A floor AND a ceiling. auto-fill with only a floor turned a 2,560px
@@ -2622,7 +2630,7 @@
         .lbl-list { container: queue / inline-size; }
         /* Below the shared tracks the row is flex: the rail reserves what it
            needs and the name ellipsises instead. */
-        @container queue (max-width: 559px) { .lbl-qrow .lbl-meta { display: none; } .lbl-qrow .lbl-actions { min-width: max-content; } }
+        @container queue (max-width: 559px) { .lbl-qrow .lbl-actions { min-width: max-content; } }
         /* A list this narrow is a phone's, whatever the window: a tablet with
            the sidebar open gave the list 435px, the buttons kept their full
            width beside the name, and the customer's name showed as "C". The
@@ -2713,6 +2721,8 @@
         .lbl-qrow:is(.on, [aria-selected="true"]):has(+ .lbl-preview) {
             box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected), calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected); }
         .lbl-qrow .lbl-name { font-size: var(--text-sm); font-weight: var(--weight-medium); }
+        /* An order's date reads as body (13/20), like the mockup's .dt; the lists that share .lbl-meta keep the caption. */
+        .lbl-qrow .lbl-meta { font-size: var(--text-body); line-height: var(--lh-control); font-variant-numeric: tabular-nums; }
         .lbl-actions .grp { margin-left: calc(var(--gap-cluster) - var(--control-gap)); }
         .swap { display: inline-grid; }
         .swap > span { grid-area: 1 / 1; text-align: center; }
@@ -2729,11 +2739,32 @@
         /* The label draws its edge from --border-strong (a frozen rule). Whatever that shared grey becomes,
            the label inside its frame keeps the edge it had. */
         .lbl-frame { --border-strong: var(--paper-edge); }
+        /* THE QUEUE RUNS EDGE TO EDGE OF THE SHEET (the mockup's .pm and .orders; the Production Manager only, and not
+           beside the preview pane from 1500): a rule above the toolbar and another above the list, a rule under every
+           order across the sheet, and the open order's wash and its 2px teal edge spanning the sheet. The words stay on
+           the text edge; the bands are drawn past it by the gutter. */
+        .q-card { position: relative; padding-top: var(--sp-4); }
+        .q-card::before, .q-card > .lbl-list > .lbl-grid::before { content: ""; position: absolute; top: 0; inset-inline: calc(-1 * var(--wrap-pad));
+            height: var(--bw-hairline); background: var(--border-default); pointer-events: none; }
+        .q-card > .lbl-list > .lbl-grid { position: relative; box-shadow: none; }
+        .q-card > .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview) { position: relative; isolation: isolate; background: none; box-shadow: none; }
+        .q-card > .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::before { content: ""; position: absolute; z-index: -1; inset: 0 calc(-1 * var(--wrap-pad)); pointer-events: none; }
+        .q-card > .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::after { content: ""; position: absolute; bottom: 0; inset-inline: calc(-1 * var(--wrap-pad));
+            height: var(--bw-hairline); background: var(--border-soft); pointer-events: none; }
+        .q-card > .lbl-list > .lbl-grid > :last-child::after { background: var(--border-default); }
+        .q-card > .lbl-list > .lbl-grid > .lbl-qrow:has(+ .lbl-preview)::after { display: none; }
+        @media (hover: hover) { .q-card > .lbl-list > .lbl-grid > .lbl-qrow:hover::before { background: var(--surface-secondary); } }
+        .q-card > .lbl-list > .lbl-grid > :is(.lbl-qrow:is(.on, [aria-selected="true"]), .lbl-preview)::before { background: var(--action-selected); box-shadow: var(--ring-selected); }
         /* A list as narrow as a phone's: worded 40 buttons in a grid, three on
            the first line and two on the second (the mix, spec 8.2); the label
            is scaled there, so its frame draws no shadow. */
         @container queue (max-width: 559px) {
-            .lbl-qrow { padding: var(--sp-3) 0; row-gap: var(--sp-3); }
+            /* The number and the date on one line, the name 4 under it, the buttons 12 under that (the mockup's .m-orow). */
+            .lbl-qrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; padding: var(--sp-3) 0; row-gap: var(--sp-1); }
+            .lbl-qrow > .lbl-num { grid-area: 1 / 1; justify-self: start; min-width: 0; }
+            .lbl-qrow > .lbl-meta { grid-area: 1 / 2; justify-self: end; width: auto; margin: 0; padding: 0; }
+            .lbl-qrow > .lbl-who { grid-column: 1 / -1; }
+            .lbl-qrow > .lbl-actions { grid-column: 1 / -1; margin-top: var(--sp-2); }
             .lbl-qrow .lbl-actions { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--control-gap); }
             .lbl-qrow .lbl-actions > .btn { grid-column: span 2; padding: 0 var(--sp-2); justify-content: center; }
             .lbl-qrow .lbl-actions > .btn:nth-child(n+4) { grid-column: span 3; }
@@ -2755,8 +2786,17 @@
             .ov-hero.pm-head > .ov-hero-act { display: contents; }
             .ov-hero.pm-head > .ov-hero-act > .btn { margin: 0; }
             .ov-hero.pm-head > .ov-hero-act > .btn-primary { grid-column: 1 / -1; }
-            .ov-hero.pm-head .more-btn { grid-column: 2; grid-row: 1; justify-self: end; align-self: end; margin-bottom: var(--control-gap);
+            .ov-hero.pm-head .more-btn { grid-column: 2; grid-row: 1; justify-self: end; align-self: start;
+                margin-top: calc((var(--lh-title) - var(--control-h-lg)) / 2);
                 width: var(--control-h-lg); min-width: var(--control-h-lg); padding: 0; }
+            /* Refresh and More are two 40 squares at the title's right, the status line keeping its words and no glyph
+               (the mockup's phone head). Refresh stays in the status line in the markup, so the tab order is unchanged. */
+            .ov-hero.pm-head { position: relative; }
+            .ov-hero.pm-head > .ph-text { padding-right: calc(2 * var(--control-h-lg) + var(--control-gap) + var(--sp-2)); }
+            .pm-head .ph-sub > .info { position: absolute; top: calc((var(--lh-title) - var(--control-h-lg)) / 2); right: calc(var(--control-h-lg) + var(--control-gap));
+                width: var(--control-h-lg); height: var(--control-h-lg); margin: 0; padding: 0; align-content: normal; place-items: center;
+                border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-control); background: var(--surface-primary); box-shadow: var(--shadow-control); }
+            .pm-head .ph-sub > .info::before { inset: 0; top: 0; width: auto; height: auto; margin: 0; border-radius: inherit; }
             .pm-head .more-txt, .pm-head .more-btn > .ic:nth-child(2) { display: none; }
             .pm-head .more-btn > .ic:nth-child(3) { display: inline-flex; }
         }
@@ -3912,7 +3952,7 @@
         /* An order number that is a door still has to sit in the same column as
            one that is not, so the link takes only the colour: .lbl-num keeps the
            14px tabular geometry and the 92px column. */
-        .lbl-num-link, .modal-order-link, .action-link { color: var(--text-brand); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); }
+        .lbl-num-link, .modal-order-link, .action-link { color: var(--text-brand); text-decoration: underline; text-underline-offset: var(--sp-1); text-decoration-color: var(--link-underline); }
         @media (hover: hover) { .lbl-num-link:hover, .modal-order-link:hover { text-decoration: underline; } }
         .label-sheet .ls-dead { border: var(--bw-marker) solid var(--paper-ink); font-size: 1.68em; font-weight: var(--weight-semibold); letter-spacing: .04em;
             text-align: center; padding: .35em .4em; margin-bottom: .7em; }
@@ -4209,6 +4249,11 @@
             .tbl-tools { gap: var(--sp-2); }
             .tbl-tools-l, .tbl-tools-r { display: contents; }
             .tbl-tools .tbl-search { flex: 1 1 100%; } }
+        /* The Production Manager's toolbar buttons are an equal pair on a phone (the mockup's .m-two), its size choice a line of its own. */
+        @media (max-width: 640px) {
+            .q-card .tbl-tools-r > .btn { flex: 1 1 0; min-width: 0; }
+            .q-card .tbl-tools-r > select { flex: 1 1 100%; }
+        }
         /* THE SEARCH FIELD (the mix, spec 6): one 32 well, 280 wide, its 16
            glyph 12 in and 8 from the words, the clear button at its end. The
            input fills the field and runs under its two hairlines, so the whole
@@ -5604,7 +5649,7 @@
            the size of the text around it unless the place sets one. Links came in
            seven styles: teal, ink, grey, underlined or not, 12px or body size. */
         :is(.linkish, .miss-open, .lbl-num-link, .modal-order-link, .action-link, .rel-open, .md-a, .followed-link) {
-            color: var(--text-link); text-decoration: underline; text-decoration-color: var(--border-emphasis); }
+            color: var(--text-link); text-decoration: underline; text-underline-offset: var(--sp-1); text-decoration-color: var(--link-underline); }
         @media (hover: hover) { :is(.linkish, .miss-open, .lbl-num-link, .modal-order-link, .action-link, .rel-open, .md-a, .followed-link):hover {
             text-decoration-color: currentColor; } }
         /* A table of contents is a list of places, not running text: teal names
@@ -7465,7 +7510,7 @@ Projected Image UK"></textarea>
                 if (b.dataset.wgText === text) return;
                 b.textContent = '';
                 if (icon) b.append(ico(icon));
-                b.append(document.createTextNode(text));
+                b.append(el('span', 'wg-txt', text));
                 b.dataset.wgText = text;
             };
             const want = [];
@@ -7488,6 +7533,7 @@ Projected Image UK"></textarea>
                 cust.setAttribute('data-wg-customize', '');
                 wgAttr(cust, 'aria-pressed', 'false');
                 label(cust, 'Customise', I.settings);
+                cust.setAttribute('aria-label', 'Customise');
                 const off = wgLayouts === false ? 'Layouts are unavailable right now' : wgLayouts === null ? 'Loading your layout' : null;
                 if (cust.disabled !== !!off) cust.disabled = !!off;
                 wgAttr(cust, 'title', off);
@@ -13382,7 +13428,7 @@ Projected Image UK"></textarea>
         function prodQueues(onPick, tabCounts) {
             const n = labelsCounts || {};
             return queueCounters(QUEUE.slice(0, 3).map(q => [q[0], q[1], n[q[0]]]),
-                [[QUEUE[3][0], QUEUE[3][1], I.check, tabCounts && tabCounts.dispatched, 'orders'], [QUEUE[4][0], QUEUE[4][1], I.box]], queueMode, onPick, 'Queues');
+                [[QUEUE[3][0], QUEUE[3][1], I.checkCircle, tabCounts && tabCounts.dispatched, 'orders'], [QUEUE[4][0], QUEUE[4][1], I.box]], queueMode, onPick, 'Queues');
         }
         /* The count of a loaded list on a tab, in the tabs' own .cnt (Complete and Custom shipments lost the
            one their card titles carried; the server's counts cover the flow's three queues only). */
@@ -19042,7 +19088,7 @@ Projected Image UK"></textarea>
                 }, 180);
             };
             const oldf = el('button', 'btn btn-sm' + (labelsOldest ? ' on' : ''));
-            oldf.append(document.createTextNode(labelsOldest ? 'Oldest first' : 'Newest first'));
+            oldf.append(ico(I.sort), document.createTextNode(labelsOldest ? 'Oldest first' : 'Newest first'));
             oldf.title = 'Flip the queue order';
             oldf.onclick = () => { labelsOldest = !labelsOldest; renderLabels(); };
             bar.append(oldf);
