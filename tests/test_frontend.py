@@ -10929,7 +10929,7 @@ def t_the_production_manager_fix_round_one():
     ok("more.classList.add('more-btn');" in fn and "more.setAttribute('aria-label', 'More');" in fn and "el('span', 'more-txt', 'More')" in fn
        and "ico(I.moreH)" in fn and "hero.classList.add('pm-head');" in fn, "More keeps its word and its name; a phone shows it as dots")
     ok("moreH: SV(" in SCRIPT, "the dots glyph")
-    ph = CSS[CSS.index("/* THE PRODUCTION MANAGER'S PHONE HEADER"):][:4600]
+    ph = CSS[CSS.index("/* THE PRODUCTION MANAGER'S PHONE HEADER"):][:6400]
     ok(".ov-hero.pm-head { display: grid;" in ph and ".ov-hero.pm-head > .ov-hero-act { display: contents; }" in ph
        and ".ov-hero.pm-head > .ov-hero-act > .more-btn {" in ph and "grid-column: 1 / -1;" in ph and "grid-column: 2; grid-row: 1;" in ph,
        "the head is a grid: the text and More on the first row, Print new on a full row, then two equal buttons")
@@ -12012,6 +12012,28 @@ def t_every_link_has_the_one_underline():
     crm = _winner(".crm-cline a", "text-decoration-color")
     ok(crm == "var(--link-underline)" and _winner(".crm-cline a", "text-underline-offset") == "var(--sp-1)", "the CRM contact link carries the recipe's tokens")
     ok("@media (hover: hover) { .crm-cline a:hover { text-decoration-color: currentColor; } }" in CSS, "and turns teal under the pointer like the rest")
+
+
+@test
+def t_custom_shipments_refresh_is_the_same_square_as_the_other_queues():
+    """Re-review observation (uniformity). The Custom shipments tab showed Refresh as a bare glyph on its status line while the
+    other four queue tabs show it as a 40 square at the title's right. Its head is now the Production Manager's phone
+    head: the same square at the right edge (it has no More beside it, and none is invented), the title with the room
+    to its left, and its one action, New shipment, still a full-width button. The queue's content and actions are as
+    they were."""
+    cq = fn_src("async function renderCustomQueue(box) {")
+    ok("head.classList.add('pm-head');" in cq and "box.append(head);" in cq and "actions: [newShip]" in cq,
+       "the tab's head is the queue head, with its one action as before")
+    ok("More" not in cq.split("box.append(prodQueues")[0], "and no More menu is invented for it")
+    ok(not re.search(r"\bmore\b\s*=", cq.split("box.append(prodQueues")[0]), "nor a more button")
+    pad = _phone_rule(".ov-hero.pm-head:not(:has(.more-btn)) > .ph-text")
+    ok(pad and "padding-right: calc(var(--control-h-lg) + var(--sp-2))" in pad, "the title has the one square's room on its right")
+    sq = _phone_rule(".pm-head:not(:has(.more-btn)) .ph-sub > .info")
+    ok(sq and "right: 0" in sq, "and Refresh is that square at the edge, with no More beside it")
+    one = _phone_rule(".ov-hero.pm-head > .ov-hero-act > .btn:only-child")
+    ok(one and "grid-column: 1 / -1" in one, "a lone action takes the row, as New shipment did")
+    ok(CSS.index(".ov-hero.pm-head > .ph-text { padding-right: calc(2 * var(--control-h-lg)") < CSS.index(".ov-hero.pm-head:not(:has(.more-btn)) > .ph-text"),
+       "after the rules they refine")
 
 
 @test
