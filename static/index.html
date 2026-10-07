@@ -2809,9 +2809,13 @@
             .ov-hero.pm-head > .ph-text > h2 { grid-column: 1 / -1; grid-row: 1; }
             .pm-head .ph-sub > .live-dot { grid-row: 2; grid-column: 1; }
             .pm-head .ph-sub > .ov-updated { grid-row: 2; grid-column: 2; }
-            .pm-head .ph-title > .info { grid-row: 2; grid-column: 3; margin-block: calc((var(--lh-control) - var(--control-h-lg)) / 2); }
-            /* The (i)'s 40 target leans 10 above its line, so the title's line keeps that much clear of it. */
-            .ov-hero.pm-head > .ph-text:has(> .ph-title > .info) { row-gap: calc((var(--control-h-lg) - var(--lh-control)) / 2); }
+            /* Its 40 target leans DOWN as the status line's Refresh does (the shared header's construction): 4 above the 20 line
+               to 16 below it, the glyph centred on the line by padding, so the status line is 4 under the title with the target
+               never reaching the title's box. */
+            .pm-head .ph-title > .info { grid-row: 2; grid-column: 3; align-content: start;
+                margin-block: calc(-1 * var(--sp-1)) calc(var(--lh-control) - var(--control-h-lg) + var(--sp-1));
+                padding-top: calc(var(--sp-1) + (var(--lh-control) - var(--icon-md)) / 2); }
+            .pm-head .ph-title > .info::before { top: calc(var(--sp-1) + var(--lh-control) / 2); }
             .pm-head .more-txt, .pm-head .more-btn > .ic:nth-child(2) { display: none; }
             .pm-head .more-btn > .ic:nth-child(3) { display: inline-flex; }
         }
