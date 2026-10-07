@@ -2188,7 +2188,7 @@
         .sk-body { font-size: var(--text-body); line-height: var(--lh-prose); color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; margin-top: var(--sp-2); max-width: var(--measure); }
         .sk-body.clamped { max-height: calc(var(--lh-prose) * 1em * 5); overflow: hidden; -webkit-mask-image: linear-gradient(180deg, var(--black) 58%, transparent); mask-image: linear-gradient(180deg, var(--black) 58%, transparent); }
         .sk-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-4); margin-top: var(--sp-2); }
-        .sk-more { background: transparent; border: 0; color: var(--text-brand); font: inherit; font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); }
+        .sk-more { background: transparent; border: 0; font: inherit; font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); padding: 0; cursor: pointer; }
         .sk-meta { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
         .sk-when { font-size: var(--text-body); color: var(--text-secondary); margin: var(--sp-1-5) 0 0; max-width: var(--measure); line-height: var(--lh-control); }
         .sk-body.md { white-space: normal; }
@@ -2245,7 +2245,7 @@
             padding: var(--sp-2) var(--sp-3); white-space: pre-wrap; overflow-wrap: anywhere; line-height: var(--lh-caption); }
         .md-quote { border-left: var(--bw-hairline) solid var(--border-emphasis); padding-left: var(--sp-3); color: var(--text-secondary); }
         .md-hr { border: 0; border-top: var(--bw-hairline) solid var(--border-default); margin: var(--sp-3) 0; }
-        .md-a { color: var(--text-primary); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); overflow-wrap: anywhere; }
+        .md-a { overflow-wrap: anywhere; }
         .md-task { color: var(--text-tertiary); }
         .md .prose-table { max-width: 100%; }
         /* How they are used: a term and its facts, in two columns. */
@@ -2281,8 +2281,7 @@
         .pchat-send { flex-shrink: 0; padding: 0; width: var(--control-h); height: var(--control-h); min-height: var(--control-h); display: grid; place-items: center; }
         .pchat-send svg { width: var(--icon-md); height: var(--icon-md); }
         /* customer sector selector */
-        .seclink { background: transparent; border: 0; color: var(--text-brand); font: inherit; font-weight: var(--weight-medium); cursor: pointer; padding: 0; text-align: left; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); }
-        @media (hover: hover) { .seclink:hover { text-decoration: underline; } }
+        .seclink { background: transparent; border: 0; font: inherit; font-weight: var(--weight-medium); cursor: pointer; padding: 0; text-align: left; }
         /* what-changed digest */
         .changes-strip { margin: var(--sp-0-5) 0 var(--sp-6); }
         .changes-head { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-tertiary); display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
@@ -2965,9 +2964,7 @@
         .proof-body { padding: 0 !important; overflow: hidden !important; }
         .proof-frame { display: block; width: 100%; height: min(76vh, 820px); border: 0;
             border-radius: 0 0 var(--radius-card) var(--radius-card); background: var(--surface-primary); }
-        .proof-ext { margin-left: auto; margin-right: var(--sp-3); font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-brand);
-            text-decoration: underline; font-weight: var(--weight-medium); text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); }
-        @media (hover: hover) { .proof-ext:hover { text-decoration: underline; } }
+        .proof-ext { margin-left: auto; margin-right: var(--sp-3); font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); }
         /* ---- production lifecycle segments + dispatch ---- */
         /* flex-wrap, not nowrap: at 375px a five-item bar measured 422px wide,
            so its LAST segment sat past the viewport with nothing scrolling -
@@ -3538,9 +3535,7 @@
         .mail-order { border-top: var(--bw-hairline) solid var(--border-default); padding: var(--sp-2) 0 var(--sp-1); }
         .mail-order:first-of-type { border-top: 0; padding-top: 0; }
         .mail-order-top { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
-        .mail-order-name { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-brand);
-            text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); }
-        @media (hover: hover) { .mail-order-name:hover { text-decoration: underline; } }
+        .mail-order-name { font-size: var(--text-body); font-weight: var(--weight-medium); }
         .mail-order-stage { display: inline-flex; align-items: center; font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); border-radius: var(--radius-tag); padding: 0 var(--sp-2); }
         .mail-order-stage.shipped { background: var(--success-bg); color: var(--success); }
         .mail-order-stage.made { background: var(--action-soft); color: var(--text-brand); }
@@ -3554,7 +3549,7 @@
             border: var(--bw-hairline) solid var(--action-line); border-radius: var(--radius-inset);
             padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-2); }
         .linkish { border: 0; background: none; padding: 0; font: inherit; font-size: var(--text-xs); line-height: var(--lh-caption);
-            font-weight: var(--weight-medium); color: var(--text-link); text-decoration: underline; cursor: pointer; text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); }
+            font-weight: var(--weight-medium); cursor: pointer; }
         .mrule { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-2); }
         .mrule-head { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
         .mrule-name { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); }
@@ -3764,7 +3759,8 @@
         .crm-ta-sub { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
         .crm-cline { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1-5) 0; font-size: var(--text-body); }
         .crm-cline svg { width: var(--icon-md); height: var(--icon-md); color: var(--text-tertiary); flex: none; }
-        .crm-cline a { color: var(--text-brand); text-decoration: underline; word-break: normal; overflow-wrap: anywhere; text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); }
+        .crm-cline a { color: var(--text-brand); text-decoration: underline; word-break: normal; overflow-wrap: anywhere; text-underline-offset: var(--sp-1); text-decoration-color: var(--link-underline); }
+        @media (hover: hover) { .crm-cline a:hover { text-decoration-color: currentColor; } }
         .crm-cf { display: grid; grid-template-columns: minmax(90px, 150px) 1fr; gap: var(--sp-1) var(--sp-2-5);
             font-size: var(--text-body); }
         .crm-cf-k { color: var(--text-tertiary); font-size: var(--text-xs); line-height: var(--lh-caption); padding-top: var(--sp-0-5); }
@@ -3975,7 +3971,7 @@
         .miss-row b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
         .miss-co { color: var(--text-primary); font-weight: var(--weight-medium); }
         .miss-queue { margin-left: auto; padding: var(--sp-1) var(--sp-2); font-size: var(--text-xs); line-height: var(--lh-caption); }
-        .miss-open { color: var(--text-brand); text-decoration: underline; font-weight: var(--weight-medium); text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); cursor: pointer; }
+        .miss-open { font-weight: var(--weight-medium); cursor: pointer; }
         @media (hover: hover) { .miss-open:hover { text-decoration: underline; } }
         /* An order number that is a door still has to sit in the same column as
            one that is not, so the link takes only the colour: .lbl-num keeps the
@@ -5024,7 +5020,7 @@
         .followed > .ic { display: inline-grid; }
         .followed > .ic { place-items: center; margin-right: var(--sp-0-5); }
         .followed > .ic svg { width: var(--icon-xs); height: var(--icon-xs); display: block; }
-        .followed-link { color: var(--text-secondary); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--border-emphasis); cursor: pointer; }
+        .followed-link { cursor: pointer; }
         /* The AI summary, a section of its own (the mix, spec 8.3): body copy at
            the reading measure, the skills it followed 8 under it. */
         .ai-summary-text { margin: 0; color: var(--text-secondary); max-width: var(--measure); }
@@ -5276,7 +5272,7 @@
             /* The only way into a folder was the 20px line box of its name.
                The padding is the touch target; the negative margin cancels
                its effect on the row, which keeps its old height. */
-            padding: var(--control-pad-y) 0; margin: calc(-1 * var(--control-pad-y)) 0; text-decoration: none; text-underline-offset: 2px; }
+            padding: var(--control-pad-y) 0; margin: calc(-1 * var(--control-pad-y)) 0; text-decoration: none; text-underline-offset: var(--sp-1); }
         /* The underline is the hover, not the resting state: drawn at rest it
            striped every name in the list and told the reader nothing. */
         @media (hover: hover) { .files-name:hover { color: var(--text-brand); text-decoration: underline; } }
@@ -5676,9 +5672,9 @@
         /* ONE LINK. Teal, underlined in a quiet line that turns teal on hover, at
            the size of the text around it unless the place sets one. Links came in
            seven styles: teal, ink, grey, underlined or not, 12px or body size. */
-        :is(.linkish, .miss-open, .lbl-num-link, .modal-order-link, .action-link, .rel-open, .md-a, .followed-link) {
+        :is(.linkish, .miss-open, .lbl-num-link, .modal-order-link, .action-link, .rel-open, .md-a, .followed-link, .sk-more, .seclink, .proof-ext, .mail-order-name) {
             color: var(--text-link); text-decoration: underline; text-underline-offset: var(--sp-1); text-decoration-color: var(--link-underline); }
-        @media (hover: hover) { :is(.linkish, .miss-open, .lbl-num-link, .modal-order-link, .action-link, .rel-open, .md-a, .followed-link):hover {
+        @media (hover: hover) { :is(.linkish, .miss-open, .lbl-num-link, .modal-order-link, .action-link, .rel-open, .md-a, .followed-link, .sk-more, .seclink, .proof-ext, .mail-order-name):hover {
             text-decoration-color: currentColor; } }
         /* A table of contents is a list of places, not running text: teal names
            whose underline appears under the pointer, not two rows of underlines. */
