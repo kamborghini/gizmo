@@ -2281,7 +2281,7 @@ def t_the_forecast_tab_exists_and_is_gated():
     # trusting the one that leads.
     ok("fcCompare()" in chart and "toggleFcCompare" in chart,
        "sources can be drawn against each other on the chart")
-    ok("cmp.length >= 6" in chart, "capped, because a chart of fourteen lines is unreadable")
+    ok("picks >= FC_CMP_MAX" in chart, "capped, because a chart of fourteen lines is unreadable")
     ok("grain === 'month' && cmp.length" in chart,
        "monthly only: a source forecasts a month, and spreading it over days invents a shape")
     ok("clearFcCompare" in chart, "and the comparison can be cleared in one press")
@@ -12156,6 +12156,60 @@ def t_a_name_that_matches_no_test_is_not_a_pass():
                        capture_output=True, text=True, timeout=120)
     ok(r.returncode == 1, "exit code %d, not 1" % r.returncode)
     ok("matches no test" in r.stdout, "and it says so: %r" % r.stdout[-120:])
+
+
+@test
+def t_compare_methods_draws_each_method_in_its_own_colour():
+    """Compare methods drew its lines from the chart ramp, starting at the fifth
+    colour and going round: the second method was the Expected teal, the third
+    the dark teal of money taken, the fourth the plan's blue and the fifth the
+    grey of Was predicted. Each method now has a colour of its own (purple,
+    orange, magenta), chosen clear of every line the chart draws and of the
+    status colours, and keeps it while it stays picked. Three is the cap: a
+    fourth colour would collide."""
+    root = CSS.split(":root {")[1].split("\n        }")[0]
+    ok("--purple-800: #6b21a8;" in root and "--orange-600: #ea580c;" in root and "--fuchsia-500: #d946ef;" in root,
+       "the three hues are primitives in the block")
+    ok("--c-method-1: var(--purple-800); --c-method-2: var(--orange-600); --c-method-3: var(--fuchsia-500);" in root,
+       "and each method slot is a role of its own")
+    ok("const FC_METHOD = ['--c-method-1', '--c-method-2', '--c-method-3'];" in SCRIPT and "const FC_CMP_MAX = 3;" in SCRIPT,
+       "three slots, three at most")
+    chart = fn_src("function fcChartCard(")
+    ok("color: tokenValue(FC_METHOD[i]), full: true" in chart and "CH[(i + 4)" not in chart,
+       "a method draws in its slot's colour, not the chart ramp's")
+    ok("'Three lines at most: take one off to add another'" in chart, "and a fourth chip says why it waits")
+    ok("\n        .chart-line.compare { stroke-dasharray: 4 4; opacity: .7; }\n        .chart-line.compare.full { opacity: 1; }\n" in CSS
+       and "(s.full ? ' full' : '')" in fn_src("function trendChart("),
+       "dashed as a comparison is, but at the strength its colour was chosen at")
+    ok("['The methods compared', ['--c-method-1', '--c-method-2', '--c-method-3']]" in SCRIPT, "and the Design page shows them")
+    if not _node_ok():
+        print("       (node unavailable, behaviour not run)")
+        return
+    js = r"""
+const store = {}; const localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: k => { delete store[k]; } };
+function renderForecast() {}
+const LS_FCCMP = 'sc_fc_compare_v1';
+""" + SCRIPT.split("        const LS_FCCMP = 'sc_fc_compare_v1';\n", 1)[1].split("        function clearFcCompare()", 1)[0] + r"""
+const out = {};
+['A', 'B', 'C', 'D'].forEach(toggleFcCompare); out.four = fcCompare();
+toggleFcCompare('B'); out.offB = fcCompare();
+toggleFcCompare('D'); out.inD = fcCompare();
+toggleFcCompare('C'); out.offC = fcCompare();
+toggleFcCompare('A'); out.offA = fcCompare();
+toggleFcCompare('D'); out.empty = fcCompare();
+store[LS_FCCMP] = JSON.stringify(['P', 'Q', 'R', 'S', 'T', 'U']); out.legacy = fcCompare();
+store[LS_FCCMP] = '{"x":1}'; out.junk = fcCompare();
+console.log(JSON.stringify(out));
+"""
+    got = _run_node(js)
+    eq(got["four"], ["A", "B", "C"], "a fourth pick waits: three at most")
+    eq(got["offB"], ["A", None, "C"], "taking B off leaves its slot empty, so C keeps its colour")
+    eq(got["inD"], ["A", "D", "C"], "the next pick takes the empty slot")
+    eq(got["offC"], ["A", "D"], "a trailing empty slot is dropped")
+    eq(got["offA"], [None, "D"], "D keeps the second colour when A goes")
+    eq(got["empty"], [], "and the last one off leaves nothing")
+    eq(got["legacy"], ["P", "Q", "R"], "a list saved before the cap keeps its first three")
+    eq(got["junk"], [], "and anything that is not a list reads as none")
 
 
 if __name__ == "__main__":

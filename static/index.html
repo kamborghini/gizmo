@@ -67,12 +67,12 @@
             --live-green: #22A55A;
             --red-50: #fef2f2; --red-300: #fca5a5; --red-500: #ef4444;
             --red-700: #b91c1c; --red-900: #7f1d1d;
-            --orange-700: #c2410c;
+            --orange-600: #ea580c; --orange-700: #c2410c;
             --amber-50: #fffbeb; --amber-700: #b45309; --amber-800: #92400e; --amber-900: #78350f;
             --green-50: #f0fdf4; --green-700: #15803d;
             --blue-50: #eff6ff; --blue-700: #1d4ed8;
-            --purple-50: #faf5ff; --purple-700: #7e22ce;
-            --pink-700: #be185d;
+            --purple-50: #faf5ff; --purple-700: #7e22ce; --purple-800: #6b21a8;
+            --pink-700: #be185d; --fuchsia-500: #d946ef;
             /* Print inks. The label and day sheets predate the neutral scale
                and are physical output, so they keep their measured greys. */
             --print-black-1: #111111; --print-black-2: #222222; --print-black-3: #333333;
@@ -163,6 +163,14 @@
             --c-area: color-mix(in srgb, var(--teal-500) 15%, transparent);
             --c-area-edge: color-mix(in srgb, var(--teal-650) 35%, transparent);
             --c-plan: var(--brand-blue);
+            /* A method Compare methods draws: a colour per slot, kept while the
+               method stays picked. Teal, the plan blue, the comparison grey and
+               the status green, red and amber already mean something, so the
+               three are purple, orange and magenta: each 24.7 or more apart in
+               OKLab for full colour vision and 17.4 under protan and deutan
+               simulation, 3:1 and more on white, and clear of every line the
+               chart already draws. A fourth would collide, so three is the cap. */
+            --c-method-1: var(--purple-800); --c-method-2: var(--orange-600); --c-method-3: var(--fuchsia-500);
             /* The feature band: a soft teal gradient, and its rules and empty tracks. */
             --band-bg: radial-gradient(120% 140% at 0% 0%, var(--teal-band-1) 0%, transparent 60%),
                        linear-gradient(110deg, var(--teal-band-2) 0%, var(--teal-band-3) 55%, var(--teal-band-4) 100%);
@@ -4726,6 +4734,7 @@
            pen next to it. */
         .chart-line { fill: none; stroke-width: var(--chart-stroke); vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
         .chart-line.compare { stroke-dasharray: 4 4; opacity: .7; }
+        .chart-line.compare.full { opacity: 1; }
         /* A forecast is not a comparison line: it is the SAME series continuing
            past today, so it keeps the lead line's weight and colour and says
            "not yet certain" with the dash alone. A dimmed forecast reads as a
@@ -9165,7 +9174,7 @@ Projected Image UK"></textarea>
                     svg.append(svgEl('line', { class: 'chart-split', x1: X(opts.splitAt), x2: X(opts.splitAt),
                         y1: padT, y2: H - padB }));
                 }
-                series.forEach((s, si) => { const p = svgEl('path', { class: 'chart-line' + (si > 0 && !s.lead ? ' compare' : '') + (s.dash ? ' dash' : ''), d: line(s.values), stroke: s.color || (si ? CH[3] : CH[0]) }); if (!REDUCE_MOTION && si === 0) drawPath = p; svg.append(p); });
+                series.forEach((s, si) => { const p = svgEl('path', { class: 'chart-line' + (si > 0 && !s.lead ? ' compare' : '') + (s.dash ? ' dash' : '') + (s.full ? ' full' : ''), d: line(s.values), stroke: s.color || (si ? CH[3] : CH[0]) }); if (!REDUCE_MOTION && si === 0) drawPath = p; svg.append(p); });
                 /* A series with a single point (money taken on the first of the
                    month) is a dot, ringed in white, rather than a speck. */
                 series.forEach(s => runsOf(s.values).filter(r => r.length === 1).forEach(r =>
@@ -15911,14 +15920,29 @@ Projected Image UK"></textarea>
            lines diverge over the autumn is the whole argument for trusting the
            one that leads. Empty means just the leader. */
         const LS_FCCMP = 'sc_fc_compare_v1';
+        /* Three at most, one per colour slot (--c-method-1 to 3). A method
+           keeps its slot, and so its colour, while it stays picked: taking one
+           off leaves its slot empty rather than shifting the others along,
+           because a line that changes colour when a different line goes reads
+           as a different method. A list saved before the cap keeps its first
+           three. */
+        const FC_CMP_MAX = 3;
+        const FC_METHOD = ['--c-method-1', '--c-method-2', '--c-method-3'];
         function fcCompare() {
-            try { return JSON.parse(localStorage.getItem(LS_FCCMP)) || []; } catch (e) { return []; }
+            let set;
+            try { set = JSON.parse(localStorage.getItem(LS_FCCMP)) || []; } catch (e) { set = []; }
+            return Array.isArray(set) ? set.slice(0, FC_CMP_MAX).map(n => (typeof n === 'string' ? n : null)) : [];
         }
         function toggleFcCompare(name) {
             const set = fcCompare();
             const i = set.indexOf(name);
-            if (i >= 0) set.splice(i, 1); else set.push(name);
-            try { localStorage.setItem(LS_FCCMP, JSON.stringify(set.slice(0, 6))); } catch (e) {}
+            if (i >= 0) set[i] = null;
+            else {
+                const gap = set.indexOf(null);
+                if (gap >= 0) set[gap] = name; else if (set.length < FC_CMP_MAX) set.push(name);
+            }
+            while (set.length && set[set.length - 1] == null) set.pop();
+            try { localStorage.setItem(LS_FCCMP, JSON.stringify(set)); } catch (e) {}
             renderForecast();
         }
         function clearFcCompare() { try { localStorage.removeItem(LS_FCCMP); } catch (e) {} renderForecast(); }
@@ -16356,10 +16380,14 @@ Projected Image UK"></textarea>
             if (grain === 'month' && cmp.length) {
                 const by = {};
                 ((sanity || {}).models || []).forEach(m => { if (cmp.indexOf(m.name) >= 0) by[m.name] = m.months || {}; });
+                /* Each in its slot's own colour, dashed as a comparison is,
+                   but at full strength: the colours were chosen at full
+                   strength, and at the comparison's 70% the orange falls
+                   under 3:1 on white. */
                 cmp.forEach((n, i) => {
-                    if (!by[n]) return;
+                    if (!n || !by[n]) return;
                     series.push({ name: n.length > 26 ? n.slice(0, 25) + '\u2026' : n,
-                                  color: CH[(i + 4) % CH.length],
+                                  color: tokenValue(FC_METHOD[i]), full: true,
                                   values: rows.map(r => (by[n][r.month] == null ? null : by[n][r.month])) });
                 });
             }
@@ -16376,8 +16404,8 @@ Projected Image UK"></textarea>
             phoneSw.classList.add('fc-cmp-phone');
             card.append(phoneSw);
             /* The methods to draw, while Compare methods is on: a chip per
-               method, tap to add its line. Capped at six, because a chart with
-               fourteen lines is a chart nobody reads. */
+               method, tap to add its line. Capped at three, because a fourth
+               line's colour would collide with one the chart already draws. */
             const srcs = ((sanity || {}).models || []).filter(m => m.months);
             if (cmpOn && srcs.length) {
                 const box = el('div', 'fc-cmp-box');
@@ -16392,12 +16420,13 @@ Projected Image UK"></textarea>
                     box.append(go);
                 } else {
                     const chips = el('div', 'fc-cmp');
+                    const picks = cmp.filter(Boolean).length;
                     srcs.forEach(m => {
                         const picked = cmp.indexOf(m.name) >= 0;
                         const b = el('button', 'chip' + (picked ? ' on' : ''), m.name);
                         b.type = 'button';
-                        b.disabled = !picked && cmp.length >= 6;
-                        if (b.disabled) b.title = 'Six lines at most: take one off to add another';
+                        b.disabled = !picked && picks >= FC_CMP_MAX;
+                        if (b.disabled) b.title = 'Three lines at most: take one off to add another';
                         b.setAttribute('aria-pressed', picked ? 'true' : 'false');
                         if (m.name === (sanity || {}).best) b.append(document.createTextNode(' '), fcChip('made', 'in use'));
                         b.onclick = () => toggleFcCompare(m.name);
@@ -23190,6 +23219,7 @@ Projected Image UK"></textarea>
             ['Greys', ['--ink', '--ink-2', '--ink-3', '--ink-4', '--line-ctl', '--line', '--line-soft', '--fill', '--white']],
             ['The ink frame', ['--surface-chrome', '--text-on-chrome', '--nav-text', '--nav-muted', '--chrome-fill', '--chrome-press', '--nav-on-bg', '--nav-on-icon']],
             ['One colour per measure', ['--c-taken', '--c-still', '--c-exp', '--c-exp-line', '--c-range', '--c-range-edge', '--c-area', '--c-area-edge', '--c-plan']],
+            ['The methods compared', ['--c-method-1', '--c-method-2', '--c-method-3']],
             ['The feature band', ['--band-bg', '--band-rule', '--teal-band-1', '--teal-band-2', '--teal-band-3', '--teal-band-4']],
             ['Shadows and rules', ['--shadow-control', '--shadow-raise', '--shadow-pop', '--shadow-focal', '--shadow-label', '--ring-chosen', '--ring-live', '--ring-selected', '--rule-t', '--rule-b', '--rule-t-soft', '--rule-b-soft', '--rule-t-band']],
             ['States', ['--press', '--press-fill', '--link-underline', '--live-dot', '--live-halo', '--live-green', '--border-soft']],

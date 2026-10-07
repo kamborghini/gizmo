@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-07",
+   "title": "Compare methods in colours of its own",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": "forecast",
+     "text": "Compare methods draws each method in a colour of its own: purple, orange and magenta. None of them is a colour the chart already uses for money taken, what is expected or what was predicted, and each is easy to tell apart for people who see red and green alike. A method keeps its colour while it stays picked, and three can be drawn at once."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-07",
    "title": "Reactor's new look",
    "items": [
     {
