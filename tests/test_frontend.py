@@ -11793,6 +11793,9 @@ def t_the_forecast_chart_and_lists_match_the_mockup():
        "the label is caption, 600, ink")
     wc = fn_src("function fcWorthCard(latest, sc, al) {")
     ok("all.append(ico(I.chev))" in wc and "I.arrowRight" not in wc, "Show all ends in the chevron, not an arrow")
+    ok("@media (max-width: 1100px) { .rlist.cols-2 { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; } }" in CSS
+       and "@media (max-width: 900px) { .rlist.cols-2" not in CSS,
+       "and the list stacks under 1100, where its 5 is too narrow for a row's words (the audit found one ending in an ellipsis at 1024)")
 
 
 def _winner(selector, prop):
@@ -11847,6 +11850,8 @@ def t_the_production_manager_and_its_phone_head_match_the_mockup():
     ok(".pm-head .ph-title, .pm-head .ph-sub { display: contents; }" in CSS and ".pm-head .ph-title > .info { grid-row: 2; grid-column: 3;" in CSS
        and ".pm-head .ph-title > h2 { grid-column: 1 / -1; grid-row: 1; }" in CSS,
        "the queue's (i) rides on the status line on a phone, so the title has the squares' side to itself and the (i)'s 40 target never reaches Refresh")
+    ok(".ov-hero.pm-head > .ph-text:has(> .ph-title > .info) { row-gap: calc((var(--control-h-lg) - var(--lh-control)) / 2); }" in CSS,
+       "and the title's line keeps clear of the 10 that target leans above its own (the audit found the two boxes overlapping by 6)")
     ok("hero.querySelector('.ov-hero-act')" in SCRIPT and "[pnBtn, coll, newShip, more].filter(Boolean).forEach(b => heroActs.append(b));" in SCRIPT,
        "the header's buttons are still added in their order")
     # Forecast's phone head and every widget grid's Customise

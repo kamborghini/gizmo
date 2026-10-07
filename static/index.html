@@ -2808,6 +2808,8 @@
             .pm-head .ph-sub > .live-dot { grid-row: 2; grid-column: 1; }
             .pm-head .ph-sub > .ov-updated { grid-row: 2; grid-column: 2; }
             .pm-head .ph-title > .info { grid-row: 2; grid-column: 3; margin-block: calc((var(--lh-control) - var(--control-h-lg)) / 2); }
+            /* The (i)'s 40 target leans 10 above its line, so the title's line keeps that much clear of it. */
+            .ov-hero.pm-head > .ph-text:has(> .ph-title > .info) { row-gap: calc((var(--control-h-lg) - var(--lh-control)) / 2); }
             .pm-head .more-txt, .pm-head .more-btn > .ic:nth-child(2) { display: none; }
             .pm-head .more-btn > .ic:nth-child(3) { display: inline-flex; }
         }
@@ -4223,7 +4225,8 @@
             box-shadow: inset 0 0 0 var(--bw-strong) var(--fill-mark); pointer-events: none; }
         .rlist > .rlist-row:first-child, .rlist.cols-2 > .rlist-row:nth-child(odd) { box-shadow: var(--rule-t); }
         .rlist { box-shadow: var(--rule-b); }
-        @media (max-width: 900px) { .rlist.cols-2 { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; } }
+        /* The 5 of the 7 to 5 split is too narrow for a row's words under 1100, so the list stacks there (its labels end in no ellipsis). */
+        @media (max-width: 1100px) { .rlist.cols-2 { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; } }
         /* ---------- the table card, to the reference's own measurements ----------
            A toolbar above the table box and a pager below it, both sitting in
            the card's 16px padding with the card's own 16px gap between them.
