@@ -109,6 +109,11 @@ def client_configured() -> bool:
     return bool(CLIENT_ID and CLIENT_SECRET)
 
 
+# What a refused refresh token means for the person reading it. One sentence,
+# so the page and the sweep notes say the same thing.
+_REFUSED = "Xero refused the refresh token. Reconnect Xero from the Reconciliation tab."
+
+
 def _load_token() -> dict:
     try:
         with open(TOKEN_PATH, encoding="utf-8") as fh:
@@ -361,8 +366,16 @@ async def _access_token() -> str:
         if tok.get("error") or not tok.get("access_token"):
             err = str(tok.get("error") or "")
             if err == "invalid_grant":
-                _state["token_error"] = ("Xero refused the refresh token. Reconnect Xero "
-                                         "from the Reconciliation tab.")
+                _state["token_error"] = _REFUSED
+                # Kept in the token file too: memory is emptied by every
+                # restart, and a refusal forgotten there put the page back to
+                # a green tag over a dead link after each deploy. A fresh
+                # consent writes a new file and a disconnect deletes it.
+                try:
+                    d["refused_at"] = time.time()
+                    _write_token(d)
+                except Exception:
+                    logger.exception("xero: could not record the refused token")
                 raise RuntimeError(_state["token_error"])
             # Anything else is Xero having a moment. Telling the merchant to
             # reconnect would spend a healthy token on a revocation.
@@ -374,6 +387,7 @@ async def _access_token() -> str:
         if tok.get("refresh_token"):
             d["refresh_token"] = str(tok["refresh_token"])
             d["last_refresh"] = time.time()
+            d.pop("refused_at", None)
             _state["token_error"] = ""
             try:
                 _write_token(d)
@@ -582,13 +596,15 @@ async def organisation() -> dict:
 
 def status() -> dict:
     d = _load_token()
+    refused = bool(_state.get("token_error") or d.get("refused_at"))
     out = {"configured": client_configured(), "connected": connected(),
            "tenant": str(d.get("tenant_name") or ""),
            "last_refresh": d.get("last_refresh") or 0, "warning": "",
            # Xero refused the refresh token (invalid_grant): the link is dead
            # until someone re-consents. A flag, so the page can say so and
-           # offer Reconnect rather than keep a green tag over a sentence.
-           "needs_reconnect": bool(_state.get("token_error"))}
+           # offer Reconnect rather than keep a green tag over a sentence; read
+           # from the token file as well, so it outlives a restart.
+           "needs_reconnect": refused}
     failed_at = _state.get("save_failed_at") or 0
     if failed_at and time.time() - failed_at < 3600:
         out["warning"] = ("The refreshed Xero token could not be saved to the data volume. "
@@ -596,4 +612,6 @@ def status() -> dict:
                           "now, or Xero will need reconnecting.")
     elif _state.get("token_error"):
         out["warning"] = _state["token_error"]
+    elif refused:
+        out["warning"] = _REFUSED
     return out

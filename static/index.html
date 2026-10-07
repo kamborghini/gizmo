@@ -2488,14 +2488,16 @@
            off to the right of a 335px window. */
         .conn-doc-meta { display: none; }
         @media (max-width: 640px) {
-            .conn-doc, .conn-doc tbody, .conn-doc tfoot { display: block; }
-            .conn-doc thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-            .conn-doc tr { display: flex; align-items: baseline; gap: var(--sp-3); padding: var(--sp-2) 0; border-bottom: var(--bw-hairline) solid var(--border-default); }
-            .conn-doc tfoot tr { border-bottom: 0; }
-            .conn-doc td { display: block; padding: 0; border: 0; }
-            .conn-doc td:first-child { flex: 1 1 auto; min-width: 0; }
-            .conn-doc td.cd-mid { display: none; }
-            .conn-doc .conn-doc-meta { display: block; }
+            /* The lines table only: the window's other two tables keep their
+               headings, which say what Xero holds now and what it would become. */
+            .conn-doc.cd-lines, .conn-doc.cd-lines tbody, .conn-doc.cd-lines tfoot { display: block; }
+            .conn-doc.cd-lines thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+            .conn-doc.cd-lines tr { display: flex; align-items: baseline; gap: var(--sp-3); padding: var(--sp-2) 0; border-bottom: var(--bw-hairline) solid var(--border-default); }
+            .conn-doc.cd-lines tfoot tr { border-bottom: 0; }
+            .conn-doc.cd-lines td { display: block; padding: 0; border: 0; }
+            .conn-doc.cd-lines td:first-child { flex: 1 1 auto; min-width: 0; }
+            .conn-doc.cd-lines td.cd-mid { display: none; }
+            .conn-doc.cd-lines .conn-doc-meta { display: block; }
         }
         /* ONE COLUMN for the Xero sync page.
            Prose is capped at a 52ch reading measure, which is right. The
@@ -2624,7 +2626,7 @@
         .lbl-meta { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); white-space: nowrap; }
         /* The document window's contact line: an address and a Xero id run
            past a phone's window unless they may break anywhere. */
-        .lbl-meta.cx-contact { white-space: normal; overflow-wrap: anywhere; }
+        .lbl-meta:is(.cx-contact, .conn-doc-meta) { white-space: normal; overflow-wrap: anywhere; }
         /* The row's own figure, one treatment on both finance pages: the money
            ends the row at the right edge in 14px medium ink. The meta column's
            12px muted type is right for a date and wrong for the number the row
@@ -2977,7 +2979,7 @@
             gap: var(--sp-3) var(--sp-4); }
         .recon-conn-status { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); min-width: 0; }
         .recon-conn-count { font-size: var(--text-body); color: var(--text-secondary); margin-left: var(--sp-1); }
-        .recon-conn-acts { display: flex; align-items: center; gap: var(--sp-2); }
+        .recon-conn-acts { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
         .recon-conn-warn { margin-bottom: 0; }
         /* The last sweep's notes: one list with a list's rhythm, at the prose
            measure, not a stack of field-help lines with a field's gap under
@@ -8358,7 +8360,10 @@ Projected Image UK"></textarea>
                file browser measured 1,912ms of blocked JS per keystroke on a
                broad term before its own debounce went in. */
             if (oninput) {
-                inp.oninput = () => {
+                inp.oninput = (e) => {
+                    /* Mid-composition (Japanese or Chinese input) is not a word
+                       yet: a search and its redraw would end the composing. */
+                    if (e && e.isComposing) return;
                     clearTimeout(inp._t);
                     inp._t = setTimeout(() => { inp._t = null; if (inp.isConnected) oninput(inp.value.trim()); }, 150);
                 };
@@ -8369,6 +8374,7 @@ Projected Image UK"></textarea>
                 inp.onchange = () => {
                     if (inp._t) { clearTimeout(inp._t); inp._t = null; oninput(inp.value.trim()); }
                 };
+                inp.addEventListener('compositionend', () => inp.oninput());
             }
             /* The house clear, replacing the browser's blue one. Hidden until
                there is a query, and it puts focus back in the field: clearing a
@@ -13811,7 +13817,7 @@ Projected Image UK"></textarea>
                 return;
             }
             const wrap = el('div', 'conn-doc-wrap');
-            const t = document.createElement('table'); t.className = 'conn-doc';
+            const t = document.createElement('table'); t.className = 'conn-doc cd-lines';
             const thead = document.createElement('thead');
             const hr = document.createElement('tr');
             [['Description', ''], ['Qty', 'num'], ['Unit', 'num'],
@@ -14021,18 +14027,19 @@ Projected Image UK"></textarea>
             const k = cxKind(d);
             return (k === 'created' || k === 'updated') ? rec : null;
         }
-        /* What Send does with those, in its dialog: named, with how far out. */
+        /* What Send does with those, in its dialog: named, with how far out.
+           Always "as it stands": in strict mode the connector's check already
+           reports such a document as quarantined, which is not flagged here. */
         function cxMismatchNote(items) {
             const mis = (items || []).filter(x => cxMismatch(x.d));
             if (!mis.length) return '';
-            const held = mis.every(x => cxMismatch(x.d).mode === 'strict');
             const one = mis.length === 1;
             const names = mis.slice(0, 3).map(x => {
                 const rec = cxMismatch(x.d), cur = (x.d.preview || {}).currency || 'GBP';
                 return (x.order ? x.order + ', ' : '') + money(Math.abs(Number(rec.diff) || 0), cur, 2) + ' out';
             });
             return ' ' + mis.length + (one ? ' document does not' : ' documents do not') + ' match Shopify and '
-                + (held ? 'will be held back' : 'will be sent as ' + (one ? 'it stands' : 'they stand')) + ': '
+                + 'will be sent as ' + (one ? 'it stands' : 'they stand') + ': '
                 + names.join('; ') + (mis.length > 3 ? ' and ' + (mis.length - 3) + ' more' : '') + '.';
         }
         /* The settings by the names the Settings card gives them; any other
@@ -14260,9 +14267,15 @@ Projected Image UK"></textarea>
             const thead = el('thead'); thead.append(hr); tbl.append(thead);
             const tb = el('tbody');
             /* An order with a document out against Shopify goes first, its
-               documents kept together. */
+               documents kept together, and within an order (one order's check
+               included) that document leads. */
             const misFirst = new Set(entries.filter(e => e.mis).map(e => e.r));
-            if (misFirst.size) entries = entries.filter(e => misFirst.has(e.r)).concat(entries.filter(e => !misFirst.has(e.r)));
+            if (misFirst.size) {
+                const pos = new Map(); entries.forEach((e, i) => { if (!pos.has(e.r)) pos.set(e.r, i); });
+                entries = entries.map((e, i) => [e, i]).sort((a, b) =>
+                    (misFirst.has(b[0].r) - misFirst.has(a[0].r)) || (pos.get(a[0].r) - pos.get(b[0].r))
+                    || ((b[0].mis ? 1 : 0) - (a[0].mis ? 1 : 0)) || (a[1] - b[1])).map(x => x[0]);
+            }
             let prev = null;
             entries.forEach(e => {
                 const r = e.r, first = r !== prev; prev = r;
@@ -14289,8 +14302,7 @@ Projected Image UK"></textarea>
                         const cur = (p && p.currency) || 'GBP';
                         oc.append(el('span', 'lbl-chip bad', money(Math.abs(Number(rec.diff) || 0), cur, 2) + ' out'));
                         why('Shopify says ' + money(Number(rec.expected) || 0, cur, 2) + ' and this document comes to '
-                            + money(Number(rec.computed) || 0, cur, 2) + '. '
-                            + (rec.mode === 'strict' ? 'It would be held back.' : 'It would be sent as it stands.'));
+                            + money(Number(rec.computed) || 0, cur, 2) + '. It would be sent as it stands.');
                     } else {
                         oc.append(el('span', 'lbl-chip ' + (dry ? w[2] : w[3]), dry ? w[0] : w[1]));
                         why(cxWhy(d, dry));
@@ -15318,7 +15330,9 @@ Projected Image UK"></textarea>
                     return;
                 }
                 const docs = c.docs || [];
+                /* A document out against Shopify is named in the summary too. */
                 const oneOut = cxSection(results, 'one', title, docs.length ? cxOneSentence(docs, !sent)
+                        + (sent ? '' : cxMismatchNote(docs.map(d => ({ order: connOneCheck.order, d: d }))))
                     : 'The check found no document to write for this order.');
                 if (docs.length || c.error) oneOut.append(connDocTable(cxEntries([{ order: connOneCheck.order, found: true, docs: docs, error: c.error }]), !sent, false));
             }
@@ -17891,7 +17905,7 @@ Projected Image UK"></textarea>
                text and cursor as they are NOW, letters typed while the list
                was being fetched included. */
             const typing = document.activeElement;
-            if (typing && box.contains(typing) && typing.closest('.tbl-search')) {
+            if (typing && box.contains(typing) && typing.matches('.tbl-search input')) {
                 reconSearchKeep = { typed: typing.value, at: typing.selectionStart };
             }
             box.innerHTML = '';
@@ -17983,7 +17997,7 @@ Projected Image UK"></textarea>
                 if (!teamMe || teamMe.role === 'master') {
                     const rc = el('button', 'btn btn-sm btn-primary');
                     rc.type = 'button';
-                    rc.append(ico(I.link || I.refresh), document.createTextNode('Reconnect Xero'));
+                    rc.append(ico(I.logIn), document.createTextNode('Reconnect Xero'));
                     rc.onclick = async () => {
                         /* The tab opens inside the click, or the browser blocks it. */
                         const tab = window.open('', '_blank');
@@ -17994,14 +18008,10 @@ Projected Image UK"></textarea>
                                 tab.location = r.url;
                                 addToast('Approve the connection in the new tab, and pick the '
                                          + 'organisation. This page updates when it lands.', 'good');
+                                watchReconXero(true);
                             } else {
-                                const fb = el('p', 'card-sub');
-                                fb.append(document.createTextNode('Your browser blocked the new tab. '));
-                                const a = el('a', 'action-link', 'Open the Xero sign-in here');
-                                a.href = r.url; a.target = '_blank'; a.rel = 'noopener';
-                                fb.append(a); card.append(fb);
+                                reconConnectFallback(card, r.url, 'xero', true);
                             }
-                            watchReconXero();
                         } catch (e) {
                             if (tab) tab.close();
                             toastError(e.message);
@@ -18049,8 +18059,9 @@ Projected Image UK"></textarea>
                      !teamMe || teamMe.role === 'master' ? '' : 'Ask the master account to reconnect Xero.']
                         .filter(Boolean).join(' ')));
             } else if (xs.warning) card.append(el('div', 'mail-viewwarn recon-conn-warn', xs.warning));
-            const notes = (st.sweep_notes || []).map(n => xs.needs_reconnect
-                ? String(n).replace(' Reconnect Xero from the Reconciliation tab.', '') : n);
+            /* The band above says the refusal once; the sweep's own note
+               saying the same is left out while it stands. */
+            const notes = (st.sweep_notes || []).filter(n => !(xs.needs_reconnect && /refused the refresh token/i.test(String(n))));
             if (notes.length) {
                 const nb = el('div', 'recon-notes');
                 nb.append(el('div', 'recon-notes-h', 'Notes from the last sweep' + (st.last_sync ? ', ' + fmtDate(st.last_sync) : '')));
@@ -18160,7 +18171,7 @@ Projected Image UK"></textarea>
                                 /* Pop-ups blocked: give them something to click,
                                    rather than a cheerful message about a tab
                                    that never opened. */
-                                reconConnectFallback(mc, r.url);
+                                reconConnectFallback(mc, r.url, 'mailbox');
                             }
                         } catch (e) {
                             if (tab) tab.close();
@@ -18249,7 +18260,7 @@ Projected Image UK"></textarea>
                                          + 'organisation. This card updates when it lands.', 'good');
                                 watchReconXero();
                             } else {
-                                reconConnectFallback(su, r.url);
+                                reconConnectFallback(su, r.url, 'xero');
                             }
                         } catch (e) {
                             if (tab) tab.close();
@@ -18311,13 +18322,6 @@ Projected Image UK"></textarea>
             const searchWrap = tableSearch('Search discrepancies', reconFilter.q, (v) => {
                 reconFilter.q = v; refreshReconList();
             });
-            if (reconSearchKeep) {
-                const k = reconSearchKeep; reconSearchKeep = null;
-                searchWrap.input.value = k.typed;
-                setTimeout(() => { if (searchWrap.input.isConnected) { searchWrap.input.focus(); try { searchWrap.input.setSelectionRange(k.at, k.at); } catch (e) {} } }, 0);
-                /* Typed on while the last list was on its way: search for that too. */
-                if (k.typed.trim() !== reconFilter.q) { reconFilter.q = k.typed.trim(); refreshReconList(); }
-            }
             /* The Liability tab's filter chip, not a flat tab strip. In the same
                toolbar slot one page drew bordered pills and the other drew bare
                text, and the bare text sat 400px under the page tabs it is
@@ -18331,12 +18335,27 @@ Projected Image UK"></textarea>
                 reconFilter.status, v => { reconFilter.status = v; refreshReconList(); });
             list.append(tableTools([searchWrap, statusChip], [exp]));
             box.append(widget(list, 'discrepancies', 'full', 'Discrepancies'));
+            /* Back into the new box at once, in the same task as the redraw,
+               so no key pressed meanwhile lands on the page instead. */
+            if (reconSearchKeep) {
+                const k = reconSearchKeep; reconSearchKeep = null;
+                const inp = searchWrap.input;
+                inp.value = k.typed;
+                if (inp.isConnected) { inp.focus(); try { inp.setSelectionRange(k.at, k.at); } catch (e) {} }
+                /* Typed on while the last list was on its way: search for that too. */
+                if (k.typed.trim() !== reconFilter.q) { reconFilter.q = k.typed.trim(); refreshReconList(); }
+            }
             if (!ex.length) {
                 /* Filters that hide everything are not an all clear: with
                    21 open the page said "Nothing needs attention." */
                 if (reconFilter.severity || reconFilter.status || reconFilter.q) {
                     const clr = el('button', 'btn btn-sm', 'Clear filters'); clr.type = 'button';
-                    clr.onclick = () => { reconFilter = { severity: '', status: '', q: '' }; refreshReconList(); };
+                    clr.onclick = () => {
+                        /* The box too: a redraw keeps what is typed in a focused
+                           box, and would put the search straight back. */
+                        searchWrap.input.value = '';
+                        reconFilter = { severity: '', status: '', q: '' }; refreshReconList();
+                    };
                     list.append(emptyState({ icon: I.search, text: 'Nothing matches these filters.', action: clr }));
                 } else {
                     list.append(el('div', 'empty', xs.connected
@@ -18410,13 +18429,17 @@ Projected Image UK"></textarea>
             line.append(copy); row.append(line);
             card.append(row);
         }
-        function reconConnectFallback(card, url) {
-            /* A real link, which carries the click through a pop-up blocker. */
-            const row = el('p', 'card-sub');
+        function reconConnectFallback(card, url, what, reconnect) {
+            /* A real link, which carries the click through a pop-up blocker.
+               Named for the sign-in it opens (Xero's said Google and watched
+               the mailbox), and one per card however often it is pressed. */
+            const old = card.querySelector('.recon-fallback'); if (old) old.remove();
+            const row = el('p', 'card-sub recon-fallback');
             row.append(document.createTextNode('Your browser blocked the new tab. '));
-            const a2 = el('a', 'action-link', 'Open the Google sign-in here');
+            const xero = what === 'xero';
+            const a2 = el('a', 'action-link', xero ? 'Open the Xero sign-in here' : 'Open the Google sign-in here');
             a2.href = url; a2.target = '_blank'; a2.rel = 'noopener';
-            a2.onclick = () => watchReconMailbox();
+            a2.onclick = () => (xero ? watchReconXero(reconnect) : watchReconMailbox());
             row.append(a2);
             row.append(document.createTextNode(' (the link works once, for five minutes).'));
             card.append(row);
@@ -18440,7 +18463,7 @@ Projected Image UK"></textarea>
                 }
             }, 5000);
         }
-        function watchReconXero() {
+        function watchReconXero(reconnect) {
             if (reconXeroWatch) clearInterval(reconXeroWatch);
             let tries = 0;
             reconXeroWatch = setInterval(async () => {
@@ -18458,9 +18481,11 @@ Projected Image UK"></textarea>
                 } catch (e) { /* the approval tab may still be open */ }
                 if (tries >= 40) {
                     clearInterval(reconXeroWatch); reconXeroWatch = null;
-                    toastError('Xero is still not connected. If Xero showed an error it is '
-                               + 'usually the redirect URI not matching the one registered '
-                               + 'on the app.');
+                    toastError(reconnect
+                        ? 'Xero has not been reconnected yet. If Xero showed an error, press Reconnect Xero again.'
+                        : 'Xero is still not connected. If Xero showed an error it is '
+                          + 'usually the redirect URI not matching the one registered '
+                          + 'on the app.');
                 }
             }, 3000);
         }
@@ -18518,7 +18543,12 @@ Projected Image UK"></textarea>
         const reconKey = (k) => cap(String(k).replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase());
         function reconValue(k, v) {
             if (v == null || v === '') return '';
-            if (typeof v === 'object') return Array.isArray(v) ? v.map(x => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(', ') : JSON.stringify(v);
+            /* A record inside a record (an order's refunds) is money in pence
+               and a date, said as such; it printed as JSON with the raw pence. */
+            const rec = (x) => (x && x.pence != null && /^-?\d+$/.test(String(x.pence)))
+                ? money(Number(x.pence) / 100, 'GBP', 2) + (x.created_at ? ' on ' + fmtDate(x.created_at) : '')
+                : JSON.stringify(x);
+            if (typeof v === 'object') return Array.isArray(v) ? v.map(x => typeof x === 'object' ? rec(x) : String(x)).join(', ') : rec(v);
             const key = String(k).toLowerCase(), str = String(v);
             if (/^-?\d+(\.\d+)?$/.test(str)) {
                 /* Every amount the sweep keeps is integer pence (recon.py:

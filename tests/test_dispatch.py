@@ -16551,6 +16551,17 @@ def t_a_xero_outage_is_not_reported_as_a_dead_token():
         # Reconnect, because the refusal reached it only as a sentence.
         st = xero_api.status()
         ok(st.get("needs_reconnect") is True, "the status says so as a flag the page can act on: %r" % st)
+        # A restart (every deploy) empties memory; the refusal must outlive it,
+        # or the page goes back to a green tag over a dead link.
+        xero_api._state["token_error"] = ""
+        st = xero_api.status()
+        ok(st.get("needs_reconnect") is True and "Reconnect" in (st.get("warning") or ""),
+           "the refusal outlives a restart, with its warning: %r" % st)
+        # A fresh consent writes a fresh token file, which carries no refusal.
+        xero_api._write_token({"refresh_token": "rt-fresh", "tenant_id": "t1", "tenant_name": "Projected Image"})
+        ok(xero_api.status().get("needs_reconnect") is False, "and a fresh consent clears it")
+        xero_api.disconnect()
+        ok(xero_api.status().get("needs_reconnect") is False, "as does a disconnect")
     finally:
         (xero_api.httpx.AsyncClient, xero_api.RETRY_WAITS,
          xero_api.CLIENT_ID, xero_api.CLIENT_SECRET) = saved
