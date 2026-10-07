@@ -11850,8 +11850,6 @@ def t_the_production_manager_and_its_phone_head_match_the_mockup():
     ok(".pm-head .ph-title, .pm-head .ph-sub { display: contents; }" in CSS and ".pm-head .ph-title > .info { grid-row: 2; grid-column: 3;" in CSS
        and ".pm-head .ph-title > h2 { grid-column: 1 / -1; grid-row: 1; }" in CSS,
        "the queue's (i) rides on the status line on a phone, so the title has the squares' side to itself and the (i)'s 40 target never reaches Refresh")
-    ok(".ov-hero.pm-head > .ph-text:has(> .ph-title > .info) { row-gap: calc((var(--control-h-lg) - var(--lh-control)) / 2); }" in CSS,
-       "and the title's line keeps clear of the 10 that target leans above its own (the audit found the two boxes overlapping by 6)")
     ok("hero.querySelector('.ov-hero-act')" in SCRIPT and "[pnBtn, coll, newShip, more].filter(Boolean).forEach(b => heroActs.append(b));" in SCRIPT,
        "the header's buttons are still added in their order")
     # Forecast's phone head and every widget grid's Customise
@@ -11899,6 +11897,24 @@ def t_the_phone_toolbar_and_both_head_shapes_hold_in_every_state():
     ok(withi and "grid-column: 1 / -1" in withi and "grid-row: 1" in withi, "and with an (i) the title in its wrapper still does")
     ok("if (o.info) { const row = el('div', 'ph-title'); row.append(h, o.info); text.append(row); } else text.append(h);" in SCRIPT,
        "both shapes come from the one header builder: the title in a wrapper with its (i), or bare")
+
+
+@test
+def t_the_phone_heads_info_target_leans_down_so_the_status_line_is_4_under_the_title():
+    """Re-review NEW-3. Where the queue's (i) rides on the phone status line, its 40 target leans DOWN as the status line's
+    Refresh does (ruling L189): 4 above the 20 line to 16 below it, the glyph centred on the line by padding, so the status
+    line sits 4 under the title (the mockup's), the target never reaches the title's box, and the row gap that held the
+    title's line clear of a target leaning 10 above it (which put the status line 10 under the title) is gone."""
+    i = _phone_rule(".pm-head .ph-title > .info")
+    ok(i and "grid-row: 2; grid-column: 3;" in i, "the (i) is still in the status line's row, the third column")
+    ok("margin-block: calc(-1 * var(--sp-1)) calc(var(--lh-control) - var(--control-h-lg) + var(--sp-1))" in i,
+       "its box is 4 above the line and reaches 16 below it (margin -4 over and 40 - 20 - 4 under)")
+    ok("align-content: start" in i and "padding-top: calc(var(--sp-1) + (var(--lh-control) - var(--icon-md)) / 2)" in i,
+       "its glyph is centred on the line by padding, as Refresh's is")
+    b = _phone_rule(".pm-head .ph-title > .info::before")
+    ok(b and "top: calc(var(--sp-1) + var(--lh-control) / 2)" in b, "and so is its highlight square")
+    ok(":has(> .ph-title > .info)" not in CSS, "no row gap holds the title's line off the target any more")
+    ok("row-gap: var(--sp-1)" in _phone_rule(".ov-hero.pm-head > .ph-text"), "the status line is 4 under the title, with or without an (i)")
 
 
 @test
