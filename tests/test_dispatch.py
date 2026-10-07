@@ -16915,7 +16915,7 @@ def t_clearing_a_collection_actually_clears_it():
     still on the dispatch record, so the very next read re-derived it. "The van
     has been, book another" did nothing at all."""
     from datetime import datetime as _dt, timezone as _tz
-    today = _dt.now(_tz.utc).date().isoformat()
+    today = copilot._london_today().isoformat()   # the day the code reckons in (London), not the UTC date
     copilot._write_dispatch({"9001": {"carrier_name": "DHL", "carrier_label": "DHL Express",
                                       "collection_date": "CN-1", "order_name": "#1",
                                       "ready_date": "", "dispatched_at": today + "T09:00:00+00:00"}})
@@ -16941,7 +16941,7 @@ def t_the_latest_booking_of_the_day_is_the_one_that_counts():
     booking of the day. After a clear and a re-book that is the stale one, and
     its reference is the one that would be read out to the courier."""
     from datetime import datetime as _dt, timezone as _tz
-    today = _dt.now(_tz.utc).date().isoformat()
+    today = copilot._london_today().isoformat()   # the day the code reckons in (London), not the UTC date
     copilot._write_dispatch({
         "1": {"carrier_name": "DHL", "collection_date": "OLD-1", "order_name": "#1",
               "dispatched_at": today + "T08:00:00+00:00"},
@@ -17372,7 +17372,7 @@ def t_a_collection_is_read_from_the_couriers_own_reference():
     van coming", so it is worth more than a ledger this app keeps beside it, and
     it covers shipments booked before the ledger existed."""
     from datetime import datetime as _dt, timezone as _tz
-    today = _dt.now(_tz.utc).date().isoformat()
+    today = copilot._london_today().isoformat()   # the day the code reckons in (London), not the UTC date
     copilot._write_dispatch({
         "9001": {"carrier_name": "DHL", "carrier_label": "DHL Express",
                  "collection_date": "CN-8842", "order_name": "#104294",
@@ -17430,8 +17430,8 @@ def t_one_collection_a_day_per_courier_not_one_per_parcel():
     second pickup. So "book a collection" becomes "already scheduled" for the
     rest of that day on its own, per courier, without anyone remembering."""
     from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-    today = _dt.now(_tz.utc).date().isoformat()
-    tomorrow = (_dt.now(_tz.utc).date() + _td(days=1)).isoformat()
+    today = copilot._london_today().isoformat()   # the day the code reckons in (London), not the UTC date
+    tomorrow = (copilot._london_today() + _td(days=1)).isoformat()
     cfg = {"collection_by_carrier": {"DHL": "I_Need_To_Book_A_Collection",
                                      "UPS": "I_Have_Daily_Collection"},
            "collection_option": "I_Need_To_Book_A_Collection"}
@@ -17469,6 +17469,28 @@ def t_one_collection_a_day_per_courier_not_one_per_parcel():
        "I_Need_To_Book_A_Collection_For_Next_Day",
        "while today's van does not cover tomorrow's parcel")
 
+
+
+@test
+def t_the_collection_tests_hold_in_the_hour_after_midnight():
+    """Two of the collection tests built "today" from the UTC date while the code reckons the day in London, so
+    between 00:00 and 01:00 BST they failed on a clean tree. They now use the day the code uses. Proven here by
+    running them with the clock at 00:30 BST on the 15th of July (23:30 UTC on the 14th), the hour that broke them: a test
+    that took its date from the real UTC clock would now be a day off the code's."""
+    import datetime as _real
+    class _Frozen(_real.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = _real.datetime(2026, 7, 14, 23, 30, tzinfo=_real.timezone.utc)
+            return base.astimezone(tz) if tz else base.replace(tzinfo=None)
+    saved = copilot.datetime
+    copilot.datetime = _Frozen
+    try:
+        eq(copilot._london_today().isoformat(), "2026-07-15", "the code's day is London's, a day ahead of UTC in this hour")
+        t_a_collection_is_read_from_the_couriers_own_reference()
+        t_one_collection_a_day_per_courier_not_one_per_parcel()
+    finally:
+        copilot.datetime = saved
 
 @test
 def t_a_booked_collection_is_written_down_before_anything_can_fail():
