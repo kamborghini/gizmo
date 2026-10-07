@@ -450,8 +450,6 @@
            seemed to end at CRM on a laptop, Workspace and all under it. */
         .side-body.more-below { -webkit-mask-image: linear-gradient(180deg, var(--black) calc(100% - var(--sp-8)), transparent);
             mask-image: linear-gradient(180deg, var(--black) calc(100% - var(--sp-8)), transparent); }
-        /* A phone zooms the page into any field under 16px when it is tapped. */
-        @media (pointer: coarse) { input:not([type=checkbox]):not([type=radio]), textarea, select { font-size: var(--text-md); } }
         .side-body::-webkit-scrollbar { display: none; }
         .side-foot { padding: 0 var(--sp-3) var(--sp-3); flex: none; display: flex; flex-direction: column; gap: var(--sp-2); }
         .brand { display: flex; align-items: center; gap: var(--control-gap); flex: 1; min-width: 0; height: var(--control-h); padding: 0 var(--sp-1);
@@ -5657,6 +5655,12 @@
         .guide-toc-link { font-size: var(--text-body); line-height: var(--lh-control); font-weight: var(--weight-regular); text-decoration-color: transparent; }
         .guide-toc-link:focus-visible { text-decoration-color: currentColor; }
         @media (hover: hover) { .guide-toc-link:hover { text-decoration-color: currentColor; } }
+
+        /* A field under a finger is 16, or iOS zooms into the page when it takes focus. This is the LAST word on a field's
+           size and the only place the stylesheet's 16 for a field is written: it comes after every field rule, and the
+           :is() list takes the specificity of its strongest member (the chat box's id), so a field carrying .psel,
+           .lbl-size or any other field class does not beat it. */
+        @media (pointer: coarse) { :is(input:not([type=checkbox]):not([type=radio]), textarea, select, #input) { font-size: var(--text-md); } }
     </style>
 </head>
 <body>
