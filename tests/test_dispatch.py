@@ -26542,6 +26542,54 @@ def t_the_connector_settings_list_holds_only_what_the_connector_keeps():
     ok({"RECONCILE_MODE", "ORDERS_SINCE", "MAX_DOCS_PER_RUN"} <= copilot._CONNECTOR_SETTABLE, "the real knobs stay")
 
 
+
+@test
+def t_a_refusal_never_overwrites_a_reconnect_that_landed_meanwhile():
+    """Review N2, 2026-10-07: recording a refused refresh token in the token
+    file must not write over a fresh consent that landed while the refresh was
+    in flight (the consent callback writes outside the refresh lock), or the
+    new token is lost and the page goes red again after saying connected."""
+    saved = (xero_api.httpx.AsyncClient, xero_api.RETRY_WAITS,
+             xero_api.CLIENT_ID, xero_api.CLIENT_SECRET)
+    xero_api.RETRY_WAITS = (0.0, 0.0)
+    xero_api.CLIENT_ID = xero_api.CLIENT_SECRET = "demo"
+
+    class _R:
+        status_code = 400
+        text = "refused"
+        def json(self): return {"error": "invalid_grant"}
+
+    class _C:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, **kw):
+            # The consent walk lands while Xero is answering the old refresh.
+            xero_api._write_token({"refresh_token": "rt-fresh", "tenant_id": "t1",
+                                   "tenant_name": "Projected Image", "connected_at": time.time()})
+            return _R()
+    xero_api.httpx.AsyncClient = lambda *a, **k: _C()
+    try:
+        xero_api._write_token({"refresh_token": "rt-dead", "tenant_id": "t1"})
+        xero_api._state["access"] = ""
+        xero_api._state["access_exp"] = 0.0
+        xero_api._state["token_error"] = ""
+        err = None
+        try:
+            run(xero_api._access_token())
+        except Exception as e:
+            err = e
+        ok(err is not None, "the refresh with the old token still fails")
+        d = xero_api._load_token()
+        eq(d.get("refresh_token"), "rt-fresh", "the fresh consent's token is kept")
+        ok("refused_at" not in d, "and is not marked refused")
+        ok(xero_api.status().get("needs_reconnect") is False, "so the page shows the link as good: %r" % xero_api.status())
+    finally:
+        (xero_api.httpx.AsyncClient, xero_api.RETRY_WAITS,
+         xero_api.CLIENT_ID, xero_api.CLIENT_SECRET) = saved
+        xero_api._state["token_error"] = ""
+        xero_api.disconnect()
+
+
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a

@@ -8360,10 +8360,7 @@ Projected Image UK"></textarea>
                file browser measured 1,912ms of blocked JS per keystroke on a
                broad term before its own debounce went in. */
             if (oninput) {
-                inp.oninput = (e) => {
-                    /* Mid-composition (Japanese or Chinese input) is not a word
-                       yet: a search and its redraw would end the composing. */
-                    if (e && e.isComposing) return;
+                inp.oninput = () => {
                     clearTimeout(inp._t);
                     inp._t = setTimeout(() => { inp._t = null; if (inp.isConnected) oninput(inp.value.trim()); }, 150);
                 };
@@ -8374,7 +8371,6 @@ Projected Image UK"></textarea>
                 inp.onchange = () => {
                     if (inp._t) { clearTimeout(inp._t); inp._t = null; oninput(inp.value.trim()); }
                 };
-                inp.addEventListener('compositionend', () => inp.oninput());
             }
             /* The house clear, replacing the browser's blue one. Hidden until
                there is a query, and it puts focus back in the field: clearing a
@@ -18322,6 +18318,12 @@ Projected Image UK"></textarea>
             const searchWrap = tableSearch('Search discrepancies', reconFilter.q, (v) => {
                 reconFilter.q = v; refreshReconList();
             });
+            /* This search rebuilds its own box, so a word still being composed
+               (Japanese or Chinese input) waits until it is finished; the
+               other searches keep filtering as each letter lands. */
+            const baseInput = searchWrap.input.oninput;
+            searchWrap.input.oninput = (e) => { if (e && e.isComposing) return; baseInput(); };
+            searchWrap.input.addEventListener('compositionend', () => baseInput());
             /* The Liability tab's filter chip, not a flat tab strip. In the same
                toolbar slot one page drew bordered pills and the other drew bare
                text, and the bare text sat 400px under the page tabs it is
@@ -18341,7 +18343,11 @@ Projected Image UK"></textarea>
                 const k = reconSearchKeep; reconSearchKeep = null;
                 const inp = searchWrap.input;
                 inp.value = k.typed;
-                if (inp.isConnected) { inp.focus(); try { inp.setSelectionRange(k.at, k.at); } catch (e) {} }
+                /* In a microtask: after the rows are back, so focusing does not
+                   lay out a half-built page and scroll it (the box jumped from
+                   the top to under a phone's keyboard), yet before any key
+                   event, so no keystroke lands on the page. */
+                queueMicrotask(() => { if (inp.isConnected) { inp.focus(); try { inp.setSelectionRange(k.at, k.at); } catch (e) {} } });
                 /* Typed on while the last list was on its way: search for that too. */
                 if (k.typed.trim() !== reconFilter.q) { reconFilter.q = k.typed.trim(); refreshReconList(); }
             }

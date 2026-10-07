@@ -12283,8 +12283,10 @@ def t_reconciliation_tells_the_truth_about_its_links_filters_and_sweeps():
        "only the search box itself is carried across a redraw: Tab to its clear button had wiped the search")
     keep = fn.split("if (reconSearchKeep) {", 1)
     ok(len(keep) == 2 and "box.append(widget(list, 'discrepancies', 'full', 'Discrepancies'));" in keep[0]
-       and "setTimeout" not in keep[1].split("refreshReconList(); }", 1)[0] and "inp.focus();" in keep[1],
-       "and focus returns in the same task as the redraw, once the box is in the page, so no keystroke is lost")
+       and "setTimeout" not in keep[1].split("refreshReconList(); }", 1)[0] and "queueMicrotask(() => { if (inp.isConnected) { inp.focus();" in keep[1],
+       "and focus returns in a microtask: after the rows, so the page does not jump, before any key, so none is lost")
+    ok("if (e && e.isComposing) return; baseInput();" in fn and "isComposing" not in fn_src("function tableSearch("),
+       "a word being composed waits here, where the box is rebuilt, and nowhere else")
     ok("        .recon-conn-acts { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }" in CSS,
        "the three buttons of a refused link wrap on a phone instead of running off the card")
     ok("!(xs.needs_reconnect && /refused the refresh token/i.test(String(n)))" in fn,
