@@ -4010,8 +4010,8 @@ def t_a_forecast_is_drawn_as_a_range_not_as_three_competing_lines():
     ok("'P90'" not in fc and "'P10'" not in fc,
        "the forecast chart no longer draws P10 and P90 as their own lines")
     ok("band: band" in fc and "splitAt:" in fc, "it passes the interval and the handover")
-    ok("dash: true" in fc and "lead: true" in fc,
-       "the forecast is the same line continuing, dashed - not a dimmed comparison line")
+    ok("dash: true" not in fc and "lead: true" in fc,
+       "the forecast is the same line continuing, solid as the mockup draws it - not a dimmed comparison line (spec 6: only the plan tick is dashed)")
     ok("joins(i, r.p10)" in fc and "joins(i, r.p50)" in fc,
        "and both meet the last actual value, so the band pinches to nothing at today")
     # Said in words, because a shaded band explains itself only to somebody who
@@ -10082,7 +10082,7 @@ def t_lists_are_rows_split_by_hairlines():
         ok(part in fn, "listRows: " + part)
     row = CSS.split("\n        .rlist-row {")[1].split("}")[0]
     ok("min-height: var(--row-h)" in row and "gap: var(--gap-row-icon)" in row, "a list row is 44 with its icon 12 from its words")
-    ok(".rlist.cols-2 { grid-auto-flow: column;" in CSS, "two columns read down")
+    ok(".rlist.cols-2 { grid-auto-flow: column; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);" in CSS, "two columns read down, split 7 to 5 as the page's own columns are")
     sect = CSS.split("\n        details.sect {")[1].split("}")[0]
     ok("border: 0" in sect and "box-shadow: var(--rule-b-soft)" in sect, "a drawer is a hairline row")
 
@@ -10981,7 +10981,7 @@ def t_a_single_series_wash_is_the_area_strength():
     trend line starts at that strength, not the 36% it had, and Cash in has none."""
     ok("--c-area: color-mix(in srgb, var(--teal-500) 15%, transparent);" in CSS, "the area token is teal at 15%")
     ok("'stop-color': washColor, 'stop-opacity': '0.15'" in SCRIPT and "'0.36'" not in SCRIPT, "the wash starts at the area strength")
-    ok("format: (n) => money(n, 'GBP', 0), tickFormat: fmtCompact, area: false," in SCRIPT, "Cash in keeps no wash")
+    ok("format: (n) => money(n, 'GBP', 0), tickFormat: fmtCompactGBP, area: false," in SCRIPT, "Cash in keeps no wash")
 
 
 @test
@@ -11761,6 +11761,31 @@ def t_what_the_app_measure_found_stays_fixed():
     ok(".empty-chat .big svg { width: var(--icon-md); height: var(--icon-md); }" in CSS and ".chat-recent-row .ic svg { width: var(--icon-md); height: var(--icon-md);" in CSS,
        "the chat's empty tile and a recent chat's row draw a 16 icon, as every tile and row does (spec 4.3)")
     ok("cardSub.title = cardSub.textContent;" in SCRIPT, "a board card's sender and snippet line, which ends in an ellipsis, carries its full text")
+
+
+@test
+def t_the_forecast_chart_and_lists_match_the_mockup():
+    """Final review F1 to F7 (the mockup's Forecast): the Expected line and its key are solid (only the plan tick is
+    dashed); Cash in's money axis reads £0, £1.5k, £6k; a plot under 520 wide has two steps (three ticks) as the phone
+    mockup has; a month day by day has its dates weekly from the 1st; the last taken point carries its figure beside it;
+    Show all ends in a chevron; and 'The numbers behind it' splits 7 to 5 like the Worth and Why columns above it."""
+    fc = fn_src("function fcChartCard(latest, ledger, sanity) {")
+    ok("dash: true" not in fc, "the Expected series is solid (its legend key follows: a series with no dash is keyed solid)")
+    ok("name: 'Expected', color: tokenValue('--c-exp-line'), lead: true," in fc, "and is still the lead line")
+    ok("tickFormat: fmtCompactGBP" in fc and "xWeekly: range === 'month'" in fc and "lastLabel: grain === 'day'" in fc,
+       "Cash in asks for the pound axis, weekly dates on a month and the last-taken label")
+    ok("(Number(n) < 0 ? '-\\u00a3' : '\\u00a3') + fmtCompact(Math.abs(Number(n) || 0))" in SCRIPT, "the pound axis is the pound sign and the compact figure")
+    df = fn_src("function drawFrame(svg, c) {")
+    ok("const ticks = W < 520 ? 2 : 4," in df, "two steps on a narrow plot, four on a wide one")
+    ok("if (c.xWeekly) { for (let i = 0; i < n; i += 7) idxs.push(i); }" in df, "weekly from the first point when asked")
+    tc = fn_src("function trendChart(opts) {")
+    ok("xWeekly: !!opts.xWeekly" in tc and "if (opts.lastLabel) {" in tc and "class: 'chart-last'" in tc, "trendChart passes the option and draws the label")
+    ok("flip ? lx - 10 : lx + 10" in tc, "the label turns to the left of its dot when it would pass the right edge")
+    last = CSS.split(".chart-wrap .chart-last {")[1].split("}")[0]
+    ok("var(--weight-semibold)" in last and "var(--text-primary)" in last and "var(--text-xs)" in last and "var(--lh-caption)" in last,
+       "the label is caption, 600, ink")
+    wc = fn_src("function fcWorthCard(latest, sc, al) {")
+    ok("all.append(ico(I.chev))" in wc and "I.arrowRight" not in wc, "Show all ends in the chevron, not an arrow")
 
 
 @test
