@@ -2789,7 +2789,7 @@
             .ov-hero.pm-head > .ov-hero-act { display: contents; }
             .ov-hero.pm-head > .ov-hero-act > .btn { margin: 0; }
             .ov-hero.pm-head > .ov-hero-act > .btn-primary { grid-column: 1 / -1; }
-            .ov-hero.pm-head .more-btn { grid-column: 2; grid-row: 1; justify-self: end; align-self: start;
+            .ov-hero.pm-head > .ov-hero-act > .more-btn { grid-column: 2; grid-row: 1; justify-self: end; align-self: start;
                 margin-top: calc((var(--lh-title) - var(--control-h-lg)) / 2);
                 width: var(--control-h-lg); min-width: var(--control-h-lg); padding: 0; }
             /* Refresh and More are two 40 squares at the title's right, the status line keeping its words and no glyph
@@ -2800,6 +2800,14 @@
                 width: var(--control-h-lg); height: var(--control-h-lg); margin: 0; padding: 0; align-content: normal; place-items: center;
                 border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-control); background: var(--surface-primary); box-shadow: var(--shadow-control); }
             .pm-head .ph-sub > .info::before { inset: 0; top: 0; width: auto; height: auto; margin: 0; border-radius: inherit; }
+            /* The title has the squares' side to itself, as the mockup's has: the queue's (i), when there is one, rides on the
+               status line instead, so its 40 target never reaches Refresh. The markup order, and so the tab order, is unchanged. */
+            .ov-hero.pm-head > .ph-text { display: grid; grid-template-columns: auto auto auto minmax(0, 1fr); align-items: center; column-gap: var(--sp-2); row-gap: var(--sp-1); }
+            .pm-head .ph-title, .pm-head .ph-sub { display: contents; }
+            .pm-head .ph-title > h2 { grid-column: 1 / -1; grid-row: 1; }
+            .pm-head .ph-sub > .live-dot { grid-row: 2; grid-column: 1; }
+            .pm-head .ph-sub > .ov-updated { grid-row: 2; grid-column: 2; }
+            .pm-head .ph-title > .info { grid-row: 2; grid-column: 3; margin-block: calc((var(--lh-control) - var(--control-h-lg)) / 2); }
             .pm-head .more-txt, .pm-head .more-btn > .ic:nth-child(2) { display: none; }
             .pm-head .more-btn > .ic:nth-child(3) { display: inline-flex; }
         }

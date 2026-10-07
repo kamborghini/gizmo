@@ -10927,9 +10927,9 @@ def t_the_production_manager_fix_round_one():
     ok("more.classList.add('more-btn');" in fn and "more.setAttribute('aria-label', 'More');" in fn and "el('span', 'more-txt', 'More')" in fn
        and "ico(I.moreH)" in fn and "hero.classList.add('pm-head');" in fn, "More keeps its word and its name; a phone shows it as dots")
     ok("moreH: SV(" in SCRIPT, "the dots glyph")
-    ph = CSS[CSS.index("/* THE PRODUCTION MANAGER'S PHONE HEADER"):][:2600]
+    ph = CSS[CSS.index("/* THE PRODUCTION MANAGER'S PHONE HEADER"):][:4600]
     ok(".ov-hero.pm-head { display: grid;" in ph and ".ov-hero.pm-head > .ov-hero-act { display: contents; }" in ph
-       and ".ov-hero.pm-head .more-btn {" in ph and "grid-column: 1 / -1;" in ph and "grid-column: 2; grid-row: 1;" in ph,
+       and ".ov-hero.pm-head > .ov-hero-act > .more-btn {" in ph and "grid-column: 1 / -1;" in ph and "grid-column: 2; grid-row: 1;" in ph,
        "the head is a grid: the text and More on the first row, Print new on a full row, then two equal buttons")
     ok(".pm-head .more-txt, .pm-head .more-btn > .ic:nth-child(2) { display: none; }" in ph, "the word and the caret give way to the dots")
     # Small things.
@@ -11841,8 +11841,12 @@ def t_the_production_manager_and_its_phone_head_match_the_mockup():
     ok(".ov-hero.pm-head > .ph-text { padding-right: calc(2 * var(--control-h-lg) + var(--control-gap) + var(--sp-2)); }" in CSS
        and ".pm-head .ph-sub > .info { position: absolute; top: calc((var(--lh-title) - var(--control-h-lg)) / 2); right: calc(var(--control-h-lg) + var(--control-gap));" in CSS,
        "Refresh is a 40 square beside More at the title's right, left in the status line in the markup so the tab order is the same")
-    ok("margin-top: calc((var(--lh-title) - var(--control-h-lg)) / 2);" in CSS.split(".ov-hero.pm-head .more-btn {")[1][:300] and "align-self: start" in CSS.split(".ov-hero.pm-head .more-btn {")[1][:300],
-       "and More is level with the title, not a line lower")
+    mb = CSS.split(".ov-hero.pm-head > .ov-hero-act > .more-btn {")[1][:300]
+    ok("margin-top: calc((var(--lh-title) - var(--control-h-lg)) / 2);" in mb and "align-self: start" in mb,
+       "and More is level with Refresh and the title, not a line lower (its rule outweighs the head's own margin: 0 on the rail's buttons)")
+    ok(".pm-head .ph-title, .pm-head .ph-sub { display: contents; }" in CSS and ".pm-head .ph-title > .info { grid-row: 2; grid-column: 3;" in CSS
+       and ".pm-head .ph-title > h2 { grid-column: 1 / -1; grid-row: 1; }" in CSS,
+       "the queue's (i) rides on the status line on a phone, so the title has the squares' side to itself and the (i)'s 40 target never reaches Refresh")
     ok("hero.querySelector('.ov-hero-act')" in SCRIPT and "[pnBtn, coll, newShip, more].filter(Boolean).forEach(b => heroActs.append(b));" in SCRIPT,
        "the header's buttons are still added in their order")
     # Forecast's phone head and every widget grid's Customise
