@@ -3434,7 +3434,7 @@ def t_search_repaints_are_debounced_everywhere():
     debounce went in, and seven other searches still repainted synchronously.
     The shared factory debounces for everyone now, and the two hand-rolled
     repainting searches got their own."""
-    fn = SCRIPT.split("function tableSearch(")[1][:1100]
+    fn = fn_src("function tableSearch(")
     ok("setTimeout(() => { inp._t = null; if (inp.isConnected) oninput(inp.value.trim()); }, 150)" in fn,
        "the factory debounces its callers")
     ok("search._t = setTimeout(paintMailBody, 150)" in SCRIPT, "the mail search too")
@@ -3445,7 +3445,7 @@ def t_search_repaints_are_debounced_everywhere():
     ok("tableSearch('Search products…', pState.q" in SCRIPT,
        "and the products search, which is the house search box and debounces inside tableSearch")
     ok("find._t = setTimeout(paint, 150)" in SCRIPT, "and the booked-shipments search")
-    ok("inp.onchange = () => {" in SCRIPT.split("function tableSearch(")[1][:1300],
+    ok("inp.onchange = () => {" in fn_src("function tableSearch("),
        "and a blur or Enter flushes the pending run, so chips cannot act on a stale query")
 
 
@@ -12229,6 +12229,7 @@ const out = {};
 [['total', 396000], ['tax', 66000], ['remaining', 12000], ['pence', 231840], ['paid_pence', 330000],
  ['due_pence', 0], ['total_pence', 31800], ['credited_pence', 4850], ['fees_pence', null], ['id', 5551234],
  ['order_id', '820017'], ['due', '2026-10-01']].forEach(([k, v]) => { out[k] = reconValue(k, v); });
+out.refunds = reconValue('refunds', [{ id: 948211000001, created_at: '2026-09-18', pence: 42000 }]);
 console.log(JSON.stringify(out));
 """)
     got = _run_node(js)
@@ -12243,6 +12244,8 @@ console.log(JSON.stringify(out));
     eq(got["fees_pence"], "", "a field with no value prints nothing")
     eq(got["id"], "5551234", "an id is not money")
     eq(got["order_id"], "820017", "nor is an order id")
+    ok(got["refunds"].startswith("\u00a3420.00 on ") and "pence" not in got["refunds"],
+       "an order's refunds read as pounds and a date, not JSON with raw pence: %r" % got["refunds"])
     ok(got["due"] and "2026" not in got["due"] or got["due"].endswith("2026"), "a due date is a date: %r" % got["due"])
 
 
@@ -12269,12 +12272,30 @@ def t_reconciliation_tells_the_truth_about_its_links_filters_and_sweeps():
        "the walk's watcher waits for the link to be good, not merely present")
     ok("'Nothing matches these filters.'" in fn and "'Clear filters'" in fn,
        "an empty filtered list says so, with the way back")
+    ok("searchWrap.input.value = '';\n                        reconFilter = { severity: '', status: '', q: '' }; refreshReconList();" in fn,
+       "Clear filters empties the box too, or a focused box would put the search straight back")
     ok("reconFilter.severity || reconFilter.status || reconFilter.q" in fn,
        "and only when a filter or search is in play")
     ok("tableSearch('Search discrepancies', reconFilter.q, null)" not in fn
        and "tableSearch('Search discrepancies', reconFilter.q, (v) =>" in fn,
        "search filters as you type, so clearing it clears the list")
-    ok("reconSearchKeep" in fn, "and keeps its cursor through the redraw")
+    ok("typing.matches('.tbl-search input')" in fn,
+       "only the search box itself is carried across a redraw: Tab to its clear button had wiped the search")
+    keep = fn.split("if (reconSearchKeep) {", 1)
+    ok(len(keep) == 2 and "box.append(widget(list, 'discrepancies', 'full', 'Discrepancies'));" in keep[0]
+       and "setTimeout" not in keep[1].split("refreshReconList(); }", 1)[0] and "inp.focus();" in keep[1],
+       "and focus returns in the same task as the redraw, once the box is in the page, so no keystroke is lost")
+    ok("        .recon-conn-acts { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }" in CSS,
+       "the three buttons of a refused link wrap on a phone instead of running off the card")
+    ok("!(xs.needs_reconnect && /refused the refresh token/i.test(String(n)))" in fn,
+       "the refusal is said once: the sweep note saying the same is left out while the band shows")
+    ok("ico(I.logIn)" in fn and "reconConnectFallback(card, r.url, 'xero', true)" in fn,
+       "Reconnect has its own icon, and a blocked tab gets the shared fallback")
+    fb = fn_src("function reconConnectFallback(")
+    ok("card.querySelector('.recon-fallback')" in fb and "'Open the Xero sign-in here'" in fb and "watchReconXero(reconnect)" in fb,
+       "one fallback per card, named for the sign-in it opens and watching the right link (Connect Xero's said Google)")
+    ok("'Xero has not been reconnected yet. If Xero showed an error, press Reconnect Xero again.'" in watch,
+       "and a reconnect that does not land is not called 'still not connected'")
     sweep = fn_src("function watchReconSweep(")
     ok("'/api/recon/status'" in sweep and "5000" in sweep and "tries >= 120" in sweep,
        "a running sweep is asked about every five seconds, for ten minutes at most")
@@ -12309,7 +12330,6 @@ const rows = [{ order: '#104529', docs: [good] }, { order: '#104530', docs: [bad
 const e = cxEntries(rows); out.mis = e.map(x => !!x.mis);
 out.tally = cxTally(rows).mismatch;
 out.note = cxMismatchNote(e.filter(x => x.d).map(x => ({ order: x.r.order, d: x.d })));
-out.heldNote = cxMismatchNote([{ order: '#104531', d: held }]);
 out.none = cxMismatchNote([{ order: '#104529', d: good }]);
 console.log(JSON.stringify(out));
 """)
@@ -12320,8 +12340,6 @@ console.log(JSON.stringify(out));
     eq(got["tally"], 1, "and the tally counts it")
     eq(got["note"], " 1 document does not match Shopify and will be sent as it stands: #104530, £33.50 out.",
        "the Send dialog names it")
-    eq(got["heldNote"], " 1 document does not match Shopify and will be held back: #104531, £10.00 out.",
-       "and says so when the connector holds such documents back")
     eq(got["none"], "", "and says nothing when everything matches")
     table = fn_src("function connDocTable(")
     ok("cxMismatch(" in table and "' out'" in table and "'lbl-chip bad'" in table, "the row's tag says how far out it is, in red")
@@ -12331,7 +12349,10 @@ console.log(JSON.stringify(out));
     ok("cxMismatchNote(" in tag and "cxMismatchNote(" in one, "both Send dialogs name it")
     ok("' of those to write does not match Shopify, and is listed first.'" in SCRIPT,
        "the tag summary names it too, while it stays counted with what Send writes, so the tabs still add up")
-    ok("e.g === 'attention' || e.mis" not in SCRIPT, "and it is never counted twice")
+    ok("['attention', 'Needs attention', n.attention]" in SCRIPT, "and it is never counted twice, so the tabs add up")
+    ok("((b[0].mis ? 1 : 0) - (a[0].mis ? 1 : 0))" in table, "within an order, one order's check included, it leads")
+    ok("cxMismatchNote(docs.map(d => ({ order: connOneCheck.order, d: d })))" in SCRIPT, "and a one-order check's summary names it")
+    ok("held back" not in fn_src("function cxMismatchNote("), "no wording for a case the connector reports as quarantined")
 
 
 @test
@@ -12363,12 +12384,17 @@ def t_xero_sync_holds_together_on_a_phone_and_names_its_synced_figure():
     ok("'conn-doc-meta lbl-meta'" in modal and "'cd-mid'" in modal, "each line carries its quantity, unit, account and tax for a phone")
     ok(".conn-doc-meta { display: none; }" in CSS, "hidden where the columns show")
     small = CSS.split(".conn-doc-meta { display: none; }", 1)[1]
-    for rule in (".conn-doc td.cd-mid { display: none; }", ".conn-doc .conn-doc-meta { display: block; }",
-                 ".conn-doc tr { display: flex;"):
+    for rule in (".conn-doc.cd-lines td.cd-mid { display: none; }", ".conn-doc.cd-lines .conn-doc-meta { display: block; }",
+                 ".conn-doc.cd-lines tr { display: flex;"):
         ok(rule in small, "on a phone: " + rule)
+    ok(".conn-doc tr { display: flex;" not in small and ".conn-doc thead { position: absolute;" not in small,
+       "and only the lines table folds: the changes table keeps its In Xero now and Would become headings")
+    ok("t.className = 'conn-doc cd-lines';" in modal, "the lines table is the one marked")
+    ok(".lbl-meta:is(.cx-contact, .conn-doc-meta) { white-space: normal; overflow-wrap: anywhere; }" in CSS,
+       "a long line's detail wraps too")
     meta_base = "\n        .lbl-meta { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); white-space: nowrap; }"
     ok("'lbl-meta cx-contact'" in modal and meta_base in CSS
-       and ".lbl-meta.cx-contact { white-space: normal; overflow-wrap: anywhere; }" in CSS.split(meta_base, 1)[1],
+       and ".lbl-meta:is(.cx-contact, .conn-doc-meta) { white-space: normal; overflow-wrap: anywhere; }" in CSS.split(meta_base, 1)[1],
        "and the contact line wraps inside the window, after the nowrap it overrides")
     ok("kpi('Synced', 'synced', 'Invoices, credit notes and contacts')" in SCRIPT, "the Synced figure says what it counts")
 
