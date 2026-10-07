@@ -11954,6 +11954,10 @@ def t_the_copy_leftovers_are_cleared():
     for new in ("Nothing was changed. Press Refresh and check before trying again.", "changes Shopify only: it does not", "Already done, just logging it",
                 "Two contacts share that name. Pick one from the list.", "Filed in the CRM: open the deal"):
         ok(new in SCRIPT, "says: " + new)
+    for gone, new in (("toastOk('Deal won - '", "toastOk('Deal won: '"), ("(row.reason ? ' - ' + row.reason", "(row.reason ? ': ' + row.reason"),
+                      ("(m.size ? ' - ' + m.size + ' mm'", "(m.size ? ', ' + m.size + ' mm'"), ("p.name + ' - '", "p.name + ', '"),
+                      ("u.name + ' - ' + u.deals", "u.name + ', ' + u.deals")):
+        ok(gone not in SCRIPT and new in SCRIPT, "a comma or colon, not a spaced hyphen: " + new)
     ok("'Shopify fulfilment could not be completed.'" in SCRIPT and "' Fulfilment writer is not wired.'" in SCRIPT, "fulfilment, in the words a person reads")
     ok("res.fulfillment" in SCRIPT and "sh.fulfillment" in SCRIPT, "while the fields the server sends keep their names")
     ok(SCRIPT.count("'Not enough data in this range yet.'") == 2 and "range to chart yet" not in SCRIPT, "the chart's empty line is seven words")
