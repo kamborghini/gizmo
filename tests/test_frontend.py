@@ -11763,6 +11763,45 @@ def t_what_the_app_measure_found_stays_fixed():
     ok("cardSub.title = cardSub.textContent;" in SCRIPT, "a board card's sender and snippet line, which ends in an ellipsis, carries its full text")
 
 
+@test
+def t_the_shell_and_the_icons_are_the_mockups():
+    """Final review S1, S2, M6 and M7. The phone's top bar button is the menu glyph while the sidebar is a drawer (900 and
+    under), the panel glyph beside a sidebar that can hide; the account row's menu is horizontal dots; every glyph the
+    mockup's sprite draws that the app also draws is the sprite's own path (the corners of the truck, eye, calendar and
+    printer differed); and a sidebar group's caret shows when it is shut, on hover or under focus, not as a column of carets."""
+    mock = open(os.path.join(ROOT, "docs", "design", "mix", "mix.html"), encoding="utf-8").read()
+    sprite = {m.group(1): m.group(2) for m in re.finditer(r'<symbol id="i-([\w-]+)" viewBox="0 0 24 24">(.*?)</symbol>', mock, re.S)}
+    ok(len(sprite) >= 49, "the mockup's sprite is read: %d glyphs" % len(sprite))
+    pairs = {"grid": "grid", "globe": "globe", "tag": "tag", "box": "package", "users": "users", "card": "card", "scale": "scale", "trendUp": "trend",
+             "arrowsLR": "swap", "printer": "printer", "ruler": "ruler", "briefcase": "briefcase", "projector": "projector", "folder": "folder",
+             "userCheck": "team", "bookmark": "bookmark", "book": "book", "chat": "chat", "helpCircle": "help", "search": "search", "upload": "upload",
+             "info": "info", "chevDown": "down", "chev": "right", "refresh": "refresh", "plus": "plus", "cal": "calendar", "moreH": "more", "menu": "menu",
+             "panelLeft": "panel", "table": "table", "cash": "cash", "columns": "columns", "compare": "compare", "compass": "compass", "target": "target",
+             "shield": "shield", "arrowRight": "arrow", "flag": "flag", "eye": "eye", "eyeOff": "eyeoff", "edit": "pen", "check": "tick",
+             "arrowUpRight": "up", "arrowDownRight": "dn", "truck": "truck", "wallet": "wallet", "fileSheet": "sheetfile",
+             "inbox": "inbox", "sort": "sort", "checkCircle": "check"}
+    norm = lambda t: re.sub(r"\s+", "", re.sub(r"></\w+>", "/>", t.replace(" />", "/>").replace('"', "'")))
+    blk = SCRIPT.split("const I = {")[1].split("\n        };")[0]
+    bad = []
+    for key, sid in pairs.items():
+        m = re.search(r"^            %s: SV\('(.*)'\),?$" % re.escape(key), blk, re.M)
+        if not m:
+            bad.append(key + " is missing"); continue
+        if norm(m.group(1)) != norm(sprite[sid].strip()):
+            bad.append(key)
+    ok(not bad, "glyphs that are not the mockup's: %s" % bad)
+    ok("moreV" not in SCRIPT, "the vertical dots are gone, nothing draws them")
+    ok("$('menu-btn').innerHTML = I.panelLeft + I.menu;" in SCRIPT and "mb[0].classList.add('mb-panel'); mb[1].classList.add('mb-menu');" in SCRIPT,
+       "the top bar's button holds both glyphs")
+    ok(".mb-menu { display: none; }" in CSS and "@media (max-width: 900px) { .mb-panel { display: none; } .mb-menu { display: block; } }" in CSS,
+       "the menu glyph shows at 900 and under, the panel glyph above (written on the glyphs, so the button keeps its one breakpoint rule)")
+    ok("$('side-user-more').innerHTML = I.moreH;" in SCRIPT, "the account row's menu is horizontal dots")
+    ok("$('nav-mail').append(ico(I.inbox)" in SCRIPT, "the Inbox's nav glyph is the tray")
+    ok("opacity: 0;" in CSS.split(".nav-group .nav-caret {")[1].split("}")[0], "a group's caret is hidden at rest")
+    ok('.nav-group[aria-expanded="false"] .nav-caret, .nav-group:focus-visible .nav-caret { opacity: 1; }' in CSS
+       and "@media (hover: hover) { .nav-group:hover .nav-caret { opacity: 1; } }" in CSS, "and shows when the group is shut, under focus or under the pointer")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
