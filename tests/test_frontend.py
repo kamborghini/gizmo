@@ -10388,7 +10388,7 @@ def t_every_target_on_a_phone_fits_a_finger():
     ok(".chart-expand { width: var(--control-h-lg); height: var(--control-h-lg); }" in b and ".ktable tr.ktable-grp th { height: var(--control-h-lg); }" in b,
        "and so are the chart's expand square and a maker's band")
     ok(re.search(r":root \{ --wrap-pad: var\(--sp-4\); \}", CSS), "the gutter is 16")
-    ok("@media (pointer: coarse) { input:not([type=checkbox]):not([type=radio]), textarea, select { font-size: var(--text-md); } }" in CSS,
+    ok("@media (pointer: coarse) { :is(input:not([type=checkbox]):not([type=radio]), textarea, select, #input) { font-size: var(--text-md); } }" in CSS,
        "and a real field under a finger keeps 16 so iOS does not zoom into it")
 
 
@@ -11871,6 +11871,35 @@ def t_the_shell_and_the_icons_are_the_mockups():
     ok("opacity: 0;" in CSS.split(".nav-group .nav-caret {")[1].split("}")[0], "a group's caret is hidden at rest")
     ok('.nav-group[aria-expanded="false"] .nav-caret, .nav-group:focus-visible .nav-caret { opacity: 1; }' in CSS
        and "@media (hover: hover) { .nav-group:hover .nav-caret { opacity: 1; } }" in CSS, "and shows when the group is shut, under focus or under the pointer")
+
+
+@test
+def t_a_field_under_a_finger_is_16_whatever_its_class():
+    """Final review I3. The coarse-pointer rule sat before the field rules at element specificity, so every select and
+    textarea (and any field with a class) was 13 on a phone and iOS zoomed the page on focus. It is now the last
+    font-size rule in the stylesheet, under (pointer: coarse), written as an :is() list that takes the specificity of its
+    strongest member (the chat box's id), so no field class outweighs it."""
+    rules = _rules(CSS)
+    sizing = [i for i, (sel, body) in enumerate(rules) if re.search(r"(?<![\w-])(font-size|font)\s*:", body) and not sel.strip().startswith(":root")]
+    ok(sizing, "the stylesheet sets sizes")
+    last_sel, last_body = rules[sizing[-1]]
+    ok("pointer: coarse" in last_sel, "the last rule that sets a size is the coarse-pointer one: %s" % last_sel[:80])
+    ok(":is(input:not([type=checkbox]):not([type=radio]), textarea, select, #input)" in last_sel and "font-size: var(--text-md)" in last_body,
+       "it is an :is() list of the three fields and the chat box (whose id outweighs a class), and sets the 16")
+    ok(CSS.count("pointer: coarse) { :is(input:not") == 1, "and it is written once")
+    # Every field rule above it sets the size at a specificity the :is() list matches or beats.
+    def spec(sel):
+        ids = len(re.findall(r"#[\w-]+", sel)); cls = len(re.findall(r"\.[\w-]+|\[[^\]]+\]|:(?!is\(|not\(|where\()[\w-]+", sel)); el = len(re.findall(r"(?:^|[\s>+~(])[a-z][\w-]*", sel))
+        return (ids, cls, el)
+    ours = (1, 0, 0)    # the :is() list takes its strongest member's: the chat box's id
+    above = []
+    for sel, body in rules[:sizing[-1]]:
+        if not re.search(r"(?<![\w-])font-size\s*:", body) or "@media print" in sel or "label-sheet" in sel:
+            continue
+        for one in [x.strip() for x in re.sub(r"^@[^{]*?\)\s", "", sel).split(",")]:
+            if re.search(r"(^|[\s>+~])(input|select|textarea)(?![\w-])", one) and not one.startswith("@") and spec(one) > ours:
+                above.append(one[:70])
+    ok(not above, "field selectors outweighing the 16: %s" % above[:5])
 
 
 if __name__ == "__main__":
