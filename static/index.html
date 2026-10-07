@@ -2805,6 +2805,8 @@
             .ov-hero.pm-head > .ph-text { display: grid; grid-template-columns: auto auto auto minmax(0, 1fr); align-items: center; column-gap: var(--sp-2); row-gap: var(--sp-1); }
             .pm-head .ph-title, .pm-head .ph-sub { display: contents; }
             .pm-head .ph-title > h2 { grid-column: 1 / -1; grid-row: 1; }
+            /* With no (i) (To ship, Complete) the title is the grid's own child: it takes the row across as well, or it wraps in the first column. */
+            .ov-hero.pm-head > .ph-text > h2 { grid-column: 1 / -1; grid-row: 1; }
             .pm-head .ph-sub > .live-dot { grid-row: 2; grid-column: 1; }
             .pm-head .ph-sub > .ov-updated { grid-row: 2; grid-column: 2; }
             .pm-head .ph-title > .info { grid-row: 2; grid-column: 3; margin-block: calc((var(--lh-control) - var(--control-h-lg)) / 2); }
@@ -4254,10 +4256,14 @@
             .tbl-tools { gap: var(--sp-2); }
             .tbl-tools-l, .tbl-tools-r { display: contents; }
             .tbl-tools .tbl-search { flex: 1 1 100%; } }
-        /* The Production Manager's toolbar buttons are an equal pair on a phone (the mockup's .m-two), its size choice a line of its own. */
+        /* The Production Manager's toolbar buttons are an equal pair on a phone (the mockup's .m-two), Print all beside Newest
+           first, each half the line less half the gap, so a third button cannot be squeezed in beside them: Print shipping
+           labels (its words are the widest) takes a whole line under the pair, and the size choice the line after it. The
+           markup's order, and so the tab order, is unchanged; the third button is only moved by `order`. */
         @media (max-width: 640px) {
-            .q-card .tbl-tools-r > .btn { flex: 1 1 0; min-width: 0; }
-            .q-card .tbl-tools-r > select { flex: 1 1 100%; }
+            .q-card .tbl-tools-r > .btn { flex: 1 1 calc(50% - var(--sp-1)); min-width: 0; }
+            .q-card .tbl-tools-r > .btn.ship-btn { flex-basis: 100%; order: 1; }
+            .q-card .tbl-tools-r > select { flex: 1 1 100%; order: 2; }
         }
         /* THE SEARCH FIELD (the mix, spec 6): one 32 well, 280 wide, its 16
            glyph 12 in and 8 from the words, the clear button at its end. The
@@ -19064,7 +19070,7 @@ Projected Image UK"></textarea>
                4x6 sheet, and they are never the same run. */
             const shipLabels = shown.filter(shipLabelEligible);
             if (shipLabels.length) {
-                slBtn = el('button', 'btn btn-sm');
+                slBtn = el('button', 'btn btn-sm ship-btn');
                 slBtn.append(ico(I.printer), document.createTextNode(
                     'Print shipping labels (' + shipLabels.length + ')'));
                 slBtn.title = 'Reprint the courier labels for dispatched orders in this list';
