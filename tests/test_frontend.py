@@ -11829,8 +11829,8 @@ def t_the_production_manager_and_its_phone_head_match_the_mockup():
     oldf = fn_src("function renderLabels() {") if "function renderLabels() {" in SCRIPT else SCRIPT
     ok("oldf.append(ico(I.sort), document.createTextNode(labelsOldest ? 'Oldest first' : 'Newest first'));" in oldf, "Newest first has the sort glyph, its words unchanged")
     ok("I.checkCircle, tabCounts && tabCounts.dispatched, 'orders']" in SCRIPT, "Complete's icon is the circled check")
-    ok(".q-card .tbl-tools-r > .btn { flex: 1 1 0; min-width: 0; }" in CSS and ".q-card .tbl-tools-r > select { flex: 1 1 100%; }" in CSS,
-       "on a phone the two toolbar buttons are an equal pair and the size choice a line of its own")
+    ok(".q-card .tbl-tools-r > .btn { flex: 1 1 calc(50% - var(--sp-1)); min-width: 0; }" in CSS and ".q-card .tbl-tools-r > select { flex: 1 1 100%; order: 2; }" in CSS,
+       "on a phone the two toolbar buttons are an equal pair and the size choice a line of its own (a third button's own line is its own guard)")
     qc = CSS.split("@container queue (max-width: 559px) { .lbl-qrow .lbl-actions { min-width: max-content; } }")[0]
     ok(".lbl-qrow .lbl-meta { display: none; }" not in CSS, "the date is no longer hidden on a phone")
     ok(".lbl-qrow > .lbl-meta { grid-area: 1 / 2; justify-self: end;" in CSS and ".lbl-qrow > .lbl-num { grid-area: 1 / 1; justify-self: start; min-width: 0; }" in CSS,
@@ -11859,6 +11859,46 @@ def t_the_production_manager_and_its_phone_head_match_the_mockup():
     ok("[data-wg-customize] { position: absolute; top: calc((var(--lh-title) - var(--control-h-lg)) / 2); right: 0;" in CSS and "[data-wg-customize] .wg-txt { display: none; }" in CSS,
        "on a phone it is a 40 icon button at the title's right")
     ok("#view-forecast .ov-hero-act > .btn:not([data-wg-customize]) { flex: 1 1 0; min-width: 0; }" in CSS, "and Forecast's How it works and Upload workbook are an equal pair")
+
+
+def _phone_rule(selector):
+    """The declarations of one exact selector inside the 640 phone media rule (joined, last wins), or None."""
+    got = None
+    for sel, body in _rules(CSS):
+        if sel.startswith("@media (max-width: 640px) "):
+            # the scanner leaves a block's first rule prefixed with the media's own `... {`
+            own = sel[len("@media (max-width: 640px) "):].split("{")[-1]
+            if selector in [x.strip() for x in own.split(",")]:
+                got = (got or "") + body
+    return got
+
+
+@test
+def t_the_phone_toolbar_and_both_head_shapes_hold_in_every_state():
+    """Re-review NEW-1 and NEW-2 (the wave's two regressions). A phone's toolbar buttons are an equal pair, Print all
+    beside Newest first, and a third button, Print shipping labels, takes a line of its own at the pair's width or more
+    so its words never leave it (it had been squeezed into the pair's row: 147 in 112); and the Production Manager's phone
+    head places the title across the row whether or not the queue has an (i): To ship and Complete have none, and their
+    title wrapped onto two lines with the status line adrift of its dot."""
+    pair = _phone_rule(".q-card .tbl-tools-r > .btn")
+    ok(pair and "flex: 1 1 calc(50% - var(--sp-1))" in pair and "min-width: 0" in pair,
+       "the toolbar's buttons share the line in halves (less half the 8 gap), so two make a pair")
+    third = _phone_rule(".q-card .tbl-tools-r > .btn.ship-btn")
+    ok(third and "flex-basis: 100%" in third and "order: 1" in third,
+       "Print shipping labels has the whole line to itself, under the pair")
+    sel = _phone_rule(".q-card .tbl-tools-r > select")
+    ok(sel and "flex: 1 1 100%" in sel and "order: 2" in sel, "and the size choice is the line after it")
+    ok("slBtn = el('button', 'btn btn-sm ship-btn');" in SCRIPT, "the button carries the class the phone rule reads")
+    ok("flex: 1 1 0; min-width: 0" not in CSS.split("The Production Manager's toolbar buttons")[1][:600],
+       "no zero basis squeezes a third button into the pair's row")
+    # The head without an (i): the h2 is a direct child of .ph-text and must still take row 1 across all four columns.
+    bare = _phone_rule(".ov-hero.pm-head > .ph-text > h2")
+    ok(bare and "grid-column: 1 / -1" in bare and "grid-row: 1" in bare,
+       "with no (i) the bare title takes row 1 across all columns, so it does not wrap in the first one and the status line stays on its dot")
+    withi = _phone_rule(".pm-head .ph-title > h2")
+    ok(withi and "grid-column: 1 / -1" in withi and "grid-row: 1" in withi, "and with an (i) the title in its wrapper still does")
+    ok("if (o.info) { const row = el('div', 'ph-title'); row.append(h, o.info); text.append(row); } else text.append(h);" in SCRIPT,
+       "both shapes come from the one header builder: the title in a wrapper with its (i), or bare")
 
 
 @test
