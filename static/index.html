@@ -4166,7 +4166,7 @@
            a soft line divides it. Two columns read down where there is room,
            so a phone's single column keeps the same order. */
         .rlist { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: var(--gap-cols); }
-        .rlist.cols-2 { grid-auto-flow: column; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(var(--rows, 2), auto); }
+        .rlist.cols-2 { grid-auto-flow: column; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); grid-template-rows: repeat(var(--rows, 2), auto); }
         .rlist-row { position: relative; display: flex; align-items: center; gap: var(--gap-row-icon); min-height: var(--row-h); width: 100%;
             padding: 0; border: 0; background: none; font: inherit; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-primary);
             text-align: left; cursor: pointer; box-shadow: var(--rule-t-soft); }
@@ -4646,6 +4646,8 @@
            a literal, and it sat three units off the --text-tertiary every other muted
            line already uses. */
         .chart-wrap .axis-x text, .chart-wrap .axis-y text { fill: var(--text-tertiary); font-size: var(--text-xs); line-height: var(--lh-caption); font-family: var(--font-sans); }
+        /* The last taken figure, beside its dot: caption, 600, ink. */
+        .chart-wrap .chart-last { fill: var(--text-primary); font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-semibold); font-family: var(--font-sans); font-variant-numeric: tabular-nums; }
         /* 1.4, measured off the reference's own line. 2.25 read as a marker
            pen next to it. */
         .chart-line { fill: none; stroke-width: var(--chart-stroke); vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
@@ -8816,6 +8818,8 @@ Projected Image UK"></textarea>
             else { let t; window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(run, 120); }); }
             requestAnimationFrame(run);
         }
+        /* Pounds on a chart's axis: £0, £1.5k, £6k. */
+        const fmtCompactGBP = (n) => (Number(n) < 0 ? '-\u00a3' : '\u00a3') + fmtCompact(Math.abs(Number(n) || 0));
         const fmtCompact = (n) => { n = Number(n) || 0; const a = Math.abs(n); if (a >= 1e6) return (n / 1e6).toFixed(a >= 1e7 ? 0 : 1).replace(/\.0$/, '') + 'M'; if (a >= 1e3) return (n / 1e3).toFixed(a >= 1e4 ? 0 : 1).replace(/\.0$/, '') + 'k'; return String(Math.round(n)); };
         /* A tap or click anywhere else puts every chart back to rest. */
         document.addEventListener('pointerdown', (e) => document.querySelectorAll('.chart-wrap').forEach(w => {
@@ -8895,7 +8899,8 @@ Projected Image UK"></textarea>
                 : (i) => padL + (n <= 1 ? 0 : (i / (n - 1)) * (W - padL - padR));
             const minV = c.minV || 0;
             const Y = (v) => padT + (1 - (((Number(v) || 0) - minV) / ((maxV - minV) || 1))) * (H - padT - padB);
-            const ticks = 4, gy = svgEl('g', { class: 'axis-y' });
+            /* Four steps, and two (three ticks) on a plot under 520 wide, as the mockup's phone chart has them. */
+            const ticks = W < 520 ? 2 : 4, gy = svgEl('g', { class: 'axis-y' });
             for (let t = 0; t <= ticks; t++) {
                 const yy = padT + t / ticks * (H - padT - padB);
                 // The rule starts at the axis and runs to the card edge; it used
@@ -8920,7 +8925,10 @@ Projected Image UK"></textarea>
                steps - 1.5x its neighbours on all four charts - and the guard
                that popped a crowded tick only fired when the two landed inside
                0.6 of a step of each other. */
-            const idxs = []; for (let i = n - 1; i >= 0; i -= step) idxs.unshift(i);
+            const idxs = [];
+            /* A month drawn day by day has its dates weekly from the 1st (1, 8, 15, 22, 29), the same at every width. */
+            if (c.xWeekly) { for (let i = 0; i < n; i += 7) idxs.push(i); }
+            else for (let i = n - 1; i >= 0; i -= step) idxs.unshift(i);
             /* Keep every date inside the plot AND clear of the y numbers. On an
                endpoint scale the first point sits exactly on padL, so a centred
                date there straddled the axis and printed its own left half on
@@ -9003,7 +9011,7 @@ Projected Image UK"></textarea>
             const maxV = fit ? fit.hi : axisTop(Math.max.apply(null, all.concat([0])), allWhole(all));
             const draw = (W, redraw) => {
                 const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, width: W, height: H });
-                const { X, Y } = drawFrame(svg, { W, H, padL, padR, padT, padB, n, labels, minV, maxV, fmt, tickFmt: opts.tickFormat || fmt, yTicks: true });
+                const { X, Y } = drawFrame(svg, { W, H, padL, padR, padT, padB, n, labels, minV, maxV, fmt, tickFmt: opts.tickFormat || fmt, yTicks: true, xWeekly: !!opts.xWeekly });
                 const uid = 'cg' + (++_chartSeq);
                 const defs = svgEl('defs'); const grad = svgEl('linearGradient', { id: uid, x1: 0, y1: 0, x2: 0, y2: 1 });
                 /* The wash under a single line is that line's own colour, faded from
@@ -9085,6 +9093,17 @@ Projected Image UK"></textarea>
                    The reference chart has none of them: its <svg> contains zero
                    circles at rest and every text node in it is an x-axis date. The
                    numbers live in the tooltip, on hover. */
+                /* The last point that happened carries its figure beside it (the mockup's £5,116 on Cash in): the
+                   first series' last value, in the caption weight, on the right of the dot or the left of it at the edge. */
+                if (opts.lastLabel) {
+                    const vs = series[0].values; let li = -1;
+                    vs.forEach((v, i) => { if (v != null && isFinite(v)) li = i; });
+                    if (li >= 0) {
+                        const txt = fmt(vs[li]), tw = String(txt).length * 6.4, lx = X(li), flip = lx + 10 + tw > W;
+                        const lt = svgEl('text', { class: 'chart-last', x: flip ? lx - 10 : lx + 10, y: Y(vs[li]) - 6, 'text-anchor': flip ? 'end' : 'start' });
+                        lt.textContent = txt; svg.append(lt);
+                    }
+                }
                 const hoverLine = svgEl('line', { class: 'chart-hover-line', x1: 0, y1: padT, x2: 0, y2: H - padB, opacity: 0 }); svg.append(hoverLine);
                 const dots = series.map(s => { const c = svgEl('circle', { class: 'chart-dot', r: CHART.dotR, fill: s.color || CH[0], opacity: 0 }); svg.append(c); return c; });
                 const tip = el('div', 'chart-tip'); tip.setAttribute('aria-hidden', 'true'); wrap.append(tip);
@@ -15967,7 +15986,7 @@ Projected Image UK"></textarea>
             if (sales.length) { const n = el('span', 'cnt', String(sales.length)); n.append(el('span', 'sr-only', sales.length === 1 ? ' month' : ' months')); head.append(n); }
             if (sales.length > 3) {
                 const tools = el('div', 'sec-tools');
-                const all = el('button', 'link', 'Show all'); all.type = 'button'; all.append(ico(I.arrowRight));
+                const all = el('button', 'link', 'Show all'); all.type = 'button'; all.append(ico(I.chev));
                 all.onclick = () => fcPage('Worth looking at', () => fcWorthTable(latest, sales.slice().sort((a, b) => a.month < b.month ? -1 : 1)));
                 tools.append(all); head.append(tools);
             }
@@ -16220,10 +16239,10 @@ Projected Image UK"></textarea>
             /* The legend says in words what each treatment is, because a
                shaded band explains itself only to somebody who already reads
                forecast charts. One colour per measure (the mix): taken in the
-               dark teal, keyed as a dot; expected as the teal line, dashed; the
+               dark teal, keyed as a dot; expected as the teal line, solid; the
                likely range as the teal area. */
             const series = [{ name: 'Taken', color: tokenValue('--c-taken'), key: 'dot', values: actualVals },
-                            { name: 'Expected', color: tokenValue('--c-exp-line'), dash: true, lead: true,
+                            { name: 'Expected', color: tokenValue('--c-exp-line'), lead: true,
                               values: rows.map((r, i) => joins(i, r.p50)) }];
             const band = rows.some(r => r.p10 != null && r.p90 != null)
                 ? { name: 'Likely range', color: tokenValue('--c-area'),
@@ -16266,7 +16285,8 @@ Projected Image UK"></textarea>
             const chart = trendChart({ headless: true, legend: true, label: 'Cash in, ' + title, title: title,
                 source: 'Shopify orders and the nightly forecast', period: period, yUnit: 'GBP', labels: labels, series: series,
                 band: band, splitAt: handover > 0 && handover < rows.length - 1 ? handover : null,
-                format: (n) => money(n, 'GBP', 0), tickFormat: fmtCompact, area: false,
+                format: (n) => money(n, 'GBP', 0), tickFormat: fmtCompactGBP, area: false,
+                xWeekly: range === 'month', lastLabel: grain === 'day',
                 height: window.matchMedia('(max-width: 640px)').matches ? 200 : 268, annotate: false });
             card.append(chart);
             /* On a phone the switch sits under the chart, where a thumb finds
