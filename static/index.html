@@ -2750,8 +2750,8 @@
            half of the 16 between the two (--q-bleed-end), so the band reaches the split and no further. */
         .q-card { position: relative; gap: var(--sp-4); --q-bleed-end: var(--wrap-pad); }
         @media (min-width: 641px) {
-            .q-card { padding-top: calc(var(--bw-hairline) + var(--sp-4)); }
-            .q-card::before { content: ""; position: absolute; top: 0; inset-inline: calc(-1 * var(--wrap-pad));
+            .q-card { border-top: var(--bw-hairline) solid transparent; padding-top: var(--sp-4); }
+            .q-card::before { content: ""; position: absolute; top: calc(-1 * var(--bw-hairline)); inset-inline: calc(-1 * var(--wrap-pad));
                 height: var(--bw-hairline); background: var(--border-default); pointer-events: none; }
         }
         @media (max-width: 640px) { .ov-wrap > .queues { margin-bottom: var(--sp-4); } }

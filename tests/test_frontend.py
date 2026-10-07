@@ -11947,10 +11947,11 @@ def t_the_queue_band_is_one_treatment_at_every_width():
     ok(base is None, "the card has no padding above its toolbar of its own (a phone has no rule there): %r" % base)
     ok(_winner(".q-card", "gap") == "var(--sp-4)", "the toolbar and the list are 16 apart (the mockup's .toolbar padding and .m-tools margin)")
     desk = _media_rule("@media (min-width: 641px)", ".q-card")
-    ok(desk and "padding-top: calc(var(--bw-hairline) + var(--sp-4))" in desk, "a desktop's controls start 16 clear under the 1 rule above them")
+    ok(desk and "border-top: var(--bw-hairline) solid transparent" in desk and "padding-top: var(--sp-4)" in desk and "calc(" not in desk,
+       "a desktop's controls start 16 clear under the 1 row the rule has (the card's own hairline of border, so no padding is an odd 17)")
     rule = _media_rule("@media (min-width: 641px)", ".q-card::before")
-    ok(rule and "top: 0" in rule and "height: var(--bw-hairline)" in rule and "inset-inline: calc(-1 * var(--wrap-pad))" in rule,
-       "the rule above the toolbar is drawn from 641 up and runs the sheet's width")
+    ok(rule and "top: calc(-1 * var(--bw-hairline))" in rule and "height: var(--bw-hairline)" in rule and "inset-inline: calc(-1 * var(--wrap-pad))" in rule,
+       "the rule above the toolbar is drawn from 641 up, in that border row, and runs the sheet's width")
     ok(not any(sel.split("{")[-1].strip().startswith(".q-card::before") for sel, _ in _rules(CSS)
                if not sel.startswith("@media (min-width: 641px)")),
        "and nowhere else: a phone has no rule above the search")
