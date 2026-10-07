@@ -10397,7 +10397,7 @@ def t_every_target_on_a_phone_fits_a_finger():
     ok(".chart-expand { width: var(--control-h-lg); height: var(--control-h-lg); }" in b and ".ktable tr.ktable-grp th { height: var(--control-h-lg); }" in b,
        "and so are the chart's expand square and a maker's band")
     ok(re.search(r":root \{ --wrap-pad: var\(--sp-4\); \}", CSS), "the gutter is 16")
-    ok("@media (pointer: coarse) { :is(input:not([type=checkbox]):not([type=radio]), textarea, select, #input) { font-size: var(--text-md); } }" in CSS,
+    ok("@media (pointer: coarse) { :is(input:not([type=checkbox]):not([type=radio]), textarea, select, #input, [contenteditable=\"true\"]) { font-size: var(--text-md); } }" in CSS,
        "and a real field under a finger keeps 16 so iOS does not zoom into it")
 
 
@@ -12064,8 +12064,10 @@ def t_a_field_under_a_finger_is_16_whatever_its_class():
     ok(sizing, "the stylesheet sets sizes")
     last_sel, last_body = rules[sizing[-1]]
     ok("pointer: coarse" in last_sel, "the last rule that sets a size is the coarse-pointer one: %s" % last_sel[:80])
-    ok(":is(input:not([type=checkbox]):not([type=radio]), textarea, select, #input)" in last_sel and "font-size: var(--text-md)" in last_body,
-       "it is an :is() list of the three fields and the chat box (whose id outweighs a class), and sets the 16")
+    ok(":is(input:not([type=checkbox]):not([type=radio]), textarea, select, #input, [contenteditable=\"true\"])" in last_sel and "font-size: var(--text-md)" in last_body,
+       "it is an :is() list of the three fields, the chat box (whose id outweighs a class) and an editable area, and sets the 16")
+    composer = open(os.path.join(ROOT, "static", "composer.js"), encoding="utf-8").read()
+    ok("area.contentEditable = 'true';" in composer and re.search(r"\.cmp-area \{[^}]*font-size: var\(--text-body\)", composer), "the Inbox composer's editable area is a contenteditable at body size (13), so under a finger it is this rule's")
     ok(CSS.count("pointer: coarse) { :is(input:not") == 1, "and it is written once")
     # Every field rule above it sets the size at a specificity the :is() list matches or beats.
     def spec(sel):
