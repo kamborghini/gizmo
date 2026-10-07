@@ -5686,7 +5686,7 @@
            size and the only place the stylesheet's 16 for a field is written: it comes after every field rule, and the
            :is() list takes the specificity of its strongest member (the chat box's id), so a field carrying .psel,
            .lbl-size or any other field class does not beat it. */
-        @media (pointer: coarse) { :is(input:not([type=checkbox]):not([type=radio]), textarea, select, #input) { font-size: var(--text-md); } }
+        @media (pointer: coarse) { :is(input:not([type=checkbox]):not([type=radio]), textarea, select, #input, [contenteditable="true"]) { font-size: var(--text-md); } }
     </style>
 </head>
 <body>
