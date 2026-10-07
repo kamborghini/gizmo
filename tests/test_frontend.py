@@ -5895,8 +5895,9 @@ def t_an_icon_size_comes_from_the_scale_and_not_from_the_rule():
     # is a piece of illustration, not an interface icon on the scale.
     icons = [i for i in icons if "rg-ic" not in i]
     ok(not icons, "%d icon sizes bypass the scale: %s" % (len(icons), icons[:5]))
-    for t in ("--icon-xs", "--icon-sm", "--icon-md", "--icon-lg", "--icon-xl"):
+    for t in ("--icon-xs", "--icon-sm", "--icon-md", "--icon-lg"):    # no 20: every tile's glyph is 16 (spec 4.3)
         ok(t + ":" in CSS, "the icon scale still defines " + t)
+    ok("--icon-xl" not in CSS, "and --icon-xl, which nothing reads now, is gone")
 
     # Square boxes and status dots, the same way. Forty-eight rules set an
     # equal width and height in TWENTY-ONE different sizes; 22, 26, 30, 34 and
@@ -11754,6 +11755,11 @@ def t_what_the_app_measure_found_stays_fixed():
     ok(".mail-bulkbar .btn { min-height: var(--control-h-lg); }" in CSS.split("THE PHONE")[1] and "min-height: calc(var(--control-h-lg) + 2 * var(--sp-1))" in CSS.split("THE PHONE")[1],
        "the Inbox's bulk-bar buttons are 40 on a phone, the bar the 48 that holds them")
     ok(".files-up.failed .bar { display: none; }" in CSS, "a failed upload has no empty progress track squeezing its name and reason")
+    # Found by putting the app beside the mockup: two icons the page meant to draw were 0 by 0.
+    ok(".qt .ic svg { width: var(--icon-md); height: var(--icon-md); }" in CSS, "the Production Manager's Complete and Custom shipments tabs draw their icons")
+    ok(".rlist-row > .ic:not(:last-child) svg { width: var(--icon-md); height: var(--icon-md); }" in CSS, "and so does the leading icon of a list row (Forecast's numbers behind it)")
+    ok(".empty-chat .big svg { width: var(--icon-md); height: var(--icon-md); }" in CSS and ".chat-recent-row .ic svg { width: var(--icon-md); height: var(--icon-md);" in CSS,
+       "the chat's empty tile and a recent chat's row draw a 16 icon, as every tile and row does (spec 4.3)")
     ok("cardSub.title = cardSub.textContent;" in SCRIPT, "a board card's sender and snippet line, which ends in an ellipsis, carries its full text")
 
 

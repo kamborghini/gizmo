@@ -290,7 +290,7 @@
             --fc-wl-cols-m: 84px minmax(0, 1fr) 92px;
             --rg-h: 12px; --rg-band: 6px;
             --tip-max: 360px;       /* and at most this, or the plot's width less 16 */
-            --icon-xs: 12px; --icon-sm: 14px; --icon-md: 16px; --icon-lg: 18px; --icon-xl: 20px;
+            --icon-xs: 12px; --icon-sm: 14px; --icon-md: 16px; --icon-lg: 18px;
             /* 16 at 1.75 in every control, row, tile and nav item; 14 at 2 only
                for inline glyphs (crumb, link and list chevrons, chip arrows). */
             --icon-stroke: 1.75; --icon-stroke-s: 2;
@@ -1189,7 +1189,7 @@
             background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
         .sizes-caret { display: inline-grid; place-items: center; align-self: center; flex: none; color: var(--text-tertiary);
             transition: transform var(--dur) var(--ease); }
-        .sizes-caret svg { width: var(--icon-sm); height: var(--icon-sm); display: block; }
+        .sizes-caret svg { width: var(--icon-sm); height: var(--icon-sm); display: block; stroke-width: var(--icon-stroke-s); }
         .sizes-open[aria-expanded="true"] .sizes-caret { transform: rotate(90deg); }
         .sizes-name { min-width: 0; overflow-wrap: anywhere; }
         mark.sizes-hit { background: var(--warning-bg); color: inherit; border-radius: var(--radius-tag); }
@@ -4168,6 +4168,7 @@
         .rlist-row .ic { color: var(--text-tertiary); }
         .rlist-row .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .rlist-row > .ic:last-child svg { width: var(--icon-sm); height: var(--icon-sm); stroke-width: var(--icon-stroke-s); }
+        .rlist-row > .ic:not(:last-child) svg { width: var(--icon-md); height: var(--icon-md); }
         @media (hover: hover) { .rlist-row:hover, .rlist-row:hover :is(.ic, .cnt) { color: var(--text-link); } }
         .rlist-row:active, .rlist-row:active :is(.ic, .cnt) { color: var(--text-link-hover); }
         .rlist-row:focus-visible { outline: 0; }
@@ -4457,6 +4458,7 @@
         .qt { height: var(--control-h); padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-control); background: none; display: flex; align-items: center;
             gap: var(--control-gap); font: inherit; font-weight: var(--weight-medium); color: var(--text-secondary); white-space: nowrap; cursor: pointer; }
         .qt .ic { color: var(--text-tertiary); }
+        .qt .ic svg { width: var(--icon-md); height: var(--icon-md); }
         .qt.on { background: var(--action-selected); color: var(--text-primary); box-shadow: var(--ring-chosen); }
         .qt.on .ic { color: var(--text-brand); }
         @media (hover: hover) { .qt:not(.on):hover { background: var(--surface-tertiary); } }
@@ -4846,7 +4848,7 @@
         .spinner svg { width: var(--icon-md); height: var(--icon-md); animation: navspin 1s linear infinite; }
         .empty-chat { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: var(--sp-7); }
         .empty-chat .big { width: var(--box-2xl); height: var(--box-2xl); border-radius: var(--radius-inset); background: var(--surface-tertiary); color: var(--text-primary); display: grid; place-items: center; margin-bottom: var(--sp-4); }
-        .empty-chat .big svg { width: var(--icon-xl); height: var(--icon-xl); }
+        .empty-chat .big svg { width: var(--icon-md); height: var(--icon-md); }
         .empty-chat h2 { font-size: var(--text-head); margin: 0 0 var(--sp-2); font-weight: var(--weight-medium); letter-spacing: normal; line-height: var(--lh-control); }
         .empty-chat p { color: var(--text-secondary); margin: 0 0 var(--sp-6); max-width: var(--measure); line-height: var(--lh-prose); }
         /* One column as wide as the intro above it: every starter on one line, the
@@ -4978,7 +4980,7 @@
         .chat-recent-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: var(--row-h); border: 0; background: transparent;
             border-radius: 0; box-shadow: var(--rule-b-soft); padding: 0 var(--sp-2); font: inherit; font-size: var(--text-body); color: var(--text-primary); text-align: left; cursor: pointer; }
         @media (hover: hover) { .chat-recent-row:hover { background: var(--surface-secondary); } }
-        .chat-recent-row .ic svg { width: var(--icon-sm); height: var(--icon-sm); display: block; color: var(--text-tertiary); }
+        .chat-recent-row .ic svg { width: var(--icon-md); height: var(--icon-md); display: block; color: var(--text-tertiary); }
         .crr-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .crr-at { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); flex: none; }
         @media (max-width: 900px) {
