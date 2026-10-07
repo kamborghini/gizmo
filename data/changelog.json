@@ -6,7 +6,52 @@
    "items": [
     {
      "kind": "changed",
-     "text": "Reactor has a new look: one white page in a dark frame, one set of greys, and Projected Image's teal for what is chosen and for the one main button on each screen."
+     "text": "Reactor has a new look: one white page in a dark frame, one set of greys, and Projected Image's teal for what is chosen and for the one main button on each screen. The sidebar is part of the dark frame, and Hide sidebar folds it away."
+    },
+    {
+     "kind": "changed",
+     "text": "Every page opens the same way: its title, at most one short line or a live status, and its actions. The explanations that used to fill the top of a page now sit behind the small (i) beside the title or figure they explain, and open with a tap or the keyboard as well as a pointer."
+    },
+    {
+     "kind": "changed",
+     "tab": "forecast",
+     "text": "Forecast leads with the month: what it is expected to come to against the plan, its likely range drawn as one bar, then what has been taken and where the year lands. Cash in has a Compare methods switch and simpler ranges; Worth looking at shows each month's likely range and whether it is safely ahead, likely ahead or likely behind; the method pages sit under How it works. The forecast now calls each of its models a method."
+    },
+    {
+     "kind": "changed",
+     "tab": "labels",
+     "text": "Production Manager shows how many orders wait in Unprocessed, To make and To ship at the top, with Complete and Custom shipments beside them. The queue, its buttons and the label print exactly as they did; an open order and its label now read as one block, and on a phone each order's buttons keep their words."
+    },
+    {
+     "kind": "changed",
+     "text": "Far fewer words on every screen: most of the explanation has gone or moved behind an (i), an empty list says one line and offers the next step, and every warning and cost is kept."
+    },
+    {
+     "kind": "changed",
+     "text": "Charts show the day under the pointer or your finger, and the arrow keys move along them; on a phone the legend reads the day out instead of a tooltip covering the chart."
+    },
+    {
+     "kind": "changed",
+     "text": "On a phone every button, field and choice is big enough for a thumb, and typing in a field no longer makes the page zoom in."
+    },
+    {
+     "kind": "fixed",
+     "tab": "crm",
+     "text": "The CRM pipeline shows all five stages on a laptop screen. The fifth used to sit past the edge of the board, with nothing to say it was there."
+    },
+    {
+     "kind": "fixed",
+     "text": "On a phone or tablet the closed menu no longer casts a shadow over the left edge of every page, and a row of tabs that scrolls keeps the one you are on in view."
+    },
+    {
+     "kind": "changed",
+     "tab": "guide",
+     "text": "The Guide's heading stays put as you move between its sections, and Print the guide sits beside its search."
+    },
+    {
+     "kind": "added",
+     "tab": "guide",
+     "text": "Admins have a new Design section in the Guide: every colour and typeface in Reactor and the shared parts its screens are built from, drawn by the same code as the screens, with how readable each colour is."
     }
    ]
   },
