@@ -366,14 +366,21 @@ async def _access_token() -> str:
         if tok.get("error") or not tok.get("access_token"):
             err = str(tok.get("error") or "")
             if err == "invalid_grant":
+                # A consent can land while this refresh is in flight: its
+                # callback writes the token file outside this lock. Then the
+                # token Xero refused is no longer ours, and recording the
+                # refusal would write the dead token over the fresh one.
+                cur = _load_token()
+                if cur.get("refresh_token") != rt:
+                    raise XeroTransient("Xero was reconnected while this was under way. Try again.")
                 _state["token_error"] = _REFUSED
                 # Kept in the token file too: memory is emptied by every
                 # restart, and a refusal forgotten there put the page back to
                 # a green tag over a dead link after each deploy. A fresh
                 # consent writes a new file and a disconnect deletes it.
                 try:
-                    d["refused_at"] = time.time()
-                    _write_token(d)
+                    cur["refused_at"] = time.time()
+                    _write_token(cur)
                 except Exception:
                     logger.exception("xero: could not record the refused token")
                 raise RuntimeError(_state["token_error"])
