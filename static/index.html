@@ -2809,6 +2809,11 @@
                 width: var(--control-h-lg); height: var(--control-h-lg); margin: 0; padding: 0; align-content: normal; place-items: center;
                 border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-control); background: var(--surface-primary); box-shadow: var(--shadow-control); }
             .pm-head .ph-sub > .info::before { inset: 0; top: 0; width: auto; height: auto; margin: 0; border-radius: inherit; }
+            /* Custom shipments has no More: Refresh is the one square, at the edge, the title has that square's room, and its one
+               action (New shipment) takes the row. */
+            .ov-hero.pm-head:not(:has(.more-btn)) > .ph-text { padding-right: calc(var(--control-h-lg) + var(--sp-2)); }
+            .pm-head:not(:has(.more-btn)) .ph-sub > .info { right: 0; }
+            .ov-hero.pm-head > .ov-hero-act > .btn:only-child { grid-column: 1 / -1; }
             /* The title has the squares' side to itself, as the mockup's has: the queue's (i), when there is one, rides on the
                status line instead, so its 40 target never reaches Refresh. The markup order, and so the tab order, is unchanged. */
             .ov-hero.pm-head > .ph-text { display: grid; grid-template-columns: auto auto auto minmax(0, 1fr); align-items: center; column-gap: var(--sp-2); row-gap: var(--sp-1); }
@@ -18891,8 +18896,10 @@ Projected Image UK"></textarea>
             const newShip = el('button', 'btn btn-sm');
             newShip.append(ico(I.plus), document.createTextNode('New shipment'));
             newShip.onclick = openCustomShip;
-            box.append(pageHead({ view: 'labels', title: 'Production Manager', live: Date.now(),
-                onRefresh: () => renderCustomQueue(box), refreshLabel: 'Refresh', actions: [newShip] }));
+            const head = pageHead({ view: 'labels', title: 'Production Manager', live: Date.now(),
+                onRefresh: () => renderCustomQueue(box), refreshLabel: 'Refresh', actions: [newShip] });
+            head.classList.add('pm-head');      // the queue's phone head: Refresh is the 40 square at the title's right
+            box.append(head);
             box.append(prodQueues((k) => { queueMode = k; labelsCache = null; labelSel = null; loadLabels(true); }));
             const card = el('div', 'card');
             let paint = () => {};
