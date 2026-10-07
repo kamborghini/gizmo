@@ -12212,6 +12212,167 @@ console.log(JSON.stringify(out));
     eq(got["junk"], [], "and anything that is not a list reads as none")
 
 
+@test
+def t_reconciliation_evidence_reads_its_pence_as_pounds():
+    """Live fault, 2026-10-07: the sweep keeps every amount in integer pence
+    (recon.py: total, tax, remaining, pence and the _pence fields), but an
+    opened discrepancy printed total and tax as pounds, so order #104477 read a
+    total of £396,000.00 and VAT of £66,000.00 instead of £3,960.00 and
+    £660.00. Every money field in evidence is pence now. Run in node."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = ("const _moneyFmts = {};\n" + fn_src("function moneyFmt(") + "\n" + fn_src("function money(") + "\n"
+          + "const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];\n"
+          + fn_src("function fmtDate(") + "\n" + fn_src("function reconValue(") + r"""
+const out = {};
+[['total', 396000], ['tax', 66000], ['remaining', 12000], ['pence', 231840], ['paid_pence', 330000],
+ ['due_pence', 0], ['total_pence', 31800], ['credited_pence', 4850], ['fees_pence', null], ['id', 5551234],
+ ['order_id', '820017'], ['due', '2026-10-01']].forEach(([k, v]) => { out[k] = reconValue(k, v); });
+console.log(JSON.stringify(out));
+""")
+    got = _run_node(js)
+    eq(got["total"], "£3,960.00", "an order's total is pence")
+    eq(got["tax"], "£660.00", "and so is its VAT")
+    eq(got["remaining"], "£120.00", "a credit note's remaining credit too")
+    eq(got["pence"], "£2,318.40", "the payout's own pence as before")
+    eq(got["paid_pence"], "£3,300.00", "and every _pence field")
+    eq(got["due_pence"], "£0.00", "zero is still money")
+    eq(got["total_pence"], "£318.00", "a mailbox document's total")
+    eq(got["credited_pence"], "£48.50", "credited")
+    eq(got["fees_pence"], "", "a field with no value prints nothing")
+    eq(got["id"], "5551234", "an id is not money")
+    eq(got["order_id"], "820017", "nor is an order id")
+    ok(got["due"] and "2026" not in got["due"] or got["due"].endswith("2026"), "a due date is a date: %r" % got["due"])
+
+
+@test
+def t_reconciliation_tells_the_truth_about_its_links_filters_and_sweeps():
+    """Live faults, 2026-10-07, found by rebuilding the working page:
+    - an expired Xero link kept a green Xero tag and a teal Sweep now, and told
+      you to reconnect from this tab, which had no Reconnect;
+    - with filters hiding everything it said "Nothing needs attention." even
+      with 21 open;
+    - the search's clear button emptied the box but left the list filtered;
+    - a sweep started elsewhere showed "Sweeping..." for good, because the page
+      never asked again."""
+    fn = fn_src("function renderRecon(")
+    ok("xs.needs_reconnect" in fn and "'Xero needs reconnecting'" in fn,
+       "a refused link turns the Xero tag red and says what it needs")
+    ok("'Reconnect Xero'" in fn and "api('/api/recon/xero-link', {})" in fn,
+       "and offers Reconnect through the same walk as Connect")
+    ok("'Ask the master account to reconnect Xero.'" in fn, "which only the master account may start, so others are told who")
+    ok("'btn btn-sm' + (xs.needs_reconnect ? '' : ' btn-primary')" in fn,
+       "Reconnect is then the one teal action and Sweep now steps down")
+    watch = fn_src("function watchReconXero(")
+    ok("st.xero.connected && !st.xero.needs_reconnect" in watch,
+       "the walk's watcher waits for the link to be good, not merely present")
+    ok("'Nothing matches these filters.'" in fn and "'Clear filters'" in fn,
+       "an empty filtered list says so, with the way back")
+    ok("reconFilter.severity || reconFilter.status || reconFilter.q" in fn,
+       "and only when a filter or search is in play")
+    ok("tableSearch('Search discrepancies', reconFilter.q, null)" not in fn
+       and "tableSearch('Search discrepancies', reconFilter.q, (v) =>" in fn,
+       "search filters as you type, so clearing it clears the list")
+    ok("reconSearchKeep" in fn, "and keeps its cursor through the redraw")
+    sweep = fn_src("function watchReconSweep(")
+    ok("'/api/recon/status'" in sweep and "5000" in sweep and "tries >= 120" in sweep,
+       "a running sweep is asked about every five seconds, for ten minutes at most")
+    ok("if (st.sweeping) watchReconSweep();" in fn, "whenever the page shows one running")
+    ok("sw.textContent = 'Sweeping" not in fn, "and the busy button keeps its icon")
+
+
+@test
+def t_a_document_that_does_not_match_shopify_is_never_shown_as_safe():
+    """Live fault, 2026-10-07: in a tag check, #104530 came to £33.50 less than
+    Shopify and would be sent as it stood, yet its row read a grey "Would
+    create" like every safe one, Send stayed armed, and neither dialog said a
+    word; only its document window did. Now the row says how far out it is, in
+    red, its order sorts first, and both Send
+    dialogs and the tag summary name it. Run in node."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    consts = "\n".join(l for l in SCRIPT.split("\n") if l.strip().startswith(("const CX_LOCKED", "const CX_NOTHING")))
+    words = "const CX_DOC_WORDS = {" + SCRIPT.split("const CX_DOC_WORDS = {", 1)[1].split("};", 1)[0] + "};"
+    js = ("const _moneyFmts = {};\n" + fn_src("function moneyFmt(") + "\n" + fn_src("function money(") + "\n"
+          + words + "\n" + consts + "\n" + fn_src("function cxKind(") + "\n" + fn_src("function cxGroup(") + "\n"
+          + fn_src("function cxMismatch(") + "\n" + fn_src("function cxEntries(") + "\n" + fn_src("function cxTally(") + "\n"
+          + fn_src("function cxMismatchNote(") + r"""
+const out = {};
+const bad = { kind: 'invoice', action: 'created', preview: { currency: 'GBP', reconcile: { ok: false, computed: 410.0, expected: 443.5, diff: -33.5, mode: 'warn' } } };
+const good = { kind: 'invoice', action: 'created', preview: { currency: 'GBP', reconcile: { ok: true, computed: 120, expected: 120, diff: 0, mode: 'warn' } } };
+const held = { kind: 'invoice', action: 'created', preview: { currency: 'GBP', reconcile: { ok: false, computed: 90, expected: 100, diff: -10, mode: 'strict' } } };
+const quarantined = { kind: 'invoice', action: 'quarantined', preview: { reconcile: { ok: false, diff: 5, mode: 'warn' } } };
+out.flag = !!cxMismatch(bad); out.good = !!cxMismatch(good); out.q = !!cxMismatch(quarantined);
+const rows = [{ order: '#104529', docs: [good] }, { order: '#104530', docs: [bad] }];
+const e = cxEntries(rows); out.mis = e.map(x => !!x.mis);
+out.tally = cxTally(rows).mismatch;
+out.note = cxMismatchNote(e.filter(x => x.d).map(x => ({ order: x.r.order, d: x.d })));
+out.heldNote = cxMismatchNote([{ order: '#104531', d: held }]);
+out.none = cxMismatchNote([{ order: '#104529', d: good }]);
+console.log(JSON.stringify(out));
+""")
+    got = _run_node(js)
+    ok(got["flag"] and not got["good"], "a document out against Shopify is flagged, a matching one is not: %r" % got)
+    ok(not got["q"], "and one the connector already holds back keeps its own word")
+    eq(got["mis"], [False, True], "the entry carries the flag")
+    eq(got["tally"], 1, "and the tally counts it")
+    eq(got["note"], " 1 document does not match Shopify and will be sent as it stands: #104530, £33.50 out.",
+       "the Send dialog names it")
+    eq(got["heldNote"], " 1 document does not match Shopify and will be held back: #104531, £10.00 out.",
+       "and says so when the connector holds such documents back")
+    eq(got["none"], "", "and says nothing when everything matches")
+    table = fn_src("function connDocTable(")
+    ok("cxMismatch(" in table and "' out'" in table and "'lbl-chip bad'" in table, "the row's tag says how far out it is, in red")
+    ok("misFirst" in table, "and its order sorts first")
+    tag = SCRIPT.split("tagSend.onclick = async () => {", 1)[1].split("{ title: 'Send tagged orders'", 1)[0]
+    one = SCRIPT.split("oneSend.onclick = async () => {", 1)[1].split("{ title: 'Send one order'", 1)[0]
+    ok("cxMismatchNote(" in tag and "cxMismatchNote(" in one, "both Send dialogs name it")
+    ok("' of those to write does not match Shopify, and is listed first.'" in SCRIPT,
+       "the tag summary names it too, while it stays counted with what Send writes, so the tabs still add up")
+    ok("e.g === 'attention' || e.mis" not in SCRIPT, "and it is never counted twice")
+
+
+@test
+def t_xero_sync_offers_no_setting_the_connector_will_not_keep():
+    """Live fault, 2026-10-07: Change settings offered Shop timezone, and Save
+    said "Saved", but the connector does not accept that setting (it is not in
+    its SETTING_FIELDS) and never returns it, so nothing was kept. It is set on
+    the connector service itself, so the page no longer offers it."""
+    ok("SHOP_TIMEZONE" not in SCRIPT, "no Shop timezone field, and none in the values read back")
+
+
+@test
+def t_xero_sync_holds_together_on_a_phone_and_names_its_synced_figure():
+    """Live faults, 2026-10-07, measured at a real 390x844:
+    - the tag check's five-choice filter grew into a 789px grey slab, because
+      the phone rule flex: 1 1 100% stretched it down its column;
+    - payout notes printed over the next row, because every table cell kept
+      the 44px row height once the phone layout stacked them;
+    - the document window hid the Amount column and the total off to the
+      right, and the contact line ran past the window's edge.
+    And "Synced 1214" counted contacts too, which the connector's ledger
+    reports as one figure: it now says what it counts."""
+    phone = CSS.split(".segmented:has(> :nth-child(4)) > * { flex: 1 1 calc(var(--sp-7) * 3); } }", 1)
+    ok(len(phone) == 2 and "@media (max-width: 640px) { .cx-res > .segmented { flex: none; } }" in phone[1],
+       "the tag filter keeps its own height, after the phone rule it overrides")
+    ok(".ktable.cx-docs td { display: block; padding: 0; border: 0; width: auto; min-width: 0; height: auto; }" in CSS,
+       "a stacked cell grows with its text, so a payout note never prints over the next row")
+    modal = fn_src("function connDocModal(")
+    ok("'conn-doc-meta lbl-meta'" in modal and "'cd-mid'" in modal, "each line carries its quantity, unit, account and tax for a phone")
+    ok(".conn-doc-meta { display: none; }" in CSS, "hidden where the columns show")
+    small = CSS.split(".conn-doc-meta { display: none; }", 1)[1]
+    for rule in (".conn-doc td.cd-mid { display: none; }", ".conn-doc .conn-doc-meta { display: block; }",
+                 ".conn-doc tr { display: flex;"):
+        ok(rule in small, "on a phone: " + rule)
+    meta_base = "\n        .lbl-meta { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); white-space: nowrap; }"
+    ok("'lbl-meta cx-contact'" in modal and meta_base in CSS
+       and ".lbl-meta.cx-contact { white-space: normal; overflow-wrap: anywhere; }" in CSS.split(meta_base, 1)[1],
+       "and the contact line wraps inside the window, after the nowrap it overrides")
+    ok("kpi('Synced', 'synced', 'Invoices, credit notes and contacts')" in SCRIPT, "the Synced figure says what it counts")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

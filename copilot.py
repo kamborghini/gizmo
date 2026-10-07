@@ -18049,9 +18049,12 @@ _CONNECTOR_READS = {
 # The settings the Xero sync page may change. Deliberately a short list of
 # OPERATIONAL knobs: nothing here can point the service at a different shop,
 # a different Xero organisation, or a different set of credentials.
+# SHOP_TIMEZONE is not here: the connector neither accepts nor returns it (it
+# is not in its SETTING_FIELDS), so offering it made Save say "Saved" over
+# nothing. It is set on the connector service itself.
 _CONNECTOR_SETTABLE = {
     "RECONCILE_MODE", "RECONCILE_TOLERANCE", "MAX_DOCS_PER_RUN", "RUNAWAY_ABORT_ABOVE",
-    "ORDERS_SINCE", "SHOP_TIMEZONE", "XERO_SALES_ACCOUNT_CODE",
+    "ORDERS_SINCE", "XERO_SALES_ACCOUNT_CODE",
     "XERO_TAX_TYPE_STANDARD", "XERO_TAX_TYPE_ZERO",
     "CUSTOMER_REF_METAFIELD_NAMESPACE", "CUSTOMER_REF_METAFIELD_KEY",
 }

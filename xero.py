@@ -584,7 +584,11 @@ def status() -> dict:
     d = _load_token()
     out = {"configured": client_configured(), "connected": connected(),
            "tenant": str(d.get("tenant_name") or ""),
-           "last_refresh": d.get("last_refresh") or 0, "warning": ""}
+           "last_refresh": d.get("last_refresh") or 0, "warning": "",
+           # Xero refused the refresh token (invalid_grant): the link is dead
+           # until someone re-consents. A flag, so the page can say so and
+           # offer Reconnect rather than keep a green tag over a sentence.
+           "needs_reconnect": bool(_state.get("token_error"))}
     failed_at = _state.get("save_failed_at") or 0
     if failed_at and time.time() - failed_at < 3600:
         out["warning"] = ("The refreshed Xero token could not be saved to the data volume. "

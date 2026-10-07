@@ -16547,6 +16547,10 @@ def t_a_xero_outage_is_not_reported_as_a_dead_token():
             err = e
         ok(not isinstance(err, xero_api.XeroTransient), "invalid_grant is not transient")
         ok("reconnect" in str(err).lower(), "and THAT one says reconnect: %s" % err)
+        # Live fault 2026-10-07: the page kept a green Xero tag and offered no
+        # Reconnect, because the refusal reached it only as a sentence.
+        st = xero_api.status()
+        ok(st.get("needs_reconnect") is True, "the status says so as a flag the page can act on: %r" % st)
     finally:
         (xero_api.httpx.AsyncClient, xero_api.RETRY_WAITS,
          xero_api.CLIENT_ID, xero_api.CLIENT_SECRET) = saved
@@ -16592,6 +16596,7 @@ def t_a_token_that_could_not_be_saved_retries_inside_xeros_grace():
         ok(st.get("warning"), "and the failure is on the status the tab reads")
         ok("volume" in st["warning"] or "save" in st["warning"].lower(),
            "in words that name the actual problem: %s" % st["warning"])
+        ok(st.get("needs_reconnect") is False, "a token that could not be saved still works, so no reconnect yet")
     finally:
         (xero_api.httpx.AsyncClient, xero_api._write_token,
          xero_api.CLIENT_ID, xero_api.CLIENT_SECRET) = saved
@@ -26515,6 +26520,16 @@ def t_a_long_header_is_read_in_linear_time_and_the_index_holds_a_bounded_amount(
         ok(copilot._SKILL_INDEX_CHARS <= 5_000_000, copilot._SKILL_INDEX_CHARS)
     finally:
         copilot._SKILL_INDEX.clear(); copilot._SKILL_INDEX.update(saved[0]); copilot._SKILL_INDEX_CHARS = saved[1]
+
+
+@test
+def t_the_connector_settings_list_holds_only_what_the_connector_keeps():
+    """Live fault, 2026-10-07: SHOP_TIMEZONE was on the list the Xero sync page
+    may change, but the connector neither accepts nor returns it, so a save of
+    it was dropped there while the page said "Saved"."""
+    ok("SHOP_TIMEZONE" not in copilot._CONNECTOR_SETTABLE, "not offered, so never 'saved'")
+    ok({"RECONCILE_MODE", "ORDERS_SINCE", "MAX_DOCS_PER_RUN"} <= copilot._CONNECTOR_SETTABLE, "the real knobs stay")
+
 
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The

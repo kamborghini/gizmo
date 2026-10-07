@@ -2,6 +2,47 @@
  "releases": [
   {
    "date": "2026-10-07",
+   "title": "Reconciliation and Xero sync put right",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": "recon",
+     "text": "An opened discrepancy showed its figures 100 times too big: an order of £3,960 read £396,000, and its VAT £66,000. Every figure in it now reads in pounds."
+    },
+    {
+     "kind": "fixed",
+     "tab": "recon",
+     "text": "When Xero stops accepting Reactor's connection, Reconciliation says so in red and offers Reconnect Xero as its main button. It used to stay green, and told you to reconnect from a tab with no way to."
+    },
+    {
+     "kind": "fixed",
+     "tab": "recon",
+     "text": "When filters or a search hide everything, the list says nothing matches and offers to clear them, rather than saying nothing needs attention."
+    },
+    {
+     "kind": "fixed",
+     "tab": "recon",
+     "text": "Search filters as you type, and clearing it clears the list. A sweep running in the background now shows when it has finished, instead of saying Sweeping for good."
+    },
+    {
+     "kind": "fixed",
+     "tab": "connector",
+     "text": "In a one-order or tag check, a document that does not match Shopify is marked in red with how far out it is, listed first and named in the summary and the Send box. It used to look like every safe one."
+    },
+    {
+     "kind": "fixed",
+     "tab": "connector",
+     "text": "Change settings no longer offers Shop timezone, which the Xero connector never kept, although saving said it had."
+    },
+    {
+     "kind": "fixed",
+     "tab": "connector",
+     "text": "The Synced figure says it counts invoices, credit notes and contacts. On a phone the tag filters, payout notes and the document window now fit the screen."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-07",
    "title": "Compare methods in colours of its own",
    "items": [
     {
