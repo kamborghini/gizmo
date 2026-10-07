@@ -2742,22 +2742,32 @@
         /* The label draws its edge from --border-strong (a frozen rule). Whatever that shared grey becomes,
            the label inside its frame keeps the edge it had. */
         .lbl-frame { --border-strong: var(--paper-edge); }
-        /* THE QUEUE RUNS EDGE TO EDGE OF THE SHEET (the mockup's .pm and .orders; the Production Manager only, and not
-           beside the preview pane from 1500): a rule above the toolbar and another above the list, a rule under every
-           order across the sheet, and the open order's wash and its 2px teal edge spanning the sheet. The words stay on
-           the text edge; the bands are drawn past it by the gutter. */
-        .q-card { position: relative; padding-top: var(--sp-4); }
-        .q-card::before, .q-card > .lbl-list > .lbl-grid::before { content: ""; position: absolute; top: 0; inset-inline: calc(-1 * var(--wrap-pad));
+        /* THE QUEUE RUNS EDGE TO EDGE OF THE SHEET (the mockup's .pm and .orders; the Production Manager only, one treatment
+           at every width, beside the preview pane from 1500 as well): on a desktop a rule above the toolbar with 16 clear
+           under it, the controls, 16 clear, then a rule above the list (the card's own gap is the 16), a rule under every
+           order across the sheet, and the open order's wash and its 2px teal edge spanning the sheet. A phone has no rule
+           above the search (the queue tabs sit 16 over it, as the mockup's .m-tools has). The words stay on the text edge;
+           the bands are drawn past it by the gutter, and on the right, while the preview pane is open beside the list, by
+           half of the 16 between the two (--q-bleed-end), so the band reaches the split and no further. */
+        .q-card { position: relative; gap: var(--sp-4); --q-bleed-end: var(--wrap-pad); }
+        @media (min-width: 641px) {
+            .q-card { padding-top: calc(var(--bw-hairline) + var(--sp-4)); }
+            .q-card::before { content: ""; position: absolute; top: 0; inset-inline: calc(-1 * var(--wrap-pad));
+                height: var(--bw-hairline); background: var(--border-default); pointer-events: none; }
+        }
+        @media (max-width: 640px) { .ov-wrap > .queues { margin-bottom: var(--sp-4); } }
+        .lbl-split:not(:has(.lbl-pane:empty)) > .lbl-list { --q-bleed-end: var(--sp-2); }
+        .q-card .lbl-list > .lbl-grid::before { content: ""; position: absolute; top: 0; inset-inline: calc(-1 * var(--wrap-pad)) calc(-1 * var(--q-bleed-end));
             height: var(--bw-hairline); background: var(--border-default); pointer-events: none; }
-        .q-card > .lbl-list > .lbl-grid { position: relative; box-shadow: none; }
-        .q-card > .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview) { position: relative; isolation: isolate; background: none; box-shadow: none; }
-        .q-card > .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::before { content: ""; position: absolute; z-index: -1; inset: 0 calc(-1 * var(--wrap-pad)); pointer-events: none; }
-        .q-card > .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::after { content: ""; position: absolute; bottom: 0; inset-inline: calc(-1 * var(--wrap-pad));
+        .q-card .lbl-list > .lbl-grid { position: relative; box-shadow: none; }
+        .q-card .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview) { position: relative; isolation: isolate; background: none; box-shadow: none; }
+        .q-card .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::before { content: ""; position: absolute; z-index: -1; inset: 0 calc(-1 * var(--q-bleed-end)) 0 calc(-1 * var(--wrap-pad)); pointer-events: none; }
+        .q-card .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::after { content: ""; position: absolute; bottom: 0; inset-inline: calc(-1 * var(--wrap-pad)) calc(-1 * var(--q-bleed-end));
             height: var(--bw-hairline); background: var(--border-soft); pointer-events: none; }
-        .q-card > .lbl-list > .lbl-grid > :last-child::after { background: var(--border-default); }
-        .q-card > .lbl-list > .lbl-grid > .lbl-qrow:has(+ .lbl-preview)::after { display: none; }
-        @media (hover: hover) { .q-card > .lbl-list > .lbl-grid > .lbl-qrow:hover::before { background: var(--surface-secondary); } }
-        .q-card > .lbl-list > .lbl-grid > :is(.lbl-qrow:is(.on, [aria-selected="true"]), .lbl-preview)::before { background: var(--action-selected); box-shadow: var(--ring-selected); }
+        .q-card .lbl-list > .lbl-grid > :last-child::after { background: var(--border-default); }
+        .q-card .lbl-list > .lbl-grid > .lbl-qrow:has(+ .lbl-preview)::after { display: none; }
+        @media (hover: hover) { .q-card .lbl-list > .lbl-grid > .lbl-qrow:hover::before { background: var(--surface-secondary); } }
+        .q-card .lbl-list > .lbl-grid > :is(.lbl-qrow:is(.on, [aria-selected="true"]), .lbl-preview)::before { background: var(--action-selected); box-shadow: var(--ring-selected); }
         /* A list as narrow as a phone's: worded 40 buttons in a grid, three on
            the first line and two on the second (the mix, spec 8.2); the label
            is scaled there, so its frame draws no shadow. */

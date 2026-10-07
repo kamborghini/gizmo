@@ -11809,6 +11809,16 @@ def _winner(selector, prop):
     return got
 
 
+def _exact(selector, prop):
+    """Like _winner, for a selector list that has commas inside :is(): the rule whose whole selector is `selector`."""
+    got = None
+    for sel, body in _rules(CSS):
+        if sel.split("{")[-1].strip() == selector:
+            for m in re.finditer(r"(?<![\w-])" + re.escape(prop) + r"\s*:\s*([^;}]+)", body):
+                got = m.group(1).strip()
+    return got
+
+
 @test
 def t_the_production_manager_and_its_phone_head_match_the_mockup():
     """Final review P1 to P8 and F8 (the mockup's Production Manager and Forecast phone head). Only the look moves: the
@@ -11818,14 +11828,14 @@ def t_the_production_manager_and_its_phone_head_match_the_mockup():
     phone at the right of the number's line, the name 4 under it and the buttons 12 under that; Refresh and More are two
     squares at the title's right; Complete's icon is circled; the order number's underline is the link underline at
     offset 4 and its date is body; and the Customise control is a 40 icon button, named Customise, at a phone's title."""
-    ok(".q-card { position: relative; padding-top: var(--sp-4); }" in CSS, "the queue card holds the rule above its toolbar")
-    ok(".q-card::before, .q-card > .lbl-list > .lbl-grid::before { content: \"\"; position: absolute; top: 0; inset-inline: calc(-1 * var(--wrap-pad));" in CSS,
-       "a rule above the toolbar and another above the list, each the sheet's width")
-    ok("::after { content: \"\"; position: absolute; bottom: 0; inset-inline: calc(-1 * var(--wrap-pad));" in CSS, "a rule under every order across the sheet")
-    ok(".q-card > .lbl-list > .lbl-grid > :last-child::after { background: var(--border-default); }" in CSS, "the last one a little stronger")
-    ok("{ background: var(--action-selected); box-shadow: var(--ring-selected); }" in CSS.split(".q-card > .lbl-list > .lbl-grid > :is(.lbl-qrow:is(.on")[1][:260],
+    ok(".q-card { position: relative; gap: var(--sp-4); --q-bleed-end: var(--wrap-pad); }" in CSS, "the queue card is the positioned one the rules hang from")
+    ok(".q-card .lbl-list > .lbl-grid::before { content: \"\"; position: absolute; top: 0; inset-inline: calc(-1 * var(--wrap-pad)) calc(-1 * var(--q-bleed-end));" in CSS,
+       "a rule above the toolbar (from 641) and another above the list, each the sheet's width")
+    ok("::after { content: \"\"; position: absolute; bottom: 0; inset-inline: calc(-1 * var(--wrap-pad)) calc(-1 * var(--q-bleed-end));" in CSS, "a rule under every order across the sheet")
+    ok(".q-card .lbl-list > .lbl-grid > :last-child::after { background: var(--border-default); }" in CSS, "the last one a little stronger")
+    ok("{ background: var(--action-selected); box-shadow: var(--ring-selected); }" in CSS.split(".q-card .lbl-list > .lbl-grid > :is(.lbl-qrow:is(.on")[1][:260],
        "the open order's wash spans the sheet with the 2px teal edge from --ring-selected")
-    ok("inset: 0 calc(-1 * var(--wrap-pad))" in CSS, "and its band is drawn past the text edge by the gutter, so the words stay on it")
+    ok("inset: 0 calc(-1 * var(--q-bleed-end)) 0 calc(-1 * var(--wrap-pad))" in CSS, "and its band is drawn past the text edge by the gutter, so the words stay on it")
     oldf = fn_src("function renderLabels() {") if "function renderLabels() {" in SCRIPT else SCRIPT
     ok("oldf.append(ico(I.sort), document.createTextNode(labelsOldest ? 'Oldest first' : 'Newest first'));" in oldf, "Newest first has the sort glyph, its words unchanged")
     ok("I.checkCircle, tabCounts && tabCounts.dispatched, 'orders']" in SCRIPT, "Complete's icon is the circled check")
@@ -11859,16 +11869,22 @@ def t_the_production_manager_and_its_phone_head_match_the_mockup():
     ok("#view-forecast .ov-hero-act > .btn:not([data-wg-customize]) { flex: 1 1 0; min-width: 0; }" in CSS, "and Forecast's How it works and Upload workbook are an equal pair")
 
 
-def _phone_rule(selector):
-    """The declarations of one exact selector inside the 640 phone media rule (joined, last wins), or None."""
+def _media_rule(media, selector):
+    """The declarations of one exact selector inside one media rule (joined, last wins), or None."""
     got = None
+    prefix = media + " "
     for sel, body in _rules(CSS):
-        if sel.startswith("@media (max-width: 640px) "):
+        if sel.startswith(prefix):
             # the scanner leaves a block's first rule prefixed with the media's own `... {`
-            own = sel[len("@media (max-width: 640px) "):].split("{")[-1]
+            own = sel[len(prefix):].split("{")[-1]
             if selector in [x.strip() for x in own.split(",")]:
                 got = (got or "") + body
     return got
+
+
+def _phone_rule(selector):
+    """The declarations of one exact selector inside the 640 phone media rule (joined, last wins), or None."""
+    return _media_rule("@media (max-width: 640px)", selector)
 
 
 @test
@@ -11915,6 +11931,41 @@ def t_the_phone_heads_info_target_leans_down_so_the_status_line_is_4_under_the_t
     ok(b and "top: calc(var(--sp-1) + var(--lh-control) / 2)" in b, "and so is its highlight square")
     ok(":has(> .ph-title > .info)" not in CSS, "no row gap holds the title's line off the target any more")
     ok("row-gap: var(--sp-1)" in _phone_rule(".ov-hero.pm-head > .ph-text"), "the status line is 4 under the title, with or without an (i)")
+
+
+@test
+def t_the_queue_band_is_one_treatment_at_every_width():
+    """Re-review NEW-4, NEW-5 and NEW-8. The mockup's queue band: on a desktop a rule, 16 clear, the toolbar's controls,
+    16 clear, then the list's rule (the rules 65 apart, the mockup's), the card's own gap being the 16; on a phone no rule
+    above the search at all and 16 between the queue tabs and the search (.m-tools margin-top 16), the list's own rule
+    staying; and from 1500, beside the preview pane, the rows take the same treatment as below it (one queue, one
+    treatment at every width): the bands and rules run to the sheet edge on the left and to the middle of the 16 between
+    the list and the pane on the right, the open order's wash and teal edge the same."""
+    base = _winner(".q-card", "padding-top")
+    ok(base is None, "the card has no padding above its toolbar of its own (a phone has no rule there): %r" % base)
+    ok(_winner(".q-card", "gap") == "var(--sp-4)", "the toolbar and the list are 16 apart (the mockup's .toolbar padding and .m-tools margin)")
+    desk = _media_rule("@media (min-width: 641px)", ".q-card")
+    ok(desk and "padding-top: calc(var(--bw-hairline) + var(--sp-4))" in desk, "a desktop's controls start 16 clear under the 1 rule above them")
+    rule = _media_rule("@media (min-width: 641px)", ".q-card::before")
+    ok(rule and "top: 0" in rule and "height: var(--bw-hairline)" in rule and "inset-inline: calc(-1 * var(--wrap-pad))" in rule,
+       "the rule above the toolbar is drawn from 641 up and runs the sheet's width")
+    ok(not any(sel.split("{")[-1].strip().startswith(".q-card::before") for sel, _ in _rules(CSS)
+               if not sel.startswith("@media (min-width: 641px)")),
+       "and nowhere else: a phone has no rule above the search")
+    ok("var(--sp-4)" in (_phone_rule(".ov-wrap > .queues") or ""), "on a phone the queue tabs sit 16 over the search")
+    # the one treatment from 1500: rows reach the same selectors whether or not the split wraps the list
+    ok(".q-card > .lbl-list" not in CSS, "no selector needs the list to be the card's direct child, which it is not beside the preview pane")
+    ok(".q-card .lbl-list > .lbl-grid::before" in CSS and ".q-card .lbl-list > .lbl-grid > :last-child::after" in CSS
+       and ".q-card .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::after" in CSS, "the list's rule and every order's rule are the card's, split or not")
+    ok(_winner(".q-card", "--q-bleed-end") == "var(--wrap-pad)", "the right end of a band is the gutter by default")
+    ok(_winner(".lbl-split:not(:has(.lbl-pane:empty)) > .lbl-list", "--q-bleed-end") == "var(--sp-2)",
+       "and half of the 16 between the list and its preview pane while the pane is open")
+    for sel in (".q-card .lbl-list > .lbl-grid::before", ".q-card .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::after"):
+        ok(_exact(sel, "inset-inline") == "calc(-1 * var(--wrap-pad)) calc(-1 * var(--q-bleed-end))", sel + " ends at the bleed")
+    ok(_exact(".q-card .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::before", "inset") == "0 calc(-1 * var(--q-bleed-end)) 0 calc(-1 * var(--wrap-pad))",
+       "and so does every order's wash")
+    ok(_exact(".q-card .lbl-list > .lbl-grid > :is(.lbl-qrow:is(.on, [aria-selected=\"true\"]), .lbl-preview)::before", "box-shadow") == "var(--ring-selected)",
+       "the open order's wash keeps its 2px teal edge beside the pane")
 
 
 @test
