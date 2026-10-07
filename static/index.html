@@ -207,7 +207,6 @@
             --rule-t-band: inset 0 var(--bw-hairline) 0 var(--band-rule);
             --ring-default: inset 0 0 0 var(--bw-hairline) var(--border-default);
             --ring-emphasis: inset 0 0 0 var(--bw-hairline) var(--border-emphasis);
-            --ring-line: inset 0 0 0 var(--bw-hairline) var(--action-line);
             --ring-action: inset 0 0 0 var(--bw-hairline) var(--border-selected);
             --ring-action-2: inset 0 0 0 var(--bw-strong) var(--border-selected);
             --ring-edge: inset 0 0 0 var(--bw-hairline) color-mix(in srgb, var(--black) 45%, transparent);
@@ -1167,7 +1166,9 @@
         /* Notes takes what the other columns leave (max-width 0 with width
            100% in an auto table): at a fixed 440px the table never fitted its
            card, Undercut was cut mid-number at 1280 and even 1728 scrolled. */
-        .ktable td.sizes-notes { color: var(--text-tertiary); font-size: var(--text-xs); line-height: var(--lh-caption); max-width: 0; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ktable td.sizes-notes { color: var(--text-tertiary); font-size: var(--text-xs); line-height: var(--lh-caption); max-width: 0; width: 100%; }
+        /* The one line and its ellipsis are the inner span's, so the cell itself clips nothing and the open row's fill can bleed past it. */
+        .ktable td.sizes-notes > .sizes-note { display: block; width: 0; min-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         /* The list fits its card: a heading over a column of numbers takes
            two lines rather than 137px, and a card under 860px gives the model
            8rem and puts the notes away (they were 63px of '...' there; each
@@ -1208,6 +1209,9 @@
             font-weight: var(--weight-regular); color: var(--text-secondary); }
         .sizes-model .sizes-labeltag { display: table; margin-left: calc(var(--icon-sm) + var(--sp-1)); margin-top: var(--sp-1); }
         .ktable tr.sizes-row.open td { background: var(--surface-secondary); border-bottom-color: transparent; }
+        /* The open row's fill bleeds 8 either side, like the detail under it and every other row of the family. */
+        .ktable tr.sizes-row.open > td:first-child { box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary); }
+        .ktable tr.sizes-row.open > td:last-child { box-shadow: var(--sp-2) 0 0 var(--surface-secondary); }
         .ktable tr.sizes-detail > td { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary);
             padding: 0 var(--sp-4) var(--sp-4) calc(var(--sp-3) + var(--icon-sm) + var(--sp-1)); }
         @media (hover: hover) { .ktable tbody tr.sizes-detail:hover td { background: var(--surface-secondary); } }
@@ -1245,6 +1249,7 @@
             @media (hover: hover) { .ktable.sizes-table tr.sizes-row:hover { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); } }
             .ktable.sizes-table tr.sizes-row.open { border-bottom-color: transparent; }
             .ktable.sizes-table tr.sizes-row > td { display: block; min-width: 0; padding: 0; border: 0; background: none; }
+            .ktable.sizes-table tr.sizes-row.open > td { box-shadow: none; }
             .ktable.sizes-table td.sizes-model { grid-area: model; }
             .ktable.sizes-table td.sizes-maker { grid-area: maker; color: var(--text-secondary); font-size: var(--text-xs); line-height: var(--lh-caption); }
             .ktable.sizes-table td.sizes-status { grid-area: status; white-space: normal; }
@@ -1604,7 +1609,7 @@
            newest first. They were four walls of cards with no dates, no
            source and no way to correct one. */
         .ktable.mem-table td { vertical-align: top; }
-        .ktable.mem-table td.mem-kind, .ktable.mem-table td.mem-from, .ktable.mem-table td.mem-at { white-space: nowrap; }
+        .ktable.mem-table td.mem-from, .ktable.mem-table td.mem-at { white-space: nowrap; }
         .ktable.mem-table td.mem-from, .ktable.mem-table td.mem-at { color: var(--text-secondary); }
         .ktable.mem-table td.mem-acts-cell { width: 1%; padding-block: var(--sp-2); }
         .mem-text { font-size: var(--text-body); line-height: var(--lh-control); max-width: var(--measure); overflow-wrap: anywhere; }
@@ -3929,7 +3934,6 @@
         .disp-notice { text-align: center; padding: var(--sp-4) 0; }
         .disp-notice p { color: var(--text-secondary); margin-bottom: var(--sp-3); }
         .disp-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-top: var(--sp-3); }
-        .disp-boxedit { display: flex; gap: var(--sp-1); align-items: center; margin-bottom: var(--sp-1); }
         .disp-boxname { flex: 1 1 auto; }
         .disp-boxdim { width: 62px; flex: none; }
         .disp-breakdown { font-size: var(--text-xs); line-height: var(--lh-caption); margin-top: var(--sp-1); }
@@ -4107,13 +4111,6 @@
         /* 7vh is for a page that is only the gate. Under a card it is stacked
            on the card's own margin, which measured 65 to 71px of nothing. */
         .ov-wrap > * + .run-gate { margin-top: 0; }
-        .run-gate .rg-ic { width: 56px; height: 56px; border-radius: var(--radius-inset); background: var(--action-soft); color: var(--text-brand); display: grid; place-items: center; box-shadow: var(--ring-line); margin-bottom: var(--sp-4); }
-        .run-gate .rg-ic svg { width: 26px; height: 26px; }
-        .run-gate h2 { font-size: var(--text-head); font-weight: var(--weight-medium); letter-spacing: normal; margin: 0 0 var(--sp-2); }
-        /* 20px leading and a 20px step, so the gate's internal rhythm reads 16,
-           8, 20, 12 with every value on the spacing scale. The 22 was a hand
-           number and 1.6 resolved to 22.4, which is the same number twice. */
-        .run-gate p { color: var(--text-secondary); font-size: var(--text-body); line-height: var(--lh-control); margin: 0 0 var(--sp-5); max-width: 42ch; }
         /* Wider, not taller. This overrode the vertical padding to 12px and
            came out 46px against a control system that is 32 everywhere and a
            reference whose largest button is also 32. The reference makes a
@@ -4123,7 +4120,6 @@
         /* The gate's one line is the empty state's, not the old paragraph's (Customers' own gate keeps those). */
         .run-gate .empty-line { color: var(--text-primary); font-size: var(--text-head); line-height: var(--lh-control); margin: 0; max-width: var(--measure); }
         .run-gate .rg-btn svg { width: var(--icon-md); height: var(--icon-md); }
-        .run-gate .rg-note { margin-top: var(--sp-3); font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
         /* ---------- Keywords tab ---------- */
         /* A table in the reference always sits inside a card, under a header,
            and runs edge to edge within it. This wrapper IS that card: the
@@ -4980,7 +4976,7 @@
         /* Nothing unbroken pushes the chat sideways: an address, a SKU or a
            handle wraps where it must. */
         .msg.user .bubble, .summary, .prose, .insight .t, .insight .d, .action .text, details.sect .body, .data-src-pre, .resp-note { overflow-wrap: anywhere; }
-        .resp-head .who { margin: 0; line-height: inherit; }
+        .resp-head .who { margin: 0; }
         .resp-head .who:focus { outline: 0; }
         .resp-at { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
         .resp-copy { margin-left: auto; }
@@ -9048,7 +9044,7 @@ Projected Image UK"></textarea>
             wrap.setAttribute('role', 'group'); wrap.setAttribute('aria-roledescription', 'chart');
             wrap.setAttribute('aria-label', (opts.label || opts.title || 'Chart') + '. Use the left and right arrow keys to read it point by point.');
             const live = el('p', 'sr-only'); live.setAttribute('role', 'status'); card.append(live);
-            if (!series.length || labels.length < 2) { wrap.append(el('div', 'empty', 'Not enough data in this range to chart yet.')); return card; }
+            if (!series.length || labels.length < 2) { wrap.append(el('div', 'empty', 'Not enough data in this range yet.')); return card; }
             const n = labels.length;
             /* An uncertainty band is DATA: p90 is routinely the highest thing
                on the plot, so its values set the domain alongside the lines.
@@ -9256,7 +9252,7 @@ Projected Image UK"></textarea>
             const card = el('div', 'chart-card' + (REDUCE_MOTION || opts.noIntro ? '' : ' chart-anim'));
             card.append(chartHead(opts, [{ color }], 'bar'));
             const wrap = el('div', 'chart-wrap'); card.append(wrap);
-            if (vals.length < 1) { wrap.append(el('div', 'empty', 'Not enough data in this range to chart yet.')); return card; }
+            if (vals.length < 1) { wrap.append(el('div', 'empty', 'Not enough data in this range yet.')); return card; }
             const n = vals.length, maxV = axisTop(Math.max.apply(null, vals.concat([0])), allWhole(vals));
             const draw = (W) => {
                 const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, width: W, height: H });
@@ -17624,7 +17620,7 @@ Projected Image UK"></textarea>
                 tr.append(mTd);
                 tr.append(el('td', 'num sizes-glass', r.glass || ''), el('td', 'num sizes-image', r.image || ''), ...sizesProducedCells(r));
                 tr.append(el('td', 'num sizes-under', r.undercut && r.undercut !== '0' ? r.undercut : ''));
-                const n = el('td', 'sizes-notes', r.notes || ''); if (r.notes) n.title = r.notes;
+                const n = el('td', 'sizes-notes'); if (r.notes) { n.append(el('span', 'sizes-note', r.notes)); n.title = r.notes; }
                 tr.append(n);
                 tr.onclick = () => {
                     const now = !st.open[key];
@@ -18621,7 +18617,7 @@ Projected Image UK"></textarea>
                 renderLabels();
                 // Give them the real reason, not a generic retry.
                 toastError((e.message || 'Could not mark that order.')
-                    + (e.noReply ? '' : ' Nothing was changed - press Refresh and check before trying again.'));
+                    + (e.noReply ? '' : ' Nothing was changed. Press Refresh and check before trying again.'));
             } finally {
                 delete madeBusy[o.id];
             }
@@ -20775,7 +20771,7 @@ Projected Image UK"></textarea>
                     + [live.booked.carrier, live.booked.service, live.booked.tracking]
                         .filter(Boolean).join(' ')
                     + '). The label is printed and the parcel travels to the address it was '
-                    + 'cut from. Changing the address here changes Shopify only - it does not '
+                    + 'cut from. Changing the address here changes Shopify only: it does not '
                     + 'change the label or the courier booking.'));
                 body.append(w);
             }
@@ -21595,7 +21591,7 @@ Projected Image UK"></textarea>
                 else if (f.ok) out.append(el('div', 'disp-ok-line', res.notified ? 'Order marked fulfilled in Shopify and the customer was emailed tracking.' : 'Order marked fulfilled in Shopify.'));
                 else if (f.reason === 'permission') out.append(el('div', 'disp-warn', 'Booked, but the app could not mark the order fulfilled (missing the write_fulfillments permission). Fulfil it manually in Shopify, or grant the permission and it will work next time.'));
                 else if (f.reason === 'nothing_to_fulfill') out.append(el('div', 'sub', 'Shopify had nothing left to fulfil for this order.'));
-                else if (f.reason && f.reason !== 'not_attempted') out.append(el('div', 'disp-warn', f.detail || 'Shopify fulfillment could not be completed.'));
+                else if (f.reason && f.reason !== 'not_attempted') out.append(el('div', 'disp-warn', f.detail || 'Shopify fulfilment could not be completed.'));
                 if (res.tag && !res.tag.ok && res.tag.note) out.append(el('div', 'disp-warn', res.tag.note));
                 labelButtons(out, s.labels);
                 const done = el('button', 'btn'); done.style.marginTop = 'var(--sp-4)'; done.textContent = 'Done'; done.onclick = close;
@@ -25134,7 +25130,7 @@ Projected Image UK"></textarea>
                    add-then-hunt-it-down-and-tick-it. */
                 const lw = el('label', 'crm-cline');
                 doneNow = document.createElement('input'); doneNow.type = 'checkbox';
-                lw.append(doneNow, document.createTextNode(' Already done - just logging it'));
+                lw.append(doneNow, document.createTextNode(' Already done, just logging it'));
                 m.body.append(lw);
             }
             const bar = m.foot();
@@ -25671,7 +25667,7 @@ Projected Image UK"></textarea>
                 let dup = coll[dupIn.dataset.pickedId || ''];
                 if (!dup || dup.name.toLowerCase() !== nm) {
                     const byName = Object.values(coll).filter(x => x.name.toLowerCase() === nm && x.id !== keepId);
-                    if (byName.length > 1) { toastError('Two contacts share that name - pick one from the list.'); return; }
+                    if (byName.length > 1) { toastError('Two contacts share that name. Pick one from the list.'); return; }
                     dup = byName[0];
                 }
                 if (!dup || dup.id === keepId) { toastError('Type the duplicate’s exact name and pick it from the list.'); return; }
@@ -28204,7 +28200,7 @@ Projected Image UK"></textarea>
                 /* A website enquiry that already became pipeline: one click
                    lands on its deal, no retyping, no hunting. */
                 const chip = el('div', 'mail-crmchip');
-                const a = actionLink('miss-open', 'Filed in the CRM - open the deal');
+                const a = actionLink('miss-open', 'Filed in the CRM: open the deal');
                 a.onclick = async () => {
                     m.close();
                     setView('crm');
@@ -28650,7 +28646,7 @@ Projected Image UK"></textarea>
                 const stInfo = infoButton('About the storage', { title: 'Connect the storage', guide: ['files', ''],
                     body: 'Files keeps its storage in a Cloudflare R2 bucket: durable, '
                     + 'priced in pennies, and the app signs every transfer so nothing is public. '
-                    + 'Three keys in Railway switch it on; the Guide tab has the exact steps.' });
+                    + 'Three keys in Railway switch it on.' });
                 head.append(titleInfo(st, stInfo));
                 head.append(el('p', 'card-desc', 'Storage is not set up yet.'));
                 card.append(head);
@@ -30829,7 +30825,7 @@ Projected Image UK"></textarea>
             // Shipping (World Options)
             const sh = s.shipping || {};
             const shRow = connRow('Shipping (World Options)', sh.ok ? 'on' : sh.available ? 'mid' : 'off',
-                sh.ok ? ('Connected. Dispatch couriers from the Production Manager.' + (sh.fulfillment ? '' : ' Fulfillment writer is not wired.'))
+                sh.ok ? ('Connected. Dispatch couriers from the Production Manager.' + (sh.fulfillment ? '' : ' Fulfilment writer is not wired.'))
                     : sh.available ? 'Add your World Options API key to dispatch couriers.' : 'Not available on this server.');
             if (sh.available) {
                 // A real button appended beside the badge, not instead of it:

@@ -19,7 +19,8 @@ COMPOSER = open(os.path.join(ROOT, "static", "composer.js"), encoding="utf-8").r
 
 _passed, _failed = 0, []
 # ONLY=<part of a name> runs just the matching tests: the whole page suite takes
-# about two minutes, which is too long to wait for one red test.
+# about two minutes, which is too long to wait for one red test. A name that
+# matches nothing is a mistake, not a pass: it prints so and exits 1.
 _ONLY = os.environ.get("ONLY", "")
 
 
@@ -682,7 +683,7 @@ def t_crm_activities_open_an_editor_and_the_bin_keeps_its_promise():
     delete confirm promised a 30-day restore that had no UI."""
     ok("crmActivityForm({ id: a.id }" in SCRIPT, "tapping an activity row opens it for editing")
     ok(re.search(r"op: 'update', id: editing\.id", SCRIPT), "the form saves through the update op")
-    ok("Already done - just logging it" in SCRIPT, "a call that already happened is one tick")
+    ok("Already done, just logging it" in SCRIPT, "a call that already happened is one tick")
     ok("paintBin" in SCRIPT and re.search(r"op: 'restore', id: t\.id", SCRIPT),
        "the Bin view exists and restores")
 
@@ -736,7 +737,7 @@ def t_the_deal_modal_shows_the_email_thread_history():
 def t_website_enquiries_link_both_ways():
     """A filed enquiry is one click from email to deal and back - a reference
     that does not open is a dead reference."""
-    ok("Filed in the CRM - open the deal" in SCRIPT,
+    ok("Filed in the CRM: open the deal" in SCRIPT,
        "the email modal links to the deal it became")
     ok(re.search(r"crmDealModal\(t\.crm_deal_id\)", SCRIPT), "and actually opens it")
     ok(re.search(r"openMailThread\(x\.mail_thread_id\)", SCRIPT),
@@ -2313,7 +2314,9 @@ def t_the_size_list_tab_is_searchable_and_reads_the_same_sheet_as_the_label():
     ok("['Holder glass, mm', 1], ['Image, mm', 1], ['Produced as, mm', 1], ['Status']" in fn and "['Undercut, mm', 1]" in fn
        and ".ktable th.num, .ktable td.num { text-align: right; font-variant-numeric: tabular-nums; }" in CSS,
        "numbers sit in tabular columns with the unit in the heading, and the status in its own")
-    ok("text-overflow: ellipsis" in CSS.split(".ktable td.sizes-notes {")[1].split("}")[0] and "n.title = r.notes;" in fn, "a note is one line, the whole of it on hover")
+    ok("text-overflow: ellipsis" in CSS.split(".ktable td.sizes-notes > .sizes-note {")[1].split("}")[0] and "n.title = r.notes;" in fn
+       and "overflow" not in CSS.split(".ktable td.sizes-notes {")[1].split("}")[0],
+       "a note is one line (its inner span's, so the cell clips nothing), the whole of it on hover")
     ok("xbtn.onclick = () => sizesExport(sizesRows());" in fn and "a.download = 'size-list.csv';" in SCRIPT, "and the filtered list exports as CSV")
     ok("ruled: ['Ruled in the app', 'made']" in SCRIPT and "excluded: ['Not a gobo', 'note']" in SCRIPT,
        "a ruling and an exclusion read as chips, in the Status filter's words")
@@ -5891,9 +5894,6 @@ def t_an_icon_size_comes_from_the_scale_and_not_from_the_rule():
             m = re.search(r"(?<![\w-])" + prop + r"\s*:\s*([^;}]+)", body)
             if m and re.search(r"\d+(px|rem|em)", re.sub(r"var\([^)]*\)", "", m.group(1))):
                 icons.append(s2[:50] + " { " + prop + ": " + m.group(1).strip() + " }")
-    # .run-gate .rg-ic is the one deliberate outlier: a 26px badge glyph that
-    # is a piece of illustration, not an interface icon on the scale.
-    icons = [i for i in icons if "rg-ic" not in i]
     ok(not icons, "%d icon sizes bypass the scale: %s" % (len(icons), icons[:5]))
     for t in ("--icon-xs", "--icon-sm", "--icon-md", "--icon-lg"):    # no 20: every tile's glyph is 16 (spec 4.3)
         ok(t + ":" in CSS, "the icon scale still defines " + t)
@@ -5911,9 +5911,8 @@ def t_an_icon_size_comes_from_the_scale_and_not_from_the_rule():
         h = re.search(r"(?<![\w-])height\s*:\s*(\d+(?:\.\d+)?)px", body)
         if not (w and h) or w.group(1) != h.group(1): continue
         v = float(w.group(1))
-        # A 1px square is a hairline or a screen-reader trick, and .rg-ic is an
-        # illustration rather than an interface box. Both are deliberate.
-        if v <= 1 or "rg-ic" in s2: continue
+        # A 1px square is a hairline or a screen-reader trick: deliberate.
+        if v <= 1: continue
         boxes.append(s2[:44] + " { %spx }" % int(v))
     ok(not boxes, "%d square boxes bypass the scale: %s" % (len(boxes), boxes[:5]))
     # The mix (2026-10-06) draws every dot at the one 8px step: --dot-lg left
@@ -5971,7 +5970,10 @@ def t_every_defined_token_is_read():
     stylesheet, the script or the composer."""
     root = CSS.split(":root {")[1].split("\n        }")[0]
     defined = re.findall(r"(--[\w-]+)\s*:", root)
-    readers = CSS + SCRIPT + COMPOSER
+    # The Design page's own list of names (MIX_TOKENS) only shows a token; it is not a reader of it.
+    ok("const MIX_TOKENS = [" in SCRIPT and "];" in SCRIPT.split("const MIX_TOKENS = [", 1)[1], "the Design list is there to be left out")
+    pre, rest = SCRIPT.split("const MIX_TOKENS = [", 1)
+    readers = CSS + pre + rest.split("];", 1)[1] + COMPOSER
     unread = [d for d in defined if "var(" + d + ")" not in readers and "'" + d + "'" not in readers
               and "'" + d.replace("--owner-", "--owner-") + "'" not in readers]
     # the owner hues are read by name composition: tokenValue('--owner-' + k)
@@ -9513,13 +9515,18 @@ def t_the_printed_sheets_do_not_change():
     # --border-strong is deliberately not in this list. It is a screen token the mix moved (to --line-ctl),
     # and the one printed thing that drew with it, the label sheet, cancels it with `border: 0 !important`
     # under body.printing-label; the on-screen preview's edge is the label frame's own --paper-edge.
+    ok("\n        body {" in CSS, "the body rule the A4 sheets inherit from is there")
     body = CSS.split("\n        body {")[1].split("}")[0]
     ok("font-size: var(--text-sm); line-height: var(--lh-body);" in body,
        "the A4 sheets still inherit 14px on a 1.5 line from body")
     py = open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()
-    a = py.index('    @mcp.custom_route("/print/production-labels", methods=["GET", "OPTIONS"])')
+    start = '    @mcp.custom_route("/print/production-labels", methods=["GET", "OPTIONS"])'
+    ok(start in py, "the server's print route is still there")
+    a = py.index(start)
+    ok("return HTMLResponse(doc, headers=doc_headers)" in py[a:], "and still ends in the document it returns")
     b = py.index("return HTMLResponse(doc, headers=doc_headers)", a)
     eq(h(py[a:b]), "61376908bdf445b7", "the server's print document is unchanged")
+    ok("_LABEL_LOGO_SVG = " in py, "the logo it prints is still there")
     i = py.index("_LABEL_LOGO_SVG = ")
     eq(h(py[i:py.index("\n", i)]), "5cda691da0ce3b1e", "and so is the logo it prints")
 
@@ -11788,6 +11795,17 @@ def t_the_forecast_chart_and_lists_match_the_mockup():
     ok("all.append(ico(I.chev))" in wc and "I.arrowRight" not in wc, "Show all ends in the chevron, not an arrow")
 
 
+def _winner(selector, prop):
+    """The value a property ends with for one exact selector at the stylesheet's own level: the last declaration of it,
+    across every rule that names the selector (same specificity, so source order decides)."""
+    got = None
+    for sel, body in _rules(CSS):
+        if selector in [x.strip() for x in sel.split(",")]:
+            for m in re.finditer(r"(?<![\w-])" + re.escape(prop) + r"\s*:\s*([^;}]+)", body):
+                got = m.group(1).strip()
+    return got
+
+
 @test
 def t_the_production_manager_and_its_phone_head_match_the_mockup():
     """Final review P1 to P8 and F8 (the mockup's Production Manager and Forecast phone head). Only the look moves: the
@@ -11902,8 +11920,58 @@ def t_a_field_under_a_finger_is_16_whatever_its_class():
     ok(not above, "field selectors outweighing the 16: %s" % above[:5])
 
 
+@test
+def t_the_dead_css_and_the_double_rules_are_gone():
+    """Final review M2, M3 and M1's other half. The run gate's .rg-ic, .rg-note, h2 and p rules matched nothing (the gate
+    is an empty state whose one line is .empty-line); .disp-boxedit had two rules with different gaps and the later one
+    (4) beat the first (8: spec 4.4); the response head's name had a caption line height that a later rule's
+    line-height: inherit overrode, so the computed winner was the body's 20."""
+    for dead in (".run-gate .rg-ic", ".run-gate .rg-note", ".run-gate h2", ".run-gate p {"):
+        ok(dead not in CSS, "gone: " + dead)
+    ok(len(re.findall(r"\n        \.disp-boxedit \{", CSS)) == 1 and _winner(".disp-boxedit", "gap") == "var(--sp-2)", ".disp-boxedit is one rule, 8 between its controls")
+    ok(_winner(".resp-head .who", "line-height") == "var(--lh-caption)" and _winner(".resp-head .who", "font-size") == "var(--text-xs)",
+       "the response head's name computes to 12/16, its last line-height being the caption's")
+
+
+@test
+def t_the_copy_leftovers_are_cleared():
+    """Final review M4 and L138 and L210. No spaced hyphen as a dash in five UI strings; fulfilment in British
+    spelling where a person reads it (never in a field name); the chart's empty line is seven words; the storage popover no
+    longer points at steps the Guide does not have; the Size list's note ellipsis is an inner span so the open row's
+    fill bleeds; and the Memory kind tags may wrap."""
+    for gone in ("Nothing was changed - press Refresh", "changes Shopify only - it does not", "Already done - just logging it",
+                 "share that name - pick one", "Filed in the CRM - open the deal"):
+        ok(gone not in SCRIPT, "no spaced hyphen: " + gone)
+    for new in ("Nothing was changed. Press Refresh and check before trying again.", "changes Shopify only: it does not", "Already done, just logging it",
+                "Two contacts share that name. Pick one from the list.", "Filed in the CRM: open the deal"):
+        ok(new in SCRIPT, "says: " + new)
+    ok("'Shopify fulfilment could not be completed.'" in SCRIPT and "' Fulfilment writer is not wired.'" in SCRIPT, "fulfilment, in the words a person reads")
+    ok("res.fulfillment" in SCRIPT and "sh.fulfillment" in SCRIPT, "while the fields the server sends keep their names")
+    ok(SCRIPT.count("'Not enough data in this range yet.'") == 2 and "range to chart yet" not in SCRIPT, "the chart's empty line is seven words")
+    ok("the Guide tab has the exact steps" not in SCRIPT and "'Three keys in Railway switch it on.'" in SCRIPT, "the storage popover claims no steps")
+    ok(".sizes-note" in CSS and "n.append(el('span', 'sizes-note', r.notes));" in SCRIPT, "the notes' ellipsis is the span's")
+    ok(".ktable tr.sizes-row.open > td:first-child { box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary); }" in CSS
+       and ".ktable tr.sizes-row.open > td:last-child { box-shadow: var(--sp-2) 0 0 var(--surface-secondary); }" in CSS, "so the open row's fill bleeds 8 either side")
+    ok("td.mem-kind" not in CSS.split(".ktable.mem-table td.mem-from, .ktable.mem-table td.mem-at { white-space: nowrap; }")[0].split("\n")[-1],
+       "the Memory kind cell is not nowrap")
+    ok(".ktable.mem-table td.mem-kind, .ktable.mem-table td.mem-from" not in CSS, "so its tags wrap before the table widens")
+
+
+@test
+def t_a_name_that_matches_no_test_is_not_a_pass():
+    """Final review L76: ONLY=<name> with no match used to print '0 passed' and exit 0, so a typo looked like a green run.
+    It exits 1 and says why."""
+    r = subprocess.run([sys.executable, os.path.abspath(__file__)], env=dict(os.environ, ONLY="__no_such_test_name__"),
+                       capture_output=True, text=True, timeout=120)
+    ok(r.returncode == 1, "exit code %d, not 1" % r.returncode)
+    ok("matches no test" in r.stdout, "and it says so: %r" % r.stdout[-120:])
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
     print(f"{_passed} passed, {len(_failed)} failed")
+    if _ONLY and _passed + len(_failed) == 0:
+        print(f"ONLY={_ONLY!r} matches no test: nothing was run")
+        sys.exit(1)
     sys.exit(1 if _failed else 0)
