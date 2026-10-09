@@ -26590,6 +26590,54 @@ def t_a_refusal_never_overwrites_a_reconnect_that_landed_meanwhile():
         xero_api.disconnect()
 
 
+
+DOOR_WITH_SHOPS_XML = """<Envelope><Body><GetAllServicesAndRatesResponse>
+<GetAllServicesAndRatesResult><Message/><NotificationtType>SUCCESS</NotificationtType><wsRateService>
+ <wsAvailableServicesAndRates>
+   <wsPackageTypeCode>UPS_My_Packaging</wsPackageTypeCode><wsServiceCode>11</wsServiceCode>
+   <wsServiceTypeCode>UPS_Standard</wsServiceTypeCode><wsServiceTypeName>11 Standard</wsServiceTypeName>
+   <wsDeliveryDateTime>Tue, 13 Oct 2026&lt;br/&gt;End of business day</wsDeliveryDateTime>
+   <wsQuoteDetails><TotalNetCharge>15.35</TotalNetCharge></wsQuoteDetails>
+ </wsAvailableServicesAndRates>
+ <wsAvailableServicesAndRates>
+   <wsPackageTypeCode>DHL_NonDocument</wsPackageTypeCode><wsServiceCode>W</wsServiceCode>
+   <wsServiceTypeCode>DHL_ECONOMY_SELECT</wsServiceTypeCode><wsServiceTypeName>W Economy Select</wsServiceTypeName>
+   <wsDeliveryDateTime>Tue, 13 Oct 2026&lt;br/&gt;End of business day</wsDeliveryDateTime>
+   <wsQuoteDetails><TotalNetCharge>19.35</TotalNetCharge><ServiceType>DHL</ServiceType></wsQuoteDetails>
+   <wsDeliveryDropOffShops><wsDropOffShop><Description>DHL ServicePoint Dame St</Description><HouseNo>4</HouseNo><Street>Dame St</Street><City>Dublin</City><PostCode>D02 X285</PostCode><ParcelShopNumber>DUB017</ParcelShopNumber></wsDropOffShop></wsDeliveryDropOffShops>
+ </wsAvailableServicesAndRates>
+</wsRateService></GetAllServicesAndRatesResult></GetAllServicesAndRatesResponse></Body></Envelope>"""
+
+
+@test
+def t_a_door_service_that_lists_nearby_shops_is_still_a_door_service():
+    """Live fault, 2026-10-09: DHL vanished from an Irish order's courier list.
+    Missing a service? showed World Options returning ten services, DHL among
+    them, while the window showed four. A door quote's DHL and FedEx Economy
+    services had started carrying a list of nearby pickup shops, and Reactor read
+    any shop list as "delivered to a shop", so with shop services switched off it
+    hid them. A service is collect-from-a-shop only when shop delivery was asked
+    for or its code says Access Point."""
+    reset_dispatch(); reset_prod(); _ship_cfg()
+    post("/api/shipping/config", {"op": "set", "show_parcelshop": False})
+
+    async def door(service, action, inner, retryable=True):
+        return ET.fromstring(DOOR_WITH_SHOPS_XML)
+    saved = worldoptions._soap_call; worldoptions._soap_call = door
+    try:
+        r = post("/api/dispatch/quote", {"order_id": 12345, "box": BOX})
+        eq(r.status_code, 200, r.text)
+        body = r.json()
+        eq(body["show_parcelshop"], False, "shop services are switched off, as live")
+        codes = [o["service_type_code"] for o in body["options"]]
+        ok("DHL_ECONOMY_SELECT" in codes, "DHL is offered: " + str(codes))
+        dhl = [o for o in body["options"] if o["service_type_code"] == "DHL_ECONOMY_SELECT"][0]
+        eq(dhl["delivery_dropoff"], False, "to the door, not to a shop")
+        eq(dhl["delivery_shops"], [], "and carries no shop for the window to say the customer collects from")
+    finally:
+        worldoptions._soap_call = saved
+
+
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a

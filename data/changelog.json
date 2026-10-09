@@ -1,6 +1,17 @@
 {
  "releases": [
   {
+   "date": "2026-10-09",
+   "title": "DHL is back in the courier list",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": "labels",
+     "text": "DHL had disappeared from the courier options for Irish orders, and some FedEx Economy services with it. World Options started listing nearby pickup shops beside those door-to-door services, and Reactor took that to mean the customer would collect from a shop, so with shop services switched off it hid them. They show again as the door deliveries they are."
+    }
+   ]
+  },
+  {
    "date": "2026-10-07",
    "title": "Reconciliation and Xero sync put right",
    "items": [
