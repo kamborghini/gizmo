@@ -18011,6 +18011,24 @@ _MAIL_NO_SEND = ("You are not set up to send email from here. "
 _FILES_STORE_FAIL = ("The change could not be saved. The data volume may be "
                      "unwritable; check Settings, Connections.")
 _font_cache: dict = {}
+
+
+def _brand_svg(name: str):
+    # Projected Image's wordmark, from projectedimage.com, served like the
+    # label typeface. It has no script in it, and the response forbids any all
+    # the same, in case it is ever opened on its own rather than as an image.
+    key = "brand:" + name
+    if key not in _font_cache:
+        try:
+            with open(os.path.join(os.path.dirname(__file__), "data", "brand", name), "rb") as fh:
+                _font_cache[key] = fh.read()
+        except OSError:
+            return PlainTextResponse("Not found", status_code=404)
+    return Response(_font_cache[key], media_type="image/svg+xml",
+                    headers={**_API_HEADERS, "Cache-Control": "public, max-age=86400",
+                             "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})
+
+
 _PRINT_ORIGINS = {"https://extensions.shopifycdn.com", "https://admin.shopify.com"}
 _xero_oauth_states: dict = {}
 # ------------------------------------------------------------------
@@ -26479,20 +26497,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/brand/logo.svg", methods=["GET"])
     async def brand_logo(request: Request):
-        # Projected Image's wordmark, from projectedimage.com, at the top of the
-        # sidebar. Public static bytes like the font above. It has no script in
-        # it, and the response forbids any all the same, in case it is ever
-        # opened on its own rather than as an image.
-        if "logo" not in _font_cache:
-            try:
-                with open(os.path.join(os.path.dirname(__file__), "data", "brand",
-                                       "projected-image-logo.svg"), "rb") as fh:
-                    _font_cache["logo"] = fh.read()
-            except OSError:
-                return PlainTextResponse("Not found", status_code=404)
-        return Response(_font_cache["logo"], media_type="image/svg+xml",
-                        headers={**_API_HEADERS, "Cache-Control": "public, max-age=86400",
-                                 "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})
+        # The brand's own colours: dark lettering, for a light ground.
+        return _brand_svg("projected-image-logo.svg")
+
+    @mcp.custom_route("/brand/logo-light.svg", methods=["GET"])
+    async def brand_logo_light(request: Request):
+        # The same mark with white lettering, for the sidebar's ink frame,
+        # where the dark lettering would vanish. The teal shield is unchanged.
+        return _brand_svg("projected-image-logo-light.svg")
 
     @mcp.custom_route("/print/production-labels/sign", methods=["POST", "OPTIONS"])
     async def sign_label_doc(request: Request):

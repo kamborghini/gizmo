@@ -9246,8 +9246,22 @@ def t_reactor_wears_projected_images_brand_from_one_place():
        and "font-family: var(--font-display)" in CSS.split(".ds-type-page) {")[1][:80],
        "Bricolage sets the wordmark and the page titles, from one list, and nothing else (the mix, 4.2)")
     ok(CSS.count("font-family: var(--font-display)") == 1, "nowhere else sets a title face")
-    ok('<span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Reactor</span>' in HTML,
-       "the teal mark and the wordmark head the sidebar (the mix: the ink logo would vanish on the ink frame)")
+    ok('<img class="brand-logo" src="/brand/logo-light.svg" alt="" width="144" height="40" />'
+       '<span class="brand-sep" aria-hidden="true"></span><span class="brand-name">Reactor</span>' in HTML,
+       "Projected Image's logo, its lettering white so it holds on the ink frame, a hairline and the wordmark head the sidebar")
+    ok('aria-label="Reactor, by Projected Image: go to the Overview"><img class="brand-logo"' in HTML,
+       "the button's own label names Projected Image, so the logo is silent rather than read twice")
+    logo = CSS.split(".brand .brand-logo {")[1].split("}")[0]
+    ok("height: var(--box-md)" in logo and "width: auto" in logo and "flex: none" in logo,
+       "the logo is 24 tall at its own proportions (86 wide)")
+    ok("gap: var(--sp-1-5)" in CSS.split("        .brand {")[1].split("}")[0]
+       and CSS.rfind("@media", 0, CSS.index(".side-head { gap: var(--sp-1); }"))
+       == CSS.rfind("@media (max-width: 640px) {", 0, CSS.index(".side-head { gap: var(--sp-1); }")),
+       "6 either side of the hairline, and 4 to Hide sidebar's 40 target on a phone, so logo, hairline and "
+       "Reactor (158) sit inside the button at every width (measured in the rig: 168 wide on a computer, 160 on a phone)")
+    ok("background: var(--chrome-rule)" in CSS.split(".brand .brand-sep {")[1].split("}")[0]
+       and "--chrome-rule: color-mix(in srgb, var(--white) 20%, transparent);" in CSS,
+       "the hairline between them is white at 20% on the ink")
     ok("background: var(--surface-page)" in CSS.split("        body {")[1].split("}")[0], "on the white page")
 
 
@@ -9659,8 +9673,9 @@ def t_the_page_is_one_sheet_in_an_ink_frame():
     ok("background: var(--nav-on-bg)" in on and "color: var(--text-on-chrome)" in on,
        "the chosen one is teal at 18% with white words")
     ok('.nav-item:is(.active, [aria-current="page"]) svg { color: var(--nav-on-icon); }' in CSS, "and a teal icon")
-    ok('<span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Reactor</span>' in HTML,
-       "the brand row is the teal mark and the wordmark")
+    ok('<img class="brand-logo" src="/brand/logo-light.svg"' in HTML and '<span class="brand-name">Reactor</span>' in HTML
+       and "brand-mark" not in HTML,
+       "the brand row is Projected Image's logo and the wordmark, the old teal tile gone")
     ok('id="side-hide"' in HTML and "$('side-hide').onclick = toggleSidebar;" in SCRIPT, "with Hide sidebar beside it")
     beta = CSS.split("\n        .beta-tag {")[1].split("}")[0]
     ok("font-size: var(--text-micro)" in beta and "background: none" in beta, "Beta is a micro word, not a box")

@@ -13825,15 +13825,26 @@ def t_the_record_keeps_what_the_forecast_in_use_said():
 
 @test
 def t_the_brand_mark_is_served_and_can_never_run_anything():
-    """The sidebar's Projected Image wordmark is served by the app itself, like
-    the label typeface. It is an SVG, so the response forbids every script and
-    every fetch, in case it is ever opened on its own rather than as an image."""
+    """Projected Image's wordmark is served by the app itself, like the label
+    typeface, in its own colours and white-lettered for the sidebar's ink. It
+    is an SVG, so the response forbids every script and every fetch, in case
+    it is ever opened on its own rather than as an image."""
     r = client.get("/brand/logo.svg")
     eq(r.status_code, 200)
     eq(r.headers["content-type"], "image/svg+xml")
     eq(r.headers["content-security-policy"], "default-src 'none'; style-src 'unsafe-inline'")
     ok(r.content.startswith(b"<svg") and b"<script" not in r.content and b"#13B7C0" in r.content,
        "the brand's own mark, in its teal, with nothing in it that runs")
+    light = client.get("/brand/logo-light.svg")
+    eq(light.status_code, 200)
+    eq(light.headers["content-type"], "image/svg+xml")
+    eq(light.headers["content-security-policy"], "default-src 'none'; style-src 'unsafe-inline'")
+    ok(light.content.startswith(b"<svg") and b"<script" not in light.content and b"#13B7C0" in light.content,
+       "the sidebar's copy keeps the teal shield and runs nothing")
+    ok(b"#2F2F2F" not in light.content and b'fill="black"' not in light.content,
+       "and its lettering is white, with no dark ink that would vanish on the ink frame")
+    eq(light.content.count(b"<path"), r.content.count(b'fill="#2F2F2F"') + 1,
+       "every letter of the original is there, one white shape each, and the shield")
 
 
 @test
