@@ -22804,10 +22804,8 @@ Projected Image UK"></textarea>
             });
             coF.append(coSel); body.append(coF);
             body.append(el('p', 'field-help', 'Tells the courier whether to send a driver for each booking or that pickup is already covered. Picking the wrong one can double-book collections.'));
-            const psWrap = el('label', 'disp-notify');
-            const psCb = document.createElement('input'); psCb.type = 'checkbox'; psCb.checked = !!cfg.show_parcelshop;
-            psWrap.append(psCb, el('span', null, ' Show parcel shop services in quotes (parcels the customer collects from a shop, or that you drop off). Off by default.'));
-            body.append(psWrap);
+            /* No switch for pickup-shop services: customers never collect from
+               a shop (Cameron, 2026-10-09), so the server never offers them. */
             // Two printers, two stocks. Set once here rather than chosen at every
             // print: the stock in each printer does not change from day to day,
             // and the select beside the print button is only ever a one-off.
@@ -23022,7 +23020,7 @@ Projected Image UK"></textarea>
                     const payload = { op: 'set', origin: origin, notify_customer: notifyCb.checked,
                         plugin_code: pluginIn.value.trim() || 'Web_Service',
                         ready_time: readyIn.value || '', close_time: closeIn.value || '',
-                        collection_option: coSel.value, show_parcelshop: psCb.checked,
+                        collection_option: coSel.value,
                         collection_by_carrier: collByCarrier,
                         eori: intlIn.eori.value.trim(), vat_number: intlIn.vat_number.value.trim(),
                         default_hs_code: intlIn.default_hs_code.value.trim(), trade_term: intlIn.trade_term.value.trim(),

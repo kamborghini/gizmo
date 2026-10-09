@@ -8,6 +8,11 @@
      "kind": "fixed",
      "tab": "labels",
      "text": "DHL had disappeared from the courier options for Irish orders, and some FedEx Economy services with it. World Options started listing nearby pickup shops beside those door-to-door services, and Reactor took that to mean the customer would collect from a shop, so with shop services switched off it hid them. They show again as the door deliveries they are."
+    },
+    {
+     "kind": "changed",
+     "tab": "labels",
+     "text": "Customers never collect from a shop. Reactor no longer offers or books any service that delivers to a pickup shop, for orders and custom shipments alike, and the switch for them is gone from Settings. Dropping your own parcels off at a shop is a separate setting and works as before."
     }
    ]
   },

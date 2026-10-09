@@ -12401,6 +12401,15 @@ def t_xero_sync_holds_together_on_a_phone_and_names_its_synced_figure():
     ok("kpi('Synced', 'synced', 'Invoices, credit notes and contacts')" in SCRIPT, "the Synced figure says what it counts")
 
 
+@test
+def t_settings_offer_no_switch_for_shop_delivery():
+    """Business rule (Cameron, 2026-10-09): "our customers should never collect
+    from shop". Settings, Shipping had a switch that turned pickup-shop services
+    on. It is gone, and the save no longer sends the setting."""
+    ok("Show parcel shop services in quotes" not in SCRIPT and "psCb" not in SCRIPT, "no switch")
+    ok("show_parcelshop: psCb.checked" not in SCRIPT, "and nothing saves it")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
