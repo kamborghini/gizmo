@@ -140,13 +140,15 @@
             --owner-pink-bg: color-mix(in srgb, var(--owner-pink) 10%, var(--white));
             --owner-brown-bg: color-mix(in srgb, var(--owner-brown) 10%, var(--white));
             /* The ink frame (the mix, 4.1): the sidebar and the edge round the one
-               white sheet. Words on it are white at 72%, muted white at 50%; the
-               chosen item is teal at 18% with white words and a teal icon. */
+               white sheet. Words on it are white at 72%, muted white at 50%, a
+               hairline white at 20%; the chosen item is teal at 18% with white
+               words and a teal icon. */
             --surface-chrome: var(--ink); --text-on-chrome: var(--white);
             --nav-text: color-mix(in srgb, var(--white) 72%, transparent);
             --nav-muted: color-mix(in srgb, var(--white) 50%, transparent);
             --chrome-fill: color-mix(in srgb, var(--white) 12%, transparent);
             --chrome-press: color-mix(in srgb, var(--white) 18%, transparent);
+            --chrome-rule: color-mix(in srgb, var(--white) 20%, transparent);
             --nav-on-bg: color-mix(in srgb, var(--teal-500) 18%, transparent); --nav-on-icon: var(--teal-500);
             /* A link's underline; the live dot and its halo. */
             --link-underline: color-mix(in srgb, var(--teal-700) 35%, transparent);
@@ -459,14 +461,19 @@
             mask-image: linear-gradient(180deg, var(--black) calc(100% - var(--sp-8)), transparent); }
         .side-body::-webkit-scrollbar { display: none; }
         .side-foot { padding: 0 var(--sp-3) var(--sp-3); flex: none; display: flex; flex-direction: column; gap: var(--sp-2); }
-        .brand { display: flex; align-items: center; gap: var(--control-gap); flex: 1; min-width: 0; height: var(--control-h); padding: 0 var(--sp-1);
+        .brand { display: flex; align-items: center; gap: var(--sp-1-5); flex: 1; min-width: 0; height: var(--control-h); padding: 0 var(--sp-1);
             border: 0; border-radius: var(--radius-row); background: transparent; color: var(--text-on-chrome); text-align: left;
             font-family: inherit; cursor: pointer; transition: background var(--dur) var(--ease); }
         @media (hover: hover) { .brand:hover { background: var(--chrome-fill); } }
         .brand:active { background: var(--chrome-press); }
-        /* The mix's mark: a 24 teal tile with a 4 corner, then the product's
-           name in the wordmark's Bricolage 600 at 16/20, white on the ink. */
-        .brand .brand-mark { width: var(--box-md); height: var(--box-md); flex: none; border-radius: var(--radius-tag); background: var(--action-primary); }
+        /* Projected Image's logo at 24 tall (86 wide), its lettering white so
+           it holds on the ink, a hairline 6 either side, then the product's
+           name in the wordmark's Bricolage 600 at 16/20: 158 in all, inside
+           the 168 the row leaves beside Hide sidebar (160 on a phone). The
+           button's own label names both, so the logo is silent to a screen
+           reader. */
+        .brand .brand-logo { height: var(--box-md); width: auto; flex: none; display: block; }
+        .brand .brand-sep { width: var(--bw-hairline); align-self: stretch; margin: var(--sp-1-5) 0; flex: none; background: var(--chrome-rule); }
         .brand-name { font-size: var(--text-md); line-height: var(--lh-control); font-weight: var(--weight-semibold); letter-spacing: var(--tr-title); }
         /* Hide sidebar: the brand row's 28 ghost square. The top bar's menu
            button brings the sidebar back, and opens the drawer on a phone. */
@@ -5625,6 +5632,9 @@
             :is(.sidebar .icon-btn, .brand, .mem-btn, .crm-ticon, .crm-col-add, .sizes-open, .files-name, .guide-toc-link, .miss-open, .action-link, details summary) { min-height: var(--control-h-lg); }
             .ktable tr.ktable-grp th { height: var(--control-h-lg); }
             :is(.sidebar .icon-btn, .mem-btn, .crm-ticon) { min-width: var(--control-h-lg); }
+            /* Hide sidebar's 40 target leaves its glyph room enough, so 4 to it
+               keeps the brand row's logo, hairline and name whole. */
+            .side-head { gap: var(--sp-1); }
             .chart-expand { width: var(--control-h-lg); height: var(--control-h-lg); }
             :is(.guide-toc-link, .miss-open, .action-link) { display: inline-flex; align-items: center; }
             :is(.sizes-open, .files-name) { align-items: center; }
@@ -5734,7 +5744,7 @@
             <!-- Header, scrolling body, footer: the three parts of the reference's
                  sidebar. The brand is a button like its logo row, and it goes home. -->
             <div class="side-head">
-                <button class="brand" id="brand-home" type="button" aria-label="Reactor, by Projected Image: go to the Overview"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Reactor</span></button>
+                <button class="brand" id="brand-home" type="button" aria-label="Reactor, by Projected Image: go to the Overview"><img class="brand-logo" src="/brand/logo-light.svg" alt="" width="144" height="40" /><span class="brand-sep" aria-hidden="true"></span><span class="brand-name">Reactor</span></button>
                 <button class="icon-btn side-hide" id="side-hide" type="button" title="Hide sidebar" aria-label="Hide sidebar" aria-keyshortcuts="Meta+B" aria-controls="sidebar" aria-expanded="true"></button>
             </div>
             <div class="side-body">

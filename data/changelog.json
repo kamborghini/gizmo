@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-09",
+   "title": "Projected Image's logo in the sidebar",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": "",
+     "text": "The sidebar now opens with Projected Image's logo beside Reactor, its lettering in white so it reads on the dark frame. It takes the place of the plain teal square."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-09",
    "title": "DHL is back in the courier list",
    "items": [
     {
