@@ -8204,6 +8204,22 @@ def _wo_tech(e: BaseException, order_id="") -> dict:
     return tech
 
 
+
+def _is_shop_delivery(x) -> bool:
+    """A service that delivers to a pickup shop the customer collects from: one
+    World Options flagged for shop delivery, an Access Point code, or a ParcelShop
+    or Access Point name (Evri ParcelShop and the like arrive as ordinary door
+    quotes). Never offered and never booked: "our customers should never collect
+    from shop" (Cameron, 2026-10-09)."""
+    if not isinstance(x, dict):
+        return False
+    if x.get("delivery_dropoff"):
+        return True
+    code = str(x.get("service_type_code") or "").strip().lower()
+    blob = (str(x.get("service_full") or "") + " " + str(x.get("service_name") or "") + " " + code).lower()
+    return ("parcelshop" in blob or "parcel shop" in blob or "access point" in blob
+            or code.endswith("_ap"))
+
 async def _quote_options(origin: dict, dest: dict, boxes: list, currency: str,
                          insurance: str, cfg: dict) -> tuple:
     """Every courier option for one parcel to one address, as a single priced list.
@@ -8226,26 +8242,20 @@ async def _quote_options(origin: dict, dest: dict, boxes: list, currency: str,
                                         collection_dropoff=dropoff, shipment_mode=mode,
                                         delivery_dropoff=delivery_dropoff)
 
-    show_shop = bool(cfg.get("show_parcelshop", False))
     # World Options prices with a signature service implied unless one is named, so
     # a second pass asking for no signature can come back cheaper. Both are shown
     # and labelled, because "no signature" changes what the customer gets.
     nosig_variant = "Fedex_No_Signature_Required"
-    # Two quotes, in parallel: to the door, and to a pickup shop. The cheaper
-    # Access Point services are ONLY returned when the request asks to deliver to
-    # a shop. Quoting is free; a failure on either side must not lose the other.
-    # Skipped entirely when shop services are hidden, so nothing is asked for
-    # that will not be shown.
+    # Customers never collect from a shop (Cameron, 2026-10-09), so the quote is
+    # to the door only: the pickup-shop quote that surfaced Access Point services
+    # is never asked for.
     async def _q_nosig():
         return await worldoptions.quote(origin, dest, boxes, currency=currency,
                                         residential=residential, insurance=insurance,
                                         collection_dropoff=dropoff, shipment_mode=mode,
                                         signature_type=nosig_variant)
     try:
-        jobs = [_q(False), _q_nosig()] + ([_q(True)] if show_shop else [])
-        got = await asyncio.gather(*jobs, return_exceptions=True)
-        door, nosig = got[0], got[1]
-        point = got[2] if show_shop else {"options": []}
+        door, nosig = await asyncio.gather(_q(False), _q_nosig(), return_exceptions=True)
     except worldoptions.WorldOptionsError as e:
         return [], currency, str(e), e
     except Exception as e:
@@ -8256,26 +8266,13 @@ async def _quote_options(origin: dict, dest: dict, boxes: list, currency: str,
         logger.info("no-signature quote unavailable: %s", nosig)
         nosig = {"options": []}
     if isinstance(door, Exception):
-        if isinstance(point, Exception):
-            err = door
-            if isinstance(err, worldoptions.WorldOptionsError):
-                return [], currency, str(err), err
-            logger.exception("dispatch quote failed", exc_info=door)
-            return [], currency, "Couldn't get courier quotes. Check the server logs.", door
-        door = {"options": []}
-    if isinstance(point, Exception):
-        logger.info("pickup-point quote unavailable: %s", point)
-        point = {"options": []}
+        if isinstance(door, worldoptions.WorldOptionsError):
+            return [], currency, str(door), door
+        logger.exception("dispatch quote failed", exc_info=door)
+        return [], currency, "Couldn't get courier quotes. Check the server logs.", door
 
     res = dict(door)
-    seen = {o.get("service_type_code") for o in (door.get("options") or [])}
     merged = list(door.get("options") or [])
-    for opt_row in (point.get("options") or []):
-        # Keep only what the door quote could not offer, so the list does not
-        # double up with the same service twice.
-        if opt_row.get("service_type_code") and opt_row["service_type_code"] in seen:
-            continue
-        merged.append(opt_row)
     # A no-signature price only earns a row when it actually beats the normal one.
     priced = {o.get("service_type_code"): o.get("amount") for o in merged
               if o.get("service_type_code") and o.get("amount") is not None}
@@ -8299,16 +8296,8 @@ async def _quote_options(origin: dict, dest: dict, boxes: list, currency: str,
         ns["saves_vs_signed"] = round(base_amt - amt, 2)
         merged.append(ns)
 
-    if not show_shop:
-        # A shop service is any that delivers to a pickup point, or whose name
-        # says so (Evri ParcelShop and the like arrive as ordinary door quotes).
-        def _is_shop(x):
-            if x.get("delivery_dropoff"):
-                return True
-            blob = (str(x.get("service_full") or "") + " " + str(x.get("service_type_code") or "")).lower()
-            return ("parcelshop" in blob or "parcel shop" in blob
-                    or "access point" in blob or blob.endswith("_ap"))
-        merged = [x for x in merged if not _is_shop(x)]
+    # Never a service the customer collects from a shop, whatever arrives.
+    merged = [x for x in merged if not _is_shop_delivery(x)]
     merged.sort(key=lambda x: (x.get("amount") is None, x.get("amount") or 0))
     if not merged:
         return [], currency, ("World Options returned no courier options for this address and parcel. "
@@ -8355,7 +8344,6 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
             out["tech"] = tech
             _record_wo_failure(tech)
         return out
-    show_shop = bool(cfg.get("show_parcelshop", False))
     _collection_plans(cfg, options)
     return {
         "options": options,
@@ -8368,7 +8356,7 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
         "goods_value": goods_value,
         "insurance": insurance,
         "dropoff": dropoff,
-        "show_parcelshop": show_shop,
+        "show_parcelshop": False,   # customers never collect from a shop
         "has_eori": bool(cfg.get("eori")),
         "default_hs_code": cfg.get("default_hs_code") or "",
         # Drives the customs-declaration card in the UI; booking refuses an
@@ -8455,7 +8443,7 @@ async def run_custom_quote(registry: dict, dest: dict, boxes: list,
         "dropoff": (cfg.get("collection_option") == "I_Am_Going_To_Drop_Off_My_Packages"),
         "collection_option": str(cfg.get("collection_option") or ""),
         "collection_options": (worldoptions.COLLECTION_OPTIONS if worldoptions else []),
-        "show_parcelshop": bool(cfg.get("show_parcelshop", False)),
+        "show_parcelshop": False,   # customers never collect from a shop
         "has_eori": bool(cfg.get("eori")),
         "default_hs_code": cfg.get("default_hs_code") or "",
         "international": international,
@@ -8690,7 +8678,6 @@ _DIAGNOSE_VARIANTS = [
     ("No signature required (DHL wording)", {"signature_type": "DHL_No_Signature_Required"}),
     ("Asking UPS only", {"service_name": "UPS"}),
     ("UPS packaging instead of a generic parcel", {"package_type": "UPS_My_Packaging"}),
-    ("Delivered to a pickup shop", {"delivery_dropoff": True}),
 ]
 
 
@@ -8736,7 +8723,7 @@ async def run_dispatch_diagnose(registry: dict, order_id, boxes: list) -> dict:
                  "code": op.get("service_type_code") or "",
                  "delivery": " ".join(x for x in [op.get("delivery_date"), op.get("delivery_time")] if x),
                  "amount": op.get("amount"), "currency": op.get("currency")}
-                for op in (res.get("options") or [])]
+                for op in (res.get("options") or []) if not _is_shop_delivery(op)]
         svcs.sort(key=lambda s: (s["amount"] is None, s["amount"] or 0))
         if not rows:
             baseline = {s["code"] for s in svcs}
@@ -9016,15 +9003,13 @@ def _shops_for(cfg: dict, option: dict) -> tuple:
         shops = option.get("shops") or []
         if shops and isinstance(shops[0], dict):
             dropoff_shop = shops[0]
-    delivery_shop = None
-    if option.get("delivery_dropoff"):
-        dshops = option.get("delivery_shops") or []
-        if dshops and isinstance(dshops[0], dict):
-            delivery_shop = dshops[0]
-        else:
-            return None, None, ("This is a collect-from-shop service but World Options did not "
-                                "return a shop for this address. Pick a to-the-door service instead.")
-    return dropoff_shop, delivery_shop, ""
+    # Customers never collect from a shop (Cameron, 2026-10-09): such a service
+    # is refused here, for the Dispatch window and custom shipments alike,
+    # before anything reaches World Options.
+    if _is_shop_delivery(option):
+        return None, None, ("Reactor never sends a parcel to a pickup shop: customers get it at "
+                            "their door. Pick a to-the-door service instead.")
+    return dropoff_shop, None, ""
 
 
 def _intents() -> dict:
@@ -19043,7 +19028,7 @@ def _shipping_public(cfg: dict) -> dict:
         "ready_time": cfg.get("ready_time") or "",
         "close_time": cfg.get("close_time") or "",
         "collection_option": cfg.get("collection_option") or "I_Need_To_Book_A_Collection",
-        "show_parcelshop": bool(cfg.get("show_parcelshop", False)),
+        "show_parcelshop": False,   # customers never collect from a shop
         "collection_options": (worldoptions.COLLECTION_OPTIONS if worldoptions else []),
         "collection_by_carrier": (cfg.get("collection_by_carrier")
                                   if isinstance(cfg.get("collection_by_carrier"), dict) else {}),
@@ -25803,8 +25788,6 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             cfg["default_box_id"] = want if want in have else ""
         if "notify_customer" in body:
             cfg["notify_customer"] = bool(body.get("notify_customer"))
-        if "show_parcelshop" in body:
-            cfg["show_parcelshop"] = bool(body.get("show_parcelshop"))
         for tkey in ("ready_time", "close_time"):
             if tkey in body:
                 tv = str(body.get(tkey) or "").strip()

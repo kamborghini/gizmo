@@ -1874,61 +1874,69 @@ def t_failed_dispatched_tag_is_reported():
         copilot._order_tag_writer = saved
 
 @test
-def t_pickup_point_services_are_surfaced():
-    """The cheaper Access Point services only come back when the quote asks to
-    deliver to a shop, so the route must run BOTH quotes and merge them."""
-    reset_dispatch(); reset_prod()
-    post("/api/shipping/config", {"op": "set", "show_parcelshop": True})
-    r = post("/api/dispatch/quote", {"order_id": 12345, "box": BOX})
+def t_shop_delivery_is_never_offered():
+    """Business rule (Cameron, 2026-10-09): "our customers should never collect
+    from shop". No pickup-point quote is asked for, no Access Point or ParcelShop
+    service is offered, and the old setting that switched them on is ignored,
+    even when it is still saved as on."""
+    reset_dispatch(); reset_prod(); _ship_cfg()
+    cfg = copilot._load_shipping(); cfg["show_parcelshop"] = True; copilot._save_shipping(cfg)
+    r = post("/api/shipping/config", {"op": "set", "show_parcelshop": True})
     eq(r.status_code, 200, r.text)
-    opts = r.json()["options"]
-    codes = [o["service_type_code"] for o in opts]
-    ok("UPS_Express_Saver_AP" in codes, "the cheaper Access Point service is offered: " + str(codes))
-    eq(codes.count("UPS_Express_Saver"), 1, "the door service is not duplicated")
-    ap = [o for o in opts if o["service_type_code"] == "UPS_Express_Saver_AP"][0]
-    eq(ap["delivery_dropoff"], True, "flagged as collect-from-shop")
-    eq(ap["delivery_shops"][0]["name"], "Corner Shop", "the shop is named")
-    eq(opts[0]["amount"], min(o["amount"] for o in opts if o["amount"]), "still cheapest first")
-    # a door option must never be mislabelled
-    door = [o for o in opts if o["service_type_code"] == "UPS_Express_Saver"][0]
-    eq(door["delivery_dropoff"], False, "door service not flagged")
-    post("/api/shipping/config", {"op": "set", "show_parcelshop": False})
-
-@test
-def t_booking_an_access_point_sends_the_shop():
-    reset_dispatch(); reset_prod()
-    holder = {}
+    holder = {"xmls": []}
     async def cap(service, action, inner, retryable=True):
-        if service == "ShipmentService":
-            holder["xml"] = inner; return ET.fromstring(BOOK_XML)
-        return ET.fromstring(AP_XML if "IsDeliveryDropoffRequired" in inner else RATE_XML)
+        holder["xmls"].append(inner)
+        return ET.fromstring(AP_XML if "IsDeliveryDropoffRequired" in inner else RATE_XML.replace(
+            "</wsRateService>", AP_XML.split("<wsRateService>", 1)[1].split("</wsRateService>", 1)[0] + "</wsRateService>"))
     saved = worldoptions._soap_call; worldoptions._soap_call = cap
     try:
-        opt = {"service_type_code": "UPS_Express_Saver_AP", "package_type_code": "UPS_My_Packaging",
-               "carrier_name": "UPS", "service_name": "Express Saver Access Point", "amount": 7.44,
-               "delivery_dropoff": True,
-               "delivery_shops": [{"id": "UPS991", "name": "Corner Shop", "street": "7 Market St",
-                                    "city": "Manchester", "postcode": "M1 3AA"}]}
-        r = post("/api/dispatch/book", {"order_id": 12345, "option": opt, "box": BOX})
+        r = post("/api/dispatch/quote", {"order_id": 12345, "box": BOX})
         eq(r.status_code, 200, r.text)
-        xml = holder["xml"]
-        ok("<sd:DeliveryDropOffInfo>" in xml, "shop block sent")
-        ok("<sd:DropOffId>UPS991</sd:DropOffId>" in xml, "shop id sent")
-        ok("<sd:IsDeliveryDropoffRequired>true</sd:IsDeliveryDropoffRequired>" in xml, "flag sent")
-        ok(xml.index("<sd:CustomerReference>") < xml.index("<sd:DeliveryDropOffInfo>")
-           < xml.index("<sd:PackageDetails>"), "XSD sequence order kept")
-        eq(r.json()["delivery_shop"]["name"], "Corner Shop", "reported back for the UI")
+        body = r.json()
+        codes = [o["service_type_code"] for o in body["options"]]
+        ok(not any("IsDeliveryDropoffRequired" in x for x in holder["xmls"]), "no pickup-point quote is asked for")
+        ok("UPS_Express_Saver_AP" not in codes, "an Access Point service that arrives anyway is not offered: " + str(codes))
+        ok("UPS_Express_Saver" in codes, "while its door service is")
+        ok(not any(o.get("delivery_dropoff") for o in body["options"]), "nothing is collect-from-shop")
+        eq(body["show_parcelshop"], False, "and the window is told shop services are off")
+        c = post("/api/custom/quote", {"address": dict(CUST_ADDR), "box": dict(BOX)})
+        eq(c.status_code, 200, c.text)
+        ok("UPS_Express_Saver_AP" not in [o["service_type_code"] for o in c.json()["options"]], "a custom shipment's quote neither")
+    finally:
+        worldoptions._soap_call = saved
+    got = post("/api/shipping/config", {"op": "get"}).json()["config"]
+    ok(not got.get("show_parcelshop"), "the setting cannot be switched on")
+
+
+@test
+def t_a_shop_delivery_is_never_booked():
+    """The rule's backstop: an option that would deliver to a pickup shop is
+    refused before anything reaches World Options, from the Dispatch window and
+    from a custom shipment alike."""
+    reset_dispatch(); reset_prod(); _ship_cfg()
+    sent = []
+    async def cap(service, action, inner, retryable=True):
+        sent.append(service)
+        return ET.fromstring(BOOK_XML if service == "ShipmentService" else RATE_XML)
+    saved = worldoptions._soap_call; worldoptions._soap_call = cap
+    shop = [{"id": "UPS991", "name": "Corner Shop", "street": "7 Market St", "city": "Manchester", "postcode": "M1 3AA"}]
+    try:
+        for opt in ({"service_type_code": "UPS_Express_Saver_AP", "package_type_code": "UPS_My_Packaging",
+                     "carrier_name": "UPS", "service_name": "Express Saver Access Point", "amount": 7.44,
+                     "delivery_dropoff": True, "delivery_shops": shop},
+                    {"service_type_code": "UPS_Express_Saver_AP", "package_type_code": "UPS_My_Packaging",
+                     "carrier_name": "UPS", "amount": 7.44, "delivery_dropoff": False, "delivery_shops": []},
+                    {"service_type_code": "EVRI_PARCELSHOP", "service_full": "Evri ParcelShop Next Day",
+                     "carrier_name": "EVRISEND", "amount": 3.10}):
+            r = post("/api/dispatch/book", {"order_id": 12345, "option": opt, "box": BOX})
+            eq(r.status_code, 400, "refused: " + r.text)
+            ok("pickup shop" in r.json().get("error", ""), "and says why: " + r.text)
+            c = post("/api/custom/book", custom_body(id="csnoshop" + str(len(sent)), option=opt))
+            eq(c.status_code, 400, "a custom shipment is refused too: " + c.text)
+        eq([x for x in sent if x == "ShipmentService"], [], "nothing was booked at World Options")
     finally:
         worldoptions._soap_call = saved
 
-@test
-def t_access_point_without_a_shop_is_refused():
-    reset_dispatch(); reset_prod()
-    opt = {"service_type_code": "UPS_Express_Saver_AP", "package_type_code": "UPS_My_Packaging",
-           "carrier_name": "UPS", "delivery_dropoff": True, "delivery_shops": []}
-    r = post("/api/dispatch/book", {"order_id": 12345, "option": opt, "box": BOX})
-    eq(r.status_code, 400, "refused rather than shipping nowhere")
-    ok("did not return a shop" in r.json()["error"], "explains why")
 
 @test
 def t_one_failed_quote_does_not_lose_the_other():
@@ -1963,14 +1971,6 @@ def t_parcelshop_services_are_hidden_by_default():
        "no pickup-point request is made when the setting is off")
 
 @test
-def t_parcelshop_can_be_switched_on():
-    post("/api/shipping/config", {"op": "set", "show_parcelshop": True})
-    r = post("/api/dispatch/quote", {"order_id": 12345, "box": BOX})
-    codes = [o["service_type_code"] for o in r.json()["options"]]
-    ok(any(x.endswith("_AP") for x in codes), "shown when asked for: " + str(codes))
-    post("/api/shipping/config", {"op": "set", "show_parcelshop": False})
-
-@test
 def t_diagnose_reports_what_each_setting_returns():
     r = post("/api/dispatch/diagnose", {"order_id": 12345, "box": BOX})
     eq(r.status_code, 200, r.text)
@@ -1979,10 +1979,11 @@ def t_diagnose_reports_what_each_setting_returns():
     ok("As the app quotes now" in labels, "baseline row present")
     ok(any("signature" in l.lower() for l in labels), "signature variants tried")
     ok(any("UPS only" in l for l in labels), "per-carrier variant tried")
-    # the pickup-point variant finds services the baseline did not
-    codes = [x["code"] for x in d["extra_found"]]
-    ok("UPS_Express_Saver_AP" in codes,
-       "reports the service that only appears under another setting: " + str(d["extra_found"]))
+    # Customers never collect from a shop, so no pickup-shop variant is tried and
+    # no shop service is ever suggested as missing.
+    ok(not any("pickup shop" in l.lower() for l in labels), "no pickup-shop variant: " + str(labels))
+    codes = [x["code"] for x in d["extra_found"]] + [s["code"] for row in d["rows"] for s in row["services"]]
+    ok(not any(c.upper().endswith("_AP") for c in codes), "no Access Point service is reported: " + str(codes))
     ok(all(x["name"].strip() for x in d["extra_found"]), "every reported service is named, not a bare code")
     base = d["rows"][0]["services"]
     ok(base and all(not s.get("new") for s in base), "baseline rows are never marked new")
