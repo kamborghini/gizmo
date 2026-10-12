@@ -18,6 +18,17 @@
   },
   {
    "date": "2026-10-12",
+   "title": "Orders not paid through Shopify Payments",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": "connector",
+     "text": "Checking one order paid by PayPal, by bank transfer, on account or marked as paid now says Shopify Payments took no payment for it, so no payout note will be added. It used to say the order had not been paid out by Shopify yet, which was never going to change."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-12",
    "title": "A quicker Inbox, and response times in Settings",
    "items": [
     {
