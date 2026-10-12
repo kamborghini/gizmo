@@ -2,6 +2,22 @@
  "releases": [
   {
    "date": "2026-10-12",
+   "title": "Old discrepancies stay open",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": "recon",
+     "text": "Reconciliation no longer marks an open payout, chargeback or Xero sale as no longer detected just because it has grown older than the months a sweep looks back over. Each sweep keeps checking anything still open, however old, so it stays open until a sweep sees it put right or you close it. A payout or chargeback that old will rarely clear by itself, because its bank line is older than the sweep reads, so close it once you have checked it."
+    },
+    {
+     "kind": "fixed",
+     "tab": "recon",
+     "text": "A bill or remittance from the accounts mailbox that an open discrepancy rests on is now kept until the discrepancy is closed. Before, it was cleared out once it was old enough, and the next sweep then marked the discrepancy no longer detected."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-12",
    "title": "Payout checks that could not run",
    "items": [
     {
