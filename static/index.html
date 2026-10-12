@@ -26765,7 +26765,7 @@ Projected Image UK"></textarea>
                    only the time of the sync changes, and that one line moves
                    in place. A sync error always redraws, so its own "since"
                    stays true; an action always redraws. */
-                const same = poll && !d.sync_error && mailBoardKey(d) === mailPaintedKey
+                const same = poll && !d.sync_error && !mailFound && mailBoardKey(d) === mailPaintedKey
                     && mailAgeKey(d) === mailPaintedAges;
                 mailCache = d;
                 // Never yank the keyboard out from under someone: while an
@@ -26785,7 +26785,9 @@ Projected Image UK"></textarea>
         function mailAgeKey(d) {
             return (d.threads || []).map(t => mailAgo(t.last_at)
                 + (mailHours(t.last_at) > 4 ? 'a' : '') + (mailHours(t.last_at) > 8 ? 'b' : '')
-                + (mailHours(t.state_at > t.last_at ? t.state_at : t.last_at) > 24 ? 'c' : '')).join(',');
+                + (mailHours(t.state_at > t.last_at ? t.state_at : t.last_at) > 24 ? 'c' : '')).join(',')
+                /* and a send that may have gone out says how long ago */
+                + '|' + (d.outbound_pending || []).map(p => mailAgo(p.at)).join(',');
         }
         /* What is on screen, compared by the poll: not the page's copy, which
            a poll skipped under someone's typing has already moved on. */

@@ -27232,6 +27232,9 @@ def t_only_a_signed_in_request_sees_or_counts_its_timing():
         r = post("/api/crm/board", {})
         ok(_server_timing(r).get("app", 0) > 0, "a signed-in request still gets it")
         ok("/api/crm/board" in perf.ROUTES, "and is counted")
+        _uid, msess, _ = ready_user("Mo", "mo")
+        eq(post_s(msess, "/api/status", {}).status_code, 403)
+        ok("/api/status" not in perf.ROUTES, "a refusal, even signed in, is not a time worth counting")
     with_accounts(go)
 
 
@@ -27321,11 +27324,15 @@ def t_a_relabel_steps_aside_for_a_running_sync():
                     await got.pop()          # the relabel, while a sync holds the lock
                 finally:
                     copilot._mail_lock.release()
+            t = copilot._load_mail()["threads"]["t1"]
+            t["label_retry_at"] = time.time() + 400     # an earlier failure's back-off
+            t["label_tried_at"] = time.time()
             run_async(busy_sync())
             eq(calls, [], "it did not wait out the sync")
-            t = copilot._load_mail()["threads"]["t1"]
             ok(copilot._mail_want_label(t) != (t.get("gmail_label") or ""),
                "so the sync's catch-up sees the label is owed: %r" % t.get("gmail_label"))
+            ok("label_retry_at" not in t and t.get("label_tried_at") == 0,
+               "and takes it first, back-off or not: %r" % {k: t.get(k) for k in ("label_retry_at", "label_tried_at")})
         finally:
             restore()
             _gm.modify_thread, _gm.ensure_label, copilot._mail_lock, copilot.MAIL_LABEL_LOCK_WAIT = saved
@@ -27359,6 +27366,53 @@ def t_an_opened_email_reads_as_read_at_once_unless_gmail_refuses():
         finally:
             restore()
             _gm.modify_thread = saved
+    with_mail(go)
+
+
+@test
+def t_a_read_on_open_never_outlives_what_gmail_says():
+    """The re-check of #15's fixes (PAGE4). Three edges of reading on open:
+    a mark-read Gmail never answered left the board saying read; the put-back
+    after a refusal was never saved, so a store written in between kept the
+    read on disk; and Mark unread pressed while the mark-read was still at
+    Gmail was undone by it, though that is how somebody undoes an accidental
+    open."""
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        copilot._load_mail()["threads"]["t1"]["unread"] = True
+        calls = []
+
+        async def modify(tid, add=None, remove=None):
+            calls.append((tuple(add or ()), tuple(remove or ())))
+        saved = (_gm.modify_thread, copilot._mail_set_unread)
+        got, restore = _capture_spawn()
+        try:
+            # Gmail never answers: put back, and saved even though another
+            # writer saved the optimistic read in between.
+            async def silent(store, ids, unread):
+                return {"changed": 0, "failed": 0}
+            copilot._mail_set_unread = silent
+            eq(post_s(sess, "/api/mail/thread", {"id": "t1"}).status_code, 200)
+            copilot._write_mail(copilot._load_mail())          # another writer, mid-flight
+            run_async(got.pop(0))
+            eq(copilot._load_mail()["threads"]["t1"]["unread"], True, "unanswered is not confirmed")
+            with open(copilot.MAILBOX_PATH, encoding="utf-8") as fh:
+                eq(json.load(fh)["mailbox"]["threads"]["t1"]["unread"], True, "and the disk says so too")
+            # Mark unread pressed while the mark-read is still to run: it wins.
+            copilot._mail_set_unread = saved[1]
+            _gm.modify_thread = modify
+            eq(post_s(sess, "/api/mail/thread", {"id": "t1"}).status_code, 200)
+            eq(post_s(sess, "/api/mail/read", {"id": "t1", "unread": True}).status_code, 200)
+            calls.clear()
+            run_async(got.pop(0))
+            eq(calls, [], "the late mark-read stands down")
+            eq(copilot._load_mail()["threads"]["t1"]["unread"], True, "and the email stays unread, as asked")
+        finally:
+            restore()
+            _gm.modify_thread, copilot._mail_set_unread = saved
     with_mail(go)
 
 

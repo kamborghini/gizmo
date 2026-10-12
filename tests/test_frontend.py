@@ -7607,7 +7607,7 @@ let viewActive = true, busy = false;
 const synced = el('p'); synced.dataset.mailSynced = '';
 document.querySelector = (sel) => sel === '#view-mail.active' ? (viewActive ? {} : null)
     : sel === '#mail-content [data-mail-synced]' ? synced : null;
-let mailCache = null, mailTimer = null, mailFetchSeq = 0, mailFetchedAt = 0, paints = 0, calls = [];
+let mailCache = null, mailTimer = null, mailFetchSeq = 0, mailFetchedAt = 0, paints = 0, calls = [], mailFound = null;
 function mailInputBusy() { return busy; }
 const board = () => ({ connected: true, address: 'sales@shop.test', synced_at: '2026-10-12T09:00:00Z',
                        sync_error: '', threads: [{ id: 't1', unread: true, state: 'unassigned',
@@ -7651,6 +7651,15 @@ const settle = () => new Promise(r => setImmediate(r));
   out.failing = paints;
   paints = 0; await refreshMailQuiet();
   out.action = paints;
+  // A send stamped and never confirmed ages too, on a board whose rows do not.
+  next = board(); next.threads[0].last_at = '2026-10-09T09:00:00Z'; next.threads[0].state = 'done';
+  next.outbound_pending = [{ id: 'p1', at: new Date(now - 120000).toISOString() }];
+  await refreshMailQuiet(); paints = 0;
+  now += 30 * 60000; ticks[0](); await settle();
+  out.pendingAges = paints;
+  // While whole-mailbox search results are showing, they are drawn every time.
+  paints = 0; mailFound = { q: 'x', rows: [] }; ticks[0](); await settle();
+  out.searching = paints; mailFound = null;
   console.log(JSON.stringify(out));
 })();
 """
@@ -7667,6 +7676,8 @@ const settle = () => new Promise(r => setImmediate(r));
     ok(got["nextMinute"] == 0, "and once drawn, the next quiet minute is quiet again")
     ok(got["failing"] == 1, "a sync error always redraws, so what it says stays true")
     ok(got["action"] == 1, "and an action always redraws")
+    ok(got["pendingAges"] == 1, "a send that may have gone out keeps its age honest: %r" % got)
+    ok(got["searching"] == 1, "and search results are redrawn, as before")
 
 
 @test

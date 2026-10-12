@@ -14234,21 +14234,30 @@ def _mail_sync_soon() -> bool:
     return _spawn_bg(_mail_sync_now())
 
 
+_mail_read_lock = asyncio.Lock()    # read-state changes, one at a time
+
+
 async def _mail_mark_read_later(tid: str) -> None:
     """Opening an email is reading it, so Gmail is told, after the window has
     opened. The board already shows it read (the thread route marks it so in
-    memory, because the person has read it); if Gmail refuses, it goes back
-    to unread rather than showing a read state Gmail does not have, and the
-    next sync re-reads the truth from Gmail either way."""
+    memory, because the person has read it). Unless Gmail confirms, it goes
+    back to unread, saved, rather than showing a read state Gmail does not
+    have; and the next sync re-reads the truth from Gmail either way.
+
+    Under _mail_read_lock, which Mark read/unread takes too, and standing
+    down if the email was marked unread meanwhile: that is how somebody
+    undoes an accidental open, and a late mark-read must not undo it."""
     try:
-        store = _load_mail()
-        res = await _mail_set_unread(store, [tid], False)
-        if res.get("failed"):
+        async with _mail_read_lock:
+            store = _load_mail()
             t = store.get("threads", {}).get(tid)
-            if t is not None:
+            if t is None or t.get("unread"):
+                return
+            res = await _mail_set_unread(store, [tid], False)
+            if not res.get("changed"):
                 t["unread"] = True
-        elif res.get("changed") and _mail_mem is store:
-            _write_mail(store)
+            if _mail_mem is store:
+                _write_mail(store)
     except Exception:
         logger.exception("mail: marking read on open failed")
 
@@ -14281,6 +14290,13 @@ async def _mail_labels_later(tid: str) -> None:
             async with asyncio.timeout(MAIL_LABEL_LOCK_WAIT):
                 await _mail_lock.acquire()
         except TimeoutError:
+            # First in line for that catch-up: an earlier failure's back-off
+            # or a backlog of never-tried threads would otherwise keep a
+            # fresh move's label wrong for minutes.
+            t = _load_mail().get("threads", {}).get(tid)
+            if t is not None:
+                t.pop("label_retry_at", None)
+                t["label_tried_at"] = 0
             return
         try:
             store = _load_mail()
@@ -22110,8 +22126,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not ids:
             return _json({"error": "Nothing was selected."}, 400)
         unread = bool(body.get("unread"))
-        out = await _mail_set_unread(_load_mail(), ids, unread)
-        _write_mail(_load_mail())
+        async with _mail_read_lock:      # after any read-on-open still at Gmail
+            out = await _mail_set_unread(_load_mail(), ids, unread)
+            _write_mail(_load_mail())
         if out["changed"]:
             _track(who, "mail", "marked " + str(out["changed"]) + " email"
                    + ("" if out["changed"] == 1 else "s")

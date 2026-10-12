@@ -331,8 +331,8 @@ class TimingMiddleware:
 
     Only for a request the door let in on a live session (perf.admit): a
     sign-in's marks told a real username from a made-up one, and refused
-    requests in the table washed out the real times. A path the router does
-    not know (a 404) and an answer long by design (perf.no_record) are not
+    requests in the table washed out the real times. A refusal (any 4xx,
+    a 404 included) and an answer long by design (perf.no_record) are not
     counted."""
 
     def __init__(self, app):
@@ -350,7 +350,10 @@ class TimingMiddleware:
             if message["type"] == "http.response.start" and marks.get("_door"):
                 marks["app"] = (time.perf_counter() - t0) * 1000
                 MutableHeaders(raw=message["headers"])["server-timing"] = perf.header(marks)
-                if message.get("status") != 404 and not marks.get("_skip"):
+                status = message.get("status") or 0
+                # A refusal (401, 403, 409 and the like) is not a time worth
+                # counting, even signed in: it only dilutes the real ones.
+                if (status < 400 or status >= 500) and not marks.get("_skip"):
                     perf.record(path, marks["app"])
             await send(message)
 
