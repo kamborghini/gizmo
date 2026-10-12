@@ -2471,6 +2471,15 @@
         .dt-dot.ok { background: var(--success); }
         .dt-dot.off { background: transparent; box-shadow: inset 0 0 0 var(--bw-hairline) var(--border-emphasis); }
         .dt-row.settled .dt-c { color: var(--text-tertiary); }
+        /* An open row and its detail are one block: the teal wash, run 16 past
+           the text edge so the words stay on it, and the open edge. */
+        .dtable > .dt-detail { grid-column: 1 / -1; padding: var(--sp-2) 0 var(--sp-5); border-bottom: var(--bw-hairline) solid var(--border-default); }
+        .dt-row.open, .dtable > .dt-detail { background: var(--action-selected);
+            box-shadow: calc(-1 * var(--sp-4)) 0 0 var(--action-selected), var(--sp-4) 0 0 var(--action-selected); }
+        .dt-row.open { border-bottom-color: transparent; }
+        .dt-row.open::before { content: ""; position: absolute; top: 0; bottom: 0; left: calc(-1 * var(--sp-4)); width: var(--bw-strong); background: var(--border-selected); }
+        .dtable > .dt-detail { position: relative; }
+        .dtable > .dt-detail::before { content: ""; position: absolute; top: 0; bottom: 0; left: calc(-1 * var(--sp-4)); width: var(--bw-strong); background: var(--border-selected); }
         .dt-row.click { cursor: pointer; }
         @media (hover: hover) { .dt-row.click:hover { background: var(--surface-secondary); } }
         /* ONE TABLE, NARROW: a table whose columns no longer fit its own width
@@ -2506,6 +2515,21 @@
             .dt-l > .dtable > .dt-row > .dt-c:empty { display: none; }
             .dt-l > .dtable > .dt-row > .dt-c.go { display: none; }
         }
+        /* Liability (12 Oct 2026): every customer owing in one table, what they
+           owe straight after their name. */
+        .dt-owing { --dt-cols: minmax(12rem, 2fr) max-content max-content minmax(7rem, 1fr) max-content max-content minmax(6rem, 1fr) minmax(6rem, 1fr) max-content; }
+        .lia-detail-head { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+        .lia-detail-head .icon-btn { margin-left: auto; }
+        .lia-detail .ktable { background: transparent; }
+        .ktable td.strong { font-weight: var(--weight-semibold); }
+        /* The orders take three fifths beside the chase email, their dates and
+           tags on one line. */
+        .lia-detail > .duo { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+        .lia-detail .ktable :is(td) { white-space: nowrap; }
+        /* Paid but still tagged: one line under the legend, the orders after
+           the words. */
+        .miss-strip.inline { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--sp-3); row-gap: var(--sp-1); }
+        .miss-strip.inline > .miss-row { padding: 0; border: 0; }
         /* Products (12 Oct 2026): the catalogue as one table whose columns share
            the row, the figures straight after the words. */
         .dt-products { --dt-cols: minmax(14rem, 2.4fr) minmax(6rem, 1fr) max-content minmax(7rem, 1fr) max-content max-content max-content max-content; }
@@ -7319,6 +7343,7 @@ Projected Image UK"></textarea>
                 /* A row that opens what it lists: the whole row answers a pointer,
                    and its main cell carries the button a keyboard reaches. */
                 if (r.onClick) { row.classList.add('click'); row.onclick = r.onClick; }
+                if (r.open) row.classList.add('open');
                 r.cells.forEach((c, i) => {
                     const cell = el('div', 'dt-c' + (i === 0 ? ' dt-main' : '') + (cols[i] && cols[i].cls ? ' ' + cols[i].cls : ''));
                     cell.setAttribute('role', 'cell');
@@ -7326,6 +7351,8 @@ Projected Image UK"></textarea>
                     row.append(cell);
                 });
                 t.append(row);
+                /* An opened row's detail sits under it across every column. */
+                if (r.after) { const det = el('div', 'dt-detail'); det.append(r.after); t.append(det); }
             });
             wrap.append(t);
             return wrap;
@@ -13525,12 +13552,23 @@ Projected Image UK"></textarea>
                one line says what the page is; which tags count and how terms are
                worked out wait behind the title's info button, word for word
                (copy plan, Liability #1). The stamp and Refresh live on the tabs. */
-            box.append(pageHead({ view: 'liability', title: 'Liability', line: 'What customers owe on unpaid orders.',
+            /* Refresh is worded in the header, as on Xero sync; the stamp stays on
+               the tab row (12 Oct 2026). */
+            const liaRefresh = el('button', 'btn btn-sm'); liaRefresh.type = 'button';
+            liaRefresh.append(ico(I.refresh), document.createTextNode('Refresh'));
+            liaRefresh.onclick = () => loadLiability(true, true);
+            box.append(pageHead({ view: 'liability', title: 'Liability', line: 'What customers owe on unpaid orders.', actions: [liaRefresh],
                 info: infoButton('About Liability', { title: 'Liability', body: 'Credit extended to customers, from orders tagged '
                     + (d.tags || []).map(t => '"' + t + '"').join(', ')
                     + '. Terms come from the order itself, then a Net tag on the customer, otherwise Net '
                     + d.default_terms + ' is assumed and marked.' }) }));
-            box.append(financeTabs('liability', freshLabel(liabilityCache.at), [refreshBtn(() => loadLiability(true, true))]));
+            box.append(financeTabs('liability', freshLabel(liabilityCache.at), []));
+            /* Nothing owed is one line, not six £0 tiles over a card that says
+               so (12 Oct 2026, DF-20). */
+            if (!(d.customers || []).length && !(d.total > 0)) {
+                box.append(emptyState({ icon: I.wallet, text: 'Nothing is owed.', sub: 'Checked just now.' }));
+                return;
+            }
             /* Under the header and its tabs every block is a card the grid can
                move, each spanning the row. */
 
@@ -13616,7 +13654,7 @@ Projected Image UK"></textarea>
             }
 
             if ((d.stale_tagged || []).length) {
-                const s = el('div', 'miss-strip');
+                const s = el('div', 'miss-strip inline');
                 const head = el('div', 'miss-head');
                 const nst = d.stale_tagged.length;
                 head.append(ico(I.warning), el('b', null, 'Paid but still tagged'),
@@ -13727,7 +13765,7 @@ Projected Image UK"></textarea>
             }
             lCard.append(lHead);
             lCard.append(tableTools(left, right));
-            const host = el('div', 'lbl-rows'); lCard.append(host);
+            const host = el('div', 'card-bleed'); lCard.append(host);
             function paint() {
                 host.innerHTML = '';
                 let custs = d.customers
@@ -13752,77 +13790,80 @@ Projected Image UK"></textarea>
                         + (frows.length === 1 ? ' order' : ' orders') + ' · ' + liaMoney(fsum, cur, 0)
                         + ' outstanding · ' + custs.length + (custs.length === 1 ? ' customer' : ' customers')));
                 }
-                if (!custs.length) {
-                    host.append(el('div', 'empty', d.total > 0 ? 'Nothing matches these filters.'
-                        : 'Nothing is owed.'));
-                    return;
-                }
-                custs.forEach(({ c, rows }) => {
-                    const key = c.name;
-                    const row = el('div', 'lbl-row' + (liaOpen === key ? ' on' : ''));
-                    row.setAttribute('role', 'button'); row.tabIndex = 0;
-                    row.addEventListener('keydown', (e) => { if (e.target !== row) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } });
-                    const ln = el('div', 'lia-name', c.name); ln.title = c.name; row.append(ln);
-                    const mid = el('div', 'lbl-who');
-                    const line = el('span', 'lbl-nameline');
-                    /* Exact, like the figure at the end of the same row and
-                       the orders in the drill-down under it. Rounded pounds are
-                       for the KPI tiles and the share legend, which summarise
-                       many orders; this states one customer's debt, which is
-                       the number that gets chased. */
-                    /* Under a filter the row speaks for the orders the filter
-                       kept, as its count already did: it went on showing the
-                       whole account's overdue money and oldest age beside a
-                       count of one order within terms. */
-                    const part = rows.length < (c.orders || []).length;
-                    const cOver = part ? rows.filter(r => r.status === 'overdue').reduce((a, r) => a + (r.outstanding || 0), 0) : c.overdue;
-                    const cOld = part ? rows.reduce((a, r) => Math.max(a, r.age_days || 0), 0) : c.oldest_days;
-                    const cTotal = part ? rows.reduce((a, r) => a + (r.outstanding || 0), 0) : c.total;
-                    if (cOver > 0) line.append(el('span', 'lbl-chip bad', 'Overdue ' + liaMoney(cOver, cur)));
-                    else line.append(el('span', 'lbl-chip made', 'Within terms'));
-                    if (c.last_chased && c.last_chased.at) {
-                        const days = Math.max(0, Math.floor((Date.now() - Date.parse(c.last_chased.at)) / 86400000));
-                        line.append(el('span', 'lbl-chip note', days === 0 ? 'Chased today' : 'Chased ' + liaDays(days) + ' ago'));
-                    }
-                    mid.append(line);
-                    mid.append(el('span', 'sub', rows.length + (rows.length === 1 ? ' order' : ' orders')
-                        + '  \u00b7  oldest ' + liaDays(cOld) + '  \u00b7  ' + c.terms + (c.assumed ? ' (assumed)' : '')));
-                    row.append(mid);
-                    /* The money ends the row, where the reconciliation row's
-                       money ends its row and where the reference groups a list
-                       row's figure. Inside the nameline it sat at the left of a
-                       1,039px column with 890px of nothing to its right, in a
-                       weight and size neither the other tab nor the reference
-                       gives a row figure. */
-                    row.append(el('div', 'lbl-meta fig', liaMoney(cTotal, cur)));
-                    row.onclick = () => { liaOpen = (liaOpen === key ? null : key); renderLiability(); };
-                    host.append(row);
-                    if (liaOpen === key) {
-                        const wrap = el('div', 'ktable-wrap'); wrap.style.margin = 'var(--sp-1) 0 var(--sp-4)';
-                        const tb = el('table', 'ktable');
-                        tb.innerHTML = '<thead><tr><th>Order</th><th>Order date</th><th>Due</th><th class="num">Value</th>'
-                            + '<th class="num">Paid</th><th class="num">Outstanding</th><th>Terms</th><th>Channel</th><th>Status</th></tr></thead>';
-                        const tbody = el('tbody');
-                        rows.forEach(r => {
-                            const tr = el('tr');
-                            const onc = el('td', 'kw'); onc.append(orderA(r.name, r.admin_url));
-                            tr.append(onc);
-                            tr.append(el('td', null, fmtDate(r.created_at)));
-                            tr.append(el('td', null, r.due ? fmtDate(r.due) : 'unknown'));
-                            tr.append(el('td', 'num', liaMoney(r.value, cur)));
-                            tr.append(el('td', 'num', liaMoney(r.paid, cur)));
-                            const out = el('td', 'num', liaMoney(r.outstanding, cur)); out.style.fontWeight = 'var(--weight-semibold)';
-                            tr.append(out);
-                            tr.append(el('td', null, r.terms + (r.terms_source === 'assumed' ? ' (assumed)'
-                                : r.terms_source === 'customer' ? ' (tag)' : '')));
-                            tr.append(el('td', null, (r.channels || [r.channel]).join(', ')));
-                            const tds = el('td'); tds.append(liaChip(r)); tr.append(tds);
-                            tbody.append(tr);
-                        });
-                        tb.append(tbody); wrap.append(tb); host.append(wrap);
-                        host.append(chasePanel(c, cur));
-                    }
+                /* Every customer owing in one table (12 Oct 2026, DF-18): Owed
+                   straight after the name, every fact under its own head, and
+                   an opened account under its own row. */
+                const clearAll = el('button', 'btn btn-sm'); clearAll.type = 'button'; clearAll.textContent = 'Clear filters';
+                clearAll.onclick = () => clr.click();
+                const none = d.total > 0 ? emptyState({ icon: I.search, text: 'Nothing matches these filters.', action: clearAll })
+                    : el('div', 'empty', 'Nothing is owed.');
+                host.append(dtable([{ head: 'Customer' }, { head: 'Owed', cls: 'num' }, { head: 'Overdue', cls: 'num' }, { head: 'Status' },
+                                    { head: 'Orders', cls: 'num' }, { head: 'Oldest', cls: 'num' }, { head: 'Terms' }, { head: 'Last chased' },
+                                    { head: '', cls: 'act go' }],
+                    custs.map(({ c, rows }) => {
+                        const key = c.name;
+                        const toggle = () => { liaOpen = (liaOpen === key ? null : key); renderLiability(); };
+                        /* Under a filter the row speaks for the orders the filter
+                           kept, as its count already did. */
+                        const part = rows.length < (c.orders || []).length;
+                        const cOver = part ? rows.filter(r => r.status === 'overdue').reduce((a, r) => a + (r.outstanding || 0), 0) : c.overdue;
+                        const cOld = part ? rows.reduce((a, r) => Math.max(a, r.age_days || 0), 0) : c.oldest_days;
+                        const cTotal = part ? rows.reduce((a, r) => a + (r.outstanding || 0), 0) : c.total;
+                        const nm = el('button', 'dt-link dt-name', c.name); nm.type = 'button'; nm.title = c.name;
+                        nm.setAttribute('aria-expanded', String(liaOpen === key));
+                        nm.onclick = (e) => { e.stopPropagation(); toggle(); };
+                        const st = el('span', 'dt-name');
+                        st.append(el('span', 'dt-dot ' + (cOver > 0 ? 'bad' : 'ok')), document.createTextNode(cOver > 0 ? 'Overdue' : 'Within terms'));
+                        let chased = '';
+                        if (c.last_chased && c.last_chased.at) {
+                            const days = Math.max(0, Math.floor((Date.now() - Date.parse(c.last_chased.at)) / 86400000));
+                            chased = days === 0 ? 'Today' : liaDays(days) + ' ago';
+                        }
+                        const go = el('span', 'prod-go'); go.innerHTML = liaOpen === key ? I.chevDown : I.chevLeft; go.setAttribute('aria-hidden', 'true');
+                        return { open: liaOpen === key, onClick: toggle,
+                                 cells: [nm, liaMoney(cTotal, cur), cOver > 0 ? el('span', 'dt-bad', liaMoney(cOver, cur)) : '', st,
+                                         String(rows.length), liaDays(cOld), c.terms + (c.assumed ? ' (assumed)' : ''), chased, go],
+                                 after: liaOpen === key ? liaDetail(c, rows) : null };
+                    }),
+                    { cls: 'dt-owing', label: 'Customers owing', empty: none }));
+            }
+            /* An opened account (12 Oct 2026, R9): its orders and the chase email
+               side by side, the X beside its name. Two-line cells (value over
+               paid, terms over channel) so both fit at a laptop's width. */
+            function liaDetail(c, rows) {
+                const det = el('div', 'lia-detail');
+                const h = el('div', 'lia-detail-head');
+                const tot = rows.reduce((a, r) => a + (r.outstanding || 0), 0);
+                h.append(el('b', null, c.name), el('span', 'lbl-meta', rows.length + (rows.length === 1 ? ' order' : ' orders')
+                    + ' \u00b7 ' + liaMoney(tot, cur) + ' outstanding'));
+                const x = el('button', 'icon-btn'); x.type = 'button'; x.innerHTML = I.x;
+                x.setAttribute('aria-label', 'Close ' + c.name);
+                x.onclick = (e) => { e.stopPropagation(); liaOpen = null; renderLiability(); };
+                h.append(x); det.append(h);
+                const duo = el('div', 'duo');
+                const wrap = el('div', 'ktable-wrap'); const tb = el('table', 'ktable');
+                const thead = el('thead'); const htr = el('tr');
+                [['Order'], ['Due'], ['Value and paid', 1], ['Outstanding', 1], ['Terms and channel'], ['Status']].forEach(([hd, num]) => htr.append(el('th', num ? 'num' : null, hd)));
+                thead.append(htr); tb.append(thead);
+                const tbody = el('tbody');
+                rows.forEach(r => {
+                    const tr = el('tr');
+                    const onc = el('td', 'kw'); onc.append(orderA(r.name, r.admin_url), el('div', 'prod-sub', 'ordered ' + fmtDate(r.created_at)));
+                    tr.append(onc);
+                    tr.append(el('td', null, r.due ? fmtDate(r.due) : 'unknown'));
+                    const val = el('td', 'num', liaMoney(r.value, cur)); val.append(el('div', 'prod-sub', liaMoney(r.paid, cur) + ' paid'));
+                    tr.append(val);
+                    tr.append(el('td', 'num strong', liaMoney(r.outstanding, cur)));
+                    const tc = el('td', null, r.terms + (r.terms_source === 'assumed' ? ' (assumed)' : r.terms_source === 'customer' ? ' (tag)' : ''));
+                    tc.append(el('div', 'prod-sub', (r.channels || [r.channel]).join(', ')));
+                    tr.append(tc);
+                    const tds = el('td'); tds.append(liaChip(r)); tr.append(tds);
+                    tbody.append(tr);
                 });
+                tb.append(tbody); wrap.append(tb);
+                duo.append(wrap, chasePanel(c, cur));
+                det.append(duo);
+                return det;
             }
             paint();
 

@@ -2039,6 +2039,26 @@ def t_an_order_missing_its_terms_is_flagged_on_the_queue_row():
 
 
 @test
+def t_liability_owing_is_a_table_with_the_account_opened_beside_its_email():
+    """DF-18, DF-20, 12 Oct 2026: each customer owing was a name at the left,
+    an Overdue tag in the middle and the amount alone at the far edge, the row
+    Cameron's first screenshot showed on Loan units; nothing owed was six £0
+    tiles and a card holding one centred line."""
+    fn = fn_src("function renderLiability(")
+    ok("dtable(" in fn and "'dt-owing'" in fn and "'lia-name'" not in fn, "customers owing is a table")
+    for head in ("'Customer'", "'Owed'", "'Overdue'", "'Status'", "'Orders'", "'Oldest'", "'Terms'", "'Last chased'"):
+        ok("head: " + head in fn, "with a column " + head)
+    ok("after: liaOpen === key ? liaDetail(c, rows) : null" in fn, "an opened account opens under its own row")
+    det = fn_src("function liaDetail(") if "function liaDetail(" in SCRIPT else ""
+    ok("el('div', 'duo')" in det and "chasePanel(c, cur)" in det and "'Value and paid'" in det and "'Terms and channel'" in det,
+       "its orders beside the chase email, two-line cells so both fit")
+    ok("aria-label', 'Close ' + c.name" in det, "and an X beside its name closes it")
+    ok("text: 'Nothing is owed.', sub: 'Checked just now.'" in fn, "nothing owed is one line, not six £0 tiles and a card")
+    ok("r.after" in fn_src("function dtable("), "a table row can carry its detail under it")
+    ok("actions: [liaRefresh]" in fn, "Refresh is worded in the header, as on Xero sync")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left
@@ -3672,7 +3692,9 @@ def t_a_rows_keydown_never_steals_an_inner_controls_keypress():
     handlers = _re2.findall(r"addEventListener\('keydown', \((e|ev)\) => \{[^\n]*(?:Enter)[^\n]*\}\);", SCRIPT)
     hits = _re2.findall(r"addEventListener\('keydown', \((?:e|ev)\) => \{ if \((?:e|ev)\.target !== \w+\) return;", SCRIPT)
     rowish = _re2.findall(r"(row|tr|r|card)\.(?:addEventListener\('keydown'|onkeydown)", SCRIPT)
-    ok(len(hits) >= 5, "the container handlers carry the target guard (%d)" % len(hits))
+    # Rows that became tables (12 Oct 2026: Liability, the filter counters) open from a real
+    # button in the row, which needs no keydown of its own, so fewer handlers remain to guard.
+    ok(len(hits) >= 4, "the container handlers carry the target guard (%d)" % len(hits))
     ok("if (e.target !== card) return;" in SCRIPT, "the deal card too")
     # The two leaf handlers (the follow-up ticks) have no children to steal from
     # and legitimately omit the guard.
@@ -11419,7 +11441,7 @@ def t_liability_and_reconciliation_wear_the_mix():
     for gone in ("Every unpaid order by how late it is", "Open one to see the orders behind the figure", "No orders currently carry an unpaid tag",
                  "Where Shopify, Xero and the inbox disagree", "That is the goal state."):
         ok(gone not in SCRIPT, "cut: " + gone)
-    ok(SCRIPT.count("'Nothing is owed.'") == 2 and "'Nothing needs attention.'" in SCRIPT, "the empty lines are short")
+    ok(SCRIPT.count("'Nothing is owed.'") >= 2 and "'Nothing needs attention.'" in SCRIPT, "the empty lines are short")
 
 
 @test
