@@ -13,6 +13,22 @@
   },
   {
    "date": "2026-10-12",
+   "title": "Payout notes say what is missing",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": "connector",
+     "text": "When Shopify will not show the Xero sync an order's payout, the invoice window now says so in words, with the permission that is missing and where to add it. It showed Shopify's own reply in code, cut off at the edge of the box. The payout pass on the Xero sync page says it the same way."
+    },
+    {
+     "kind": "fixed",
+     "tab": "connector",
+     "text": "Reactor's Shopify app now includes permission to view Shopify Payments accounts, which payout notes need as well as payouts themselves. Shopify asks for it once the new version of the app is released. Until it is approved, Settings, under Connections, says that this permission is missing and what it is for; it said every permission was granted, because it only checked what Reactor writes."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-12",
    "title": "Payout checks that could not run",
    "items": [
     {
