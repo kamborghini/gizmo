@@ -2,6 +2,22 @@
  "releases": [
   {
    "date": "2026-10-12",
+   "title": "The CRM is built once, not for every look",
+   "items": [
+    {
+     "kind": "improved",
+     "tab": "crm",
+     "text": "The CRM's board is now put together once and shared, not built again for every person and every refresh, so it usually opens quicker and other people's clicks spend less time waiting behind it."
+    },
+    {
+     "kind": "improved",
+     "tab": "crm",
+     "text": "An open CRM still checks for changes every minute and a half, but when nothing has changed it no longer downloads and redraws the whole board."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-12",
    "title": "The Production Manager keeps its orders between clicks",
    "items": [
     {
