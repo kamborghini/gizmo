@@ -13697,6 +13697,7 @@ Projected Image UK"></textarea>
         let connHealth = null;
         let connSettings = null;
         let connSettingsOpen = false;
+        let connSettingsEdits = {};   // what has been typed in the open form, so a repaint keeps it
         /* The document a dry run says it would send, laid out the way it will
            appear in Xero. Nothing here writes: it is the last look before the
            accounts are touched, so it shows the fields that decide what lands
@@ -15008,6 +15009,67 @@ Projected Image UK"></textarea>
         /* The connector's reconcile modes, in words. 'warn', 'strict' and
            'off' reached the screen as they are stored. */
         const CX_MODE = { warn: 'Send it and report the difference', strict: 'Hold it back', off: 'Do not check' };
+        /* The Settings card sends only what was changed in it. The connector
+           keeps a value the same as its default or its variable as no choice
+           at all, so the whole form posted back would clear any choice saved
+           on the connector's own tab that this form showed out of date. */
+        function connSettingsChanges(shown, now) {
+            const out = {};
+            Object.keys(now).forEach(k => {
+                const v = String(now[k] == null ? '' : now[k]).trim();
+                if (v !== String(shown[k] == null ? '' : shown[k]).trim()) out[k] = v;
+            });
+            return out;
+        }
+        /* As the connector compares: numbers by value (0.020 is 0.02), the rest exactly. */
+        function cxSameSetting(key, a, b) {
+            return a === b || (['RECONCILE_TOLERANCE', 'MAX_DOCS_PER_RUN', 'RUNAWAY_ABORT_ABOVE'].includes(key)
+                && a !== '' && b !== '' && !isNaN(a) && !isNaN(b) && Number(a) === Number(b));
+        }
+        /* Where a setting's value comes from, under its field: every field
+           shows the value as it applies, so without this the default, the
+           service's variable and a choice saved on the connector look the
+           same. Once the field is changed, what Save will make of it. A
+           connector that says nothing of sources gets no note (null). A saved
+           choice carries its way back: what applies with nothing saved. */
+        function connSettingNote(key, shown, now, s) {
+            const from = s && s.sources && s.sources[key];
+            const fb = s && s.fallbacks && s.fallbacks[key];
+            if (!from || !fb) return null;
+            const fbv = String(fb.value == null ? '' : fb.value).trim();
+            const without = fb.from === 'env' ? 'Set by ' + key + ' on the connector service'
+                : fbv ? 'The default' : 'Not set';
+            const v = String(now == null ? '' : now).trim();
+            if (v === String(shown == null ? '' : shown).trim()) {
+                return from === 'settings' ? { text: 'Saved on the connector', back: fb } : { text: without };
+            }
+            return { text: (v === '' || cxSameSetting(key, v, fbv) ? without : 'Saved on the connector') + ' once you save' };
+        }
+        /* The form starts from the connector's settings as they are now, read
+           again as it opens: the copy read with the page is never refreshed by
+           the polling, and a choice made on the connector's own tab since
+           would show here out of date. Settings that cannot be read are not
+           opened. */
+        async function connOpenSettings() {
+            const d = (await connOp({ op: 'settings' })).data;
+            if (!d) throw new Error('The connector sent no settings back.');
+            connSettings = d; connSettingsEdits = {}; connSettingsOpen = true;
+        }
+        /* Sends what was changed, or nothing. "Saved" only for what the
+           connector holds afterwards: it answered ok for a save it never kept,
+           so the server reads the settings back and names what did not stick. */
+        async function connSaveSettings(shown, now, labels) {
+            const changes = connSettingsChanges(shown, now);
+            const keys = Object.keys(changes);
+            if (!keys.length) { toastOk('Nothing has changed, so there was nothing to save.'); return false; }
+            const r = await connOp({ op: 'settings_save', fields: changes });
+            const missed = (r && r.unapplied) || [];
+            if (!missed.length) { toastOk('Saved. They apply to the next run.'); return true; }
+            toastError('The connector did not keep ' + missed.map(k => labels[k] || k).join(', ') + '.'
+                + (missed.length < keys.length ? ' The rest was saved.' : '')
+                + ' Open the settings again to see what it holds.');
+            return true;
+        }
         function renderConnector() {
             const box = $('connector-content'); box.innerHTML = '';
             /* One line (copy plan, Xero sync #1). Whether Auto Run is on is the
@@ -15802,7 +15864,17 @@ Projected Image UK"></textarea>
                 xHead.append(titleInfo(xt, xtInfo));
                 const toggle = el('button', 'btn btn-sm',
                                   connSettingsOpen ? 'Hide settings' : 'Change settings');
-                toggle.onclick = () => { connSettingsOpen = !connSettingsOpen; renderConnector(); };
+                toggle.onclick = async () => {
+                    if (connSettingsOpen) { connSettingsOpen = false; connSettingsEdits = {}; renderConnector(); return; }
+                    toggle.disabled = true;
+                    try { await connOpenSettings(); }
+                    catch (e) {
+                        toggle.disabled = false;
+                        toastError('The settings could not be read again, so they were not opened. ' + e.message);
+                        return;
+                    }
+                    renderConnector();
+                };
                 const xAct = el('div', 'card-act'); xAct.append(toggle); xHead.append(xAct); xCard.append(xHead);
                 if (!connSettingsOpen) {
                     /* The values as they stand, read before anything is opened. */
@@ -15824,26 +15896,61 @@ Projected Image UK"></textarea>
                 if (connSettingsOpen) {
                     const grid = el('div', 'disp-addr-grid');
                     const fields = {};
+                    /* shown: each value as this form drew it, before anything
+                       typed. Save sends only what differs from it. */
+                    const shown = {}, labels = {};
                     const add = (key, label, help, opts) => {
                         let input;
+                        /* A value a list does not have (a variable set to
+                           "Strict") is added to it and selected, so it shows
+                           as it is and reads as unchanged. */
+                        const put = (v) => {
+                            if (opts && ![...input.options].some(o => o.value === v)) input.add(new Option(CX_MODE[v] || v, v), 0);
+                            input.value = v;
+                        };
                         if (opts) {
                             input = document.createElement('select');
                             input.className = 'crm-input';
-                            opts.forEach(o => {
-                                const op = document.createElement('option');
-                                op.value = o; op.textContent = CX_MODE[o] || o; input.append(op);
-                            });
-                            input.value = connSettings[key] || opts[0];
+                            opts.forEach(o => input.add(new Option(CX_MODE[o] || o, o)));
+                            put(connSettings[key] || opts[0]);
                         } else {
                             input = crmText(connSettings[key] || '', '');
                         }
                         fields[key] = input;
                         crmField(grid, label, input);
+                        shown[key] = input.value; labels[key] = label;
+                        if (key in connSettingsEdits) put(connSettingsEdits[key]);
                         /* The help belongs to its field, in the same grid cell.
                            As a cell of its own it pushed every field after it
                            one place along, so the grid alternated field-help
                            and field-field. */
                         if (help) input.parentElement.append(el('span', 'field-help', help));
+                        const src = el('span', 'field-help');
+                        const paint = () => {
+                            const n = connSettingNote(key, shown[key], input.value, connSettings);
+                            src.textContent = n ? n.text : '';
+                            src.hidden = !n;
+                            if (!n || !n.back) return;
+                            const fv = String(n.back.value == null ? '' : n.back.value);
+                            const said = key === 'RECONCILE_MODE' ? (CX_MODE[fv] || fv) : fv;
+                            const back = el('button', 'linkish', n.back.from === 'env' ? 'Use the service’s value (' + said + ')'
+                                : fv ? 'Use the default (' + said + ')' : 'Clear it');
+                            back.type = 'button';
+                            /* Puts back what applies with nothing saved; Save then
+                               sends it, and the connector lets go of its copy. */
+                            back.onclick = (ev) => {
+                                ev.preventDefault();
+                                put(fv);
+                                connSettingsEdits[key] = fv;
+                                paint();
+                            };
+                            src.append(' ', back);
+                        };
+                        const edited = () => { connSettingsEdits[key] = input.value; paint(); };
+                        input.addEventListener('input', edited);
+                        input.addEventListener('change', edited);
+                        paint();
+                        input.parentElement.append(src);
                     };
                     add('RECONCILE_MODE', 'When a total disagrees with Shopify',
                         'Sending anyway once let a discounted invoice through, out by \u00a333.50.',
@@ -15864,13 +15971,12 @@ Projected Image UK"></textarea>
                     xCard.append(grid);
                     const save = el('button', 'btn btn-primary', 'Save settings');
                     save.onclick = async () => {
-                        const out = {};
-                        Object.keys(fields).forEach(k => { out[k] = fields[k].value.trim(); });
+                        const now = {};
+                        Object.keys(fields).forEach(k => { now[k] = fields[k].value; });
                         save.disabled = true;
                         try {
-                            await connOp({ op: 'settings_save', fields: out });
-                            toastOk('Saved. They apply to the next run.');
-                            connSettingsOpen = false;
+                            if (!(await connSaveSettings(shown, now, labels))) { save.disabled = false; return; }
+                            connSettingsOpen = false; connSettingsEdits = {};
                             await refreshConnector();
                         } catch (e) { save.disabled = false; toastError(e.message); }
                     };

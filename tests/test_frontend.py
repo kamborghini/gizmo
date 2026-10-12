@@ -12853,6 +12853,103 @@ def t_xero_sync_offers_no_setting_the_connector_will_not_keep():
 
 
 @test
+def t_xero_sync_settings_send_only_what_was_changed_from_settings_read_on_opening():
+    """Found 2026-10-12: the Settings card posted all ten fields from a copy of
+    the connector's settings read when the page opened, and polling never read
+    them again. The connector keeps a value the same as its default or its
+    variable as no choice at all, so a stale default in that copy would clear
+    a choice saved on the connector's own tab: strict back to warn, or the
+    orders-since date cleared, which widens the sync window. The form now
+    starts from settings read as it opens and sends only what was changed in
+    it; nothing changed sends nothing. Run for real, in node."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    mode = re.search(r"const CX_MODE = \{.*?\};", SCRIPT).group(0)
+    js = mode + "\n" + "\n".join(fn_src(f) for f in (
+        "function connSettingsChanges(", "function cxSameSetting(", "function connSettingNote(",
+        "async function connOpenSettings(", "async function connSaveSettings(")) + r"""
+let connSettings = { RECONCILE_MODE: 'warn' }, connSettingsOpen = false, connSettingsEdits = { RECONCILE_MODE: 'off' };
+const calls = [], toasts = [];
+let answer = null;
+const connOp = async (b) => { calls.push(b); if (answer instanceof Error) throw answer; return answer; };
+const toastOk = (m) => toasts.push(['ok', m]);
+const toastError = (m) => toasts.push(['bad', m]);
+const shown = { RECONCILE_MODE: 'strict', RECONCILE_TOLERANCE: '0.02', ORDERS_SINCE: '2026-08-01', XERO_SALES_ACCOUNT_CODE: '4000 ' };
+const s = { sources: { RECONCILE_MODE: 'settings', RECONCILE_TOLERANCE: 'default', ORDERS_SINCE: 'env', XERO_SALES_ACCOUNT_CODE: 'default' },
+            fallbacks: { RECONCILE_MODE: { value: 'warn', from: 'default' }, RECONCILE_TOLERANCE: { value: '0.02', from: 'default' },
+                         ORDERS_SINCE: { value: '2026-08-01', from: 'env' }, XERO_SALES_ACCOUNT_CODE: { value: '4000', from: 'default' } } };
+const w = (o) => Object.assign({}, shown, o);
+(async () => {
+  const out = {};
+  out.none = connSettingsChanges(shown, w({}));
+  out.one = connSettingsChanges(shown, w({ RECONCILE_TOLERANCE: ' 0.5 ' }));
+  out.spaces = connSettingsChanges(shown, w({ XERO_SALES_ACCOUNT_CODE: '4000' }));
+  out.cleared = connSettingsChanges(shown, w({ ORDERS_SINCE: '' }));
+  out.notes = {
+    saved: connSettingNote('RECONCILE_MODE', 'strict', 'strict', s),
+    env: connSettingNote('ORDERS_SINCE', '2026-08-01', '2026-08-01', s),
+    dflt: connSettingNote('RECONCILE_TOLERANCE', '0.02', '0.02', s),
+    toChoice: connSettingNote('RECONCILE_TOLERANCE', '0.02', '0.5', s),
+    sameNumber: connSettingNote('RECONCILE_MODE', 'strict', 'warn', s),
+    blankToEnv: connSettingNote('ORDERS_SINCE', '2026-08-01', '', s),
+    older: connSettingNote('RECONCILE_MODE', 'strict', 'strict', { RECONCILE_MODE: 'strict' }),
+    tol: connSettingNote('RECONCILE_TOLERANCE', '0.5', '0.020', s),
+  };
+  answer = { data: { RECONCILE_MODE: 'strict' } };
+  await connOpenSettings();
+  out.opened = { calls: calls.splice(0), settings: connSettings, open: connSettingsOpen, edits: connSettingsEdits };
+  connSettingsOpen = false; answer = new Error('unreachable');
+  try { await connOpenSettings(); out.failedOpen = 'opened'; } catch (e) { out.failedOpen = connSettingsOpen; }
+  calls.length = 0;
+  out.saveNothing = await connSaveSettings(shown, w({}), {});
+  out.saveNothingCalls = calls.splice(0);
+  answer = { data: { ok: true }, unapplied: [] };
+  out.saveOne = await connSaveSettings(shown, w({ ORDERS_SINCE: '2026-09-01' }), {});
+  out.saveOneCalls = calls.splice(0);
+  answer = { data: { ok: true }, unapplied: ['ORDERS_SINCE'] };
+  await connSaveSettings(shown, w({ ORDERS_SINCE: '2026-09-01', RECONCILE_TOLERANCE: '0.5' }), { ORDERS_SINCE: 'Only orders since' });
+  out.toasts = toasts;
+  console.log(JSON.stringify(out));
+})();
+"""
+    got = _run_node(js)
+    eq(got["none"], {}, "nothing changed, nothing to send")
+    eq(got["one"], {"RECONCILE_TOLERANCE": "0.5"}, "only the field changed, trimmed")
+    eq(got["spaces"], {}, "spaces round a value are no change")
+    eq(got["cleared"], {"ORDERS_SINCE": ""}, "a box emptied is a change: it clears a choice")
+    n = got["notes"]
+    eq(n["saved"]["text"], "Saved on the connector", "a saved choice says so")
+    eq(n["saved"]["back"], {"value": "warn", "from": "default"}, "and offers the way back to the default")
+    eq(n["env"], {"text": "Set by ORDERS_SINCE on the connector service"}, "a variable is named")
+    eq(n["dflt"], {"text": "The default"}, "the default says so")
+    eq(n["toChoice"], {"text": "Saved on the connector once you save"}, "once changed, what Save will make of it")
+    eq(n["sameNumber"], {"text": "The default once you save"}, "the default chosen again is no choice")
+    eq(n["blankToEnv"], {"text": "Set by ORDERS_SINCE on the connector service once you save"},
+       "a box emptied goes back to the variable")
+    eq(n["tol"], {"text": "The default once you save"}, "0.020 is the default 0.02, as the connector compares")
+    eq(n["older"], None, "a connector that says nothing of sources gets no note")
+    o = got["opened"]
+    eq(o["calls"], [{"op": "settings"}], "opening reads the settings again")
+    eq(o["settings"], {"RECONCILE_MODE": "strict"}, "and the form starts from them")
+    ok(o["open"] is True and o["edits"] == {}, "with nothing typed carried over")
+    eq(got["failedOpen"], False, "settings that cannot be read are not opened")
+    eq(got["saveNothing"], False, "a save with nothing changed")
+    eq(got["saveNothingCalls"], [], "makes no request")
+    eq(got["saveOneCalls"], [{"op": "settings_save", "fields": {"ORDERS_SINCE": "2026-09-01"}}],
+       "a save sends only the field changed")
+    t = got["toasts"]
+    eq(t[0][0], "ok", "nothing changed is said")
+    eq(t[1], ["ok", "Saved. They apply to the next run."], "a kept save says Saved")
+    eq(t[2][0], "bad", "a value the connector did not keep is a problem")
+    ok("Only orders since" in t[2][1] and "The rest was saved" in t[2][1], t[2][1])
+    card = fn_src("function renderConnector(")
+    ok("await connOpenSettings()" in card and "await connSaveSettings(shown, now, labels)" in card,
+       "the card opens and saves through them")
+    ok("op: 'settings_save', fields: out" not in SCRIPT, "the whole form is never posted")
+
+
+@test
 def t_xero_sync_holds_together_on_a_phone_and_names_its_synced_figure():
     """Live faults, 2026-10-07, measured at a real 390x844:
     - the tag check's five-choice filter grew into a 789px grey slab, because

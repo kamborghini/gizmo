@@ -591,10 +591,11 @@ def check_refunds(cache: dict) -> list:
     return out
 
 
-def check_payouts_vs_bank(cache: dict) -> list:
+def check_payouts_vs_bank(cache: dict, open_refs: frozenset = frozenset()) -> list:
     """Every Shopify payout must land in the bank, once, at its exact amount.
     (Only runs when the payouts scope is granted and the store uses Shopify
-    Payments; otherwise the sweep records that this check could not run.)"""
+    Payments; otherwise the sweep records that this check could not run.)
+    `open_refs`: the records open findings rest on, watched past the window."""
     out = []
     payouts = cache.get("shopify", {}).get("payouts", {})
     bank = cache.get("xero", {}).get("bank_transactions", {})
@@ -619,8 +620,9 @@ def check_payouts_vs_bank(cache: dict) -> list:
         # only mean "we did not fetch the transaction". Shopify hands back
         # payouts with no window, so without this the check invents a
         # high-severity missing deposit for every payout that outlives the
-        # bank data it is matched against.
-        if str(p.get("date") or "") < horizon:
+        # bank data it is matched against. A payout an open finding rests on
+        # is still looked at: left out, the finding read as settled.
+        if str(p.get("date") or "") < horizon and p["id"] not in open_refs:
             continue
         hit = None
         for t in receives.get(p["pence"], []):
@@ -1028,9 +1030,10 @@ def _check_remittance(d: dict, base_ev: list, num_idx: dict, payments: dict,
     return out
 
 
-def check_disputes(cache: dict) -> list:
+def check_disputes(cache: dict, open_refs: frozenset = frozenset()) -> list:
     """A chargeback is money leaving with a story attached; the books must
-    show it. Matched against SPEND bank lines and ACCREC credit notes."""
+    show it. Matched against SPEND bank lines and ACCREC credit notes.
+    Disputes open findings rest on are watched past the window."""
     out = []
     bank = cache.get("xero", {}).get("bank_transactions", {})
     notes = cache.get("xero", {}).get("credit_notes", {})
@@ -1040,7 +1043,8 @@ def check_disputes(cache: dict) -> list:
     disputes = [d for d in sorted(cache.get("shopify", {}).get("disputes", {}).values(),
                                   key=lambda d: str(d.get("date") or ""))
                 if d["status"] not in ("won",) and d["pence"] not in (None, 0)   # a won dispute takes nothing
-                and str(d.get("date") or "") >= horizon]                         # older than the books we hold
+                and (str(d.get("date") or "") >= horizon                         # older than the books we hold,
+                     or d["id"] in open_refs)]                                   # unless a finding rests on it
     fits_of: dict = {}
     for i, d in enumerate(disputes):
         bank_fit, notes_fit = [], []
@@ -1070,11 +1074,12 @@ def check_disputes(cache: dict) -> list:
     return out
 
 
-def check_xero_orphan_sales(cache: dict) -> list:
+def check_xero_orphan_sales(cache: dict, open_refs: frozenset = frozenset()) -> list:
     """The other direction of section 7: a sales record in Xero that no
     Shopify order explains. LOW by design - invoicing off-Shopify is
     legitimate - and if MOST invoices are unmatched that is one systemic
-    finding about numbering, not hundreds of per-invoice alarms."""
+    finding about numbering, not hundreds of per-invoice alarms. Invoices
+    open findings rest on are watched past the window."""
     orders = cache.get("shopify", {}).get("orders", {})
     if not orders:
         return []                          # no Shopify picture; silence beats noise
@@ -1087,19 +1092,38 @@ def check_xero_orphan_sales(cache: dict) -> list:
         order_keys.add(norm_ref(str(o["id"])))
         if o["total"] is not None:
             order_amounts.add((o["total"], o["currency"]))
-    candidates = [v for v in xinv.values()
-                  if v["type"] == "ACCREC" and v["status"] in ("AUTHORISED", "PAID")
-                  and v["date"] >= cutoff and v["total"] not in (None, 0)]
-    orphans = []
-    for v in candidates:
+    sales = [v for v in xinv.values()
+             if v["type"] == "ACCREC" and v["status"] in ("AUTHORISED", "PAID")
+             and v["total"] not in (None, 0)]
+    candidates = [v for v in sales if v["date"] >= cutoff]
+
+    def _unexplained(v: dict) -> bool:
         keys = {norm_ref(v["number"]), norm_ref(v["reference"])}
         for m in re.findall(r"#?\d{4,}", v["number"] + " " + v["reference"]):
             keys.add(norm_ref(m))
         if keys & order_keys:
-            continue
-        if (v["total"], v["currency"]) in order_amounts:
-            continue                       # amount-matched somewhere; the forward check owns it
-        orphans.append(v)
+            return False
+        # Amount-matched somewhere; the forward check owns it.
+        return (v["total"], v["currency"]) not in order_amounts
+
+    orphans = [v for v in candidates if _unexplained(v)]
+    # Past the window, an invoice is looked at only for the open finding it
+    # rests on: left out, that finding read as settled. It stays out of the
+    # share below, or old invoices would say most recent ones name no order.
+    watched = [v for v in sales if v["date"] < cutoff and v["id"] in open_refs and _unexplained(v)]
+
+    def _each(vs: list) -> list:
+        return [make_exc(
+            "xero_sale_without_shopify", "low",
+            f"Xero invoice {v['number'] or v['id']} ({money(v['total'], v['currency'])}, "
+            f"{v['contact'] or 'no contact'}) matches no Shopify order",
+            [v["id"]], amount=v["total"], currency=v["currency"], date=v["date"],
+            systems=["shopify", "xero"],
+            why="No order shares its number, reference or amount. An off-Shopify sale is legitimate; an invented one is not.",
+            suggestion="Confirm where this sale came from.",
+            evidence=[ev("xero", "invoice", f"Invoice {v['number'] or v['id']}", v, 1)])
+            for v in vs]
+
     if candidates and len(orphans) > max(10, len(candidates) * 3 // 10):
         return [make_exc(
             "invoice_numbering_unlinked", "medium",
@@ -1113,17 +1137,15 @@ def check_xero_orphan_sales(cache: dict) -> list:
                         "is expected and can be ignored with a note."),
             evidence=[ev("xero", "invoice", f"Invoice {v['number'] or v['id']}", v, i + 1)
                       for i, v in enumerate(orphans[:8])],
-            computed=[f"{len(orphans)} unmatched of {len(candidates)} in the window."])]
-    return [make_exc(
-        "xero_sale_without_shopify", "low",
-        f"Xero invoice {v['number'] or v['id']} ({money(v['total'], v['currency'])}, "
-        f"{v['contact'] or 'no contact'}) matches no Shopify order",
-        [v["id"]], amount=v["total"], currency=v["currency"], date=v["date"],
-        systems=["shopify", "xero"],
-        why="No order shares its number, reference or amount. An off-Shopify sale is legitimate; an invented one is not.",
-        suggestion="Confirm where this sale came from.",
-        evidence=[ev("xero", "invoice", f"Invoice {v['number'] or v['id']}", v, 1)])
-        for v in orphans[:40]]
+            computed=[f"{len(orphans)} unmatched of {len(candidates)} in the window."])] + _each(watched)
+    return _each(orphans[:40] + watched)
+
+
+def _open_refs(store: dict) -> frozenset:
+    """Every record an open finding rests on, by id."""
+    return frozenset(str(r) for e in (store.get("exceptions") or {}).values()
+                     if not e.get("stale") and e.get("status") in ("new", "investigating")
+                     for r in (e.get("refs") or []))
 
 
 def prune(cache: dict, docs: dict, store: dict) -> list:
@@ -1137,12 +1159,7 @@ def prune(cache: dict, docs: dict, store: dict) -> list:
     # a check that ran and did not emit it, and marks it "no longer detected".
     # The discrepancy would drop off the board looking resolved, which is the
     # one outcome this tool exists to prevent.
-    keep = set()
-    for e in (store.get("exceptions") or {}).values():
-        if e.get("stale") or e.get("status") not in ("new", "investigating"):
-            continue
-        for r in (e.get("refs") or []):
-            keep.add(str(r))
+    keep = _open_refs(store)
     gone: list = []
 
     undated = []
@@ -1191,8 +1208,11 @@ def prune(cache: dict, docs: dict, store: dict) -> list:
     # sentence. Capped: this is a hint for wording, not a second ledger.
     store["retention_dropped"] = sorted(set(gone))[:3000]
 
+    # The same holds for a mailbox document: one an open finding rests on is
+    # kept, or the next sweep finds nothing and writes the finding off.
     doc_cut = _cutoff_day(DOCS_KEEP_DAYS)
-    stale_docs = [k for k, d in docs.items() if _day(d.get("date")) and _day(d.get("date")) < doc_cut]
+    stale_docs = [k for k, d in docs.items() if str(k) not in keep
+                  and _day(d.get("date")) and _day(d.get("date")) < doc_cut]
     for k in stale_docs:
         docs.pop(k, None)
     if stale_docs:
@@ -1224,6 +1244,10 @@ def prune(cache: dict, docs: dict, store: dict) -> list:
 ALL_CHECKS = [check_orders_vs_invoices, check_refunds, check_payouts_vs_bank,
               check_stale_unreconciled, check_duplicates, check_overpayments,
               check_disputes, check_xero_orphan_sales]
+# The checks that look back only so far. Each still looks at the records open
+# findings rest on, which retention keeps for them: a check that stopped
+# looking at a record because it had aged read as the discrepancy going away.
+WATCH_OPEN = (check_payouts_vs_bank, check_disputes, check_xero_orphan_sales)
 
 # What the sweep's notes call things. They reach the Reconciliation page as
 # sentences, where "bank_transactions" and "check_orders_vs_invoices" read as
@@ -2120,9 +2144,10 @@ async def _sweep_inner(deep_docs: bool) -> dict:
                 notes.append("The checks that read Xero's " + _words(xero_failed) + " were skipped "
                              "rather than run on the copy from the last good sweep. What they found "
                              "before stays as it was.")
+    open_refs = _open_refs(store)
     for check in checks_to_run:
         try:
-            for e in check(cache):
+            for e in (check(cache, open_refs) if check in WATCH_OPEN else check(cache)):
                 fresh[e["id"]] = e
             ran_kinds |= CHECK_KINDS.get(check.__name__, set())
         except Exception:
