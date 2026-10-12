@@ -8889,7 +8889,13 @@ Projected Image UK"></textarea>
             [left, right].forEach(n => ['data-widget', 'data-size', 'data-widget-label'].forEach(a => n.removeAttribute(a)));
             inner.append(left, right);
             pair.append(inner);
+            if (o.plain) return pair;   // a page that is not arranged (a product's plan)
             return widget(pair, id, 'full', label);
+        }
+        /* The card cardifySections made from a heading with these words, or null. */
+        function cardTitled(box, words) {
+            return [...box.children].find(n => n.classList && n.classList.contains('card')
+                && (n.querySelector(':scope > .card-head .card-title') || {}).textContent === words) || null;
         }
         /* A report's first row (12 Oct 2026): the summary beside What changed,
            as one widget. Without a summary the strip keeps its fixed place
@@ -11858,6 +11864,7 @@ Projected Image UK"></textarea>
             if (Array.isArray(s.insights) && s.insights.length) { box.append(el('div', 'section-title', 'Findings')); const b = el('div', 'insights'); s.insights.forEach((x, i) => b.append(insightCard(x, i))); box.append(b); }
             if (Array.isArray(s.sections) && s.sections.length) { box.append(el('div', 'section-title', 'Details')); s.sections.forEach(sec => box.append(sectionCard(sec))); }
             cardifySections(box);
+            pairNodes(cardTitled(box, 'Top opportunities'), cardTitled(box, 'Findings'), null, null, { plain: true });
             syncPrintBtn();
         }
 

@@ -2085,6 +2085,10 @@ def t_a_report_pairs_its_short_blocks():
        "the radar's two lists sit side by side, the long text under each name")
     ok("@container radar (max-width: 64rem) { .radar-cols { grid-template-columns: minmax(0, 1fr); } }" in CSS
        and ".duo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));" in CSS, "and stack when narrow")
+    pd = fn_src("function renderProductDetail(")
+    ok("pairNodes(cardTitled(box, 'Top opportunities'), cardTitled(box, 'Findings'), null, null, { plain: true })" in pd,
+       "a product's plan sets its opportunities beside its findings, as a plain pair (that page is not arranged)")
+    ok("if (o.plain) return pair;" in fn_src("function pairNodes("), "a plain pair is not a widget")
     pl = fn_src("function renderProductList(")
     ok("pairNodes(totalsW, topHost, 'top-products'" in pl and "{ flip: true }" in pl, "the totals sit beside Top products by revenue")
     ok("dtable(" in pl and "'prod-row'" not in pl and "'dt-products'" in pl, "the catalogue is a table, not rows of chips")
