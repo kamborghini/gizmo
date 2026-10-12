@@ -2141,6 +2141,23 @@ def t_xero_sync_is_a_band_a_status_line_and_its_tables():
 
 
 @test
+def t_forecast_runs_to_its_columns_and_its_prose_windows_are_narrow():
+    """DF-26 to DF-28, 12 Oct 2026: Why £53,691 and its bar stopped at 62ch,
+    300px short of their column; each of the numbers behind it had 597px
+    between its label and its count; and two paragraphs opened in an 820px
+    window."""
+    ok("max-width" not in CSS.split("\n        .fc-split-bar {")[1].split("}")[0], "the split bar runs to the column's edge")
+    ok("flex: 0 1 auto" in CSS.split("\n        .rlist-row .lbl {")[1].split("}")[0], "each count and chevron follow the label")
+    pg = fn_src("function fcPage(")
+    ok("m.modal.classList.add(o && o.prose ? 'prose' : 'wide');" in pg and ".modal.disp-modal.prose { max-width: 520px; }" in CSS,
+       "a window is wide only for a table; paragraphs take the house window's 520")
+    hw = fn_src("function fcHowItWorks(")
+    ok("fcPage('The plan it is judged against', () => fcPlanJudged(c, latest), { prose: true })" in hw
+       and "fcPage('How much to trust it', () => fcTrust(latest), { prose: !(latest.metrics || []).length })" in hw,
+       "the plan's and the trust's paragraphs open narrow; the trust's backtest table stays wide")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left
@@ -8437,7 +8454,8 @@ def t_the_forecast_explains_itself_once_and_in_plain_lines():
     dr = SCRIPT.split("function fcDriversCard(", 1)[1].split("\n        function ", 1)[0]
     order = [dr.index("'fc-drive-key "), dr.index("'fc-drive-lbl'"), dr.index("'fc-drive-amt'")]
     ok(order == sorted(order), "key, then words, then the amount at the right of the measure")
-    ok("max-width: var(--measure)" in CSS.split(".fc-drive {")[1].split("}")[0], "the statement is measured")
+    # 12 Oct 2026 (DF-26): the statement takes its column; at the measure it stopped 300px short of it.
+    ok("max-width" not in CSS.split(".fc-drive {")[1].split("}")[0], "the statement takes its column")
     ok("' forecast by the '" in dr and "' method.'" in dr, "and names the method it quotes, in a caption under the rows")
     simple = open(os.path.join(ROOT, "forecast", "simple.py"), encoding="utf-8").read()
     ok("The Theta method again" not in simple, "every source description stands on its own")
@@ -10998,7 +11016,8 @@ def t_the_forecast_header_is_the_mix_header():
     for t in ("'Which method is running, and why'", "'How each one works, and how right it has been'", "'How much to trust it'",
               "'The plan it is judged against'", "'The Forecast in the Guide'"):
         ok(t in how, "How it works holds " + t)
-    ok("fcPage(" in how and "function fcPage(title, build) {" in SCRIPT, "each opens in a window")
+    # 12 Oct 2026: fcPage takes o.prose, for the windows that are paragraphs.
+    ok("fcPage(" in how and "function fcPage(title, build, o) {" in SCRIPT, "each opens in a window")
     ok("'Upload workbook'" in fn_src("function forecastUploadButton()"), "the upload button says Upload workbook")
     ok("const MONTH_NAMES = ['January'," in SCRIPT, "the status line says the month in full")
 

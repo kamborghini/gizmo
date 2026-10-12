@@ -3323,6 +3323,8 @@
            SwiftUI has a shape for this, ConcentricRectangle; on the web it is
            one subtraction, as long as it is written down rather than guessed. */
         .modal.disp-modal { max-width: 720px; width: 94vw; }
+        /* A window of paragraphs (Forecast's plan and trust) is the house window's width. */
+        .modal.disp-modal.prose { max-width: 520px; }
         /* Inside a window a group is a tinted well with no edge (the mix, spec 3): the window is boxed as a whole. */
         .disp-dest { padding: var(--sp-3) var(--sp-3); background: var(--surface-secondary); border: 0;
             border-radius: var(--radius-inset); margin-bottom: var(--sp-4); }
@@ -4569,7 +4571,9 @@
             padding: 0; border: 0; background: none; font: inherit; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-primary);
             text-align: left; cursor: pointer; box-shadow: var(--rule-t-soft); }
         .rlist-row .ic { color: var(--text-tertiary); }
-        .rlist-row .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        /* The count and the chevron follow the label (12 Oct 2026, DF-27): at the row's
+           far end they sat 597px from it. */
+        .rlist-row .lbl { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .rlist-row > .ic:last-child svg { width: var(--icon-sm); height: var(--icon-sm); stroke-width: var(--icon-stroke-s); }
         .rlist-row > .ic:not(:last-child) svg { width: var(--icon-md); height: var(--icon-md); }
         @media (hover: hover) { .rlist-row:hover, .rlist-row:hover :is(.ic, .cnt) { color: var(--text-link); } }
@@ -5117,12 +5121,14 @@
         /* A flex column, so the bar's own top margin (side by side) adds to the head's
            12 rather than collapsing into it. Stacked, the bar sits 12 under its head. */
         .fc-why { display: flex; flex-direction: column; }
-        .fc-split-bar { display: flex; gap: var(--sp-0-5); height: var(--sp-2); max-width: var(--measure); }
+        .fc-split-bar { display: flex; gap: var(--sp-0-5); height: var(--sp-2); }
         @container fcpair (not (max-width: 1000px)) { .fc-split-bar { margin-top: calc((var(--control-h) - var(--sp-2)) / 2); } }
         .fc-split-bar > i { border-radius: var(--radius-full); }
         .fc-split-bar > .taken { width: var(--w); background: var(--c-taken); }
         .fc-split-bar > .still { flex: 1; background: var(--c-still); }
-        .fc-drive { max-width: var(--measure); margin-top: var(--sp-3); }
+        /* The statement and its bar take their column (12 Oct 2026, DF-26): at the
+           measure they stopped 300px short of it. */
+        .fc-drive { margin-top: var(--sp-3); }
         .fc-drive-row { display: flex; align-items: center; gap: var(--control-gap); height: var(--row-h); box-shadow: var(--rule-b-soft); }
         .fc-drive-row:nth-last-child(-n+2) { box-shadow: var(--rule-b); }
         .fc-drive-key { flex: none; width: var(--icon-xs); height: var(--dot-md); border-radius: var(--radius-swatch); }
@@ -17210,8 +17216,11 @@ Projected Image UK"></textarea>
            last one opened is kept, so a choice made inside it (how many methods
            to show) repaints it in place: the page behind is not the window. */
         let fcLivePage = null;
-        function fcPage(title, build) {
-            const m = sheetModal(title); m.modal.classList.add('wide'); m.body.append(build());
+        /* o.prose: a window of paragraphs is the sheet's own width (12 Oct
+           2026, DF-28); two paragraphs in an 820px window ran 120 characters
+           a line. A table keeps the wide window. */
+        function fcPage(title, build, o) {
+            const m = sheetModal(title); m.modal.classList.add(o && o.prose ? 'prose' : 'wide'); m.body.append(build());
             fcLivePage = { m: m, build: build };
             return m;
         }
@@ -17269,8 +17278,8 @@ Projected Image UK"></textarea>
                   onClick: () => fcPage('Which method is running, and why', () => fcUntitled(fcOptimisedCard(latest))) },
                 { icon: I.target, label: 'How each one works, and how right it has been', n: nsrc || null, unit: 'methods',
                   onClick: () => fcPage('How each one works, and how right it has been', () => fcUntitled(fcAlgorithmsCard(latest))) },
-                { icon: I.shield, label: 'How much to trust it', onClick: () => fcPage('How much to trust it', () => fcTrust(latest)) },
-                { icon: I.fileSheet, label: 'The plan it is judged against', onClick: () => fcPage('The plan it is judged against', () => fcPlanJudged(c, latest)) },
+                { icon: I.shield, label: 'How much to trust it', onClick: () => fcPage('How much to trust it', () => fcTrust(latest), { prose: !(latest.metrics || []).length }) },
+                { icon: I.fileSheet, label: 'The plan it is judged against', onClick: () => fcPage('The plan it is judged against', () => fcPlanJudged(c, latest), { prose: true }) },
             ], { label: 'The Forecast in the Guide', at: ['money', 'Forecast'] });
         }
 
