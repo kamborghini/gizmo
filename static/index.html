@@ -3680,6 +3680,8 @@
         .mail-who-card { max-width: 100%; min-width: 0; }
         .mail-who-card .mail-who-name, .mail-who-card .mail-who-load { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .mail-who-name { font-weight: var(--weight-medium); color: var(--text-primary); }
+        /* A person is two lines (12 Oct 2026): the name over where they are and what they hold. */
+        .mail-who-txt { display: flex; flex-direction: column; min-width: 0; }
         .mail-who-load { color: var(--text-tertiary); }
         /* Hollow, because the card already carries a solid one. Two 8px discs
            sat 18px apart saying unrelated things - the colour that keys the
@@ -3886,11 +3888,15 @@
            whole list and the row you just ticked slides out from under the
            pointer. 44 (a row) is the armed height: a 32 button and 4 of padding
            each side, with room to spare. The bar has no edge, only its tint. */
+        /* The list's own head row (12 Oct 2026, OPS-27): a hairline under it
+           and no fill; a tick arms it in place. It was a grey box over the list. */
         .mail-bulkbar { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
             min-height: var(--row-h);
-            padding: var(--sp-1) var(--sp-3); margin-bottom: var(--sp-2); border: 0;
-            border-radius: var(--radius-inset); background: var(--surface-tertiary); font-size: var(--text-xs); line-height: var(--lh-caption); }
+            padding: var(--sp-1) 0 var(--sp-1) calc(var(--dot-md) + var(--sp-2-5)); margin-bottom: 0; border: 0; border-bottom: var(--bw-hairline) solid var(--border-default);
+            border-radius: 0; background: none; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
         .mail-bulkbar .btn { min-height: var(--control-h); padding: 0 var(--sp-3); font-size: var(--text-body); }
+        /* The head row sits straight on its rows: the card's gap is taken back. */
+        .card > #mail-bulk-host:has(> .mail-bulkbar) { margin-bottom: calc(-1 * var(--sp-3)); }
         /* The 44 above only holds if everything in the bar is one height: the
            Assign select (only a lead sees it) is the 32 of the buttons beside
            it, with their weight. */
@@ -27522,8 +27528,9 @@ Projected Image UK"></textarea>
                     dot.title = (m.name || 'This person') + "'s colour";
                     c.append(dot);
                 }
+                let pick = null;
                 if (m.uid === d.me) {
-                    const pick = document.createElement('select');
+                    pick = document.createElement('select');
                     pick.className = 'mail-presence-pick'; pick.title = 'Where are you working today?'; pick.setAttribute('aria-label', 'Where are you working today?');
                     [['office', 'In office'], ['home', 'At home'], ['out', 'Out']].forEach(([v, lab]) => {
                         const o = document.createElement('option');
@@ -27536,19 +27543,24 @@ Projected Image UK"></textarea>
                     };
                     const meDot = el('span', 'mail-presence ' + (m.presence || 'office'));
                     meDot.title = PRESENCE_LABEL[m.presence || 'office'];
-                    c.append(meDot, el('span', 'mail-who-name', m.name + ' (you)'), pick);
+                    c.append(meDot);
                 } else {
                     /* Office green against home amber is exactly the pair a
                        colour-blind reader cannot separate, and the dot carried
                        no other signal at all. */
                     const dot = el('span', 'mail-presence ' + (m.presence || ''));
                     dot.title = PRESENCE_LABEL[m.presence] || 'Presence unknown';
-                    c.append(dot, el('span', 'mail-who-name', m.name));
+                    c.append(dot);
                 }
                 const active = (m.assigned || 0) + (m.progress || 0);
                 const load = active + ' active' + (m.waiting ? ', ' + m.waiting + ' waiting' : '');
-                c.append(el('span', 'mail-who-load',
-                    m.uid === d.me ? load : (PRESENCE_LABEL[m.presence] || 'Presence unknown') + ' · ' + load));
+                /* The name over where they are and what they hold; yours keeps
+                   its chooser beside it. */
+                const txt = el('span', 'mail-who-txt');
+                txt.append(el('span', 'mail-who-name', m.name + (m.uid === d.me ? ' (you)' : '')),
+                    el('span', 'mail-who-load', m.uid === d.me ? load : (PRESENCE_LABEL[m.presence] || 'Presence unknown') + ' \u00b7 ' + load));
+                c.append(txt);
+                if (pick) c.append(pick);
                 who.append(c);
             });
             /* In a card with a title. Bare on the background this row read as

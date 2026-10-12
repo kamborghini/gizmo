@@ -2254,6 +2254,23 @@ def t_loan_units_lends_from_its_header_and_chases_from_out_now():
 
 
 @test
+def t_the_inbox_list_has_a_head_row_and_who_is_on_today_is_one_line():
+    """OPS-27, 12 Oct 2026: the bulk bar was a grey filled box over the list.
+    It is now the list's own head row, a hairline under it and no fill, armed
+    in place at the same height. Who is on today is one line of two-line
+    entries: a name over where they are and what they hold."""
+    bb = CSS.split("\n        .mail-bulkbar {")[1].split("}")[0]
+    ok("background: none" in bb and "border-bottom: var(--bw-hairline) solid var(--border-default)" in bb
+       and "margin-bottom: 0" in bb and "border-radius: 0" in bb, "the bulk bar is the list's head row")
+    ok("min-height: var(--row-h)" in bb, "idle and armed measure the same")
+    ok("padding: var(--sp-1) 0 var(--sp-1) calc(var(--dot-md) + var(--sp-2-5));" in bb, "its tick lines up with the rows' ticks, after the unread dot")
+    ok(".card > #mail-bulk-host:has(> .mail-bulkbar) { margin-bottom: calc(-1 * var(--sp-3)); }" in CSS, "and it sits straight on its rows")
+    fn = fn_src("function renderMail()")
+    ok("const txt = el('span', 'mail-who-txt');" in fn and ".mail-who-txt { display: flex; flex-direction: column;" in CSS,
+       "each person is a name over presence and load")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left
@@ -12029,7 +12046,7 @@ def t_the_inbox_presence_row_is_names_not_boxes():
     ok("\n            .mail-who-card .mail-presence-pick { height: var(--control-h-lg); min-height: var(--control-h-lg); }" in CSS,
        "and your presence choice is a 40 target there")
     mw = fn_src("function renderMail() {")
-    for kept in ("'mail-who-card'", "'who-dot' + ownClass(m.colour)", "'mail-presence ' + (m.presence || 'office')", "'mail-who-name', m.name + ' (you)'",
+    for kept in ("'mail-who-card'", "'who-dot' + ownClass(m.colour)", "'mail-presence ' + (m.presence || 'office')", "'mail-who-name', m.name + (m.uid === d.me ? ' (you)' : '')",
                  "pick.className = 'mail-presence-pick';", "api('/api/mail/presence'", "el('span', 'mail-who-load',"):
         ok(kept in mw, "kept: " + kept)
 
