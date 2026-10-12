@@ -2685,6 +2685,17 @@ def t_nothing_owed_still_says_what_is_paid_but_tagged():
 
 
 @test
+def t_team_people_keeps_one_teal():
+    """Final review M-3, 12 Oct 2026 (Cameron's ruling: one teal per screen):
+    New account stayed teal while a Tabs panel's Save or the new account's
+    Create, both teal, were open under it."""
+    rp = fn_src("function renderTeamPeople(")
+    ok("const busy = teamNewOpen || d.users.some(u => u.id === teamTabsOpen && u.role !== 'master');" in rp
+       and "const add = el('button', 'btn btn-sm' + (busy ? '' : ' btn-primary'));" in rp,
+       "New account steps down while a form under it has the teal")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left

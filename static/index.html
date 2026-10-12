@@ -31709,7 +31709,9 @@ Projected Image UK"></textarea>
                 + 'just hidden.' });
             head.append(titleInfo(pt, ptInfo));
             const act = el('div', 'card-act');
-            const add = el('button', 'btn btn-sm btn-primary'); add.append(ico(I.plus), document.createTextNode('New account'));
+            /* One teal: while the new account's Create or a Tabs panel's Save is open, they have it. */
+            const busy = teamNewOpen || d.users.some(u => u.id === teamTabsOpen && u.role !== 'master');
+            const add = el('button', 'btn btn-sm' + (busy ? '' : ' btn-primary')); add.append(ico(I.plus), document.createTextNode('New account'));
             add.onclick = () => { teamNewOpen = !teamNewOpen; renderTeam(); };
             head.append(el('p', 'card-desc', 'Made, dispatched, files and sales are the last 30 days.'));
             act.append(add); head.append(act); card.append(head);
