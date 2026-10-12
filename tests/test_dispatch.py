@@ -20040,8 +20040,8 @@ def t_only_operational_settings_can_be_changed_from_the_page():
     ensure_auth()
     seen = []
     real = copilot._connector_call
-    async def fake(method, path, params=None):
-        seen.append((method, path, dict(params or {})))
+    async def fake(method, path, params=None, json_body=None):
+        seen.append((method, path, dict(json_body or params or {})))
         return 200, {"ok": True}
     copilot._connector_call = fake
     old_url = os.environ.get("CONNECTOR_URL")
@@ -20053,7 +20053,7 @@ def t_only_operational_settings_can_be_changed_from_the_page():
             "SHOPIFY_SHOP": "someone-elses.myshopify.com",
             "DASHBOARD_TOKEN": "nope"}})
         eq(r.status_code, 200, r.text)
-        sent = seen[-1][2]
+        sent = [s for s in seen if s[0] == "POST"][-1][2]
         eq(sent.get("RECONCILE_MODE"), "strict", "the operational one goes through")
         for blocked in ("XERO_CLIENT_SECRET", "SHOPIFY_SHOP", "DASHBOARD_TOKEN"):
             ok(blocked not in sent, blocked + " must not be settable from a browser")
@@ -20062,6 +20062,76 @@ def t_only_operational_settings_can_be_changed_from_the_page():
            "a save of nothing settable is refused rather than sent as empty")
     finally:
         copilot._connector_call = real
+        if old_url is None:
+            os.environ.pop("CONNECTOR_URL", None)
+        else:
+            os.environ["CONNECTOR_URL"] = old_url
+
+
+@test
+def t_a_settings_save_reaches_the_connector_as_a_body_of_only_what_changed():
+    """Live fault, found 2026-10-12: the Settings card on the Xero sync page
+    had never saved anything. The save went as a query string with no body,
+    the connector reads POST /api/settings from its body only, so it answered
+    ok, kept nothing, and the page said "Saved". The test above swaps
+    _connector_call out, so it never saw the wire. This one answers where the
+    connector does, at the transport: a body is read, a query string is not.
+    What goes is only what the page changed, nothing filled in beside it, and
+    a save the settings read straight after do not show is reported, so the
+    page cannot say Saved over nothing again."""
+    ensure_auth()
+    defaults = {"RECONCILE_MODE": "warn", "RECONCILE_TOLERANCE": "0.02", "ORDERS_SINCE": ""}
+    saved = {"RECONCILE_MODE": "strict"}
+    wire = []
+    keeps = {"on": True}
+    def connector(request):
+        if request.url.host != "conn.railway.internal" or request.url.path != "/api/settings":
+            raise _httpx.ConnectError("the test suite does not reach " + request.url.host, request=request)
+        if request.method == "GET":
+            return _httpx.Response(200, json={
+                **{k: saved.get(k) or v for k, v in defaults.items()},
+                "sources": {k: "settings" if k in saved else "default" for k in defaults}})
+        body = json.loads(request.content) if request.content else {}
+        wire.append({"query": dict(request.url.params), "type": request.headers.get("content-type", ""),
+                     "csrf": request.headers.get("x-connector"), "body": body})
+        if keeps["on"]:
+            for k, v in body.items():
+                if v == "":
+                    saved.pop(k, None)
+                else:   # stored in its rule's form, as the connector does: 0.50 is kept as 0.5
+                    saved[k] = str(float(v)) if k == "RECONCILE_TOLERANCE" else v
+        return _httpx.Response(200, json={"ok": True})
+    real_httpx = copilot.httpx
+    copilot.httpx = _RoutedHttpx(connector)
+    old_url = os.environ.get("CONNECTOR_URL")
+    os.environ["CONNECTOR_URL"] = "http://conn.railway.internal:8899"
+    save = lambda fields: post("/api/connector", {"op": "settings_save", "fields": fields})
+    try:
+        r = save({"RECONCILE_TOLERANCE": "0.50", "SHOPIFY_SHOP": "someone-elses.myshopify.com"})
+        eq(r.status_code, 200, r.text)
+        eq(len(wire), 1, "one save, one request")
+        eq(wire[0]["query"], {}, "nothing in the query string, which the connector does not read")
+        ok("application/json" in wire[0]["type"], "the fields go as a JSON body: " + wire[0]["type"])
+        eq(wire[0]["csrf"], "1", "with the connector's CSRF header")
+        eq(wire[0]["body"], {"RECONCILE_TOLERANCE": "0.50"},
+           "exactly the field the page changed: no other field filled in, and none off the list")
+        eq(saved.get("RECONCILE_TOLERANCE"), "0.5", "and the connector kept it")
+        eq(r.json().get("unapplied"), [], "kept in its own form (0.5 for 0.50) is still kept")
+        eq(saved.get("RECONCILE_MODE"), "strict", "a choice the page did not touch is left alone")
+
+        r = save({"RECONCILE_MODE": ""})
+        eq(wire[-1]["body"], {"RECONCILE_MODE": ""}, "a blank goes too: it clears a saved choice")
+        ok("RECONCILE_MODE" not in saved and r.json().get("unapplied") == [], r.text)
+
+        keeps["on"] = False   # a connector that answers ok and keeps nothing, as before this fix
+        r = save({"ORDERS_SINCE": "2026-09-01", "RECONCILE_TOLERANCE": "0.5"})
+        eq(r.json().get("unapplied"), ["ORDERS_SINCE"],
+           "a value the connector does not show back is named, so the page does not say Saved")
+        saved["RECONCILE_MODE"] = "strict"
+        r = save({"RECONCILE_MODE": ""})
+        eq(r.json().get("unapplied"), ["RECONCILE_MODE"], "and a clear that left the choice in place is named too")
+    finally:
+        copilot.httpx = real_httpx
         if old_url is None:
             os.environ.pop("CONNECTOR_URL", None)
         else:

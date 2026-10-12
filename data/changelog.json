@@ -2,6 +2,22 @@
  "releases": [
   {
    "date": "2026-10-12",
+   "title": "Xero sync settings save",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": "connector",
+     "text": "Saving the Settings card on the Xero sync page now changes the connector's settings. It never had: the connector answered as if it had saved them and kept nothing, and the page said Saved. It now says Saved only once the connector shows the new values, and names any it did not keep."
+    },
+    {
+     "kind": "improved",
+     "tab": "connector",
+     "text": "Change settings reads the connector's settings again as it opens, and Save sends only what you changed, so a choice made on the connector's own page since cannot be put back to an old value. Changing nothing sends nothing. Under each field it says whether the value is the default, set on the connector service, or saved on the connector, with a way back to the default."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-12",
    "title": "Old discrepancies stay open",
    "items": [
     {
