@@ -2415,6 +2415,24 @@ def t_the_guide_reads_in_two_columns_and_lists_requests_as_a_table():
 
 
 @test
+def t_the_settings_window_keeps_one_rhythm_and_says_stored_secrets():
+    """The Settings window (12 Oct 2026): 488 wide with gaps set inline and
+    varying, each connection's state at the far edge, the vault row named for
+    where it lives, and on a phone the Store profile's boxes kept two lines
+    whatever their text, so it scrolled inside them."""
+    ok("'Secrets on the volume'" not in SCRIPT and SCRIPT.count("connRow('Stored secrets'") == 3, "the vault row reads Stored secrets (Cameron's ruling 6)")
+    ok("#settings-modal > .modal { max-width: 552px; }" in CSS, "a 552 document window")
+    sm = HTML.split('id="settings-modal"')[1].split('<div id="label-print">')[0] if '<div id="label-print">' in HTML.split('id="settings-modal"')[1] else HTML.split('id="settings-modal"')[1][:12000]
+    ok('class="section-title" style=' not in sm and 'class="section-title set-h"' in sm, "no section heading sets its own spacing")
+    ok("#settings-modal .set-h { margin: var(--sp-5) 0 var(--sp-2); padding-top: var(--sp-5); border-top: var(--bw-hairline) solid var(--border-default); }" in CSS,
+       "every section on one rhythm: a hairline with 20 above it, the heading, its rows")
+    cr = fn_src("function connRow(")
+    ok("tl.append(document.createTextNode(title), pill);" in cr, "each connection's state sits beside its name")
+    os_ = fn_src("function openSettings(")
+    ok("document.querySelectorAll('#settings-modal textarea.pf-input').forEach(" in os_ and "autoGrow(ta)" in os_, "the profile's boxes grow to fit their text")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left

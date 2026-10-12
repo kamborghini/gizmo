@@ -6036,6 +6036,15 @@
            a 124px column on a phone. */
         .setting-row { flex-wrap: wrap; }
         .setting-title { font-size: var(--text-body); font-weight: var(--weight-medium); }
+        .setting-title.has-tag { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+        /* The Settings window (12 Oct 2026): a 552 document window, every
+           section on one rhythm: a hairline with 20 above it, the heading, then
+           its rows. The gaps were set inline and varied. */
+        #settings-modal > .modal { max-width: 552px; }
+        #settings-modal .set-h { margin: var(--sp-5) 0 var(--sp-2); padding-top: var(--sp-5); border-top: var(--bw-hairline) solid var(--border-default); }
+        #settings-modal .modal-body > .set-h:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+        #settings-modal .set-sub { margin-top: 0; }
+        #settings-modal .field-label { display: block; margin-top: var(--sp-3); }
         .setting-sub { font-size: var(--text-xs); color: var(--text-secondary); margin-top: var(--sp-1); line-height: var(--lh-caption); }
         .modal-foot { display: flex; justify-content: flex-end; gap: var(--sp-2); padding: var(--sp-4);
             border-top: var(--bw-hairline) solid var(--border-default); background: var(--surface-secondary);
@@ -6391,8 +6400,8 @@
                 <button class="icon-btn" id="settings-close" title="Close" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <div class="section-title" style="margin: 0 0 var(--sp-2);">Store profile</div>
-                <p class="field-help" style="margin-top:0">Reactor reads this with every chat and report.</p>
+                <div class="section-title set-h">Store profile</div>
+                <p class="field-help set-sub">Reactor reads this with every chat and report.</p>
 
                 <label class="field-label" for="pf-voice">Brand voice</label>
                 <textarea id="pf-voice" class="pf-input" rows="2" placeholder="e.g. Plain and friendly. We talk to lighting technicians, venues and event planners."></textarea>
@@ -6410,7 +6419,7 @@
                     <p class="field-help" id="settings-readonly" hidden>An admin sets the store profile and the preferences below.</p>
                 </div>
 
-                <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">Sign-in</div>
+                <div class="section-title set-h">Sign-in</div>
                 <div class="settings-toggles">
                     <div class="setting-row">
                         <div><div class="setting-title">Two-step sign-in</div><div class="setting-sub" id="mfa-sub">A code from your phone as well as your password.</div></div>
@@ -6419,8 +6428,8 @@
                 </div>
 
                 <div id="signoff-row" style="display:none">
-                    <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">Your sign-off</div>
-                    <p class="field-help" style="margin-top:0">Ends every email you send from the Inbox.</p>
+                    <div class="section-title set-h">Your sign-off</div>
+                    <p class="field-help set-sub">Ends every email you send from the Inbox.</p>
                     <textarea id="signoff-text" class="pf-input" rows="4" placeholder="e.g. Cameron
 Projected Image UK"></textarea>
                     <div class="mail-statebar">
@@ -6428,7 +6437,7 @@ Projected Image UK"></textarea>
                     </div>
                 </div>
 
-                <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">Preferences</div>
+                <div class="section-title set-h">Preferences</div>
                 <div class="settings-toggles">
                     <div class="setting-row">
                         <div><div class="setting-title">Track inventory</div><div class="setting-sub">Show low-stock figures and advice. Turn off for unlimited stock.</div></div>
@@ -6447,7 +6456,7 @@ Projected Image UK"></textarea>
                         <div class="toggle" data-pref="flag_anomalies"><span class="sw"></span></div>
                     </div>
                 </div>
-                <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">Automatic refresh</div>
+                <div class="section-title set-h">Automatic refresh</div>
                 <div class="setting-row">
                     <div><div class="setting-title">Auto-refresh reports</div><div class="setting-sub">Re-run audits on a schedule. Uses AI credits each run.</div></div>
                     <div class="toggle" id="sched-toggle"><span class="sw"></span></div>
@@ -6461,12 +6470,12 @@ Projected Image UK"></textarea>
                     </select>
                 </div>
                 <div id="privacy-sec" hidden>
-                    <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">Privacy requests</div>
+                    <div class="section-title set-h">Privacy requests</div>
                     <div id="privacy-reqs"><div class="setting-sub">Checking requests…</div></div>
                 </div>
-                <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">Connections</div>
+                <div class="section-title set-h">Connections</div>
                 <div id="connections"><div class="setting-sub">Checking connections…</div></div>
-                <div class="section-title" style="margin: var(--sp-5) 0 var(--sp-2);">AI usage (last 30 days)</div>
+                <div class="section-title set-h">AI usage (last 30 days)</div>
                 <div id="usage"><div class="setting-sub">Loading usage…</div></div>
             </div>
         </div>
@@ -31937,13 +31946,18 @@ Projected Image UK"></textarea>
         /* words: what the pill says for this row, [on, mid, off]. A row that
            is not a connection (the secrets, the backups, the disk) said
            'Connected' or 'Not connected' about something that is neither. */
+        /* A connection: its name with its state beside it, then its line
+           (12 Oct 2026). The state sat at the row's far edge, which is the
+           controls' place. */
         function connRow(title, state, sub, words) {
             const row = el('div', 'setting-row');
-            const left = el('div'); left.append(el('div', 'setting-title', title), el('div', 'setting-sub', sub));
             const w = words || ['Connected', 'Needs setup', 'Not connected'];
             const pill = el('span', 'g-badge ' + (state === 'on' ? 'on' : state === 'mid' ? 'mid' : 'off'),
                 state === 'on' ? w[0] : state === 'mid' ? w[1] : w[2]);
-            row.append(left, pill);
+            const tl = el('div', 'setting-title has-tag');
+            tl.append(document.createTextNode(title), pill);
+            const left = el('div'); left.append(tl, el('div', 'setting-sub', sub));
+            row.append(left);
             return row;
         }
         function aiConnRow(ai) {
@@ -31977,15 +31991,15 @@ Projected Image UK"></textarea>
                behaves identically whether or not its token is encrypted. */
             const tv = s.token_vault || {};
             if (!tv.enabled) {
-                host.append(connRow('Secrets on the volume', 'off',
+                host.append(connRow('Stored secrets', 'off',
                     'Not encrypted: secrets are stored in plain text.', CR_SEAL));
             } else if ((tv.plaintext || []).length) {
-                host.append(connRow('Secrets on the volume', 'mid',
+                host.append(connRow('Stored secrets', 'mid',
                     'Mostly encrypted, but these are still in plain text: '
                     + tv.plaintext.join(', ') + '. They are sealed the next time the app '
                     + 'restarts, or the next time each is written.', CR_SEAL));
             } else {
-                host.append(connRow('Secrets on the volume', 'on',
+                host.append(connRow('Stored secrets', 'on',
                     tv.stored
                         ? ('Encrypted at rest \u00b7 ' + tv.sealed
                            + (tv.sealed === 1 ? ' secret' : ' secrets') + ' sealed')
@@ -32400,6 +32414,12 @@ Projected Image UK"></textarea>
             $('settings-readonly').hidden = canEdit;
             settingsAtOpen = profileKey(profile);
             $('settings-modal').classList.add('show');
+            /* The profile's boxes grow to fit their text (12 Oct 2026): on a
+               phone two lines held a paragraph, scrolling inside the box. */
+            document.querySelectorAll('#settings-modal textarea.pf-input').forEach(ta => {
+                if (ta.dataset.grows) ta.dispatchEvent(new Event('input'));
+                else { ta.dataset.grows = '1'; autoGrow(ta); }
+            });
             (canEdit ? $('pf-voice') : $('settings-close')).focus();
             loadConnections();
             loadSchedule();
