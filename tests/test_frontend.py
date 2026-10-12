@@ -2039,6 +2039,57 @@ def t_an_order_missing_its_terms_is_flagged_on_the_queue_row():
 
 
 @test
+def t_figures_sit_together_at_their_own_width():
+    """Cameron's screenshots, 12 Oct 2026: Out now 1, On the shelf 2 and
+    Overdue 0 each at the left of a third of a 1,450px row; Synced, Failed and
+    Quarantined 460px apart. The strip was a 12-track grid that gave every
+    figure a share of the row whatever it held. A figure group is as wide as
+    its figures, each at least --fig-min, packed from the text edge with a
+    hairline between, and it wraps rather than squeezing."""
+    strip = CSS.split("\n        .metrics.metrics-strip {")[1].split("}")[0]
+    for need in ("display: flex", "flex-wrap: wrap", "width: fit-content", "max-width: 100%"):
+        ok(need in strip, "the group: " + need)
+    ok("repeat(12, minmax(0, 1fr))" not in CSS and not re.search(r"metrics-strip[^{]*\{ grid-column: span", CSS),
+       "no figure is given a share of the row")
+    ok(".metrics-strip > .stat { flex: 0 1 auto; min-width: var(--fig-min); }" in CSS, "each figure is its own width, at least 96")
+    ok(".metrics-strip > .stat:has(.stat-spark) { width: var(--fig-spark-w); }" in CSS, "a figure with a sparkline is the sparkline's 144")
+    ok("--fig-min: 96px;" in CSS and "--fig-spark-w: 144px;" in CSS, "both are tokens")
+    ok(not re.search(r"\.metrics-strip \.stat-row \{[^}]*container-type", CSS),
+       "the figure line is not a size container, which would leave it no width of its own to size the group by")
+    ok("/* A FIGURE GROUP ON A PHONE" in CSS, "the phone rule is there")
+    phone = CSS.split("/* A FIGURE GROUP ON A PHONE")[1].split("\n        }")[0] if "/* A FIGURE GROUP ON A PHONE" in CSS else ""
+    ok(all(":has(> :nth-child(%d):last-child)" % n in phone for n in (3, 5, 6)) and "repeat(3, minmax(0, 1fr))" in phone,
+       "on a phone three, five and six figures run three across, so none sits alone")
+
+
+@test
+def t_a_filter_figure_is_a_counter_not_a_circle():
+    """Cameron's third screenshot: each severity tile had an empty check circle
+    stranded at its far right edge, 300px from its word. A figure that filters
+    the list under it is a counter, the Production Manager's tile: a dot, the
+    word and the figure, the chosen one in the teal fill."""
+    fn = fn_src("function counterTile(") if "function counterTile(" in SCRIPT else ""
+    for need in ("el('button', 'fc", "fc-dot", "aria-pressed", "fc-l", "fc-v"):
+        ok(need in fn, "a counter carries " + need)
+    ok("statAct(I.check)" not in SCRIPT, "no filter figure carries the ring any more")
+    ok("counterTile(" in fn_src("function renderRecon(") and "counterTile(" in fn_src("function renderLiability("),
+       "Reconciliation's severities and Liability's buckets are counters")
+    sel = '\n        .fc:is(.on, [aria-pressed="true"]) {'
+    on = CSS.split(sel)[1].split("}")[0] if sel in CSS else ""
+    ok("background: var(--action-primary)" in on, "the chosen counter is the teal fill")
+    ok('.fc:is(.on, [aria-pressed="true"]) :is(.fc-l, .fc-v span) { color: var(--text-on-action); }' in CSS, "with ink words on it")
+    ok("'fcs fcs-money'" in fn_src("function renderLiability("), "Liability's counters hold money, and say so")
+    ok("/* COUNTERS ON A PHONE" in CSS, "the phone rule is there")
+    ph = CSS.split("/* COUNTERS ON A PHONE")[1].split("\n        }")[0] if "/* COUNTERS ON A PHONE" in CSS else ""
+    ok(".fcs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }" in ph,
+       "on a phone counters go two by two (Reconciliation's four), never off the edge")
+    ok(".fcs-money { grid-template-columns: minmax(0, 1fr); }" in ph and ".fcs-money .fc { flex-direction: row;" in ph,
+       "and counters whose figure is money are full-width rows, word left and figure right: three of them clipped £41,908")
+    ok(".metrics.metrics-strip > .fcs { order: 1; grid-column: 1 / -1; }" in ph,
+       "under the plain figures, which then share one row three across")
+
+
+@test
 def t_one_page_column_with_the_top_bar_on_it():
     """Cameron's 2,200 monitor, 12 Oct 2026: the breadcrumb sat at the sheet's
     left edge, well left of the page's title, and Search past the page's right
@@ -2216,13 +2267,13 @@ def t_a_kpi_with_a_list_behind_it_opens_it():
     ok("name.target = '_blank'; name.rel = 'noopener'" in md, "an item with a url opens the page in a new tab, safely")
     ok("d.empty || 'Nothing to list.'" in md, "an empty list says so instead of showing nothing")
     ok("opener.focus()" in md, "closing hands focus back to the card")
-    ok("stat.append(statAct(I.check));" in SCRIPT and SCRIPT.count("stat.append(statAct(I.check));") == 2,
-       "both filter strips carry the ring")
+    ok("statAct(I.check)" not in SCRIPT and SCRIPT.count("counterTile(") >= 3,
+       "both filter strips are counters now (12 Oct 2026), not figures with a ring at the edge")
     ok(".stat.stat-open { cursor: pointer; }" in CSS, "an opener shows a pointer")
-    ok(".stat.stat-open:hover .label, .stat.stat-pick:hover .label { color: var(--text-primary); }" in CSS,
+    ok(".stat.stat-open:hover .label { color: var(--text-primary); }" in CSS,
        "and under the pointer its label darkens (the mix: a figure has no box to tint)")
-    ok(".stat-pick:is(.on, [aria-pressed=\"true\"]) > .stat-act { background: var(--action-primary);" in CSS,
-       "a set filter fills its ring")
+    ok('.fc:is(.on, [aria-pressed="true"]) { background: var(--action-primary);' in CSS,
+       "a set filter is the teal counter")
     ok(".chart-expand, .stat-act, .wg-hide, [data-wg-control]" in CSS, "the cue is screen furniture, hidden in print")
 
 @test
@@ -5410,13 +5461,13 @@ def t_loan_units_puts_three_stats_on_three_columns():
     """The shared grid is four columns wide. Three stats on it leave a hole where
     a fourth would be, which reads as a KPI that failed to load rather than as a
     row of three."""
-    # Since 2026-10-05 they are the one figure card every page uses: the strip,
-    # whose twelve tracks share any count across the row (three take a third each).
+    # Since 2026-10-05 they are the one figure group every page uses. Since
+    # 12 Oct 2026 the group is as wide as its figures: three thirds of a
+    # 1,450px row was the blank space in Cameron's first screenshot.
     fn = fn_src("function renderLoans(")
-    ok("const mgrid = metricsStrip([" in fn, "the counts are the app's one figure strip")
-    ok(".metrics-strip > .stat:nth-child(4n+3):last-child { grid-column: span 4; }" in CSS
-       and ".metrics.metrics-strip { grid-template-columns: repeat(12, minmax(0, 1fr)); }" in CSS,
-       "which seats three as thirds of its twelve tracks, no hole")
+    ok("const mgrid = metricsStrip([" in fn, "the counts are the app's one figure group")
+    ok(".metrics-strip > .stat { flex: 0 1 auto; min-width: var(--fig-min); }" in CSS,
+       "which sits the three side by side at their own width, no hole and no thirds")
     head = fn[fn.index("const mgrid = metricsStrip(["):]
     ok(head[:600].count("{ label: ") == 3, "and there are still exactly three stats")
 
@@ -5784,7 +5835,7 @@ def t_every_control_family_declares_its_states():
     ok("setBusy(btn, true)" in SCRIPT and "markInvalid(reasonIn, true)" in SCRIPT, "and uses them")
     for sel, attr in ((".nav-item", 'aria-current="page"'), (".btn", "aria-pressed"), (".tab", "aria-current"),
                       (".tab", "aria-pressed"), (".toggle", "aria-checked"), (".mrow", "aria-selected"),
-                      (".files-row", "aria-selected"), (".segmented > button", "aria-pressed"), (".stat.stat-pick", "aria-pressed")):
+                      (".files-row", "aria-selected"), (".segmented > button", "aria-pressed"), (".fc", "aria-pressed")):
         ok(re.search(re.escape(sel) + r":is\([^)]*" + attr, CSS), "%s's selected rule has its %s twin" % (sel, attr))
     ok("n.setAttribute('aria-current', 'page')" in SCRIPT, "and the nav actually sets aria-current")
 
@@ -9545,15 +9596,14 @@ def t_the_spacing_pass_holds():
        and "height: var(--control-h);" in CSS.split("\n        .segmented > button {")[1].split("}")[0],
        "a segmented track is a control's 32, level with the field beside it (its choice, 28, is drawn inside it)")
     ok("flex: 1 1 auto;" in CSS.split("\n        .segmented > button {")[1].split("}")[0], "and a wrapped track fills its lines")
-    ok(".metrics.metrics-strip { grid-template-columns: repeat(12, minmax(0, 1fr)); }" in CSS
-       and "calc(100% / 60)" not in CSS, "figures keep a 16 gap both ways at every width")
+    ok("column-gap: var(--sp-8); row-gap: var(--sp-6);" in CSS.split("\n        .metrics.metrics-strip {")[1].split("}")[0]
+       and "calc(100% / 60)" not in CSS, "a figure group keeps its 32 between figures and 24 between lines at every width")
     ok(".metrics-strip > .stat > .stat-row { margin-top: 0; }" in CSS, "a figure sits one distance under its label")
     ok("grid-row: span 3; grid-template-rows: subgrid;" in CSS, "and a row of tiles shares its label, figure and note rows")
-    # A tile that is a size container cannot share its parent's rows: the narrow
-    # check lives on the figure's line, never on the tile.
-    ok(".metrics-strip .stat-row { container-type: inline-size;" in CSS
-       and not re.search(r"\.metrics-strip > \.stat \{[^}]*container-type", CSS),
-       "the narrow-tile check is on the figure line, so the tile can still share rows")
+    # Neither the tile nor its figure line is a size container: a container
+    # has no width of its own, so a figure group could not be as wide as it.
+    ok(not re.search(r"\.metrics-strip[^{]*\{[^}]*container-type", CSS),
+       "no part of a figure group is a size container")
     ok(".tbl-tools-l, .tbl-tools-r { display: contents; }" in CSS and ".tbl-tools .tbl-search { flex: 1 1 100%; }" in CSS,
        "a phone toolbar flows as one row: the search and a track take a line, short controls pair up")
     ok("min-height: var(--row-h)" in CSS.split("\n        .tabs {")[1].split("}")[0], "every page's strip is the one 44 row")
@@ -10363,8 +10413,8 @@ def t_a_figure_row_never_asks_more_gap_than_a_phone_has():
         blk = CSS.split(mk)[1][:900]
         ok(".metrics { column-gap: var(--sp-4); }" in blk, "a phone figure row has a 16 gap")
         ok(".metrics > .stat::before { left: calc(-0.5 * var(--sp-4)); }" in blk, "and its hairline is half of it before the figure")
-    ok(re.search(r"\.metrics\.metrics-strip \{ grid-template-columns: repeat\(12, minmax\(0, 1fr\)\); \}", CSS) is not None,
-       "the strip is still 12 tracks (the reason the gap has to shrink)")
+    ok("repeat(3, minmax(0, 1fr))" in CSS.split("/* A FIGURE GROUP ON A PHONE")[1][:900],
+       "a phone figure group is two or three across, so its gap is paid at most twice")
     ok(".chat-metrics .metrics > .stat::before { left: calc(-0.5 * var(--sp-3)); }" in CSS, "a chat answer's figure row moves its hairline to its own 12 gap")
 
 

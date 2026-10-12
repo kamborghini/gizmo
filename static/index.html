@@ -362,6 +362,9 @@
             --search-w: 280px;      /* a list's search field */
             --pop-w: 360px;         /* a popover's width (the window's, less 16 a side, on a phone) */
             --qc-w: 184px;          /* a queue counter */
+            --fc-w: 128px;          /* a counter that filters a list (12 Oct 2026) */
+            --fig-min: 96px;        /* a figure's least width in a figure group, so a one-digit figure is not a sliver */
+            --fig-spark-w: 144px;   /* a figure with a sparkline: the sparkline's width */
             --ono-w: 100px;         /* an order row's number column */
             --icon-col: 34px;       /* the file list's icon column: 16px glyph, 18px gutter */
             /* The widget grid. Four columns when four cells of --wgrid-cell fit
@@ -1308,77 +1311,93 @@
         /* Two columns below that: the third tile takes the row, not a half
            with an empty cell beside it that reads as a tile that failed. */
         @media (max-width: 1100px) { .metrics.metrics-3 > :nth-child(3):last-child { grid-column: 1 / -1; } }
-        /* One frame, every row of it full. The strip is twelve tracks: four
-           across by default, five or six across when there are five or six
-           (three across for six on a narrower page), and a short last row
-           shares the width - seven is four then three, nine is four, four, then
-           one across - instead of a boxed hole at the end. It was sixty tracks,
-           and fifty-nine gaps forced the column gap to shrink to a sixtieth of
-           the strip (12px at 1024, 6 on a phone) while rows stayed 16 apart, so
-           tiles sat glued side by side. Twelve tracks keep the 16 both ways. */
-        .metrics.metrics-strip { grid-template-columns: repeat(12, minmax(0, 1fr)); }
-        @media (min-width: 901px) {
-            .metrics-strip > .stat { grid-column: span 3; }
-            .metrics-strip > .stat:nth-child(4n+1):last-child { grid-column: span 12; }
-            .metrics-strip > .stat:nth-child(4n+1):nth-last-child(2),
-            .metrics-strip > .stat:nth-child(4n+2):last-child { grid-column: span 6; }
-            .metrics-strip > .stat:nth-child(4n+1):nth-last-child(3),
-            .metrics-strip > .stat:nth-child(4n+2):nth-last-child(2),
-            .metrics-strip > .stat:nth-child(4n+3):last-child { grid-column: span 4; }
-            /* Five do not divide twelve, so five take a grid of their own. */
-            .metrics.metrics-strip:has(> :nth-child(5):last-child) { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-            .metrics-strip:has(> :nth-child(5):last-child) > .stat { grid-column: auto; }
-            .metrics-strip:has(> :nth-child(6):last-child) > .stat { grid-column: span 4; }
+        /* A FIGURE GROUP (12 Oct 2026). Cameron's 2,200 monitor: Out now 1, On
+           the shelf 2 and Overdue 0 each at the left of a third of a 1,450px
+           row, Synced 120 and Failed 0 460px apart. The strip was twelve tracks
+           that gave every figure a share of the row whatever it held. Now the
+           group is as wide as its figures: each one its own width (at least
+           --fig-min, a sparkline's when it has one), packed from the text edge,
+           a hairline in the middle of the gap before it. A row that runs out of
+           room wraps, and the clip on .metrics keeps the first hairline of every
+           line outside the group, so each line starts on the text edge. */
+        .metrics.metrics-strip { display: flex; flex-wrap: wrap; align-items: flex-start; width: fit-content; max-width: 100%;
+            column-gap: var(--sp-8); row-gap: var(--sp-6); }
+        .metrics-strip > .stat { flex: 0 1 auto; min-width: var(--fig-min); }
+        .metrics-strip > .stat:has(.stat-spark) { width: var(--fig-spark-w); }
+        /* A FIGURE GROUP ON A PHONE: two across, and three across for three,
+           five and six, so no figure sits alone on a row; a figure with a
+           sparkline takes the row (the .metrics phone rule). */
+        @media (max-width: 640px) {
+            .metrics.metrics-strip { display: grid; width: auto; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .metrics.metrics-strip:has(> :nth-child(3):last-child),
+            .metrics.metrics-strip:has(> :nth-child(5):last-child),
+            .metrics.metrics-strip:has(> :nth-child(6):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .metrics-strip > .stat { min-width: 0; }
+            .metrics-strip > .stat:has(.stat-spark) { width: auto; }
         }
-        @media (min-width: 1500px) { .metrics-strip:has(> :nth-child(6):last-child) > .stat { grid-column: span 2; } }
-        /* Two across on a narrow page, an odd last cell taking the row. */
-        @media (max-width: 900px) {
-            .metrics-strip > .stat { grid-column: span 6; }
-            .metrics-strip > .stat:nth-child(odd):last-child { grid-column: span 12; }
-        }
-        /* Three figures stay three across down to a phone: two and a lone
-           full-width third read as a row that ran out. */
-        @media (min-width: 641px) and (max-width: 900px) {
-            .metrics-strip:has(> :nth-child(3):last-child) > .stat { grid-column: span 4; } }
         /* A figure sits under its label at one distance in every tile. Pinned
            to the foot of the tile (margin-top: auto), a tile with a shorter note
            or an unwrapped change pill dropped its figure lower than its
            neighbours', and a row of figures stopped lining up. */
         .metrics-strip > .stat > .stat-row { margin-top: 0; }
-        /* A row of tiles shares its label, figure and note rows (subgrid), so a
-           label that wraps in one tile moves every figure in the row down with
-           it and the figures stay level. Tiles with a sparkline keep their own
-           flow: the spark is a fourth part the shared rows do not have. */
+        /* On a phone a row of tiles shares its label, figure and note rows
+           (subgrid), so a label that wraps in one tile moves every figure in the
+           row down with it and the figures stay level. Tiles with a sparkline
+           keep their own flow: the spark is a fourth part the shared rows do not
+           have. In the wider group the labels do not wrap, so it does not arise. */
         .metrics-strip > .stat:not(:has(.stat-spark)) { display: grid; grid-row: span 3; grid-template-rows: subgrid;
             grid-template-columns: minmax(0, 1fr); row-gap: var(--gap-fig); align-content: start; }
         .metrics-strip:has(> .stat .stat-spark) > .stat { grid-row: auto; }
-        /* A tile too narrow for its figure and change pill on one line puts the
-           pill under the figure. Tiles in a row are one width, so every tile in
-           it decides the same way: one pill wrapping and the next not read as
-           two designs. The container is the figure's own line, not the tile:
-           a tile that is a container cannot share its rows (subgrid, above). */
-        .metrics-strip .stat-row { container-type: inline-size; row-gap: var(--sp-1);
-            /* Its row is as tall as the tallest in the line of tiles, so the
-               figure starts at the top of it rather than floating in the middle. */
-            align-content: flex-start; }
-        @container (max-width: 13rem) { .metrics-strip .stat-row > .value { flex-basis: 100%; } }
-        /* A KPI card that is also a filter has to answer the click that set
-           it, with an inset hairline in the accent: no lift is ADDED, because a
-           card does not float, and the base lift is not taken away either -
-           replacing it sat the picked card flatter than the three it was
-           picked out from. */
-        .stat.stat-pick { cursor: pointer; }
-        /* A figure that filters the list under it is chosen the way a counter
-           is: its label and figure in ink, a teal-line bar under the label. */
-        .stat.stat-pick:is(.on, [aria-pressed="true"]) .label { color: var(--text-primary); }
-        .stat.stat-pick:is(.on, [aria-pressed="true"]) .label::after { content: ""; position: absolute; left: 0; right: 0; bottom: calc(-1 * var(--sp-1));
-            height: var(--bw-strong); border-radius: var(--radius-swatch); background: var(--fill-mark); }
+        /* The figure's own line: a change pill wraps under the figure when the
+           figure and pill do not fit side by side. It is not a size container:
+           one gave the line no width of its own, so the group had nothing to be
+           as wide as. */
+        .metrics-strip .stat-row { row-gap: var(--sp-1); align-content: flex-start; }
+        /* COUNTERS (12 Oct 2026). A figure that filters the list under it is
+           the Production Manager's counter, not a figure with an empty ring at
+           its far edge (Cameron's third screenshot: each severity's circle sat
+           300px from its word): a fill tile, a dot and the word, the figure
+           under them with what it is worth beside it. The chosen one is the
+           teal fill with ink words. A group of them is one item in a figure
+           group, with the group's hairline before it. */
+        .fcs { display: flex; flex-wrap: wrap; align-items: stretch; gap: var(--control-gap); }
+        .metrics > .fcs { position: relative; }
+        .metrics > .fcs::before { content: ""; position: absolute; top: 0; bottom: 0; left: calc(-0.5 * var(--sp-8));
+            width: var(--bw-hairline); background: var(--border-default); }
+        .fc { min-width: var(--fc-w); padding: var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius-tile); background: var(--surface-tertiary);
+            display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); font: inherit; color: var(--text-primary); text-align: left; cursor: pointer; }
+        .fc-l { display: flex; align-items: center; gap: var(--sp-1-5); font-weight: var(--weight-medium); color: var(--text-secondary); white-space: nowrap; }
+        .fc-dot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); flex: none; background: var(--border-emphasis); }
+        .fc-dot.bad { background: var(--error); }
+        .fc-dot.warn { background: var(--warning); }
+        .fc-dot.ok { background: var(--success); }
+        .fc-v { display: flex; align-items: baseline; gap: var(--sp-2); }
+        .fc-v b { font-size: var(--fig-m); font-weight: var(--weight-semibold); line-height: var(--lh-none); letter-spacing: var(--tr-fig); font-variant-numeric: tabular-nums; }
+        .fc-v span { color: var(--text-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .fc:is(.on, [aria-pressed="true"]) { background: var(--action-primary); box-shadow: var(--shadow-focal); }
+        .fc:is(.on, [aria-pressed="true"]) :is(.fc-l, .fc-v span) { color: var(--text-on-action); }
+        @media (hover: hover) { .fc:not(.on):hover { background: var(--surface-sunken); } }
+        .fc:not(.on):active { background: var(--press-fill); }
+        /* COUNTERS ON A PHONE: two by two (Reconciliation's four, a count and its
+           money), and counters whose figure is money (Liability's buckets) full
+           width rows, the word left and the figure right, under the plain
+           figures, which then share one row: three money figures side by side ran
+           off a 390 screen. */
+        @media (max-width: 640px) {
+            .fcs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .fc { min-width: 0; padding: var(--sp-3); }
+            .fcs-money { grid-template-columns: minmax(0, 1fr); }
+            .fcs-money .fc { flex-direction: row; align-items: center; justify-content: space-between; }
+            .metrics.metrics-strip:has(> .fcs) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .metrics.metrics-strip > .fcs { order: 1; grid-column: 1 / -1; }
+            .metrics.metrics-strip > .fcs::before { display: none; }
+        }
         /* An interactive KPI says so: a pointer, the hover the reference gives
            its rows, and a corner cue. A card that opens a list carries the
            reference's ArrowUpRight; a card that filters the list under it
            carries a ring that fills with a tick when it is the filter set. */
         .stat.stat-open { cursor: pointer; }
-        @media (hover: hover) { .stat.stat-open:hover .label, .stat.stat-pick:hover .label { color: var(--text-primary); } }
+        @media (hover: hover) { .stat.stat-open:hover .label { color: var(--text-primary); } }
         .stat-act { position: absolute; top: calc((var(--lh-control) - var(--box-xs)) / 2); right: 0; width: var(--box-xs); height: var(--box-xs); display: grid; place-items: center; color: var(--text-tertiary); transition: color var(--dur) var(--ease), background var(--dur) var(--ease); }
         .stat-act svg { width: var(--icon-md); height: var(--icon-md); display: block; }
         .stat:focus-visible > .stat-act { color: var(--text-primary); }
@@ -1387,10 +1406,6 @@
         /* The opener's corner mark is a real button (see statOpens): the mark's look and a button's reset; the house focus ring is the control rule's. */
         .stat-open-btn { padding: 0; border: 0; background: none; font: inherit; cursor: pointer; }
         @media (hover: hover) { .stat-open-btn:hover { color: var(--text-primary); } }
-        .stat-pick > .stat-act { border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-circle); color: transparent; background: var(--surface-primary); }
-        .stat-pick > .stat-act svg { width: var(--icon-xs); height: var(--icon-xs); }
-        @media (hover: hover) { .stat-pick:hover > .stat-act { color: var(--text-tertiary); } }
-        .stat-pick:is(.on, [aria-pressed="true"]) > .stat-act { background: var(--action-primary); border-color: var(--border-selected); color: var(--text-on-action); }
         /* The list behind a KPI: the figure, what the list is, then the rows. */
         .modal.smodal { max-width: 640px; }
         /* Reading an email is prose, so it takes a narrower measure than the
@@ -13109,6 +13124,23 @@ Projected Image UK"></textarea>
            and .stat-v, two class names that were never styled at all.
            Not statCard(): its label-to-help matcher reads "Overdue orders" as
            the Overview's order count and hangs the wrong sentence on it. */
+        /* A counter: a figure that filters the list under it (see .fc). o.dot is
+           its severity colour (bad, warn, ok, or none for grey), o.money what it
+           is worth, o.on whether it is the filter that is set. */
+        function counterTile(label, value, o) {
+            o = o || {};
+            const b = el('button', 'fc' + (o.on ? ' on' : ''));
+            b.type = 'button';
+            b.setAttribute('aria-pressed', o.on ? 'true' : 'false');
+            const l = el('span', 'fc-l');
+            l.append(el('span', 'fc-dot' + (o.dot ? ' ' + o.dot : '')), document.createTextNode(label));
+            const v = el('span', 'fc-v');
+            v.append(el('b', '', value));
+            if (o.money) v.append(el('span', '', o.money));
+            b.append(l, v);
+            if (o.onClick) b.onclick = o.onClick;
+            return b;
+        }
         function financeStat(label, value, tone, unknown, note) {
             const c = el('div', 'stat' + (tone ? ' ' + tone : ''));
             c.append(el('div', 'label', label));
@@ -13170,6 +13202,10 @@ Projected Image UK"></textarea>
                soon and overdue when there is some. 'Due soon £0' was amber
                while 'Overdue £0' was green. */
             const grid = el('div', 'metrics metrics-flat metrics-3 metrics-strip');
+            /* The three buckets that filter the list are one group of counters,
+               in their place in the row (12 Oct 2026). */
+            const LIA_DOT = { within: 'ok', due_soon: 'warn', overdue: 'bad' };
+            let liaCounters = null;
             [['Total outstanding', d.total, liaNum(d.total, v => liaMoney(v, cur, 0)), ''],
              ['Within terms', within, liaNum(within, v => liaMoney(v, cur, 0)), ''],
              ['Due soon', d.due_soon, liaNum(d.due_soon, v => liaMoney(v, cur, 0)), d.due_soon > 0 ? 'warn' : ''],
@@ -13177,18 +13213,14 @@ Projected Image UK"></textarea>
              ['Overdue orders', d.overdue_orders, liaNum(d.overdue_orders, v => String(v)), d.overdue_orders > 0 ? 'bad' : ''],
              ['Oldest debt', d.oldest_days, liaNum(d.oldest_days, v => v ? liaDays(v) : 'None'), '']].forEach(([k, raw, v, tone]) => {
                 const known = liaKnown(raw);
-                const stat = financeStat(k, v, known ? tone : '', !known);
                 const pick = LIA_PICK[k];
                 if (pick) {
-                    stat.classList.add('stat-pick');
-                    stat.append(statAct(I.check));
-                    if (liaF.status === pick) stat.classList.add('on');
-                    stat.setAttribute('role', 'button'); stat.tabIndex = 0;
-                    stat.setAttribute('aria-pressed', liaF.status === pick ? 'true' : 'false');
-                    stat.addEventListener('keydown', (ev) => { if (ev.target !== stat) return; if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); stat.click(); } });
-                    stat.onclick = () => { liaF.status = liaF.status === pick ? 'all' : pick; renderLiability(); };
+                    if (!liaCounters) { liaCounters = el('div', 'fcs fcs-money'); grid.append(liaCounters); }
+                    liaCounters.append(counterTile(k, v, { dot: known && raw > 0 ? LIA_DOT[pick] : '', on: liaF.status === pick,
+                        onClick: () => { liaF.status = liaF.status === pick ? 'all' : pick; renderLiability(); } }));
+                    return;
                 }
-                grid.append(stat);
+                grid.append(financeStat(k, v, known ? tone : '', !known));
             });
             box.append(widget(grid, 'summary', 'full', 'Summary'));
 
@@ -18301,21 +18333,17 @@ Projected Image UK"></textarea>
                the other. Each card is also the filter for its own severity, so
                it has to show when it is the one that is set. */
             const counts = st.open_counts || {};
-            const mets = el('div', 'metrics metrics-flat metrics-strip');
+            const amounts = st.open_amounts || {};
+            /* Counters, one per severity (12 Oct 2026): a dot, the word, the
+               open count and, when the sweep sends it, the money at stake. They
+               count what is still OPEN; the list under them shows every status,
+               and its head says how many are open. */
+            const mets = el('div', 'fcs recon-sev');
             [['critical', 'Critical', 'bad'], ['high', 'High', 'bad'],
              ['medium', 'Medium', 'warn'], ['low', 'Low', '']].forEach(([k, lab, tone]) => {
-                /* The tiles count what is still OPEN; the list under them shows
-                   every status. Said on the tile, so Medium 1 over a list of two
-                   (one of them explained) is not a contradiction. */
-                const stat = financeStat(lab, String(counts[k] || 0), counts[k] ? tone : '', false, 'open');
-                stat.classList.add('stat-pick');
-                stat.append(statAct(I.check));
-                if (reconFilter.severity === k) stat.classList.add('on');
-                stat.setAttribute('role', 'button'); stat.tabIndex = 0;
-                stat.setAttribute('aria-pressed', reconFilter.severity === k ? 'true' : 'false');
-                stat.addEventListener('keydown', (ev) => { if (ev.target !== stat) return; if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); stat.click(); } });
-                stat.onclick = () => { reconFilter.severity = reconFilter.severity === k ? '' : k; refreshReconList(); };
-                mets.append(stat);
+                mets.append(counterTile(lab, String(counts[k] || 0), { dot: tone, on: reconFilter.severity === k,
+                    money: typeof amounts[k] === 'number' ? money(amounts[k], st.currency || 'GBP') : '',
+                    onClick: () => { reconFilter.severity = reconFilter.severity === k ? '' : k; refreshReconList(); } }));
             });
             box.append(widget(mets, 'severity', 'full', 'Severity'));
             /* The discrepancies, in one card composed like the reference's list
