@@ -7776,27 +7776,44 @@ function mailAgoLong(iso) { return 'at ' + iso.slice(11, 16); }
 @test
 def t_inbox_rows_off_screen_are_not_laid_out_on_a_wide_list():
     """The 2026-10-12 speed audit, P5. Every redraw of the Inbox laid out and
-    painted every row, about 400 of them, though some twenty are on screen:
-    68 to 85 ms on a desktop per redraw, 28 to 32 ms with this rule. The
-    size a row stands at until it is drawn is its real content height (the
-    row's 44 px less its padding), so the reader's place holds across a
-    redraw; the audit's first draft used the whole row height and moved the
-    place by 14 to 44 rows. It applies only where every row is one line (a
-    list wider than 560 px; narrower, rows wrap to two), and only on screen."""
+    painted every row, about 400 of them, though some twenty are on screen.
+    Until it is drawn a row stands at its real content height, so the
+    reader's place holds across a redraw: the row's 44 px less its padding,
+    or on a touch screen the 32 px of its tallest control (rows are 48 px
+    there). It applies only where every row is one line: a list wider than
+    560 px, in a window wider than 640 px (both wrap rows to two lines below
+    that; the review found 604 to 640 px windows moving the reader some 89
+    rows), and only on screen."""
     css = CSS
     i = css.find("@container mlist not (max-width: 560px)")
-    ok(i >= 0, "the rule sits where rows are one line")
+    ok(i >= 0, "the rule sits where the list is wide")
+    ok("@media screen and (min-width: 641px) {" in css[max(0, i - 200):i], "in a window wider than the 640 px wrap, on screen only")
+    wrap = re.search(r"@media \(max-width: 640px\) \{[^@]*?\.mrow \{ flex-wrap: wrap; \}", css)
+    ok(wrap, "which is where a narrow window wraps the rows")
     seg = css[i:i + 600]
     ok(".mrow {" in seg and "content-visibility: auto" in seg, "Inbox rows off screen are skipped")
-    ok("contain-intrinsic-size: auto calc(var(--row-h) - 2 * var(--sp-2))" in seg,
-       "standing at their content height, from the row's own tokens")
-    before = css[:i]
-    ok(before.rstrip().endswith("@media screen {") or "@media screen" in before[-200:], "on screen only")
+    ok("contain-intrinsic-size: auto max(calc(var(--row-h) - 2 * var(--sp-2)), var(--control-h-sm))" in seg,
+       "standing at their content height, from the row's own tokens, touch included")
     for other in (".lbl-row", ".crm-card", ".files-row"):
         ok(not re.search(re.escape(other) + r"[^{]*\{[^}]*content-visibility", css), other + " is left alone")
     pad = re.search(r"\.mrow \{[^}]*padding: var\(--sp-2\) 0; min-height: var\(--row-h\)", css)
     ok(pad, "the row's padding and height are the ones the size is made from")
 
+
+@test
+def t_a_read_mark_the_page_makes_itself_never_outlives_the_board():
+    """Review of the fifth speed PR. Closing an email that was only read marks
+    its row read in the page's own copy of the board. If Gmail then refused
+    the read, the server put the row back to unread and its board was the
+    one the page's revision names again, so every poll was answered
+    {same: true} and the wrong mark stayed. A copy the page has changed
+    itself holds no revision: the next poll fetches the board whole."""
+    m = re.search(r"m\.onQuietClose = \(\) => \{(.*?)\n            \};", SCRIPT, re.S)
+    ok(m, "the quiet close is where the page marks a row read itself")
+    body = m.group(1)
+    ok("row.unread = false" in body and "mailRev = ''" in body,
+       "and it lets the revision go with the edit")
+    ok(SCRIPT.count("row.unread = false") == 1, "and it is the only place the page edits a row of the board")
 
 @test
 def t_closing_an_email_only_read_fetches_nothing():

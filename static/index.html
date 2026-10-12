@@ -3448,15 +3448,17 @@
         /* The keyboard ring is drawn inside the row, so it is never cut away. */
         .mrow:focus-visible { outline-offset: -2px; }
         /* Rows off screen are not laid out or painted until they come near
-           (the 2026-10-12 speed audit, P5): a redraw of some 400 rows went
-           from 68 to 85 ms to 28 to 32 on a desktop. Until it is drawn a row
-           stands at its real content height, the row less its padding, so
-           the reader's place holds across a redraw; the whole row height
-           moved it 14 to 44 rows. Only where every row is one line: a list
-           560 px or narrower wraps them to two. Only on screen. */
-        @media screen {
+           (the 2026-10-12 speed audit, P5): a Refresh of 400 rows went from
+           157-184 ms of a desktop's main thread to 101-125. Until it is drawn
+           a row stands at its real content height, so the reader's place
+           holds across a redraw: the row less its padding, or on a touch
+           screen its 32 px controls (rows are 48 px there). Only where every
+           row is one line: a list 560 px or narrower, or a window 640 px or
+           narrower, wraps them to two. Only on screen. */
+        @media screen and (min-width: 641px) {
             @container mlist not (max-width: 560px) {
-                .mrow { content-visibility: auto; contain-intrinsic-size: auto calc(var(--row-h) - 2 * var(--sp-2)); }
+                .mrow { content-visibility: auto;
+                    contain-intrinsic-size: auto max(calc(var(--row-h) - 2 * var(--sp-2)), var(--control-h-sm)); }
             }
         }
         /* 16, the size every other tick in the app is drawn at (.fslot input,
@@ -28789,6 +28791,11 @@ Projected Image UK"></textarea>
                 const row = mailCache && (mailCache.threads || []).find(t => t.id === id);
                 if (row && row.unread) {
                     row.unread = false;
+                    /* A copy the page has changed itself is no board the
+                       server named: if Gmail refuses the read, the server's
+                       board is the one this revision names again, and every
+                       poll would be told nothing changed. */
+                    mailRev = '';
                     ++mailFetchSeq;    // a poll already in flight carries the board from before the read
                     if (!mailInputBusy()) renderMail();
                 }

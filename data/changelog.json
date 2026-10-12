@@ -17,7 +17,7 @@
     {
      "kind": "improved",
      "tab": "mail",
-     "text": "Reactor now keeps its connection to Gmail open for half a minute between requests, so opening, sorting and syncing email waits less on setting up a new connection each time."
+     "text": "Reactor now keeps its connection to Gmail open for half a minute between requests, so reading an email in full, opening its attachments and refreshing the Inbox wait less on setting up a new connection each time."
     }
    ]
   },
