@@ -2284,7 +2284,6 @@
         .sk-textarea { resize: vertical; min-height: calc(var(--lh-body) * 1em * 12); line-height: var(--lh-control); }
         .sk-textarea.mem-ta { min-height: calc(var(--lh-body) * 1em * 3); }
         .sk-form-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
-        .sk-spacer { flex: 1; }
         .sk-count { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); white-space: nowrap; font-variant-numeric: tabular-nums; }
         .sk-count.over { color: var(--error); }
         .btn.ghost { background: transparent; border-color: transparent; box-shadow: none; }
@@ -2364,14 +2363,14 @@
         .sk-facts dd { margin: 0; color: var(--text-primary); max-width: var(--measure); }
         @media (max-width: 640px) { .sk-facts { grid-template-columns: 1fr; gap: var(--sp-1); } .sk-facts dd + dt { margin-top: var(--sp-2); } }
         @media (max-width: 640px) {
-            .sk-form-row .sk-spacer { display: none; }
             .sk-form-row .sk-count { flex-basis: 100%; order: -1; }
         }
         /* By the card's width: on an iPad the titles were squeezed to 60px
            beside their buttons while a 640 window gave them a line each. */
         /* Read and add, the review's main button, stays at the right when the
-           row wraps, not alone at the left under the others. */
-        .sk-upload .sk-form-row .btn-primary { margin-left: auto; }
+           row wraps on a phone, not alone at the left under the others. On a
+           desk it follows Cancel (WS-32). */
+        @media (max-width: 640px) { .sk-upload .sk-form-row .btn-primary { margin-left: auto; } }
         .sk-card { container: skcard / inline-size; }
         @container skcard (max-width: 600px) {
             .sk-head { flex-wrap: wrap; }
@@ -13210,7 +13209,6 @@ Projected Image UK"></textarea>
             more.onclick = () => fi.click();
             more.disabled = busy || items.length >= UPLOAD_MAX;
             if (items.length >= UPLOAD_MAX) more.title = 'Up to ' + UPLOAD_MAX + ' files at a time';
-            const spacer = el('div', 'sk-spacer');
             const cancel = el('button', 'btn btn-sm'); cancel.type = 'button'; cancel.textContent = 'Cancel';
             cancel.disabled = busy;
             cancel.onclick = async () => {
@@ -13230,7 +13228,7 @@ Projected Image UK"></textarea>
             plain.onclick = () => addUploads(false);
             read.onclick = () => addUploads(true);
             if (busy) { setBusy(read, true); read.lastChild.textContent = skView.busy; }
-            row.append(more, fi, spacer, cancel, plain, read);
+            row.append(more, fi, cancel, plain, read);
             box.append(row);
             box.append(el('p', 'sk-upload-cost', (n > 1 ? 'Read and add is ' + n + ' AI runs, one for each skill. ' : 'Read and add is an AI run. ')
                 + 'Add without reading saves them as they are; each can be read later from the skill.'));
@@ -13646,7 +13644,6 @@ Projected Image UK"></textarea>
                     bo.dispatchEvent(new Event('input'));
                 } catch (e) { toastError('That file could not be read.'); }
             };
-            const spacer = el('div', 'sk-spacer');
             const cancel = el('button', 'btn btn-sm'); cancel.type = 'button'; cancel.textContent = 'Cancel';
             cancel.onclick = async () => {
                 const dirty = ti.value !== ti.dataset.initial || bo.value !== bo.dataset.initial || wh.value !== wh.dataset.initial || (cb.checked ? '1' : '') !== cb.dataset.initial;
@@ -13710,7 +13707,7 @@ Projected Image UK"></textarea>
                 }
             };
             if (skillCaps.upload) row.append(fileBtn, fi);
-            row.append(count, spacer, splitBtn, cancel, save);
+            row.append(count, splitBtn, cancel, save);
             f.append(row);
             check();
             requestAnimationFrame(() => (s ? bo : ti).focus());

@@ -2385,6 +2385,19 @@ def t_skills_read_in_two_columns_with_their_use_on_top():
 
 
 @test
+def t_the_skill_forms_keep_their_buttons_beside_their_words():
+    """WS-32 (R7), 12 Oct 2026: New skill, Edit skill and the Markdown review put
+    a spacer between their words and their buttons, so Cancel and Add skill sat
+    at the form's far edge, 1,017px from the character count at 2200."""
+    ok("sk-spacer" not in SCRIPT and ".sk-spacer" not in CSS, "no spacer pushes a form's buttons away")
+    ok("row.append(count, splitBtn, cancel, save);" in fn_src("function skillEditor("), "the count, then Cancel and Add skill")
+    ok("row.append(more, fi, cancel, plain, read);" in fn_src("function skillUploads("), "More files, then Cancel and the two ways to add")
+    ok("\n        .sk-upload .sk-form-row .btn-primary { margin-left: auto; }" not in CSS
+       and "@media (max-width: 640px) { .sk-upload .sk-form-row .btn-primary { margin-left: auto; } }" in CSS,
+       "Read and add keeps to the right only on a phone, where the row wraps")
+
+
+@test
 def t_the_chat_start_sits_in_the_optical_middle():
     """WS-40, 12 Oct 2026: the start block sat at the top of the conversation
     column with a void under it, and listed three recent conversations."""
