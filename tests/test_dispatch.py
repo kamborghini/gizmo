@@ -3278,9 +3278,12 @@ def t_the_permissions_settings_shows_are_read_from_shopify():
         got = run(server.shopify_granted_scopes())
         ok("currentAppInstallation" in seen[0][2] and seen[0][:2] == ("POST", "graphql.json"), seen)
         eq(got["error"], "")
-        eq(set(got["missing"]), {"write_merchant_managed_fulfillment_orders", "write_payment_terms"},
-           "each missing write is named")
+        eq(set(got["missing"]), {"write_merchant_managed_fulfillment_orders", "write_payment_terms",
+                                 "read_shopify_payments_payouts", "read_shopify_payments_accounts"},
+           "each missing write is named, and each read a feature needs")
         ok(all(got["missing"].values()), "with what it is for")
+        ok("Xero sync" in got["missing"]["read_shopify_payments_accounts"],
+           "the accounts scope is named for the payout note it holds up")
         run(server.shopify_granted_scopes())
         eq(len(seen), 1, "a good answer is kept rather than asked again")
         server._granted_scopes.update({"at": 0.0, "scopes": None, "error": ""})

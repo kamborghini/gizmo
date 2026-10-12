@@ -1233,6 +1233,16 @@ REQUIRED_WRITE_SCOPES = {
     "write_merchant_managed_fulfillment_orders": "fulfilling and holding orders",
     "write_payment_terms": "putting an unpaid purchase order on 30-day terms",
 }
+# The reads a feature cannot do without, checked the same way. Asked for in
+# shopify.app.toml is not the same as granted: the Xero sync's payout note
+# was refused "Access denied for shopifyPaymentsAccount field" because the app
+# asked for payouts and never for accounts, and Settings, which only checked
+# writes, said everything was permitted. With the client id and secret the
+# connector signs in as this app, so what this install lacks, it lacks too.
+REQUIRED_READ_SCOPES = {
+    "read_shopify_payments_payouts": "Reconciliation's payout checks, and payout notes on Xero sync when it signs in as Reactor",
+    "read_shopify_payments_accounts": "payout notes on Xero sync when it signs in as Reactor",
+}
 _granted_scopes: dict = {"at": 0.0, "scopes": None, "error": ""}
 
 
@@ -1261,7 +1271,8 @@ async def shopify_granted_scopes(max_age: float = 900.0) -> dict:
             # absent because the lookup itself failed.
             return {"scopes": [], "missing": {}, "error": str(e)[:200]}
     return {"scopes": got, "error": "",
-            "missing": {k: v for k, v in REQUIRED_WRITE_SCOPES.items() if k not in got}}
+            "missing": {k: v for k, v in {**REQUIRED_WRITE_SCOPES, **REQUIRED_READ_SCOPES}.items()
+                        if k not in got}}
 
 
 # The forecast job's reads of the store, made here with the app's own credential
