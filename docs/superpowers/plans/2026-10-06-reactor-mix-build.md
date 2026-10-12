@@ -253,7 +253,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `static/index.html:15-31` (the token block's header comment), `:46-68` (tier 1 primitives), `:84-96` and `:102`, `:128`, `:134`, `:146`, `:154` (the tier 2 lines that read the old greys), `:1720` (the select chevron's encoded grey), the script after `const DS_COLOURS = [...]` (22066-22083)
 - Modify: `data/changelog.json` (the newest entry)
-- Test: `tests/test_frontend.py` (`t_reactor_wears_projected_images_brand_from_one_place` 9339, `t_the_charts_are_drawn_to_the_reference_spec` 1737, `t_every_chart_line_comes_off_the_ramp` 3175, a new test)
+- Test: `tests/test_frontend.py` (`t_reactor_wears_the_shops_brand_from_one_place` 9339, `t_the_charts_are_drawn_to_the_reference_spec` 1737, `t_every_chart_line_comes_off_the_ramp` 3175, a new test)
 
 **Interfaces:**
 - Consumes: nothing new.
@@ -307,11 +307,11 @@ In `static/index.html` replace:
            Light, because the app is embedded inside the Shopify admin and a
            dark panel inside a light admin reads as a foreign object.
 
-           The look is Projected Image's own (2026-10-05, Cameron: "uniformity
+           The look is [shop name]'s own (2026-10-05, Cameron: "uniformity
            is key", "one source of truth"): the brand's teal, ink and off-white,
            Bricolage Grotesque for titles and Inter for everything else, 8px
            cards and no shadows on what sits on the page, taken from
-           projectedimage.com's own theme settings; then the polish pass
+           [shop website]'s own theme settings; then the polish pass
            (Cameron: "Do not use pill-shaped UI unnecessarily"): 6px controls,
            4px tags, one control height per row, one text size for controls,
            one reading measure. This block is the only place any of it is
@@ -324,7 +324,7 @@ with:
            The look is "the mix" (docs/superpowers/specs/2026-10-06-reactor-
            mix-design.md; Cameron, 2026-10-05: "i like the mix", "go with the
            dark sidebar"): one white sheet in an ink frame, one grey ramp,
-           Projected Image's teal for what is chosen and the one primary
+           [shop name]'s teal for what is chosen and the one primary
            action, Inter in five steps with Bricolage Grotesque for the
            wordmark and page titles only, figures first and words on request.
            This block is the only place any of it is defined, and the Guide's
@@ -336,9 +336,9 @@ with:
 Replace:
 
 ```
-            /* ---- Tier 1: primitives. Projected Image's brand (teal #13B7C0,
+            /* ---- Tier 1: primitives. [shop name]'s brand (teal #13B7C0,
                ink #121212, charcoal #2F2F2F, off-white #F7F7F7, blue #334FB4,
-               from projectedimage.com) on the shadcn/ui "neutral" scale and the
+               from [shop website]) on the shadcn/ui "neutral" scale and the
                Tailwind status families. The bright teal is 2.45:1 on white, too
                faint for text: it is a FILL with ink on it (7.64:1), and text in
                teal is --teal-700 (6.26:1). Two custom neutral steps are marked. ---- */
@@ -351,8 +351,8 @@ Replace:
 with:
 
 ```
-            /* ---- Tier 1: primitives. Projected Image's brand (teal #13B7C0,
-               ink #121212, blue #334FB4, from projectedimage.com), one grey
+            /* ---- Tier 1: primitives. [shop name]'s brand (teal #13B7C0,
+               ink #121212, blue #334FB4, from [shop website]), one grey
                ramp (the mix, 4.1) and the Tailwind status families. The bright
                teal is 2.45:1 on white, too faint for text: it is a FILL with ink
                on it (7.64:1), and text in teal is --teal-700 (6.26:1). ---- */
@@ -529,7 +529,7 @@ In the script, directly after the line `            ['Charts, in the order lines
 
 - [ ] **Step 9: Update the guards that pinned the old greys**
 
-In `t_reactor_wears_projected_images_brand_from_one_place` replace:
+In `t_reactor_wears_the_shops_brand_from_one_place` replace:
 
 ```python
     for tok, v in (("teal-500", "#13B7C0"), ("ink", "#121212"), ("off-white", "#F7F7F7"), ("brand-blue", "#334FB4")):
@@ -612,7 +612,7 @@ with:
 
 - [ ] **Step 10: Open the release note**
 
-Replace the newest entry in `data/changelog.json` (the one titled "Reactor in Projected Image's colours", dated 2026-10-05; every item in it describes this unshipped branch) with this one, dated today:
+Replace the newest entry in `data/changelog.json` (the one titled "Reactor in [shop name]'s colours", dated 2026-10-05; every item in it describes this unshipped branch) with this one, dated today:
 
 ```json
   {
@@ -621,7 +621,7 @@ Replace the newest entry in `data/changelog.json` (the one titled "Reactor in Pr
    "items": [
     {
      "kind": "changed",
-     "text": "Reactor has a new look: one white page in a dark frame, one set of greys, and Projected Image's teal for what is chosen and for the one main button on each screen."
+     "text": "Reactor has a new look: one white page in a dark frame, one set of greys, and [shop name]'s teal for what is chosen and for the one main button on each screen."
     }
    ]
   },
@@ -1192,7 +1192,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `static/index.html:6` (theme-color), `:337-497` (the sidebar block's rules), `:500` (after `.main`), `:2608` (`.nav-new-dot`), `:2632-2637` (Beta), `:4949` (ONE TAG list), `:4991-4994` (the brand row markup), `:5487-5490` (icon wiring), `:29327-29335` (`toggleSidebar`), `:29540` (boot wiring)
-- Test: `tests/test_frontend.py` (`t_the_sidebar_does_not_dim_where_you_are_not` 3562, `t_the_sidebar_keeps_one_inset` 2678, `t_the_header_is_one_implementation_with_one_collapse_point` 5919, `t_reactor_wears_projected_images_brand_from_one_place` 9339, a new test)
+- Test: `tests/test_frontend.py` (`t_the_sidebar_does_not_dim_where_you_are_not` 3562, `t_the_sidebar_keeps_one_inset` 2678, `t_the_header_is_one_implementation_with_one_collapse_point` 5919, `t_reactor_wears_the_shops_brand_from_one_place` 9339, a new test)
 
 **Interfaces:**
 - Consumes: `--surface-chrome`, `--text-on-chrome`, `--nav-text`, `--nav-muted`, `--chrome-fill`, `--chrome-press`, `--nav-on-bg`, `--nav-on-icon`, `--frame-inset`, `--radius-sheet`, `--gap-row-icon`, `--text-micro`, `--lh-caption`, `--row-h` (Tasks 3 and 4); `toggleSidebar()` (index.html:29327); `I.panelLeft`.
@@ -1303,7 +1303,7 @@ Replace:
             transition: background var(--dur) var(--ease); }
         .brand:hover { background: var(--surface-tertiary); }
         .brand:active { background: var(--surface-sunken); }
-        /* Projected Image's wordmark, then the product's own name after a
+        /* [shop name]'s wordmark, then the product's own name after a
            hairline: the company's tool, said once, at the top of every page. */
         .brand .brand-mark { height: var(--box-md); width: auto; flex: none; display: block; }
         .brand .brand-sep { width: var(--bw-hairline); align-self: stretch; margin: var(--sp-1-5) 0; background: var(--border-default); flex: none; }
@@ -1330,7 +1330,7 @@ In the markup replace:
 
 ```html
             <div class="side-head">
-                <button class="brand" id="brand-home" type="button" aria-label="Reactor, by Projected Image: go to the Overview"><img class="brand-mark" src="/brand/logo.svg" alt="Projected Image" width="144" height="40" /><span class="brand-sep" aria-hidden="true"></span><span class="brand-name">Reactor</span></button>
+                <button class="brand" id="brand-home" type="button" aria-label="Reactor, by [shop name]: go to the Overview"><img class="brand-mark" src="/brand/logo.svg" alt="[shop name]" width="144" height="40" /><span class="brand-sep" aria-hidden="true"></span><span class="brand-name">Reactor</span></button>
             </div>
 ```
 
@@ -1338,7 +1338,7 @@ with:
 
 ```html
             <div class="side-head">
-                <button class="brand" id="brand-home" type="button" aria-label="Reactor, by Projected Image: go to the Overview"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Reactor</span></button>
+                <button class="brand" id="brand-home" type="button" aria-label="Reactor, by [shop name]: go to the Overview"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Reactor</span></button>
                 <button class="icon-btn side-hide" id="side-hide" type="button" title="Hide sidebar" aria-label="Hide sidebar" aria-keyshortcuts="Meta+B" aria-controls="sidebar" aria-expanded="true"></button>
             </div>
 ```
@@ -1677,10 +1677,10 @@ with:
     ok("$('side-hide').onclick = toggleSidebar;" in SCRIPT, "and Hide sidebar is the same toggle")
 ```
 
-In `t_reactor_wears_projected_images_brand_from_one_place` replace:
+In `t_reactor_wears_the_shops_brand_from_one_place` replace:
 
 ```python
-    ok('<img class="brand-mark" src="/brand/logo.svg" alt="Projected Image"' in HTML, "the wordmark heads the sidebar")
+    ok('<img class="brand-mark" src="/brand/logo.svg" alt="[shop name]"' in HTML, "the wordmark heads the sidebar")
 ```
 
 with:
@@ -2003,7 +2003,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `static/index.html:298-302` (the title-face list and its controls rule), `:619-756` (`.ov-wrap` padding, header rules, the phone header), `:1118-1119` (the widget grid's tab offsets), the script after `refreshBtn` (5455-5461), `:586` (the busy spin)
-- Test: `tests/test_frontend.py` (`t_reactor_wears_projected_images_brand_from_one_place` 9339, `t_the_brand_pilot_review_findings_stay_fixed` 9403, `t_the_spacing_pass_holds` 9494, `t_a_header_keeps_its_tabs_at_16_in_the_grid` 7066, `t_focus_is_declared_once_per_kind` 5901, a new test)
+- Test: `tests/test_frontend.py` (`t_reactor_wears_the_shops_brand_from_one_place` 9339, `t_the_brand_pilot_review_findings_stay_fixed` 9403, `t_the_spacing_pass_holds` 9494, `t_a_header_keeps_its_tabs_at_16_in_the_grid` 7066, `t_focus_is_declared_once_per_kind` 5901, a new test)
 
 **Interfaces:**
 - Consumes: `freshLabel(at)` (5435), `heroAct(updated, ...buttons)` (5449), `refreshBtn(onClick, label)` (5455), `BETA_TABS` (29211), `--text-title`, `--lh-title`, `--tr-title`, `--live-dot`, `--ring-live`.
@@ -2263,7 +2263,7 @@ Directly after the `refreshBtn` function (it ends `            return b;\n      
 
 - [ ] **Step 7: Update the guards that pinned the old header**
 
-In `t_reactor_wears_projected_images_brand_from_one_place` replace:
+In `t_reactor_wears_the_shops_brand_from_one_place` replace:
 
 ```python
     ok(":is(.brand-name, .ov-hero h2, .ds-type-page, .section-title, .card-title, .chart-head .ct, .run-gate h2, .empty-chat h2, .modal-head h3, .auth-card h2) {"
@@ -11585,7 +11585,7 @@ Replace the newest entry in `data/changelog.json` (the one titled "Reactor's new
    "items": [
     {
      "kind": "changed",
-     "text": "Reactor has a new look: one white page in a dark frame, with Projected Image's teal for what is chosen and for the one main button on each screen. The sidebar is part of the dark frame, and Hide sidebar folds it away."
+     "text": "Reactor has a new look: one white page in a dark frame, with [shop name]'s teal for what is chosen and for the one main button on each screen. The sidebar is part of the dark frame, and Hide sidebar folds it away."
     },
     {
      "kind": "changed",

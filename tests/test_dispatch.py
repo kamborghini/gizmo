@@ -21594,6 +21594,26 @@ def t_the_environment_reference_is_generated_from_the_code():
 
 
 @test
+def t_the_environment_reference_does_not_name_the_shop():
+    """The repository is public, and the reference printed two of the code's
+    defaults with the shop's own domain in them. It writes [shop domain] in
+    its place. The domain is read off the quote site's default here too, so
+    this test does not carry it either."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("env_reference", os.path.join(HERE, "tools", "env_reference.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    host = next(r[3] for r in mod.collect(HERE) if r[0] == "PROPOSAL_HOST").strip("\"'")
+    domain = host.split(".", 1)[1]
+    ok(domain.count(".") >= 1, "the quote site's default is a host on the shop's domain: " + host)
+    for text, where in ((mod.render(HERE), "the generated reference"),
+                        (open(os.path.join(HERE, "docs", "ENVIRONMENT.md"), encoding="utf-8").read(),
+                         "docs/ENVIRONMENT.md")):
+        ok(domain not in text, where + " names the shop's domain")
+        ok('| `PROPOSAL_HOST` | `"quote.[shop domain]"` |' in text, where + ": the row says what stands there")
+
+
+@test
 def t_the_stores_are_measured_not_guessed():
     """Most stores are parsed from disk on every request that needs them. The
     audit could not say whether that costs anything, because the volume is

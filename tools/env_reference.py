@@ -22,6 +22,10 @@ import sys
 MODULES = ["server", "copilot", "eori", "google_data", "google_mail", "logdrain",
            "pipedrive", "recon", "tokenvault", "worldoptions", "xero"]
 OUT = os.path.join("docs", "ENVIRONMENT.md")
+# The repository is public, and two defaults carry the shop's own domain. The
+# reference prints [shop domain] in its place. The domain is read off the
+# quote site's default ("quote.<domain>"), so this file does not name it.
+SHOP_DOMAIN_FROM = "PROPOSAL_HOST"
 
 
 def _banner_index(lines):
@@ -76,8 +80,17 @@ def collect(root):
     return found
 
 
+def _shop_domain(rows):
+    for name, _mod, _section, default, _comment, _lineno in rows:
+        if name == SHOP_DOMAIN_FROM:
+            host = default.strip("\"'")
+            return host.split(".", 1)[1] if host.count(".") >= 2 else ""
+    return ""
+
+
 def render(root):
     rows = collect(root)
+    shop = _shop_domain(rows)
     by_name = {}
     for name, mod, section, default, comment, lineno in sorted(rows, key=lambda r: (r[0], r[1], r[5])):
         e = by_name.setdefault(name, {"modules": [], "default": default, "comment": comment,
@@ -92,7 +105,9 @@ def render(root):
            f"{len(by_name)} variables are read. Every one has a default unless marked "
            "**(required)**; the defaults below are the code's own expressions, so a "
            "path like `/data/...` means the Railway volume. Set a variable in Railway, "
-           "never in the code, and never paste a secret into chat or a document.", ""]
+           "never in the code, and never paste a secret into chat or a document."
+           + (" `[shop domain]` stands for the shop's own website domain, which those "
+              "defaults carry." if shop else ""), ""]
     # Group: server.py first, then copilot.py by section, then the other modules.
     groups = {}
     for name, e in by_name.items():
@@ -107,7 +122,8 @@ def render(root):
         items = groups[(_, title)]
         out += [f"## {title}", "", "| Variable | Default | Read by | Notes |", "|---|---|---|---|"]
         for name, e in sorted(items):
-            default = e["default"].replace("|", "\\|")
+            default = e["default"].replace(shop, "[shop domain]") if shop else e["default"]
+            default = default.replace("|", "\\|")
             if len(default) > 60:
                 default = default[:57] + "..."
             notes = e["comment"].replace("|", "\\|")
