@@ -7626,7 +7626,7 @@ let viewActive = true, busy = false;
 const synced = el('p'); synced.dataset.mailSynced = '';
 document.querySelector = (sel) => sel === '#view-mail.active' ? (viewActive ? {} : null)
     : sel === '#mail-content [data-mail-synced]' ? synced : null;
-let mailCache = null, mailTimer = null, mailFetchSeq = 0, mailFetchedAt = 0, paints = 0, calls = [], mailFound = null;
+let mailCache = null, mailRev = '', mailTimer = null, mailFetchSeq = 0, mailFetchedAt = 0, paints = 0, calls = [], mailFound = null;
 function mailInputBusy() { return busy; }
 const board = () => ({ connected: true, address: 'sales@shop.test', synced_at: '2026-10-12T09:00:00Z',
                        sync_error: '', threads: [{ id: 't1', unread: true, state: 'unassigned',
@@ -7697,6 +7697,105 @@ const settle = () => new Promise(r => setImmediate(r));
     ok(got["action"] == 1, "and an action always redraws")
     ok(got["pendingAges"] == 1, "a send that may have gone out keeps its age honest: %r" % got)
     ok(got["searching"] == 1, "and search results are redrawn, as before")
+
+
+@test
+def t_the_inbox_poll_sends_its_revision_and_an_unchanged_board_is_not_sent():
+    """The 2026-10-12 speed audit, S6. The minute's poll downloaded the whole
+    board (about 140 KB on the wire with 3,000 threads) to find, most minutes,
+    that only the time of the sync had moved. The poll now sends the board's
+    revision, and an unchanged board comes back as {same: true} with that
+    time alone: the synced line moves, and everything the poll redrew for
+    before (ages and amber, search results, a board skipped under typing)
+    is still redrawn. Refresh and actions send no revision and get the
+    whole board, as before."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    ok("mailRev = " in fn_src("async function loadMail("), "a load keeps the board's revision")
+    js = MINIDOM + r"""
+let now = Date.parse('2026-10-12T09:30:00Z'); Date.now = () => now;
+let viewActive = true, busy = false;
+const synced = el('p'); synced.dataset.mailSynced = '';
+document.querySelector = (sel) => sel === '#view-mail.active' ? (viewActive ? {} : null)
+    : sel === '#mail-content [data-mail-synced]' ? synced : null;
+let mailCache = null, mailRev = '', mailFetchSeq = 0, mailFetchedAt = 0, paints = 0, sent = [], mailFound = null;
+function mailInputBusy() { return busy; }
+const board = (rev) => ({ connected: true, address: 'sales@shop.test', synced_at: '2026-10-12T09:00:00Z', rev,
+                          sync_error: '', threads: [{ id: 't1', unread: true, state: 'unassigned',
+                                                      last_at: '2026-10-12T09:20:00Z', state_at: '2026-10-12T09:20:00Z' }] });
+let server = board('r1'), syncedAt = '2026-10-12T09:00:00Z';
+async function api(path, body) {
+  sent.push(JSON.stringify(body));
+  if (body && body.rev === server.rev) return { same: true, rev: server.rev, synced_at: syncedAt };
+  return Object.assign(JSON.parse(JSON.stringify(server)), { synced_at: syncedAt });
+}
+function renderMail() { paints += 1; mailNotePainted(mailCache); }
+function mailAgoLong(iso) { return 'at ' + iso.slice(11, 16); }
+""" + "\n".join(fn_src(f) for f in ("function mailAgo(", "function mailHours(", "async function refreshMailQuiet(",
+                                     "function mailBoardKey(", "function mailAgeKey(", "function mailNotePainted(",
+                                     "function mailSyncedLine(", "function mailPaintSynced(")) + r"""
+(async () => {
+  const out = {};
+  mailCache = board('r1'); mailRev = 'r1'; renderMail(); paints = 0;
+  syncedAt = '2026-10-12T09:05:00Z'; await refreshMailQuiet(false, true);
+  out.quiet = { paints, sent: sent.pop(), line: synced.textContent, cache: mailCache.synced_at, rev: mailRev };
+  paints = 0; now += 5 * 3600 * 1000; await refreshMailQuiet(false, true);
+  out.hoursLater = paints;
+  paints = 0; await refreshMailQuiet(false, true);
+  out.nextMinute = paints;
+  paints = 0; mailFound = { q: 'x', rows: [] }; await refreshMailQuiet(false, true); mailFound = null;
+  out.searching = paints;
+  server = board('r2'); server.threads.push({ id: 't2', unread: true, state: 'unassigned', last_at: '2026-10-12T14:31:00Z' });
+  paints = 0; await refreshMailQuiet(false, true);
+  out.moved = { paints, rev: mailRev, rows: mailCache.threads.length };
+  server = board('r3'); busy = true; paints = 0; await refreshMailQuiet(false, true);
+  out.whileTyping = { paints, rev: mailRev };
+  busy = false; paints = 0; await refreshMailQuiet(false, true);
+  out.afterTyping = { paints, sent: sent[sent.length - 1] };
+  paints = 0; await refreshMailQuiet(true); out.force = { paints, sent: sent[sent.length - 1] };
+  paints = 0; await refreshMailQuiet(); out.action = { paints, sent: sent[sent.length - 1] };
+  console.log(JSON.stringify(out));
+})();
+"""
+    got = _run_node(js)
+    q = got["quiet"]
+    ok(q["sent"] == '{"rev":"r1"}' and q["paints"] == 0, "the poll sends its revision and a quiet minute draws nothing: %r" % q)
+    ok("09:05" in q["line"] and q["cache"] == "2026-10-12T09:05:00Z" and q["rev"] == "r1",
+       "it moves the synced line and keeps the new time: %r" % q)
+    ok(got["hoursLater"] == 1 and got["nextMinute"] == 0, "time passing still moves the ages and amber, once: %r" % got)
+    ok(got["searching"] == 1, "search results are redrawn, as before")
+    ok(got["moved"] == {"paints": 1, "rev": "r2", "rows": 2}, "a board that moved is kept, with its revision, and drawn: %r" % got)
+    ok(got["whileTyping"] == {"paints": 0, "rev": "r3"}, "nothing is drawn under someone typing: %r" % got)
+    ok(got["afterTyping"]["paints"] == 1 and got["afterTyping"]["sent"] == '{"rev":"r3"}',
+       "and the board they missed is drawn on the next poll, even one told nothing changed: %r" % got)
+    ok(got["force"] == {"paints": 1, "sent": '{"force":true}'}, "Refresh sends no revision: %r" % got)
+    ok(got["action"] == {"paints": 1, "sent": "{}"}, "and an action gets the whole board, as before: %r" % got)
+
+
+@test
+def t_inbox_rows_off_screen_are_not_laid_out_on_a_wide_list():
+    """The 2026-10-12 speed audit, P5. Every redraw of the Inbox laid out and
+    painted every row, about 400 of them, though some twenty are on screen:
+    68 to 85 ms on a desktop per redraw, 28 to 32 ms with this rule. The
+    size a row stands at until it is drawn is its real content height (the
+    row's 44 px less its padding), so the reader's place holds across a
+    redraw; the audit's first draft used the whole row height and moved the
+    place by 14 to 44 rows. It applies only where every row is one line (a
+    list wider than 560 px; narrower, rows wrap to two), and only on screen."""
+    css = CSS
+    i = css.find("@container mlist not (max-width: 560px)")
+    ok(i >= 0, "the rule sits where rows are one line")
+    seg = css[i:i + 600]
+    ok(".mrow {" in seg and "content-visibility: auto" in seg, "Inbox rows off screen are skipped")
+    ok("contain-intrinsic-size: auto calc(var(--row-h) - 2 * var(--sp-2))" in seg,
+       "standing at their content height, from the row's own tokens")
+    before = css[:i]
+    ok(before.rstrip().endswith("@media screen {") or "@media screen" in before[-200:], "on screen only")
+    for other in (".lbl-row", ".crm-card", ".files-row"):
+        ok(not re.search(re.escape(other) + r"[^{]*\{[^}]*content-visibility", css), other + " is left alone")
+    pad = re.search(r"\.mrow \{[^}]*padding: var\(--sp-2\) 0; min-height: var\(--row-h\)", css)
+    ok(pad, "the row's padding and height are the ones the size is made from")
 
 
 @test

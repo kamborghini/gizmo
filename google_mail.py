@@ -288,21 +288,65 @@ async def _token(acct: Account = SALES) -> str:
     return acct.access["token"]
 
 
+# One pooled client for the Gmail API (the 2026-10-12 speed audit, X9). A
+# client per call was a new connection and TLS handshake every time (Shopify
+# measured 89 ms fresh against 29 ms pooled before its own calls were pooled)
+# and about 3 ms of the server's one thread to build its SSL context, 5 to 45
+# times a minute for the mail loop alone. Made inside the running loop, made
+# again for another loop or another httpx (the tests swap it), and kept warm
+# only briefly: the gain is in bursts, and a connection left idle for minutes
+# only invites Google to drop it between calls.
+_pool = None
+_pool_for = (None, None)
+
+
+def _pool_drop() -> None:
+    """Forget the pooled client; the next call makes a new one."""
+    global _pool, _pool_for
+    _pool, _pool_for = None, (None, None)
+
+
+def _client():
+    global _pool, _pool_for
+    loop = asyncio.get_running_loop()
+    if _pool is None or _pool.is_closed or _pool_for[0] is not loop or _pool_for[1] is not httpx:
+        _pool = httpx.AsyncClient(timeout=25.0, limits=httpx.Limits(
+            max_connections=10, max_keepalive_connections=8, keepalive_expiry=30.0))
+        _pool_for = (loop, httpx)
+    return _pool
+
+
+async def _send(method: str, url: str, params, body, token: str):
+    """One request on the pooled client. A pooled connection can be dropped by
+    Google between calls, the one failure a fresh connection never had. One
+    that never opened sent nothing, so the call is made again, a send
+    included; one that failed after the request may have arrived is made
+    again only when it changes nothing (a read), so an email is never sent
+    twice."""
+    for attempt in (0, 1):
+        try:
+            return await _client().request(method, url, params=params, json=body,
+                                            headers={"Authorization": f"Bearer {token}"})
+        except httpx.ConnectError:
+            if attempt:
+                raise
+        except (httpx.RemoteProtocolError, httpx.ReadError, httpx.WriteError):
+            if attempt or method.upper() != "GET":
+                raise
+
+
 async def _call(method: str, path: str, *, params: dict = None, body: dict = None,
                 acct: Account = SALES) -> dict:
     token = await _token(acct)
     url = f"{API_BASE}/gmail/v1/users/me/{path}"
-    async with httpx.AsyncClient(timeout=25.0) as c:
-        r = await c.request(method, url, params=params, json=body,
-                            headers={"Authorization": f"Bearer {token}"})
-        if r.status_code == 401:
-            # Google can kill an access token before its stated expiry (the
-            # mailbox password changed, a security event). Standard recovery:
-            # drop the cache, mint a fresh token, retry exactly once.
-            acct.access["token"], acct.access["exp"] = "", 0.0
-            token = await _token(acct)
-            r = await c.request(method, url, params=params, json=body,
-                                headers={"Authorization": f"Bearer {token}"})
+    r = await _send(method, url, params, body, token)
+    if r.status_code == 401:
+        # Google can kill an access token before its stated expiry (the
+        # mailbox password changed, a security event). Standard recovery:
+        # drop the cache, mint a fresh token, retry exactly once.
+        acct.access["token"], acct.access["exp"] = "", 0.0
+        token = await _token(acct)
+        r = await _send(method, url, params, body, token)
     if r.status_code >= 400:
         try:
             detail = r.json().get("error", {}).get("message", "") or r.text[:300]
