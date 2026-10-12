@@ -2430,6 +2430,10 @@
         /* The two halves' headings stand level. */
         .wpair-in > * > .section-title:first-child { margin-top: 0; }
         @container wpair (max-width: 64rem) { .wpair > .wpair-in, .wpair.even > .wpair-in, .wpair.flip > .wpair-in, .wpair.fit > .wpair-in { grid-template-columns: minmax(0, 1fr); } }
+        /* Side by side, a fit pair's table is not a size container: one measures
+           as nothing, and Xero sync's runs sat in an 88px column. Stacked, it
+           is one again, so it turns two-line when narrow. */
+        @container wpair (min-width: 64rem) { .wpair.fit > .wpair-in > * .dt { container-type: normal; } }
         /* what-changed digest */
         .changes-strip { margin: var(--sp-0-5) 0 var(--sp-6); }
         /* Beside the summary it is a short list, two columns of the measure and

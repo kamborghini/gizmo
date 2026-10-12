@@ -2696,6 +2696,19 @@ def t_team_people_keeps_one_teal():
 
 
 @test
+def t_a_table_beside_its_neighbour_keeps_its_natural_width():
+    """Found in Task 10's shots, 12 Oct 2026: Xero sync's runs table sat in an
+    88px column beside the quarantine log, each run a stack of six lines. The
+    pair gives the table its natural width (max-content), but a table's
+    wrapper is a size container, which measures as nothing; with it switched
+    off the column is 420px. While the pair stands side by side the table is
+    not a container, so it is measured; stacked, it is one again and turns
+    two-line when narrow."""
+    ok("@container wpair (min-width: 64rem) { .wpair.fit > .wpair-in > * .dt { container-type: normal; } }" in CSS,
+       "side by side, a fit pair's table is measured at its own width")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left
