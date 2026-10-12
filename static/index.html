@@ -1244,6 +1244,16 @@
         .sizes-dl dt { color: var(--text-secondary); }
         .sizes-dl dd { margin: 0; white-space: normal; }
         .sizes-detail-acts { margin-top: var(--sp-3); }
+        /* The opened model's band: Cut at and Set size on one line, the
+           measures under it, the words in the right-hand cell. */
+        .ktable tr.sizes-detail > td { vertical-align: top; }
+        .ktable tr.sizes-detail > td.sizes-d-r { padding-left: var(--sp-3); }
+        .sizes-cut { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); min-height: var(--control-h); }
+        .sizes-cut > .k { color: var(--text-secondary); }
+        .sizes-cut > .sizes-detail-acts { margin-top: 0; align-items: center; }
+        .sizes-cut b { font-weight: var(--weight-semibold); color: var(--text-primary); }
+        .sizes-facts { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-5); margin-top: var(--sp-1); color: var(--text-primary); }
+        .sizes-facts > span > span { margin-right: var(--sp-2); color: var(--text-secondary); }
         .sizes-edit-unit { align-self: center; color: var(--text-secondary); font-size: var(--text-body); }
         .sizes-unit { display: none; }
         /* The label's answer for the name typed, and a search put right, each
@@ -1272,7 +1282,7 @@
             .ktable.sizes-table tr.sizes-row.open { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); }
             @media (hover: hover) { .ktable.sizes-table tr.sizes-row:hover { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); } }
             .ktable.sizes-table tr.sizes-row.open { border-bottom-color: transparent; }
-            .ktable.sizes-table tr.sizes-row > td { display: block; min-width: 0; padding: 0; border: 0; background: none; }
+            .ktable.sizes-table tr.sizes-row > td { display: block; height: auto; min-width: 0; padding: 0; border: 0; background: none; }
             .ktable.sizes-table tr.sizes-row.open > td { box-shadow: none; }
             .ktable.sizes-table td.sizes-model { grid-area: model; }
             .ktable.sizes-table td.sizes-maker { grid-area: maker; color: var(--text-secondary); font-size: var(--text-xs); line-height: var(--lh-caption); }
@@ -1281,7 +1291,8 @@
             .ktable.sizes-table td.sizes-fig { grid-area: fig; align-self: center; font-size: var(--fig-s); font-weight: var(--weight-semibold); letter-spacing: var(--tr-fig); line-height: var(--lh-none); }
             .ktable.sizes-table td.sizes-fig .sizes-unit { display: inline; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }
             .ktable.sizes-table tr.sizes-row > :is(td.sizes-glass, td.sizes-image, td.sizes-under, td.sizes-notes) { display: none; }
-            .ktable.sizes-table tr.sizes-detail > td { padding: 0 0 var(--sp-4); }
+            .ktable.sizes-table tr.sizes-detail > td { height: auto; padding: 0 0 var(--sp-4); }
+            .ktable.sizes-table tr.sizes-detail > td.sizes-d-l { padding-bottom: var(--sp-2); }
             .sizes-dl { grid-template-columns: minmax(0, 1fr); gap: 0; }
             .sizes-dl dd + dt { margin-top: var(--sp-2); }
         }
@@ -18062,30 +18073,44 @@ Projected Image UK"></textarea>
            notes. Hover text was the only way to read a note or the reason a
            row needs review, and a tablet has no hover; under 860px the notes
            were not on screen at all. */
+        /* An opened model (12 Oct 2026, OPS-16): one band lined up with the
+           table's own columns. Under Maker to Produced as, Cut at with Set size
+           straight after it, and the model's measures; under Status to Notes,
+           the words: the ruling, the review, the notes, its other names and
+           any one customer's size. It was a 177px list of every fact. */
         function sizesDetail(r, span, canEdit) {
-            const tr = el('tr', 'sizes-detail'); const td = el('td'); td.colSpan = span; td.id = 'sizes-d-' + r._i;
-            const dl = el('dl', 'sizes-dl');
-            const add = (k, v) => { if (v) dl.append(el('dt', null, k), el('dd', null, v)); };
+            const tr = el('tr', 'sizes-detail');
+            const left = el('td', 'sizes-d-l'); left.colSpan = span - 3; left.id = 'sizes-d-' + r._i;
+            const right = el('td', 'sizes-d-r'); right.colSpan = 3;
             const v = sizesEff(r);
-            add('Cut at', r.ruling === 'exclude' ? 'Nothing: it is ruled not a gobo, so its label prints no size and no CHECK.' : v ? v + ' mm' : 'No size yet, so its label says CHECK.');
+            const cut = el('div', 'sizes-cut');
+            const acts = el('div', 'act-row sizes-detail-acts');
+            acts.append(el('b', null, r.ruling === 'exclude' ? 'Nothing: it is ruled not a gobo, so its label prints no size and no CHECK.'
+                : v ? v + ' mm' : 'No size yet, so its label says CHECK.'));
+            if (canEdit) {
+                const setBtn = el('button', 'btn btn-sm', 'Set size'); setBtn.type = 'button';
+                setBtn.onclick = () => sizesInlineRule(acts, r, setBtn);
+                acts.append(setBtn);
+            }
+            cut.append(el('span', 'k', 'Cut at'), acts);
+            left.append(cut);
+            const facts = el('div', 'sizes-facts');
+            const fact = (k, val) => { if (!val) return; const f = el('span'); f.append(el('span', null, k), document.createTextNode(val)); facts.append(f); };
+            fact('Holder glass', r.glass && r.glass + ' mm');
+            fact('Image', r.image && r.image + ' mm');
+            fact('Undercut', r.undercut && r.undercut !== '0' ? r.undercut + ' mm' : '');
+            if (facts.childNodes.length) left.append(facts);
+            const dl = el('dl', 'sizes-dl');
+            const add = (k, val) => { if (val) dl.append(el('dt', null, k), el('dd', null, val)); };
             if (r.ruling) add('Ruling', 'Made in the app. ' + (r.off_sheet ? 'This model is not on the sheet.'
                 : r.produced ? 'The sheet says ' + r.produced + ' mm.' : 'The sheet has no size for it.'));
-            add('Holder glass', r.glass && r.glass + ' mm');
-            add('Image', r.image && r.image + ' mm');
-            add('Undercut', r.undercut && r.undercut !== '0' ? r.undercut + ' mm' : '');
             // A ruling settles what the sheet flagged; the flag is kept as the sheet's.
-            add(r.ruling ? 'Sheet’s review' : 'Needs review', r.review);
+            add(r.ruling ? 'Sheet\u2019s review' : 'Needs review', r.review);
             add('Notes', r.off_sheet ? '' : r.notes);
             add('Also sold as', (r._aka || []).join(', '));
             (r.domain_rulings || []).forEach(d => add('One customer', 'Orders from ' + d.domain + ' are cut at ' + d.size + ' mm.'));
-            td.append(dl);
-            if (canEdit) {
-                const acts = el('div', 'act-row sizes-detail-acts');
-                const setBtn = el('button', 'btn btn-sm', 'Set size'); setBtn.type = 'button';
-                setBtn.onclick = () => sizesInlineRule(acts, r, setBtn);
-                acts.append(setBtn); td.append(acts);
-            }
-            tr.append(td);
+            if (dl.childNodes.length) right.append(dl);
+            tr.append(left, right);
             return tr;
         }
         function sizesInlineRule(acts, r, setBtn) {
@@ -18093,7 +18118,9 @@ Projected Image UK"></textarea>
             inp.value = sizesEff(r); inp.setAttribute('aria-label', 'Production size in millimetres');
             const save = el('button', 'btn btn-sm btn-primary', 'Save'); const cancel = el('button', 'btn btn-sm', 'Cancel');
             save.type = cancel.type = 'button';
-            cancel.onclick = () => { acts.replaceChildren(setBtn); setBtn.focus(); };
+            /* The size and Set size come back as they were. */
+            const before = [...acts.childNodes];
+            cancel.onclick = () => { acts.replaceChildren(...before); setBtn.focus(); };
             save.onclick = async () => {
                 setBusy(save, true);
                 try {

@@ -2190,6 +2190,26 @@ def t_the_production_manager_opens_an_order_under_its_row_at_every_width():
 
 
 @test
+def t_an_opened_size_is_one_band_and_never_prints_over_the_next_model():
+    """OPS-16 and OPS-17, 12 Oct 2026: an opened model was a 177px list of
+    every fact under the row, and on a phone its cells kept the table's 44px
+    height as blocks, so its details printed over the models under it. Now it
+    is one band lined up with the table: Cut at with Set size straight after
+    it, and the facts, under Maker to Produced as; the words (ruling, review,
+    notes, other names) under Status to Notes. On a phone every cell is as
+    tall as what it holds."""
+    sd = fn_src("function sizesDetail(")
+    ok("left.colSpan = span - 3;" in sd and "right.colSpan = 3;" in sd, "the band lines up with the table's own columns")
+    ok("el('div', 'sizes-cut')" in sd and "cut.append(el('span', 'k', 'Cut at'), acts)" in sd, "Cut at with Set size straight after it")
+    ok("el('div', 'sizes-facts')" in sd and "el('dl', 'sizes-dl')" in sd, "the facts on the left, the words on the right")
+    ph = CSS.split("@container sizes (max-width: 520px) {")[1].split("\n        }")[0]
+    ok("height: auto" in ph.split(".ktable.sizes-table tr.sizes-row > td {")[1].split("}")[0], "on a phone a model's cells are as tall as what they hold")
+    ok(".ktable.sizes-table tr.sizes-detail > td { height: auto; padding: 0 0 var(--sp-4); }" in ph, "and so are its details', which push the next model down (OPS-17)")
+    ir = fn_src("function sizesInlineRule(")
+    ok("const before = [...acts.childNodes];" in ir and "acts.replaceChildren(...before);" in ir, "Cancel puts the size and Set size back as they were")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left
