@@ -2385,6 +2385,16 @@ def t_skills_read_in_two_columns_with_their_use_on_top():
 
 
 @test
+def t_the_chat_start_sits_in_the_optical_middle():
+    """WS-40, 12 Oct 2026: the start block sat at the top of the conversation
+    column with a void under it, and listed three recent conversations."""
+    ec = fn_src("function renderEmptyChat(")
+    ok("convos.filter(x => x.turns.length).slice(0, 6)" in ec, "six recent conversations")
+    ok(".chat-inner:has(> .empty-chat) { min-height: 100%; }" in CSS, "the start fills the space above the box")
+    ok("padding-bottom: 12vh" in CSS.split("\n        .empty-chat {")[1].split("}")[0], "and sits a little above its middle")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left

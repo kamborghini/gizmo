@@ -5340,7 +5340,10 @@
         .thinking .spinner { flex: none; }
         .spinner { display: inline-grid; place-items: center; width: var(--box-xs); height: var(--box-xs); color: var(--text-tertiary); }
         .spinner svg { width: var(--icon-md); height: var(--icon-md); animation: navspin 1s linear infinite; }
-        .empty-chat { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: var(--sp-7); }
+        /* The start in the optical middle of the space above the box (12 Oct
+           2026, WS-40): it sat at the top with a void under it. */
+        .chat-inner:has(> .empty-chat) { min-height: 100%; }
+        .empty-chat { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: var(--sp-7); padding-bottom: 12vh; }
         .empty-chat .big { width: var(--box-2xl); height: var(--box-2xl); border-radius: var(--radius-inset); background: var(--surface-tertiary); color: var(--text-primary); display: grid; place-items: center; margin-bottom: var(--sp-4); }
         .empty-chat .big svg { width: var(--icon-md); height: var(--icon-md); }
         .empty-chat h2 { font-size: var(--text-head); margin: 0 0 var(--sp-2); font-weight: var(--weight-medium); letter-spacing: normal; line-height: var(--lh-control); }
@@ -10373,7 +10376,7 @@ Projected Image UK"></textarea>
                 el('p', null, 'Ask about products, orders, customers and stock.'));
             /* Earlier conversations first: after a reload, and on a phone, the
                list is far out of sight under the whole menu. */
-            const recent = convos.filter(x => x.turns.length).slice(0, 3);
+            const recent = convos.filter(x => x.turns.length).slice(0, 6);
             if (recent.length) {
                 const r = el('div', 'chat-recent');
                 r.append(el('div', 'chat-recent-h', 'Recent'));
