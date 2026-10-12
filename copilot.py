@@ -48,6 +48,7 @@ import anthropic
 import httpx
 import jwt
 import eori
+import perf
 import google_data
 import mailmime
 import google_mail
@@ -1831,6 +1832,7 @@ PRODUCTION_STATE_MAX = _env_num(int, os.environ.get("PRODUCTION_STATE_MAX", "100
 _poisoned_stores: set = set()
 
 
+@perf.timed("store")      # Server-Timing: reading a store from disk
 def _load_json_store(path: str, key, default):
     try:
         with open(path, "r", encoding="utf-8") as fh:
@@ -1966,6 +1968,7 @@ def _drop_memory_stores(paths=None) -> None:
             _forget_store(path)
 
 
+@perf.timed("store")      # Server-Timing: writing a store to disk
 def _write_json_store(path: str, key: Optional[str], data, *, private: bool = False) -> None:
     """The one way a store reaches disk.
 
@@ -3459,12 +3462,14 @@ def _fallback_for(model: str, e: Exception) -> str:
     return fb
 
 
+@perf.timed("ai")           # Server-Timing: how long this request waited on Claude
 async def _xcreate(client, **kwargs):
     """Every model call. A forced tool call is asked for in words on a model
     that refuses to be forced, and asked for once more if the answer came
     back as prose, so each caller still finds its tool block. A call the
     model fails at Anthropic is asked of the fallback model once, and the
     failure is kept for the usage panel either way."""
+    perf.no_record()        # long by design: out of the slowest-routes table
     must = None
     if _forces_tool(kwargs) and not _can_force_tool(kwargs.get("model", "")):
         must = _unforce(kwargs)
@@ -10802,7 +10807,50 @@ def _etag_matches(header: Optional[str], etag: str) -> bool:
     return False
 
 
-def _asset_response(kind: str, version: str = ""):
+# (kind, content hash, encoding) -> the asset compressed at the strongest
+# level. Keyed on the hash of the bytes that were packed, never on whatever
+# _asset_hashes says at that moment, so a page swapped mid-pack (the tests
+# do it) can never put one build's bytes under another build's URL.
+_asset_packed: dict = {}
+_asset_packing: set = set()     # content hashes whose packing has started
+
+
+def _pack_assets() -> None:
+    """Compress the page's assets once per build, zstd and gzip at their
+    strongest levels. Runs in a thread (see _pack_assets_soon): zstd at level
+    19 is about half a second on app.js, which no request should wait for."""
+    _shell, assets = _page_parts()
+    live = set()
+    for kind, (_media, blob) in list(assets.items()):
+        h = hashlib.sha256(blob).hexdigest()[:12]
+        live.add(h)
+        for enc in ("zstd", "gzip"):
+            if (kind, h, enc) not in _asset_packed:
+                try:
+                    _asset_packed[(kind, h, enc)] = perf.compress(blob, enc, strong=True)
+                except ValueError:
+                    pass                # no zstd on this Python: gzip alone
+    for key in [k for k in _asset_packed if k[1] not in live]:
+        _asset_packed.pop(key, None)    # an earlier build's copies
+
+
+def _pack_assets_soon() -> None:
+    """Start _pack_assets in a thread, once per build. Until it lands, the
+    middleware compresses each request at its quick level, as before."""
+    h = _asset_hashes.get("js", "")
+    if not h or h in _asset_packing:
+        return
+    _asset_packing.add(h)
+
+    def run():
+        try:
+            _pack_assets()
+        except Exception:
+            logger.exception("assets: packing failed; serving them compressed per request")
+    threading.Thread(target=run, name="asset-pack", daemon=True).start()
+
+
+def _asset_response(kind: str, version: str = "", accept: str = ""):
     """The app's own CSS or JS. Static bytes with no data and no auth, and the
     URL carries a content hash, so a year of caching is safe: a new build asks
     for a new URL and there is nothing to invalidate.
@@ -10810,14 +10858,26 @@ def _asset_response(kind: str, version: str = ""):
     The hash must match. The page itself 404s outside the Shopify admin, and
     without this check these two URLs would hand the app's whole client source
     to anyone who guessed the path. The shell always sends the current hash,
-    and it is revalidated on every open, so it can never send a stale one."""
+    and it is revalidated on every open, so it can never send a stale one.
+
+    Served from the build's packed copy when there is one in an encoding the
+    browser takes. Compressing app.js again on every uncached request cost
+    about 50 ms of the event loop per first open, bunched after each update
+    when everybody reloads (the 2026-10-12 audit, D3)."""
     _shell, assets = _page_parts()
     asset = assets.get(kind)
     if not asset or version != _asset_hashes.get(kind, ""):
         return PlainTextResponse("Not found", status_code=404, headers=_API_HEADERS)
     media, blob = asset
-    return Response(blob, media_type=media,
-                    headers={**_API_HEADERS, "Cache-Control": "public, max-age=31536000, immutable"})
+    headers = {**_API_HEADERS, "Cache-Control": "public, max-age=31536000, immutable"}
+    enc = perf.pick_encoding(accept)
+    packed = _asset_packed.get((kind, version, enc)) if enc else None
+    if packed is None:
+        _pack_assets_soon()
+        return Response(blob, media_type=media, headers=headers)
+    # The middleware leaves an answer that already has an encoding alone, and
+    # still adds Vary: Accept-Encoding to it.
+    return Response(packed, media_type=media, headers={**headers, "Content-Encoding": enc})
 
 
 _SHOP_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\.myshopify\.com$")
@@ -11196,6 +11256,7 @@ def _ai_slot() -> Optional[JSONResponse]:
     return None
 
 
+@perf.timed("auth")       # Server-Timing: the door, reading the body included
 async def _guard(request: Request, *, ai: bool = False, min_level: int = 0,
                  max_body: Optional[int] = None, cap: Optional[int] = None,
                  body: bool = True):
@@ -11215,6 +11276,9 @@ async def _guard(request: Request, *, ai: bool = False, min_level: int = 0,
     if not ok:
         return _json({"error": AUTH_REFUSALS.get(reason, "Unauthorized"), "reason": reason or "session"}, 401), None, ""
     uid = str(who or "")
+    perf.admit()            # Server-Timing is for people the door let in
+    if ai:
+        perf.no_record()    # a Claude answer is long by design
     if min_level and _team_level(uid) < min_level:
         return _json({"error": "Only an admin can do that."}, 403), None, ""
     if ai:
@@ -12702,6 +12766,14 @@ def _files_sign_get(key: str, name: str, inline: bool = False) -> str:
     return _files_s3().generate_presigned_url("get_object", Params=params, ExpiresIn=300)
 
 
+def _r2_call(method: str, **kw):
+    """One storage call, client and all. For asyncio.to_thread: building the
+    client is itself a blocking call (the first use after a deploy imports
+    and configures boto3), so `to_thread(_files_s3().get_object, ...)` ran
+    that part on the event loop."""
+    return getattr(_files_s3(), method)(Bucket=R2_BUCKET, **kw)
+
+
 def _files_head(key: str):
     """True byte count of what actually landed in the bucket. None means the
     bucket answered 'no such object'; anything else raises, because a storage
@@ -13160,14 +13232,14 @@ async def _mail_fetch_parts(files: list, uid: str, inline_keys: list = None):
         # object in memory to discover it was too big - on a single worker,
         # which takes dispatch, labels and the inbox down with the inbox.
         try:
-            size = _files_head(key)
+            size = await asyncio.to_thread(_files_head, key)
         except Exception:
             size = None
         if size is not None and size > budget:
             raise ValueError(f"{_mail_part_name(key)} does not fit: attachments come to "
                              "more than 25MB in total.")
         try:
-            obj = await asyncio.to_thread(_files_s3().get_object, Bucket=R2_BUCKET, Key=key)
+            obj = await asyncio.to_thread(_r2_call, "get_object", Key=key)
             return await asyncio.to_thread(obj["Body"].read)
         except Exception as e:
             raise ValueError(f"{_mail_part_name(key)} is missing from storage.") from e
@@ -13241,7 +13313,7 @@ async def _mail_logo_part(key: str):
     if not key or not _files_configured():
         return None
     try:
-        obj = await asyncio.to_thread(_files_s3().get_object, Bucket=R2_BUCKET, Key=key)
+        obj = await asyncio.to_thread(_r2_call, "get_object", Key=key)
         data = await asyncio.to_thread(obj["Body"].read)
     except Exception as e:
         logger.warning("mail: the footer logo could not be read (%s); "
@@ -14136,6 +14208,114 @@ async def _mail_sync_labels(t: dict, owner_name: str = "") -> bool:
     # cached label ids: both must reach disk.
     return True
 
+
+
+# The board read never waits for Gmail (the 2026-10-12 speed audit, X10): it
+# answers from what it holds and, when that is stale, starts one sync behind.
+# The mail loop already syncs every minute, so this only matters after a
+# deploy (the loop starts 20 s in) or while the loop is failing, and it is
+# rate-limited so a failing Gmail is not asked again by every open tab.
+_mail_bg_sync = {"t": 0.0}
+MAIL_BG_SYNC_GAP = 60
+
+
+def _mail_stale(store: dict) -> bool:
+    try:
+        age = (datetime.now(timezone.utc)
+               - datetime.fromisoformat(store["synced_at"])).total_seconds()
+        return age >= MAIL_SYNC_SECONDS
+    except (KeyError, TypeError, ValueError):
+        return True
+
+
+def _mail_sync_soon() -> bool:
+    """Start one sync behind the answer when the picture is stale. False when
+    one is running, the picture is fresh, or one was started under a minute
+    ago."""
+    if _mail_lock.locked() or not _mail_stale(_load_mail()):
+        return False
+    now = time.monotonic()
+    if now - _mail_bg_sync["t"] < MAIL_BG_SYNC_GAP:
+        return False
+    _mail_bg_sync["t"] = now
+    return _spawn_bg(_mail_sync_now())
+
+
+_mail_read_lock = asyncio.Lock()    # read-state changes, one at a time
+
+
+async def _mail_mark_read_later(tid: str) -> None:
+    """Opening an email is reading it, so Gmail is told, after the window has
+    opened. The board already shows it read (the thread route marks it so in
+    memory, because the person has read it). Unless Gmail confirms, it goes
+    back to unread, saved, rather than showing a read state Gmail does not
+    have; and the next sync re-reads the truth from Gmail either way.
+
+    Under _mail_read_lock, which Mark read/unread takes too, and standing
+    down if the email was marked unread meanwhile: that is how somebody
+    undoes an accidental open, and a late mark-read must not undo it."""
+    try:
+        async with _mail_read_lock:
+            store = _load_mail()
+            t = store.get("threads", {}).get(tid)
+            if t is None or t.get("unread"):
+                return
+            res = await _mail_set_unread(store, [tid], False)
+            if not res.get("changed"):
+                t["unread"] = True
+            if _mail_mem is store:
+                _write_mail(store)
+    except Exception:
+        logger.exception("mail: marking read on open failed")
+
+
+MAIL_LABEL_LOCK_WAIT = 2.0     # seconds a relabel waits for a running sync
+
+
+def _mail_labels_soon(tid: str) -> None:
+    if google_mail.connected():
+        _spawn_bg(_mail_labels_later(tid))
+
+
+async def _mail_labels_later(tid: str) -> None:
+    """The Gmail half of a claim, assign or state change, after the answer.
+
+    The move is already on disk (durable first, Gmail second); this only
+    carries it into Gmail as a label, so the person no longer waits for a
+    Gmail round trip over a fresh connection to see their click land.
+
+    Under _mail_lock, the sync's own lock: two quick moves on one thread, or
+    a move and the sync's label catch-up, would otherwise each read the old
+    label, and the thread could end up wearing both owners' labels in Gmail.
+    The owner is read again here, so the label is the thread's state now,
+    not the state when the click was made."""
+    try:
+        # Briefly. A sync holding the lock runs the same label catch-up
+        # (_mail_label_reconcile) before it lets go, so waiting it out only
+        # queued Refresh and the mail loop behind a burst of clicks.
+        try:
+            async with asyncio.timeout(MAIL_LABEL_LOCK_WAIT):
+                await _mail_lock.acquire()
+        except TimeoutError:
+            # First in line for that catch-up: an earlier failure's back-off
+            # or a backlog of never-tried threads would otherwise keep a
+            # fresh move's label wrong for minutes.
+            t = _load_mail().get("threads", {}).get(tid)
+            if t is not None:
+                t.pop("label_retry_at", None)
+                t["label_tried_at"] = 0
+            return
+        try:
+            store = _load_mail()
+            t = store.get("threads", {}).get(tid)
+            if not t:
+                return
+            if await _mail_sync_labels(t, _team_name(t.get("owner") or "")) and _mail_mem is store:
+                _write_mail(store)
+        finally:
+            _mail_lock.release()
+    except Exception:
+        logger.exception("mail: the Gmail label after a move failed")
 
 # What the board is FOR: live work, plus recently closed conversations for
 # context. Two years of finished mail belongs behind search, not in a payload
@@ -19323,15 +19503,18 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/assets/app.css", methods=["GET"])
     async def app_css(request: Request):
-        return _asset_response("css", request.query_params.get("v", ""))
+        return _asset_response("css", request.query_params.get("v", ""),
+                               request.headers.get("accept-encoding", ""))
 
     @mcp.custom_route("/assets/app.js", methods=["GET"])
     async def app_js(request: Request):
-        return _asset_response("js", request.query_params.get("v", ""))
+        return _asset_response("js", request.query_params.get("v", ""),
+                               request.headers.get("accept-encoding", ""))
 
     @mcp.custom_route("/assets/composer.js", methods=["GET"])
     async def composer_js(request: Request):
-        return _asset_response("composer", request.query_params.get("v", ""))
+        return _asset_response("composer", request.query_params.get("v", ""),
+                               request.headers.get("accept-encoding", ""))
 
     @mcp.custom_route("/webhooks/orders", methods=["POST"])
     async def order_webhook(request: Request):
@@ -20784,10 +20967,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return err
         try:
             if google_mail.connected():
-                await _mail_sync_now(force=bool(body.get("force"))
-                                     and time.monotonic() - _mail_last_force["t"] > 15)
+                # Refresh (force) syncs while the person waits, as before: a
+                # forced sync at most every 15 s, and in between only a stale
+                # picture is re-read. Opening the page and the minute's poll
+                # answer from what the board holds and sync behind it.
                 if body.get("force"):
+                    perf.no_record()     # a whole Gmail walk: long by design
+                    await _mail_sync_now(force=time.monotonic() - _mail_last_force["t"] > 15)
                     _mail_last_force["t"] = time.monotonic()
+                else:
+                    _mail_sync_soon()
             store = _load_mail()
             # Setup aids, master only: which Cloud project this app's existing
             # OAuth client lives in, and the EXACT callback the server will
@@ -20834,15 +21023,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # Opening the thread IS the viewing heartbeat: the collision warning
         # never depends on the modal's poll having started.
         # Opening it here IS reading it, so Gmail is told, the same as if the
-        # person had opened it there. Bounded and best effort: a Gmail hiccup
-        # must not stop somebody looking at their email, and the next sync
-        # re-reads the truth from Gmail anyway.
+        # person had opened it there. After the answer: a Gmail round trip and
+        # a whole-mailbox save stood between the click and the window, and a
+        # Gmail hiccup must not stop somebody looking at their email.
         if t.get("unread") and not body.get("peek"):
-            try:
-                await _mail_set_unread(_load_mail(), [t["id"]], False)
-                _write_mail(_load_mail())
-            except Exception:
-                logger.exception("mail: marking read on open failed")
+            t["unread"] = False    # what the person now sees; put back if Gmail refuses
+            _spawn_bg(_mail_mark_read_later(t["id"]))
         now = time.monotonic()
         v = _mail_viewers.setdefault(t["id"], {})
         v[who] = now
@@ -20909,10 +21095,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         t["done_at"] = ""
         _mail_log(t, who, "claimed")
         # Durable FIRST, Gmail second: the ownership change must survive a
-        # restart even if the label trip hangs or fails.
+        # restart even if the label trip hangs or fails. The label follows
+        # after the answer (_mail_labels_later).
         _write_mail(_load_mail())
-        if await _mail_sync_labels(t, _team_name(who)):
-            _write_mail(_load_mail())
+        _mail_labels_soon(t["id"])
         _track(who, "mail", "claimed an email", (t.get("subject") or "")[:60])
         return _json({"ok": True})
 
@@ -20956,8 +21142,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         else:
             _mail_log(t, who, "released", ("note: " + note[:80]) if note else "")
         _write_mail(_load_mail())
-        if await _mail_sync_labels(t, _team_name(target) if target else ""):
-            _write_mail(_load_mail())
+        _mail_labels_soon(t["id"])
         _track(who, "mail",
                ("assigned an email to " + (_team_name(target) or "someone")) if target
                else "released an email",
@@ -20990,8 +21175,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         _mail_log(t, who, {"assigned": "moved it back to assigned", "progress": "started work",
                            "waiting": "is waiting on the customer", "done": "marked it done"}[state])
         _write_mail(_load_mail())
-        if await _mail_sync_labels(t, _team_name(t.get("owner") or "")):
-            _write_mail(_load_mail())
+        _mail_labels_soon(t["id"])
         _track(who, "mail", "email " + ("done" if state == "done" else "moved to " + state),
                (t.get("subject") or "")[:60])
         return _json({"ok": True})
@@ -21328,7 +21512,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             okv, why = False, f"{name} is not an image, so it cannot go inline."
         if not okv:
             try:
-                await asyncio.to_thread(_files_s3().delete_object, Bucket=R2_BUCKET, Key=key)
+                await asyncio.to_thread(_r2_call, "delete_object", Key=key)
             except Exception:
                 logger.warning("mail: refused attachment %s could not be removed", key)
             _track(who, "mail", "refused an attachment", why[:200])
@@ -21983,8 +22167,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not ids:
             return _json({"error": "Nothing was selected."}, 400)
         unread = bool(body.get("unread"))
-        out = await _mail_set_unread(_load_mail(), ids, unread)
-        _write_mail(_load_mail())
+        async with _mail_read_lock:      # after any read-on-open still at Gmail
+            out = await _mail_set_unread(_load_mail(), ids, unread)
+            _write_mail(_load_mail())
         if out["changed"]:
             _track(who, "mail", "marked " + str(out["changed"]) + " email"
                    + ("" if out["changed"] == 1 else "s")
@@ -22121,7 +22306,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 return _json({"error": "Storage did not answer; try again."}, 502)
             if _sniff_kind(head) not in _IMAGE_EXT.values():
                 try:
-                    await asyncio.to_thread(_files_s3().delete_object, Bucket=R2_BUCKET, Key=key)
+                    await asyncio.to_thread(_r2_call, "delete_object", Key=key)
                 except Exception:
                     pass
                 return _json({"error": "That file is not a PNG, JPG, GIF or WebP image."}, 400)
@@ -22522,6 +22707,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         regions: fresh volume, first-run setup, restore, sign back in. Only
         the volume's own JSON/CSV files are accepted, by basename, so a
         crafted zip cannot write anywhere else."""
+        perf.no_record()        # long by design: out of the slowest-routes table
         big = 120 * 1024 * 1024
         err, _body, who = await _guard(request, max_body=big, body=False)
         if err:
@@ -22706,6 +22892,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def backup_route(request: Request):
         """Everything the app has learned lives as files on one volume; this hands
         the merchant a zip of it. JSON and CSV only, fonts and code excluded."""
+        perf.no_record()        # long by design: out of the slowest-routes table
         err, _body, who = await _guard(request, body=False)
         if err:
             return err
@@ -24060,7 +24247,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     d["files"].pop(fid, None)
                     _write_files(d)
                     try:
-                        await asyncio.to_thread(_files_s3().delete_object, Bucket=R2_BUCKET, Key=f["r2_key"])
+                        await asyncio.to_thread(_r2_call, "delete_object", Key=f["r2_key"])
                     except Exception:
                         logger.warning("files: refused upload %s could not be removed", f["r2_key"])
                     _track(_who, "files", "refused an upload", why[:200])
@@ -27793,6 +27980,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                        # the stores are read from disk per request, so this is
                        # what a slow CRM save would show up as, before it does.
                        "stores": _store_report()},
+            # Each route's typical and slowest time since this process
+            # started (perf.summary), slowest first: the live numbers the
+            # 2026-10-12 speed audit could only model.
+            "timing": perf.summary(),
             "email_alerts": {"ok": bool(RESEND_API_KEY and ALERT_EMAIL_TO)},
             # Whether the long-lived credentials on the volume are encrypted.
             # Read from the FILES, not from the environment: a key that is set

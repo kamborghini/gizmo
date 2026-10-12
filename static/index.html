@@ -14557,7 +14557,9 @@ Projected Image UK"></textarea>
         function loansWarmCrm() {
             if (crmCache && crmCache.persons) return;
             api('/api/crm/board', {}).then(r => {
-                if (r && r.crm && !crmCache) { crmCache = r.crm; }
+                /* Dated like any other load: at zero, the next CRM visit took
+                   the copy for ancient and fetched the whole board again. */
+                if (r && r.crm && !crmCache) { crmCache = r.crm; crmLoadedAt = Date.now(); }
             }).catch(() => {});
         }
         async function loadLoans(quiet) {
@@ -26824,16 +26826,26 @@ Projected Image UK"></textarea>
             else if (e.key === 'c' && cur) { e.preventDefault(); const b = cur.querySelector('.mail-claim'); if (b && !b.disabled) b.click(); }
         });
         function showMailView() {
-            if (mailCache) { renderMail(); refreshMailQuiet(); } else { loadMail(); }
-            if (!mailTimer) mailTimer = setInterval(() => {
-                if (document.querySelector('#view-mail.active')) refreshMailQuiet();
-            }, 60000);
+            if (mailCache) { renderMail(); refreshMailQuiet(false, true); } else { loadMail(); }
+            if (!mailTimer) {
+                /* Not in a hidden tab: the minute's poll fetched and redrew the
+                   whole board for nobody (the 2026-10-12 speed audit, P1).
+                   Coming back to the tab catches up at once if a minute has
+                   gone. */
+                mailTimer = setInterval(() => {
+                    if (document.querySelector('#view-mail.active') && !document.hidden) refreshMailQuiet(false, true);
+                }, 60000);
+                document.addEventListener('visibilitychange', () => {
+                    if (!document.hidden && mailCache && document.querySelector('#view-mail.active')
+                        && Date.now() - mailFetchedAt >= 60000) refreshMailQuiet(false, true);
+                });
+            }
         }
         async function loadMail() {
             const box = $('mail-content'); box.innerHTML = '';
             const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Opening the inbox…'));
             box.append(t);
-            try { mailCache = await api('/api/mail/board', {}); renderMail(); }
+            try { mailCache = await api('/api/mail/board', {}); mailFetchedAt = Date.now(); renderMail(); }
             catch (e) {
                 box.innerHTML = '';
                 box.append(el('div', 'msg error', e.message || 'Could not load the inbox.'));
@@ -26845,19 +26857,55 @@ Projected Image UK"></textarea>
             return !!(a && a.closest && a.closest('#mail-content')
                 && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA'));
         }
-        async function refreshMailQuiet(force) {
+        let mailFetchedAt = 0;
+        async function refreshMailQuiet(force, poll) {
             const seq = ++mailFetchSeq;
             let ok = true;
             try {
                 const d = await api('/api/mail/board', force ? { force: true } : {});
                 if (seq !== mailFetchSeq) return true;   // an action's fresher fetch already landed
+                mailFetchedAt = Date.now();
+                /* A poll (the minute's tick, a revisit) redraws only when the
+                   board moved: rebuilding up to 5,800 elements to show the
+                   same board was most of the Inbox's cost. On a quiet minute
+                   only the time of the sync changes, and that one line moves
+                   in place. A sync error always redraws, so its own "since"
+                   stays true; an action always redraws. */
+                const same = poll && !d.sync_error && !mailFound && mailBoardKey(d) === mailPaintedKey
+                    && mailAgeKey(d) === mailPaintedAges;
                 mailCache = d;
                 // Never yank the keyboard out from under someone: while an
                 // input in this view holds focus, keep the data and skip the
                 // repaint; the next tick or action paints it.
-                if (document.querySelector('#view-mail.active') && !mailInputBusy()) renderMail();
+                if (document.querySelector('#view-mail.active') && !mailInputBusy()) {
+                    if (same) mailPaintSynced(d); else renderMail();
+                }
             } catch (e) { ok = false; /* keep the last good board */ }
             return ok;
+        }
+        function mailBoardKey(d) { return JSON.stringify(Object.assign({}, d, { synced_at: '' })); }
+        /* What time alone changes on screen: each row's age as written and
+           which of the 4 h, 8 h and 24 h marks it has passed (amber, red, and
+           quiet for over a day). A poll redraws when this moved since the
+           last drawing, so a quiet board still ages and escalates on time. */
+        function mailAgeKey(d) {
+            return (d.threads || []).map(t => mailAgo(t.last_at)
+                + (mailHours(t.last_at) > 4 ? 'a' : '') + (mailHours(t.last_at) > 8 ? 'b' : '')
+                + (mailHours(t.state_at > t.last_at ? t.state_at : t.last_at) > 24 ? 'c' : '')).join(',')
+                /* and a send that may have gone out says how long ago */
+                + '|' + (d.outbound_pending || []).map(p => mailAgo(p.at)).join(',');
+        }
+        /* What is on screen, compared by the poll: not the page's copy, which
+           a poll skipped under someone's typing has already moved on. */
+        let mailPaintedKey = '', mailPaintedAges = '';
+        function mailNotePainted(d) { mailPaintedKey = mailBoardKey(d); mailPaintedAges = mailAgeKey(d); }
+        function mailSyncedLine(d) {
+            return (d.address || 'The mailbox the team answers')
+                + (d.synced_at ? ' \u00b7 synced ' + mailAgoLong(d.synced_at) : ' \u00b7 never synced');
+        }
+        function mailPaintSynced(d) {
+            const line = document.querySelector('#mail-content [data-mail-synced]');
+            if (line) line.textContent = mailSyncedLine(d);
         }
         async function mailAct(path, body) {
             const r = await api(path, body);
@@ -26877,6 +26925,7 @@ Projected Image UK"></textarea>
         function renderMail() {
             const box = $('mail-content'); box.innerHTML = '';
             const d = mailCache;
+            mailNotePainted(d);
             const hero = mailHero(box);
             if (!d.connected) {
                 /* The setup card is built from the parts Reconciliation's own
@@ -27054,8 +27103,9 @@ Projected Image UK"></textarea>
             const mHead = el('div', 'card-head');
             const lab = (text, n) => text + (n ? ' (' + n + ')' : '');
             mHead.append(el('h3', 'card-title', lab('Shared inbox', counts.open)));
-            mHead.append(el('p', 'card-desc', (d.address || 'The mailbox the team answers')
-                + (d.synced_at ? ' \u00b7 synced ' + mailAgoLong(d.synced_at) : ' \u00b7 never synced')));
+            const mSynced = el('p', 'card-desc', mailSyncedLine(d));
+            mSynced.dataset.mailSynced = '';      // mailPaintSynced moves it on a quiet poll
+            mHead.append(mSynced);
             const mAct = el('div', 'card-act');
             const filt = el('button', 'btn btn-sm', 'Filters' + (d.rules ? ' (' + d.rules + ')' : ''));
             filt.title = 'Rules that sort mail as it arrives';
@@ -28609,6 +28659,7 @@ Projected Image UK"></textarea>
             m.body.append(el('div', 'setting-sub',
                 'This one is older than the board keeps, so it is read only here.'));
             const gm = el('a', 'setting-sub', 'Open in Gmail');
+            gm.dataset.mailReadonly = '';     // reading, so closing need not reload the board
             gm.href = 'https://mail.google.com/mail/u/?authuser='
                 + encodeURIComponent(mailCache.address || '')
                 + '#all/' + encodeURIComponent(t.id);
@@ -28640,13 +28691,31 @@ Projected Image UK"></textarea>
             const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
             const body = el('div', 'modal-body');
             modal.append(head, body); overlay.append(modal); document.body.append(overlay);
-            const close = () => {
+            /* Anything pressed or typed inside the window is why the board is
+               fetched again on close. A window that sets onQuietClose (the
+               email reader) changes nothing if it was only read, so it puts
+               its own row right instead of downloading the whole board (the
+               2026-10-12 speed audit, P1). */
+            let touched = false;
+            /* A control marked data-mail-readonly (reading the full text,
+               opening the email in Gmail) and the X itself are reading. */
+            const touches = (t) => {
+                if (!t || x.contains(t) || !t.closest) return false;
+                const c = t.closest('button, a, input, select, textarea, label, [contenteditable]');
+                return !!c && !('mailReadonly' in c.dataset);
+            };
+            overlay.addEventListener('click', (e) => { if (touches(e.target)) touched = true; }, true);
+            overlay.addEventListener('input', () => { touched = true; }, true);
+            overlay.addEventListener('keydown', (e) => { if (e.key === 'Enter' && touches(e.target)) touched = true; }, true);
+            const m = { body: body, overlay: overlay, onQuietClose: null };
+            m.close = () => {
                 overlay.remove();
                 if (overlay._timer) clearInterval(overlay._timer);
-                if (document.querySelector('#view-mail.active')) refreshMailQuiet();
+                if (!document.querySelector('#view-mail.active')) return;
+                if (touched || !m.onQuietClose) refreshMailQuiet(); else m.onQuietClose();
             };
-            x.onclick = close;   /* the X is the only way out, as everywhere else */
-            return { body: body, close: close, overlay: overlay };
+            x.onclick = m.close;   /* the X is the only way out, as everywhere else */
+            return m;
         }
         /* The email being fetched to open: a double click (the gesture every
            mail client teaches) or a held Enter sent two reads and stacked two
@@ -28661,6 +28730,16 @@ Projected Image UK"></textarea>
             finally { mailOpening.delete(id); }
             const m = mailModal('Email');
             m.overlay.querySelector('.modal').classList.add('mreader');
+            /* Only read: the server tells Gmail behind its answer, so the one
+               change to the board is this row's unread mark. */
+            m.onQuietClose = () => {
+                const row = mailCache && (mailCache.threads || []).find(t => t.id === id);
+                if (row && row.unread) {
+                    row.unread = false;
+                    ++mailFetchSeq;    // a poll already in flight carries the board from before the read
+                    if (!mailInputBusy()) renderMail();
+                }
+            };
             paintMailThread(m, r);
             m.overlay._timer = setInterval(async () => {
                 try {
@@ -28815,6 +28894,7 @@ Projected Image UK"></textarea>
             m.body.append(orders);
             mailLoadOrders(orders, t, m);
             const gm = el('a', 'setting-sub', 'Open in Gmail');
+            gm.dataset.mailReadonly = '';     // reading, so closing need not reload the board
             gm.href = 'https://mail.google.com/mail/u/?authuser='
                 + encodeURIComponent(mailCache.address || '')
                 + '#all/' + encodeURIComponent(t.id);
@@ -28912,6 +28992,7 @@ Projected Image UK"></textarea>
                demand and never kept: it is customer correspondence, and the
                board has no need to hold it. */
             const full = el('button', 'linkish', 'Read the full emails');
+            full.dataset.mailReadonly = '';   // the text is fetched and never kept: still only reading
             full.onclick = async () => {
                 full.disabled = true; full.textContent = 'Reading\u2026';
                 let r;
@@ -31161,6 +31242,23 @@ Projected Image UK"></textarea>
         /* words: what the pill says for this row, [on, mid, off]. A row that
            is not a connection (the secrets, the backups, the disk) said
            'Connected' or 'Not connected' about something that is neither. */
+        /* Each route's typical time and its slowest twentieth since Reactor
+           last started, slowest first (the server keeps them, perf.summary):
+           live numbers, so a slow page is named before anybody has to
+           describe it. Nothing timed yet, no row. */
+        function timingRow(rows) {
+            /* Under a millisecond has nothing to say about slowness. */
+            const top = (rows || []).filter(r => r && r.count && r.p95 >= 1).slice(0, 5);
+            if (!top.length) return null;
+            const slow = top.some(r => r.count >= 20 && r.p95 > 2000);
+            const name = r => String(r.route || '').replace(/^\/api\//, '').replace(/[\/_-]+/g, ' ');
+            const ms = v => v < 1 ? 'under 1 ms' : Math.round(v) + ' ms';
+            /* "1 in 20" only from at least 20 answers; fewer cannot say it. */
+            return connRow('Response times', slow ? 'mid' : 'on',
+                'Slowest since Reactor last started: ' + top.map(r => name(r) + ' usually ' + ms(r.p50)
+                    + (r.count >= 20 ? ', 1 in 20 over ' + ms(r.p95) : '')).join(' \u00b7 ')
+                    + (slow ? '. Worth mentioning if a page feels slow.' : ''), ['Fine', 'Slow', '']);
+        }
         function connRow(title, state, sub, words) {
             const row = el('div', 'setting-row');
             const left = el('div'); left.append(el('div', 'setting-title', title), el('div', 'setting-sub', sub));
@@ -31336,6 +31434,8 @@ Projected Image UK"></textarea>
                         + (r.parse_ms != null ? ' (read in ' + Math.round(r.parse_ms) + ' ms)' : '')).join(' \u00b7 ')
                     + (slow ? '. A save on a store this size rewrites all of it; worth mentioning.' : ''), ['Fine', 'Large', '']));
             }
+            const timing = timingRow(s.timing);
+            if (timing) host.append(timing);
             // Email alerts
             host.append(connRow('Email alerts', s.email_alerts && s.email_alerts.ok ? 'on' : 'mid',
                 s.email_alerts && s.email_alerts.ok ? 'Alerts and failures also reach your inbox.'
@@ -31949,7 +32049,9 @@ Projected Image UK"></textarea>
         loadProfile();  // pull the saved store profile from the server (for the Settings modal)
         loadMemory('notes');   // the notes alone: Overview shows the open follow-ups; the Memory tab reads the rest when opened
         loadAnalysisCache();  // restore last AI-tab results (no tokens spent)
-        loadAlerts();         // any change alerts from scheduled refreshes
+        /* The alerts are not read here: authBoot reads them once it knows
+           who is signed in. A read here ran beside that one, so every boot
+           asked twice, or asked signed out and read nothing. */
 
         // Demo hook for visual testing (no data exposed).
         /* A skill body is the one thing here worth minutes of typing, and it
