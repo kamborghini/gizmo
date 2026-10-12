@@ -5357,12 +5357,26 @@ async def _orders_snapshot(registry: dict, days: int,
                 _orders_cache.pop(k, None)
 
     async def swept() -> tuple:
+        """(orders, meta, ids named while it ran, whether THIS caller started
+        it). A starter's request predates every change named while its sweep
+        ran, so answering it from that sweep is what every read always did; a
+        caller that joined a running sweep may have arrived after a change."""
         task = _orders_inflight.get(key)
-        if task is None or task.done():
+        mine = task is None or task.done()
+        if mine:
             task = asyncio.ensure_future(_sweep_orders(registry, days, fields, key))
             _orders_inflight[key] = task   # no await between the read and the write, so these cannot interleave
         # Shielded: a browser hanging up must not cancel the sweep others are waiting on.
-        return await asyncio.shield(task)
+        return (*await asyncio.shield(task), mine)
+
+    async def refreshed() -> None:
+        task = _orders_refreshing.get(key)
+        if task is None or task.done():
+            task = asyncio.ensure_future(_refresh_orders(registry, key))
+            _orders_refreshing[key] = task
+        await asyncio.shield(task)
+        if _orders_refreshing.get(key) is task:
+            _orders_refreshing.pop(key, None)
 
     def answer(orders, m):
         if meta is not None:
@@ -5374,7 +5388,7 @@ async def _orders_snapshot(registry: dict, days: int,
     # pending AND nothing is being read. Bounded: a change landing during each
     # read could otherwise keep this going; after three rounds the answer is
     # one fresh sweep, which is what every read used to be.
-    last = None        # this caller's own sweep, once it has had one
+    last = None        # a sweep this caller may be answered from (see swept)
     for rnd in range(4):
         hit = _orders_cache.get(key) if ORDER_CACHE_SECS > 0 else None
         if hit is not None and not hit["pending"] and not hit["reading"]:
@@ -5384,31 +5398,35 @@ async def _orders_snapshot(registry: dict, days: int,
         if hit is not None:
             if last is not None and (len(hit["pending"]) > ORDER_REFRESH_MAX
                                      or hit["meta"].get("truncated")):
-                # A storm of changes during this caller's own sweep: it is
-                # answered from that sweep, as every caller of a sweep always
-                # was, and the changes wait for the next load.
+                # Too many changes to read one by one, or a sweep cut short:
+                # the caller that started this sweep is answered from it, as
+                # it always was, and the changes wait for the next load.
                 return answer(*last)
-            task = _orders_refreshing.get(key)
-            if task is None or task.done():
-                task = asyncio.ensure_future(_refresh_orders(registry, key))
-                _orders_refreshing[key] = task
-            await asyncio.shield(task)
-            if _orders_refreshing.get(key) is task:
-                _orders_refreshing.pop(key, None)
+            await refreshed()
             continue
-        orders, m, flight = await swept()
-        last = (orders, m)
+        orders, m, flight, mine = await swept()
+        # A joiner of a sweep that saw a change is never answered from it.
+        last = (orders, m) if (mine or not flight) else None
         if key not in _orders_cache:
             # Not stored: the cache is off, the sweep failed (said in meta),
             # or everything was retired while it ran. Its callers keep its
-            # answer, as they always have, unless an order was named as
-            # changed while it ran: then it may hold that order as it was,
-            # and is swept again rather than answered from.
-            if flight and rnd < 2:
+            # answer, as they always have, except a caller that joined it
+            # while an order was named as changed: that one may hold the
+            # order as it was, and sweeps again rather than being answered.
+            if last is None and rnd < 2:
                 continue
             return answer(orders, m)
+    # Still changing after three rounds. One more read by id when that can
+    # put the snapshot right, then one fresh sweep, which is what every read
+    # used to be (it starts after this caller arrived, so it is current).
+    hit = _orders_cache.get(key) if ORDER_CACHE_SECS > 0 else None
+    if hit is not None and len(hit["pending"]) <= ORDER_REFRESH_MAX and not hit["meta"].get("truncated"):
+        await refreshed()
+        hit = _orders_cache.get(key)
+        if hit is not None and not hit["pending"] and not hit["reading"]:
+            return answer(hit["orders"], hit["meta"])
     _orders_cache.pop(key, None)
-    orders, m, _flight = await swept()
+    orders, m, _flight, _mine = await swept()
     return answer(orders, m)
 
 
