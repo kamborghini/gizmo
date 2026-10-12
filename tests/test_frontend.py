@@ -8244,7 +8244,7 @@ def t_the_crm_refresh_waits_for_someone_typing_in_it():
         print("       (node unavailable, skipped)")
         return
     js = MINIDOM + r"""
-let reads = 0, paints = 0, crmCache = {}, crmLoadedAt = 0, onRead = null;
+let reads = 0, paints = 0, crmCache = {}, crmLoadedAt = 0, onRead = null, crmRev = '', crmPaintedRev = '';
 const setInterval = () => 0;
 document.querySelector = (sel) => sel === '#view-crm.active' ? el('div') : null;
 async function api() { reads += 1; if (onRead) onRead(); crmLoadedAt = 0; return { crm: {} }; }
@@ -8266,6 +8266,51 @@ search.closest = (sel) => sel === '#crm-content' ? host : null;
     ok(got["typing"] == {"reads": 0, "paints": 0}, "no refresh under the search box: %r" % got)
     ok(got["startedMidRead"] == {"reads": 1, "paints": 0}, "nor when typing starts while it reads: %r" % got)
     ok(got["idle"] == {"reads": 2, "paints": 1}, "and it refreshes once nobody is typing: %r" % got)
+
+
+@test
+def t_the_crm_poll_sends_its_revision_and_redraws_only_on_change():
+    """The 2026-10-12 speed audit, S1. Every 90 seconds and on every return to
+    the tab, each open CRM downloaded the whole board (about 400 KB) and
+    redrew it. The page now sends the revision it holds; an unchanged board
+    comes back as {same: true} and nothing is drawn. A board whose redraw was
+    skipped under someone's typing is drawn on the next quiet poll, and every
+    load and write keeps the revision beside the board it describes."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    ok("let crmRev = ''" in SCRIPT, "the page keeps the board's revision")
+    for f in ("async function loadCRM(", "async function crmOp("):
+        ok("crmRev = " in fn_src(f), f + " keeps the revision beside the board")
+    ok("crmPaintedRev = crmRev" in fn_src("function renderCRM("), "and a drawing notes the revision it drew")
+    js = MINIDOM + r"""
+let reads = [], paints = 0, crmCache = { deals: {} }, crmLoadedAt = 0, crmRev = 'r1', crmPaintedRev = 'r1';
+let next = null;
+const setInterval = () => 0;      // the slice carries the page's own 90 s poll
+document.querySelector = (sel) => sel === '#view-crm.active' ? el('div') : null;
+document.activeElement = null;
+async function api(path, body) { reads.push(body.rev || ''); crmLoadedAt = 0; return next; }
+function renderCRM() { paints += 1; crmPaintedRev = crmRev; }
+""" + fn_src("async function crmMaybeRefresh(") + r"""
+(async () => {
+  const out = {};
+  next = { same: true, rev: 'r1' };
+  await crmMaybeRefresh();
+  out.same = { sent: reads.slice(), paints };
+  next = { crm: { deals: { d1: {} } }, rev: 'r2' };
+  crmLoadedAt = 0; await crmMaybeRefresh();  // a minute on
+  out.moved = { paints, rev: crmRev, has: !!crmCache.deals.d1 };
+  crmPaintedRev = 'r1';                     // that drawing was skipped under someone's typing
+  next = { same: true, rev: 'r2' }; paints = 0;
+  crmLoadedAt = 0; await crmMaybeRefresh();
+  out.catchUp = paints;
+  console.log(JSON.stringify(out));
+})();
+"""
+    got = _run_node(js)
+    ok(got["same"] == {"sent": ["r1"], "paints": 0}, "the poll sends its revision and an unchanged board draws nothing: %r" % got)
+    ok(got["moved"] == {"paints": 1, "rev": "r2", "has": True}, "a board that moved is kept, with its revision, and drawn")
+    ok(got["catchUp"] == 1, "and a drawing skipped earlier is made on the next quiet poll")
 
 
 @test

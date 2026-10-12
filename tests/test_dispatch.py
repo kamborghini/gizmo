@@ -28162,6 +28162,95 @@ def t_a_failing_shopify_is_not_asked_again_by_the_load_that_started_the_sweep():
     _with_shop(go)
 
 
+# =========================== speed: the CRM board, built once per version =====
+# The third speed pull request (the 2026-10-12 audit, S1). Every board read
+# rebuilt, serialised and compressed the whole board on the one event loop
+# (about 50 ms at production size, while every other request waited), and
+# every open CRM tab read it again every 90 seconds.
+
+@test
+def t_the_crm_board_is_built_once_per_version_of_what_it_shows():
+    """The board is the CRM store shaped with the team list, today's date and
+    the clock (a deal rots N days after it was last touched). It is now built
+    once per version of those and reused, and a write warms it for the next
+    read. A change to the CRM, the team, the date or the hour builds it
+    again, so nobody is shown a board older than what it is built from."""
+    def go():
+        post("/api/crm/contact", {"op": "person_add", "name": "Board Probe", "emails": ["bp@example.com"]})
+        built, real = [], copilot._crm_shape
+
+        def spy(d):
+            built.append(1)
+            return real(d)
+        saved_today = copilot._crm_today
+        copilot._crm_shape = spy
+        copilot._crm_board_cache["key"] = None       # a cold start, as after a deploy
+        try:
+            a = post("/api/crm/board", {}).json()
+            b = post("/api/crm/board", {}).json()
+            eq(len(built), 1, "two reads, one build")
+            eq(a, b, "and the same board both times")
+            ok(a.get("rev"), "with a revision to compare against")
+            built.clear()
+            w = post("/api/crm/contact", {"op": "person_add", "name": "Second Probe", "emails": ["sp@example.com"]})
+            eq(w.status_code, 200, w.text[:200])
+            c = post("/api/crm/board", {}).json()
+            eq(len(built), 1, "the write built it once, and the read after it reused that")
+            ok(any(p.get("name") == "Second Probe" for p in c["crm"]["persons"].values()), "and it shows the write")
+            ok(c["rev"] != a["rev"] and c["rev"] == w.json().get("rev"), "under a new revision, which the write answered")
+            built.clear()
+            ready_user("Board Teammate", "boardmate")
+            d = post("/api/crm/board", {}).json()
+            eq(len(built), 1, "a change to the team builds it again")
+            ok(any(r["name"] == "Board Teammate" for r in d["crm"]["team"]), "and the new name is on it")
+            built.clear()
+            copilot._crm_today = lambda: saved_today() + timedelta(days=1)
+            e = post("/api/crm/board", {}).json()
+            eq(len(built), 1, "a new day builds it again")
+            eq(e["crm"]["today"], (saved_today() + timedelta(days=1)).isoformat())
+        finally:
+            copilot._crm_shape, copilot._crm_today = real, saved_today
+    with_accounts(go)
+
+
+@test
+def t_an_unchanged_crm_board_is_not_sent_again():
+    """Each open CRM tab asks for the board every 90 seconds and on every
+    return to the tab: about 400 KB each time at production size, redrawn in
+    full. The page now sends the revision it holds and an unchanged board
+    answers {same: true}. A page that sends no revision (one still open from
+    before this update) gets the whole board as it always has."""
+    def go():
+        post("/api/crm/contact", {"op": "person_add", "name": "Rev Probe", "emails": ["rp@example.com"]})
+        full = post("/api/crm/board", {}).json()
+        rev = full["rev"]
+        same = post("/api/crm/board", {"rev": rev}).json()
+        eq(same, {"same": True, "rev": rev}, "nothing changed, nothing sent")
+        old_page = post("/api/crm/board", {}).json()
+        ok("crm" in old_page, "an older page that sends no revision still gets the board")
+        post("/api/crm/contact", {"op": "person_add", "name": "Rev Probe 2", "emails": ["rp2@example.com"]})
+        moved = post("/api/crm/board", {"rev": rev}).json()
+        ok("crm" in moved and moved["rev"] != rev, "a board that moved is sent, with its new revision")
+        stale = post("/api/crm/board", {"rev": "not-a-revision"}).json()
+        ok("crm" in stale, "an unknown revision gets the board")
+    with_accounts(go)
+
+
+@test
+def t_forgetting_the_crm_forgets_its_board():
+    """The cached board shares some collections with the CRM store in memory
+    (the leads, the stages, the settings). A write that fails forgets the
+    store so the next read comes from disk; its board must go with it, or a
+    change that was never saved could be served from the board."""
+    def go():
+        post("/api/crm/contact", {"op": "person_add", "name": "Forget Probe", "emails": ["fp@example.com"]})
+        copilot._crm_board()
+        ok(copilot._crm_board_cache["key"] is not None, "the board is kept")
+        copilot._forget_store(copilot.CRM_PATH)
+        eq(copilot._crm_board_cache["key"], None, "and forgotten with the store")
+    with_accounts(go)
+
+
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a

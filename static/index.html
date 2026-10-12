@@ -14567,7 +14567,7 @@ Projected Image UK"></textarea>
             api('/api/crm/board', {}).then(r => {
                 /* Dated like any other load: at zero, the next CRM visit took
                    the copy for ancient and fetched the whole board again. */
-                if (r && r.crm && !crmCache) { crmCache = r.crm; crmLoadedAt = Date.now(); }
+                if (r && r.crm && !crmCache) { crmCache = r.crm; crmRev = r.rev || ''; crmLoadedAt = Date.now(); }
             }).catch(() => {});
         }
         async function loadLoans(quiet) {
@@ -24202,6 +24202,11 @@ Projected Image UK"></textarea>
            Shopify is read-only here and the AI never sees any of it.
            ================================================================== */
         let crmCache = null, crmSeg = 'deals', crmDealsMode = 'board';
+        /* The revision of the board in crmCache, and of the one last drawn.
+           The poll sends crmRev and an unchanged board comes back as
+           {same: true}, not 400 KB (the 2026-10-12 speed audit, S1). Every
+           line that sets crmCache sets crmRev with it, or clears it. */
+        let crmRev = '', crmPaintedRev = '';
         let crmQ = '', crmStatus = 'open', crmLeadsMode = 'active', crmContactsMode = 'people';
         let crmActPeriod = 'upcoming', crmActTypesOff = {}, crmActMine = false;
         let crmLabelF = '', crmOwnerF = '', crmContactsQ = '', crmContactsPage = 1, crmContactsSize = 25;
@@ -24271,7 +24276,7 @@ Projected Image UK"></textarea>
             box.append(t);
             try {
                 const r = await api('/api/crm/board', {});
-                crmCache = r.crm; crmLoadedAt = Date.now();
+                crmCache = r.crm; crmRev = r.rev || ''; crmLoadedAt = Date.now();
                 renderCRM();
             } catch (e) {
                 box.innerHTML = '';
@@ -24298,8 +24303,15 @@ Projected Image UK"></textarea>
             };
             if (typing()) return;
             try {
-                const r = await api('/api/crm/board', {});
-                crmCache = r.crm; crmLoadedAt = Date.now();
+                const r = await api('/api/crm/board', crmRev ? { rev: crmRev } : {});
+                crmLoadedAt = Date.now();
+                if (r && r.same) {
+                    /* Nothing moved. Draw only if the last board that came
+                       was never drawn (it arrived under someone's typing). */
+                    if (crmPaintedRev !== crmRev && !typing()) renderCRM();
+                    return;
+                }
+                crmCache = r.crm; crmRev = r.rev || '';
                 if (!typing()) renderCRM();
             } catch (e) { /* stale is better than an error bar mid-work */ }
         }
@@ -24308,7 +24320,7 @@ Projected Image UK"></textarea>
         async function crmOp(path, body) {
             /* Every write returns the fresh state, so the UI never guesses. */
             const r = await api(path, body);
-            if (r && r.crm) { crmCache = r.crm; crmLoadedAt = Date.now(); }
+            if (r && r.crm) { crmCache = r.crm; crmRev = r.rev || ''; crmLoadedAt = Date.now(); }
             return r;
         }
         /* The deal's notes and changelog stay out of the board payload at
@@ -24350,6 +24362,7 @@ Projected Image UK"></textarea>
         }
 
         function renderCRM() {
+            crmPaintedRev = crmRev;
             const box = $('crm-content');
             /* A re-render must not throw the reader back to the top, or snap
                the board back to stage 1: every op repaints the whole tab. */
@@ -24629,7 +24642,7 @@ Projected Image UK"></textarea>
             if (go) {
                 btn.textContent = 'Import again';
                 toastOk('Imported. The CRM tab now holds your Pipedrive data.');
-                crmCache = null;
+                crmCache = null; crmRev = '';
                 loadCRM();
                 return;
             }
@@ -28805,7 +28818,7 @@ Projected Image UK"></textarea>
                 a.onclick = async () => {
                     m.close();
                     setView('crm');
-                    if (!crmCache) { try { const rr = await api('/api/crm/board', {}); crmCache = rr.crm; crmLoadedAt = Date.now(); } catch (e) { toastError(e.message); return; } }
+                    if (!crmCache) { try { const rr = await api('/api/crm/board', {}); crmCache = rr.crm; crmRev = rr.rev || ''; crmLoadedAt = Date.now(); } catch (e) { toastError(e.message); return; } }
                     renderCRM();
                     crmDealModal(t.crm_deal_id);
                 };

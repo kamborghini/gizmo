@@ -1944,6 +1944,10 @@ def _load_json_cached(path: str, key, default, prepare=None):
 def _forget_store(path: str) -> None:
     """Drop the cached copy: the next read comes from disk."""
     _json_cache.pop(path, None)
+    if path == CRM_PATH:
+        # The cached board shares collections with the store in memory, so a
+        # change that was never saved must not outlive it there either.
+        _crm_board_cache["key"] = None
 
 
 def _memory_stores() -> dict:
@@ -11230,6 +11234,20 @@ def _json(data: dict, status: int = 200) -> JSONResponse:
                         headers={**_API_HEADERS, "X-App-Build": _build_id()})
 
 
+def _json_dumps_like_starlette(data) -> bytes:
+    """The bytes JSONResponse would send for `data`, made once so a board that
+    has not changed is not serialised again for every reader."""
+    return json.dumps(data, ensure_ascii=False, allow_nan=False, indent=None,
+                      separators=(",", ":")).encode("utf-8")
+
+
+def _json_body(raw: bytes, status: int = 200) -> Response:
+    """An answer made of bytes _json_dumps_like_starlette made, with the
+    headers every _json answer carries."""
+    return Response(raw, status_code=status, media_type="application/json",
+                    headers={**_API_HEADERS, "X-App-Build": _build_id()})
+
+
 # ---------------------------------------------------------------------------
 # Abuse / cost controls — in-memory rate limiting + request-size guards
 # ---------------------------------------------------------------------------
@@ -12444,6 +12462,42 @@ def _crm_shape(d: dict) -> dict:
                              "value": v.get("value") or 0,
                              "deleted_at": v.get("deleted_at") or ""}
                             for v in trash[:50]]}
+
+
+# The board, built once per version of what it is built from (the 2026-10-12
+# speed audit, S1): every read rebuilt and serialised the whole board on the
+# one event loop, about 50 ms at production size while every other request
+# waited, and each open CRM tab read it again every 90 seconds. _crm_shape
+# reads the CRM store, the users store (the team list and its names), today's
+# London date (what is due) and the clock (a deal rots N days after it was
+# last touched), so the key holds each: the two stores by their file (a write,
+# a restore or a hand repair is a new file), the date, and the hour, which is
+# as late as a rotting flag can come. A write warms it with the board it built.
+_crm_board_cache: dict = {"key": None, "board": None, "rev": "", "body": None}
+
+
+def _crm_board_key():
+    return (_stat_key(CRM_PATH), _stat_key(USERS_PATH), _crm_today().isoformat(),
+            datetime.now(timezone.utc).strftime("%Y-%m-%dT%H"))
+
+
+def _crm_board_keep(key, board: dict) -> str:
+    rev = hashlib.sha256(repr(key).encode("utf-8")).hexdigest()[:16] if key[0] is not None else ""
+    if rev:
+        _crm_board_cache.update(key=key, board=board, rev=rev, body=None)
+    return rev
+
+
+def _crm_board() -> tuple:
+    """(board, revision): the shaped CRM, built only when something it is
+    built from has changed. The revision is "" when the store has no file
+    yet, and such a board is not kept."""
+    key = _crm_board_key()
+    c = _crm_board_cache
+    if key[0] is not None and c["key"] == key:
+        return c["board"], c["rev"]
+    board = _crm_shape(_load_crm())
+    return board, _crm_board_keep(key, board)
 
 
 def _crm_team_list() -> list:
@@ -18890,7 +18944,8 @@ def _crm_ok(d: dict, extra: Optional[dict] = None, action: str = "",
     _write_crm(d)
     if action:
         _track(who, "crm", action, detail)
-    out = {"ok": True, "crm": _crm_shape(d)}
+    board = _crm_shape(d)
+    out = {"ok": True, "crm": board, "rev": _crm_board_keep(_crm_board_key(), board)}
     if extra:
         out.update(extra)
     return _json(out)
@@ -23496,11 +23551,24 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/crm/board", methods=["POST"])
     async def crm_board_route(request: Request):
-        err, _body, _who = await _crm_guard(request)
+        err, body, _who = await _crm_guard(request)
         if err:
             return err
         try:
-            return _json({"crm": _crm_shape(_load_crm())})
+            board, rev = _crm_board()
+            # The page sends the revision it holds; an unchanged board is not
+            # sent again (about 400 KB at production size, every 90 seconds
+            # per open tab). A page that sends none, one still open from
+            # before this update, gets the whole board as it always did.
+            if rev and str((body or {}).get("rev") or "") == rev:
+                return _json({"same": True, "rev": rev})
+            c = _crm_board_cache
+            if rev and c["rev"] == rev and c["body"] is not None:
+                return _json_body(c["body"])
+            raw = _json_dumps_like_starlette({"crm": board, "rev": rev})
+            if rev and c["rev"] == rev:
+                c["body"] = raw
+            return _json_body(raw)
         except Exception:
             logger.exception("CRM board failed")
             return _json({"error": "Couldn't load the CRM."}, 500)
@@ -23962,7 +24030,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if rep["linked"]:
                     _track(actor, "crm", "linked contacts to Shopify",
                            str(rep["linked"]) + " matched by email")
-                return _json({"ok": True, "report": rep, "crm": _crm_shape(_load_crm())})
+                board, rev = _crm_board()
+                return _json({"ok": True, "report": rep, "crm": board, "rev": rev})
 
             if op in ("person_merge", "org_merge"):
                 # 1,951 imported people guarantee duplicates, and deleting the
