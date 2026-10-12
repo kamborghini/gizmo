@@ -2271,6 +2271,24 @@ def t_the_inbox_list_has_a_head_row_and_who_is_on_today_is_one_line():
 
 
 @test
+def t_files_is_one_table_with_its_meter_on_the_tab_row():
+    """OPS-28 to OPS-31, 12 Oct 2026: the facts sat in fixed cells pushed to
+    the right of a stretching name, a folder's figures sat apart from the
+    files', the meter was a line of its own over the tabs, and on a phone four
+    40 targets fought a file name for the row."""
+    fn = fn_src("function renderFiles() {")
+    ok("const tabsRow = el('div', 'page-tabs');" in fn and "end.append(meter);" in fn, "the storage meter is at the tab row's right end (OPS-29)")
+    ok("#files-content .files-list:has(> .files-row) { display: grid; grid-template-columns: max-content minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, .6fr) max-content;" in CSS,
+       "the list is one grid: Name 2, Owner 1, Modified 1, Size 0.6, then the actions (OPS-28)")
+    ok("#files-content .files-list > .files-row > .files-cols { display: contents; }" in CSS, "each row's facts take the list's own columns")
+    br = fn_src("function renderFilesBrowser(")
+    ok("row.append(filesCols(byName(f.by), tot.at ? fmtDate(tot.at) : ''" in br, "a folder's Owner says who made it")
+    ok(br.count("filesMore(acts, [") == 2 and ".files-more { display: none; }" in CSS, "on a phone each row's actions wait behind its ••• (OPS-31)")
+    ok("            #files-content .files-acts:has(> .files-more) > :not(.files-more) { display: none; }\n            #files-content .files-acts > .files-more { display: inline-flex; }" in CSS,
+       "where the ••• shows and the buttons step aside")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left

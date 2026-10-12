@@ -5699,6 +5699,21 @@
            159.5px together at the small scale, so that list reserves its own
            width and its header cell is built to match. */
         #files-content .files-acts { min-width: 118px; justify-content: flex-end; }
+        /* ONE TABLE BY ITS COLUMNS (12 Oct 2026, OPS-28, OPS-30): the list is
+           one grid and every row takes its tracks, the icon, Name 2, Owner 1,
+           Modified 1 and Size 0.6 sharing the spare width, then the actions in
+           one column, a folder's two in the files' last two slots. The facts sat
+           in fixed cells pushed right by a stretching name. Not on a phone,
+           where a row is two lines. */
+        @media (min-width: 641px) {
+            #files-content .files-list:has(> .files-row) { display: grid; grid-template-columns: max-content minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, .6fr) max-content; column-gap: var(--sp-4); }
+            #files-content .files-list:has(> .files-row) > * { grid-column: 1 / -1; }
+            #files-content .files-list > .files-row { display: grid; grid-template-columns: subgrid; column-gap: var(--sp-4); }
+            #files-content .files-list > .files-row > .files-cols { display: contents; }
+            #files-content .files-list > .files-row > .files-cols > .who { display: block; }
+        }
+        .files-more { display: none; }
+        .page-tabs-end > .files-meter { margin: 0; }
         #files-content .files-acts.wide { min-width: 160px; }
         /* The name is the flexible cell and it starts from a floor rather than
            from its own text: with a content basis, a long name and a short one
@@ -5836,6 +5851,9 @@
                where a column starts: a folder row can keep the 60px it was
                reserving for buttons it does not have, and show more name. */
             #files-content .files-acts { min-width: 0; }
+            /* The row's actions wait behind its ••• (12 Oct 2026, OPS-31). */
+            #files-content .files-acts:has(> .files-more) > :not(.files-more) { display: none; }
+            #files-content .files-acts > .files-more { display: inline-flex; }
             /* Two text buttons cannot share a phone line with a file name: the
                trash rows were clipping theirs to four characters. */
             #files-content .files-acts.wide { order: 4; flex: 1 1 100%;
@@ -29657,6 +29675,15 @@ Projected Image UK"></textarea>
                      el('span', 'size', size || ''));
             return c;
         }
+        /* On a phone a row's actions wait behind its ••• (12 Oct 2026, OPS-31):
+           four 40 targets do not fit beside a file's name. The button lives in
+           the actions cell, so the row keeps the list's columns. */
+        function filesMore(acts, items, name) {
+            const b = el('button', 'icon-btn files-more'); b.type = 'button'; b.innerHTML = I.moreH;
+            b.setAttribute('aria-label', 'Actions for ' + name); b.setAttribute('aria-haspopup', 'menu');
+            b.onclick = (e) => { e.stopPropagation(); dropMenu(b, items); };
+            acts.append(b);
+        }
         function filesHeadRow(whenLabel, wide) {
             const row = el('div', 'files-row files-head');
             row.append(el('span', 'files-ic'), el('span', 'files-name still', 'Name'),
@@ -29708,11 +29735,15 @@ Projected Image UK"></textarea>
             const meter = el('div', 'files-meter' + (pct >= 90 ? ' warn' : ''));
             const bar = el('div', 'bar'); const fill = el('i'); fill.style.width = pct + '%'; bar.append(fill);
             meter.append(bar, el('span', null, fmtBytes(d.used) + ' of ' + fmtBytes(d.quota) + ' used'));
-            box.append(meter);
             if (d.setup_error) box.append(el('div', 'msg error', 'Storage error: ' + d.setup_error
                 + '. Uploads may fail until it is fixed.'));
-            box.append(tabStrip([['files', 'Files'], { key: 'trash', label: 'Trash', extra: d.trash.length ? el('span', 'crm-badge', String(d.trash.length)) : null }],
+            /* The meter at the tab row's right end (12 Oct 2026, OPS-29): it was
+               a line of its own between the header and the tabs. */
+            const tabsRow = el('div', 'page-tabs');
+            tabsRow.append(tabStrip([['files', 'Files'], { key: 'trash', label: 'Trash', extra: d.trash.length ? el('span', 'crm-badge', String(d.trash.length)) : null }],
                                 filesSeg, (k) => { filesSeg = k; renderFiles(); }, { label: 'Files sections' }));
+            const end = el('div', 'page-tabs-end'); end.append(meter); tabsRow.append(end);
+            box.append(tabsRow);
             const host = el('div'); box.append(host);
             if (filesSeg === 'trash') renderFilesTrash(host);
             else renderFilesBrowser(host);
@@ -29768,6 +29799,8 @@ Projected Image UK"></textarea>
                 name.textContent = f.name;
                 const from = filesPathOf(f.folder_id);
                 if (from) name.append(el('span', 'fpath', '  ·  ' + from));
+                /* Cut with an ellipsis when the column is narrow, so said in full on hover. */
+                name.title = f.name + (from ? ' (from ' + from + ')' : '');
                 row.append(name, filesCols(byName(f.by), fmtDate(f.trashed_at), fmtBytes(f.size)));
                 const acts = el('div', 'files-acts wide');
                 // The small scale, like every other control in this card: at
@@ -30050,7 +30083,8 @@ Projected Image UK"></textarea>
                 // reference prints it under the folder's title.
                 name.append(el('span', 'fpath', '  ·  ' + (bits.length ? bits.join(', ') : 'Empty')));
                 row.append(name);
-                row.append(filesCols('', tot.at ? fmtDate(tot.at) : '', tot.size ? fmtBytes(tot.size) : ''));
+                /* Owner is who made the folder (12 Oct 2026): it was blank. */
+                row.append(filesCols(byName(f.by), tot.at ? fmtDate(tot.at) : '', tot.size ? fmtBytes(tot.size) : ''));
                 const acts = el('div', 'files-acts');
                 const rn = el('button', 'icon-btn'); rn.innerHTML = I.edit; rn.title = 'Rename folder';
                 rn.onclick = () => inlineRename(row, name, f.name, async (v) => {
@@ -30063,6 +30097,8 @@ Projected Image UK"></textarea>
                     catch (e) { toastError(e.message || 'Could not delete the folder.'); }
                 };
                 acts.append(rn, del);
+                filesMore(acts, [{ label: 'Rename', icon: I.edit, onClick: () => rn.click() },
+                                 { label: 'Delete folder', icon: I.trash, onClick: () => del.click() }], f.name);
                 row.append(acts);
                 // Folders accept dropped rows (move) and dropped OS files (upload into it).
                 row.ondragover = (e) => { e.preventDefault(); e.stopPropagation(); row.classList.add('dropok'); };
@@ -30124,6 +30160,10 @@ Projected Image UK"></textarea>
                     catch (e) { toastError(e.message || 'Could not delete the file.'); }
                 };
                 acts.append(dl, mv, rn, del);
+                filesMore(acts, [{ label: 'Download', icon: I.download, onClick: () => dl.click() },
+                                 { label: 'Move to folder', icon: I.moveTo, onClick: () => mv.click() },
+                                 { label: 'Rename', icon: I.edit, onClick: () => rn.click() },
+                                 { label: 'Move to trash', icon: I.trash, onClick: () => del.click() }], f.name);
                 row.append(acts);
                 row.draggable = true;
                 row.ondragstart = (e) => { dragFileId = fid; e.dataTransfer.effectAllowed = 'move'; };
