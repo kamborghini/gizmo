@@ -5098,8 +5098,9 @@ def _month_axis(months: int) -> list:
 # How long a swept order list may be reused. Every queue segment needs the SAME
 # sweep, so at 45 seconds a merchant who read one screen before clicking the
 # next paid the whole 8-page fan-out again. Correctness does not rest on the
-# TTL: _bust_orders() clears these the moment an order webhook lands or the app
-# writes a tag, so a real change is never waited out.
+# TTL: an order webhook or a write by the app names its order, which every
+# snapshot reads again before it answers (_orders_changed), and Refresh retires
+# them all (_bust_orders), so a real change is never waited out.
 ORDER_CACHE_SECS = _env_num(int, os.environ.get("ORDER_CACHE_SECS", "180"), "180", "ORDER_CACHE_SECS")
 # Distinct (days, fields) sweeps kept. There are about seven in the codebase,
 # so with a longer TTL this became the binding constraint rather than the
@@ -5123,10 +5124,11 @@ ORDER_REFRESH_MAX = 50
 # Without these the app is blind between reads: the order snapshot has a 45s
 # TTL, and an edit made in the Shopify admin (a payment landing, a tag changed,
 # a refund) stays invisible until the clock runs out. Shopify POSTs order
-# events here instead; each verified event retires the snapshot, so the next
-# read of any tab reflects reality within seconds. The TTL stays as the
-# backstop, because webhooks are at-least-once, unordered and occasionally
-# late; the payload is treated purely as a trigger and never as state.
+# events here instead; each verified event names its order, which every
+# snapshot reads again from Shopify before it answers, so the next read of any
+# tab reflects reality within seconds. The TTL stays as the backstop, because
+# webhooks are at-least-once, unordered and occasionally late; the payload only
+# says which order to read again and is never used as state.
 # ---------------------------------------------------------------------------
 WEBHOOK_MAX_BYTES = 1024 * 1024        # a full order payload, with headroom
 # version: the Shopify version the last event was sent in, from its own header.
@@ -5208,9 +5210,11 @@ def _orders_changed(order_ids) -> None:
     for i in order_ids or ():
         try:
             ids.add(int(i))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             pass
-    if not ids:
+    if not ids or ORDER_CACHE_SECS <= 0:
+        # Nothing cached to put right (the cache switched off): detach any
+        # sweep in flight, exactly as every change used to.
         _bust_orders()
         return
     global _orders_epoch
@@ -5223,7 +5227,8 @@ def _orders_changed(order_ids) -> None:
 
 async def _sweep_orders(registry: dict, days: int, fields: str, key) -> tuple:
     """One shared sweep: fetches, stores if it is worth storing, and returns
-    (orders, meta) to every caller waiting on it."""
+    (orders, meta, ids named as changed while it ran) to every caller waiting
+    on it."""
     full_epoch = _orders_full_epoch    # retired by _bust_orders, or not
     flight: set = set()                # orders named as changed while this runs
     _orders_flight[key] = flight
@@ -5235,10 +5240,10 @@ async def _sweep_orders(registry: dict, days: int, fields: str, key) -> tuple:
         # as changed while it ran are stored as pending, to be read again.
         if ORDER_CACHE_SECS > 0 and not meta.get("failed") and _orders_full_epoch == full_epoch:
             _orders_cache[key] = {"at": time.monotonic(), "orders": orders,
-                                  "meta": dict(meta), "pending": set(flight)}
+                                  "meta": dict(meta), "pending": set(flight), "reading": set()}
             while len(_orders_cache) > ORDER_CACHE_MAX:
                 _orders_cache.pop(min(_orders_cache, key=lambda k: _orders_cache[k]["at"]), None)
-        return orders, meta
+        return orders, meta, flight
     finally:
         if _orders_flight.get(key) is flight:
             _orders_flight.pop(key, None)
@@ -5265,12 +5270,28 @@ async def _refresh_orders(registry: dict, key) -> bool:
     if entry is None:
         return False
     ids = sorted(entry["pending"])
-    entry["pending"] = set()           # changes from here on are pending again
     if not ids:
         return True
-    if len(ids) > ORDER_REFRESH_MAX:
+    if len(ids) > ORDER_REFRESH_MAX or entry["meta"].get("truncated"):
+        # Too many for one read, or a sweep the page cap cut short: that holds
+        # the oldest orders only, and adding a newer one an event named would
+        # make a list no sweep returns. One sweep is the honest answer.
         _orders_cache.pop(key, None)
         return False
+    # Taken off the to-read list, but held as being read until they land: a
+    # load arriving meanwhile must wait for this read, not take the snapshot
+    # for current (_orders_snapshot checks both).
+    entry["pending"] = set()
+    entry["reading"] = set(ids)
+    try:
+        return await _refresh_orders_read(registry, key, entry, ids)
+    except BaseException:
+        if _orders_cache.get(key) is entry:
+            _orders_cache.pop(key, None)    # half put right is not put right
+        raise
+
+
+async def _refresh_orders_read(registry: dict, key, entry: dict, ids: list) -> bool:
     days, fields = key
     names = [f for f in fields.split(",") if f]
     full_epoch = _orders_full_epoch
@@ -5309,6 +5330,7 @@ async def _refresh_orders(registry: dict, key) -> bool:
             o = {k: v for k, v in o.items() if k != "created_at"}
         rows[oid] = o
     entry["orders"] = [rows[i] for i in sorted(rows)]   # ascending id, as the sweep pages them
+    entry["reading"] = set()
     return True
 
 
@@ -5342,17 +5364,30 @@ async def _orders_snapshot(registry: dict, days: int,
         # Shielded: a browser hanging up must not cancel the sweep others are waiting on.
         return await asyncio.shield(task)
 
+    def answer(orders, m):
+        if meta is not None:
+            meta.update(m)
+        return orders
+
     # A snapshot with orders named as changed (_orders_changed) is put right,
-    # by id, before it answers anyone. Bounded: a change landing during each
+    # by id, before it answers anyone: it is current only when nothing is
+    # pending AND nothing is being read. Bounded: a change landing during each
     # read could otherwise keep this going; after three rounds the answer is
     # one fresh sweep, which is what every read used to be.
-    for _ in range(3):
+    last = None        # this caller's own sweep, once it has had one
+    for rnd in range(4):
         hit = _orders_cache.get(key) if ORDER_CACHE_SECS > 0 else None
-        if hit is not None and not hit["pending"]:
-            if meta is not None:
-                meta.update(hit["meta"])
-            return hit["orders"]
+        if hit is not None and not hit["pending"] and not hit["reading"]:
+            return answer(hit["orders"], hit["meta"])
+        if rnd == 3:
+            break
         if hit is not None:
+            if last is not None and (len(hit["pending"]) > ORDER_REFRESH_MAX
+                                     or hit["meta"].get("truncated")):
+                # A storm of changes during this caller's own sweep: it is
+                # answered from that sweep, as every caller of a sweep always
+                # was, and the changes wait for the next load.
+                return answer(*last)
             task = _orders_refreshing.get(key)
             if task is None or task.done():
                 task = asyncio.ensure_future(_refresh_orders(registry, key))
@@ -5361,19 +5396,20 @@ async def _orders_snapshot(registry: dict, days: int,
             if _orders_refreshing.get(key) is task:
                 _orders_refreshing.pop(key, None)
             continue
-        orders, m = await swept()
+        orders, m, flight = await swept()
+        last = (orders, m)
         if key not in _orders_cache:
             # Not stored: the cache is off, the sweep failed (said in meta),
             # or everything was retired while it ran. Its callers keep its
-            # answer, as they always have.
-            if meta is not None:
-                meta.update(m)
-            return orders
+            # answer, as they always have, unless an order was named as
+            # changed while it ran: then it may hold that order as it was,
+            # and is swept again rather than answered from.
+            if flight and rnd < 2:
+                continue
+            return answer(orders, m)
     _orders_cache.pop(key, None)
-    orders, m = await swept()
-    if meta is not None:
-        meta.update(m)
-    return orders
+    orders, m, _flight = await swept()
+    return answer(orders, m)
 
 
 async def _paginate_orders(registry: dict, days: int, max_pages: int = ORDER_PAGE_CAP,
@@ -19710,11 +19746,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # cannot be read retires every snapshot, as every event used to.
         try:
             _event_order = json.loads(raw).get("id")
-        except Exception:
-            _event_order = None
-        if _event_order:
+            if not _event_order:
+                raise ValueError("no order id")
             _orders_changed([_event_order])
-        else:
+        except Exception:
             _bust_orders()
         _webhook_state["last_at"] = time.time()
         _webhook_state["last_topic"] = str(request.headers.get("x-shopify-topic") or "")

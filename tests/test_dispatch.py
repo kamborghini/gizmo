@@ -3876,7 +3876,7 @@ def t_a_tag_write_retires_the_snapshot_immediately():
             first = calls["n"]
             run(copilot.run_production_labels({}, tag="IP"))
             eq(calls["n"], first, "a repeat load costs nothing")
-            copilot._bust_orders()          # what every tag/fulfilment write does
+            copilot._bust_orders()          # Refresh, or a change nobody can name
             run(copilot.run_production_labels({}, tag="IP"))
             eq(calls["n"], first + 1, "and the write forced a re-read")
         with_cache(go)
@@ -4489,12 +4489,18 @@ def wh_headers(raw, secret=SECRET, topic="orders/updated", delivery="d1",
 
 @test
 def t_a_signed_order_event_retires_the_order_snapshot():
+    # Since 2026-10-12 a named order is read again rather than every snapshot
+    # retired (_orders_changed); the event must still reach it.
     copilot._webhook_seen.clear()
     raw = json.dumps({"id": 1}).encode()
-    before = copilot._orders_epoch
-    r = client.post("/webhooks/orders", content=raw, headers=wh_headers(raw, delivery="ev1"))
+    named, saved = [], copilot._orders_changed
+    copilot._orders_changed = lambda ids: (named.append(list(ids)), saved(ids))
+    try:
+        r = client.post("/webhooks/orders", content=raw, headers=wh_headers(raw, delivery="ev1"))
+    finally:
+        copilot._orders_changed = saved
     eq(r.status_code, 200, r.text)
-    ok(copilot._orders_epoch > before, "the snapshot was retired")
+    eq(named, [[1]], "the event's order is named, so every snapshot reads it again")
     ok(copilot._webhook_state["count"] >= 1, "and the event was counted")
 
 @test
@@ -27721,6 +27727,7 @@ class _FakeShop:
         self.calls = []                    # ("sweep" | "ids", args)
         self.delay = 0.0
         self.fail_ids = False
+        self.on_call = None                # (kind, n) -> None, run as each call arrives
         self.other = other                 # everything that is not an order list
 
     async def tools(self, registry, name, args):
@@ -27728,10 +27735,9 @@ class _FakeShop:
             return await self.other(registry, name, args) if self.other else {}
         kind = "ids" if args.get("ids") else "sweep"
         self.calls.append((kind, dict(args)))
-        if self.delay:
-            await asyncio.sleep(self.delay)
-        if kind == "ids" and self.fail_ids:
-            return {"_failed": True}
+        if self.on_call:
+            self.on_call(kind, len(self.calls))
+        fail = kind == "ids" and self.fail_ids
         rows = sorted(self.orders.values(), key=lambda o: o["id"])
         if kind == "ids":
             want = {int(x) for x in str(args["ids"]).split(",") if x}
@@ -27743,7 +27749,12 @@ class _FakeShop:
         keep = [f for f in str(args.get("fields") or "").split(",") if f]
         if keep:
             rows = [{k: v for k, v in o.items() if k in keep or k == "id"} for o in rows]
-        return {"orders": [json.loads(json.dumps(o)) for o in rows]}
+        # The store as it was when the request arrived: a change made while
+        # the answer is on its way is not in it, as with Shopify.
+        answer = {"orders": [json.loads(json.dumps(o)) for o in rows]}
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        return {"_failed": True} if fail else answer
 
     def kinds(self):
         return [k for k, _ in self.calls]
@@ -27925,6 +27936,152 @@ def t_adding_payment_terms_rereads_the_order():
         _with_shop(go)
     finally:
         reset_prod()
+
+
+# ---- review of the order-cache change ---------------------------------------
+
+@test
+def t_a_load_during_a_read_by_id_waits_for_it():
+    """Review CONC1 (high). The changed order was taken off the to-read list
+    before Shopify answered, so a second load arriving during the read found a
+    clean-looking snapshot and was answered with the old order: on the ledger,
+    a paid invoice still owed."""
+    def go(shop):
+        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,financial_status"))
+        shop.orders[888]["financial_status"] = "paid"
+        copilot._orders_changed([888])
+        shop.delay = 0.05
+
+        async def two():
+            a = asyncio.ensure_future(copilot._orders_snapshot({}, days=180, fields="id,created_at,financial_status"))
+            await asyncio.sleep(0.01)              # the read by id is in flight
+            b = await copilot._orders_snapshot({}, days=180, fields="id,created_at,financial_status")
+            return await a, b
+        a, b = run(two())
+        for who, got in (("the first load", a), ("a load during its read", b)):
+            eq({o["id"]: o["financial_status"] for o in got}[888], "paid", who + " sees it paid")
+        eq(shop.kinds().count("ids"), 1, "one read, shared")
+    _with_shop(go)
+
+
+@test
+def t_with_the_cache_off_a_named_change_detaches_the_sweep():
+    """Review CONC2. With the cache switched off, a sweep in flight is still
+    shared; a write used to detach it, so the reload after the write swept
+    afresh. A named change does the same again."""
+    shop = _FakeShop(_shop_orders())
+    saved, was = copilot._tool_json, copilot.ORDER_CACHE_SECS
+    copilot._tool_json, copilot.ORDER_CACHE_SECS = shop.tools, 0
+    copilot._bust_orders()
+    try:
+        shop.delay = 0.05
+
+        async def scenario():
+            early = asyncio.ensure_future(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+            await asyncio.sleep(0.01)
+            shop.orders[777]["tags"] = "PC"
+            copilot._orders_changed([777])
+            late = await copilot._orders_snapshot({}, days=180, fields="id,created_at,tags")  # early still sweeping
+            return await early, late
+        _early, late = run(scenario())
+        eq({o["id"]: o["tags"] for o in late}[777], "PC", "the reload after the write sees it")
+        eq(shop.kinds(), ["sweep", "sweep"], "because it swept afresh, as before")
+    finally:
+        copilot._tool_json, copilot.ORDER_CACHE_SECS = saved, was
+        copilot._bust_orders()
+
+
+@test
+def t_a_late_joiner_is_never_answered_from_a_sweep_that_was_not_kept():
+    """Review CONC3/EQUIV1. A load that joined a sweep after a named change was
+    answered with that sweep's list when it was not kept (Refresh pressed
+    elsewhere meanwhile, or a page failed), so the changed order showed as it
+    was. It now sweeps again instead."""
+    def go(shop):
+        shop.delay = 0.05
+
+        async def scenario():
+            first = asyncio.ensure_future(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+            await asyncio.sleep(0.01)
+            shop.orders[777]["tags"] = "PC"
+            copilot._orders_changed([777])
+            late = asyncio.ensure_future(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+            await asyncio.sleep(0.01)
+            copilot._bust_orders()                 # Refresh pressed on another page
+            return await first, await late
+        _first, late = run(scenario())
+        eq({o["id"]: o["tags"] for o in late}[777], "PC", "the late load sees the change")
+    _with_shop(go)
+
+
+@test
+def t_a_snapshot_made_current_is_not_thrown_away():
+    """Review COMPAT3. After its third read by id the loop dropped a snapshot
+    it had just made current and swept the whole store anyway."""
+    def go(shop):
+        def hook(kind, n):
+            if n in (1, 2):
+                copilot._orders_changed([777])     # the write during the sweep, its echo during the read
+        shop.on_call = hook
+        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        eq(shop.kinds(), ["sweep", "ids", "ids"], "no sweep after it is current: %r" % shop.kinds())
+    _with_shop(go)
+
+
+@test
+def t_a_storm_of_changes_costs_one_sweep_not_two():
+    """Review CONC4. More changes than can be read by id at once, arriving
+    while a sweep ran, made one load sweep twice."""
+    def go(shop):
+        saved = copilot.ORDER_REFRESH_MAX
+        copilot.ORDER_REFRESH_MAX = 2
+        try:
+            shop.on_call = lambda kind, n: copilot._orders_changed([777, 888, 999])
+            run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+            eq(shop.kinds().count("sweep"), 1, "one sweep: %r" % shop.kinds())
+        finally:
+            copilot.ORDER_REFRESH_MAX = saved
+    _with_shop(go)
+
+
+@test
+def t_a_cut_short_sweep_is_swept_again_not_added_to():
+    """Review EQUIV2. A sweep stopped by the page cap holds the oldest orders;
+    adding a newer one an event named made a list no sweep would return."""
+    orders = [dict(_shop_orders()[0], id=10000 + i, name="#%d" % i, created_at=_ago(2)) for i in range(260)]
+
+    def go(shop):
+        saved = copilot._paginate_orders
+        copilot._paginate_orders = lambda *a, **k: saved(*a, **{**k, "max_pages": 1})
+        try:
+            meta = {}
+            got = run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags", meta=meta))
+            ok(meta.get("truncated") and len(got) == 250, "the sweep was cut short")
+            copilot._orders_changed([10259])       # an order past the cut
+            shop.calls.clear()
+            got = run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+            eq(shop.kinds(), ["sweep"], "swept again: %r" % shop.kinds())
+            ok(10259 not in {o["id"] for o in got}, "and nothing a sweep would not return")
+        finally:
+            copilot._paginate_orders = saved
+    _with_shop(go, orders)
+
+
+@test
+def t_an_order_event_with_a_number_too_big_still_retires_everything():
+    """Review COMPAT1. An id like 1e400 raised out of the webhook after the
+    delivery was recorded, so Shopify's retry was taken as handled and
+    nothing was retired."""
+    def go(shop):
+        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        copilot._webhook_seen.clear()
+        raw = b'{"id": 1e400}'
+        r = client.post("/webhooks/orders", content=raw, headers=wh_headers(raw, delivery="big-1"))
+        eq(r.status_code, 200, r.text)
+        shop.calls.clear()
+        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        eq(shop.kinds(), ["sweep"], "every snapshot was retired: %r" % shop.kinds())
+    _with_shop(go)
 
 
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
