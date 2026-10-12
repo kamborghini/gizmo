@@ -12678,7 +12678,6 @@ def _files_ensure_bucket_locked(page_origin: str) -> None:
         return
     if _files_ready["error"] and time.time() - float(_files_ready.get("at") or 0) < 60:
         return
-    _files_ready["at"] = time.time()
     s3 = _files_s3()
     try:
         if not _files_ready["bucket"]:
@@ -12696,6 +12695,10 @@ def _files_ensure_bucket_locked(page_origin: str) -> None:
             _files_ready["cors"] = True
         _files_ready["error"] = ""
     except Exception as e:
+        # Stamped when an attempt FAILS, not when it starts: uploads arriving
+        # while a retry is still asking storage wait on the lock for its
+        # answer, instead of taking the retry for a failure a moment ago.
+        _files_ready["at"] = time.time()
         _files_ready["error"] = f"{type(e).__name__}: {e}"[:200]
         logger.warning("files: bucket setup failed: %s", _files_ready["error"])
 
@@ -13004,8 +13007,12 @@ def _files_delta(d: dict, files=(), folders=()) -> dict:
     """What a page that asked for it (delta) needs to bring its copy of the
     store up to date after a change to these records, shaped exactly as
     _files_shape shapes them: each record as it now shows (None when it no
-    longer shows), each one's trash entry likewise, and the space used."""
-    out = {"files": {}, "trash": {}, "folders": {}, "used": _files_usage(d)}
+    longer shows), each one's trash entry likewise, the space used, and the
+    two things a page's copy holds that change without a record changing:
+    the storage error (an upload is often what finds storage back) and the
+    names of the people who uploaded."""
+    out = {"files": {}, "trash": {}, "folders": {}, "used": _files_usage(d),
+           "setup_error": _files_ready["error"], "names": _team_names()}
     for k in files:
         v = d["files"].get(k)
         out["files"][k] = v if v and v.get("status") == "active" and not v.get("hidden") else None

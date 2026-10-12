@@ -8376,7 +8376,7 @@ def t_a_big_folder_is_drawn_a_page_at_a_time():
     if not _node_ok():
         print("       (node unavailable, skipped)")
         return
-    js = MINIDOM + fn_src("function filesPaged(") + r"""
+    js = MINIDOM + "let filesPagedFocus = -1;\n" + fn_src("function filesPaged(") + r"""
 const rows = Array.from({ length: 150 }, (_, i) => 'r' + i);
 const list = el('div'); let more = 0;
 filesPaged(list, rows, 60, (r) => el('div', 'files-row', r), () => { more += 1; });
@@ -8391,6 +8391,49 @@ console.log(JSON.stringify({ n: list.children.length, last: btn.textContent, mor
     ok(got["n"] == 61 and got["first"] == "r0", "60 rows and the button: %r" % got)
     ok(got["last"] == "Show more (90 remaining)" and got["more"] == 1, "which says what is left and shows more: %r" % got)
     ok(got["few"] == 40, "a small folder is drawn whole, with no button: %r" % got)
+
+
+@test
+def t_show_more_keeps_the_keyboard_and_a_row_just_named_is_shown():
+    """Review of the fourth speed PR. Show more draws the list again under the
+    button, which took the keyboard to the top of the page; it now goes to
+    the first row Show more brought. And a folder made or a row renamed so
+    that it sorts past the rows on screen was hidden behind Show more; the
+    page now shows down to it."""
+    for f in ("function filesPaged(", "function filesCapFor("):
+        ok(f in SCRIPT, f + " exists")
+    fn = SCRIPT.split("function renderFilesBrowser(host) {")[1]
+    fn = fn[:fn.index("\n        function ")]
+    ok("filesRowCap = filesCapFor(" in fn, "the folder's count is raised to show a row just named")
+    ok(fn.count("filesReveal.add(") >= 3, "for a new folder, a renamed folder and a renamed file")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + fn_src("function filesPaged(") + fn_src("function filesCapFor(") + r"""
+const FILES_HIT_STEP = 60;
+let filesPagedFocus = -1;
+const rows = Array.from({ length: 150 }, (_, i) => 'r' + i);
+const host = el('div'); document.append(host);
+const mk = (r) => { const n = el('div', 'files-row'); const b = el('button', 'files-name', r); n.append(b);
+                    n.querySelector = (s) => s === '.files-name' ? b : null; return n; };
+let cap = 60;
+const paint = () => { host.innerHTML = ''; const list = el('div', 'files-list'); host.append(list);
+                      filesPaged(list, rows, cap, mk, () => { cap += 60; paint(); }); return list; };
+paint();
+const btn = host.children[0].children[60];
+btn.focus(); btn.onclick();
+setTimeout(() => {
+  const ids = rows.map(r => r);
+  console.log(JSON.stringify({ focused: document.activeElement && document.activeElement.textContent,
+    capNone: filesCapFor(ids, 60, new Set()), capNear: filesCapFor(ids, 60, new Set(['r59'])),
+    capFar: filesCapFor(ids, 60, new Set(['r130'])), capKept: filesCapFor(ids, 180, new Set(['r2'])) }));
+}, 0);
+"""
+    got = _run_node(js)
+    ok(got["focused"] == "r60", "the keyboard goes to the first row Show more brought: %r" % got)
+    ok(got["capNone"] == 60 and got["capNear"] == 60, "nothing to show, or already on screen: the count stands: %r" % got)
+    ok(got["capFar"] == 180, "a row just named at 131st is shown, a whole page at a time: %r" % got)
+    ok(got["capKept"] == 180, "and the count never shrinks for it: %r" % got)
 
 
 @test
@@ -8458,8 +8501,9 @@ def t_a_files_delta_patches_the_page_copy_exactly():
 let filesRev = 'r9';
 let filesCache = { files: { f1: { name: 'a' }, f2: { name: 'b' } }, folders: { d1: { name: 'Jobs' } },
                    trash: [{ id: 'f0', name: 'z' }], used: 5 };
+filesCache.setup_error = 'RuntimeError: an earlier outage'; filesCache.names = { u1: 'Cameron' };
 filesPatch({ files: { f1: null, f3: { name: 'c' } }, trash: { f1: { id: 'f1', name: 'a' }, f0: null },
-             folders: { d1: null, d2: { name: 'New' } }, used: 9 });
+             folders: { d1: null, d2: { name: 'New' } }, used: 9, setup_error: '', names: { u1: 'Cameron', u2: 'Ann' } });
 console.log(JSON.stringify({ c: filesCache, rev: filesRev }));
 """
     got = _run_node(js)
@@ -8468,6 +8512,8 @@ console.log(JSON.stringify({ c: filesCache, rev: filesRev }));
     eq_(got["c"]["folders"], {"d2": {"name": "New"}}, "folders set and removed")
     eq_(got["c"]["trash"], [{"id": "f1", "name": "a"}], "the trash entry replaces, and one gone is gone")
     eq_(got["c"]["used"], 9, "the space used")
+    eq_(got["c"]["setup_error"], "", "a storage error that has cleared clears on the page too")
+    eq_(got["c"]["names"], {"u1": "Cameron", "u2": "Ann"}, "and a teammate added since is named")
     eq_(got["rev"], "", "and the copy no longer claims a revision")
 
 

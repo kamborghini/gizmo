@@ -29166,17 +29166,37 @@ Projected Image UK"></textarea>
            so a redraw after an upload does not fold the list back up. */
         const FILES_HIT_STEP = 60;
         let filesHitCap = FILES_HIT_STEP, filesRowCap = FILES_HIT_STEP, filesRowCapFor = null;
+        let filesPagedFocus = -1;
+        const filesReveal = new Set();   // ids just made or renamed here, shown however they sort
         function filesPaged(list, rows, cap, makeRow, more) {
             /* A thousand files is about 34,000 elements, 155 to 237 ms of a
                desktop's main thread for every open (the 2026-10-12 speed
                audit, P2). Only the rows on the page are ever built. */
-            rows.slice(0, cap).forEach(r => list.append(makeRow(r)));
+            rows.slice(0, cap).forEach((r, i) => {
+                const n = makeRow(r);
+                list.append(n);
+                /* Show more draws the list again under the button, which took
+                   the keyboard with it to the top of the page: it goes to the
+                   first row Show more brought instead, once the list is in. */
+                if (i === filesPagedFocus) {
+                    const f = n.querySelector('.files-name') || n;
+                    setTimeout(() => f.focus(), 0);
+                }
+            });
+            filesPagedFocus = -1;
             if (rows.length > cap) {
                 const b = el('button', 'btn', 'Show more (' + (rows.length - cap) + ' remaining)');
                 b.style.cssText = 'margin:var(--sp-2) auto;display:block';
-                b.onclick = more;
+                b.onclick = () => { filesPagedFocus = cap; more(); };
                 list.append(b);
             }
+        }
+        function filesCapFor(ids, cap, reveal) {
+            /* How many rows to draw so that every id in reveal is among them,
+               a whole page at a time, and never fewer than are drawn now. */
+            let need = cap;
+            ids.forEach((id, i) => { if (reveal.has(id)) need = Math.max(need, Math.ceil((i + 1) / FILES_HIT_STEP) * FILES_HIT_STEP); });
+            return need;
         }
         let filesSort = 'name', filesSel = new Set();
         let filesUploads = [], filesQueue = [], filesActive = 0, filesNewFolder = false;
@@ -29244,15 +29264,18 @@ Projected Image UK"></textarea>
                 Object.values(tr).forEach(v => { if (v) c.trash.push(v); });
             }
             if (delta.used != null) c.used = delta.used;
+            if ('setup_error' in delta) c.setup_error = delta.setup_error;
+            if (delta.names) c.names = delta.names;
             filesRev = '';
         }
         let filesRepaintT = 0, filesRepaintLast = 0;
         function filesRepaintSoon() {
-            /* Finished uploads redraw the view once per batch, at most every
-               300 ms: in a thousand-file folder each redraw was most of a
-               second, and thirty files drew it thirty times. A full redraw
-               keeps the storage meter honest too; skipped while someone is
-               typing in a rename box, where the list alone is redrawn. */
+            /* Finished uploads redraw the view at most every 300 ms, so files
+               that finish together are drawn together: every file redrew it,
+               and in a thousand-file folder each redraw was most of a second.
+               A full redraw keeps the storage meter honest too; skipped while
+               someone is typing in a rename box, where the list alone is
+               redrawn. */
             if (filesRepaintT) return;
             filesRepaintT = setTimeout(() => {
                 filesRepaintT = 0; filesRepaintLast = Date.now();
@@ -29699,7 +29722,7 @@ Projected Image UK"></textarea>
                 const acts = el('div', 'files-acts');
                 const rn = el('button', 'icon-btn'); rn.innerHTML = I.edit; rn.title = 'Rename folder';
                 rn.onclick = () => inlineRename(row, name, f.name, async (v) => {
-                    try { await filesOp('/api/files/folder', { op: 'rename', id: fid, name: v }); } catch (e) { toastError(e.message); }
+                    try { await filesOp('/api/files/folder', { op: 'rename', id: fid, name: v }); filesReveal.add(fid); } catch (e) { toastError(e.message); }
                     paintList();
                 });
                 const del = el('button', 'icon-btn'); del.innerHTML = I.trash; del.title = 'Delete folder (must be empty)';
@@ -29760,7 +29783,7 @@ Projected Image UK"></textarea>
                     // A rename must not quietly cost the file its type.
                     const oldExt = f.name.includes('.') ? f.name.split('.').pop() : '';
                     if (oldExt && !v.includes('.')) v = v + '.' + oldExt;
-                    try { await filesOp('/api/files/file', { op: 'rename', id: fid, name: v }); } catch (e) { toastError(e.message); }
+                    try { await filesOp('/api/files/file', { op: 'rename', id: fid, name: v }); filesReveal.add(fid); } catch (e) { toastError(e.message); }
                     paintList();
                 });
                 const del = el('button', 'icon-btn'); del.innerHTML = I.trash; del.title = 'Move to trash';
@@ -29894,7 +29917,7 @@ Projected Image UK"></textarea>
                         if (done) return; done = true; filesNewFolder = false;
                         const v = inp.value.trim();
                         if (commit && v) {
-                            try { await filesOp('/api/files/folder', { op: 'add', name: v, parent_id: filesFolder, delta: 1 }); }
+                            try { const r = await filesOp('/api/files/folder', { op: 'add', name: v, parent_id: filesFolder, delta: 1 }); if (r && r.id) filesReveal.add(r.id); }
                             catch (e) { toastError(e.message || 'Could not create the folder.'); }
                         }
                         paintList();
@@ -29908,6 +29931,12 @@ Projected Image UK"></textarea>
                 /* A folder is painted a page at a time too, its own folders
                    first. Its count starts again only in another folder. */
                 if (filesRowCapFor !== filesFolder) { filesRowCapFor = filesFolder; filesRowCap = FILES_HIT_STEP; }
+                /* A folder just made, or a row just renamed, is shown wherever
+                   it sorts: the one row somebody is looking for. */
+                if (filesReveal.size) {
+                    filesRowCap = filesCapFor(folders.map(e => e[0]).concat(files.map(e => e[0])), filesRowCap, filesReveal);
+                    filesReveal.clear();
+                }
                 filesPaged(list, folders.map(e => ['d', e]).concat(files.map(e => ['f', e])), filesRowCap,
                     ([kind, [fid, f]]) => kind === 'd' ? folderRow(fid, f) : fileRow(fid, f, false),
                     () => { filesRowCap += FILES_HIT_STEP; paintList(); });

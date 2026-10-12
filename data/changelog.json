@@ -12,12 +12,12 @@
     {
      "kind": "improved",
      "tab": "files",
-     "text": "Uploading many files no longer redraws the whole folder after each one: the list catches up a few times a second while they finish, and each upload sends back only the file it added rather than the whole file store twice."
+     "text": "Uploading many files no longer redraws the whole folder for every file: files that finish together are drawn together, at most a few times a second, and signing for and confirming each upload sends back only what changed rather than the whole file store twice."
     },
     {
      "kind": "improved",
      "tab": "files",
-     "text": "While storage is checking a finished upload, everyone else can carry on in Files and the Finder drive instead of waiting for it, and going back to Files no longer downloads the whole file store when nothing in it has changed."
+     "text": "While storage is checking a finished upload, everyone else can carry on in Files and the Finder drive instead of waiting for it, and going back to Files no longer downloads the whole file store again when nothing has changed since it was last downloaded."
     }
    ]
   },

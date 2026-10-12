@@ -28481,6 +28481,21 @@ def _files_apply(store, delta):
         store["trash"] = [t for t in store["trash"] if t["id"] not in tr] + [v for v in tr.values() if v]
     if delta.get("used") is not None:
         store["used"] = delta["used"]
+    if "setup_error" in delta:
+        store["setup_error"] = delta["setup_error"]
+    if delta.get("names"):
+        store["names"] = delta["names"]
+
+
+async def _files_wait_for(event, gate, secs=10.0):
+    """Wait for a fake's call to begin, failing (and freeing it) rather than
+    spinning for ever when a change means storage is never asked."""
+    for _ in range(int(secs / 0.01)):
+        if event.is_set():
+            return
+        await asyncio.sleep(0.01)
+    gate.set()
+    raise AssertionError("storage was never asked")
 
 
 def _files_race(*calls):
@@ -28528,7 +28543,12 @@ def t_an_upload_answers_what_changed_when_the_page_asks():
     exactly the store the tree answers, through a replacement into the trash.
     Without delta the answers are the whole store, as before."""
     def go(fake):
+        # Storage had failed when the page last read the store: its banner says
+        # so, and the first upload that finds storage back must clear it.
+        copilot._files_ready.update({"error": "RuntimeError: an earlier outage", "at": 0.0})
         mine = post("/api/files/tree", {}).json()["store"]
+        ok(mine["setup_error"], "the page's copy shows the earlier failure")
+        mine["names"] = {}                     # read before a teammate was added
         nf = post("/api/files/folder", {"op": "add", "name": "Jobs", "delta": 1}).json()
         ok("store" not in nf and nf.get("id") and nf.get("delta"), "a new folder answers itself: %r" % nf)
         _files_apply(mine, nf["delta"])
@@ -28547,12 +28567,11 @@ def t_an_upload_answers_what_changed_when_the_page_asks():
         upload("Proof.PDF", 12)                  # replaces the first, which goes to the trash
         upload("notes.pdf", 7)
         full = post("/api/files/tree", {}).json()["store"]
-        by_id = lambda rows: sorted(rows, key=lambda t: t["id"])
-        eq(mine["files"], full["files"], "the patched copy holds exactly the store's files")
-        eq(mine["folders"], full["folders"], "and its folders")
-        eq(by_id(mine["trash"]), by_id(full["trash"]), "and its trash")
-        eq(mine["used"], full["used"], "and the space used")
+        in_order = lambda st: {**st, "trash": sorted(st["trash"], key=lambda t: t["id"])}
+        eq(in_order(mine), in_order(full), "the patched copy is exactly the store, field for field")
         eq(len(full["trash"]), 1, "the replaced proof is in the trash")
+        eq(full["setup_error"], "", "storage recovered, and the patched copy says so too")
+        ok(mine["names"].get(full["files"][next(iter(full["files"]))]["by"]), "and it names the uploader")
         old = post("/api/files/upload-url", {"name": "old-page.pdf", "size": 5}).json()
         ok(old.get("store") is not None, "a page that does not ask still gets the whole store")
     with_files(go)
@@ -28589,8 +28608,7 @@ def t_confirming_an_upload_does_not_hold_files_while_storage_answers():
             return r
 
         async def folder(ac):
-            while not fake.entered.is_set():
-                await asyncio.sleep(0.01)
+            await _files_wait_for(fake.entered, fake.gate)
             r = await ac.post("/api/files/folder", json={"op": "add", "name": "Meanwhile"})
             order.append("folder")
             fake.gate.set()
@@ -28631,8 +28649,7 @@ def t_signing_an_upload_does_not_hold_files_while_storage_is_set_up():
             return r
 
         async def folder(ac):
-            while not fake.entered.is_set():
-                await asyncio.sleep(0.01)
+            await _files_wait_for(fake.entered, fake.gate)
             r = await ac.post("/api/files/folder", json={"op": "add", "name": "Meanwhile"})
             order.append("folder")
             fake.gate.set()
@@ -28641,6 +28658,40 @@ def t_signing_an_upload_does_not_hold_files_while_storage_is_set_up():
         eq(rs.status_code, 200, rs.text)
         eq(rf.status_code, 200, rf.text)
         eq(order, ["folder", "sign"], "a folder was made while storage was being set up")
+    with_files(go, s3=slow)
+
+
+@test
+def t_uploads_during_a_storage_retry_wait_for_its_answer():
+    """Setting the bucket up moved out of the store's lock, and a retry after
+    a failure stamped its start time before it asked storage, so uploads
+    arriving during the retry read it as a failure a moment ago and were
+    refused (502) while it was about to succeed. They now wait for its
+    answer: three uploads at once after storage comes back all sign."""
+    import threading
+
+    class SlowBucket(FakeS3):
+        def __init__(self):
+            super().__init__()
+            self.heads = 0
+
+        def head_bucket(self, Bucket):
+            self.heads += 1
+            time.sleep(0.4)
+            return super().head_bucket(Bucket)
+    slow = SlowBucket()
+
+    def go(fake):
+        fake.bucket_exists = True
+        copilot._files_ready.update({"bucket": False, "cors": False,
+                                     "error": "RuntimeError: an earlier outage", "at": time.time() - 120})
+
+        def sign(n):
+            return lambda ac: ac.post("/api/files/upload-url", json={"name": f"back{n}.pdf", "size": 10})
+        rs = _files_race(sign(1), sign(2), sign(3))
+        eq([r.status_code for r in rs], [200, 200, 200], [r.text[:120] for r in rs])
+        eq(fake.heads, 1, "storage was asked once, and the others took its answer")
+        eq(copilot._files_ready["error"], "", "and the failure is cleared")
     with_files(go, s3=slow)
 
 
