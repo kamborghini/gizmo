@@ -7472,9 +7472,11 @@ def t_a_print_overtaken_by_a_newer_one_opens_no_dialog():
         print("       (node unavailable, skipped)")
         return
     ok("let printSeq = 0;" in SCRIPT, "the print paths share one sequence counter")
-    paths = ["function labelFontReady(", "function printLabels(", "async function loanPrintSticker(",
-             "function printDispatchManifest(", "function printStockUsage(", "function printDaySheet(",
-             "function printGuide("]
+    paths = ["function labelFontReady(", "function labelPrintCss(", "function printLabels(",
+             "async function loanPrintSticker(", "function printDispatchManifest(", "function printStockUsage(",
+             "function printDaySheet(", "function printGuide("]
+    lays = re.search(r"const PRINT_LAYS_LABELS = .*", SCRIPT)
+    ok(lays, "the label prints say whether they lay the labels out themselves")
     js = MINIDOM + r"""
 // A clock the test drives, so the typeface wait, the 40ms before the dialog
 // and the 800ms tidy-up happen in a known order and take no real time.
@@ -7521,7 +7523,8 @@ const api = async () => ({ tag: 'PI-0001', barcode: '', qr: '' });
 const loanStickerSheet = (d) => el('div', 'loan-sticker', 'Sticker ' + d.tag);
 const labelOrders = () => [{ id: 1, name: '#1001', items: [{ production_size: '37.5', glass_type: 'Clear', quantity: 2 }] }];
 const prodStateOf = () => ({}), orderNo = (o) => o.name, fmtDate = (s) => s.slice(0, 10), guideText = (d) => String(d);
-""" + "\n".join(fn_src(p) for p in paths) + r"""
+const navigator = { vendor: 'Google Inc.' };
+""" + lays.group(0) + "\n" + "\n".join(fn_src(p) for p in paths) + r"""
 let stickerBtn;
 const PATHS = {
   labels: () => printLabels([{ id: 1, name: '#1001' }]),
@@ -9607,16 +9610,19 @@ def t_the_printed_sheets_do_not_change():
     here is a change to paper: undo it, or ask Cameron first."""
     import hashlib
     h = lambda t: hashlib.sha256(t.encode("utf-8")).hexdigest()[:16]
+    # 2026-10-12: the six print paths that share the staging box gained their
+    # sequence checks, so an overtaken print opens no dialog (Cameron: "open a
+    # PR for the print fix"). Nothing they build, size or style changed.
     funcs = {
         "function prodSize(": "c8b194be336787e3", "function carrierDims(": "560211cb05b49d72",
         "function stickerDims(": "b65799c062e28ec8", "function labelFontReady(": "e90e9106a39a03f4",
         "function labelDims(": "a3e5c994043b70d4", "function labelPrintCss(": "061bc8a8862da9f0",
         "function fitLabel(": "b8bebb1841f753aa", "function loanStickerSheet(": "4e84233802eb448d",
-        "async function loanPrintSticker(": "d7705852736415ca", "function labelSheet(": "68217ade25de37e2",
-        "function printDispatchManifest(": "7298fb528556d1bb", "function printStockUsage(": "87dcb3552a1cd72e",
-        "function printDaySheet(": "59667d1651a03de6", "function printShippingLabelsFor(": "1574f28f689be7a0",
-        "function printLabelImages(": "b5f3da205c85e60b", "function printLabels(": "4f2e020a18b82af7",
-        "function printGuide(": "d169080c58a6a3f6", "const LABEL_SIZES = {": "aaba502d9fc95f0f",
+        "async function loanPrintSticker(": "4a189b1c5dc561ce", "function labelSheet(": "68217ade25de37e2",
+        "function printDispatchManifest(": "201f519b02240216", "function printStockUsage(": "925866a99c5abee1",
+        "function printDaySheet(": "ad4c8109bf351ddf", "function printShippingLabelsFor(": "1574f28f689be7a0",
+        "function printLabelImages(": "b5f3da205c85e60b", "function printLabels(": "9f0c0c7984c62d96",
+        "function printGuide(": "ca6a40b9b220aff5", "const LABEL_SIZES = {": "aaba502d9fc95f0f",
     }
     for sig, want in funcs.items():
         ok(sig in SCRIPT, "the print code is still there: " + sig)
