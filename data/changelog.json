@@ -23,6 +23,27 @@
   },
   {
    "date": "2026-10-12",
+   "title": "Files keeps up with big folders and long uploads",
+   "items": [
+    {
+     "kind": "improved",
+     "tab": "files",
+     "text": "A big folder now shows its first 60 entries and a Show more button that says how many are left, as a search already did, so a folder of a thousand files opens without the page stalling."
+    },
+    {
+     "kind": "improved",
+     "tab": "files",
+     "text": "Uploading many files no longer redraws the whole folder for every file: files that finish together are drawn together, at most a few times a second, and signing for and confirming each upload sends back only what changed rather than the whole file store twice."
+    },
+    {
+     "kind": "improved",
+     "tab": "files",
+     "text": "While storage is checking a finished upload, everyone else can carry on in Files and the Finder drive instead of waiting for it, and going back to Files no longer downloads the whole file store again when nothing has changed since it was last downloaded."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-12",
    "title": "An erasure that stops part way leaves nothing half done",
    "items": [
     {

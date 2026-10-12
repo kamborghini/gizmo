@@ -29137,6 +29137,12 @@ Projected Image UK"></textarea>
            30-day trash, never instant.
            ================================================================== */
         let filesCache = null, filesFolder = '', filesQ = '', filesSeg = 'files';
+        /* The revision of the store in filesCache, and of the one last drawn.
+           A look at the tree sends filesRev and an unchanged store comes back
+           as {same: true} (the 2026-10-12 speed audit, S9). A copy patched
+           from a delta answer is no revision the server named, so it holds
+           none, and the next look fetches the store whole. */
+        let filesRev = '', filesPaintedRev = '';
         let filesHeroAct = null;   // the page header's action slot, filled by the browser
         /* The Finder drive takes a password of its own, made here after a full
            sign-in and shown once. The Reactor password no longer opens it: the
@@ -29189,10 +29195,44 @@ Projected Image UK"></textarea>
                 api('/api/files/drive', {}).then(st => paint(st), e => { body.replaceChildren(el('p', 'drive-note', e.message)); });
             });
         }
-        /* How many search hits are painted at a time. The remainder is never
-           hidden: the count of what is left sits on the Show more button. */
+        /* How many search hits, or rows of a folder, are painted at a time.
+           The remainder is never hidden: the count of what is left sits on
+           the Show more button. A folder keeps its count while it is open,
+           so a redraw after an upload does not fold the list back up. */
         const FILES_HIT_STEP = 60;
-        let filesHitCap = FILES_HIT_STEP;
+        let filesHitCap = FILES_HIT_STEP, filesRowCap = FILES_HIT_STEP, filesRowCapFor = null;
+        let filesPagedFocus = -1;
+        const filesReveal = new Set();   // ids just made or renamed here, shown however they sort
+        function filesPaged(list, rows, cap, makeRow, more) {
+            /* A thousand files is about 34,000 elements, 155 to 237 ms of a
+               desktop's main thread for every open (the 2026-10-12 speed
+               audit, P2). Only the rows on the page are ever built. */
+            rows.slice(0, cap).forEach((r, i) => {
+                const n = makeRow(r);
+                list.append(n);
+                /* Show more draws the list again under the button, which took
+                   the keyboard with it to the top of the page: it goes to the
+                   first row Show more brought instead, once the list is in. */
+                if (i === filesPagedFocus) {
+                    const f = n.querySelector('.files-name') || n;
+                    setTimeout(() => f.focus(), 0);
+                }
+            });
+            filesPagedFocus = -1;
+            if (rows.length > cap) {
+                const b = el('button', 'btn', 'Show more (' + (rows.length - cap) + ' remaining)');
+                b.style.cssText = 'margin:var(--sp-2) auto;display:block';
+                b.onclick = () => { filesPagedFocus = cap; more(); };
+                list.append(b);
+            }
+        }
+        function filesCapFor(ids, cap, reveal) {
+            /* How many rows to draw so that every id in reveal is among them,
+               a whole page at a time, and never fewer than are drawn now. */
+            let need = cap;
+            ids.forEach((id, i) => { if (reveal.has(id)) need = Math.max(need, Math.ceil((i + 1) / FILES_HIT_STEP) * FILES_HIT_STEP); });
+            return need;
+        }
         let filesSort = 'name', filesSel = new Set();
         let filesUploads = [], filesQueue = [], filesActive = 0, filesNewFolder = false;
 
@@ -29209,10 +29249,18 @@ Projected Image UK"></textarea>
                tab quietly re-reads it; a repaint only happens when something
                actually changed and no one is mid-typing in a rename box. */
             try {
-                const r = await api('/api/files/tree', {});
-                if (JSON.stringify(r.store) === JSON.stringify(filesCache)) return;
-                filesCache = r.store;
-                if (!filesInputBusy() && document.querySelector('#view-files.active')) renderFiles();
+                const r = await api('/api/files/tree', filesRev ? { rev: filesRev } : {});
+                const quiet = () => !filesInputBusy() && document.querySelector('#view-files.active');
+                if (r && r.same) {
+                    /* Nothing moved. Draw only if the last store that came
+                       was never drawn (it arrived under someone's typing). */
+                    if (filesCache && filesPaintedRev !== filesRev && quiet()) renderFiles();
+                    return;
+                }
+                const drawn = JSON.stringify(r.store) === JSON.stringify(filesCache) && filesPaintedRev === filesRev;
+                filesCache = r.store; filesRev = r.rev || '';
+                if (drawn) { filesPaintedRev = filesRev; return; }
+                if (quiet()) renderFiles();
             } catch (e) { /* the cached view stands until the next visit */ }
         }
         async function loadFiles() {
@@ -29221,7 +29269,7 @@ Projected Image UK"></textarea>
             box.append(t);
             try {
                 const r = await api('/api/files/tree', {});
-                filesCache = r.store;
+                filesCache = r.store; filesRev = r.rev || '';
                 renderFiles();
             } catch (e) {
                 box.innerHTML = '';
@@ -29229,10 +29277,52 @@ Projected Image UK"></textarea>
             }
         }
         async function filesOp(path, body) {
-            /* Every write returns the fresh store, so the UI never guesses. */
+            /* Every write returns the fresh store, or, asked with delta, only
+               what changed, which is patched in: either way the UI never
+               guesses. */
             const r = await api(path, body);
-            if (r && r.store) filesCache = r.store;
+            if (r && r.store) { filesCache = r.store; filesRev = r.rev || ''; }
+            else if (r && r.delta) filesPatch(r.delta);
             return r;
+        }
+        function filesPatch(delta) {
+            /* A record is set or, sent as null, removed; a folder likewise; a
+               trash entry replaces any with its id; the space used is taken
+               as sent. The server shapes each exactly as the whole store. */
+            const c = filesCache;
+            if (!c || !delta) return;
+            Object.entries(delta.files || {}).forEach(([k, v]) => { if (v) c.files[k] = v; else delete c.files[k]; });
+            Object.entries(delta.folders || {}).forEach(([k, v]) => { if (v) c.folders[k] = v; else delete c.folders[k]; });
+            const tr = delta.trash || {};
+            if (Object.keys(tr).length) {
+                c.trash = (c.trash || []).filter(t => !(t.id in tr));
+                Object.values(tr).forEach(v => { if (v) c.trash.push(v); });
+            }
+            if (delta.used != null) c.used = delta.used;
+            if ('setup_error' in delta) c.setup_error = delta.setup_error;
+            if (delta.names) c.names = delta.names;
+            filesRev = '';
+        }
+        let filesRepaintT = 0, filesRepaintLast = 0;
+        function filesRepaintSoon() {
+            /* Finished uploads redraw the view at most every 300 ms, so files
+               that finish together are drawn together: every file redrew it,
+               and in a thousand-file folder each redraw was most of a second.
+               A full redraw keeps the storage meter honest too; skipped while
+               someone is typing in a rename box, where the list alone is
+               redrawn. */
+            if (filesRepaintT) return;
+            filesRepaintT = setTimeout(() => {
+                filesRepaintT = 0; filesRepaintLast = Date.now();
+                if (!filesInputBusy() && document.querySelector('#view-files.active')) renderFiles();
+                else if (renderFilesBrowser._paintList) renderFilesBrowser._paintList();
+            }, Math.max(0, 300 - (Date.now() - filesRepaintLast)));
+        }
+        function filesProgress(u) {
+            /* A progress tick moves one bar and one number. It rebuilt every
+               row of the upload panel, many times a second per upload. */
+            if (u._fill && u._label) { u._fill.style.width = u.pct + '%'; u._label.textContent = u.pct + '%'; return; }
+            if (renderFilesBrowser._paintUploads) renderFilesBrowser._paintUploads();
         }
         function fmtBytes(n) {
             n = Number(n) || 0;
@@ -29289,6 +29379,7 @@ Projected Image UK"></textarea>
         }
 
         function renderFiles() {
+            filesPaintedRev = filesRev;
             const box = $('files-content'); box.innerHTML = '';
             const d = filesCache;
             /* One line (copy plan, Files #1); the trash keeps its 30 days on the
@@ -29666,7 +29757,7 @@ Projected Image UK"></textarea>
                 const acts = el('div', 'files-acts');
                 const rn = el('button', 'icon-btn'); rn.innerHTML = I.edit; rn.title = 'Rename folder';
                 rn.onclick = () => inlineRename(row, name, f.name, async (v) => {
-                    try { await filesOp('/api/files/folder', { op: 'rename', id: fid, name: v }); } catch (e) { toastError(e.message); }
+                    try { await filesOp('/api/files/folder', { op: 'rename', id: fid, name: v }); filesReveal.add(fid); } catch (e) { toastError(e.message); }
                     paintList();
                 });
                 const del = el('button', 'icon-btn'); del.innerHTML = I.trash; del.title = 'Delete folder (must be empty)';
@@ -29727,7 +29818,7 @@ Projected Image UK"></textarea>
                     // A rename must not quietly cost the file its type.
                     const oldExt = f.name.includes('.') ? f.name.split('.').pop() : '';
                     if (oldExt && !v.includes('.')) v = v + '.' + oldExt;
-                    try { await filesOp('/api/files/file', { op: 'rename', id: fid, name: v }); } catch (e) { toastError(e.message); }
+                    try { await filesOp('/api/files/file', { op: 'rename', id: fid, name: v }); filesReveal.add(fid); } catch (e) { toastError(e.message); }
                     paintList();
                 });
                 const del = el('button', 'icon-btn'); del.innerHTML = I.trash; del.title = 'Move to trash';
@@ -29834,19 +29925,14 @@ Projected Image UK"></textarea>
                     const ql = filesQ.toLowerCase();
                     const hits = sortFiles(Object.entries(fmap)
                         .filter(([, f]) => f.name.toLowerCase().includes(ql)));
+                    if (filesReveal.size) { filesHitCap = filesCapFor(hits.map(e => e[0]), filesHitCap, filesReveal); filesReveal.clear(); }
                     if (!hits.length) list.append(el('div', 'files-empty', 'No file matches that search.'));
                     else list.append(filesHeadRow('Modified'));
                     /* Painted in pages, the way the CRM contacts list already
                        is. The count of what is not on screen is ON screen, so
                        nobody is ever shown fewer matches than there are. */
-                    hits.slice(0, filesHitCap).forEach(([fid, f]) => list.append(fileRow(fid, f, true)));
-                    if (hits.length > filesHitCap) {
-                        const more = el('button', 'btn',
-                            'Show more (' + (hits.length - filesHitCap) + ' remaining)');
-                        more.style.cssText = 'margin:var(--sp-2) auto;display:block';
-                        more.onclick = () => { filesHitCap += FILES_HIT_STEP; paintList(); };
-                        list.append(more);
-                    }
+                    filesPaged(list, hits, filesHitCap, ([fid, f]) => fileRow(fid, f, true),
+                        () => { filesHitCap += FILES_HIT_STEP; paintList(); });
                     listHost.append(list);
                     return;
                 }
@@ -29867,7 +29953,7 @@ Projected Image UK"></textarea>
                         if (done) return; done = true; filesNewFolder = false;
                         const v = inp.value.trim();
                         if (commit && v) {
-                            try { await filesOp('/api/files/folder', { op: 'add', name: v, parent_id: filesFolder }); }
+                            try { const r = await filesOp('/api/files/folder', { op: 'add', name: v, parent_id: filesFolder, delta: 1 }); if (r && r.id) filesReveal.add(r.id); }
                             catch (e) { toastError(e.message || 'Could not create the folder.'); }
                         }
                         paintList();
@@ -29878,8 +29964,18 @@ Projected Image UK"></textarea>
                     list.append(row);
                     setTimeout(() => inp.focus(), 0);
                 }
-                folders.forEach(([fid, f]) => list.append(folderRow(fid, f)));
-                files.forEach(([fid, f]) => list.append(fileRow(fid, f, false)));
+                /* A folder is painted a page at a time too, its own folders
+                   first. Its count starts again only in another folder. */
+                if (filesRowCapFor !== filesFolder) { filesRowCapFor = filesFolder; filesRowCap = FILES_HIT_STEP; }
+                /* A folder just made, or a row just renamed, is shown wherever
+                   it sorts: the one row somebody is looking for. */
+                if (filesReveal.size) {
+                    filesRowCap = filesCapFor(folders.map(e => e[0]).concat(files.map(e => e[0])), filesRowCap, filesReveal);
+                    filesReveal.clear();
+                }
+                filesPaged(list, folders.map(e => ['d', e]).concat(files.map(e => ['f', e])), filesRowCap,
+                    ([kind, [fid, f]]) => kind === 'd' ? folderRow(fid, f) : fileRow(fid, f, false),
+                    () => { filesRowCap += FILES_HIT_STEP; paintList(); });
                 if (!folders.length && !files.length && !filesNewFolder)
                     list.append(emptyState({ icon: I.folder, text: 'No files here yet.', action: (() => {
                         const u = el('button', 'btn'); u.type = 'button'; u.append(ico(I.upload), document.createTextNode('Upload'));
@@ -29900,7 +29996,10 @@ Projected Image UK"></textarea>
                         : u.state === 'signing' ? 'Starting…'
                         : u.state === 'confirming' ? 'Finishing…'
                         : u.state === 'done' ? 'Done' : u.pct + '%';
-                    row.append(el('span', 'upstate', label));
+                    const labelEl = el('span', 'upstate', label);
+                    row.append(labelEl);
+                    // Only a sending row's bar and number move between states.
+                    if (u.state === 'sending') { u._fill = fill; u._label = labelEl; } else { u._fill = u._label = null; }
                     if (u.state === 'failed') {
                         const rt = el('button', 'btn', 'Try again');
                         rt.onclick = () => { u.state = 'waiting'; u.pct = 0; u.err = ''; filesQueue.push(u.job); paintUploads(); filesPump(); };
@@ -29974,7 +30073,7 @@ Projected Image UK"></textarea>
                 const hit = Object.entries(filesCache.folders).find(([, f]) =>
                     String(f.parent_id || '') === String(parent) && f.name.toLowerCase() === seg.toLowerCase());
                 if (hit) { memo[key] = hit[0]; parent = hit[0]; continue; }
-                const r = await filesOp('/api/files/folder', { op: 'add', name: seg, parent_id: parent });
+                const r = await filesOp('/api/files/folder', { op: 'add', name: seg, parent_id: parent, delta: 1 });
                 memo[key] = r.id; parent = r.id;
             }
             return parent;
@@ -30025,15 +30124,17 @@ Projected Image UK"></textarea>
             try {
                 row.state = 'signing'; paint();
                 const ctype = file.type || 'application/octet-stream';
+                /* delta: each answer is what changed, not the whole store
+                   (twice per file, about 85 KB each at 2,000 files). */
                 const r = await filesOp('/api/files/upload-url',
-                    { name: file.name, size: file.size, type: ctype, folder_id: folder });
+                    { name: file.name, size: file.size, type: ctype, folder_id: folder, delta: 1 });
                 row.state = 'sending'; paint();
                 await new Promise((resolve, reject) => {
                     const x = new XMLHttpRequest();
                     x.open('PUT', r.url);
                     x.setRequestHeader('Content-Type', ctype);
                     x.upload.onprogress = (ev) => {
-                        if (ev.lengthComputable) { row.pct = Math.round(ev.loaded * 100 / ev.total); paint(); }
+                        if (ev.lengthComputable) { row.pct = Math.round(ev.loaded * 100 / ev.total); filesProgress(row); }
                     };
                     x.onload = () => (x.status >= 200 && x.status < 300) ? resolve()
                         : reject(new Error('Storage refused the upload (status ' + x.status + ').'));
@@ -30041,14 +30142,10 @@ Projected Image UK"></textarea>
                     x.send(file);
                 });
                 row.state = 'confirming'; paint();
-                await filesOp('/api/files/complete', { id: r.id });
+                await filesOp('/api/files/complete', { id: r.id, delta: 1 });
                 row.state = 'done'; row.pct = 100;
                 paint();
-                // A full repaint keeps the storage meter honest too; skipped
-                // while someone is typing in a rename box, where the list
-                // alone refreshes instead.
-                if (!filesInputBusy() && document.querySelector('#view-files.active')) renderFiles();
-                else if (renderFilesBrowser._paintList) renderFilesBrowser._paintList();
+                filesRepaintSoon();
             } catch (e) {
                 row.state = 'failed'; row.err = e.message || 'Upload failed.';
                 paint();
