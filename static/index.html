@@ -2087,10 +2087,10 @@
         @media (max-width: 640px) {
             .card-head { grid-template-columns: 1fr; }
             .card-act { grid-column: 1; grid-row: auto; justify-content: flex-start; margin-top: var(--sp-2); }
-            /* A single icon button (the Guide's print) stays beside its title,
-               as on a desktop, rather than taking a line of its own. */
-            .card-head:has(> .card-act > :only-child:is(.mem-btn, .icon-btn, .btn-icon)) { grid-template-columns: 1fr auto; }
-            .card-head > .card-act:has(> :only-child:is(.mem-btn, .icon-btn, .btn-icon)) { grid-column: 2; grid-row: 1 / span 2; margin-top: 0; }
+            /* A single button (the Guide's print, + Lead, Add a unit, Retry failed) stays
+               beside its title, as on a desktop, rather than taking a line of its own (R13). */
+            .card-head:has(> .card-act > :only-child:is(button, .btn)) { grid-template-columns: 1fr auto; }
+            .card-head > .card-act:has(> :only-child:is(button, .btn)) { grid-column: 2; grid-row: 1 / span 2; margin-top: 0; }
         }
 
         /* ---------- Form controls: one recipe, applied by element ---------- */
@@ -2135,7 +2135,8 @@
            icon site in the file has to size its own svg. This one never did:
            the chevron measured 0x0 and an expandable row's only cue was the
            pointer cursor. 16px, like the caret on a select. */
-        details.sect summary .chev { margin-left: auto; transition: transform var(--dur) var(--ease); color: var(--text-tertiary); display: grid; }
+        /* The marker leads the row's words, so no row ends in a stranded chevron (R7). */
+        details.sect summary .chev { order: -1; transition: transform var(--dur) var(--ease); color: var(--text-tertiary); display: grid; }
         details.sect summary .chev svg { width: var(--icon-md); height: var(--icon-md); display: block; }
         details.sect[open] summary .chev { transform: rotate(90deg); }
         details.sect .body { padding: 0 0 var(--sp-4); color: var(--text-secondary); font-size: var(--text-body); line-height: var(--lh-control); }
@@ -2306,7 +2307,7 @@
         .btn.ghost { background: transparent; border-color: transparent; box-shadow: none; }
         .btn.ghost .ic { color: var(--text-tertiary); }
         .sk-head { display: flex; align-items: flex-start; gap: var(--sp-2); }
-        .sk-title { font-size: var(--text-body); font-weight: var(--weight-medium); flex: 1; min-width: 0; overflow-wrap: anywhere; line-height: var(--lh-control); margin: 0; padding-top: var(--sp-0-5); }
+        .sk-title { font-size: var(--text-body); font-weight: var(--weight-medium); flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; line-height: var(--lh-control); margin: 0; padding-top: var(--sp-0-5); }
         .sk-acts { display: flex; align-items: center; gap: var(--sp-1); flex-shrink: 0; }
         .sk-body { font-size: var(--text-body); line-height: var(--lh-prose); color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; margin-top: var(--sp-2); max-width: var(--measure); }
         .sk-body.clamped { max-height: calc(var(--lh-prose) * 1em * 5); overflow: hidden; -webkit-mask-image: linear-gradient(180deg, var(--black) 58%, transparent); mask-image: linear-gradient(180deg, var(--black) 58%, transparent); }
@@ -2391,7 +2392,6 @@
         .sk-card { container: skcard / inline-size; }
         @container skcard (max-width: 600px) {
             .sk-head { flex-wrap: wrap; }
-            .sk-title { flex-basis: 100%; }
         }
         @keyframes navspin { to { transform: rotate(360deg); } }
         /* per-page ask panel. No margin of its own: it is always a direct
@@ -3520,6 +3520,8 @@
             border-top: var(--bw-hairline) solid var(--border-default); padding-block: var(--sp-4); padding-inline: 0; }
         @media (max-width: 640px) { .rel { grid-template-columns: minmax(0, 1fr); } }
         .rel-rail { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); }
+        /* On a phone the title and its date share one line (R13), not the date alone above it. */
+        @media (max-width: 640px) { .rel-rail { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-2); } .rel-rail > .rel-title { order: -1; flex: 1 1 auto; } }
         .rel:first-child { border-top: 0; padding-top: 0; }
         .rel-head { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; margin-bottom: var(--sp-2); }
         .rel-title { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); margin: 0; }
@@ -4696,6 +4698,8 @@
             .ktable.crm-deals-table :is(th, td):nth-child(5), .ktable.crm-deals-table :is(th, td):nth-child(6) { display: none; }
             .ktable.crm-contact-table :is(.crm-deals, .crm-label) { display: none; }
         }
+        /* A phone's two-line rows have room for what the narrow table hid (final visual review S12). */
+        @media (max-width: 640px) { .ktable.crm-contact-table > tbody > tr > td:is(.crm-deals, .crm-label):not(:empty), .ktable.crm-deals-table > tbody > tr > td:is(:nth-child(5), :nth-child(6)):not(:empty) { display: block; } }
         /* Restated after the pair above, or the shorthand there would put 16px
            back on the right of a column whose whole content is a 16px box. */
         .ktable.crm-table th.tick, .ktable.crm-table td.tick { padding-right: 0; }
@@ -5960,7 +5964,7 @@
            the spare width shared between the columns. Their floors are fixed:
            an opened Tabs panel spans every column, and a content floor handed
            its whole width to the flexible ones. */
-        .dt-people { --dt-cols: minmax(12rem, 2fr) minmax(7.5rem, 1fr) repeat(4, minmax(5rem, 1fr)) minmax(7rem, 1fr) max-content; }
+        .dt-people { --dt-cols: minmax(12rem, 2fr) minmax(7.5rem, 1fr) repeat(4, minmax(4.5rem, 1fr)) minmax(7rem, 1fr) max-content; }
         .dmenu-item.danger, .dmenu-item.danger .ic { color: var(--error); }
         /* Team, Work (12 Oct 2026): the clock and the hours at their natural
            widths side by side, the sessions under heads with a day line. */
@@ -25056,7 +25060,7 @@ Projected Image UK"></textarea>
                 listBox.append(dtable([{ head: 'Request', cls: 'stack' }, { head: 'Asked by', cls: 'stack' }, { head: 'Page' }, { head: 'State', cls: 'stack' }]
                     .concat(u.can_triage ? [{ head: '', cls: 'act' }] : []),
                     rows.slice(from, from + reqView.size).map(r => reqRow(r, u)),
-                    { cls: 'dt-req' + (u.can_triage ? ' triage' : ''), label: 'Feature requests', stop: 'l' }));
+                    { cls: 'dt-req' + (u.can_triage ? ' triage' : ''), label: 'Feature requests', stop: 'm' }));
                 if (rows.length > 25) listBox.append(tablePager({ total: rows.length, page: reqView.page, pageSize: reqView.size, sizes: [25, 50, 100],
                     noun: 'requests', onPage: (k) => { reqView.page = k; paintList(); }, onSize: (k) => { reqView.size = k; reqView.page = 1; paintList(); } }));
             };
@@ -31880,7 +31884,7 @@ Projected Image UK"></textarea>
                     return { cls: u.active === false ? 'settled' : '', cells: [who, roleCell, nf(c.made), nf(c.dispatched), nf(c.files), nf(c.crm),
                                 u.last_login_at ? fmtDate(u.last_login_at) : el('span', 'dt-muted', 'Never logged in'), acts],
                              after: teamTabsOpen === u.id && u.role !== 'master' ? teamTabsPanel(u, manageable) : null };
-                }), { cls: 'dt-people', label: 'People', stop: 'l' }));
+                }), { cls: 'dt-people', label: 'People', stop: 'm' }));
             host.append(card);
         }
         function renderTeamWork(host) {
@@ -32045,7 +32049,7 @@ Projected Image UK"></textarea>
             const feed = el('div', 'tm-feed');
             if (tags.length) feed.append(tableTools(tags, []));
             feed.append(dtable([{ head: 'Time' }, { head: 'Area' }, { head: 'Who' }, { head: 'What' }], tableRows,
-                { cls: 'dt-feed', label: 'Activity', main: 3,
+                { cls: 'dt-feed', label: 'Activity', main: 3, stop: 's',
                   empty: emptyState({ icon: I.search, text: 'Nothing recorded for that view yet.', action: (teamFilterWho || teamFilterArea) ? clr : null }) }));
             /* Who and Area as two short lists beside the feed, each with its
                count; the chosen one has the teal edge, and a person with nothing

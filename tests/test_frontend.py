@@ -2794,6 +2794,70 @@ def t_a_search_shows_its_whole_hint():
 
 
 @test
+def t_a_laptop_keeps_the_people_requests_and_activity_tables():
+    """Final visual review S1, 12 Oct 2026: at a 1440 window Team's People,
+    the Guide's Requests and Team's Activity dropped to two-line rows with no
+    column heads, where the mockups keep the table. People and Requests turned
+    at 72rem, wider than the 1,116 column a 1440 window gives; the feed at
+    56rem, in its 828 beside the filter lists. Each now turns where its own
+    columns stop fitting."""
+    ok("{ cls: 'dt-people', label: 'People', stop: 'm' }" in SCRIPT and ".dt-people { --dt-cols: minmax(12rem, 2fr) minmax(7.5rem, 1fr) repeat(4, minmax(4.5rem, 1fr)) minmax(7rem, 1fr) max-content; }" in CSS,
+       "People keeps its table to 56rem, its counts floored at 4.5rem so it fits there")
+    ok("label: 'Feature requests', stop: 'm' }" in SCRIPT, "Requests to 56rem")
+    ok("{ cls: 'dt-feed', label: 'Activity', main: 3, stop: 's'," in SCRIPT, "and the feed to 40rem")
+
+
+@test
+def t_a_phone_card_keeps_its_one_button_beside_its_title():
+    """Final visual review S3, 12 Oct 2026 (R13): on a phone a card head's one
+    worded button (+ Lead, + Activity, Add a unit, New account, Retry failed,
+    Change settings) took a line of its own under the title. Only an icon
+    button stayed beside it. Any single button now does."""
+    ok(".card-head:has(> .card-act > :only-child:is(button, .btn)) { grid-template-columns: 1fr auto; }" in CSS
+       and ".card-head > .card-act:has(> :only-child:is(button, .btn)) { grid-column: 2; grid-row: 1 / span 2; margin-top: 0; }" in CSS,
+       "one button stays on the title's line")
+
+
+@test
+def t_a_details_row_leads_with_its_marker():
+    """Final visual review S5, 12 Oct 2026 (R7): each Details row (Sales,
+    Stock, Traffic, Pages checked) ended in a chevron 480px from its words;
+    the notes have the marker lead the word, so no row ends in a stranded
+    chevron."""
+    ok("details.sect summary .chev { order: -1; transition: transform var(--dur) var(--ease); color: var(--text-tertiary); display: grid; }" in CSS,
+       "the chevron leads the row's words")
+
+
+@test
+def t_a_phone_crm_row_keeps_every_value():
+    """Final visual review S12, 12 Oct 2026: on a phone no CRM contact showed
+    its deals or label, and no deal its next activity or status: a September
+    rule hid those columns when the narrow table still scrolled sideways. In
+    two-line rows there is room, so a phone shows them, each after its name."""
+    ok("@media (max-width: 640px) { .ktable.crm-contact-table > tbody > tr > td:is(.crm-deals, .crm-label):not(:empty), .ktable.crm-deals-table > tbody > tr > td:is(:nth-child(5), :nth-child(6)):not(:empty) { display: block; } }" in CSS,
+       "a phone's two-line rows show the values the narrow table hid")
+
+
+@test
+def t_a_skills_tag_sits_beside_its_title():
+    """Final visual review S14, 12 Oct 2026 (R13): House style's Every answer
+    tag stood at the far end of its text column, 250px from the title, and on
+    a phone on a line of its own. The title is as wide as its words, so the
+    tag follows it, and wraps under it only when the line is full."""
+    ok(".sk-title { font-size: var(--text-body); font-weight: var(--weight-medium); flex: 0 1 auto;" in CSS, "the title is as wide as its words")
+    ok(".sk-title { flex-basis: 100%; }" not in CSS, "and a narrow card no longer puts the tag on a line of its own")
+
+
+@test
+def t_a_phone_release_puts_its_date_beside_its_title():
+    """Final visual review S16, 12 Oct 2026 (R13): on a phone each release in
+    What's new put its date alone on a line above its title; the mockup has
+    them share one line."""
+    ok("@media (max-width: 640px) { .rel-rail { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-2); } .rel-rail > .rel-title { order: -1; flex: 1 1 auto; } }" in CSS,
+       "the title, then its date, on one line")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left
