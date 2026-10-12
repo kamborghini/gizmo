@@ -2210,6 +2210,32 @@ def t_an_opened_size_is_one_band_and_never_prints_over_the_next_model():
 
 
 @test
+def t_the_crm_lists_are_tables_and_its_extras_wait_in_more():
+    """OPS-19 to OPS-25, 12 Oct 2026: a lead and an activity were each a
+    name at the left and their facts 800 to 1,200px away; Pipedrive import
+    was a link on the tab row; Insights' months were a ladder of bars beside
+    an empty half; and Contacts kept an empty 48px band for a selection bar."""
+    fn = fn_src("function renderCRM() {")
+    ok("actions: heads" in fn and "dropMenu(more, [" in fn and "'Pipedrive import'" in fn, "Pipedrive import is in the header's More menu (OPS-22)")
+    ok("crmPdOpen" not in SCRIPT and "function openPipedriveImport(" in SCRIPT, "and opens as a window, closed by its X")
+    ld = fn_src("function renderCRMLeads(")
+    ok("dtable([{ head: 'Lead' }, { head: 'Person' }, { head: 'Organisation' }, { head: 'Value', cls: 'num' }, { head: 'Arrived' }]" in ld,
+       "Leads is a table (OPS-20)")
+    ac = fn_src("function renderCRMActivities(")
+    ok("{ head: 'Activity', cls: 'stack' }, { head: 'Deal' }, { head: 'Person' }" in ac and "'No linked deal'" in ac and "{ head: 'Due' }" in ac,
+       "Activities is a table, the person beside the deal (OPS-19)")
+    ok("cls: 'dt-grp'" in ac and ".dt-row.dt-grp > .dt-c { grid-column: 1 / -1;" in CSS, "its day groups are rows with their counts")
+    ok(".dt-c > .ic svg { width: var(--icon-md); height: var(--icon-md); }" in CSS, "an icon in a table cell has its size (the type column drew nothing)")
+    ins = fn_src("function renderCRMInsights(")
+    ok("'card crm-wide'" in ins and "el('div', 'crm-months')" in ins and ".crm-charts > .crm-wide { grid-column: 1 / -1; }" in CSS,
+       "Won by month runs across the row as columns (OPS-24)")
+    ch = CSS.split("\n        .crm-charts {")[1].split("}")[0]
+    ok("align-items: start" in ch, "the others two by two in the page column, each only as tall as its chart")
+    ct = fn_src("function renderCRMContacts(")
+    ok("'lbl-toolbar crm-selbar'" not in ct and "el('tr', 'crm-selhead')" in ct, "a tick arms the table's head row in place: no empty band (OPS-25)")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left
@@ -3836,9 +3862,9 @@ def t_a_rows_keydown_never_steals_an_inner_controls_keypress():
     handlers = _re2.findall(r"addEventListener\('keydown', \((e|ev)\) => \{[^\n]*(?:Enter)[^\n]*\}\);", SCRIPT)
     hits = _re2.findall(r"addEventListener\('keydown', \((?:e|ev)\) => \{ if \((?:e|ev)\.target !== \w+\) return;", SCRIPT)
     rowish = _re2.findall(r"(row|tr|r|card)\.(?:addEventListener\('keydown'|onkeydown)", SCRIPT)
-    # Rows that became tables (12 Oct 2026: Liability, Reconciliation, the filter counters) open
-    # from a real button in the row, which needs no keydown of its own, so fewer handlers remain.
-    ok(len(hits) >= 3, "the container handlers carry the target guard (%d)" % len(hits))
+    # Rows that became tables (12 Oct 2026: Liability, Reconciliation, CRM leads, the filter counters)
+    # open from a real button in the row, which needs no keydown of its own, so fewer handlers remain.
+    ok(len(hits) >= 2, "the container handlers carry the target guard (%d)" % len(hits))
     ok("if (e.target !== card) return;" in SCRIPT, "the deal card too")
     # The two leaf handlers (the follow-up ticks) have no children to steal from
     # and legitimately omit the guard.
@@ -8564,7 +8590,7 @@ def t_the_reviewers_last_findings_stay_closed():
        "the team list shares its columns")
     ok(".tm-sign-save { margin-top: var(--sp-2); }" in CSS, "and Save sign-off stands off its field")
     # CRM Insights: each empty chart says what fills it.
-    ok("function bars(title, desc, rows, fmt, empty) {" in SCRIPT
+    ok("function bars(title, desc, rows, fmt, empty, o) {" in SCRIPT
        and "'Nothing done in the last 30 days.'" in SCRIPT
        and "'No expected close dates ahead.'" in SCRIPT,
        "each chart's empty line is its own")

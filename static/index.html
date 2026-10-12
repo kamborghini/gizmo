@@ -2458,6 +2458,9 @@
         .dt-c.stack { flex-direction: column; align-items: flex-start; justify-content: center; gap: 0; }
         .dt-c.act { justify-content: flex-end; gap: var(--control-gap); }
         .dt-c.email { overflow-wrap: anywhere; }
+        /* An icon in a cell (an activity's type) has the house size: its drawing has none of its own. */
+        .dt-c > .ic { color: var(--text-tertiary); }
+        .dt-c > .ic svg { width: var(--icon-md); height: var(--icon-md); }
         .dt-head .dt-c.sort { color: var(--text-secondary); }
         .dt-head .dt-c svg { width: var(--icon-sm); height: var(--icon-sm); }
         .dt-name { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; font-weight: var(--weight-medium); color: var(--text-primary); }
@@ -3543,8 +3546,30 @@
         .guide-none[hidden] { display: none; }
         .guide-print-row { margin: 0 0 var(--sp-2); }
         .card-grid > .span-all { grid-column: 1 / -1; }
-        .crm-charts { display: grid; gap: var(--sp-4); align-items: stretch;
+        /* Insights (12 Oct 2026, OPS-23, OPS-24): Won by month across the row
+           as columns, the other four two by two, each only as tall as its chart. */
+        .crm-charts { display: grid; gap: var(--sp-4); align-items: start;
             grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); }
+        .crm-charts > .crm-wide { grid-column: 1 / -1; }
+        .crm-months { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--sp-2); height: 12rem; }
+        .crm-month { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; justify-items: center; gap: var(--sp-1); min-width: 0; }
+        .crm-month-track { display: flex; align-items: flex-end; width: 100%; max-width: 3rem; height: 100%; }
+        .crm-month-bar { width: 100%; min-height: 2px; border-radius: var(--radius-swatch) var(--radius-swatch) 0 0; background: var(--fill-mark); }
+        .crm-month-v { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .crm-month-l { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); white-space: nowrap; }
+        .crm-wide:has(> .crm-months) > .crm-bars { display: none; }
+        @media (max-width: 640px) { .crm-wide > .crm-months { display: none; } .crm-wide:has(> .crm-months) > .crm-bars { display: block; } }
+        /* Leads and Activities (12 Oct 2026, OPS-19, OPS-20): one table each. */
+        .dt-leads { --dt-cols: minmax(14rem, 2fr) minmax(0, 1fr) minmax(0, 1fr) max-content max-content; }
+        .dt-acts { --dt-cols: max-content max-content minmax(14rem, 2fr) minmax(0, 1fr) minmax(0, 1fr) max-content max-content; }
+        .dt-acts.multi { --dt-cols: max-content max-content minmax(14rem, 2fr) minmax(0, 1fr) minmax(0, 1fr) max-content max-content max-content; }
+        :is(.dt-leads, .dt-acts) .dt-link { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .dt-leads .dt-name > :is(.lbl-chip) { flex: none; }
+        .crm-unseen .dt-link { font-weight: var(--weight-semibold); }
+        /* A group row (Overdue, Today) spans the table, its count after it. */
+        .dt-row.dt-grp > .dt-c { grid-column: 1 / -1; }
+        .dt-row.dt-grp { min-height: var(--control-h); }
+        .dt-row.dt-grp .crm-group { display: flex; align-items: center; gap: var(--sp-2); margin: 0; }
         .crm-contact-table td.tick, .crm-contact-table th.tick { width: 34px; padding-right: 0; }
         .crm-contact-table td .lbl-chip { margin-left: var(--sp-2); }
         /* The Pipedrive survey writes into a host that is appended whether or
@@ -4121,7 +4146,8 @@
         /* Idle and armed measure the same, so ticking a row never moves the
            table under the pointer: 28px is the armed height, the small button
            the card header and the toolbar above it are both built from. */
-        .crm-selbar { min-height: var(--control-h-md); }
+        .crm-selbar { display: flex; align-items: center; gap: var(--control-gap); }
+        .ktable tr.crm-selhead > th { padding: 0; }
         .crm-act-row .crm-mid { flex: 1; min-width: 0; cursor: pointer; }
         /* The contacts table's tick is the same gesture as the activity row's,
            so it is drawn here rather than hand-sized at the call site. Both are
@@ -24660,7 +24686,7 @@ Projected Image UK"></textarea>
            scroll on one tab beside a 25-row pager on the next is two pages. */
         let crmDealsPage = 1, crmDealsSize = 25;
         const crmContactSel = new Set();   /* bulk-delete ticks, master only */
-        let crmLoadedAt = 0, crmPdOpen = false;
+        let crmLoadedAt = 0;
         const CRM_TYPES = [['call', 'Call'], ['meeting', 'Meeting'], ['task', 'Task'],
                            ['deadline', 'Deadline'], ['email', 'Email'], ['lunch', 'Lunch']];
         const crmTypeIcon = t => ({ call: I.phone, meeting: I.users, task: I.check,
@@ -24814,7 +24840,17 @@ Projected Image UK"></textarea>
             /* One line; the amber and red key waits behind the title's info
                button, word for word (copy plan, CRM #1). pageHead puts Beta by
                the title, as for every tab in BETA_TABS. */
-            box.append(pageHead({ view: 'crm', title: 'CRM', line: 'Deals, activities and contacts for the sales desk.',
+            /* Pipedrive import waits in the header's More menu, master only
+               (12 Oct 2026, OPS-22): it was a link at the far end of the tab
+               row, and opened as a card on all five tabs. */
+            const heads = [];
+            if (!teamMe || teamMe.role === 'master') {
+                const more = el('button', 'btn btn-sm'); more.type = 'button';
+                more.append(document.createTextNode('More'), ico(I.chevDown));
+                more.onclick = () => dropMenu(more, [{ label: 'Pipedrive import', icon: I.download, onClick: openPipedriveImport }]);
+                heads.push(more);
+            }
+            box.append(pageHead({ view: 'crm', title: 'CRM', line: 'Deals, activities and contacts for the sales desk.', actions: heads,
                 info: infoButton('About the CRM', { title: 'CRM', body: 'Every open deal '
                     + 'should carry a next activity; cards wearing the amber warning are the ones '
                     + 'with nothing scheduled, and a red edge means a deal has sat untouched too long.' }) }));
@@ -24824,45 +24860,6 @@ Projected Image UK"></textarea>
                                   ['contacts', 'Contacts'], ['insights', 'Insights']],
                                  crmSeg, (k) => { crmSeg = k; renderCRM(); }, { label: 'CRM sections' });
             box.append(seg);
-            /* Moving off Pipedrive: the survey is read-only and writes nothing
-               to either system, so it is safe to press at any time. Once real
-               data lives here the panel folds to one quiet line - it must not
-               squat between the tabs and the pipeline forever. */
-            if (!teamMe || teamMe.role === 'master') {
-                /* Folded to one quiet link until it is asked for, data or not:
-                   open, it was a card and a teal button on all five tabs. */
-                if (!crmPdOpen) {
-                    /* On the right of the segment row, the way a toolbar keeps
-                       its quiet extras on the right rail, rather than as a
-                       block of its own that breaks the page's rhythm. */
-                    const link = actionLink('miss-open', 'Pipedrive import');
-                    link.className = 'miss-open crm-sub';
-                    link.onclick = () => { crmPdOpen = true; renderCRM(); };
-                    const segRow = el('div', 'seg-row'); box.replaceChild(segRow, seg); segRow.append(seg, link);
-                } else {
-                    /* The house card: a 16px title over a 14px line saying what
-                       it does, the same pair the contacts card below it wears.
-                       Two cards on one screen at two type scales read as two
-                       different pages. */
-                    const pd = el('div', 'card');
-                    const pdHead = el('div', 'card-head');
-                    pdHead.append(el('h3', 'card-title', 'Moving from Pipedrive'));
-                    pdHead.append(el('p', 'card-desc',
-                        'Reads your Pipedrive account and writes nothing, to either system.'));
-                    pd.append(pdHead);
-                    const row = el('div', 'lbl-toolbar');
-                    /* Small buttons, as the Deals card head directly under it uses. */
-                    const go = el('button', 'btn btn-sm', 'Look at my Pipedrive');
-                    const out = el('div', 'pd-out');
-                    go.onclick = () => runPipedriveSurvey(out, go);
-                    row.append(go);
-                    const hide = el('button', 'btn btn-sm', 'Hide');
-                    hide.onclick = () => { crmPdOpen = false; renderCRM(); };
-                    row.append(hide);
-                    pd.append(row, out);
-                    box.append(pd);
-                }
-            }
             /* Only the board earns 1600px; everything else keeps the house
                measure, or five stat cards stretch into near-empty bands. */
             /* Each segment declares its own width. Deals is a board, contacts
@@ -24880,6 +24877,20 @@ Projected Image UK"></textarea>
             if (newBoard) newBoard.scrollLeft = keepX;
         }
 
+        /* Moving off Pipedrive, as a window from More: the survey reads and
+           writes nothing, to either system, so it is safe to press at any time.
+           Its X is what Hide was. */
+        function openPipedriveImport() {
+            const m = sheetModal('Pipedrive import');
+            m.body.append(el('p', 'card-sub', 'Reads your Pipedrive account and writes nothing, to either system.'));
+            const row = el('div', 'lbl-toolbar');
+            const go = el('button', 'btn btn-sm', 'Look at my Pipedrive'); go.type = 'button';
+            const out = el('div', 'pd-out');
+            go.onclick = () => runPipedriveSurvey(out, go);
+            row.append(go);
+            m.body.append(row, out);
+            return m;
+        }
         async function runPipedriveSurvey(host, btn) {
             btn.disabled = true; btn.textContent = 'Reading\u2026';
             host.innerHTML = '';
@@ -25988,9 +25999,10 @@ Projected Image UK"></textarea>
             rows.slice(0, 60).forEach(r => hist.append(r.node()));
             m.body.append(hist);
         }
-        function crmActRow(a, refresh) {
-            const r = el('div', 'crm-act-row' + (a.done ? ' done' : ''));
+        function crmActTick(a, refresh) {
             const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!a.done;
+            cb.setAttribute('aria-label', (a.done ? 'Mark not done: ' : 'Mark done: ') + a.subject);
+            cb.onclick = (ev) => ev.stopPropagation();
             cb.onchange = async () => {
                 try {
                     const res = await crmOp('/api/crm/activity', { op: a.done ? 'undone' : 'done', id: a.id });
@@ -26001,7 +26013,11 @@ Projected Image UK"></textarea>
                     if (res.followup_deal_id) crmActivityForm({ deal_id: res.followup_deal_id, followup: true }, refresh);
                 } catch (e) { toastError(e.message); }
             };
-            r.append(cb, ico(crmTypeIcon(a.type)));
+            return cb;
+        }
+        function crmActRow(a, refresh) {
+            const r = el('div', 'crm-act-row' + (a.done ? ' done' : ''));
+            r.append(crmActTick(a, refresh), ico(crmTypeIcon(a.type)));
             /* Everything except the checkbox opens the editor: moving a call
                to Friday is the single most common activity operation, and it
                used to be impossible without corrupting the history. */
@@ -26180,7 +26196,6 @@ Projected Image UK"></textarea>
                 tools.append(b);
             });
             card.append(tableTools([tools, mine].filter(Boolean), [seg]));
-            const list = el('div', 'card-bleed crm-act-list'); card.append(list);
             host.append(card);
             const today = crmCache.today;
             const weekEnd = new Date(Date.parse(today) + 6 * 86400000).toISOString().slice(0, 10);
@@ -26204,13 +26219,12 @@ Projected Image UK"></textarea>
             if (!acts.length) {
                 /* Inside the card, not instead of it: the filter that emptied
                    the list has to stay on the page beside the emptiness. */
-                list.append(el('div', 'empty', crmActPeriod === 'done'
+                card.append(el('div', 'empty', crmActPeriod === 'done'
                     ? 'Nothing completed yet.' : 'Nothing scheduled.'));
                 return;
             }
             /* Day groups, so a run of Tuesdays reads as a day plan, not a wall. */
-            const cap = crmActPeriod === 'done' ? 500 : 400;
-            let lastGroup = null;
+            const limit = crmActPeriod === 'done' ? 500 : 400;
             const groupOf = (a) => {
                 if (crmActPeriod === 'done') return (a.done_at || '').slice(0, 7) || 'Undated';
                 if (!a.due_date) return 'No date';
@@ -26219,19 +26233,48 @@ Projected Image UK"></textarea>
                 if (a.due_date <= weekEnd) return 'This week';
                 return 'Later';
             };
-            acts.slice(0, cap).forEach(a => {
+            const shown = acts.slice(0, limit);
+            const perGroup = {};
+            shown.forEach(a => { const g = groupOf(a); perGroup[g] = (perGroup[g] || 0) + 1; });
+            /* One table (12 Oct 2026, OPS-19): the tick, the type, the activity
+               over where and its note, the deal and the person side by side (the
+               person showed only when there was no deal), who it is for, the
+               priority and when it is due. A group row carries its count. */
+            const multi = crmMulti();
+            const rows = [];
+            let lastGroup = null;
+            shown.forEach(a => {
                 const g = groupOf(a);
                 if (g !== lastGroup) {
                     lastGroup = g;
                     const nice = /^\d{4}-\d{2}$/.test(g)
                         ? new Date(g + '-01T12:00:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
                         : g;
-                    list.append(el('div', 'crm-group', nice));
+                    const gh = el('span', 'crm-group'); gh.append(document.createTextNode(nice), el('span', 'cnt', String(perGroup[g])));
+                    rows.push({ cls: 'dt-grp', cells: [gh] });
                 }
-                list.append(crmActRow(a, renderCRM));
+                const what = el('span', 'dt-name');
+                const sb = el('button', 'dt-link', a.subject); sb.type = 'button'; sb.title = a.subject;
+                sb.onclick = (ev) => { ev.stopPropagation(); crmActivityForm({ id: a.id }, renderCRM); };
+                what.append(sb);
+                const preview = a.note_preview || a.note || '';
+                const under = [a.location, preview && !a.done ? preview : ''].filter(Boolean).join(' \u00b7 ');
+                const actCell = document.createDocumentFragment(); actCell.append(what);
+                if (under) actCell.append(el('span', 'dt-sub', under));
+                const deal = a.deal_id && crmCache.deals[a.deal_id];
+                const per = crmPerson(a.person_id);
+                const cells = [crmActTick(a, renderCRM), ico(crmTypeIcon(a.type)), actCell,
+                    deal ? deal.title : el('span', 'dt-muted', 'No linked deal'), (per && per.name) || ''];
+                if (multi) cells.push((a.assignee && crmUname(a.assignee)) || '');
+                cells.push(a.priority ? el('span', 'crm-prio ' + a.priority, cap(a.priority)) : '',
+                    el('span', 'crm-act-due ' + a.state, (a.due_date ? fmtDate(a.due_date) : '') + (a.due_time ? ', ' + a.due_time : '')));
+                rows.push({ cls: a.done ? 'settled' : '', onClick: () => crmActivityForm({ id: a.id }, renderCRM), cells: cells });
             });
-            if (acts.length > cap)
-                list.append(el('div', 'crm-sub', 'Showing the first ' + cap + ' of ' + acts.length + '.'));
+            card.append(dtable([{ head: '' }, { head: '' }, { head: 'Activity', cls: 'stack' }, { head: 'Deal' }, { head: 'Person' }]
+                .concat(multi ? [{ head: 'For' }] : []).concat([{ head: 'Priority' }, { head: 'Due' }]),
+                rows, { cls: 'dt-acts' + (multi ? ' multi' : ''), label: 'Activities', main: 2 }));
+            if (acts.length > limit)
+                card.append(el('div', 'crm-sub', 'Showing the first ' + limit + ' of ' + acts.length + '.'));
         }
 
         /* ---------------- contacts ---------------- */
@@ -26327,14 +26370,12 @@ Projected Image UK"></textarea>
                 [...crmContactSel].forEach(id => { if (!visible.has(id)) crmContactSel.delete(id); });
                 const master = !teamMe || teamMe.role === 'master';
                 /* IDLE AND ARMED MEASURE THE SAME, the rule the inbox's bulk
-                   bar already keeps. This bar used to exist only once something
-                   was ticked, so the first tick dropped a 48px band between the
-                   toolbar and the table and every row slid down under the
-                   pointer: the second tick of a run landed on the wrong person.
-                   Now it is always on the page and only its CONTENTS change. */
-                const bar2 = master ? el('div', 'lbl-toolbar crm-selbar') : null;
-                if (bar2) list.append(bar2);
-                if (bar2 && crmContactSel.size) {
+                   bar keeps. A tick turns the table's head row into the
+                   selection bar, in place and at the same height (12 Oct 2026,
+                   OPS-25), so no row moves under the pointer: the bar used to
+                   stand empty above the table, a 48px band, until a tick. */
+                const bar2 = master && crmContactSel.size ? el('div', 'crm-selbar') : null;
+                if (bar2) {
                     const del = el('button', 'btn btn-sm');
                     del.append(ico(I.trash), document.createTextNode(
                         'Delete ' + crmContactSel.size + ' selected'));
@@ -26372,7 +26413,10 @@ Projected Image UK"></textarea>
                 if (people) cols.push('<th>Organisation</th>', '<th>Email</th>', '<th>Phone</th>');
                 else cols.push('<th>Website</th>', '<th>Address</th>');
                 cols.push('<th class="num crm-deals">Deals</th>', '<th class="crm-label">Label</th>');
-                tb.innerHTML = '<thead><tr>' + cols.join('') + '</tr></thead>';
+                if (bar2) {
+                    const thead = el('thead'); const tr0 = el('tr', 'crm-selhead'); const th0 = el('th'); th0.colSpan = cols.length;
+                    th0.append(bar2); tr0.append(th0); thead.append(tr0); tb.append(thead);
+                } else tb.innerHTML = '<thead><tr>' + cols.join('') + '</tr></thead>';
                 const tbody = el('tbody');
                 const pageCount = Math.max(1, Math.ceil(items.length / crmContactsSize));
                 if (crmContactsPage > pageCount) crmContactsPage = pageCount;
@@ -26805,34 +26849,28 @@ Projected Image UK"></textarea>
             const seg = segmented([['active', 'Inbox'], ['archived', 'Archive']], crmLeadsMode,
                                   (k) => { crmLeadsMode = k; renderCRM(); }, { label: 'Show' });
             card.append(tableTools([], [seg]));
-            /* Bleed, and the rows shed the frame they wear standing alone: a
-               list already inside a card is a list of rows. */
-            const list = el('div', 'card-bleed crm-lead-list'); card.append(list);
             host.append(card);
             const leads = Object.values(crmCache.leads)
                 .filter(l => (crmLeadsMode === 'archived') === !!l.archived)
                 .sort((a, b) => (a.seen === b.seen ? String(b.created_at).localeCompare(String(a.created_at)) : (a.seen ? 1 : -1)));
-            if (!leads.length) { list.append(el('div', 'empty', crmLeadsMode === 'archived' ? 'Nothing archived.' : 'The inbox is clear.')); return; }
-            leads.forEach(l => {
-                const row = el('div', 'lbl-row');
-                row.setAttribute('role', 'button'); row.tabIndex = 0;
-                row.addEventListener('keydown', (ev) => { if (ev.target !== row) return; if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); row.click(); } });
-                const left = el('div', 'lia-name');
-                if (!l.seen && !l.archived) left.append(el('span', 'crm-new-dot'));
-                const t = el('span', null, ' ' + l.title);
-                if (!l.seen && !l.archived) t.style.fontWeight = 'var(--weight-semibold)';
-                left.append(t); row.append(left);
-                const mid = el('div', 'lbl-who');
-                const bits = [];
-                if (l.value) bits.push(crmMoney(l.value));
-                const who = crmWho(l); if (who) bits.push(who);
-                bits.push(fmtDate(l.created_at));
-                mid.append(el('span', 'sub', bits.join(' · ')));
-                if (l.label) mid.append(crmChip(l.label));
-                row.append(mid);
-                row.onclick = () => crmLeadModal(l.id);
-                list.append(row);
-            });
+            /* One table (12 Oct 2026, OPS-20): the lead with its label beside
+               it, then who, which organisation, what it is worth and when it
+               arrived, each under its head, every row one height. Each was a
+               title at the left and its facts 800px away. */
+            card.append(dtable([{ head: 'Lead' }, { head: 'Person' }, { head: 'Organisation' }, { head: 'Value', cls: 'num' }, { head: 'Arrived' }],
+                leads.map(l => {
+                    const unseen = !l.seen && !l.archived;
+                    const nm = el('span', 'dt-name' + (unseen ? ' crm-unseen' : ''));
+                    if (unseen) nm.append(el('span', 'crm-new-dot'));
+                    const b = el('button', 'dt-link', l.title); b.type = 'button'; b.title = l.title;
+                    b.onclick = (ev) => { ev.stopPropagation(); crmLeadModal(l.id); };
+                    nm.append(b);
+                    if (l.label) nm.append(crmChip(l.label));
+                    const pp = crmPerson(l.person_id), oo = crmOrg(l.org_id);
+                    return { onClick: () => crmLeadModal(l.id),
+                             cells: [nm, (pp && pp.name) || '', (oo && oo.name) || '', l.value ? crmMoney(l.value) : '', fmtDate(l.created_at)] };
+                }), { cls: 'dt-leads', label: 'Leads',
+                      empty: el('div', 'empty', crmLeadsMode === 'archived' ? 'Nothing archived.' : 'The inbox is clear.') }));
         }
         function crmLeadForm() {
             const m = crmModal('New lead');
@@ -27127,8 +27165,9 @@ Projected Image UK"></textarea>
                the way the deals and contacts tabs beside this one are built.
                They were bare bordered boxes with a bold line on top, which is
                a card missing its header rather than a different thing. */
-            function bars(title, desc, rows, fmt, empty) {
-                const box2 = el('div', 'card');
+            function bars(title, desc, rows, fmt, empty, o) {
+                o = o || {};
+                const box2 = el('div', o.cols ? 'card crm-wide' : 'card');
                 const bh = el('div', 'card-head');
                 /* A counting rule is the title's info button; descriptions that
                    restated the title went (copy plan, CRM #11 to #15). */
@@ -27154,6 +27193,19 @@ Projected Image UK"></textarea>
                 /* Each chart says what fills it: wins, close dates, stages,
                    losses or done activities are not the same wait. */
                 if (!rows.length) body.append(el('div', 'empty', empty || 'Nothing to chart yet.'));
+                /* Across the row as columns, each with its value over it (12 Oct
+                   2026, OPS-24); the bar rows stay for a phone. */
+                if (o.cols && rows.length) {
+                    const colsEl = el('div', 'crm-months');
+                    rows.forEach(([lab, v]) => {
+                        const c = el('div', 'crm-month');
+                        const track = el('div', 'crm-month-track'); const bar = el('div', 'crm-month-bar');
+                        bar.style.height = Math.max(2, v / max * 100) + '%'; track.append(bar);
+                        c.append(el('span', 'crm-month-v', fmt ? fmt(v) : String(v)), track, el('span', 'crm-month-l', lab));
+                        colsEl.append(c);
+                    });
+                    box2.insertBefore(colsEl, body);
+                }
                 charts.append(box2);
                 /* The BODY, so a caller's footnote lands under the bars it is
                    about rather than in the card's block rhythm. */
@@ -27166,7 +27218,7 @@ Projected Image UK"></textarea>
             won.forEach(x => { const k = (x.won_at || '').slice(0, 7); if (k) byMonth[k] = (byMonth[k] || 0) + (x.value || 0); });
             bars('Won by month', null,
                 Object.keys(byMonth).sort().slice(-12).map(k => [niceMonth(k), Math.round(byMonth[k])]), crmMoney,
-                'No deals won yet.');
+                'No deals won yet.', { cols: true });
             /* The forecast Pipedrive sells separately: open deals by their
                expected close month, both the raw sum and the weighted one. */
             const fc = {};
