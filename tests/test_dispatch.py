@@ -9291,13 +9291,15 @@ def t_mail_sync_pipeline_and_history_short_circuit():
             eq(j["threads"][0]["subject"], "Order query")
             eq(calls["get"], 1)
             # Same historyId again: the listing is enough, no thread fetch.
+            # (A board read no longer syncs inline, so the sync is run here.)
             copilot._load_mail()["synced_at"] = ""     # force staleness
-            post("/api/mail/board", {})
+            run_async(copilot._mail_sync_now())
+            eq(calls["list"], 2, "the sync did run")
             eq(calls["get"], 1, "an unchanged thread costs nothing to re-sync")
             # A bumped historyId is fetched again.
             listing[0]["historyId"] = "h2"
             copilot._load_mail()["synced_at"] = ""
-            post("/api/mail/board", {})
+            run_async(copilot._mail_sync_now())
             eq(calls["get"], 2)
         finally:
             _gm.list_threads, _gm.get_thread = saved
@@ -17944,9 +17946,13 @@ def t_an_inbox_click_writes_the_mailbox_once_not_twice():
            "a label already correct is not rewritten")
     finally:
         copilot._write_mail = saved
+    # Since 2026-10-12 the label trip runs after the answer, in one place
+    # (_mail_labels_later), and that is where the follow-up write is guarded.
     src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
-    eq(src.count("if await _mail_sync_labels("), 3,
-       "every route guards its follow-up write on there being something to write")
+    eq(src.count("if await _mail_sync_labels("), 1,
+       "the one follow-up write is guarded on there being something to write")
+    eq(src.count('_mail_labels_soon(t["id"])'), 3,
+       "and claim, assign and state all hand the label to it")
     ok("await _mail_sync_labels(t, _team_name(who))\n        _write_mail" not in src,
        "and none of them writes unconditionally any more")
 
@@ -20500,7 +20506,9 @@ def t_the_name_an_attachment_is_SENT_under_gets_the_same_gate_as_the_upload():
     ok("_DANGEROUS_EXT" in src,
        "the outgoing name is checked, not only the uploaded one")
     ok("_file_ext(nm)" in src, "by its extension")
-    ok("_files_head(key)" in src, "and the object is measured before it is read")
+    ok("asyncio.to_thread(_files_head, key)" in src
+       and src.index("_files_head") < src.index('"get_object"'),
+       "and the object is measured before it is read (off the event loop since 2026-10-12)")
 
 
 @test
@@ -26905,6 +26913,597 @@ def t_a_door_service_that_lists_nearby_shops_is_still_a_door_service():
         eq(dhl["delivery_shops"], [], "and carries no shop for the window to say the customer collects from")
     finally:
         worldoptions._soap_call = saved
+
+
+# =========================== speed: live timing, compression, the loop ==========
+# The first speed pull request after the 2026-10-12 audit. Each test fails on
+# the code before it.
+
+def _server_timing(r) -> dict:
+    """Server-Timing as {name: milliseconds}."""
+    out = {}
+    for part in (r.headers.get("server-timing") or "").split(","):
+        name, _, dur = part.strip().partition(";dur=")
+        if name and dur:
+            out[name] = float(dur)
+    return out
+
+
+@test
+def t_every_api_answer_says_where_its_time_went():
+    """Speed design 4.1. Production's console cannot be read from here, so
+    every Shopify and Gmail wait in the 2026-10-12 audit was a model. Every
+    API answer now carries its own Server-Timing (the browser's DevTools shows
+    it on the Reactor frame), and an admin's Settings shows each route's
+    typical and slowest time since the last start."""
+    import perf
+
+    def go():
+        perf.ROUTES.clear()
+        r = post("/api/crm/contact", {"op": "person_add", "name": "Timing Probe",
+                                      "emails": ["probe@example.com"]})
+        eq(r.status_code, 200, r.text[:200])
+        marks = _server_timing(r)
+        ok(marks.get("app", 0) > 0, "the whole request is timed: %r" % r.headers.get("server-timing"))
+        ok(marks.get("auth", 0) > 0, "and the door: %r" % marks)
+        ok(marks.get("store", 0) > 0, "and the save to the store: %r" % marks)
+        for i in range(3):
+            post("/api/no-such-route-%d" % i, {})
+        ok(not [k for k in perf.ROUTES if "no-such-route" in k],
+           "a path nobody serves is not remembered, so probing cannot grow the table")
+        s = post("/api/status", {})
+        eq(s.status_code, 200, s.text[:200])
+        rows = {x["route"]: x for x in s.json().get("timing") or []}
+        ok("/api/crm/contact" in rows, "an admin's Settings can show it: %s" % sorted(rows)[:6])
+        row = rows["/api/crm/contact"]
+        ok(row["count"] >= 1 and row["p95"] >= row["p50"] > 0, "typical and slowest: %r" % row)
+    with_accounts(go)
+
+
+@test
+def t_time_waiting_on_shopify_is_its_own_mark():
+    """The audit's biggest desk wait (X1) is Shopify order sweeps, and how
+    long a page waits on Shopify is exactly the number nobody had. Every
+    Shopify call goes through server._request, so that is where it is timed."""
+    import perf
+
+    class _Resp:
+        status_code = 200
+        headers = {}
+
+        def json(self):
+            return {"shop": {"name": "Test"}}
+
+        def raise_for_status(self):
+            pass
+
+    class _Client:
+        async def request(self, method, url, **kw):
+            await asyncio.sleep(0.02)
+            return _Resp()
+
+    async def _hdr():
+        return {}
+
+    saved = (server._http, server._headers, server.SHOPIFY_STORE)
+    server.SHOPIFY_STORE = server.SHOPIFY_STORE or "test-store"
+    server._http, server._headers = (lambda: _Client()), _hdr
+    try:
+        async def go():
+            marks, token = perf.start()
+            try:
+                await server._request("GET", "shop.json")
+            finally:
+                perf.stop(token)
+            return marks
+        marks = run_async(go())
+        ok(marks.get("shop", 0) >= 15, "the 20 ms Shopify wait is marked: %r" % marks)
+    finally:
+        server._http, server._headers, server.SHOPIFY_STORE = saved
+
+
+@test
+def t_big_answers_go_out_as_zstd_compressed_off_the_loop():
+    """The audit's S2. gzip at level 6 ran on the event loop for every big
+    answer: half of a CRM click, during which nobody else's request moved.
+    Python's own zstd at level 3 does the same job six to twelve times
+    cheaper and Chrome, which runs the Shopify admin, asks for it; anything
+    that does not still gets gzip. A body over 64 KB is compressed in a
+    worker thread, so the loop keeps serving everyone else meanwhile."""
+    import threading
+    import perf
+    from compression import zstd as _z
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse as _JR
+    from starlette.routing import Route
+
+    big = {"rows": [{"id": i, "name": "Northern Stage Ltd", "note": "gobo %d" % i} for i in range(3000)]}
+    mid = {"rows": [{"id": i, "name": "Northern Stage Ltd"} for i in range(100)]}
+    seen = {}
+
+    async def _big(request):
+        seen["loop"] = threading.get_ident()
+        return _JR(big)
+
+    async def _mid(request):
+        seen["loop"] = threading.get_ident()
+        return _JR(mid)
+
+    app = Starlette(routes=[Route("/big", _big), Route("/mid", _mid)])
+    app.add_middleware(server.CompressionMiddleware)
+    c = TestClient(app)
+    calls = []
+    real = perf.compress
+
+    def spy(body, enc, *a, **k):
+        calls.append((enc, threading.get_ident()))
+        return real(body, enc, *a, **k)
+
+    def decoded(r):
+        raw = r.content
+        return json.loads(raw if raw[:1] == b"{" else _z.decompress(raw))
+
+    perf.compress = spy
+    try:
+        r = c.get("/big", headers={"Accept-Encoding": "gzip, deflate, br, zstd"})
+        eq(r.headers.get("content-encoding"), "zstd", "a browser that reads zstd is sent zstd")
+        eq(decoded(r), big, "and it is the same data on the other side")
+        ok(calls and calls[-1][1] != seen["loop"], "a big body is compressed off the loop thread")
+        ok("accept-encoding" in (r.headers.get("vary") or "").lower(), "and says what it varies on")
+        calls.clear()
+        r = c.get("/mid", headers={"Accept-Encoding": "zstd"})
+        eq(r.headers.get("content-encoding"), "zstd")
+        ok(calls and calls[-1][1] == seen["loop"], "a small one is cheaper to do in place")
+        r = c.get("/big", headers={"Accept-Encoding": "gzip, deflate"})
+        eq(r.headers.get("content-encoding"), "gzip", "a browser without zstd still gets gzip")
+        eq(r.json(), big)
+        r = c.get("/big", headers={"Accept-Encoding": "zstd;q=0, gzip"})
+        eq(r.headers.get("content-encoding"), "gzip", "zstd refused by q=0 is not sent")
+        r = c.get("/big", headers={"Accept-Encoding": "identity"})
+        eq(r.headers.get("content-encoding"), None, "and nothing is forced on a client that asks for none")
+    finally:
+        perf.compress = real
+
+
+@test
+def t_the_page_assets_are_compressed_once_per_build():
+    """The audit's D3. app.js and app.css were gzipped again on every
+    uncached request, about 50 ms of the event loop per first open, bunched
+    after each update when everyone reloads. Each build's assets are now
+    packed once, at the strongest levels, away from any request, and served
+    as they are."""
+    import gzip as _gz
+    import perf
+    from compression import zstd as _z
+
+    shell, assets = copilot._page_parts()
+    h = copilot._asset_hashes["js"]
+    blob = assets["js"][1]
+    kicked, calls = [], []
+    real_soon, real = copilot._pack_assets_soon, perf.compress
+
+    def spy(body, enc, *a, **k):
+        calls.append(enc)
+        return real(body, enc, *a, **k)
+
+    copilot._asset_packed.clear()
+    copilot._pack_assets_soon = lambda: kicked.append(1)
+    perf.compress = spy
+    try:
+        r1 = client.get("/assets/app.js?v=" + h, headers={"Accept-Encoding": "gzip, zstd"})
+        eq(r1.status_code, 200)
+        ok(kicked, "the first request starts the packing")
+        eq(r1.headers.get("content-encoding"), "zstd", "and is still served compressed meanwhile")
+        copilot._pack_assets()          # what the background thread runs
+        calls.clear()
+        r2 = client.get("/assets/app.js?v=" + h, headers={"Accept-Encoding": "gzip, zstd"})
+        eq(r2.headers.get("content-encoding"), "zstd")
+        eq(calls, [], "served from the pack: nothing is compressed per request")
+        # The test client may already have decoded it; the wire size is the
+        # Content-Length either way.
+        eq(r2.content if r2.content == blob else _z.decompress(r2.content), blob, "the same bytes")
+        wire1, wire2 = int(r1.headers["content-length"]), int(r2.headers["content-length"])
+        ok(wire2 < wire1, "and smaller than the quick per-request level: %d against %d" % (wire2, wire1))
+        ok("max-age=31536000" in (r2.headers.get("cache-control") or ""), "still cached for a year")
+        r3 = client.get("/assets/app.js?v=" + h, headers={"Accept-Encoding": "gzip"})
+        eq(r3.headers.get("content-encoding"), "gzip")
+        eq(calls, [], "the gzip copy is packed too")
+        eq(r3.content, blob, "and arrives as the same bytes")
+        r4 = client.get("/assets/app.js?v=" + h, headers={"Accept-Encoding": "identity"})
+        eq(r4.headers.get("content-encoding"), None)
+        eq(r4.content, blob, "a client that asks for none gets the plain file")
+        eq(client.get("/assets/app.js?v=000000000000",
+                      headers={"Accept-Encoding": "zstd"}).status_code, 404,
+           "the hash still has to match")
+    finally:
+        copilot._pack_assets_soon, perf.compress = real_soon, real
+
+
+@test
+def t_an_attachment_is_measured_off_the_event_loop():
+    """The audit's S8. Drafting or sending with an attachment asked storage
+    for its size with a blocking call on the event loop, so every other
+    request in the app waited for the round trip, and for up to about 45 s
+    when storage was slow."""
+    import threading
+    seen = {}
+
+    class _Body:
+        def read(self):
+            seen["read"] = threading.get_ident()
+            return b"%PDF-1.4 a quote"
+
+    class _S3:
+        def get_object(self, Bucket, Key):
+            seen["get"] = threading.get_ident()
+            return {"Body": _Body()}
+
+    def head(key):
+        seen["head"] = threading.get_ident()
+        return 16
+
+    def s3():
+        seen.setdefault("client", threading.get_ident())
+        return _S3()
+
+    saved = (copilot._files_head, copilot._files_s3, copilot._mail_attachment_ok)
+    copilot._files_head, copilot._files_s3 = head, s3
+    copilot._mail_attachment_ok = lambda key, uid: True
+    try:
+        async def go():
+            seen["loop"] = threading.get_ident()
+            return await copilot._mail_fetch_parts([{"key": "files/u1/quote.pdf", "name": "quote.pdf",
+                                                     "type": "application/pdf"}], "u1")
+        files, _inline, _total = run_async(go())
+        eq(files[0]["data"], b"%PDF-1.4 a quote")
+        for k in ("head", "client", "get", "read"):
+            ok(seen[k] != seen["loop"], "the %s call ran off the event loop" % k)
+    finally:
+        copilot._files_head, copilot._files_s3, copilot._mail_attachment_ok = saved
+
+
+def _capture_spawn():
+    """Swap _spawn_bg for a recorder. Returns (coroutines, restore)."""
+    got, saved = [], copilot._spawn_bg
+
+    def spawn(coro):
+        got.append(coro)
+        return True
+    copilot._spawn_bg = spawn
+
+    def restore():
+        copilot._spawn_bg = saved
+        for c in got:
+            c.close()
+    return got, restore
+
+
+@test
+def t_the_inbox_answers_from_memory_and_syncs_behind():
+    """The audit's X10. A board read synced Gmail inline whenever the
+    picture was over two minutes old: after every deploy, and on every open
+    and 60 s poll while Gmail was failing, each waiting up to 25 s per call
+    before the board it already held was shown. It now answers from what it
+    holds and starts one sync behind, at most once a minute. Refresh still
+    syncs while the person waits."""
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        copilot._load_mail()["synced_at"] = "2026-01-01T00:00:00+00:00"
+        inline = []
+
+        async def fake_sync(force=False):
+            inline.append(force)
+            return ""
+        saved_sync = copilot._mail_sync_now
+        copilot._mail_sync_now = fake_sync
+        copilot._mail_bg_sync["t"] = 0.0
+        copilot._mail_last_force["t"] = 0.0
+        got, restore = _capture_spawn()
+        try:
+            r = post("/api/mail/board", {})
+            eq(r.status_code, 200, r.text[:200])
+            eq(inline, [], "the answer did not wait for Gmail")
+            eq([c.cr_code.co_name for c in got], ["fake_sync"], "one sync was started behind it")
+            ok(any(t["id"] == "t1" for t in r.json()["threads"]), "and the board it holds was shown")
+            post("/api/mail/board", {})
+            eq(len(got), 1, "a second read within the minute starts no second sync")
+            r = post("/api/mail/board", {"force": True})
+            eq(r.status_code, 200)
+            eq(inline, [True], "Refresh still syncs while the person waits")
+        finally:
+            restore()
+            copilot._mail_sync_now = saved_sync
+    with_mail(go)
+
+
+@test
+def t_opening_and_claiming_email_do_not_wait_for_gmail():
+    """The audit's X10 and S4. Opening an unread email waited for Gmail to
+    mark it read and a whole-mailbox save before the window could open, and
+    every claim, assign and state change waited for Gmail to relabel the
+    thread over a fresh connection. Both now happen after the answer: the
+    ownership is still on disk first, Gmail second, and the relabel waits
+    for any sync that is running so two passes never interleave on one
+    thread."""
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        copilot._load_mail()["threads"]["t1"]["unread"] = True
+        calls = []
+
+        async def modify(tid, add=None, remove=None):
+            calls.append(("modify", tid, tuple(add or ()), tuple(remove or ())))
+
+        async def ensure(name, known):
+            calls.append(("ensure", name))
+            known[name] = "L-" + name
+            return known[name]
+        saved = (_gm.modify_thread, _gm.ensure_label, copilot._mail_lock)
+        _gm.modify_thread, _gm.ensure_label = modify, ensure
+        got, restore = _capture_spawn()
+        try:
+            r = post_s(sess, "/api/mail/thread", {"id": "t1"})
+            eq(r.status_code, 200, r.text[:200])
+            eq(calls, [], "the email opened without waiting for Gmail")
+            eq(len(got), 1, "marking it read was started behind")
+            run_async(got.pop())
+            eq(calls, [("modify", "t1", (), ("UNREAD",))], "Gmail is told it was read")
+            ok(not copilot._load_mail()["threads"]["t1"]["unread"], "and the board follows")
+            with open(copilot.MAILBOX_PATH, encoding="utf-8") as fh:
+                ok(not json.load(fh)["mailbox"]["threads"]["t1"]["unread"], "on disk too")
+            calls.clear()
+            r = post_s(sess, "/api/mail/claim", {"id": "t1"})
+            eq(r.status_code, 200, r.text[:200])
+            eq(calls, [], "the claim answered before Gmail was asked")
+            with open(copilot.MAILBOX_PATH, encoding="utf-8") as fh:
+                ok(json.load(fh)["mailbox"]["threads"]["t1"].get("owner"), "and was on disk first")
+            eq(len(got), 1, "the relabel was started behind")
+            copilot._mail_lock = asyncio.Lock()     # a fresh lock for this test's own loop
+
+            async def held():
+                await copilot._mail_lock.acquire()
+                job = asyncio.ensure_future(got.pop())
+                await asyncio.sleep(0.05)
+                waited = not calls
+                copilot._mail_lock.release()
+                await job
+                return waited
+            ok(run_async(held()), "the relabel waits for a sync that is running")
+            ok(("ensure", "Copilot/Ann") in calls, "and then labels the thread: %r" % calls)
+            t = copilot._load_mail()["threads"]["t1"]
+            eq(t.get("gmail_label"), "Copilot/Ann")
+            with open(copilot.MAILBOX_PATH, encoding="utf-8") as fh:
+                eq(json.load(fh)["mailbox"]["threads"]["t1"].get("gmail_label"), "Copilot/Ann",
+                   "and the label reached the disk")
+        finally:
+            restore()
+            _gm.modify_thread, _gm.ensure_label, copilot._mail_lock = saved
+    with_mail(go)
+
+
+# ---- review of #15 --------------------------------------------------------
+
+@test
+def t_only_a_signed_in_request_sees_or_counts_its_timing():
+    """Review of #15 (SERVER1, COMPAT1, COMPAT3). The header went on every
+    /api/ answer. A wrong-password sign-in for a real name saves a failure
+    count (a store mark) and one for a made-up name saves nothing, so the two
+    vague 401s differed: a clean yes or no on whether a username exists,
+    undoing the sign-in's levelling. And refused requests were counted, so
+    anyone could wash a route's real times out of Settings. Only a request
+    that passed the door with a live session now gets the header or counts."""
+    import perf
+
+    def go():
+        ensure_auth()
+        ready_user("Ruth", "ruth")
+        perf.ROUTES.clear()
+        h = {"Authorization": "Bearer " + tok()}
+        for p in (copilot._rl_hits, copilot._rl_global, copilot._login_hits):
+            p.clear()
+        real = client.post("/api/auth/login", json={"username": "ruth", "password": "wrong-password-1"}, headers=h)
+        fake = client.post("/api/auth/login", json={"username": "nobody-here", "password": "wrong-password-1"},
+                           headers=h)
+        eq((real.status_code, fake.status_code), (401, 401))
+        eq(real.headers.get("server-timing"), None, "a sign-in answer carries no breakdown")
+        eq(fake.headers.get("server-timing"), None)
+        names = lambda r: sorted(k for k in r.headers.keys() if k not in ("content-length", "date"))
+        eq(names(real), names(fake), "and the two answers carry the same headers")
+        for _ in range(5):
+            copilot._rl_hits.clear(); copilot._rl_global.clear()
+            r = client.post("/api/crm/board", json={}, headers=h)     # no session
+            eq(r.status_code, 401)
+            eq(r.headers.get("server-timing"), None, "a refused request learns nothing from the timing")
+        ok("/api/crm/board" not in perf.ROUTES, "and is not counted")
+        r = post("/api/crm/board", {})
+        ok(_server_timing(r).get("app", 0) > 0, "a signed-in request still gets it")
+        ok("/api/crm/board" in perf.ROUTES, "and is counted")
+        _uid, msess, _ = ready_user("Mo", "mo")
+        eq(post_s(msess, "/api/status", {}).status_code, 403)
+        ok("/api/status" not in perf.ROUTES, "a refusal, even signed in, is not a time worth counting")
+    with_accounts(go)
+
+
+@test
+def t_a_claude_call_is_timed_and_kept_out_of_the_table():
+    """Review of #15 (PAGE3, COMPAT4). Answers that call Claude take seconds
+    by design; counted, they filled the Response times row and pinned it at
+    Slow for the life of the process, pushing out the desk pages it exists to
+    name. Every model call goes through _xcreate, which now marks its time as
+    "ai" and keeps its request out of the table."""
+    import perf, types
+    saved = copilot._xcreate_once
+
+    async def fake_once(client, kwargs):
+        await asyncio.sleep(0.01)
+        return types.SimpleNamespace(stop_reason="end_turn", content=[])
+    copilot._xcreate_once = fake_once
+    try:
+        async def go():
+            marks, token = perf.start()
+            try:
+                await copilot._xcreate(None, model="claude-test", messages=[], max_tokens=10)
+            finally:
+                perf.stop(token)
+            return marks
+        marks = run_async(go())
+        ok(marks.get("ai", 0) >= 5, "the model's time is its own mark: %r" % marks)
+        ok(marks.get("_skip"), "and the request is kept out of the slowest-routes table")
+        eq(perf.header(marks).count("_"), 0, "the flags never reach the header")
+    finally:
+        copilot._xcreate_once = saved
+
+
+@test
+def t_the_slowest_twentieth_is_the_slowest_twentieth():
+    """Review of #15 (SERVER2). With 20 samples p95 picked the maximum, so
+    Settings said '1 in 20 over X ms' when nothing was over X."""
+    import perf
+    saved = dict(perf.ROUTES)
+    perf.ROUTES.clear()
+    try:
+        for i in range(1, 21):
+            perf.record("/api/x", float(i))
+        for i in range(1, 101):
+            perf.record("/api/y", float(i))
+        rows = {r["route"]: r for r in perf.summary()}
+        eq(rows["/api/x"]["p95"], 19.0, "one of twenty is over it")
+        eq(rows["/api/y"]["p95"], 95.0, "five of a hundred are over it")
+        eq(rows["/api/y"]["p50"], 50.0)
+    finally:
+        perf.ROUTES.clear()
+        perf.ROUTES.update(saved)
+
+
+@test
+def t_a_relabel_steps_aside_for_a_running_sync():
+    """Review of #15 (SERVER3). Each click's relabel queued on _mail_lock, so a
+    burst of claims during a slow Gmail held the mail loop and anyone's
+    Refresh behind every one of them. A relabel now waits briefly for the
+    lock and otherwise leaves the thread to the sync's own label catch-up,
+    which already runs under the lock and compares the label it wants with
+    the one it has."""
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        calls = []
+
+        async def modify(tid, add=None, remove=None):
+            calls.append(tid)
+
+        async def ensure(name, known):
+            known[name] = "L-" + name
+            return known[name]
+        saved = (_gm.modify_thread, _gm.ensure_label, copilot._mail_lock, copilot.MAIL_LABEL_LOCK_WAIT)
+        _gm.modify_thread, _gm.ensure_label = modify, ensure
+        copilot.MAIL_LABEL_LOCK_WAIT = 0.05
+        got, restore = _capture_spawn()
+        try:
+            eq(post_s(sess, "/api/mail/claim", {"id": "t1"}).status_code, 200)
+            copilot._mail_lock = asyncio.Lock()
+
+            async def busy_sync():
+                await copilot._mail_lock.acquire()
+                try:
+                    await got.pop()          # the relabel, while a sync holds the lock
+                finally:
+                    copilot._mail_lock.release()
+            t = copilot._load_mail()["threads"]["t1"]
+            t["label_retry_at"] = time.time() + 400     # an earlier failure's back-off
+            t["label_tried_at"] = time.time()
+            run_async(busy_sync())
+            eq(calls, [], "it did not wait out the sync")
+            ok(copilot._mail_want_label(t) != (t.get("gmail_label") or ""),
+               "so the sync's catch-up sees the label is owed: %r" % t.get("gmail_label"))
+            ok("label_retry_at" not in t and t.get("label_tried_at") == 0,
+               "and takes it first, back-off or not: %r" % {k: t.get(k) for k in ("label_retry_at", "label_tried_at")})
+        finally:
+            restore()
+            _gm.modify_thread, _gm.ensure_label, copilot._mail_lock, copilot.MAIL_LABEL_LOCK_WAIT = saved
+    with_mail(go)
+
+
+@test
+def t_an_opened_email_reads_as_read_at_once_unless_gmail_refuses():
+    """Review of #15 (PAGE4). The board followed only once Gmail confirmed the
+    read, so a poll landing between the window opening and Gmail answering
+    showed the email unread again after the person had read it. It now reads
+    as read at once, and goes back to unread if Gmail refuses."""
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        copilot._load_mail()["threads"]["t1"]["unread"] = True
+
+        async def refuse(tid, add=None, remove=None):
+            raise _gm.GmailError("backend error")
+        saved = _gm.modify_thread
+        _gm.modify_thread = refuse
+        got, restore = _capture_spawn()
+        try:
+            eq(post_s(sess, "/api/mail/thread", {"id": "t1"}).status_code, 200)
+            rows = {t["id"]: t for t in post_s(sess, "/api/mail/board", {}).json()["threads"]}
+            eq(rows["t1"]["unread"], False, "read as soon as it is opened")
+            run_async(got.pop(0))
+            eq(copilot._load_mail()["threads"]["t1"]["unread"], True, "and unread again when Gmail refuses")
+        finally:
+            restore()
+            _gm.modify_thread = saved
+    with_mail(go)
+
+
+@test
+def t_a_read_on_open_never_outlives_what_gmail_says():
+    """The re-check of #15's fixes (PAGE4). Three edges of reading on open:
+    a mark-read Gmail never answered left the board saying read; the put-back
+    after a refusal was never saved, so a store written in between kept the
+    read on disk; and Mark unread pressed while the mark-read was still at
+    Gmail was undone by it, though that is how somebody undoes an accidental
+    open."""
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        copilot._load_mail()["threads"]["t1"]["unread"] = True
+        calls = []
+
+        async def modify(tid, add=None, remove=None):
+            calls.append((tuple(add or ()), tuple(remove or ())))
+        saved = (_gm.modify_thread, copilot._mail_set_unread)
+        got, restore = _capture_spawn()
+        try:
+            # Gmail never answers: put back, and saved even though another
+            # writer saved the optimistic read in between.
+            async def silent(store, ids, unread):
+                return {"changed": 0, "failed": 0}
+            copilot._mail_set_unread = silent
+            eq(post_s(sess, "/api/mail/thread", {"id": "t1"}).status_code, 200)
+            copilot._write_mail(copilot._load_mail())          # another writer, mid-flight
+            run_async(got.pop(0))
+            eq(copilot._load_mail()["threads"]["t1"]["unread"], True, "unanswered is not confirmed")
+            with open(copilot.MAILBOX_PATH, encoding="utf-8") as fh:
+                eq(json.load(fh)["mailbox"]["threads"]["t1"]["unread"], True, "and the disk says so too")
+            # Mark unread pressed while the mark-read is still to run: it wins.
+            copilot._mail_set_unread = saved[1]
+            _gm.modify_thread = modify
+            eq(post_s(sess, "/api/mail/thread", {"id": "t1"}).status_code, 200)
+            eq(post_s(sess, "/api/mail/read", {"id": "t1", "unread": True}).status_code, 200)
+            calls.clear()
+            run_async(got.pop(0))
+            eq(calls, [], "the late mark-read stands down")
+            eq(copilot._load_mail()["threads"]["t1"]["unread"], True, "and the email stays unread, as asked")
+        finally:
+            restore()
+            _gm.modify_thread, copilot._mail_set_unread = saved
+    with_mail(go)
 
 
 def _written_off(e):
