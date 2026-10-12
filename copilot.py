@@ -24523,9 +24523,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # business at the door.
         vague = _json({"error": "That username and password do not match."}, 401)
         if not u:
-            # Spend what an existing account would: three of the four failure
-            # paths returned before _check_pw ran, so the response TIME answered
-            # the question the vague body refuses to. One dummy verify levels it.
+            # Spend what an existing account would: the response TIME must not
+            # answer the question the vague body refuses to. One dummy verify
+            # levels it.
             _check_pw(pw, _PW_DUMMY)
             # Coalesced, not one row per attempt. The ledger is a fixed-size
             # FIFO, and this endpoint is reachable by any Shopify staff user of
@@ -24533,6 +24533,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # a burst of bad logins flush the whole audit history out of it.
             _track_login_noise(username)
             return vague
+        # Verified BEFORE the lock, the switch and the expiry are looked at, so
+        # every real account costs one verify like a made-up name does. They
+        # used to answer before any scrypt ran: five wrong guesses lock any
+        # real account, and from then on the clock told it from a made-up one.
+        # The result is only read once all three have let the account through.
+        pw_ok = _check_pw(pw, u.get("pw") or _PW_DUMMY)
         if str(u.get("lock_until") or "") > now.isoformat():
             # Locked answers exactly like wrong: a different reply would tell
             # a guesser which usernames exist.
@@ -24548,7 +24554,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # accounts exist or which are mid-reset.
             _track_login_refusal(uid, "the temporary password had expired")
             return vague
-        if not _check_pw(pw, u.get("pw") or ""):
+        if not pw_ok:
             _note_wrong_password(d, u, uid, now=now)
             _track_login_refusal(uid, "wrong password")
             return vague

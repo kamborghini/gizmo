@@ -27703,6 +27703,81 @@ def t_an_open_sale_or_refund_finding_outlives_the_window():
         _unconfigure_recon()
 
 
+@test
+def t_every_refused_sign_in_costs_exactly_one_password_check():
+    """Every refusal at the door is the same 401, and a made-up username pays
+    one dummy password check so it costs what a wrong password costs. But a
+    real account that was locked, switched off or holding an expired
+    break-glass password was refused before any check ran, so it answered in
+    a fraction of the time. Five wrong guesses lock any real account, and from
+    then on the clock said which usernames exist. Counted, not timed, so a
+    loaded machine cannot flake it; and the lock, the switch and the expiry
+    still refuse the right password, without counting a single wrong one."""
+    def go():
+        ensure_auth()
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        locked_until = (_dt.now(_tz.utc) + _td(minutes=15)).isoformat()
+        _w, _s, _ = ready_user("Wren", "wren-wrong")
+        lock_uid, _s, lock_pw = ready_user("Lark", "lark-locked")
+        off_uid, _s, off_pw = ready_user("Otto", "otto-off")
+        exp_uid, _s, exp_pw = ready_user("Ezra", "ezra-expired")
+        d = copilot._load_users()
+        d["users"][lock_uid]["lock_until"] = locked_until
+        d["users"][lock_uid]["locks"] = 1
+        d["users"][off_uid]["active"] = False
+        d["users"][exp_uid]["pw_expires_at"] = "2000-01-01T00:00:00+00:00"
+        copilot._write_users(d)
+
+        def held(uid):
+            u = copilot._load_users()["users"][uid]
+            return (int(u.get("fails") or 0), int(u.get("locks") or 0),
+                    u.get("lock_until") or "", u.get("active", True), u.get("pw_expires_at") or "")
+        before = {uid: held(uid) for uid in (lock_uid, off_uid, exp_uid)}
+
+        spent, real = [], copilot._check_pw
+        copilot._check_pw = lambda pw, stored: (spent.append(1), real(pw, stored))[1]
+        try:
+            def knock(username, password):
+                copilot._login_hits.clear()
+                spent.clear()
+                r = login(username, password)
+                return len(spent), r
+            guess = "a-guess-that-is-wrong"
+            tried = {
+                "a made-up username": knock("nobody-by-this-name", guess),
+                "a wrong password": knock("wren-wrong", guess),
+                "a locked account": knock("lark-locked", guess),
+                "a locked account's right password": knock("lark-locked", lock_pw),
+                "a switched-off account": knock("otto-off", guess),
+                "a switched-off account's right password": knock("otto-off", off_pw),
+                "an expired password, wrongly typed": knock("ezra-expired", guess),
+                "an expired password, rightly typed": knock("ezra-expired", exp_pw),
+            }
+        finally:
+            copilot._check_pw = real
+
+        # Headers that differ between any two requests by nature, not by path.
+        per_request = {"date", "server-timing"}
+        def shape(r):
+            return sorted((k.lower(), v) for k, v in r.headers.items()
+                          if k.lower() not in per_request)
+        _n, first = tried["a made-up username"]
+        for what, (n, r) in tried.items():
+            eq(n, 1, "%s runs exactly one password check, not %d" % (what, n))
+            eq(r.status_code, 401, "%s is refused: %s" % (what, r.text))
+            eq(r.content, first.content, "%s reads exactly like a made-up name" % what)
+            eq(shape(r), shape(first), "%s carries the same headers as a made-up name" % what)
+
+        eq(held(lock_uid), before[lock_uid],
+           "the locked account stays locked, its right password clears nothing and "
+           "a guess at it adds nothing to the count")
+        eq(held(off_uid), before[off_uid], "the switched-off account is untouched")
+        eq(held(exp_uid), before[exp_uid], "the expired password is untouched")
+        wren = copilot._load_users()["users"][_w]
+        eq(int(wren.get("fails") or 0), 1, "a wrong password on an open account still counts")
+    with_accounts(go)
+
+
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a
