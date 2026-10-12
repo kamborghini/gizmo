@@ -2051,10 +2051,27 @@ def t_a_report_pairs_its_short_blocks():
     ok("grid-template-columns: minmax(0, 7fr) minmax(0, 5fr)" in pin and "align-items: start" in pin, "seven twelfths and five, each as tall as itself")
     ok(".wpair { container: wpair / inline-size; }" in CSS and "@container wpair (max-width: 64rem) { .wpair-in { grid-template-columns: minmax(0, 1fr);" in CSS,
        "and one above the other when the pair is narrow")
+    ok("pairNodes(sumW, cs, 'summary'" in (fn_src("function summaryAndChanges(") if "function summaryAndChanges(" in SCRIPT else ""),
+       "the summary sits beside What changed")
     ov = fn_src("function renderOverview(")
-    for pair in ("pairNodes(sumW, cs, 'summary'", "pairNodes(secW, channelsCard(data.trends), 'sectors'",
-                 "pairNodes(byId('actions'), byId('notable'), 'actions'", "pairNodes(byId('details'), chat, 'details'"):
+    for pair in ("summaryAndChanges(box, data.changes, data.changes_since", "pairNodes(secW, channelsCard(data.trends), 'sectors'",
+                 "pairNodes(wgChild(box, 'actions'), wgChild(box, 'notable'), 'actions'", "pairNodes(wgChild(box, 'details'), chat, 'details'"):
         ok(pair in ov, "Overview pairs: " + pair)
+    seo = fn_src("function renderSEO(")
+    for pair in ("summaryAndChanges(box, data.changes, data.changes_since", "pairNodes(wgChild(box, 'opportunities'), wgChild(box, 'findings'), 'opportunities'",
+                 "pairNodes(wgChild(box, 'details'), chat, 'details'"):
+        ok(pair in seo, "SEO pairs: " + pair)
+    ok("strip.prepend(sc)" in seo and "'score'" not in seo, "SEO's score is the first figure of the checks, one group (DF-11)")
+    kw = fn_src("function renderKeywords(")
+    for pair in ("summaryAndChanges(box, data.changes, data.changes_since", "pairNodes(kpisW, wgChild(box, 'scan'), 'kpis'",
+                 "pairNodes(wgChild(box, 'opportunities'), wgChild(box, 'findings'), 'opportunities'",
+                 "pairNodes(wgChild(box, 'keywords'), paid, 'keywords'", "pairNodes(wgChild(box, 'details'), chat, 'details'"):
+        ok(pair in kw, "Keywords pairs: " + pair)
+    ok("!/^Ad spend/i.test(m.label)" in kw, "the ad spend is said once, under Paid search")
+    ok(".wpair .metrics.metrics-strip:has(> :nth-child(5):last-child) { display: grid; grid-template-columns: repeat(3, max-content); }" in CSS,
+       "five figures in half a row go three then two, so ROAS is not alone on a line")
+    kt = fn_src("function keywordTable(")
+    ok("i >= 15" in kt and "'Show all ' + n + ' keywords'" in kt, "fifteen keywords, then Show all")
     ok("noChannels: true" in ov, "Traffic by channel leaves the chart grid to sit beside Sales by sector")
     ok("el('button', 'btn pchat-send')" in SCRIPT and "btn-primary pchat-send" not in SCRIPT,
        "the page chat's send is plain: one teal per screen, and Ask is a side door")
@@ -11261,7 +11278,7 @@ def t_the_report_pages_wear_the_mix():
     for fname, view in (("function renderOverview(cache) {", "overview"), ("function renderSEO(cache) {", "seo")):
         ok(fname in SCRIPT, fname + " exists")
         fn = fn_src(fname)
-        ok("pageHead({ view: '" + view + "'" in fn and "live: cache.at" in fn and "summarySection(" in fn,
+        ok("pageHead({ view: '" + view + "'" in fn and "live: cache.at" in fn and ("summarySection(" in fn or "summaryAndChanges(" in fn),
            view + ": the one header, and the Summary section")
         ok("el('div', 'ov-hero')" not in fn and "'badge'" not in fn, view + ": no header built by hand")
     ok("function summarySection(text, followed) {" in SCRIPT, "one Summary builder")
@@ -11432,6 +11449,9 @@ def t_fix_round_one_reports_and_the_phone_header():
     for fname in ("function renderOverview(cache) {", "function renderSEO(cache) {", "function renderKeywords(cache) {", "function renderCustomers(seg) {"):
         ok(fname in SCRIPT, fname + " exists")
         fn = fn_src(fname)
+        # Since 12 Oct 2026 a report builds both through summaryAndChanges, which pairs them as one
+        # widget, or leaves the strip in its fixed place before the first card when there is no summary.
+        if "summaryAndChanges(" in fn: fn = fn_src("function summaryAndChanges(")
         ok("changesStrip(" in fn and "summarySection(" in fn, fname + ": it builds both")
         ok(fn.index("changesStrip(") < fn.index("summarySection("), fname + ": the fixed strip comes before the first movable card")
     ok("note: 'Pulls live Shopify data. No AI credits used.'" in SCRIPT, "the Products gate keeps its cost note")
