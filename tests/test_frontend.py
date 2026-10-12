@@ -2158,6 +2158,38 @@ def t_forecast_runs_to_its_columns_and_its_prose_windows_are_narrow():
 
 
 @test
+def t_the_production_manager_opens_an_order_under_its_row_at_every_width():
+    """Cameron's ruling, 12 Oct 2026: the opened order's label goes under its
+    row at every width, as a two-column band (the label, and beside it the
+    repeat-customer line, the size note and Print this label), and the page
+    stays on its 1,200 column: no side pane, no widening. One teal per screen:
+    Print new steps down while an order is open, and a custom shipment's
+    Reprint label is plain. The counters are 128, the name column is as wide
+    as its widest name (OPS-10), and the windows start on their first heading
+    (OPS-15). The queue's content, columns, statuses and actions do not change."""
+    fn = fn_src("function renderLabels(")
+    ok("wideSplit" not in fn and "'lbl-pane'" not in fn and "row.after(wrap);" in fn, "the label opens under its row at every width")
+    # Its two print rules stay as they were: the print CSS is frozen (t_the_printed_sheets_do_not_change).
+    ok(".lbl-pane { position: sticky" not in CSS and "            .lbl-split { display: grid;" not in CSS, "and the side pane's screen rules are gone")
+    pv = CSS.split("\n        .lbl-grid > .lbl-preview {")[1].split("}")[0]
+    ok("display: grid" in pv and "grid-template-columns: max-content minmax(0, 1fr)" in pv, "the band is two columns: the label, and its words")
+    ok("grid-template-rows: auto auto minmax(0, 1fr)" in pv, "the words stay together at the label's top, the last row taking the rest")
+    ok(".lbl-preview > .lbl-frame { grid-column: 1; grid-row: 1 / span 3; }" in CSS, "the label on the left, the words beside its top")
+    ok("pnBtn = el('button', 'btn btn-sm' + (labelSel ? '' : ' btn-primary'));" in SCRIPT, "Print new steps down while an order is open")
+    cq = fn_src("function renderCustomQueue(")
+    ok("const rp = el('button', 'btn btn-sm');" in cq and "'btn btn-sm btn-primary'" not in cq, "a custom shipment's Reprint label is plain")
+    ok("el('button', 'btn btn-sm lbl-slot')" in cq and ".lbl-actions .lbl-slot { visibility: hidden; }" in CSS,
+       "and a shipment with no tracking keeps an empty slot, so Reprint label lines up (OPS-11)")
+    ok(re.search(r"--qc-w:\s*128px;", CSS), "the counters are about as wide as their words")
+    ok("grid-template-columns: var(--ono-w) minmax(220px, max-content) minmax(0, 1fr) max-content max-content;" in CSS,
+       "the name column is as wide as its widest name, and the spare goes to the item line (OPS-10)")
+    ok(".disp-modal .modal-body > .section-title:first-child { margin-top: 0; }" in CSS, "a window starts on its first heading (OPS-15)")
+    ok("const host = el('div', 'coll-host');" in fn_src("async function openBookCollection(")
+       and ".coll-host > .section-title { margin-top: var(--sp-6); }" in CSS and ".coll-host > .section-title:first-child { margin-top: var(--sp-4); }" in CSS,
+       "and Collections has no band above Booked for today")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left
@@ -2433,22 +2465,13 @@ def t_six_buttons_never_paint_over_the_date():
     # label preview open leaves the list 900px wide, and the labelled rail
     # painted over the item line and the date.
     ok(".lbl-list { container: queue / inline-size; }" in CSS, "the list is the container")
-    ok("const listBox = el('div', 'lbl-list')" in SCRIPT and "split.append(listBox, pane)" in SCRIPT,
-       "with or without the pane beside it")
+    # 12 Oct 2026: no pane any more (Cameron's ruling); the list is the card's own.
+    ok("const listBox = el('div', 'lbl-list')" in SCRIPT and "qCard.append(listBox);" in SCRIPT,
+       "and is the card's own")
     # And one set of tracks for every row: a refunded order's shorter rail or
     # a wider date moved its own row's columns by up to 121px.
     ok("grid-template-columns: subgrid" in CSS and ".lbl-grid > * { grid-column: 1 / -1; }" in CSS,
        "each row is a subgrid of the list, so the columns line up down the queue")
-
-
-@test
-def t_the_label_preview_sits_beside_the_queue_on_a_wide_screen():
-    """Opened inline it shoved every order below it down the page."""
-    ok(".lbl-split" in CSS and ".lbl-pane" in CSS, "the split layout is styled")
-    ok("lbl-split" in SCRIPT and "lbl-pane" in SCRIPT, "and built by the renderer")
-    ok("matchMedia('(min-width: 1500px)')" in SCRIPT, "decided once, above 1500")
-    ok("if (pane) pane.append(wrap); else row.after(wrap);" in SCRIPT,
-       "and it still falls back to inline where there is no room for a pane, under its own row")
 
 
 @test
@@ -9582,7 +9605,7 @@ def t_the_app_wide_layout_sweep_holds():
     ok("window.matchMedia('(max-width: 760px)')" not in SCRIPT and SCRIPT.count("window.matchMedia('(max-width: 900px)')") == 5
        and "window.innerWidth > 760" not in SCRIPT,
        "the script's sidebar checks moved with the stop")
-    ok("if (pane) pane.append(wrap); else row.after(wrap);" in SCRIPT, "a label preview opens under its own row")
+    ok("row.after(wrap);" in fn_src("function renderLabels(") and "wideSplit" not in SCRIPT, "a label preview opens under its own row")
     body = fn_src("function bodyToNodes(")
     ok("mdTableRule(lines[i + 1].trim())" in body and "pipeTable(rows)" in body, "a Markdown table in a report is a table")
     ok("else if (connQuar && !connQuar.length) qHost.append(" in SCRIPT, "an empty quarantine list says so")
@@ -10825,7 +10848,7 @@ def t_queue_counters_read_across_the_bench():
     ok("background: var(--action-primary)" in on and "box-shadow: var(--shadow-focal)" in on, "the chosen one is teal with the focal glow")
     qt = CSS.split("\n        .qt.on {")[1].split("}")[0]
     ok("box-shadow: var(--ring-chosen)" in qt and "background: var(--action-selected)" in qt, "a queue tab is chosen on the segment recipe")
-    eq(_token_raw("qc-w"), "184px", "--qc-w")
+    eq(_token_raw("qc-w"), "128px", "--qc-w (12 Oct 2026: about as wide as its word, the mockup's tiles)")
 
 
 @test
@@ -12473,14 +12496,12 @@ def t_the_queue_band_is_one_treatment_at_every_width():
     ok(".q-card .lbl-list > .lbl-grid::before" in CSS and ".q-card .lbl-list > .lbl-grid > :last-child::after" in CSS
        and ".q-card .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::after" in CSS, "the list's rule and every order's rule are the card's, split or not")
     ok(_winner(".q-card", "--q-bleed-end") == "var(--wrap-pad)", "the right end of a band is the gutter by default")
-    ok(_winner(".lbl-split:not(:has(.lbl-pane:empty)) > .lbl-list", "--q-bleed-end") == "var(--sp-2)",
-       "and half of the 16 between the list and its preview pane while the pane is open")
     for sel in (".q-card .lbl-list > .lbl-grid::before", ".q-card .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::after"):
         ok(_exact(sel, "inset-inline") == "calc(-1 * var(--wrap-pad)) calc(-1 * var(--q-bleed-end))", sel + " ends at the bleed")
     ok(_exact(".q-card .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::before", "inset") == "0 calc(-1 * var(--q-bleed-end)) 0 calc(-1 * var(--wrap-pad))",
        "and so does every order's wash")
     ok(_exact(".q-card .lbl-list > .lbl-grid > :is(.lbl-qrow:is(.on, [aria-selected=\"true\"]), .lbl-preview)::before", "box-shadow") == "var(--ring-selected)",
-       "the open order's wash keeps its 2px teal edge beside the pane")
+       "the open order's wash keeps its 2px teal edge")
 
 
 @test

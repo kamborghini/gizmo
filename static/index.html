@@ -361,7 +361,7 @@
             --chevron-room: calc(var(--sp-3) + var(--icon-md) + var(--sp-2));   /* a select's chevron: 12 in, 16 wide, 8 clear */
             --search-w: 280px;      /* a list's search field */
             --pop-w: 360px;         /* a popover's width (the window's, less 16 a side, on a phone) */
-            --qc-w: 184px;          /* a queue counter */
+            --qc-w: 128px;          /* a queue counter: about as wide as its word (12 Oct 2026) */
             --fc-w: 128px;          /* a counter that filters a list (12 Oct 2026) */
             --fig-min: 96px;        /* a figure's least width in a figure group, so a one-digit figure is not a sliver */
             --fig-spark-w: 144px;   /* a figure with a sparkline: the sparkline's width */
@@ -3016,25 +3016,12 @@
         @container queue (min-width: 860px) {
             .lbl-qrow .lbl-who { overflow: visible; white-space: normal; }
         }
-        /* The queue and the label preview, side by side. The pane sticks so the
-           label stays in view while you work down a long queue, and the list
-           column keeps a sane row length instead of stretching to the screen. */
-        .lbl-split { display: block; }
-        @media (min-width: 1500px) {
-            .lbl-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 460px);
-                gap: var(--sp-4); align-items: start; }
-        }
-        .lbl-pane { position: sticky; top: var(--sp-3); }
-        /* No order selected: the pane collapses and the list takes the row back,
-           rather than leaving a 460px hole down the side of the queue. */
-        .lbl-split:has(.lbl-pane:empty) { grid-template-columns: minmax(0, 1fr); }
-        .lbl-pane:empty { display: none; }
         /* Wider still: display:contents dissolves the .lbl-who box so the name
            and the "Company - 3 items - 6 pcs" line become two real columns
            rather than two stacked lines with a growing void beside them. The
            width buys information, which is the only thing it is worth buying. */
         @container queue (min-width: 1200px) {
-            .lbl-grid { grid-template-columns: var(--ono-w) minmax(220px, 1fr) minmax(0, 210px) max-content max-content; }
+            .lbl-grid { grid-template-columns: var(--ono-w) minmax(220px, max-content) minmax(0, 1fr) max-content max-content; }
             .lbl-qrow .lbl-who { display: contents; }
             .lbl-qrow .lbl-who .sub { align-self: center; font-size: var(--text-xs); line-height: var(--lh-caption); overflow: hidden;
                 text-overflow: ellipsis; white-space: nowrap; }
@@ -3061,28 +3048,38 @@
         /* An order's date reads as body (13/20), like the mockup's .dt; the lists that share .lbl-meta keep the caption. */
         .lbl-qrow .lbl-meta { font-size: var(--text-body); line-height: var(--lh-control); font-variant-numeric: tabular-nums; }
         .lbl-actions .grp { margin-left: calc(var(--gap-cluster) - var(--control-gap)); }
+        .lbl-actions .lbl-slot { visibility: hidden; }
         .swap { display: inline-grid; }
         .swap > span { grid-area: 1 / 1; text-align: center; }
         .swap > .gone { visibility: hidden; }
-        .lbl-grid > .lbl-preview { padding: 0 0 var(--sp-6); background: var(--action-selected);
+        .lbl-grid > .lbl-preview { display: grid; grid-template-columns: max-content minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr);
+            column-gap: var(--sp-6); align-items: start;
+            padding: 0 0 var(--sp-6); background: var(--action-selected);
             box-shadow: var(--rule-b-soft), calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected), calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected); }
         @container queue (min-width: 560px) {
             .lbl-grid > .lbl-preview { padding-left: calc(var(--ono-w) + var(--sp-2-5)); }
         }
-        .lbl-pane > .lbl-preview { padding: var(--sp-4); border-radius: var(--radius-tile); background: var(--action-selected); }
-        .lbl-preview > .lbl-hist { margin: 0 0 var(--sp-3); }
+        /* The opened order (12 Oct 2026): the real label on the left at actual
+           size, and beside its top the repeat-customer line, the size note and
+           Print this label. One column in a narrow queue, as on a phone. */
+        .lbl-preview > .lbl-frame { grid-column: 1; grid-row: 1 / span 3; }
+        .lbl-preview > :not(.lbl-frame) { grid-column: 2; min-width: 0; }
+        .lbl-preview > .lbl-hist { margin: 0 0 var(--sp-2); }
         .lbl-preview > .lbl-toolbar { margin: var(--sp-3) 0 0; }
+        @container queue (max-width: 559px) {
+            .lbl-grid > .lbl-preview { display: block; }
+            .lbl-preview > .lbl-hist { margin: 0 0 var(--sp-3); }
+        }
         .lbl-frame { margin: 0; width: fit-content; max-width: 100%; border-radius: var(--radius-control); box-shadow: var(--shadow-label); }
         /* The label draws its edge from --border-strong (a frozen rule). Whatever that shared grey becomes,
            the label inside its frame keeps the edge it had. */
         .lbl-frame { --border-strong: var(--paper-edge); }
         /* THE QUEUE RUNS EDGE TO EDGE OF THE SHEET (the mockup's .pm and .orders; the Production Manager only, one treatment
-           at every width, beside the preview pane from 1500 as well): on a desktop a rule above the toolbar with 16 clear
+           at every width): on a desktop a rule above the toolbar with 16 clear
            under it, the controls, 16 clear, then a rule above the list (the card's own gap is the 16), a rule under every
            order across the sheet, and the open order's wash and its 2px teal edge spanning the sheet. A phone has no rule
            above the search (the queue tabs sit 16 over it, as the mockup's .m-tools has). The words stay on the text edge;
-           the bands are drawn past it by the gutter, and on the right, while the preview pane is open beside the list, by
-           half of the 16 between the two (--q-bleed-end), so the band reaches the split and no further. */
+           the bands are drawn past it by the gutter on both sides (--q-bleed-end). */
         .q-card { position: relative; gap: var(--sp-4); --q-bleed-end: var(--wrap-pad); }
         @media (min-width: 641px) {
             .q-card { border-top: var(--bw-hairline) solid transparent; padding-top: var(--sp-4); }
@@ -3090,7 +3087,6 @@
                 height: var(--bw-hairline); background: var(--border-default); pointer-events: none; }
         }
         @media (max-width: 640px) { .ov-wrap > .queues { margin-bottom: var(--sp-4); } }
-        .lbl-split:not(:has(.lbl-pane:empty)) > .lbl-list { --q-bleed-end: var(--sp-2); }
         .q-card .lbl-list > .lbl-grid::before { content: ""; position: absolute; top: 0; inset-inline: calc(-1 * var(--wrap-pad)) calc(-1 * var(--q-bleed-end));
             height: var(--bw-hairline); background: var(--border-default); pointer-events: none; }
         .q-card .lbl-list > .lbl-grid { position: relative; box-shadow: none; }
@@ -5866,6 +5862,14 @@
         /* No rule straight under a section heading, whether its first row
            follows the heading or opens a group of switches: Sign-in and
            Preferences drew one and the other sections did not. */
+        /* A window starts on its first heading, and its sections sit 24 apart
+           (12 Oct 2026, OPS-15): the page's 48 opened a blank band under the
+           window's head. */
+        .disp-modal .modal-body .section-title { margin-top: var(--sp-6); }
+        .disp-modal .modal-body > .section-title:first-child { margin-top: 0; }
+        /* Collections: Booked for today 16 under the line over it, the next group 24 on. */
+        .coll-host > .section-title { margin-top: var(--sp-6); }
+        .coll-host > .section-title:first-child { margin-top: var(--sp-4); }
         .modal-body .section-title + .setting-row,
         .modal-body .section-title + * > .setting-row:first-child { border-top: 0; }
         .toggle[aria-disabled="true"] { cursor: default; }
@@ -19858,8 +19862,15 @@ Projected Image UK"></textarea>
                             catch (e) { toastError('Could not copy it.'); }
                         };
                         acts.append(cp);
+                    } else {
+                        /* An empty slot as wide as Copy tracking, so Reprint label
+                           lines up down the list (OPS-11). */
+                        const slot = el('button', 'btn btn-sm lbl-slot'); slot.type = 'button'; slot.tabIndex = -1; slot.setAttribute('aria-hidden', 'true');
+                        slot.append(ico(I.copy), el('span', 'lbl-btn-txt', 'Copy tracking'));
+                        acts.append(slot);
                     }
-                    const rp = el('button', 'btn btn-sm btn-primary');
+                    /* Plain: nine teal Reprint labels down a list were nine primaries. */
+                    const rp = el('button', 'btn btn-sm');
                     rp.append(ico(I.printer), el('span', 'lbl-btn-txt', 'Reprint label'));
                     rp.title = 'Reprint label';
                     if (sh.has_label === false) {
@@ -19975,7 +19986,8 @@ Projected Image UK"></textarea>
             coll.onclick = openBookCollection;
             bar.append(coll);
             if (unprinted.length && unprinted.length < printable.length) {
-                pnBtn = el('button', 'btn btn-sm btn-primary');
+                /* One teal: while an order is open its Print is the one. */
+                pnBtn = el('button', 'btn btn-sm' + (labelSel ? '' : ' btn-primary'));
                 pnBtn.append(ico(I.printer), document.createTextNode('Print new (' + unprinted.length + ')'));
                 pnBtn.onclick = () => printLabels(unprinted);
             }
@@ -20158,21 +20170,14 @@ Projected Image UK"></textarea>
                     : (labelsFilter === 'unprinted' ? 'Every live order has been printed.' : 'Every live order is marked made.')));
                 return;
             }
-            /* On a wide screen the label preview belongs BESIDE the queue, not
-               inside it. Opened inline it shoves every order below it down the
-               page, so the row you just clicked jumps under your cursor and the
-               rest of the queue moves. Below 1500px it stays inline, which is
-               right on a tablet where there is no room for a second column. */
-            const wideSplit = window.matchMedia('(min-width: 1500px)').matches;
-            /* The list is its own container, so the rows are laid out by the
-               width they actually get, with or without the pane beside them. */
+            /* The opened order's label goes under its own row at every width
+               (Cameron's ruling, 12 Oct 2026): a two-column band, the label and
+               beside it its words and Print this label, on the page's own
+               column. The pane beside the queue from 1500px went with it. The
+               list is its own container, so the rows are laid out by the width
+               they actually get. */
             const listBox = el('div', 'lbl-list'); const list = el('div', 'lbl-grid'); listBox.append(list);
-            const pane = wideSplit ? el('aside', 'lbl-pane') : null;
-            if (wideSplit) {
-                const split = el('div', 'lbl-split');
-                split.append(listBox, pane);
-                qCard.append(split);
-            } else qCard.append(listBox);
+            qCard.append(listBox);
             shown.forEach(o => {
                 const st = prodStateOf(o);
                 // In the Complete queue "fulfilled" is the expected state, not staleness.
@@ -20307,9 +20312,8 @@ Projected Image UK"></textarea>
                     const p2 = el('button', 'btn'); p2.append(ico(I.printer), document.createTextNode('Print this label'));
                     p2.onclick = () => printLabels([o]);
                     act.append(p2); wrap.append(act);
-                    /* Beside the queue from 1500px; below that under its own row,
-                       where it is seen, not after the whole queue card. */
-                    if (pane) pane.append(wrap); else row.after(wrap);
+                    /* Under its own row, where it is seen, not after the whole queue card. */
+                    row.after(wrap);
                     // Must run after it is in the document, or there is nothing to measure.
                     // Re-measured once the label typeface arrives: until then the metrics
                     // are the fallback font's and the shrink figure would be wrong.
@@ -22708,7 +22712,7 @@ Projected Image UK"></textarea>
                 + 'reference from the booking. Their service cannot be asked what is scheduled, so '
                 + 'a collection booked in their portal rather than here will not show.' }));
             body.append(ch);
-            const host = el('div'); body.append(host);
+            const host = el('div', 'coll-host'); body.append(host);
             host.append(el('div', 'empty', 'Loading\u2026'));
             const dlg = uiConfirm(body, { title: 'Collections', okText: 'Done', hideCancel: true });
             let data = null;
