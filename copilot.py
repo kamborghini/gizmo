@@ -10936,12 +10936,18 @@ def _connector_url_safe(url: str) -> bool:
                 or (u.hostname or "") in ("localhost", "127.0.0.1", "::1"))
 
 
-async def _connector_call(method: str, path: str, params: Optional[dict] = None):
+async def _connector_call(method: str, path: str, params: Optional[dict] = None,
+                          json_body: Optional[dict] = None):
     """One call to the connector service. The service's own token rides in the
     Authorization header and NEVER leaves this process; X-Connector is its CSRF
     header for anything mutating. Transport failure raises, so the route can
     say plainly that the service is unreachable, as opposed to the service
-    answering with an error of its own (returned as-is)."""
+    answering with an error of its own (returned as-is).
+
+    params go in the query string, which is where most of the service's doors
+    read them. json_body goes as a JSON body, for a door that reads only its
+    body: POST /api/settings does, and a save sent as params was answered ok
+    and kept nothing, from the day the page was built to 12 Oct 2026."""
     headers = {}
     token = os.environ.get("CONNECTOR_TOKEN") or ""
     if token and not _connector_url_safe(_connector_url()):
@@ -10952,7 +10958,8 @@ async def _connector_call(method: str, path: str, params: Optional[dict] = None)
     if method == "POST":
         headers["X-Connector"] = "1"
     async with httpx.AsyncClient(timeout=25.0) as cx:
-        r = await cx.request(method, _connector_url() + path, params=params, headers=headers)
+        r = await cx.request(method, _connector_url() + path, params=params, json=json_body,
+                             headers=headers)
     try:
         body = r.json()
     except Exception:
@@ -18061,6 +18068,40 @@ _CONNECTOR_SETTABLE = {
     "XERO_TAX_TYPE_STANDARD", "XERO_TAX_TYPE_ZERO",
     "CUSTOMER_REF_METAFIELD_NAMESPACE", "CUSTOMER_REF_METAFIELD_KEY",
 }
+# Kept as numbers by the connector, so 0.50 comes back as 0.5.
+_CONNECTOR_NUMERIC = {"RECONCILE_TOLERANCE", "MAX_DOCS_PER_RUN", "RUNAWAY_ABORT_ABOVE"}
+
+
+def _connector_settings_unapplied(sent: dict, now: dict) -> list:
+    """The fields a save sent that the connector's settings, read straight
+    after, do not show. The page said "Saved" for as long as the connector
+    answered ok, and that answer came for a save that kept nothing, so a save
+    is now judged by what the connector holds afterwards.
+
+    A value is kept when it reads back the same (numbers by value, as the
+    connector stores them in their own form). A blank clears a saved choice,
+    so it is kept when the field no longer comes from a saved choice; a
+    connector too old to say where values come from cannot show that, and a
+    blank is taken on trust there."""
+    sources = now.get("sources") if isinstance(now.get("sources"), dict) else None
+    missed = []
+    for k in sorted(sent):
+        v = str(sent[k] or "").strip()
+        if not v:
+            if sources is not None and sources.get(k) == "settings":
+                missed.append(k)
+            continue
+        got = str(now.get(k) if now.get(k) is not None else "").strip()
+        if got == v:
+            continue
+        if k in _CONNECTOR_NUMERIC:
+            try:
+                if float(got) == float(v):
+                    continue
+            except ValueError:
+                pass
+        missed.append(k)
+    return missed
 
 
 # ---- helpers add_routes kept to itself -------------------------------------
@@ -27056,11 +27097,26 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                          for k, v in fields.items() if k in _CONNECTOR_SETTABLE}
                 if not clean:
                     return _json({"error": "None of those are settings this page can change."}, 400)
-                code, data = await _connector_call("POST", "/api/settings", clean)
-                if code < 400:
-                    _track(who, "connector", "changed connector settings",
-                           ", ".join(sorted(clean)))
-                return _json({"available": True, "data": data}, code if code >= 400 else 200)
+                # As a JSON body: the connector reads this door's body and
+                # nothing else. The page sends only the fields changed in it,
+                # from settings read as it opened, because the connector keeps
+                # a value the same as its default or variable as no choice,
+                # so an unchanged stale value would clear a choice saved on
+                # the connector's own tab.
+                code, data = await _connector_call("POST", "/api/settings", json_body=clean)
+                if code >= 400:
+                    return _json({"available": True, "data": data}, code)
+                unapplied = []
+                try:
+                    code2, now = await _connector_call("GET", "/api/settings")
+                    if code2 < 400 and isinstance(now, dict):
+                        unapplied = _connector_settings_unapplied(clean, now)
+                except Exception:
+                    pass   # the save itself was answered; the page reads the settings again anyway
+                kept = sorted(set(clean) - set(unapplied))
+                if kept:
+                    _track(who, "connector", "changed connector settings", ", ".join(kept))
+                return _json({"available": True, "data": data, "unapplied": unapplied})
 
             if op == "payouts":
                 # Telling an invoice which payout paid it. A DRY RUN lists the
