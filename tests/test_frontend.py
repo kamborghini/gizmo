@@ -2336,6 +2336,31 @@ def t_team_is_tables_with_the_admin_actions_in_a_menu():
 
 
 @test
+def t_memory_shows_what_it_learned_and_lines_its_parts_up():
+    """WS-20 to WS-24, 12 Oct 2026: what Reactor learned sat behind a lone
+    link; each tracked change put its actions 800px from its figures; a note's
+    Kind cell held up to three tags; the new note's Kind sat at the far right;
+    and an empty Notes card offered Add a note twice."""
+    kp = fn_src("function knowledgeParts(")
+    ok("el('details', 'know-body')" not in kp and "el('div', 'know-grid')" in kp, "what it learned shows as a preview, no disclosure (WS-21)")
+    ok("n.classList && n.classList.contains('md-h')" in kp and "'Pages it read'" in kp, "a section per heading, Pages it read the last block")
+    ok("fresh.append(el('p', 'card-sub', 'Uses AI credits. Reads up to 12 pages, once.'), learnBtn || '');" in kp, "on a fresh store Learn my store follows its line (WS-23)")
+    ok("\n        .know-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));" in CSS, "three across")
+    ok("\n        .impact-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));" in CSS, "tracked changes three across (WS-20)")
+    ir = fn_src("function impactRow(")
+    ok(ir.index("row.append(chips)") < ir.index("row.append(acts)") and "'Concluded'" in ir, "each change's actions under its figures, a concluded one tagged")
+    ok("' \\u00b7 Tracked by '" in ir and "Change in your headline figures since then" not in ir, "the when line in one piece, the rest behind the (i)")
+    mr = fn_src("function memRow(")
+    ok("k.append(el('span', 'lbl-chip warn', 'Waiting for an admin'))" not in mr and "states.append(el('span', 'lbl-chip warn', 'Waiting for an admin'))" in mr,
+       "one kind tag; the states go under the note (WS-22)")
+    ok(".mem-add, .mem-edit { max-width: 720px; }" in CSS and "row.append(el('span', 'mem-edit-l', m ? 'Correct this note' : 'New note'), sel);" in fn_src("function memEditor("),
+       "the editor at 720 with Kind beside its label (WS-24)")
+    pn = fn_src("function paintNotes(")
+    ok("if (!memoryLoadErr && canEditInstructions() && memories.length)" in pn, "an empty Notes card offers Add a note once, in its empty line (WS-23)")
+    ok("{ key: k, label: l, n: groups[k] }" in pn, "the filters carry their counts without brackets")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left
@@ -9108,7 +9133,8 @@ def t_members_see_only_the_memory_buttons_the_server_allows():
     imp = fn_src("function impactRow(")
     ok("const mayAct = canEditInstructions() || (!!it.by_uid && !!teamMe && it.by_uid === String(teamMe.id || ''));" in imp,
        "Conclude and Delete for the tracker or an admin")
-    ok("if (mayAct) acts.append(del);" in imp and "' Tracked by ' + it.by" in imp, "and it says who tracked it")
+    # 12 Oct 2026: the actions sit under the figures, and the when line is one piece ("· Tracked by").
+    ok("if (mayAct) {" in imp and "acts.append(del);" in imp.split("if (mayAct) {")[-1] and "Tracked by ' + it.by" in imp, "and it says who tracked it")
     ok("if (!s.reading && canEditInstructions()) {" in SCRIPT and "if (canEditInstructions()) foot.append(again);" in SCRIPT,
        "a skill's reading is run by an admin")
 
@@ -12047,7 +12073,9 @@ const fmtDate = (d) => '5 Oct'; const ico = () => el('span'); const I = new Prox
 const canEditInstructions = () => true; const memOp = () => {}; const memGuard = () => true; const uiConfirm = async () => true;
 let memInject = 40; let memories = [];
 """ + fn_src("function memSentIds()") + "\n" + fn_src("function memRow(m, sent)") + r"""
-const kinds = (tr) => tr.children[0].children.map(c => c.textContent);
+// 12 Oct 2026 (WS-22): Kind holds one tag; the states sit under the note, in .mem-states.
+const kinds = (tr) => tr.children[0].children.map(c => c.textContent).concat(((tr.children[1].children.find(x => x.className === 'mem-states') || {}).children || []).map(c => c.textContent));
+const kindCell = (tr) => tr.children[0].children.map(c => c.textContent);
 const meta = (tr) => { const c = tr.children[1].children.find(x => x.className === 'mem-meta'); return c ? c.textContent : null; };
 const row = (m) => { memories = [m]; return memRow(m, memSentIds()); };
 const waitingPref = row({ id: 'a', type: 'preference', text: 'Trade accounts reorder.', source: 'chat', status: 'pending', by: 'Dee Pugh', created: 'x' });
@@ -12055,10 +12083,11 @@ const waitingFollow = row({ id: 'b', type: 'followup', text: 'Chase Acme.', sour
 const waitingNoBy = row({ id: 'c', type: 'fact', text: 'A fact.', source: 'chat', status: 'pending', created: 'x' });
 const live = row({ id: 'd', type: 'preference', text: 'Quote in working days.', source: 'chat', status: 'active', created: 'x' });
 const closed = row({ id: 'e', type: 'followup', text: 'Done thing.', source: 'chat', status: 'done', created: 'x' });
-console.log(JSON.stringify({ wp: kinds(waitingPref), wpMeta: meta(waitingPref), wf: kinds(waitingFollow), wfMeta: meta(waitingFollow), wn: kinds(waitingNoBy), wnMeta: meta(waitingNoBy),
+console.log(JSON.stringify({ wpKind: kindCell(waitingPref), wp: kinds(waitingPref), wpMeta: meta(waitingPref), wf: kinds(waitingFollow), wfMeta: meta(waitingFollow), wn: kinds(waitingNoBy), wnMeta: meta(waitingNoBy),
   live: kinds(live), liveMeta: meta(live), closed: kinds(closed) }));
 """
     got = _run_node(js)
+    ok(got["wpKind"] == ["Preference"], "Kind holds one tag: %s" % got["wpKind"])
     ok(got["wp"] == ["Preference", "Waiting for an admin", "Not read with answers"], got["wp"])
     ok(got["wpMeta"] == "From Dee Pugh", got["wpMeta"])
     ok(got["wf"] == ["Follow-up", "Waiting for an admin", "Not read with answers"], "a waiting follow-up is not read either: %s" % got["wf"])

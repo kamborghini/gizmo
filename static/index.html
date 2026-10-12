@@ -1688,7 +1688,10 @@
         @media (hover: hover) { .mem-btn.ok:hover { color: var(--success); background: var(--success-bg); } }
         @media (hover: hover) { .mem-btn.del:hover { color: var(--error); background: var(--error-bg); } }
         .mem-edit, .mem-add { display: grid; gap: var(--sp-2); }
-        .mem-edit-top { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+        .mem-edit-top { display: flex; align-items: center; justify-content: flex-start; gap: var(--sp-3); }
+        /* The note editor at its measure, Kind beside its label (12 Oct 2026, WS-24). */
+        .mem-add, .mem-edit { max-width: 720px; }
+        .mem-states { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-1); }
         .mem-edit-l { font-size: var(--text-body); font-weight: var(--weight-medium); }
         .mem-ta { min-height: calc(var(--control-h) * 2); }
         /* An inline message under the field it is about. */
@@ -1728,6 +1731,12 @@
         }
         /* Store-knowledge card */
         .know-edit { display: grid; gap: var(--sp-2); }
+        .know-fresh { align-items: center; } .know-fresh > .card-sub { margin: 0; }
+        /* What Reactor learned, three across (12 Oct 2026, WS-21). */
+        .know-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-6) var(--sp-8); align-items: start; }
+        @media (max-width: 900px) { .know-grid { grid-template-columns: minmax(0, 1fr); } }
+        .know-grid > .know-sec { margin: 0; max-width: none; }
+        .know-grid .md-h { margin-top: 0; }
         .know-body { border-top: var(--bw-hairline) solid var(--border-default);
             padding-block-start: var(--sp-3); padding-inline: 0; }
         .know-body summary { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-brand); cursor: pointer; font-weight: var(--weight-medium); list-style: none;
@@ -5021,16 +5030,20 @@
         .track-btn:is(.on, [aria-pressed="true"]) { background: var(--success-bg); color: var(--success); border-color: transparent; cursor: default; }
         .track-btn > span { display: grid; place-items: center; } .track-btn svg { width: var(--icon-xs); height: var(--icon-xs); display: block; }
         /* Each tracked change a row of the card, separated by a rule. */
-        .impact-list { list-style: none; margin: 0; padding: 0; }
+        /* Tracked changes three across (12 Oct 2026, WS-20), each block its
+           title, when, figures and actions, lined up across the three. */
+        .impact-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-6) var(--sp-8); align-items: start; list-style: none; margin: 0; padding: 0; }
+        @media (max-width: 900px) { .impact-list { grid-template-columns: minmax(0, 1fr); } }
         .card > .impact-list { padding-inline: 0; }
-        .impact-row { padding: var(--sp-3) 0; border-top: var(--bw-hairline) solid var(--border-default); }
-        .impact-row:first-child { border-top: 0; padding-top: 0; }
+        .impact-row { display: flex; flex-direction: column; gap: var(--sp-2); padding: 0; border-top: 0; }
         .impact-row.done .impact-text { color: var(--text-secondary); }
         .impact-top { display: flex; align-items: flex-start; gap: var(--sp-3); }
         .impact-text { flex: 1; font-weight: var(--weight-medium); font-size: var(--text-body); line-height: var(--lh-control); }
-        .impact-acts { display: flex; gap: var(--sp-1); flex: none; }
-        .impact-sub { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); margin: var(--sp-2) 0 var(--sp-2-5); }
-        .impact-deltas { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: var(--sp-2); }
+        .impact-acts { display: flex; align-items: center; gap: var(--sp-1); flex: none; }
+        .impact-sub { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); margin: 0; }
+        .impact-deltas { display: grid; grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr)); gap: var(--sp-2) var(--sp-4); }
+        /* Small figures, no tiles: rises green, falls red. */
+        .impact-deltas .idelta { background: none; padding: 0; min-width: 0; border-radius: 0; }
         .idelta { display: flex; flex-direction: column; gap: 0; background: var(--surface-tertiary); border: 0; border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-3); min-width: 86px; }
         .idelta .il { font-size: var(--text-xs); line-height: var(--lh-caption); text-transform: none; letter-spacing: normal; color: var(--text-tertiary); font-weight: var(--weight-medium); }
         .idelta .iv { font-size: var(--text-body); font-weight: var(--weight-medium); }
@@ -12307,43 +12320,28 @@ Projected Image UK"></textarea>
             if (host.hidden) return;
             const head = el('div', 'card-head');
             const tt = el('h3', 'card-title', 'Tracked changes');
-            head.append(titleInfo(tt, infoButton('About tracked changes', { title: 'Tracked changes', body: 'Actions you pressed Track on in an answer, measured by your headline figures from that day.' })));
+            head.append(titleInfo(tt, infoButton('About tracked changes', { title: 'Tracked changes', body: 'Actions you pressed Track on in an answer, measured by your headline figures from that day. Each shows the change in those figures since it was tracked.' })));
             host.append(head);
             if (impactErr) { host.append(loadFailure('Your tracked changes could not be measured just now. ' + impactErr, () => loadMemory())); return; }
             const list = el('ul', 'impact-list');
             impact.forEach(it => list.append(impactRow(it)));
             host.append(list);
         }
+        /* A tracked change (12 Oct 2026, WS-20): its title, when it was
+           tracked and by whom, its figures, then its actions straight under
+           them, one block of three across. The actions sat at the row's far
+           end, 800px from the figures. */
         function impactRow(it) {
             const row = el('li', 'impact-row' + (it.status === 'concluded' ? ' done' : ''));
-            const top = el('div', 'impact-top');
-            top.append(el('div', 'impact-text', it.text || ''));
-            const acts = el('div', 'impact-acts');
-            /* Yours to settle, or an admin's: the server says the same. */
-            const mayAct = canEditInstructions() || (!!it.by_uid && !!teamMe && it.by_uid === String(teamMe.id || ''));
-            if (it.status !== 'concluded' && mayAct) {
-                const cc = el('button', 'btn btn-sm'); cc.append(ico(I.check), document.createTextNode('Conclude'));
-                cc.title = 'Stop measuring and keep what it came to as a learning';
-                cc.onclick = () => impactOp({ op: 'conclude', id: it.id }, cc);
-                acts.append(cc);
-            }
-            const del = el('button', 'mem-btn del'); del.innerHTML = I.trash;
-            del.setAttribute('aria-label', 'Delete tracked change: ' + (it.text || '').slice(0, 60)); del.title = 'Delete';
-            del.onclick = async () => {
-                if (!await uiConfirm('Delete the tracked change "' + (it.text || '').slice(0, 80) + '"? Its figures go with it.',
-                    { title: 'Delete tracked change', okText: 'Delete' })) return;
-                impactOp({ op: 'delete', id: it.id });
-            };
-            if (mayAct) acts.append(del);
-            top.append(acts); row.append(top);
+            row.append(el('div', 'impact-text', it.text || ''));
             /* Measured to the day it was concluded (the server keeps those
                figures), and said so: 'since then' read as counting from the
                conclusion. */
             const from = fmtDate(it.started_at);
-            const who = it.by ? ' Tracked by ' + it.by + '.' : '';
+            const who = it.by ? ' \u00b7 Tracked by ' + it.by : '';
             row.append(el('div', 'impact-sub', it.status === 'concluded'
-                ? 'Measured from ' + from + ' to ' + fmtDate(it.concluded_at) + '.' + who
-                : 'Tracking since ' + from + '.' + who + ' Change in your headline figures since then:'));
+                ? 'Measured from ' + from + ' to ' + fmtDate(it.concluded_at) + who
+                : 'Tracking since ' + from + who));
             const chips = el('div', 'impact-deltas');
             (it.deltas || []).forEach(d => {
                 const cls = d.pct == null ? 'flat' : d.pct > 0 ? 'up' : d.pct < 0 ? 'down' : 'flat';
@@ -12357,6 +12355,27 @@ Projected Image UK"></textarea>
                     : 'No starting figures were captured when this was tracked, so it cannot be measured.'));
             }
             row.append(chips);
+            const acts = el('div', 'impact-acts');
+            /* Yours to settle, or an admin's: the server says the same. */
+            const mayAct = canEditInstructions() || (!!it.by_uid && !!teamMe && it.by_uid === String(teamMe.id || ''));
+            if (it.status === 'concluded') acts.append(el('span', 'lbl-chip note', 'Concluded'));
+            else if (mayAct) {
+                const cc = el('button', 'btn btn-sm'); cc.append(ico(I.check), document.createTextNode('Conclude'));
+                cc.title = 'Stop measuring and keep what it came to as a learning';
+                cc.onclick = () => impactOp({ op: 'conclude', id: it.id }, cc);
+                acts.append(cc);
+            }
+            if (mayAct) {
+                const del = el('button', 'mem-btn del'); del.innerHTML = I.trash;
+                del.setAttribute('aria-label', 'Delete tracked change: ' + (it.text || '').slice(0, 60)); del.title = 'Delete';
+                del.onclick = async () => {
+                    if (!await uiConfirm('Delete the tracked change "' + (it.text || '').slice(0, 80) + '"? Its figures go with it.',
+                        { title: 'Delete tracked change', okText: 'Delete' })) return;
+                    impactOp({ op: 'delete', id: it.id });
+                };
+                acts.append(del);
+            }
+            row.append(acts);
             return row;
         }
         /* quiet: the caller says what went wrong itself, so the failure is
@@ -12438,12 +12457,20 @@ Projected Image UK"></textarea>
                 };
                 const del = el('button', 'btn btn-sm'); del.append(ico(I.trash), document.createTextNode('Delete')); del.onclick = deleteKnowledge;
                 acts.append(ed, re, del);
-            } else if (!learned && knowledgeRead && canEditInstructions()) {
-                const b = el('button', 'btn btn-sm'); b.append(ico(I.book), document.createTextNode('Learn my store'));
-                b.title = 'Reads up to 12 pages of your website. An AI run.'; b.onclick = () => learnStore(b); acts.append(b);
             }
             head.append(acts); out.push(head);
-            if (!learned && !learning && !knowledgeErr && knowledgeRead) out.push(el('p', 'card-sub', 'Uses AI credits. Reads up to 12 pages, once.'));
+            /* On a fresh store, Learn my store follows the line that says what
+               it costs (12 Oct 2026, WS-23): it sat at the head's far end. */
+            if (!learned && !learning && !knowledgeErr && knowledgeRead) {
+                const fresh = el('div', 'act-row know-fresh');
+                let learnBtn = null;
+                if (canEditInstructions()) {
+                    learnBtn = el('button', 'btn btn-sm'); learnBtn.append(ico(I.book), document.createTextNode('Learn my store'));
+                    learnBtn.title = 'Reads up to 12 pages of your website. An AI run.'; learnBtn.onclick = () => learnStore(learnBtn);
+                }
+                fresh.append(el('p', 'card-sub', 'Uses AI credits. Reads up to 12 pages, once.'), learnBtn || '');
+                out.push(fresh);
+            }
             if (learned && knowEditing) {
                 const f = el('div', 'know-edit');
                 const ta = el('textarea', 'sk-textarea'); ta.value = knowledge.knowledge || ''; ta.dataset.initial = ta.value;
@@ -12481,18 +12508,24 @@ Projected Image UK"></textarea>
                 row.append(save, cancel, count); f.append(ta, kMsg, row); out.push(f);
                 requestAnimationFrame(() => ta.focus());
             } else if (learned && !learning) {
-                const det = el('details', 'know-body');
-                const sum = el('summary'); sum.textContent = 'What Reactor learned';
-                const body = el('div', 'know-text'); body.append(knowNodes(knowledge.knowledge));
-                det.append(sum, body);
+                /* What it learned, shown whole as a preview (12 Oct 2026, WS-21):
+                   a block for each of its headings, three across, and the pages
+                   it read as the last block. It sat behind a lone link. */
+                const grid = el('div', 'know-grid');
+                let sec = null;
+                [...knowNodes(knowledge.knowledge).childNodes].forEach(n => {
+                    if (!sec || (n.classList && n.classList.contains('md-h'))) { sec = el('div', 'know-sec know-text'); grid.append(sec); }
+                    sec.append(n);
+                });
                 const src = (knowledge.sources || []).filter(u => /^https?:\/\//.test(u));
                 if (src.length) {
-                    det.append(el('div', 'know-src-h', 'Pages it read'));
+                    const ps = el('div', 'know-sec');
+                    ps.append(el('div', 'know-src-h', 'Pages it read'));
                     const ul = el('ul', 'know-src');
                     src.forEach(u => { const li = el('li'); const a = el('a', null, u.replace(/^https?:\/\//, '')); a.href = u; a.target = '_blank'; a.rel = 'noopener'; li.append(a); ul.append(li); });
-                    det.append(ul);
+                    ps.append(ul); grid.append(ps);
                 }
-                out.push(det);
+                out.push(grid);
             }
             return out;
         }
@@ -12533,7 +12566,8 @@ Projected Image UK"></textarea>
             const head = el('div', 'card-head');
             /* What notes are and who keeps them, word for word, behind the
                title's info button (copy plan, Memory #6). */
-            const nt = el('h3', 'card-title', 'Notes' + (memories.length ? ' (' + memories.length + ')' : ''));
+            const nt = el('h3', 'card-title', 'Notes');
+            if (memories.length) nt.append(el('span', 'card-n', String(memories.length)));
             const ntInfo = infoButton('About notes', { title: 'Notes', body: 'What Reactor keeps from chat, and what ' + (canEditInstructions() ? 'you add' : 'an admin adds') + ' here. It reads the newest ' + memInject
                     + ' of each kind with every answer. Rules for how to work belong in Skills.'
                     + (canEditInstructions()
@@ -12541,7 +12575,8 @@ Projected Image UK"></textarea>
                         : ' Only an admin can add, correct or delete a note, and a note from your chats or tracked changes waits for an admin to keep it.') });
             head.append(titleInfo(nt, ntInfo));
             const acts = el('div', 'card-act');
-            if (!memoryLoadErr && canEditInstructions()) {
+            /* With no notes the empty line carries Add a note, once (WS-23). */
+            if (!memoryLoadErr && canEditInstructions() && memories.length) {
                 const add = el('button', 'btn btn-sm btn-primary'); add.append(ico(I.plus), document.createTextNode('Add a note'));
                 add.onclick = () => { memView.adding = true; memView.editId = null; paintNotes(); };
                 acts.append(add);
@@ -12568,7 +12603,7 @@ Projected Image UK"></textarea>
             const search = tableSearch('Search notes…', memView.q, (v) => { memView.q = v; memView.page = 1; paintNotesList(); });
             /* A tab changes the list alone, in place, so focus stays on it. */
             let tabs = null;
-            if (F.length > 2) tabs = segmented(F.map(([k, l]) => [k, l + ' (' + groups[k] + ')']), memView.f, (k) => {
+            if (F.length > 2) tabs = segmented(F.map(([k, l]) => ({ key: k, label: l, n: groups[k] })), memView.f, (k) => {
                 memView.f = k; memView.page = 1;
                 [...tabs.children].forEach((b, i) => { const on = F[i][0] === k; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
                 paintNotesList();
@@ -12611,17 +12646,21 @@ Projected Image UK"></textarea>
             const k = el('td', 'mem-kind'); k.append(el('span', 'lbl-chip note', MEM_WORDS[m.type] || cap(String(m.type || ''))));
             const t = el('td', 'mem-note');
             const tx = el('div', 'mem-text', m.text || ''); tx.id = 'mem-' + m.id; t.append(tx);
+            /* Kind holds one tag (12 Oct 2026, WS-22); the states go under the note. */
+            const states = el('div', 'mem-states');
             const bits = [];
             /* Two states as tags, not sentences (copy plan, Memory #10 and #11). A waiting note also says,
                visibly, who it is from (what an admin acts on) and, with the tag below, that it is not read. */
-            if (waiting) k.append(el('span', 'lbl-chip warn', 'Waiting for an admin'));
+            let nStates = 0;
+            if (waiting) { states.append(el('span', 'lbl-chip warn', 'Waiting for an admin')); nStates++; }
             if (waiting && m.by) bits.push('from ' + m.by);
             if (m.type === 'followup' && m.status !== 'open' && !waiting) bits.push((m.status === 'done' ? 'Done' : 'Dismissed') + ' ' + fmtDate(m.updated || m.created) + (m.closed_by === 'chat' ? ' in chat' : ''));
             if (m.edited) bits.push('corrected');
             /* A waiting note is not read (memSentIds leaves it out), so it carries the tag too; a follow-up that is
                done or dismissed is closed work and never was. */
             const closedFollowup = m.type === 'followup' && m.status !== 'open' && !waiting;
-            if (!sent.has(m.id) && !closedFollowup) k.append(el('span', 'lbl-chip note', 'Not read with answers'));
+            if (!sent.has(m.id) && !closedFollowup) { states.append(el('span', 'lbl-chip note', 'Not read with answers')); nStates++; }
+            if (nStates) t.append(states);
             if (m.status === 'dismissed' && m.type !== 'followup') bits.push('dismissed');
             if (bits.length) t.append(el('div', 'mem-meta', cap(bits.join(' · '))));
             const fromWord = MEM_FROM[m.source] || (m.source ? cap(m.source) : 'Added here');
