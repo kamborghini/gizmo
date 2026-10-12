@@ -26817,6 +26817,223 @@ def t_a_door_service_that_lists_nearby_shops_is_still_a_door_service():
         worldoptions._soap_call = saved
 
 
+def _written_off(e):
+    """The sweep wrote this finding off as gone."""
+    return any("No longer detected" in h.get("note", "") for h in e.get("history") or [])
+
+
+def _left_as_it_was(stores, xid, before, why):
+    """An open finding a sweep did not see go: still open, nothing written."""
+    e = stores["store"]["exceptions"][xid]
+    ok(not e.get("stale") and not _written_off(e), why + ": %s" % e["history"][-1:])
+    eq(e["status"], before["status"], why)
+    eq(e["history"], before["history"], why + ": and nothing written on its history")
+
+
+@test
+def t_an_open_payout_finding_is_not_settled_by_ageing_past_the_window():
+    """Every read answered, and still an open payout finding was marked "No
+    longer detected" once its payout aged past the window the check matches
+    in. The check leaves out a payout older than the bank lines it holds, and
+    the merge read that as the discrepancy going away. It keeps watching the
+    payout an open finding rests on instead, so the finding closes only when a
+    sweep sees the deposit."""
+    import copy as _copy
+    payout = {"id": 7101, "date": _rc._cutoff_day(10), "amount": "312.40",
+              "currency": "GBP", "status": "paid"}
+    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
+    answers = {"shopify_list_payouts": {"payouts": [payout]},
+               "shopify_payout_transactions": {"transactions": []},
+               "shopify_list_disputes": {"disputes": []}}
+    stores = _payments_world(fx, answers)
+    try:
+        run_async(_rc.sweep())
+        exs = stores["store"]["exceptions"]
+        found = [x for x, e in exs.items() if e["kind"] == "payout_missing_from_bank"]
+        eq(len(found), 1, "a paid payout with no deposit is found")
+        xid = found[0]
+        exs[xid]["status"] = "investigating"
+        before = _copy.deepcopy(exs[xid])
+        # Months on, the deposit never found, and Shopify still lists the payout.
+        aged = _rc._cutoff_day(_rc.FETCH_DAYS + 5)
+        payout["date"] = aged
+        for n in (1, 2):
+            r = run_async(_rc.sweep())
+            ok(not _did_not_run(r["notes"], "payout"), "every read answered: %s" % r["notes"])
+            _left_as_it_was(stores, xid, before, "sweep %d: a payout past the window is not a "
+                                                  "deposit found" % n)
+            ok("7101" in stores["cache"]["shopify"]["payouts"], "the payout it rests on is still held")
+        # Still watched: the deposit turns up, and the sweep that sees it settles it.
+        fx.bank.append(_raw_btxn("BT-7101", "RECEIVE", "312.40", aged))
+        run_async(_rc.sweep())
+        e = stores["store"]["exceptions"][xid]
+        ok(e["stale"] and _written_off(e), "a sweep that sees the deposit settles it")
+    finally:
+        _unconfigure_recon()
+
+
+@test
+def t_an_open_chargeback_finding_is_not_settled_by_ageing_past_the_window():
+    """The chargeback check leaves out disputes older than the books it holds,
+    by the same rule as payouts, with the same result for an open finding."""
+    import copy as _copy
+    dispute = {"id": 8101, "order_id": 104275, "type": "chargeback", "amount": "95.00",
+               "currency": "GBP", "reason": "fraudulent", "status": "lost",
+               "initiated_at": _rc._cutoff_day(10)}
+    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
+    answers = {"shopify_list_payouts": {"payouts": []},
+               "shopify_list_disputes": {"disputes": [dispute]}}
+    stores = _payments_world(fx, answers)
+    try:
+        run_async(_rc.sweep())
+        exs = stores["store"]["exceptions"]
+        found = [x for x, e in exs.items() if e["kind"] == "chargeback_missing_from_xero"]
+        eq(len(found), 1, "a chargeback with no Xero record is found")
+        xid = found[0]
+        exs[xid]["status"] = "investigating"
+        before = _copy.deepcopy(exs[xid])
+        aged = _rc._cutoff_day(_rc.FETCH_DAYS + 5)
+        dispute["initiated_at"] = aged
+        for n in (1, 2):
+            r = run_async(_rc.sweep())
+            ok(not _did_not_run(r["notes"], "chargeback"), "every read answered: %s" % r["notes"])
+            _left_as_it_was(stores, xid, before, "sweep %d: a dispute past the window is not one "
+                                                  "recorded" % n)
+            ok("8101" in stores["cache"]["shopify"]["disputes"], "the dispute it rests on is still held")
+        fx.bank.append(_raw_btxn("BT-8101", "SPEND", "95.00", aged))
+        run_async(_rc.sweep())
+        e = stores["store"]["exceptions"][xid]
+        ok(e["stale"] and _written_off(e), "a sweep that sees it recorded settles it")
+    finally:
+        _unconfigure_recon()
+
+
+@test
+def t_an_open_xero_sale_finding_is_not_settled_by_ageing_past_the_window():
+    """The check for Xero sales with no Shopify order looks only at the last
+    WINDOW_DAYS of invoices, a shorter horizon than the cache keeps, so an
+    open finding went "no longer detected" two months before retention could
+    even have touched its invoice."""
+    import copy as _copy
+    stray = dict(_raw_xinv("INV-9001", "77.00", contact="Walk-in Trade"),
+                 DateString=_rc._cutoff_day(10) + "T00:00:00")
+    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00"), stray])
+    stores = _payments_world(fx, {})
+    try:
+        run_async(_rc.sweep())
+        exs = stores["store"]["exceptions"]
+        found = [x for x, e in exs.items() if e["kind"] == "xero_sale_without_shopify"]
+        eq(len(found), 1, "an invoice no order explains is found")
+        xid = found[0]
+        exs[xid]["status"] = "investigating"
+        before = _copy.deepcopy(exs[xid])
+        stray["DateString"] = _rc._cutoff_day(_rc.WINDOW_DAYS + 5) + "T00:00:00"
+        for n in (1, 2):
+            run_async(_rc.sweep())
+            _left_as_it_was(stores, xid, before, "sweep %d: an invoice past the window is not "
+                                                  "one explained" % n)
+            ok("XR-INV-9001" in stores["cache"]["xero"]["invoices"], "the invoice it rests on is still held")
+        stray["Status"] = "VOIDED"
+        run_async(_rc.sweep())
+        e = stores["store"]["exceptions"][xid]
+        ok(e["stale"] and _written_off(e), "a sweep that sees it voided settles it")
+    finally:
+        _unconfigure_recon()
+
+
+@test
+def t_an_open_xero_sale_past_the_window_does_not_tip_the_numbering_finding():
+    """An invoice watched past the window only for its own open finding is not
+    one of the recent invoices the numbering finding is a share of: eleven old
+    ones must not turn one recent, properly referenced invoice into "most
+    invoices reference no Shopify order"."""
+    orders = {"1": _ord(104275, "#104275", 84200, date=_rc._cutoff_day(10))}
+    xinv = {"XI-INV-104275": _inv("INV-104275", 84200, date=_rc._cutoff_day(10))}
+    old = _rc._cutoff_day(_rc.WINDOW_DAYS + 5)
+    for i in range(11):
+        v = _inv("INV-90%02d" % i, 7700 + i, contact="Walk-in Trade", date=old)
+        xinv[v["id"]] = v
+    cache = {"shopify": {"orders": orders}, "xero": {"invoices": xinv}}
+    eq(_rc.check_xero_orphan_sales(cache), [], "past the window and watched by nothing: not looked at")
+    watched = frozenset(v["id"] for v in xinv.values() if v["contact"] == "Walk-in Trade")
+    kinds = [e["kind"] for e in _rc.check_xero_orphan_sales(cache, open_refs=watched)]
+    eq(kinds, ["xero_sale_without_shopify"] * 11, "each watched invoice is its own finding still")
+
+
+@test
+def t_an_open_mailbox_finding_is_not_settled_by_its_document_ageing_out():
+    """Retention keeps the Xero and Shopify records an open finding rests on,
+    but not the mailbox document behind one: the document was dropped, and the
+    next sweep, finding nothing, wrote the finding off as no longer detected."""
+    import copy as _copy
+    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
+    stores = _recon_world(fx, [_raw_order(104275, "#104275", "842.00")])
+    stores["docs"]["m9:a9"] = {
+        "doc_type": "supplier_invoice", "invoice_numbers": ["SUP-4410"], "total_pence": 48000,
+        "amounts": [48000], "currency": "GBP", "invoice_lines": [], "counterparty": "Acme Glass",
+        "extracted_by": "text", "verified": True, "source_key": "m9:a9", "filename": "sup.pdf",
+        "from": "accounts@acmeglass.example", "date": _rc._cutoff_day(10)}
+    stores["docs"]["m8:a8"] = dict(stores["docs"]["m9:a9"], source_key="m8:a8",
+                                   invoice_numbers=["INV-104275"])
+    try:
+        run_async(_rc.sweep())
+        exs = stores["store"]["exceptions"]
+        found = [x for x, e in exs.items() if e["kind"] == "gmail_doc_missing_from_xero"]
+        eq(len(found), 1, "a bill in the mailbox and not in Xero is found")
+        xid = found[0]
+        exs[xid]["status"] = "investigating"
+        before = _copy.deepcopy(exs[xid])
+        for k in ("m9:a9", "m8:a8"):
+            stores["docs"][k]["date"] = _rc._cutoff_day(_rc.DOCS_KEEP_DAYS + 5)
+        for n in (1, 2, 3):
+            run_async(_rc.sweep())
+            _left_as_it_was(stores, xid, before, "sweep %d: a document past retention is not a "
+                                                  "bill entered" % n)
+            ok("m9:a9" in stores["docs"], "the document it rests on is still held")
+        ok("m8:a8" not in stores["docs"], "one no open finding rests on is dropped as before")
+        fx.invoices.append(_raw_xinv("SUP-4410", "480.00", typ="ACCPAY", contact="Acme Glass"))
+        run_async(_rc.sweep())
+        e = stores["store"]["exceptions"][xid]
+        ok(e["stale"] and _written_off(e), "a sweep that sees the bill in Xero settles it")
+    finally:
+        _unconfigure_recon()
+
+
+@test
+def t_an_open_sale_or_refund_finding_outlives_the_window():
+    """The sale and refund checks have no date horizon of their own, and
+    retention keeps the order an open finding rests on, so an order older than
+    the window Shopify is read for is still checked from the copy held."""
+    refunded = dict(_raw_order(104275, "#104275", "842.00"),
+                    refunds=[{"id": 5501, "created_at": _rc._cutoff_day(10),
+                              "transactions": [{"kind": "refund", "status": "success",
+                                                "amount": "20.00"}]}])
+    orders = [refunded, _raw_order(104276, "#104276", "120.00")]
+    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
+    stores = _recon_world(fx, orders)
+    try:
+        run_async(_rc.sweep())
+        exs = stores["store"]["exceptions"]
+        kinds = ("shopify_sale_missing", "shopify_refund_missing")
+        found = sorted(x for x, e in exs.items() if e["kind"] in kinds)
+        eq(len(found), 2, "the missing sale and the unrecorded refund are both found")
+        for xid in found:
+            exs[xid]["status"] = "investigating"
+        # Both orders pass the window: Shopify no longer lists them, the cache
+        # still holds them.
+        old = _rc._cutoff_day(_rc.FETCH_DAYS + 5)
+        for o in stores["cache"]["shopify"]["orders"].values():
+            o["created_at"] = old
+        orders.clear()
+        run_async(_rc.sweep())
+        for xid in found:
+            e = stores["store"]["exceptions"][xid]
+            ok(not e.get("stale") and not _written_off(e), e["kind"] + " stays open")
+        ok({"104275", "104276"} <= set(stores["cache"]["shopify"]["orders"]), "both orders are held")
+    finally:
+        _unconfigure_recon()
+
+
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a
