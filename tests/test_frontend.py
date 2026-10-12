@@ -7794,6 +7794,9 @@ def t_inbox_rows_off_screen_are_not_laid_out_on_a_wide_list():
     ok(".mrow {" in seg and "content-visibility: auto" in seg, "Inbox rows off screen are skipped")
     ok("contain-intrinsic-size: auto max(calc(var(--row-h) - 2 * var(--sp-2)), var(--control-h-sm))" in seg,
        "standing at their content height, from the row's own tokens, touch included")
+    ok("@supports (height: 1lh) {" in seg
+       and "contain-intrinsic-size: auto max(calc(var(--row-h) - 2 * var(--sp-2)), var(--control-h-sm), 1lh)" in seg,
+       "and its own line, where text alone is zoomed (re-check: rows grew to 46-56 px while their stand-ins stayed 44)")
     for other in (".lbl-row", ".crm-card", ".files-row"):
         ok(not re.search(re.escape(other) + r"[^{]*\{[^}]*content-visibility", css), other + " is left alone")
     pad = re.search(r"\.mrow \{[^}]*padding: var\(--sp-2\) 0; min-height: var\(--row-h\)", css)
@@ -7814,6 +7817,70 @@ def t_a_read_mark_the_page_makes_itself_never_outlives_the_board():
     ok("row.unread = false" in body and "mailRev = ''" in body,
        "and it lets the revision go with the edit")
     ok(SCRIPT.count("row.unread = false") == 1, "and it is the only place the page edits a row of the board")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    # Run for real: open an unread email, Gmail refuses the read (the server
+    # puts it back), close the window untouched, then the minute's polls.
+    js = MINIDOM + r"""
+const I = { x: '<svg></svg>' };
+Node_.prototype.querySelector = function (sel) {
+  const c = sel.replace(/^\./, '');
+  const walk = (n) => { for (const k of n.children || []) { if (k.classList.contains(c)) return k; const f = walk(k); if (f) return f; } return null; };
+  return walk(this);
+};
+Node_.prototype.closest = function (sel) {
+  const tags = sel.split(',').map(x => x.trim().toUpperCase());
+  for (let n = this; n && n.tagName; n = n.parentNode) if (tags.indexOf(n.tagName) >= 0) return n;
+  return null;
+};
+function setInterval(f) { return 1; } function clearInterval() {}
+let now = Date.parse('2026-10-12T09:30:00Z'); Date.now = () => now;
+const synced = el('p'); synced.dataset.mailSynced = '';
+document.querySelector = (sel) => sel === '#view-mail.active' ? {} : sel === '#mail-content [data-mail-synced]' ? synced : null;
+let mailCache = null, mailRev = '', mailFetchSeq = 0, mailFetchedAt = 0, mailFound = null, sent = [], drawnUnread = null;
+function mailInputBusy() { return false; }
+function toastError() {}
+function paintMailThread() {}
+function mailAgoLong(iso) { return 'at ' + iso.slice(11, 16); }
+function renderMail() { mailNotePainted(mailCache); drawnUnread = mailCache.threads[0].unread; }
+const server = { connected: true, address: 'sales@shop.test', sync_error: '',
+  threads: [{ id: 't1', unread: true, state: 'unassigned', last_at: '2026-10-12T09:20:00Z', state_at: '2026-10-12T09:20:00Z' }] };
+let syncedAt = '2026-10-12T09:00:00Z';
+const revOf = () => 'r' + (server.threads[0].unread ? 'U' : 'R');
+async function api(path, body) {
+  if (path === '/api/mail/thread') { server.threads[0].unread = false; return { thread: { id: body.id } }; }
+  sent.push(JSON.stringify(body));
+  const rev = revOf();
+  if (!body.force && body.rev === rev) return { same: true, rev, synced_at: syncedAt };
+  return Object.assign(JSON.parse(JSON.stringify(server)), { synced_at: syncedAt, rev });
+}
+""" + "\n".join(fn_src(f) for f in ("function mailAgo(", "function mailHours(", "async function refreshMailQuiet(",
+                                     "function mailBoardKey(", "function mailAgeKey(", "function mailNotePainted(",
+                                     "function mailSyncedLine(", "function mailPaintSynced(", "function mailModal(",
+                                     "async function openMailThread(")) + r"""
+const settle = () => new Promise(r => setImmediate(r));
+const top = () => document.body.children[document.body.children.length - 1];
+(async () => {
+  const out = {};
+  mailCache = await api('/api/mail/board', {}); mailRev = mailCache.rev; renderMail();
+  await openMailThread('t1'); await settle();
+  server.threads[0].unread = true;                 // Gmail refused the read; the server puts it back
+  top().children[0].children[0].children[1].click(); await settle();   // closed untouched
+  out.afterClose = drawnUnread;
+  now += 60000; await refreshMailQuiet(false, true);
+  out.poll1 = { sent: sent[sent.length - 1], drawnUnread };
+  now += 60000; await refreshMailQuiet(false, true);
+  out.poll2 = { sent: sent[sent.length - 1], drawnUnread };
+  console.log(JSON.stringify(out));
+})();
+"""
+    got = _run_node(js)
+    ok(got["afterClose"] is False, "closing it draws the row read at once: %r" % got)
+    ok(got["poll1"] == {"sent": "{}", "drawnUnread": True},
+       "the next poll asks for the whole board and draws the row unread again, as Gmail has it: %r" % got)
+    ok(got["poll2"]["sent"] == '{"rev":"rU"}' and got["poll2"]["drawnUnread"] is True,
+       "and after that the poll sends the revision again: %r" % got)
 
 @test
 def t_closing_an_email_only_read_fetches_nothing():
@@ -7841,7 +7908,7 @@ Node_.prototype.closest = function (sel) {
 };
 const ticks = []; function setInterval(f) { ticks.push(f); return ticks.length; } function clearInterval() {}
 document.querySelector = (sel) => sel === '#view-mail.active' ? {} : null;
-let mailCache = { threads: [{ id: 't1', unread: true }, { id: 't2', unread: false }] };
+let mailCache = { threads: [{ id: 't1', unread: true }, { id: 't2', unread: false }] }, mailRev = 'r1';
 let calls = [], paints = 0, mailFetchSeq = 0;
 async function api(path) { calls.push(path); return { thread: { id: 'x' } }; }
 function toastError() {}

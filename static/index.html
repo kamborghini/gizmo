@@ -3451,14 +3451,20 @@
            (the 2026-10-12 speed audit, P5): a Refresh of 400 rows went from
            157-184 ms of a desktop's main thread to 101-125. Until it is drawn
            a row stands at its real content height, so the reader's place
-           holds across a redraw: the row less its padding, or on a touch
-           screen its 32 px controls (rows are 48 px there). Only where every
-           row is one line: a list 560 px or narrower, or a window 640 px or
-           narrower, wraps them to two. Only on screen. */
+           holds across a redraw: the row less its padding, its 32 px controls
+           on a touch screen (rows are 48 px there), or its own line where the
+           browser zooms text alone. Only where every row is one line: a list
+           560 px or narrower, or a window 640 px or narrower, wraps them to
+           two. Only on screen. The line is in a second rule of its own: a
+           browser without the lh unit keeps the first, where a value it
+           could not read would leave no size at all. */
         @media screen and (min-width: 641px) {
             @container mlist not (max-width: 560px) {
                 .mrow { content-visibility: auto;
                     contain-intrinsic-size: auto max(calc(var(--row-h) - 2 * var(--sp-2)), var(--control-h-sm)); }
+                @supports (height: 1lh) {
+                    .mrow { contain-intrinsic-size: auto max(calc(var(--row-h) - 2 * var(--sp-2)), var(--control-h-sm), 1lh); }
+                }
             }
         }
         /* 16, the size every other tick in the app is drawn at (.fslot input,
