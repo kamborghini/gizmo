@@ -1541,20 +1541,21 @@
         /* The hide button sits on the card's top right corner, a control with
            the control's corner, and carries its own ground because it sits over
            whatever the card draws there. */
-        .ov-wrap.wg-editing > [data-widget] > .wg-hide { position: absolute; top: calc(-1 * var(--sp-3)); right: calc(-1 * var(--sp-3)); z-index: 1;
+        .ov-wrap.wg-editing > [data-widget] > .wg-hide { position: absolute; top: 0; right: 0; z-index: 1;
             margin: 0; padding: 0; width: var(--control-h-sm); height: var(--control-h-sm); min-width: 0; min-height: 0;
             background: var(--surface-primary); box-shadow: var(--shadow-pop);
             border-radius: var(--radius-control); cursor: pointer; }
-        /* A widget with no padding of its own (a chart group, a row of tiles)
-           had its corner control under the hide button: Overview's 24M, the
-           first SEO and Liability tile. In Customise it gets the room. */
-        .ov-wrap.wg-editing > [data-widget]:not(:has(> .card-head)) { padding-top: var(--sp-8); }
+        /* The grip, in the gutter left of the block's first line. */
+        .ov-wrap.wg-editing > [data-widget] > .wg-grip { position: absolute; top: 0; left: calc(-1 * var(--sp-6)); display: grid; place-items: center;
+            height: var(--control-h-sm); color: var(--text-tertiary); pointer-events: none; }
+        .ov-wrap.wg-editing > [data-widget] > .wg-grip svg { width: var(--icon-md); height: var(--icon-md); }
+        @media (max-width: 640px) { .ov-wrap.wg-editing > [data-widget] > .wg-grip { display: none; } }
         @media (hover: hover) { .ov-wrap.wg-editing > [data-widget] > .wg-hide:hover { background: var(--surface-tertiary); } }
         .ov-wrap.wg-editing > [data-widget] > .wg-hide:active { background: var(--surface-sunken); }
         .ov-wrap.wg-editing > [data-widget] > .wg-hide:disabled { background: var(--surface-primary); cursor: not-allowed; }
         /* A card head's own buttons move clear of the hide button, which sat
            over Store knowledge's Delete. */
-        .ov-wrap.wg-editing > .card[data-widget] > .card-head { padding-right: calc(var(--sp-4) + var(--sp-8)); }
+        .ov-wrap.wg-editing > [data-widget] .card-head { padding-right: calc(var(--sp-4) + var(--sp-8)); }
         /* chat drill-down: show the data behind this. A hairline row on the
            text edge, not a box (the mix, spec 3): the row is a 32 control (40 on
            a phone, where --control-h is 40), and what it opens sits under it. */
@@ -6546,6 +6547,7 @@ Projected Image UK"></textarea>
             arrowDown: SV('<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>'),
             down: SV('<polyline points="23 18 13.5 8.5 8.5 13.5 1 6"></polyline><polyline points="17 18 23 18 23 12"></polyline>'),
             check: SV('<path d="M20 6 9 17l-5-5"/>'),
+            gripVertical: SV('<circle cx="9" cy="12" r="1"></circle><circle cx="9" cy="5" r="1"></circle><circle cx="9" cy="19" r="1"></circle><circle cx="15" cy="12" r="1"></circle><circle cx="15" cy="5" r="1"></circle><circle cx="15" cy="19" r="1"></circle>'),
             eyeOff: SV('<path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"></path><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"></path><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"></path><path d="m2 2 20 20"></path>'),
             win: SV('<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>'),
             warning: SV('<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>'),
@@ -8165,16 +8167,23 @@ Projected Image UK"></textarea>
                 wgAttr(n, 'aria-setsize', String(shown.length));
                 wgAttr(n, 'aria-haspopup', null);
                 [...n.children].forEach(c => {
-                    if (c.classList.contains('wg-hide') || c.inert) return;
+                    if (c.classList.contains('wg-hide') || c.classList.contains('wg-grip') || c.inert) return;
                     c.inert = true;
                     wgInert.add(c);
                 });
+                /* The hide control on the block's first line, an eye-off (12 Oct
+                   2026, WS-60), and a grip in the gutter saying where to take
+                   hold. A block with no heading took a band to hold a bare x. */
                 let x = n.querySelector(':scope > .wg-hide');
                 if (!x) {
                     x = el('button', 'icon-btn wg-hide'); x.type = 'button';
-                    x.append(ico(I.x));
+                    x.append(ico(I.eyeOff));
                     x.onclick = () => wgHide(view, n);
                     n.append(x);
+                }
+                if (!n.querySelector(':scope > .wg-grip')) {
+                    const g = el('span', 'wg-grip'); g.setAttribute('aria-hidden', 'true'); g.append(ico(I.gripVertical));
+                    n.append(g);
                 }
                 wgAttr(x, 'aria-label', 'Hide ' + name);
                 if (x.disabled !== (shown.length < 2)) x.disabled = shown.length < 2;
@@ -8189,6 +8198,7 @@ Projected Image UK"></textarea>
                 const orig = wgOrig.get(n);
                 if (orig) { orig.forEach(([a, v]) => wgAttr(n, a, v)); wgOrig.delete(n); }
                 n.querySelectorAll(':scope > .wg-hide').forEach(b => b.remove());
+                n.querySelectorAll(':scope > .wg-grip').forEach(b => b.remove());
                 [...n.children].forEach(c => { if (wgInert.has(c)) { c.inert = false; wgInert.delete(c); } });
                 n.classList.remove('wg-held', 'wg-lifted', 'wg-landed');
             });

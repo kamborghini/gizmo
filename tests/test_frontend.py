@@ -2433,6 +2433,20 @@ def t_the_settings_window_keeps_one_rhythm_and_says_stored_secrets():
 
 
 @test
+def t_customise_puts_its_controls_on_the_blocks_first_line():
+    """WS-60, 12 Oct 2026: in Customise a block with no heading took a 40px
+    band at its top to hold a bare x on the corner, and nothing said where to
+    take hold of a block to drag it."""
+    dec = fn_src("function wgDecorate(")
+    ok("x.append(ico(I.eyeOff));" in dec and "el('span', 'wg-grip')" in dec, "the hide control is an eye-off, and a grip says where to take hold")
+    hide = CSS.split(".ov-wrap.wg-editing > [data-widget] > .wg-hide {")[1].split("}")[0]
+    ok("top: 0; right: 0;" in hide, "the hide control sits on the block's first line")
+    ok(":not(:has(> .card-head)) { padding-top: var(--sp-8); }" not in CSS, "with no band reserved for it")
+    ok(".ov-wrap.wg-editing > [data-widget] > .wg-grip {" in CSS and "gripVertical: SV(" in SCRIPT, "the grip in the gutter left of the block")
+    ok("n.querySelectorAll(':scope > .wg-grip').forEach(b => b.remove());" in fn_src("function wgUndecorate("), "and both go when Customise ends")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left
@@ -9845,7 +9859,8 @@ def t_the_app_wide_layout_sweep_holds():
         "@container cxcard (max-width: 560px) {\n            .ktable.cx-docs { min-width: 0; display: block; }": "Xero results stack by the card's width",
         ".conn-pairs { grid-template-columns: fit-content(40%) minmax(0, 1fr); }": "a value never runs out of its panel or goes to 0px",
         ".lbl-rows .lbl-nameline { flex-wrap: wrap; row-gap: var(--sp-1); }": "chips go under a title in lists",
-        "top: calc(-1 * var(--sp-3)); right: calc(-1 * var(--sp-3)); z-index: 1;": "a card's hide button is off its controls",
+        # 12 Oct 2026 (WS-60): the hide button sits on the block's first line, and every card head keeps it room.
+        ".ov-wrap.wg-editing > [data-widget] .card-head { padding-right: calc(var(--sp-4) + var(--sp-8)); }": "a card's hide button is off its controls",
         ".dpanel select { padding-right: var(--chevron-room); }": "a filter select's chevron is clear of its label",
     }
     for rule, why in rules.items():
