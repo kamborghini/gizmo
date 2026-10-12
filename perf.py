@@ -25,6 +25,7 @@ import contextvars
 import functools
 import gzip
 import inspect
+import math
 import time
 
 try:                                    # in the standard library from Python 3.14
@@ -91,9 +92,30 @@ def timed(name: str):
     return wrap
 
 
+def admit() -> None:
+    """The door let this request in on a live session. Only such a request
+    gets the header or is counted: on a refusal or a sign-in the marks would
+    say what the vague answer is careful not to (a wrong password for a real
+    name saves a failure count, a made-up name saves nothing), and refused
+    requests in the table would wash out the real times."""
+    marks = _marks.get()
+    if marks is not None:
+        marks["_door"] = True
+
+
+def no_record() -> None:
+    """Long by design (a Claude call, a backup, a forced Gmail sync): still
+    timed in its own header, but kept out of the slowest-routes table, which
+    is for the pages that ought to be quick."""
+    marks = _marks.get()
+    if marks is not None:
+        marks["_skip"] = True
+
+
 def header(marks: dict) -> str:
-    """The Server-Timing value: app first, then the rest by name."""
-    names = (["app"] if "app" in marks else []) + sorted(k for k in marks if k != "app")
+    """The Server-Timing value: app first, then the rest by name. Flags (a
+    leading underscore) are not timings and never leave."""
+    names = (["app"] if "app" in marks else []) + sorted(k for k in marks if k != "app" and k[:1] != "_")
     return ", ".join(f"{n};dur={marks[n]:.1f}" for n in names)
 
 
@@ -117,9 +139,11 @@ def summary(limit: int = 12) -> list:
             continue
         ordered = sorted(times)
         n = len(ordered)
+        # Nearest rank: exactly n/20 of the times are above p95, which is
+        # what Settings says ("1 in 20 over").
         rows.append({"route": route, "count": n,
-                     "p50": round(ordered[(n - 1) // 2], 1),
-                     "p95": round(ordered[min(n - 1, (n * 95) // 100)], 1)})
+                     "p50": round(ordered[max(0, math.ceil(n * 0.5) - 1)], 1),
+                     "p95": round(ordered[max(0, math.ceil(n * 0.95) - 1)], 1)})
     rows.sort(key=lambda r: -r["p95"])
     return rows[:limit]
 

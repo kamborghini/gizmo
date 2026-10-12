@@ -27028,6 +27028,173 @@ def t_opening_and_claiming_email_do_not_wait_for_gmail():
     with_mail(go)
 
 
+# ---- review of #15 --------------------------------------------------------
+
+@test
+def t_only_a_signed_in_request_sees_or_counts_its_timing():
+    """Review of #15 (SERVER1, COMPAT1, COMPAT3). The header went on every
+    /api/ answer. A wrong-password sign-in for a real name saves a failure
+    count (a store mark) and one for a made-up name saves nothing, so the two
+    vague 401s differed: a clean yes or no on whether a username exists,
+    undoing the sign-in's levelling. And refused requests were counted, so
+    anyone could wash a route's real times out of Settings. Only a request
+    that passed the door with a live session now gets the header or counts."""
+    import perf
+
+    def go():
+        ensure_auth()
+        ready_user("Ruth", "ruth")
+        perf.ROUTES.clear()
+        h = {"Authorization": "Bearer " + tok()}
+        for p in (copilot._rl_hits, copilot._rl_global, copilot._login_hits):
+            p.clear()
+        real = client.post("/api/auth/login", json={"username": "ruth", "password": "wrong-password-1"}, headers=h)
+        fake = client.post("/api/auth/login", json={"username": "nobody-here", "password": "wrong-password-1"},
+                           headers=h)
+        eq((real.status_code, fake.status_code), (401, 401))
+        eq(real.headers.get("server-timing"), None, "a sign-in answer carries no breakdown")
+        eq(fake.headers.get("server-timing"), None)
+        names = lambda r: sorted(k for k in r.headers.keys() if k not in ("content-length", "date"))
+        eq(names(real), names(fake), "and the two answers carry the same headers")
+        for _ in range(5):
+            copilot._rl_hits.clear(); copilot._rl_global.clear()
+            r = client.post("/api/crm/board", json={}, headers=h)     # no session
+            eq(r.status_code, 401)
+            eq(r.headers.get("server-timing"), None, "a refused request learns nothing from the timing")
+        ok("/api/crm/board" not in perf.ROUTES, "and is not counted")
+        r = post("/api/crm/board", {})
+        ok(_server_timing(r).get("app", 0) > 0, "a signed-in request still gets it")
+        ok("/api/crm/board" in perf.ROUTES, "and is counted")
+    with_accounts(go)
+
+
+@test
+def t_a_claude_call_is_timed_and_kept_out_of_the_table():
+    """Review of #15 (PAGE3, COMPAT4). Answers that call Claude take seconds
+    by design; counted, they filled the Response times row and pinned it at
+    Slow for the life of the process, pushing out the desk pages it exists to
+    name. Every model call goes through _xcreate, which now marks its time as
+    "ai" and keeps its request out of the table."""
+    import perf, types
+    saved = copilot._xcreate_once
+
+    async def fake_once(client, kwargs):
+        await asyncio.sleep(0.01)
+        return types.SimpleNamespace(stop_reason="end_turn", content=[])
+    copilot._xcreate_once = fake_once
+    try:
+        async def go():
+            marks, token = perf.start()
+            try:
+                await copilot._xcreate(None, model="claude-test", messages=[], max_tokens=10)
+            finally:
+                perf.stop(token)
+            return marks
+        marks = run_async(go())
+        ok(marks.get("ai", 0) >= 5, "the model's time is its own mark: %r" % marks)
+        ok(marks.get("_skip"), "and the request is kept out of the slowest-routes table")
+        eq(perf.header(marks).count("_"), 0, "the flags never reach the header")
+    finally:
+        copilot._xcreate_once = saved
+
+
+@test
+def t_the_slowest_twentieth_is_the_slowest_twentieth():
+    """Review of #15 (SERVER2). With 20 samples p95 picked the maximum, so
+    Settings said '1 in 20 over X ms' when nothing was over X."""
+    import perf
+    saved = dict(perf.ROUTES)
+    perf.ROUTES.clear()
+    try:
+        for i in range(1, 21):
+            perf.record("/api/x", float(i))
+        for i in range(1, 101):
+            perf.record("/api/y", float(i))
+        rows = {r["route"]: r for r in perf.summary()}
+        eq(rows["/api/x"]["p95"], 19.0, "one of twenty is over it")
+        eq(rows["/api/y"]["p95"], 95.0, "five of a hundred are over it")
+        eq(rows["/api/y"]["p50"], 50.0)
+    finally:
+        perf.ROUTES.clear()
+        perf.ROUTES.update(saved)
+
+
+@test
+def t_a_relabel_steps_aside_for_a_running_sync():
+    """Review of #15 (SERVER3). Each click's relabel queued on _mail_lock, so a
+    burst of claims during a slow Gmail held the mail loop and anyone's
+    Refresh behind every one of them. A relabel now waits briefly for the
+    lock and otherwise leaves the thread to the sync's own label catch-up,
+    which already runs under the lock and compares the label it wants with
+    the one it has."""
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        calls = []
+
+        async def modify(tid, add=None, remove=None):
+            calls.append(tid)
+
+        async def ensure(name, known):
+            known[name] = "L-" + name
+            return known[name]
+        saved = (_gm.modify_thread, _gm.ensure_label, copilot._mail_lock, copilot.MAIL_LABEL_LOCK_WAIT)
+        _gm.modify_thread, _gm.ensure_label = modify, ensure
+        copilot.MAIL_LABEL_LOCK_WAIT = 0.05
+        got, restore = _capture_spawn()
+        try:
+            eq(post_s(sess, "/api/mail/claim", {"id": "t1"}).status_code, 200)
+            copilot._mail_lock = asyncio.Lock()
+
+            async def busy_sync():
+                await copilot._mail_lock.acquire()
+                try:
+                    await got.pop()          # the relabel, while a sync holds the lock
+                finally:
+                    copilot._mail_lock.release()
+            run_async(busy_sync())
+            eq(calls, [], "it did not wait out the sync")
+            t = copilot._load_mail()["threads"]["t1"]
+            ok(copilot._mail_want_label(t) != (t.get("gmail_label") or ""),
+               "so the sync's catch-up sees the label is owed: %r" % t.get("gmail_label"))
+        finally:
+            restore()
+            _gm.modify_thread, _gm.ensure_label, copilot._mail_lock, copilot.MAIL_LABEL_LOCK_WAIT = saved
+    with_mail(go)
+
+
+@test
+def t_an_opened_email_reads_as_read_at_once_unless_gmail_refuses():
+    """Review of #15 (PAGE4). The board followed only once Gmail confirmed the
+    read, so a poll landing between the window opening and Gmail answering
+    showed the email unread again after the person had read it. It now reads
+    as read at once, and goes back to unread if Gmail refuses."""
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        copilot._load_mail()["threads"]["t1"]["unread"] = True
+
+        async def refuse(tid, add=None, remove=None):
+            raise _gm.GmailError("backend error")
+        saved = _gm.modify_thread
+        _gm.modify_thread = refuse
+        got, restore = _capture_spawn()
+        try:
+            eq(post_s(sess, "/api/mail/thread", {"id": "t1"}).status_code, 200)
+            rows = {t["id"]: t for t in post_s(sess, "/api/mail/board", {}).json()["threads"]}
+            eq(rows["t1"]["unread"], False, "read as soon as it is opened")
+            run_async(got.pop(0))
+            eq(copilot._load_mail()["threads"]["t1"]["unread"], True, "and unread again when Gmail refuses")
+        finally:
+            restore()
+            _gm.modify_thread = saved
+    with_mail(go)
+
+
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a

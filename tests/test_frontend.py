@@ -7584,36 +7584,47 @@ def t_the_inbox_poll_rests_in_a_hidden_tab_and_redraws_only_on_change():
     minute's poll downloaded the whole board and rebuilt the whole Inbox (up
     to 5,800 elements) whether anything had changed or not, and kept doing it
     in a tab nobody was looking at. Now it rests while the tab is hidden and
-    catches up as soon as the tab is back, and a quiet minute updates only
-    the "synced" line. An action still always redraws. Run for real, in node."""
+    catches up as soon as the tab is back, and a minute in which nothing on
+    screen would change updates only the "synced" line. An action still
+    always redraws.
+
+    The review of #15 (PAGE1, PAGE2): the comparison is with what is ON
+    SCREEN, not with the page's copy, so a redraw skipped while someone was
+    typing is drawn on the next poll; and the ages and the 4 h amber and 8 h
+    red marks are part of it, so time passing on a quiet board still moves
+    them. Run for real, in node."""
     if not _node_ok():
         print("       (node unavailable, skipped)")
         return
-    for f in ("function mailBoardKey(", "function mailSyncedLine(", "function mailPaintSynced("):
-        ok(f in SCRIPT, "the page compares boards and moves the synced line on its own: " + f)
+    for f in ("function mailBoardKey(", "function mailSyncedLine(", "function mailPaintSynced(",
+              "function mailAgeKey(", "function mailNotePainted("):
+        ok(f in SCRIPT, "the page compares what it drew and moves the synced line on its own: " + f)
+    ok("mailNotePainted(d)" in fn_src("function renderMail("), "and every redraw notes what it drew")
     js = MINIDOM + r"""
-let now = 1000000; Date.now = () => now;
+let now = Date.parse('2026-10-12T09:30:00Z'); Date.now = () => now;
 const ticks = []; function setInterval(f, ms) { ticks.push(f); return ticks.length; }
-let viewActive = true;
+let viewActive = true, busy = false;
 const synced = el('p'); synced.dataset.mailSynced = '';
 document.querySelector = (sel) => sel === '#view-mail.active' ? (viewActive ? {} : null)
     : sel === '#mail-content [data-mail-synced]' ? synced : null;
 let mailCache = null, mailTimer = null, mailFetchSeq = 0, mailFetchedAt = 0, paints = 0, calls = [];
-function mailInputBusy() { return false; }
+function mailInputBusy() { return busy; }
 const board = () => ({ connected: true, address: 'sales@shop.test', synced_at: '2026-10-12T09:00:00Z',
-                       sync_error: '', threads: [{ id: 't1', unread: true, state: 'assigned' }] });
+                       sync_error: '', threads: [{ id: 't1', unread: true, state: 'unassigned',
+                                                   last_at: '2026-10-12T09:20:00Z', state_at: '2026-10-12T09:20:00Z' }] });
 let next = board();
 async function api(path, body) { calls.push(path + (body && body.force ? ' force' : '')); return JSON.parse(JSON.stringify(next)); }
-function renderMail() { paints += 1; }
+function renderMail() { paints += 1; mailNotePainted(mailCache); }
 function loadMail() {}
 function mailAgoLong(iso) { return 'at ' + iso.slice(11, 16); }
-""" + "\n".join(fn_src(f) for f in ("function showMailView(", "async function refreshMailQuiet(",
-                                     "function mailBoardKey(", "function mailSyncedLine(",
-                                     "function mailPaintSynced(")) + r"""
+""" + "\n".join(fn_src(f) for f in ("function mailAgo(", "function mailHours(", "function showMailView(",
+                                     "async function refreshMailQuiet(", "function mailBoardKey(",
+                                     "function mailAgeKey(", "function mailNotePainted(",
+                                     "function mailSyncedLine(", "function mailPaintSynced(")) + r"""
 const settle = () => new Promise(r => setImmediate(r));
 (async () => {
   const out = {};
-  mailCache = board();
+  mailCache = board(); renderMail(); paints = 0;
   showMailView(); await settle();
   out.visit = { calls: calls.length, paints };              // drawn from the copy; the same board is not drawn twice
   calls = []; paints = 0;
@@ -7624,12 +7635,18 @@ const settle = () => new Promise(r => setImmediate(r));
   now += 61000; dispatch(document, new Ev('visibilitychange')); await settle();
   out.backLate = calls.length;                                // back after a minute: catches up at once
   next = board(); next.synced_at = '2026-10-12T09:05:00Z';
-  ticks[0](); await settle();
+  paints = 0; ticks[0](); await settle();
   out.quiet = { paints, line: synced.textContent };
-  next = board(); next.threads.push({ id: 't2', unread: true, state: 'unassigned' });
-  ticks[0](); await settle();
-  out.changed = paints;
-  next = board(); next.threads.push({ id: 't2', unread: true, state: 'unassigned' }); next.sync_error = 'quota';
+  next = board(); next.threads.push({ id: 't2', unread: true, state: 'unassigned', last_at: '2026-10-12T09:31:00Z' });
+  busy = true; paints = 0; ticks[0](); await settle();
+  out.whileTyping = paints;                                   // never under someone's keyboard
+  busy = false; ticks[0](); await settle();
+  out.afterTyping = paints;                                   // the board they missed is drawn on the next poll
+  paints = 0; now += 5 * 3600 * 1000; ticks[0](); await settle();
+  out.hoursLater = paints;                                    // the same board, five hours on: ages and amber move
+  paints = 0; ticks[0](); await settle();
+  out.nextMinute = paints;
+  next = JSON.parse(JSON.stringify(next)); next.sync_error = 'quota';
   paints = 0; ticks[0](); await settle();
   out.failing = paints;
   paints = 0; await refreshMailQuiet();
@@ -7638,13 +7655,16 @@ const settle = () => new Promise(r => setImmediate(r));
 })();
 """
     got = _run_node(js)
-    ok(got["visit"] == {"calls": 1, "paints": 1}, "a visit draws the copy once and refreshes behind it: %r" % got)
+    ok(got["visit"] == {"calls": 1, "paints": 1}, "a revisit draws the copy once and not the same board again: %r" % got)
     ok(got["hiddenTick"] == 0, "a hidden tab does not poll")
     ok(got["backSoon"] == 0, "and coming back within the minute fetches nothing")
     ok(got["backLate"] == 1, "but coming back after it catches up at once")
     ok(got["quiet"]["paints"] == 0, "a quiet minute does not redraw the Inbox: %r" % got)
     ok("09:05" in got["quiet"]["line"], "it only moves the synced line: %r" % got["quiet"])
-    ok(got["changed"] == 1, "a board that moved is drawn")
+    ok(got["whileTyping"] == 0, "nothing is redrawn under someone typing")
+    ok(got["afterTyping"] == 1, "and the board they missed is drawn on the next poll: %r" % got)
+    ok(got["hoursLater"] == 1, "time passing on a quiet board still moves the ages and the amber: %r" % got)
+    ok(got["nextMinute"] == 0, "and once drawn, the next quiet minute is quiet again")
     ok(got["failing"] == 1, "a sync error always redraws, so what it says stays true")
     ok(got["action"] == 1, "and an action always redraws")
 
@@ -7676,13 +7696,16 @@ Node_.prototype.closest = function (sel) {
 const ticks = []; function setInterval(f) { ticks.push(f); return ticks.length; } function clearInterval() {}
 document.querySelector = (sel) => sel === '#view-mail.active' ? {} : null;
 let mailCache = { threads: [{ id: 't1', unread: true }, { id: 't2', unread: false }] };
-let calls = [], paints = 0;
+let calls = [], paints = 0, mailFetchSeq = 0;
 async function api(path) { calls.push(path); return { thread: { id: 'x' } }; }
 function toastError() {}
 function renderMail() { paints += 1; }
 function mailInputBusy() { return false; }
 async function refreshMailQuiet() { calls.push('/api/mail/board'); }
-function paintMailThread(m) { const b = el('button', 'btn', 'Reply'); m.body.append(b); }
+function paintMailThread(m) {
+  const full = el('button', 'linkish', 'Read the full emails'); full.dataset.mailReadonly = '';
+  m.body.append(el('button', 'btn', 'Reply'), full);
+}
 """ + "\n".join(fn_src(f) for f in ("function mailModal(", "async function openMailThread(")) + r"""
 const settle = () => new Promise(r => setImmediate(r));
 const top = () => document.body.children[document.body.children.length - 1];
@@ -7691,12 +7714,19 @@ const closeX = () => top().children[0].children[0].children[1];
   const out = {};
   await openMailThread('t1'); await settle();
   calls = [];
+  const seq0 = mailFetchSeq;
   closeX().click(); await settle();
-  out.readOnly = { calls: calls.slice(), paints, unread: mailCache.threads[0].unread };
+  out.readOnly = { calls: calls.slice(), paints, unread: mailCache.threads[0].unread, dropsInFlight: mailFetchSeq > seq0 };
   await openMailThread('t2'); await settle();
   calls = []; paints = 0;
   closeX().click(); await settle();
   out.alreadyRead = { calls: calls.slice(), paints };
+  await openMailThread('t2'); await settle();
+  calls = [];
+  top().children[0].children[1].children[1].click();          // Read the full emails
+  dispatch(closeX(), new Ev('keydown', { key: 'Enter', bubbles: true }));
+  closeX().click(); await settle();
+  out.readingOnly = calls.slice();
   await openMailThread('t2'); await settle();
   calls = [];
   const body = top().children[0].children[1];
@@ -7710,6 +7740,8 @@ const closeX = () => top().children[0].children[0].children[1];
     ok(got["readOnly"]["calls"] == [], "closing an email only read fetches nothing: %r" % got)
     ok(got["readOnly"]["unread"] == False, "the row it was is marked read on the page's copy")
     ok(got["readOnly"]["paints"] == 1, "and drawn once from it")
+    ok(got["readOnly"]["dropsInFlight"], "a poll already in flight is dropped, so it cannot draw the email unread again")
+    ok(got["readingOnly"] == [], "reading the full text, opening it in Gmail or Enter on the X is still only reading: %r" % got)
     ok(got["alreadyRead"] == {"calls": [], "paints": 0}, "an email already read changes nothing at all")
     ok(got["pressed"] == ["/api/mail/board"], "pressing anything inside it refreshes the board on close, as before")
 
@@ -7761,8 +7793,10 @@ def t_settings_names_the_slowest_routes():
     js = MINIDOM + fn_src("function connRow(") + "\n" + fn_src("function timingRow(") + r"""
 const none = timingRow([]);
 const row = timingRow([{ route: '/api/crm/board', count: 40, p50: 52.4, p95: 140.2 },
-                       { route: '/api/production-labels', count: 9, p50: 900, p95: 4100 },
-                       { route: '/api/alerts', count: 30, p50: 0.2, p95: 0.4 }]);
+                       { route: '/api/production-labels', count: 29, p50: 900, p95: 4100 },
+                       { route: '/api/alerts', count: 30, p50: 0.2, p95: 0.4 },
+                       { route: '/api/auth/state', count: 30, p50: 0.3, p95: 1.4 },
+                       { route: '/api/loans', count: 3, p50: 20, p95: 30 }]);
 console.log(JSON.stringify({ none: none === null, text: row.textContent }));
 """
     got = _run_node(js)
@@ -7773,6 +7807,9 @@ console.log(JSON.stringify({ none: none === null, text: row.textContent }));
     ok("Slow" in got["text"], "a route whose slowest twentieth is over two seconds marks it slow")
     ok("alerts" not in got["text"] and " 0 ms" not in got["text"],
        "a route that answers in under a millisecond has nothing to say here: %r" % got["text"])
+    ok("auth state usually under 1 ms" in got["text"], "a typical time under a millisecond says so: %r" % got["text"])
+    ok("loans usually 20 ms" in got["text"] and "over 30 ms" not in got["text"],
+       "and a route seen fewer than 20 times has no '1 in 20' to quote")
     ok("timingRow(s.timing)" in SCRIPT, "and Settings draws it from the status answer")
     for word in ("—", "–", "Railway", "gizmo", "API"):
         ok(word not in fn_src("function timingRow("), "house rules: no %r in the row's words" % word)

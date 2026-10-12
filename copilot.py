@@ -3462,12 +3462,14 @@ def _fallback_for(model: str, e: Exception) -> str:
     return fb
 
 
+@perf.timed("ai")           # Server-Timing: how long this request waited on Claude
 async def _xcreate(client, **kwargs):
     """Every model call. A forced tool call is asked for in words on a model
     that refuses to be forced, and asked for once more if the answer came
     back as prose, so each caller still finds its tool block. A call the
     model fails at Anthropic is asked of the fallback model once, and the
     failure is kept for the usage panel either way."""
+    perf.no_record()        # long by design: out of the slowest-routes table
     must = None
     if _forces_tool(kwargs) and not _can_force_tool(kwargs.get("model", "")):
         must = _unforce(kwargs)
@@ -11267,6 +11269,9 @@ async def _guard(request: Request, *, ai: bool = False, min_level: int = 0,
     if not ok:
         return _json({"error": AUTH_REFUSALS.get(reason, "Unauthorized"), "reason": reason or "session"}, 401), None, ""
     uid = str(who or "")
+    perf.admit()            # Server-Timing is for people the door let in
+    if ai:
+        perf.no_record()    # a Claude answer is long by design
     if min_level and _team_level(uid) < min_level:
         return _json({"error": "Only an admin can do that."}, 403), None, ""
     if ai:
@@ -14231,15 +14236,24 @@ def _mail_sync_soon() -> bool:
 
 async def _mail_mark_read_later(tid: str) -> None:
     """Opening an email is reading it, so Gmail is told, after the window has
-    opened. The board changes only once Gmail confirms (_mail_set_unread), so
-    it never shows a read state Gmail refused, and the next sync re-reads the
-    truth from Gmail either way."""
+    opened. The board already shows it read (the thread route marks it so in
+    memory, because the person has read it); if Gmail refuses, it goes back
+    to unread rather than showing a read state Gmail does not have, and the
+    next sync re-reads the truth from Gmail either way."""
     try:
         store = _load_mail()
-        if (await _mail_set_unread(store, [tid], False)).get("changed") and _mail_mem is store:
+        res = await _mail_set_unread(store, [tid], False)
+        if res.get("failed"):
+            t = store.get("threads", {}).get(tid)
+            if t is not None:
+                t["unread"] = True
+        elif res.get("changed") and _mail_mem is store:
             _write_mail(store)
     except Exception:
         logger.exception("mail: marking read on open failed")
+
+
+MAIL_LABEL_LOCK_WAIT = 2.0     # seconds a relabel waits for a running sync
 
 
 def _mail_labels_soon(tid: str) -> None:
@@ -14260,13 +14274,23 @@ async def _mail_labels_later(tid: str) -> None:
     The owner is read again here, so the label is the thread's state now,
     not the state when the click was made."""
     try:
-        async with _mail_lock:
+        # Briefly. A sync holding the lock runs the same label catch-up
+        # (_mail_label_reconcile) before it lets go, so waiting it out only
+        # queued Refresh and the mail loop behind a burst of clicks.
+        try:
+            async with asyncio.timeout(MAIL_LABEL_LOCK_WAIT):
+                await _mail_lock.acquire()
+        except TimeoutError:
+            return
+        try:
             store = _load_mail()
             t = store.get("threads", {}).get(tid)
             if not t:
                 return
             if await _mail_sync_labels(t, _team_name(t.get("owner") or "")) and _mail_mem is store:
                 _write_mail(store)
+        finally:
+            _mail_lock.release()
     except Exception:
         logger.exception("mail: the Gmail label after a move failed")
 
@@ -20891,6 +20915,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # picture is re-read. Opening the page and the minute's poll
                 # answer from what the board holds and sync behind it.
                 if body.get("force"):
+                    perf.no_record()     # a whole Gmail walk: long by design
                     await _mail_sync_now(force=time.monotonic() - _mail_last_force["t"] > 15)
                     _mail_last_force["t"] = time.monotonic()
                 else:
@@ -20945,6 +20970,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # a whole-mailbox save stood between the click and the window, and a
         # Gmail hiccup must not stop somebody looking at their email.
         if t.get("unread") and not body.get("peek"):
+            t["unread"] = False    # what the person now sees; put back if Gmail refuses
             _spawn_bg(_mail_mark_read_later(t["id"]))
         now = time.monotonic()
         v = _mail_viewers.setdefault(t["id"], {})
@@ -22623,6 +22649,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         regions: fresh volume, first-run setup, restore, sign back in. Only
         the volume's own JSON/CSV files are accepted, by basename, so a
         crafted zip cannot write anywhere else."""
+        perf.no_record()        # long by design: out of the slowest-routes table
         big = 120 * 1024 * 1024
         err, _body, who = await _guard(request, max_body=big, body=False)
         if err:
@@ -22807,6 +22834,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def backup_route(request: Request):
         """Everything the app has learned lives as files on one volume; this hands
         the merchant a zip of it. JSON and CSV only, fonts and code excluded."""
+        perf.no_record()        # long by design: out of the slowest-routes table
         err, _body, who = await _guard(request, body=False)
         if err:
             return err

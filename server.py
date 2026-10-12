@@ -322,13 +322,18 @@ class CompressionMiddleware:
 
 
 class TimingMiddleware:
-    """Server-Timing on every /api/ answer, and each route's recent times.
+    """Server-Timing on /api/ answers, and each route's recent times.
 
-    Opens the request's marks (perf.start) so the door, the stores and the
-    Shopify calls inside it can add to them, then writes them into the
-    answer's head as it leaves. Sits inside CompressionMiddleware, which adds
-    its own "zip" mark before the head goes out. A path the router does not
-    know (a 404) is not remembered, so probing it cannot grow the table."""
+    Opens the request's marks (perf.start) so the door, the stores, the
+    Shopify and Claude calls inside it can add to them, then writes them into
+    the answer's head as it leaves. Sits inside CompressionMiddleware, which
+    adds its own "zip" mark before the head goes out.
+
+    Only for a request the door let in on a live session (perf.admit): a
+    sign-in's marks told a real username from a made-up one, and refused
+    requests in the table washed out the real times. A path the router does
+    not know (a 404) and an answer long by design (perf.no_record) are not
+    counted."""
 
     def __init__(self, app):
         self.app = app
@@ -342,10 +347,10 @@ class TimingMiddleware:
         t0 = time.perf_counter()
 
         async def send_wrapper(message):
-            if message["type"] == "http.response.start":
+            if message["type"] == "http.response.start" and marks.get("_door"):
                 marks["app"] = (time.perf_counter() - t0) * 1000
                 MutableHeaders(raw=message["headers"])["server-timing"] = perf.header(marks)
-                if message.get("status") != 404:
+                if message.get("status") != 404 and not marks.get("_skip"):
                     perf.record(path, marks["app"])
             await send(message)
 

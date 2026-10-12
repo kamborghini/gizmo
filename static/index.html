@@ -26666,7 +26666,8 @@ Projected Image UK"></textarea>
                    only the time of the sync changes, and that one line moves
                    in place. A sync error always redraws, so its own "since"
                    stays true; an action always redraws. */
-                const same = poll && mailCache && !d.sync_error && mailBoardKey(d) === mailBoardKey(mailCache);
+                const same = poll && !d.sync_error && mailBoardKey(d) === mailPaintedKey
+                    && mailAgeKey(d) === mailPaintedAges;
                 mailCache = d;
                 // Never yank the keyboard out from under someone: while an
                 // input in this view holds focus, keep the data and skip the
@@ -26678,6 +26679,19 @@ Projected Image UK"></textarea>
             return ok;
         }
         function mailBoardKey(d) { return JSON.stringify(Object.assign({}, d, { synced_at: '' })); }
+        /* What time alone changes on screen: each row's age as written and
+           which of the 4 h, 8 h and 24 h marks it has passed (amber, red, and
+           quiet for over a day). A poll redraws when this moved since the
+           last drawing, so a quiet board still ages and escalates on time. */
+        function mailAgeKey(d) {
+            return (d.threads || []).map(t => mailAgo(t.last_at)
+                + (mailHours(t.last_at) > 4 ? 'a' : '') + (mailHours(t.last_at) > 8 ? 'b' : '')
+                + (mailHours(t.state_at > t.last_at ? t.state_at : t.last_at) > 24 ? 'c' : '')).join(',');
+        }
+        /* What is on screen, compared by the poll: not the page's copy, which
+           a poll skipped under someone's typing has already moved on. */
+        let mailPaintedKey = '', mailPaintedAges = '';
+        function mailNotePainted(d) { mailPaintedKey = mailBoardKey(d); mailPaintedAges = mailAgeKey(d); }
         function mailSyncedLine(d) {
             return (d.address || 'The mailbox the team answers')
                 + (d.synced_at ? ' \u00b7 synced ' + mailAgoLong(d.synced_at) : ' \u00b7 never synced');
@@ -26704,6 +26718,7 @@ Projected Image UK"></textarea>
         function renderMail() {
             const box = $('mail-content'); box.innerHTML = '';
             const d = mailCache;
+            mailNotePainted(d);
             const hero = mailHero(box);
             if (!d.connected) {
                 /* The setup card is built from the parts Reconciliation's own
@@ -28437,6 +28452,7 @@ Projected Image UK"></textarea>
             m.body.append(el('div', 'setting-sub',
                 'This one is older than the board keeps, so it is read only here.'));
             const gm = el('a', 'setting-sub', 'Open in Gmail');
+            gm.dataset.mailReadonly = '';     // reading, so closing need not reload the board
             gm.href = 'https://mail.google.com/mail/u/?authuser='
                 + encodeURIComponent(mailCache.address || '')
                 + '#all/' + encodeURIComponent(t.id);
@@ -28474,13 +28490,16 @@ Projected Image UK"></textarea>
                its own row right instead of downloading the whole board (the
                2026-10-12 speed audit, P1). */
             let touched = false;
-            overlay.addEventListener('click', (e) => {
-                const t = e.target;
-                if (t && !x.contains(t) && t.closest
-                    && t.closest('button, a, input, select, textarea, label, [contenteditable]')) touched = true;
-            }, true);
+            /* A control marked data-mail-readonly (reading the full text,
+               opening the email in Gmail) and the X itself are reading. */
+            const touches = (t) => {
+                if (!t || x.contains(t) || !t.closest) return false;
+                const c = t.closest('button, a, input, select, textarea, label, [contenteditable]');
+                return !!c && !('mailReadonly' in c.dataset);
+            };
+            overlay.addEventListener('click', (e) => { if (touches(e.target)) touched = true; }, true);
             overlay.addEventListener('input', () => { touched = true; }, true);
-            overlay.addEventListener('keydown', (e) => { if (e.key === 'Enter') touched = true; }, true);
+            overlay.addEventListener('keydown', (e) => { if (e.key === 'Enter' && touches(e.target)) touched = true; }, true);
             const m = { body: body, overlay: overlay, onQuietClose: null };
             m.close = () => {
                 overlay.remove();
@@ -28508,7 +28527,11 @@ Projected Image UK"></textarea>
                change to the board is this row's unread mark. */
             m.onQuietClose = () => {
                 const row = mailCache && (mailCache.threads || []).find(t => t.id === id);
-                if (row && row.unread) { row.unread = false; if (!mailInputBusy()) renderMail(); }
+                if (row && row.unread) {
+                    row.unread = false;
+                    ++mailFetchSeq;    // a poll already in flight carries the board from before the read
+                    if (!mailInputBusy()) renderMail();
+                }
             };
             paintMailThread(m, r);
             m.overlay._timer = setInterval(async () => {
@@ -28664,6 +28687,7 @@ Projected Image UK"></textarea>
             m.body.append(orders);
             mailLoadOrders(orders, t, m);
             const gm = el('a', 'setting-sub', 'Open in Gmail');
+            gm.dataset.mailReadonly = '';     // reading, so closing need not reload the board
             gm.href = 'https://mail.google.com/mail/u/?authuser='
                 + encodeURIComponent(mailCache.address || '')
                 + '#all/' + encodeURIComponent(t.id);
@@ -28761,6 +28785,7 @@ Projected Image UK"></textarea>
                demand and never kept: it is customer correspondence, and the
                board has no need to hold it. */
             const full = el('button', 'linkish', 'Read the full emails');
+            full.dataset.mailReadonly = '';   // the text is fetched and never kept: still only reading
             full.onclick = async () => {
                 full.disabled = true; full.textContent = 'Reading\u2026';
                 let r;
@@ -31018,11 +31043,13 @@ Projected Image UK"></textarea>
             /* Under a millisecond has nothing to say about slowness. */
             const top = (rows || []).filter(r => r && r.count && r.p95 >= 1).slice(0, 5);
             if (!top.length) return null;
-            const slow = top.some(r => r.p95 > 2000);
+            const slow = top.some(r => r.count >= 20 && r.p95 > 2000);
             const name = r => String(r.route || '').replace(/^\/api\//, '').replace(/[\/_-]+/g, ' ');
+            const ms = v => v < 1 ? 'under 1 ms' : Math.round(v) + ' ms';
+            /* "1 in 20" only from at least 20 answers; fewer cannot say it. */
             return connRow('Response times', slow ? 'mid' : 'on',
-                'Slowest since Reactor last started: ' + top.map(r => name(r) + ' usually '
-                    + Math.round(r.p50) + ' ms, 1 in 20 over ' + Math.round(r.p95) + ' ms').join(' \u00b7 ')
+                'Slowest since Reactor last started: ' + top.map(r => name(r) + ' usually ' + ms(r.p50)
+                    + (r.count >= 20 ? ', 1 in 20 over ' + ms(r.p95) : '')).join(' \u00b7 ')
                     + (slow ? '. Worth mentioning if a page feels slow.' : ''), ['Fine', 'Slow', '']);
         }
         function connRow(title, state, sub, words) {
