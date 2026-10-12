@@ -16,7 +16,6 @@ Token Management:
   - Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET (recommended for OAuth apps)
   - Falls back to static SHOPIFY_ACCESS_TOKEN if client credentials not set
 """
-import gzip
 import re
 import sys
 import urllib.parse
@@ -29,6 +28,7 @@ import secrets
 from typing import Optional, List, Dict, Any
 from enum import Enum
 import httpx
+import perf
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 from mcp.server.mcpserver import MCPServer
 from starlette.responses import JSONResponse
@@ -225,6 +225,11 @@ def _http() -> httpx.AsyncClient:
 
 GZIP_MIN_BYTES = _env_num(int, os.environ.get("GZIP_MIN_BYTES", "1024"), "1024", "GZIP_MIN_BYTES")
 GZIP_LEVEL = _env_num(int, os.environ.get("GZIP_LEVEL", "6"), "6", "GZIP_LEVEL")
+perf.GZIP_LEVEL = GZIP_LEVEL
+# A body this big is compressed in a worker thread. zlib and zstd both let go
+# of the GIL while they work, so the event loop keeps serving everyone else;
+# below this the hand-off costs more than it saves.
+COMPRESS_THREAD_MIN = 64 * 1024
 # What is worth compressing. Everything here is text; images, PDFs and the
 # stored label files are already compressed and would only cost CPU.
 _COMPRESSIBLE = ("application/json", "application/javascript", "application/xml",
@@ -247,7 +252,12 @@ class CompressionMiddleware:
 
     Measured on this app's own routes: the Complete production queue goes from
     1,117 KB to 30 KB, the CRM board from 1,162 KB to 309 KB, and app.js from
-    819 KB to 196 KB, for single-digit milliseconds of CPU."""
+    819 KB to 196 KB, for single-digit milliseconds of CPU.
+
+    zstd where the browser asks for it, gzip otherwise (perf.pick_encoding).
+    On a 2.4 MB CRM board gzip took 32 ms of the event loop and zstd 5 ms for
+    the same size on the wire, and a body over COMPRESS_THREAD_MIN is done in
+    a worker thread, so nobody else's request waits behind it."""
 
     def __init__(self, app):
         self.app = app
@@ -257,7 +267,9 @@ class CompressionMiddleware:
             await self.app(scope, receive, send)
             return
         raw = scope.get("headers") or []
-        accepts = any(k == b"accept-encoding" and b"gzip" in v.lower() for k, v in raw)
+        enc = perf.pick_encoding(b",".join(v for k, v in raw if k == b"accept-encoding")
+                                 .decode("latin-1"))
+        accepts = bool(enc)
 
         state: dict = {"start": None}
         chunks: list = []
@@ -287,11 +299,19 @@ class CompressionMiddleware:
                 chunks.append(message.get("body", b""))
                 if message.get("more_body"):
                     return
-                body = gzip.compress(b"".join(chunks), GZIP_LEVEL)
+                data = b"".join(chunks)
+                t0 = time.perf_counter()
+                if len(data) >= COMPRESS_THREAD_MIN:
+                    body = await asyncio.to_thread(perf.compress, data, enc)
+                else:
+                    body = perf.compress(data, enc)
+                zip_ms = (time.perf_counter() - t0) * 1000
                 head = state["start"]
                 hdrs = MutableHeaders(raw=head["headers"])
-                hdrs["content-encoding"] = "gzip"
+                hdrs["content-encoding"] = enc
                 hdrs["content-length"] = str(len(body))
+                if hdrs.get("server-timing"):
+                    hdrs["server-timing"] = hdrs["server-timing"] + f", zip;dur={zip_ms:.1f}"
                 state["start"] = None
                 await send(head)
                 await send({"type": "http.response.body", "body": body, "more_body": False})
@@ -299,6 +319,40 @@ class CompressionMiddleware:
             await send(message)
 
         await self.app(scope, receive, send_wrapper)
+
+
+class TimingMiddleware:
+    """Server-Timing on every /api/ answer, and each route's recent times.
+
+    Opens the request's marks (perf.start) so the door, the stores and the
+    Shopify calls inside it can add to them, then writes them into the
+    answer's head as it leaves. Sits inside CompressionMiddleware, which adds
+    its own "zip" mark before the head goes out. A path the router does not
+    know (a 404) is not remembered, so probing it cannot grow the table."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        path = scope.get("path") or ""
+        if scope.get("type") != "http" or not path.startswith("/api/"):
+            await self.app(scope, receive, send)
+            return
+        marks, token = perf.start()
+        t0 = time.perf_counter()
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                marks["app"] = (time.perf_counter() - t0) * 1000
+                MutableHeaders(raw=message["headers"])["server-timing"] = perf.header(marks)
+                if message.get("status") != 404:
+                    perf.record(path, marks["app"])
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            perf.stop(token)
 
 
 def _boot_report() -> None:
@@ -367,6 +421,7 @@ def build_app():
         logger.exception("files: junk rescue failed; continuing")
     app = mcp.streamable_http_app(**MCP_HTTP)
     app.add_middleware(MCPAuthMiddleware)
+    app.add_middleware(TimingMiddleware)
     # Added last, so it wraps outermost and sees every response, including the
     # static assets and the print pages.
     app.add_middleware(CompressionMiddleware)
@@ -529,6 +584,7 @@ _shopify_gate = asyncio.Semaphore(_env_num(int, os.environ.get("SHOPIFY_MAX_CONC
 _RETRY_STATUS = {429, 500, 502, 503, 504}
 
 
+@perf.timed("shop")      # Server-Timing: how long this request waited on Shopify
 async def _request(
     method: str,
     path: str,
