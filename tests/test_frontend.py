@@ -2574,8 +2574,8 @@ def t_the_files_search_is_debounced_and_paged():
     i = fn.index("q.oninput")
     seg = fn[i:i + 400]
     ok("clearTimeout(q._t)" in seg and "setTimeout(" in seg, "typing is debounced")
-    ok("FILES_HIT_STEP" in SCRIPT and "filesHitCap" in fn, "and the hits are paged")
-    ok("remaining)" in fn,
+    ok("FILES_HIT_STEP" in SCRIPT and "filesPaged(list, hits, filesHitCap" in fn, "and the hits are paged")
+    ok("remaining)" in fn_src("function filesPaged("),
        "with the number NOT shown on screen, so nothing is quietly dropped")
 
 
@@ -8356,6 +8356,161 @@ const crmUname = () => '', fmtDate = (x) => x, cap = (x) => x, crmActivityForm =
     got = _run_node(js)
     ok(got["box"] is False and got["toasts"] == 1, "a failed tick is unticked, and says why: %r" % got)
     ok(got["redrawn"] == 1, "and the next poll redraws though nothing changed: %r" % got)
+
+
+@test
+def t_a_big_folder_is_drawn_a_page_at_a_time():
+    """The 2026-10-12 speed audit, P2. A folder was drawn whole: a thousand
+    files is about 34,000 elements, 155 to 237 ms of a desktop's main thread
+    (four times that on a phone) for every open, revisit and cleared search.
+    A folder now draws its first 60 rows and a Show more that says how many
+    are left, the way search already did; the count stays per folder, so a
+    redraw after an upload does not fold the list back up."""
+    for f in ("function filesPaged(",):
+        ok(f in SCRIPT, f + " exists")
+    fn = SCRIPT.split("function renderFilesBrowser(host) {")[1]
+    fn = fn[:fn.index("\n        function ")]
+    pl = fn[fn.index("function paintList() {"):]
+    ok(pl.count("filesPaged(list, ") == 2, "search and the folder are both drawn a page at a time")
+    ok("filesRowCap" in pl and "filesRowCapFor !== filesFolder" in pl, "a folder's count starts again only in another folder")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + fn_src("function filesPaged(") + r"""
+const rows = Array.from({ length: 150 }, (_, i) => 'r' + i);
+const list = el('div'); let more = 0;
+filesPaged(list, rows, 60, (r) => el('div', 'files-row', r), () => { more += 1; });
+const btn = list.children[list.children.length - 1];
+btn.onclick();
+const few = el('div');
+filesPaged(few, rows.slice(0, 40), 60, (r) => el('div', 'files-row', r), () => {});
+console.log(JSON.stringify({ n: list.children.length, last: btn.textContent, more,
+  first: list.children[0].textContent, few: few.children.length }));
+"""
+    got = _run_node(js)
+    ok(got["n"] == 61 and got["first"] == "r0", "60 rows and the button: %r" % got)
+    ok(got["last"] == "Show more (90 remaining)" and got["more"] == 1, "which says what is left and shows more: %r" % got)
+    ok(got["few"] == 40, "a small folder is drawn whole, with no button: %r" % got)
+
+
+@test
+def t_finished_uploads_redraw_once_per_batch_and_progress_moves_one_bar():
+    """The 2026-10-12 speed audit, P2 and S9. Every finished upload redrew the
+    whole Files view (about 720 ms per file in a thousand-file folder), every
+    progress tick rebuilt every row of the upload panel, and each upload was
+    signed for and confirmed with the whole store sent back twice. Now the
+    page asks for only what changed and patches its copy, finished uploads
+    redraw the view once per batch, and a progress tick moves one bar."""
+    for f in ("function filesPatch(", "function filesRepaintSoon(", "function filesProgress(",
+              "async function filesOp(", "async function filesSend("):
+        ok(f in SCRIPT, f + " exists")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+let filesCache = { files: {}, folders: {}, trash: [], used: 0 }, filesRev = 'r1', filesPaintedRev = 'r1';
+let calls = [], renders = 0, full = 0, rows = [];
+const renderFilesBrowser = { _paintUploads: () => { full += 1; rows.forEach(u => { u._fill = el('i'); u._label = el('span'); }); },
+                             _paintList: () => {} };
+function renderFiles() { renders += 1; }
+function filesInputBusy() { return false; }
+document.querySelector = (sel) => sel === '#view-files.active' ? el('div') : null;
+let n = 0;
+async function api(path, body) {
+  calls.push([path, body.delta || 0]);
+  if (path === '/api/files/upload-url') { n += 1; return { ok: true, id: 'f' + n, url: 'https://r2.test/' + n, replaces: false, delta: { used: n * 10 } }; }
+  return { ok: true, id: body.id, delta: { files: { [body.id]: { name: body.id + '.pdf', status: 'active', size: 10 } }, trash: {}, folders: {}, used: 30 } };
+}
+class XMLHttpRequest {
+  constructor() { this.upload = {}; }
+  open() {} setRequestHeader() {}
+  send() { setTimeout(() => { for (let i = 1; i <= 5; i++) this.upload.onprogress({ lengthComputable: true, loaded: i, total: 5 }); this.status = 200; this.onload(); }, 5); }
+}
+""" + fn_src("function filesPatch(") + fn_src("function filesRepaintSoon(") + fn_src("function filesProgress(") \
+        + fn_src("async function filesOp(") + fn_src("async function filesSend(") + r"""
+(async () => {
+  rows = [1, 2, 3].map(i => ({ name: 'u' + i + '.pdf', pct: 0, state: 'waiting', err: '' }));
+  await Promise.all(rows.map(u => filesSend({ file: { name: u.name, size: 10, type: 'application/pdf' }, row: u, folder: '' })));
+  await new Promise(r => setTimeout(r, 450));
+  console.log(JSON.stringify({ renders, full, calls, files: Object.keys(filesCache.files).sort(), used: filesCache.used,
+    rev: filesRev, states: rows.map(u => u.state), bar: rows[0]._fill && rows[0]._fill.style.width }));
+})();
+"""
+    got = _run_node(js)
+    ok(all(d == 1 for _p, d in got["calls"]) and len(got["calls"]) == 6, "signing and confirming ask for what changed: %r" % got["calls"])
+    ok(got["files"] == ["f1", "f2", "f3"] and got["used"] == 30, "and the page's copy is patched with it: %r" % got)
+    ok(got["rev"] == "", "a patched copy is no named revision: the next look fetches the store")
+    ok(got["states"] == ["done"] * 3, "every upload finished: %r" % got["states"])
+    ok(got["renders"] == 1, "three uploads finishing together redraw the view once: %r" % got["renders"])
+    ok(got["full"] == 12, "the panel is rebuilt only when an upload changes state, not per tick: %r" % got["full"])
+
+
+@test
+def t_a_files_delta_patches_the_page_copy_exactly():
+    """The page's half of the delta answers: a record is set or removed, a
+    folder likewise, a trash entry replaces any with its id, and the space
+    used is taken as sent."""
+    ok("function filesPatch(" in SCRIPT, "filesPatch exists")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = fn_src("function filesPatch(") + r"""
+let filesRev = 'r9';
+let filesCache = { files: { f1: { name: 'a' }, f2: { name: 'b' } }, folders: { d1: { name: 'Jobs' } },
+                   trash: [{ id: 'f0', name: 'z' }], used: 5 };
+filesPatch({ files: { f1: null, f3: { name: 'c' } }, trash: { f1: { id: 'f1', name: 'a' }, f0: null },
+             folders: { d1: null, d2: { name: 'New' } }, used: 9 });
+console.log(JSON.stringify({ c: filesCache, rev: filesRev }));
+"""
+    got = _run_node(js)
+    eq_ = lambda a, b, m: ok(a == b, m + ": %r" % (a,))
+    eq_(got["c"]["files"], {"f2": {"name": "b"}, "f3": {"name": "c"}}, "records set and removed")
+    eq_(got["c"]["folders"], {"d2": {"name": "New"}}, "folders set and removed")
+    eq_(got["c"]["trash"], [{"id": "f1", "name": "a"}], "the trash entry replaces, and one gone is gone")
+    eq_(got["c"]["used"], 9, "the space used")
+    eq_(got["rev"], "", "and the copy no longer claims a revision")
+
+
+@test
+def t_the_files_tree_sends_its_revision_and_redraws_only_on_change():
+    """Each visit to Files re-read the whole store. The page now sends the
+    revision it holds and an unchanged store comes back as {same: true}. A
+    redraw skipped while someone typed in a rename box is made on the next
+    quiet look, which it never was before (an equal store returned early)."""
+    for f in ("async function refreshFilesQuiet(", "async function loadFiles(", "function renderFiles("):
+        ok(f in SCRIPT, f + " exists")
+    ok("filesRev = " in fn_src("async function loadFiles("), "a load keeps the store's revision")
+    ok("filesPaintedRev = filesRev" in fn_src("function renderFiles("), "and a drawing notes what it drew")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+let filesCache = { files: { f1: {} } }, filesRev = 'r1', filesPaintedRev = 'r1', sent = [], paints = 0, next = null, busy = false;
+document.querySelector = (sel) => sel === '#view-files.active' ? el('div') : null;
+function filesInputBusy() { return busy; }
+function renderFiles() { paints += 1; filesPaintedRev = filesRev; }
+async function api(path, body) { sent.push(body.rev || ''); return next; }
+""" + fn_src("async function refreshFilesQuiet(") + r"""
+(async () => {
+  const out = {};
+  next = { same: true, rev: 'r1' }; await refreshFilesQuiet();
+  out.same = { sent: sent.slice(), paints };
+  next = { store: { files: { f1: {}, f2: {} } }, rev: 'r2' }; busy = true; await refreshFilesQuiet();
+  out.typing = { paints, rev: filesRev, has: !!filesCache.files.f2 };
+  busy = false; next = { same: true, rev: 'r2' }; await refreshFilesQuiet();
+  out.catchUp = paints;
+  filesRev = ''; filesPaintedRev = '';            // a patched copy, drawn
+  next = { store: { files: { f1: {}, f2: {} } }, rev: 'r2' }; await refreshFilesQuiet();
+  out.equal = { paints, rev: filesRev, painted: filesPaintedRev, sent: sent[sent.length - 1] };
+  console.log(JSON.stringify(out));
+})();
+"""
+    got = _run_node(js)
+    ok(got["same"] == {"sent": ["r1"], "paints": 0}, "the look sends its revision and an unchanged store draws nothing: %r" % got)
+    ok(got["typing"] == {"paints": 0, "rev": "r2", "has": True}, "a moved store is kept, undrawn while someone types: %r" % got)
+    ok(got["catchUp"] == 1, "and drawn on the next quiet look: %r" % got)
+    ok(got["equal"] == {"paints": 1, "rev": "r2", "painted": "r2", "sent": ""},
+       "a patched copy asks without a revision, and an equal store is not drawn again: %r" % got)
 
 
 @test

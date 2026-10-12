@@ -28454,6 +28454,230 @@ def t_the_crm_revision_is_the_board_itself():
     with_accounts(go)
 
 
+
+# =========================== speed: Files, instant actions =====================
+# The fourth speed pull request (the 2026-10-12 audit, S9 and P2). Every upload
+# saved and sent back the whole Files store twice, held the store's lock while
+# storage answered, and the page redrew the whole folder after every file.
+
+def _files_key(up):
+    return up["url"].split("?")[0].replace("https://fake-r2.test/", "")
+
+
+def _files_apply(store, delta):
+    """What the page does with a delta answer (filesPatch in the page)."""
+    for k, v in (delta.get("files") or {}).items():
+        if v:
+            store["files"][k] = v
+        else:
+            store["files"].pop(k, None)
+    for k, v in (delta.get("folders") or {}).items():
+        if v:
+            store["folders"][k] = v
+        else:
+            store["folders"].pop(k, None)
+    tr = delta.get("trash") or {}
+    if tr:
+        store["trash"] = [t for t in store["trash"] if t["id"] not in tr] + [v for v in tr.values() if v]
+    if delta.get("used") is not None:
+        store["used"] = delta["used"]
+
+
+def _files_race(*calls):
+    """Requests raced on ONE loop through the real ASGI stack, as production
+    runs them (TestClient threads would each bring their own loop)."""
+    import httpx
+
+    async def race():
+        copilot._rl_hits.clear(); copilot._rl_global.clear()
+        transport = httpx.ASGITransport(app=server.mcp.streamable_http_app(**server.MCP_HTTP))
+        headers = {"Authorization": "Bearer " + tok(), "X-App-Session": ensure_auth()}
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver",
+                                     headers=headers, timeout=30) as ac:
+            return await asyncio.gather(*[c(ac) for c in calls])
+    return run(race())
+
+
+@test
+def t_an_unchanged_files_tree_is_not_sent_again():
+    """Every visit to Files re-read the whole store (about 85 KB at 2,000
+    files, four times that at 8,000) to find, most times, nothing new. The
+    store now comes with a revision, a fingerprint of what was sent; the
+    page sends it back and an unchanged store answers {same: true}. A page
+    with no revision (one open from before this update) gets the store."""
+    def go(fake):
+        t = post("/api/files/tree", {}).json()
+        ok(t.get("store") and t.get("rev"), "the store comes with its revision")
+        eq(post("/api/files/tree", {"rev": t["rev"]}).json(), {"same": True, "rev": t["rev"]},
+           "nothing changed, nothing sent")
+        ok("store" in post("/api/files/tree", {}).json(), "an older page still gets the store")
+        f = post("/api/files/folder", {"op": "add", "name": "Jobs"}).json()
+        ok(f.get("store") and f.get("rev") and f["rev"] != t["rev"], "a change answers the store under a new revision")
+        moved = post("/api/files/tree", {"rev": t["rev"]}).json()
+        ok(moved.get("store") and moved["rev"] == f["rev"], "and the tree sends the store that moved, under that revision")
+        ok("store" in post("/api/files/tree", {"rev": "not-a-revision"}).json(), "an unknown revision gets the store")
+    with_files(go)
+
+
+@test
+def t_an_upload_answers_what_changed_when_the_page_asks():
+    """Each upload answered the whole store twice, once to sign for it and once
+    to confirm it (about 20 ms of the server's one thread and 170 KB per file
+    at 2,000 files). A page that sends delta gets only what changed: the
+    records, the trash and the space used. Patching its copy with them gives
+    exactly the store the tree answers, through a replacement into the trash.
+    Without delta the answers are the whole store, as before."""
+    def go(fake):
+        mine = post("/api/files/tree", {}).json()["store"]
+        nf = post("/api/files/folder", {"op": "add", "name": "Jobs", "delta": 1}).json()
+        ok("store" not in nf and nf.get("id") and nf.get("delta"), "a new folder answers itself: %r" % nf)
+        _files_apply(mine, nf["delta"])
+
+        def upload(name, size):
+            a = post("/api/files/upload-url", {"name": name, "size": size, "folder_id": nf["id"], "delta": 1}).json()
+            ok("store" not in a and a.get("id") and a.get("url"), "signing answers the upload, not the store: %r" % list(a))
+            _files_apply(mine, a["delta"])
+            fake.objects[_files_key(a)] = size
+            c = post("/api/files/complete", {"id": a["id"], "delta": 1})
+            eq(c.status_code, 200, c.text)
+            ok("store" not in c.json(), "and confirming answers what changed")
+            _files_apply(mine, c.json()["delta"])
+            return a, c.json()
+        upload("proof.pdf", 10)
+        upload("Proof.PDF", 12)                  # replaces the first, which goes to the trash
+        upload("notes.pdf", 7)
+        full = post("/api/files/tree", {}).json()["store"]
+        by_id = lambda rows: sorted(rows, key=lambda t: t["id"])
+        eq(mine["files"], full["files"], "the patched copy holds exactly the store's files")
+        eq(mine["folders"], full["folders"], "and its folders")
+        eq(by_id(mine["trash"]), by_id(full["trash"]), "and its trash")
+        eq(mine["used"], full["used"], "and the space used")
+        eq(len(full["trash"]), 1, "the replaced proof is in the trash")
+        old = post("/api/files/upload-url", {"name": "old-page.pdf", "size": 5}).json()
+        ok(old.get("store") is not None, "a page that does not ask still gets the whole store")
+    with_files(go)
+
+
+@test
+def t_confirming_an_upload_does_not_hold_files_while_storage_answers():
+    """Confirming an upload asks storage twice (what really landed and its
+    first bytes) and held the store's lock across both, so every other change
+    to Files and the Finder drive waited on storage, and a batch's uploads
+    were confirmed one at a time. Storage is now asked outside the lock and
+    the record checked again before it is kept."""
+    import threading
+
+    class SlowHead(FakeS3):
+        def __init__(self):
+            super().__init__()
+            self.entered, self.gate = threading.Event(), threading.Event()
+
+        def head_object(self, Bucket, Key):
+            self.entered.set()
+            self.gate.wait(3)
+            return super().head_object(Bucket, Key)
+    slow = SlowHead()
+
+    def go(fake):
+        up = post("/api/files/upload-url", {"name": "slow.pdf", "size": 10}).json()
+        fake.objects[_files_key(up)] = 10
+        order = []
+
+        async def complete(ac):
+            r = await ac.post("/api/files/complete", json={"id": up["id"]})
+            order.append("complete")
+            return r
+
+        async def folder(ac):
+            while not fake.entered.is_set():
+                await asyncio.sleep(0.01)
+            r = await ac.post("/api/files/folder", json={"op": "add", "name": "Meanwhile"})
+            order.append("folder")
+            fake.gate.set()
+            return r
+        rc, rf = _files_race(complete, folder)
+        eq(rc.status_code, 200, rc.text)
+        eq(rf.status_code, 200, rf.text)
+        eq(order, ["folder", "complete"], "a folder was made while storage was still answering")
+        eq(copilot._load_files()["files"][up["id"]]["status"], "active", "and the upload was still kept")
+    with_files(go, s3=slow)
+
+
+@test
+def t_signing_an_upload_does_not_hold_files_while_storage_is_set_up():
+    """The first upload after a deploy, or one a minute while storage is
+    failing, sets the bucket up over the network before it signs. That ran
+    under the store's lock, so everything else in Files waited on it. It now
+    runs before the lock is taken."""
+    import threading
+
+    class SlowSetup(FakeS3):
+        def __init__(self):
+            super().__init__()
+            self.entered, self.gate = threading.Event(), threading.Event()
+
+        def head_bucket(self, Bucket):
+            self.entered.set()
+            self.gate.wait(3)
+            return super().head_bucket(Bucket)
+    slow = SlowSetup()
+
+    def go(fake):
+        order = []
+
+        async def sign(ac):
+            r = await ac.post("/api/files/upload-url", json={"name": "first.pdf", "size": 10})
+            order.append("sign")
+            return r
+
+        async def folder(ac):
+            while not fake.entered.is_set():
+                await asyncio.sleep(0.01)
+            r = await ac.post("/api/files/folder", json={"op": "add", "name": "Meanwhile"})
+            order.append("folder")
+            fake.gate.set()
+            return r
+        rs, rf = _files_race(sign, folder)
+        eq(rs.status_code, 200, rs.text)
+        eq(rf.status_code, 200, rf.text)
+        eq(order, ["folder", "sign"], "a folder was made while storage was being set up")
+    with_files(go, s3=slow)
+
+
+@test
+def t_one_upload_confirmed_twice_at_once_is_one_file():
+    """With storage asked outside the lock, two confirmations of one upload (a
+    retry while the first is still answering) can both be in flight. The
+    record is checked again under the lock: one is kept, the other is told
+    the upload is no longer expected, and the space is counted once."""
+    import threading
+
+    class SlowHead(FakeS3):
+        def __init__(self):
+            super().__init__()
+            self.n, self.gate = 0, threading.Event()
+
+        def head_object(self, Bucket, Key):
+            self.n += 1
+            if self.n >= 2:
+                self.gate.set()
+            self.gate.wait(3)
+            return super().head_object(Bucket, Key)
+    slow = SlowHead()
+
+    def go(fake):
+        up = post("/api/files/upload-url", {"name": "twice.pdf", "size": 10}).json()
+        fake.objects[_files_key(up)] = 10
+
+        def complete(ac):
+            return ac.post("/api/files/complete", json={"id": up["id"]})
+        a, b = _files_race(complete, complete)
+        eq(sorted([a.status_code, b.status_code]), [200, 400], (a.text, b.text))
+        d = copilot._load_files()
+        eq([v["status"] for v in d["files"].values()], ["active"], "one file")
+        eq(copilot._files_usage(d), 10, "counted once")
+    with_files(go, s3=slow)
+
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a
