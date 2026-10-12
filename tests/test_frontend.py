@@ -5592,7 +5592,7 @@ def t_an_unpaid_order_and_a_failed_lookup_read_differently():
     seg = fn[j:j + 600]
     ok("msg error" not in seg, "which is NOT an error")
     ok("field-help" in seg, "just a note saying to come back to it")
-    ok("The invoice itself is unaffected" in fn,
+    ok("The invoice itself is unaffected" in fn_src("function cxPayoutWhy(") and "cxPayoutWhy(pay" in fn,
        "and a payout that cannot be read never implies the invoice is wrong")
 
 
@@ -8183,6 +8183,104 @@ def _run_js(src):
         return r.stdout
     finally:
         os.unlink(path)
+
+
+@test
+def t_a_refused_payout_lookup_says_which_permission_and_never_shows_json():
+    """Cameron's screenshot of 2026-10-12: the document window's Payout note
+    read 'Could not read payouts: Shopify GraphQL errors: [{"message":"Access
+    denied for shopifyPaymentsAccount field. Requi' and stopped at the box's
+    edge. The connector's single-order lookup passed Shopify's JSON through
+    unguarded, the page printed it on a line that cannot wrap, and nothing
+    said the cause: the app asked Shopify for payouts but not for the
+    accounts they hang off. The inputs are the connector's real strings, old
+    and new; the helper is run, not read."""
+    i = SCRIPT.index("        const CX_SETTING_WORDS")
+    helpers = SCRIPT[i:SCRIPT.index("        /* One run problem as a sentence.")]
+    req = "the `read_shopify_payments` or the `read_shopify_payments_accounts` access scope"
+    shopify_json = json.dumps([{"message": "Access denied for shopifyPaymentsAccount field. Required access: " + req + ".",
+                                "locations": [{"line": 3, "column": 3}], "path": ["shopifyPaymentsAccount"],
+                                "extensions": {"code": "ACCESS_DENIED", "documentation": "https://shopify.dev/api/usage/access-scopes",
+                                               "requiredAccess": req}}])
+    old_pass = ("Shopify refused the payouts query. The app needs the read_shopify_payments_payouts and "
+                "read_shopify_payments_accounts scopes, and the shop must use Shopify Payments.")
+    cases = {
+        "prod": [{"state": "unavailable", "message": "Could not read payouts: Shopify GraphQL errors: " + shopify_json}, {}],
+        "reactor": [{"state": "unavailable", "reason": "refused", "needs": ["read_shopify_payments_accounts"],
+                     "message": "Shopify refused the payouts query: the app needs read_shopify_payments_accounts."},
+                    {"auth": "client_credentials", "admin": True}],
+        "own": [{"state": "unavailable", "reason": "refused", "needs": ["read_shopify_payments_accounts"]},
+                {"auth": "static", "admin": True}],
+        "unknown_admin": [{"state": "unavailable", "message": "Could not read payouts: Shopify GraphQL errors: " + shopify_json},
+                          {"admin": True}],
+        "pass_old": [{"error": old_pass}, {"pass": True, "admin": True, "auth": "client_credentials"}],
+        "no_account": [{"state": "unavailable", "message": "This shop has no Shopify Payments account, so there are no payouts to read."}, {}],
+        "http500": [{"state": "unavailable", "message": "Could not read payouts: Shopify HTTP 500 after 5 attempts"}, {}],
+        "other_gql": [{"state": "unavailable", "message": "Could not read payouts: Shopify GraphQL errors: "
+                       + json.dumps([{"message": "Field 'payouts' doesn't exist on type 'Shop'"}])}, {}],
+        "too_many": [{"error": "More than 2,500 payouts since 2026-09-01: narrow the date and run again.",
+                      "errorReason": "too_many"}, {"pass": True}],
+        # The payout pass carries errors that are not about payouts at all.
+        "busy": [{"error": "A sync is already running"}, {"pass": True, "admin": True}],
+        "volume": [{"error": "EACCES: permission denied, open '/data/state/ledger.json'"}, {"pass": True, "admin": True}],
+        # The client's own failures, each in words and never as JSON.
+        "http401": [{"state": "unavailable", "message": "Could not read payouts: Shopify HTTP 401: [API] Invalid API key or access token (unrecognized login or wrong password)"}, {}],
+        "cost": [{"state": "unavailable", "message": "Could not read payouts: Shopify query cost exceeded: "
+                  + json.dumps([{"message": "Query cost is 1200, which exceeds the single query max cost limit (1000).", "extensions": {"code": "MAX_COST_EXCEEDED"}}])}, {}],
+        "empty": [{"state": "unavailable", "message": "Could not read payouts: Shopify GraphQL: empty data"}, {}],
+        "network": [{"state": "unavailable", "message": "Could not read payouts: fetch failed"}, {}],
+    }
+    js = ("const money = (n, cur, dp) => '£' + Number(n).toFixed(dp);\n" + helpers
+          + "\nconst C = " + json.dumps(cases) + ";\nconst out = {};\n"
+          + "for (const k in C) out[k] = cxPayoutWhy(C[k][0], C[k][1]);\n"
+          + "console.log(JSON.stringify(out));\n")
+    raw = _run_js(js)
+    if raw is None:
+        print("       (node unavailable, skipped)")
+        return
+    o = json.loads(raw)
+    for k, v in o.items():
+        both = v["lead"] + " " + v["detail"]
+        ok(not re.search(r'\[\{|"message"|`|GraphQL|JSON|[‒-―]', both), "%s: no JSON, code marks or dashes: %r" % (k, both))
+    ok(o["prod"]["lead"] == "Shopify would not show this order’s payout, so no note can be shown. The invoice itself is unaffected.",
+       "the production case leads with what happened: %r" % o["prod"]["lead"])
+    ok("view Shopify Payments accounts (read_shopify_payments_accounts)" in o["prod"]["detail"]
+       and "payouts (read" not in o["prod"]["detail"], "and names the one permission Shopify named: %r" % o["prod"]["detail"])
+    ok(o["prod"]["detail"].endswith("An admin can add that permission."), "a member is told who can fix it")
+    ok(o["reactor"]["detail"].startswith("The Xero sync signs in to Shopify as Reactor, and Reactor is not allowed to view Shopify Payments accounts")
+       and "Settings, under Connections" in o["reactor"]["detail"], "signing in as Reactor points an admin at Settings: %r" % o["reactor"]["detail"])
+    ok("an app of its own" in o["own"]["detail"] and "Settings, then Apps, find that app under Legacy custom apps" in o["own"]["detail"]
+       and "Develop apps" not in o["own"]["detail"], "its own app points at Shopify's current place for it: %r" % o["own"]["detail"])
+    ok("If it signs in as Reactor" in o["unknown_admin"]["detail"], "not knowing how it signs in, both ways are said")
+    ok("also need Shopify Payments payouts" in o["unknown_admin"]["detail"] and "also need" not in o["reactor"]["detail"],
+       "Shopify names only the accounts permission when both are missing, so an app Settings cannot see is told both")
+    ok(o["busy"]["lead"] == "No notes were written." and o["busy"]["detail"] == "A sync is already running.",
+       "a busy connector is not a payout lookup: %r" % o["busy"])
+    ok(o["volume"]["lead"] == "No notes were written." and "Shopify" not in o["volume"]["detail"] + o["volume"]["lead"],
+       "nor is a file's permission a Shopify refusal: %r" % o["volume"])
+    ok(o["http401"]["detail"].startswith("Shopify did not accept the Xero sync\u2019s sign-in (error 401)")
+       and "Try again" not in o["http401"]["detail"], "a refused sign-in is not told to wait: %r" % o["http401"])
+    ok(o["cost"]["detail"] == "Shopify said the lookup asked for too much at once.", o["cost"])
+    ok(o["empty"]["detail"] == o["network"]["detail"] == "Shopify did not answer properly. Try again in a few minutes.",
+       "a client error string never reaches the page: %r" % [o["empty"], o["network"]])
+    ok(o["pass_old"]["lead"] == "Shopify would not show the payouts, so no notes can be written."
+       and "Shopify Payments accounts and Shopify Payments payouts" in o["pass_old"]["detail"],
+       "the payout pass, from the connector as it is today, names both: %r" % o["pass_old"])
+    ok(o["no_account"]["lead"].startswith("This store has no Shopify Payments account") and not o["no_account"]["detail"], o["no_account"])
+    ok(o["http500"]["detail"] == "Shopify did not answer properly (error 500). Try again in a few minutes.", o["http500"])
+    ok(o["other_gql"]["detail"].startswith("Shopify said: Field 'payouts' doesn't exist"), "another refusal is Shopify's words, unwrapped: %r" % o["other_gql"])
+    ok(o["too_many"]["lead"] == "The payouts could not be looked up, so no notes were written."
+       and "More than 2,500 payouts since 2026-09-01" in o["too_many"]["detail"], o["too_many"])
+    # Every place a payout failure is shown goes through it, and the line wraps.
+    block = SCRIPT[SCRIPT.index("if (pay.state === 'unavailable') {"):][:500]
+    ok("cxPayoutWhy(pay, { auth: ((connCache.data || {}).config || {}).shopifyAuth, admin: connIsAdmin() })" in block
+       and "pay.message" not in block, "the document window shows the translation, never the connector's raw message")
+    ok("cxDetail(d.error)" not in SCRIPT and "cxDetail(connPayResult.error)" not in SCRIPT
+       and SCRIPT.count("cxPayoutWhy(") >= 4, "and so do the payout pass and its toast")
+    ok(".msg > .lbl-meta { white-space: normal; overflow-wrap: anywhere; }" in CSS, "a message box's detail line wraps")
+    perm = SCRIPT[SCRIPT.index("host.append(connRow('Shopify permissions', 'off',"):][:700]
+    ok("sc.missing[k]" in perm and "approve" in perm and "reinstall" not in perm,
+       "Settings names each missing permission with what it is for, and the managed install needs approving, not reinstalling")
 
 
 @test
