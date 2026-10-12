@@ -1,9 +1,15 @@
-FROM python:3.12-slim
+# Python 3.14 on Debian 13, pinned by digest so a build gets exactly the image
+# that was tested. Dependabot (docker, below in .github/dependabot.yml) raises
+# the digest when the image is rebuilt with Debian security fixes; moving to a
+# new Python minor stays a deliberate change. 3.14.8 ships pip 26.2.1.
+FROM python:3.14.8-slim-trixie@sha256:89fb7d3da20043c370643435258bdd7ab755d326d359001d02988ed15ae5219e
 
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# requirements.txt is the hashed lock (`make lock`): every package, pinned, and
+# refused if its download does not match.
+RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 
 COPY . .
 

@@ -1,0 +1,21 @@
+# The nightly service's direct dependencies, pinned exactly; `make lock`
+# compiles them into requirements-service.txt with hashes, which the image and
+# CI install. The newest set that works together (2026-10-02): statsforecast
+# 2.1.1 requires pandas below 3, and pandas 2.3 under numpy 2.5 warns on every
+# date sum that numpy will later refuse, so numpy stays on 2.4.
+# The nightly service's image. Deliberately WITHOUT the gradient boosters: the
+# per-product model they serve has been off by default since it forecast
+# October, the best month of the year, at a quarter of what October has ever
+# been. They were two thirds of the image and were being imported on every run
+# for nothing. Switching FORECAST_M5 back on needs requirements-m5.txt as well.
+numpy==2.4.6
+pandas==2.3.3
+openpyxl==3.1.5
+# scipy: the non-negative least squares behind the blend weights, and the floor
+# statsmodels and statsforecast both stand on.
+scipy==1.18.1
+# Holt-Winters and the simple exponential smoothing behind Theta.
+statsmodels==0.15.0
+# More voices for the panel: AutoETS, AutoARIMA, AutoTheta, AutoCES. Optional
+# at runtime - simple.py skips them when the import fails.
+statsforecast==2.1.1

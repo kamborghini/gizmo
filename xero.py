@@ -25,9 +25,14 @@ Token mechanics (Xero specifics that bite if forgotten):
   * the tenant id comes from GET /connections after consent and rides on every
     API call in the xero-tenant-id header.
 
-Rate limits: 60 calls/minute, 5000/day per tenant. The client self-paces under
-the minute limit and honours 429 Retry-After with a ceiling (the same rule as
-the Shopify layer: a sleep must never park the app for an hour).
+Rate limits, per organisation (tenant): 60 calls a minute and 5 at once on
+every tier; 1,000 calls a day on Starter, the tier new apps have had since
+2 March 2026, and 5,000 a day from Core up (Starter also allows only five
+connected organisations). The client self-paces under the minute limit and
+honours a minute 429's Retry-After with a ceiling (the same rule as the Shopify
+layer: a sleep must never park the app for an hour). A daily 429 is not
+retried: it asks for a wait of hours, so it is raised at once as XeroDailyLimit,
+in words a person can act on.
 """
 from __future__ import annotations
 
@@ -102,6 +107,11 @@ _MINUTE_BUDGET = 55          # a little headroom under Xero's 60
 
 def client_configured() -> bool:
     return bool(CLIENT_ID and CLIENT_SECRET)
+
+
+# What a refused refresh token means for the person reading it. One sentence,
+# so the page and the sweep notes say the same thing.
+_REFUSED = "Xero refused the refresh token. Reconnect Xero from the Reconciliation tab."
 
 
 def _load_token() -> dict:
@@ -225,6 +235,20 @@ def consent_url(redirect_uri: str, state: str) -> str:
 RETRY_WAITS = (1.0, 2.0)
 
 
+class XeroDailyLimit(RuntimeError):
+    """Xero's calls for the day are used up for this organisation. Not
+    transient in the network sense and not a dead token: the advice is to wait,
+    and the wait runs to hours, so retrying only spends the rest of the sweep."""
+
+
+def _wait_words(seconds: float) -> str:
+    mins = max(1, round(seconds / 60))
+    if mins < 90:
+        return f"{mins} minute{'s' if mins != 1 else ''}"
+    hours = round(seconds / 3600)
+    return f"{hours} hour{'s' if hours != 1 else ''}"
+
+
 class XeroTransient(RuntimeError):
     """Xero could not be reached, or answered a 5xx. The credential is fine;
     the network or their service is not. Distinct from a dead token because
@@ -342,8 +366,23 @@ async def _access_token() -> str:
         if tok.get("error") or not tok.get("access_token"):
             err = str(tok.get("error") or "")
             if err == "invalid_grant":
-                _state["token_error"] = ("Xero refused the refresh token. Reconnect Xero "
-                                         "from the Reconciliation tab.")
+                # A consent can land while this refresh is in flight: its
+                # callback writes the token file outside this lock. Then the
+                # token Xero refused is no longer ours, and recording the
+                # refusal would write the dead token over the fresh one.
+                cur = _load_token()
+                if cur.get("refresh_token") != rt:
+                    raise XeroTransient("Xero was reconnected while this was under way. Try again.")
+                _state["token_error"] = _REFUSED
+                # Kept in the token file too: memory is emptied by every
+                # restart, and a refusal forgotten there put the page back to
+                # a green tag over a dead link after each deploy. A fresh
+                # consent writes a new file and a disconnect deletes it.
+                try:
+                    cur["refused_at"] = time.time()
+                    _write_token(cur)
+                except Exception:
+                    logger.exception("xero: could not record the refused token")
                 raise RuntimeError(_state["token_error"])
             # Anything else is Xero having a moment. Telling the merchant to
             # reconnect would spend a healthy token on a revocation.
@@ -355,6 +394,7 @@ async def _access_token() -> str:
         if tok.get("refresh_token"):
             d["refresh_token"] = str(tok["refresh_token"])
             d["last_refresh"] = time.time()
+            d.pop("refused_at", None)
             _state["token_error"] = ""
             try:
                 _write_token(d)
@@ -429,14 +469,24 @@ async def _get(path: str, params: Optional[dict] = None,
             continue
         if resp.status_code == 304:
             return {"_not_modified": True}
-        if resp.status_code == 429 and attempt < 3:
+        if resp.status_code == 429:
+            problem = (resp.headers.get("X-Rate-Limit-Problem") or "").strip().lower()
             try:
-                wait = min(float(resp.headers.get("Retry-After", "5")), 20.0)
+                after = float(resp.headers.get("Retry-After", "5"))
             except ValueError:
-                wait = 5.0
-            logger.warning("xero 429 on %s; backing off %.1fs", path, wait)
-            await asyncio.sleep(max(wait, 1.0))
-            continue
+                after = 5.0
+            # A daily 429 asks for hours: say so now rather than spend three
+            # retries on it. A minute's wait never runs past 60 seconds, so a
+            # long one marks the daily limit even if the header's wording moves.
+            if problem.startswith("da") or after > 300:
+                logger.warning("xero daily limit reached on %s (retry after %.0fs)", path, after)
+                raise XeroDailyLimit("Xero's daily limit for this organisation is used up; "
+                                     "it frees up in about " + _wait_words(after) + ".")
+            if attempt < 3:
+                wait = min(after, 20.0)
+                logger.warning("xero 429 on %s; backing off %.1fs", path, wait)
+                await asyncio.sleep(max(wait, 1.0))
+                continue
         if resp.status_code >= 500 and attempt < 3:
             await asyncio.sleep(min(2 ** attempt, 8))
             continue
@@ -553,9 +603,15 @@ async def organisation() -> dict:
 
 def status() -> dict:
     d = _load_token()
+    refused = bool(_state.get("token_error") or d.get("refused_at"))
     out = {"configured": client_configured(), "connected": connected(),
            "tenant": str(d.get("tenant_name") or ""),
-           "last_refresh": d.get("last_refresh") or 0, "warning": ""}
+           "last_refresh": d.get("last_refresh") or 0, "warning": "",
+           # Xero refused the refresh token (invalid_grant): the link is dead
+           # until someone re-consents. A flag, so the page can say so and
+           # offer Reconnect rather than keep a green tag over a sentence; read
+           # from the token file as well, so it outlives a restart.
+           "needs_reconnect": refused}
     failed_at = _state.get("save_failed_at") or 0
     if failed_at and time.time() - failed_at < 3600:
         out["warning"] = ("The refreshed Xero token could not be saved to the data volume. "
@@ -563,4 +619,6 @@ def status() -> dict:
                           "now, or Xero will need reconnecting.")
     elif _state.get("token_error"):
         out["warning"] = _state["token_error"]
+    elif refused:
+        out["warning"] = _REFUSED
     return out

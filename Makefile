@@ -1,7 +1,7 @@
 # The developer's entry points. Every command a person runs against this repo
 # is here, so nothing lives only in somebody's memory.
 #
-#   make install        create .venv and install the pinned requirements
+#   make install        create .venv (Python 3.14) from the hashed locks
 #   make run            start the app on :8000, loading .env if there is one
 #   make test           the dispatch suite (about a minute, no network)
 #   make test-frontend  the static guards on the single-page app (seconds)
@@ -9,18 +9,40 @@
 #   make sast           CI's blocking security scan (bandit, high severity)
 #   make check          everything CI runs that needs no network
 #   make env-doc        regenerate docs/ENVIRONMENT.md from the code
+#   make lock           compile the exact pins (*.in) into the hashed lock files
+#   make ext-check      build and type-check the Shopify extensions (needs npm ci)
+#   make shopify-deploy stage a new app version on Shopify (needs npm ci; releases nothing)
+#   make shopify-release VERSION=reactor-NN   release a staged version to the store
 
 PY ?= .venv/bin/python
 
-.PHONY: help install run test test-frontend test-forecast sweep sast env-doc check
+.PHONY: help install run test test-frontend test-forecast sweep sast env-doc check lock ext-check shopify-deploy shopify-release
 
 help:
-	@sed -n '4,12p' Makefile
+	@sed -n '4,16p' Makefile
 
+# requirements.in and forecast/requirements-service.in hold the direct pins;
+# the .txt beside each is every package installed, transitive ones included,
+# pinned with hashes, for every platform (macOS here, Linux in the image and
+# CI). The header names the pip-compile command Dependabot regenerates them
+# with when it raises a pin. Needs uv (brew install uv).
+LOCK = uv pip compile --universal --python-version 3.14 --generate-hashes --quiet
+lock:
+	$(LOCK) requirements.in -o requirements.txt \
+	  --custom-compile-command "pip-compile --generate-hashes --output-file=requirements.txt requirements.in"
+	cd forecast && $(LOCK) requirements-service.in -o requirements-service.txt \
+	  --custom-compile-command "pip-compile --generate-hashes --output-file=requirements-service.txt requirements-service.in"
+	cd forecast && $(LOCK) requirements-m5.in -o requirements-m5.txt \
+	  --custom-compile-command "pip-compile --generate-hashes --output-file=requirements-m5.txt requirements-m5.in"
+
+# The same Python as the images and CI, from the same hashed lock. The forecast
+# lock and the scanners make check uses come too, so `make check` runs here
+# exactly as CI does. Needs uv (brew install uv).
 install:
-	python3 -m venv .venv
-	$(PY) -m pip install --quiet --upgrade pip
-	$(PY) -m pip install --quiet -r requirements.txt
+	uv venv --clear --python 3.14 .venv
+	uv pip install --python $(PY) --quiet --require-hashes -r requirements.txt
+	uv pip install --python $(PY) --quiet --require-hashes -r forecast/requirements-service.txt
+	uv pip install --python $(PY) --quiet bandit==1.9.4 pip-audit==2.10.1
 
 # `.env` is read here, by the shell, and nowhere in the code: production has
 # no such file (Railway injects variables), and a loader in the app would let
@@ -51,6 +73,23 @@ sast:
 env-doc:
 	$(PY) tools/env_reference.py --write
 
-check: test-frontend test-forecast sweep sast
+# Skips with a note when node_modules are not installed; CI installs them and
+# passes --require.
+ext-check:
+	$(PY) tools/ext_check.py
+
+check: test-frontend test-forecast sweep sast ext-check
 	$(PY) tools/env_reference.py --check
 	$(PY) tests/test_dispatch.py
+
+# Shopify's own tool, at a version this repo names, so a new release of it
+# cannot change what a deploy sends (permissions, extensions, the webhook
+# version) without a commit here. 4.8.4 staged and released reactor-21 on
+# 2 October 2026. Review the pin when the api_versions move. Both open a
+# browser to sign in, so run them from a terminal.
+SHOPIFY = npx --yes @shopify/cli@4.8.4
+shopify-deploy:
+	$(SHOPIFY) app deploy --no-release
+shopify-release:
+	@test -n "$(VERSION)" || { echo "usage: make shopify-release VERSION=reactor-NN (the name shopify-deploy printed)"; exit 2; }
+	$(SHOPIFY) app release --version $(VERSION)

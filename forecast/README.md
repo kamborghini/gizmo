@@ -183,7 +183,9 @@ Setting it up, once:
    the orders and products through `/hooks/forecast/shopify`, and Reactor
    runs four fixed read-only queries with its own, `read_all_orders`
    included, which is what lets a run read past the sixty days a plain
-   `read_orders` token can see (900 days is the default history).
+   `read_orders` token can see (about five years is the default history,
+   always from the 1st of a month, plus one month before it so the shop's
+   opening half month is recognised and left out).
 
    Never give this service Reactor's `SHOPIFY_CLIENT_ID` and
    `SHOPIFY_CLIENT_SECRET`. That secret also signs every webhook Reactor
@@ -193,7 +195,7 @@ Setting it up, once:
 
    A read-only token of the service's own still works and skips Reactor:
    `SHOPIFY_FORECAST_TOKEN` with `SHOP` (the myshopify domain). Optional:
-   `FORECAST_SCENARIO`, `FORECAST_HISTORY_DAYS` (900), `FORECAST_HORIZON` (90).
+   `FORECAST_SCENARIO`, `FORECAST_HISTORY_DAYS` (1830), `FORECAST_HORIZON` (90).
 3. **In the Forecast tab**, as an admin, upload the cash flow workbook.
 
 The first run posts the morning after. A run that fails posts the failure,

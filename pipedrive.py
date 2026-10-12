@@ -30,12 +30,15 @@ API_TOKEN = os.environ.get("PIPEDRIVE_API_TOKEN", "")
 DOMAIN = os.environ.get("PIPEDRIVE_DOMAIN", "").strip().replace(".pipedrive.com", "")
 API_BASE = os.environ.get("PIPEDRIVE_API_BASE", "").rstrip("/")
 
-# Endpoints that still only exist on v1. Pipedrive took a batch of v1 routes out
-# of support on 1 Aug 2026 but published no v2 replacement for these, so they
-# are named here deliberately rather than assumed.
-# What v1 still serves. Everything else moved to v2, and asking v1 for it
-# returns an empty success rather than an error, which is worse than a 404:
-# the import reports that it worked and quietly brings nothing.
+# What is still read from v1. Pipedrive took a batch of v1 routes out of support
+# on 1 Aug 2026 (all of them are read on v2 here), and asking v1 for those
+# returns an empty success rather than an error, which is worse than a 404: the
+# import reports that it worked and quietly brings nothing. These have no v2
+# form yet, except the three field lists: v2 has had them since 10 Dec 2025, but
+# renames key to field_code and name to field_name and folds subfields into
+# their field, and the import reads v1's shape. v1's field lists are not among
+# the routes taken out of support, so they stay here until the import moves.
+# Archived leads have their own path, leads/archived, since 15 Jul 2025.
 _V1_ONLY = ("notes", "files", "users", "leads", "leadLabels", "activityTypes",
             "dealFields", "personFields", "organizationFields", "currencies")
 
@@ -217,6 +220,12 @@ async def survey() -> dict:
         leads, leads_all = await _count("leads", version="v1")
     except PipedriveError:
         leads, leads_all = [], False
+    # Like archived deals, archived leads stopped coming back with the rest
+    # (15 July 2025) and live behind their own path.
+    try:
+        archived_leads, arch_leads_all = await _count("leads/archived", version="v1")
+    except PipedriveError:
+        archived_leads, arch_leads_all = [], False
 
     by_pipeline = Counter(str(d.get("pipeline_id") or "") for d in deals)
     currencies = Counter(str(d.get("currency") or "") for d in deals)
@@ -235,6 +244,7 @@ async def survey() -> dict:
             "organizations": len(orgs), "orgs_complete": orgs_all,
             "activities": len(activities), "activities_complete": acts_all,
             "leads": len(leads), "leads_complete": leads_all,
+            "archived_leads": len(archived_leads), "archived_leads_complete": arch_leads_all,
             "users": len(users), "pipelines": len(pipelines), "stages": len(stages),
         },
         "pipelines": [{"id": str(p.get("id")), "name": p.get("name") or "",

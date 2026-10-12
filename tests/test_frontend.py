@@ -18,10 +18,16 @@ CSS = max(re.findall(r"<style>(.*?)</style>", HTML, re.S), key=len)
 COMPOSER = open(os.path.join(ROOT, "static", "composer.js"), encoding="utf-8").read()
 
 _passed, _failed = 0, []
+# ONLY=<part of a name> runs just the matching tests: the whole page suite takes
+# about two minutes, which is too long to wait for one red test. A name that
+# matches nothing is a mistake, not a pass: it prints so and exits 1.
+_ONLY = os.environ.get("ONLY", "")
 
 
 def test(fn):
     global _passed
+    if _ONLY and _ONLY not in fn.__name__:
+        return fn
     try:
         fn()
         _passed += 1
@@ -268,7 +274,10 @@ def t_the_type_scale_is_closed():
 
 @test
 def t_weights_radii_and_elevation_are_closed():
-    weights = {int(v) for v in _re.findall(r"font-weight: *([0-9]{3})", _SCREEN)}
+    # A typeface's own @font-face range ("font-weight: 200 800") says what the
+    # file can draw, not a weight anything is set in.
+    weights = {int(v) for v in _re.findall(r"font-weight: *([0-9]{3})",
+                                           _re.sub(r"@font-face \{[^}]*\}", "", _SCREEN))}
     ok(weights <= {400, 500, 600}, "weights outside the scale: " + str(sorted(weights - {400, 500, 600})))
     radii = {float(v) for v in _re.findall(r"border-radius: *([0-9.]+)px", _SCREEN)}
     # 2 is the chart legend's key. The reference escapes its own scale there too
@@ -569,17 +578,14 @@ def t_inbox_unread_filters_and_claude_reply():
     ok("rows.sort((a, b) => (b.unread ? 1 : 0) - (a.unread ? 1 : 0))" in SCRIPT,
        "unread rises to the top of the list")
     # The requirement is unchanged - unread must be unmistakable, not a
-    # 100-weight difference. What carries it changed: the row background now
-    # says WHOSE the email is, so unread keeps the edge, the bold sender, the
-    # accented age and the word "New" instead of the tint. Four signals, one of
-    # them a word, which is more than it had reason to need.
-    ok("inset var(--bw-strong) 0 0 var(--action-primary)" in HTML, "unread keeps the edge down its left")
-    unread_rule = CSS.split(".mrow.unread {")[1].split("}")[0]
-    ok("background:" not in unread_rule,
-       "and not the background, which now belongs to whoever claimed it")
-    ok("var(--weight-medium)" in CSS.split(".mrow.unread .mfrom {")[1].split("}")[0],
-       "the sender stays bold")
-    ok("'munread', 'New'" in SCRIPT, "with a word, for anyone who cannot see the tint")
+    # 100-weight difference. Since the mix (spec 8.3) it is carried by the
+    # sender at 600, an 8px teal dot at the row's start, the accented age and
+    # the word "New" for a screen reader; the row is not tinted by its owner.
+    ok("\n        .mrow.unread {" not in CSS, "unread no longer draws a bar down the row's left")
+    ok("var(--weight-semibold)" in CSS.split(".mrow.unread .mfrom {")[1].split("}")[0],
+       "the sender is 600")
+    ok("width: var(--dot-md);" in CSS.split("\n        .munread {")[1].split("}")[0], "with an 8px dot")
+    ok("const u = el('span', 'munread'); u.append(el('span', 'sr-only', 'New'));" in SCRIPT, "and a word, for anyone who cannot see the dot")
     ok("if (mailFilter === 'unread') {" in SCRIPT and "if (!t.unread) return false;" in SCRIPT,
        "unread ignores state: a done email marked unread in Gmail is still findable")
     ok("'/api/mail/read'" in SCRIPT, "read state can be changed from here")
@@ -677,7 +683,7 @@ def t_crm_activities_open_an_editor_and_the_bin_keeps_its_promise():
     delete confirm promised a 30-day restore that had no UI."""
     ok("crmActivityForm({ id: a.id }" in SCRIPT, "tapping an activity row opens it for editing")
     ok(re.search(r"op: 'update', id: editing\.id", SCRIPT), "the form saves through the update op")
-    ok("Already done - just logging it" in SCRIPT, "a call that already happened is one tick")
+    ok("Already done, just logging it" in SCRIPT, "a call that already happened is one tick")
     ok("paintBin" in SCRIPT and re.search(r"op: 'restore', id: t\.id", SCRIPT),
        "the Bin view exists and restores")
 
@@ -731,7 +737,7 @@ def t_the_deal_modal_shows_the_email_thread_history():
 def t_website_enquiries_link_both_ways():
     """A filed enquiry is one click from email to deal and back - a reference
     that does not open is a dead reference."""
-    ok("Filed in the CRM - open the deal" in SCRIPT,
+    ok("Filed in the CRM: open the deal" in SCRIPT,
        "the email modal links to the deal it became")
     ok(re.search(r"crmDealModal\(t\.crm_deal_id\)", SCRIPT), "and actually opens it")
     ok(re.search(r"openMailThread\(x\.mail_thread_id\)", SCRIPT),
@@ -877,6 +883,177 @@ def t_nothing_pinned_to_the_viewport_prints():
     ok(HTML.index('<a class="skip-link"') < HTML.index('id="app"'),
        "it still comes first in the document, which is the point of it")
 
+def css_blocks(css):
+    """Top-level blocks of a stylesheet as (prelude, body) pairs, by counting
+    braces, so a rule is known to sit inside @media print and not after it."""
+    out, depth, start, head = [], 0, 0, ""
+    for i, ch in enumerate(css):
+        if ch == "{":
+            if depth == 0:
+                head, start = css[start:i].strip(), i + 1
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                out.append((head, css[start:i].strip()))
+                start = i + 1
+    return out
+
+
+@test
+def t_nothing_in_the_page_can_add_to_or_cut_a_label_print():
+    """Cameron, 30 September: "why you are printing blanks again on the
+    productions lables, how is this bug back". The bench printed a blank
+    after every label. The PDF saved from the bench's own print dialog (Opera,
+    Chromium 151) showed the page 66px taller than its 4 x 4 label, with
+    nothing drawn in those 66px, on the page's own body. The app's page,
+    printed by the same engine, was one page per label, and nothing the app
+    makes gets past the body-level hide: something on that machine put itself
+    inside the page and forced itself visible.
+
+    Hiding what is there cannot keep up with what might be there. A first fix
+    cut the page to exactly N labels tall; review and 3,138 test prints then
+    showed that anything ABOVE the labels pushed them down and the cut took
+    the last label off, with the page count still right. So nothing is cut:
+    in print the labels are laid against the top of the page, over anything
+    else, and nothing beside body prints. Measured in Chromium 151 and 154 and
+    Firefox 155 over 13 ways of forcing content into the page (above, below,
+    beside body, text, positioned, kept first), every label printed, one per
+    page, in place; only content taller than the whole run adds a (visible)
+    page, as before. WebKit is left as it was: laid this way, its A4 runs
+    crept up the page a little more on every label."""
+    ok("function labelPrintCss(" in SCRIPT, "one helper writes every fixed-size label print's page rule")
+    src = fn_src("function labelPrintCss(")
+    gate = re.search(r"const PRINT_LAYS_LABELS = [^;\n]+;", SCRIPT)
+    ok(gate, "whether this browser lays the labels is decided in one place")
+    if not any(os.access(os.path.join(p, "node"), os.X_OK)
+               for p in os.environ.get("PATH", "").split(os.pathsep)):
+        print("       (node unavailable, skipped)")
+        return
+    harness = """
+const out = [];
+for (const vendor of ['Google Inc.', '', 'Apple Computer, Inc.']) {
+  const run = new Function('navigator', `${GATE}
+${SRC}
+return labelPrintCss;`);
+  const labelPrintCss = run({vendor});
+  for (const d of [{w: 101.6, h: 50.8}, {w: 101.6, h: 76.2}, {w: 101.6, h: 101.6}, {w: 101.6, h: 152.4},
+                   {w: 50.8, h: 101.6}, {w: 210, h: 297}])
+    out.push({vendor, w: d.w, h: d.h, css: labelPrintCss(d)});
+}
+console.log(JSON.stringify(out));
+""".replace("${GATE}", gate.group(0).replace("`", "")).replace("${SRC}", src.replace("`", "").replace("${", "$ {"))
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(harness)
+        path = fh.name
+    try:
+        r = subprocess.run(["node", path], capture_output=True, text=True, timeout=30)
+        ok(r.returncode == 0, "labelPrintCss did not run: " + (r.stderr or "")[:300])
+        for c in json.loads(r.stdout):
+            css, w, h, vendor = c["css"], c["w"], c["h"], c["vendor"]
+            webkit = vendor == "Apple Computer, Inc."
+            where = "%s, %s x %s mm: " % (vendor or "Firefox", w, h)
+            blocks = css_blocks(css)
+            ok([b[0] for b in blocks] == ["@page", "@media print"],
+               where + "a page rule and a print block, and nothing that reaches the screen: %s" % [b[0] for b in blocks])
+            ok(blocks[0][1] == "size: %smm %smm; margin: 0;" % (w, h),
+               where + "the printer's page is the label stock, with no margin: " + blocks[0][1])
+            rules = dict(css_blocks(blocks[1][1]))
+            ok(rules.get("html:root > :not(head):not(body)") == "display: none !important;",
+               where + "nothing put beside body prints, in every browser")
+            ok("height" not in blocks[1][1] and "overflow" not in blocks[1][1],
+               where + "nothing is cut: a cut takes the last label off when anything sits above the labels")
+            laid = rules.get("html:root body.printing-label #label-print")
+            if webkit:
+                ok(laid is None and len(rules) == 1, where + "WebKit is left as it was")
+            else:
+                ok(laid == "position: absolute !important; top: 0 !important; left: 0 !important; "
+                           "z-index: 2147483647 !important;",
+                   where + "the labels are laid against the top of the page, in front of anything else: %s" % laid)
+                ok(rules.get("html:root, html:root body.printing-label") == "position: static !important;",
+                   where + "against the page itself: html and body are not what the labels are placed in")
+    finally:
+        os.unlink(path)
+    # The laid box must beat label mode's own rule for it in the stylesheet.
+    ok("body.printing-label #label-print { position: static !important; left: auto !important; }" in CSS,
+       "label mode's own rule for the box is (1,1,1); the laid rule's html:root makes it (1,2,2) and it wins")
+    # Both fixed-size label prints go through it; the A4 documents flow over
+    # as many pages as they need, so they keep their own page rule.
+    ok("rule.textContent = labelPrintCss(d);" in fn_src("function printLabels("),
+       "production labels are laid by it")
+    ok("rule.textContent = labelPrintCss(dims);" in fn_src("async function loanPrintSticker("),
+       "and so is the serial sticker")
+    # The laying is keyed on label mode, so both prints must switch it on
+    # before they print, after writing the rule.
+    for name in ("function printLabels(", "async function loanPrintSticker("):
+        f = fn_src(name)
+        on = f.find("document.body.classList.add('printing-label');")
+        ok(on > f.find("rule.textContent = labelPrintCss(") > 0 and on < f.find("window.print()"),
+           name + " writes the rule, then switches label mode on, then prints")
+    ok(not re.search(r"rule\.textContent = '@page \{ size: ' \+ \w+\.w \+ 'mm '", SCRIPT),
+       "no label print writes its page size by hand any more")
+
+
+@test
+def t_a_typeface_that_will_not_load_never_abandons_a_print():
+    """Review, 30 September: document.fonts.load REJECTS when the label
+    typeface cannot be fetched, and five print paths waited on it with a
+    rejection handler that only cleaned up, so a broken font file meant no
+    printout at all, silently. The serial sticker had been fixed for exactly
+    this; the others had not. The wait itself now never rejects: a broken
+    typeface prints in the fallback, as a slow one already did."""
+    src = fn_src("function labelFontReady(")
+    if not any(os.access(os.path.join(p, "node"), os.X_OK)
+               for p in os.environ.get("PATH", "").split(os.pathsep)):
+        print("       (node unavailable, skipped)")
+        return
+    harness = """
+const document = { fonts: { load: () => Promise.reject(new Error('network')) } };
+""" + src + """
+labelFontReady().then(() => console.log('resolved'), () => console.log('rejected'));
+"""
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(harness)
+        path = fh.name
+    try:
+        r = subprocess.run(["node", path], capture_output=True, text=True, timeout=30)
+        ok(r.returncode == 0, "labelFontReady did not run: " + (r.stderr or "")[:300])
+        eq_ = (r.stdout or "").strip()
+        ok(eq_ == "resolved", "a typeface that fails to load still lets the print go ahead (got %r)" % eq_)
+    finally:
+        os.unlink(path)
+
+
+@test
+def t_the_shopify_print_offers_every_stock_and_starts_on_the_production_size():
+    """Cameron, 30 September: "add 4x4 to the shopify print too". The print
+    action on an order in Shopify listed its own five sizes, without the 4 x 4
+    the production printer is loaded with, and always opened on 4 x 6. The
+    stock is a shop setting, not something chosen at the print button, so both
+    actions now offer exactly the sizes the server knows and open on the
+    production printer's saved size, which the signing call hands back."""
+    src = open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()
+    block = src[src.index("LABEL_STOCK = ("):]
+    server = set(re.findall(r'"([0-9a-z]+)"', block[:block.index(")")]))
+    for ext in ("print-label-order", "print-label-bulk"):
+        jsx = open(os.path.join(ROOT, "extensions", ext, "src", "PrintActionExtension.jsx"), encoding="utf-8").read()
+        sizes = jsx[jsx.index("const SIZES = ["):]
+        sizes = sizes[:sizes.index("];")]
+        offered = re.findall(r'value: "([0-9a-z]+)"', sizes)
+        ok(set(offered) == server, ext + " offers exactly the sizes the server can print (%s against %s)"
+           % (sorted(offered), sorted(server)))
+        ok(offered == ["4x2", "4x3", "4x4", "4x6", "2x4", "a4"], ext + " in the page's own order: %s" % offered)
+        ok('"4 x 4 in (102 x 102 mm)"' in sizes, ext + " names 4 x 4 as the page does")
+        ok("if (out.size && SIZES.some((o) => o.value === out.size)) setSize(out.size);" in jsx,
+           ext + " opens on the production printer's saved size when the server names one it offers")
+        ok("defaultSelected={o.value === size ? true : undefined}" in jsx,
+           ext + " and shows that size as chosen, not a fixed 4 x 6")
+        ok('disabled={status !== "ready"}' in jsx,
+           ext + " holds the size menu until the label is ready, so a size picked early is not overwritten")
+        ok('tone="subdued"' not in jsx and '<s-text color="subdued">' in jsx,
+           ext + " greys its note with color: admin s-text has no subdued tone")
+
+
 @test
 def t_the_print_sheet_fits_its_own_page_box():
     """The sheet was pinned to 186mm: 4mm wider than A4 portrait's print box, so
@@ -980,10 +1157,13 @@ def t_muted_text_is_readable_on_every_ground_the_app_paints():
 
 @test
 def t_each_semantic_ink_is_readable_on_its_own_tint_and_on_the_page():
+    for ground in ("action-primary", "action-hover", "action-active"):
+        r = _contrast(_token("text-on-action"), _token(ground))
+        ok(r >= 4.5, "ink on the brand button's --%s is %.2f:1, under 4.5" % (ground, r))
     """A win/warn/danger chip is a colour pair. Retuning one half without the
     other is how a status chip becomes unreadable."""
     for ink, tint in [("error", "error-bg"), ("success", "success-bg"), ("warning", "warning-bg"),
-                      ("action-primary", "action-soft")]:
+                      ("text-brand", "action-soft"), ("text-brand", "action-selected")]:
         for ground in (tint, "surface-primary"):
             r = _contrast(_token(ink), _token(ground))
             ok(r >= 4.5, "--%s on --%s is %.2f:1, under 4.5" % (ink, ground, r))
@@ -1013,8 +1193,8 @@ def t_the_targets_a_finger_has_to_hit_are_big_enough():
 def t_icon_only_buttons_clear_the_minimum():
     """An icon button was the 16px glyph plus 4px of padding: 24px, on the line."""
     rule = re.search(r"\.icon-btn \{.*?\}", HTML, re.S).group(0)
-    ok("min-width: var(--control-h-md)" in rule and "min-height: var(--control-h-md)" in rule,
-       "icon buttons carry an explicit floor rather than inheriting one from their glyph")
+    ok("min-width: var(--control-h)" in rule and "min-height: var(--control-h)" in rule,
+       "icon buttons carry an explicit 32 floor rather than inheriting one from their glyph")
     ok(re.search(r"\.toast-x \{ min-width: var\(--control-h-sm\); min-height: var\(--control-h-sm\)", HTML),
        "so does the toast dismiss, which sits on its own over the page")
 
@@ -1035,30 +1215,18 @@ def t_the_deal_board_can_be_worked_without_a_mouse():
 
 @test
 def t_a_thumb_inside_a_track_takes_the_track_radius_minus_the_gap():
-    """Concentric corners. A rounded thumb inside a rounded track has to take
-    the track's radius MINUS the gap, or the two curves are not parallel and
-    the thumb reads as a slightly wrong shape rattling in its slot.
-
-    Picking the inner radius off the token scale by eye is what goes stale:
-    these two tracks used the SAME 8px thumb with different padding, so .seg
-    was concentric by luck (10 - 2 = 8) and .lbl-seg was 2px out (10 - 4 wants
-    6). Deriving it means the thumb follows the track, so changing either the
-    radius or the padding cannot silently break the corner. SwiftUI ships a
-    shape for this (ConcentricRectangle); on the web it is one subtraction, as
-    long as it is written down instead of guessed."""
-    # Anchored at the start of the rule: ".seg {" is also a substring of
-    # ".lbl-seg {", which silently matched the wrong control.
-    for track, thumb in ((r"\.lbl-seg \{", r"\.lbl-segbtn \{"), (r"\.seg \{", r"\.seg button \{")):
-        tm = re.search(r"(?m)^\s*" + track + r"([^}]*)\}", CSS)
-        bm = re.search(r"(?m)^\s*" + thumb + r"([^}]*)\}", CSS)
-        ok(tm and bm, "both halves of the control are still one rule each")
-        ok("--track-r:" in tm.group(1) and "--track-pad:" in tm.group(1),
-           "the track names its own radius and gap: " + track)
-        ok("border-radius: var(--track-r)" in tm.group(1),
-           "and rounds itself with them: " + track)
-        ok("calc(var(--track-r) - var(--track-pad))" in bm.group(1),
-           "the thumb derives its radius from the track rather than picking one: " + thumb)
-
+    """The segmented control is the one track with a thumb in it (2026-10-05:
+    five tab families became tabStrip() and segmented()). Since the pills went
+    (Cameron: "Do not use pill-shaped UI unnecessarily") the track has the
+    control's 6px corner and no edge, and the thumb that less the 2px inset, so
+    the two curves run parallel."""
+    track = re.findall(r"\n        \.segmented \{([^}]*)\}", CSS)
+    thumb = re.findall(r"\n        \.segmented > button::before \{([^}]*)\}", CSS)
+    ok(len(track) == 1 and len(thumb) == 1, "both halves of the control are still one rule each (the thumb is drawn on the segment's ::before, Task 45)")
+    ok("border-radius: var(--radius-control)" in track[0] and "border: 0" in track[0],
+       "the track takes the control corner and has no edge of its own")
+    ok("border-radius: calc(var(--radius-control) - var(--sp-0-5))" in thumb[0], "and the thumb is concentric inside it")
+    ok(_token_raw("radius-control") == "var(--radius-xs)", "and the control corner is 6px, not a pill")
 
 @test
 def t_beating_the_plan_is_not_something_worth_looking_at():
@@ -1074,9 +1242,11 @@ def t_beating_the_plan_is_not_something_worth_looking_at():
     fn = SCRIPT.split("function fcAlertWeight(", 1)[1].split("\n        }", 1)[0]
     ok("if (gap > 0) return 0;" in fn, "a month over its plan carries no weight")
     ok("a.risk === 'watch' ? 50" in fn, "and a watch still outranks a quiet shortfall")
-    row = SCRIPT.split("function fcAlertRow(", 1)[1].split("\n        }", 1)[0]
-    ok("FC_VERDICT[a.verdict]" in row,
-       "the alert tone comes from the map the month table uses, not a second opinion")
+    # Since the mix (2026-10-06) a month's standing is its outlook, worked out
+    # from the run's own codes in the words Cameron approved.
+    row = fn_src("function fcOutlook(a) {")
+    ok("FC_VERDICT_WORDS[a.verdict]" in row,
+       "the outlook falls back on the words the month table uses, not a second opinion")
     ok("'warn'" not in row, "so nothing that beat its plan arrives in warning amber")
 
     # The ranking itself, on the two rows that exposed it plus the shortfall
@@ -1204,16 +1374,21 @@ def t_the_dead_elevation_token_is_gone():
     # .pfilters left this list when Products became a card: it is a panel
     # INSIDE that card now, on the muted ground, and a shadow inside a card
     # is a second frame.
-    for cls in ("card", "lia-card", "auth-card"):
+    # A card is a section with no box since the mix (2026-10-06); what is still
+    # boxed keeps the house elevation.
+    for cls in ("lia-card",):
         rule = re.search(r"\." + cls + r" \{[^}]*\}", HTML, re.S)
         ok(rule and "var(--shadow-sm)" in rule.group(0),
            ".%s carries the house card elevation like every other card" % cls)
+    # The sign-in card floats like every window since the mix (2026-10-06).
+    auth = re.search(r"\.auth-card \{[^}]*\}", HTML, re.S)
+    ok(auth and "box-shadow: var(--shadow-pop)" in auth.group(0), ".auth-card carries the pop shadow, a live elevation")
     # This used to assert the rule carried var(--shadow-sm), and it went on passing
     # after --shadow-sm became `none` under the neutral palette - so every segmented
     # control in the app silently lost its selected state while the guard stayed
     # green. A marker has to be asserted by its EFFECT, never by the presence of
     # a token that may resolve to nothing.
-    for sel in (r"\.lbl-segbtn:is\(\.on, \[aria-pressed=\"true\"\]\)", r"\.seg button:is\(\.on, \[aria-pressed=\"true\"\]\)"):
+    for sel in (r"\.segmented > button:is\(\.on, \[aria-pressed=\"true\"\]\)::before",):
         rule = re.search(sel + r" \{[^}]*\}", HTML, re.S)
         ok(rule, "the %s rule is still there" % sel)
         shadow = re.search(r"box-shadow:\s*([^;}]+)", rule.group(0))
@@ -1240,10 +1415,10 @@ def t_one_component_per_role_across_tabs():
     # Since 2026-09-23 each of the Work tab's three lists is a titled card, as
     # the People tab's is.
     ok("cardOf('Recent sessions'" in SCRIPT and "cardOf('On the clock now')" in SCRIPT
-       and "cardOf('Hours per person')" in SCRIPT, "and all three of its headings moved together")
+       and "cardOf('Hours per person'" in SCRIPT, "and all three of its headings moved together")
     banner = re.search(r"\.alerts-banner \{[^}]*\}", HTML).group(0)
-    ok("var(--bw-hairline) solid var(--border-default)" in banner,
-       "the alerts banner wears the hairline every other tinted notice wears")
+    ok("border" not in banner and "var(--warning-bg)" in banner,
+       "the alerts banner is the tint every other notice is: no border (the notice recipe, since the mix)")
     lia = re.search(r"\.lia-name \{[^}]*\}", HTML).group(0)
     ok("text-overflow: ellipsis" in lia,
        "and a long account name truncates like every other child of its row")
@@ -1353,19 +1528,21 @@ def t_a_tick_box_that_is_a_div_still_answers_the_keyboard():
 @test
 def t_every_status_chip_has_the_same_geometry():
     """Chips split 6px against 12px roughly along tab lines, so the same kind of
-    label was a rounded rectangle in one tab and a capsule in the next. The
-    radius scale's own comment names the three steps card, control, chip, which
-    settles which of the two is the chip. Under the neutral system that shape is
-    a capsule, --radius-full, and it has to be the SAME capsule everywhere."""
-    chips = ["pill", "mail-order-stage", "lbl-chip", "fchip", "mail-owner",
-             "mcount", "mrule-tag", "g-badge", "mail-claim", "mail-crmchip"]
-    for c in chips:
+    label was a rounded rectangle in one tab and a capsule in the next. Since
+    2026-10-05 (no pills) a label that only displays is a tag, 4px, from one
+    recipe; a chip you press is a control, 6px."""
+    for c in ["pill", "mail-order-stage", "lbl-chip", "mcount", "g-badge", "mail-crmchip", "mail-owner"]:
         rule = re.search(r"\." + c + r" \{[^}]*\}", HTML, re.S)
         ok(rule, "the .%s rule is still there" % c)
-        ok("border-radius: var(--radius-full)" in rule.group(0),
-           ".%s takes the chip radius from the token, not a literal" % c)
-    ok("border-radius: 12px" not in re.search(r"\.fchip \{[^}]*\}", HTML).group(0),
-       "and no chip keeps the control radius")
+        ok("border-radius: var(--radius-tag)" in rule.group(0), ".%s takes the tag corner" % c)
+    for c in ["fchip", "mail-claim"]:
+        rule = re.search(r"\." + c + r" \{[^}]*\}", HTML, re.S)
+        ok("border-radius: var(--radius-control)" in rule.group(0), ".%s is pressed, so it takes the control corner" % c)
+    tags = CSS.split("ONE TAG.")[1].split("}")[0]
+    for prop in ("height: var(--tag-h)", "border-radius: var(--radius-tag)", "border: 0", "font-size: var(--text-xs)"):
+        ok(prop in tags, "the one tag recipe sets " + prop)
+    ok(not re.search(r"\.(pill|kbadge|lbl-chip|crm-prio|crm-chip|g-badge|kbadge) \{[^}]*height: 20px", CSS),
+       "and no tag carries its own raw height")
 
 
 @test
@@ -1374,7 +1551,7 @@ def t_the_inbox_crm_chip_is_the_accent_not_a_lookalike():
     accent trio, so the CRM link chip was a slightly different blue from every
     other accent-tinted chip in the app."""
     rule = re.search(r"\.mail-crmchip \{[^}]*\}", HTML, re.S).group(0)
-    for tok in ("var(--action-soft)", "var(--action-line)", "var(--action-primary)"):
+    for tok in ("var(--action-soft)", "var(--action-line)", "var(--text-brand)"):
         ok(tok in rule, ".mail-crmchip reads %s" % tok)
     for h in ("#eef4ff", "#c7d7fe", "#3538cd"):
         ok(h not in HTML, "the near-miss %s is gone" % h)
@@ -1389,10 +1566,10 @@ def t_a_heading_with_a_control_in_it_is_still_the_heading_component():
     ok("el('div', 'section-title')" in fn, "it uses the real component")
     ok("font-size:11px" not in fn and "font-weight" not in fn,
        "and sets no type of its own")
-    ok(re.search(r"\.section-title > \.seg \{[^}]*order: 1", HTML),
+    ok(re.search(r"\.section-title > \.segmented \{[^}]*order: 1", HTML),
        "the range control is ordered past the ::after hairline, which is "
        "always the last flex item")
-    ok(re.search(r"\.section-title > \.seg \{[^}]*letter-spacing: normal", HTML),
+    ok(re.search(r"\.section-title > \.segmented \{[^}]*letter-spacing: normal", HTML),
        "and the heading's tracking does not leak into the button labels")
     ok("el('div', 'disp-subhead', sec.h)" not in SCRIPT,
        "the Guide's on-screen headings are headings, not dispatch field labels")
@@ -1440,8 +1617,10 @@ def t_the_custom_shipment_queue_speaks_its_own_tab_s_language():
         ok(own in fn, "it uses the tab's own .%s" % own)
     # And the page around the list is the other four tabs' page: a card with a
     # counted title, its actions in the head and the house search (2026-09-23).
-    ok("tableSearch('Search reference, name or tracking'" in fn and "el('div', 'card-head')" in fn
-       and "heroAct(" in fn, "the list sits in a card like the order queues' own")
+    # Since the mix (2026-10-06) its page is the order queues' own: the same
+    # header, the same counters and tabs, the house search, no card title.
+    ok("tableSearch('Search reference, name or tracking'" in fn and "pageHead({ view: 'labels'" in fn
+       and "prodQueues(" in fn, "the list sits on the same page as the order queues' own")
     ok("margin-left:auto" not in fn, "and the inline one-off layout is gone")
 
 
@@ -1452,7 +1631,7 @@ def t_the_customers_switcher_is_the_house_control():
     ok(".secbar" not in HTML and ".secbtn" not in HTML,
        "the one-off pill component is retired")
     fn = re.search(r"function sectorBar.*?\n        \}", SCRIPT, re.S).group(0)
-    ok("el('div', 'lbl-seg')" in fn and "lbl-segbtn" in fn,
+    ok("segmented(segOptions()" in fn,
        "it is built on the same segmented control as every other tab")
     ok("box.append(hero, sectorBar())" in SCRIPT,
        "and the hero comes first, like every other tab")
@@ -1581,23 +1760,22 @@ def t_the_charts_are_drawn_to_the_reference_spec():
     reference labels its own y axis at x=18 in a mid grey."""
     css = CSS
     grid = re.search(r"\.chart-wrap \.gridline \{[^}]*\}", css).group(0)
-    ok("stroke: var(--border-default)" in grid and "stroke-opacity: .5" in grid,
-       "the grid is the border colour at half opacity, one step lighter than "
-       "the card's own edge: " + grid)
-    ok(_token("border-default") == "#e5e5e5", "and that token still resolves to #e5e5e5")
+    ok("stroke: var(--border-soft)" in grid and "opacity" not in grid,
+       "the grid is line-soft, solid (the mix): " + grid)
+    ok(_token("border-soft").lower() == "#eeeff1", "and that token resolves to the ramp's line-soft, #EEEFF1")
     ok("dasharray" not in grid, "and solid, not dashed")
     line = re.search(r"\.chart-line \{[^}]*\}", css).group(0)
     # The weight is a token now, so check the token resolves to the reference
     # value rather than checking the rule spells it out.
     ok("stroke-width: var(--chart-stroke)" in line, "the line weight comes from the token: " + line)
-    ok(_token_raw("chart-stroke") == "1.4px", "and that token is still 1.4, not a marker pen")
+    ok(_token_raw("chart-stroke") == "var(--bw-strong)", "and that token is the mix's 2px series line")
     axis = re.search(r"\.chart-wrap \.axis-x text[^{]*\{[^}]*\}", css).group(0)
     # Same requirement, re-anchored: the dates are the app's muted grey rather
     # than the near-black body ink. It used to be the #666666 literal measured
     # off the reference, which was the only string in the app painted from a
     # hex instead of a token and sat three units off --text-tertiary.
     ok("fill: var(--text-tertiary)" in axis and "#" not in axis, "dates are muted grey from the token: " + axis)
-    ok(_token("text-tertiary") == "#696969", "and that token still resolves to a grey (#696969)")
+    ok(_token("text-tertiary").lower() == "#5f6368", "and that token resolves to ink-3, #5F6368")
     ok(".axis-y text" in axis and "var(--text-xs)" in axis,
        "and the y numbers are painted by the same 12px rule: " + axis)
     # The frame draws the rules from the axis to the card edge and labels both axes.
@@ -1628,7 +1806,9 @@ def t_a_link_is_still_identifiable_without_colour():
         i = style.find("\n        " + sel + " {")
         ok(i >= 0, "the %s rule is still there" % sel)
         body = style[i:style.index("}", i)]
-        ok("text-decoration: underline" in body,
+        # underlined by its own rule or as a member of the ONE LINK recipe (its :is() list carries the underline for them all)
+        recipe = style.split("ONE LINK.")[1][:900].split("{")[0]
+        ok("text-decoration: underline" in body or all(c.strip() in recipe for c in sel.split(",")),
            "%s is underlined, since colour can no longer mark it" % sel)
         ok("text-decoration: none" not in body,
            "%s does not then turn the underline back off" % sel)
@@ -1677,7 +1857,7 @@ def t_the_production_queue_links_its_order_numbers():
     ok('"admin_url": _admin_order_url(o.get("id")),' in
        open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read(),
        "and the label order payload carries the url, like every other order payload")
-    ok(re.search(r"\.lbl-num-link[^{]*\{[^}]*var\(--action-primary\)", HTML),
+    ok(re.search(r"\.lbl-num-link[^{]*\{[^}]*var\(--text-brand\)", HTML),
        "it reads as a link, while .lbl-num keeps the tabular column geometry")
 
 
@@ -1906,10 +2086,8 @@ def t_prose_is_capped_to_a_reading_measure():
     """The whole point of the width work is that DATA gets the width and TEXT
     does not. A 1,640px line of 12px help text is worse than the crowding."""
     rule = re.search(r"\.setting-sub, \.field-help[\s\S]{0,900}?\}", CSS).group(0)
-    ok("52ch" in rule, "prose is capped in ch, not pixels")
-    ok("var(--" not in rule.split("max-width:")[1].split(";")[0],
-       "and the cap is written on the rule, not held in a root custom property "
-       "where ch would resolve against the root font size instead of the text's own")
+    # Since 2026-10-05 every prose cap is the one --measure token, in ch.
+    ok("max-width: var(--measure)" in rule and re.search(r"--measure:\s*\d+ch", CSS), "prose is capped in ch, not pixels, from one token")
 
 
 @test
@@ -1972,9 +2150,11 @@ def t_contacts_is_a_table_not_a_run_together_line():
 def t_each_crm_segment_declares_its_own_width():
     """crm-narrow capped four segments at 1120 with no auto margins, so they
     hugged the left edge with an empty band down the right."""
+    # Since 2026-10-05 no section is capped: capped, Leads ended 350px short of
+    # the Pipedrive card stacked above it. Every CRM section takes the page.
     ok("crm-seg-" in SCRIPT, "the segment carries its own class")
-    ok(".crm-seg-leads" in CSS and ".crm-seg-insights" in CSS,
-       "and the short ones are capped by name rather than by a blanket rule")
+    ok(not re.search(r"\.crm-seg-[a-z]+ \{[^}]*max-width", CSS) and ".crm-narrow" not in CSS,
+       "and no section is capped, so stacked cards end on one edge")
 
 
 @test
@@ -2012,8 +2192,10 @@ def t_a_kpi_with_a_list_behind_it_opens_it():
     ok("if (m.detail && typeof m.detail === 'object') statOpens(c, m);" in SCRIPT,
        "a metric with a detail becomes an opener; one without stays a plain card")
     fn = re.search(r"function statOpens\(c, m\) \{(.*?)\n        \}", SCRIPT, re.S).group(1)
-    for need in ("stat-open", "setAttribute('role', 'button')", "tabIndex = 0", "aria-haspopup",
-                 "ev.key === 'Enter' || ev.key === ' '", "I.arrowUpRight", "openStatDetail(m, c)"):
+    # Since the Task 44 accessibility pass the tile is not itself a button (it holds an info button): a real
+    # button in its corner opens the list, and a click anywhere on the tile still does.
+    for need in ("stat-open", "el('button', 'stat-act stat-open-btn')", "aria-haspopup", "I.arrowUpRight",
+                 "c.addEventListener('click', () => openStatDetail(m, b))"):
         ok(need in fn, "the opener carries %s" % need)
     ok("arrowUpRight: SV(" in SCRIPT, "the icon exists")
     md = re.search(r"function openStatDetail\(m, opener\) \{(.*?)\n        \}", SCRIPT, re.S).group(1)
@@ -2023,8 +2205,8 @@ def t_a_kpi_with_a_list_behind_it_opens_it():
     ok("stat.append(statAct(I.check));" in SCRIPT and SCRIPT.count("stat.append(statAct(I.check));") == 2,
        "both filter strips carry the ring")
     ok(".stat.stat-open { cursor: pointer; }" in CSS, "an opener shows a pointer")
-    ok(".stat.stat-open:hover, .stat.stat-pick:hover { border-color: var(--border-strong); background: var(--surface-secondary); }" in CSS,
-       "and the reference's row hover")
+    ok(".stat.stat-open:hover .label, .stat.stat-pick:hover .label { color: var(--text-primary); }" in CSS,
+       "and under the pointer its label darkens (the mix: a figure has no box to tint)")
     ok(".stat-pick:is(.on, [aria-pressed=\"true\"]) > .stat-act { background: var(--action-primary);" in CSS,
        "a set filter fills its ring")
     ok(".chart-expand, .stat-act, .wg-hide, [data-wg-control]" in CSS, "the cue is screen furniture, hidden in print")
@@ -2049,12 +2231,12 @@ def t_the_forecast_tab_exists_and_is_gated():
     ok("'forecast'" in keys, "the tab is in the permission list")
     ok("'forecast'" in re.search(r"const OPT_IN_TABS = \[[^\]]+\]", SCRIPT).group(0),
        "and nobody inherits it: it holds the cash flow plan")
-    ok("if (tabAllowed('forecast')) tab('forecast', 'Forecast');" in SCRIPT, "it sits in the Finance tab strip")
+    ok("tabAllowed('forecast') && tab('forecast', 'Forecast')" in SCRIPT, "it sits in the Finance tab strip")
     ok("if (v === 'forecast') showForecastView();" in SCRIPT, "and opening it loads the latest run")
     fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
     ok("api('/api/forecast', {})" in SCRIPT.split("async function refreshForecast()")[1][:200], "it reads the posted run")
     ok("forecastSetupCard(c)" in fn and "No forecast yet" in SCRIPT, "with no run it explains the setup instead of showing nothing")
-    ok("segControl(names.map(" in fn, "every scenario in the workbook can be chosen")
+    ok("segmented(names.map(" in fn, "every scenario in the workbook can be chosen")
     # "Cash in", not "Net sales": the forecast is denominated in the order
     # total, because that is what the cash flow plan and Shopify's own forecast
     # are both written in. And MONTH by month, not day by day: the daily line
@@ -2065,32 +2247,28 @@ def t_the_forecast_tab_exists_and_is_gated():
     # the page answers three questions in a reader's own words - where am I,
     # where am I expected to be, is that good - and the tables that used to be
     # dealt onto the screen all at once now wait behind drawers.
-    ov = SCRIPT.split("function fcOverviewCard(", 1)[1].split("\n        function ", 1)[0]
-    for q in ("'Where I am now'", "'Where I am expected to be'", "'Where the year lands'"):
-        ok(q in ov, "the overview asks " + q)
-    # Each answer is its OWN block. The joined multi-column frame was retired
-    # on purpose and must not come back, here or anywhere.
-    ok("metricsStrip(mets)" in ov and "fc-now" not in SCRIPT,
-       "each answer is a house KPI block, not three columns welded into one card")
-    # Good or bad is the change pill ON the number it judges, which is where
-    # the reference puts it, not a fourth abstract box.
-    ok("delta:" in ov and "trend:" in ov,
-       "the verdict rides on the figure it qualifies")
+    # Since the mix (2026-10-06) the three questions are one feature band, its
+    # labels two to four words (spec 4.2 and 8.1).
+    ov = fn_src("function fcBand(latest, sc) {")
+    for q in ("'Taken so far'", "'Expected this month'", "'Year lands at'"):
+        ok(q in ov, "the band answers " + q)
+    ok("featureBand({" in ov and "fc-now" not in SCRIPT, "in one band, the screen's one focal point")
+    # Good or bad is the change chip ON the number it judges.
+    ok("chip: chip(gap)" in ov and "chip: chip(yg)" in ov, "the verdict rides on the figure it qualifies")
     ok("8 times out of 10" in ov and "not a commitment" in ov,
        "and says how wide the range is, in money, rather than printing P10 and P90")
-    order = [fn.index("fcOverviewCard(latest, sc)"), fn.index("fcChartCard("),
-             fn.index("fcDriversCard(latest, sc)"), fn.index("'The numbers behind it'"),
-             fn.index("'How this forecast works'")]
+    order = [fn.index("fcBand(latest, sc)"), fn.index("fcChartCard("),
+             fn.index("fcDriversCard(latest, sc)"), fn.index("'The numbers behind it'")]
     ok(order == sorted(order),
-       "overview, then the picture, then why, then the numbers, then how it works")
-    for t in ("Month by month against ", "Every source, side by side",
-              "How each one works, and how right it has been"):
-        ok("fcDrawer('" + t in fn or 'fcDrawer(\'' + t in fn or ("fcDrawer('" + t) in fn,
-           "'" + t + "' is a drawer, not dealt onto the screen")
+       "overview, then the picture, then why, then the numbers")
+    for t in ("Month by month against ", "Every method, side by side"):
+        ok("label: '" + t in fn, "'" + t + "' is a list row that opens a window, not dealt onto the screen")
+    ok("'How each one works, and how right it has been'" in fn_src("function fcHowItWorks(c, latest, sc) {"),
+       "and how each method works is a page under How it works (the mix)")
     # The graph is back, and the reader chooses the scale rather than being
     # locked into one: a day question and a year question are different questions.
     chart = SCRIPT.split("function fcChartCard(", 1)[1].split("\n        function ", 1)[0]
-    ok("filterTabs(FC_RANGES, range, setFcRange)" in chart, "the range is the reader's to pick")
+    ok("choiceSelect(FC_RANGES, range, setFcRange" in chart, "the range is the reader's to pick: seven segments on a desktop, one compact list on a phone")
     for key in ("'today'", "'week'", "'month'", "'q'", "'year'", "'ahead'", "'custom'"):
         ok(key in SCRIPT, "range " + key + " is offered")
     ok("grain = 'month'" in chart and "dayRows" in chart,
@@ -2103,7 +2281,7 @@ def t_the_forecast_tab_exists_and_is_gated():
     # trusting the one that leads.
     ok("fcCompare()" in chart and "toggleFcCompare" in chart,
        "sources can be drawn against each other on the chart")
-    ok("cmp.length >= 6" in chart, "capped, because a chart of fourteen lines is unreadable")
+    ok("picks >= FC_CMP_MAX" in chart, "capped, because a chart of fourteen lines is unreadable")
     ok("grain === 'month' && cmp.length" in chart,
        "monthly only: a source forecasts a month, and spreading it over days invents a shape")
     ok("clearFcCompare" in chart, "and the comparison can be cleared in one press")
@@ -2138,7 +2316,9 @@ def t_the_size_list_tab_is_searchable_and_reads_the_same_sheet_as_the_label():
     ok("['Holder glass, mm', 1], ['Image, mm', 1], ['Produced as, mm', 1], ['Status']" in fn and "['Undercut, mm', 1]" in fn
        and ".ktable th.num, .ktable td.num { text-align: right; font-variant-numeric: tabular-nums; }" in CSS,
        "numbers sit in tabular columns with the unit in the heading, and the status in its own")
-    ok("text-overflow: ellipsis" in CSS.split(".ktable td.sizes-notes {")[1].split("}")[0] and "n.title = r.notes;" in fn, "a note is one line, the whole of it on hover")
+    ok("text-overflow: ellipsis" in CSS.split(".ktable td.sizes-notes > .sizes-note {")[1].split("}")[0] and "n.title = r.notes;" in fn
+       and "overflow" not in CSS.split(".ktable td.sizes-notes {")[1].split("}")[0],
+       "a note is one line (its inner span's, so the cell clips nothing), the whole of it on hover")
     ok("xbtn.onclick = () => sizesExport(sizesRows());" in fn and "a.download = 'size-list.csv';" in SCRIPT, "and the filtered list exports as CSV")
     ok("ruled: ['Ruled in the app', 'made']" in SCRIPT and "excluded: ['Not a gobo', 'note']" in SCRIPT,
        "a ruling and an exclusion read as chips, in the Status filter's words")
@@ -2223,7 +2403,7 @@ def t_the_size_list_finds_a_fixture_however_it_is_written():
     ok("'Nothing has ' + said + ', so these are the models with ' + meant + '.'" in paint, "and the list says it put it right")
     ok("const told = sizesLast.fixed.filter(f => !f[0].startsWith(f[1]));" in paint, "but not for a word still being typed ('clayp')")
     none = SCRIPT.split("function sizesNone(toks)")[1][:1600]
-    ok("'Nothing is cut at ' + n + ' mm, and no holder takes ' + n + ' mm glass.'" in none and "st.q = v + 'mm';" in none,
+    ok("'Nothing is cut at ' + n + ' mm.'" in none and "st.q = v + 'mm';" in none,
        "a size the bench does not cut names the nearest it does, each a search")
     ok("const SIZES_QSORTS = [['match', 'Best match']].concat(SIZES_SORTS);" in SCRIPT, "Best match is offered while searching")
     ok("defs.push(['Search: ' + st.q" not in SCRIPT, "the search is in its box, not repeated as a chip")
@@ -2486,13 +2666,17 @@ def t_the_beta_tabs_say_so_everywhere_they_are_named():
     # On the page: CRM's own heading carries it; the three Finance tabs carry
     # it on their own tab, because the 'Finance' heading is shared with
     # Liability and gained and lost the tag as you moved between the four.
-    ok("cTitle.append(el('span', 'beta-tag'" in SCRIPT, "the CRM heading carries it")
+    ok("pageHead({ view: 'crm'" in SCRIPT and "BETA_TABS.indexOf(o.view) >= 0" in fn_src("function pageHead(o) {"),
+       "the CRM heading carries it, from the one header builder")
     ft = fn_src("function financeTabs(")
-    ok("if (BETA_TABS.indexOf(key) >= 0) b.append(el('span', 'beta-tag', 'Beta'));" in ft,
-       "and each Finance tab in beta carries it on the tab")
+    # Since 2026-10-05 the Finance tabs carry no Beta: the sidebar and the top
+    # bar say it, and a Finance screen carried it seven times at once.
+    ok("beta-tag" not in ft, "and the Finance tabs do not repeat it")
     for t in ("rTitle", "hTitle"):
         ok(t + ".append(el('span', 'beta-tag'" not in SCRIPT, "not on the shared Finance heading (" + t + ")")
-    ok("BETA_TABS.indexOf(v) >= 0" in SCRIPT, "and the topbar title does too")
+    # Since the mix (2026-10-06) the top bar is crumbs, which say where you are
+    # and nothing else; Beta sits beside the page title (Task 7's pageHead).
+    ok("$('view-title').append(" not in SCRIPT, "the crumbs carry no Beta")
     ok(".beta-tag {" in CSS, "the badge is styled")
 
 
@@ -2508,16 +2692,16 @@ def t_every_tab_shares_one_page_wrapper():
 
 @test
 def t_the_sidebar_keeps_one_inset():
-    """Every block in the sidebar sits 8px from each edge, the reference's
-    p-2 on its header, each group and its footer. The ask button used to be
-    width:100% with no horizontal margin, so it alone ran the full width and
-    broke the line the whole column keeps."""
+    """Every block in the sidebar sits 12px from each edge (an item's own 8 puts
+    its words 20 from the frame): the brand row, the nav, the conversations and
+    the footer. The ask button used to be width:100% with no horizontal margin,
+    so it alone ran the full width and broke the line the whole column keeps."""
     for sel, why in ((r"\.side-head \{[^}]*\}", "the brand row"),
                      (r"\.nav \{[^}]*\}", "the nav list"),
                      (r"\.convos \{[^}]*\}", "the conversation list"),
                      (r"\.side-foot \{[^}]*\}", "the footer")):
         block = re.search(sel, CSS).group(0)
-        ok("var(--sp-2)" in block, why + " shares the 8px inset: " + block[:90])
+        ok("var(--sp-3)" in block, why + " shares the sidebar's 12px inset: " + block[:90])
     # Refresh all spends AI credits and runs four reports, so it sits in those
     # reports' headers; the support card took a sixth of every sidebar, and its
     # link lives in the account menu (Cameron's call, 24 Sep 2026).
@@ -2639,18 +2823,23 @@ def t_a_tab_left_open_is_told_it_is_out_of_date():
 
 
 @test
-def t_a_table_sits_in_its_own_box_inside_the_card():
-    """Measured off the reference's rendered page, not judged by eye: its table
-    lives in a second frame at the base 10px radius inside a 14px card, and that
-    inset edge is most of what makes its lists read the way they do. This used to
-    be stripped flat on the reasoning that a card is already a box."""
-    rule = CSS.split(".card .ktable-wrap, .card-bleed .ktable-wrap {")[1].split("}")[0]
-    ok("border-radius: var(--radius-md)" in rule, "the table keeps its own radius inside a card")
-    ok("border: 0" not in rule, "and its own border")
-    ok("--radius-md: 10px" in CSS, "at the base radius the reference builds everything from")
-    # A table that deliberately touches the card edge still can.
+def t_a_table_inside_a_card_has_no_second_frame():
+    """The reference drew a table in a second frame a step inside its card. On
+    2026-10-05 Cameron's brief ruled the other way: "Avoid excessive borders,
+    containers ... use hierarchy and whitespace rather than wrapping everything
+    in a box". A border directly inside a border goes: the card is the frame,
+    the table keeps the card's gutter and its outer columns line up with the
+    card's text."""
+    ok(".card .ktable-wrap { border: 0; border-radius: 0; background: transparent; }" in CSS,
+       "a table inside a section draws no frame of its own")
+    ok(".card .ktable-wrap :is(th, td):first-child { padding-left: 0; }" in CSS
+       and ".card .ktable-wrap :is(th, td):last-child { padding-right: 0; }" in CSS,
+       "and its outer columns sit on the page's text edge")
+    ok(".card > .ktable-wrap :is(th, td):first-child" not in CSS,
+       "no table straight in a section is pushed back in by a gutter (the mix: there is none)")
+    ok("--radius-inset: var(--radius-xs)" in CSS and "--radius-card: var(--radius-pop)" in CSS, "corners set once")
     bleed = CSS.split("\n        .card-bleed .ktable-wrap {")[1].split("}")[0]
-    ok("border: 0" in bleed, "a bleed table is still flat to the edge")
+    ok("border: 0" in bleed, "a bleed table is still flat")
 
 
 @test
@@ -2658,17 +2847,16 @@ def t_the_table_is_built_to_the_reference_measurements():
     """Every number here was read off the reference with getComputedStyle. They
     are asserted because the last pass at this drifted by eye: 16px cell padding
     against its 12px, and body text a shade grey against its foreground."""
+    # The mix (2026-10-06, spec 6): a 32 head in caption type, 44 rows.
     th = CSS.split(".ktable th {")[1].split("}")[0]
     td = CSS.split(".ktable td {")[1].split("}")[0]
-    ok("padding: var(--sp-3)" in th and "padding: var(--sp-3)" in td,
-       "cells are padded 12px square, header and body alike")
-    ok("height: 44px" in th, "the header row is 44px")
-    ok("line-height: var(--lh-control)" in th and "line-height: var(--lh-control)" in td, "20px line box in both")
+    ok("padding: 0 var(--sp-3)" in th and "padding: 0 var(--sp-3)" in td, "cells are 12 in, header and body alike")
+    ok("height: var(--control-h)" in th and "height: var(--row-h)" in td, "the head row is 32, a body row 44")
+    ok("line-height: var(--lh-caption)" in th and "line-height: var(--lh-control)" in td, "each on its step's one line height")
     ok("color: var(--text-primary)" in td and "var(--text-secondary)" not in td,
        "body cells are foreground, not a muted grey")
     hover = CSS.split(".ktable tbody tr:hover td {")[1].split("}")[0]
-    ok("var(--surface-secondary)" in hover,
-       "the hover is half-strength muted; a full one reads as selected")
+    ok("var(--surface-secondary)" in hover, "the hover is the fill")
 
 
 @test
@@ -2676,15 +2864,14 @@ def t_the_table_toolbar_and_pager_match_the_reference():
     """The chrome around a table: a 28px search 320px wide with the icon inset
     32px, 28px filter and action buttons, and 32px square pager steps at the base
     radius. All four numbers are the reference's own."""
-    srch = CSS.split(".tbl-search input {")[1].split("}")[0]
-    ok("height: var(--control-h-md)" in srch and "width: 320px" in srch, "the search field is 28 by 320")
-    ok(re.search(r"--control-h-md:\s*28px", CSS), "the small control token is the reference's 28")
-    ok("padding: var(--sp-1) var(--sp-2-5) var(--sp-1) var(--sp-7)" in srch, "with room for the icon on the left")
+    srch = CSS.split("\n        .tbl-search {")[1].split("}")[0]
+    ok("height: var(--control-h)" in srch and "width: var(--search-w)" in srch, "the search field is 32 by 280 (the mix)")
+    ok("padding: 0 var(--sp-3)" in srch and "gap: var(--control-gap)" in srch, "its glyph 12 in and 8 from the words")
     btn = CSS.split(".btn-sm {")[1].split("}")[0]
-    ok("min-height: var(--control-h-md)" in btn and "padding: 0 var(--sp-2-5)" in btn, "small buttons are 28px tall")
+    ok("min-height: var(--control-h)" in btn and "padding: 0 var(--sp-3)" in btn, "toolbar buttons are the one 32 button")
     step = CSS.split(".tbl-step {")[1].split("}")[0]
-    ok("width: var(--control-h)" in step and "height: var(--control-h)" in step, "pager steps are 32px square")
-    ok("border-radius: var(--radius-md)" in step, "at the base radius, not the control radius")
+    ok("width: var(--control-h)" in step and "height: var(--control-h)" in step, "pager steps are 32 squares")
+    ok("border-radius: var(--radius-control)" in step, "a pill, like everything else pressed")
     # The pager must never claim to be paging through more than it is.
     fn = SCRIPT.split("function tablePager(o) {")[1][:1600]
     ok("Math.ceil(total / size)" in fn, "the page count comes from the total it was given")
@@ -2707,7 +2894,8 @@ def t_the_production_toolbar_is_sorted_not_shortened():
     fn = fn[:fn.index("\n        function ")]
     ok("const qCard = el('div', 'card q-card')" in fn, "the queue is a card, header and all")
     ok("tableTools([findWrap, filtTabs]" in fn, "search and filters on the toolbar")
-    ok("filterTabs([['all'" in fn, "the filters are counted tabs, not a segmented control")
+    ok("segmented([{ key: 'all', label: 'All', n: orders.length }" in fn,
+       "the filters are a segmented control with counts: a choice of what the list shows")
     # The two page-level rails are unstyled holders now: their children are
     # taken out and placed, and neither is ever appended to the page.
     ok("const bar = el('div');" in fn and "const tools = el('div');" in fn,
@@ -2727,7 +2915,8 @@ def t_the_production_toolbar_is_sorted_not_shortened():
     ok("qCard.append(fileIn)" in fn, "the size-list picker is still in the page")
     # And the page does not print the same sentence twice.
     ok(fn.count("el('p', null, heroCopy)") == 0, "the hero no longer repeats the queue's own line")
-    ok("el('p', 'card-desc', data.single" in fn, "which the card carries instead")
+    ok("infoButton('About this queue'" in fn and "el('p', 'card-desc'" not in fn,
+       "the queue's rule waits behind the header's info button (the mix), not under a card title")
 
 
 @test
@@ -2736,7 +2925,8 @@ def t_a_dropdown_menu_can_always_be_got_out_of():
     on Escape, on a click anywhere else, on a second press of its own trigger and
     on scrolling the page under it, and hands focus back each time. Verified in a
     browser as well as here; the suite can only read the source."""
-    fn = SCRIPT.split("function dropMenu(anchor, items) {")[1][:3800]
+    ok("function dropMenu(anchor, items) {" in SCRIPT, "the menu builder exists")
+    fn = fn_src("function dropMenu(anchor, items) {")
     close = SCRIPT.split("function closeDMenu() {")[1][:1200]
     ok("dmenuOpen.anchor === anchor" in fn, "a second press of the trigger closes it")
     ok("e.key === 'Escape'" in fn, "Escape closes it")
@@ -2765,25 +2955,25 @@ def t_the_menu_and_tabs_are_the_reference_measurements():
     trigger carries a ::after of height 2px in the near-black, the width of the
     trigger itself. The pill is still the thing that must never come back."""
     panel = CSS.split(".dmenu {")[1].split("}")[0]
-    ok("border-radius: var(--radius-md)" in panel, "the panel is at the base radius")
-    ok("padding: var(--sp-1)" in panel, "padded 4px")
-    ok("var(--shadow-md)" in panel, "its edge is a ring, not a border")
+    ok("border-radius: var(--radius-pop)" in panel, "the panel takes the floating corner (the mix: 10)")
+    ok("padding: var(--menu-pad)" in panel, "padded 4px")
+    ok("var(--shadow-pop)" in panel, "its edge is the pop shadow's ring, not a border")
     ok("border:" not in panel, "and it has no border at all")
     item = CSS.split(".dmenu-item {")[1].split("}")[0]
-    ok("height: 28px" in item, "items are 28px")
-    ok("padding: var(--sp-1) var(--sp-7) var(--sp-1) var(--sp-1-5)" in item, "with room on the right for a tick")
-    ok("border-radius: var(--radius-sm)" in item, "at the control radius")
-    tab = CSS.split(".ftab {")[1].split("}")[0]
-    ok("height: var(--control-h-sm)" in tab and "padding: var(--sp-0-5) var(--sp-1-5)" in tab, "tabs are 24px")
+    ok("min-height: var(--control-h)" in item, "items are 32px, a nav row")
+    ok("padding: 0 var(--sp-7) 0 var(--sp-2)" in item, "with room on the right for a tick")
+    ok("border-radius: var(--radius-row)" in item, "at the row corner, 6 inside the 10 with its 4 padding")
+    tab = CSS.split("\n        .tab {")[1].split("}")[0]
+    ok("height: auto" in tab and "padding: 0" in tab, "a tab fills its 44 strip and is as wide as its label (the mix)")
     ok("background: none" in tab, "with no filled pill")
-    on = CSS.split(".ftab:is(.on, [aria-selected=\"true\"]) {")[1].split("}")[0]
+    on = CSS.split(".tab:is(.on, [aria-current=\"page\"], [aria-pressed=\"true\"]) {")[1].split("}")[0]
     ok("color: var(--text-primary)" in on and "background" not in on,
        "the live tab takes full ink and still no fill behind it")
-    rule = CSS.split(".ftab:is(.on, [aria-selected=\"true\"])::after {")[1].split("}")[0]
-    ok("height: 2px" in rule, "and a 2px rule under it")
-    ok("var(--action-primary)" in rule, "painted in the near-black, not a tint that may resolve to nothing")
+    rule = CSS.split(".tab:is(.on, [aria-current=\"page\"], [aria-pressed=\"true\"])::after {")[1].split("}")[0]
+    ok("height: var(--bw-strong)" in rule and "bottom: 0" in rule, "and a 2px rule under it, on the strip's own rule")
+    ok("var(--fill-mark)" in rule, "painted in the brand's mark teal (3.85:1 on white), a colour that actually paints")
     ok("left: 0" in rule and "right: 0" in rule, "the width of the tab itself, as the reference draws it")
-    ok(any("position: relative" in b for b in re.findall(r"\.ftab \{([^}]*)\}", CSS)),
+    ok(any("position: relative" in b for b in re.findall(r"\n        \.tab \{([^}]*)\}", CSS)),
        "with the tab as the box it is positioned against, or it hangs off the page")
 
 
@@ -2815,22 +3005,22 @@ def t_the_finance_pages_share_the_reference_tab_strip():
     reads as a control you press rather than a place you are. A pill is still
     wrong; what the reference actually draws instead is a 2px rule under the
     live trigger, and colour on its own left three near-identical links."""
-    ok("const seg = el('div', 'ptabs')" in SCRIPT, "the strip is the page-level one")
-    ok("el('button', 'ptab'" in SCRIPT, "and its tabs are page tabs")
-    fn = SCRIPT.split("function financeTabs(active, updated, actions) {")[1][:900]
-    ok("lbl-segbtn" not in fn, "the segmented control is gone from it")
-    ok("aria-current" in fn, "and the live one says it is the current page")
-    tab = CSS.split(".ptab {")[1].split("}")[0]
-    ok("height: 25px" in tab and "padding: var(--sp-0-5) var(--sp-1-5)" in tab, "25px tall, as the reference draws it")
-    ok("font-size: var(--text-sm)" in tab, "at 14px, bigger than a filter tab inside a card")
+    fn = SCRIPT.split("function financeTabs(active, updated, actions) {")[1][:1600]
+    ok("const seg = tabStrip([" in fn and "{ nav: true, label: 'Finance pages' }" in fn, "the strip is the shared tabs, as pages")
+    ok("el('button', kind === 'tabs' ? 'tab' : null)" in SCRIPT, "and its tabs are the one tab")
+    ok("segmented(" not in fn, "the segmented control is gone from it")
+    ok("opts.nav ? 'aria-current' : 'aria-pressed'" in SCRIPT, "and the live one says it is the current page")
+    tab = CSS.split("\n        .tab {")[1].split("}")[0]
+    ok("height: auto" in tab and "padding: 0" in tab, "one 44 strip for every tab row (the mix)")
+    ok("font-size: var(--text-body)" in tab, "at the body's 13")
     ok("background: none" in tab, "with no pill")
-    on = CSS.split(".ptab:is(.on, [aria-current=\"page\"]) {")[1].split("}")[0]
+    on = CSS.split(".tab:is(.on, [aria-current=\"page\"], [aria-pressed=\"true\"]) {")[1].split("}")[0]
     ok("color: var(--text-primary)" in on and "background" not in on, "the live page takes full ink, with no pill")
-    rule = CSS.split(".ptab:is(.on, [aria-current=\"page\"])::after {")[1].split("}")[0]
-    ok("height: 2px" in rule, "and carries the reference's 2px rule under it")
-    ok("var(--action-primary)" in rule, "in the near-black, which is a colour that actually paints")
+    rule = CSS.split(".tab:is(.on, [aria-current=\"page\"], [aria-pressed=\"true\"])::after {")[1].split("}")[0]
+    ok("height: var(--bw-strong)" in rule, "and carries a 2px rule under it")
+    ok("var(--fill-mark)" in rule, "in the brand's mark teal, a colour that actually paints")
     ok("left: 0" in rule and "right: 0" in rule, "spanning the trigger's own width")
-    ok(any("position: relative" in b for b in re.findall(r"\.ptab \{([^}]*)\}", CSS)),
+    ok(any("position: relative" in b for b in re.findall(r"\n        \.tab \{([^}]*)\}", CSS)),
        "positioned against the tab, so the strip's metrics do not move")
 
 
@@ -2915,7 +3105,7 @@ def t_the_inbox_is_composed_like_the_reference():
        "the mailbox and its last sweep are the line under it")
     ok("mCard.append(tableTools([sWrap, states], [viewSeg]))" in fn,
        "search and states left, the view switch right")
-    ok("filterTabs([['open'" in fn, "the states are counted tabs")
+    ok("segmented([['open'" in fn, "the states are a counted segmented control")
     ok("el('div', 'lbl-toolbar')" not in fn, "the old jammed row is gone")
     # Who is on today became a card of its own rather than a bare strip.
     ok("el('h3', 'card-title', 'Who is on today')" in fn, "the team strip is a card")
@@ -2935,8 +3125,8 @@ def t_the_mail_row_is_the_reference_measurement():
     with the card's own padding, and a 0.5px rule, which lands on a device pixel
     on some screens and disappears on others."""
     row = CSS.split(".mrow {")[1].split("}")[0]
-    ok("padding: var(--sp-3)" in row, "12px on every side")
-    ok("border-top: var(--bw-hairline) solid var(--border-default)" in row, "a full hairline in the border ink")
+    ok("padding: var(--sp-2) 0" in row and "min-height: var(--row-h)" in row, "a 44 row, 8 above and below, words on the text edge (the mix)")
+    ok("box-shadow: var(--rule-b-soft)" in row and "border: 0" in row, "a full hairline under it, drawn as a shadow")
     ok("0.5px" not in row, "and not a half-pixel one")
 
 
@@ -2970,7 +3160,7 @@ def t_the_files_card_counts_what_is_actually_there():
     ok("(f.folder_id || '') === filesFolder" in seg, "it counts the files in this folder")
     ok("(f.parent_id || '') === filesFolder" in seg, "and the folders inside it")
     ok("' files match'" in seg, "a search counts its matches instead")
-    ok("Searching every folder" in seg, "and says that is what it is doing")
+    ok("'Results from every folder.'" in seg, "and says that is what it is doing")
     # A crumb trail of one step is the same word the title already carries.
     cr = fn[fn.index("function paintCrumbs() {"):][:1200]
     ok("if (!chain.length) return;" in cr, "no crumb trail at the root")
@@ -2981,16 +3171,16 @@ def t_the_files_list_is_the_reference_measurement():
     """The control radius read as a large button rather than a frame around
     rows, and a 0.5px rule lands on a device pixel on some screens only."""
     lst = CSS.split(".files-list {")[1].split("}")[0]
-    ok("border-radius: var(--radius-md)" in lst, "the list box is at the base radius")
-    ok("var(--bw-hairline) solid var(--border-default)" in lst, "in the border ink")
+    ok("border: 0" in lst and "border-radius: 0" in lst and "background: none" in lst,
+       "the list has no box of its own (the mix, and the ruling that rows sit on the section's text edge)")
     row = CSS.split(".files-row { display: flex")[1].split("}")[0]
-    ok("padding: var(--sp-3)" in row, "the shared row shell is padded 12px square")
+    ok("padding: var(--sp-3) 0" in row, "the shared row shell is 12 above and below and none at the sides")
     ok("border-top: var(--bw-hairline) solid var(--border-default)" in row and "0.5px" not in row,
        "with a full hairline, not a half-pixel one")
     # The Files list itself is denser than the shell it borrows: 8 + a 28px
     # action button + 8 + the hairline is the reference's 45px row. The Team
     # and Work rows keep the 12px square, so the density is scoped to the tab.
-    ok(re.search(r"#files-content \.files-row \{ padding: var\(--sp-2\) var\(--sp-3\); \}", CSS),
+    ok(re.search(r"#files-content \.files-row \{ padding: var\(--sp-2\) 0; \}", CSS),
        "and the Files rows sit at the reference's own density")
 
 
@@ -3006,8 +3196,10 @@ def t_every_chart_line_comes_off_the_ramp():
     ok("'--chart-1', '--chart-2', '--chart-3', '--chart-4', '--chart-5'" in ramp
        and "].map(tokenValue)" in SCRIPT.split("const CH = [")[1][:120],
        "the ramp is read from the tokens, not carried as hex")
-    for i, hexv in enumerate(("#171717", "#525252", "#737373", "#a1a1a1", "#d4d4d4"), 1):
-        ok(_token("chart-%d" % i) == hexv, "--chart-%d still resolves to %s" % (i, hexv))
+    # The brand's order (2026-10-05): teal, dark teal, blue, grey, amber.
+    # The grey is ink-3, the ramp's lightest text grey: a line needs 3:1.
+    for i, hexv in enumerate(("#0F9097", "#08484C", "#334FB4", "#5F6368", "#b45309"), 1):
+        ok(_token("chart-%d" % i).lower() == hexv.lower(), "--chart-%d still resolves to %s" % (i, hexv))
     # Every series names a ramp slot.
     for m in _re.finditer(r"color: (CH\[\d\]|[A-Za-z_$][\w.$]*)", SCRIPT):
         ok(m.group(1).startswith("CH[") or not m.group(1).startswith("#"),
@@ -3020,7 +3212,7 @@ def t_the_chart_legend_belongs_to_the_plot():
     top of its own plot for it, so a multi-series chart carried a band of
     nothing across the top and named its lines somewhere else."""
     ok("function chartLegend(series, band) {" in SCRIPT, "the legend is its own piece")
-    ok("if ((multi && series.length > 1) || bandOpt || series.some(s => s.dash)) {" in SCRIPT
+    ok("if (opts.legend || (multi && series.length > 1) || bandOpt || series.some(s => s.dash)) {" in SCRIPT
        and "if (lg.children.length > 1 || lg.querySelector('.dash, .band')) card.append(lg);" in SCRIPT,
        "drawn between the header and the plot, whenever there are marks to tell apart: two lines, "
        "a dashed line or a shaded range, and never for one plain line")
@@ -3030,8 +3222,9 @@ def t_the_chart_legend_belongs_to_the_plot():
     ok("(sr.dash || (i > 0 && !sr.lead)) ? 'dash' : ''" in lg and "if (band && " in lg,
        "a dashed or comparison series is keyed dashed, and a band gets a key of its own")
     ok(".filter(v => v != null).length > 1" in lg, "and only a series that draws something gets a key")
-    ok(".chart-legend .sw.dash {" in CSS and "repeating-linear-gradient" in CSS.split(".chart-legend .sw.dash {")[1].split("}")[0],
-       "painted as a dashed stroke, not a dashed border (the drop-target signal)")
+    dash = ".chart-legend .sw.dash, .chart-tip .sw.dash {"
+    ok(dash in CSS and "repeating-linear-gradient" in CSS.split(dash)[1].split("}")[0],
+       "painted as a dashed stroke, not a dashed border (the drop-target signal), in the legend and the tooltip alike")
     # The source line is provenance, not a key: its dot was painted in the
     # first series' colour and read as a third swatch.
     ok("src-dot" not in SCRIPT and "src-dot" not in CSS, "the source line carries no coloured dot")
@@ -3049,17 +3242,16 @@ def t_the_chart_legend_belongs_to_the_plot():
     ok(SCRIPT.count("opts.height || CHART.h") == 2,
        "both charts default to the same height instead of 220 in one and 230 in the other")
     lg = CSS.split(".chart-legend {")[1].split("}")[0]
-    ok("justify-content: flex-end" in lg, "right-aligned, as the reference aligns it")
+    ok("justify-content: flex-start" in lg, "on its own row from the left (the mix)")
     ok("gap: var(--sp-4)" in lg, "16px between keys")
-    ok("padding-bottom: var(--sp-3)" in lg and "margin-bottom: var(--sp-5)" in lg,
-       "12 then 20 before the first gridline")
-    sw = CSS.split(".chart-legend .sw {")[1].split("}")[0]
-    ok("width: var(--dot-md)" in sw and "height: var(--dot-md)" in sw
-       and _token_raw("dot-md") == "8px", "the key is an 8px square")
-    ok("border-radius: var(--radius-3xs)" in sw, "with a 2px corner, not the app's own radius")
+    ok("margin-bottom: var(--sp-2)" in lg, "8 before the plot")
+    sw = CSS.split(".chart-legend .sw, .chart-tip .sw {")[1].split("}")[0]
+    ok("width: var(--sp-3)" in sw and "height: var(--bw-strong)" in sw, "a series is keyed as a 12 line")
+    ok("border-radius: var(--radius-swatch)" in sw and _token_raw("radius-swatch") == "var(--radius-3xs)",
+       "with the swatch role's 2px corner")
     item = CSS.split(".chart-legend .lg {")[1].split("}")[0]
-    ok("gap: var(--sp-1-5)" in item, "6px between a key and its name")
-    ok("color: var(--text-primary)" in item, "and the name in full ink, as the reference sets it")
+    ok("gap: var(--control-gap)" in item, "8px between a key and its name")
+    ok("color: var(--text-tertiary)" in item, "and the name in ink-3, a caption")
 
 
 @test
@@ -3242,7 +3434,7 @@ def t_search_repaints_are_debounced_everywhere():
     debounce went in, and seven other searches still repainted synchronously.
     The shared factory debounces for everyone now, and the two hand-rolled
     repainting searches got their own."""
-    fn = SCRIPT.split("function tableSearch(")[1][:1100]
+    fn = fn_src("function tableSearch(")
     ok("setTimeout(() => { inp._t = null; if (inp.isConnected) oninput(inp.value.trim()); }, 150)" in fn,
        "the factory debounces its callers")
     ok("search._t = setTimeout(paintMailBody, 150)" in SCRIPT, "the mail search too")
@@ -3253,7 +3445,7 @@ def t_search_repaints_are_debounced_everywhere():
     ok("tableSearch('Search products…', pState.q" in SCRIPT,
        "and the products search, which is the house search box and debounces inside tableSearch")
     ok("find._t = setTimeout(paint, 150)" in SCRIPT, "and the booked-shipments search")
-    ok("inp.onchange = () => {" in SCRIPT.split("function tableSearch(")[1][:1300],
+    ok("inp.onchange = () => {" in fn_src("function tableSearch("),
        "and a blur or Enter flushes the pending run, so chips cannot act on a stale query")
 
 
@@ -3266,14 +3458,6 @@ def t_touch_and_scroll_behave_like_an_app():
     ok("-webkit-tap-highlight-color: transparent" in rule, "no grey tap flash")
     ok(".modal-body, .dmenu, .scroll { overscroll-behavior: contain; }" in CSS,
        "and scroll does not chain out of modals or menus")
-
-
-@test
-def t_nested_boxes_step_their_radius_down():
-    """A 14px box inside a 14px box with 16px padding reads blocky at the inner
-    corner. The tables already stepped down; these three shapes had not."""
-    ok(".card .insight, .card .empty, .chart-card .empty { border-radius: var(--radius-md); }" in CSS,
-       "insight and empty boxes step down inside cards")
 
 
 @test
@@ -3326,7 +3510,7 @@ def t_the_connector_tab_is_fully_plumbed():
     ok("'connector']" in SCRIPT.split("const BETA_TABS = [")[1][:60], "it wears Beta")
     ok("connector: 'Xero sync'" in SCRIPT, "the topbar can name it")
     ok("if (v === 'connector') showConnectorView();" in SCRIPT, "and setView opens it")
-    ok("if (tabAllowed('connector')) tab('connector', 'Xero sync');" in SCRIPT,
+    ok("tabAllowed('connector') && tab('connector', 'Xero sync')" in SCRIPT,
        "it sits in the Finance strip, gated like Reconciliation")
 
 
@@ -3375,26 +3559,26 @@ def t_every_control_is_the_same_height_as_every_other():
     ok("input[type=date], input[type=time] { height: var(--control-h); }" in CSS,
        "and a native date control is pinned, since it carries its own height")
     sm = CSS.split(".btn-sm {")[1].split("}")[0]
-    ok("min-height: var(--control-h-md)" in sm and re.search(r"--control-h-md:\s*28px", CSS), "the small button stays 28")
+    ok("min-height: var(--control-h)" in sm, "and the small button is the same 32: the mix has no 28 text button")
 
 
 @test
 def t_the_sidebar_does_not_dim_where_you_are_not():
-    """The reference marks position with a pill and a weight, and leaves every
-    other label at full strength. This one greyed the inactive items to --text-secondary,
-    which is what made the whole sidebar read washed out beside it."""
+    """The reference marks position with a fill and a weight, and leaves every
+    other label at full strength. Since the mix (2026-10-06) the sidebar is
+    the ink frame: every row is white at 72%, and where you are is teal at 18%
+    with white words and a teal icon. Nothing else is dimmed."""
     item = CSS.split(".nav-item {")[1].split("}")[0]
-    ok("height: var(--control-h)" in item, "nav items are 32px, as the reference draws them")
-    ok("color: var(--text-primary)" in item, "an inactive item is full-strength ink")
-    ok("font-weight: var(--weight-regular)" in item, "at normal weight")
+    ok("height: var(--control-h)" in item, "nav items are 32px")
+    ok("color: var(--nav-text)" in item, "an inactive item is the frame's 72% white")
+    ok("font-weight: var(--weight-medium)" in item, "at the nav's one weight")
     act = CSS.split(".nav-item:is(.active, [aria-current=\"page\"]) {")[1].split("}")[0]
-    ok("font-weight: var(--weight-medium)" in act, "and the active one carries the weight")
-    ok("background: var(--surface-tertiary)" in act, "on the muted pill")
+    ok("background: var(--nav-on-bg)" in act and "color: var(--text-on-chrome)" in act,
+       "the active one is teal at 18% with white words")
     side = CSS.split(".sidebar {")[1].split("}")[0]
-    ok("border-right: var(--bw-hairline) solid var(--border-default)" in side,
-       "the sidebar wears the reference's hairline on its right edge (its 'sidebar' variant)")
+    ok("background: var(--surface-chrome)" in side and "border-right" not in side, "the sidebar is the ink frame, with no edge")
     grp = CSS.split(".nav-group {")[1].split("}")[0]
-    ok("color: var(--text-secondary)" in grp, "group labels sit at the reference's 70% foreground")
+    ok("color: var(--nav-muted)" in grp, "group labels are the frame's muted white")
 
 
 @test
@@ -3426,7 +3610,7 @@ def t_a_chip_is_exactly_twenty_pixels():
     """It inherited its height from a line box plus padding, which gave 21.5 -
     a hair taller than the reference's badge everywhere one appeared."""
     chip = CSS.split(".lbl-chip {")[1].split("}")[0]
-    ok("height: 20px" in chip, "set, not inherited")
+    ok("height: var(--tag-h)" in chip and re.search(r"--tag-h:\s*20px", CSS), "set from the one tag height, not inherited")
     ok("display: inline-flex" in chip and "align-items: center" in chip,
        "so its content is optically centred rather than sitting on a baseline")
 
@@ -3439,16 +3623,16 @@ def t_the_kpi_card_keeps_the_hierarchy_the_reference_measures():
     all four KPI cards on the reference's Default dashboard AND its CRM one:
     both agree the label is 14px muted, and Default - the page this one maps to
     - puts the value at 30px/500. Pinned here so it is not "corrected" again."""
+    # The mix (2026-10-06, spec 4.2 and 6): the label is 13 at 500 in ink-2,
+    # the figure Inter 600 at 28 on a line of 1, the note a caption.
     lab = CSS.split(".stat .label {")[1].split("}")[0]
-    ok("font-size: var(--text-sm)" in lab, "the label is the 14px one")
-    ok("color: var(--text-tertiary)" in lab, "and muted, not full-strength")
+    ok("font-size: var(--text-body)" in lab, "the label is the body's 13")
+    ok("color: var(--text-secondary)" in lab, "in ink-2, a step under the figure")
     val = CSS.split(".stat .value {")[1].split("}")[0]
-    ok("font-size: var(--text-3xl)" in val, "the number is 30px (the scale gained the reference's 24px step as --text-2xl, so 30 is --text-3xl)")
-    ok("font-weight: var(--weight-medium)" in val, "at 500, as the Default card draws it")
-    # Anchored on the line start: ".stat .stat-note {" also contains the
-    # shorter string, and matching that one reads the wrong rule.
+    ok("font-size: var(--fig-m)" in val, "the number is the 28 figure")
+    ok("font-weight: var(--weight-semibold)" in val, "at 600")
     note = re.search(r"^\s*\.stat-note \{([^}]*)\}", CSS, re.M).group(1)
-    ok("font-size: var(--text-sm)" in note, "and the sub-line matches the label at 14px")
+    ok("font-size: var(--text-xs)" in note, "and the sub-line is a caption")
 
 
 @test
@@ -3466,45 +3650,56 @@ def t_the_card_elevation_token_actually_paints():
     """The companion to the dead-token lesson above: asserting that fifteen card
     rules carry var(--shadow-sm) means nothing while the token itself resolves to
     `none`. The reference measures rgba(0,0,0,.05) 0 1px 2px 0 on every card."""
+    # Since 2026-10-05 the brand (projectedimage.com sets every shadow's
+    # opacity to 0) puts no shadow under anything that sits on the page, so
+    # --shadow-sm paints nothing on purpose, said where it is defined. What must
+    # still paint is the lift of what genuinely floats: menus, dialogs, drawers.
     m = re.search(r"--shadow-sm:\s*([^;]+);", CSS)
     ok(m, "the token is still declared")
-    val = m.group(1).strip()
-    ok(val != "none", "and it paints rather than silently voiding every shadow list")
-    ok("0 1px 2px 0" in val and "5%" in val,
-       "at the reference's 5%% alpha, not a heavier invented lift")
+    ok(m.group(1).strip() == "0 0 0 0 transparent" and "the mix puts no shadow" in CSS.split("--shadow-sm:")[1][:120],
+       "a card's elevation paints nothing by the brand's decision, and says so")
+    # Not `none`: a list holding `none` is invalid, so the sign-in card's
+    # `var(--shadow-sm), var(--shadow-lg)` silently lost its float.
+    ok(not re.search(r"--shadow-[a-z]+:\s*none", CSS), "no shadow token is `none`, which breaks every list it joins")
+    ok("box-shadow: var(--shadow-pop);" in CSS.split(".auth-card {")[1].split("}")[0],
+       "so the sign-in card keeps its float, the pop shadow every window wears")
+    # Since the mix (2026-10-06) everything that floats shares the one pop shadow.
+    for tok in ("--shadow-lg",):
+        v = re.search(tok + r":\s*([^;]+);", CSS).group(1)
+        ok(v.strip() == "var(--shadow-pop)", tok + " is the one pop shadow")
+    pop = re.search(r"--shadow-pop:\s*([^;]+);", CSS).group(1)
+    ok("none" not in pop and "color-mix" in pop, "and it still paints: what floats is lifted")
 
 
 @test
 def t_a_rising_number_is_not_congratulated_in_green():
     """gizmo paints metrics where a rise is bad news - unfulfilled orders,
-    at-risk customers - so a green "up" reads as approval of a number the
-    merchant needs to worry about. Nothing here spends colour on direction.
-
-    The KPI chip has since been demoted a second time: a solid near-black pill
-    made the CHANGE the loudest mark on a card whose subject is the figure, so
-    the up chip is a neutral tint under the value's own weight. The rule that
-    matters is unchanged - no green, and the tinted down chip is the only mark
-    in the row that pulls the eye."""
-    up = re.search(r"\.delta\.up \{[^}]*\}", CSS)
-    ok(up, "the .delta.up rule is still there")
-    ok("var(--surface-sunken)" in up.group(0) and "var(--text-primary)" in up.group(0),
-       "the up chip is a neutral tint carrying full ink, not a fill: " + up.group(0)[:70])
-    ok("var(--action-primary)" not in up.group(0),
-       "and no longer outweighs the 30px figure it annotates")
-    for sel in (r"\.delta\.up", r"\.prod-chip \.cmp\.up"):
+    at-risk customers - so a green "up" there reads as approval of a number the
+    merchant needs to worry about. Since the mix (2026-10-06, spec 6) a change
+    chip is green or red, but by what the change MEANS, never by its direction
+    alone: the arrow and a hidden word carry the direction."""
+    ok("function deltaTone(label, trend, better) {" in SCRIPT, "a change's tone is worked out, not read off its direction")
+    bad = SCRIPT.split("const RISE_IS_BAD = [")[1].split("]")[0]
+    for k in ("'unfulfilled'", "'at risk'", "'position'", "'overdue'"):
+        ok(k in bad, "a rise in " + k + " is bad news, so it is not green")
+    ok("changeChip(m.trend, m.delta, deltaTone(m.label, m.trend, m.better))" in SCRIPT, "the KPI chip asks")
+    ok(not re.search(r"\.delta\.up \{[^}]*var\(--success\)", CSS), "no rule paints a rise green because it is a rise")
+    good = CSS.split("\n        .delta.good {")[1].split("}")[0]
+    ok("color: var(--success)" in good and "background: var(--success-bg)" in good, "a good change is the green pair")
+    worse = CSS.split("\n        .delta.bad {")[1].split("}")[0]
+    ok("color: var(--error)" in worse and "background: var(--error-bg)" in worse, "a bad one the red pair")
+    for sel in (r"\.prod-chip \.cmp\.up",):
         rule = re.search(sel + r" \{[^}]*\}", CSS)
-        ok(rule, "the %s rule is still there" % sel)
-        ok("var(--success)" not in rule.group(0), "and %s spends no green on direction alone" % sel)
-    # The product list's compare chip is the same kind of mark, so it wears the
-    # same neutral tint: as a filled black pill it was the heaviest thing on
-    # every product row and read as a button (2026-09-23 design sweep).
-    cmp_up = re.search(r"\.prod-chip \.cmp\.up \{[^}]*\}", CSS)
-    ok("var(--surface-sunken)" in cmp_up.group(0) and "var(--action-primary)" not in cmp_up.group(0),
-       "the product comparison chip matches the KPI change chip")
-    # The tinted half of the pair stays, because red IS the reference's one tint.
-    down = re.search(r"\.delta\.down \{[^}]*\}", CSS)
-    ok(down and "var(--error)" in down.group(0),
-       "while a falling number keeps the reference's red")
+        ok(rule and "var(--success)" not in rule.group(0), "the product comparison chip spends no green on direction either")
+    # Review (6 October 2026): a report's and a chat answer's metrics can be labelled anything, so colour only a
+    # label whose meaning is KNOWN; any other label gets the neutral chip, with its arrow and its hidden word.
+    ok("const RISE_IS_GOOD_FIRST = [" in SCRIPT and "const RISE_IS_GOOD = [" in SCRIPT and "function changeChip(" in SCRIPT,
+       "the tone lists and the chip builder are there")
+    words = SCRIPT.split("const RISE_IS_BAD = [")[1].split("]")[0]
+    for k in ("'refund'", "'return'", "'cancel'", "'churn'", "'bounce'", "'abandon'", "'cost'", "'complaint'", "'chargeback'", "'dispute'"):
+        ok(k in words, "a rise in " + k + " is bad news")
+    ok(".chat-metrics .delta:is(.good, .bad)" in CSS, "no chip in a chat answer is coloured, whatever its direction")
+    ok(".delta.flat:not(.up):not(.down) { padding-left: var(--sp-2); }" in CSS, "and a neutral chip that has an arrow keeps the arrow's 4")
 
 
 @test
@@ -3651,49 +3846,6 @@ def t_both_charts_curve_through_one_function():
 
 
 @test
-def t_nothing_that_draws_an_edge_sits_on_the_cards_edge():
-    """Cameron photographed two of these: the aged-debt bar running into the
-    card's border, and the SEO insight cards - white, bordered - flush inside a
-    white bordered card.
-
-    One cause. `.card > *` hands every child the 16px inset as PADDING, which
-    is right for a table or a composer bar that should meet the card's edge
-    with only its content inset. Padding sits INSIDE the border box, so a child
-    with a border of its own still spans the full width and its border lands
-    exactly on the card's. Those take the inset as MARGIN instead."""
-    rule = re.search(r"\.card > :is\(\.lia-bar, \.lbl-row, \.ktable-wrap, \.empty[^)]*\),\s*\n\s*"
-                     r"\.card-bleed > \.empty \{([^}]*)\}", CSS)
-    ok(rule, "the gutter exception is still there")
-    body = rule.group(1)
-    ok("margin-left: var(--sp-4)" in body and "margin-right: var(--sp-4)" in body,
-       "and it insets by margin, which is outside the border box")
-    bar = re.search(r"\.card > \.lia-bar, \.card > \.ktable-wrap \{([^}]*)\}", CSS)
-    ok(bar and "padding-left: 0" in bar.group(1),
-       "and the two with no padding of their own drop what they were given, "
-       "or they inset twice")
-    # The insight rows used to be bordered cards, and .insights held the gutter
-    # as padding to inset them. They are hairline ROWS on the card now, so the
-    # same requirement - a bleed child is inset by 16, and never by a mechanism
-    # that puts two borders on one line - is met a step lower down: the row
-    # sheds its frame and carries the gutter in its own padding, the way an
-    # .action row already does. The rule between two rows has to reach the
-    # card's edge, so the wrapper hands out nothing.
-    rows = re.search(r"\.card-bleed > \.insights > \.insight,[\s\S]{0,220}?\{([^}]*)\}", CSS)
-    ok(rows and "border: 0" in rows.group(1),
-       "a list already inside a card draws no second frame of its own")
-    ok(re.search(r"\.card-bleed > \.insights > \.insight \+ \.insight,[\s\S]{0,260}?"
-                 r"\{[^}]*border-top: var\(--bw-hairline\) solid var\(--border-default\)", CSS),
-       "the rows are separated by one hairline instead")
-    ins = re.search(r"^\s*\.insight \{([^}]*)\}", CSS, re.M)
-    ok(ins and "padding: var(--sp-3) var(--sp-4)" in ins.group(1),
-       "and the 16px gutter comes from the row's own padding, so the hairline "
-       "between two rows reaches the card's edge")
-    # The bleed wrapper must still do its actual job for tables.
-    ok(".card-bleed .ktable-wrap { border: 0" in CSS,
-       "and a table still runs to the card edge with no second frame")
-
-
-@test
 def t_a_block_with_its_own_heading_is_not_swallowed_by_the_one_above():
     """The page-chat panel is a section-title plus its own .card. cardifySections
     collected everything after a heading until the next DIRECT-child heading, and
@@ -3716,8 +3868,8 @@ def t_one_rhythm_down_the_page():
     rule = re.search(r"\.ov-wrap > \*:not\(\.run-gate\) \{([^}]*)\}", CSS)
     ok(rule, "the page rhythm rule is still there")
     ok("margin-bottom: var(--page-rhythm)" in rule.group(1)
-       and re.search(r"\.ov-wrap \{[^}]*--page-rhythm: var\(--sp-6\)", CSS),
-       "and it is the reference's 24px")
+       and re.search(r"\.ov-wrap \{[^}]*--page-rhythm: var\(--sp-9\)", CSS),
+       "and it is the mix's 48 between sections")
     ok("margin-top: 0" in rule.group(1),
        "with stray top margins zeroed, or the two stack up")
     head = re.search(r"\.ov-wrap > \.section-title \{([^}]*)\}", CSS)
@@ -3745,8 +3897,8 @@ def t_a_heading_keeps_its_12px_on_a_phone():
        "and both exceptions come after it")
     phone = [b for b in re.findall(r"@media \(max-width: 640px\) \{((?:[^{}]|\{[^{}]*\})*)\}", CSS)
              if re.search(r"(?<![\w-])\.ov-wrap \{", b)]
-    ok(phone and re.search(r"\.ov-wrap \{[^}]*--page-rhythm: var\(--sp-4\)", phone[0]),
-       "the phone gap is the property re-pointed to 16, not a margin rule")
+    ok(phone and re.search(r"\.ov-wrap \{[^}]*--page-rhythm: var\(--sp-7\)", phone[0]),
+       "the phone gap is the property re-pointed to 32, not a margin rule")
 
 
 @test
@@ -3809,7 +3961,7 @@ def t_the_size_alert_leads_to_the_thing_that_fixes_it():
 @test
 def t_the_resolve_button_is_hidden_when_the_server_would_refuse_it():
     """A button that always errors is worse than no button."""
-    ok("if (sizeRulesCanEdit)" in SCRIPT, "the action is gated on the grant")
+    ok(re.search(r"if \(sizeRulesCanEdit(\)| && )", SCRIPT), "the action is gated on the grant")
     ok("let sizeRulesCanEdit = false" in SCRIPT,
        "defaulting to hidden, so a failed permission read does not offer it")
     ok("function loadSizeRulePerm(" in SCRIPT
@@ -3817,20 +3969,6 @@ def t_the_resolve_button_is_hidden_when_the_server_would_refuse_it():
                                            SCRIPT.index("function coverageCard(") + 400],
        "asked whenever the card draws, not only when the check is run by hand - "
        "the weekly scan puts the card on screen without runCoverage being called")
-
-
-@test
-def t_a_table_in_a_card_is_inset_rather_than_welded_to_it():
-    """The rule's own comment says the table gets "its OWN box, inset by the
-    card's padding" - a 10px frame inside a 14px card. It was not inset: as a
-    direct card child it took the gutter as PADDING, which sits inside its own
-    border box, so its border landed on the card's and its text floated 30px in
-    while the line sat at 1px. Measured on Xero sync and the size check."""
-    rule = re.search(r"\.card > \.lia-bar, \.card > \.ktable-wrap \{([^}]*)\}", CSS)
-    ok(rule and "padding-left: 0" in rule.group(1),
-       "the wrap drops the padding it was handed")
-    ok(re.search(r"\.card > :is\(\.lia-bar, \.lbl-row, \.ktable-wrap", CSS),
-       "and takes the inset as margin instead, like the other boxed children")
 
 
 @test
@@ -3849,59 +3987,6 @@ def t_no_borderless_strip_is_sliced_by_someone_elses_border():
        "the strip no longer scrolls under the card's border")
     ok("flex-wrap: wrap" in who,
        "it wraps, so every person is whole and nothing meets an edge it should not")
-
-
-@test
-def t_a_box_painted_inside_a_card_sits_inside_its_gutter():
-    """The card hands its 16px gutter to every child as PADDING. That is right
-    for prose and for a table that meets the card's edge, and wrong for
-    anything that paints its own box: padding sits inside the box, so the box
-    still spans the full card and its colour lands on the card's border. The
-    Xero sync last-run notice went out that way twice - red touching the frame
-    on both sides - and each time the measurement was read as "inside the
-    padding" because 1px from the border IS the padded child's edge.
-
-    The CSS keeps one list of the boxed classes the script puts straight into
-    a card; those take the gutter as MARGIN. Every class that paints a box in
-    a card must be on it, and the notice must still be one of them."""
-    m = re.search(r"\.card > :is\(([^)]*)\),\s*\.card-bleed > \.empty \{([^}]*)\}", CSS)
-    ok(m is not None, "the margin-inset list for boxed children of a card is still one rule")
-    listed = {c.strip() for c in m.group(1).split(",")}
-    body = m.group(2)
-    ok("margin-left: var(--sp-4)" in body and "margin-right: var(--sp-4)" in body
-       and "width: auto" in body,
-       "the listed classes take the gutter as margin and let auto width fill it")
-    for cls in (".cx-health", ".msg", ".mail-sendwarn", ".disp-warn", ".empty", ".mail-empty",
-                ".lbl-row", ".lia-bar", ".ktable-wrap",
-                # A RULE between rows is an edge too, and these three shipped
-                # without it. .fc-algo put every source name, every line of
-                # prose and both ends of every divider 1px from the card's
-                # border, because its padding shorthand's 0 had quietly
-                # overridden the card's 16px gutter.
-                ".fc-algo", ".fc-alert", ".know-body", ".fc-drive-tot", ".fc-split-bar"):
-        ok(cls in listed, cls + " is inset by margin, not welded to the card's border")
-    # The inset must not be taken TWICE. A child that paints a filled box keeps
-    # its own padding, because that padding sits inside the box it draws. A
-    # child that only draws a RULE has no box to pad, so the card's gutter
-    # lands on top of the margin and pushes its text 32px in against a
-    # card-sub at 16px - which is what happened the moment .fc-algo was first
-    # moved onto this list.
-    _ZEROED_BY_THE_CARD_RULE = (".lia-bar", ".ktable-wrap")
-    for cls in sorted(listed):
-        own = " ".join(re.findall(r"(?:^|\})\s*" + re.escape(cls) + r"\s*\{([^}]*)\}", CSS, re.M))
-        paints_fill = re.search(re.escape(cls) + r"[^{]*\{[^}]*background", CSS) is not None
-        draws_rule = "border-top:" in own or "border-bottom:" in own
-        if draws_rule and not paints_fill:
-            ok("padding-inline: 0" in own or cls in _ZEROED_BY_THE_CARD_RULE,
-               cls + " draws a rule, so its horizontal padding is 0 and the margin "
-                     "alone insets it, or its text sits 32px in from a 16px card")
-    notice = CSS.split(".cx-health {")[1].split("}")[0]
-    ok("padding:" in notice, "the notice keeps its own padding inside its box")
-    ok(".cx-health.bad { background:" in CSS and ".cx-health.ok { background:" in CSS,
-       "the notice paints a box, which is why it has to be on the list")
-    ok("el('div', 'cx-health bad')" in SCRIPT and "el('div', 'cx-health ok')" in SCRIPT
-       and "sCard.append(h)" in SCRIPT,
-       "the script still puts the notice straight into the Connection card")
 
 
 @test
@@ -3930,16 +4015,17 @@ def t_a_forecast_is_drawn_as_a_range_not_as_three_competing_lines():
     ok("'P90'" not in fc and "'P10'" not in fc,
        "the forecast chart no longer draws P10 and P90 as their own lines")
     ok("band: band" in fc and "splitAt:" in fc, "it passes the interval and the handover")
-    ok("dash: true" in fc and "lead: true" in fc,
-       "the forecast is the same line continuing, dashed - not a dimmed comparison line")
+    ok("dash: true" not in fc and "lead: true" in fc,
+       "the forecast is the same line continuing, solid as the mockup draws it - not a dimmed comparison line (spec 6: only the plan tick is dashed)")
     ok("joins(i, r.p10)" in fc and "joins(i, r.p50)" in fc,
        "and both meet the last actual value, so the band pinches to nothing at today")
     # Said in words, because a shaded band explains itself only to somebody who
     # already reads forecast charts, and this page is read by directors. Said
     # ONCE, in the chart's own legend: a second key under the plot repeated it
     # while the legend above showed two identical squares.
-    ok("name: 'Taken'" in fc and "name: 'Expected'" in fc and "'Likely range, 8 times in 10'" in fc,
-       "and the legend says in words what its three treatments mean")
+    ok("name: 'Taken'" in fc and "name: 'Expected'" in fc and "name: 'Likely range'" in fc
+       and "'Likely range, 8 times in 10.'" in fc,
+       "the legend says in words what its three treatments mean, and About this chart how often the range holds")
     ok("fc-key" not in SCRIPT and "fc-key" not in CSS, "in one key, not two")
 
 
@@ -3948,12 +4034,12 @@ def t_the_forecast_page_never_dresses_an_estimate_as_a_banked_figure():
     """Never make predicted money look like confirmed money. The overview
     separates the two in the reader's own words and says out loud that the
     forward figure is an expectation."""
-    ov = SCRIPT.split("function fcOverviewCard(", 1)[1].split("\n        function ", 1)[0]
-    ok("taken so far in" in ov, "what is banked is labelled as taken")
+    ov = fn_src("function fcBand(latest, sc) {")
+    ok("'Taken so far'" in ov, "what is banked is labelled as taken")
     ok("It is an expectation, not a commitment." in ov,
        "and what is forward is labelled as an expectation")
     dr = SCRIPT.split("function fcDriversCard(", 1)[1].split("\n        function ", 1)[0]
-    ok("Already taken" in dr and "Still expected" in dr,
+    ok("'Taken so far'" in dr and "'Still expected'" in dr,
        "the driver breakdown splits the month the same way")
     # The honest decomposition. This model forecasts the shop's takings from the
     # shop's own history: there is no invoice ledger behind it, so it must not
@@ -4059,17 +4145,17 @@ def t_the_forecast_tab_shows_the_five_plain_models_and_what_they_scored():
        "the plan's own target sits beside them for comparison")
     ok(".sort(" in fn and "mape" in fn, "ordered by what each scored, best first")
     # Directors read this table, and none of these names explains itself.
-    ok("name.title = m.about" in fn and "has-help" in fn and "name.tabIndex = 0" in fn,
-       "every source says on hover what it does, what it assumes and when it misleads")
+    ok("name.append(infoButton(m.name, { title: m.name, body: m.about }))" in fn,
+       "every method says behind an info button what it does, what it assumes and when it misleads")
     ok("helpHead('Typical error'" in fn and "helpHead('Bias'" in fn,
        "and so do the two columns nobody can be expected to read cold")
-    ok("'Source'" in fn, "the column is what it is: a source, not a model")
+    ok("'Method'" in fn, "the column is what it is: a method (Cameron's word), not a model")
     # Twelve rows is a lot to land on someone who opened the page to read one
     # number. The choice of how much to show is remembered per person.
-    ok("filterTabs(FC_ROWS, mode, setFcRowsMode)" in fn, "the reader chooses how much to see")
+    ok("segmented(FC_ROWS, mode, setFcRowsMode)" in fn, "the reader chooses how much to see")
     ok("mode === 'one' ? ranked.slice(0, 1)" in fn and "ranked.slice(0, 3)" in fn,
        "one row, three rows, or all of them")
-    ok("'Just the headline'" in SCRIPT and "'The three quoted'" in SCRIPT and "'Every source'" in SCRIPT,
+    ok("'Just the headline'" in SCRIPT and "'The three quoted'" in SCRIPT and "'Every method'" in SCRIPT,
        "named so the choice explains itself")
     ok("localStorage.setItem(LS_FCROWS" in SCRIPT and "return FC_ROWS.some(r => r[0] === v) ? v : 'three'" in SCRIPT,
        "remembered, defaulting to the three that are quoted, and a junk value falls back rather than breaking")
@@ -4141,16 +4227,16 @@ def t_the_forecast_tab_shows_the_five_plain_models_and_what_they_scored():
     # does not have to read about Theta to trust it; the reader who wants to
     # opens one drawer and finds all of it.
     ok("fcUntitled(fcOptimisedCard(latest))" in SCRIPT and "fcUntitled(fcAlgorithmsCard(latest))" in SCRIPT,
-       "the tab draws both, under How this forecast works")
-    ok(SCRIPT.index("'How this forecast works'") > SCRIPT.index("fcDriversCard(latest, sc)"),
-       "and it sits below the money, never above it")
+       "the tab draws both, as pages under How it works")
+    ok("fcHowItWorks(c, latest, sc)" in SCRIPT.split("function renderForecast()")[1][:3000],
+       "and they wait behind the header's button, never dealt above the money")
     ok("!sn || !sn.available" in fn and "sn.reason" in fn,
        "a run with too little history says so instead of drawing an empty table")
     ok("fcSanityCard(latest, sc)" in SCRIPT, "and the tab actually calls it")
-    # It is a sanity CHECK: it belongs above the month table it is checking.
-    ok(SCRIPT.index("fcSanityCard(latest, sc)")
-       < SCRIPT.index("'Month by month against ' + sc"),
-       "the check is read before the thing it checks")
+    # Since the mix (2026-10-06) the four tables are list rows in the mockup's
+    # order, each opening a window; the check sits beside what it checks.
+    ok(SCRIPT.index("label: 'Month by month against ' + sc") < SCRIPT.index("label: 'Every method, side by side'"),
+       "the month table, then every method beside it")
 
 
 # --- Web Interface Guidelines pass ------------------------------------------
@@ -4279,7 +4365,7 @@ def t_the_login_screen_knows_a_password_is_not_always_enough():
     step = step[:step.index("\n            async function finish")]
     ok("/api/auth/mfa-verify" in step, "which finishes against the verify route")
     ok("one-time-code" in step, "with the autocomplete that lets a phone fill it")
-    ok("recovery codes" in step, "and says what to do with a lost phone")
+    ok("recovery code" in step, "and says what to do with a lost phone: a recovery code works too")
 
 
 @test
@@ -4324,10 +4410,10 @@ def t_every_owner_tint_keeps_its_text_readable():
 
     inks = {k: _token(k) for k in ("text-primary", "text-secondary", "text-tertiary")}
     for name in TEAM_TINTS:
-        # .mrow specifically: the same name also styles the 8px presence dot,
-        # which takes the SOLID colour and carries no text, so a contrast floor
-        # does not apply to it.
-        m = re.search(r"\.mrow\.own-" + name + r"\s*\{[^}]*background:\s*var\(--owner-" + name + r"-bg\)", CSS)
+        # The owner TAG specifically (the mix: the row is no longer washed in the owner's tint): the same
+        # name also styles the 8px presence dot, which takes the SOLID colour and carries no text, so a
+        # contrast floor does not apply to it.
+        m = re.search(r"\.mail-owner\.own-" + name + r"\s*\{[^}]*background:\s*var\(--owner-" + name + r"-bg\)", CSS)
         ok(m, "there is a tint for " + name)
         # The tint is DERIVED: the hue at 10% over white. Compute the same mix
         # the browser will, and measure the inks against that.
@@ -4345,24 +4431,19 @@ def t_the_owner_tint_did_not_quietly_take_unreads_signal():
     """Handing the row background to the owner costs unread one of its four
     signals. It has to keep the other three, or a claimed unread email stops
     looking unread - which on a shared inbox means a customer waits."""
-    unread = CSS.split(".mrow.unread {")[1].split("}")[0]
-    ok("background:" not in unread,
-       "unread no longer claims the background: the owner has it")
-    ok("inset var(--bw-strong) 0 0" in unread, "but keeps the bar down its left")
-    ok(".mrow.unread .mfrom" in CSS and "var(--weight-medium)" in
+    ok("\n        .mrow.unread {" not in CSS, "the row is washed in nobody's tint now: the owner is a tag at its end")
+    ok(".mrow.unread .mfrom" in CSS and "var(--weight-semibold)" in
        CSS.split(".mrow.unread .mfrom {")[1].split("}")[0],
-       "and the bold sender, which is what Gmail leans on anyway")
+       "and unread keeps the 600 sender, which is what Gmail leans on anyway")
+    ok("background: var(--fill-mark)" in CSS.split(".munread::before {")[1].split("}")[0], "and the teal mark dot at the row's start")
 
 
 @test
 def t_a_selected_row_still_reads_as_selected_over_a_tint():
     """Selection is transient and deliberate - you are about to act on those
     rows - so it wins over whose they are."""
-    idx_sel = CSS.index(".mrow:is(.selected")
-    idx_own = CSS.index(".own-red")
-    ok(idx_own < idx_sel,
-       "the selected rule comes after the tints, so it overrides rather than "
-       "losing to whichever was written last")
+    ok(".mrow.own-red" not in CSS, "the row itself has no owner tint to lose to (the tint is the owner tag's)")
+    ok(".mrow:is(.selected" in CSS, "and the selected rule is there, a teal wash with its edge")
 
 
 @test
@@ -4658,8 +4739,12 @@ def t_escape_closes_the_dropdown_and_never_the_modal_behind_it():
 @test
 def t_the_keyboard_highlight_looks_exactly_like_the_mouse_one():
     """Two highlights that differ by a shade read as two different states."""
-    ok(re.search(r"\.crm-ta-drop button:hover[^{]*\.crm-ta-drop button\.on[^{]*\{", CSS),
-       "the keyboard highlight shares the hover rule rather than inventing a colour")
+    # Since the mix (2026-10-06) a hover lives in @media (hover: hover), so the
+    # two are two rules; they must still paint exactly the same thing.
+    on = re.search(r"\.crm-ta-drop button\.hot, \.crm-ta-drop button\.on \{([^}]*)\}", CSS)
+    hov = re.search(r"\.crm-ta-drop button:hover \{([^}]*)\}", CSS)
+    ok(on and hov and on.group(1).strip() == hov.group(1).strip(),
+       "the keyboard highlight paints exactly what the hover paints rather than inventing a colour")
 
 
 @test
@@ -5293,22 +5378,6 @@ def t_the_serial_sticker_prints_on_the_production_printer_with_its_codes():
 
 
 @test
-def t_a_row_inset_by_a_margin_is_not_also_a_full_width_row():
-    """.lbl-row carries width:100% so button rows fill their container. Inside a
-    card it ALSO takes a 16px margin each side, and 100% plus two margins is 32px
-    wider than the card: every row in every card hung its right border out past
-    the frame. Whichever half is removed, the two must never coexist."""
-    m = re.search(r"\.card > :is\(\.lia-bar, \.lbl-row.*?\{(.*?)\}", CSS, re.S)
-    ok(m is not None, "the rule that insets card rows by a margin is still there")
-    inset = m.group(1)
-    ok("margin-left" in inset, "and it is still a margin that does the insetting")
-    row = re.search(r"\n\s*\.lbl-row \{(.*?)\}", CSS, re.S)
-    ok(row is not None, ".lbl-row is still declared")
-    ok("width: auto" in inset or "width: 100%" not in row.group(1),
-       "an inset row must either reset its width or not claim 100% in the first place")
-
-
-@test
 def t_the_topbar_button_hides_itself_rather_than_naming_the_tabs_that_want_it():
     """The corner button was hidden by a list of view names, so every tab added
     after that list - Loan units - arrived with an empty 26px button in the
@@ -5327,11 +5396,15 @@ def t_loan_units_puts_three_stats_on_three_columns():
     """The shared grid is four columns wide. Three stats on it leave a hole where
     a fourth would be, which reads as a KPI that failed to load rather than as a
     row of three."""
+    # Since 2026-10-05 they are the one figure card every page uses: the strip,
+    # whose twelve tracks share any count across the row (three take a third each).
     fn = fn_src("function renderLoans(")
-    head = fn[:fn.index("mgrid.classList")] if "mgrid.classList" in fn else fn
-    ok("metrics-3" in fn, "the three-column modifier is applied")
-    ok(head.count("{ label: ") == 3,
-       "and there are still exactly three stats - a fourth means dropping metrics-3")
+    ok("const mgrid = metricsStrip([" in fn, "the counts are the app's one figure strip")
+    ok(".metrics-strip > .stat:nth-child(4n+3):last-child { grid-column: span 4; }" in CSS
+       and ".metrics.metrics-strip { grid-template-columns: repeat(12, minmax(0, 1fr)); }" in CSS,
+       "which seats three as thirds of its twelve tracks, no hole")
+    head = fn[fn.index("const mgrid = metricsStrip(["):]
+    ok(head[:600].count("{ label: ") == 3, "and there are still exactly three stats")
 
 
 @test
@@ -5559,8 +5632,8 @@ def t_auto_run_shows_the_services_state_not_what_this_tab_last_clicked():
     ok("connAuto.enabled" in seg, "and reads the service's own flag")
     ok("'Auto Run on'" in seg and "'Auto Run off'" in seg,
        "which is spelled out, not left to a toggle's position")
-    ok("Nothing runs on its own" in seg,
-       "and OFF says what off means, rather than only being unlit")
+    ok("'Orders go only when '" in seg,
+       "and OFF says what off means, rather than only being unlit (one line since the mix)")
 
 
 @test
@@ -5674,10 +5747,10 @@ def t_every_control_family_declares_its_states():
     families = {".btn": ("hover", "active", "disabled"), ".btn-primary": ("hover", "active", "disabled"),
                 ".btn-danger": ("hover", "active"), ".icon-btn": ("hover", "active", "disabled"),
                 ".nav-item": ("hover", "active"), ".chip": ("hover", "active", "disabled"),
-                ".lbl-segbtn": ("hover", "active", "disabled"), ".mail-claim": ("hover", "active", "disabled"),
+                ".segmented > button": ("hover", "active", "disabled"), ".mail-claim": ("hover", "active", "disabled"),
                 ".send": ("hover", "active", "disabled"), ".dmenu-item": ("hover", "active"),
                 ".convo": ("hover", "active"), ".mem-btn": ("hover", "active"), ".track-btn": ("hover", "active"),
-                ".ptab": ("hover", "active"), ".ftab": ("hover", "active"),
+                ".tab": ("hover", "active"),
                 ".wg-hide": ("hover", "active", "disabled")}
     for sel, states in families.items():
         for st in states:
@@ -5695,9 +5768,9 @@ def t_every_control_family_declares_its_states():
        "and cancelled")
     ok("function setBusy(" in SCRIPT and "function markInvalid(" in SCRIPT, "the script owns the two ARIA entry points")
     ok("setBusy(btn, true)" in SCRIPT and "markInvalid(reasonIn, true)" in SCRIPT, "and uses them")
-    for sel, attr in ((".nav-item", 'aria-current="page"'), (".btn", "aria-pressed"), (".ptab", "aria-current"),
-                      (".ftab", "aria-selected"), (".toggle", "aria-checked"), (".mrow", "aria-selected"),
-                      (".files-row", "aria-selected"), (".lbl-segbtn", "aria-pressed"), (".stat.stat-pick", "aria-pressed")):
+    for sel, attr in ((".nav-item", 'aria-current="page"'), (".btn", "aria-pressed"), (".tab", "aria-current"),
+                      (".tab", "aria-pressed"), (".toggle", "aria-checked"), (".mrow", "aria-selected"),
+                      (".files-row", "aria-selected"), (".segmented > button", "aria-pressed"), (".stat.stat-pick", "aria-pressed")):
         ok(re.search(re.escape(sel) + r":is\([^)]*" + attr, CSS), "%s's selected rule has its %s twin" % (sel, attr))
     ok("n.setAttribute('aria-current', 'page')" in SCRIPT, "and the nav actually sets aria-current")
 
@@ -5707,17 +5780,19 @@ def t_focus_is_declared_once_per_kind():
     """Controls draw the outline, fields draw the ring, each written once. The
     field rule had been copied nine times, once per component, and one copy
     drew the outline instead."""
-    ok(CSS.count("box-shadow: var(--focus-ring)") == 3,
-       "the ring is read by the field rule and by the two composite fields that "
-       "focus as a whole (the radio card, the composer box), and nowhere else")
-    ok(':is(input, textarea, select, [contenteditable="true"]):focus { outline: none; border-color: var(--action-primary); box-shadow: var(--focus-ring); }' in CSS,
+    ok(CSS.count("box-shadow: var(--focus-ring)") == 4,
+       "the ring is read by the field rule and by the three composite fields that "
+       "focus as a whole (the radio card, the composer box, the search field), and nowhere else")
+    ok(':is(input, textarea, select, [contenteditable="true"]):focus { outline: none; box-shadow: var(--focus-ring); }' in CSS,
        "one rule for every field, contenteditable included")
     ok(not re.search(r"\.[\w-]+:focus \{[^}]*(focus-ring|focus-outline)", CSS),
        "no component carries its own copy of either focus look")
-    ok(CSS.count("outline: var(--focus-outline)") == 4,
-       "the outline is read by the control rule and by three deliberate variants (the "
-       "custom-drawn checkbox, the menu item which insets it, and a widget card just dropped "
-       "in Customize mode, which borrows it for --dur-landed), and nowhere else")
+    ok(CSS.count("outline: var(--focus-outline)") == 7,
+       "the outline is read by the control rule and by six deliberate variants (the "
+       "custom-drawn checkbox, the menu item which insets it, a widget card just dropped "
+       "in Customize mode, which borrows it for --dur-landed, and the info button, which "
+       "draws it on its 24 face so a phone's 40 target never shows, a chart's plot, one stop for the arrow keys, "
+       "and a segmented choice, which draws it on the choice it shows rather than on the 40 target round it), and nowhere else")
 
 
 @test
@@ -5725,7 +5800,9 @@ def t_the_header_is_one_implementation_with_one_collapse_point():
     """Measured 2026-09-07: one .topbar, 48px on every view at 375, 640, 760,
     761, 900 and 1200, no overflow, no overlap. The one defect was a long
     conversation title wrapping to 63px inside the 48px bar."""
-    ok(HTML.count('class="topbar"') == 1 and CSS.count(".topbar {") == 1, "one header, one rule")
+    # The mix (2026-10-06): the phone's ink bar restyles the bar inside its own
+    # breakpoint, so the one base rule is the one at the stylesheet's indent.
+    ok(HTML.count('class="topbar"') == 1 and CSS.count("\n        .topbar {") == 1, "one header, one base rule")
     ok(".topbar { height: var(--topbar-h);" in CSS and "--topbar-h: 48px" in CSS, "at the shell's height token")
     h1 = CSS.split(".topbar h1 {")[1].split("}")[0]
     for prop in ("min-width: 0", "overflow: hidden", "text-overflow: ellipsis", "white-space: nowrap"):
@@ -5736,12 +5813,22 @@ def t_the_header_is_one_implementation_with_one_collapse_point():
     # The trigger is always there, as the reference's is: on a phone it opens
     # the drawer, on a desk it folds the sidebar away. The drawer itself still
     # happens at exactly one width.
-    ok(".menu-btn { display: inline-grid; }" in CSS, "the trigger is always shown")
+    # The mix (2026-10-06): on a desk the brand row's Hide sidebar folds the
+    # sidebar and the top bar's trigger brings it back; on a phone that trigger
+    # opens the drawer. One rule says which, by whether the sidebar is shown.
+    ok(".menu-btn { display: inline-grid; }" in CSS, "the top bar's trigger exists")
+    hits = []
     for m in re.finditer(r"@media[^{]*\{", CSS):
         depth, i = 1, m.end()
         while i < len(CSS) and depth:
             depth += {"{": 1, "}": -1}.get(CSS[i], 0); i += 1
-        ok(".menu-btn" not in CSS[m.end():i], "and no breakpoint hides or reveals it: " + m.group(0))
+        if ".menu-btn" in CSS[m.end():i]:
+            hits.append(CSS[m.start():i])
+    # (ok, not eq: this test sits above the line that defines eq, and the
+    # harness runs each test as it is declared.)
+    ok(hits == ["@media (min-width: 901px) { body:not(.sidebar-collapsed) .menu-btn { display: none; } }"],
+       "one breakpoint rule shows or hides it, by whether the sidebar is in view: %r" % hits)
+    ok("$('side-hide').onclick = toggleSidebar;" in SCRIPT, "and Hide sidebar is the same toggle")
     ok(re.search(r"@media \(max-width: 900px\)[^@]*?\.sidebar \{ position: fixed;", CSS),
        "the sidebar leaves the flow at 900 and only there (every portrait iPad gets the whole width)")
     ok("@media (min-width: 901px) { body.sidebar-collapsed .sidebar { margin-left: calc(-1 * var(--sidebar-w)); } }" in CSS,
@@ -5809,12 +5896,10 @@ def t_an_icon_size_comes_from_the_scale_and_not_from_the_rule():
             m = re.search(r"(?<![\w-])" + prop + r"\s*:\s*([^;}]+)", body)
             if m and re.search(r"\d+(px|rem|em)", re.sub(r"var\([^)]*\)", "", m.group(1))):
                 icons.append(s2[:50] + " { " + prop + ": " + m.group(1).strip() + " }")
-    # .run-gate .rg-ic is the one deliberate outlier: a 26px badge glyph that
-    # is a piece of illustration, not an interface icon on the scale.
-    icons = [i for i in icons if "rg-ic" not in i]
     ok(not icons, "%d icon sizes bypass the scale: %s" % (len(icons), icons[:5]))
-    for t in ("--icon-xs", "--icon-sm", "--icon-md", "--icon-lg", "--icon-xl"):
+    for t in ("--icon-xs", "--icon-sm", "--icon-md", "--icon-lg"):    # no 20: every tile's glyph is 16 (spec 4.3)
         ok(t + ":" in CSS, "the icon scale still defines " + t)
+    ok("--icon-xl" not in CSS, "and --icon-xl, which nothing reads now, is gone")
 
     # Square boxes and status dots, the same way. Forty-eight rules set an
     # equal width and height in TWENTY-ONE different sizes; 22, 26, 30, 34 and
@@ -5828,13 +5913,14 @@ def t_an_icon_size_comes_from_the_scale_and_not_from_the_rule():
         h = re.search(r"(?<![\w-])height\s*:\s*(\d+(?:\.\d+)?)px", body)
         if not (w and h) or w.group(1) != h.group(1): continue
         v = float(w.group(1))
-        # A 1px square is a hairline or a screen-reader trick, and .rg-ic is an
-        # illustration rather than an interface box. Both are deliberate.
-        if v <= 1 or "rg-ic" in s2: continue
+        # A 1px square is a hairline or a screen-reader trick: deliberate.
+        if v <= 1: continue
         boxes.append(s2[:44] + " { %spx }" % int(v))
     ok(not boxes, "%d square boxes bypass the scale: %s" % (len(boxes), boxes[:5]))
+    # The mix (2026-10-06) draws every dot at the one 8px step: --dot-lg left
+    # with its last reader, the old Why key.
     for t in ("--box-xs", "--box-sm", "--box-md", "--box-lg", "--box-xl", "--box-2xl",
-              "--dot-md", "--dot-lg"):
+              "--dot-md"):
         ok(t + ":" in CSS, "the box and dot scales still define " + t)
 
     # A knob inside a switch is DERIVED from its track, like a thumb in a
@@ -5886,7 +5972,10 @@ def t_every_defined_token_is_read():
     stylesheet, the script or the composer."""
     root = CSS.split(":root {")[1].split("\n        }")[0]
     defined = re.findall(r"(--[\w-]+)\s*:", root)
-    readers = CSS + SCRIPT + COMPOSER
+    # The Design page's own list of names (MIX_TOKENS) only shows a token; it is not a reader of it.
+    ok("const MIX_TOKENS = [" in SCRIPT and "];" in SCRIPT.split("const MIX_TOKENS = [", 1)[1], "the Design list is there to be left out")
+    pre, rest = SCRIPT.split("const MIX_TOKENS = [", 1)
+    readers = CSS + pre + rest.split("];", 1)[1] + COMPOSER
     unread = [d for d in defined if "var(" + d + ")" not in readers and "'" + d + "'" not in readers
               and "'" + d.replace("--owner-", "--owner-") + "'" not in readers]
     # the owner hues are read by name composition: tokenValue('--owner-' + k)
@@ -5918,28 +6007,17 @@ def t_the_script_paints_from_tokens_only():
 
 @test
 def t_a_boxed_child_of_a_card_is_inset():
-    """Sweep, 2026-09-07: the Xero run banner (.msg) and the Mail send warning
-    sat flush against their card's border on both sides. A card pads its
-    children, so a child that paints its own box has to take the inset as a
-    margin instead, and the list of those is derived here: every painted class
-    the script appends straight into a card must be in it."""
-    m = re.search(r"\.card > :is\(([^)]*)\)", CSS)
-    ok(m, "the inset list exists")
-    inset = {c.strip().lstrip(".") for c in m.group(1).split(",")}
-    for c in ("msg", "mail-sendwarn", "disp-warn", "mail-empty", "lbl-row", "ktable-wrap", "lia-bar", "empty"):
-        ok(c in inset, "." + c + " is inset")
-    appended = set(re.findall(r"(?:sCard|card|box|host|wrap)\.append\(el\('div', '([a-z0-9-]+)[' ]", SCRIPT))
-    for c in sorted(appended):
-        rule = re.search(r"(?<![\w-])\." + re.escape(c) + r"(?![\w-])\s*\{([^}]*)\}", CSS)
-        if not rule: continue
-        b = rule.group(1)
-        if re.search(r"(?<![\w-])(background|border)(?!-radius|-collapse)\s*:", b) and "transparent" not in b and "none" not in b.split("background")[-1][:12]:
-            ok(c in inset, "." + c + " paints a box and is appended to a card, so it must be inset")
-    ok(".card > :is(.msg, .mail-sendwarn, .disp-warn) { max-width: 56rem; }" in CSS, "and a notice reads as prose, not a ribbon")
-    ok("max-width: calc(100% - 2 * var(--sp-4))" in CSS.split("#view-connector .card > .lbl-row {")[1].split("}")[0],
-       "a fit-content row counts its own inset, so it cannot hang out of the card at 375")
+    """Sweep, 2026-09-07: boxed notices sat flush against their card's border.
+    Since the mix (2026-10-06) a section has no border to sit against: its
+    content runs on the page's text edge, so a notice spans its section and
+    its words keep the reading measure. The sweep's other lessons stay."""
+    ok(not re.search(r"\.card > :is\(", CSS), "no list of children taking a gutter back as a margin")
+    ok(".load-failed > div:first-child { max-width: var(--measure); }" in CSS and ".card > :is(.msg, .mail-sendwarn, .disp-warn) { max-width" not in CSS,
+       "and a notice spans its card while its words keep the reading measure")
+    ok("max-width: 100%" in CSS.split("#view-connector .card > .lbl-row {")[1].split("}")[0],
+       "a fit-content row never runs past its section at 375")
     ok(".ov-wrap > * + .run-gate { margin-top: 0; }" in CSS, "the run gate centres itself only when it is the whole page")
-    ok("line-height: var(--lh-control)" in CSS.split(".lbl-segbtn {")[1].split("}")[0], "segmented buttons are 24 tall in a 32 strip")
+    ok("line-height: var(--lh-control)" in CSS.split("\n        .segmented > button {")[1].split("}")[0], "segmented buttons are 24 tall in a 32 strip")
     ok("const label = a.metric || a.title || a.detail || 'A change was recorded without a description';" in SCRIPT,
        "an alert row shows whatever its record carries")
     ok("board.append(el('div', 'empty', 'No pipeline stages are set up yet.'))" in SCRIPT, "an empty pipeline says so")
@@ -6817,8 +6895,8 @@ def t_every_report_view_with_several_blocks_names_its_cards():
         if view == "overview":
             ids += ["kpi-*"] if "wgKpiId(m.label)" in src else []
         ok(len(set(ids)) >= 2, "%s names %d cards: %r" % (view, len(set(ids)), ids))
-        ok("heroAct(" in src or (view == "mail" and "hero.append(heroAct(''))" in src),
-           "the %s header has the action slot Customize goes in" % view)
+        ok("heroAct(" in src or "pageHead({" in src or (view == "mail" and "mailHero(box)" in src),
+           "the %s header has the action slot Customize goes in (pageHead builds it since the mix)" % view)
     ok(len(ov_ids) >= 5, "and the Overview still names its own")
 
 
@@ -6867,14 +6945,14 @@ def t_a_held_card_scrolls_the_page_near_its_edge_and_stops_when_the_drag_ends():
 
 
 @test
-def t_a_header_keeps_its_tabs_at_16_in_the_grid():
-    """A tab strip belongs to the page header above it, so it sits 16 below it
-    rather than at the 24 between blocks: the flow does that with a margin, and
+def t_a_header_keeps_its_tabs_at_20_in_the_grid():
+    """A tab strip belongs to the page header above it, so it sits 20 below it
+    rather than at the 48 between sections: the flow does that with a margin, and
     in the grid, where every margin is zero and the gap is the rhythm, a
     negative top margin worked out from the two tokens takes the gap back to
-    16. On a phone the gap is 16 already and the margin is nothing."""
-    ok(".ov-hero:has(+ .page-tabs) { margin-bottom: var(--sp-4); }" in CSS, "the flow's rule is still there")
-    ok(".ov-wrap.wgrid > .ov-hero + .page-tabs { margin-top: calc(var(--sp-4) - var(--page-rhythm)); }" in CSS,
+    20. (On a phone the rhythm is 32, so the margin is smaller there.)"""
+    ok(".ov-hero:has(+ .page-tabs) { margin-bottom: var(--sp-5); }" in CSS, "the flow's rule: 20 above the tabs (the mix, 4.4)")
+    ok(".ov-wrap.wgrid > .ov-hero + .page-tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm)); }" in CSS,
        "and the grid's reads the same two tokens")
 
 
@@ -6993,8 +7071,10 @@ def t_the_sign_in_card_is_the_clean_minimal_design():
     there is no Google, Facebook or Apple sign-in, and the image policy would
     block the logos anyway."""
     card = re.search(r"\.auth-card \{[^}]*\}", CSS, re.S).group(0)
+    # Since the mix (2026-10-06) it floats like every window: the 10 corner and
+    # the pop shadow, its sky tint kept.
     for want in ("linear-gradient(to bottom, var(--auth-card-top), var(--surface-primary))",
-                 "border-radius: var(--radius-xl)", "var(--shadow-lg)", "var(--auth-card-line)"):
+                 "border-radius: var(--radius-pop)", "var(--shadow-pop)", "var(--auth-card-line)"):
         ok(want in card, "the card carries " + want)
     ok("background: linear-gradient(to bottom, var(--auth-go-top), var(--action-primary))" in CSS,
        "the button darkens toward its foot")
@@ -7110,7 +7190,8 @@ def t_the_products_page_searches_everything_and_draws_a_bounded_list():
     catalogue on every filter change."""
     ok("const P_ROWS_MAX = 300;" in SCRIPT, "a bound on rows drawn")
     ok("rows.slice(0, P_ROWS_MAX).forEach(r => {" in SCRIPT, "the list draws within it")
-    ok("rows.length > P_ROWS_MAX ? '. The first ' + P_ROWS_MAX" in SCRIPT, "and says when it stopped")
+    ok("'Showing ' + P_ROWS_MAX + ' of ' + rows.length + '. Search or filter for more.'" in SCRIPT,
+       "and says when it stopped, in a line (the mix's copy plan, Products #6)")
 
 
 @test
@@ -7522,7 +7603,7 @@ async function uiConfirm() { return true; }
 async function refreshMailQuiet() {}
 function toastError(m) { toasts.push('error: ' + m); } function toastOk(m) { toasts.push('ok: ' + m); }
 function paintMailBody() {}
-""" + fn_src("function paintMailBulk(rows)") + "\n" + fn_src("function mailOfferUndo(") + r"""
+""" + fn_src("function mailTick(cb)") + "\n" + fn_src("function paintMailBulk(rows)") + "\n" + fn_src("function mailOfferUndo(") + r"""
 const findBtn = (host, text) => { const walk = (n) => { if (n.tagName === 'BUTTON' && n.textContent === text) return n;
   for (const c of n.children || []) { const f = walk(c); if (f) return f; } return null; }; return walk(host); };
 (async () => {
@@ -7622,6 +7703,8 @@ def t_a_paid_report_run_is_one_run_and_stays_on_screen():
     js = MINIDOM + r"""
 const byId = {}; const $ = (id) => byId[id] || (byId[id] = Object.assign(el('div'), { id }));
 const I = {}; function loader() { return el('span'); }
+function pageHead(o) { const h = el('div', 'ov-hero'); h.append(el('h2', null, o.title || '')); return h; }
+const RUN_COST = 'x';
 const reportRuns = {};
 let overviewCache = null, seoCache = null, keywordsCache = null;
 let calls = 0, release; const answer = new Promise(r => { release = r; });
@@ -7651,7 +7734,7 @@ function renderRunGate(id) { painted.push('gate'); $(id).innerHTML = ''; $(id).a
     # the tab let a second sector's run take it, and the first was run again.
     js = MINIDOM + r"""
 const byId = {}; const $ = (id) => byId[id] || (byId[id] = Object.assign(el('div'), { id }));
-const I = {}; function loader() { return el('span'); } function sectorBar() { return el('div'); }
+const I = {}; function loader() { return el('span'); } function sectorBar() { return el('div'); } function pageHead(o) { const h = el('div', 'ov-hero'); h.append(el('h2', null, o.title || '')); return h; }
 const SEG_ALL = '__all__'; const customersCache = {}; let customersSeg = SEG_ALL;
 const customersRuns = new Set();
 const painted = []; function renderCustomers(seg) { painted.push(seg); }
@@ -7745,7 +7828,7 @@ def t_a_late_product_plan_does_not_replace_the_one_on_screen():
     ok(head.startswith("productSeq++; productPlanRun = false;"), head)
     js = MINIDOM + r"""
 const byId = {}; const $ = (id) => byId[id] || (byId[id] = Object.assign(el('div'), { id }));
-const I = {}; function loader() { return el('span'); } function ico() { return el('span'); }
+const I = {}; function loader() { return el('span'); } function ico() { return el('span'); } function pageHead(o) { const h = el('div', 'ov-hero'); h.append(el('h2', null, o.title || '')); return h; }
 function renderRunGate() { shown.push('gate'); }
 let productSeq = 0, productPlanRun = false, productList = [];
 function renderProductList() { """ + head + r""" shown.push('list'); }
@@ -7973,9 +8056,9 @@ console.log(JSON.stringify([
 def t_the_month_pill_is_worked_out_from_the_figures_beside_it():
     """The pill said +72.0% and the alert under it +72.3% for the same month
     against the same plan: the run's gap_pct arrives rounded to two places."""
-    ov = SCRIPT.split("function fcOverviewCard(", 1)[1].split("\n        function ", 1)[0]
+    ov = fn_src("function fcBand(latest, sc) {")
     ok("(p50 - target) / target" in ov and "(cur.gap_pct || {})[sc]" not in ov,
-       "the overview works its percentage out from the money it prints")
+       "the band works its percentage out from the money it prints")
     fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
     ok("r.gap_pct" not in fn and "(r.p50 - t) / t" in fn, "and so does the month table")
     ok("FC_VERDICT_WORDS[v]" in fn and "FC_BASIS[r.method]" in fn,
@@ -7989,7 +8072,10 @@ def t_the_scenario_label_sits_with_its_control():
     ::after that grows, so the label has to be ordered past it with the
     control. And the scenarios are called what the workbook calls them."""
     rule = CSS.split(".fc-seg-lbl {")[1].split("}")[0]
-    ok("order: 1" in rule and "margin-left: auto" not in rule, "the label moves with the control")
+    ok("order" not in rule and "margin-left: auto" not in rule, "the label keeps its place before the control")
+    fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
+    ok("[el('span', 'fc-seg-lbl', 'Plan'),\n                segmented(" in fn,
+       "and both ride in the tab row's end group, label first (the mix)")
     ok("'Algo '" not in SCRIPT, "Algorithm 1 is not abbreviated to Algo 1")
 
 
@@ -7999,14 +8085,15 @@ def t_the_forecast_explains_itself_once_and_in_plain_lines():
     key was stranded at the card edge with the amounts in a column of their
     own between it and the words; and the sentence under it quoted a source
     description that began "The Theta method again"."""
-    ov = SCRIPT.split("function fcOverviewCard(", 1)[1].split("\n        function ", 1)[0]
+    ov = fn_src("function fcBand(latest, sc) {")
     tail = ov.split("const half = ", 1)[1]
-    ok("el('div', 'card')" not in tail and "box.append(conf)" in tail, "the caveat is a line, not a card")
+    ok("el('div', 'card')" not in tail and "infoButton('How sure this is'" in ov,
+       "the caveat waits behind an info button on the figure it qualifies (the mix), not in a card")
     dr = SCRIPT.split("function fcDriversCard(", 1)[1].split("\n        function ", 1)[0]
     order = [dr.index("'fc-drive-key "), dr.index("'fc-drive-lbl'"), dr.index("'fc-drive-amt'")]
     ok(order == sorted(order), "key, then words, then the amount at the right of the measure")
-    ok("max-width: 52ch" in CSS.split(".fc-drive {")[1].split("}")[0], "the statement is measured")
-    ok("The days left come from the source in use, " in dr, "and names the source it quotes")
+    ok("max-width: var(--measure)" in CSS.split(".fc-drive {")[1].split("}")[0], "the statement is measured")
+    ok("' forecast by the '" in dr and "' method.'" in dr, "and names the method it quotes, in a caption under the rows")
     simple = open(os.path.join(ROOT, "forecast", "simple.py"), encoding="utf-8").read()
     ok("The Theta method again" not in simple, "every source description stands on its own")
 
@@ -8069,8 +8156,8 @@ def t_the_reviewers_last_findings_stay_closed():
     ok(".tm-sign-save { margin-top: var(--sp-2); }" in CSS, "and Save sign-off stands off its field")
     # CRM Insights: each empty chart says what fills it.
     ok("function bars(title, desc, rows, fmt, empty) {" in SCRIPT
-       and "'No activity was marked done in the last 30 days.'" in SCRIPT
-       and "'No open deal has an expected close date from this month on.'" in SCRIPT,
+       and "'Nothing done in the last 30 days.'" in SCRIPT
+       and "'No expected close dates ahead.'" in SCRIPT,
        "each chart's empty line is its own")
     # The queue shares its tracks from the width the date appears at.
     ok("@container queue (min-width: 560px) {\n            .lbl-grid { display: grid;" in CSS, "a refunded row's date stays in line on a tablet")
@@ -8215,7 +8302,7 @@ def t_a_check_lists_what_it_found_under_the_tiles_not_inside_one():
     tile = re.search(r"@supports \(grid-template-rows: subgrid\) \{\s*\.cx-tile \{([^}]*)\}", CSS)
     ok(tile and "grid-template-columns: minmax(0, 1fr)" in tile.group(1),
        "a tile's one column can never be wider than the tile")
-    ok(tile and "grid-row: span 3" in tile.group(1), "and it spans title, hint and controls, with no result row")
+    ok(tile and "grid-row: span 2" in tile.group(1), "and it spans title and controls, with no result row (its hint is behind the title's info button since the mix)")
     fn = fn_src("function renderConnector(")
     ok("const cxTile = (title, hint, row) => {" in fn, "a tile takes no result")
     ok(fn.count("grid.append(cxTile(") == 3 and "Out))" not in fn, "and none of the three is handed one")
@@ -8327,7 +8414,7 @@ def t_the_page_agrees_with_itself_after_a_run():
     ok("st.lastError !== tagErr && !boxSaysIt" in fn, "the chip does not repeat the tag section or the box")
     ok("op: 'quarantine'" not in fn and "connQuar" in fn, "the quarantine list is painted from what was read with the status")
     ok("connTagBusy === 'check' ? 'A tag check is in progress" in fn, "and the busy chip says what is running")
-    ok("connFocus = { sec: 'tag', on: 'tab' };" in fn and "sec.querySelector('.ftab.on')" in fn,
+    ok("connFocus = { sec: 'tag', on: 'tab' };" in fn and "sec.querySelector('.segmented > button.on')" in fn,
        "a filter click keeps focus on the filter")
 
 
@@ -8337,7 +8424,7 @@ def t_the_xero_page_keeps_the_details_the_last_check_found():
     one line that holds it."""
     fn = fn_src("function renderConnector(")
     ok(".ktable.cx-docs td { vertical-align: top; }" in CSS, "rows are top-aligned; the bare .cx-docs td rule lost to .ktable td")
-    ok("'Nothing has run yet: no review and no send.'" in fn, "no run is not a green box")
+    ok("'Nothing has run yet.'" in fn, "no run is not a green box")
     ok("((connHealth && connHealth.guards) || {}).reconcileTolerance" in fn, "the tolerance comes from the health guards")
     ok("connTagPending" in fn and "connTagPending = '';" in fn_src("function connStartWatch("),
        "the tag in flight names the busy section and is cleared when collected")
@@ -8391,7 +8478,8 @@ def t_a_page_is_called_what_the_sidebar_calls_it():
     for view, name in (("overview", "Overview"), ("seo", "SEO"), ("keywords", "Keywords"), ("memory", "Memory"),
                        ("liability", "Liability"), ("recon", "Reconciliation"), ("forecast", "Forecast"), ("connector", "Xero sync")):
         ok(view + ": '" + name + "'" in titles, "the topbar calls " + view + " " + name)
-        ok("el('h2', null, '" + name + "')" in SCRIPT, "and so does its page heading: " + name)
+        ok("el('h2', null, '" + name + "')" in SCRIPT or "title: '" + name + "'" in SCRIPT,
+           "and so does its page heading: " + name)
     ok("comp ? 'Customers' : (seg + ' sector')" in SCRIPT, "Customers too")
     for old in ("'Store overview'", "'SEO and optimisation'", "'Keyword and CPC intelligence'",
                 "'Memory and knowledge'", "'Finance'"):
@@ -8411,7 +8499,7 @@ def t_a_search_does_not_take_customise_away():
     fn = fn_src("function renderProductList(")
     ok("const narrowed = rows.length < all;" in fn and "if (top.length > 1 || narrowed) {" in fn,
        "a narrowed list keeps the card")
-    ok("so there is nothing to rank." in fn, "and the card says why it has no bars")
+    ok("'Nothing to rank for this period.'" in fn, "and the card says why it has no bars")
 
 
 @test
@@ -8437,15 +8525,17 @@ def t_the_xero_page_uses_one_set_of_outcome_words():
     rc = fn_src("function cxReviewCounts(")
     ok("n('skippedSynced') + n('skippedInXero')" in rc and "n('skippedTest') + n('skippedCancelled')" in rc,
        "from the connector's own counters")
-    ok("An admin links it in Railway." in fn and "el('ol', 'setup-steps')" in fn,
-       "the unlinked page gives an admin the steps and a member the one fact")
-    ok("(!connAuto ? ''" in fn, "and the header makes no promise when Auto Run's state is unknown")
+    ok("'An admin needs to link this.'" in fn and "el('ol', 'setup-steps')" in fn and "linkHelp.push(steps)" in fn,
+       "the unlinked page gives an admin the steps, behind the card's info button, and a member the one fact")
+    ok("Auto Run is on, so new orders go" not in fn and "Nothing is written until a review" not in fn,
+       "and the header makes no promise about Auto Run at all: its one line says what the page does (the mix)")
     ok(".modal-body .section-title + * > .setting-row:first-child { border-top: 0; }" in CSS,
        "Settings draws no rule straight under a heading, in any section, Connections included")
     rc = fn_src("function cxReviewCounts(")
     ok("voided: n('voided'), keptPaid: n('updateBlocked')" in rc and "if (kind === 'creditNotes') {" in rc,
        "a void and an edit left as posted are counted, and a credit note shows no outcome it cannot have")
-    ok(".setup-steps li > .setup-code { white-space: nowrap; word-break: normal; }" in CSS, "a code word in a step never splits")
+    ok(".setup-steps li > .setup-code { word-break: normal; overflow-wrap: anywhere; }" in CSS,
+       "a code word in a step splits only when it is longer than the line")
 
 
 # ---- Workspace pages, 24 September 2026 -------------------------------------
@@ -8997,7 +9087,7 @@ def t_a_queue_row_keeps_its_buttons_in_the_last_column():
     ok(".lbl-qrow > .lbl-meta { grid-row: 1; grid-column: -3 / -2; }" in CSS
        and ".lbl-qrow > .lbl-actions { grid-row: 1; grid-column: -2 / -1; }" in CSS,
        "the date and the buttons are pinned to the last two columns of the first line")
-    i = SCRIPT.index("No shipments booked to a pasted address yet.")
+    i = SCRIPT.index("'No custom shipments yet.'")
     body = SCRIPT[i:i + 4000]
     ok("if (sh.contents) who.append(el('span', 'sub', sh.contents));" not in body
        and body.count("el('span', 'sub')") == 1 and "'sub-line'" in body,
@@ -9020,8 +9110,8 @@ def t_a_queue_row_never_squeezes_the_customer_name_to_nothing():
     narrow = CSS[CSS.index("@container queue (max-width: 559px) {\n"):][:400]
     ok(".lbl-qrow { flex-wrap: wrap; }" in narrow and ".lbl-qrow .lbl-actions { flex: 1 1 100%; justify-content: flex-start; }" in narrow,
        "a list as narrow as a phone's puts the buttons on their own line, whatever the window")
-    ok("@media (min-width: 641px) { .card-head { grid-template-columns: 1fr fit-content(50%); } }" in CSS
-       and ".q-card > .card-head" not in CSS, "every card's buttons wrap within half its header, the queue's included")
+    ok("@media (min-width: 641px) { .card-head { grid-template-columns: 1fr fit-content(max(50%, 100% - 18rem - var(--sp-4))); } }" in CSS
+       and ".q-card > .card-head" not in CSS, "every card's buttons wrap within the room the title leaves, the queue's included")
 
 
 @test
@@ -9033,7 +9123,7 @@ def t_a_stat_header_keeps_its_count_beside_its_buttons():
     to the title's row instead, the rail made every stat header 14px taller at
     every width, Xero sync's Connection included, and put the buttons above
     the title on a phone."""
-    general = CSS.index("@media (min-width: 641px) { .card-head { grid-template-columns: 1fr fit-content(50%); } }")
+    general = CSS.index("@media (min-width: 641px) { .card-head { grid-template-columns: 1fr fit-content(max(50%, 100% - 18rem - var(--sp-4))); } }")
     i = CSS.index("@media (min-width: 641px) {\n            .card-head-stat {")
     block = CSS[i:CSS.index("}\n        }", i) + 1]
     ok(general < i, "after the rule for every header, so a stat header's own wins")
@@ -9081,7 +9171,7 @@ def t_the_app_wide_layout_sweep_holds():
         ".dpanel.dpanel-search { min-width: 0; width: min(340px, calc(100vw - 16px)); }": "the search palette has one width",
         ".dmenu { max-width: min(420px, calc(100vw - 16px)); }": "a menu is never wider than the window",
         ".card[hidden] { display: none; }": "a hidden card is hidden",
-        ".guide-tools > .tbl-search { justify-self: start; }": "the guide search's clear button is in its field",
+        ".guide-tools > .act-row > .tbl-search { flex: 1 1 0; }": "the guide search gives way to Print on a phone",
         ".setting-row > div:first-child { flex: 1 1 12rem; }": "a settings row keeps 12rem of words",
         ".build-bar { max-width: min(460px, calc(100vw - 32px)); }": "the update bar fits a phone",
         ".toggle .sw { flex: none; }": "the Deep analysis switch never squeezes",
@@ -9092,24 +9182,24 @@ def t_the_app_wide_layout_sweep_holds():
         ".ktable.crm-table td.crm-phone { white-space: nowrap; }": "a phone number is never split",
         ".crm-focus .disp-boxrow > .disp-text { flex: 1 1 8rem; min-width: 7rem; }": "a stage's name keeps 7rem",
         ".followed > .ic { display: inline-grid; }": "the book icon leads its line",
-        ".lia-name { font-size: var(--text-sm); font-weight: var(--weight-medium); flex: 0 0 clamp(150px, 30%, 320px);": "one name width per list",
+        ".lia-name { font-size: var(--text-body); font-weight: var(--weight-medium); flex: 0 0 clamp(150px, 30%, 320px);": "one name width per list",
         "body:has(#view-chat.active) .build-bar { bottom: auto; top: calc(var(--topbar-h) + 12px); }": "the update bar is clear of the composer on Chat",
-        "#team-content .card + .card { margin-top: var(--sp-4); }": "Team's cards are spaced",
+        "#team-content .card + .card { margin-top: var(--page-rhythm); }": "Team's cards are spaced at the page rhythm",
         # operations
         "flex-wrap: wrap; row-gap: var(--sp-1); }": "courier chips wrap",
         "@container loans (max-width: 620px)": "loan rows by the card's width",
         "@container mlist (max-width: 560px)": "Inbox rows by the list's width",
         ".mail-bulk-hint { color: inherit; flex: 1 1 0; min-width: 7rem; }": "the bulk hint gives way before the buttons wrap",
-        ".ktable td.sizes-notes { color: var(--text-tertiary); font-size: var(--text-xs); max-width: 0; width: 100%;": "size notes take what is left",
+        ".ktable td.sizes-notes { color: var(--text-tertiary); font-size: var(--text-xs); line-height: var(--lh-caption); max-width: 0; width: 100%;": "size notes take what is left",
         "@container crmtable (max-width: 640px)": "CRM tables come in on a narrow card",
-        "word-break: normal; overflow-wrap: anywhere; text-underline-offset: 2px;": "contact lines break between words",
+        "word-break: normal; overflow-wrap: anywhere; text-underline-offset: var(--sp-1);": "contact lines break between words",
         ".mown-slot { flex: 0 0 auto; min-width: 88px; max-width: 150px;": "owner chips show a short name whole",
-        ".lbl-seg > * { flex: 1 1 auto; }": "a phone tab strip that wraps fills its lines",
+        ".segmented > * { flex: 1 0 auto; justify-content: center; }": "a phone segmented strip fills its line and scrolls rather than wraps",
         "@media (max-width: 1100px) { .metrics.metrics-3 > :nth-child(3):last-child { grid-column: 1 / -1; } }": "a third tile takes the row",
         ".lbl-qrow .lbl-actions { justify-self: start; }": "queue buttons line up",
         # dashboards and finance
         "details.sect .body .ktable :is(th, td) { overflow-wrap: normal; }": "a figure in a drawer stays whole",
-        ".ktable { width: 100%; border-collapse: collapse; font-size: var(--text-sm); background: var(--surface-primary); min-width: min(460px, 100%); }": "a table fits a narrow card",
+        ".ktable { width: 100%; border-collapse: collapse; font-size: var(--text-body); background: none; min-width: min(460px, 100%); }": "a table fits a narrow card",
         ".ktable td.num { white-space: nowrap; }": "figures keep one line",
         "@container sizes (max-width: 1000px) { .ktable.sizes-table th { white-space: normal; } }": "the size list's headings wrap only in a narrow card",
         "@container cxcard (max-width: 560px) {\n            .ktable.cx-docs { min-width: 0; display: block; }": "Xero results stack by the card's width",
@@ -9129,8 +9219,3335 @@ def t_the_app_wide_layout_sweep_holds():
     ok("else if (connQuar && !connQuar.length) qHost.append(" in SCRIPT, "an empty quarantine list says so")
 
 
+@test
+def t_the_day_sheet_leaves_projectors_out_and_says_so():
+    """A projector or accessory is not glass to cut (order #104453): the day
+    sheet does not count it as a CHECK it cannot resolve, and says how many it
+    left out. The coverage card offers a size rule only for a gap in the size
+    list, never for an order that has no projector on it."""
+    ok("function printDaySheet(" in SCRIPT, "the day sheet exists")
+    body = fn_src("function printDaySheet(")
+    ok("if (it.projector) {" in body and "if (it.not_gobo)" in body
+       and body.index("if (it.projector) {") < body.index("if (it.not_gobo)"),
+       "projectors are taken out before anything else is counted")
+    ok("projector or accessory" in body and "projectors or accessories" in body,
+       "and the sheet says how many it left out")
+    cov = SCRIPT[SCRIPT.index("const fix = el('button', 'btn btn-sm', 'Resolve');") - 400:][:600]
+    ok("!r.order_problem" in cov, "Resolve is offered only for a gap in the size list")
+
+
+@test
+def t_a_label_row_printed_by_name_starts_after_its_count_and_wraps():
+    """#104453's projector printed as `1x` then a gap, then "Projected Image 40
+    Watt LED Weather...": the count's column is held wide so sizes line up, and
+    a row's text is cut to one line. A row with no size has nothing to line up
+    with, so its name starts after the count and wraps."""
+    ok("function labelSheet(" in SCRIPT, "the label exists")
+    body = fn_src("function labelSheet(")
+    ok("if (!it.production_size) row.classList.add('named', 'wrap');" in body,
+       "a row with no size is marked to start after its count and to wrap")
+    ok(".label-sheet .ls-it.named .ls-iqs { min-width: 0; }" in CSS,
+       "and its count's column is not held wide")
+
+
+@test
+def t_the_forecast_reads_the_month_the_reader_is_in():
+    """The 03:00 run on the 1st is as of the last day of the month before. The
+    page took that month for this one: on 1 Oct 2026 it read "38,741 taken so
+    far in Oct 2026, 30 of 30 days in", September's whole takings, and showed
+    October's forecast less that as still to come. Run as written in node."""
+    if not _node_ok():
+        return
+    pick = lambda name: fn_src("function " + name + "(")
+    iso = re.search(r"const fcISO = \(d\) => [^;]+;", SCRIPT).group(0)
+    js = iso + "\n" + "\n".join(pick(n) for n in ("fcBankedThisMonth", "fcCurrentMonth", "fcCurrentRow",
+                                                   "fcDaysSoFar", "fcDaysInMonth")) + """
+const hist = [{date: '2026-09-29', actual: 1000}, {date: '2026-09-30', actual: 2000}, {date: '2026-10-01', actual: 700}];
+const rows = [{month: '2026-09', method: 'actual', p50: 38741}, {month: '2026-10', method: 'forecast', p50: 50568}];
+const first = {as_of: '2026-09-30', daily: {history: hist.slice(0, 2)}, monthly: rows};
+const second = {as_of: '2026-10-01', daily: {history: hist},
+                monthly: [rows[0], {month: '2026-10', method: 'actual_to_date + forecast', p50: 51000}]};
+const mid = {as_of: '2026-09-09', daily: {history: [{date: '2026-09-09', actual: 300}]},
+             monthly: [{month: '2026-09', method: 'actual_to_date + forecast', p50: 30781}]};
+const f = (l) => ({month: fcCurrentMonth(l), banked: fcBankedThisMonth(l), sofar: fcDaysSoFar(l),
+                   days: fcDaysInMonth(l), row: fcCurrentRow(l).month});
+console.log(JSON.stringify([f(first), f(second), f(mid)]));
+"""
+    a, b, c = _run_node(js)
+    ok(a == {"month": "2026-10", "banked": 0, "sofar": 0, "days": 31, "row": "2026-10"},
+       "on the 1st, the new month with nothing taken yet, not last month's whole takings: %s" % a)
+    ok(b == {"month": "2026-10", "banked": 700, "sofar": 1, "days": 31, "row": "2026-10"},
+       "a day in, the day's takings: %s" % b)
+    ok(c == {"month": "2026-09", "banked": 300, "sofar": 9, "days": 30, "row": "2026-09"},
+       "mid-month, as before: %s" % c)
+
+
+@test
+def t_a_closed_month_is_shown_as_what_directors_were_told():
+    """The chart's "Was predicted" plotted whichever source turned out closest,
+    chosen after the month closed, so September's 36% miss looked like a hit.
+    It plots what the forecast in use said. The record card says each closed
+    month in pounds: what came in, what the forecast in use said and when,
+    whether it landed inside its likely range, and the closest source, and it
+    no longer claims every figure was made before the month began."""
+    chart = fn_src("function fcChartCard(")
+    said = chart.split("const said = {};", 1)[1].split("series.push", 1)[0]
+    ok("r.in_use" in said and "r.winner" not in said,
+       "the predicted line is the forecast in use, never the hindsight winner")
+    rec = fn_src("function fcRecordCard(")
+    ok("r.in_use" in rec and "' came in.'" in rec and "fcMoney(u.value)" in rec,
+       "each closed month in pounds, with what the forecast in use said")
+    ok("fcDay(u.made)" in rec and "u.seen_through" in rec, "and when, from which whole months")
+    ok("its likely range of" in rec and "u.inside" in rec, "and whether it landed inside its range")
+    ok("u.reconstructed" in rec and "Worked out afterwards" in rec,
+       "a month filled in afterwards says so")
+    ok("Closest: " in rec, "and the closest source beside it")
+    ok("before the month began" not in SCRIPT and "before each month began" not in SCRIPT,
+       "nothing claims every figure was made before the month began")
+    ok("Worked out afterwards" in rec and "October 2026" not in rec,
+       "a filled-in month says so without a date that only holds if this ships in October")
+
+
+@test
+def t_the_chart_starts_at_the_month_the_reader_is_in():
+    """On the 1st the chart's default view, This month, drew September (the
+    run's as_of month) while the overview above it had moved on to October.
+    "This month" and "The months ahead" start from the reader's month."""
+    chart = fn_src("function fcChartCard(")
+    ok("const curMonth = fcCurrentMonth(latest);" in chart, "the chart works out the reader's month")
+    month = chart.split("range === 'month')", 1)[1].split("\n", 1)[0]
+    ahead = chart.split("range === 'ahead')", 1)[1].split("\n", 1)[0]
+    ok("curMonth + '-01'" in month and "from = curMonth;" in ahead,
+       "This month and The months ahead start there: %s | %s" % (month.strip(), ahead.strip()))
+    ok("r.date.slice(0, 7) === curMonth" in chart and "fcISO(asOf).slice(0, 7)" not in chart,
+       "and the month's days are the reader's month, not the run's")
+
+
+@test
+def t_two_choosers_and_nothing_else():
+    """Five hand-built families did two jobs (Cameron, 2026-10-05: "uniformity
+    is key", "one source of truth"): page tabs, filter tabs, two segmented
+    tracks and the Guide's own. Now tabs move between sections and a segmented
+    control changes what a card shows, each built by one function and drawn by
+    one block, and nothing else may build or style either."""
+    for name in ("function chooser(kind, items, current, onPick, opts) {",
+                 "function tabStrip(items, current, onPick, opts) { return chooser('tabs'",
+                 "function segmented(items, current, onPick, opts) { return chooser('segmented'"):
+        ok(name in SCRIPT, "the builder is there: " + name[:40])
+    ok(not re.search(r"el\('div', '(tabs|segmented)", SCRIPT.replace("const bar = el('div', kind);", "")),
+       "no screen builds a strip by hand")
+    for gone in ("lbl-seg", "lbl-segbtn", "'ptab", "ptabs", "'ftab", "ftabs", "filterTabs(", "segControl(", "gseg"):
+        ok(gone not in SCRIPT, "the old family is gone from the script: " + gone)
+    for gone in (r"\.lbl-seg", r"\.ptab", r"\.ftab", r"\.seg \{", r"\.seg button"):
+        ok(not re.search(gone, CSS.replace("(.ptab, .ftab, .seg,\n           .lbl-seg", "")), "and from the sheet: " + gone)
+    for base in ("\n        .tabs {", "\n        .tab {", "\n        .segmented {", "\n        .segmented > button {"):
+        ok(CSS.count(base) == 1, "one base rule: " + base.strip())
+    ok(SCRIPT.count("tabStrip(") >= 7 and SCRIPT.count("segmented(") >= 15,
+       "every section strip and every in-card choice goes through them")
+
+
+@test
+def t_reactor_wears_projected_images_brand_from_one_place():
+    """The brand (projectedimage.com's own theme settings, 2026-10-05) is set
+    once, at the root, and every screen reads it."""
+    for tok, v in (("teal-500", "#13B7C0"), ("ink", "#121212"), ("brand-blue", "#334FB4")):
+        ok(_token_raw(tok).lower() == v.lower(), "--%s is the brand's %s" % (tok, v))
+    for tok, ref in (("action-primary", "var(--teal-500)"), ("text-on-action", "var(--ink)"), ("text-brand", "var(--teal-700)"),
+                     ("surface-page", "var(--white)"), ("radius-control", "var(--radius-xs)")):
+        ok(_token_raw(tok) == ref, "--%s reads %s" % (tok, ref))
+    ok(_contrast(_token("teal-500"), "#ffffff") < 3, "the bright teal is too faint for text, which is why it is a fill")
+    ok(not re.search(r"(?<![-\w])color:\s*var\(--action-primary\)", CSS), "so nothing writes text in it")
+    ok("family=Inter:opsz,wght@14..32,400..700" in HTML and "family=Geist" not in HTML,
+       "the interface face is Inter, with the optical sizes the figures were measured in")
+    ok(CSS.count("@font-face { font-family: 'Bricolage Grotesque'") == 1, "the heading face is defined once")
+    ok(":is(.brand-name, .ov-hero h2, .ds-type-page) {" in CSS
+       and "font-family: var(--font-display)" in CSS.split(".ds-type-page) {")[1][:80],
+       "Bricolage sets the wordmark and the page titles, from one list, and nothing else (the mix, 4.2)")
+    ok(CSS.count("font-family: var(--font-display)") == 1, "nowhere else sets a title face")
+    ok('<img class="brand-logo" src="/brand/logo-light.svg" alt="" width="144" height="40" />'
+       '<span class="brand-sep" aria-hidden="true"></span><span class="brand-name">Reactor</span>' in HTML,
+       "Projected Image's logo, its lettering white so it holds on the ink frame, a hairline and the wordmark head the sidebar")
+    ok('aria-label="Reactor, by Projected Image: go to the Overview"><img class="brand-logo"' in HTML,
+       "the button's own label names Projected Image, so the logo is silent rather than read twice")
+    logo = CSS.split(".brand .brand-logo {")[1].split("}")[0]
+    ok("height: var(--box-md)" in logo and "width: auto" in logo and "flex: none" in logo,
+       "the logo is 24 tall at its own proportions (86 wide)")
+    ok("gap: var(--sp-1-5)" in CSS.split("        .brand {")[1].split("}")[0]
+       and CSS.rfind("@media", 0, CSS.index(".side-head { gap: var(--sp-1); }"))
+       == CSS.rfind("@media (max-width: 640px) {", 0, CSS.index(".side-head { gap: var(--sp-1); }")),
+       "6 either side of the hairline, and 4 to Hide sidebar's 40 target on a phone, so logo, hairline and "
+       "Reactor (158) sit inside the button at every width (measured in the rig: 168 wide on a computer, 160 on a phone)")
+    ok("background: var(--chrome-rule)" in CSS.split(".brand .brand-sep {")[1].split("}")[0]
+       and "--chrome-rule: color-mix(in srgb, var(--white) 20%, transparent);" in CSS,
+       "the hairline between them is white at 20% on the ink")
+    ok("background: var(--surface-page)" in CSS.split("        body {")[1].split("}")[0], "on the white page")
+
+
+@test
+def t_the_design_page_is_the_source_of_truth_made_visible():
+    """Design, in the Guide, is for admins and draws every part with the
+    builder the screens use, reading each colour from the tokens as the browser
+    has them. A gallery with its own copies would drift from the app the first
+    time either changed."""
+    segs = SCRIPT.split("const GUIDE_SEGS = [")[1].split("];")[0]
+    ok("['design', 'Design'," in segs and "'admin']" in segs, "Design is a Guide section, marked for admins")
+    ok("const guideSegs = () => GUIDE_SEGS.filter(s => s[3] !== 'admin' || guideAdmin());" in SCRIPT,
+       "and only an admin is offered it")
+    render = SCRIPT.split("function renderGuide() {")[1].split("\n        function ")[0]
+    ok("tabStrip(guideSegs()" in render and "tabStrip(GUIDE_SEGS" not in render, "the strip is built from the gated list")
+    ok("if (!guideSegs().some(s => s[0] === guideSeg)) guideSeg = 'guide';" in render,
+       "someone who is not an admin is never left on it")
+    seg = SCRIPT.split("function paintGuideSeg() {")[1].split("\n        function ")[0]
+    ok("if (guideSeg === 'design') { paintDesign(host); return; }" in seg, "it paints without fetching anything")
+    ok("box.querySelectorAll(':scope > .tabs > .tab')" in seg, "and the Guide's own tabs are told apart from the examples")
+    fn = SCRIPT.split("function paintDesign(host) {")[1].split("\n        function ")[0]
+    for part in ("tabStrip(", "segmented(", "metricsStrip(", "loadFailure(", "refreshBtn(", "'ktable-wrap'", "'ktable'",
+                 "'btn btn-primary'", "'chip'", "'empty'", "el('label', 'pfield')", "'field-help'", "'field-msg'",
+                 "toastOk(", "toastError("):
+        ok(part in fn, "the page draws %s with the real thing" % part)
+    block = SCRIPT.split("const DS_COLOURS = [")[1].split("function paintDesign(host) {")[0]
+    ok(not re.search(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b", block + fn), "no colour is written into the page, only token names")
+    ok("getComputedStyle(p).color" in block, "each is read as the browser resolves it")
+    for name in re.findall(r"'(--[a-z0-9-]*[a-z0-9])'", block):
+        ok(re.search(re.escape(name) + r":", CSS), "%s is a token the app defines" % name)
+    ok("'--chart-' + n" in block, "and the chart ramp is shown whole")
+    ds = "\n".join(l for l in CSS.split("\n") if l.strip().startswith(".ds-"))
+    ok(ds and not re.search(r"#[0-9a-fA-F]{3,6}\b|\d+px", ds), "the gallery's frame uses tokens only")
+
+
+@test
+def t_a_tab_strip_that_scrolls_on_a_phone_holds_its_underline():
+    """Found in the phone sweep: the live tab's underline hangs 3px under the
+    tab, and a strip that scrolls sideways counts that as overflow downwards
+    too, so every tab strip on a phone carried a vertical scrollbar 3px tall."""
+    rule = CSS.split(".tab:is(.on, [aria-current=\"page\"], [aria-pressed=\"true\"])::after {")[1][:240]
+    ok("bottom: 0; height: var(--bw-strong);" in rule, "the underline sits inside the strip (the mix), so nothing hangs under it")
+    tabs = CSS.split("\n        .tabs {")[1].split("}")[0]
+    ok("overflow-x: auto" in tabs and "overflow-y: hidden" in tabs, "the strip scrolls sideways only, on every screen")
+
+
+@test
+def t_the_brand_pilot_review_findings_stay_fixed():
+    """The review of the brand pilot (2026-10-05) found the teal and ink
+    changes had reached places the stylesheet guard could not see, and a
+    handful of layouts the new choosers broke. Each is held here."""
+    # Words and ticks on a status fill are white: ink on red-700 was 2.9:1.
+    ok(_token_raw("text-on-status") == "var(--white)", "a status fill carries white")
+    ok(_contrast(_token("text-on-status"), _token("error")) >= 4.5, "white on the error red reads at 4.5:1")
+    ok(_contrast(_token("text-on-status"), _token("success")) >= 4.5, "and on the success green")
+    ok("color: var(--text-on-status)" in CSS.split(".crm-badge {")[1].split("}")[0], "the count badges on tabs")
+    ok("color: var(--text-on-status)" in CSS.split(".action .check svg {")[1].split("}")[0], "and the done tick")
+    # The bright teal is never text, wherever the colour is set: the stylesheet,
+    # a style set from the script, or the composer's own injected rules.
+    for name, src in (("the page script", SCRIPT), ("composer.js", COMPOSER)):
+        ok(not re.search(r"(?<![-\w])color\s*[:=]\s*'?var\(--action-(primary|hover)\)", src),
+           "%s writes no words in the bright teal" % name)
+    ok("'.cmp-area a { color: var(--text-link); }'" in COMPOSER, "links in an email are the link teal")
+    ok("'.cmp-b:focus-visible { outline: var(--focus-outline); outline-offset: var(--sp-0-5); }'" in COMPOSER,
+       "and a focused formatting button shows the app's own outline, not a 1.2:1 glow")
+    ok("border-color: var(--border-selected)" in COMPOSER.split("'.cmp-area:focus {")[1].split("}")[0],
+       "and the editing area's focus edge is the selected edge every other field has")
+    # A segmented control is never stretched across a card, and keeps its gutter.
+    seg = CSS.split("        .segmented { display: inline-flex;")[1].split("}")[0]
+    ok("align-self: flex-start" in seg, "a column parent does not stretch the track")
+    # Since the mix (2026-10-06) a section has no gutter for a track to be
+    # inset from: it sits on the page's text edge like the rest of its section.
+    ok("Those are inset by margin instead." not in CSS, "and no list of boxed children takes a gutter back")
+    phone = CSS.split("@media (max-width: 640px) {\n            .segmented {")[1].split("}")[0]
+    ok("align-self: stretch" in phone and "flex: 1 1 100%" in phone,
+       "on a phone it takes and fills a line of its own, in a column parent or a row")
+    # Since the pills went a 6px track that wraps needs no special corner, and
+    # on a phone a track never wraps: it scrolls like a tab strip.
+    ok("flex-wrap: nowrap; overflow-x: auto" in phone and ".wrapped" not in CSS and "segWrapWatch" not in SCRIPT,
+       "and on a phone it scrolls rather than leaving a choice alone on a second line")
+    # The Finance strip lines up with the chooser beside it.
+    ok(".page-tabs > .tabs { margin-bottom: 0; }" in CSS, "the Finance strip carries no space below it in its row")
+    # A scrolling strip keeps the focus ring inside itself (the mix: drawn on ::before).
+    ok(".tab:focus-visible::before {" in CSS and "padding-inline: var(--sp-2); margin: 0 calc(-1 * var(--sp-2)) var(--sp-7);"
+       in CSS.split("\n        .tabs {")[1].split("}")[0], "room at each end for the focus ring, taken back so the tabs do not move")
+    # Controls inside a title stay in the interface face.
+    ok(".ov-hero h2 :is(button, input, select, textarea, label, .segmented, .tabs, .beta-tag) { font-family: var(--font-sans); }" in CSS,
+       "Beta or a control beside a page title is not set in the title face")
+    # Design shows every colour token, read from the stylesheet.
+    fn = fn_src("function dsOtherColours(")
+    ok("document.styleSheets" in fn and "selectorText === ':root'" in fn and "CSS.supports('color'" in fn,
+       "the colours a section does not name are read from the :root list itself")
+    ok("Every other role a screen can ask for" in SCRIPT and "The palette the roles are drawn from" in SCRIPT,
+       "and shown, roles and palette apart")
+    # A read for What's new that lands late does not clear the section now showing.
+    seg = SCRIPT.split("function paintGuideSeg() {")[1].split("\n        function ")[0]
+    ok("const ticket = ++guidePaintSeq;" in seg and seg.count("ticket !== guidePaintSeq") == 2,
+       "both the answer and the failure check they are still the latest paint")
+
+
+@test
+def t_a_chooser_hears_a_press_on_a_choice_it_was_told_to_show():
+    """CRM deals marks List while a closed status means the Board cannot draw,
+    and the chooser ignored a press on the choice already marked, so pressing
+    List there was lost and Open drew the Board again."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + fn_src("function chooser(") + r"""
+const picks = [];
+const bar = chooser('segmented', [['board', 'Board'], ['list', 'List']], 'board', (k) => picks.push(k));
+const [board, list] = bar.children;
+// the caller shows List for a while, as CRM deals does for a closed status
+board.classList.remove('on'); list.classList.add('on');
+list.click();                 // the reader keeps List: heard
+list.click();                 // pressed again: nothing new to hear
+board.click();                // back to Board: heard
+console.log(JSON.stringify({ picks, listOn: list.classList.contains('on'), boardOn: board.classList.contains('on') }));
+"""
+    got = _run_node(js)
+    eq(got["picks"], ["list", "board"], "the press on the shown choice counts once, and a repeat does not")
+    ok(got["boardOn"] and not got["listOn"], "and the marks follow the last press")
+
+
+@test
+def t_every_field_takes_the_field_corner():
+    """The size select and the two dispatch fields were given the corner of a
+    box inside a card (6) when the corners got roles, beside fields at 8. A
+    field is a field wherever it sits."""
+    for sel in (".lbl-size {", ".disp-num {", ".disp-text {", ".psel {", ".tm-field {", ".sk-input, .sk-textarea {",
+                ".pf-input {", ".pchat-ta {"):
+        rule = CSS.split("\n        " + sel)[1].split("}")[0]
+        ok("border-radius: var(--radius-field)" in rule, sel + " has the field corner")
+    # A role that cannot be changed is a label (2026-10-05), so it is a tag.
+    ok("border-radius: var(--radius-tag)" in CSS.split("\n        .tm-role-fixed {")[1].split("}")[0], "a fixed role is a tag, not a field")
+
+
+@test
+def t_the_spacing_pass_holds():
+    """2026-10-05, Cameron: "it needs to all be beautifully spaced, no overlaps or
+    elements pushing other elements out the way". An audit of every screen at
+    five sizes and three reviewers found these; each is held here."""
+    ok(".ov-hero:has(+ .tabs) { margin-bottom: var(--sp-5); }" in CSS, "a tab strip sits 20 under its header on every screen")
+    ok("min-height: 60px" not in CSS.split(".ov-hero:has(+ .page-tabs)")[1][:600], "Finance intros reserve no empty line")
+    ok("--segment-h" not in CSS
+       and "height: var(--control-h);" in CSS.split("\n        .segmented > button {")[1].split("}")[0],
+       "a segmented track is a control's 32, level with the field beside it (its choice, 28, is drawn inside it)")
+    ok("flex: 1 1 auto;" in CSS.split("\n        .segmented > button {")[1].split("}")[0], "and a wrapped track fills its lines")
+    ok(".metrics.metrics-strip { grid-template-columns: repeat(12, minmax(0, 1fr)); }" in CSS
+       and "calc(100% / 60)" not in CSS, "figures keep a 16 gap both ways at every width")
+    ok(".metrics-strip > .stat > .stat-row { margin-top: 0; }" in CSS, "a figure sits one distance under its label")
+    ok("grid-row: span 3; grid-template-rows: subgrid;" in CSS, "and a row of tiles shares its label, figure and note rows")
+    # A tile that is a size container cannot share its parent's rows: the narrow
+    # check lives on the figure's line, never on the tile.
+    ok(".metrics-strip .stat-row { container-type: inline-size;" in CSS
+       and not re.search(r"\.metrics-strip > \.stat \{[^}]*container-type", CSS),
+       "the narrow-tile check is on the figure line, so the tile can still share rows")
+    ok(".tbl-tools-l, .tbl-tools-r { display: contents; }" in CSS and ".tbl-tools .tbl-search { flex: 1 1 100%; }" in CSS,
+       "a phone toolbar flows as one row: the search and a track take a line, short controls pair up")
+    ok("min-height: var(--row-h)" in CSS.split("\n        .tabs {")[1].split("}")[0], "every page's strip is the one 44 row")
+    ok("metrics-finance" not in CSS, "one figure card, not a Finance size of it")
+    ok("@media (min-width: 641px) { .crm-pipeline > .crm-col { flex: 1 1 0; min-width: calc(var(--sp-8) * 4); } }" in CSS,
+       "the pipeline's stages share the board instead of one sitting past its edge")
+    ok(".sidebar.open { margin-left: 0; box-shadow: var(--shadow-lg); }" in CSS, "a closed drawer paints no shadow on the page")
+    ok("padding: 0 var(--wrap-pad);" in CSS.split(".topbar {")[1].split("}")[0], "the top bar keeps the page's gutter")
+    ok(".ov-hero-act:not(:has(> :not([hidden]))) { display: none; }" in CSS, "an empty header rail takes no line")
+    ok(".card > .ktable-wrap + .tbl-foot { margin-top: 0; }" in CSS and ".card > .metrics { margin-bottom: 0; }" in CSS
+       and ".card > .tabs { margin-bottom: 0; }" in CSS and ".card > .load-failed { margin-top: 0; }" in CSS,
+       "a page margin never adds to a card's own 16")
+    for sel in ("#team-content .card + .card { margin-top: var(--page-rhythm); }", ".ds-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--page-rhythm); }",
+                ".guide-grid > .guide-card { break-inside: avoid; margin-bottom: var(--page-rhythm); }"):
+        ok(sel in CSS, "stacked cards are the page rhythm apart: " + sel[:40])
+    guide = SCRIPT.split("function renderGuide() {")[1].split("\n        function ")[0]
+    ok("heroAct(" not in guide and "box._desc" not in SCRIPT and "box._print" not in SCRIPT,
+       "the Guide's header is the same on every tab")
+    ok("const b = el('button', 'btn btn-sm'); b.textContent = 'Try again';" in SCRIPT, "every Try again is the small button")
+    mail = SCRIPT.split("function renderMail() {")[1][:6000]
+    ok("el('h3', 'card-title', 'Connect the shared mailbox')" in mail and "'setting-title'" not in mail and ".style.cssText" not in mail,
+       "the Inbox setup card is built from the shared parts, with no sizes of its own")
+
+
+@test
+def t_every_corner_is_a_role():
+    """2026-10-05, Cameron: "Establish a single source of truth ... Avoid one-off
+    styling" and "Do not use pill-shaped UI unnecessarily". Outside the token
+    block a corner names its role (control, field, row, card, inset, tag,
+    swatch, full, circle), never a raw size, so changing a role changes every
+    thing that plays it. The exceptions are named: the printed sheets
+    (physical output with their own paper values), the scrollbar thumb, and
+    the sign-in card, a surface standing alone on an empty page."""
+    body = CSS[CSS.index("\n        }", CSS.index(":root {")):]
+    bad = []
+    for m in re.finditer(r"border-radius:([^;}]*)", body):
+        v = m.group(1)
+        if re.search(r"--radius-(sm|xs|2xs|3xs|md|lg|xl)\b", v) or re.search(r"\d+px", v):
+            st = body.rfind("}", 0, m.start())
+            sel = body[st + 1:m.start()].split("{")[0].strip().split("\n")[-1]
+            if not re.search(r"label-sheet|day-sheet|scrollbar|\.auth-card", sel):
+                bad.append(sel[:50])
+    ok(not bad, "corners that name a size instead of a role: %s" % bad[:6])
+    for role, prim in (("control", "var(--radius-xs)"), ("field", "var(--radius-control)"), ("card", "var(--radius-pop)"),
+                       ("inset", "var(--radius-xs)"), ("tag", "var(--radius-2xs)"), ("row", "var(--radius-control)"),
+                       ("pop", "var(--radius-md)"), ("tile", "var(--radius-md)"), ("sheet", "var(--radius-lg)")):
+        ok(_token_raw("radius-" + role) == prim, "--radius-%s is %s" % (role, prim))
+    # Round only where the shape means something.
+    rounds = []
+    for m in re.finditer(r"border-radius:\s*var\(--radius-full\)", body):
+        st = body.rfind("}", 0, m.start())
+        rounds.append(body[st + 1:m.start()].split("{")[0].strip().split("\n")[-1])
+    for sel in rounds:
+        ok(re.search(r"bar|\.sw\b|toggle|\.tab:is|track|fill|meter|seo-score|::after", sel),
+           "a round shape with a purpose (a bar, a switch, the tab underline): " + sel[:50])
+
+
+# ---- The mix, 6 October 2026 -------------------------------------------------
+
+@test
+def t_the_printed_sheets_do_not_change():
+    """2026-10-05, Cameron: "i dont like how you have changed my production
+    lables". The production label, the serial sticker, the courier labels and
+    the A4 sheets (day sheet, dispatch manifest, stock usage, the printed Guide)
+    are paper. The mix restyles the screen only, so every print function, the
+    print CSS, the tokens and body type print inherits, the label face and the
+    server's own print document are pinned to their bytes at 9a8c442. A failure
+    here is a change to paper: undo it, or ask Cameron first."""
+    import hashlib
+    h = lambda t: hashlib.sha256(t.encode("utf-8")).hexdigest()[:16]
+    funcs = {
+        "function prodSize(": "c8b194be336787e3", "function carrierDims(": "560211cb05b49d72",
+        "function stickerDims(": "b65799c062e28ec8", "function labelFontReady(": "e90e9106a39a03f4",
+        "function labelDims(": "a3e5c994043b70d4", "function labelPrintCss(": "061bc8a8862da9f0",
+        "function fitLabel(": "b8bebb1841f753aa", "function loanStickerSheet(": "4e84233802eb448d",
+        "async function loanPrintSticker(": "d7705852736415ca", "function labelSheet(": "68217ade25de37e2",
+        "function printDispatchManifest(": "7298fb528556d1bb", "function printStockUsage(": "87dcb3552a1cd72e",
+        "function printDaySheet(": "59667d1651a03de6", "function printShippingLabelsFor(": "1574f28f689be7a0",
+        "function printLabelImages(": "b5f3da205c85e60b", "function printLabels(": "4f2e020a18b82af7",
+        "function printGuide(": "d169080c58a6a3f6", "const LABEL_SIZES = {": "aaba502d9fc95f0f",
+    }
+    for sig, want in funcs.items():
+        ok(sig in SCRIPT, "the print code is still there: " + sig)
+        eq(h(_body_of(sig)), want, sig + " is byte for byte what prints today")
+    for pre, want in (("        const LABEL_LOGO = ", "215e8bea15a6faf4"),
+                      ("        const PRINT_LAYS_LABELS = ", "4a6515c3bd7492f9")):
+        ok(pre in SCRIPT, "the print constant is still there: " + pre.strip())
+        i = SCRIPT.index(pre)
+        eq(h(SCRIPT[i:SCRIPT.index("\n", i)]), want, pre.strip() + " is unchanged")
+    pr = re.compile(r"label-sheet|day-sheet|loan-sticker|guide-print-row|#label-print|printing-label|@media print|@page")
+    rules = [s + "{" + re.sub(r"\s+", " ", b).strip() + "}" for s, b in _rules(CSS) if pr.search(s)]
+    eq(len(rules), 80, "the print rules are the same eighty")
+    eq(h("\n".join(rules)), "dd6dd5eed001305b", "and each is unchanged, in order")
+    ok('<div id="label-print"></div>' in HTML, "the print staging area is still a child of the page")
+    ff = re.search(r"@font-face \{ font-family: 'Bricolage Grotesque';[^}]*\}", CSS)
+    ok(ff, "the label face is still declared")
+    eq(h(ff.group(0)), "b3eb4de40583f995", "and declared exactly as before")
+    # What print reads from the token block, and what the A4 sheets inherit from body.
+    for tok, want in (("white", "#ffffff"), ("black", "#000000"), ("print-black-1", "#111111"),
+                      ("print-black-2", "#222222"), ("print-black-3", "#333333"), ("print-grey-1", "#bbbbbb"),
+                      ("print-grey-2", "#dddddd"), ("paper", "var(--white)"), ("paper-ink", "var(--black)"),
+                      ("paper-ink-2", "var(--print-black-1)"), ("paper-ink-3", "var(--print-black-2)"),
+                      ("paper-ink-4", "var(--print-black-3)"), ("paper-rule", "var(--print-grey-2)"),
+                      ("paper-rule-2", "var(--print-grey-1)"), ("paper-rule-strong", "var(--print-black-1)"),
+                      ("font-print", "'Bricolage Grotesque', -apple-system, 'Segoe UI', Roboto, Arial, sans-serif"),
+                      ("text-xs", "12px"), ("text-sm", "14px"), ("text-md", "16px"), ("weight-medium", "500"),
+                      ("weight-semibold", "600"), ("bw-hairline", "1px"), ("bw-strong", "2px"), ("bw-marker", "3px"),
+                      ("sp-2", "8px"), ("radius-xs", "6px"), ("lh-body", "1.5")):
+        eq(_token_raw(tok), want, "--" + tok + " (print reads it)")
+    # --border-strong is deliberately not in this list. It is a screen token the mix moved (to --line-ctl),
+    # and the one printed thing that drew with it, the label sheet, cancels it with `border: 0 !important`
+    # under body.printing-label; the on-screen preview's edge is the label frame's own --paper-edge.
+    ok("\n        body {" in CSS, "the body rule the A4 sheets inherit from is there")
+    body = CSS.split("\n        body {")[1].split("}")[0]
+    ok("font-size: var(--text-sm); line-height: var(--lh-body);" in body,
+       "the A4 sheets still inherit 14px on a 1.5 line from body")
+    py = open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()
+    start = '    @mcp.custom_route("/print/production-labels", methods=["GET", "OPTIONS"])'
+    ok(start in py, "the server's print route is still there")
+    a = py.index(start)
+    ok("return HTMLResponse(doc, headers=doc_headers)" in py[a:], "and still ends in the document it returns")
+    b = py.index("return HTMLResponse(doc, headers=doc_headers)", a)
+    eq(h(py[a:b]), "61376908bdf445b7", "the server's print document is unchanged")
+    ok("_LABEL_LOGO_SVG = " in py, "the logo it prints is still there")
+    i = py.index("_LABEL_LOGO_SVG = ")
+    eq(h(py[i:py.index("\n", i)]), "5cda691da0ce3b1e", "and so is the logo it prints")
+
+
+@test
+def t_the_mix_greys_are_one_ramp():
+    """The mix (spec 2026-10-06, 4.1): one grey ramp, every grey on screen is
+    one of its steps, and the semantic tier reads them. Outside the token block
+    no rule writes a colour of its own."""
+    for tok, v in (("ink", "#121212"), ("ink-2", "#3C4043"), ("ink-3", "#5F6368"), ("ink-4", "#8A9096"),
+                   ("line-ctl", "#DADCE0"), ("line", "#E6E7EA"), ("line-soft", "#EEEFF1"), ("fill", "#F3F4F5"),
+                   ("white", "#ffffff"), ("teal-500", "#13B7C0"), ("teal-600", "#11A6AF"), ("teal-650", "#0F9097"),
+                   ("teal-700", "#0B6B71"), ("teal-900", "#08484C"), ("teal-50", "#F1FBFB"), ("teal-200", "#B8E9EC"),
+                   ("brand-blue", "#334FB4"), ("green-700", "#15803D"), ("green-50", "#F0FDF4"),
+                   ("amber-700", "#B45309"), ("amber-50", "#FFFBEB"), ("red-700", "#B91C1C"), ("red-50", "#FEF2F2")):
+        eq(_token_raw(tok).lower(), v.lower(), "--" + tok)
+    for tok, ref in (("text-secondary", "var(--ink-2)"), ("text-tertiary", "var(--ink-3)"),
+                     ("text-disabled", "var(--ink-4)"), ("surface-page", "var(--white)"),
+                     ("surface-secondary", "var(--fill)"), ("surface-tertiary", "var(--fill)"),
+                     ("surface-sunken", "var(--line)"), ("border-default", "var(--line)"),
+                     ("border-strong", "var(--line-ctl)"), ("border-emphasis", "var(--ink-4)"),
+                     ("action-soft", "var(--fill)"), ("action-line", "var(--line)")):
+        eq(_token_raw(tok), ref, "--" + tok)
+    ok(not re.search(r"--neutral-\d+\s*:", CSS) and "--off-white" not in CSS,
+       "the old neutral scale and the off-white page are gone")
+    for ground in ("white", "fill", "line"):
+        ok(_contrast(_token("ink-3"), _token(ground)) >= 4.5, "ink-3, the lightest text, reads on --" + ground)
+    rest = re.sub(r"/\*.*?\*/", "", CSS[CSS.index("\n        }", CSS.index(":root {")):], flags=re.S)
+    ok(not re.search(r"(?<![\w-])#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(", rest), "no rule outside the block writes a colour")
+    enc = set(m.lower() for m in re.findall(r"%23([0-9a-fA-F]{6})", rest))
+    ok(enc <= {"5f6368", "ffffff"}, "a drawn glyph's colour is a ramp step too: %s" % sorted(enc))
+    ok("const MIX_TOKENS = [" in SCRIPT, "the Design section's list of the mix's tokens exists")
+
+
+@test
+def t_the_ink_frame_the_measures_and_the_shadows_are_tokens():
+    """Spec 4.1 and 4.6: the ink frame, one colour per measure on every screen,
+    the feature band, five shadows, hairlines drawn as inset shadows, and one
+    focus ring. Each is set once here and only read elsewhere."""
+    want = {
+        "teal-band-1": "#D3F1F3", "teal-band-2": "#DDF4F5", "teal-band-3": "#EBF8F9", "teal-band-4": "#F2FBFB",
+        "live-green": "#22A55A",
+        "surface-chrome": "var(--ink)", "text-on-chrome": "var(--white)",
+        "nav-text": "color-mix(in srgb, var(--white) 72%, transparent)",
+        "nav-muted": "color-mix(in srgb, var(--white) 50%, transparent)",
+        "chrome-fill": "color-mix(in srgb, var(--white) 12%, transparent)",
+        "chrome-press": "color-mix(in srgb, var(--white) 18%, transparent)",
+        "nav-on-bg": "color-mix(in srgb, var(--teal-500) 18%, transparent)", "nav-on-icon": "var(--teal-500)",
+        "link-underline": "color-mix(in srgb, var(--teal-700) 35%, transparent)",
+        "live-dot": "var(--live-green)", "live-halo": "color-mix(in srgb, var(--live-green) 15%, transparent)",
+        "press": "var(--line)", "press-fill": "var(--line-ctl)",
+        "c-taken": "var(--teal-900)", "c-still": "color-mix(in srgb, var(--teal-500) 45%, transparent)",
+        "c-exp": "var(--ink)", "c-exp-line": "var(--teal-650)", "c-range": "var(--teal-200)",
+        "c-range-edge": "var(--teal-650)", "c-area": "color-mix(in srgb, var(--teal-500) 15%, transparent)",
+        "c-area-edge": "color-mix(in srgb, var(--teal-650) 35%, transparent)", "c-plan": "var(--brand-blue)",
+        "band-rule": "color-mix(in srgb, var(--teal-900) 12%, transparent)", "border-soft": "var(--line-soft)",
+        "shadow-control": "0 1px 1px color-mix(in srgb, var(--ink) 4%, transparent)",
+        "ring-chosen": "var(--shadow-control), inset 0 0 0 var(--bw-hairline) var(--teal-650)",
+        "ring-live": "0 0 0 var(--sp-0-5) var(--live-halo)",
+        "ring-selected": "inset var(--bw-strong) 0 0 var(--teal-650)",
+        "rule-t": "inset 0 var(--bw-hairline) 0 var(--border-default)",
+        "rule-b": "inset 0 calc(-1 * var(--bw-hairline)) 0 var(--border-default)",
+        "rule-t-soft": "inset 0 var(--bw-hairline) 0 var(--border-soft)",
+        "rule-b-soft": "inset 0 calc(-1 * var(--bw-hairline)) 0 var(--border-soft)",
+        "rule-t-band": "inset 0 var(--bw-hairline) 0 var(--band-rule)",
+        "focus-ring": "0 0 0 var(--bw-strong) var(--white), 0 0 0 calc(2 * var(--bw-strong)) var(--teal-650)",
+        "focus-outline": "var(--bw-strong) solid var(--teal-650)",
+        "shadow-lg": "var(--shadow-pop)",
+    }
+    for tok, v in want.items():
+        eq(_token_raw(tok), v, "--" + tok)
+    for tok in ("band-bg", "shadow-raise", "shadow-pop", "shadow-focal", "shadow-label"):
+        v = _token_raw(tok)
+        ok("color-mix" in v or "var(--teal-band-" in v, "--%s is drawn from the palette: %s" % (tok, v[:60]))
+    ok(all("var(--teal-band-%d)" % n in _token_raw("band-bg") for n in (1, 2, 3, 4)), "the band runs through its four stops")
+    ok(_contrast(_token("ink"), _token("teal-500")) >= 4.5, "ink on the teal fill reads at 4.5:1")
+    tokens = SCRIPT.split("const MIX_TOKENS = [")[1].split("];")[0]
+    for group in ("'The ink frame'", "'One colour per measure'", "'Shadows and rules'"):
+        ok(group in tokens, "the Design section lists " + group)
+
+
+@test
+def t_the_mix_type_sizes_space_and_corners_are_tokens():
+    """Spec 4.2 to 4.5: five Inter steps with one line height each, Bricolage's
+    two sizes, four figure sizes, the control and row heights, the 4px scale's
+    roles and one corner per role. Each is set once here."""
+    for tok, v in (("text-micro", "11px"), ("text-xs", "12px"), ("text-body", "13px"), ("text-sm", "14px"),
+                   ("text-head", "15px"), ("text-md", "16px"), ("text-2xl", "24px"), ("text-title", "26px"),
+                   ("fig-xl", "44px"), ("fig-l", "36px"), ("fig-m", "28px"), ("fig-s", "var(--text-2xl)"),
+                   ("tr-title", "-0.02em"), ("tr-fig", "-0.03em"), ("lh-caption", "16px"), ("lh-control", "20px"),
+                   ("lh-title", "32px"), ("lh-none", "1"),
+                   ("tag-h", "20px"), ("control-h-sm", "24px"), ("control-h-md", "28px"), ("control-h", "32px"),
+                   ("control-h-lg", "40px"), ("row-h", "44px"), ("row-h-2", "60px"), ("order-row-h", "64px"),
+                   ("box-2xl", "40px"), ("icon-md", "16px"), ("icon-sm", "14px"), ("icon-stroke", "1.75"),
+                   ("icon-stroke-s", "2"), ("topbar-h", "48px"), ("sidebar-w", "236px"), ("frame-inset", "var(--sp-2)"),
+                   ("wrap-pad", "var(--sp-8)"), ("sp-9", "48px"), ("sp-10", "64px"),
+                   ("control-gap", "var(--sp-2)"), ("gap-row-icon", "var(--sp-3)"), ("gap-cluster", "var(--sp-4)"),
+                   ("gap-fig", "var(--sp-3)"), ("gap-cols", "var(--sp-10)"), ("pop-offset", "var(--sp-2)"),
+                   ("pop-pad", "var(--sp-4)"), ("tip-pad", "var(--sp-3)"), ("menu-pad", "var(--sp-1)"),
+                   ("radius-3xs", "2px"), ("radius-2xs", "4px"), ("radius-xs", "6px"), ("radius-md", "10px"),
+                   ("radius-lg", "12px"), ("radius-pop", "var(--radius-md)"), ("radius-tile", "var(--radius-md)"),
+                   ("radius-sheet", "var(--radius-lg)"), ("radius-band", "var(--radius-sheet)"),
+                   ("radius-card", "var(--radius-pop)"), ("switch-w", "28px"), ("switch-h", "16px"),
+                   ("switch-inset", "2px")):
+        eq(_token_raw(tok), v, "--" + tok)
+    tokens = SCRIPT.split("const MIX_TOKENS = [")[1].split("];")[0]
+    for group in ("'Type'", "'Sizes'", "'Space'", "'Corners'"):
+        ok(group in tokens, "the Design section lists " + group)
+
+
+@test
+def t_the_page_is_one_sheet_in_an_ink_frame():
+    """Spec 5 (Cameron, 2026-10-05: "go with the dark sidebar"): the chrome is
+    ink, the page is one white sheet 8 inside it with a 12 corner and no edge
+    or shadow, and the sidebar is the frame itself: its words white at 72%,
+    the chosen page teal at 18% with white words and a teal icon."""
+    ok("@media screen {\n            #app { background: var(--surface-chrome); }" in CSS, "the frame is ink, on screen only")
+    sheet = CSS.split("\n            .main { margin: var(--frame-inset) var(--frame-inset) var(--frame-inset) 0;")
+    ok(len(sheet) == 2 and "border-radius: var(--radius-sheet)" in sheet[1].split("}")[0]
+       and "background: var(--surface-primary)" in sheet[1].split("}")[0], "the page is one white sheet, 8 in, 12 round")
+    ok(CSS.index("@media screen {\n            #app {") > CSS.index("\n        .main {"), "set after the base .main rule")
+    side = CSS.split("\n        .sidebar {")[1].split("}")[0]
+    ok("background: var(--surface-chrome)" in side and "border-right" not in side, "the sidebar is the ink, with no edge")
+    item = CSS.split("\n        .nav-item {")[1].split("}")[0]
+    ok("color: var(--nav-text)" in item and "height: var(--control-h)" in item and "gap: var(--gap-row-icon)" in item,
+       "a nav row is 32, white at 72%, its icon 12 from its words")
+    on = CSS.split('.nav-item:is(.active, [aria-current="page"]) {')[1].split("}")[0]
+    ok("background: var(--nav-on-bg)" in on and "color: var(--text-on-chrome)" in on,
+       "the chosen one is teal at 18% with white words")
+    ok('.nav-item:is(.active, [aria-current="page"]) svg { color: var(--nav-on-icon); }' in CSS, "and a teal icon")
+    ok('<img class="brand-logo" src="/brand/logo-light.svg"' in HTML and '<span class="brand-name">Reactor</span>' in HTML
+       and "brand-mark" not in HTML,
+       "the brand row is Projected Image's logo and the wordmark, the old teal tile gone")
+    ok('id="side-hide"' in HTML and "$('side-hide').onclick = toggleSidebar;" in SCRIPT, "with Hide sidebar beside it")
+    beta = CSS.split("\n        .beta-tag {")[1].split("}")[0]
+    ok("font-size: var(--text-micro)" in beta and "background: none" in beta, "Beta is a micro word, not a box")
+    ok(".beta-tag" not in CSS.split("ONE TAG.")[1].split("{")[0], "and has left the one tag recipe")
+    ok('<meta name="theme-color" content="#121212" />' in HTML, "a phone's own bar is ink too")
+
+
+@test
+def t_the_top_bar_says_where_you_are_and_finds_anything():
+    """Spec 5: the top bar sits inside the sheet with crumbs on the left
+    (section, chevron, page) and search on the right (a 32 well, 232 wide, the
+    shortcut in a key cap). On a phone or tablet it is the ink frame: the
+    menu, the section, search; the sheet rises under it with 12 corners."""
+    ok('<div class="crumbs"><span id="view-crumb"></span><span class="crumb-chev" id="crumb-chev" aria-hidden="true"></span><h1 id="view-title">Overview</h1></div>' in HTML,
+       "the crumbs are the section, a chevron and the page")
+    ok("topbar-sep" not in HTML, "the hairline after the trigger is gone")
+    ok("function setViewCrumb(v) {" in SCRIPT, "the section is read from the sidebar's own groups")
+    sv = SCRIPT.split("function setView(v) {")[1][:1600]
+    ok("setViewCrumb(v);" in sv and "document.body.dataset.view = v;" in sv, "and set with the page on every move")
+    ok("$('view-title').append(" not in SCRIPT, "the crumbs carry no Beta: the page title does")
+    bar = CSS.split("\n        .topbar {")[1].split("}")[0]
+    ok("border-bottom" not in bar and "padding: 0 var(--wrap-pad)" in bar, "no rule under the bar, on the page's gutter")
+    find = CSS.split("\n        .topbar-search {")[1].split("}")[0]
+    for prop in ("height: var(--control-h)", "width: var(--find-w)", "background: var(--surface-tertiary)",
+                 "border-radius: var(--radius-control)"):
+        ok(prop in find, "search: " + prop)
+    eq(_token_raw("find-w"), "232px", "--find-w")
+    kbd = CSS.split("\n        .topbar-search kbd {")[1].split("}")[0]
+    ok("height: var(--tag-h)" in kbd and "font-size: var(--text-micro)" in kbd and "box-shadow: var(--ring-default)" in kbd,
+       "the shortcut is a 20 key cap in micro type")
+    phone = CSS.split("@media screen and (max-width: 900px) {")
+    ok(len(phone) > 1 and ".view.active { background: var(--surface-primary); border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;" in phone[1],
+       "on a phone the sheet rises under an ink bar")
+
+
+@test
+def t_a_page_header_is_one_builder():
+    """Spec 5 and 4.4: a Bricolage title at 26/32 (24 on a phone) with Beta
+    beside it where it applies; at most one short line or a status line under
+    it (a live dot, the stamp and a 24 Refresh, or words split by a dot); the
+    page's actions on the right. 12 from the top bar, 20 above the tabs, 32
+    above the body. Bricolage is for the wordmark and page titles only."""
+    ok("function pageHead(o) {" in SCRIPT, "the builder exists")
+    fn = fn_src("function pageHead(o) {")
+    for part in ("el('div', 'ov-hero')", "BETA_TABS.indexOf(o.view) >= 0", "el('span', 'live-dot')", "freshLabel(o.live)",
+                 "r.className = 'info'", "el('span', 'dot-sep')", "el('p', null, o.line)", "heroAct('', ...(o.actions || []))"):
+        ok(part in fn, "pageHead: " + part)
+    h2 = CSS.split("\n        .ov-hero h2 {")[1].split("}")[0]
+    for prop in ("font-size: var(--text-title)", "line-height: var(--lh-title)", "font-weight: var(--weight-semibold)",
+                 "letter-spacing: var(--tr-title)"):
+        ok(prop in h2, "the page title: " + prop)
+    ok(":is(.brand-name, .ov-hero h2, .ds-type-page) {" in CSS, "Bricolage is for the wordmark and page titles only")
+    sub = CSS.split("\n        .ph-sub {")[1].split("}")[0]
+    ok("margin-top: var(--sp-1)" in sub and "color: var(--text-tertiary)" in sub, "the line sits 4 under the title in ink-3")
+    dot = CSS.split("\n        .live-dot {")[1].split("}")[0]
+    ok("background: var(--live-dot)" in dot and "box-shadow: var(--ring-live)" in dot, "the live dot wears its halo")
+    info = CSS.split("\n        .info {")[1].split("}")[0]
+    ok("width: var(--control-h-sm)" in info and "height: var(--control-h-sm)" in info, "Refresh is a 24 icon button in the line")
+    ok(".ov-wrap > .ov-hero { margin-bottom: var(--sp-7); }" in CSS and ".ov-hero:has(+ .tabs) { margin-bottom: var(--sp-5); }" in CSS,
+       "32 above the body, 20 above the tabs")
+    ok(re.search(r"\.ov-wrap \{[^}]*padding: var\(--sp-3\) var\(--wrap-pad\) var\(--sp-9\)", CSS), "12 under the top bar")
+
+
+@test
+def t_the_page_header_wraps_sits_right_in_the_grid_stays_off_paper_and_syncs():
+    """Review of the page header (6 October 2026, fix rounds 1 and 2). Five
+    things the first cut got wrong: (1) a page title that is DATA (a product's
+    name, "X sector") never wrapped, so a long one pushed the phone page
+    sideways; (2) a Customise page's header sat one grid gap above its first
+    block, not the 32 a plain page gives it, and the first cure (a margin on
+    whatever follows) pushed a lone one-column KPI tile down out of its row,
+    so the offset is on the header, which is alone in its full-width row;
+    (3) at 900 and under the grid's tabs sat 16 under the header where plain
+    pages have 20; (4) the live dot and the refresh glyph would print on a
+    report's PDF with no stamp beside them; (5) Hide sidebar never reported
+    whether the sidebar was in view."""
+    ok("\n        .ov-hero h2 {" in CSS, "the page title rule exists")
+    h2 = CSS.split("\n        .ov-hero h2 {")[1].split("}")[0]
+    ok("white-space: nowrap" not in h2, "a page title may wrap: nowrap pushed a long product name off the phone's column")
+    ok("flex-wrap: wrap" in h2 and "overflow-wrap: anywhere" in h2,
+       "it wraps, breaks a word longer than the column, and Beta follows it onto the next line")
+    # (2)
+    zeroed = "\n        .ov-wrap.wgrid > * { margin: 0; }"
+    ok(zeroed in CSS, "the grid still zeroes its children's margins")
+    gap = ".ov-wrap.wgrid > .ov-hero:not(:has(+ :is(.tabs, .page-tabs, .queues))) { margin-bottom: calc(var(--sp-7) - var(--page-rhythm)); }"
+    ok(gap in CSS, "a Customise page's header sits 32 above what follows it, as on a plain page, unless tabs follow (they have their own 20)")
+    ok(CSS.index(gap) > CSS.index(zeroed), "after the grid zeroes its children's margins, so it is not undone")
+    ok(".ov-hero + :not(.tabs, .page-tabs)" not in CSS,
+       "and the offset is not on whatever follows the header: that can be a one-column tile (it would sit lower than its row) or a hidden block")
+    # (3)
+    ok(".ov-wrap.wgrid > .ov-hero + .tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm)); }" in CSS
+       and "calc(var(--sp-5) - var(--page-rhythm) - var(--sp-1))" not in CSS
+       and "calc(var(--sp-4) - var(--page-rhythm) - var(--sp-1))" not in CSS,
+       "at 900 and under the grid's tabs are 20 under the header too: since the mix the strip carries no 4px padding to take back, so the one base rule serves every width")
+    # (4)
+    hide = "\n        .ph-sub > :is(.live-dot, .info) { display: none; }"
+    ok(hide in CSS, "the live dot and the refresh glyph are hidden unless something says otherwise")
+    after = CSS[CSS.index(hide):]
+    m = re.search(r"@media screen \{", after)
+    ok(m is not None, "and shown again inside a screen-only block")
+    depth, i = 1, m.end()
+    while i < len(after) and depth:
+        depth += {"{": 1, "}": -1}.get(after[i], 0); i += 1
+    scr = after[m.end():i]
+    ok(".ph-sub > .live-dot { display: block; }" in scr and ".ph-sub > .info { display: inline-grid; }" in scr,
+       "the screen block shows both, after the hiding rule, so a printed report never carries them")
+    # (5)
+    ok("function openSidebar() {" in SCRIPT and "function closeSidebar() {" in SCRIPT, "the drawer's two functions exist")
+    ok("$('side-hide').setAttribute('aria-expanded', 'true')" in fn_src("function openSidebar() {"),
+       "opening the drawer tells Hide sidebar the sidebar is in view")
+    ok("$('side-hide').setAttribute('aria-expanded', 'false')" in fn_src("function closeSidebar() {"),
+       "closing it tells Hide sidebar it is not")
+    menu = "$('menu-btn').setAttribute('aria-expanded', String(!(document.body.classList.contains('sidebar-collapsed')"
+    boot = "$('side-hide').setAttribute('aria-expanded', $('menu-btn').getAttribute('aria-expanded'));"
+    ok(menu in SCRIPT, "the boot code still sets the menu button's state")
+    ok(boot in SCRIPT, "and sets Hide sidebar's too")
+    ok(SCRIPT.index(boot) > SCRIPT.index(menu), "after the menu button's, so it reports what the menu button reports and a sidebar restored as folded is not called open")
+
+
+@test
+def t_a_button_is_the_mix_button():
+    """Spec 6: a button is 32 tall with a 6 corner, a line-ctl hairline and a
+    1px lift, 13/20 at 500, a 16 icon 8 from its word. Primary is the teal fill
+    with ink words. There is no 28 text button any more: btn-sm is the same 32,
+    so every control in a row lines up. Pressed is one step darker than hover
+    and nothing jumps; an open menu's button keeps the fill."""
+    b = CSS.split("\n        .btn {")[1].split("}")[0]
+    for prop in ("min-height: var(--control-h)", "padding: 0 var(--sp-3)", "border-radius: var(--radius-control)",
+                 "font-size: var(--text-body)", "font-weight: var(--weight-medium)", "gap: var(--control-gap)",
+                 "box-shadow: var(--shadow-control)", "solid var(--border-strong)"):
+        ok(prop in b, ".btn: " + prop)
+    act = CSS.split("\n        .btn:active {")[1].split("}")[0]
+    ok("background: var(--press)" in act and "translateY" not in act, "pressed is one step darker and does not move")
+    sm = CSS.split(".btn-sm {")[1].split("}")[0]
+    ok("min-height: var(--control-h)" in sm and "padding: 0 var(--sp-3)" in sm and "font-size: var(--text-body)" in sm,
+       "btn-sm is the same 32 button")
+    ok(".btn-sm.btn-icon { width: var(--control-h);" in CSS, "an icon button is a 32 square")
+    ok(re.search(r"\.icon-btn \{[^}]*min-width: var\(--control-h\); min-height: var\(--control-h\)", CSS),
+       "and so is a ghost icon button")
+    p = CSS.split(".btn-primary {")[1].split("}")[0]
+    ok("background: var(--action-primary)" in p and "color: var(--text-on-action)" in p, "primary is teal with ink words")
+    ok('.btn[aria-expanded="true"] { background: var(--surface-tertiary); }' in CSS, "an open menu's button keeps the fill")
+    ok(".btn:not(.btn-sm):has(> .ic:first-child)" not in CSS, "an icon does not pull a button's edge in")
+    ghost = CSS.split("\n        .btn.ghost {")[1].split("}")[0]
+    ok("border-color: transparent" in ghost and "box-shadow: none" in ghost, "a ghost button has no edge and no lift")
+
+
+@test
+def t_a_field_is_the_mix_field():
+    """Spec 6: real inputs, 32 tall, 13/20, a line-ctl hairline, the focus ring
+    on the field (a 2px teal-line ring 2 off its edge, not a glow). A search is
+    one 280 field with its glyph in flow, ringed as a whole while its input has
+    focus; a select's chevron is a 16 glyph 12 from the edge in ink-3."""
+    f = CSS.split("input[type=email], input[type=password], input[type=url], input[type=tel], input:not([type]), textarea, select {")[1].split("}")[0]
+    for prop in ("solid var(--border-strong)", "font-size: var(--text-body)", "padding: var(--control-pad-y) var(--sp-3)",
+                 "min-height: var(--control-h)", "box-shadow: var(--shadow-control)"):
+        ok(prop in f, "field: " + prop)
+    ok(':is(input, textarea, select, [contenteditable="true"]):focus { outline: none; box-shadow: var(--focus-ring); }' in CSS,
+       "a field's focus is the one ring, and its edge does not change colour under it")
+    s = CSS.split("\n        .tbl-search {")[1].split("}")[0]
+    for prop in ("height: var(--control-h)", "width: var(--search-w)", "gap: var(--control-gap)", "padding: 0 var(--sp-3)",
+                 "solid var(--border-strong)"):
+        ok(prop in s, "search: " + prop)
+    eq(_token_raw("search-w"), "280px", "--search-w")
+    ok(".tbl-search:focus-within { box-shadow: var(--focus-ring); }" in CSS and ".tbl-search input:focus { box-shadow: none; }" in CSS,
+       "the search is ringed as one field, not its input inside it")
+    ok("position: absolute" not in CSS.split("\n        .tbl-search .ic {")[1].split("}")[0], "its glyph sits in flow")
+    sel = CSS.split("\n        select { appearance: none;")[1].split("}")[0]
+    ok("stroke='%235F6368'" in sel and "stroke-width='1.75'" in sel and "right var(--sp-3) center" in sel,
+       "the chevron is a 16 glyph at 1.75 in ink-3, 12 from the edge")
+    for rule in (".tbl-tools select {", "input.field-sm, select.field-sm {", ".tbl-rows select {", ".dpanel input, .dpanel select {"):
+        ok("var(--control-h)" in CSS.split(rule)[1].split("}")[0] and "28px" not in CSS.split(rule)[1].split("}")[0]
+           and "var(--control-h-md)" not in CSS.split(rule)[1].split("}")[0], rule + " is 32")
+
+
+@test
+def t_tabs_sit_on_a_rule_and_the_chosen_segment_is_white():
+    """Spec 5 and 6: tabs that move between sections sit on a full-width rule,
+    44 tall, as wide as their words and 24 apart, the live one in ink with a
+    2px teal-line underline. A segmented chooser is a 32 fill track whose chosen
+    segment is white with a teal-line ring and ink words. A count sits 8 after
+    its word; an icon-only choice still says its name."""
+    tabs = CSS.split("\n        .tabs {")[1].split("}")[0]
+    for prop in ("min-height: var(--row-h)", "box-shadow: var(--rule-b)", "gap: 0 var(--sp-6)", "align-items: stretch"):
+        ok(prop in tabs, ".tabs: " + prop)
+    tab = CSS.split("\n        .tab {")[1].split("}")[0]
+    ok("font-size: var(--text-body)" in tab and "color: var(--text-tertiary)" in tab and "padding: 0" in tab,
+       "a tab is its word, 13 at 500 in ink-3")
+    rule = CSS.split('.tab:is(.on, [aria-current="page"], [aria-pressed="true"])::after {')[1].split("}")[0]
+    ok("bottom: 0" in rule and "height: var(--bw-strong)" in rule and "var(--fill-mark)" in rule
+       and "border-radius: var(--radius-swatch) var(--radius-swatch) 0 0" in rule, "the underline sits on the rule, 2px, teal-line")
+    ok(".ov-wrap > .tabs { margin-inline: calc(-1 * var(--wrap-pad)); padding-inline: var(--wrap-pad); max-width: none; }" in CSS,
+       "a page's own strip runs edge to edge across the sheet")
+    ok(".ov-wrap > :is(.tabs, .page-tabs, .seg-row) { margin-bottom: var(--sp-7); }" in CSS, "and sits 32 above the body")
+    pt = CSS.split("\n        .page-tabs {")[1].split("}")[0]
+    ok("min-height: var(--row-h)" in pt and "box-shadow: var(--rule-b)" in pt, "a tab row with a chooser on its right is the same 44 on a rule")
+    seg = CSS.split("\n        .segmented {")[1].split("}")[0]
+    ok("background: var(--surface-tertiary)" in seg and "padding: 0 var(--sp-0-5)" in seg, "the track is the fill, 2 in at its sides (its choices are its full height)")
+    on = CSS.split('.segmented > button:is(.on, [aria-pressed="true"]) {')[1].split("}")[0]
+    drawn = CSS.split('.segmented > button:is(.on, [aria-pressed="true"])::before {')[1].split("}")[0]
+    ok("color: var(--text-primary)" in on and "background: var(--surface-primary)" in drawn and "box-shadow: var(--ring-chosen)" in drawn,
+       "the chosen segment is white, ink, with the teal-line ring (drawn inset on ::before)")
+    cnt = CSS.split("\n        .cnt {")[1].split("}")[0]
+    ok("font-size: var(--text-xs)" in cnt and "color: var(--text-tertiary)" in cnt and "tabular-nums" in cnt, "a count is caption, ink-3, tabular")
+    fn = fn_src("function chooser(")
+    ok("if (o.n != null) b.append(el('span', 'cnt', String(o.n)));" in fn, "a choice can carry its count")
+    ok("if (o.icon) { b.append(ico(o.icon)); b.setAttribute('aria-label', o.label);" in fn, "and an icon-only choice keeps its name")
+
+
+@test
+def t_a_section_is_a_title_and_space():
+    """Spec 3 and 6 (Cameron: "it still all looks very dated and text heavy"):
+    one sheet, few boxes. A section is a 15/20 600 head, then its content 12
+    under it, 48 from the next (32 on a phone); no edge, no fill, no padding,
+    so its content runs on the page's own text edge. A chart sits in its
+    section without a frame either."""
+    card = CSS.split("\n        .card {")[1].split("}")[0]
+    for prop in ("background: none", "border: 0", "box-shadow: none", "padding: 0", "gap: var(--sp-3)"):
+        ok(prop in card, ".card: " + prop)
+    ok("\n        .card > * { padding-left" not in CSS, "children are not handed a gutter any more")
+    ok(not re.search(r"\.card > :is\(\.lia-bar, \.lbl-row", CSS), "so nothing has to take one back as a margin")
+    for sel in ("\n        .card-title {", "\n        .section-title {"):
+        r = CSS.split(sel)[1].split("}")[0]
+        ok("font-size: var(--text-head)" in r and "font-weight: var(--weight-semibold)" in r and "line-height: var(--lh-control)" in r,
+           sel.strip() + " is the head step, 15/20 at 600")
+    ok(re.search(r"\.ov-wrap \{[^}]*--page-rhythm: var\(--sp-9\)", CSS), "48 between sections")
+    chart = CSS.split("\n        .chart-card {")[1].split("}")[0]
+    ok("border: 0" in chart and "padding: 0" in chart and "background: none" in chart, "a chart has no frame of its own")
+
+
+@test
+def t_an_explanation_waits_behind_an_info_button():
+    """Spec 3, 6 and 7: numbers first, words on request. An explanation moves
+    word for word behind a 24 info button beside its heading or figure label;
+    the button opens a popover (10 corner, the pop shadow, 16 inside, 8 from
+    its trigger) with the words and "More in the Guide". It opens on a tap and
+    from the keyboard, unlike the old hover-only title text."""
+    ok("info: SV(" in SCRIPT and "arrowRight: SV(" in SCRIPT, "the info glyph and the link arrow are icons like the rest")
+    ok("function infoButton(label, o) {" in SCRIPT, "the builder exists")
+    fn = fn_src("function infoButton(label, o) {")
+    for part in ("el('button', 'info')", "b.setAttribute('aria-label', label)", "b.setAttribute('aria-haspopup', 'dialog')",
+                 "dropPanel(b, (box) => {", "box.classList.add('ipop')", "'More in the Guide'", "openGuideAt(o.guide[0], o.guide[1] || '')"):
+        ok(part in fn, "infoButton: " + part)
+    ok("function pageHead(o) {" in SCRIPT, "the page header builder exists")
+    ph = fn_src("function pageHead(o) {")
+    ok("row.append(h, o.info)" in ph and "h.append(o.info)" not in ph,
+       "a page title can carry one, beside the heading and not inside it: the heading's name stays its title, not 'Liability Beta About Liability'")
+    ok("\n        .ph-title { display: flex;" in CSS and "\n        .ph-title > .info {" in CSS,
+       "and a rule keeps the glyph on the title's first line, 8 after the title and its Beta")
+    pop = CSS.split("\n        .dpanel.ipop {")[1].split("}")[0]
+    ok("padding: var(--pop-pad)" in pop and "width: var(--pop-w)" in pop, "the popover is 16 inside, one width")
+    eq(_token_raw("pop-w"), "360px", "--pop-w")
+    menu = CSS.split("\n        .dmenu {")[1].split("}")[0]
+    ok("border-radius: var(--radius-pop)" in menu and "box-shadow: var(--shadow-pop)" in menu, "on the floating corner and shadow")
+    for fname in ("function dropMenu(", "function dropPanel("):
+        f = fn_src(fname)
+        ok("tokenNum('--pop-offset')" in f and "r.bottom + 4" not in f, fname + " opens 8 from its trigger")
+    link = CSS.split("\n        .link {")[1].split("}")[0]
+    ok("color: var(--text-link)" in link and "font-weight: var(--weight-medium)" in link and "text-decoration: none" in link,
+       "a standalone link is teal words at 500 with an arrow, not underlined")
+    base = CSS.split("\n        .info {")[1].split("}")[0]
+    ok("display: none" in base and "@media screen { .info { display: inline-grid; } }" in CSS,
+       "an info button shows on a screen only, so a report printed to PDF never carries one beside its title")
+
+
+@test
+def t_a_tab_row_keeps_its_rule_and_its_gutter_at_every_width():
+    """Review of the shared parts (6 October 2026, fix round 1). Three faults in
+    the first cut of the tab rows: (1) on a phone the Finance strip shared one
+    nowrap line with its stamp and Refresh and was squeezed to about 156 wide,
+    cutting "Reconciliation"; (2) the strip's own box runs 8 past the text for
+    the focus box, so a strip in a section drew its hairline 8 past the text at
+    each end and CRM's admin row (tabs plus a link) drew a rule only as wide as
+    its strip; (3) the Finance strip took its 8 back with no padding, so the
+    focus box was clipped on the first and last tab."""
+    # (1) the narrow row: the stamp and buttons first, the strip on the line under with the row's rule beneath it
+    ok("@media (max-width: 1100px) {\n            .page-tabs { flex-wrap: wrap; row-gap: var(--sp-2); }" in CSS,
+       "at 1100 and under the Finance row wraps (Forecast's wide end squeezed and clipped the strip on a phone, a tablet and a desktop with the sidebar open, up to about 1010)")
+    ok("@media (max-width: 640px) {\n            .page-tabs { flex-wrap: wrap;" not in CSS
+       and "@media (max-width: 900px) {\n            .page-tabs { flex-wrap: wrap;" not in CSS, "and the rules are not repeated at 640 or 900")
+    ok(".page-tabs-end { order: -1; flex: 1 1 100%; margin-left: 0; justify-content: space-between; }" in CSS,
+       "with the stamp and buttons on the first line")
+    ok(".page-tabs > .tabs { flex: 1 1 100%; min-height: var(--row-h); }" in CSS,
+       "and the strip alone on the line under them, a 44 line, so the rule sits under the tabs")
+    # (3) the Finance strip's focus room
+    ok("\n        .page-tabs > .tabs { margin: 0 calc(-1 * var(--sp-2)); padding: 0 var(--sp-2); max-width: none;" in CSS,
+       "the Finance strip keeps 8 of room at each end for the focus box and takes it back, so the words stay on the gutter")
+    # (2) a strip in a section, and CRM's admin row
+    strip = ".card > .tabs { max-width: none; box-shadow: none;"
+    ok(strip in CSS, "a strip in a section draws no box-shadow rule along its wider box")
+    ok("center bottom / calc(100% - 2 * var(--sp-2)) var(--bw-hairline) no-repeat" in CSS.split(strip)[1].split("}")[0]
+       if strip in CSS else False, "its hairline runs from the text edge to the text edge, 8 in from each end of the box")
+    seg = ".ov-wrap > .seg-row:has(> .tabs) { flex-wrap: nowrap; gap: var(--sp-6); min-height: var(--row-h); box-shadow: var(--rule-b);"
+    ok(seg in CSS, "CRM's tab row with its link is the same 44 row on a full-width rule as the Finance row")
+    ok("margin-inline: calc(-1 * var(--wrap-pad)); padding-inline: var(--wrap-pad); }" in CSS.split(seg)[1][:200]
+       if seg in CSS else False, "running edge to edge with its words on the gutter")
+    ok(".seg-row > .tabs { margin: 0 calc(-1 * var(--sp-2)); padding: 0 var(--sp-2); max-width: none; box-shadow: none;" in CSS,
+       "its strip gives up its own rule")
+    ok(".seg-row:has(> .tabs) > :not(.tabs) { order: -1; flex: none; margin-left: auto; }" in CSS
+       and ".ov-wrap > .seg-row:has(> .tabs) { flex-wrap: wrap; row-gap: var(--sp-2); }" in CSS,
+       "and on a phone its link takes the first line at the right, as the Finance stamp does")
+
+
+@test
+def t_a_disabled_or_danger_button_keeps_one_colour_and_the_old_fields_are_on_the_recipe():
+    """Review of the shared parts (6 October 2026, fix round 1). The 16 icon
+    inherits ink-2 from `.btn .ic`, which beat the button's own colour, so a
+    disabled or danger button showed a mismatched icon. And `.psel` (Products'
+    selects) and `.sk-input` / `.sk-textarea` (the Skills and Memory editors) still
+    wore the old 14px field with a --border-default edge and no lift."""
+    base = ".btn .ic { color: var(--text-secondary); }"
+    fix = '.btn:is([disabled], :disabled, [aria-disabled="true"], .btn-danger, .btn.ghost[disabled], .btn.ghost[aria-disabled="true"]) .ic { color: inherit; }'
+    ok(base in CSS and fix in CSS, "a disabled or danger button hands its own colour to its icon")
+    ok(CSS.index(fix) > CSS.index(base), "after the rule it overrides")
+    ok("\n        .psel { border-radius: var(--radius-field); padding: var(--control-pad-y) var(--sp-3); font-size: var(--text-body); min-height: var(--control-h); }" in CSS,
+       "a Products select is the 13/20 32 field with 12 each side")
+    ok(re.search(r"\n        \.sk-input, \.sk-textarea \{[^}]*\}", CSS) is not None, "the editor field rule is there")
+    rule = re.search(r"\n        \.sk-input, \.sk-textarea \{[^}]*\}", CSS).group(0) if re.search(r"\n        \.sk-input, \.sk-textarea \{[^}]*\}", CSS) else ""
+    ok("border-default" not in rule and "border:" not in rule and "--text-sm" not in rule and "background" not in rule,
+       "an editor field carries no edge, ink or size of its own: the one recipe (line-ctl edge, 13, lift, the focus ring) applies")
+    ok("min-height: var(--control-h)" in rule and "padding: var(--control-pad-y) var(--sp-3)" in rule, "and it is 32 tall with 12 each side")
+    ok(".disp-boxedit > select, .disp-boxedit > input { height: var(--control-h); box-sizing: border-box; }" in CSS
+       and "\n        .disp-boxedit > select.psel { min-width: 168px; }" in CSS,
+       "the dispatch box select is a 32 field with its own chevron room, not a 36 with 8 each side")
+
+
+@test
+def t_a_screens_method_pages_sit_in_one_how_it_works_menu():
+    """Spec 6: one header button holds a screen's method pages as a menu; it
+    replaces Forecast's "How this forecast works" section. A menu row is 32
+    with a 6 corner, a 16 icon 12 from its words and a count at its end; the
+    last row, after a rule, is the Guide's link."""
+    ok("function howItWorks(items, guide) {" in SCRIPT, "the builder exists")
+    fn = fn_src("function howItWorks(items, guide) {")
+    for part in ("el('button', 'btn')", "ico(I.helpCircle)", "'How it works'", "dropMenu(b, ", "'-'", "link: true"):
+        ok(part in fn, "howItWorks: " + part)
+    dm = fn_src("function dropMenu(")
+    ok("if (it.n != null) { const c = el('span', 'cnt', String(it.n));" in dm and "b.append(c); }" in dm, "a menu row can carry a count (and a unit for a screen reader)")
+    ok("if (it.link) { b.classList.add('dmenu-link'); b.append(ico(I.arrowRight)); }" in dm, "and the Guide's row is a link")
+    item = CSS.split("\n        .dmenu-item {")[1].split("}")[0]
+    for prop in ("min-height: var(--control-h)", "gap: var(--gap-row-icon)", "border-radius: var(--radius-row)", "font-size: var(--text-body)"):
+        ok(prop in item, ".dmenu-item: " + prop)
+    ok(".dmenu-item .cnt { margin-left: auto; padding-left: var(--sp-2); }" in CSS, "the count sits at the row's end")
+    ok(".dmenu-link { color: var(--text-link); }" in CSS, "the Guide's row is teal words")
+    ok(".dmenu-item.dmenu-link .ic { color: inherit; }" in CSS and ".dmenu-item.dmenu-link svg {" in CSS,
+       "and its arrow is teal and 14: qualified by .dmenu-item, which is later than .dmenu-link and set the arrow in ink-3 at 16 when it was not")
+
+
+@test
+def t_figures_stand_in_a_row_split_by_hairlines():
+    """Spec 6 and 4.2: figures in one row split by hairlines, no box: the label
+    above (13 at 500 in ink-2), the figure (Inter 600 at 28, tabular, tracked
+    -0.03em, on a line of 1), the change chip 12 beside it, a note under it.
+    The first figure of each row starts on the text edge."""
+    st = CSS.split("\n        .stat {")[1].split("}")[0]
+    for prop in ("background: none", "border: 0", "padding: 0", "gap: var(--gap-fig)"):
+        ok(prop in st, ".stat: " + prop)
+    lab = CSS.split(".stat .label {")[1].split("}")[0]
+    ok("font-size: var(--text-body)" in lab and "color: var(--text-secondary)" in lab and "font-weight: var(--weight-medium)" in lab,
+       "the label is 13 at 500 in ink-2")
+    val = CSS.split(".stat .value {")[1].split("}")[0]
+    for prop in ("font-size: var(--fig-m)", "font-weight: var(--weight-semibold)", "letter-spacing: var(--tr-fig)",
+                 "line-height: var(--lh-none)", "font-variant-numeric: tabular-nums"):
+        ok(prop in val, "the figure: " + prop)
+    row = CSS.split("\n        .metrics {")[1].split("}")[0]
+    ok("overflow: clip" in row and "column-gap: var(--sp-8)" in row, "a row clips the hairline its first figure draws outside it")
+    rule = CSS.split("\n        .metrics > .stat::before {")[1].split("}")[0]
+    ok("left: calc(-0.5 * var(--sp-8))" in rule and "background: var(--border-default)" in rule and "width: var(--bw-hairline)" in rule,
+       "each figure draws its hairline in the middle of the gap before it")
+    ok(".card .metrics-strip > .stat { border-color: transparent;" not in CSS, "no tinted tile inside a section")
+
+
+@test
+def t_the_feature_band_draws_the_main_question():
+    """Spec 6: one per screen at most, for its main question (Forecast:
+    expected this month). A soft teal gradient with a 12 corner: the hero
+    figure at 44 with its chip, the likely range as one bar with the plan as a
+    blue tick, and side figures stacked, each a 28 tile, a figure and a meter.
+    Bar positions are data percentages, the one style the markup carries; the
+    domain is the round span around the values (the mockup's 30,000 to 70,000)."""
+    for name in ("function bandDomain(vals) {", "function rangeBar(r) {", "function meter(m) {", "function featureBand(o) {"):
+        ok(name in SCRIPT, "the builder exists: " + name)
+    band = CSS.split("\n        .fband {")[1].split("}")[0]
+    ok("background: var(--band-bg)" in band and "border-radius: var(--radius-band)" in band, "the band is the teal gradient, 12 round")
+    ok("font-size: var(--fig-xl)" in CSS.split("\n        .fb-hero .fb-fig {")[1].split("}")[0], "the hero figure is 44")
+    fill = CSS.split("\n        .fb-fill {")[1].split("}")[0]
+    ok("background: var(--c-range)" in fill and "inset 0 0 0 var(--bw-hairline) var(--c-range-edge)" in fill, "the range is teal-glow with a teal-line edge")
+    ok("background: var(--c-plan)" in CSS.split("\n        .fb-plan {")[1].split("}")[0], "the plan is a blue tick")
+    ok("background: var(--c-exp)" in CSS.split("\n        .fb-exp {")[1].split("}")[0], "the expected point is an ink dot")
+    fr = fn_src("function rangeBar(r) {")
+    ok("style.setProperty('--at-lo', bandPct(r.lo, r.d))" in fr and ".style.left" not in fr, "positions are percentages in custom properties")
+    if not _node_ok():
+        print("       (node unavailable, harness skipped)")
+        return
+    js = "\n".join((SCRIPT[SCRIPT.index("        function bandDomain(vals) {"):SCRIPT.index("        function rangeBar(r) {")],
+                    "const d = bandDomain([41327, 66054, 53691, 37566]);",
+                    "const m = bandDomain([41327, 66054, 37566, 53691, 24180, 39960, 38750, 34690, 55980, 35860]);",
+                    "console.log(JSON.stringify([d, ['lo', 41327, 'hi', 66054, 'exp', 53691, 'plan', 37566].filter((x, i) => i % 2).map(v => bandPct(v, d)), m, bandPct(41327, m), bandPct(-5, d), bandPct(1e9, d)]));"))
+    out = _run_node(js)
+    eq(out[0], {"min": 30000, "max": 70000}, "the band's domain")
+    eq(out[1], ["28.3%", "90.1%", "59.2%", "18.9%"], "where the bar's marks fall (the mockup's own)")
+    eq(out[2], {"min": 20000, "max": 70000}, "one scale across the mini bars")
+    eq(out[3], "42.7%", "a mini bar's low end")
+    eq([out[4], out[5]], ["0.0%", "100.0%"], "a mark never leaves its track")
+
+
+@test
+def t_lists_are_rows_split_by_hairlines():
+    """Spec 3 and 6: lists are rows split by hairlines, no box. A table is a 32
+    head in caption type and 44 rows, line framing it (top, under the head,
+    bottom) and line-soft between rows, numbers right and tabular. A list row
+    is 44: a 16 icon 12 from its words, a count and a chevron at its end; two
+    columns read down where there is room. A drawer is a row, not a box."""
+    wrap = CSS.split("\n        .ktable-wrap {")[1].split("}")[0]
+    ok("border: 0" in wrap and "background: none" in wrap and "box-shadow: var(--rule-t), var(--rule-b)" in wrap,
+       "a table has no box: a line above and below")
+    th = CSS.split(".ktable th {")[1].split("}")[0]
+    for prop in ("height: var(--control-h)", "font-size: var(--text-xs)", "color: var(--text-tertiary)", "padding: 0 var(--sp-3)",
+                 "box-shadow: var(--rule-b)"):
+        ok(prop in th, "th: " + prop)
+    td = CSS.split(".ktable td {")[1].split("}")[0]
+    ok("height: var(--row-h)" in td and "solid var(--border-soft)" in td and "padding: 0 var(--sp-3)" in td, "a 44 row on a soft divider")
+    ok(".ktable :is(th, td):first-child { padding-left: 0; }" in CSS and ".ktable :is(th, td):last-child { padding-right: 0; }" in CSS,
+       "the outer columns sit on the text edge")
+    ok("function listRows(items, opts) {" in SCRIPT, "the list row builder exists")
+    fn = fn_src("function listRows(items, opts) {")
+    for part in ("el('nav', 'rlist'", "el('button', 'rlist-row')", "el('span', 'cnt'", "el('span', 'sr-only', ' ' + it.unit)", "ico(I.chev)"):
+        ok(part in fn, "listRows: " + part)
+    row = CSS.split("\n        .rlist-row {")[1].split("}")[0]
+    ok("min-height: var(--row-h)" in row and "gap: var(--gap-row-icon)" in row, "a list row is 44 with its icon 12 from its words")
+    ok(".rlist.cols-2 { grid-auto-flow: column; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);" in CSS, "two columns read down, split 7 to 5 as the page's own columns are")
+    sect = CSS.split("\n        details.sect {")[1].split("}")[0]
+    ok("border: 0" in sect and "box-shadow: var(--rule-b-soft)" in sect, "a drawer is a hairline row")
+
+
+@test
+def t_every_row_family_sits_on_the_sections_text_edge():
+    """Ruling on Task 16 (6 October 2026): since Task 11 a section has no gutter,
+    so a row that carries its own side padding sits that far in from the
+    section's title. Every row family that stands straight in a section has no
+    side padding: its words start where the title's do and its hairlines run the
+    text column. Left as they are, by design: a boxed list (the Inbox list, whose
+    rows carry owner tints and an unread bar inside the box) and a filled band or
+    panel (the Size list's group band and detail panel), whose fill is their box.
+    The Production Manager queue rows (Task 33) are on the edge too: their wash
+    and hover bleed 8 past the column instead of padding the words in."""
+    def side(body):
+        left = right = None
+        mm = re.search(r"(?<![-\w])padding:\s*([^;}]+)", body)
+        if mm:
+            v = mm.group(1).split()
+            if len(v) == 1: left = right = v[0]
+            elif len(v) in (2, 3): left, right = v[1], v[1]
+            elif len(v) == 4: left, right = v[3], v[1]
+        mm = re.search(r"padding-inline:\s*([^;}\s]+)", body)
+        if mm: left = right = mm.group(1)
+        mm = re.search(r"padding-left:\s*([^;}\s]+)", body)
+        if mm: left = mm.group(1)
+        mm = re.search(r"padding-right:\s*([^;}\s]+)", body)
+        if mm: right = mm.group(1)
+        return left, right
+    anchored = [".files-row", "#files-content .files-row", ".files-empty", ".guide-rows > .guide-row", ".sk-item", ".impact-row",
+                ".action", ".prod-row", ".card-bleed.prod-rows > .prod-row", ".card-bleed.crm-lead-list > .lbl-row",
+                ".mem-table tr", ".ktable.sizes-table tr.sizes-row", ".cx-docs tr"]
+    for sel in anchored:
+        mm = re.search(r"\n\s*" + re.escape(sel) + r" \{([^}]*)\}", CSS)
+        ok(mm is not None, sel + " is still a rule")
+        if not mm: continue
+        l, r = side(mm.group(1))
+        ok(l in ("0", "0px") and r in ("0", "0px"), sel + " has no side padding (left %s, right %s)" % (l, r))
+    # The Production Manager's order row: its own rule is the one at the stylesheet's 8-space indent
+    # (the container queries above it carry deeper ones), and its wash and hover bleed past the column.
+    mm = re.search(r"\n        \.lbl-qrow \{([^}]*)\}", CSS)
+    ok(mm is not None, ".lbl-qrow is a rule")
+    l, r = side(mm.group(1)) if mm else (None, None)
+    ok(l in ("0", "0px") and r in ("0", "0px"), ".lbl-qrow has no side padding (left %s, right %s)" % (l, r))
+    ok("calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected)" in CSS.split('\n        .lbl-qrow:is(.on, [aria-selected="true"]) {')[1].split("}")[0],
+       "and the open order's wash is a bleed of 8, not padding")
+    inline = ["\.card-bleed > \.insights > \.insight, \.card-bleed \.block > \.insights > \.insight \\{",
+              "\.card-bleed\.crm-act-list > \.crm-sub \\{",
+              "\.scan-card \.card-bleed > \.summary, \.scan-card \.card-bleed \.block > \.section-title \\{"]
+    for pat in inline:
+        mm = re.search(pat + r"([^}]*)\}", CSS)
+        ok(mm is not None, pat.replace("\\", "") + " is still a rule")
+        if not mm: continue
+        l, r = side(mm.group(1))
+        ok(l in ("0", "0px") and r in ("0", "0px"), pat.replace("\\", "")[:60] + " has no side padding")
+    ok(re.search(r"\n\s*\.tm-day \{ background: none; \}", CSS) is not None, "a day label in the activity list is a plain row, not a filled band")
+    ok(".files-list { border: 0; border-radius: 0; background: none; overflow: visible; }" in CSS, "a list of files has no box")
+    mk = "\n        .card .ktable-wrap, .card-bleed .ktable-wrap {"
+    ok(mk in CSS, "the section table rule is still there")
+    if mk in CSS:
+        ok("box-shadow" not in CSS.split(mk)[1].split("}")[0],
+           "and it no longer switches off the lines above and below a table that the table rule draws (a table in a section was left unframed)")
+
+
+@test
+def t_a_tag_is_twenty_tall_in_caption_type():
+    """Spec 6 and 4.5: a tag is 20 tall with a 4 corner, caption type on its
+    one 16 line, 8 in, a tint and no border. Status is shown by colour and
+    shape (a dot, a tag, a bar), not a sentence."""
+    tags = CSS.split("ONE TAG.")[1].split("}")[0]
+    for prop in ("height: var(--tag-h)", "padding: 0 var(--sp-2)", "font-size: var(--text-xs)", "line-height: var(--lh-caption)",
+                 "font-weight: var(--weight-medium)", "border: 0", "border-radius: var(--radius-tag)"):
+        ok(prop in tags, "a tag: " + prop)
+
+
+@test
+def t_an_empty_space_is_a_tile_a_line_and_its_action():
+    """Spec 6 and 7 (Cameron: "i hate the stupid projector thing"): an empty
+    state is a 40 icon tile with the screen's own icon on the fill, one line of
+    8 words or fewer in the head step, and its action, centred in its space.
+    No illustration, no box. A report's run gate is one: the page header with
+    its one line, then the tile, the cost and Run."""
+    ok("function emptyState(o) {" in SCRIPT, "the builder exists")
+    fn = fn_src("function emptyState(o) {")
+    for part in ("el('div', 'empty-state'", "el('span', 'empty-ic')", "ico(o.icon", "el('p', 'empty-line', o.text)", "if (o.action) box.append(o.action);"):
+        ok(part in fn, "emptyState: " + part)
+    tile = CSS.split("\n        .empty-ic {")[1].split("}")[0]
+    ok("width: var(--box-2xl)" in tile and "height: var(--box-2xl)" in tile and "background: var(--surface-tertiary)" in tile
+       and "border-radius: var(--radius-control)" in tile, "a 40 tile on the fill with a 6 corner")
+    line = CSS.split("\n        .empty-line {")[1].split("}")[0]
+    ok("font-size: var(--text-head)" in line and "font-weight: var(--weight-semibold)" in line, "one line in the head step")
+    st = CSS.split("\n        .empty-state {")[1].split("}")[0]
+    ok("align-items: center" in st and "text-align: center" in st and "border" not in st and "background" not in st, "centred, no box")
+    gate = fn_src("function renderRunGate(boxId, o) {")
+    ok("pageHead({ view: o.view, title: o.title, line: o.desc," in gate and "emptyState({ icon: o.icon, text: o.note, action: btn, cls: 'run-gate' })" in gate,
+       "a run gate is the header (with its extra words behind an info button) and an empty state")
+    ok("rg-ic" not in gate and "illustration" not in gate, "no drawn tile of its own")
+    e = CSS.split("\n        .empty {")[1].split("}")[0]
+    ok("text-align: center" in e and "font-size: var(--text-body)" in e and "border: 0" in e, "a list that matched nothing says so quietly")
+    ok(".ov-wrap > .empty, .ov-wrap > .widget-group > .empty, .card-grid > .empty { background" not in CSS, "with no box round it")
+
+
+@test
+def t_a_figure_row_never_asks_more_gap_than_a_phone_has():
+    """Found in the rig audit after the figure row landed (Task 14): a KPI strip
+    is a 12-track grid, so its column gap is paid eleven times. At the desktop's
+    40 that is 440, more than a phone's 347 content width, so every track was 0
+    wide and the second figure of each row was cut off by the row's clip. On a
+    phone the gap is 16 (176 in all) and the hairline sits in the middle of it."""
+    mk = "@media (max-width: 640px) {\n            .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }"
+    ok(mk in CSS, "the phone figure-row block is there")
+    if mk in CSS:
+        blk = CSS.split(mk)[1][:900]
+        ok(".metrics { column-gap: var(--sp-4); }" in blk, "a phone figure row has a 16 gap")
+        ok(".metrics > .stat::before { left: calc(-0.5 * var(--sp-4)); }" in blk, "and its hairline is half of it before the figure")
+    ok(re.search(r"\.metrics\.metrics-strip \{ grid-template-columns: repeat\(12, minmax\(0, 1fr\)\); \}", CSS) is not None,
+       "the strip is still 12 tracks (the reason the gap has to shrink)")
+    ok(".chat-metrics .metrics > .stat::before { left: calc(-0.5 * var(--sp-3)); }" in CSS, "a chat answer's figure row moves its hairline to its own 12 gap")
+
+
+@test
+def t_the_figure_and_table_review_fixes_hold():
+    """Review of Tasks 14 to 16 (6 October 2026): (1) a grid page's figures carry
+    no per-tile hairline and no side padding, so every row's first figure starts
+    on the text edge; (2) the open or pick mark sits at the tile's corner on the
+    label's line; (3) chips on the feature band have a white ground (the later
+    tone rules were beating the band's); (4) the CRM tables are 44 rows with their
+    outer columns on the text edge; (5) the Size list's band and detail
+    panel keep their words on the text edge and bleed their fill 8 past it."""
+    ok(".ov-wrap.wgrid > .stat[data-widget] { box-shadow: inset" not in CSS, "no hairline on a grid tile")
+    ok(not re.search(r"\.ov-wrap\.wgrid > \.stat\[data-widget\] \{[^}]*padding-left", CSS), "and no side padding")
+    act = CSS.split("\n        .stat-act {")[1].split("}")[0] if "\n        .stat-act {" in CSS else ""
+    ok("top: calc((var(--lh-control) - var(--box-xs)) / 2)" in act and "right: 0" in act and "var(--sp-4)" not in act.split("width")[0],
+       "the mark sits at the corner on the label's first line, not 16 in")
+    ok(".fband .delta:is(.good, .bad, .flat) { background: var(--surface-primary); }" in CSS, "a chip on the band has a white ground")
+    ok(".ktable.crm-table td { padding: var(--sp-4); }" not in CSS and ".ktable.crm-table th { padding: 0 var(--sp-4); }" not in CSS,
+       "the CRM tables have no 16px cell of their own")
+    ok(".ktable.crm-table :is(th, td) { padding: 0 var(--sp-3); }" in CSS
+       and ".ktable.crm-table :is(th, td):first-child { padding-left: 0; }" in CSS
+       and ".ktable.crm-table :is(th, td):last-child { padding-right: 0; }" in CSS, "they are 44 rows with their outer columns on the text edge")
+    ok(".ktable-wrap:has(> .sizes-table) { overflow: visible; }" in CSS, "the Size list's wrapper lets a fill bleed")
+    band = CSS.split("\n        .ktable tr.ktable-grp th {")[1].split("}")[0] if "\n        .ktable tr.ktable-grp th {" in CSS else ""
+    ok("padding: var(--sp-1-5) 0" in band and "calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary)" in band,
+       "a maker's band keeps its words on the text edge and bleeds its fill 8 each side")
+    det = CSS.split("\n        .ktable tr.sizes-detail > td {")[1].split("}")[0] if "\n        .ktable tr.sizes-detail > td {" in CSS else ""
+    ok("calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary)" in det, "so does the detail panel")
+    ok(".ktable tr.sizes-row.open td:first-child { box-shadow" not in CSS,
+       "the open row stays flush: its notes cell ends in an ellipsis, which clips its own shadow, so a bleed on one side only would leave a notch")
+
+
+@test
+def t_an_unknown_or_bad_rising_label_is_never_green():
+    """Review of Task 14 (6 October 2026): the tone of a change chip is worked
+    out from its label, run here through node. A label the app knows is coloured
+    by what the move means; a label on neither list ("Refund rate" and "Churn"
+    are on the bad list; "Something odd" and "Products" are on neither) is
+    neutral, and never green when it rises."""
+    if not _node_ok():
+        print("       (node unavailable, harness skipped)")
+        return
+    a, b = "        const RISE_IS_GOOD_FIRST = [", "        function changeChip("
+    ok(a in SCRIPT and b in SCRIPT, "the tone block can be lifted")
+    cases = [["Refund rate", "up"], ["Returns", "up"], ["Cancelled orders", "up"], ["Churn", "up"], ["Bounce rate", "up"],
+             ["Cart abandonment", "up"], ["Revenue (7d)", "up"], ["Revenue (7d)", "down"], ["Orders (7d)", "up"],
+             ["Unfulfilled (7d)", "up"], ["Unfulfilled (7d)", "down"], ["Return on ad spend", "up"], ["Returning customers", "up"],
+             ["At risk", "up"], ["Something odd", "up"], ["Something odd", "down"], ["Products", "up"], ["Late orders", "up"],
+             ["Avg Google position", "up"], ["Ad spend (90d)", "up"], ["Refund rate", "down"], ["Whatever", "flat"],
+             ["expected", "up"], ["Expected this month", "up"], ["Expected refunds", "up"]]
+    got = _run_node(SCRIPT[SCRIPT.index(a):SCRIPT.index(b)] + "\nconsole.log(JSON.stringify(%s.map(c => deltaTone(c[0], c[1]))));" % json.dumps(cases))
+    want = ["bad", "bad", "bad", "bad", "bad", "bad", "good", "bad", "good", "bad", "good", "good", "good", "bad", "flat", "flat", "flat",
+            "bad", "bad", "bad", "good", "flat", "good", "good", "bad"]
+    for c, g, w in zip(cases, got, want):
+        ok(g == w, "%s %s is %s (got %s)" % (c[0], c[1], w, g))
+    ok(all(g != "good" for c, g in zip(cases, got) if c[0] in ("Something odd", "Products", "Refund rate", "Churn", "Bounce rate", "Returns")
+           and c[1] == "up"), "an unknown or bad-rising label is never green")
+
+
+@test
+def t_a_chart_reads_out_the_day_it_is_on():
+    """Spec 6 Chart: the legend on its own row; hover, a finger dragging or the
+    arrow keys show the day; on a desktop a tooltip sits beside the point, on a
+    phone the legend row reads the day out instead so nothing is covered; a
+    status line tells a screen reader when the day changes. The grid is
+    line-soft, the floor line-ctl, the series line 2px."""
+    tc = SCRIPT.split("function trendChart(", 1)[1].split("\n        function ", 1)[0]
+    for part in ("if (!opts.headless) card.append(chartHead(opts, series, 'trend'));",
+                 "wrap.setAttribute('role', 'group'); wrap.setAttribute('aria-roledescription', 'chart');",
+                 "live.setAttribute('role', 'status');", "wrap.onkeydown = (e) => {", "e.key === 'ArrowLeft' || e.key === 'ArrowRight'",
+                 "svg.onpointermove = (e) => at(e.clientX);", "svg.setPointerCapture(e.pointerId)",
+                 "window.matchMedia('(max-width: 640px)').matches", "legendEl.classList.add('reading')", "wrap._rest = rest;"):
+        ok(part in tc, "trendChart: " + part)
+    ok("touchstart" not in tc and "mousemove" not in tc, "one pointer path for a mouse, a pen and a finger")
+    ok(".chart-wrap" in SCRIPT.split("function autoPlot(")[0][-1200:] or "document.addEventListener('pointerdown', (e) => document.querySelectorAll('.chart-wrap')" in SCRIPT,
+       "a tap anywhere else puts a chart back to rest")
+    grid = CSS.split("\n        .chart-wrap .gridline {")[1].split("}")[0]
+    ok("stroke: var(--border-soft)" in grid and "opacity" not in grid, "the grid is line-soft, solid")
+    ok(".chart-wrap .gridline.axis0 { stroke: var(--border-strong); }" in CSS, "the floor is line-ctl")
+    eq(_token_raw("chart-stroke"), "var(--bw-strong)", "--chart-stroke")
+    tip = CSS.split("\n        .chart-tip {")[1].split("}")[0]
+    for prop in ("width: var(--tip-w)", "padding: var(--tip-pad)", "border-radius: var(--radius-pop)", "box-shadow: var(--shadow-pop)"):
+        ok(prop in tip, "the tooltip: " + prop)
+    lg = CSS.split("\n        .chart-legend {")[1].split("}")[0]
+    ok("justify-content: flex-start" in lg and "margin-bottom: var(--sp-2)" in lg, "the legend is its own row, 8 over the plot")
+
+
+@test
+def t_queue_counters_read_across_the_bench():
+    """Spec 6: the queues that make a flow are big tiles in flow order with
+    small chevrons between, the label above a 36 figure (28 on a phone), a 10
+    corner on the fill; the chosen counter is a teal fill with the focal glow.
+    The rest of the queues are tabs beside them on the chosen recipe."""
+    ok("function queueCounters(flow, rest, current, onPick, label) {" in SCRIPT, "the builder exists")
+    fn = fn_src("function queueCounters(flow, rest, current, onPick, label) {")
+    for part in ("el('nav', 'queues')", "el('button', 'qc'", "el('span', 'qc-l', l)", "el('b', 'qc-n'", "el('span', 'qsep')",
+                 "el('div', 'qrest')", "el('button', 'qt'", "setAttribute('aria-current', 'page')"):
+        ok(part in fn, "queueCounters: " + part)
+    qc = CSS.split("\n        .qc {")[1].split("}")[0]
+    ok("border-radius: var(--radius-tile)" in qc and "background: var(--surface-tertiary)" in qc and "width: var(--qc-w)" in qc,
+       "a counter is a tile on the fill with the 10 corner")
+    ok("font-size: var(--fig-l)" in CSS.split("\n        .qc-n {")[1].split("}")[0], "its figure is 36")
+    on = CSS.split("\n        .qc.on {")[1].split("}")[0]
+    ok("background: var(--action-primary)" in on and "box-shadow: var(--shadow-focal)" in on, "the chosen one is teal with the focal glow")
+    qt = CSS.split("\n        .qt.on {")[1].split("}")[0]
+    ok("box-shadow: var(--ring-chosen)" in qt and "background: var(--action-selected)" in qt, "a queue tab is chosen on the segment recipe")
+    eq(_token_raw("qc-w"), "184px", "--qc-w")
+
+
+@test
+def t_a_switch_is_a_track_and_its_word():
+    """Spec 6 Switch: a 28 by 16 track, ink-4 when off and teal when on, a 12
+    knob, its word beside it; the control 32 tall. Forecast's Compare methods
+    is one, built in the script."""
+    t = CSS.split("\n        .toggle {")[1].split("}")[0]
+    ok("min-height: var(--control-h)" in t and "font-size: var(--text-body)" in t and "font-weight: var(--weight-medium)" in t,
+       "the control is 32 and its word 13 at 500")
+    sw = CSS.split("\n        .toggle .sw {")[1].split("}")[0]
+    ok("background: var(--border-emphasis)" in sw, "off is ink-4")
+    knob = CSS.split("\n        .toggle .sw::after {")[1].split("}")[0]
+    ok("box-shadow: var(--shadow-raise)" in knob, "the knob is raised")
+    ok('.toggle:is(.on, [aria-checked="true"]) .sw { background: var(--fill-mark); }' in CSS, "on is the teal mark")
+    ok("function switchBtn(label, on, onToggle) {" in SCRIPT, "a switch can be built in the script")
+    fn = fn_src("function switchBtn(label, on, onToggle) {")
+    ok("setAttribute('role', 'switch')" in fn and "setAttribute('aria-checked'" in fn and "el('span', 'sw')" in fn, "and says its state")
+
+
+@test
+def t_hover_is_only_for_a_pointer_that_hovers():
+    """Spec 4.6 and principle 6: a touch screen keeps :hover after a tap, so a
+    tapped row or button stayed lit. Every hover rule lives inside
+    @media (hover: hover); pressed is one step darker than hover on every
+    device; focus is a 2px teal-line ring 2 off the edge."""
+    outside = [s for s, b in _rules(CSS) if ":hover" in s and "@media (hover: hover)" not in s]
+    ok(not outside, "%d hover rules outside @media (hover: hover): %s" % (len(outside), outside[:5]))
+    ok(CSS.count("@media (hover: hover)") >= 80, "and they are all still there, gated")
+    g = CSS.split(":is(button, select, input, textarea, summary, [role=\"button\"], .toggle,\n            [tabindex], .convos):focus-visible {")[1].split("}")[0]
+    ok("outline: var(--focus-outline); outline-offset: var(--sp-0-5);" in g, "focus sits 2 off the edge")
+    for sel, want in ((".btn:active {", "var(--press)"), (".dmenu-item:active {", "var(--press)"), (".nav-item:active {", "var(--chrome-press)"),
+                      (".topbar-search:active {", "var(--press-fill)"), (".btn-primary:active {", "var(--action-active)")):
+        ok(want in CSS.split(sel)[1].split("}")[0], sel + " presses to " + want)
+
+
+@test
+def t_a_section_shows_its_edge_only_while_it_is_being_moved():
+    """Spec 8.3 Report: Customize keeps its drag; outlines show only in
+    Customize mode. With no boxes at rest, an unboxed section needs room round
+    its dashed edge, and its hide button floats on the pop shadow."""
+    edit = CSS.split(".ov-wrap.wg-editing > [data-widget]:not(:focus-visible) {")[1].split("}")[0]
+    ok("dashed var(--border-emphasis)" in edit and "outline-offset: var(--sp-2)" in edit, "a dashed edge 8 outside the content, in Customize mode")
+    rest = [s for s, b in _rules(CSS) if "[data-widget]" in s and "wg-editing" not in s and re.search(r"outline:|border:", b)]
+    ok(not rest, "and none at rest: %s" % rest[:3])
+    hide = CSS.split(".ov-wrap.wg-editing > [data-widget] > .wg-hide {")[1].split("}")[0]
+    ok("box-shadow: var(--shadow-pop)" in hide and "width: var(--control-h-sm)" in hide, "the hide button is a 24 square on the pop shadow")
+
+
+@test
+def t_every_target_on_a_phone_fits_a_finger():
+    """Spec principle 6 and 4.3: on a phone every target is 40 and every
+    control and row title is 14; the gutter is 16 and sections are 32 apart.
+    Keyed on the width (640), which is what the 390 audit measures. An info
+    button keeps its 24 look; its 40 target grows away from its words."""
+    blocks = [b for p, b in css_blocks(CSS) if p.endswith("@media (max-width: 640px)") and "THE PHONE" in p]
+    ok(len(blocks) == 1, "one phone block for the parts")
+    b = blocks[0]
+    for sel in (".btn", ".icon-btn", ".chip", ".toggle", ".qt", ".dmenu-item", ".rlist-row", ".nav-item", ".tbl-search", "select"):
+        ok(sel in b, sel + " is in the 40 rule")
+    ok("min-height: var(--control-h-lg)" in b and "font-size: var(--text-sm)" in b, "40 tall, 14 words")
+    ok(".segmented > button { height: var(--control-h-lg); }" in b, "a segment is the track's full 40: the target is the track, as in the mockup")
+    seg = CSS.split("\n        .segmented > button {")[1].split("}")[0]
+    ok("position: relative; isolation: isolate;" in seg and "height: var(--control-h);" in seg and "border-radius: 0;" in seg,
+       "a segment is the track's whole height, and draws nothing itself")
+    ok("\n        .segmented > button::before { content: \"\"; position: absolute; inset: var(--sp-0-5) 0; z-index: -1;" in CSS
+       and '.segmented > button:is(.on, [aria-pressed="true"])::before { background: var(--surface-primary); box-shadow: var(--ring-chosen); }' in CSS,
+       "the chosen segment is drawn inset by the track's 2 on ::before, which is what keeps the target 40 and the look 36")
+    ok(":is(.tab, .tbl-step, .guide-toc-link, .toggle) { min-width: var(--control-h-lg); }" in b and ".tbl-step { width: var(--control-h-lg); }" in b
+       and ".toggle:has(> .sw:only-child) { justify-content: flex-end; }" in b,
+       "a short tab, a pager step, a contents link and a switch with no word are 40 wide too, the switch's track staying at the end (Task 45: found by the app measure)")
+    ok("padding-right: calc(var(--control-h-lg) - var(--control-h-sm))" in b, "an info button's target grows away from its words")
+    for sel in (".sidebar .icon-btn", ".brand", ".mem-btn", ".crm-ticon", ".crm-col-add", ".sizes-open", ".files-name", ".guide-toc-link", ".miss-open", ".action-link", "details summary"):
+        ok(sel in b.split("The rest of what a finger meets")[1] if "The rest of what a finger meets" in b else False, sel + " is a 40 target too")
+    ok(".guide-tools { grid-template-columns: minmax(0, 1fr); }" in b, "the Guide's search row shrinks to its track")
+    ok(".az button { flex: none; height: var(--control-h-lg); min-width: var(--control-h-lg); }" in b, "the Size list's A to Z is a swipeable line of 40 squares")
+    ok(".chart-expand { width: var(--control-h-lg); height: var(--control-h-lg); }" in b and ".ktable tr.ktable-grp th { height: var(--control-h-lg); }" in b,
+       "and so are the chart's expand square and a maker's band")
+    ok(re.search(r":root \{ --wrap-pad: var\(--sp-4\); \}", CSS), "the gutter is 16")
+    ok("@media (pointer: coarse) { :is(input:not([type=checkbox]):not([type=radio]), textarea, select, #input, [contenteditable=\"true\"]) { font-size: var(--text-md); } }" in CSS,
+       "and a real field under a finger keeps 16 so iOS does not zoom into it")
+
+
+@test
+def t_text_comes_in_the_five_steps():
+    """Spec 4.2: Inter at 11/16, 12/16, 13/20, 14/20 and 15/20; Bricolage at the
+    wordmark's 16/20 and a page title's 26/32 (24 on a phone); figures at 44,
+    36, 28 and 24 on a line of 1. Every screen rule's size and line height is
+    one of them, from the token block. Print keeps its own, untouched."""
+    # The print guard's own list, and the report's print-only header, which
+    # is paper too: neither is screen type.
+    pr = re.compile(r"label-sheet|day-sheet|loan-sticker|guide-print-row|#label-print|printing-label|@media print|@page|print-head")
+    sizes = {"var(--text-micro)", "var(--text-xs)", "var(--text-body)", "var(--text-sm)", "var(--text-head)", "var(--text-md)",
+             "var(--text-title)", "var(--text-2xl)", "var(--fig-xl)", "var(--fig-l)", "var(--fig-m)", "var(--fig-s)", "inherit"}
+    lhs = {"var(--lh-caption)", "var(--lh-control)", "var(--lh-title)", "var(--lh-none)", "var(--lh-prose)", "inherit", "normal"}
+    bad = []
+    for sel, body in _rules(CSS):
+        if pr.search(sel) or sel.strip() == "body":
+            continue
+        for m in re.finditer(r"(?<![\w-])font-size\s*:\s*([^;}]+)", body):
+            if m.group(1).strip() not in sizes: bad.append(sel[:50] + " size " + m.group(1).strip())
+        for m in re.finditer(r"(?<![\w-])line-height\s*:\s*([^;}]+)", body):
+            if m.group(1).strip() not in lhs: bad.append(sel[:50] + " line " + m.group(1).strip())
+    ok(not bad, "%d off the five steps: %s" % (len(bad), bad[:6]))
+    track = [sel[:50] + " " + m.group(1).strip() for sel, body in _rules(CSS) if not pr.search(sel)
+             for m in re.finditer(r"(?<![\w-])letter-spacing\s*:\s*([^;}]+)", body)
+             if m.group(1).strip() not in ("normal", "0", "var(--tr-title)", "var(--tr-fig)")]
+    ok(not track, "tracking only on titles and figures, from the token block: %s" % track[:6])
+    md = [s for s, b in _rules(CSS) if not pr.search(s) and "font-size: var(--text-md)" in b]
+    ok(all(".brand-name" in s or "pointer: coarse" in s for s in md), "16 is the wordmark's, and a phone field's: %s" % md)
+    for gone in ("--text-lg", "--text-xl", "--text-3xl", "--lh-tight", "--lh-snug"):
+        ok(gone + ":" not in CSS, gone + " has left the token block")
+    ok('body > :where(:not([id="label-print"])) { font-size: var(--text-body); line-height: var(--lh-control); }' in CSS,
+       "the app's own text is 13/20, and the print staging area keeps body's own")
+    ok('@media screen { :where(svg[stroke-width="2"]) { stroke-width: var(--icon-stroke); } }' in CSS, "every interface icon is drawn at 1.75")
+
+
+@test
+def t_the_phone_and_chart_review_fixes_hold():
+    """Review of Tasks 19, 24 and 25 (6 October 2026): (1) the chat's Send and
+    input are 40 on a phone; (2) a small close or clear glyph has a 40 hit area
+    centred on it; (3) the four figures the type sweep shrank are on the figure
+    scale again and the sign-in title has the title tracking; (4) the report's
+    print-only header keeps body's 14 on 1.5; (5) the chart tooltip grows to
+    its content inside the plot; (6) the chart's status line speaks on an arrow
+    step, or after the pointer rests on one point, not on every move."""
+    blocks = [b for p, b in css_blocks(CSS) if p.endswith("@media (max-width: 640px)") and "THE PHONE" in p]
+    ok(len(blocks) == 1, "the phone block is there")
+    b = blocks[0] if blocks else ""
+    ok(".send { width: var(--control-h-lg); height: var(--control-h-lg); }" in b, "Send is 40 by 40 on a phone")
+    ok("#input { min-height: var(--control-h-lg); }" in b, "and the input is at least 40 tall (its auto-grow sets only a taller height)")
+    ok(":is(.convo .del, .toast-x, .tbl-search .tbl-clear, .alert-x, .sk-chip-x, .fchip button) { position: relative; }" in b,
+       "the small glyph buttons are the containing block for their hit area")
+    shared = ".ov-wrap.wg-editing > [data-widget] > .wg-hide)::after {"
+    ok(shared in b, "the hit-area rule is there")
+    sbody = b.split(shared)[1].split("}")[0] if shared in b else ""
+    ok('content: ""; position: absolute; height: var(--control-h-lg);' in sbody and "width" not in sbody and "left" not in sbody,
+       "the rule shared by the squares sets only their height (a shared width or left would out-rank each one's own, since its list carries the hide button's long selector)")
+    ok(":is(.toast-x, .alert-x, .sk-chip-x, .fchip button)::after {\n                left: 50%; top: 50%; width: var(--control-h-lg);" in b,
+       "a button with no neighbour on a side has a 40 square centred on it")
+    ok(".tbl-search .tbl-clear::after { left: 0; top: 50%; margin: calc(var(--control-h-lg) / -2) 0 0; width: min(var(--control-h-lg), calc(100% + var(--sp-2) + var(--bw-hairline))); }" in b,
+       "the clear button's square starts at its left edge, never over the input, and runs right to the field's own edge")
+    ok(".convo .del::after { left: 0; top: 50%; width: var(--control-h-lg); margin: calc(var(--control-h-lg) / -2) 0 0; }" in b,
+       "the conversation delete's square starts at its left edge, never over the title, and runs right")
+    ok(".ov-wrap.wg-editing > [data-widget] > .wg-hide::after { left: 0; bottom: 0; width: min(var(--control-h-lg), calc(100% + var(--sp-1))); }" in b,
+       "the Customise hide button's square sits on its foot and runs up and right only, as far as the gutter lets it")
+    ok(".wg-hide)::after" in b and ".wg-hide) { position: relative; }" not in b, "and the hide button stays absolutely positioned")
+    for sel in (".seg-card .seg-n {", ".card-head-stat .card-desc {"):
+        ok(sel in CSS, sel + " is a rule")
+        r = CSS.split("\n        " + sel)[1].split("}")[0] if ("\n        " + sel) in CSS else ""
+        ok("font-size: var(--fig-s)" in r and "letter-spacing: var(--tr-fig)" in r, sel + " is on the figure scale")
+    ok("td.sizes-fig { grid-area: fig; align-self: center; font-size: var(--fig-s);" in CSS and "letter-spacing: var(--tr-fig)" in CSS.split("td.sizes-fig { grid-area: fig;")[1].split("}")[0],
+       "a Size list card's figure is on the figure scale")
+    ok(".chat-metrics .stat .value { font-size: var(--fig-s); }" in CSS, "and a chat answer's figures")
+    ok("letter-spacing: var(--tr-title)" in CSS.split("\n        .auth-card h2 {")[1].split("}")[0] if "\n        .auth-card h2 {" in CSS else False,
+       "the sign-in title has the title tracking, not a figure's")
+    ph = CSS.split("\n        .print-head {")[1].split("}")[0] if "\n        .print-head {" in CSS else ""
+    ok("font-size: var(--text-sm)" in ph and "line-height: var(--lh-body)" in ph, "the print header keeps body's 14 on 1.5")
+    tip = CSS.split("\n        .chart-tip {")[1].split("}")[0] if "\n        .chart-tip {" in CSS else ""
+    ok("width: max-content" in tip and "min-width: var(--tip-w)" in tip and "max-width: min(var(--tip-max), calc(100% - var(--sp-4)))" in tip,
+       "the tooltip is as wide as its content, at least the token, at most 360 or the plot less 16")
+    eq(_token_raw("tip-max"), "360px", "--tip-max")
+    ok(".chart-tip .tr > span:not(.sw) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }" in CSS, "a name too long ends in an ellipsis")
+    ok("function trendChart(" in SCRIPT, "the chart builder is there")
+    tc = SCRIPT.split("function trendChart(", 1)[1].split("\n        function ", 1)[0]
+    ok("say(said, announce);" in tc and "setTimeout(() => { if (live.textContent !== text) live.textContent = text; }, 600)" in tc,
+       "the status line is said at once only when told to, and otherwise after 600ms at rest")
+    ok("(e.key === 'ArrowRight' ? 1 : -1), true); }" in tc, "an arrow step announces at once")
+    ok("svg.onpointermove = (e) => at(e.clientX);" in tc and "show(Math.round(" in tc and "(n - 1)));" in tc, "a pointer move does not")
+    ok("clearTimeout(liveT); hoverLine" in tc, "and resting the chart cancels a pending announcement")
+
+
+@test
+def t_the_forecast_header_is_the_mix_header():
+    """Spec 8.1: Forecast with Beta; a status line saying the month the reader
+    is in and which run this is; How it works (the four method pages, each in
+    a window) and Upload workbook; the Finance tabs with the Plan chooser at
+    the row's right. The intro paragraph and the How this forecast works
+    section are gone from the page."""
+    fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
+    ok("pageHead({ view: 'forecast', title: 'Forecast'," in fn and "'Run as of ' + fmtDate(latest.as_of)" in fn,
+       "the header is the one builder, with its status line")
+    ok("fcHowItWorks(c, latest, sc)" in fn and "financeTabs('forecast', '', plan)" in fn,
+       "How it works is in the header and the Plan chooser on the tab row")
+    ok("el('span', 'fc-seg-lbl', 'Plan')" in fn, "the chooser is labelled Plan")
+    ok("'How this forecast works'" not in SCRIPT and "never a promise.'" not in fn, "the method section and the intro are gone")
+    how = fn_src("function fcHowItWorks(c, latest, sc) {")
+    for t in ("'Which method is running, and why'", "'How each one works, and how right it has been'", "'How much to trust it'",
+              "'The plan it is judged against'", "'The Forecast in the Guide'"):
+        ok(t in how, "How it works holds " + t)
+    ok("fcPage(" in how and "function fcPage(title, build) {" in SCRIPT, "each opens in a window")
+    ok("'Upload workbook'" in fn_src("function forecastUploadButton()"), "the upload button says Upload workbook")
+    ok("const MONTH_NAMES = ['January'," in SCRIPT, "the status line says the month in full")
+
+
+@test
+def t_forecast_leads_with_the_month_in_a_band():
+    """Spec 8.1: the feature band answers the screen's main question. Expected
+    this month at 44 with its chip and "against plan", its likely range drawn
+    as one bar with the plan as a blue tick, "How sure this is" behind an info
+    button word for word; beside it Taken so far (Day N of M, a meter) and Year
+    lands at (its chip, the plan, a meter)."""
+    ok("function fcBand(latest, sc) {" in SCRIPT and "function fcOverviewCard(" not in SCRIPT, "the band replaced the three tiles")
+    fb = fn_src("function fcBand(latest, sc) {")
+    for part in ("label: 'Expected this month'", "label: 'Taken so far'", "label: 'Year lands at'", "'against plan'",
+                 "infoButton('How sure this is'", "8 times out of 10. It is an expectation, not a commitment.",
+                 "never a promise.", "rangeBar({", "midLabel: 'Likely range'", "'Day ' + fcDaysSoFar(latest) + ' of ' + fcDaysInMonth(latest)",
+                 "'Plan ' + fcMoney(yt)", "fcSideMeter("):
+        ok(part in fb, "fcBand: " + part)
+    fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
+    ok("const band = fcBand(latest, sc);" in fn, "the page draws it first")
+    ok(".fc-conf" not in CSS, "the old caveat line is gone")
+
+
+@test
+def t_cash_in_is_the_mix_chart_section():
+    """Spec 8.1 item 4: Cash in with About this chart beside it, the legend on
+    its own row, Compare methods and the range chooser (Today, Week, Month, 3
+    months, 12 months, Months ahead, and Custom as a calendar icon). The head's
+    old source line moved into the info button word for word."""
+    ranges = SCRIPT.split("const FC_RANGES = [")[1].split("];")[0]
+    for k, label in (("today", "Today"), ("week", "Week"), ("month", "Month"), ("q", "3 months"),
+                     ("year", "12 months"), ("ahead", "Months ahead"), ("custom", "Custom range")):
+        ok("['%s', '%s']" % (k, label) in ranges, "the range %s is called %s" % (k, label))
+    chart = fn_src("function fcChartCard(")
+    for part in ("infoButton('About this chart'", "'Source: Shopify orders and the nightly forecast \\u00b7 ' + period + '.'",
+                 "switchBtn('Compare methods', cmpOn, setFcCompareOn)", "segmented(FC_RANGES.map(", "icon: I.cal",
+                 "headless: true", "legend: true", "key: 'dot'", "name: 'Likely range'", "tokenValue('--c-taken')",
+                 "tokenValue('--c-exp-line')", "tokenValue('--c-area')", "const cmp = cmpOn ? fcCompare() : [];",
+                 "'Pick a start and an end date.'", "'Nothing to draw for this range yet.'"):
+        ok(part in chart, "Cash in: " + part)
+    ok("Compare sources on the chart" not in SCRIPT and "the leading source" not in chart,
+       "the compare card's title is the switch's word, and a source is a method")
+    ok("const LS_FCCMPON = 'sc_fc_cmp_on_v1';" in SCRIPT and "function setFcCompareOn(v) {" in SCRIPT,
+       "the switch is remembered per person")
+    tools = CSS.split("\n        .section-title > .sec-tools {")[1].split("}")[0]
+    ok("order: 1" in tools and "margin-left: auto" in tools, "a section's tools sit at its right, past the spacer")
+    ok(".chart-band { stroke: none; fill: var(--c-area); }" in CSS, "the likely range is the area colour, at full strength")
+    # Found drawing the section in the rig: the first button-made switch had the browser's own box, and a
+    # line chart washes the area under its first series in the amber chart colour unless told not to.
+    ok("button.toggle { border: 0; background: none; padding: 0;" in CSS, "a switch built as a button has no box of its own")
+    ok("area: false," in chart, "Cash in draws no wash under Taken: the likely range is its one area")
+
+
+@test
+def t_worth_looking_at_sits_beside_why():
+    """Spec 8.1 item 5: Worth looking at (a table with mini range bars and the
+    approved outlooks: Safely ahead, Likely ahead, Likely behind) beside Why
+    \u00a353,691 (a split bar and three rows, the method in a caption under them and
+    how it works behind an info button). A cash warning stays a sentence."""
+    fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
+    ok("const pair = el('div', 'fc-pair');" in fn and "fcWorthCard(latest, sc, al)" in fn, "the two sit in one pair")
+    ok("function fcAlertRow(" not in SCRIPT and "fc-alert" not in SCRIPT + CSS, "the old alert rows are gone")
+    ol = fn_src("function fcOutlook(a) {")
+    for w in ("'Safely ahead'", "'Likely ahead'", "'Likely behind'", "FC_VERDICT_WORDS[a.verdict]"):
+        ok(w in ol, "the outlook says " + w)
+    ok("'warn'" not in ol, "and nothing that beat its plan arrives in warning amber")
+    wt = fn_src("function fcWorthTable(latest, list) {")
+    for part in ("t.setAttribute('role', 'table')", "'Against plan'", "'Likely range'", "'Outlook'", "el('span', 'rg')",
+                 "changeChip(tr,", "bandDomain([].concat(", "'rg-fill'", "'rg-plan'", "'rg-exp'"):
+        ok(part in wt, "the table: " + part)
+    wc = fn_src("function fcWorthCard(latest, sc, al) {")
+    ok("el('span', 'cnt'" in wc and "'Show all'" in wc and "fcPage('Worth looking at'" in wc, "a count, and Show all opens every month")
+    ok("el('div', 'msg error'" in wc and "fcAlertText(worst)" in wc, "a cash warning stays a sentence")
+    ok(".slice(0, 3)" in wc, "three months on the page")
+    dr = fn_src("function fcDriversCard(latest, sc) {")
+    for part in ("'Why ' + fcMoney(cur.p50)", "infoButton('How this is worked out'", "'It misleads when'",
+                 "'Taken so far'", "'Still expected'", "'Expected this month'", "' method.'"):
+        ok(part in dr, "Why: " + part)
+    ok("@container fcpair (max-width: 1000px)" in CSS and "@container fcwl (max-width: 560px)" in CSS,
+       "side by side while there is room, and the phone's three columns by the table's own width")
+    eq(_token_raw("fc-wl-cols"), "76px 72px 72px 84px minmax(96px, 1fr) 96px", "--fc-wl-cols")
+    # Found in the rig: the bar's top margin collapsed into the head's 12 and the bar sat 12 above the table's head row.
+    ok(".fc-why { display: flex; flex-direction: column; }" in CSS, "Why is a flex column, so the bar's margin lines it up with the table's head row")
+
+
+@test
+def t_the_numbers_behind_it_are_four_rows_and_a_method_is_a_method():
+    """Spec 8.1 item 6 and Cameron's words: the numbers behind the forecast are
+    four list rows in two columns, each opening its table in a window, and the
+    forecast calls each model a method, never a source."""
+    fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
+    ok("listRows([" in fn and "{ cols: 2, label: 'The numbers behind it' }" in fn, "four list rows in two columns")
+    labels = ["'Month by month against ' + sc", "'Cash under ' + sc", "'Every method, side by side'",
+              "'What each method said, and what came in'"]
+    at = [fn.find("label: " + l) for l in labels]
+    ok(-1 not in at and at == sorted(at), "in the mockup's order: %s" % at)
+    ok("fcDrawer(" not in SCRIPT and "LS_FCOPEN" not in SCRIPT and "fcSourceName" not in SCRIPT,
+       "the drawers and their memory are gone, and so is the source picker nothing called")
+    for name in ("fcOptimisedCard", "fcAlgorithmsCard", "fcRecordCard", "fcSanityCard", "fcTrust", "fcPlanJudged",
+                 "fcDriversCard", "fcChartCard", "fcWorthCard", "fcBand", "fcHowItWorks"):
+        # Its own strings only: comments go, and so does FC_BEST_AT (the
+        # service's own words), which sits after fcOptimisedCard.
+        body = re.sub(r"/\*.*?\*/", "", fn_src("function " + name + "(").split("const FC_BEST_AT")[0], flags=re.S)
+        words = " ".join(re.findall(r"'((?:[^'\\]|\\.)*)'", body))
+        ok(not re.search(r"\b[Ss]ources?\b(?!:)", words), name + " says method, not source: %s"
+           % re.findall(r"[^.]*\b[Ss]ources?\b(?!:)[^.]*", words)[:2])
+    ok("'Every method'" in SCRIPT and "'Every source'" not in SCRIPT, "the sanity table's chooser says method")
+    tb = fn_src("function fcTable(head, rows, right) {")
+    ok("th.classList.add('num')" in tb and "style.textAlign" not in tb, "a number column is the table's own class, not an inline style")
+    setup = fn_src("function forecastSetupCard(c) {")
+    ok("'The first run lands after 03:00.'" in setup and "'No cash flow workbook yet. Upload one above.'" in setup,
+       "the setup lines are short")
+    ok("infoButton('Setting up the forecast'" in setup, "and the setup steps wait behind an info button")
+    # Found in the rig: the show-how-many chooser lives inside the Every method window, and the page behind it is
+    # not the window, so a choice there changed nothing until the window was opened again.
+    ok("fcRepaintPage();" in fn_src("function setFcRowsMode(v) {") and "lp.m.body.replaceChildren(lp.build())" in fn_src("function fcRepaintPage() {"),
+       "a choice made inside a method window repaints that window")
+
+
+@test
+def t_every_known_risk_reads_in_the_three_approved_outlooks():
+    """The service raises an alert for every month whose risk is high whatever
+    its verdict (forecast/variance.py), so a high-risk month that the run calls
+    "on track" read "On track" beside a neutral chip. For the risk codes the
+    service produces the only statuses are Safely ahead, Likely ahead and
+    Likely behind; a code the run might add later falls back on the verdict's
+    words."""
+    ok("function fcOutlook(a) {" in SCRIPT, "fcOutlook is there")
+    src = fn_src("function fcOutlook(a) {")
+    ok("if (a.risk === 'high') return 'Likely behind';" in src, "a high-risk month is behind")
+    if not any(os.access(os.path.join(p, "node"), os.X_OK) for p in os.environ.get("PATH", "").split(os.pathsep)):
+        print("       (node unavailable, the behaviour half skipped)")
+        return
+    js = ("const FC_VERDICT_WORDS = { 'on track': 'On track', underrun: 'Under plan', overrun: 'Over plan' };\n"
+          "const fcSentence = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';\n" + src + "\n"
+          "const out = [];\n"
+          "for (const risk of ['secure', 'watch', 'high']) for (const verdict of ['on track', 'underrun', 'overrun'])\n"
+          "  for (const [projected, target] of [[10, 20], [20, 10]]) out.push(fcOutlook({ risk, verdict, projected, target }));\n"
+          "out.push(fcOutlook({ risk: 'later-code', verdict: 'underrun' }));\n"
+          "console.log(JSON.stringify(out));")
+    r = subprocess.run(["node", "-e", js], capture_output=True, text=True)
+    ok(r.returncode == 0, "the outlook ran: " + (r.stderr or "")[:200])
+    got = json.loads(r.stdout)
+    ok(set(got[:-1]) == {"Safely ahead", "Likely ahead", "Likely behind"},
+       "the known risk codes read only in the approved words: %s" % sorted(set(got[:-1])))
+    ok(got[-1] == "Under plan", "an unknown code falls back on the verdict's words")
+
+
+@test
+def t_forecast_controls_that_only_work_on_a_screen_do_not_print():
+    """The Plan label and the Compare methods switch printed on a Forecast
+    report (their chooser and the range did not). The frozen print block is
+    not touched: they are hidden by default and shown inside @media screen, as
+    the info button is. The Plan label is regular weight, as in the mockup."""
+    lbl = CSS.split("\n        .fc-seg-lbl {")[1].split("}")[0]
+    ok("font-weight: var(--weight-regular)" in lbl and "weight-medium" not in lbl, "the Plan label is regular weight")
+    ok("\n        .page-tabs-end > .fc-seg-lbl { display: none; }" in CSS
+       and "@media screen { .page-tabs-end > .fc-seg-lbl { display: inline-block; } }" in CSS,
+       "the Plan label is for a screen")
+    ok("\n        .fc-cash .sec-tools > .toggle { display: none; }" in CSS
+       and "@media screen { .fc-cash .sec-tools > .toggle { display: inline-flex; } }" in CSS,
+       "so is the Compare methods switch")
+    ok("\n        .fc-worth > .section-title > .sec-tools { display: none; }" in CSS
+       and "@media screen { .fc-worth > .section-title > .sec-tools { display: flex; } }" in CSS,
+       "and Show all (one more class than the head's own rule, which comes later in the sheet)")
+    for blk in re.findall(r"@media print \{.*?\n        \}", CSS, re.S):
+        ok("fc-seg-lbl" not in blk and "fc-cash" not in blk and "fc-worth" not in blk, "the frozen print block is as it was")
+
+
+@test
+def t_the_side_meters_put_the_plan_tick_where_it_is():
+    """The plan tick was clamped to the end of a meter drawn to the expected
+    figure, so a plan above expectation (Algorithm 2: 124.7% and 135.9%) sat at
+    the end and read as on plan. Each meter is drawn to the larger of expected
+    and plan, so the tick is where it really is and the light bar stops at the
+    expected figure."""
+    ok("function fcSideMeter(taken, exp, plan) {" in SCRIPT, "one helper draws both meters")
+    ok("meter({ taken: " not in fn_src("function fcBand(latest, sc) {") and "fcSideMeter(" in fn_src("function fcBand(latest, sc) {"),
+       "and the band uses it")
+    ok("--end" in fn_src("function meter(m) {"), "a meter can end short of its track")
+    ok("width: calc(var(--end, 100%) - var(--at) - var(--sp-0-5))" in CSS.split("\n        .fb-meter .still {")[1].split("}")[0],
+       "the light bar runs to that end")
+    if not _node_ok():
+        print("       (node unavailable, the behaviour half skipped)")
+        return
+    js = "\n".join(("const meter = (m) => m;", fn_src("function fcSideMeter(taken, exp, plan) {"),
+                    "console.log(JSON.stringify([fcSideMeter(5116, 53691, 66931), fcSideMeter(5116, 53691, 37566), fcSideMeter(5116, 53691, null), fcSideMeter(0, 0, null)]));"))
+    a, b, c, z = _run_node(js)
+    ok(a["plan"] == 100 and abs(a["end"] - 80.2) < 0.1 and abs(a["taken"] - 7.6) < 0.1, "a plan above expected is the end of the track: %s" % a)
+    ok(abs(b["plan"] - 70.0) < 0.1 and b["end"] == 100 and abs(b["taken"] - 9.5) < 0.1, "a plan below it is a tick inside the bar: %s" % b)
+    ok(c["plan"] is None and c["end"] == 100, "no plan, no tick: %s" % c)
+    ok(z["taken"] == 0, "nothing expected is an empty meter: %s" % z)
+
+
+@test
+def t_cash_in_phone_range_looks_like_the_mockups_button():
+    """The phone's range is still a real select (for assistive tech and the
+    keyboard) but wears the mockup's button: a calendar icon, the chosen range
+    and a chevron, 40 tall. The clear button under the compare chips has its
+    text on the text edge, not 12 in."""
+    chart = fn_src("function fcChartCard(")
+    ok("el('span', 'fc-range-pick')" in chart and "ico(I.cal)" in chart and "choiceSelect(FC_RANGES, range, setFcRange" in chart,
+       "a calendar icon beside the real select")
+    ok("\n        .fc-range-pick { display: none; }" in CSS and ".fc-cash .sec-tools > .choice-select" not in CSS,
+       "shown only on a phone")
+    pick = CSS.split("\n        .fc-range-pick > select {")[1].split("}")[0]
+    ok("padding-left: calc(var(--sp-3) + var(--icon-md) + var(--sp-2))" in pick and "var(--shadow-control)" in pick, "room for the icon, a button's look")
+    ok(".fc-range-pick > .ic svg { width: var(--icon-md); height: var(--icon-md); }" in CSS, "the icon has a size (a bare svg here is 0 by 0)")
+    ok("\n        .fc-cmp-box > .btn.ghost { margin-left: calc(-1 * (var(--sp-3) + var(--bw-hairline))); }" in CSS, "Clear starts on the text edge")
+
+
+@test
+def t_worth_and_why_stack_at_12_and_cash_warnings_do_not_pile_up():
+    """Stacked (1000 and under, phones) Why's bar sits 12 under its head, as in
+    the phone mockup; the 24 that centres it on the table's head row beside it
+    applies only side by side. A cash warning is said once, with the number of
+    further months; Show all is a 40 target on a phone."""
+    bar = CSS.split("\n        .fc-split-bar {")[1].split("}")[0]
+    ok("margin-top" not in bar, "the bar has no offset of its own")
+    ok("@container fcpair (not (max-width: 1000px)) { .fc-split-bar { margin-top: calc((var(--control-h) - var(--sp-2)) / 2); } }" in CSS,
+       "the offset is for the side-by-side layout only")
+    wc = fn_src("function fcWorthCard(latest, sc, al) {")
+    ok("cash.length > 1" in wc and "' more month'" in wc and "cash.slice(1)" not in wc and wc.count("'msg error'") == 1,
+       "one warning, then the count of further months")
+    ok("@media (max-width: 640px) { .link { min-height: var(--control-h-lg); } }" in CSS and ".fc-worth .sec-tools > .link" not in CSS,
+       "Show all is 40 on a phone, from the global link rule (its own copy was the same rule, measured: 40 tall at 390, 20 at 1440, unchanged)")
+
+
+@test
+def t_forecast_window_and_setup_details():
+    """No upload button, no instruction to use it; a window's chooser keeps the
+    keyboard's place when it repaints; the unread .sect-group rules are gone;
+    the How it works count says what it counts to a screen reader."""
+    setup = fn_src("function forecastSetupCard(c) {")
+    ok("c.can_upload ? 'No cash flow workbook yet. Upload one above.' : 'No cash flow workbook yet.'" in setup,
+       "the upload line is for people who can upload")
+    rp = fn_src("function fcRepaintPage() {")
+    ok("segmented > button.on" in rp and ".focus()" in rp, "the chooser's pressed button takes focus again")
+    ok(".sect-group" not in CSS and "sect-group" not in SCRIPT, "no reader, no rule")
+    dm = fn_src("function dropMenu(anchor, items) {")
+    ok("it.unit" in dm and "'sr-only'" in dm, "a menu count can carry a unit for a screen reader")
+    ok("unit: 'methods'" in fn_src("function fcHowItWorks(c, latest, sc) {"), "and How it works says methods")
+
+
+@test
+def t_a_single_series_wash_is_the_series_own_colour():
+    """trendChart washed the area under a single series in CH[4], which is
+    amber since the ramp changed, so every single-series chart (Overview and
+    SEO trends, the product revenue chart) had an amber wash under its teal
+    line. It takes the series' own colour at the low opacity it always had.
+    Cash in still draws none: its one area is the likely range."""
+    tc = SCRIPT.split("function trendChart(", 1)[1].split("\n        function ", 1)[0]
+    ok("'stop-color': CH[4]" not in tc, "no amber wash")
+    ok("const washColor = (series[0] && series[0].color) || CH[0];" in tc
+       and tc.count("'stop-color': washColor") == 2, "the series' own colour, both ends of the ramp")
+    ok("area: false," in fn_src("function fcChartCard("), "Cash in has no wash")
+
+
+@test
+def t_the_production_manager_is_the_mix_page():
+    """Spec 8.2: the header with the live line and Refresh, then Collections,
+    New shipment and More; counters for Unprocessed, To make and To ship with
+    Complete and Custom shipments as tabs beside them; the toolbar exactly as it
+    was, its filters counted; the two queue rules worth keeping behind an info
+    button; an empty queue one line and the way on (copy plan, Production
+    Manager #1 to #16)."""
+    ok("function prodQueues(onPick, tabCounts) {" in SCRIPT, "one builder draws the queues for both renderers")
+    fn = fn_src("function renderLabels() {")
+    for part in ("pageHead({ view: 'labels', title: 'Production Manager', live: labelsCache.at",
+                 "infoButton('About this queue'", "box.append(prodQueues(",
+                 "[pnBtn, coll, newShip, more].filter(Boolean).forEach(b => heroActs.append(b));",
+                 "{ key: 'all', label: 'All', n: orders.length }", "tableTools([findWrap, filtTabs],",
+                 "[allBtn, slBtn, oldf, sizeSel].filter(Boolean)", "if (data.counts) labelsCounts = data.counts;",
+                 "'Nothing on the bench.'", "'Go to Unprocessed'", "'One order, opened from Shopify. Refresh for all.'",
+                 "'First ' + lm.checked + ' open orders checked: none missing the tag.'"):
+        ok(part in fn, "renderLabels: " + part)
+    ok("tabStrip(QUEUE" not in SCRIPT and "el('div', 'card-head')" not in fn and "'The bench queue, from" not in SCRIPT,
+       "no strip of queue tabs, no queue card title, no intro")
+    pq = fn_src("function prodQueues(onPick, tabCounts) {")
+    ok("queueCounters(QUEUE.slice(0, 3)" in pq and "I.check" in pq and "I.box" in pq, "three counters, two tabs")
+    cq = fn_src("async function renderCustomQueue(box) {")
+    ok("pageHead({ view: 'labels'" in cq and "prodQueues(" in cq and "'No custom shipments yet.'" in cq,
+       "Custom shipments is the same page")
+    ld = fn_src("async function loadLabels(force, fresh) {")
+    ok("pageHead({ view: 'labels', title: 'Production Manager', line: 'Finding orders tagged" in ld, "and so is the loading state")
+    # The widget grid's 20 under a header applies when the counters are its very next sibling
+    # (:has(+ .queues) is not re-worked for one inserted later), so both are built in one pass and
+    # the partial-sweep notice follows the counters.
+    ok("box.append(hero);" in fn and "box.append(prodQueues(" in fn and "if (data.partial_note)" in fn
+       and fn.index("box.append(hero);") < fn.index("box.append(prodQueues(") < fn.index("if (data.partial_note)"),
+       "the counters are built straight after the header, the partial-sweep notice after them")
+    ok(".ov-hero-act:has(> .btn + .btn + .btn) > .btn:not(.btn-icon) { flex: none; }" in CSS and ".ov-hero-act:has(> .btn + .btn + .btn) { flex-wrap: wrap; }" in CSS,
+       "a phone rail of three words wraps, each at its own width, instead of running past the gutter")
+
+
+@test
+def t_an_order_row_is_a_hairline_row_and_the_open_one_is_one_block():
+    """Spec 6 and 8.2: order rows are 64 tall with a hairline between them; the
+    Preview / Hide toggle keeps one width so no column moves; the open row and
+    its preview are one block in the teal wash with the teal bar; the open
+    order's Print is the screen's one primary; the label sits in a frame with
+    its own shadow; on a phone the buttons keep their words, three then two.
+    What the rows hold and do is the queue's own and does not change. By the
+    row-family ruling (6 October 2026) the row's words sit on the section's text
+    edge: the wash and the hover bleed 8 past the column with box-shadow, and the
+    open order's teal bar is drawn on the bleed's outer edge."""
+    fn = fn_src("function renderLabels() {")
+    for part in ("const pv = el('button', 'btn btn-sm');", "el('span', 'lbl-btn-txt swap')", "ico(pvOn ? I.eyeOff : I.eye)",
+                 "if (pvOn && !unproc && !shipMode) pr.classList.add('btn-primary');", "el('figure', 'lbl-frame')",
+                 "const p2 = el('button', 'btn');", "db.classList.add('grp');", "rd.classList.add('grp');"):
+        ok(part in fn, "renderLabels: " + part)
+    ok("wrap.style.margin" not in fn and "act.style.marginTop" not in fn, "no inline spacing in the preview")
+    ok("eyeOff: SV(" in SCRIPT, "Hide has its own glyph")
+    row = CSS.split("\n        .lbl-qrow {")[1].split("}")[0]
+    ok("min-height: var(--order-row-h)" in row and "box-shadow: var(--rule-b-soft)" in row and "border: 0" in row,
+       "a 64 row on a hairline, no box")
+    ok("padding: var(--sp-2) 0;" in row, "its words start on the text edge: no side padding")
+    bleed = "calc(-1 * var(--sp-2)) 0 0 %s, var(--sp-2) 0 0 %s"
+    on = CSS.split('\n        .lbl-qrow:is(.on, [aria-selected="true"]) {')[1].split("}")[0]
+    ok("background: var(--action-selected)" in on and bleed % (("var(--action-selected)",) * 2) in on,
+       "the open row is the teal wash, bleeding 8 past the column on each side")
+    ok("calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected)" in on, "and the teal bar is on the bleed's outer edge")
+    hov = CSS.split("@media (hover: hover) { .lbl-qrow:hover {")[1].split("} }")[0]
+    ok("background: var(--surface-secondary)" in hov and bleed % (("var(--surface-secondary)",) * 2) in hov,
+       "the hover fill bleeds the same 8")
+    pv = CSS.split("\n        .lbl-grid > .lbl-preview {")[1].split("}")[0]
+    ok("background: var(--action-selected)" in pv and bleed % (("var(--action-selected)",) * 2) in pv
+       and "calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected)" in pv and "padding: 0 0 var(--sp-6)" in pv,
+       "and its preview carries on the same block, on the same edges")
+    ok(".swap > .gone { visibility: hidden; }" in CSS, "the toggle's other word holds its width")
+    frame = CSS.split("\n        .lbl-frame {")[1].split("}")[0]
+    ok("box-shadow: var(--shadow-label)" in frame and "border-radius: var(--radius-control)" in frame, "the label's frame")
+    phone = CSS[CSS.index("/* A list as narrow as a phone's: worded 40 buttons"):][:2200]
+    ok("grid-template-columns: repeat(6, minmax(0, 1fr))" in phone and ".lbl-qrow .lbl-actions .lbl-btn-txt { display: inline; }" in phone
+       and "padding: var(--sp-3) 0; row-gap: var(--sp-1); }" in phone,
+       "on a phone the buttons keep their words in a grid, three then two, and the words stay on the text edge")
+    ok(".lbl-row { flex-wrap: wrap; padding: var(--sp-3); }\n            .lbl-qrow { padding-inline: 0; }" in CSS,
+       "the shared phone rule that pads every .lbl-row 12 in does not pad the queue's (found in the rig at 390)")
+    eq(_token_raw("ono-w"), "100px", "--ono-w")
+
+
+@test
+def t_the_queue_still_holds_and_does_what_it_did():
+    """House rule (2026-10-06): the mix changes the look around the Production
+    Manager queue, never its content or its actions. The row's cells and chips,
+    every button with its title and what it does, the toolbar's items in their
+    order, the More menu's items in their order and the preview's wording."""
+    fn = fn_src("function renderLabels() {")
+    for part in ("orderA(orderNo(o), o.admin_url, 'lbl-num lbl-num-link')", "el('span', 'lbl-name', o.display_name)",
+                 "(o.is_company ? 'Company' : 'Customer') + '  \u00b7  '", "el('div', 'lbl-meta', fmtDate(o.created_at))",
+                 "'Due ' + (o.due_label || '')", "ageDays(o.created_at) + 'd'", "el('span', 'lbl-chip note', 'Note')",
+                 "dsp.canceled ? 'Cancelled' : booked ? 'Booked' : 'Dispatched'", "el('span', 'lbl-chip bad', 'No terms')",
+                 "el('span', 'lbl-chip made', 'Made')", "el('span', 'lbl-chip note', 'Printed')"):
+        ok(part in fn, "the row still shows: " + part)
+    for title, handler in (("'Hide label preview' : 'Preview label'", "labelSel = (labelSel === o.id ? null : o.id); renderLabels();"),
+                           ("'Change the delivery address or contact details'", "openOrderEdit(o)"),
+                           ("'Preview the proposal proof'", "openProposal(o)"),
+                           ("pr.title = 'Print label'", "printLabels([o])"),
+                           ("'Remove the Unprocessed tag and add IP, so this order joins To make'", "readyToMake(o, rd)"),
+                           ("'View shipment / reprint label' : 'Dispatch a courier for this order'", "openDispatch(o)"),
+                           ("'Mark this order as made'", "toggleMade(o)")):
+        ok(title in fn and handler in fn, "the row still offers " + title)
+    for word in ("'Proof'", "'Print'", "'Ready to make'", "'Shipment' : 'Dispatch'", "'Made' : 'Mark made'", "'Edit'", "'Preview'", "'Hide'"):
+        ok(word in fn, "a button still says " + word)
+    ok("tableTools([findWrap, filtTabs]," in fn and "[allBtn, slBtn, oldf, sizeSel].filter(Boolean)" in fn
+       and "tableSearch('Find order, customer or tracking'" in fn, "the toolbar's items, in their order")
+    for t in ("'Print all (' + printable.length + ')'", "'Print shipping labels (' + shipLabels.length + ')'",
+              "labelsOldest ? 'Oldest first' : 'Newest first'", "(k === savedSize ? '  (default)' : '')"):
+        ok(t in fn, "the toolbar still says " + t)
+    ok("more.onclick = () => dropMenu(more, [" in fn, "More still opens the menu")
+    menu = fn[fn.index("more.onclick = () => dropMenu(more, ["):]
+    items = ("Size check", "Day sheet", "Dispatch manifest", "Stock usage", "Margins", "Size rules", "Update size list", "Shipping settings")
+    for m in items:
+        ok("label: '" + m + "'" in menu, "More still has " + m)
+    at = [menu.index("label: '" + m + "'") for m in items]
+    ok(at == sorted(at), "More keeps its items in their order")
+
+    # ORDER, not only presence: a later task that moved a button, a cell, a chip or a filter would still have
+    # every string above. Each list is today's order in the source, which is the order on the bench.
+    def in_order(parts, what):
+        for part in parts:
+            ok(part in fn, what + ": still there: " + part)
+        at = [fn.index(part) for part in parts]
+        ok(at == sorted(at) and len(set(at)) == len(at), what + ", in this order: " + " < ".join(parts))
+    in_order(["acts.append(pv);", "acts.append(ed);", "acts.append(pf);", "acts.append(pr);", "acts.append(rd);",
+              "acts.append(db);", "acts.append(mk);"],
+             "the row's buttons run Preview, Edit, Proof, Print, Ready to make or Dispatch, Mark made")
+    in_order(["row.append(orderA(orderNo(o)", "row.append(who);", "row.append(el('div', 'lbl-meta', fmtDate(o.created_at)));", "row.append(acts);"],
+             "the row's cells run the number, who, the date, the buttons")
+    in_order(["nameLine.append(el('span', 'lbl-name', o.display_name));", "nameLine.append(el('span', 'lbl-chip bad', cap(staleStatus)));",
+              "'Due ' + (o.due_label || '')", "ageDays(o.created_at) + 'd'", "el('span', 'lbl-chip note', 'Note')", "nameLine.append(dc);",
+              "nameLine.append(tc);", "nameLine.append(el('span', 'lbl-chip made', 'Made'))", "nameLine.append(pc);"],
+             "the name line runs the name, the status, Due, the age, Note, the courier, No terms, Made or Printed")
+    in_order(["who.append(nameLine);", "who.append(el('span', 'sub',"], "under the name line comes the Company line")
+    in_order(["key: 'all'", "key: 'unprinted'", "key: 'unmade'"], "the filters run All, Unprinted, Not made")
+    in_order(["[pnBtn, coll, newShip, more].filter(Boolean).forEach(b => heroActs.append(b));"], "the page's actions keep their order")
+    for t in ("'Actual size preview: '", "'% so the whole order fits one label.'", "' - some rows would be cut off the printed label. '",
+              "'Choose a larger stock size before printing.'", "'Print this label'", "histLine(o)"):
+        ok(t in fn, "the preview still says " + t)
+
+
+@test
+def t_the_production_manager_fix_round_one():
+    """Review of Tasks 31 to 34: the label preview's own outline (not a shared
+    grey), a phone header laid out as the mockup has it, the open order with no
+    seam through it, Hide centred where Preview was, no extra gap under the
+    single-order line, and a count for the two tabs that lost theirs."""
+    # The label's edge is frozen with the label: the preview draws it from its own token.
+    eq(_token_raw("paper-edge"), "#D4D4D4", "--paper-edge")
+    ok("\n        .lbl-frame { --border-strong: var(--paper-edge); }" in CSS,
+       "the frame hands the label the edge it always had, whatever --border-strong became (the frozen rule is untouched)")
+    # The wrap is for rails of three or more buttons, so a stamp and Refresh stay on one line.
+    ok("\n            .ov-hero-act:has(> .btn + .btn + .btn) { flex-wrap: wrap; }" in CSS
+       and "\n            .ov-hero-act { margin-left: 0; flex-basis: 100%; padding-top: 0; }" in CSS,
+       "the phone rail wraps only with three buttons or more")
+    # The phone header: Refresh and an icon-only More in the head, Collections and New shipment sharing a row.
+    fn = fn_src("function renderLabels() {")
+    ok("more.classList.add('more-btn');" in fn and "more.setAttribute('aria-label', 'More');" in fn and "el('span', 'more-txt', 'More')" in fn
+       and "ico(I.moreH)" in fn and "hero.classList.add('pm-head');" in fn, "More keeps its word and its name; a phone shows it as dots")
+    ok("moreH: SV(" in SCRIPT, "the dots glyph")
+    ph = CSS[CSS.index("/* THE PRODUCTION MANAGER'S PHONE HEADER"):][:6400]
+    ok(".ov-hero.pm-head { display: grid;" in ph and ".ov-hero.pm-head > .ov-hero-act { display: contents; }" in ph
+       and ".ov-hero.pm-head > .ov-hero-act > .more-btn {" in ph and "grid-column: 1 / -1;" in ph and "grid-column: 2; grid-row: 1;" in ph,
+       "the head is a grid: the text and More on the first row, Print new on a full row, then two equal buttons")
+    ok(".pm-head .more-txt, .pm-head .more-btn > .ic:nth-child(2) { display: none; }" in ph, "the word and the caret give way to the dots")
+    # Small things.
+    ok("\n        .q-note { margin: 0; color: var(--text-tertiary); }" in CSS, "the single-order line adds no gap of its own to the card's 12")
+    ok('\n        .lbl-qrow:is(.on, [aria-selected="true"]):has(+ .lbl-preview) {' in CSS
+       and "var(--rule-b-soft)" not in CSS.split('\n        .lbl-qrow:is(.on, [aria-selected="true"]):has(+ .lbl-preview) {')[1].split("}")[0],
+       "no hairline through the open order where its preview follows")
+    ok(".swap > span { grid-area: 1 / 1; text-align: center; }" in CSS, "Hide is centred in the width Preview reserves")
+    # Counts on the tabs that had one in their card titles.
+    qc = fn_src("function queueCounters(")
+    ok("if (n != null) { const c = el('span', 'cnt', String(n));" in qc and "[k, l, icon, n, unit]" in qc, "a tab can carry a count")
+    pq = fn_src("function prodQueues(onPick, tabCounts) {")
+    ok("[QUEUE[3][0], QUEUE[3][1], I.checkCircle, tabCounts && tabCounts.dispatched, 'orders']" in pq, "Complete's count is the loaded list's")
+    ok("prodQueues((k) => { queueMode = k; labelsCache = null; labelSel = null; labelsFilter = 'all'; loadLabels(true); }, dispatched ? { dispatched: orders.length } : null)" in fn,
+       "the queue page passes it when Complete is open")
+    cq = fn_src("async function renderCustomQueue(box) {")
+    ok("tabCount(box, 'shipments', rows.length, 'shipments')" in cq, "Custom shipments shows its loaded list's length once it is read")
+    ok("function tabCount(box, key, n, unit) {" in SCRIPT, "one helper puts the count on a tab")
+
+
+@test
+def t_the_report_pages_wear_the_mix():
+    """Spec 8.3 (Report) and the copy plan (Overview, SEO, shared report parts):
+    the header is the one builder with its live line and Refresh all; the AI
+    summary is a Summary section of its own with the skills it followed as a
+    small row; a figure's and a chart's explanation is an info button; the run
+    gate says what the report is and what it costs in a few words."""
+    for fname, view in (("function renderOverview(cache) {", "overview"), ("function renderSEO(cache) {", "seo")):
+        ok(fname in SCRIPT, fname + " exists")
+        fn = fn_src(fname)
+        ok("pageHead({ view: '" + view + "'" in fn and "live: cache.at" in fn and "summarySection(" in fn,
+           view + ": the one header, and the Summary section")
+        ok("el('div', 'ov-hero')" not in fn and "'badge'" not in fn, view + ": no header built by hand")
+    ok("function summarySection(text, followed) {" in SCRIPT, "one Summary builder")
+    ok("labelEl.append(infoButton(m.label, { title: m.label, body: help }))" in fn_src("function statCard(m, i) {"),
+       "a figure's help is an info button")
+    ok("if (opts.help) ct.append(infoButton(" in fn_src("function chartHead(opts, series, kind) {"), "and so is a chart's")
+    ok("const POSITION_HELP = 'Lower is better. Position 1 is the top of search results.';" in SCRIPT
+       and SCRIPT.count("Lower is better. Position 1") == 1, "said once, for both position charts")
+    ok("has-help" not in SCRIPT + CSS, "no help is left that only a pointer can reach")
+    ok("\n        .followed > .ic { place-items: center; margin-right: var(--sp-0-5); }" in CSS
+       and ".followed > .ic { display: grid" not in CSS, "the book icon stays inline at the head of its row")
+    for gone in ("Here\u2019s how your store is doing.", "Ask anything about the numbers and recommendations on this page.",
+                 "Trends populate after you run", "notable change", "whatever the range above", "optimisation health score",
+                 "Followed your skill", "'Source: ' + opts.source", "Compute live KPIs", "Crawl your storefront and fuse"):
+        ok(gone not in SCRIPT, "cut: " + gone)
+    for new in ("'Live figures and an AI summary of the store.'", "'Crawl the store and rank fixes by revenue.'",
+                "more: 'Takes up to a minute.'", "'No trends yet. Connect Google to add traffic.'",
+                "'Connect Search Console to see search trends.'", "'Suggested questions'", "'Followed: '"):
+        ok(new in SCRIPT, "says: " + new)
+
+
+@test
+def t_a_single_series_wash_is_the_area_strength():
+    """The mix's area tint is teal at 15% (--c-area). The wash under a single
+    trend line starts at that strength, not the 36% it had, and Cash in has none."""
+    ok("--c-area: color-mix(in srgb, var(--teal-500) 15%, transparent);" in CSS, "the area token is teal at 15%")
+    ok("'stop-color': washColor, 'stop-opacity': '0.15'" in SCRIPT and "'0.36'" not in SCRIPT, "the wash starts at the area strength")
+    ok("format: (n) => money(n, 'GBP', 0), tickFormat: fmtCompactGBP, area: false," in SCRIPT, "Cash in keeps no wash")
+
+
+@test
+def t_the_boxed_report_panels_lose_their_box():
+    """Spec 3: only four things are boxed. The chat drill-down, an insight, an
+    impact chip, a customer segment and the Products filters were each a bordered
+    box inside the sheet (carried from the Phase 3 review): the drill-down and the
+    insight are hairline rows on the text edge, the chip a tinted well with no
+    edge, a segment a figure in a grid and the filters a row of fields."""
+    def rule(sel):
+        m = re.search(r"\n        " + re.escape(sel) + r" \{([^}]*)\}", CSS)
+        ok(m is not None, sel + " is a rule at the stylesheet's own indent")
+        return m.group(1) if m else ""
+    dd = rule(".data-drill")
+    ok("border: 0;" in dd and "border-radius: 0;" in dd and "background: none;" in dd, "the drill-down has no box")
+    ok("min-height: var(--control-h)" in rule(".data-drill summary"), "its row is a control tall, 40 on a phone")
+    ok(".data-drill[open] summary" not in CSS, "an open drill-down draws no rule under its row")
+    ins = rule(".insight")
+    ok("border: 0;" in ins and "border-radius: 0;" in ins and "background: none;" in ins and "box-shadow: none;" in ins
+       and "padding: var(--sp-3) 0;" in ins, "an insight has no box and sits on the text edge")
+    ok("\n        .insights > .insight + .insight { border-top: var(--bw-hairline) solid var(--border-default); }" in CSS, "a hairline between neighbours")
+    ok(".insight:hover { border-color" not in CSS, "and no hover edge")
+    ok("border: 0;" in rule(".idelta") and "var(--surface-tertiary)" in rule(".idelta"), "an impact chip is a well with no edge")
+    sc, pf = rule(".seg-card"), rule(".pfilters")
+    ok("border: 0;" in sc and "background: none;" in sc and "box-shadow: none;" in sc and "padding: 0;" in sc,
+       "a customer segment is a figure in a grid with no box")
+    ok("border: 0;" in pf and "background: none;" in pf and "padding: 0;" in pf and "border-radius: 0;" in pf,
+       "the Products filters are a row of fields with no panel round them")
+
+
+@test
+def t_keywords_products_and_customers_wear_the_mix():
+    """Spec 8.3 (Report) and the copy plan (Keywords, Products, Customers): one
+    header builder on every state, the AI summary as a section, setup steps and
+    definitions behind info buttons, the Customers run gate the same empty state
+    every report's is, and the shorter lines."""
+    for fname in ("function renderKeywords(cache) {", "async function runKeywords(box) {", "function renderProductList() {",
+                  "async function loadProducts(force) {", "async function openProduct(id, title) {",
+                  "function renderProductDetail(d, id, title) {", "function customersBusy(seg) {", "function renderCustomers(seg) {"):
+        ok(fname in SCRIPT, fname + " exists")
+        fn = fn_src(fname)
+        ok("pageHead({" in fn or "customerGateHead(seg)" in fn, fname + ": the one header")
+        ok("el('div', 'ov-hero')" not in fn, fname + ": none built by hand")
+    ok("function customerGate(seg) {" in SCRIPT, "the Customers gate exists")
+    gate = fn_src("function customerGate(seg) {")
+    ok("emptyState({ icon: I.users, text: RUN_COST, action: btn, cls: 'run-gate' })" in gate,
+       "the Customers gate is the run gate's empty state, its cost in the words every gate uses")
+    ok("'rg-ic'" not in SCRIPT and "'rg-note'" not in SCRIPT, "no run gate draws its own tile or note")
+    ok("infoButton('The two Google sources'" in SCRIPT and "infoButton('Linking Google Ads'" in SCRIPT, "the Google steps wait behind info buttons")
+    ok("function cardifySections(root) {" in SCRIPT, "cardifySections exists")
+    ok("c.nodeType === 1 && !c.classList.contains('info') && (c.classList.contains('segmented')" in fn_src("function cardifySections(root) {"),
+       "a heading folded into a card keeps its info button beside its words, not in the card's action slot")
+    ok("inp.placeholder = 'A competitor or blog post address'" in SCRIPT, "what to scan is the field's own hint")
+    # "Pulls live Shopify data. No AI credits used." is a cost note and stays (fix round 1): it is no longer in this list.
+    for gone in ("Pull the keywords you rank for", "Paste any public page", "Two Google sources fill", "No paid search data yet. Link",
+                 "Load your catalogue with up to", "Filter, sort and compare your catalogue",
+                 "The plan for this product.", "that earned most, ", "Analyse all customers", "From your orders and customer list",
+                 "Who your best customers are", "Nobody with a reorder rhythm"):
+        ok(gone not in SCRIPT, "cut: " + gone)
+    for new in ("'Your keywords and ad spend, with a ranked plan.'", "'Your catalogue with up to 24 months of sales.'",
+                "'Open a product for its optimisation plan.'", "'Nothing to rank for this period.'",
+                "'Customers and sectors by retention, value and revenue.'", "'No repeat accounts overdue.'",
+                "'Tag these in Shopify to count them as trade.'", "' Some products are missing: the catalogue is too large.'"):
+        ok(new in SCRIPT, "says: " + new)
+
+
+@test
+def t_liability_and_reconciliation_wear_the_mix():
+    """Spec 8.3 (Finance) and the copy plan (Liability, Reconciliation): the one
+    header with a short line, the rule and the setup behind info buttons beside
+    their titles, the address to copy and the Connect action kept on the card,
+    "Read only" kept as the safety point, and the shorter empty lines."""
+    for fname in ("function renderLiability() {", "async function loadLiability(force, fresh) {", "function renderRecon() {"):
+        ok(fname in SCRIPT, fname + " exists")
+        fn = fn_src(fname)
+        ok("pageHead({" in fn and "el('div', 'ov-hero')" not in fn, fname + ": the one header")
+    ok("line: 'What customers owe on unpaid orders.'" in SCRIPT and "infoButton('About Liability'" in SCRIPT, "Liability's line and its rule")
+    rc = fn_src("function renderRecon() {")
+    ok("line: 'Checks Shopify, Xero and the inbox agree. Read only.'" in rc, "Reconciliation's line keeps Read only")
+    ok("infoButton('Connecting the accounts mailbox'" in rc and "infoButton('Setting up Xero'" in rc, "both setups wait behind info buttons")
+    ok("'Read only: Reactor cannot change your books.'" in rc and "ucp.append(ico(I.copy)" in rc, "the security line and the address to copy stay")
+    for gone in ("Every unpaid order by how late it is", "Open one to see the orders behind the figure", "No orders currently carry an unpaid tag",
+                 "Where Shopify, Xero and the inbox disagree", "That is the goal state."):
+        ok(gone not in SCRIPT, "cut: " + gone)
+    ok(SCRIPT.count("'Nothing is owed.'") == 2 and "'Nothing needs attention.'" in SCRIPT, "the empty lines are short")
+
+
+@test
+def t_the_finance_row_prints_nothing_and_the_chase_panel_has_no_box():
+    """Carried from the Phase 3 and 4 reviews. The Finance tab row prints as an
+    empty 44 band on a rule, because its tabs and chooser do not print: the
+    @media print block is frozen, so the row is for a screen by its own rules
+    (hidden, then shown under @media screen, as the info button is). And the
+    Liability chase panel is no bordered box (spec 3)."""
+    ok("\n        .page-tabs { display: none;" in CSS and "\n        @media screen { .page-tabs { display: flex; } }" in CSS,
+       "the Finance tab row is hidden by default and shown for a screen")
+    ok("\n        .page-tabs { display: none;" in CSS and CSS.index("\n        .page-tabs { display: none;") < CSS.index("@media screen { .page-tabs { display: flex; } }"),
+       "and the screen rule follows its base rule")
+    ok("\n            .card-head:has(> :is(.card-title, .title-row) > .info) { row-gap: var(--sp-3); }" in CSS
+       and CSS.index(".card-head:has(> :is(.card-title, .title-row) > .info) { row-gap: var(--sp-3); }") > CSS.index("\n            .info::before { inset: auto; left: 0;"),
+       "on a phone a line under a title with an info button sits 12 below it, clear of the 40 target")
+    m = re.search(r"\n        \.lia-chase \{([^}]*)\}", CSS)
+    ok(m is not None, ".lia-chase is a rule at the stylesheet's own indent")
+    r = m.group(1) if m else ""
+    ok("border: 0;" in r and "background: none;" in r and "padding: 0;" in r and "border-radius: 0;" in r, "the chase panel has no box")
+
+
+@test
+def t_xero_sync_wears_the_mix():
+    """Spec 8.3 (Finance) and the copy plan (Xero sync): one line under the
+    title; the link steps and the security note behind the setup card's info
+    button; Xero linked as a tag; the review rule, each tile's how-to and the
+    settings note behind their titles' info buttons; the shorter lines."""
+    ok("function renderConnector() {" in SCRIPT, "renderConnector exists")
+    fn = fn_src("function renderConnector() {")
+    ok("pageHead({ view: 'connector', title: 'Xero sync', line: 'Shopify orders, refunds and customers, sent into Xero.' })" in fn,
+       "the one header and its line")
+    ok("el('div', 'ov-hero')" not in fn and "hero.append(heroAct(''))" not in fn, "nothing built by hand")
+    for part in ("infoButton('Linking the connector'", "infoButton('About review and send'", "infoButton('About these settings'",
+                 "if (hint) t.append(infoButton(title, { title: title, body: hint }))", "'An admin needs to link this.'",
+                 "el('span', 'lbl-chip ' + (cfg.dryOnly ? 'note' : cfg.shop ? 'made' : 'warn')", "'Nothing has run yet.'",
+                 "'No review yet.'", "'Held back for bad data. Fix the cause, then retry.'", "'Empty now. Refresh to update the count.'"):
+        ok(part in fn, "Xero sync: " + part)
+    ok("\n        .card-head > .lbl-chip { justify-self: start; }" in CSS
+       and CSS.index("\n        .card-head > .lbl-chip { justify-self: start; }") > CSS.index("\n        .lbl-chip.warn {"),
+       "a state tag in a card's head is its own width, not the grid column's")
+    for gone in ("invoices, credit notes and contacts in Xero", "did not write; retry once", "held back rather than written",
+                 "Reviews and sends alike", "An admin links it in Railway.", "'cx-tile-hint'", "Nothing runs on its own"):
+        ok(gone not in SCRIPT, "cut: " + gone)
+
+
+@test
+def t_fix_round_one_reports_and_the_phone_header():
+    """Fix round 1 for the report pages. (1) The changes strip is a fixed block with no id: after the
+    first card the grid can move it would take Customise down, so on every report it comes BEFORE the
+    Summary widget. (2) A cost note is never dropped: the Products gate and the Trade radar still say
+    no AI credits are used. (3) A status line's stamp keeps its own width, so Refresh sits beside it and its 40
+    target leans down, never over the title. (4) The SEO score and the Xero sync tiles have no box.
+    (5) The scan field has one aria-label."""
+    for fname in ("function renderOverview(cache) {", "function renderSEO(cache) {", "function renderKeywords(cache) {", "function renderCustomers(seg) {"):
+        ok(fname in SCRIPT, fname + " exists")
+        fn = fn_src(fname)
+        ok("changesStrip(" in fn and "summarySection(" in fn, fname + ": it builds both")
+        ok(fn.index("changesStrip(") < fn.index("summarySection("), fname + ": the fixed strip comes before the first movable card")
+    ok("note: 'Pulls live Shopify data. No AI credits used.'" in SCRIPT, "the Products gate keeps its cost note")
+    ok("function radarCard(d) {" in SCRIPT, "radarCard exists")
+    rc = fn_src("function radarCard(d) {")
+    ok("head.append(el('h3', 'card-title', 'Trade radar'));" in rc and "el('p', 'card-desc', 'No AI credits used.')" in rc
+       and rc.index("'Trade radar'") < rc.index("'No AI credits used.'"), "the Trade radar keeps its cost note")
+    ok("function keywordScanCard() {" in SCRIPT, "keywordScanCard exists")
+    kc = fn_src("function keywordScanCard() {")
+    ok(kc.count("setAttribute('aria-label'") == 1 and "inp.setAttribute('aria-label', 'Page to scan');" in kc, "the scan field is named once")
+    ph = "\n            .ov-updated { margin-left: 0; padding-top: 0; flex-basis: 100%; white-space: normal; }\n"
+    ok(ph in CSS and ".ph-sub > .ov-updated { flex: none; white-space: nowrap; }" in CSS.split(ph)[1][:600],
+       "on a phone a status line's stamp is its own width, so Refresh sits beside it")
+    ok(".ph-sub > .info { margin-block: calc(-1 * var(--sp-1)) calc(var(--lh-control) - var(--control-h-lg) + var(--sp-1));" in CSS
+       and "align-content: start;" in CSS.split(".ph-sub > .info { margin-block")[1][:300]
+       and CSS.index(".ph-sub > .info { margin-block") > CSS.index("\n            .info::before { inset: auto; left: 0;"),
+       "its 40 target leans down, after the phone .info rules, and never up over the title")
+    def rule(sel):
+        m = re.search(r"\n        " + re.escape(sel) + r" \{([^}]*)\}", CSS)
+        ok(m is not None, sel + " is a rule at the stylesheet's own indent")
+        return m.group(1) if m else ""
+    ss, tl = rule(".seo-score"), rule(".cx-tile")
+    ok("border: 0;" in ss and "background: none;" in ss and "box-shadow: none;" in ss and "padding: 0;" in ss, "the SEO score has no box")
+    ok("border: 0;" in tl and "border-radius: 0;" in tl and "padding: 0;" in tl, "a Xero sync tile has no box")
+    ok("gap: var(--sp-4) var(--sp-8)" in rule(".cx-grid"), "and the three forms sit 32 apart in their columns")
+
+
+@test
+def t_the_four_run_gates_word_their_cost_the_same():
+    """Ruling after the Tasks 35 to 38 review: Overview, SEO, Keywords and Customers each ask for a run that
+    uses AI credits, so each says so in the SAME words (one constant, in an empty-state line of 8 words or
+    fewer). What a gate used to add to its cost line (SEO's minute, what Keywords and Customers read) is not
+    dropped: it sits behind the title's info button, word for word."""
+    m = re.search(r"const RUN_COST = '([^']*)';", SCRIPT)
+    ok(m is not None, "one constant words the cost")
+    cost = m.group(1) if m else ""
+    ok("AI credits" in cost and "only when you run it" in cost, "it says AI credits, and only when you run it")
+    ok(len(cost.split()) <= 8, "and it is an empty state's line: 8 words or fewer")
+    for fname, needle in (("function showOverviewView() {", "note: RUN_COST"), ("function showSeoView() {", "note: RUN_COST"),
+                          ("function showKeywordsView() {", "note: RUN_COST"), ("function customerGate(seg) {", "text: RUN_COST")):
+        ok(fname in SCRIPT, fname + " exists")
+        ok(needle in fn_src(fname), fname + " says it through the constant")
+        ok("Uses AI credits" not in fn_src(fname), fname + " words no cost of its own")
+    for more in ("more: 'Takes up to a minute.'", "more: 'Reads Search Console and Analytics.'", "'Reads Shopify customers and orders.'"):
+        ok(more in SCRIPT, "kept behind the info button: " + more)
+    ok("info: o.more ? infoButton('About this run', { title: o.title, body: o.more }) : null" in fn_src("function renderRunGate(boxId, o) {"),
+       "a gate's extra words sit behind its title's info button")
+
+
+@test
+def t_the_size_list_and_loan_units_wear_the_mix():
+    """Spec 8.3 (Queue) and the copy plan (Size list, Loan units): one line under
+    each title, the ruling rule behind the Size list's info button, figures
+    whose labels say it all, and the shorter empty and status lines."""
+    for fname, line in (("function renderSizes() {", "line: 'The glass size the bench cuts for every fixture.'"),
+                        ("function renderLoans() {", "line: 'Projectors out on loan, and for how long.'")):
+        ok(fname in SCRIPT, fname + " exists")
+        fn = fn_src(fname)
+        ok(line in fn and "el('div', 'ov-hero')" not in fn, fname + ": the one header and its line")
+    ok("infoButton('About the size list'" in SCRIPT and "' · built-in copy'" in SCRIPT, "the ruling rule and the short stamp")
+    for gone in ("Every fixture on the size sheet", "the copy that came with the app", "and no holder takes", "'with customers'",
+                 "'ready to go'", "nothing past its date", "Longest out first.", "Every loan unit the shop owns.",
+                 "start tracking it", "worth a chase", "A loan with no due date turns amber"):
+        ok(gone not in SCRIPT, "cut: " + gone)
+    for new in ("'Nothing is out.'", "'No loan units yet.'", "'no due date'", "'Turns amber after this many days without a due date.'"):
+        ok(new in SCRIPT, "says: " + new)
+
+
+@test
+def t_the_crm_wears_the_mix():
+    """Spec 8.3 (Desk) and the copy plan (CRM): the one header with Beta and one
+    line, the amber and red key behind its info button, what a lead is and the
+    funnel's counting rule behind theirs, descriptions that restated a title
+    gone, and one-line empty states."""
+    ok("function renderCRM() {" in SCRIPT, "renderCRM exists")
+    fn = fn_src("function renderCRM() {")
+    ok("pageHead({ view: 'crm', title: 'CRM', line: 'Deals, activities and contacts for the sales desk.'" in fn
+       and "el('div', 'ov-hero')" not in fn, "the one header and its line")
+    ok("infoButton('About the CRM'" in fn and "infoButton('What a lead is'" in SCRIPT, "the key and the definition wait behind info buttons")
+    ok("bh.append(desc ? titleInfo(bt, infoButton('About ' + title, { title: title, body: desc })) : bt)" in SCRIPT, "an Insights rule is its title's info button, beside it")
+    ok("emptyState({ icon: I.briefcase, text: 'No deals yet.', action: acts })" in SCRIPT, "an empty pipeline is one line and its two ways on")
+    for gone in ("Everything the desk is working on", "An empty pipeline is a fresh start", "The calls, emails and meetings the desk owes",
+                 "Everyone the desk deals with", "Tick rows to delete", "What closed, summed into the month", "This fills in",
+                 "they are expected to land", "What the desk actually got done", "cannot be forecast"):
+        ok(gone not in SCRIPT, "cut: " + gone)
+    for new in ("'No deals won yet.'", "'No expected close dates ahead.'", "'No pipeline stages yet.'", "'Nothing done in the last 30 days.'"):
+        ok(new in SCRIPT, "says: " + new)
+
+
+@test
+def t_the_crm_board_lanes_cards_and_focus_panels_have_no_box():
+    """Carried from the Phase 3 review (spec 3 and 8.3): a CRM lane is a tint with no outline, a
+    deal card a white tile on it with no border (the fill difference separates them; a drop still lights the
+    lane, hover and the red 'untouched too long' edge are drawn as shadows), and .crm-focus has no box."""
+    def rule(sel):
+        m = re.search(r"\n        " + re.escape(sel) + r" \{([^}]*)\}", CSS)
+        ok(m is not None, sel + " is a rule at the stylesheet's own indent")
+        return m.group(1) if m else ""
+    col = rule(".crm-col")
+    ok("background: var(--surface-secondary)" in col and "border: 0;" in col and "border: var(--bw-hairline)" not in col, "a lane is a tint with no outline")
+    ok(".card .crm-col { border-color: transparent; }" not in CSS, "and no rule is left holding a transparent outline")
+    ok("box-shadow: inset 0 0 0 var(--bw-strong) var(--border-selected)" in rule(".crm-col.dragover"), "a lane still lights when a deal is dragged over it")
+    card = rule(".crm-card")
+    ok("background: var(--surface-primary)" in card and "border: 0;" in card and "box-shadow: none;" in card, "a deal card is a white tile with no border or shadow")
+    ok("box-shadow: inset 0 0 0 var(--bw-hairline) var(--border-emphasis)" in CSS.split("@media (hover: hover) { .crm-card:hover {")[1].split("}")[0],
+       "its hover is a ring, inside hover: hover")
+    ok("box-shadow: inset var(--bw-marker) 0 0 var(--error)" in rule(".crm-card.rotten") and "border-left" not in rule(".crm-card.rotten"),
+       "a deal untouched too long keeps its red edge, drawn inside the tile")
+    foc = rule(".crm-focus")
+    ok("border: 0;" in foc and "border-radius: 0;" in foc and "padding: 0;" in foc and "border: var(--bw-hairline)" not in foc, ".crm-focus has no box")
+
+
+@test
+def t_the_inbox_and_files_wear_the_mix():
+    """Spec 8.3 (Desk) and the copy plan (Inbox, Files): one line under each
+    title, the amber and red rule and the setup behind info buttons, the
+    warning that matters kept as the setup card's line, the address to copy on
+    the card, counts in the card's line, and one-line empty states."""
+    ok("function mailHero(box) {" in SCRIPT and "function renderFiles() {" in SCRIPT and "function renderMail() {" in SCRIPT, "the three functions exist")
+    ok("pageHead({ view: 'mail', title: 'Inbox', line: 'The shared mailbox, with an owner on every email.'" in fn_src("function mailHero(box) {"),
+       "the Inbox header")
+    ok("pageHead({ view: 'files', title: 'Files', line: 'The office file server, from anywhere.' })" in fn_src("function renderFiles() {"),
+       "the Files header")
+    m = fn_src("function renderMail() {")
+    ok("infoButton('About connecting the shared mailbox'" in m and "'Choose the shared mailbox, not your own account.'" in m and "card.append(r2);" in m,
+       "the setup waits behind its info button, the warning and the address stay")
+    ok("hero.append(heroAct(''))" not in m, "pageHead gave the header its slot")
+    for gone in ("Where each person is working", "Tick a few to claim", "'Every email has an owner. Good.'",
+                 "reachable from anywhere", "Uploads may fail until the R2 keys", "Drag files in to store them, or onto",
+                 "Searching every folder for", "Dragging files in needs a folder", "Nothing here yet. Drag files in",
+                 "Nothing deleted in the last 30 days", "Ask an admin to connect the shared mailbox."):
+        ok(gone not in SCRIPT, "cut: " + gone.strip())
+    for new in ("'An admin needs to connect the shared mailbox.'", "'Results from every folder.'", "'Clear the search to upload here.'",
+                "'No files here yet.'", "'Deleted for good after 30 days.'", "'Storage is not set up yet.'"):
+        ok(new in SCRIPT, "says: " + new)
+
+
+@test
+def t_the_inbox_list_is_hairline_rows_and_an_upload_row_has_no_box():
+    """Carried from the Phase 3 review (spec 3 and 8.3). The Inbox list is hairline rows on the text edge
+    with all their information: the selected row is the teal wash with a 2px teal-line edge (as the open
+    order is), an unread row has its sender at 600 and an 8px teal dot, the owner tint is an owner tag
+    (a 20 tag), and hover and selected fills bleed 8 past the column with box-shadow. A file upload row has no box."""
+    def rule(sel):
+        m = re.search(r"\n        " + re.escape(sel) + r" \{([^}]*)\}", CSS)
+        ok(m is not None, sel + " is a rule at the stylesheet's own indent")
+        return m.group(1) if m else ""
+    ml = rule(".mlist")
+    ok("border: 0;" in ml and "background: none;" in ml and "overflow: visible;" in ml and "container: mlist / inline-size;" in ml,
+       "the list has no box, clips nothing (the bleed is a shadow) and is still the container its rows are laid out by")
+    row = rule(".mrow")
+    ok("padding: var(--sp-2) 0;" in row and "min-height: var(--row-h);" in row and "box-shadow: var(--rule-b-soft);" in row
+       and "border: 0;" in row and "border-top" not in row, "a row is a 44 hairline row on the text edge")
+    bleed = "calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary)"
+    ok(bleed in CSS.split("@media (hover: hover) { .mrow:hover {")[1].split("}")[0], "hover is a fill that bleeds 8 past the column")
+    ok(".mrow:hover::after" not in CSS, "and not a wash laid over the row (the tints it was for are gone)")
+    sel = rule(".mrow:is(.selected, [aria-selected=\"true\"])")
+    ok("background: var(--action-selected);" in sel and "calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected)" in sel
+       and "calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected)" in sel,
+       "selected is the teal wash, bleeding 8, with a 2px teal-line edge, as the open order is")
+    ok("\n        .mrow.unread {" not in CSS, "an unread row no longer carries a bar down its edge")
+    ok("font-weight: var(--weight-semibold)" in rule(".mrow.unread .mfrom"), "an unread sender is 600")
+    mu = rule(".munread")
+    ok("width: var(--dot-md);" in mu and "height: var(--dot-md);" in mu and "order: -1;" in mu,
+       "the unread mark is an 8 dot at the row's start, its word kept for a screen reader")
+    ok("background: var(--fill-mark)" in rule(".munread::before") and "border-radius: var(--radius-circle)" in rule(".munread::before"), "and it is the teal mark")
+    ok(_contrast(_token("fill-mark"), "#ffffff") >= 3, "which is at least 3:1 on white (a non-text mark)")
+    ok(".mrow.own-red" not in CSS, "the row is not tinted by its owner")
+    tag = rule(".mail-owner")
+    ok("height: var(--tag-h);" in tag and "border: 0;" in tag and "border-radius: var(--radius-tag);" in tag, "the owner is a 20 tag")
+    for name in ("red", "orange", "yellow", "green", "blue", "purple", "pink", "brown"):
+        ok(re.search(r"\.mail-owner\.own-%s\s*\{ background: var\(--owner-%s-bg\); \}" % (name, name), CSS), "the owner tag takes " + name + "'s tint")
+    ok("function mailOwnerChip(t) {" in SCRIPT, "mailOwnerChip exists")
+    ok("el('span', 'mail-owner' + ownClass(mailColour(t.owner)))" in fn_src("function mailOwnerChip(t) {"), "the tag is built with its owner's class")
+    ok("min-height: var(--control-h-sm);" in rule(".mown-slot"), "the owner column holds one height, whether it shows a 20 tag or the 24 Claim button")
+    up = rule(".files-up")
+    ok("border: 0;" in up and "background: none;" in up and "border-radius: 0;" in up and "box-shadow: var(--rule-b-soft);" in up, "an upload row is a hairline row, no box")
+    ok("box-shadow: inset 0 calc(-1 * var(--bw-hairline)) 0 var(--error);" in rule(".files-up.failed"), "a failed one has a red rule")
+
+
+@test
+def t_team_memory_and_skills_wear_the_mix():
+    """Spec 8.3 (Workspace) and the copy plan (Team, Memory, Skills): one line
+    under each title; security notes, retention rules and how things are read
+    behind info buttons beside their titles, word for word; the cost warning
+    kept as a short line; statuses as tags; one-line empty states."""
+    for fname, line in (("function renderTeam() {", "'Who can sign in, and what everyone has done.'"),
+                        ("function renderMemory() {", "'What Reactor remembers with every answer.'"),
+                        ("function renderSkills() {", "'Playbooks Reactor follows in chat, reports and email drafts.'")):
+        ok(fname in SCRIPT, fname + " exists")
+        fn = fn_src(fname)
+        ok("line: " + line in fn and "el('div', 'ov-hero')" not in fn, fname + ": the one header and its line")
+    for part in ("infoButton('About accounts'", "infoButton('How much is kept'", "infoButton('About store knowledge'",
+                 "infoButton('About notes'", "infoButton('About tracked changes'", "infoButton('How skills are used'",
+                 "infoButton('About skills'", "'Uses AI credits. Reads up to 12 pages, once.'",
+                 "el('span', 'lbl-chip warn', 'Waiting for an admin')", "el('span', 'lbl-chip note', 'Not read with answers')",
+                 "emptyState({ icon: I.bookmark, text: 'No notes yet.', action: first })", "emptyState({ icon: I.book, text: 'No skills yet.' })"):
+        ok(part in SCRIPT, "says: " + part)
+    for gone in ("'tm-foot'", "Who can sign in, what each may open", "No part-time accounts yet. Set", "keeps in mind with every answer",
+                 "Learning the store is an AI run", "Reactor keeps a note when something", "Reactor does not read it yet",
+                 "older than the newest", "Instructions and playbooks Reactor follows", "None yet: answers name", "Ideas: a brand voice"):
+        ok(gone not in SCRIPT, "cut: " + gone)
+
+
+@test
+def t_a_waiting_note_says_who_wrote_it_and_that_it_is_not_read():
+    """Fix round 1 (Task 42 review). A note waiting for an admin used to say 'Waiting for an admin to keep it,
+    from Dee Pugh. Reactor does not read it yet': what an admin acts on. As tags it lost the author and the fact
+    that it is not read. Both are kept, VISIBLE (a title cannot be reached by touch or keyboard): the author in
+    the note's meta line ('From Dee Pugh', existing words) and the 'Not read with answers' tag on a waiting note as
+    well as on a note past the newest 40 of its kind. Run the real row in node."""
+    ok("function memRow(m, sent) {" in SCRIPT and "function memSentIds() {" in SCRIPT, "memRow and memSentIds exist")
+    ok("if (waiting && m.by) bits.push('from ' + m.by);" in fn_src("function memRow(m, sent) {"), "the author goes in the meta line")
+    # Three tags and a meta line must not break the phone's stacked row (found in the rig: the table ran 142 past the screen).
+    ok("\n            .ktable.mem-table td { display: block; border: 0; padding: 0; height: auto; }" in CSS,
+       "a stacked cell is as tall as what it holds, not the column row's fixed height")
+    ok('grid-template-areas: "kind kind acts" "note note note";' in CSS, "the kind area has the free column")
+    ok("td.mem-kind { grid-area: kind; display: flex; flex-wrap: wrap;" in CSS and "white-space: normal; }" in CSS.split("td.mem-kind { grid-area: kind;")[1][:200],
+       "and its tags wrap rather than widen the row")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+const cap = s => { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); };
+const MEM_WORDS = { fact: 'Fact', decision: 'Decision', followup: 'Follow-up', preference: 'Preference', insight: 'Learning' };
+const MEM_FROM = { chat: 'Chat', merchant: 'Added here', 'tracked change': 'Tracked change' };
+const fmtDate = (d) => '5 Oct'; const ico = () => el('span'); const I = new Proxy({}, { get: () => '' });
+const canEditInstructions = () => true; const memOp = () => {}; const memGuard = () => true; const uiConfirm = async () => true;
+let memInject = 40; let memories = [];
+""" + fn_src("function memSentIds()") + "\n" + fn_src("function memRow(m, sent)") + r"""
+const kinds = (tr) => tr.children[0].children.map(c => c.textContent);
+const meta = (tr) => { const c = tr.children[1].children.find(x => x.className === 'mem-meta'); return c ? c.textContent : null; };
+const row = (m) => { memories = [m]; return memRow(m, memSentIds()); };
+const waitingPref = row({ id: 'a', type: 'preference', text: 'Trade accounts reorder.', source: 'chat', status: 'pending', by: 'Dee Pugh', created: 'x' });
+const waitingFollow = row({ id: 'b', type: 'followup', text: 'Chase Acme.', source: 'chat', status: 'pending', by: 'Dee Pugh', created: 'x' });
+const waitingNoBy = row({ id: 'c', type: 'fact', text: 'A fact.', source: 'chat', status: 'pending', created: 'x' });
+const live = row({ id: 'd', type: 'preference', text: 'Quote in working days.', source: 'chat', status: 'active', created: 'x' });
+const closed = row({ id: 'e', type: 'followup', text: 'Done thing.', source: 'chat', status: 'done', created: 'x' });
+console.log(JSON.stringify({ wp: kinds(waitingPref), wpMeta: meta(waitingPref), wf: kinds(waitingFollow), wfMeta: meta(waitingFollow), wn: kinds(waitingNoBy), wnMeta: meta(waitingNoBy),
+  live: kinds(live), liveMeta: meta(live), closed: kinds(closed) }));
+"""
+    got = _run_node(js)
+    ok(got["wp"] == ["Preference", "Waiting for an admin", "Not read with answers"], got["wp"])
+    ok(got["wpMeta"] == "From Dee Pugh", got["wpMeta"])
+    ok(got["wf"] == ["Follow-up", "Waiting for an admin", "Not read with answers"], "a waiting follow-up is not read either: %s" % got["wf"])
+    ok(got["wfMeta"] == "From Dee Pugh", got["wfMeta"])
+    ok(got["wn"] == ["Fact", "Waiting for an admin", "Not read with answers"] and got["wnMeta"] is None,
+       "a waiting note with no author says only that it waits: %s %s" % (got["wn"], got["wnMeta"]))
+    ok(got["live"] == ["Preference"] and got["liveMeta"] is None, "a note that is read carries neither tag")
+    ok(got["closed"] == ["Follow-up"], "and a closed follow-up still carries no 'not read' tag: %s" % got["closed"])
+
+
+@test
+def t_the_inbox_tick_and_claim_have_a_40_square_on_a_phone():
+    """Fix round 1 (Task 41 review): at 640 and under the row's tick was 16 (24 on touch) and Claim 24. Each
+    keeps its look and gets an invisible 40 square (the ::after pattern of the other small controls). A bare
+    checkbox cannot carry a pseudo-element, so every tick is wrapped in a label (a tap on the label's square
+    ticks the input, and stops there: it must not open the thread). Claim leans on its own ::after."""
+    ok("function mailTick(cb) {" in SCRIPT, "one helper wraps a tick")
+    tick = fn_src("function mailTick(cb) {")
+    ok("el('label', 'mail-tick')" in tick and "lab.onclick = (e) => e.stopPropagation();" in tick and "lab.append(cb);" in tick,
+       "in a label that keeps the tap off the row")
+    ok("row.append(mailTick(cb));" in SCRIPT and "bar.append(mailTick(all));" in SCRIPT, "the row's tick and the bulk bar's both use it")
+    ok("cb.type = 'checkbox'; cb.className = 'mail-check';" in SCRIPT, "and the input itself is unchanged")
+    i = CSS.index("\n            .mail-tick::after { left: 50%; top: 50%;") if "\n            .mail-tick::after { left: 50%; top: 50%;" in CSS else -1
+    ok(i > 0, "the tick's square is a rule inside the phone block")
+    block = CSS[:i]
+    ok(block.rindex("@media (max-width: 640px) {") > block.rindex("\n        }"), "inside the 640 block, not outside it")
+    ok("\n            .mail-tick::after { left: 50%; top: 50%; width: var(--control-h-lg); margin: calc(var(--control-h-lg) / -2) 0 0 calc(var(--control-h-lg) / -2); }" in CSS,
+       "40 wide and 40 high, centred on the tick")
+    ok("\n            .mail-claim::after { left: 0; right: 0; top: 50%; margin-top: calc(var(--control-h-lg) / -2); }" in CSS,
+       "Claim's is its own width and 40 high, centred on it")
+    ok("\n            .mail-tick::after, .mail-claim::after { content: \"\"; position: absolute; height: var(--control-h-lg); }" in CSS, "both are invisible")
+    ok(re.search(r"\n        \.mail-tick \{[^}]*position: relative;[^}]*\}", CSS) is not None, "the label is the square's anchor")
+
+
+@test
+def t_the_inbox_presence_row_is_names_not_boxes():
+    """Fix round 1 (Task 41 review, spec 3): 'Who is on today' was a row of bordered capsules. Each person is
+    now a plain group (colour dot, presence ring, name, the presence choice for you, the load), people 32 apart
+    on a desktop and hairline 44 rows on a phone. Nothing is dropped and every action stays."""
+    def rule(sel, indent=8):
+        m = re.search(r"\n" + " " * indent + re.escape(sel) + r" \{([^}]*)\}", CSS)
+        ok(m is not None, sel + " is a rule at indent %d" % indent)
+        return m.group(1) if m else ""
+    card = rule(".mail-who-card")
+    ok("border: 0;" in card and "background: none;" in card and "border-radius: 0;" in card and "padding: 0;" in card
+       and "border: var(--bw-hairline)" not in card, "a person has no box")
+    ok("gap: var(--sp-2) var(--sp-8);" in rule(".mail-who"), "people sit 32 apart")
+    phone = rule(".mail-who-card", 12)
+    ok("box-shadow: var(--rule-b-soft);" in phone and "min-height: var(--row-h);" in phone and "padding: 0;" in phone and "38px" not in phone,
+       "on a phone each is a hairline 44 row")
+    ok("\n            .mail-who { gap: 0; }" in CSS, "with no gap between rows but the hairline")
+    ok("\n            .mail-who-card .mail-presence-pick { height: var(--control-h-lg); min-height: var(--control-h-lg); }" in CSS,
+       "and your presence choice is a 40 target there")
+    mw = fn_src("function renderMail() {")
+    for kept in ("'mail-who-card'", "'who-dot' + ownClass(m.colour)", "'mail-presence ' + (m.presence || 'office')", "'mail-who-name', m.name + ' (you)'",
+                 "pick.className = 'mail-presence-pick';", "api('/api/mail/presence'", "el('span', 'mail-who-load',"):
+        ok(kept in mw, "kept: " + kept)
+
+
+@test
+def t_chat_the_guide_and_design_wear_the_mix():
+    """Spec 8.3 (Workspace) and the copy plan (Chat, Guide, Design): the empty
+    chat's one line, Enter and Shift+Enter on Send's own tooltip, the Guide's
+    header with no line (its tabs say it), each Design section's explanation
+    behind its title, the mix's tokens drawn on the Design page, and the
+    composer on the same corners, type and focus as the page."""
+    ok("'Ask about products, orders, customers and stock.'" in SCRIPT, "the empty chat's line")
+    ok('title="Enter to send · Shift+Enter for a new line"' in HTML and '<span class="hint">' not in HTML, "the keys are Send's tooltip")
+    ok("function renderGuide() {" in SCRIPT and "function dsCard(title, desc, ...kids) {" in SCRIPT and "function paintDesign(host) {" in SCRIPT,
+       "renderGuide, dsCard and paintDesign exist")
+    ok("pageHead({ view: 'guide', title: 'Guide' })" in fn_src("function renderGuide() {"), "the Guide's header")
+    ok("titleInfo(t, infoButton('About ' + title, { title: title, body: desc }))" in fn_src("function dsCard(title, desc, ...kids) {"),
+       "a Design section's explanation is its title's info button, beside it")
+    ok("MIX_TOKENS.forEach(([group, names]) =>" in fn_src("function paintDesign(host) {"), "the Design page draws the mix's tokens")
+    for gone in ("How the desk runs, what changed", "Short and specific beats polished", "Ask for a feature if something is missing",
+                 "It goes on Guide, Requests", "The strip of headline figures", "What a screen says when there is nothing",
+                 "When there is, it shows here.", "Reactor reads your live figures and answers"):
+        ok(gone not in SCRIPT, "cut: " + gone)
+    for bad in ("var(--radius-sm)", "var(--radius-xs)", "outline-offset: 1px", "line-height: 20px", "line-height: 1.5"):
+        ok(bad not in COMPOSER, "the composer reads the roles: " + bad)
+    ok("@media (hover: hover) { .cmp-b:hover" in COMPOSER, "and hovers only where there is a pointer")
+    ok("@media (hover: hover) { .cmp-x:hover" in COMPOSER, "the file chip's remove square too")
+    # Carried from the Phase 3 review: on a phone every control is a 40 target.
+    ph = COMPOSER.split("'@media (max-width: 640px) { .cmp-b { min-height: var(--control-h-lg); min-width: var(--control-h-lg); }',")
+    ok(len(ph) == 2, "the composer has a 640 rule that makes its buttons 40")
+    ph = ph[1][:700] if len(ph) == 2 else ""
+    ok(".cmp-sel { height: var(--control-h-lg); }" in ph, "and its selects")
+    ok(".cmp-x::after {" in ph and "width: var(--control-h-lg); height: var(--control-h-lg);" in ph, "and the remove square, as an invisible 40 square round it (the chip does not grow)")
+
+
+@test
+def t_windows_sign_in_and_settings_wear_the_mix():
+    """Spec 8.3 (Floating) and the copy plan (Sign-in, Settings window, Other
+    dialogs): the sign-in card on the floating corner and shadow; every window's
+    help one short line or its title's info button, warnings kept; no setting
+    or hosting name on a connection line; no header anywhere built by hand; the
+    old corner and badge rules gone."""
+    for new in ("'Your own account, not Shopify’s. No account? Ask an admin.'", "'Code from your authenticator app, or a recovery code.'",
+                "'Create the master admin account. You need the setup code.'", "'Set your own password before carrying on.'",
+                "'Not encrypted: secrets are stored in plain text.'", "'Not set up yet. Steps on the Inbox tab.'",
+                "'Weigh the packed box: couriers re-weigh and bill it.'", "'Collections booked in their portal do not show.'",
+                "'Its labels print no size from now on.'", "Keep these recovery codes somewhere safe: '"):
+        ok(new in SCRIPT, "says: " + new)
+    for gone in ("TOKEN_ENCRYPTION_KEY", "set APP_URL in Railway", "GA4_PROPERTY_ID", "GSC_SITE_URL", "RESEND_API_KEY", "ZETA_URL and ZETA",
+                 "GOOGLE_OAUTH_CLIENT_ID / SECRET", "Add your API key to start dispatching", "insurer wins",
+                 "somewhere safe - ", "applied to every chat and every report as authoritative"):
+        ok(gone not in SCRIPT + HTML, "cut: " + gone)
+    ok(SCRIPT.count("el('div', 'ov-hero')") == 1 and "el('div', 'ov-hero')" in fn_src("function pageHead(o) {")
+       and "el('div', 'badge')" not in SCRIPT, "every page header is pageHead's, the one place that builds one")
+    ok(".ov-hero .badge" not in CSS, "so the badge's rules are gone")
+    card = re.search(r"\.auth-card \{[^}]*\}", CSS, re.S).group(0)
+    ok("border-radius: var(--radius-pop)" in card and "box-shadow: var(--shadow-pop)" in card, "the sign-in card floats like every window")
+    modal = CSS.split("\n        .modal {")[1].split("}")[0]
+    ok("border: 0" in modal and "border-radius: var(--radius-pop)" in modal and "box-shadow: var(--shadow-pop)" in modal,
+       "a dialog floats like every window: the 10 corner and the pop shadow, its edge the shadow's own ring")
+    h3 = CSS.split("\n        .modal-head h3 {")[1].split("}")[0]
+    ok("font-weight: var(--weight-semibold)" in h3 and "line-height: var(--lh-control)" in h3, "and its title is the head step")
+    toast = CSS.split("\n        .toast {")[1].split("}")[0]
+    ok("border: 0" in toast and "padding: var(--pop-pad)" in toast and "box-shadow: var(--shadow-pop)" in toast,
+       "a toast floats the same way, 16 inside, its status still the bar at its left")
+    ok(not re.search(r"--radius-(sm|xl)\s*:", CSS) and "var(--radius-sm)" not in SCRIPT + CSS + COMPOSER, "the old corners are gone")
+
+
+@test
+def t_the_last_boxes_inside_windows_and_notices_have_no_edge():
+    """Carried from the Phase 4 reviews (spec 3 and 6): inside a floating layer what is boxed is a section or a
+    tinted well with no edge (the dispatch window's destination, customs and technical details, and the code
+    block in the last); a warning notice is a tint with no border (the alerts banner and the missing-tag strip: their
+    old border declarations were dead under the notice recipe, and are gone); the Inbox's bulk bar has no border and
+    keeps its actions; the dispatch window's controls are the field height (32); and the last four bordered boxes
+    (the await notice, a Collections row, the email reader's files, a recent chat) are a notice, a hairline row, a well
+    and a hairline row."""
+    def rule(sel, nth=0):
+        ms = list(re.finditer(r"\n        " + re.escape(sel) + r" \{([^}]*)\}", CSS))
+        ok(len(ms) > nth, sel + " is a rule at the stylesheet's own indent")
+        return ms[nth].group(1) if len(ms) > nth else ""
+    for sel in (".disp-dest", ".disp-customs", ".disp-tech", ".disp-tech-pre"):
+        r = rule(sel)
+        ok("border: 0;" in r and "border: var(--bw-hairline)" not in r, sel + " has no edge")
+    ok(len(re.findall(r"\n        \.disp-customs \{", CSS)) == 1, ".disp-customs is one rule, not two that disagree")
+    for sel in (".alerts-banner", ".miss-strip"):
+        r = rule(sel)
+        ok("border" not in r and "var(--warning-bg)" in r, sel + " is the tint, its dead border gone (the notice recipe gives it none)")
+    ok(".alerts-banner" in CSS.split("ONE NOTICE.")[1].split("}")[0] and ".miss-strip" in CSS.split("ONE NOTICE.")[1].split("}")[0]
+       and "border: 0;" in CSS.split("ONE NOTICE.")[1].split("}")[0], "and both are on the notice recipe, which has no border")
+    bar = rule(".mail-bulkbar")
+    ok("border: 0;" in bar and "border: var(--bw-hairline)" not in bar, "the Inbox's bulk bar has no border")
+    armed = rule(".mail-bulkbar.armed")
+    ok("border-color" not in armed and "background: var(--action-soft)" in armed, "armed it is the teal tint, still no border")
+    ok("width: var(--control-h); height: var(--control-h);" in rule(".disp-boxedit .icon-btn"), "the box row's icon button is the 32 of the fields beside it")
+    ins = rule(".disp-insure input[type=number]")
+    ok("height: var(--control-h);" in ins and "36px" not in ins, "and the insure field takes the field height token")
+    # Pre-measure fold: the last four bordered boxes (spec 3).
+    aw = rule(".disp-await")
+    ok("border" not in aw and "var(--surface-secondary)" in aw, ".disp-await is a tint with no edge and no marker")
+    ok(".disp-await" in CSS.split("ONE NOTICE.")[1].split("}")[0], "on the notice recipe, like every other notice")
+    cr = rule(".coll-row")
+    ok("border:" not in cr and "box-shadow: var(--rule-b-soft)" in cr and "border-radius" not in cr and "background" not in cr,
+       "a Collections row is a hairline row")
+    mf = rule(".mail-files")
+    ok("border: 0;" in mf and "background: var(--surface-tertiary)" in mf, "the email reader's files are a well with no edge")
+    rr = rule(".chat-recent-row")
+    ok("border: 0;" in rr and "box-shadow: var(--rule-b-soft)" in rr and "border-radius: 0" in rr, "a recent chat is a hairline row")
+
+
+@test
+def t_a_kpi_that_opens_a_list_does_not_nest_its_info_button():
+    """Task 44 (accessibility): a figure tile that opens its breakdown was role=button and held an info
+    <button> in its label, so a screen reader could not reach the info button and the controls were
+    nested. The tile is no longer a button: a real button in its corner opens the list (the keyboard and
+    screen-reader way, carrying the tile's old label), and a click anywhere on the tile still opens it, exactly as
+    before. The info button's own click stops short of the tile. Run in node."""
+    ok("function statOpens(c, m) {" in SCRIPT and "function infoButton(label, o) {" in SCRIPT, "statOpens and infoButton exist")
+    so = fn_src("function statOpens(c, m) {")
+    ok("setAttribute('role', 'button')" not in so and "tabIndex" not in so and "c.setAttribute('aria-label'" not in so, "the tile carries no button role, tab stop or name")
+    ok("e.stopPropagation();" in fn_src("function infoButton(label, o) {"), "an info button's click stops short of what it sits in")
+    ok("\n        .stat-open-btn {" in CSS, "the corner button has its own reset")
+    ok("\n            .stat-open-btn::after { content: \"\"; position: absolute; left: 50%; top: 50%; width: var(--control-h-lg); height: var(--control-h-lg);" in CSS,
+       "and on a phone an invisible 40 square")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+const I = { arrowUpRight: '<svg></svg>' };
+const opened = [];
+function openStatDetail(m, opener) { opened.push(m.label + '|' + opener.tagName); }
+function infoButton(label) { const b = el('button', 'info'); b.type = 'button'; b.onclick = (e) => { e.stopPropagation(); }; return b; }
+""" + fn_src("function statOpens(c, m)") + r"""
+const tile = el('div', 'stat'); const lab = el('div', 'label', 'Revenue'); const ib = infoButton('Revenue'); lab.append(ib); tile.append(lab);
+statOpens(tile, { label: 'Revenue', value: '£1,200', detail: {} });
+const btns = []; const walk = (n) => { for (const c of n.children || []) { if (c.tagName === 'BUTTON') btns.push(c); walk(c); } }; walk(tile);
+const own = btns.filter(b => b !== ib);
+const out = { role: tile.getAttribute('role'), tab: tile.attrs.tabindex === undefined && tile.tabIndex === undefined, ownCount: own.length,
+  ownLabel: own[0] && own[0].getAttribute('aria-label'), ownPopup: own[0] && own[0].getAttribute('aria-haspopup'), nestedInOpener: own[0] ? own[0].parentNode === tile : null };
+tile.click(); out.afterTile = opened.slice();
+opened.length = 0; own[0].click(); out.afterOwn = opened.slice();
+opened.length = 0; ib.click(); out.afterInfo = opened.slice();
+console.log(JSON.stringify(out));
+"""
+    got = _run_node(js)
+    ok(got["role"] is None and got["tab"] is True, "the tile is not a button and not a tab stop: %s" % got)
+    ok(got["ownCount"] == 1 and got["nestedInOpener"] is True, "one real button opens it, a child of the tile")
+    ok(got["ownLabel"] == "Revenue: £1,200. Open the list behind it" and got["ownPopup"] == "dialog", "and it carries the tile's old name: %s" % got["ownLabel"])
+    ok(got["afterTile"] == ["Revenue|BUTTON"], "a click anywhere on the tile still opens it, once: %s" % got["afterTile"])
+    ok(got["afterOwn"] == ["Revenue|BUTTON"], "so does the button, once (its click bubbles to the tile): %s" % got["afterOwn"])
+    ok(got["afterInfo"] == [], "and the info button opens nothing but its own help: %s" % got["afterInfo"])
+
+
+@test
+def t_a_standalone_link_is_a_40_target_on_a_phone():
+    """Carried from the Phase 3 review: the shared .link ('More in the Guide' in every popover, 'Show all') was
+    under 40 tall on a phone outside the one place that sized it. At 640 and under it is 40 tall everywhere; an
+    inline link inside a sentence is not a .link and is unchanged."""
+    rule = "@media (max-width: 640px) { .link { min-height: var(--control-h-lg); } }"
+    ok(rule in CSS, "a standalone link is 40 tall at 640 and under")
+    ok(CSS.index(rule) > CSS.index("\n        .link { display: inline-flex;"), "after its base rule")
+    ok(".fc-worth .sec-tools > .link" not in CSS, "and Show all, a .link in a section's tools, needs no rule of its own")
+    ok("el('button', 'link', 'More in the Guide')" in SCRIPT, "the popover's Guide link is a .link")
+
+
+@test
+def t_no_comment_or_rule_still_describes_the_old_look():
+    """Task 44's last-old-rules sweep. A comment that says 24, 16, 18, 28 or off-white
+    where the mix is 48, 20, 15, 32 or white sends the next change the wrong way, and a
+    rule nothing can match is weight. None of these phrases may come back, the dead rules
+    stay gone, the header's spec path is on one line, and the Forecast pair's two
+    container queries meet with no gap between them."""
+    stale = ("off-white page", "14px workhorse", "LARGE and LIGHT", "track 28", "cards are 8", "24 on a tablet",
+             "Ranks: page 30", "a panel 12", "The caveat under the KPI", "a raised knob", "internal 16",
+             "the 8px inset", "the reference's content inset", "the reference's first group", "NavUser",
+             "reference sets its page title", "an INACTIVE item is full-strength", "gap-6")
+    for phrase in stale:
+        ok(phrase not in CSS, "the old wording is gone from the stylesheet: " + phrase)
+    ok("#view-title .beta-tag" not in CSS, "the top bar's title is set with textContent, so no Beta can be inside it")
+    ok("setViewTitle(text) { const h = $('view-title'); h.textContent = text;" in SCRIPT, "which is why that rule was dead")
+    ok(".crm-focus.plain" not in CSS and "crm-focus plain" not in SCRIPT, "the no-op .plain variant and its class are gone")
+    ok("\n           docs/superpowers/specs/2026-10-06-reactor-mix-design.md." in HTML[:4000], "the spec path sits whole on one line")
+    ok("@container fcpair (max-width: 1000px) { .fc-cols { grid-template-columns: minmax(0, 1fr); } }" in CSS,
+       "stacked at 1000 and under")
+    ok("@container fcpair (not (max-width: 1000px)) { .fc-split-bar {" in CSS and "fcpair (min-width: 1001px)" not in CSS,
+       "and the side-by-side offset is the exact complement, so a width between 1000 and 1001 is one or the other")
+
+
+@test
+def t_an_info_button_sits_beside_its_heading_not_in_it():
+    """Pre-measure fold (the review of Tasks 43 and 44): an info button inside an h3 put its label into the heading's
+    accessible name ('Notes About notes'). It sits beside the heading in a title row, as the page header's does
+    (.ph-title), so a heading's name is its words and the button is its own control named About <title>. Every
+    h3 that carried one is built through titleInfo; the helper is run in node for a heading already in its head and one
+    not yet placed."""
+    ok("function titleInfo(h, info) {" in SCRIPT, "the helper exists")
+    ok("\n        .title-row { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }" in CSS, "and the row is a flex line")
+    lines = SCRIPT.split("\n")
+    bad = []
+    for i, l in enumerate(lines):
+        m = re.search(r"\b(\w+)\.append\([^;\n]*infoButton\(", l)
+        if not m:
+            continue
+        host = m.group(1)
+        for j in range(i, max(0, i - 60), -1):
+            d = re.search(r"(?:const|let|var)\s+%s\s*=\s*(.*)" % host, lines[j])
+            if d:
+                if re.search(r"el\('h[1-6]'|querySelector\('\.modal-head h3'\)|querySelector\('\.card-title'\)", d.group(1)):
+                    bad.append((i + 1, host))
+                break
+    ok(not bad, "no info button is appended into a heading: %s" % bad)
+    ok("infoButton('About ' + title, " in fn_src("function dsCard(title, desc, ...kids) {"), "a Design section's button is About <title>")
+    ok("infoButton('About feature requests'" in SCRIPT and "infoButton('About filters'" in SCRIPT
+       and "infoButton('About connecting the shared mailbox'" in SCRIPT and "infoButton('About size rules'" in SCRIPT,
+       "and so are Feature requests, the Filters window, the Inbox connect card and Size rules")
+    ok(".card-head:has(> :is(.card-title, .title-row) > .info) { row-gap: var(--sp-3); }" in CSS, "the phone's gap under a title with a button reads the row too")
+    ok("':scope > .card-head .card-title'" in SCRIPT, "the customise list still finds a widget's title")
+    if not _node_ok():
+        return
+    js = MINIDOM + r"""
+""" + fn_src("function titleInfo(h, info) {") + r"""
+const head = el('div', 'card-head');
+const h = el('h3', 'card-title', 'Notes');
+head.append(h, el('div', 'card-act'));
+const b = el('button', 'info');
+const row = titleInfo(h, b);
+const a = { placed: head.children[0] === row && head.children.length === 2, order: row.children[0] === h && row.children[1] === b,
+  name: h.textContent, rowClass: row.className, inHeading: h.contains(b) };
+const h2 = el('h3', 'card-title', 'Trash'); const b2 = el('button', 'info');
+const row2 = titleInfo(h2, b2);
+const head2 = el('div', 'card-head'); head2.append(row2);
+const c = { unplaced: row2.parentNode === head2 && row2.children.length === 2, name: h2.textContent, inHeading: h2.contains(b2) };
+console.log(JSON.stringify({ a, c }));
+"""
+    res = _run_node(js)
+    a, b = res["a"], res["c"]
+    ok(a["placed"] and a["order"] and a["name"] == "Notes" and a["rowClass"] == "title-row" and not a["inHeading"],
+       "a heading already in its head is replaced by the row, button after it: %s" % a)
+    ok(b["unplaced"] and b["name"] == "Trash" and not b["inHeading"], "one not yet placed comes back as the row to append: %s" % b)
+
+
+@test
+def t_the_pre_measure_fold_is_in():
+    """Pre-measure fold (the review of Tasks 43 and 44): the Settings mailbox line points where the steps are; the
+    composer's select and file chip read the control height like its buttons; the dispatch boxes' W, L and D say cm;
+    the comments that said 28 and 24 say 32 and 48; the Forecast 'Show all' reads the global
+    link rule; and the chart window pads 16 at its sides like every window."""
+    ok("'Not set up yet. Steps on the Inbox tab.'" in SCRIPT and "Steps in the Guide" not in SCRIPT, "the mailbox line names the Inbox tab")
+    ok(".cmp-sel { height: var(--control-h);" in COMPOSER and ".cmp-chip { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--control-h);" in COMPOSER
+       and "32px" not in COMPOSER, "the composer's select and chip are the control height, so a touch bar is 40 all along")
+    ok(SCRIPT.count("inp.placeholder = ph === 'kg' ? ph : ph + ' cm';") == 2 and "inp.placeholder = ph;" not in SCRIPT
+       and "i.placeholder = k === 'weight' ? 'kg' : k.slice(0, 1).toUpperCase() + k.slice(1) + ' cm';" in SCRIPT,
+       "W, L and D carry their unit, kg already does, in the dispatch window, the custom shipment and the parcel presets")
+    ok(".disp-boxrow:has(> .disp-sel) { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }" in CSS
+       and ".disp-boxrow > .disp-sel { grid-column: 1 / 4; min-width: 0; }" in CSS,
+       "and on a phone the custom shipment's parcel row is a preset and the remove square, then four equal measures (they were 26 wide)")
+    def rule(sel):
+        ms = list(re.finditer(r"\n        " + re.escape(sel) + r" \{([^}]*)\}", CSS))
+        ok(len(ms) == 1, sel + " is one rule at the stylesheet's indent")
+        return ms[0].group(1) if ms else ""
+    for stale in ("a 28px square", "28px bordered tile", "the 28px the card actions above it are", "the page sets 24 between"):
+        ok(stale not in CSS, "stale comment gone: " + stale)
+    ok(".fc-worth .sec-tools > .link" not in CSS and "@media (max-width: 640px) { .link { min-height: var(--control-h-lg); } }" in CSS,
+       "Show all reads the global 40 link rule")
+    cm = rule(".chart-modal .modal-body")
+    ok("padding: var(--sp-4) var(--sp-4) var(--sp-6);" in cm, "the chart window pads 16 at its sides")
+
+
+@test
+def t_a_type_size_and_its_line_height_come_as_a_pair():
+    """Task 45 (the measure tool's text styles, spec 4.2): a caption is 12/16 and a micro label 11/16, so a rule that
+    sets one of those sizes sets the caption line height too; it used to inherit the body's 20 and print as 12/20, a
+    style off the list, in 158 rules. Where a rule names both, the pair is one the spec lists: caption and micro with
+    --lh-caption, body and the 14 step with --lh-control (or --lh-prose for running text), the head step and the
+    wordmark's 16 with --lh-control, a figure with --lh-none."""
+    frozen = re.compile(r"label-sheet|day-sheet|loan-sticker|guide-print-row|#label-print|printing-label|@media print|@page")
+    pairs = {"--text-micro": {"--lh-caption"}, "--text-xs": {"--lh-caption"},
+             "--text-body": {"--lh-control", "--lh-prose"}, "--text-sm": {"--lh-control", "--lh-prose"},
+             "--text-head": {"--lh-control"}, "--text-md": {"--lh-control"},
+             "--fig-xl": {"--lh-none"}, "--fig-l": {"--lh-none"}, "--fig-m": {"--lh-none"}, "--fig-s": {"--lh-none"}}
+    missing, wrong = [], []
+    for sel, body in _rules(CSS):
+        if frozen.search(sel) or sel.strip().startswith(":root") or sel.strip() in ("body", ".print-head"):
+            continue    # body and the print head are what the A4 sheets inherit: frozen with the print
+        fs = re.search(r"(?<![\w-])font-size:\s*var\((--[\w-]+)\)", body)
+        if not fs or fs.group(1) not in pairs:
+            continue
+        tok = fs.group(1)
+        lh = re.search(r"(?<![\w-])line-height:\s*([^;]+);", body)
+        shorthand = re.search(r"(?<![\w-])font:\s*[^;]*/", body)
+        if not lh and not shorthand:
+            if tok in ("--text-micro", "--text-xs"):
+                missing.append(sel.strip()[:70])
+            continue
+        if lh:
+            m = re.match(r"var\((--[\w-]+)\)", lh.group(1).strip())
+            if m and m.group(1) not in pairs[tok]:
+                wrong.append("%s: %s with %s" % (sel.strip()[:60], tok, m.group(1)))
+    ok(not missing, "%d caption or micro rules without their line height: %s" % (len(missing), missing[:12]))
+    ok(not wrong, "type sizes paired with a line height the spec does not list: %s" % wrong[:12])
+
+
+@test
+def t_what_the_app_measure_found_stays_fixed():
+    """Task 45 (the measure tool pointed at the app, and the 165-screen audit): each cause it found is fixed where the
+    value comes from. The browser's own bold (700, or 900 inside a 600) is 600 on screen; a chip's line is the 20 of its
+    step, not the buttons' 'normal'; a maker's band and a unit read the step's own line; the scopes list is code, not
+    a monospace list; an empty line centres by max-width, so no padding is a fraction; a visually hidden paragraph has
+    no margin; and a field's vertical padding is the even 4 (its 32 is the min-height's)."""
+    ok("@media screen { b, strong { font-weight: var(--weight-semibold); } }" in CSS, "bold is 600 on screen")
+    chip = CSS.split("\n        .chip {")[1].split("}")[0]
+    ok("line-height: var(--lh-control)" in chip, "a chip has its step's line height, not a button's normal")
+    grp = CSS.split("\n        .ktable tr.ktable-grp th {")[1].split("}")[0]
+    ok("line-height: var(--lh-control)" in grp and "padding: var(--sp-1-5) 0" in grp, "a maker's band reads 13/20 and stays 32 tall")
+    ok("font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }" in CSS.split(".sizes-unit { display: inline;")[1][:160],
+       "a unit beside a figure has the body line, not the figure's 1")
+    crm = CSS.split("\n        .crm-col-sum {")[1].split("}")[0]
+    ok("line-height: var(--lh-control)" in crm and "line-height: var(--lh-none)" not in crm, "a pipeline column's sum is 13/20")
+    ok("li.append(el('code', 'setup-code', x))" in SCRIPT and "font-family" not in CSS.split("\n        .setup-scopes {")[1].split("}")[0],
+       "the permission scopes are code in a list, not a list set in monospace")
+    e = CSS.split("\n        .empty {")[1].split("}")[0]
+    ok("calc((100%" not in e and "margin-inline: auto" in e and "max-width: calc(var(--measure) + 2 * var(--sp-4))" in e and "padding: var(--sp-6) var(--sp-4)" in e,
+       "an empty line centres by width, its padding the 16 gutter")
+    ok("margin: 0; overflow: hidden; clip: rect(0 0 0 0)" in CSS.split("\n        .sr-only {")[1].split("}")[0], "hidden text has no margin of its own")
+    ok(_token_raw("control-pad-y") == "var(--sp-1)", "a field's vertical padding is 4: its 32 is the min-height's and the line centres in it")
+    ok(CSS.count("calc((100% - var(--measure)) / 2)") == 0, "and no rule pads by a share of its container")
+    # Found in the data-filled states (the Inbox, Files, Skills and the CRM board, seeded in the page).
+    ok(".sk-acts .mem-btn { min-width: var(--control-h); min-height: var(--control-h); }" in CSS,
+       "a skill's icon actions are the 32 of the Use in chat button beside them, not a 24 beside a 32")
+    ok("s.style.color = 'color-mix(in srgb, ' + c + ' 80%, var(--ink))'" in fn_src("function crmChip(name) {"),
+       "a label chip's words are its colour darkened toward ink, so amber, orange and green clear 4.5 on their tint")
+    ok(".mail-bulkbar .btn { min-height: var(--control-h-lg); }" in CSS.split("THE PHONE")[1] and "min-height: calc(var(--control-h-lg) + 2 * var(--sp-1))" in CSS.split("THE PHONE")[1],
+       "the Inbox's bulk-bar buttons are 40 on a phone, the bar the 48 that holds them")
+    ok(".files-up.failed .bar { display: none; }" in CSS, "a failed upload has no empty progress track squeezing its name and reason")
+    # Found by putting the app beside the mockup: two icons the page meant to draw were 0 by 0.
+    ok(".qt .ic svg { width: var(--icon-md); height: var(--icon-md); }" in CSS, "the Production Manager's Complete and Custom shipments tabs draw their icons")
+    ok(".rlist-row > .ic:not(:last-child) svg { width: var(--icon-md); height: var(--icon-md); }" in CSS, "and so does the leading icon of a list row (Forecast's numbers behind it)")
+    ok(".empty-chat .big svg { width: var(--icon-md); height: var(--icon-md); }" in CSS and ".chat-recent-row .ic svg { width: var(--icon-md); height: var(--icon-md);" in CSS,
+       "the chat's empty tile and a recent chat's row draw a 16 icon, as every tile and row does (spec 4.3)")
+    ok("cardSub.title = cardSub.textContent;" in SCRIPT, "a board card's sender and snippet line, which ends in an ellipsis, carries its full text")
+
+
+@test
+def t_the_forecast_chart_and_lists_match_the_mockup():
+    """Final review F1 to F7 (the mockup's Forecast): the Expected line and its key are solid (only the plan tick is
+    dashed); Cash in's money axis reads £0, £1.5k, £6k; a plot under 520 wide has two steps (three ticks) as the phone
+    mockup has; a month day by day has its dates weekly from the 1st; the last taken point carries its figure beside it;
+    Show all ends in a chevron; and 'The numbers behind it' splits 7 to 5 like the Worth and Why columns above it."""
+    fc = fn_src("function fcChartCard(latest, ledger, sanity) {")
+    ok("dash: true" not in fc, "the Expected series is solid (its legend key follows: a series with no dash is keyed solid)")
+    ok("name: 'Expected', color: tokenValue('--c-exp-line'), lead: true," in fc, "and is still the lead line")
+    ok("tickFormat: fmtCompactGBP" in fc and "xWeekly: range === 'month'" in fc and "lastLabel: grain === 'day'" in fc,
+       "Cash in asks for the pound axis, weekly dates on a month and the last-taken label")
+    ok("(Number(n) < 0 ? '-\\u00a3' : '\\u00a3') + fmtCompact(Math.abs(Number(n) || 0))" in SCRIPT, "the pound axis is the pound sign and the compact figure")
+    df = fn_src("function drawFrame(svg, c) {")
+    ok("const ticks = W < 520 ? 2 : 4," in df, "two steps on a narrow plot, four on a wide one")
+    ok("if (c.xWeekly) { for (let i = 0; i < n; i += 7) idxs.push(i); }" in df, "weekly from the first point when asked")
+    tc = fn_src("function trendChart(opts) {")
+    ok("xWeekly: !!opts.xWeekly" in tc and "if (opts.lastLabel) {" in tc and "class: 'chart-last'" in tc, "trendChart passes the option and draws the label")
+    ok("flip ? lx - 10 : lx + 10" in tc, "the label turns to the left of its dot when it would pass the right edge")
+    last = CSS.split(".chart-wrap .chart-last {")[1].split("}")[0]
+    ok("var(--weight-semibold)" in last and "var(--text-primary)" in last and "var(--text-xs)" in last and "var(--lh-caption)" in last,
+       "the label is caption, 600, ink")
+    wc = fn_src("function fcWorthCard(latest, sc, al) {")
+    ok("all.append(ico(I.chev))" in wc and "I.arrowRight" not in wc, "Show all ends in the chevron, not an arrow")
+    ok("@container fcnumbers (max-width: 1000px) { .rlist.cols-2 { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; } }" in CSS
+       and "@media (max-width: 1100px) { .rlist.cols-2" not in CSS and "@media (max-width: 900px) { .rlist.cols-2" not in CSS,
+       "and the list stacks with the pair above it, by its own width (1000), where its 5 is too narrow for a row's words (the audit found one ending in an ellipsis at 1024)")
+
+
+def _winner(selector, prop):
+    """The value a property ends with for one exact selector at the stylesheet's own level: the last declaration of it,
+    across every rule that names the selector (same specificity, so source order decides)."""
+    got = None
+    for sel, body in _rules(CSS):
+        if selector in [x.strip() for x in sel.split(",")]:
+            for m in re.finditer(r"(?<![\w-])" + re.escape(prop) + r"\s*:\s*([^;}]+)", body):
+                got = m.group(1).strip()
+    return got
+
+
+def _exact(selector, prop):
+    """Like _winner, for a selector list that has commas inside :is(): the rule whose whole selector is `selector`."""
+    got = None
+    for sel, body in _rules(CSS):
+        if sel.split("{")[-1].strip() == selector:
+            for m in re.finditer(r"(?<![\w-])" + re.escape(prop) + r"\s*:\s*([^;}]+)", body):
+                got = m.group(1).strip()
+    return got
+
+
+@test
+def t_the_production_manager_and_its_phone_head_match_the_mockup():
+    """Final review P1 to P8 and F8 (the mockup's Production Manager and Forecast phone head). Only the look moves: the
+    queue's rows, words, buttons and order are the queue guards' business. The queue runs edge to edge of the sheet with a
+    rule above the toolbar and above the list, a rule under each order and the open order's wash and 2px teal edge across
+    the sheet; Newest first has the sort glyph; the toolbar's two buttons are an equal pair on a phone; the date shows on a
+    phone at the right of the number's line, the name 4 under it and the buttons 12 under that; Refresh and More are two
+    squares at the title's right; Complete's icon is circled; the order number's underline is the link underline at
+    offset 4 and its date is body; and the Customise control is a 40 icon button, named Customise, at a phone's title."""
+    ok(".q-card { position: relative; gap: var(--sp-4); --q-bleed-end: var(--wrap-pad); }" in CSS, "the queue card is the positioned one the rules hang from")
+    ok(".q-card .lbl-list > .lbl-grid::before { content: \"\"; position: absolute; top: 0; inset-inline: calc(-1 * var(--wrap-pad)) calc(-1 * var(--q-bleed-end));" in CSS,
+       "a rule above the toolbar (from 641) and another above the list, each the sheet's width")
+    ok("::after { content: \"\"; position: absolute; bottom: 0; inset-inline: calc(-1 * var(--wrap-pad)) calc(-1 * var(--q-bleed-end));" in CSS, "a rule under every order across the sheet")
+    ok(".q-card .lbl-list > .lbl-grid > :last-child::after { background: var(--border-default); }" in CSS, "the last one a little stronger")
+    ok("{ background: var(--action-selected); box-shadow: var(--ring-selected); }" in CSS.split(".q-card .lbl-list > .lbl-grid > :is(.lbl-qrow:is(.on")[1][:260],
+       "the open order's wash spans the sheet with the 2px teal edge from --ring-selected")
+    ok("inset: 0 calc(-1 * var(--q-bleed-end)) 0 calc(-1 * var(--wrap-pad))" in CSS, "and its band is drawn past the text edge by the gutter, so the words stay on it")
+    oldf = fn_src("function renderLabels() {") if "function renderLabels() {" in SCRIPT else SCRIPT
+    ok("oldf.append(ico(I.sort), document.createTextNode(labelsOldest ? 'Oldest first' : 'Newest first'));" in oldf, "Newest first has the sort glyph, its words unchanged")
+    ok("I.checkCircle, tabCounts && tabCounts.dispatched, 'orders']" in SCRIPT, "Complete's icon is the circled check")
+    ok(".q-card .tbl-tools-r > .btn { flex: 1 1 calc(50% - var(--sp-1)); min-width: 0; }" in CSS and ".q-card .tbl-tools-r > select { flex: 1 1 100%; order: 2; }" in CSS,
+       "on a phone the two toolbar buttons are an equal pair and the size choice a line of its own (a third button's own line is its own guard)")
+    qc = CSS.split("@container queue (max-width: 559px) { .lbl-qrow .lbl-actions { min-width: max-content; } }")[0]
+    ok(".lbl-qrow .lbl-meta { display: none; }" not in CSS, "the date is no longer hidden on a phone")
+    ok(".lbl-qrow > .lbl-meta { grid-area: 1 / 2; justify-self: end;" in CSS and ".lbl-qrow > .lbl-num { grid-area: 1 / 1; justify-self: start; min-width: 0; }" in CSS,
+       "the number is left on the first line and the date right")
+    ok("align-items: center; padding: var(--sp-3) 0; row-gap: var(--sp-1); }" in CSS and ".lbl-qrow > .lbl-actions { grid-column: 1 / -1; margin-top: var(--sp-2); }" in CSS,
+       "the name is 4 under the number and the buttons 12 under the name (4 and 8)")
+    ok(".lbl-qrow .lbl-meta { font-size: var(--text-body); line-height: var(--lh-control);" in CSS, "an order's date reads as body")
+    ok("text-underline-offset: var(--sp-1); text-decoration-color: var(--link-underline); }" in CSS.split("ONE LINK.")[1][:700], "the link recipe's underline is the teal 35% at offset 4")
+    ok(".lbl-num-link, .modal-order-link, .action-link { color: var(--text-brand); text-decoration: underline; text-underline-offset: var(--sp-1); text-decoration-color: var(--link-underline); }" in CSS,
+       "and so is the order number's own")
+    ok(".ov-hero.pm-head > .ph-text { padding-right: calc(2 * var(--control-h-lg) + var(--control-gap) + var(--sp-2)); }" in CSS
+       and ".pm-head .ph-sub > .info { position: absolute; top: calc((var(--lh-title) - var(--control-h-lg)) / 2); right: calc(var(--control-h-lg) + var(--control-gap));" in CSS,
+       "Refresh is a 40 square beside More at the title's right, left in the status line in the markup so the tab order is the same")
+    mb = CSS.split(".ov-hero.pm-head > .ov-hero-act > .more-btn {")[1][:300]
+    ok("margin-top: calc((var(--lh-title) - var(--control-h-lg)) / 2);" in mb and "align-self: start" in mb,
+       "and More is level with Refresh and the title, not a line lower (its rule outweighs the head's own margin: 0 on the rail's buttons)")
+    ok(".pm-head .ph-title, .pm-head .ph-sub { display: contents; }" in CSS and ".pm-head .ph-title > .info { grid-row: 2; grid-column: 3;" in CSS
+       and ".pm-head .ph-title > h2 { grid-column: 1 / -1; grid-row: 1; }" in CSS,
+       "the queue's (i) rides on the status line on a phone, so the title has the squares' side to itself and the (i)'s 40 target never reaches Refresh")
+    ok("hero.querySelector('.ov-hero-act')" in SCRIPT and "[pnBtn, coll, newShip, more].filter(Boolean).forEach(b => heroActs.append(b));" in SCRIPT,
+       "the header's buttons are still added in their order")
+    # Forecast's phone head and every widget grid's Customise
+    ok("b.append(el('span', 'wg-txt', text));" in SCRIPT and "cust.setAttribute('aria-label', 'Customise');" in SCRIPT, "Customise keeps its name when its word is hidden")
+    ok("[data-wg-customize] { position: absolute; top: calc((var(--lh-title) - var(--control-h-lg)) / 2); right: 0;" in CSS and "[data-wg-customize] .wg-txt { display: none; }" in CSS,
+       "on a phone it is a 40 icon button at the title's right")
+    ok("#view-forecast .ov-hero-act > .btn:not([data-wg-customize]) { flex: 1 1 0; min-width: 0; }" in CSS, "and Forecast's How it works and Upload workbook are an equal pair")
+
+
+def _media_rule(media, selector):
+    """The declarations of one exact selector inside one media rule (joined, last wins), or None."""
+    got = None
+    prefix = media + " "
+    for sel, body in _rules(CSS):
+        if sel.startswith(prefix):
+            # the scanner leaves a block's first rule prefixed with the media's own `... {`
+            own = sel[len(prefix):].split("{")[-1]
+            if selector in [x.strip() for x in own.split(",")]:
+                got = (got or "") + body
+    return got
+
+
+def _phone_rule(selector):
+    """The declarations of one exact selector inside the 640 phone media rule (joined, last wins), or None."""
+    return _media_rule("@media (max-width: 640px)", selector)
+
+
+@test
+def t_the_phone_toolbar_and_both_head_shapes_hold_in_every_state():
+    """Re-review NEW-1 and NEW-2 (the wave's two regressions). A phone's toolbar buttons are an equal pair, Print all
+    beside Newest first, and a third button, Print shipping labels, takes a line of its own at the pair's width or more
+    so its words never leave it (it had been squeezed into the pair's row: 147 in 112); and the Production Manager's phone
+    head places the title across the row whether or not the queue has an (i): To ship and Complete have none, and their
+    title wrapped onto two lines with the status line adrift of its dot."""
+    pair = _phone_rule(".q-card .tbl-tools-r > .btn")
+    ok(pair and "flex: 1 1 calc(50% - var(--sp-1))" in pair and "min-width: 0" in pair,
+       "the toolbar's buttons share the line in halves (less half the 8 gap), so two make a pair")
+    third = _phone_rule(".q-card .tbl-tools-r > .btn.ship-btn")
+    ok(third and "flex-basis: 100%" in third and "order: 1" in third,
+       "Print shipping labels has the whole line to itself, under the pair")
+    sel = _phone_rule(".q-card .tbl-tools-r > select")
+    ok(sel and "flex: 1 1 100%" in sel and "order: 2" in sel, "and the size choice is the line after it")
+    ok("slBtn = el('button', 'btn btn-sm ship-btn');" in SCRIPT, "the button carries the class the phone rule reads")
+    ok("flex: 1 1 0; min-width: 0" not in CSS.split("The Production Manager's toolbar buttons")[1][:600],
+       "no zero basis squeezes a third button into the pair's row")
+    # The head without an (i): the h2 is a direct child of .ph-text and must still take row 1 across all four columns.
+    bare = _phone_rule(".ov-hero.pm-head > .ph-text > h2")
+    ok(bare and "grid-column: 1 / -1" in bare and "grid-row: 1" in bare,
+       "with no (i) the bare title takes row 1 across all columns, so it does not wrap in the first one and the status line stays on its dot")
+    withi = _phone_rule(".pm-head .ph-title > h2")
+    ok(withi and "grid-column: 1 / -1" in withi and "grid-row: 1" in withi, "and with an (i) the title in its wrapper still does")
+    ok("if (o.info) { const row = el('div', 'ph-title'); row.append(h, o.info); text.append(row); } else text.append(h);" in SCRIPT,
+       "both shapes come from the one header builder: the title in a wrapper with its (i), or bare")
+
+
+@test
+def t_the_phone_heads_info_target_leans_down_so_the_status_line_is_4_under_the_title():
+    """Re-review NEW-3. Where the queue's (i) rides on the phone status line, its 40 target leans DOWN as the status line's
+    Refresh does (ruling L189): 4 above the 20 line to 16 below it, the glyph centred on the line by padding, so the status
+    line sits 4 under the title (the mockup's), the target never reaches the title's box, and the row gap that held the
+    title's line clear of a target leaning 10 above it (which put the status line 10 under the title) is gone."""
+    i = _phone_rule(".pm-head .ph-title > .info")
+    ok(i and "grid-row: 2; grid-column: 3;" in i, "the (i) is still in the status line's row, the third column")
+    ok("margin-block: calc(-1 * var(--sp-1)) calc(var(--lh-control) - var(--control-h-lg) + var(--sp-1))" in i,
+       "its box is 4 above the line and reaches 16 below it (margin -4 over and 40 - 20 - 4 under)")
+    ok("align-content: start" in i and "padding-top: calc(var(--sp-1) + (var(--lh-control) - var(--icon-md)) / 2)" in i,
+       "its glyph is centred on the line by padding, as Refresh's is")
+    b = _phone_rule(".pm-head .ph-title > .info::before")
+    ok(b and "top: calc(var(--sp-1) + var(--lh-control) / 2)" in b, "and so is its highlight square")
+    ok(":has(> .ph-title > .info)" not in CSS, "no row gap holds the title's line off the target any more")
+    ok("row-gap: var(--sp-1)" in _phone_rule(".ov-hero.pm-head > .ph-text"), "the status line is 4 under the title, with or without an (i)")
+
+
+@test
+def t_the_queue_band_is_one_treatment_at_every_width():
+    """Re-review NEW-4, NEW-5 and NEW-8. The mockup's queue band: on a desktop a rule, 16 clear, the toolbar's controls,
+    16 clear, then the list's rule (the rules 65 apart, the mockup's), the card's own gap being the 16; on a phone no rule
+    above the search at all and 16 between the queue tabs and the search (.m-tools margin-top 16), the list's own rule
+    staying; and from 1500, beside the preview pane, the rows take the same treatment as below it (one queue, one
+    treatment at every width): the bands and rules run to the sheet edge on the left and to the middle of the 16 between
+    the list and the pane on the right, the open order's wash and teal edge the same."""
+    base = _winner(".q-card", "padding-top")
+    ok(base is None, "the card has no padding above its toolbar of its own (a phone has no rule there): %r" % base)
+    ok(_winner(".q-card", "gap") == "var(--sp-4)", "the toolbar and the list are 16 apart (the mockup's .toolbar padding and .m-tools margin)")
+    desk = _media_rule("@media (min-width: 641px)", ".q-card")
+    ok(desk and "border-top: var(--bw-hairline) solid transparent" in desk and "padding-top: var(--sp-4)" in desk and "calc(" not in desk,
+       "a desktop's controls start 16 clear under the 1 row the rule has (the card's own hairline of border, so no padding is an odd 17)")
+    rule = _media_rule("@media (min-width: 641px)", ".q-card::before")
+    ok(rule and "top: calc(-1 * var(--bw-hairline))" in rule and "height: var(--bw-hairline)" in rule and "inset-inline: calc(-1 * var(--wrap-pad))" in rule,
+       "the rule above the toolbar is drawn from 641 up, in that border row, and runs the sheet's width")
+    ok(not any(sel.split("{")[-1].strip().startswith(".q-card::before") for sel, _ in _rules(CSS)
+               if not sel.startswith("@media (min-width: 641px)")),
+       "and nowhere else: a phone has no rule above the search")
+    ok("var(--sp-4)" in (_phone_rule(".ov-wrap > .queues") or ""), "on a phone the queue tabs sit 16 over the search")
+    # the one treatment from 1500: rows reach the same selectors whether or not the split wraps the list
+    ok(".q-card > .lbl-list" not in CSS, "no selector needs the list to be the card's direct child, which it is not beside the preview pane")
+    ok(".q-card .lbl-list > .lbl-grid::before" in CSS and ".q-card .lbl-list > .lbl-grid > :last-child::after" in CSS
+       and ".q-card .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::after" in CSS, "the list's rule and every order's rule are the card's, split or not")
+    ok(_winner(".q-card", "--q-bleed-end") == "var(--wrap-pad)", "the right end of a band is the gutter by default")
+    ok(_winner(".lbl-split:not(:has(.lbl-pane:empty)) > .lbl-list", "--q-bleed-end") == "var(--sp-2)",
+       "and half of the 16 between the list and its preview pane while the pane is open")
+    for sel in (".q-card .lbl-list > .lbl-grid::before", ".q-card .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::after"):
+        ok(_exact(sel, "inset-inline") == "calc(-1 * var(--wrap-pad)) calc(-1 * var(--q-bleed-end))", sel + " ends at the bleed")
+    ok(_exact(".q-card .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::before", "inset") == "0 calc(-1 * var(--q-bleed-end)) 0 calc(-1 * var(--wrap-pad))",
+       "and so does every order's wash")
+    ok(_exact(".q-card .lbl-list > .lbl-grid > :is(.lbl-qrow:is(.on, [aria-selected=\"true\"]), .lbl-preview)::before", "box-shadow") == "var(--ring-selected)",
+       "the open order's wash keeps its 2px teal edge beside the pane")
+
+
+@test
+def t_the_numbers_behind_it_stack_with_the_pair_above_it():
+    """Re-review NEW-7 (F7). Worth looking at and Why stack by their own container at 1000; The numbers behind it stacked by
+    the viewport at 1100, so beside an open sidebar the two could disagree (the pair stacked and the list not, or the
+    other way about). The numbers widget is now a container of its own and its list stacks by that, at the same 1000 as the
+    pair: the widgets are the same width in the grid, so both stack together and both are 7 to 5 together."""
+    ok(re.search(r"\.fc-numbers \{ container: fcnumbers / inline-size; \}", CSS), "the numbers widget is the list's container")
+    ok("el('div', 'widget-group fc-numbers'), 'numbers', 'full', 'The numbers behind it'" in SCRIPT, "and the forecast's numbers block carries it")
+    stack = re.search(r"@container fcnumbers \(max-width: (\d+)px\) \{ \.rlist\.cols-2 \{ grid-auto-flow: row; grid-template-columns: minmax\(0, 1fr\); grid-template-rows: none; \} \}", CSS)
+    pair = re.search(r"@container fcpair \(max-width: (\d+)px\) \{ \.fc-cols \{ grid-template-columns: minmax\(0, 1fr\); \} \}", CSS)
+    ok(stack and pair and stack.group(1) == pair.group(1) == "1000", "the list stacks at the same measure as the pair: 1000")
+    ok(CSS.index(".rlist.cols-2 { grid-auto-flow: column;") < stack.start(), "after its base rule")
+    ok("@media (max-width: 1100px) { .rlist.cols-2" not in CSS, "and no viewport rule stacks it any more")
+    ok(CSS.count("rlist.cols-2 {") == 2 and "cols: 2" in SCRIPT and SCRIPT.count("cols: 2") == 1, "only the forecast's numbers use the two-column list")
+
+
+@test
+def t_every_link_has_the_one_underline():
+    """Re-review NEW-6 (P8). The ONE LINK recipe is a teal underline in the 35% line at offset 4. The recipe moved some
+    links and left others on the grey underline at offset 2, so the screens held two link styles (Skills' more, a section's
+    link, the proof's open, a mail order's name, a CRM contact line). Now no rule outside the recipe sets an underline
+    colour or an offset of its own: an offset is the recipe's 4 and a colour is the recipe's line, the hover's own colour
+    or none; and the four single-class links are members of the recipe, the CRM contact link carries its tokens."""
+    paper = re.compile(r"label-sheet|day-sheet|loan-sticker|@page|@font-face")
+    bad = []
+    for sel, body in _rules(CSS):
+        if paper.search(sel): continue
+        for m in re.finditer(r"(?<![\w-])text-underline-offset\s*:\s*([^;}]+)", body):
+            if m.group(1).strip() != "var(--sp-1)": bad.append(sel.split("{")[-1].strip()[-50:] + " offset " + m.group(1).strip())
+        for m in re.finditer(r"(?<![\w-])text-decoration-color\s*:\s*([^;}]+)", body):
+            if m.group(1).strip() not in ("var(--link-underline)", "currentColor", "transparent"):
+                bad.append(sel.split("{")[-1].strip()[-50:] + " colour " + m.group(1).strip())
+    ok(not bad, "links with an underline of their own: " + "; ".join(bad))
+    rec = CSS.split("ONE LINK.")[1][:900]
+    ok(":is(.linkish, .miss-open, .lbl-num-link, .modal-order-link, .action-link, .rel-open, .md-a, .followed-link, .sk-more, .seclink, .proof-ext, .mail-order-name) {" in rec
+       and ":is(.linkish, .miss-open, .lbl-num-link, .modal-order-link, .action-link, .rel-open, .md-a, .followed-link, .sk-more, .seclink, .proof-ext, .mail-order-name):hover {" in rec,
+       "Skills' more, a section's link, the proof's open and a mail order's name are in the recipe, hover and all")
+    for sel in (".sk-more", ".seclink", ".proof-ext", ".mail-order-name"):
+        ok(not re.search(r"\n\s*(@media \(hover: hover\) \{ )?" + re.escape(sel) + r"(:hover)? \{[^}]*text-decoration", CSS), sel + " keeps no underline rule of its own")
+    crm = _winner(".crm-cline a", "text-decoration-color")
+    ok(crm == "var(--link-underline)" and _winner(".crm-cline a", "text-underline-offset") == "var(--sp-1)", "the CRM contact link carries the recipe's tokens")
+    ok("@media (hover: hover) { .crm-cline a:hover { text-decoration-color: currentColor; } }" in CSS, "and turns teal under the pointer like the rest")
+
+
+@test
+def t_custom_shipments_refresh_is_the_same_square_as_the_other_queues():
+    """Re-review observation (uniformity). The Custom shipments tab showed Refresh as a bare glyph on its status line while the
+    other four queue tabs show it as a 40 square at the title's right. Its head is now the Production Manager's phone
+    head: the same square at the right edge (it has no More beside it, and none is invented), the title with the room
+    to its left, and its one action, New shipment, still a full-width button. The queue's content and actions are as
+    they were."""
+    cq = fn_src("async function renderCustomQueue(box) {")
+    ok("head.classList.add('pm-head');" in cq and "box.append(head);" in cq and "actions: [newShip]" in cq,
+       "the tab's head is the queue head, with its one action as before")
+    ok("More" not in cq.split("box.append(prodQueues")[0], "and no More menu is invented for it")
+    ok(not re.search(r"\bmore\b\s*=", cq.split("box.append(prodQueues")[0]), "nor a more button")
+    pad = _phone_rule(".ov-hero.pm-head:not(:has(.more-btn)) > .ph-text")
+    ok(pad and "padding-right: calc(var(--control-h-lg) + var(--sp-2))" in pad, "the title has the one square's room on its right")
+    sq = _phone_rule(".pm-head:not(:has(.more-btn)) .ph-sub > .info")
+    ok(sq and "right: 0" in sq, "and Refresh is that square at the edge, with no More beside it")
+    one = _phone_rule(".ov-hero.pm-head > .ov-hero-act > .btn:only-child")
+    ok(one and "grid-column: 1 / -1" in one, "a lone action takes the row, as New shipment did")
+    ok(CSS.index(".ov-hero.pm-head > .ph-text { padding-right: calc(2 * var(--control-h-lg)") < CSS.index(".ov-hero.pm-head:not(:has(.more-btn)) > .ph-text"),
+       "after the rules they refine")
+
+
+@test
+def t_the_shell_and_the_icons_are_the_mockups():
+    """Final review S1, S2, M6 and M7. The phone's top bar button is the menu glyph while the sidebar is a drawer (900 and
+    under), the panel glyph beside a sidebar that can hide; the account row's menu is horizontal dots; every glyph the
+    mockup's sprite draws that the app also draws is the sprite's own path (the corners of the truck, eye, calendar and
+    printer differed); and a sidebar group's caret shows when it is shut, on hover or under focus, not as a column of carets."""
+    mock = open(os.path.join(ROOT, "docs", "design", "mix", "mix.html"), encoding="utf-8").read()
+    sprite = {m.group(1): m.group(2) for m in re.finditer(r'<symbol id="i-([\w-]+)" viewBox="0 0 24 24">(.*?)</symbol>', mock, re.S)}
+    ok(len(sprite) >= 49, "the mockup's sprite is read: %d glyphs" % len(sprite))
+    pairs = {"grid": "grid", "globe": "globe", "tag": "tag", "box": "package", "users": "users", "card": "card", "scale": "scale", "trendUp": "trend",
+             "arrowsLR": "swap", "printer": "printer", "ruler": "ruler", "briefcase": "briefcase", "projector": "projector", "folder": "folder",
+             "userCheck": "team", "bookmark": "bookmark", "book": "book", "chat": "chat", "helpCircle": "help", "search": "search", "upload": "upload",
+             "info": "info", "chevDown": "down", "chev": "right", "refresh": "refresh", "plus": "plus", "cal": "calendar", "moreH": "more", "menu": "menu",
+             "panelLeft": "panel", "table": "table", "cash": "cash", "columns": "columns", "compare": "compare", "compass": "compass", "target": "target",
+             "shield": "shield", "arrowRight": "arrow", "flag": "flag", "eye": "eye", "eyeOff": "eyeoff", "edit": "pen", "check": "tick",
+             "arrowUpRight": "up", "arrowDownRight": "dn", "truck": "truck", "wallet": "wallet", "fileSheet": "sheetfile",
+             "inbox": "inbox", "sort": "sort", "checkCircle": "check"}
+    norm = lambda t: re.sub(r"\s+", "", re.sub(r"></\w+>", "/>", t.replace(" />", "/>").replace('"', "'")))
+    blk = SCRIPT.split("const I = {")[1].split("\n        };")[0]
+    bad = []
+    for key, sid in pairs.items():
+        m = re.search(r"^            %s: SV\('(.*)'\),?$" % re.escape(key), blk, re.M)
+        if not m:
+            bad.append(key + " is missing"); continue
+        if norm(m.group(1)) != norm(sprite[sid].strip()):
+            bad.append(key)
+    ok(not bad, "glyphs that are not the mockup's: %s" % bad)
+    ok("moreV" not in SCRIPT, "the vertical dots are gone, nothing draws them")
+    ok("$('menu-btn').innerHTML = I.panelLeft + I.menu;" in SCRIPT and "mb[0].classList.add('mb-panel'); mb[1].classList.add('mb-menu');" in SCRIPT,
+       "the top bar's button holds both glyphs")
+    ok(".mb-menu { display: none; }" in CSS and "@media (max-width: 900px) { .mb-panel { display: none; } .mb-menu { display: block; } }" in CSS,
+       "the menu glyph shows at 900 and under, the panel glyph above (written on the glyphs, so the button keeps its one breakpoint rule)")
+    ok("$('side-user-more').innerHTML = I.moreH;" in SCRIPT, "the account row's menu is horizontal dots")
+    ok("$('nav-mail').append(ico(I.inbox)" in SCRIPT, "the Inbox's nav glyph is the tray")
+    ok("opacity: 0;" in CSS.split(".nav-group .nav-caret {")[1].split("}")[0], "a group's caret is hidden at rest")
+    ok('.nav-group[aria-expanded="false"] .nav-caret, .nav-group:focus-visible .nav-caret { opacity: 1; }' in CSS
+       and "@media (hover: hover) { .nav-group:hover .nav-caret { opacity: 1; } }" in CSS, "and shows when the group is shut, under focus or under the pointer")
+
+
+@test
+def t_a_field_under_a_finger_is_16_whatever_its_class():
+    """Final review I3. The coarse-pointer rule sat before the field rules at element specificity, so every select and
+    textarea (and any field with a class) was 13 on a phone and iOS zoomed the page on focus. It is now the last
+    font-size rule in the stylesheet, under (pointer: coarse), written as an :is() list that takes the specificity of its
+    strongest member (the chat box's id), so no field class outweighs it."""
+    rules = _rules(CSS)
+    sizing = [i for i, (sel, body) in enumerate(rules) if re.search(r"(?<![\w-])(font-size|font)\s*:", body) and not sel.strip().startswith(":root")]
+    ok(sizing, "the stylesheet sets sizes")
+    last_sel, last_body = rules[sizing[-1]]
+    ok("pointer: coarse" in last_sel, "the last rule that sets a size is the coarse-pointer one: %s" % last_sel[:80])
+    ok(":is(input:not([type=checkbox]):not([type=radio]), textarea, select, #input, [contenteditable=\"true\"])" in last_sel and "font-size: var(--text-md)" in last_body,
+       "it is an :is() list of the three fields, the chat box (whose id outweighs a class) and an editable area, and sets the 16")
+    composer = open(os.path.join(ROOT, "static", "composer.js"), encoding="utf-8").read()
+    ok("area.contentEditable = 'true';" in composer and re.search(r"\.cmp-area \{[^}]*font-size: var\(--text-body\)", composer), "the Inbox composer's editable area is a contenteditable at body size (13), so under a finger it is this rule's")
+    ok(CSS.count("pointer: coarse) { :is(input:not") == 1, "and it is written once")
+    # Every field rule above it sets the size at a specificity the :is() list matches or beats.
+    def spec(sel):
+        ids = len(re.findall(r"#[\w-]+", sel)); cls = len(re.findall(r"\.[\w-]+|\[[^\]]+\]|:(?!is\(|not\(|where\()[\w-]+", sel)); el = len(re.findall(r"(?:^|[\s>+~(])[a-z][\w-]*", sel))
+        return (ids, cls, el)
+    ours = (1, 0, 0)    # the :is() list takes its strongest member's: the chat box's id
+    above = []
+    for sel, body in rules[:sizing[-1]]:
+        if not re.search(r"(?<![\w-])font-size\s*:", body) or "@media print" in sel or "label-sheet" in sel:
+            continue
+        for one in [x.strip() for x in re.sub(r"^@[^{]*?\)\s", "", sel).split(",")]:
+            if re.search(r"(^|[\s>+~])(input|select|textarea)(?![\w-])", one) and not one.startswith("@") and spec(one) > ours:
+                above.append(one[:70])
+    ok(not above, "field selectors outweighing the 16: %s" % above[:5])
+
+
+@test
+def t_the_dead_css_and_the_double_rules_are_gone():
+    """Final review M2, M3 and M1's other half. The run gate's .rg-ic, .rg-note, h2 and p rules matched nothing (the gate
+    is an empty state whose one line is .empty-line); .disp-boxedit had two rules with different gaps and the later one
+    (4) beat the first (8: spec 4.4); the response head's name had a caption line height that a later rule's
+    line-height: inherit overrode, so the computed winner was the body's 20."""
+    for dead in (".run-gate .rg-ic", ".run-gate .rg-note", ".run-gate h2", ".run-gate p {"):
+        ok(dead not in CSS, "gone: " + dead)
+    ok(len(re.findall(r"\n        \.disp-boxedit \{", CSS)) == 1 and _winner(".disp-boxedit", "gap") == "var(--sp-2)", ".disp-boxedit is one rule, 8 between its controls")
+    ok(_winner(".resp-head .who", "line-height") == "var(--lh-caption)" and _winner(".resp-head .who", "font-size") == "var(--text-xs)",
+       "the response head's name computes to 12/16, its last line-height being the caption's")
+
+
+@test
+def t_the_copy_leftovers_are_cleared():
+    """Final review M4 and L138 and L210. No spaced hyphen as a dash in five UI strings; fulfilment in British
+    spelling where a person reads it (never in a field name); the chart's empty line is seven words; the storage popover no
+    longer points at steps the Guide does not have; the Size list's note ellipsis is an inner span so the open row's
+    fill bleeds; and the Memory kind tags may wrap."""
+    for gone in ("Nothing was changed - press Refresh", "changes Shopify only - it does not", "Already done - just logging it",
+                 "share that name - pick one", "Filed in the CRM - open the deal"):
+        ok(gone not in SCRIPT, "no spaced hyphen: " + gone)
+    for new in ("Nothing was changed. Press Refresh and check before trying again.", "changes Shopify only: it does not", "Already done, just logging it",
+                "Two contacts share that name. Pick one from the list.", "Filed in the CRM: open the deal"):
+        ok(new in SCRIPT, "says: " + new)
+    for gone, new in (("toastOk('Deal won - '", "toastOk('Deal won: '"), ("(row.reason ? ' - ' + row.reason", "(row.reason ? ': ' + row.reason"),
+                      ("(m.size ? ' - ' + m.size + ' mm'", "(m.size ? ', ' + m.size + ' mm'"), ("p.name + ' - '", "p.name + ', '"),
+                      ("u.name + ' - ' + u.deals", "u.name + ', ' + u.deals")):
+        ok(gone not in SCRIPT and new in SCRIPT, "a comma or colon, not a spaced hyphen: " + new)
+    ok("'Shopify fulfilment could not be completed.'" in SCRIPT and "' Fulfilment writer is not wired.'" in SCRIPT, "fulfilment, in the words a person reads")
+    ok("res.fulfillment" in SCRIPT and "sh.fulfillment" in SCRIPT, "while the fields the server sends keep their names")
+    ok(SCRIPT.count("'Not enough data in this range yet.'") == 2 and "range to chart yet" not in SCRIPT, "the chart's empty line is seven words")
+    ok("the Guide tab has the exact steps" not in SCRIPT and "'Three keys in Railway switch it on.'" in SCRIPT, "the storage popover claims no steps")
+    ok(".sizes-note" in CSS and "n.append(el('span', 'sizes-note', r.notes));" in SCRIPT, "the notes' ellipsis is the span's")
+    ok(".ktable tr.sizes-row.open > td:first-child { box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary); }" in CSS
+       and ".ktable tr.sizes-row.open > td:last-child { box-shadow: var(--sp-2) 0 0 var(--surface-secondary); }" in CSS, "so the open row's fill bleeds 8 either side")
+    ok("td.mem-kind" not in CSS.split(".ktable.mem-table td.mem-from, .ktable.mem-table td.mem-at { white-space: nowrap; }")[0].split("\n")[-1],
+       "the Memory kind cell is not nowrap")
+    ok(".ktable.mem-table td.mem-kind, .ktable.mem-table td.mem-from" not in CSS, "so its tags wrap before the table widens")
+
+
+@test
+def t_a_name_that_matches_no_test_is_not_a_pass():
+    """Final review L76: ONLY=<name> with no match used to print '0 passed' and exit 0, so a typo looked like a green run.
+    It exits 1 and says why."""
+    r = subprocess.run([sys.executable, os.path.abspath(__file__)], env=dict(os.environ, ONLY="__no_such_test_name__"),
+                       capture_output=True, text=True, timeout=120)
+    ok(r.returncode == 1, "exit code %d, not 1" % r.returncode)
+    ok("matches no test" in r.stdout, "and it says so: %r" % r.stdout[-120:])
+
+
+@test
+def t_compare_methods_draws_each_method_in_its_own_colour():
+    """Compare methods drew its lines from the chart ramp, starting at the fifth
+    colour and going round: the second method was the Expected teal, the third
+    the dark teal of money taken, the fourth the plan's blue and the fifth the
+    grey of Was predicted. Each method now has a colour of its own (purple,
+    orange, magenta), chosen clear of every line the chart draws and of the
+    status colours, and keeps it while it stays picked. Three is the cap: a
+    fourth colour would collide."""
+    root = CSS.split(":root {")[1].split("\n        }")[0]
+    ok("--purple-800: #6b21a8;" in root and "--orange-600: #ea580c;" in root and "--fuchsia-500: #d946ef;" in root,
+       "the three hues are primitives in the block")
+    ok("--c-method-1: var(--purple-800); --c-method-2: var(--orange-600); --c-method-3: var(--fuchsia-500);" in root,
+       "and each method slot is a role of its own")
+    ok("const FC_METHOD = ['--c-method-1', '--c-method-2', '--c-method-3'];" in SCRIPT and "const FC_CMP_MAX = 3;" in SCRIPT,
+       "three slots, three at most")
+    chart = fn_src("function fcChartCard(")
+    ok("color: tokenValue(FC_METHOD[i]), full: true" in chart and "CH[(i + 4)" not in chart,
+       "a method draws in its slot's colour, not the chart ramp's")
+    ok("'Three lines at most: take one off to add another'" in chart, "and a fourth chip says why it waits")
+    ok("\n        .chart-line.compare { stroke-dasharray: 4 4; opacity: .7; }\n        .chart-line.compare.full { opacity: 1; }\n" in CSS
+       and "(s.full ? ' full' : '')" in fn_src("function trendChart("),
+       "dashed as a comparison is, but at the strength its colour was chosen at")
+    ok("['The methods compared', ['--c-method-1', '--c-method-2', '--c-method-3']]" in SCRIPT, "and the Design page shows them")
+    if not _node_ok():
+        print("       (node unavailable, behaviour not run)")
+        return
+    js = r"""
+const store = {}; const localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: k => { delete store[k]; } };
+function renderForecast() {}
+const LS_FCCMP = 'sc_fc_compare_v1';
+""" + SCRIPT.split("        const LS_FCCMP = 'sc_fc_compare_v1';\n", 1)[1].split("        function clearFcCompare()", 1)[0] + r"""
+const out = {};
+['A', 'B', 'C', 'D'].forEach(toggleFcCompare); out.four = fcCompare();
+toggleFcCompare('B'); out.offB = fcCompare();
+toggleFcCompare('D'); out.inD = fcCompare();
+toggleFcCompare('C'); out.offC = fcCompare();
+toggleFcCompare('A'); out.offA = fcCompare();
+toggleFcCompare('D'); out.empty = fcCompare();
+store[LS_FCCMP] = JSON.stringify(['P', 'Q', 'R', 'S', 'T', 'U']); out.legacy = fcCompare();
+store[LS_FCCMP] = '{"x":1}'; out.junk = fcCompare();
+console.log(JSON.stringify(out));
+"""
+    got = _run_node(js)
+    eq(got["four"], ["A", "B", "C"], "a fourth pick waits: three at most")
+    eq(got["offB"], ["A", None, "C"], "taking B off leaves its slot empty, so C keeps its colour")
+    eq(got["inD"], ["A", "D", "C"], "the next pick takes the empty slot")
+    eq(got["offC"], ["A", "D"], "a trailing empty slot is dropped")
+    eq(got["offA"], [None, "D"], "D keeps the second colour when A goes")
+    eq(got["empty"], [], "and the last one off leaves nothing")
+    eq(got["legacy"], ["P", "Q", "R"], "a list saved before the cap keeps its first three")
+    eq(got["junk"], [], "and anything that is not a list reads as none")
+
+
+@test
+def t_reconciliation_evidence_reads_its_pence_as_pounds():
+    """Live fault, 2026-10-07: the sweep keeps every amount in integer pence
+    (recon.py: total, tax, remaining, pence and the _pence fields), but an
+    opened discrepancy printed total and tax as pounds, so order #104477 read a
+    total of £396,000.00 and VAT of £66,000.00 instead of £3,960.00 and
+    £660.00. Every money field in evidence is pence now. Run in node."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = ("const _moneyFmts = {};\n" + fn_src("function moneyFmt(") + "\n" + fn_src("function money(") + "\n"
+          + "const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];\n"
+          + fn_src("function fmtDate(") + "\n" + fn_src("function reconValue(") + r"""
+const out = {};
+[['total', 396000], ['tax', 66000], ['remaining', 12000], ['pence', 231840], ['paid_pence', 330000],
+ ['due_pence', 0], ['total_pence', 31800], ['credited_pence', 4850], ['fees_pence', null], ['id', 5551234],
+ ['order_id', '820017'], ['due', '2026-10-01']].forEach(([k, v]) => { out[k] = reconValue(k, v); });
+out.refunds = reconValue('refunds', [{ id: 948211000001, created_at: '2026-09-18', pence: 42000 }]);
+console.log(JSON.stringify(out));
+""")
+    got = _run_node(js)
+    eq(got["total"], "£3,960.00", "an order's total is pence")
+    eq(got["tax"], "£660.00", "and so is its VAT")
+    eq(got["remaining"], "£120.00", "a credit note's remaining credit too")
+    eq(got["pence"], "£2,318.40", "the payout's own pence as before")
+    eq(got["paid_pence"], "£3,300.00", "and every _pence field")
+    eq(got["due_pence"], "£0.00", "zero is still money")
+    eq(got["total_pence"], "£318.00", "a mailbox document's total")
+    eq(got["credited_pence"], "£48.50", "credited")
+    eq(got["fees_pence"], "", "a field with no value prints nothing")
+    eq(got["id"], "5551234", "an id is not money")
+    eq(got["order_id"], "820017", "nor is an order id")
+    ok(got["refunds"].startswith("\u00a3420.00 on ") and "pence" not in got["refunds"],
+       "an order's refunds read as pounds and a date, not JSON with raw pence: %r" % got["refunds"])
+    ok(got["due"] and "2026" not in got["due"] or got["due"].endswith("2026"), "a due date is a date: %r" % got["due"])
+
+
+@test
+def t_reconciliation_tells_the_truth_about_its_links_filters_and_sweeps():
+    """Live faults, 2026-10-07, found by rebuilding the working page:
+    - an expired Xero link kept a green Xero tag and a teal Sweep now, and told
+      you to reconnect from this tab, which had no Reconnect;
+    - with filters hiding everything it said "Nothing needs attention." even
+      with 21 open;
+    - the search's clear button emptied the box but left the list filtered;
+    - a sweep started elsewhere showed "Sweeping..." for good, because the page
+      never asked again."""
+    fn = fn_src("function renderRecon(")
+    ok("xs.needs_reconnect" in fn and "'Xero needs reconnecting'" in fn,
+       "a refused link turns the Xero tag red and says what it needs")
+    ok("'Reconnect Xero'" in fn and "api('/api/recon/xero-link', {})" in fn,
+       "and offers Reconnect through the same walk as Connect")
+    ok("'Ask the master account to reconnect Xero.'" in fn, "which only the master account may start, so others are told who")
+    ok("'btn btn-sm' + (xs.needs_reconnect ? '' : ' btn-primary')" in fn,
+       "Reconnect is then the one teal action and Sweep now steps down")
+    watch = fn_src("function watchReconXero(")
+    ok("st.xero.connected && !st.xero.needs_reconnect" in watch,
+       "the walk's watcher waits for the link to be good, not merely present")
+    ok("'Nothing matches these filters.'" in fn and "'Clear filters'" in fn,
+       "an empty filtered list says so, with the way back")
+    ok("searchWrap.input.value = '';\n                        reconFilter = { severity: '', status: '', q: '' }; refreshReconList();" in fn,
+       "Clear filters empties the box too, or a focused box would put the search straight back")
+    ok("reconFilter.severity || reconFilter.status || reconFilter.q" in fn,
+       "and only when a filter or search is in play")
+    ok("tableSearch('Search discrepancies', reconFilter.q, null)" not in fn
+       and "tableSearch('Search discrepancies', reconFilter.q, (v) =>" in fn,
+       "search filters as you type, so clearing it clears the list")
+    ok("typing.matches('.tbl-search input')" in fn,
+       "only the search box itself is carried across a redraw: Tab to its clear button had wiped the search")
+    keep = fn.split("if (reconSearchKeep) {", 1)
+    ok(len(keep) == 2 and "box.append(widget(list, 'discrepancies', 'full', 'Discrepancies'));" in keep[0]
+       and "setTimeout" not in keep[1].split("refreshReconList(); }", 1)[0] and "queueMicrotask(() => { if (inp.isConnected) { inp.focus();" in keep[1],
+       "and focus returns in a microtask: after the rows, so the page does not jump, before any key, so none is lost")
+    ok("if (e && e.isComposing) return; baseInput();" in fn and "isComposing" not in fn_src("function tableSearch("),
+       "a word being composed waits here, where the box is rebuilt, and nowhere else")
+    ok("        .recon-conn-acts { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }" in CSS,
+       "the three buttons of a refused link wrap on a phone instead of running off the card")
+    ok("!(xs.needs_reconnect && /refused the refresh token/i.test(String(n)))" in fn,
+       "the refusal is said once: the sweep note saying the same is left out while the band shows")
+    ok("ico(I.logIn)" in fn and "reconConnectFallback(card, r.url, 'xero', true)" in fn,
+       "Reconnect has its own icon, and a blocked tab gets the shared fallback")
+    fb = fn_src("function reconConnectFallback(")
+    ok("card.querySelector('.recon-fallback')" in fb and "'Open the Xero sign-in here'" in fb and "watchReconXero(reconnect)" in fb,
+       "one fallback per card, named for the sign-in it opens and watching the right link (Connect Xero's said Google)")
+    ok("'Xero has not been reconnected yet. If Xero showed an error, press Reconnect Xero again.'" in watch,
+       "and a reconnect that does not land is not called 'still not connected'")
+    sweep = fn_src("function watchReconSweep(")
+    ok("'/api/recon/status'" in sweep and "5000" in sweep and "tries >= 120" in sweep,
+       "a running sweep is asked about every five seconds, for ten minutes at most")
+    ok("if (st.sweeping) watchReconSweep();" in fn, "whenever the page shows one running")
+    ok("sw.textContent = 'Sweeping" not in fn, "and the busy button keeps its icon")
+
+
+@test
+def t_a_document_that_does_not_match_shopify_is_never_shown_as_safe():
+    """Live fault, 2026-10-07: in a tag check, #104530 came to £33.50 less than
+    Shopify and would be sent as it stood, yet its row read a grey "Would
+    create" like every safe one, Send stayed armed, and neither dialog said a
+    word; only its document window did. Now the row says how far out it is, in
+    red, its order sorts first, and both Send
+    dialogs and the tag summary name it. Run in node."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    consts = "\n".join(l for l in SCRIPT.split("\n") if l.strip().startswith(("const CX_LOCKED", "const CX_NOTHING")))
+    words = "const CX_DOC_WORDS = {" + SCRIPT.split("const CX_DOC_WORDS = {", 1)[1].split("};", 1)[0] + "};"
+    js = ("const _moneyFmts = {};\n" + fn_src("function moneyFmt(") + "\n" + fn_src("function money(") + "\n"
+          + words + "\n" + consts + "\n" + fn_src("function cxKind(") + "\n" + fn_src("function cxGroup(") + "\n"
+          + fn_src("function cxMismatch(") + "\n" + fn_src("function cxEntries(") + "\n" + fn_src("function cxTally(") + "\n"
+          + fn_src("function cxMismatchNote(") + r"""
+const out = {};
+const bad = { kind: 'invoice', action: 'created', preview: { currency: 'GBP', reconcile: { ok: false, computed: 410.0, expected: 443.5, diff: -33.5, mode: 'warn' } } };
+const good = { kind: 'invoice', action: 'created', preview: { currency: 'GBP', reconcile: { ok: true, computed: 120, expected: 120, diff: 0, mode: 'warn' } } };
+const held = { kind: 'invoice', action: 'created', preview: { currency: 'GBP', reconcile: { ok: false, computed: 90, expected: 100, diff: -10, mode: 'strict' } } };
+const quarantined = { kind: 'invoice', action: 'quarantined', preview: { reconcile: { ok: false, diff: 5, mode: 'warn' } } };
+out.flag = !!cxMismatch(bad); out.good = !!cxMismatch(good); out.q = !!cxMismatch(quarantined);
+const rows = [{ order: '#104529', docs: [good] }, { order: '#104530', docs: [bad] }];
+const e = cxEntries(rows); out.mis = e.map(x => !!x.mis);
+out.tally = cxTally(rows).mismatch;
+out.note = cxMismatchNote(e.filter(x => x.d).map(x => ({ order: x.r.order, d: x.d })));
+out.none = cxMismatchNote([{ order: '#104529', d: good }]);
+console.log(JSON.stringify(out));
+""")
+    got = _run_node(js)
+    ok(got["flag"] and not got["good"], "a document out against Shopify is flagged, a matching one is not: %r" % got)
+    ok(not got["q"], "and one the connector already holds back keeps its own word")
+    eq(got["mis"], [False, True], "the entry carries the flag")
+    eq(got["tally"], 1, "and the tally counts it")
+    eq(got["note"], " 1 document does not match Shopify and will be sent as it stands: #104530, £33.50 out.",
+       "the Send dialog names it")
+    eq(got["none"], "", "and says nothing when everything matches")
+    table = fn_src("function connDocTable(")
+    ok("cxMismatch(" in table and "' out'" in table and "'lbl-chip bad'" in table, "the row's tag says how far out it is, in red")
+    ok("misFirst" in table, "and its order sorts first")
+    tag = SCRIPT.split("tagSend.onclick = async () => {", 1)[1].split("{ title: 'Send tagged orders'", 1)[0]
+    one = SCRIPT.split("oneSend.onclick = async () => {", 1)[1].split("{ title: 'Send one order'", 1)[0]
+    ok("cxMismatchNote(" in tag and "cxMismatchNote(" in one, "both Send dialogs name it")
+    ok("' of those to write does not match Shopify, and is listed first.'" in SCRIPT,
+       "the tag summary names it too, while it stays counted with what Send writes, so the tabs still add up")
+    ok("['attention', 'Needs attention', n.attention]" in SCRIPT, "and it is never counted twice, so the tabs add up")
+    ok("((b[0].mis ? 1 : 0) - (a[0].mis ? 1 : 0))" in table, "within an order, one order's check included, it leads")
+    ok("cxMismatchNote(docs.map(d => ({ order: connOneCheck.order, d: d })))" in SCRIPT, "and a one-order check's summary names it")
+    ok("held back" not in fn_src("function cxMismatchNote("), "no wording for a case the connector reports as quarantined")
+
+
+@test
+def t_xero_sync_offers_no_setting_the_connector_will_not_keep():
+    """Live fault, 2026-10-07: Change settings offered Shop timezone, and Save
+    said "Saved", but the connector does not accept that setting (it is not in
+    its SETTING_FIELDS) and never returns it, so nothing was kept. It is set on
+    the connector service itself, so the page no longer offers it."""
+    ok("SHOP_TIMEZONE" not in SCRIPT, "no Shop timezone field, and none in the values read back")
+
+
+@test
+def t_xero_sync_holds_together_on_a_phone_and_names_its_synced_figure():
+    """Live faults, 2026-10-07, measured at a real 390x844:
+    - the tag check's five-choice filter grew into a 789px grey slab, because
+      the phone rule flex: 1 1 100% stretched it down its column;
+    - payout notes printed over the next row, because every table cell kept
+      the 44px row height once the phone layout stacked them;
+    - the document window hid the Amount column and the total off to the
+      right, and the contact line ran past the window's edge.
+    And "Synced 1214" counted contacts too, which the connector's ledger
+    reports as one figure: it now says what it counts."""
+    phone = CSS.split(".segmented:has(> :nth-child(4)) > * { flex: 1 1 calc(var(--sp-7) * 3); } }", 1)
+    ok(len(phone) == 2 and "@media (max-width: 640px) { .cx-res > .segmented { flex: none; } }" in phone[1],
+       "the tag filter keeps its own height, after the phone rule it overrides")
+    ok(".ktable.cx-docs td { display: block; padding: 0; border: 0; width: auto; min-width: 0; height: auto; }" in CSS,
+       "a stacked cell grows with its text, so a payout note never prints over the next row")
+    modal = fn_src("function connDocModal(")
+    ok("'conn-doc-meta lbl-meta'" in modal and "'cd-mid'" in modal, "each line carries its quantity, unit, account and tax for a phone")
+    ok(".conn-doc-meta { display: none; }" in CSS, "hidden where the columns show")
+    small = CSS.split(".conn-doc-meta { display: none; }", 1)[1]
+    for rule in (".conn-doc.cd-lines td.cd-mid { display: none; }", ".conn-doc.cd-lines .conn-doc-meta { display: block; }",
+                 ".conn-doc.cd-lines tr { display: flex;"):
+        ok(rule in small, "on a phone: " + rule)
+    ok(".conn-doc tr { display: flex;" not in small and ".conn-doc thead { position: absolute;" not in small,
+       "and only the lines table folds: the changes table keeps its In Xero now and Would become headings")
+    ok("t.className = 'conn-doc cd-lines';" in modal, "the lines table is the one marked")
+    ok(".lbl-meta:is(.cx-contact, .conn-doc-meta) { white-space: normal; overflow-wrap: anywhere; }" in CSS,
+       "a long line's detail wraps too")
+    meta_base = "\n        .lbl-meta { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); white-space: nowrap; }"
+    ok("'lbl-meta cx-contact'" in modal and meta_base in CSS
+       and ".lbl-meta:is(.cx-contact, .conn-doc-meta) { white-space: normal; overflow-wrap: anywhere; }" in CSS.split(meta_base, 1)[1],
+       "and the contact line wraps inside the window, after the nowrap it overrides")
+    ok("kpi('Synced', 'synced', 'Invoices, credit notes and contacts')" in SCRIPT, "the Synced figure says what it counts")
+
+
+@test
+def t_settings_offer_no_switch_for_shop_delivery():
+    """Business rule (Cameron, 2026-10-09): "our customers should never collect
+    from shop". Settings, Shipping had a switch that turned pickup-shop services
+    on. It is gone, and the save no longer sends the setting."""
+    ok("Show parcel shop services in quotes" not in SCRIPT and "psCb" not in SCRIPT, "no switch")
+    ok("show_parcelshop: psCb.checked" not in SCRIPT, "and nothing saves it")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
     print(f"{_passed} passed, {len(_failed)} failed")
+    if _ONLY and _passed + len(_failed) == 0:
+        print(f"ONLY={_ONLY!r} matches no test: nothing was run")
+        sys.exit(1)
     sys.exit(1 if _failed else 0)

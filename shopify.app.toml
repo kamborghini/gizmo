@@ -6,7 +6,7 @@ application_url = "https://gizmo-production-c8c1.up.railway.app/"
 embedded = true
 
 [webhooks]
-api_version = "2026-04"
+api_version = "2026-10"
 
   # Shopify requires all three of an app, and delivers them to one
   # receiver that dispatches on the X-Shopify-Topic header. Changing

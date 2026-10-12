@@ -86,7 +86,7 @@ def _env_num(cast, raw, default, name):
 # ---------------------------------------------------------------------------
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
 # Model tiers. Claude Opus 5.5 everywhere by default; the env vars let a
-# cheaper tier (e.g. claude-sonnet-5) take everyday chat without a code change.
+# cheaper tier (e.g. claude-sonnet-5-5) take everyday chat without a code change.
 MODEL_FAST = os.environ.get("ANTHROPIC_MODEL_FAST") or os.environ.get("ANTHROPIC_MODEL") or "claude-opus-5-5"
 MODEL_DEEP = os.environ.get("ANTHROPIC_MODEL_DEEP", "claude-opus-5-5")
 # Asked once, with the same request, when the model above fails at Anthropic
@@ -211,7 +211,9 @@ GOBO_SIZES_PATH    = os.environ.get("GOBO_SIZES_PATH",
 # cache read 0.1x input unless _CACHE_READ_RATE says otherwise.
 _MODEL_PRICE = {
     "claude-opus-5-5": (4.0, 20.0),
+    "claude-opus-5": (5.0, 25.0),
     "claude-opus-4-8": (5.0, 25.0),
+    "claude-sonnet-5-5": (2.0, 10.0),
     "claude-sonnet-5": (2.0, 10.0),
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-haiku-4-5": (1.0, 5.0),
@@ -406,16 +408,101 @@ def _pick_model(deep: bool) -> str:
 
 
 def _effort_for(model: str, deep: bool = False) -> str:
-    """The everyday effort, or Deep analysis's. effort 'max' and 'xhigh' are
-    Opus-tier only and 400 on Sonnet/Haiku - cap non-Opus models at 'high' so
-    the request never errors."""
-    return _cap_effort(model, ANTHROPIC_EFFORT_DEEP if deep else ANTHROPIC_EFFORT)
+    """The everyday effort, or Deep analysis's, as configured. What the model
+    behind it accepts is settled where every request goes out (_fit_to_model)."""
+    return ANTHROPIC_EFFORT_DEEP if deep else ANTHROPIC_EFFORT
 
 
 def _cap_effort(model: str, eff: str) -> str:
+    """The cautious rule, for when the Models API cannot be asked: xhigh and
+    max only on a model named Opus."""
     if "opus" not in (model or "").lower() and eff in ("max", "xhigh"):
         return "high"
     return eff
+
+
+# What each model accepts, from Anthropic's Models API, read once per model.
+# A hand-kept list of which model takes which effort went stale: it capped
+# every non-Opus model at high, so a Sonnet 5.5 Deep run was cut short, while
+# letting xhigh through to Opus 4.6, which has max but not xhigh, and sending
+# Haiku 4.5 an effort and adaptive thinking, neither of which it takes.
+_EFFORT_LADDER = ("low", "medium", "high", "xhigh", "max")
+_MODEL_CAPS: dict = {}            # model -> (asked_at, caps or None)
+_MODEL_CAPS_RETRY = 600.0         # a failed read is asked again after this
+
+
+async def _model_caps(client, model: str):
+    """{"efforts": (levels it takes, low to max), "adaptive": bool}, or None
+    when the Models API could not be asked (then the cautious rule applies)."""
+    now = time.monotonic()
+    hit = _MODEL_CAPS.get(model)
+    if hit and (hit[1] is not None or now - hit[0] < _MODEL_CAPS_RETRY):
+        return hit[1]
+    caps = None
+    try:
+        info = await client.models.retrieve(model)
+        c = info.capabilities
+        c = c.model_dump() if hasattr(c, "model_dump") else dict(c or {})
+        # The API may answer with no capabilities at all (the field is
+        # nullable). That says nothing about the model, so it is unknown,
+        # asked again later, never "takes nothing": that reading would strip
+        # effort and thinking from every request on it until a restart.
+        if not isinstance(c.get("effort"), dict) or not isinstance(c.get("thinking"), dict):
+            raise ValueError("the answer named no effort or thinking capabilities")
+        eff = c["effort"]
+        caps = {"efforts": tuple(lvl for lvl in _EFFORT_LADDER
+                                 if eff.get("supported") and (eff.get(lvl) or {}).get("supported")),
+                "adaptive": bool(((c["thinking"].get("types") or {})
+                                  .get("adaptive") or {}).get("supported"))}
+    except Exception as e:
+        logger.info("model capabilities for %s unavailable (%s); using the cautious effort rule",
+                    model, type(e).__name__)
+    _MODEL_CAPS[model] = (now, caps)
+    return caps
+
+
+def _fit_effort(caps, model: str, eff: str):
+    """The effort to send: as asked if the model takes it, else the nearest
+    level below that it does, or none at all for a model that takes none."""
+    if caps is None:
+        return _cap_effort(model, eff)
+    have = caps["efforts"]
+    if not have:
+        return None
+    if eff in have:
+        return eff
+    want = _EFFORT_LADDER.index(eff) if eff in _EFFORT_LADDER else _EFFORT_LADDER.index("high")
+    below = [lvl for lvl in have if _EFFORT_LADDER.index(lvl) <= want]
+    return below[-1] if below else have[0]
+
+
+async def _fit_to_model(client, kwargs: dict) -> dict:
+    """kwargs as its model will accept them: the effort fitted, and adaptive
+    thinking dropped for a model without it. A new dict only when something
+    changes, so the caller's own request is never altered under it."""
+    oc = kwargs.get("output_config")
+    effort = oc.get("effort") if isinstance(oc, dict) else None
+    adaptive = (kwargs.get("thinking") or {}).get("type") == "adaptive"
+    if not effort and not adaptive:
+        return kwargs
+    model = str(kwargs.get("model") or "")
+    caps = await _model_caps(client, model)
+    out = kwargs
+    if effort:
+        fitted = _fit_effort(caps, model, effort)
+        if fitted != effort:
+            rest = {k: v for k, v in oc.items() if k != "effort"}
+            out = dict(kwargs)
+            if fitted:
+                out["output_config"] = {**rest, "effort": fitted}
+            elif rest:
+                out["output_config"] = rest
+            else:
+                out.pop("output_config")
+    if adaptive and caps is not None and not caps["adaptive"]:
+        out = dict(out) if out is kwargs else out
+        out.pop("thinking")
+    return out
 
 
 
@@ -1975,6 +2062,11 @@ _DEFAULT_BOXES = [
 # chosen at the print button. Kept here and offered by the config route so the
 # page and the server cannot drift about which sizes exist.
 LABEL_STOCK = ("4x2", "4x3", "4x4", "4x6", "2x4", "a4")
+# Each stock's width and height in millimetres, for the document Shopify's
+# print action opens: it knew five sizes and fell back to 4 x 6 for the rest,
+# so the 4 x 4 the production printer is loaded with could not come off it.
+LABEL_STOCK_MM = {"4x2": (101.6, 50.8), "4x3": (101.6, 76.2), "4x4": (101.6, 101.6),
+                  "4x6": (101.6, 152.4), "2x4": (50.8, 101.6), "a4": (210, 297)}
 
 _SHIPPING_DEFAULT = {
     "origin": {},
@@ -3399,9 +3491,6 @@ async def _xcreate(client, **kwargs):
         alt["model"] = fb
         if _forces_tool(alt) and not _can_force_tool(fb):
             must = _unforce(alt)
-        oc = alt.get("output_config")
-        if isinstance(oc, dict) and oc.get("effort"):
-            alt["output_config"] = {**oc, "effort": _cap_effort(fb, oc["effort"])}
         try:
             resp = await _xcreate_once(client, alt)
         except anthropic.APIError as e2:
@@ -3438,6 +3527,7 @@ async def _xcreate_once(client, kwargs: dict):
     the big system prompt (profile + memory + skills + store knowledge) and the
     tool schemas are identical across the many rounds of a chat loop, so caching
     them stops the same tokens being bought again on every round."""
+    kwargs = await _fit_to_model(client, kwargs)
     est_in, est = _call_estimate(kwargs)
     _spend_guard(est)
     system = kwargs.get("system")
@@ -3486,7 +3576,7 @@ def _usage_summary(days: int = 30) -> dict:
         i_, o_, cr, cw = e.get("in", 0), e.get("out", 0), e.get("cache_read", 0), e.get("cache_write", 0)
         b["runs"] += 1; b["in"] += i_; b["out"] += o_; b["cost"] += e.get("cost", 0)
         tot_cost += e.get("cost", 0); tot_in += i_; tot_out += o_
-        cost_sonnet += _price_for("claude-sonnet-5", i_, o_, cr, cw)
+        cost_sonnet += _price_for("claude-sonnet-5-5", i_, o_, cr, cw)
         cost_haiku += _price_for("claude-haiku-4-5", i_, o_, cr, cw)
     for b in by_kind.values():
         b["cost"] = round(b["cost"], 4)
@@ -3780,7 +3870,7 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
         kwargs = {
             "model": model, "max_tokens": MAX_TOKENS, "system": system,
             "tools": all_tools, "messages": messages,
-            "output_config": {"effort": _cap_effort(model, effort) if effort else _effort_for(model)},
+            "output_config": {"effort": effort or _effort_for(model)},
         }
         if THINKING_MODE:  # adaptive thinking: deeper reasoning, model self-paces
             kwargs["thinking"] = {"type": THINKING_MODE}
@@ -4689,6 +4779,16 @@ class DaysInput(BaseModel):
     days: Optional[int] = Field(default=28, ge=1, le=180, description="Look-back window in days.")
 
 
+def _google_not_ready(key: str) -> str:
+    """Why the chat cannot read one Google source: an unticked permission is
+    not the same as no connection, and saying so tells the person what to do."""
+    if google_data.oauth_connected() and google_data.granted().get(key) is False:
+        name = {"gsc": "Search Console", "ga4": "Analytics"}[key]
+        return json.dumps({"error": f"Google is connected without permission to read {name}. "
+                                    f"Connect Google again in Settings and leave {name} ticked."})
+    return json.dumps({"error": "Google isn't connected yet. Connect it in Settings."})
+
+
 def _build_google_tools() -> dict:
     tools: dict = {}
     if google_data.gsc_enabled():
@@ -4698,7 +4798,7 @@ def _build_google_tools() -> dict:
             Use this to ground SEO advice in how the store actually performs in Google Search —
             e.g. high-impression, low-CTR, mid-position queries are title/meta rewrite opportunities."""
             if not google_data.gsc_configured():
-                return json.dumps({"error": "Google isn't connected yet. Connect it in Settings."})
+                return _google_not_ready("gsc")
             days = params.days or 28
             return json.dumps({"overview": await google_data.gsc_overview(days),
                                "top_queries": await google_data.gsc_top_queries(days)}, default=str)
@@ -4710,7 +4810,7 @@ def _build_google_tools() -> dict:
             the top traffic channels over the window. Use to ground answers about traffic, acquisition
             and on-site performance in real analytics rather than order data alone."""
             if not google_data.ga4_configured():
-                return json.dumps({"error": "Google isn't connected yet. Connect it in Settings."})
+                return _google_not_ready("ga4")
             return json.dumps(await google_data.ga4_summary(params.days or 28), default=str)
         tools["get_ga4_data"] = (get_ga4_data, DaysInput)
 
@@ -5014,7 +5114,10 @@ _orders_epoch = 0             # bumped by every write that changes what a sweep 
 # late; the payload is treated purely as a trigger and never as state.
 # ---------------------------------------------------------------------------
 WEBHOOK_MAX_BYTES = 1024 * 1024        # a full order payload, with headroom
-_webhook_state = {"last_at": 0.0, "last_topic": "", "count": 0, "ensured": None}
+# version: the Shopify version the last event was sent in, from its own header.
+# The subscriptions keep the version they were made with, which nothing else
+# here shows, and an old one silently moves forward when Shopify retires it.
+_webhook_state = {"last_at": 0.0, "last_topic": "", "count": 0, "ensured": None, "version": ""}
 _webhook_seen: dict = {}               # delivery id -> monotonic time (dedupe)
 
 
@@ -6070,6 +6173,130 @@ def _line_has_model(li: dict) -> bool:
     return bool(_strip_price(_item_model(li, _strip_price(_item_prop(li, "Manufacturer")))))
 
 
+# A gobo the Quote Engine sells with a projector names no fixture of its own:
+# its variant says so ("Single Colour Glass Original With Projector (Quote) /
+# IH") because its fixture is the projector on the same order (#104453).
+_WITH_PROJECTOR_RE = re.compile(r"\bwith projector\b", re.I)
+_PROJECTOR_WATTS_RE = re.compile(r"\b(\d{1,3})\s*(?:watt|w)\b", re.I)
+PROJECTOR_TYPE = "projector"
+
+
+def _with_projector_variant(li: dict) -> bool:
+    return bool(_WITH_PROJECTOR_RE.search(str(li.get("variant_title") or "") + " " + str(li.get("name") or "")))
+
+
+def _sold_with_projector(li: dict) -> bool:
+    """A With Projector gobo that is cut for the projector on its order. The old
+    quote machine wrote the gobo's fixture into one "Note" property instead
+    ("Manufacturer: Standard\nStandard Models: B Size"), which nothing here
+    reads, and #103894's said B Size beside a 20 Watt: such a line keeps its
+    CHECK rather than be cut against what it says."""
+    return (_with_projector_variant(li)
+            and not re.search(r"(?im)^\s*manufacturer\s*:", _item_prop(li, "Note")))
+
+
+def _projector_watts(li: dict) -> int:
+    """A projector line's wattage ("Projected Image 40 Watt LED Weatherproof
+    Gobo Projector" is 40), or 0 for anything else. Read from what the line
+    says, not its product type: the type Projector also covers rain hoods,
+    lenses, holders and bundles, which name wattages too ("Rain Hood (40W &
+    80W)") but never "Gobo Projector"; and the old quote machine sold projectors
+    as "Outdoor Gobo Projectors" typed Custom Gobos, named in the variant."""
+    if _line_has_model(li) or _with_projector_variant(li):
+        return 0
+    text = str(li.get("title") or "") + " " + str(li.get("variant_title") or "")
+    if "gobo projector" not in text.lower():
+        return 0
+    m = _PROJECTOR_WATTS_RE.search(text)
+    return int(m.group(1)) if m else 0
+
+
+def _projector_entries(watts: int, cache: dict) -> list:
+    """The size list's Projected Image rows naming this wattage ("40/80 Watt
+    Range" for a 40 or an 80), rulings applied. Read from the rows rather than
+    through the lookup, whose spellings are uneven here: "80 Watt" finds its
+    row and "40 Watt" does not. A row is matched by its own name or by the name
+    an alias gave it, so pointing "300 Watt" at a row in the size check settles
+    a 300 Watt; and a row named for the wattage itself ("40 Watt", made by a
+    size rule) wins over a range that includes it, so ruling it decides."""
+    exact, ranged, seen = [], [], set()
+    for lm, words, e in cache.get("rows") or []:
+        model = str(e.get("model") or "")
+        own = " ".join(words)
+        if lm != "projected image" or ("watt" not in own and "watt" not in model.lower()):
+            continue
+        if str(watts) not in set(re.findall(r"\d+", own)) | set(re.findall(r"\d+", model)):
+            continue
+        is_exact = own == "%d watt" % watts
+        key = (is_exact, _norm_key(model), str(e.get("production_size") or ""))
+        if key not in seen:
+            seen.add(key)
+            (exact if is_exact else ranged).append(e)
+    return exact or ranged
+
+
+def _projector_size(o: dict, cache: dict) -> dict:
+    """What a With Projector gobo on order `o` is cut at (Cameron, 2026-10-02):
+    the size of the projector on the same order. {"size", "note", "entry"} when
+    every projector on the order agrees; otherwise {"reason"}, the CHECK the
+    label prints, with "fix" when a size rule would settle it: the (maker,
+    model) of a wattage the size list has no row for."""
+    lines = [li for li in (o.get("line_items") or []) if _line_qty(li) > 0]
+    # An upgrade changes which projector the customer gets ("Projector
+    # Upgrade", "80 Watt to 200 Watt"): which size is for a person to say.
+    if any(not _line_has_model(li) and re.search(r"\bupgrade\b", str(li.get("title") or "") + " "
+                                                 + str(li.get("variant_title") or ""), re.I) for li in lines):
+        return {"reason": "Sold with a projector, and this order upgrades one: check which size"}
+    watts = set()
+    for li in lines:
+        w = _projector_watts(li)
+        if not w:
+            continue
+        # Our rows are for our projectors. Another maker's (an Evica GP10 is
+        # 22.5, not our 10 Watt's 37.5) is for a person to size.
+        maker = _gobo_split_maker(str(li.get("title") or ""), cache)[0]
+        if maker and _norm_key(maker) != "projected image":
+            return {"reason": "Sold with a projector by %s: check its size" % maker}
+        watts.add(w)
+    watts = sorted(watts)
+    if not watts:
+        return {"reason": "Sold with a projector, but no projector is on this order"}
+    domain = _order_email_domain(o)
+    sizes, entry, by_domain = set(), None, False
+    for w in watts:
+        # A size the size check set for this customer on the wattage itself.
+        mine = _gobo_domain_size("Projected Image", "%d Watt" % w, None, domain, cache=cache)
+        if mine:
+            sizes.add(mine)
+            by_domain = True
+            continue
+        got = set()
+        for e in _projector_entries(w, cache):
+            d = _gobo_domain_size(e["manufacturer"], e["model"], e, domain, cache=cache)
+            by_domain = by_domain or bool(d)
+            got.add(d or str(e.get("production_size") or ""))
+            entry = entry or e
+        if not got or "" in got:
+            return {"reason": "No size list row for the %d Watt projector on this order" % w,
+                    "fix": ("Projected Image", "%d Watt" % w)}
+        if len(got) > 1:
+            # The size list's own clash: a rule on the wattage settles it.
+            return {"reason": "The size list gives the %d Watt projector two sizes" % w,
+                    "fix": ("Projected Image", "%d Watt" % w)}
+        sizes |= got
+    names = [str(w) for w in watts]
+    named = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    if len(sizes) > 1:
+        return {"reason": "Sold with a projector: this order has %s Watt projectors, cut at different sizes" % named}
+    if by_domain:
+        note = "Size for this customer"
+    else:
+        note = "For the %s Watt projector%s on this order" % (named, "" if len(watts) == 1 else "s")
+        if entry and entry.get("review"):
+            note += ". " + entry["review"]
+    return {"size": sizes.pop(), "note": note, "entry": entry}
+
+
 UNPROCESSED_TAG = os.environ.get("UNPROCESSED_TAG", "Unprocessed")
 MADE_TAG = os.environ.get("MADE_TAG", "PC")
 PROPOSAL_HOST = os.environ.get("PROPOSAL_HOST", "quote.projectedimage.com")
@@ -6081,6 +6308,10 @@ _tax_id_reader = None
 _forecast_reader = None   # the forecast job's four store reads, made with the app's credential
 _install_checker = None   # "installed" / "gone" / "unknown": asked before a shop/redact erases
 _customer_checker = None  # "live" / "gone" / "unknown": asked before a customers/redact erases
+# The Shopify version the server talks to, handed over by add_routes. Never
+# found by the server's module name: production starts `python server.py`,
+# which Python files under __main__, so a lookup by name finds nothing there.
+_api_version = ""
 _order_writer = None
 # The tag that marks an order sold on account: releasing one to production is
 # the moment its 30-day clock should start ticking in Shopify.
@@ -6290,6 +6521,64 @@ def _flag_address_divergence(order_id, live: dict) -> None:
         logger.exception("could not compare the booked address for %s", order_id)
 
 
+def _rest_totals(o: dict) -> dict:
+    """An order's tax and total from a REST read, in the shape the order writer
+    returns them. Not the amount outstanding: GraphQL's is documented as signed
+    (negative when the customer is owed), REST's is not, so a note built from a
+    REST read says what the totals alone can say."""
+    cur = str(o.get("currency") or "")
+    def money(key):
+        return {"amount": str(o.get(key) or ""), "currency": cur}
+    return {"tax": money("current_total_tax"), "total": money("current_total_price"),
+            "outstanding": {"amount": "", "currency": cur}}
+
+
+def _tax_change_note(before: dict, totals: dict) -> str:
+    """What an address edit did to the order's tax, said plainly, or ''.
+
+    From Shopify API 2026-10 a new shipping address on an unfulfilled order
+    recalculates its tax: a UK address corrected to an export destination, or
+    the other way, changes the total and so what the customer owes. Shopify
+    makes the change; this says so, rather than leave it to be found."""
+    def num(v):
+        try:
+            return round(float(v), 2)
+        except (TypeError, ValueError):
+            return None
+    was, now = before.get("tax") or {}, totals.get("tax") or {}
+    tax_was, tax_now = num(was.get("amount")), num(now.get("amount"))
+    if tax_was is None or tax_now is None or tax_was == tax_now:
+        return ""
+    cur = str(now.get("currency") or was.get("currency") or "")
+    def fmt(x):
+        return ("\u00a3%.2f" % x) if cur in ("GBP", "") else ("%s %.2f" % (cur, x))
+    total_was = num((before.get("total") or {}).get("amount"))
+    total_now = num((totals.get("total") or {}).get("amount"))
+    # Shopify's amount outstanding after the change, signed: above nothing the
+    # customer owes it, below nothing it is theirs to be refunded. It already
+    # counts what they paid, which the change in total alone does not.
+    owed = num((totals.get("outstanding") or {}).get("amount"))
+    msg = ("Shopify recalculated the tax for the new address: " + fmt(tax_was) + " before, "
+           + fmt(tax_now) + " now")
+    if total_now is not None:
+        msg += ", so the order total is " + fmt(total_now)
+    if owed is not None:
+        if owed > 0:
+            return msg + ". The customer now owes " + fmt(owed) + "."
+        if owed < 0:
+            return msg + ". " + fmt(-owed) + " is due back to them: refund it in Shopify."
+        return msg + ". Nothing more is owed either way."
+    # No amount outstanding to go on (the order was read back after a lost
+    # answer): only the change in total, said as what it might mean.
+    if total_was is not None and total_now is not None and total_now != total_was:
+        if total_now < total_was:
+            return msg + (". If they had paid in full, " + fmt(total_was - total_now)
+                          + " is due back to them: check the order in Shopify.")
+        return msg + (". If they had paid in full, " + fmt(total_now - total_was)
+                      + " more is due: check the order in Shopify.")
+    return msg + "."
+
+
 async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
     """Apply a merchant's edit to a placed order.
 
@@ -6329,6 +6618,13 @@ async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
             # The parcel may already be moving under the old address. Changing
             # Shopify does NOT change a label that is printed and booked, so the
             # merchant has to say out loud that they know that.
+            if "ship_to" in fields:
+                # The order's own province code goes back as a code whatever
+                # its shape (Dublin is "D", Tokyo "JP-13"), not as the
+                # deprecated free-text province.
+                own = str(((o.get("shipping_address") or {}).get("province_code")) or "").strip()
+                if own and str(fields["ship_to"].get("state") or "").strip() == own:
+                    fields["ship_to"]["state_is_code"] = True
             booked = _live_booking(order_id)
             if booked and "ship_to" in fields and not body.get("confirm_booked"):
                 return False, ("A courier label is already booked for this order ("
@@ -6348,7 +6644,7 @@ async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
                     now_there["note"] = str(again.get("note") or "")
                     _f2, _w2, still, _warn2 = _clean_edit_fields(body, now_there)
                     if not still:
-                        r = {"ok": True}
+                        r = {"ok": True, "totals": _rest_totals(again)}
                 if not r.get("ok"):
                     return False, ("Shopify did not answer, so it is not known whether the change "
                                    "was made. Open the order in Shopify to check before trying again."), \
@@ -6361,6 +6657,10 @@ async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
                                    "doesn't have the write_orders permission yet."), [], name, []
                 return False, ("Shopify refused the change"
                                + (": " + detail if detail else ".")), [], name, []
+            note = _tax_change_note(_rest_totals(o), r.get("totals") or {})
+            if note:
+                warn = list(warn) + [note]
+                changed = list(changed) + ["tax recalculated"]
             if booked and "ship_to" in fields:
                 # Mark the divergence so the fulfilment path can refuse rather
                 # than email the customer tracking for a parcel addressed
@@ -6819,6 +7119,7 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None,
     cache = cache or _gobo_sizes()   # one sheet snapshot for the whole order
     proposal_url, note_clean = _extract_proposal(str(o.get("note") or "").strip())
     items = []
+    with_projector = None   # what a With Projector gobo is cut at, worked out once
     for li in (o.get("line_items") or []):
         if _label_skip_item(str(li.get("title") or li.get("name") or "")):
             continue
@@ -6827,12 +7128,19 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None,
             continue    # refunded or edited off the order: nothing to make
         mfr = _strip_price(_item_prop(li, "Manufacturer"))
         model = _strip_price(_item_model(li, mfr))
+        # A projector or a projector accessory (a rain hood, a lens, a bundle)
+        # is not cut: it prints by name, with no size and no CHECK, and uses no
+        # glass (Cameron, 2026-10-02). #104453 printed its 40 Watt as a second
+        # "CHECK No model specified" the bench could not tell from the gobo's.
+        ptype = str((types or {}).get(li.get("product_id")) or "").strip().lower()
+        projector = not mfr and not model and (ptype == PROJECTOR_TYPE or bool(_projector_watts(li)))
+        sold_with = not mfr and not model and not projector and _sold_with_projector(li)
         # A model ruled not a gobo (Resolve, in the Size check) is not cut:
         # no size and no CHECK, printed by its name as a stock gobo is, with a
         # line saying why. The lookup does not read those rulings, and its
         # word-run step found a neighbouring row: Chauvet Rogue R2 Spot Metal,
         # ruled not a gobo, printed 26.5, the Rogue R2 Spot's size.
-        not_gobo = bool(model) and (_norm_key(mfr), _norm_key(model)) in (cache.get("excludes") or set())
+        not_gobo = projector or (bool(model) and (_norm_key(mfr), _norm_key(model)) in (cache.get("excludes") or set()))
         entry, reason = (None, "") if not_gobo else _gobo_lookup(mfr, model, cache=cache)
         dsize = None if not_gobo else _gobo_domain_size(mfr, model, entry, domain, cache=cache)
         title = str(li.get("title") or li.get("name") or "Item").strip()
@@ -6843,9 +7151,30 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None,
         # from Smoke & Mirrors. A stock gobo that DOES name its fixture (the
         # wedding gobos do) still goes through the lookup and keeps its size;
         # an unknown product type keeps the CHECK, which is the safe side.
-        stock = str((types or {}).get(li.get("product_id")) or "").strip().lower() == STOCK_GOBO_TYPE
+        stock = ptype == STOCK_GOBO_TYPE
         if stock and not model:
             entry, reason, dsize = None, "", None
+        size = dsize or (entry["production_size"] if (entry and not reason) else "")
+        size_note = ("Not a gobo" if not_gobo else "Size for this customer" if dsize
+                     else (entry["review"] if entry and entry["production_size"] and entry["review"] else ""))
+        why = "" if dsize else (reason or "")
+        if projector:
+            # The variant says which projector or accessory ("40W with Rain
+            # Hood", "B Size Glass Gobo Holder"), on the line under the name,
+            # which wraps; a bare wattage only repeats the title.
+            variant = str(li.get("variant_title") or "").strip()
+            size, why = "", ""
+            size_note = ("" if not variant or _norm_key(variant) == "default title"
+                         or re.fullmatch(r"\d+\s*w(att)?", variant, re.I) else variant)
+        elif sold_with:
+            # Cut for the projector on the same order; two projector sizes,
+            # or none, is for a person to decide, and the CHECK says which.
+            if with_projector is None:
+                with_projector = _projector_size(o, cache)
+            entry = with_projector.get("entry")
+            size = with_projector.get("size") or ""
+            size_note = with_projector.get("note") or ""
+            why = with_projector.get("reason") or ""
         items.append({
             "title": title,
             "artwork": ("" if _norm_key(title) in _GENERIC_TITLES else title),
@@ -6856,12 +7185,12 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None,
             "model": model,
             "glass_type": _item_glass(li),
             "price": str(li.get("price") or ""),
-            "production_size": dsize or (entry["production_size"] if (entry and not reason) else ""),
-            "size_note": ("Not a gobo" if not_gobo else "Size for this customer" if dsize
-                          else (entry["review"] if entry and entry["production_size"] and entry["review"] else "")),
-            "review_reason": "" if dsize else (reason or ""),
+            "production_size": size,
+            "size_note": size_note,
+            "review_reason": why,
             "stock": stock,
             "not_gobo": not_gobo,
+            "projector": projector,
         })
     return {
         "id": o.get("id"),
@@ -6941,6 +7270,11 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
                     if tag.strip().lower() == DISPATCHED_TAG.strip().lower() else [])
     tagged = [o for o in orders if any(_has_tag(o, t) for t in want)]
     tagged.sort(key=lambda o: str(o.get("created_at") or ""), reverse=True)
+    # The flow's three queues counted from the same snapshot (the mix's queue
+    # counters, 2026-10-06), so the bench sees every queue's size at once
+    # without another Shopify call.
+    counts = {key: sum(1 for o in orders if _has_tag(o, qtag))
+              for key, qtag in (("unprocessed", UNPROCESSED_TAG), ("make", PRODUCTION_TAG), ("ship", MADE_TAG))}
 
     names = await _product_option_names(
         registry,
@@ -6962,7 +7296,7 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
         partial = ("Shopify did not answer for the whole window, so this list may be "
                    "missing orders. Press Refresh in a moment.")
     return {"tag": tag, "days": days, "count": len(tagged), "orders": shaped,
-            "partial_note": partial,
+            "partial_note": partial, "counts": counts,
             "state": {str(s["id"]): state[str(s["id"])] for s in shaped if str(s["id"]) in state},
             "dispatch": _dispatch_with_live_labels(
                 {str(s["id"]): disp[str(s["id"])] for s in shaped if str(s["id"]) in disp})}
@@ -7870,6 +8204,22 @@ def _wo_tech(e: BaseException, order_id="") -> dict:
     return tech
 
 
+
+def _is_shop_delivery(x) -> bool:
+    """A service that delivers to a pickup shop the customer collects from: one
+    World Options flagged for shop delivery, an Access Point code, or a ParcelShop
+    or Access Point name (Evri ParcelShop and the like arrive as ordinary door
+    quotes). Never offered and never booked: "our customers should never collect
+    from shop" (Cameron, 2026-10-09)."""
+    if not isinstance(x, dict):
+        return False
+    if x.get("delivery_dropoff"):
+        return True
+    code = str(x.get("service_type_code") or "").strip().lower()
+    blob = (str(x.get("service_full") or "") + " " + str(x.get("service_name") or "") + " " + code).lower()
+    return ("parcelshop" in blob or "parcel shop" in blob or "access point" in blob
+            or code.endswith("_ap"))
+
 async def _quote_options(origin: dict, dest: dict, boxes: list, currency: str,
                          insurance: str, cfg: dict) -> tuple:
     """Every courier option for one parcel to one address, as a single priced list.
@@ -7892,26 +8242,20 @@ async def _quote_options(origin: dict, dest: dict, boxes: list, currency: str,
                                         collection_dropoff=dropoff, shipment_mode=mode,
                                         delivery_dropoff=delivery_dropoff)
 
-    show_shop = bool(cfg.get("show_parcelshop", False))
     # World Options prices with a signature service implied unless one is named, so
     # a second pass asking for no signature can come back cheaper. Both are shown
     # and labelled, because "no signature" changes what the customer gets.
     nosig_variant = "Fedex_No_Signature_Required"
-    # Two quotes, in parallel: to the door, and to a pickup shop. The cheaper
-    # Access Point services are ONLY returned when the request asks to deliver to
-    # a shop. Quoting is free; a failure on either side must not lose the other.
-    # Skipped entirely when shop services are hidden, so nothing is asked for
-    # that will not be shown.
+    # Customers never collect from a shop (Cameron, 2026-10-09), so the quote is
+    # to the door only: the pickup-shop quote that surfaced Access Point services
+    # is never asked for.
     async def _q_nosig():
         return await worldoptions.quote(origin, dest, boxes, currency=currency,
                                         residential=residential, insurance=insurance,
                                         collection_dropoff=dropoff, shipment_mode=mode,
                                         signature_type=nosig_variant)
     try:
-        jobs = [_q(False), _q_nosig()] + ([_q(True)] if show_shop else [])
-        got = await asyncio.gather(*jobs, return_exceptions=True)
-        door, nosig = got[0], got[1]
-        point = got[2] if show_shop else {"options": []}
+        door, nosig = await asyncio.gather(_q(False), _q_nosig(), return_exceptions=True)
     except worldoptions.WorldOptionsError as e:
         return [], currency, str(e), e
     except Exception as e:
@@ -7922,26 +8266,13 @@ async def _quote_options(origin: dict, dest: dict, boxes: list, currency: str,
         logger.info("no-signature quote unavailable: %s", nosig)
         nosig = {"options": []}
     if isinstance(door, Exception):
-        if isinstance(point, Exception):
-            err = door
-            if isinstance(err, worldoptions.WorldOptionsError):
-                return [], currency, str(err), err
-            logger.exception("dispatch quote failed", exc_info=door)
-            return [], currency, "Couldn't get courier quotes. Check the server logs.", door
-        door = {"options": []}
-    if isinstance(point, Exception):
-        logger.info("pickup-point quote unavailable: %s", point)
-        point = {"options": []}
+        if isinstance(door, worldoptions.WorldOptionsError):
+            return [], currency, str(door), door
+        logger.exception("dispatch quote failed", exc_info=door)
+        return [], currency, "Couldn't get courier quotes. Check the server logs.", door
 
     res = dict(door)
-    seen = {o.get("service_type_code") for o in (door.get("options") or [])}
     merged = list(door.get("options") or [])
-    for opt_row in (point.get("options") or []):
-        # Keep only what the door quote could not offer, so the list does not
-        # double up with the same service twice.
-        if opt_row.get("service_type_code") and opt_row["service_type_code"] in seen:
-            continue
-        merged.append(opt_row)
     # A no-signature price only earns a row when it actually beats the normal one.
     priced = {o.get("service_type_code"): o.get("amount") for o in merged
               if o.get("service_type_code") and o.get("amount") is not None}
@@ -7965,16 +8296,8 @@ async def _quote_options(origin: dict, dest: dict, boxes: list, currency: str,
         ns["saves_vs_signed"] = round(base_amt - amt, 2)
         merged.append(ns)
 
-    if not show_shop:
-        # A shop service is any that delivers to a pickup point, or whose name
-        # says so (Evri ParcelShop and the like arrive as ordinary door quotes).
-        def _is_shop(x):
-            if x.get("delivery_dropoff"):
-                return True
-            blob = (str(x.get("service_full") or "") + " " + str(x.get("service_type_code") or "")).lower()
-            return ("parcelshop" in blob or "parcel shop" in blob
-                    or "access point" in blob or blob.endswith("_ap"))
-        merged = [x for x in merged if not _is_shop(x)]
+    # Never a service the customer collects from a shop, whatever arrives.
+    merged = [x for x in merged if not _is_shop_delivery(x)]
     merged.sort(key=lambda x: (x.get("amount") is None, x.get("amount") or 0))
     if not merged:
         return [], currency, ("World Options returned no courier options for this address and parcel. "
@@ -8021,7 +8344,6 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
             out["tech"] = tech
             _record_wo_failure(tech)
         return out
-    show_shop = bool(cfg.get("show_parcelshop", False))
     _collection_plans(cfg, options)
     return {
         "options": options,
@@ -8034,7 +8356,7 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
         "goods_value": goods_value,
         "insurance": insurance,
         "dropoff": dropoff,
-        "show_parcelshop": show_shop,
+        "show_parcelshop": False,   # customers never collect from a shop
         "has_eori": bool(cfg.get("eori")),
         "default_hs_code": cfg.get("default_hs_code") or "",
         # Drives the customs-declaration card in the UI; booking refuses an
@@ -8121,7 +8443,7 @@ async def run_custom_quote(registry: dict, dest: dict, boxes: list,
         "dropoff": (cfg.get("collection_option") == "I_Am_Going_To_Drop_Off_My_Packages"),
         "collection_option": str(cfg.get("collection_option") or ""),
         "collection_options": (worldoptions.COLLECTION_OPTIONS if worldoptions else []),
-        "show_parcelshop": bool(cfg.get("show_parcelshop", False)),
+        "show_parcelshop": False,   # customers never collect from a shop
         "has_eori": bool(cfg.get("eori")),
         "default_hs_code": cfg.get("default_hs_code") or "",
         "international": international,
@@ -8356,7 +8678,6 @@ _DIAGNOSE_VARIANTS = [
     ("No signature required (DHL wording)", {"signature_type": "DHL_No_Signature_Required"}),
     ("Asking UPS only", {"service_name": "UPS"}),
     ("UPS packaging instead of a generic parcel", {"package_type": "UPS_My_Packaging"}),
-    ("Delivered to a pickup shop", {"delivery_dropoff": True}),
 ]
 
 
@@ -8402,7 +8723,7 @@ async def run_dispatch_diagnose(registry: dict, order_id, boxes: list) -> dict:
                  "code": op.get("service_type_code") or "",
                  "delivery": " ".join(x for x in [op.get("delivery_date"), op.get("delivery_time")] if x),
                  "amount": op.get("amount"), "currency": op.get("currency")}
-                for op in (res.get("options") or [])]
+                for op in (res.get("options") or []) if not _is_shop_delivery(op)]
         svcs.sort(key=lambda s: (s["amount"] is None, s["amount"] or 0))
         if not rows:
             baseline = {s["code"] for s in svcs}
@@ -8682,15 +9003,13 @@ def _shops_for(cfg: dict, option: dict) -> tuple:
         shops = option.get("shops") or []
         if shops and isinstance(shops[0], dict):
             dropoff_shop = shops[0]
-    delivery_shop = None
-    if option.get("delivery_dropoff"):
-        dshops = option.get("delivery_shops") or []
-        if dshops and isinstance(dshops[0], dict):
-            delivery_shop = dshops[0]
-        else:
-            return None, None, ("This is a collect-from-shop service but World Options did not "
-                                "return a shop for this address. Pick a to-the-door service instead.")
-    return dropoff_shop, delivery_shop, ""
+    # Customers never collect from a shop (Cameron, 2026-10-09): such a service
+    # is refused here, for the Dispatch window and custom shipments alike,
+    # before anything reaches World Options.
+    if _is_shop_delivery(option):
+        return None, None, ("Reactor never sends a parcel to a pickup shop: customers get it at "
+                            "their door. Pick a to-the-door service instead.")
+    return dropoff_shop, None, ""
 
 
 def _intents() -> dict:
@@ -9082,7 +9401,7 @@ async def run_missing_production(registry: dict, tag: Optional[str] = None) -> d
             if _label_skip_item(str(li.get("title") or li.get("name") or "")):
                 continue
             mfr = _strip_price(_item_prop(li, "Manufacturer"))
-            if mfr or _item_model(li, mfr):
+            if mfr or _item_model(li, mfr) or _with_projector_variant(li):
                 gobo += 1
         if not gobo:
             continue
@@ -9767,13 +10086,38 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
     sheet = _gobo_sizes()   # one snapshot for the whole scan
     items_seen = gobo_items = sized = no_model = ruled_out = 0
     flagged: dict = {}
+    def flag(o, oname, mfr, model, reason, order_problem=False):
+        f = flagged.setdefault((mfr, model, reason), {"manufacturer": mfr, "model": model or "(blank)",
+                                                      "reason": reason, "count": 0, "orders": []})
+        if order_problem:
+            # Not a gap in the size list: the order itself has to be looked at,
+            # so the page offers no size rule for it.
+            f["order_problem"] = True
+        f["count"] += 1
+        if oname not in [x["name"] for x in f["orders"]] and len(f["orders"]) < 3:
+            f["orders"].append({"name": oname, "admin_url": _admin_order_url(o.get("id"))})
+
     for o in orders:
         oname = str(o.get("name") or "").strip() or ("#" + str(o.get("order_number") or ""))
         domain = _order_email_domain(o)
+        with_projector = None
         for li in (o.get("line_items") or []):
             items_seen += 1
             mfr = _strip_price(_item_prop(li, "Manufacturer"))
             model = _strip_price(_item_model(li, mfr))
+            if not model and not mfr and _sold_with_projector(li):
+                # A gobo sold with a projector names no fixture but is a gobo,
+                # sized by the projector on its order exactly as its label is.
+                gobo_items += 1
+                if with_projector is None:
+                    with_projector = _projector_size(o, sheet)
+                if with_projector.get("size"):
+                    sized += 1
+                else:
+                    fix = with_projector.get("fix")
+                    flag(o, oname, *(fix or ("", "Sold with a projector")), with_projector["reason"],
+                         order_problem=not fix)
+                continue
             if not model and not mfr:
                 # No gobo options at all: an accessory or plain product, not a miss.
                 no_model += 1
@@ -9791,12 +10135,7 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
             if not reason:
                 sized += 1
                 continue
-            key = (mfr, model, reason)
-            f = flagged.setdefault(key, {"manufacturer": mfr, "model": model or "(blank)",
-                                         "reason": reason, "count": 0, "orders": []})
-            f["count"] += 1
-            if oname not in [x["name"] for x in f["orders"]] and len(f["orders"]) < 3:
-                f["orders"].append({"name": oname, "admin_url": _admin_order_url(o.get("id"))})
+            flag(o, oname, mfr, model, reason)
     rows = sorted(flagged.values(), key=lambda r: -r["count"])[:100]
     return {"orders_scanned": len(orders), "items_seen": items_seen,
             "gobo_items": gobo_items, "sized": sized,
@@ -17617,7 +17956,7 @@ def _files_tick() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Route registration (mounted onto the existing FastMCP app)
+# Route registration (mounted onto the existing MCP server app)
 # ---------------------------------------------------------------------------
 
 # ---- values add_routes used to build every time it ran ---------------------
@@ -17672,6 +18011,24 @@ _MAIL_NO_SEND = ("You are not set up to send email from here. "
 _FILES_STORE_FAIL = ("The change could not be saved. The data volume may be "
                      "unwritable; check Settings, Connections.")
 _font_cache: dict = {}
+
+
+def _brand_svg(name: str):
+    # Projected Image's wordmark, from projectedimage.com, served like the
+    # label typeface. It has no script in it, and the response forbids any all
+    # the same, in case it is ever opened on its own rather than as an image.
+    key = "brand:" + name
+    if key not in _font_cache:
+        try:
+            with open(os.path.join(os.path.dirname(__file__), "data", "brand", name), "rb") as fh:
+                _font_cache[key] = fh.read()
+        except OSError:
+            return PlainTextResponse("Not found", status_code=404)
+    return Response(_font_cache[key], media_type="image/svg+xml",
+                    headers={**_API_HEADERS, "Cache-Control": "public, max-age=86400",
+                             "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})
+
+
 _PRINT_ORIGINS = {"https://extensions.shopifycdn.com", "https://admin.shopify.com"}
 _xero_oauth_states: dict = {}
 # ------------------------------------------------------------------
@@ -17695,9 +18052,12 @@ _CONNECTOR_READS = {
 # The settings the Xero sync page may change. Deliberately a short list of
 # OPERATIONAL knobs: nothing here can point the service at a different shop,
 # a different Xero organisation, or a different set of credentials.
+# SHOP_TIMEZONE is not here: the connector neither accepts nor returns it (it
+# is not in its SETTING_FIELDS), so offering it made Save say "Saved" over
+# nothing. It is set on the connector service itself.
 _CONNECTOR_SETTABLE = {
     "RECONCILE_MODE", "RECONCILE_TOLERANCE", "MAX_DOCS_PER_RUN", "RUNAWAY_ABORT_ABOVE",
-    "ORDERS_SINCE", "SHOP_TIMEZONE", "XERO_SALES_ACCOUNT_CODE",
+    "ORDERS_SINCE", "XERO_SALES_ACCOUNT_CODE",
     "XERO_TAX_TYPE_STANDARD", "XERO_TAX_TYPE_ZERO",
     "CUSTOMER_REF_METAFIELD_NAMESPACE", "CUSTOMER_REF_METAFIELD_KEY",
 }
@@ -17752,6 +18112,16 @@ def _forecast_state() -> dict:
 def _forecast_token_ok(request: Request) -> bool:
     return _secret_ok(str(request.headers.get("x-forecast-token") or ""), FORECAST_INGEST_TOKEN)
 
+# Months scored before the ledger kept the source in use. September 2026 was
+# forecast by "Last year, adjusted for this year" (its run of 9 September was
+# rebuilt from the forecast's own code and matched the notes of that day to
+# the pound: 0.65 x last September, likely range +/-28.7%). Its figure is the
+# source's own first word, already in the ledger; only the label is supplied.
+FORECAST_IN_USE_BACKFILL = {
+    "2026-09": {"source": "Last year, adjusted for this year", "seen_through": "2026-08", "band": 0.287},
+}
+
+
 def _forecast_ledger(state: dict, body: dict) -> dict:
     """The standing record of who was right, kept across runs.
 
@@ -17764,11 +18134,39 @@ def _forecast_ledger(state: dict, body: dict) -> dict:
 
     Predictions are recorded once and never revised. A later run may have
     a better opinion about a month, but overwriting the earlier one would
-    turn a forecast into a hindcast and every source would look excellent."""
+    turn a forecast into a hindcast and every source would look excellent.
+
+    `in_use` is the other half: what the page's numbers came from. For each
+    month it keeps the source in use, its figure and likely range and what the
+    page showed, from the first run that had seen every whole month before it
+    (seen_through = the month before). Every month is then judged on a
+    forecast of the same age, made without any of its own whole-month data,
+    and a director can see what they were actually told. `predicted` keeps
+    each source's first word, whenever that was, for the ranking."""
     import math
     led = state.get("ledger") if isinstance(state.get("ledger"), dict) else {}
     predicted = led.get("predicted") if isinstance(led.get("predicted"), dict) else {}
+    in_use = led.get("in_use") if isinstance(led.get("in_use"), dict) else {}
     results = led.get("results") if isinstance(led.get("results"), list) else []
+
+    def _num(x):
+        try:
+            v = float(x)
+        except (TypeError, ValueError):
+            return None
+        return round(v, 2) if math.isfinite(v) else None
+
+    seen = str(body.get("seen_through") or "")[:7]
+    iu = body.get("in_use") if isinstance(body.get("in_use"), dict) else {}
+    if re.fullmatch(r"\d{4}-\d{2}", seen) and isinstance(iu.get("months"), dict):
+        y, mo = int(seen[:4]), int(seen[5:7])
+        nxt = f"{y + (mo == 12)}-{(mo % 12) + 1:02d}"
+        rec = iu["months"].get(nxt)
+        if nxt not in in_use and isinstance(rec, dict) and _num(rec.get("value")) is not None:
+            in_use[nxt] = {"source": str(iu.get("source") or "")[:80], "value": _num(rec.get("value")),
+                           "p10": _num(rec.get("p10")), "p90": _num(rec.get("p90")),
+                           "shown": _num(rec.get("shown")), "made": body.get("as_of"),
+                           "seen_through": seen}
 
     preds = body.get("predictions")
     if isinstance(preds, dict):
@@ -17809,10 +18207,29 @@ def _forecast_ledger(state: dict, body: dict) -> dict:
             if not by:
                 continue
             winner = min(by.items(), key=lambda kv: abs(kv[1]["error"]))
-            results.append({"month": month, "actual": round(actual, 2), "by_source": by,
-                            "winner": winner[0], "winner_error": winner[1]["error"],
-                            "closed_at": datetime.now(timezone.utc).isoformat()})
+            entry = {"month": month, "actual": round(actual, 2), "by_source": by,
+                     "winner": winner[0], "winner_error": winner[1]["error"],
+                     "closed_at": datetime.now(timezone.utc).isoformat()}
+            u = in_use.get(month)
+            if isinstance(u, dict) and isinstance(u.get("value"), (int, float)):
+                lo, hi = u.get("p10"), u.get("p90")
+                entry["in_use"] = dict(u, error=round((u["value"] - actual) / actual, 4),
+                                       inside=(bool(lo <= actual <= hi)
+                                               if isinstance(lo, (int, float)) and isinstance(hi, (int, float))
+                                               else None))
+            results.append(entry)
             scored.add(month)
+
+    for r in results:
+        b = FORECAST_IN_USE_BACKFILL.get(r.get("month")) if isinstance(r, dict) else None
+        src = ((r.get("by_source") or {}).get(b["source"]) if b else None) or {}
+        if b and "in_use" not in r and isinstance(src.get("predicted"), (int, float)) and r.get("actual"):
+            v, a = float(src["predicted"]), float(r["actual"])
+            lo, hi = round(max(0.0, v * (1 - b["band"])), 2), round(v * (1 + b["band"]), 2)
+            r["in_use"] = {"source": b["source"], "value": round(v, 2), "p10": lo, "p90": hi,
+                           "shown": None, "made": src.get("made"), "seen_through": b["seen_through"],
+                           "error": round((v - a) / a, 4), "inside": bool(lo <= a <= hi),
+                           "reconstructed": True}
 
     results.sort(key=lambda r: r.get("month") or "")
     results = results[-FORECAST_LEDGER_MONTHS:]
@@ -17820,7 +18237,8 @@ def _forecast_ledger(state: dict, body: dict) -> dict:
     # A month still ahead keeps its predictions; one long closed does not.
     predicted = {m: v for m, v in predicted.items()
                  if m in keep or m >= min(keep, default=m)}
-    return {"predicted": predicted, "results": results}
+    in_use = {m: v for m, v in in_use.items() if m in keep or m >= min(keep, default=m)}
+    return {"predicted": predicted, "in_use": in_use, "results": results}
 
 # ----- Shared inbox: who owns which email ----------------------------
 async def _mail_guard(request: Request):
@@ -18628,7 +19046,7 @@ def _shipping_public(cfg: dict) -> dict:
         "ready_time": cfg.get("ready_time") or "",
         "close_time": cfg.get("close_time") or "",
         "collection_option": cfg.get("collection_option") or "I_Need_To_Book_A_Collection",
-        "show_parcelshop": bool(cfg.get("show_parcelshop", False)),
+        "show_parcelshop": False,   # customers never collect from a shop
         "collection_options": (worldoptions.COLLECTION_OPTIONS if worldoptions else []),
         "collection_by_carrier": (cfg.get("collection_by_carrier")
                                   if isinstance(cfg.get("collection_by_carrier"), dict) else {}),
@@ -18763,13 +19181,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                fulfillment_canceler=None, webhook_ensurer=None,
                payment_terms_writer=None, order_writer=None,
                scope_reader=None, tax_id_reader=None, forecast_reader=None,
-               install_checker=None, customer_checker=None) -> None:
+               install_checker=None, customer_checker=None, api_version: str = "") -> None:
     # The write capabilities the server hands over. None of them ever joins any
     # tool registry: the AI can read the store; only the app's own print / Mark
     # made / Dispatch actions can touch tags or fulfillments.
     global _order_tag_writer, _fulfillment_writer, _fulfillment_canceler, _webhook_ensurer
     global _payment_terms_writer, _order_writer, _scope_reader, _tax_id_reader, _forecast_reader
-    global _install_checker, _customer_checker
+    global _install_checker, _customer_checker, _api_version
+    _api_version = api_version
     _customer_checker = customer_checker
     _scope_reader = scope_reader
     _forecast_reader = forecast_reader
@@ -18919,6 +19338,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         _bust_orders()
         _webhook_state["last_at"] = time.time()
         _webhook_state["last_topic"] = str(request.headers.get("x-shopify-topic") or "")
+        _webhook_state["version"] = str(request.headers.get("x-shopify-api-version") or "")[:16]
         _webhook_state["count"] += 1
         try:
             # Deferred, so the whole-store scan never stalls the receiver (a
@@ -25386,8 +25806,6 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             cfg["default_box_id"] = want if want in have else ""
         if "notify_customer" in body:
             cfg["notify_customer"] = bool(body.get("notify_customer"))
-        if "show_parcelshop" in body:
-            cfg["show_parcelshop"] = bool(body.get("show_parcelshop"))
         for tkey in ("ready_time", "close_time"):
             if tkey in body:
                 tv = str(body.get(tkey) or "").strip()
@@ -26077,6 +26495,17 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
 
 
+    @mcp.custom_route("/brand/logo.svg", methods=["GET"])
+    async def brand_logo(request: Request):
+        # The brand's own colours: dark lettering, for a light ground.
+        return _brand_svg("projected-image-logo.svg")
+
+    @mcp.custom_route("/brand/logo-light.svg", methods=["GET"])
+    async def brand_logo_light(request: Request):
+        # The same mark with white lettering, for the sidebar's ink frame,
+        # where the dark lettering would vanish. The teal shield is unchanged.
+        return _brand_svg("projected-image-logo-light.svg")
+
     @mcp.custom_route("/print/production-labels/sign", methods=["POST", "OPTIONS"])
     async def sign_label_doc(request: Request):
         """The print-action extension calls this with the merchant's id token and gets
@@ -26123,8 +26552,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return JSONResponse({"error": "Request too large."}, status_code=413, headers={**_API_HEADERS, **cors})
         raw_ids = str(body.get("ids") or "")[:2000]
         raw_size = str(body.get("size") or "4x6")
-        if raw_size not in ("4x2", "4x3", "4x6", "2x4", "a4"):
+        if raw_size not in LABEL_STOCK:
             raw_size = "4x6"
+        # The action opens on the production printer's saved stock: which roll
+        # is loaded is a shop setting, not something chosen at the print button.
+        prod_size = _load_shipping().get("label_size_production")
+        if prod_size not in LABEL_STOCK:
+            prod_size = _SHIPPING_DEFAULT["label_size_production"]
         if not raw_ids.strip():
             return JSONResponse({"error": "No order ids given."}, status_code=400, headers={**_API_HEADERS, **cors})
         exp = int(time.time()) + 300
@@ -26140,8 +26574,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 else f"https://{request.headers.get('host', '')}")
         path = (f"/print/production-labels?ids={quote(raw_ids, safe='')}"
                 f"&exp={exp}&mode={mode}&sig={sig}")
-        logger.info("print-labels sign: ok ids=%s size=%s", raw_ids[:120], raw_size)
-        return JSONResponse({"url": base + path, "path": path, "expires_in": 300},
+        logger.info("print-labels sign: ok ids=%s size=%s opens=%s", raw_ids[:120], raw_size, prod_size)
+        return JSONResponse({"url": base + path, "path": path, "expires_in": 300, "size": prod_size},
                             headers={**_API_HEADERS, **cors})
 
     @mcp.custom_route("/print/production-labels", methods=["GET", "OPTIONS"])
@@ -26150,7 +26584,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         print modal loads this URL directly (with the embedded id_token appended, the
         same way it loads the app page) and shows it in the print preview, so the
         merchant prints without ever leaving the order. Accepts ?ids=<order ids or
-        GIDs, comma separated> and optional ?size=4x2|4x3|4x6|2x4|a4."""
+        GIDs, comma separated> and optional ?size=4x2|4x3|4x4|4x6|2x4|a4."""
         if request.method == "OPTIONS":
             return PlainTextResponse("", headers=_print_cors(request))
         pre = _pre_checks(request)
@@ -26239,9 +26673,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return HTMLResponse("<p style='font:14px sans-serif;padding:20px'>No orders were selected.</p>",
                                 headers=doc_headers)
 
-        sizes = {"4x2": (101.6, 50.8), "4x3": (101.6, 76.2), "4x6": (101.6, 152.4),
-                 "2x4": (50.8, 101.6), "a4": (210, 297)}
-        w, h = sizes.get(str(request.query_params.get("size") or "4x6"), sizes["4x6"])
+        w, h = LABEL_STOCK_MM.get(str(request.query_params.get("size") or "4x6"), LABEL_STOCK_MM["4x6"])
 
         st_once, dp_once = _load_prod_state(), _load_dispatch()
         results = await asyncio.gather(*[run_production_labels(registry, order_id=i,
@@ -26289,7 +26721,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 size = esc(it.get("production_size", ""))
                 chip = ("<span class='chip'>" + esc(it["glass_type"]) + "</span>") if it.get("glass_type") else ""
                 art = it.get("artwork", it.get("title", ""))
-                row = ("<li class='row'><div class='it'><span class='iqs'>" + qty + "x"
+                # A row with no size (a projector, an accessory, a stock gobo)
+                # has nothing to line up with: its name starts after the
+                # count and wraps, rather than being cut short after a gap.
+                row = ("<li class='row'><div class='" + ("it" if size else "it named wrap") + "'><span class='iqs'>"
+                       + qty + "x"
                        + ((" " + size + "mm") if size else "") + "</span>" + chip
                        + (("<span class='desc'>&quot;" + esc(art) + "&quot;</span>") if art else "")
                        + "</div>")
@@ -26346,6 +26782,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                "body { font-family: 'Bricolage Grotesque', -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; background: #fff; color: #000; }"
                ".sheet { width: " + str(w) + "mm; height: " + str(h) + "mm; padding: " + ("3.5mm 4mm" if compact else "5mm 5.5mm") + ";"
                " overflow: hidden; page-break-after: always; break-after: page; font-size: " + ("13px" if compact else "15px") + ";"
+               # White and printed as such, so nothing laid under a label shows through it.
+               " background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact;"
                " line-height: 1.22; }"
                ".sheet:last-child { page-break-after: auto; break-after: auto; }"
                # Header per the merchant's design: logo over a big company name and a
@@ -26369,6 +26807,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                ".desc { color: #333; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }"
                # Flagged rows may wrap so the reason stays readable.
                ".it.wrap { white-space: normal; overflow: visible; } .it.wrap .desc { overflow: visible; text-overflow: clip; }"
+               ".it.named .iqs { min-width: 0; }"
                ".ctx { font-size: .78em; color: #222; margin-top: .12em; padding-left: 1.6em; }"
                # A dead order must be unmissable at arm's length.
                ".dead { border: 3px solid #000; font-size: 1.68em; font-weight: 800; letter-spacing: .04em;"
@@ -26386,12 +26825,26 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                ".rate .r1 { font-weight: 800; font-size: 1.06em; }"
                ".rate b { font-weight: 800; }"
                + rot_css
-               + "</style></head><body>"
+               # The same rules as the app's label print (30 September): something on
+               # a bench machine put 66px of its own into the page and every label
+               # printed with a blank after it. So nothing beside body prints, and
+               # the labels' box is laid against the top of the page in front of
+               # anything else, so nothing else put into the page can add a page
+               # (unless it is taller than the run), push a label down or cut one
+               # off. The script below
+               # turns the laying on except in WebKit, where A4 runs laid this way
+               # crept up the page a little more on every label.
+               + "@media print { html > :not(head):not(body) { display: none !important; }"
+               " html.lay, html.lay body { position: static !important; }"
+               " html.lay #labels { position: absolute !important; top: 0 !important; left: 0 !important; z-index: 2147483647 !important; } }"
+               + "</style></head><body><div id='labels'>"
                + ("".join("<div class='pw'>" + sh + "</div>" for sh in sheets) if portrait else "".join(sheets))
+               + "</div>"
                # Same shrink-to-fit as the app's preview: step the base font down until the
                # whole order fits its label. Measured only after the label typeface has
                # loaded (2s cap), or the metrics would be the fallback font's.
-               + "<script>(function(){function fit(){document.querySelectorAll('.sheet').forEach(function(s){"
+               + "<script>(function(){if(navigator.vendor!=='Apple Computer, Inc.')document.documentElement.classList.add('lay');"
+               "function fit(){document.querySelectorAll('.sheet').forEach(function(s){"
                "s.style.fontSize='';s.classList.remove('shed');"
                "var b=parseFloat(getComputedStyle(s).fontSize)||13,z=b,soft=b*0.75,f=b*0.6;"
                "while(s.scrollHeight>s.clientHeight&&z>soft){z-=0.5;s.style.fontSize=z+'px';}"
@@ -27006,12 +27459,24 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not code:
             return _oauth_page("Connection failed", "No authorization code returned.")
         try:
-            ok = await google_data.exchange_code(code, _redirect_uri(request))
+            got = await google_data.exchange_code(code, _redirect_uri(request))
         except Exception:
             logger.exception("Google OAuth exchange error")
-            ok = False
-        if not ok:
+            got = {"ok": False, "granted": {}}
+        granted = got.get("granted") or {}
+        names = {"gsc": "Search Console", "ga4": "Analytics"}
+        left = [names[k] for k in ("gsc", "ga4") if granted.get(k) is False]
+        if not got.get("ok"):
+            if granted and len(left) == len(names):
+                return _oauth_page("Nothing was linked",
+                                   "Search Console and Analytics were both left unticked on Google's "
+                                   "screen, so Reactor could read neither. Connect again and leave them ticked.")
             return _oauth_page("Connection failed", "Couldn't complete the connection. Please try again.")
+        if left:
+            kept = [n for k, n in names.items() if granted.get(k)]
+            return _oauth_page("✅ Connected to Google, without " + left[0],
+                               kept[0] + " is linked. " + left[0] + " was left unticked on Google's screen, "
+                               "so Reactor can't read it: connect again and leave it ticked.")
         return _oauth_page("✅ Connected to Google", "Search Console & Analytics are now linked. "
                            "You can close this tab and return to Reactor.")
 
@@ -27212,7 +27677,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         body = await _read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
-        api_version = getattr(sys.modules.get("server"), "API_VERSION", "") or ""
+        api_version = _api_version
         shop_ok, shop_name, currency = False, None, None
         try:
             shop = await _tool_json(registry, "shopify_get_shop", {})
@@ -27278,6 +27743,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             "webhooks": {"ok": bool((_webhook_state.get("ensured") or {}).get("ok")),
                          "detail": (_webhook_state.get("ensured") or {}).get("detail") or "",
                          "last_event_at": (_webhook_state["last_at"] or None),
+                         "version": _webhook_state.get("version") or None,
                          "events": _webhook_state["count"]},
             # The stock bridge: glass booked at the stock app when orders are
             # marked made. Pending = bookings still waiting on a retry.

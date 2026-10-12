@@ -25,13 +25,22 @@ from .config import Config
 
 
 class VarianceEngine:
-    def __init__(self, cfg: Config, cashflow: CashFlowModel):
+    def __init__(self, cfg: Config, cashflow: CashFlowModel, money: str = "cash"):
+        """`money` says what the forecast it is handed is in: "cash", order
+        totals with VAT and shipping (the nightly job), or "net", line-item net
+        sales (the per-product model, off by default). The plan and the cash
+        path are read in the same money, so neither path compares unlike with
+        unlike."""
         self.cfg = cfg
         self.cf = cashflow
+        if money not in ("cash", "net"):
+            raise ValueError(f"money must be 'cash' or 'net', not {money!r}")
+        self.money = money
 
     def monthly_view(self, actual_daily: pd.Series, forecast_daily: pd.DataFrame) -> pd.DataFrame:
-        """actual_daily: date -> net sales (history to as_of). forecast_daily:
-        date, p10, p50, p90 for the total level from as_of+1."""
+        """actual_daily: date -> cash in (order totals, history to as_of).
+        forecast_daily: date, p10, p50, p90 (and `rel`, see _window_band) from
+        as_of+1, in the same money."""
         as_of = pd.Timestamp(self.cfg.as_of).normalize()
         a = pd.Series(actual_daily).astype(float)
         a.index = pd.DatetimeIndex(a.index)
@@ -65,8 +74,21 @@ class VarianceEngine:
             rows.append({"month": m, "method": method, "actual_to_date": actual_mtd if m <= as_of else np.nan,
                          "projected_p10": p10, "projected_p50": p50, "projected_p90": p90})
         out = pd.DataFrame(rows)
+        # The plan in the forecast's own money: its Total Sales row, cash in
+        # with VAT and shipping, the same line the workbook's IN OUT flows call
+        # Gross Sales. It used to be compared with Net Sales, which flattered
+        # every month by about 22%: September 2026 read 12% ahead of
+        # Algorithm 2 when like for like it was 9% short. A plan that names
+        # only net sales is grossed up by the actual years' own ratios.
+        r = self.cf.sales_ratios()
         for name, sc in self.cf.scenarios.items():
-            t = sc.set_index("month")["net_sales"]
+            sc = sc.set_index("month")
+            if self.money == "net":
+                t = sc["net_sales"]
+            elif "total_sales" in sc.columns and float(sc["total_sales"].abs().sum()) > 0:
+                t = sc["total_sales"]
+            else:
+                t = sc["net_sales"] * (1 + r["shipping"] + r["taxes"])
             out[f"target|{name}"] = out["month"].map(t).astype(float)
         # months past the horizon: the scenario scaled by the trailing tracking ratio
         for name in self.cf.scenarios:
@@ -114,9 +136,14 @@ class VarianceEngine:
         mid = float(fm["p50"].sum())
         if mid <= 0:
             return float(fm["p10"].sum()), mid, float(fm["p90"].sum())
+        n_eff = max(1.0, len(fm) / persistence_days)
+        if "rel" in fm.columns:
+            # The unclipped daily width, so a wide month is not cut short by
+            # daily p10s that bottomed out at zero.
+            rel = float((fm["p50"] * fm["rel"]).sum()) / mid / np.sqrt(n_eff)
+            return max(0.0, mid * (1 - rel)), mid, mid * (1 + rel)
         rel_lo = float((fm["p10"] - fm["p50"]).sum()) / mid
         rel_hi = float((fm["p90"] - fm["p50"]).sum()) / mid
-        n_eff = max(1.0, len(fm) / persistence_days)
         return mid * (1 + rel_lo / np.sqrt(n_eff)), mid, mid * (1 + rel_hi / np.sqrt(n_eff))
 
     def _verdict(self, gap_pct: float) -> str:
@@ -139,10 +166,18 @@ class VarianceEngine:
         return "watch"
 
     def cash_view(self, monthly: pd.DataFrame, scenario: str) -> pd.DataFrame:
-        """Push the projected net sales through the scenario's cash mechanics.
-        Gross = net x (1 + shipping ratio + tax ratio) from the actual years."""
-        r = self.cf.sales_ratios()
-        gross = monthly.set_index("month")["projected_p50"] * (1 + r["shipping"] + r["taxes"])
+        """Push the projected cash in through the scenario's cash mechanics.
+        The forecast is already order totals, VAT and shipping in, which is
+        the money the sheet's Gross Sales line holds. It used to be grossed up
+        again by the actual years' ratio (x1.22), as if it were net sales,
+        which drew Algorithm 1's working capital at April 2027 at about
+        153k where like for like it is about 76k."""
+        gross = monthly.set_index("month")["projected_p50"]
+        if self.money == "net":
+            # The per-product model forecasts net sales: put it into cash in
+            # by the actual years' own shipping and tax ratios.
+            r = self.cf.sales_ratios()
+            gross = gross * (1 + r["shipping"] + r["taxes"])
         path = self.cf.project_cash(scenario, gross)
         path["below_buffer"] = path["working_capital"] < self.cfg.cash_buffer
         path["negative"] = path["working_capital"] < 0

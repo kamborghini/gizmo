@@ -80,6 +80,52 @@ for _src, _dst in ((os.path.join(os.path.dirname(__file__), "..", "data", "gobo-
 for v in ("WO_METER_NUMBER", "WO_KEY", "WO_PASSWORD"):
     os.environ.pop(v, None)
 
+# The suite never reaches the network. Twenty-five tests did, quietly: Gmail
+# syncs posted their dummy refresh token to Google, the Settings status and the
+# customs quote asked the test store's real Shopify address, and a label test
+# fetched from the courier. Each passed only because the outside world answered
+# the way it happened to that day. Now every name lookup and every connection
+# outside this machine is refused, and the test that tried fails, naming the
+# host; a test that needs an outside answer gives itself one. Installed before
+# the app is imported, so an import-time attempt is refused too. A proxy
+# setting would carry traffic out through a local port, so none is inherited.
+import socket as _socket, ipaddress as _ipaddress, errno
+for _v in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy",
+           "ANTHROPIC_BASE_URL"):
+    os.environ.pop(_v, None)
+NET_REACHED = []
+def _is_local(h):
+    if h in ("localhost", "testserver"):
+        return True
+    try:
+        return _ipaddress.ip_address(h.split("%", 1)[0]).is_loopback
+    except ValueError:
+        return False
+_REAL_GETADDRINFO = _socket.getaddrinfo
+def _no_network(host, *a, **k):
+    h = host.decode() if isinstance(host, bytes) else str(host or "")
+    if _is_local(h):
+        return _REAL_GETADDRINFO(host, *a, **k)
+    NET_REACHED.append(h)
+    raise _socket.gaierror(_socket.EAI_NONAME, "the test suite does not reach the network: " + h)
+_socket.getaddrinfo = _no_network
+# An address given as numbers skips the lookup (asyncio connects to it
+# directly), so the connection itself is checked as well.
+_REAL_CONNECT, _REAL_CONNECT_EX = _socket.socket.connect, _socket.socket.connect_ex
+def _outside(address):
+    return isinstance(address, tuple) and address and not _is_local(str(address[0]))
+def _no_connect(self, address):
+    if _outside(address):
+        NET_REACHED.append(str(address[0]))
+        raise ConnectionRefusedError("the test suite does not reach the network: " + str(address[0]))
+    return _REAL_CONNECT(self, address)
+def _no_connect_ex(self, address):
+    if _outside(address):
+        NET_REACHED.append(str(address[0]))
+        return errno.ECONNREFUSED
+    return _REAL_CONNECT_EX(self, address)
+_socket.socket.connect, _socket.socket.connect_ex = _no_connect, _no_connect_ex
+
 import jwt
 import server, copilot, worldoptions, pipedrive
 import xero as xero_api
@@ -100,7 +146,19 @@ def tok(sub=None):
     if sub is not None:
         claims["sub"] = str(sub)
     return jwt.encode(claims, SECRET, algorithm="HS256")
-def run(coro): return asyncio.get_event_loop().run_until_complete(coro)
+_RUN_LOOP = None
+
+
+def run(coro):
+    """Run a coroutine on the suite's own loop. Python 3.14 has no implicit
+    loop to borrow (3.12 already warned that asking for one was going away),
+    and asyncio.run() elsewhere closes whatever loop is current, so the suite
+    keeps its own and makes another only if that one was closed."""
+    global _RUN_LOOP
+    if _RUN_LOOP is None or _RUN_LOOP.is_closed():
+        _RUN_LOOP = asyncio.new_event_loop()
+    asyncio.set_event_loop(_RUN_LOOP)
+    return _RUN_LOOP.run_until_complete(coro)
 
 # ---- Fake Shopify order + shop ---------------------------------------------
 ORDER = {
@@ -242,6 +300,40 @@ copilot._install_checker = _install_unknown
 async def _customer_unknown(cid, email):
     return "unknown"
 copilot._customer_checker = _customer_unknown
+# Shopify's answer to the suite's dummy token is a refusal, and that is what the
+# two other readers the routes call on their own give back here: the Settings
+# permissions read (an error, never a scope reported missing) and the customs
+# tax id (empty, so the operator types it). Twelve tests asked the test store's
+# real address for these. A test that needs an answer sets its own.
+async def _scopes_refused(max_age=900.0):
+    return {"scopes": [], "missing": {}, "error": "Shopify refused the suite's dummy token"}
+copilot._scope_reader = _scopes_refused
+async def _tax_id_refused(order_id):
+    return {"tax_id": "", "source": "", "error": "Shopify refused the suite's dummy token"}
+copilot._tax_id_reader = _tax_id_refused
+# Google, likewise. The Gmail syncs that tests start post their dummy refresh
+# token to Google's token door, which refuses it; here that door gives the same
+# refusal word for word (asked once, 2 October 2026) and nothing else on Google
+# answers at all. Every Gmail and Search Console function stays real; a test
+# that wants Gmail to answer stubs _call or _token as before, and a test that
+# swaps httpx.AsyncClient for its own transport still wins.
+import httpx as _httpx
+import google_mail as _google_mail, google_data as _google_data
+def _google_offline(request):
+    if request.url.host == "oauth2.googleapis.com" and request.url.path == "/token":
+        return _httpx.Response(400, json={"error": "invalid_request",
+                                          "error_description": "Could not determine client ID from request."})
+    raise _httpx.ConnectError("the test suite does not reach " + request.url.host, request=request)
+class _RoutedHttpx:
+    """A module's httpx, with every AsyncClient it makes answered by one handler."""
+    def __init__(self, handler):
+        self._handler = handler
+    def __getattr__(self, name):
+        return getattr(_httpx, name)
+    def AsyncClient(self, *a, **k):
+        k.setdefault("transport", _httpx.MockTransport(self._handler))
+        return _httpx.AsyncClient(*a, **k)
+_google_mail.httpx = _google_data.httpx = _RoutedHttpx(_google_offline)
 APP_AUTH = {"session": "", "master": ""}
 MASTER_PW = "test-password-123"
 def ensure_auth():
@@ -565,6 +657,26 @@ def t_status_shipping_row():
     sh = r.json()["shipping"]
     eq(sh["ok"], True, "connected")
     eq(sh["fulfillment"], True, "fulfillment wired")
+
+@test
+def t_settings_names_the_shopify_version_the_server_runs():
+    """Settings said "Connected" and never the Shopify version. Production
+    starts the app as `python server.py`, which Python files under __main__,
+    not "server", so copilot's sys.modules["server"] lookup found nothing and
+    the version was dropped. The suite imports `server` by name, which hid it.
+    The server now hands the version over, and nothing in copilot may find
+    the server by its module name."""
+    held = sys.modules.pop("server")          # the app as production runs it
+    try:
+        r = post("/api/status", {})
+    finally:
+        sys.modules["server"] = held
+    eq(r.status_code, 200, r.text)
+    eq(r.json()["shopify"]["api_version"], server.API_VERSION,
+       "the version the server talks to Shopify with, with no module named server")
+    ok(not re.search(r"sys\.modules(\.get\(|\[)\s*[\'\"]server[\'\"]",
+                     open(os.path.join(os.path.dirname(copilot.__file__), "copilot.py"), encoding="utf-8").read()),
+       "copilot never looks the server up by module name: in production it is __main__")
 
 @test
 def t_backup_excludes_secret():
@@ -1762,61 +1874,69 @@ def t_failed_dispatched_tag_is_reported():
         copilot._order_tag_writer = saved
 
 @test
-def t_pickup_point_services_are_surfaced():
-    """The cheaper Access Point services only come back when the quote asks to
-    deliver to a shop, so the route must run BOTH quotes and merge them."""
-    reset_dispatch(); reset_prod()
-    post("/api/shipping/config", {"op": "set", "show_parcelshop": True})
-    r = post("/api/dispatch/quote", {"order_id": 12345, "box": BOX})
+def t_shop_delivery_is_never_offered():
+    """Business rule (Cameron, 2026-10-09): "our customers should never collect
+    from shop". No pickup-point quote is asked for, no Access Point or ParcelShop
+    service is offered, and the old setting that switched them on is ignored,
+    even when it is still saved as on."""
+    reset_dispatch(); reset_prod(); _ship_cfg()
+    cfg = copilot._load_shipping(); cfg["show_parcelshop"] = True; copilot._save_shipping(cfg)
+    r = post("/api/shipping/config", {"op": "set", "show_parcelshop": True})
     eq(r.status_code, 200, r.text)
-    opts = r.json()["options"]
-    codes = [o["service_type_code"] for o in opts]
-    ok("UPS_Express_Saver_AP" in codes, "the cheaper Access Point service is offered: " + str(codes))
-    eq(codes.count("UPS_Express_Saver"), 1, "the door service is not duplicated")
-    ap = [o for o in opts if o["service_type_code"] == "UPS_Express_Saver_AP"][0]
-    eq(ap["delivery_dropoff"], True, "flagged as collect-from-shop")
-    eq(ap["delivery_shops"][0]["name"], "Corner Shop", "the shop is named")
-    eq(opts[0]["amount"], min(o["amount"] for o in opts if o["amount"]), "still cheapest first")
-    # a door option must never be mislabelled
-    door = [o for o in opts if o["service_type_code"] == "UPS_Express_Saver"][0]
-    eq(door["delivery_dropoff"], False, "door service not flagged")
-    post("/api/shipping/config", {"op": "set", "show_parcelshop": False})
-
-@test
-def t_booking_an_access_point_sends_the_shop():
-    reset_dispatch(); reset_prod()
-    holder = {}
+    holder = {"xmls": []}
     async def cap(service, action, inner, retryable=True):
-        if service == "ShipmentService":
-            holder["xml"] = inner; return ET.fromstring(BOOK_XML)
-        return ET.fromstring(AP_XML if "IsDeliveryDropoffRequired" in inner else RATE_XML)
+        holder["xmls"].append(inner)
+        return ET.fromstring(AP_XML if "IsDeliveryDropoffRequired" in inner else RATE_XML.replace(
+            "</wsRateService>", AP_XML.split("<wsRateService>", 1)[1].split("</wsRateService>", 1)[0] + "</wsRateService>"))
     saved = worldoptions._soap_call; worldoptions._soap_call = cap
     try:
-        opt = {"service_type_code": "UPS_Express_Saver_AP", "package_type_code": "UPS_My_Packaging",
-               "carrier_name": "UPS", "service_name": "Express Saver Access Point", "amount": 7.44,
-               "delivery_dropoff": True,
-               "delivery_shops": [{"id": "UPS991", "name": "Corner Shop", "street": "7 Market St",
-                                    "city": "Manchester", "postcode": "M1 3AA"}]}
-        r = post("/api/dispatch/book", {"order_id": 12345, "option": opt, "box": BOX})
+        r = post("/api/dispatch/quote", {"order_id": 12345, "box": BOX})
         eq(r.status_code, 200, r.text)
-        xml = holder["xml"]
-        ok("<sd:DeliveryDropOffInfo>" in xml, "shop block sent")
-        ok("<sd:DropOffId>UPS991</sd:DropOffId>" in xml, "shop id sent")
-        ok("<sd:IsDeliveryDropoffRequired>true</sd:IsDeliveryDropoffRequired>" in xml, "flag sent")
-        ok(xml.index("<sd:CustomerReference>") < xml.index("<sd:DeliveryDropOffInfo>")
-           < xml.index("<sd:PackageDetails>"), "XSD sequence order kept")
-        eq(r.json()["delivery_shop"]["name"], "Corner Shop", "reported back for the UI")
+        body = r.json()
+        codes = [o["service_type_code"] for o in body["options"]]
+        ok(not any("IsDeliveryDropoffRequired" in x for x in holder["xmls"]), "no pickup-point quote is asked for")
+        ok("UPS_Express_Saver_AP" not in codes, "an Access Point service that arrives anyway is not offered: " + str(codes))
+        ok("UPS_Express_Saver" in codes, "while its door service is")
+        ok(not any(o.get("delivery_dropoff") for o in body["options"]), "nothing is collect-from-shop")
+        eq(body["show_parcelshop"], False, "and the window is told shop services are off")
+        c = post("/api/custom/quote", {"address": dict(CUST_ADDR), "box": dict(BOX)})
+        eq(c.status_code, 200, c.text)
+        ok("UPS_Express_Saver_AP" not in [o["service_type_code"] for o in c.json()["options"]], "a custom shipment's quote neither")
+    finally:
+        worldoptions._soap_call = saved
+    got = post("/api/shipping/config", {"op": "get"}).json()["config"]
+    ok(not got.get("show_parcelshop"), "the setting cannot be switched on")
+
+
+@test
+def t_a_shop_delivery_is_never_booked():
+    """The rule's backstop: an option that would deliver to a pickup shop is
+    refused before anything reaches World Options, from the Dispatch window and
+    from a custom shipment alike."""
+    reset_dispatch(); reset_prod(); _ship_cfg()
+    sent = []
+    async def cap(service, action, inner, retryable=True):
+        sent.append(service)
+        return ET.fromstring(BOOK_XML if service == "ShipmentService" else RATE_XML)
+    saved = worldoptions._soap_call; worldoptions._soap_call = cap
+    shop = [{"id": "UPS991", "name": "Corner Shop", "street": "7 Market St", "city": "Manchester", "postcode": "M1 3AA"}]
+    try:
+        for opt in ({"service_type_code": "UPS_Express_Saver_AP", "package_type_code": "UPS_My_Packaging",
+                     "carrier_name": "UPS", "service_name": "Express Saver Access Point", "amount": 7.44,
+                     "delivery_dropoff": True, "delivery_shops": shop},
+                    {"service_type_code": "UPS_Express_Saver_AP", "package_type_code": "UPS_My_Packaging",
+                     "carrier_name": "UPS", "amount": 7.44, "delivery_dropoff": False, "delivery_shops": []},
+                    {"service_type_code": "EVRI_PARCELSHOP", "service_full": "Evri ParcelShop Next Day",
+                     "carrier_name": "EVRISEND", "amount": 3.10}):
+            r = post("/api/dispatch/book", {"order_id": 12345, "option": opt, "box": BOX})
+            eq(r.status_code, 400, "refused: " + r.text)
+            ok("pickup shop" in r.json().get("error", ""), "and says why: " + r.text)
+            c = post("/api/custom/book", custom_body(id="csnoshop" + str(len(sent)), option=opt))
+            eq(c.status_code, 400, "a custom shipment is refused too: " + c.text)
+        eq([x for x in sent if x == "ShipmentService"], [], "nothing was booked at World Options")
     finally:
         worldoptions._soap_call = saved
 
-@test
-def t_access_point_without_a_shop_is_refused():
-    reset_dispatch(); reset_prod()
-    opt = {"service_type_code": "UPS_Express_Saver_AP", "package_type_code": "UPS_My_Packaging",
-           "carrier_name": "UPS", "delivery_dropoff": True, "delivery_shops": []}
-    r = post("/api/dispatch/book", {"order_id": 12345, "option": opt, "box": BOX})
-    eq(r.status_code, 400, "refused rather than shipping nowhere")
-    ok("did not return a shop" in r.json()["error"], "explains why")
 
 @test
 def t_one_failed_quote_does_not_lose_the_other():
@@ -1851,14 +1971,6 @@ def t_parcelshop_services_are_hidden_by_default():
        "no pickup-point request is made when the setting is off")
 
 @test
-def t_parcelshop_can_be_switched_on():
-    post("/api/shipping/config", {"op": "set", "show_parcelshop": True})
-    r = post("/api/dispatch/quote", {"order_id": 12345, "box": BOX})
-    codes = [o["service_type_code"] for o in r.json()["options"]]
-    ok(any(x.endswith("_AP") for x in codes), "shown when asked for: " + str(codes))
-    post("/api/shipping/config", {"op": "set", "show_parcelshop": False})
-
-@test
 def t_diagnose_reports_what_each_setting_returns():
     r = post("/api/dispatch/diagnose", {"order_id": 12345, "box": BOX})
     eq(r.status_code, 200, r.text)
@@ -1867,10 +1979,11 @@ def t_diagnose_reports_what_each_setting_returns():
     ok("As the app quotes now" in labels, "baseline row present")
     ok(any("signature" in l.lower() for l in labels), "signature variants tried")
     ok(any("UPS only" in l for l in labels), "per-carrier variant tried")
-    # the pickup-point variant finds services the baseline did not
-    codes = [x["code"] for x in d["extra_found"]]
-    ok("UPS_Express_Saver_AP" in codes,
-       "reports the service that only appears under another setting: " + str(d["extra_found"]))
+    # Customers never collect from a shop, so no pickup-shop variant is tried and
+    # no shop service is ever suggested as missing.
+    ok(not any("pickup shop" in l.lower() for l in labels), "no pickup-shop variant: " + str(labels))
+    codes = [x["code"] for x in d["extra_found"]] + [s["code"] for row in d["rows"] for s in row["services"]]
+    ok(not any(c.upper().endswith("_AP") for c in codes), "no Access Point service is reported: " + str(codes))
     ok(all(x["name"].strip() for x in d["extra_found"]), "every reported service is named, not a bare code")
     base = d["rows"][0]["services"]
     ok(base and all(not s.get("new") for s in base), "baseline rows are never marked new")
@@ -2272,6 +2385,54 @@ def t_no_nillable_string_reaches_the_service_as_null():
         worldoptions._soap_call = saved
 
 @test
+def t_a_new_field_in_the_customs_blocks_shows_up_here():
+    """The test above walks the address, shipping and billing blocks against
+    the saved schema. The customs blocks, sent on international bookings only,
+    were not walked, and by October 2026 World Options had added four optional
+    strings to them (the receiver's EORI number, and three product ids on each
+    goods line) that no test noticed. Every field in them is now sent or named
+    below as not sent, so the next new field of any kind fails here, not on a
+    booking. Whether the new four should be sent is a question for World Options."""
+    NOT_SENT = {
+        "wsAddlShipmentDetail": {"DeliveryType", "TotalCalculatedValue", "ReceiverEORINumber",
+                                 "TradeDocuments"},
+        "wsAddlShipmentDetail.GoodsDetail": {"ManufacturerProductID", "MerchantProductID",
+                                             "StandardisedProductID"},
+    }
+    holder = {}
+    async def cap(service, action, inner, retryable=True):
+        holder["xml"] = inner
+        return ET.fromstring(BOOK_XML)
+    saved = worldoptions._soap_call; worldoptions._soap_call = cap
+    try:
+        customs = {"eori": "GB123456789000", "export_reason": "Sale", "trade_term": "DAP",
+                   "invoice_number": "#104239", "receiver_tax_id": "DE-TAX-1",
+                   "goods": [{"description": "Glass projection gobo", "quantity": 2,
+                              "unit_price": 62.5, "hs": "70200080", "country": "GB", "weight": 0.1}],
+                   "total_value": 125.0}
+        run(worldoptions.book({"service_type_code": "UPS_Express", "package_type_code": "UPS_My_Packaging",
+                               "carrier_name": "UPS"},
+                              {"postcode": "LS1 1AA", "country": "GB"},
+                              {"postcode": "10115", "country": "DE", "city": "Berlin"},
+                              [{"width": 20, "length": 15, "depth": 8, "weight": 0.6}], customs=customs))
+        x = holder["xml"]
+        blocks = {"wsAddlShipmentDetail": r"<wo:AdditionalShipmentDetail>(.*?)</wo:AdditionalShipmentDetail>",
+                  "wsAddlShipmentDetail.GoodsDetail":
+                      r"<ad:wsAddlShipmentDetail\.GoodsDetail>(.*?)</ad:wsAddlShipmentDetail\.GoodsDetail>"}
+        for tname, pattern in blocks.items():
+            body = re.search(pattern, x, re.S)
+            ok(body, tname + " is in the envelope")
+            fields = _xsd_sequence(tname)
+            ok(fields and set(_xsd_nillable_strings(tname)) <= set(fields), tname + " is in the saved schema")
+            for el in fields:
+                if el not in NOT_SENT[tname]:
+                    ok(re.search(r"<ad:%s>" % el, body.group(1)),
+                       tname + "." + el + " is neither sent nor named as deliberately not sent")
+            eq(NOT_SENT[tname] - set(fields), set(), tname + ": a name listed as not sent is in the schema")
+    finally:
+        worldoptions._soap_call = saved
+
+@test
 def t_the_merchant_pays_for_the_carriage_not_the_customer():
     # TransportationPayorTypes begins with Bill_To_Receiver, so saying nothing bills
     # the CUSTOMER for the shipping. It is stated explicitly on every booking.
@@ -2508,12 +2669,16 @@ def t_an_unfetchable_link_is_kept_not_lost():
     copilot._save_dispatch_labels(778, [{"type": "url", "value": "/GetLabel.ashx?id=9"}])
     async def dead_fetch(url):
         return {}
-    saved_fetch = worldoptions.fetch_label; worldoptions.fetch_label = dead_fetch
+    # The evidence panel asks the link what it answers; a dead link answers 404.
+    async def dead_link(url, timeout):
+        return 404, b"<html>Not Found</html>", url
+    saved = (worldoptions.fetch_label, worldoptions._get_label_bytes)
+    worldoptions.fetch_label, worldoptions._get_label_bytes = dead_fetch, dead_link
     try:
         r = post("/api/dispatch/label", {"order_id": 778})
         eq(r.json()["labels"][0]["type"], "url", "the link survives when the download fails")
     finally:
-        worldoptions.fetch_label = saved_fetch
+        worldoptions.fetch_label, worldoptions._get_label_bytes = saved
 
 @test
 def t_label_urls_only_fetch_from_world_options():
@@ -2993,15 +3158,205 @@ def t_print_cors_credentials_go_only_to_this_shop():
 
 @test
 def t_dependencies_are_pinned_and_the_mcp_fix_is_in():
-    reqs = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                             "requirements.txt"), encoding="utf-8").read()
+    reqs = open(os.path.join(HERE, "requirements.in"), encoding="utf-8").read()
     for line in reqs.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
         ok("==" in line, "pinned exactly: " + line)
-    ok("mcp[cli]==1.28.1" in reqs,
-       "mcp is on the release that fixes session hijacking (PYSEC-2026-3481/2/3)")
+    m = re.search(r"^mcp(?:\[[a-z,]+\])?==(\d+)\.(\d+)\.(\d+)$", reqs, re.M)
+    ok(m and tuple(int(x) for x in m.groups()) >= (1, 28, 1),
+       "mcp is on or after the release that fixes session hijacking (PYSEC-2026-3481/2/3)")
+
+
+@test
+def t_connector_sessions_expire_by_our_choice():
+    """mcp 1.30 started closing idle sessions after 30 minutes by default. It
+    is stated in server.py so a library update cannot change it unseen."""
+    import server as srv
+    eq(srv.MCP_SESSION_IDLE_SECS, 1800, "thirty minutes")
+    eq(srv.MCP_HTTP["session_idle_timeout"], srv.MCP_SESSION_IDLE_SECS, "and it is what the endpoint is built with")
+    import inspect as _ins
+    ok("mcp.streamable_http_app(**MCP_HTTP)" in _ins.getsource(srv.build_app), "by the app exactly as served")
+
+
+def _lock_packages(text: str) -> dict:
+    """name -> (version, hashes) from a hashed lock written by `make lock`."""
+    out, cur = {}, None
+    for raw in text.splitlines():
+        line = raw.strip()
+        m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?==([^\s;\\]+)", raw)
+        if m:
+            cur = m.group(1).lower().replace("_", "-")
+            out[cur] = [m.group(2), 0]
+        elif line.startswith("--hash=sha256:") and cur:
+            out[cur][1] += 1
+    return out
+
+
+@test
+def t_the_locks_match_their_pins_and_carry_hashes():
+    """requirements.in and forecast/requirements-service.in hold the exact
+    pins; `make lock` compiles each into the hashed lock beside it, which is
+    what the images and CI install. A pin raised without recompiling, or a
+    package in the lock without a hash, fails here rather than in a build."""
+    for pins_path, lock_path in (("requirements.in", "requirements.txt"),
+                                 ("forecast/requirements-service.in", "forecast/requirements-service.txt"),
+                                 ("forecast/requirements-m5.in", "forecast/requirements-m5.txt")):
+        pins = open(os.path.join(HERE, pins_path), encoding="utf-8").read()
+        lock_text = open(os.path.join(HERE, lock_path), encoding="utf-8").read()
+        ok("pip-compile --generate-hashes" in lock_text.split("\n", 3)[1], lock_path + " says how it is rebuilt")
+        lock = _lock_packages(lock_text)
+        ok(len(lock) >= 10, lock_path + " lists every package, not just the direct ones")
+        for name, (ver, hashes) in lock.items():
+            ok(hashes >= 1, lock_path + ": " + name + " has a hash")
+        for line in pins.splitlines():
+            m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?==(\S+)", line.strip())
+            if not m:
+                continue
+            name = m.group(1).lower().replace("_", "-")
+            ok(name in lock, lock_path + " has " + name)
+            eq(lock[name][0], m.group(2), lock_path + ": " + name + " is the version " + pins_path + " pins")
+    m5 = _lock_packages(open(os.path.join(HERE, "forecast", "requirements-m5.txt"), encoding="utf-8").read())
+    service = _lock_packages(open(os.path.join(HERE, "forecast", "requirements-service.txt"), encoding="utf-8").read())
+    for name, (ver, _h) in service.items():
+        eq(m5.get(name, [None])[0], ver, "the M5 lock carries the whole service at its versions: " + name)
+    for extra in ("forecast/requirements.txt",):
+        for line in open(os.path.join(HERE, extra), encoding="utf-8").read().splitlines():
+            line = line.split("#")[0].strip()
+            if line:
+                ok(re.match(r"^[A-Za-z0-9._-]+==\S+$", line), extra + " pins exactly: " + line)
+
+
+@test
+def t_the_suite_cannot_reach_the_network():
+    """The guard itself: a name, an address given as numbers (which skips the
+    name lookup on the async path) and a name that merely starts like a
+    loopback address are all refused, and loopback still works. The attempts
+    are taken back off the record so the run loop does not charge this test."""
+    import httpx as _hx
+    before = len(NET_REACHED)
+    try:
+        for url in ("https://example.com/", "http://192.0.2.1/", "http://127.0.0.1.nip.io/"):
+            for how in ("sync", "async"):
+                try:
+                    if how == "sync":
+                        _hx.get(url, timeout=2)
+                    else:
+                        run(_hx.AsyncClient(timeout=2).get(url))
+                    ok(False, how + " " + url + " reached the network")
+                except (_hx.ConnectError, OSError):
+                    pass
+        hosts = set(NET_REACHED[before:])
+        ok({"example.com", "192.0.2.1", "127.0.0.1.nip.io"} <= hosts, hosts)
+        ok(_is_local("127.0.0.1") and _is_local("::1") and not _is_local("127.0.0.1.nip.io"))
+        ok(not any(v in os.environ for v in ("HTTPS_PROXY", "https_proxy", "ANTHROPIC_BASE_URL")),
+           "no proxy or alternative service address is inherited")
+    finally:
+        del NET_REACHED[before:]
+
+
+@test
+def t_the_permissions_settings_shows_are_read_from_shopify():
+    """The suite gives the routes a refusing stand-in for this reader, so the
+    real one is held here: it asks Shopify what the installation may do, names
+    each write the app needs that is missing, keeps a good answer for a while,
+    and reports a failed read as unknown, never as permissions missing."""
+    seen = []
+    answer = {}
+    async def fake_request(method, path, **kw):
+        seen.append((method, path, kw.get("body", {}).get("query", "")))
+        if isinstance(answer.get("raise"), Exception):
+            raise answer["raise"]
+        return answer["data"]
+    saved = (server._request, dict(server._granted_scopes))
+    server._request = fake_request
+    try:
+        server._granted_scopes.update({"at": 0.0, "scopes": None, "error": ""})
+        answer["data"] = {"data": {"currentAppInstallation": {"accessScopes": [
+            {"handle": "read_orders"}, {"handle": "write_orders"}, {"handle": "write_fulfillments"}]}}}
+        got = run(server.shopify_granted_scopes())
+        ok("currentAppInstallation" in seen[0][2] and seen[0][:2] == ("POST", "graphql.json"), seen)
+        eq(got["error"], "")
+        eq(set(got["missing"]), {"write_merchant_managed_fulfillment_orders", "write_payment_terms"},
+           "each missing write is named")
+        ok(all(got["missing"].values()), "with what it is for")
+        run(server.shopify_granted_scopes())
+        eq(len(seen), 1, "a good answer is kept rather than asked again")
+        server._granted_scopes.update({"at": 0.0, "scopes": None, "error": ""})
+        answer["raise"] = RuntimeError("Shopify refused the token")
+        got = run(server.shopify_granted_scopes())
+        eq((got["scopes"], got["missing"]), ([], {}), "a failed read claims nothing is missing")
+        ok("refused" in got["error"], got)
+    finally:
+        server._request = saved[0]
+        server._granted_scopes.clear(); server._granted_scopes.update(saved[1])
+
+
+@test
+def t_node_is_chosen_in_one_place():
+    """CI ran whatever Node the runner image carried until the workflows named
+    one, and then each named it for itself. .nvmrc holds it now: every
+    setup-node step reads that file, and package.json's floor is the same."""
+    major = open(os.path.join(HERE, ".nvmrc")).read().strip()
+    ok(re.fullmatch(r"\d+", major), ".nvmrc holds a major version: %r" % major)
+    steps = 0
+    for wf in sorted(glob.glob(os.path.join(HERE, ".github", "workflows", "*.yml"))):
+        text = open(wf, encoding="utf-8").read()
+        name = os.path.basename(wf)
+        ok("node-version:" not in text, name + " names a Node version of its own")
+        eq(text.count("actions/setup-node@"), text.count("node-version-file: .nvmrc"),
+           name + ": every setup-node step reads .nvmrc")
+        steps += text.count("node-version-file: .nvmrc")
+    ok(steps >= 2, "the test job and the weekly audit both set Node up")
+    eq(json.load(open(os.path.join(HERE, "package.json")))["engines"]["node"], ">=" + major)
+
+
+@test
+def t_shopify_deploys_use_a_pinned_tool():
+    """A deploy sends the app's permissions, extensions and webhook version to
+    the store at once. Run as @latest, a new release of Shopify's tool could
+    change what it sends with nothing here changing, so the Makefile names
+    the version and its deploy only stages; releasing is its own step."""
+    mk = open(os.path.join(HERE, "Makefile"), encoding="utf-8").read()
+    ok(re.search(r"^SHOPIFY = npx --yes @shopify/cli@\d+\.\d+\.\d+$", mk, re.M),
+       "the Makefile pins an exact version of Shopify's tool")
+    deploy = mk.split("\nshopify-deploy:\n", 1)[1].split("\n", 1)[0]
+    ok("app deploy --no-release" in deploy, "and its deploy stages without releasing: " + deploy)
+    for f in ("README.md", "Makefile", "forecast/README.md"):
+        ok("@shopify/cli@latest" not in open(os.path.join(HERE, f), encoding="utf-8").read(),
+           f + " deploys with whatever version is newest")
+
+
+@test
+def t_every_image_is_pinned_by_digest_and_runs_the_tested_python():
+    """A build must get exactly the image that was tested: a tag alone moves
+    whenever the image is rebuilt. And the images run the Python the suites
+    ran on in CI."""
+    ci = open(os.path.join(HERE, ".github", "workflows", "tests.yml"), encoding="utf-8").read()
+    tested = set(re.findall(r"python-version: '(\d+\.\d+)'", ci))
+    eq(len(tested), 1, "CI tests one Python")
+    for path in ("Dockerfile", os.path.join("forecast", "Dockerfile")):
+        froms = re.findall(r"^FROM\s+(\S+)", open(os.path.join(HERE, path), encoding="utf-8").read(), re.M)
+        ok(froms, path + " has a base image")
+        for ref in froms:
+            ok(re.search(r"@sha256:[0-9a-f]{64}$", ref), path + " pins " + ref + " by digest")
+            m = re.match(r"python:(\d+\.\d+)", ref)
+            ok(m and m.group(1) in tested, path + " runs the Python CI tests: " + ref)
+
+
+@test
+def t_the_google_service_account_transport_is_installed():
+    """requests was dropped on 2026-09-07 as unused, but google-auth reaches
+    Google through it, imported only when the service-account sign-in runs:
+    a fresh deploy could not sign in that way, and the local environment hid
+    it. CI installs from the lock alone, so this import is the check."""
+    from google.auth.transport.requests import Request
+    ok(Request, "google-auth's requests transport imports")
+    pins = open(os.path.join(HERE, "requirements.in"), encoding="utf-8").read()
+    ok(re.search(r"^google-auth\[requests\]==", pins, re.M), "and requirements.in asks for it by name")
+    lock = open(os.path.join(HERE, "requirements.txt"), encoding="utf-8").read()
+    ok(re.search(r"^requests==", lock, re.M), "so the lock carries requests")
 
 @test
 def t_app_errors_are_recorded_and_surfaced():
@@ -3043,12 +3398,53 @@ def t_weekly_snapshot_writes_once_a_week_and_excludes_credentials():
         ok("wo_secret" not in n and "google_oauth" not in n,
            "no credential file in a snapshot: " + n)
 
+def _oldest_accessible_shopify_version(now=None) -> str:
+    """Shopify's rule: a version is released on the 1st of its quarter at
+    17:00 UTC and stays accessible until the 16th of the same month a year
+    later at 15:00 UTC (2025-10 until 2026-10-16), then is silently served
+    from the oldest one still accessible."""
+    from datetime import datetime as _dt, timezone as _tz
+    now = now or _dt.now(_tz.utc)
+    live = []
+    for y in range(now.year - 2, now.year + 1):
+        for m in (1, 4, 7, 10):
+            released = _dt(y, m, 1, 17, tzinfo=_tz.utc)
+            gone = _dt(y + 1, m, 16, 15, tzinfo=_tz.utc)
+            if released <= now < gone:
+                live.append("%d-%02d" % (y, m))
+    return min(live)
+
+
 @test
 def t_the_shopify_api_version_is_supported():
-    # 2024-10 fell out of Shopify's 12-month support window, and an unsupported
-    # version is silently served from the oldest supported one.
+    """2024-10 fell out of Shopify's support window, and an unsupported version
+    is silently served from the oldest supported one. The floor is worked out
+    from today's date, not written down, so a pin that ages out fails here
+    rather than months later (a written "2025-10" would have passed after
+    2026-10-16, when 2025-10 stopped being served)."""
+    from datetime import datetime as _dt, timezone as _tz
+    eq(_oldest_accessible_shopify_version(_dt(2026, 10, 2, tzinfo=_tz.utc)), "2025-10", "the rule, checked")
+    eq(_oldest_accessible_shopify_version(_dt(2026, 10, 17, tzinfo=_tz.utc)), "2026-01", "2025-10 goes on the 16th")
+    floor = _oldest_accessible_shopify_version()
     import server as srv
-    ok(srv.API_VERSION >= "2025-10", "on a supported version, not " + srv.API_VERSION)
+    ok(srv.API_VERSION >= floor, "the Admin API on a served version, not " + srv.API_VERSION)
+    pins = {"shopify.app.toml": open(os.path.join(HERE, "shopify.app.toml"), encoding="utf-8").read()}
+    for ext in sorted(glob.glob(os.path.join(HERE, "extensions", "*", "shopify.extension.toml"))):
+        pins[os.path.relpath(ext, HERE)] = open(ext, encoding="utf-8").read()
+    found = []
+    for name, text in pins.items():
+        for v in re.findall(r'^\s*api_version\s*=\s*["\'](\d{4}-\d{2})["\']', text, re.M):
+            found.append(name)
+            ok(v >= floor, name + " pins " + v + ", older than the oldest served version " + floor)
+    ok({"shopify.app.toml", os.path.join("extensions", "print-label-order", "shopify.extension.toml"),
+        os.path.join("extensions", "print-label-bulk", "shopify.extension.toml")} <= set(found),
+       "every known pin was read, so none is skipped unchecked: " + ", ".join(sorted(found)))
+    fc = re.search(r'^API_VERSION = os\.environ\.get\("SHOPIFY_API_VERSION", "(\d{4}-\d{2})"\)',
+                   open(os.path.join(HERE, "forecast", "ingest.py"), encoding="utf-8").read(), re.M)
+    ok(fc and fc.group(1) >= floor, "and the forecast's own reads")
+    eq(fc and fc.group(1), re.search(r'"SHOPIFY_API_VERSION", "(\d{4}-\d{2})"',
+                                     open(os.path.join(HERE, "server.py"), encoding="utf-8").read()).group(1),
+       "the forecast's default is the app's, so one move moves both")
 
 @test
 def t_customs_values_are_remembered_per_product():
@@ -3481,6 +3877,29 @@ def t_a_tag_write_retires_the_snapshot_immediately():
             run(copilot.run_production_labels({}, tag="IP"))
             eq(calls["n"], first + 1, "and the write forced a re-read")
         with_cache(go)
+    finally:
+        copilot._tool_json = saved
+
+@test
+def t_the_queue_counts_ride_along_from_the_same_sweep():
+    # The mix (2026-10-06): the Production Manager shows the size of every flow
+    # queue at once, as counters. They come back with whichever queue was asked
+    # for, from the sweep that load already made: no second Shopify call.
+    orders = QUEUE_ORDERS + [
+        {"id": 999, "order_number": 3, "name": "#3", "created_at": "2026-08-12T09:00:00Z",
+         "tags": "Unprocessed", "line_items": [], "customer": {}, "shipping_address": {}},
+        {"id": 1000, "order_number": 4, "name": "#4", "created_at": "2026-08-12T09:00:00Z",
+         "tags": "IP, Rush", "line_items": [], "customer": {}, "shipping_address": {}},
+    ]
+    calls, tools = sweep_counter(orders)
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        res = with_cache(lambda: run(copilot.run_production_labels({}, tag="PC")))
+        eq(res.get("counts"), {"unprocessed": 1, "make": 2, "ship": 1}, "every flow queue is counted")
+        eq([o["id"] for o in res["orders"]], [888], "the queue asked for is unchanged")
+        eq(calls["n"], 1, "from the one sweep")
+        one = run(copilot.run_production_labels({}, order_id=12345))
+        ok("counts" not in one, "the one-order deep link swept nothing, so it counts nothing")
     finally:
         copilot._tool_json = saved
 
@@ -4074,6 +4493,20 @@ def t_a_signed_order_event_retires_the_order_snapshot():
     eq(r.status_code, 200, r.text)
     ok(copilot._orders_epoch > before, "the snapshot was retired")
     ok(copilot._webhook_state["count"] >= 1, "and the event was counted")
+
+@test
+def t_settings_names_the_version_shopify_sends_order_events_in():
+    """The order subscriptions keep the Shopify version they were made with,
+    and nothing showed which: an old one only moves forward, silently, when
+    Shopify retires it. Each event says its version in a header; the last one
+    is kept and Settings shows it beside the time of the last event."""
+    copilot._webhook_seen.clear()
+    raw = json.dumps({"id": 3}).encode()
+    h = dict(wh_headers(raw, delivery="ev-version"), **{"X-Shopify-API-Version": "2026-10"})
+    eq(client.post("/webhooks/orders", content=raw, headers=h).status_code, 200)
+    eq(post("/api/status", {}).json()["webhooks"]["version"], "2026-10")
+    page = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+    ok("', Shopify version ' + wh.version" in page, "and the Live updates row says it")
 
 @test
 def t_an_unsigned_or_missigned_event_is_refused():
@@ -5610,6 +6043,7 @@ def t_pipedrive_survey_names_what_would_not_survive_an_import():
             ("organizations", "v2"): {"data": []},
             ("activities", "v2"): {"data": [{"id": 5, "type": "site"}]},
             ("leads", "v1"): {"data": []},
+            ("leads/archived", "v1"): {"data": [{"id": "l1"}, {"id": "l2"}]},
         }
         async def fake_get(path, params=None, version="v2"):
             if path == "deals/archived":
@@ -5625,6 +6059,7 @@ def t_pipedrive_survey_names_what_would_not_survive_an_import():
             eq(j["account"]["company"], "Projected Image")
             eq(j["counts"]["deals"], 2)
             eq(j["counts"]["archived_deals"], 1, "the back catalogue is counted separately")
+            eq(j["counts"]["archived_leads"], 2, "and so are archived leads, which /v1/leads leaves out")
             warn = " ".join(j["warnings"])
             ok("2 pipelines are in use" in warn, warn)
             ok("more than one currency" in warn, warn)
@@ -6130,6 +6565,208 @@ def t_a_stock_gobo_prints_its_name_not_a_check():
 
 
 @test
+def t_a_gobo_sold_with_a_projector_is_cut_for_that_projector():
+    """Order #104453 printed "1x CHECK No model specified on this item" twice:
+    once for a "Single Colour Glass Original With Projector" gobo, which the
+    Quote Engine sells with no fixture because its fixture is the projector on
+    the same order, and once for the projector itself, which is not a gobo. A
+    flagged row drops the item's name, so the bench could not tell them apart.
+
+    Cameron's rulings (2026-10-02): a projector or accessory prints by name with
+    no CHECK and uses no glass; a With Projector gobo is cut for the projector on
+    its order, through the Projected Image row in the size list that names its
+    wattage; two projector sizes, or none, is a CHECK that says so; a plain
+    fixture-less custom gobo keeps its CHECK."""
+    sheet = copilot._gobo_sizes()
+    ok(any(r[0] == "projected image" for r in sheet.get("rows") or []),
+       "the size list has its Projected Image rows")
+    def gobo(**kw):
+        li = {"title": "Custom Gobos", "quantity": 1, "product_id": 900, "properties": [],
+              "sku": "SCGOWPIH", "variant_title": "Single Colour Glass Original With Projector (Quote) / IH",
+              "name": "Custom Gobos - Single Colour Glass Original With Projector (Quote) / IH"}
+        li.update(kw)
+        return li
+    def proj(title, sku, variant=None, qty=1, pid=901):
+        return {"title": title, "quantity": qty, "product_id": pid, "properties": [], "sku": sku,
+                "variant_title": variant, "name": title + (" - " + variant if variant else "")}
+    def shape(*lines, types=None, email="buyer@acme.co.uk"):
+        o = {"id": 1, "name": "#104453", "order_number": 104453, "note": "", "tags": "Unprocessed",
+             "email": email, "line_items": list(lines)}
+        return copilot._shape_label_order(o, {}, cache=copilot._gobo_sizes(), types=types)["items"]
+    types = {900: "Custom Gobos", 901: "Projector", 902: "Projector", 903: "Projector"}
+
+    # #104453 itself: a With Projector gobo and a 40 Watt weatherproof.
+    g, p = shape(gobo(), proj("Projected Image 40 Watt LED Weatherproof Gobo Projector", "P102W"), types=types)
+    eq((g["production_size"], g["review_reason"], g["glass_type"]), ("53.3", "", "Colour - Original"),
+       "the gobo is cut for the 40 Watt on its order (40/80 Watt Range)")
+    eq(g["size_note"], "For the 40 Watt projector on this order", "and the label says why that size")
+    eq((p["review_reason"], p["production_size"], p["artwork"]),
+       ("", "", "Projected Image 40 Watt LED Weatherproof Gobo Projector"),
+       "the projector prints by name, with no CHECK and no size")
+    ok(p["projector"] is True and p["not_gobo"] is True, "it is marked a projector, and not a gobo")
+    eq(copilot._usage_lines({"items": [g, p]}), [{"size": "53.3", "family": "Colour", "qty": 1}],
+       "only the gobo uses glass: the projector is neither a blank nor a CHECK line")
+
+    # #104196: the projector's variant says it comes with a rain hood.
+    g, _p = shape(gobo(), proj("Projected Image 40 Watt LED Weatherproof Gobo Projector", "P102W-Unit+RH",
+                               "40W with Rain Hood"), types=types)
+    eq(g["production_size"], "53.3", "a projector sold with its rain hood is still a 40 Watt")
+    # #103962: eight 20 Watt projectors and their gobos.
+    g, _p = shape(gobo(quantity=8), proj("Projected Image 20 Watt LED Gobo Projector", "P220", qty=8), types=types)
+    eq((g["production_size"], g["quantity"]), ("37.5", 8), "20 Watt Range")
+    # #104156: four 200 Watt, an original and three copies.
+    o2, c3, _p = shape(gobo(), gobo(quantity=3, sku="SCGCWPIH",
+                                    variant_title="Single Colour Glass Copy With Projector (Quote) / IH"),
+                       proj("Projected Image 200 Watt LED Weatherproof Gobo Projector", "P107W-200W+RH",
+                            "200W with Rain Hood", qty=4), types=types)
+    eq((o2["production_size"], c3["production_size"], c3["glass_type"]), ("66", "66", "Colour - Copy"),
+       "150/200 Watt Range, originals and copies alike")
+    # A 40 and an 80 on one order are both 53.3: nothing to ask.
+    g, _a, _b = shape(gobo(), proj("Projected Image 40 Watt LED Weatherproof Gobo Projector", "P102W"),
+                      proj("Projected Image 80 Watt LED Weatherproof Gobo Projector", "P103W", pid=902),
+                      types=types)
+    eq((g["production_size"], g["size_note"]), ("53.3", "For the 40 and 80 Watt projectors on this order"),
+       "two wattages cut at the same size agree")
+
+    # #104204: an 80 Watt and a 200 Watt, which are cut at different sizes.
+    g, _a, _b = shape(gobo(), proj("Projected Image 200 Watt LED Weatherproof Gobo Projector", "P107W", "200W"),
+                      proj("Projected Image 80 Watt LED Weatherproof Gobo Projector", "P103W", "80W", pid=902),
+                      types=types)
+    eq((g["production_size"], g["review_reason"]),
+       ("", "Sold with a projector: this order has 80 and 200 Watt projectors, cut at different sizes"),
+       "two sizes on one order is a person's decision, and the CHECK says which two")
+    # #104375: the projector was on another order.
+    (g,) = shape(gobo(properties=[{"name": "Item Notes", "value": "20 Watt Projector\nOrder #104349"}]), types=types)
+    eq(g["review_reason"], "Sold with a projector, but no projector is on this order",
+       "no projector on the order is a CHECK that says so")
+    # A projector the size list has no row for.
+    g, _p = shape(gobo(), proj("Projected Image 300 Watt LED Weatherproof Gobo Projector", "P300", pid=903),
+                  types=types)
+    eq(g["review_reason"], "No size list row for the 300 Watt projector on this order",
+       "a wattage with no row is a CHECK naming it")
+    # A refunded projector is not on the order any more.
+    (g,) = shape(gobo(), dict(proj("Projected Image 40 Watt LED Weatherproof Gobo Projector", "P102W"),
+                              current_quantity=0), types=types)
+    eq(g["review_reason"], "Sold with a projector, but no projector is on this order",
+       "a projector refunded off the order does not size its gobo")
+
+    # Rain hoods and lenses name wattages but are not projectors.
+    g, hood = shape(gobo(), proj("Weatherproof Rain Hood (40W & 80W)", "RH4080", pid=902), types=types)
+    eq(g["review_reason"], "Sold with a projector, but no projector is on this order",
+       "a rain hood's wattages do not size a gobo")
+    eq((hood["review_reason"], hood["projector"], hood["artwork"]), ("", True, "Weatherproof Rain Hood (40W & 80W)"),
+       "and the hood, typed Projector, prints by name")
+
+    # Another maker's projector is not sized from our rows: the Evica GP10 is
+    # 22.5 in the size list, not the 37.5 of our 10 Watt.
+    g, ev = shape(gobo(), proj("Evica GP10 - 10 watt LED Gobo Projector", "P100"), types=types)
+    eq((g["production_size"], g["review_reason"]), ("", "Sold with a projector by Evica: check its size"),
+       "a projector by another maker is a CHECK naming the maker, never our size")
+    eq((ev["review_reason"], ev["projector"]), ("", True), "and the Evica itself prints by name")
+    # An upgrade changes which projector the customer gets: an 80 Watt
+    # upgraded to a 200 Watt is cut at 66, not 53.3.
+    g, _p, up = shape(gobo(), proj("Projected Image 80 Watt LED Weatherproof Gobo Projector", "P103W"),
+                      proj("Projector Upgrade", "Projector Upgrade - 80 Watt to 200 Watt", "80 Watt to 200 Watt",
+                           pid=902), types=types)
+    eq((g["production_size"], g["review_reason"]),
+       ("", "Sold with a projector, and this order upgrades one: check which size"),
+       "an upgrade on the order is a person's decision")
+    eq((up["artwork"], up["size_note"]), ("Projector Upgrade", "80 Watt to 200 Watt"),
+       "and the upgrade prints by name, its variant under it")
+    # A projector's variant goes under its name, where it can wrap; a bare
+    # wattage repeating the title does not.
+    _g, hooded = shape(gobo(), proj("Projected Image 40 Watt LED Weatherproof Gobo Projector", "P102W-Unit+RH",
+                                    "40W with Rain Hood"), types=types)
+    eq((hooded["artwork"], hooded["size_note"]),
+       ("Projected Image 40 Watt LED Weatherproof Gobo Projector", "40W with Rain Hood"),
+       "a projector sold with its hood says so under its name")
+    _g, bare = shape(gobo(), proj("Projected Image 80 Watt LED Weatherproof Gobo Projector", "P103W", "80W"),
+                     types=types)
+    eq(bare["size_note"], "", "a variant that only repeats the wattage is left off")
+    (holder,) = shape(proj("Gobo Holders", "Allholders-B Size Glass Gobo Holder", "B Size Glass Gobo Holder",
+                           pid=902), types=types)
+    eq((holder["artwork"], holder["size_note"], holder["review_reason"]),
+       ("Gobo Holders", "B Size Glass Gobo Holder", ""), "a holder says which holder")
+
+    # A plain custom gobo with no fixture keeps its CHECK (Cameron: only the
+    # With Projector variant says it is for that projector).
+    plain, _p = shape(gobo(sku="SCGO", variant_title="Single Colour Glass Original (Quote) / IH",
+                           name="Custom Gobos - Single Colour Glass Original (Quote) / IH"),
+                      proj("Projected Image 40 Watt LED Weatherproof Gobo Projector", "P102W"), types=types)
+    eq(plain["review_reason"], "No model specified on this item", "a plain gobo keeps its CHECK")
+    # A With Projector gobo that names its own fixture is sized by it.
+    own, _p = shape(gobo(properties=[{"name": "Manufacturer", "value": "Robe"}, {"name": "Model", "value": "Forte"}]),
+                    proj("Projected Image 40 Watt LED Weatherproof Gobo Projector", "P102W"), types=types)
+    eq(own["production_size"], "30.8", "its own fixture wins over the projector")
+
+    # The old quote machine: the projector typed Custom Gobos, named in its variant.
+    g, p = shape(gobo(), {"title": "Outdoor Gobo Projectors", "quantity": 1, "product_id": 904, "properties": [],
+                          "sku": None, "variant_title": "Projected Image 80 Watt LED Weatherproof Gobo Projector (Quote) / Rolls Royce",
+                          "name": "Outdoor Gobo Projectors - Projected Image 80 Watt LED Weatherproof Gobo Projector (Quote) / Rolls Royce"},
+                 types={900: "Custom Gobos", 904: "Custom Gobos"})
+    eq((g["production_size"], p["review_reason"], p["projector"]), ("53.3", "", True),
+       "a projector named in its variant counts, and prints by name")
+    eq(p["size_note"], "Projected Image 80 Watt LED Weatherproof Gobo Projector (Quote) / Rolls Royce",
+       "with the variant that says which projector, since its title does not")
+    # #103894: that machine wrote the gobo's own fixture into a Note nothing
+    # reads, and it named a B Size beside a 20 Watt. Not cut against it.
+    noted, _p = shape(gobo(properties=[{"name": "Note", "value": "Projection Type: Front\nManufacturer: Standard\n"
+                                                                 "Standard Models: B Size"}]),
+                      proj("Projected Image 20 Watt LED Gobo Projector", "P220"), types=types)
+    eq(noted["review_reason"], "No model specified on this item",
+       "a gobo whose old Note names a fixture keeps its CHECK rather than be sized against it")
+    # Without types (an older caller) a projector is still read from its name.
+    g, p = shape(gobo(), proj("Projected Image 40 Watt LED Weatherproof Gobo Projector", "P102W"))
+    eq((g["production_size"], p["review_reason"]), ("53.3", ""), "the name alone is enough")
+
+    # A size for one customer applies through the projector's row too.
+    cache = copilot._gobo_sizes()
+    saved = list(cache["domain_rules"])
+    try:
+        cache["domain_rules"].append({"key": ("projected image", "40/80 watt range"), "domain": "acme.co.uk",
+                                      "size": "52", "manufacturer": "Projected Image", "model": "40/80 Watt Range"})
+        g, _p = shape(gobo(), proj("Projected Image 40 Watt LED Weatherproof Gobo Projector", "P102W"), types=types)
+        eq((g["production_size"], g["size_note"]), ("52", "Size for this customer"),
+           "a size ruled for this customer's domain wins, as for any gobo")
+    finally:
+        cache["domain_rules"][:] = saved
+
+
+@test
+def t_coverage_counts_gobos_sold_with_a_projector():
+    """The coverage report counted a With Projector gobo as an accessory, so its
+    CHECK never showed there. It is a gobo: sized when the projector on its order
+    sizes it, flagged with the label's own reason when not, and only a missing
+    size list row can be settled with a size rule."""
+    gobo = {"title": "Custom Gobos", "quantity": 1, "product_id": 900, "properties": [], "sku": "SCGOWPIH",
+            "variant_title": "Single Colour Glass Original With Projector (Quote) / IH"}
+    p40 = {"title": "Projected Image 40 Watt LED Weatherproof Gobo Projector", "quantity": 1, "product_id": 901,
+           "properties": [], "sku": "P102W", "variant_title": None}
+    p300 = dict(p40, title="Projected Image 300 Watt LED Weatherproof Gobo Projector", sku="P300")
+    orders = [{"id": 1, "name": "#104453", "line_items": [gobo, p40]},
+              {"id": 2, "name": "#104375", "line_items": [gobo]},
+              {"id": 3, "name": "#104999", "line_items": [gobo, p300]}]
+    async def tj(registry, name, args):
+        if name == "shopify_list_orders":
+            return {"orders": orders}
+        return await fake_tool_json(registry, name, args)
+    copilot._tool_json = tj
+    try:
+        r = run_async(copilot.run_label_coverage({}, 10))
+    finally:
+        copilot._tool_json = fake_tool_json
+    eq((r["gobo_items"], r["sized"], r["skipped_no_model"]), (3, 1, 2),
+       "three gobos, one sized by its projector; the two projectors are accessories")
+    by = {f["orders"][0]["name"]: f for f in r["flagged"]}
+    eq((by["#104375"]["model"], by["#104375"]["reason"], by["#104375"].get("order_problem")),
+       ("Sold with a projector", "Sold with a projector, but no projector is on this order", True),
+       "an order with no projector is flagged as the order's problem, not the size list's")
+    eq((by["#104999"]["manufacturer"], by["#104999"]["model"], by["#104999"].get("order_problem", False)),
+       ("Projected Image", "300 Watt", False),
+       "a wattage with no row is the size list's gap, settled with a size rule like any model")
+
+
+@test
 def t_the_push_lines_match_the_day_sheet_resolution():
     # One resolver feeds both, so the stock app and the printed day sheet can
     # never disagree about what a day's making consumed.
@@ -6406,10 +7043,7 @@ def run_async(coro):
     asyncio.run() CLOSES the loop and leaves the thread without one, which
     breaks every test after it."""
     import asyncio as _a
-    try:
-        prev = _a.get_event_loop()
-    except RuntimeError:
-        prev = None
+    prev = _RUN_LOOP if _RUN_LOOP is not None and not _RUN_LOOP.is_closed() else None
     loop = _a.new_event_loop()
     _a.set_event_loop(loop)
     try:
@@ -6728,7 +7362,7 @@ def t_files_concurrent_uploads_do_not_clobber_the_store():
         import httpx
         async def race():
             copilot._rl_hits.clear(); copilot._rl_global.clear()
-            transport = httpx.ASGITransport(app=server.mcp.streamable_http_app())
+            transport = httpx.ASGITransport(app=server.mcp.streamable_http_app(**server.MCP_HTTP))
             headers = {"Authorization": "Bearer " + tok(), "X-App-Session": ensure_auth()}
             async with httpx.AsyncClient(transport=transport, base_url="http://testserver",
                                          headers=headers) as ac:
@@ -7069,6 +7703,145 @@ def t_auth_the_print_document_needs_only_the_perimeter():
         # 3. A forged signature is refused outright.
         bad = client.get(url[:-4] + "dead")
         ok(bad.status_code in (401, 403), "a tampered signature is refused: " + str(bad.status_code))
+    with_accounts(go)
+
+@test
+def t_a_row_printed_by_name_starts_after_its_count_and_wraps():
+    """#104453's projector printed in Shopify's label as `1x` then a gap, then
+    "Projected Image 40 Watt LED Weather...": the count's column is held wide
+    so sizes line up, and a row's text is cut to one line. A row with no size
+    (a projector, an accessory, a stock gobo) has nothing to line up with, so
+    its name starts after the count and wraps; a sized row is unchanged."""
+    o = _copy.deepcopy(ORDER)
+    o["line_items"] = [
+        {"id": 1, "title": "Custom Gobos", "quantity": 1, "product_id": 900, "properties": [], "sku": "SCGOWPIH",
+         "variant_title": "Single Colour Glass Original With Projector (Quote) / IH"},
+        {"id": 2, "title": "Projected Image 40 Watt LED Weatherproof Gobo Projector", "quantity": 1,
+         "product_id": 901, "properties": [], "sku": "P102W"}]
+    async def tj(registry, name, args):
+        if name == "shopify_get_order":
+            return _copy.deepcopy(o)
+        return await fake_tool_json(registry, name, args)
+    def go():
+        ensure_auth()
+        r = client.post("/print/production-labels/sign", json={"ids": str(o["id"]), "size": "4x4"},
+                        headers={"Authorization": "Bearer " + tok()})
+        eq(r.status_code, 200, r.text[:200])
+        doc = client.get(r.json()["path"]).text
+        ok("<div class='it named wrap'><span class='iqs'>1x</span><span class='desc'>&quot;Projected Image 40 Watt "
+           "LED Weatherproof Gobo Projector&quot;</span>" in doc, "the projector's row starts after its count and wraps")
+        ok("<div class='it'><span class='iqs'>1x 53.3mm</span>" in doc, "the sized gobo's row is as it was")
+        ok(".it.named .iqs { min-width: 0; }" in doc, "and the count's column is not held wide for it")
+    copilot._tool_json = tj
+    try:
+        with_accounts(go)
+    finally:
+        copilot._tool_json = fake_tool_json
+
+
+@test
+def t_nothing_in_the_page_can_add_to_or_cut_the_shopify_label_print():
+    """The page's label print was changed on 30 September after a bench
+    browser put 66px of its own into the page and every label printed with a
+    blank after it: in print the labels are laid against the top of the page,
+    over anything else, and nothing beside body prints, so nothing in the page
+    can add a page (unless it is taller than the run), push a label down or
+    cut one off. The document Shopify's print action opens is the same labels
+    in another page, open to the same intrusion, so it gets the same rules:
+    all its labels in one box, laid when the document's own script marks the
+    page, which it does except in WebKit (laid, WebKit's A4 runs crept up the
+    page a little more on every label). Nothing is cut: a first fix that cut
+    the page to N labels tall took the last label off whenever anything sat
+    above the labels."""
+    def go():
+        ensure_auth()
+        r = client.post("/print/production-labels/sign", json={"ids": "12345,12346"},
+                        headers={"Authorization": "Bearer " + tok()})
+        eq(r.status_code, 200, r.text[:200])
+        path = r.json()["path"]
+        for size, orient, page_w, page_h in (("4x6", "", 101.6, 152.4), ("4x4", "", 101.6, 101.6),
+                                             ("4x2", "", 101.6, 50.8), ("a4", "", 210, 297),
+                                             ("4x6", "portrait", 152.4, 101.6), ("2x4", "", 50.8, 101.6)):
+            doc = client.get(path + "&size=" + size + ("&orient=" + orient if orient else "")).text
+            where = size + (" " + orient if orient else "") + ": "
+            head, _, body = doc.partition("</style>")
+            ok(re.search(r"@page \{ size: %smm %smm; margin: 0; \}" % (re.escape(str(page_w)), re.escape(str(page_h))), head),
+               where + "the printer's page is the stock asked for: " + head[head.find("@page"):][:80])
+            n = body.count("<div class='sheet'>")
+            ok(n >= 1, where + "the document has labels: " + doc[:200])
+            # The box's own closing tag, found by depth, so a label left
+            # outside it (and so not laid) is seen.
+            i = body.index("<div id='labels'>")
+            depth = 0
+            for m in re.finditer(r"<div\b|</div>", body[i:]):
+                depth += 1 if m.group(0) == "<div" else -1
+                if depth == 0:
+                    break
+            box, after = body[i:i + m.end()], body[i + m.end():]
+            eq(box.count("<div class='sheet'>"), n, where + "every label is in the one box that is laid")
+            ok("class='sheet'" not in after, where + "and none is left after it")
+            if orient:
+                eq(box.count("<div class='pw'>"), n, where + "one page wrapper per label")
+            i = head.index("@media print {")
+            depth, j = 0, i
+            for j in range(i, len(head)):
+                depth += head[j] == "{"
+                depth -= head[j] == "}"
+                if depth == 0 and head[j] == "}":
+                    break
+            block = head[i + len("@media print {"):j].strip()
+            ok("html > :not(head):not(body) { display: none !important; }" in block, where + "nothing beside body prints")
+            ok("html.lay, html.lay body { position: static !important; }" in block
+               and "html.lay #labels { position: absolute !important; top: 0 !important; left: 0 !important; "
+                   "z-index: 2147483647 !important; }" in block,
+               where + "the labels' box is laid against the top of the page, in front of anything else: " + block[:260])
+            ok("background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact;"
+               in head[head.index(".sheet {"):head.index("}", head.index(".sheet {"))],
+               where + "and each label is white, printed as such, so nothing laid under it shows through")
+            ok("overflow" not in block and "height" not in block,
+               where + "nothing is cut: a cut takes the last label off when anything sits above the labels")
+            ok("<script>(function(){if(navigator.vendor!=='Apple Computer, Inc.')"
+               "document.documentElement.classList.add('lay');" in body,
+               where + "the laying is switched on first thing, except in WebKit")
+    with_accounts(go)
+
+@test
+def t_the_shopify_print_knows_every_stock_and_starts_on_the_production_size():
+    """Cameron, 30 September: "add 4x4 to the shopify print too". The
+    document the print action opens knew five sizes and fell back to 4 x 6
+    for anything else, so the 4 x 4 the production printer is loaded with
+    could not come off it. It now prints every size the shop can choose, and
+    the signing call hands back the production printer's saved size so the
+    action opens on it: the stock is a shop setting, not a choice made at the
+    print button."""
+    def go():
+        ensure_auth()
+        eq(set(copilot.LABEL_STOCK_MM), set(copilot.LABEL_STOCK),
+           "the document can print every stock size the shop can choose")
+        eq(copilot.LABEL_STOCK_MM["4x4"], (101.6, 101.6), "4 x 4 is square, in millimetres")
+        before = post("/api/shipping/config", {"op": "get"}).json()["config"]["label_size_production"]
+        try:
+            for saved in ("4x4", "4x3", "a4"):
+                eq(post("/api/shipping/config", {"op": "set", "label_size_production": saved}).status_code, 200)
+                r = client.post("/print/production-labels/sign", json={"ids": "12345"},
+                                headers={"Authorization": "Bearer " + tok()})
+                eq(r.status_code, 200, r.text[:200])
+                eq(r.json().get("size"), saved, "the action opens on the production printer's size")
+            # A saved value the document cannot print is never handed on.
+            cfg = copilot._load_shipping()
+            cfg["label_size_production"] = "9x9"
+            copilot._save_shipping(cfg)
+            r = client.post("/print/production-labels/sign", json={"ids": "12345"},
+                            headers={"Authorization": "Bearer " + tok()})
+            eq(r.json().get("size"), "4x4", "an unknown saved size falls back to the production default")
+            path = r.json()["path"]
+            doc = client.get(path + "&size=4x4").text
+            ok("@page { size: 101.6mm 101.6mm; margin: 0; }" in doc, "a 4 x 4 print is on 4 x 4 paper")
+            ok(".sheet { width: 101.6mm; height: 101.6mm;" in doc, "with 4 x 4 labels")
+            doc = client.get(path + "&size=5x5").text
+            ok("@page { size: 101.6mm 152.4mm; margin: 0; }" in doc, "a size it does not know still prints, on 4 x 6")
+        finally:
+            eq(post("/api/shipping/config", {"op": "set", "label_size_production": before}).status_code, 200)
     with_accounts(go)
 
 @test
@@ -12706,8 +13479,11 @@ def t_the_forecast_is_many_sources_ranked_by_what_each_was_worth():
     ok('env.get("FORECAST_M5", "0") == "1"' in nightly,
        "the per-variant model is OFF by default: it forecast October at a quarter of "
        "what October has ever been. Kept behind a switch, not deleted.")
-    ok("monthly_cash(orders, as_of)" in nightly and "daily_cash(orders, as_of)" in nightly,
+    ok("monthly_cash(orders, as_of, since)" in nightly and "daily_cash(orders, as_of)" in nightly,
        "both the history and the month-to-date are the order total, so they are the same money")
+    ok(".replace(day=1)" in nightly and "run_bulk_orders(store, pull_from)" in nightly
+       and "min_total=BIG_ORDER" in nightly and "big=big" in nightly,
+       "the pull starts on the 1st so every month is whole, and the big orders reach their source")
 
     mc = ingest.split("def monthly_cash(", 1)[1].split("\ndef ", 1)[0]
     ok('ser.index < pd.Period(as_of, freq="M")' in mc,
@@ -12759,8 +13535,10 @@ def t_the_forecast_is_many_sources_ranked_by_what_each_was_worth():
     ok("def pick_opinions(" in simple and "def daily_frame(" in simple,
        "the ranking and the monthly-to-daily spread live beside the models")
     df = simple.split("def daily_frame(", 1)[1].split("\ndef ", 1)[0]
-    ok('(model.get("score") or {}).get("mape")' in df,
-       "the band is the model's OWN measured error, not a number chosen to look confident")
+    bw = simple.split("def band_width(", 1)[1].split("\ndef ", 1)[0]
+    ok("band_width(model)" in df and 'sc.get("p80")' in bw,
+       "the band is the model's OWN measured misses (the one 8 in 10 stayed within), "
+       "not a number chosen to look confident")
     ok("statsmodels" in reqs and "statsforecast" in reqs,
        "the service image can actually import them")
     # The gradient boosters serve a model that has been off by default since it
@@ -12983,13 +13761,91 @@ def t_the_nightly_service_holds_no_shopify_secret():
     body = nightly.split("try:", 1)[1]
     ok("ShopifyStore(shop, stoken) if stoken else ReactorStore(base, token)" in body,
        "the store is chosen inside the try, so a refused read reaches the tab as a failed run")
-    ok("run_bulk_orders(store, since)" in nightly and "fetch_products(store)" in nightly,
+    ok("run_bulk_orders(store, pull_from)" in nightly and "fetch_products(store)" in nightly,
        "both Shopify reads go through the store chosen")
     ok('"/hooks/forecast/shopify"' in ingest and '"/hooks/forecast/shopify"' in
        open(os.path.join(root, "copilot.py"), encoding="utf-8").read(),
        "the job and Reactor name the same hook")
     ok("def shop_host(" in ingest and 'shop if "." in shop else shop + ".myshopify.com"' in ingest,
        "either spelling of the shop reaches Shopify at the same address")
+
+@test
+def t_the_record_keeps_what_the_forecast_in_use_said():
+    """A closed month is shown as what directors were told: the source in
+    use, its figure and likely range, and when, from the first run that had
+    seen every whole month before it. It is written once. September 2026 was
+    scored before this was kept, so its source in use (rebuilt from the
+    forecast's own code) is filled in from the source's own first figure and
+    marked as worked out afterwards."""
+    L = copilot._forecast_ledger
+    state = {}
+    sep9 = {"as_of": "2026-09-09", "seen_through": "2026-08",
+            "predictions": {"2026-09": {"Last year, adjusted for this year": 24677.35, "Trend": 39197.55},
+                            "2026-10": {"Last year, adjusted for this year": 41933.0}},
+            "in_use": {"source": "Last year, adjusted for this year",
+                       "months": {"2026-09": {"value": 24677.35, "p10": 17595.0, "p90": 31759.7, "shown": 30781.0},
+                                  "2026-10": {"value": 41933.0, "p10": 29898.0, "p90": 53967.0}}}}
+    state["ledger"] = L(state, sep9)
+    iu = state["ledger"]["in_use"]
+    eq(set(iu), {"2026-09"}, "only the month after the last whole one seen is kept: October is two months on")
+    eq((iu["2026-09"]["value"], iu["2026-09"]["made"], iu["2026-09"]["seen_through"]), (24677.35, "2026-09-09", "2026-08"))
+    eq(iu["2026-09"]["shown"], 30781.0, "with what the page showed, money already taken included")
+    again = json.loads(json.dumps(sep9)); again["as_of"] = "2026-09-20"
+    again["in_use"]["months"]["2026-09"]["value"] = 33000.0
+    state["ledger"] = L(state, again)
+    eq(state["ledger"]["in_use"]["2026-09"]["value"], 24677.35, "written once, never revised")
+    oct2 = {"as_of": "2026-10-01", "seen_through": "2026-09", "actuals": {"2026-09": 38740.89},
+            "predictions": {"2026-10": {"Big orders counted apart": 50568.0}},
+            "in_use": {"source": "Big orders counted apart",
+                       "months": {"2026-10": {"value": 50568.0, "p10": 36207.0, "p90": 64929.0, "shown": 50600.0}}}}
+    state["ledger"] = L(state, oct2)
+    led = state["ledger"]
+    sep = [r for r in led["results"] if r["month"] == "2026-09"][0]
+    eq(sep["in_use"]["source"], "Last year, adjusted for this year")
+    eq(sep["in_use"]["error"], round((24677.35 - 38740.89) / 38740.89, 4))
+    eq(sep["in_use"]["inside"], False, "38,741 was above its likely range")
+    ok(not sep["in_use"].get("reconstructed"), "recorded at the time, not worked out afterwards")
+    eq(sep["winner"], "Trend", "the closest source is still recorded beside it")
+    eq(led["in_use"]["2026-10"]["source"], "Big orders counted apart", "October's is kept from the 1 Oct run")
+    json.loads(json.dumps(led, allow_nan=False))
+    # September as it stands in the live ledger: scored, with no source in use.
+    live = {"ledger": {"predicted": {}, "results": [{
+        "month": "2026-09", "actual": 38740.89, "winner": "Trend and smoothing, averaged",
+        "by_source": {"Last year, adjusted for this year": {"predicted": 24677.35, "error": -0.363, "made": "2026-09-09"},
+                      "Trend and smoothing, averaged": {"predicted": 39197.55, "error": 0.0118, "made": "2026-09-09"}}}]}}
+    got = L(live, {"as_of": "2026-10-02"})["results"][0]["in_use"]
+    eq((got["source"], got["value"], got["made"], got["seen_through"]),
+       ("Last year, adjusted for this year", 24677.35, "2026-09-09", "2026-08"))
+    ok(got["reconstructed"] is True and got["inside"] is False and abs(got["p90"] - 24677.35 * 1.287) < 0.01, got)
+    later = L({"ledger": {"predicted": {}, "results": [{"month": "2026-10", "actual": 50000.0,
+                                                        "winner": "x", "by_source": {"x": {"predicted": 1.0, "error": 0.0}}}]}},
+              {"as_of": "2026-11-02"})["results"][0]
+    ok("in_use" not in later, "only the month it names is filled in; anything else stays not on record")
+
+
+@test
+def t_the_brand_mark_is_served_and_can_never_run_anything():
+    """Projected Image's wordmark is served by the app itself, like the label
+    typeface, in its own colours and white-lettered for the sidebar's ink. It
+    is an SVG, so the response forbids every script and every fetch, in case
+    it is ever opened on its own rather than as an image."""
+    r = client.get("/brand/logo.svg")
+    eq(r.status_code, 200)
+    eq(r.headers["content-type"], "image/svg+xml")
+    eq(r.headers["content-security-policy"], "default-src 'none'; style-src 'unsafe-inline'")
+    ok(r.content.startswith(b"<svg") and b"<script" not in r.content and b"#13B7C0" in r.content,
+       "the brand's own mark, in its teal, with nothing in it that runs")
+    light = client.get("/brand/logo-light.svg")
+    eq(light.status_code, 200)
+    eq(light.headers["content-type"], "image/svg+xml")
+    eq(light.headers["content-security-policy"], "default-src 'none'; style-src 'unsafe-inline'")
+    ok(light.content.startswith(b"<svg") and b"<script" not in light.content and b"#13B7C0" in light.content,
+       "the sidebar's copy keeps the teal shield and runs nothing")
+    ok(b"#2F2F2F" not in light.content and b'fill="black"' not in light.content,
+       "and its lettering is white, with no dark ink that would vanish on the ink frame")
+    eq(light.content.count(b"<path"), r.content.count(b'fill="#2F2F2F"') + 1,
+       "every letter of the original is there, one white shape each, and the shield")
+
 
 @test
 def t_the_forecast_hook_takes_only_its_token_and_the_tab_reads_the_run():
@@ -13292,10 +14148,16 @@ def t_a_strangers_email_or_pdf_cannot_hold_the_event_loop():
     import google_mail as _gm, pipedrive as _pd, recon as _rc
     def secs(fn, *a):
         t0 = time.perf_counter(); fn(*a); return time.perf_counter() - t0
-    ok(secs(_gm._strip_html, "<p>x</p>" + "<" * 2_000_000) < 0.5, "a 2 MB run of '<' is stripped at once")
-    ok(secs(_gm._strip_html, "<p>" + "<script" * 200_000) < 0.5, "and a run of unclosed script openings")
-    ok(secs(_pd._strip_note, "<p>x</p>" + "<" * 400_000) < 0.5, "a Pipedrive note the same")
-    ok(secs(_rc._AMOUNT_RE.findall, "1" + ",111" * 100_000) < 0.5, "a PDF's endless thousands groups")
+    # Each limit separates linear from quadratic with room for a busy machine
+    # (half a second failed on a loaded one with nothing wrong). The inputs
+    # are capped before scanning (300 KB of mail, 100 KB of a note), and at
+    # those caps the quadratic forms measured 5 to 265 seconds against the
+    # linear ones' hundredths: one second leaves a margin both ways.
+    LIMIT = 1.0
+    ok(secs(_gm._strip_html, "<p>x</p>" + "<" * 2_000_000) < LIMIT, "a 2 MB run of '<' is stripped at once")
+    ok(secs(_gm._strip_html, "<p>" + "<script" * 200_000) < LIMIT, "and a run of unclosed script openings")
+    ok(secs(_pd._strip_note, "<p>x</p>" + "<" * 400_000) < LIMIT, "a Pipedrive note the same")
+    ok(secs(_rc._AMOUNT_RE.findall, "1" + ",111" * 100_000) < LIMIT, "a PDF's endless thousands groups")
     eq(_gm._strip_html("<p>Hello <b>there</b></p><script>bad()</script>"), "Hello there", "ordinary mail reads as before")
     eq(_gm._strip_html("<p>left <script>evil()"), "left", "an unclosed script still goes")
     eq(_rc._AMOUNT_RE.findall("Total 1,234.56 and \u00a399.00 then 12,345,678.90"),
@@ -13314,8 +14176,9 @@ def t_a_strangers_email_or_pdf_cannot_hold_the_event_loop():
        "and data: in a sentence is not an inline image")
     eq(_gm._strip_html('<div style="background:url(data:image/png;base64,QUJD)">Hello</div>'), "Hello",
        "one in a style goes with the tag")
-    ok(secs(_gm._strip_html, "data:" + "a" * 3_000_000) < 0.5, "a long data run is dropped at once")
-    ok(secs(_gm._strip_html, "data:a/b;" * 300_000) < 1.0,
+    ok(secs(_gm._strip_html, "data:" + "a" * 3_000_000) < LIMIT, "a long data run is dropped at once")
+    # The slowest linear case (0.44 s measured), so it keeps a wider limit.
+    ok(secs(_gm._strip_html, "data:a/b;" * 300_000) < 3.0,
        "and 2.7 MB of 'data:a/b;' is linear too (unbounded, 288 KB of it took 37 seconds)")
     import inspect as _ins
     ok("asyncio.to_thread(_strip_html" in _ins.getsource(_gm.read_thread), "and it is stripped off the loop")
@@ -13331,6 +14194,54 @@ def t_a_strangers_email_or_pdf_cannot_hold_the_event_loop():
     copilot._mail_apply_thread(store, {"id": "t1", "messages": [msg]}, "shop@example.com")
     t = (store.get("threads") or {}).get("t1") or {}
     ok("jo@x.com" not in json.dumps(t), "an overlong header naming an erased address is erased whole")
+
+@test
+def t_the_connector_endpoint_answers_at_its_public_name():
+    """The Claude.ai connector reaches /mcp at the app's public host name. mcp
+    2.x switches on DNS-rebinding protection by default and answers 421
+    "Invalid Host header" to any host but localhost, and the shared test
+    client never started the session manager, so nothing here would have
+    seen it. This starts the app exactly as served and drives initialize and
+    tools/list with the public host name, and a bearer token."""
+    import server
+    host = "gizmo-production-c8c1.up.railway.app"
+    saved = server.MCP_BEARER_TOKEN
+    server.MCP_BEARER_TOKEN = "t" * 40
+    hdr = {"Authorization": "Bearer " + "t" * 40, "Content-Type": "application/json",
+           "Accept": "application/json, text/event-stream"}
+    try:
+        with TestClient(server.build_app(), base_url="https://" + host) as c:
+            r = c.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                                     "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                                                "clientInfo": {"name": "suite", "version": "1"}}}, headers=hdr)
+            eq(r.status_code, 200, "initialize at the public name: " + r.text[:300])
+            sid = r.headers.get("mcp-session-id") or ""
+            ok(sid, "a session is given")
+            h2 = dict(hdr, **{"mcp-session-id": sid})
+            c.post("/mcp", json={"jsonrpc": "2.0", "method": "notifications/initialized"}, headers=h2)
+            r = c.post("/mcp", json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, headers=h2)
+            eq(r.status_code, 200, "tools/list: " + r.text[:300])
+            tools = (r.json().get("result") or {}).get("tools") or []
+            ok(len(tools) >= 20, "the read tools are listed: %d" % len(tools))
+            ok(all((t.get("annotations") or {}).get("readOnlyHint") for t in tools),
+               "each one marked read-only for the client")
+    finally:
+        server.MCP_BEARER_TOKEN = saved
+
+
+@test
+def t_no_transport_serves_the_tools_without_the_token():
+    """Only streamable-http goes through build_app(), where the bearer token
+    guards /mcp. MCP_TRANSPORT=sse served every tool to anyone who could reach
+    the port, with no token (found in review, older than the mcp 2 move), so
+    any transport but streamable-http or stdio is refused at start."""
+    import subprocess
+    env = {**os.environ, "MCP_TRANSPORT": "sse", "PORT": "18999", "MCP_BEARER_TOKEN": "t" * 40}
+    r = subprocess.run([sys.executable, "server.py"], env=env, cwd=HERE, capture_output=True,
+                       text=True, timeout=120)
+    eq(r.returncode, 2, "refused, not started: " + (r.stdout + r.stderr)[-300:])
+    ok("is not served" in r.stdout + r.stderr, "and it says why")
+
 
 @test
 def t_the_desktop_ai_endpoint_reads_and_every_call_is_recorded():
@@ -15648,6 +16559,21 @@ def t_a_xero_outage_is_not_reported_as_a_dead_token():
             err = e
         ok(not isinstance(err, xero_api.XeroTransient), "invalid_grant is not transient")
         ok("reconnect" in str(err).lower(), "and THAT one says reconnect: %s" % err)
+        # Live fault 2026-10-07: the page kept a green Xero tag and offered no
+        # Reconnect, because the refusal reached it only as a sentence.
+        st = xero_api.status()
+        ok(st.get("needs_reconnect") is True, "the status says so as a flag the page can act on: %r" % st)
+        # A restart (every deploy) empties memory; the refusal must outlive it,
+        # or the page goes back to a green tag over a dead link.
+        xero_api._state["token_error"] = ""
+        st = xero_api.status()
+        ok(st.get("needs_reconnect") is True and "Reconnect" in (st.get("warning") or ""),
+           "the refusal outlives a restart, with its warning: %r" % st)
+        # A fresh consent writes a fresh token file, which carries no refusal.
+        xero_api._write_token({"refresh_token": "rt-fresh", "tenant_id": "t1", "tenant_name": "Projected Image"})
+        ok(xero_api.status().get("needs_reconnect") is False, "and a fresh consent clears it")
+        xero_api.disconnect()
+        ok(xero_api.status().get("needs_reconnect") is False, "as does a disconnect")
     finally:
         (xero_api.httpx.AsyncClient, xero_api.RETRY_WAITS,
          xero_api.CLIENT_ID, xero_api.CLIENT_SECRET) = saved
@@ -15693,11 +16619,66 @@ def t_a_token_that_could_not_be_saved_retries_inside_xeros_grace():
         ok(st.get("warning"), "and the failure is on the status the tab reads")
         ok("volume" in st["warning"] or "save" in st["warning"].lower(),
            "in words that name the actual problem: %s" % st["warning"])
+        ok(st.get("needs_reconnect") is False, "a token that could not be saved still works, so no reconnect yet")
     finally:
         (xero_api.httpx.AsyncClient, xero_api._write_token,
          xero_api.CLIENT_ID, xero_api.CLIENT_SECRET) = saved
         xero_api._state["save_failed_at"] = 0.0
         xero_api.disconnect()
+
+
+@test
+def t_xeros_daily_limit_is_said_at_once_not_retried():
+    """Xero allows 1,000 calls a day per organisation on its Starter tier and
+    5,000 above it. A daily 429 asks for a wait of hours: the client spent
+    three retries on it and then showed a bare 429 in the reconciliation notes.
+    It now says what happened, and when it clears, on the first answer."""
+    calls, answers = [], []
+    class _R:
+        def __init__(self, status, headers):
+            self.status_code, self.headers, self.content = status, headers, b"{}"
+        def json(self):
+            return {"Invoices": []}
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(self.status_code)
+    class _C:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url, **kw):
+            calls.append(url)
+            return answers.pop(0)
+    async def _tok():
+        return "at"
+    async def _no_pace():
+        return None
+    saved = (xero_api.httpx.AsyncClient, xero_api._access_token, xero_api._pace)
+    xero_api.httpx.AsyncClient = lambda *a, **k: _C()
+    xero_api._access_token, xero_api._pace = _tok, _no_pace
+    try:
+        answers[:] = [_R(429, {"X-Rate-Limit-Problem": "day", "Retry-After": "18000"})]
+        try:
+            run(xero_api._get("Invoices"))
+            ok(False, "a daily 429 must raise")
+        except xero_api.XeroDailyLimit as e:
+            ok("daily limit" in str(e) and "about 5 hours" in str(e), str(e))
+            ok(len(str(e)) <= 120, "and fits the line the reconciliation notes show")
+        eq(len(calls), 1, "asked once, not retried")
+        # A long wait marks the daily limit even if the header's wording changes.
+        calls.clear(); answers[:] = [_R(429, {"Retry-After": "7200"})]
+        try:
+            run(xero_api._get("Invoices"))
+            ok(False, "a two-hour wait must raise")
+        except xero_api.XeroDailyLimit as e:
+            ok("about 2 hours" in str(e), str(e))
+        eq(xero_api._wait_words(600), "10 minutes")
+        # The minute limit is still waited out and retried.
+        calls.clear()
+        answers[:] = [_R(429, {"X-Rate-Limit-Problem": "minute", "Retry-After": "1"}), _R(200, {})]
+        eq(run(xero_api._get("Invoices")), {"Invoices": []})
+        eq(len(calls), 2, "one wait, then the answer")
+    finally:
+        xero_api.httpx.AsyncClient, xero_api._access_token, xero_api._pace = saved
 
 
 @test
@@ -15962,7 +16943,7 @@ def t_clearing_a_collection_actually_clears_it():
     still on the dispatch record, so the very next read re-derived it. "The van
     has been, book another" did nothing at all."""
     from datetime import datetime as _dt, timezone as _tz
-    today = _dt.now(_tz.utc).date().isoformat()
+    today = copilot._london_today().isoformat()   # the day the code reckons in (London), not the UTC date
     copilot._write_dispatch({"9001": {"carrier_name": "DHL", "carrier_label": "DHL Express",
                                       "collection_date": "CN-1", "order_name": "#1",
                                       "ready_date": "", "dispatched_at": today + "T09:00:00+00:00"}})
@@ -15988,7 +16969,7 @@ def t_the_latest_booking_of_the_day_is_the_one_that_counts():
     booking of the day. After a clear and a re-book that is the stale one, and
     its reference is the one that would be read out to the courier."""
     from datetime import datetime as _dt, timezone as _tz
-    today = _dt.now(_tz.utc).date().isoformat()
+    today = copilot._london_today().isoformat()   # the day the code reckons in (London), not the UTC date
     copilot._write_dispatch({
         "1": {"carrier_name": "DHL", "collection_date": "OLD-1", "order_name": "#1",
               "dispatched_at": today + "T08:00:00+00:00"},
@@ -16046,6 +17027,65 @@ def t_every_oauth_token_file_is_written_private():
         eq(_gd._load_refresh_token(), "test-refresh-token", "and it did write")
     finally:
         _gd.OAUTH_TOKEN_PATH = real
+
+
+@test
+def t_a_google_connection_says_which_permission_was_left_unticked():
+    """Google's consent screen lets a person untick Search Console or Analytics
+    and still hands back a refresh token. The connection was saved as working
+    and the unticked side failed later with Google's 403. What was granted is
+    kept with the token now: the connect page and Settings say which side is
+    missing, that side is not offered as ready, and a connection granted
+    neither is not saved at all, since it could read nothing."""
+    gd = _google_data
+    real = (gd.OAUTH_TOKEN_PATH, gd.httpx, gd.GSC_SITE_URL, gd.GA4_PROPERTY_ID)
+    gd.OAUTH_TOKEN_PATH = os.path.join(tempfile.mkdtemp(), "google_oauth.json")
+    gd.GSC_SITE_URL, gd.GA4_PROPERTY_ID = "sc-domain:example.com", "123456789"
+    answer = {}
+    gd.httpx = _RoutedHttpx(lambda request: _httpx.Response(
+        answer.get("_status", 200), json={k: v for k, v in answer.items() if k != "_status"}))
+    try:
+        answer.update(refresh_token="rt-1", access_token="at", scope=gd.SCOPES[0])
+        eq(run(gd.exchange_code("c", "https://app.test/cb")),
+           {"ok": True, "granted": {"gsc": True, "ga4": False}})
+        eq(gd.granted(), {"gsc": True, "ga4": False}, "kept with the token")
+        ok(gd.gsc_configured() and not gd.ga4_configured(), "only the granted side is ready")
+        eq(gd.status()["granted"], {"gsc": True, "ga4": False}, "and Settings is told")
+        # A connection made before this was kept reads exactly as it did.
+        gd.save_refresh_token("rt-old")
+        eq(gd.granted(), {"gsc": None, "ga4": None})
+        ok(gd.ga4_configured() and gd.gsc_configured(), "unknown is not refused")
+        # Granted neither: nothing is saved.
+        os.remove(gd.OAUTH_TOKEN_PATH)
+        answer.update(scope="openid")
+        eq(run(gd.exchange_code("c", "https://app.test/cb"))["ok"], False)
+        ok(not gd.oauth_connected(), "a connection that could read nothing is not kept")
+        copilot._oauth_states["st-neither"] = time.time() + 60
+        page = client.get("/oauth/google/callback?state=st-neither&code=c").text
+        ok("Nothing was linked" in page and "both left unticked" in page, page[-500:])
+        # The connect page names the side left unticked.
+        answer.update(scope=gd.SCOPES[1])
+        copilot._oauth_states["st-ga4-only"] = time.time() + 60
+        page = client.get("/oauth/google/callback?state=st-ga4-only&code=c").text
+        ok("without Search Console" in page and "left unticked" in page, page[-500:])
+        # And the chat says the same, rather than that Google is not connected.
+        said = json.loads(copilot._google_not_ready("gsc"))["error"]
+        ok("without permission to read Search Console" in said, said)
+        # A failure that is not about the boxes (a used code, a wrong secret)
+        # says the connection failed, not that both were unticked.
+        os.remove(gd.OAUTH_TOKEN_PATH)
+        answer.clear(); answer.update(_status=400, error="invalid_grant")
+        eq(run(gd.exchange_code("c", "https://app.test/cb")), {"ok": False, "granted": {}})
+        copilot._oauth_states["st-bad-code"] = time.time() + 60
+        page = client.get("/oauth/google/callback?state=st-bad-code&code=c").text
+        ok("Connection failed" in page and "unticked" not in page, page[-500:])
+        eq(json.loads(copilot._google_not_ready("gsc"))["error"],
+           "Google isn't connected yet. Connect it in Settings.", "with no connection, it says so")
+    finally:
+        gd.OAUTH_TOKEN_PATH, gd.httpx, gd.GSC_SITE_URL, gd.GA4_PROPERTY_ID = real
+    page = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+    ok("g.granted.ga4 === false" in page and "g.granted.gsc === false" in page,
+       "Settings' Google rows say which permission is missing")
 
 
 @test
@@ -16360,7 +17400,7 @@ def t_a_collection_is_read_from_the_couriers_own_reference():
     van coming", so it is worth more than a ledger this app keeps beside it, and
     it covers shipments booked before the ledger existed."""
     from datetime import datetime as _dt, timezone as _tz
-    today = _dt.now(_tz.utc).date().isoformat()
+    today = copilot._london_today().isoformat()   # the day the code reckons in (London), not the UTC date
     copilot._write_dispatch({
         "9001": {"carrier_name": "DHL", "carrier_label": "DHL Express",
                  "collection_date": "CN-8842", "order_name": "#104294",
@@ -16418,8 +17458,8 @@ def t_one_collection_a_day_per_courier_not_one_per_parcel():
     second pickup. So "book a collection" becomes "already scheduled" for the
     rest of that day on its own, per courier, without anyone remembering."""
     from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-    today = _dt.now(_tz.utc).date().isoformat()
-    tomorrow = (_dt.now(_tz.utc).date() + _td(days=1)).isoformat()
+    today = copilot._london_today().isoformat()   # the day the code reckons in (London), not the UTC date
+    tomorrow = (copilot._london_today() + _td(days=1)).isoformat()
     cfg = {"collection_by_carrier": {"DHL": "I_Need_To_Book_A_Collection",
                                      "UPS": "I_Have_Daily_Collection"},
            "collection_option": "I_Need_To_Book_A_Collection"}
@@ -16457,6 +17497,28 @@ def t_one_collection_a_day_per_courier_not_one_per_parcel():
        "I_Need_To_Book_A_Collection_For_Next_Day",
        "while today's van does not cover tomorrow's parcel")
 
+
+
+@test
+def t_the_collection_tests_hold_in_the_hour_after_midnight():
+    """Two of the collection tests built "today" from the UTC date while the code reckons the day in London, so
+    between 00:00 and 01:00 BST they failed on a clean tree. They now use the day the code uses. Proven here by
+    running them with the clock at 00:30 BST on the 15th of July (23:30 UTC on the 14th), the hour that broke them: a test
+    that took its date from the real UTC clock would now be a day off the code's."""
+    import datetime as _real
+    class _Frozen(_real.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = _real.datetime(2026, 7, 14, 23, 30, tzinfo=_real.timezone.utc)
+            return base.astimezone(tz) if tz else base.replace(tzinfo=None)
+    saved = copilot.datetime
+    copilot.datetime = _Frozen
+    try:
+        eq(copilot._london_today().isoformat(), "2026-07-15", "the code's day is London's, a day ahead of UTC in this hour")
+        t_a_collection_is_read_from_the_couriers_own_reference()
+        t_one_collection_a_day_per_courier_not_one_per_parcel()
+    finally:
+        copilot.datetime = saved
 
 @test
 def t_a_booked_collection_is_written_down_before_anything_can_fail():
@@ -19876,7 +20938,7 @@ def t_the_connector_token_only_travels_somewhere_it_is_safe():
             eq(copilot._connector_url_safe(url), allowed, url)
         os.environ["CONNECTOR_URL"] = "http://connector.example.com"
         try:
-            asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+            asyncio.new_event_loop().run_until_complete(
                 copilot._connector_call("GET", "/status"))
             ok(False, "a plain http host should have been refused")
         except RuntimeError as e:
@@ -23542,7 +24604,9 @@ def t_the_erasure_matcher_takes_whole_names_and_numbers_only():
        and not hs.knows("req", "0191 111 2222"), "an exact test, and only the asked-for address recognises")
     eq(d["erased_pd_persons"], ["20"])
     raw = json.dumps(d).lower()
-    ok("sarah" not in raw and "0191" not in raw, "nothing in the clear")
+    # The whole number, not a piece of it: the store holds random-salted hex
+    # hashes, and about 1 in 250 of them contains "0191" by chance.
+    ok("sarah" not in raw and "0191 111 2222" not in raw and "01911112222" not in raw, "nothing in the clear")
     old = d["erased_salt"]
     d["erased_salt"] = "not hex"
     copilot._erase_remember(d, ["Jo Smith"])
@@ -23986,6 +25050,95 @@ def t_the_missing_check_reads_every_open_order():
 
 
 @test
+def t_a_projector_wattage_is_settled_by_any_size_rule():
+    """The review of the #104453 change: the size check offers "Projected Image
+    | 300 Watt" for a projector the size list has no row for, and only one of
+    its three answers cleared the CHECK. A size, an alias to a row, and a size
+    for one customer must each settle it; and a row named for the wattage
+    itself wins over a range that includes it, so ruling "40 Watt" decides."""
+    def order(watts, email="buyer@acme.co.uk"):
+        return {"id": 1, "name": "#104999", "order_number": 104999, "note": "", "email": email, "line_items": [
+            {"title": "Custom Gobos", "quantity": 1, "product_id": 900, "properties": [], "sku": "SCGOWPIH",
+             "variant_title": "Single Colour Glass Original With Projector (Quote) / IH"},
+            {"title": "Projected Image %d Watt LED Weatherproof Gobo Projector" % watts, "quantity": 1,
+             "product_id": 901, "properties": [], "sku": "P%d" % watts}]}
+    def gobo_of(o):
+        return copilot._shape_label_order(o, {}, cache=copilot._gobo_sizes(),
+                                          types={900: "Custom Gobos", 901: "Projector"})["items"][0]
+    paths = {k: copilot.GOBO_RULE_FILES[k][1] for k in ("override", "alias")}
+    seeds = {k: open(copilot.GOBO_RULE_FILES[k][0], encoding="utf-8").read() for k in paths}
+    saved = {k: (open(p_, encoding="utf-8").read() if os.path.exists(p_) else None) for k, p_ in paths.items()}
+    def put(kind, line):
+        os.makedirs(os.path.dirname(paths[kind]), exist_ok=True)
+        with open(paths[kind], "w", encoding="utf-8") as fh:
+            fh.write(seeds[kind].rstrip("\n") + "\n" + line + "\n")
+        os.utime(paths[kind], (time.time() + 5, time.time() + 5))
+    def clear():
+        for kind, p_ in paths.items():
+            if os.path.exists(p_):
+                os.remove(p_)
+    try:
+        clear()
+        eq(gobo_of(order(300))["review_reason"], "No size list row for the 300 Watt projector on this order")
+        put("override", "Projected Image,300 Watt,,72")
+        g = gobo_of(order(300))
+        eq((g["production_size"], g["review_reason"]), ("72", ""), "a size settles it")
+        clear()
+        put("alias", "Projected Image,300 Watt,150/200 Watt Range")
+        g = gobo_of(order(300))
+        eq((g["production_size"], g["review_reason"]), ("66", ""), "so does pointing it at a row")
+        clear()
+        put("override", "Projected Image,300 Watt,acme.co.uk,70")
+        g = gobo_of(order(300))
+        eq((g["production_size"], g["size_note"]), ("70", "Size for this customer"),
+           "and a size for one customer settles it for that customer")
+        eq(gobo_of(order(300, email="someone@else.test"))["review_reason"],
+           "No size list row for the 300 Watt projector on this order", "but for nobody else")
+        clear()
+        put("override", "Projected Image,40 Watt,,50")
+        g = gobo_of(order(40))
+        eq((g["production_size"], g["review_reason"]), ("50", ""),
+           "a rule for the wattage itself wins over the range that includes it")
+        eq(gobo_of(order(80))["production_size"], "53.3", "and leaves the rest of the range alone")
+        # Two rows naming the same wattage at different sizes is the size
+        # list's own clash: the size check offers a rule on the wattage.
+        row = lambda model, size: ("projected image", tuple(copilot._loose_key(model).split()),
+                                   {"manufacturer": "Projected Image", "model": model,
+                                    "production_size": size, "review": ""})
+        clash = {"rows": [row("40/80 Watt Range", "53.3"), row("40 Watt Range Weatherproof", "50")],
+                 "domain_rules": [], "excludes": set()}
+        eq(copilot._projector_size(order(40), clash),
+           {"reason": "The size list gives the 40 Watt projector two sizes", "fix": ("Projected Image", "40 Watt")},
+           "a clash in the size list carries the rule that settles it")
+    finally:
+        clear()
+        for kind, text in saved.items():
+            if text is not None:
+                with open(paths[kind], "w", encoding="utf-8") as fh:
+                    fh.write(text)
+
+
+@test
+def t_the_missing_check_counts_a_gobo_sold_with_a_projector():
+    """An order whose only gobo is a With Projector one (#104375's shape) has a
+    gobo on it, so a paid order of that shape that never reached the bench is
+    reported like any other."""
+    o = _open_order(7)
+    o["line_items"] = [{"title": "Custom Gobos", "quantity": 1, "properties": [], "sku": "SCGOWPIH",
+                        "variant_title": "Single Colour Glass Original With Projector (Quote) / IH"}]
+    async def tools(registry, name, args):
+        if name == "shopify_list_orders":
+            return {"orders": [dict(o)] if not int(args.get("since_id") or 0) else []}
+        return {}
+    saved = copilot._tool_json; copilot._tool_json = tools
+    try:
+        res = run_async(copilot.run_missing_production({}))
+        eq([m["name"] for m in res["missing"]], ["#7"], "it is reported as missing from production")
+    finally:
+        copilot._tool_json = saved
+
+
+@test
 def t_a_stock_sheet_with_unread_orders_is_not_sent_as_final():
     """A16. The day's sheet went as FINAL figures for orders the server could
     not read, un-booking the glass their automatic bookings recorded."""
@@ -24351,6 +25504,148 @@ def t_a_lost_answer_to_an_address_edit_is_settled_by_reading_the_order():
 
 
 @test
+def t_an_address_edit_that_changes_the_tax_says_so():
+    """From Shopify API 2026-10 a new shipping address on an unfulfilled order
+    recalculates its tax, so correcting a UK address to an export one (or the
+    other way) changes what the customer owes. Shopify makes the change; the
+    Edit panel must say so, with the amounts, and the ledger must record it."""
+    import server as _srv
+    ensure_auth(); reset_dispatch(); reset_prod()
+    live = _copy.deepcopy(ORDER)
+    live.update({"current_total_tax": "20.00", "current_total_price": "120.00",
+                 "total_outstanding": "0.00", "currency": "GBP"})
+    sent = []
+    # A fully paid £120 order: after the tax drops £20, Shopify's amount
+    # outstanding is -£20, which is the customer's to be refunded.
+    answer = {"tax": "0.00", "total": "100.00", "outstanding": "-20.00"}
+    async def tools(registry, name, args):
+        if name == "shopify_get_order":
+            return _copy.deepcopy(live)
+        return await fake_tool_json(registry, name, args)
+    async def req(method, path, params=None, body=None, **kw):
+        sent.append(body)
+        m = lambda v: {"shopMoney": {"amount": v, "currencyCode": "GBP"}}
+        order = {"id": "gid://shopify/Order/12345", "currentTotalTaxSet": m(answer["tax"]),
+                 "currentTotalPriceSet": m(answer["total"]), "totalOutstandingSet": m(answer["outstanding"])}
+        if body["query"].lstrip().startswith("mutation"):
+            # The mutation's own answer is stale here; the read-back is not.
+            stale = dict(order, currentTotalTaxSet=m("20.00"))
+            return {"data": {"orderUpdate": {"order": stale, "userErrors": []}}}
+        return {"data": {"order": order}}
+    saved = (copilot._tool_json, _srv._request, copilot._order_writer)
+    copilot._tool_json, _srv._request, copilot._order_writer = tools, req, _srv.update_order_fields
+    try:
+        r = post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 6JK"}})
+        eq(r.status_code, 200, r.text)
+        mutation, readback = sent[-2], sent[-1]
+        ok(mutation["query"].lstrip().startswith("mutation") and "currentTotalTaxSet" in mutation["query"],
+           "the totals are asked for with the change")
+        ok(readback["query"].lstrip().startswith("query") and "totalOutstandingSet" in readback["query"],
+           "and read back after it, as Shopify advises")
+        addr = mutation["variables"]["input"]["shippingAddress"]
+        ok("country" not in addr and addr.get("countryCode") == "GB", "the country goes as its code only")
+        eq(r.json()["warnings"], ["Shopify recalculated the tax for the new address: \u00a320.00 before, "
+                                  "\u00a30.00 now, so the order total is \u00a3100.00. "
+                                  "\u00a320.00 is due back to them: refund it in Shopify."],
+           "a lower tax on a paid order says what is due back, from the read-back, not the stale answer")
+        ok("tax recalculated" in r.json()["changed"], "and the ledger records it")
+        # Partly paid (£110 of £120): Shopify says £10 is theirs, not the £20 drop.
+        answer.update({"outstanding": "-10.00"})
+        r = post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 6JJ"}})
+        ok(r.json()["warnings"][-1].endswith(" \u00a310.00 is due back to them: refund it in Shopify."),
+           r.json()["warnings"])
+        answer.update({"outstanding": "0.00"})
+        r = post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 6JH"}})
+        ok(r.json()["warnings"][-1].endswith("Nothing more is owed either way."), r.json()["warnings"])
+        answer.update({"tax": "30.00", "total": "130.00", "outstanding": "10.00"})
+        r = post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 7AA"}})
+        ok(r.json()["warnings"][-1].endswith("The customer now owes \u00a310.00."), r.json()["warnings"])
+        # Read back after a lost answer (REST, no signed amount outstanding):
+        # only what the change in total can say, hedged.
+        note = copilot._tax_change_note(
+            {"tax": {"amount": "20.00", "currency": "GBP"}, "total": {"amount": "120.00", "currency": "GBP"}},
+            copilot._rest_totals({"current_total_tax": "0.00", "current_total_price": "100.00", "currency": "GBP"}))
+        ok(note.endswith("If they had paid in full, \u00a320.00 is due back to them: check the order in Shopify."), note)
+        answer.update({"tax": "20.00", "total": "120.00", "outstanding": "0.00"})
+        r = post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 8BB"}})
+        eq(r.json()["warnings"], [], "nothing is said when the tax did not change (every version before 2026-10)")
+        ok("tax recalculated" not in r.json()["changed"], "and nothing is recorded")
+    finally:
+        copilot._tool_json, _srv._request, copilot._order_writer = saved
+        reset_dispatch()
+
+
+@test
+def t_an_order_address_goes_to_shopify_as_codes():
+    """MailingAddressInput's free-text country and province are deprecated.
+    The country goes only as its code (the Edit panel refuses anything else
+    already); a province goes as its code when it is one, and a typed name
+    still goes as text rather than be dropped or guessed at."""
+    import server as _srv
+    eq(_srv._addr_input({"country": "gb", "state": "ON"}), {"countryCode": "GB", "provinceCode": "ON"})
+    eq(_srv._addr_input({"country": "CA", "state": "Ontario"}), {"countryCode": "CA", "province": "Ontario"})
+    eq(_srv._addr_input({"country": "IE", "state": "D"}), {"countryCode": "IE", "provinceCode": "D"},
+       "Dublin's one-letter code is a code")
+    eq(_srv._addr_input({"country": "JP", "state": "JP-13"}), {"countryCode": "JP", "provinceCode": "JP-13"})
+    eq(_srv._addr_input({"country": "MX", "state": "Q ROO", "state_is_code": True}),
+       {"countryCode": "MX", "provinceCode": "Q ROO"}, "and the order's own code goes back as a code, any shape")
+    try:
+        _srv._addr_input({"country": "United Kingdom"})
+        ok(False, "a country name is refused, not sent as deprecated free text")
+    except ValueError as e:
+        ok("two-letter code" in str(e), str(e))
+    r = run_async(_srv.update_order_fields(1, {"ship_to": {"country": "United Kingdom"}}))
+    eq((r["ok"], r["reason"]), (False, "user_error"), "and the writer reports it instead of raising")
+
+
+@test
+def t_an_edit_sends_the_orders_own_province_code_back_as_a_code():
+    """The order's own province code goes back as a code whatever its shape
+    (Dublin is "D"), not as the deprecated free-text province."""
+    ensure_auth(); reset_dispatch(); reset_prod()
+    live = _copy.deepcopy(ORDER)
+    live["shipping_address"].update({"address1": "1 Grafton Street", "address2": "", "city": "Dublin",
+                                     "province_code": "D", "zip": "D02 X285", "country_code": "IE"})
+    async def tools(registry, name, args):
+        if name == "shopify_get_order":
+            return _copy.deepcopy(live)
+        return await fake_tool_json(registry, name, args)
+    saved = copilot._tool_json
+    copilot._tool_json = tools
+    try:
+        r = _edit({"ship_to": {"street2": "Floor 2"}})
+        eq(r.status_code, 200, r.text)
+        ship = ORDER_WRITES[-1][1]["ship_to"]
+        eq((ship.get("state"), ship.get("state_is_code")), ("D", True), "Dublin's code is marked as a code")
+        import server as _srv
+        eq(_srv._addr_input(ship).get("provinceCode"), "D", "and goes to Shopify as provinceCode")
+    finally:
+        copilot._tool_json = saved
+        reset_dispatch()
+
+
+@test
+def t_the_receivers_tax_id_is_read_from_the_orders_localized_fields():
+    """Order.localizationExtensions is deprecated in favour of localizedFields,
+    which asks the same thing (the TAX credential a checkout collects)."""
+    import server as _srv
+    seen = []
+    async def req(method, path, params=None, body=None, **kw):
+        seen.append(body["query"])
+        return {"data": {"order": {"localizedFields": {"nodes": [
+            {"key": "TAX_CREDENTIAL_IT", "value": "IT12345678901", "title": "Codice fiscale", "countryCode": "IT"}]},
+            "purchasingEntity": None, "customer": None}}}
+    saved = _srv._request
+    _srv._request = req
+    try:
+        got = run_async(_srv.shopify_order_tax_id(12345))
+    finally:
+        _srv._request = saved
+    eq(got, {"tax_id": "IT12345678901", "source": "the order's Codice fiscale"})
+    ok("localizedFields(" in seen[-1] and "localizationExtensions" not in seen[-1], "through the current field")
+
+
+@test
 def t_an_address_changed_in_the_shopify_admin_stops_mark_made():
     """A26, found by the round-4 review: an address changed in the Shopify
     admin never passes through the app's edit route, and Mark made read no
@@ -24611,6 +25906,69 @@ def _opus_run(model, script, **kw):
     finally:
         copilot._spend_guard = saved
     return fake, resp
+
+
+@test
+def t_each_request_takes_the_effort_its_model_accepts():
+    """Each tier's effort was capped at 'high' for any model not named Opus, on
+    a guess that xhigh and max are Opus only. Sonnet 5.5 takes the whole ladder,
+    so a Deep run on it was cut short; Opus 4.6 has max but not xhigh, so xhigh
+    on it was refused; Haiku 4.5 takes neither an effort nor adaptive thinking,
+    so every call on it failed over. Each request now fits what Anthropic's
+    Models API says its model accepts, asked once per model."""
+    import types as _types
+    def caps(efforts, adaptive=True):
+        return _types.SimpleNamespace(capabilities={
+            "effort": {"supported": bool(efforts),
+                       **{lvl: {"supported": lvl in efforts} for lvl in copilot._EFFORT_LADDER}},
+            "thinking": {"supported": True, "types": {"adaptive": {"supported": adaptive},
+                                                      "enabled": {"supported": True}}}})
+    table = {"claude-sonnet-5-5": caps(("low", "medium", "high", "xhigh", "max")),
+             "claude-opus-4-6": caps(("low", "medium", "high", "max")),
+             "claude-haiku-4-5": caps((), adaptive=False),
+             "claude-opus-5-5": _types.SimpleNamespace(capabilities=None)}
+    asked = []
+    def send(model, **kw):
+        fake = _OpusFake([_OpusResp([_OpusBlock("text", text="ok")])])
+        async def retrieve(m):
+            asked.append(m)
+            if m not in table:
+                raise RuntimeError("the Models API is unreachable")
+            return table[m]
+        fake.models = _types.SimpleNamespace(retrieve=retrieve)
+        saved = copilot._spend_guard
+        copilot._spend_guard = lambda *a, **k: None
+        try:
+            _run(copilot._xcreate(fake, model=model, max_tokens=100,
+                                  messages=[{"role": "user", "content": "Order 1"}], **kw))
+        finally:
+            copilot._spend_guard = saved
+        return fake.calls[0]
+    copilot._MODEL_CAPS.clear()
+    try:
+        eq(send("claude-sonnet-5-5", output_config={"effort": "max"})["output_config"], {"effort": "max"},
+           "a Sonnet 5.5 Deep run keeps max")
+        eq(send("claude-opus-4-6", output_config={"effort": "xhigh"})["output_config"], {"effort": "high"},
+           "xhigh steps down to the next level a model has")
+        eq(send("claude-opus-4-6", output_config={"effort": "max"})["output_config"], {"effort": "max"})
+        h = send("claude-haiku-4-5", output_config={"effort": "high"}, thinking={"type": "adaptive"})
+        ok("output_config" not in h and "thinking" not in h, "Haiku is sent neither: %r" % h)
+        eq(asked.count("claude-opus-4-6"), 1, "each model is asked once")
+        eq(send("claude-sonnet-9", output_config={"effort": "max"})["output_config"], {"effort": "high"},
+           "with the Models API unreachable, the cautious rule as before")
+        # An answer with no capabilities (the field may be null) is unknown:
+        # the cautious rule, not "takes nothing", and asked again later.
+        o = send("claude-opus-5-5", output_config={"effort": "max"}, thinking={"type": "adaptive"})
+        eq((o.get("output_config"), o.get("thinking")), ({"effort": "max"}, {"type": "adaptive"}),
+           "a null answer leaves effort and thinking as asked for")
+        eq(copilot._MODEL_CAPS["claude-opus-5-5"][1], None, "and is kept only as unknown, to be asked again")
+        mine = {"effort": "xhigh"}
+        send("claude-opus-4-6", output_config=mine)
+        eq(mine, {"effort": "xhigh"}, "and the request the caller built is not altered under it")
+        eq(copilot._effort_for("claude-sonnet-5-5", True), copilot.ANTHROPIC_EFFORT_DEEP,
+           "the tier's effort is asked for as configured")
+    finally:
+        copilot._MODEL_CAPS.clear()
 
 
 @test
@@ -25186,14 +26544,124 @@ def t_a_long_header_is_read_in_linear_time_and_the_index_holds_a_bounded_amount(
     finally:
         copilot._SKILL_INDEX.clear(); copilot._SKILL_INDEX.update(saved[0]); copilot._SKILL_INDEX_CHARS = saved[1]
 
-for fn in TESTS:
+
+@test
+def t_the_connector_settings_list_holds_only_what_the_connector_keeps():
+    """Live fault, 2026-10-07: SHOP_TIMEZONE was on the list the Xero sync page
+    may change, but the connector neither accepts nor returns it, so a save of
+    it was dropped there while the page said "Saved"."""
+    ok("SHOP_TIMEZONE" not in copilot._CONNECTOR_SETTABLE, "not offered, so never 'saved'")
+    ok({"RECONCILE_MODE", "ORDERS_SINCE", "MAX_DOCS_PER_RUN"} <= copilot._CONNECTOR_SETTABLE, "the real knobs stay")
+
+
+
+@test
+def t_a_refusal_never_overwrites_a_reconnect_that_landed_meanwhile():
+    """Review N2, 2026-10-07: recording a refused refresh token in the token
+    file must not write over a fresh consent that landed while the refresh was
+    in flight (the consent callback writes outside the refresh lock), or the
+    new token is lost and the page goes red again after saying connected."""
+    saved = (xero_api.httpx.AsyncClient, xero_api.RETRY_WAITS,
+             xero_api.CLIENT_ID, xero_api.CLIENT_SECRET)
+    xero_api.RETRY_WAITS = (0.0, 0.0)
+    xero_api.CLIENT_ID = xero_api.CLIENT_SECRET = "demo"
+
+    class _R:
+        status_code = 400
+        text = "refused"
+        def json(self): return {"error": "invalid_grant"}
+
+    class _C:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, **kw):
+            # The consent walk lands while Xero is answering the old refresh.
+            xero_api._write_token({"refresh_token": "rt-fresh", "tenant_id": "t1",
+                                   "tenant_name": "Projected Image", "connected_at": time.time()})
+            return _R()
+    xero_api.httpx.AsyncClient = lambda *a, **k: _C()
+    try:
+        xero_api._write_token({"refresh_token": "rt-dead", "tenant_id": "t1"})
+        xero_api._state["access"] = ""
+        xero_api._state["access_exp"] = 0.0
+        xero_api._state["token_error"] = ""
+        err = None
+        try:
+            run(xero_api._access_token())
+        except Exception as e:
+            err = e
+        ok(err is not None, "the refresh with the old token still fails")
+        d = xero_api._load_token()
+        eq(d.get("refresh_token"), "rt-fresh", "the fresh consent's token is kept")
+        ok("refused_at" not in d, "and is not marked refused")
+        ok(xero_api.status().get("needs_reconnect") is False, "so the page shows the link as good: %r" % xero_api.status())
+    finally:
+        (xero_api.httpx.AsyncClient, xero_api.RETRY_WAITS,
+         xero_api.CLIENT_ID, xero_api.CLIENT_SECRET) = saved
+        xero_api._state["token_error"] = ""
+        xero_api.disconnect()
+
+
+
+DOOR_WITH_SHOPS_XML = """<Envelope><Body><GetAllServicesAndRatesResponse>
+<GetAllServicesAndRatesResult><Message/><NotificationtType>SUCCESS</NotificationtType><wsRateService>
+ <wsAvailableServicesAndRates>
+   <wsPackageTypeCode>UPS_My_Packaging</wsPackageTypeCode><wsServiceCode>11</wsServiceCode>
+   <wsServiceTypeCode>UPS_Standard</wsServiceTypeCode><wsServiceTypeName>11 Standard</wsServiceTypeName>
+   <wsDeliveryDateTime>Tue, 13 Oct 2026&lt;br/&gt;End of business day</wsDeliveryDateTime>
+   <wsQuoteDetails><TotalNetCharge>15.35</TotalNetCharge></wsQuoteDetails>
+ </wsAvailableServicesAndRates>
+ <wsAvailableServicesAndRates>
+   <wsPackageTypeCode>DHL_NonDocument</wsPackageTypeCode><wsServiceCode>W</wsServiceCode>
+   <wsServiceTypeCode>DHL_ECONOMY_SELECT</wsServiceTypeCode><wsServiceTypeName>W Economy Select</wsServiceTypeName>
+   <wsDeliveryDateTime>Tue, 13 Oct 2026&lt;br/&gt;End of business day</wsDeliveryDateTime>
+   <wsQuoteDetails><TotalNetCharge>19.35</TotalNetCharge><ServiceType>DHL</ServiceType></wsQuoteDetails>
+   <wsDeliveryDropOffShops><wsDropOffShop><Description>DHL ServicePoint Dame St</Description><HouseNo>4</HouseNo><Street>Dame St</Street><City>Dublin</City><PostCode>D02 X285</PostCode><ParcelShopNumber>DUB017</ParcelShopNumber></wsDropOffShop></wsDeliveryDropOffShops>
+ </wsAvailableServicesAndRates>
+</wsRateService></GetAllServicesAndRatesResult></GetAllServicesAndRatesResponse></Body></Envelope>"""
+
+
+@test
+def t_a_door_service_that_lists_nearby_shops_is_still_a_door_service():
+    """Live fault, 2026-10-09: DHL vanished from an Irish order's courier list.
+    Missing a service? showed World Options returning ten services, DHL among
+    them, while the window showed four. A door quote's DHL and FedEx Economy
+    services had started carrying a list of nearby pickup shops, and Reactor read
+    any shop list as "delivered to a shop", so with shop services switched off it
+    hid them. A service is collect-from-a-shop only when shop delivery was asked
+    for or its code says Access Point."""
+    reset_dispatch(); reset_prod(); _ship_cfg()
+    post("/api/shipping/config", {"op": "set", "show_parcelshop": False})
+
+    async def door(service, action, inner, retryable=True):
+        return ET.fromstring(DOOR_WITH_SHOPS_XML)
+    saved = worldoptions._soap_call; worldoptions._soap_call = door
+    try:
+        r = post("/api/dispatch/quote", {"order_id": 12345, "box": BOX})
+        eq(r.status_code, 200, r.text)
+        body = r.json()
+        eq(body["show_parcelshop"], False, "shop services are switched off, as live")
+        codes = [o["service_type_code"] for o in body["options"]]
+        ok("DHL_ECONOMY_SELECT" in codes, "DHL is offered: " + str(codes))
+        dhl = [o for o in body["options"] if o["service_type_code"] == "DHL_ECONOMY_SELECT"][0]
+        eq(dhl["delivery_dropoff"], False, "to the door, not to a shop")
+        eq(dhl["delivery_shops"], [], "and carries no shop for the window to say the customer collects from")
+    finally:
+        worldoptions._soap_call = saved
+
+
+for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a
     # handful, which is what LOGIN_MAX_PER_MIN is sized for. The ceiling has
     # its own test rather than being weakened for everyone else's sake.
     copilot._login_hits.clear()
+    reached = len(NET_REACHED)
     try:
-        fn(); passed += 1; print(f"  PASS  {fn.__name__}")
+        fn()
+        if len(NET_REACHED) > reached:
+            raise AssertionError("reached the network: " + ", ".join(sorted(set(NET_REACHED[reached:]))))
+        passed += 1; print(f"  PASS  {fn.__name__}")
     except Exception as e:
         failed += 1; print(f"  FAIL  {fn.__name__}: {e}")
 print(f"\n{passed} passed, {failed} failed")

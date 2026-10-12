@@ -1,6 +1,285 @@
 {
  "releases": [
   {
+   "date": "2026-10-09",
+   "title": "Projected Image's logo in the sidebar",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": "",
+     "text": "The sidebar now opens with Projected Image's logo beside Reactor, its lettering in white so it reads on the dark frame. It takes the place of the plain teal square."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-09",
+   "title": "DHL is back in the courier list",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": "labels",
+     "text": "DHL had disappeared from the courier options for Irish orders, and some FedEx Economy services with it. World Options started listing nearby pickup shops beside those door-to-door services, and Reactor took that to mean the customer would collect from a shop, so with shop services switched off it hid them. They show again as the door deliveries they are."
+    },
+    {
+     "kind": "changed",
+     "tab": "labels",
+     "text": "Customers never collect from a shop. Reactor no longer offers or books any service that delivers to a pickup shop, for orders and custom shipments alike, and the switch for them is gone from Settings. Dropping your own parcels off at a shop is a separate setting and works as before."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-07",
+   "title": "Reconciliation and Xero sync put right",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": "recon",
+     "text": "An opened discrepancy showed its figures 100 times too big: an order of £3,960 read £396,000, and its VAT £66,000. Every figure in it now reads in pounds."
+    },
+    {
+     "kind": "fixed",
+     "tab": "recon",
+     "text": "When Xero stops accepting Reactor's connection, Reconciliation says so in red and offers Reconnect Xero as its main button. It used to stay green, and told you to reconnect from a tab with no way to."
+    },
+    {
+     "kind": "fixed",
+     "tab": "recon",
+     "text": "When filters or a search hide everything, the list says nothing matches and offers to clear them, rather than saying nothing needs attention."
+    },
+    {
+     "kind": "fixed",
+     "tab": "recon",
+     "text": "Search filters as you type, and clearing it clears the list. A sweep running in the background now shows when it has finished, instead of saying Sweeping for good."
+    },
+    {
+     "kind": "fixed",
+     "tab": "connector",
+     "text": "In a one-order or tag check, a document that does not match Shopify is marked in red with how far out it is, listed first and named in the summary and the Send box. It used to look like every safe one."
+    },
+    {
+     "kind": "fixed",
+     "tab": "connector",
+     "text": "Change settings no longer offers Shop timezone, which the Xero connector never kept, although saving said it had."
+    },
+    {
+     "kind": "fixed",
+     "tab": "connector",
+     "text": "The Synced figure says it counts invoices, credit notes and contacts. On a phone the tag filters, payout notes and the document window now fit the screen."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-07",
+   "title": "Compare methods in colours of its own",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": "forecast",
+     "text": "Compare methods draws each method in a colour of its own: purple, orange and magenta. None of them is a colour the chart already uses for money taken, what is expected or what was predicted, and each is easy to tell apart for people who see red and green alike. A method keeps its colour while it stays picked, and three can be drawn at once."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-07",
+   "title": "Reactor's new look",
+   "items": [
+    {
+     "kind": "changed",
+     "text": "Reactor has a new look: one white page in a dark frame, one set of greys, and Projected Image's teal for what is chosen and for the one main button on each screen. The sidebar is part of the dark frame, and Hide sidebar folds it away."
+    },
+    {
+     "kind": "changed",
+     "text": "Every page opens the same way: its title, at most one short line or a live status, and its actions. The explanations that used to fill the top of a page now sit behind the small (i) beside the title or figure they explain, and open with a tap or the keyboard as well as a pointer."
+    },
+    {
+     "kind": "changed",
+     "tab": "forecast",
+     "text": "Forecast leads with the month: what it is expected to come to against the plan, its likely range drawn as one bar, then what has been taken and where the year lands. Cash in has a Compare methods switch and simpler ranges; Worth looking at shows each month's likely range and whether it is safely ahead, likely ahead or likely behind; the method pages sit under How it works. The forecast now calls each of its models a method."
+    },
+    {
+     "kind": "changed",
+     "tab": "labels",
+     "text": "Production Manager shows how many orders wait in Unprocessed, To make and To ship at the top, with Complete and Custom shipments beside them. The queue, its buttons and the label print exactly as they did; an open order and its label now read as one block, and on a phone each order's buttons keep their words."
+    },
+    {
+     "kind": "changed",
+     "text": "Far fewer words on every screen: most of the explanation has gone or moved behind an (i), an empty list says one line and offers the next step, and every warning and cost is kept."
+    },
+    {
+     "kind": "changed",
+     "text": "Charts show the day under the pointer or your finger, and the arrow keys move along them; on a phone the legend reads the day out instead of a tooltip covering the chart."
+    },
+    {
+     "kind": "changed",
+     "text": "On a phone every button, field and choice is big enough for a thumb, and typing in a field no longer makes the page zoom in."
+    },
+    {
+     "kind": "fixed",
+     "tab": "crm",
+     "text": "The CRM pipeline shows all five stages on a laptop screen. The fifth used to sit past the edge of the board, with nothing to say it was there."
+    },
+    {
+     "kind": "fixed",
+     "text": "On a phone or tablet the closed menu no longer casts a shadow over the left edge of every page, and a row of tabs that scrolls keeps the one you are on in view."
+    },
+    {
+     "kind": "changed",
+     "tab": "guide",
+     "text": "The Guide's heading stays put as you move between its sections, and Print the guide sits beside its search."
+    },
+    {
+     "kind": "added",
+     "tab": "guide",
+     "text": "Admins have a new Design section in the Guide: every colour and typeface in Reactor and the shared parts its screens are built from, drawn by the same code as the screens, with how readable each colour is."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-02",
+   "title": "The Forecast, checked against September",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": "forecast",
+     "text": "The Forecast now measures itself against your plan in the same money: the plan's Total Sales, cash in with VAT and shipping. It used to compare with the plan's net sales, which made every month look about a fifth better against plan than it was. September showed 12% ahead of Algorithm 2 when it was really 9% short."
+    },
+    {
+     "kind": "fixed",
+     "tab": "forecast",
+     "text": "The cash projection no longer adds VAT and shipping a second time to a forecast that already includes them. That roughly doubled the working capital it showed by next April."
+    },
+    {
+     "kind": "added",
+     "tab": "forecast",
+     "text": "A new source, Big orders counted apart, forecasts orders under £2,000 from last year and adds big orders as their usual month, because a big one-off order rarely comes back in the same month a year later. On this year's months it was about 20% out, against 31% for the source that was leading, and it is ranked like every other source."
+    },
+    {
+     "kind": "changed",
+     "tab": "forecast",
+     "text": "The likely range now reaches as far as 8 in 10 of the forecast's past misses did, so \"8 times in 10\" means what it says. It is wider than before: September came in above the old range on every day from the 1st to the 22nd."
+    },
+    {
+     "kind": "fixed",
+     "tab": "forecast",
+     "text": "The forecast learns only from whole months now. The half month when the shop opened in April 2024 was being counted as a full one, and on its own it decided which source led."
+    },
+    {
+     "kind": "fixed",
+     "tab": "forecast",
+     "text": "On the 1st of a month, the Forecast no longer shows the whole of last month's takings as taken so far in the new one."
+    },
+    {
+     "kind": "added",
+     "tab": "forecast",
+     "text": "The drawer What each source said, and what came in, now gives each closed month in pounds: what came in, what the forecast in use said and when, whether it landed inside its likely range, and which source came closest. The chart's Was predicted line shows what the forecast in use said, not whichever source turned out closest afterwards."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-02",
+   "title": "Clearer answers from Xero, Google and Shopify",
+   "items": [
+    {
+     "kind": "added",
+     "text": "Google's sign in screen lets you untick Search Console or Analytics. If one is left unticked, the page after connecting now says which, Settings says so on that row, and Reactor stops trying to read it rather than failing later with a refusal. Connect again and leave both ticked to put it right."
+    },
+    {
+     "kind": "fixed",
+     "text": "When Xero's daily allowance of reads for the organisation is used up, reconciliation now says so, and roughly when it frees up, at the first refusal. It used to try three more times and then report a bare error."
+    },
+    {
+     "kind": "added",
+     "text": "Settings shows which version of Shopify order changes arrive in, beside the time of the last one under Live updates."
+    },
+    {
+     "kind": "fixed",
+     "tab": "crm",
+     "text": "The Pipedrive survey counts archived leads too, which Pipedrive keeps apart from the rest."
+    },
+    {
+     "kind": "changed",
+     "text": "If Reactor's AI is ever switched to a Claude model other than Opus, Deep analysis now gets the deepest thinking that model offers, and no model is asked for a level it refuses. A cautious guess used to cut some models short and ask others for levels they cannot do."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-02",
+   "title": "Ready for Shopify's October update",
+   "items": [
+    {
+     "kind": "added",
+     "text": "Changing the delivery address of an unfulfilled order can now change its tax, for example when a UK address is corrected to one abroad: Shopify recalculates it from its October update on. When that happens the edit says so, with the tax before and after, the new total, and what the customer owes or is due back, and the activity board records it.",
+     "tab": "labels"
+    },
+    {
+     "kind": "changed",
+     "text": "Reactor now works with Shopify on its October 2026 version. The print buttons on Shopify's order pages move to the current version too, which takes effect the next time the app is published to Shopify."
+    },
+    {
+     "kind": "fixed",
+     "text": "Settings now shows which version of Shopify Reactor is working with, next to the store's name under Connections. It was meant to from the start, but the line never appeared on the live app."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-02",
+   "title": "Everything underneath brought up to date",
+   "items": [
+    {
+     "kind": "fixed",
+     "text": "A Google connection made with a service account, rather than by signing in, works again after an update. A part it needs had been removed as unused in September, and a fresh install could not connect that way at all."
+    },
+    {
+     "kind": "changed",
+     "text": "The parts Reactor is built on are on their current releases, with their security fixes: the AI connection, the PDF reader that turns courier labels into print images and reads supplier invoices, and the web server underneath every page. Nothing you do changes."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-02",
+   "title": "Gobos sold with a projector",
+   "items": [
+    {
+     "kind": "fixed",
+     "text": "A gobo sold with a projector now prints the size of the projector on the same order, with a line under it saying so, instead of CHECK No model specified. A 40 Watt or an 80 Watt is cut at 53.3, as the size list says. When the order has projectors cut at two different sizes, no projector at all, another maker's projector, or a projector upgrade, the label says CHECK and says which.",
+     "tab": "labels"
+    },
+    {
+     "kind": "fixed",
+     "text": "Projectors, rain hoods, lenses and other projector accessories print on the production label by name, with no size and no CHECK, and with what was chosen, such as a rain hood, on the line under the name. Before, each printed a second CHECK row the bench could not tell from the gobo's. They are left out of the day sheet's cut list, which says how many it left out, and are not counted as glass used.",
+     "tab": "labels"
+    },
+    {
+     "kind": "fixed",
+     "text": "The size check counts gobos sold with a projector, and the check for paid orders that never reached production counts them too. A projector size missing from the size list can be settled in the size check as any other model can.",
+     "tab": "labels"
+    },
+    {
+     "kind": "fixed",
+     "text": "A label row printed by name, such as a projector, starts straight after its count and runs onto a second line when it is long, instead of being cut short after a gap.",
+     "tab": "labels"
+    }
+   ]
+  },
+  {
+   "date": "2026-09-30",
+   "title": "No blank page after each label",
+   "items": [
+    {
+     "kind": "fixed",
+     "text": "Production labels and serial stickers no longer print a blank page after each label when something else on the computer has put content of its own into the page, which is what happened at the bench. In Chrome, Opera, Edge and Firefox the labels are now laid at the top of the page, in front of anything else put into it, which no longer moves a label or adds a page unless it is taller than the whole run. Safari prints labels as it did before. Labels printed from an order in Shopify are printed the same way."
+    },
+    {
+     "kind": "added",
+     "text": "Shopify's print button on an order can print 4 x 4 labels, and opens on the production printer's label size rather than always on 4 x 6."
+    },
+    {
+     "kind": "fixed",
+     "text": "A label print no longer stops without a word when the label typeface cannot be loaded. It prints in a standard typeface instead, as it already did when the typeface was slow."
+    }
+   ]
+  },
+  {
    "date": "2026-09-30",
    "title": "Prints started close together",
    "items": [

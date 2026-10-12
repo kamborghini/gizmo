@@ -1070,7 +1070,12 @@ async def quote(origin: dict, destination: dict, boxes: list,
                     "lng":      _text(shop, "Longitude"),
                 })
             return out
-        delivery_shops = _shops("wsDeliveryDropOffShops")
+        # Shops to DELIVER to belong to a quote that asked for shop delivery.
+        # A door quote can list nearby pickup shops beside an ordinary door
+        # service (World Options began doing it for DHL and FedEx Economy in
+        # October 2026), and reading that list as "delivered to a shop" hid
+        # every DHL service for an Irish order, shop services being off.
+        delivery_shops = _shops("wsDeliveryDropOffShops") if delivery_dropoff else []
         # Drop-off shops offered for this service (nearest first, capped).
         shops = []
         for shop in _findall_direct(_find(opt, "wsCollectionDropOffShops"), "wsDropOffShop")[:3]:

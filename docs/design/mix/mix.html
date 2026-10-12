@@ -1,0 +1,1314 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The mix</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600&family=Inter:opsz,wght@14..32,400..700&display=swap">
+<style>
+/* ============ The mix: one source of truth ============
+   Every value below the token block reads a token. Outside it a rule may write
+   only 0, a 1px hairline or a percentage (data positions are passed in as
+   --at, --w and --at-* from the markup). Media query widths cannot read tokens. */
+:root{
+  /* ---- greys: one ramp ---- */
+  --ink:#121212;        /* text, the Expected marker */
+  --ink-2:#3C4043;      /* secondary text, figure labels */
+  --ink-3:#5F6368;      /* tertiary text, icons, counts */
+  --ink-4:#8A9096;      /* decorative marks, a switch when off (3.2:1) */
+  --line-ctl:#DADCE0;   /* control borders, chart axis, device edge */
+  --line:#E6E7EA;       /* list frames, header rules */
+  --line-soft:#EEEFF1;  /* row dividers, chart grid, mini range track */
+  --fill:#F3F4F5;       /* wells, counters, open and hover states */
+  --device:#FBFBFC;
+  --sheet:#FFFFFF;
+  --page:var(--sheet);
+  --device-edge:var(--line-ctl);
+
+  /* ---- brand ---- */
+  --teal:#13B7C0; --teal-hover:#11A6AF; --teal-line:#0F9097; --teal-text:#0B6B71;
+  --teal-dark:#08484C; --teal-wash:#F1FBFB; --teal-glow:#B8E9EC; --blue:#334FB4;
+  --link-underline:rgba(11,107,113,.35);
+
+  /* ---- status ---- */
+  --ok:#15803D; --ok-bg:#F0FDF4; --ok-dot:#22A55A; --ok-halo:rgba(34,165,90,.15);
+  --warn:#B45309; --warn-bg:#FFFBEB;
+  --bad:#B91C1C; --bad-bg:#FEF2F2;
+
+  /* ---- one colour per measure ---- */
+  --c-taken:var(--teal-dark);          /* money already in */
+  --c-still:rgba(19,183,192,.45);      /* still expected */
+  --c-exp:var(--ink);                  /* the Expected point on a range */
+  --c-exp-line:var(--teal-line);       /* Expected drawn as a series */
+  --c-range:var(--teal-glow);          /* Likely range as a bar */
+  --c-range-edge:var(--teal-line);     /* the bar's edge, so the range reads at 3:1 */
+  --c-area:rgba(19,183,192,.15); --c-area-edge:rgba(15,144,151,.35);       /* Likely range as a chart area */
+  --c-plan:var(--blue);                /* the plan */
+  --band-bg:radial-gradient(120% 140% at 0% 0%,#D3F1F3 0%,rgba(211,241,243,0) 60%),linear-gradient(110deg,#DDF4F5 0%,#EBF8F9 55%,#F2FBFB 100%);
+  --band-rule:rgba(8,72,76,.12);       /* rules and empty tracks on the band */
+
+  /* ---- type: five Inter steps, each with one line height ---- */
+  --font:"Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --display:"Bricolage Grotesque", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --fs-micro:11px;  --lh-micro:16px;   /* Beta, kbd, avatar */
+  --fs-cap:12px;    --lh-cap:16px;     /* legend, ticks, heads, counts, tags, captions */
+  --fs-body:13px;   --lh-body:20px;    /* everything else on desktop */
+  --fs-body-l:14px; --lh-body-l:20px;  /* order names; every control and row title on a phone */
+  --fs-head:15px;   --lh-head:20px;    /* section heads, the empty-state line */
+  --fw-r:400; --fw-m:500; --fw-s:600;
+  /* Bricolage: the wordmark and page titles only */
+  --fs-mark:16px; --lh-mark:20px;
+  --fs-title:26px; --fs-title-m:24px; --lh-title:32px; --tr-title:-0.02em;
+  /* figures: Inter 600 tabular, four steps; a phone figure is one step down */
+  --fs-fig-xl:44px; --fs-fig-l:36px; --fs-fig-m:28px; --fs-fig-s:24px; --lh-fig:1; --tr-fig:-0.03em;
+  /* the presentation page only */
+  --fs-deck:40px; --lh-deck:44px; --fs-deck-m:32px; --lh-deck-m:36px; --fs-lede:15px; --lh-lede:24px;
+
+  /* ---- sizes ---- */
+  --tag:20px;     /* chip, age, kbd */
+  --ctl-xs:24px;  /* info and refresh icon buttons */
+  --ctl-in:28px;  /* sidebar icon buttons, feature tiles, a chosen segment */
+  --tile-l:40px;  /* the empty-state icon tile */
+  --ctl:32px;     /* button, field, search, segmented track, queue tab, nav and menu rows, switch, table head */
+  --row:44px;     /* one-line rows, the tab strip */
+  --row-2:60px;   /* two-line phone rows */
+  --orow:64px;    /* an order row */
+  --nav:var(--ctl);
+  --ctl-m:40px;   /* phones: every target */
+  --icon:16px; --icon-s:14px; --stroke:1.75; --stroke-s:2; --stroke-hair:1; --dash:2 3;
+  --topbar:48px; --side:236px; --inset:8px;
+  --gutter:40px; --gutter-m:16px;
+  --q-w:184px;
+  --w-ono:104px; --w-date:64px; --w-find:232px; --w-search:280px; --w-tip:232px;
+  --cols:minmax(0,7fr) minmax(0,5fr); --cols-stack:minmax(0,1fr);   /* the page's split, and stacked on a narrow sheet */
+  --band-cols:minmax(0,1.6fr) 1px minmax(0,1fr);
+  --wl-cols:76px 72px 72px 84px minmax(96px,1fr) 96px;
+  --mwl-cols:84px minmax(0,1fr) 92px;
+  --label-w:384px; --measure:680px; --detail-h:320px;
+  --app-h:900px; --desk:1440px; --desk-min:1280px; --phone:390px;
+  --range-h:12px; --mini-h:12px; --mini-band:6px; --split-h:8px; --prog-h:4px; --tick:2px;
+  --mark-xs:4px; --mark-s:8px; --mark-l:16px; --swatch-s:12px; --swatch:20px;
+  --switch-w:28px; --switch-h:16px; --knob:12px;
+
+  /* ---- space: a 4px scale (2 only for hairline nudges) ---- */
+  --s-05:2px; --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px;
+  --s-6:24px; --s-8:32px; --s-10:40px; --s-12:48px; --s-16:64px; --s-24:96px;
+  --gap-seg:var(--s-05);       /* segments inside one control */
+  --gap-arrow:var(--s-05);     /* a trailing arrow after its text */
+  --gap-icon:var(--s-2);       /* icon or swatch to its label, label to count */
+  --gap-icon-row:var(--s-3);   /* a leading icon in a nav, list or menu row */
+  --gap-ctl:var(--s-2);        /* between two controls */
+  --gap-cluster:var(--s-4);    /* between two groups of controls */
+  --gap-fig:var(--s-3);        /* a figure label to its figure; a figure to its chip */
+  --gap-cols:var(--s-16);      /* the page's one two-column split */
+  --off-pop:var(--s-2); --pad-pop:var(--s-4); --pad-tip:var(--s-3); --pad-menu:var(--s-1);
+
+  /* ---- corners: one per role ---- */
+  --r-swatch:2px;   /* keys, small marks, the tab underline */
+  --r-in:4px;       /* chosen segment, kbd, info button, tags, brand mark, deck swatch, text links' focus ring */
+  --r-tag:var(--r-in);
+  --r-ctl:6px;      /* buttons, fields, search, segmented track, nav and menu rows, queue tabs, feature tiles,
+                       the switch's and chart's focus ring, the label image (its own drawn corner is about 6) */
+  --r-tile:10px; --r-pop:var(--r-tile);   /* queue counters, popovers, tooltip */
+  --r-sheet:12px; --r-band:var(--r-sheet); /* sheets, the feature band */
+  --r-full:999px;   /* dots, bars, the switch */
+  --r-screen:36px; --r-device:calc(var(--r-screen) + var(--s-3));
+
+  /* ---- shadows and rules ---- */
+  --sh-ctl:0 1px 1px rgba(18,18,18,.04);
+  --sh-raise:0 1px 2px rgba(18,18,18,.08), 0 0 0 1px rgba(18,18,18,.05);
+  --sh-chosen:var(--sh-ctl), inset 0 0 0 1px var(--teal-line);
+  --sh-pop:0 16px 40px -12px rgba(18,18,18,.22), 0 4px 10px -4px rgba(18,18,18,.08), 0 0 0 1px rgba(18,18,18,.07);
+  --sh-focal:0 1px 2px rgba(8,72,76,.18), 0 8px 20px -10px rgba(19,183,192,.7);
+  --sh-label:0 2px 6px -2px rgba(18,18,18,.12);
+  --sh-device:0 40px 80px -40px rgba(18,18,18,.28);
+  --sh-swatch:inset 0 0 0 1px rgba(18,18,18,.08);
+  --sh-key:inset 0 0 0 1px var(--line);
+  --sh-live:0 0 0 var(--s-05) var(--ok-halo);
+  --sh-selected:inset 2px 0 0 var(--teal-line);
+  --ring:0 0 0 2px var(--sheet);
+  --rule-t:inset 0 1px 0 var(--line);      --rule-b:inset 0 -1px 0 var(--line);
+  --rule-t-soft:inset 0 1px 0 var(--line-soft); --rule-b-soft:inset 0 -1px 0 var(--line-soft);
+  --rule-t-band:inset 0 1px 0 var(--band-rule);
+  --focus:var(--teal-line); --focus-w:2px;
+  /* pressed: one step darker than hover */
+  --press:var(--line);          /* on the sheet (hover is --fill) */
+  --press-fill:var(--line-ctl); /* on something already filled: counters, search (hover is --line) */
+  --teal-press:var(--teal-line);
+  --t-state:.2s; --z-under:-1; --z-pop:1;
+
+  /* ---- the ink frame around the sheet (Cameron chose the dark sidebar, 2026-10-05) ---- */
+  --chrome:var(--ink); --sheet-edge:transparent; --sh-sheet:none;
+  --nav-text:rgba(255,255,255,.72); --nav-muted:rgba(255,255,255,.5); --chrome-fill:rgba(255,255,255,.12); --chrome-press:rgba(255,255,255,.18);
+  --nav-on-bg:rgba(19,183,192,.18); --nav-on-text:var(--sheet); --nav-on-icon:var(--teal); --nav-on-sh:none;
+  --nav-avatar-text:var(--sheet); --chrome-text:var(--sheet);
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{font-family:var(--font);font-size:var(--fs-body);line-height:var(--lh-body);font-weight:var(--fw-r);color:var(--ink);background:var(--page);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-optical-sizing:auto}
+button{font:inherit;color:inherit;background:none;border:0}
+a{color:inherit;text-decoration:none}
+a[href],button{cursor:pointer}
+h1,h2,h3,small{font:inherit}
+p,li,.foot{text-wrap:pretty}
+:focus-visible{outline:var(--focus-w) solid var(--focus);outline-offset:var(--focus-w)}
+.sprite{position:absolute}
+.i{width:var(--icon);height:var(--icon);flex:none;fill:none;stroke:currentColor;stroke-width:var(--stroke);stroke-linecap:round;stroke-linejoin:round}
+.i.sm{width:var(--icon-s);height:var(--icon-s);stroke-width:var(--stroke-s)}
+.n{font-size:var(--fs-cap);line-height:var(--lh-cap);font-weight:var(--fw-m);color:var(--ink-3);font-variant-numeric:tabular-nums}
+.fig{font-weight:var(--fw-s);line-height:var(--lh-fig);letter-spacing:var(--tr-fig);font-variant-numeric:tabular-nums}
+/* words for screen readers only: directions on chips, units on counts, the chart's readout */
+.sr,.skip:not(:focus){position:absolute;width:1px;height:1px;padding:0;border:0;clip-path:inset(50%);white-space:nowrap}
+
+/* ============ presentation page ============ */
+.deck{padding:var(--s-12) var(--s-12) var(--s-8);max-width:var(--desk);margin:0 auto}
+.eyebrow{font-size:var(--fs-cap);line-height:var(--lh-cap);font-weight:var(--fw-m);color:var(--ink-3);display:flex;align-items:center;gap:var(--gap-icon)}
+.eyebrow .mark{width:var(--swatch-s);height:var(--swatch-s);border-radius:var(--r-swatch);background:var(--teal)}
+.deck h1{font-family:var(--display);font-size:var(--fs-deck);line-height:var(--lh-deck);font-weight:var(--fw-s);letter-spacing:var(--tr-title);margin-top:var(--s-3)}
+.deck .lede{font-size:var(--fs-lede);line-height:var(--lh-lede);color:var(--ink-3);margin-top:var(--s-2);max-width:var(--measure)}
+.from{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s-6) var(--s-10);margin-top:var(--s-8)}
+.from h3{font-size:var(--fs-body);line-height:var(--lh-body);font-weight:var(--fw-s);padding-top:var(--s-3);border-top:1px solid var(--line);display:flex;align-items:center;gap:var(--gap-icon)}
+.from h3 i{width:var(--swatch-s);height:var(--swatch-s);border-radius:var(--r-swatch);box-shadow:var(--sh-swatch);flex:none}
+.from ul{list-style:none;margin-top:var(--s-2);display:grid;gap:var(--s-2);color:var(--ink-2)}
+.from li{padding-left:var(--s-4);position:relative}
+.from li::before{content:"";position:absolute;left:var(--s-05);top:var(--s-2);width:var(--mark-xs);height:var(--mark-xs);border-radius:var(--r-full);background:var(--ink-4)}
+.deck-foot{margin-top:var(--s-8)}
+.swatches{display:flex;flex-wrap:wrap;gap:var(--s-3) var(--s-4)}
+.sw{display:flex;align-items:center;gap:var(--gap-icon);font-size:var(--fs-cap);line-height:var(--lh-cap);color:var(--ink-3);white-space:nowrap}
+.sw i{width:var(--swatch);height:var(--swatch);border-radius:var(--r-in);box-shadow:var(--sh-swatch);flex:none}
+.sw b{font-weight:var(--fw-m);color:var(--ink)}
+.k-calm{background:var(--fill)} .k-data{background:var(--blue)} .k-bold{background:var(--ink)}
+.k-ink{background:var(--ink)} .k-teal{background:var(--teal)} .k-teal-line{background:var(--teal-line)} .k-teal-text{background:var(--teal-text)}
+.k-taken{background:var(--c-taken)} .k-still{background:var(--c-still)} .k-range{background:var(--c-range)} .k-plan{background:var(--c-plan)}
+.sw .k-range{box-shadow:inset 0 0 0 1px var(--c-range-edge)}
+.k-band{background:var(--band-bg)} .k-fill{background:var(--fill)}
+.cap{max-width:var(--desk);margin:0 auto;padding:var(--s-10) var(--s-12) var(--s-4);display:flex;align-items:baseline;gap:var(--s-3);color:var(--ink-3)}
+.cap b{font-size:var(--fs-head);line-height:var(--lh-head);font-weight:var(--fw-s);color:var(--ink);white-space:nowrap}
+/* the frame's corner belongs to the app, so a mockup scaled to fit a narrow window keeps it concentric */
+.desk-wrap{width:100%;max-width:var(--desk);margin:0 auto;overflow:hidden}
+.desk{width:100%;min-width:var(--desk-min)}
+
+/* ============ app shell ============ */
+.app{position:relative;display:flex;align-items:flex-start;background:var(--chrome);border-radius:calc(var(--r-sheet) + var(--inset));min-height:var(--app-h)}
+.skip:focus{position:absolute;left:var(--s-3);top:var(--s-3);z-index:var(--z-pop)}
+.side{width:var(--side);flex:none;height:var(--app-h);position:sticky;top:0;display:flex;flex-direction:column;padding:var(--s-3)}
+/* one centre line for the mark, the nav icons and the avatar; one start line for every label */
+.brand{display:flex;align-items:center;gap:var(--s-2);height:var(--nav);padding:0 var(--s-05) 0 var(--s-1);color:var(--chrome-text)}
+.brand .mark{width:var(--ctl-xs);height:var(--ctl-xs);border-radius:var(--r-in);background:var(--teal);flex:none}
+.brand b{flex:1;font-family:var(--display);font-size:var(--fs-mark);line-height:var(--lh-mark);font-weight:var(--fw-s);letter-spacing:var(--tr-title)}
+:is(.side,.m-top) .btn.ghost .i{color:var(--nav-muted)}
+.navg{margin-top:var(--s-4)}
+.navg:nth-last-child(2){margin-bottom:var(--s-4)}
+.navg-h{display:block;font-size:var(--fs-cap);line-height:var(--lh-cap);font-weight:var(--fw-m);color:var(--nav-muted);padding:0 var(--s-2);margin-bottom:var(--s-1)}
+.nav{display:flex;align-items:center;gap:var(--gap-icon-row);height:var(--nav);padding:0 var(--s-2);border-radius:var(--r-ctl);font-weight:var(--fw-m);color:var(--nav-text);white-space:nowrap}
+.nav .i{color:var(--nav-muted)}
+.nav .lbl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.nav.on{background:var(--nav-on-bg);color:var(--nav-on-text);box-shadow:var(--nav-on-sh)}
+.nav.on .i{color:var(--nav-on-icon)}
+.beta{font-family:var(--font);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-m);letter-spacing:0;color:var(--nav-muted)}
+.ptitle .beta{color:var(--ink-3)}
+.who{margin-top:auto;display:flex;align-items:center;gap:var(--s-2);height:var(--row);padding:0 var(--s-05) 0 var(--s-1);color:var(--chrome-text)}
+.avatar{width:var(--ctl-xs);height:var(--ctl-xs);border-radius:var(--r-full);background:var(--chrome-fill);color:var(--nav-avatar-text);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-m);display:grid;place-items:center;flex:none}
+.who .nm{flex:1;min-width:0}
+.who .nm b{display:block;font-weight:var(--fw-m)}
+.who .nm span{display:block;font-size:var(--fs-cap);line-height:var(--lh-cap);color:var(--nav-muted)}
+
+.sheet{flex:1;min-width:0;margin:var(--inset) var(--inset) var(--inset) 0;background:var(--sheet);border:1px solid var(--sheet-edge);background-clip:padding-box;border-radius:var(--r-sheet);box-shadow:var(--sh-sheet);min-height:calc(var(--app-h) - 2 * var(--inset));display:flex;flex-direction:column}
+.sheet:focus{outline:0}
+.topbar{height:var(--topbar);display:flex;align-items:center;gap:var(--gap-ctl);padding:0 var(--gutter);flex:none}
+.crumbs{display:flex;align-items:center;gap:var(--s-1);color:var(--ink-3);flex:1;min-width:0}
+.crumbs b{color:var(--ink);font-weight:var(--fw-m)}
+.find{height:var(--ctl);width:var(--w-find);display:flex;align-items:center;gap:var(--gap-icon);padding:0 var(--s-2) 0 var(--s-3);border-radius:var(--r-ctl);background:var(--fill);color:var(--ink-3)}
+.find{text-align:start}
+.find span{flex:1}
+kbd{font-family:var(--font);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-m);color:var(--ink-3);height:var(--tag);min-width:var(--tag);padding:0 var(--s-1);display:inline-grid;place-items:center;border-radius:var(--r-in);background:var(--sheet);box-shadow:var(--sh-key)}
+
+/* page header: a display title and its actions on one line, one short line under it */
+.phead{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--s-6);padding:var(--s-3) var(--gutter) 0}
+.ptitle{display:flex;align-items:baseline;gap:var(--s-2);font-family:var(--display);font-size:var(--fs-title);line-height:var(--lh-title);font-weight:var(--fw-s);letter-spacing:var(--tr-title);white-space:nowrap}
+.sub{margin-top:var(--s-1);color:var(--ink-3);display:flex;align-items:center;gap:var(--s-2);white-space:nowrap}
+.dot-sep{width:var(--mark-xs);height:var(--mark-xs);border-radius:var(--r-full);background:var(--ink-4);flex:none}
+.live{width:var(--mark-s);height:var(--mark-s);margin-left:var(--s-05);border-radius:var(--r-full);background:var(--ok-dot);box-shadow:var(--sh-live);flex:none}
+.actions{display:flex;align-items:center;gap:var(--gap-ctl)}
+.ctl-label{color:var(--ink-3)}
+
+/* tabs on a full-width rule */
+.tabsrow{margin-top:var(--s-5);padding:0 var(--gutter);height:var(--row);display:flex;align-items:center;justify-content:space-between;gap:var(--s-6);box-shadow:var(--rule-b);flex:none}
+.tabs{display:flex;gap:var(--s-6);height:100%}
+.tab{position:relative;display:flex;align-items:center;gap:var(--gap-icon);height:100%;font-weight:var(--fw-m);color:var(--ink-3);white-space:nowrap}
+.tab.on{color:var(--ink)}
+.tab.on::after{content:"";position:absolute;left:0;right:0;bottom:0;height:var(--tick);background:var(--teal-line);border-radius:var(--r-swatch) var(--r-swatch) 0 0}
+
+/* controls */
+.btn{height:var(--ctl);display:inline-flex;align-items:center;justify-content:center;gap:var(--gap-icon);padding:0 var(--s-3);border-radius:var(--r-ctl);font-weight:var(--fw-m);color:var(--ink);background:var(--sheet);border:1px solid var(--line-ctl);box-shadow:var(--sh-ctl);white-space:nowrap;flex:none}
+.btn .i{color:var(--ink-2)}
+.btn .chev{color:var(--ink-3);margin-right:calc(-1 * var(--s-1))}
+.btn[aria-expanded="true"]{background:var(--fill)}
+.btn.primary{background:var(--teal);border-color:var(--teal-line);color:var(--ink)}
+.btn.primary .i{color:var(--ink)}
+.btn.icon{width:var(--ctl);padding:0}
+.btn.ghost{background:transparent;border-color:transparent;box-shadow:none}
+.btn.ghost .i{color:var(--ink-3)}
+.btn.sm{width:var(--ctl-in);height:var(--ctl-in)}
+/* a segmented control: every segment is the track's full height (so the target
+   is too); the chosen one is drawn inset by the track's own padding */
+.seg{display:inline-flex;height:var(--ctl);padding:0 var(--s-05);gap:var(--gap-seg);background:var(--fill);border-radius:var(--r-ctl);flex:none}
+.seg button{position:relative;isolation:isolate;height:100%;padding:0 var(--s-3);font-weight:var(--fw-m);color:var(--ink-3);display:inline-flex;align-items:center;justify-content:center;gap:var(--gap-icon);white-space:nowrap}
+.seg button::before{content:"";position:absolute;inset:var(--s-05) 0;z-index:var(--z-under);border-radius:var(--r-in)}
+/* chosen text is ink, as on tabs, nav rows and counters; the teal is on the mark */
+.seg button.on{color:var(--ink)}
+.seg button.on::before{background:var(--sheet);box-shadow:var(--sh-chosen)}
+/* the focus ring follows the drawn segment, inside the track padding and the segment gap */
+.seg button:focus-visible{outline:0}
+.seg button:focus-visible::before{outline:var(--focus-w) solid var(--focus);outline-offset:0}
+.field{height:var(--ctl);display:flex;align-items:center;gap:var(--gap-icon);padding:0 var(--s-3);border:1px solid var(--line-ctl);border-radius:var(--r-ctl);background:var(--sheet);color:var(--ink-3);box-shadow:var(--sh-ctl);min-width:0}
+/* the input runs under the field's two 1px edges (centred), so the whole field (40 on a phone) is the input */
+.field input{flex:1;min-width:0;height:calc(100% + var(--s-05));border:0;background:none;font:inherit;color:var(--ink);appearance:none}
+.field input::placeholder{color:var(--ink-3);opacity:1}
+.field input:focus{outline:0}
+.field:focus-within{outline:var(--focus-w) solid var(--focus);outline-offset:var(--focus-w)}
+/* an icon button inside a line of text: a 24 square, never taller than its 20px line, pulled 4
+   toward its words so the glyph sits 9 from them, as counts and tiles do. Its fill and focus ring
+   are drawn on ::before, so a phone can grow the target without growing what you see */
+.info{position:relative;isolation:isolate;width:var(--ctl-xs);height:var(--ctl-xs);margin-block:calc((var(--lh-body) - var(--ctl-xs)) / 2);margin-left:calc((var(--icon) - var(--ctl-xs)) / 2);display:inline-grid;place-items:center;color:var(--ink-3);flex:none}
+.info::before{content:"";position:absolute;z-index:var(--z-under);left:0;top:50%;width:var(--ctl-xs);height:var(--ctl-xs);margin-top:calc(var(--ctl-xs) / -2);border-radius:var(--r-in)}
+.info[aria-expanded="true"]{color:var(--ink)}
+.info[aria-expanded="true"]::before{background:var(--fill)}
+.info:focus-visible{outline:0}
+.info:focus-visible::before{outline:var(--focus-w) solid var(--focus);outline-offset:calc(-1 * var(--focus-w))}
+.link{display:inline-flex;align-items:center;gap:var(--gap-arrow);font-weight:var(--fw-m);color:var(--teal-text)}
+/* rings round text links take the inner corner; round the switch and chart, the control corner */
+:is(.ono,.link){border-radius:var(--r-in)}
+:is(.switch,.chart){border-radius:var(--r-ctl)}
+.switch{display:inline-flex;align-items:center;gap:var(--gap-icon);height:var(--ctl);font-weight:var(--fw-m);color:var(--ink-2);white-space:nowrap}
+.switch i{position:relative;flex:none;width:var(--switch-w);height:var(--switch-h);border-radius:var(--r-full);background:var(--ink-4);transition:background var(--t-state)}
+.switch i::after{content:"";position:absolute;left:var(--s-05);top:var(--s-05);width:var(--knob);height:var(--knob);border-radius:var(--r-full);background:var(--sheet);box-shadow:var(--sh-raise);transition:left var(--t-state)}
+.switch[aria-checked="true"] i{background:var(--teal-line)}
+.switch[aria-checked="true"] i::after{left:calc(var(--switch-w) - var(--knob) - var(--s-05))}
+.vr{width:1px;height:var(--lh-body);background:var(--line);flex:none}
+
+/* one tag: change chips (an arrow as well as a colour) and the age tag */
+.chip,.age{height:var(--tag);padding:0 var(--s-2);border-radius:var(--r-tag);display:inline-flex;align-items:center;gap:var(--gap-arrow);font-size:var(--fs-cap);line-height:var(--lh-cap);font-weight:var(--fw-s);font-style:normal;font-variant-numeric:tabular-nums;white-space:nowrap}
+.chip{padding-left:var(--s-1)}
+.chip.up{background:var(--ok-bg);color:var(--ok)}
+.chip.down{background:var(--bad-bg);color:var(--bad)}
+.age{background:var(--warn-bg);color:var(--warn)}
+
+/* sections: a title and space, no boxes */
+.body{padding:var(--s-8) var(--gutter) var(--s-12)}
+.sec{margin-top:var(--s-12)}
+.sec-h{display:flex;align-items:center;justify-content:space-between;gap:var(--s-4);min-height:var(--ctl);margin-bottom:var(--s-3)}
+.sec-h h2{display:flex;align-items:center;gap:var(--gap-icon);font-size:var(--fs-head);line-height:var(--lh-head);font-weight:var(--fw-s);white-space:nowrap}
+/* a heading with an info button: the button sits beside the heading, not inside its name */
+.sec-t{display:flex;align-items:center;gap:var(--gap-icon)}
+.tools{display:flex;align-items:center;gap:var(--s-4)}
+
+/* ---- the feature band: Forecast's one focal point ---- */
+.fband{border-radius:var(--r-band);background:var(--band-bg);padding:var(--s-6) var(--s-8);display:grid;grid-template-columns:var(--band-cols);gap:var(--s-8)}
+.fband .vr{width:auto;height:auto;background:var(--band-rule)}
+.fmain{display:flex;flex-direction:column}
+.fh{display:flex;align-items:center;gap:var(--gap-icon);min-height:var(--ctl-in)}
+.tile{width:var(--ctl-in);height:var(--ctl-in);border-radius:var(--r-ctl);background:var(--sheet);color:var(--teal-text);display:grid;place-items:center;flex:none;box-shadow:var(--sh-ctl)}
+.fl{font-weight:var(--fw-m);color:var(--ink-2);white-space:nowrap}
+.fs{color:var(--ink-2);white-space:nowrap;font-variant-numeric:tabular-nums}
+:is(.fband,.m-band) .chip{background:var(--sheet)}
+.hero{display:flex;align-items:center;flex-wrap:wrap;gap:var(--gap-fig);margin:var(--gap-fig) 0 var(--s-6)}
+.hero b{font-size:var(--fs-fig-xl)}
+.range{margin-top:auto;position:relative;padding:calc(var(--lh-cap) + var(--s-3)) 0}
+.rtrack{position:relative;height:var(--range-h);border-radius:var(--r-full);background:var(--sheet)}
+.rfill{position:absolute;top:0;bottom:0;left:var(--at-lo);width:calc(var(--at-hi) - var(--at-lo));border-radius:var(--r-full);background:var(--c-range);box-shadow:inset 0 0 0 1px var(--c-range-edge)}
+.rexp{position:absolute;top:50%;left:var(--at-exp);width:var(--mark-l);height:var(--mark-l);margin:calc(var(--mark-l) / -2) 0 0 calc(var(--mark-l) / -2);border-radius:var(--r-full);background:var(--c-exp);box-shadow:var(--ring)}
+.rplan{position:absolute;left:var(--at-plan);top:calc(var(--s-1) - var(--lh-cap) - var(--s-3));bottom:calc(-1 * var(--s-1));width:var(--tick);margin-left:calc(var(--tick) / -2);border-radius:var(--r-full);background:var(--c-plan)}
+.rl{position:absolute;font-size:var(--fs-cap);line-height:var(--lh-cap);font-weight:var(--fw-m);color:var(--ink-2);white-space:nowrap;font-variant-numeric:tabular-nums}
+.rl.t{top:0;left:calc(var(--at-plan) + var(--s-2));color:var(--ink)}
+.rl.b{bottom:0;left:var(--at);transform:translateX(-50%)}
+.rl.mid{color:var(--ink-3)}
+.side-figs{display:flex;flex-direction:column;justify-content:space-between}
+.sf + .sf{margin-top:var(--s-4);padding-top:var(--s-4);box-shadow:var(--rule-t-band)}
+.sf-num{display:flex;align-items:center;gap:var(--gap-fig);margin-top:var(--gap-fig)}
+.sf-num b{font-size:var(--fs-fig-m)}
+.sf-num .fs{margin-left:auto}
+.prog{position:relative;height:var(--prog-h);border-radius:var(--r-full);background:var(--band-rule);margin-top:var(--s-3)}
+.prog i{position:absolute;top:0;bottom:0;border-radius:var(--r-full)}
+.prog .taken{left:0;width:var(--w);background:var(--c-taken)}
+.prog .still{left:calc(var(--at) + var(--s-05));width:calc(100% - var(--at) - var(--s-05));background:var(--c-still)}
+.prog .plan{left:var(--at);top:calc(-1 * var(--s-1));bottom:calc(-1 * var(--s-1));width:var(--tick);margin-left:calc(var(--tick) / -2);background:var(--c-plan)}
+
+/* chart, with details on hover, tap or the arrow keys */
+.legend{display:flex;align-items:center;gap:var(--s-4);font-size:var(--fs-cap);line-height:var(--lh-cap);color:var(--ink-3);white-space:nowrap}
+.legend span{display:inline-flex;align-items:center;gap:var(--gap-icon)}
+/* a phone chart's held day, read out in the legend's own row: the same size, the values in ink */
+.legend.reading b{font-weight:var(--fw-m);color:var(--ink)}
+.legend.reading span{color:var(--ink);font-variant-numeric:tabular-nums}
+/* a chart key: its own line between the section head and the chart, on every device */
+.key{margin-bottom:var(--s-2)}
+.lg-dot{width:var(--mark-s);height:var(--mark-s);border-radius:var(--r-full);background:var(--c-taken);flex:none}
+.lg-line{width:var(--swatch-s);height:var(--tick);border-radius:var(--r-full);background:var(--c-exp-line);flex:none}
+.lg-band{width:var(--swatch-s);height:var(--mark-s);border-radius:var(--r-swatch);background:var(--c-area);box-shadow:inset 0 0 0 1px var(--c-area-edge);flex:none}
+.chart{width:100%;position:relative;touch-action:pan-y}
+.chart:focus-visible{outline-offset:var(--s-1)}
+.chart svg{display:block;overflow:visible}
+.chart .grid{stroke:var(--line-soft);stroke-width:var(--stroke-hair)}
+.chart .ax0{stroke:var(--line-ctl);stroke-width:var(--stroke-hair)}
+.chart .tk{font-size:var(--fs-cap);fill:var(--ink-3);font-variant-numeric:tabular-nums}
+.chart .tk-b{font-size:var(--fs-cap);font-weight:var(--fw-s);fill:var(--ink);font-variant-numeric:tabular-nums}
+.chart .band{fill:var(--c-area)}
+/* marks draw their white ring outside the fill (paint-order), so the Taken dot is 8, as its key */
+.chart .dot{fill:var(--c-taken);stroke:var(--sheet);stroke-width:var(--stroke-s);paint-order:stroke}
+.chart .exp{fill:none;stroke:var(--c-exp-line);stroke-width:var(--tick);stroke-linejoin:round;stroke-linecap:round}
+.chart .cross{stroke:var(--ink-3);stroke-width:var(--stroke-hair);stroke-dasharray:var(--dash)}
+.chart .hdot{fill:var(--c-exp-line);stroke:var(--sheet);stroke-width:var(--stroke-s)}
+.chart .rdot{fill:var(--sheet);stroke:var(--c-exp-line);stroke-width:var(--tick)}
+.tip{position:absolute;width:var(--w-tip);padding:var(--pad-tip);background:var(--sheet);border-radius:var(--r-pop);box-shadow:var(--sh-pop);font-size:var(--fs-cap);line-height:var(--lh-cap);pointer-events:none}
+.tip b{display:block;font-weight:var(--fw-s);margin-bottom:var(--s-1)}
+.tip .r{display:flex;align-items:center;gap:var(--gap-icon);height:var(--lh-body);color:var(--ink-2)}
+.tip .r span:last-child{margin-left:auto;color:var(--ink);font-weight:var(--fw-m);font-variant-numeric:tabular-nums}
+
+/* the page's one two-column split */
+.cols,.list{display:grid;grid-template-columns:var(--cols);column-gap:var(--gap-cols)}
+
+/* lists and tables: --line frames them (top, under a head, bottom), --line-soft divides rows */
+.wl .h,.wl .r{display:grid;grid-template-columns:var(--wl-cols);column-gap:var(--s-4);align-items:center}
+.wl .h{height:var(--ctl);box-shadow:var(--rule-b);font-size:var(--fs-cap);line-height:var(--lh-cap);font-weight:var(--fw-m);color:var(--ink-3)}
+.wl .r{height:var(--row);box-shadow:var(--rule-b-soft)}
+.wl .r:last-child{box-shadow:var(--rule-b)}
+.wl span{display:flex;align-items:center;min-width:0;font-variant-numeric:tabular-nums;white-space:nowrap}
+.wl .ra{justify-content:flex-end}
+.wl .mo,.wl .v{font-weight:var(--fw-m)}
+.wl .muted{color:var(--ink-3)}
+/* a mini range: the band's range bar, small */
+.rg{position:relative;width:100%;height:var(--mini-h)}
+.rg::before{content:"";position:absolute;left:0;right:0;top:50%;height:var(--tick);margin-top:calc(var(--tick) / -2);border-radius:var(--r-full);background:var(--line-soft)}
+.rg i{position:absolute}
+.rg .band{top:calc((var(--mini-h) - var(--mini-band)) / 2);height:var(--mini-band);left:var(--at-lo);width:calc(var(--at-hi) - var(--at-lo));border-radius:var(--r-full);background:var(--c-range);box-shadow:inset 0 0 0 1px var(--c-range-edge)}
+.rg .plan{top:0;bottom:0;left:var(--at-plan);width:var(--tick);margin-left:calc(var(--tick) / -2);border-radius:var(--r-full);background:var(--c-plan)}
+.rg .exp{top:50%;left:var(--at-exp);width:var(--mark-s);height:var(--mark-s);margin:calc(var(--mark-s) / -2) 0 0 calc(var(--mark-s) / -2);border-radius:var(--r-full);background:var(--c-exp);box-shadow:var(--ring)}
+
+/* why: a split bar over a sum */
+.split{display:flex;gap:var(--s-05);height:var(--split-h)}
+.split i{border-radius:var(--r-full)}
+.split .a{width:var(--w);background:var(--c-taken)}
+.split .b{flex:1;background:var(--c-still)}
+.kv{margin-top:var(--s-3)}
+.kv > div{display:flex;align-items:center;gap:var(--gap-icon);height:var(--row)}
+.kv > div:not(:last-child){box-shadow:var(--rule-b-soft)}
+.kv > div:nth-last-child(2),.kv > div:last-child{box-shadow:var(--rule-b)}
+.kv .sq{width:var(--swatch-s);height:var(--mark-s);border-radius:var(--r-swatch);flex:none}
+.kv .sq.taken{background:var(--c-taken)}
+.kv .sq.still{background:var(--c-still)}
+.kv .k{flex:1;color:var(--ink-2)}
+.kv .v{font-variant-numeric:tabular-nums;font-weight:var(--fw-m)}
+.kv .tot .k,.kv .tot .v{color:var(--ink);font-weight:var(--fw-s)}
+/* side by side with Worth looking at: the bar centres on its head row, the sums on its rows */
+.cols .split{margin-top:calc(var(--s-3) + (var(--ctl) - var(--split-h)) / 2)}
+.cols .kv{margin-top:calc((var(--ctl) - var(--split-h)) / 2)}
+.foot{margin-top:var(--s-3);font-size:var(--fs-cap);line-height:var(--lh-cap);color:var(--ink-3)}
+.foot b{font-weight:var(--fw-m);color:var(--ink-2);white-space:nowrap}
+
+/* the numbers behind it: one list of rows, read down each column (Algorithm 1 on the left,
+   the methods on the right), so the phone's single column keeps the same order */
+.list{grid-auto-flow:column;grid-template-rows:repeat(2,auto)}
+.list a{position:relative;display:flex;align-items:center;gap:var(--gap-icon-row);height:var(--row);color:var(--ink)}
+.list a:nth-child(odd){box-shadow:var(--rule-t)}
+.list a:nth-child(even){box-shadow:var(--rule-t-soft),var(--rule-b)}
+.list a .i,.m-list-1 a .i{color:var(--ink-3)}
+.list a .lbl,.m-list-1 a .lbl{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ============ production manager ============ */
+.queues{display:flex;align-items:stretch;gap:var(--gap-ctl);padding:var(--s-5) var(--gutter) 0}
+/* a counter: label plus figure, the same on every device */
+.q{width:var(--q-w);padding:var(--s-3) var(--s-4);border-radius:var(--r-tile);background:var(--fill);display:flex;flex-direction:column;gap:var(--s-2)}
+.q .ql{font-weight:var(--fw-m);color:var(--ink-2);white-space:nowrap}
+.q b{font-size:var(--fs-fig-l)}
+.q.on{background:var(--teal);box-shadow:var(--sh-focal)}
+.q.on .ql{color:var(--ink)}
+.qsep{align-self:center;color:var(--ink-4)}
+.qrest{margin-left:var(--s-4);align-self:flex-end;display:flex;gap:var(--gap-ctl)}
+.qt{height:var(--ctl);padding:0 var(--s-2);border-radius:var(--r-ctl);display:flex;align-items:center;gap:var(--gap-icon);font-weight:var(--fw-m);color:var(--ink-2);white-space:nowrap}
+.qt .i{color:var(--ink-3)}
+/* the open queue tab: the chosen-segment recipe (wash, teal ring, ink words, teal icon) */
+.qt.on{background:var(--teal-wash);color:var(--ink);box-shadow:var(--sh-chosen)}
+.qt.on .i{color:var(--teal-text)}
+.pm{margin-top:var(--s-5);border-top:1px solid var(--line);padding-bottom:var(--s-12)}
+/* search and filter on the left, the three actions on the right; on a narrow sheet the actions
+   wrap to a line of their own, still in order, rather than squeezing the search */
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:var(--gap-ctl);padding:var(--s-4) var(--gutter)}
+.toolbar .field{width:var(--w-search);flex:none}
+.tb-end{margin-left:auto;padding-left:calc(var(--gap-cluster) - var(--gap-ctl))}
+
+/* the queue: the app's own rows, a line between orders instead of a box round each */
+.orders{border-top:1px solid var(--line)}
+.orow{display:grid;grid-template-columns:var(--w-ono) minmax(0,1fr) var(--w-date) auto;align-items:center;column-gap:var(--s-4);min-height:var(--orow);padding:0 var(--gutter);box-shadow:var(--rule-b-soft)}
+.orders > :last-child,.m-orders > :last-child{box-shadow:var(--rule-b)}
+.ono{justify-self:start;font-weight:var(--fw-m);color:var(--teal-text);text-decoration:underline;text-decoration-color:var(--link-underline);text-underline-offset:var(--s-1);font-variant-numeric:tabular-nums;white-space:nowrap}
+.oc{min-width:0}
+.oc b{display:flex;align-items:center;gap:var(--gap-icon);font-size:var(--fs-body-l);line-height:var(--lh-body-l);font-weight:var(--fw-m);color:var(--ink);white-space:nowrap}
+.oc small{display:block;font-size:var(--fs-body);color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dt{color:var(--ink-3);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.acts{display:flex;gap:var(--gap-ctl)}
+.acts .grp{margin-left:calc(var(--gap-cluster) - var(--gap-ctl))}
+/* the Preview / Hide toggle keeps the width of its longer word, so no column moves */
+.swap{display:inline-grid}
+.swap > span{grid-area:1 / 1;display:inline-flex;align-items:center;justify-content:center;gap:var(--gap-icon)}
+.swap > [aria-hidden="true"]{visibility:hidden}
+/* an open row and its preview are one block: a teal wash and a 2px teal bar, no seam */
+.orow.open{background:var(--teal-wash);box-shadow:var(--sh-selected)}
+.opreview{padding:0 var(--gutter) var(--s-6) calc(var(--gutter) + var(--w-ono) + var(--s-4));background:var(--teal-wash);box-shadow:var(--sh-selected),var(--rule-b-soft)}
+.opreview p,.m-preview p{color:var(--ink-2);margin-bottom:var(--s-3)}
+.lab{margin:0;width:fit-content}
+.lab img{display:block;width:var(--label-w);max-width:100%;height:auto;border-radius:var(--r-ctl);background:var(--sheet);box-shadow:var(--sh-label)}
+.lab figcaption{margin-top:var(--s-2);font-size:var(--fs-cap);line-height:var(--lh-cap);color:var(--ink-3)}
+
+/* ============ details: an empty queue, How it works, an info button ============ */
+.details{max-width:var(--desk);margin:0 auto;padding:0 var(--s-12);display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s-6)}
+.inset{background:var(--chrome);border-radius:calc(var(--r-sheet) + var(--inset));padding:var(--inset);min-width:0;overflow:hidden}
+.inset .sheet{margin:0;min-height:0;height:var(--detail-h);border-radius:var(--r-sheet)}
+.detail-q{margin:0;align-self:flex-start;padding:var(--s-4) var(--s-2) 0}
+.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:var(--s-4)}
+.empty-ic{width:var(--tile-l);height:var(--tile-l);border-radius:var(--r-ctl);background:var(--fill);color:var(--ink-3);display:grid;place-items:center}
+.empty p{font-size:var(--fs-head);line-height:var(--lh-head);font-weight:var(--fw-s);color:var(--ink)}
+.demo{position:relative;flex:1;padding:var(--s-4)}
+.demo .head{display:flex;align-items:center;justify-content:space-between;gap:var(--s-3)}
+.pop{position:absolute;z-index:var(--z-pop);padding:var(--pad-pop);background:var(--sheet);border-radius:var(--r-pop);box-shadow:var(--sh-pop)}
+.pop h3{font-weight:var(--fw-s)}
+.pop p{margin-top:var(--s-1);color:var(--ink-2)}
+.pop p + p{margin-top:var(--s-2)}
+.pop > .link{margin-top:var(--s-3)}
+/* the menu opens 8 under its button and spans the card, from the title's edge to the button's,
+   so it never runs past a narrow card. A menu row is a nav row: 32 tall, a 16 icon, 12 to its
+   label; every label shares one left edge, and a row wraps only when the card is too narrow */
+.menu{left:var(--s-4);right:var(--s-4);top:calc(var(--s-4) + var(--ctl) + var(--off-pop));padding:var(--pad-menu)}
+.menu a{display:flex;align-items:center;gap:var(--gap-icon-row);min-height:var(--nav);padding:calc((var(--nav) - var(--lh-body)) / 2) var(--s-2);border-radius:var(--r-ctl)}
+.menu a:not(.link) .i{color:var(--ink-3)}
+.menu a .n{margin-left:auto}
+.menu hr{border:0;border-top:1px solid var(--line);margin:var(--s-1) var(--s-2)}
+.menu .link{margin-top:0;gap:var(--gap-arrow);padding-left:calc(var(--s-2) + var(--icon) + var(--gap-icon-row))}
+.ipop{left:var(--s-4);right:var(--s-4);top:calc(var(--s-4) + (var(--ctl) + var(--ctl-xs)) / 2 + var(--off-pop))}
+
+/* ============ phones ============ */
+.phones{max-width:var(--desk);margin:0 auto;padding:0 var(--s-12) var(--s-24);display:flex;justify-content:center;align-items:flex-start;gap:var(--s-16)}
+.device{display:flex;padding:var(--s-3);border-radius:var(--r-device);background:var(--device);border:1px solid var(--device-edge);box-shadow:var(--sh-device)}
+.screen{width:var(--phone);display:flex;flex-direction:column;border-radius:var(--r-screen);overflow:hidden;background:var(--chrome);position:relative}
+.status{height:var(--row);display:flex;align-items:center;justify-content:space-between;padding:0 var(--s-8);font-size:var(--fs-head);line-height:var(--lh-head);font-weight:var(--fw-s);color:var(--chrome-text);flex:none}
+.status svg{display:block}
+.m-top{height:var(--topbar);display:flex;align-items:center;gap:var(--gap-ctl);padding:0 var(--s-1);color:var(--chrome-text);flex:none}
+.m-top .crumb{flex:1;font-size:var(--fs-body-l);line-height:var(--lh-body-l);font-weight:var(--fw-m);color:var(--nav-text)}
+.m-sheet{flex:1;background:var(--sheet);border-radius:var(--r-sheet) var(--r-sheet) 0 0;box-shadow:0 0 0 1px var(--sheet-edge);padding:var(--s-5) var(--gutter-m) var(--s-8);position:relative}
+/* on a phone every target is 40 and control text is 14 */
+.screen :is(.btn,.seg,.field,.qt,.switch){height:var(--ctl-m)}
+.screen :is(.btn,.seg button,.field,.qt,.switch,.tab,.sec-h .link){font-size:var(--fs-body-l);line-height:var(--lh-body-l)}
+.screen .btn.icon{width:var(--ctl-m)}
+/* an info button keeps the desktop's 24 box where you see it; its 40 target grows up, down and
+   away from its words (padding on the right), so the target never covers the words */
+.screen .info{width:var(--ctl-m);height:var(--ctl-m);padding-right:calc(var(--ctl-m) - var(--ctl-xs));margin-block:calc((var(--lh-body) - var(--ctl-m)) / 2);margin-right:calc(var(--ctl-xs) - var(--ctl-m))}
+/* a text link keeps its look, with a 40 tall target drawn round it */
+.screen :is(.ono,.sec-h .link){position:relative}
+.screen :is(.ono,.sec-h .link)::after{content:"";position:absolute;inset:calc((var(--lh-body) - var(--ctl-m)) / 2) calc(-1 * var(--s-2))}
+.screen .ptitle{font-size:var(--fs-title-m)}
+.m-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--s-3)}
+.m-head > .actions{margin-top:calc((var(--lh-title) - var(--ctl-m)) / 2)}
+.m-acts{display:flex;gap:var(--gap-ctl);margin-top:var(--s-4)}
+.m-acts .btn,.m-two .btn{flex:1}
+.m-tabs{margin:var(--s-4) calc(-1 * var(--gutter-m)) 0;padding:0 var(--gutter-m);height:var(--row);box-shadow:var(--rule-b);overflow-x:auto;scrollbar-width:none}
+.m-tabs::-webkit-scrollbar{display:none}
+.m-plan{display:flex;align-items:center;gap:var(--s-2);margin-top:var(--s-4);font-size:var(--fs-body-l);line-height:var(--lh-body-l);color:var(--ink-3)}
+.m-plan .seg,.m-filter .seg{flex:1}
+.m-plan .seg button,.m-filter .seg button{flex:1;padding:0 var(--s-2)}
+.m-band{margin-top:var(--s-4);border-radius:var(--r-band);padding:var(--s-4);background:var(--band-bg)}
+.m-band .hero{margin-bottom:var(--s-4)}
+.m-band .hero b{font-size:var(--fs-fig-l)}
+.m-band .side-figs{margin-top:var(--s-4);padding-top:var(--s-4);box-shadow:var(--rule-t-band)}
+.m-band .sf-num b{font-size:var(--fs-fig-s)}
+.m-sec{margin-top:var(--s-8)}
+.screen .sec-h{min-height:var(--ctl-m);margin-bottom:var(--s-2)}
+/* the switch under the chart: its 40 target overhangs the section's end, so the next section starts
+   as far from its words as every other phone section does */
+.m-sec .switch{display:flex;width:fit-content;margin:var(--s-2) 0 calc((var(--lh-body-l) - var(--ctl-m)) / 2)}
+.m-wl > div{display:grid;grid-template-columns:var(--mwl-cols);align-items:center;column-gap:var(--s-4);height:var(--row-2);box-shadow:var(--rule-b-soft)}
+.m-wl > .h{height:var(--ctl);font-size:var(--fs-cap);line-height:var(--lh-cap);font-weight:var(--fw-m);color:var(--ink-3);box-shadow:var(--rule-b)}
+.m-wl > .h .ra{text-align:right}
+.m-wl > div:last-child{box-shadow:var(--rule-b)}
+.m-wl b{display:block;font-size:var(--fs-body-l);line-height:var(--lh-body-l);font-weight:var(--fw-m)}
+.m-wl small{display:flex;align-items:center;height:var(--tag);margin-top:var(--s-1);font-size:var(--fs-body);line-height:var(--lh-body);color:var(--ink-3)}
+.m-wl .rt{display:flex;flex-direction:column;align-items:flex-end;gap:var(--s-1);font-variant-numeric:tabular-nums}
+.screen .kv > div{font-size:var(--fs-body-l);line-height:var(--lh-body-l)}
+/* a row is 44 on one line and grows only when a narrow phone wraps its words */
+.m-list-1 a{position:relative;display:flex;align-items:center;gap:var(--gap-icon-row);min-height:var(--row);padding-block:var(--s-3);box-shadow:var(--rule-t-soft);font-size:var(--fs-body-l);line-height:var(--lh-body-l)}
+.m-list-1 a .lbl{white-space:normal}
+.m-list-1 a:first-child{box-shadow:var(--rule-t)}
+.m-list-1 a:last-child{box-shadow:var(--rule-t-soft),var(--rule-b)}
+.m-queues{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--gap-ctl);margin-top:var(--s-4)}
+.m-queues .q{width:auto;padding:var(--s-3)}
+.m-queues .q .ql{font-size:var(--fs-body-l);line-height:var(--lh-body-l)}
+.m-queues .q b{font-size:var(--fs-fig-m)}
+/* ghost tabs at the start of a row are pulled out by their own padding, so their icons sit on the gutter */
+.m-rest{display:flex;gap:var(--gap-ctl);margin:var(--s-2) calc(-1 * var(--s-2)) 0}
+.m-tools{display:flex;gap:var(--gap-ctl);margin-top:var(--s-4)}
+.m-tools .field{flex:1}
+.m-filter{display:flex;margin-top:var(--s-2)}
+.m-two{display:flex;gap:var(--gap-ctl);margin-top:var(--s-2)}
+.m-size{width:100%;justify-content:space-between;margin-top:var(--s-2)}
+.m-orders{margin:var(--s-4) calc(-1 * var(--gutter-m)) 0;border-top:1px solid var(--line)}
+.m-orow{padding:var(--s-3) var(--gutter-m);box-shadow:var(--rule-b-soft)}
+.m-orow .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--s-1)}
+.m-orow b{display:flex;align-items:center;gap:var(--gap-icon);font-size:var(--fs-body-l);line-height:var(--lh-body-l);font-weight:var(--fw-m)}
+.m-orow small{display:block;color:var(--ink-3)}
+/* every action carries its word; the two that change an order's state get a row of their own */
+.m-orow .acts{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:var(--gap-ctl);margin-top:var(--s-3)}
+.m-orow .acts .btn{grid-column:span 2;padding:0 var(--s-2)}
+.m-orow .acts .btn:nth-child(n+4){grid-column:span 3}
+.m-orow .acts .grp{margin-left:0}
+.m-orow.open{background:var(--teal-wash);box-shadow:var(--sh-selected)}
+.m-preview{padding:0 var(--gutter-m) var(--s-6);background:var(--teal-wash);box-shadow:var(--sh-selected),var(--rule-b-soft)}
+.m-preview .lab{width:100%}
+
+/* ============ one alignment rule, one focus ring per kind, one hover and press recipe ============ */
+/* a small count or tag beside its words sits on their baseline, not on their centre */
+:is(.nav,.seg button,.list a,.m-list-1 a,.sec-h h2){flex-wrap:wrap;align-content:center;align-items:baseline}
+:is(.nav,.seg button,.list a,.m-list-1 a) > svg{align-self:center}
+.menu a{align-items:baseline}
+.menu a > svg{align-self:center}
+
+/* focus: rows that touch their neighbours, and info buttons that sit 4 from their words, draw the
+   ring inside; tabs and list rows draw it as a rounded box inside their strip, never past its rule */
+:is(.nav,.menu a):focus-visible{outline-offset:calc(-1 * var(--focus-w))}
+.tab:focus-visible,:is(.list,.m-list-1) a:focus-visible{outline:0}
+.tab:focus-visible::before,:is(.list,.m-list-1) a:focus-visible::before{content:"";position:absolute;border-radius:var(--r-ctl);box-shadow:inset 0 0 0 var(--focus-w) var(--focus);pointer-events:none}
+.tab:focus-visible::before{inset:var(--s-1) calc(-1 * var(--s-2))}
+:is(.list,.m-list-1) a:focus-visible::before{inset:var(--s-05) calc(-1 * var(--s-2))}
+
+/* hover, only where there is a pointer to hover with (a touch screen keeps :hover after a tap) */
+@media (hover:hover){
+  .btn:hover,.qt:not(.on):hover,.menu a:hover,.orow:not(.open):hover{background:var(--fill)}
+  .btn.primary:hover{background:var(--teal-hover)}
+  :is(.side,.m-top) .btn.ghost:hover,.nav:not(.on):hover{background:var(--chrome-fill)}
+  .q:not(.on):hover,.find:hover{background:var(--line)}
+  .info:hover{color:var(--ink)}
+  .info:hover::before{background:var(--fill)}
+  /* on the teal band, white like its tiles and chips */
+  :is(.fband,.m-band) .info:hover::before{background:var(--sheet)}
+  .tab:hover,.seg button:not(.on):hover{color:var(--ink)}
+  .field:hover{border-color:var(--ink-4)}
+  :is(.link,.ono):hover{color:var(--teal-dark)}
+  .ono:hover{text-decoration-color:currentColor}
+  :is(.list,.m-list-1) a:hover,:is(.list,.m-list-1) a:hover :is(.i,.n){color:var(--teal-text)}
+  .switch:hover i{background:var(--ink-3)}
+  .switch[aria-checked="true"]:hover i{background:var(--teal-text)}
+}
+/* press: one step darker than hover, on every device */
+.btn:active,.qt:not(.on):active,.menu a:active{background:var(--press)}
+.info:active::before{background:var(--press)}
+.btn.primary:active{background:var(--teal-press)}
+:is(.side,.m-top) .btn.ghost:active,.nav:not(.on):active{background:var(--chrome-press)}
+.q:not(.on):active,.find:active{background:var(--press-fill)}
+.seg button:not(.on):active::before{background:var(--press)}
+.tab:active,.seg button:not(.on):active{color:var(--ink)}
+:is(.link,.ono):active,:is(.list,.m-list-1) a:active,:is(.list,.m-list-1) a:active :is(.i,.n){color:var(--teal-dark)}
+.switch:active i{background:var(--ink-3)}
+.switch[aria-checked="true"]:active i{background:var(--teal-text)}
+
+/* a desktop sheet narrower than 1160 (a 1280 or 1366 laptop) stacks the page split */
+.app .sheet{container-type:inline-size}
+@container (max-width:1159px){
+  .cols{grid-template-columns:var(--cols-stack)}
+  .cols .split{margin-top:0}
+}
+
+@media (max-width:1100px){ .details{grid-template-columns:1fr 1fr} }
+@media (max-width:1000px){
+  .from{grid-template-columns:1fr}
+  .phones{flex-direction:column;align-items:center;gap:var(--s-10)}
+}
+@media (max-width:760px){ .details{grid-template-columns:1fr} }
+@media (max-width:600px){
+  .deck{padding:var(--s-8) var(--gutter-m) var(--s-6)}
+  .deck h1{font-size:var(--fs-deck-m);line-height:var(--lh-deck-m)}
+  .cap{padding:var(--s-8) var(--gutter-m) var(--s-3);flex-wrap:wrap}
+  .details{padding:0 var(--gutter-m)}
+  .phones{padding:0 0 var(--s-12)}
+  .device{padding:0;border:0;border-radius:0;box-shadow:none;background:none;width:100%}
+  .screen{width:100%;border-radius:0}
+  .status{display:none}
+}
+/* a phone narrower than 390: counters give their 14px label 8 more of their width */
+@media (max-width:389px){ .m-queues .q{padding-inline:var(--s-2)} }
+@media (prefers-reduced-motion:reduce){ *{transition:none !important} }
+</style>
+</head>
+<body>
+<!-- icon sprite (Lucide-style, drawn on a 24 grid) -->
+<svg class="sprite" width="0" height="0" aria-hidden="true">
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+  <symbol id="i-tag" viewBox="0 0 24 24"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5"/></symbol>
+  <symbol id="i-package" viewBox="0 0 24 24"><path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><path d="m3.3 7 7.703 4.734a2 2 0 0 0 1.994 0L20.7 7"/><path d="m7.5 4.27 9 5.15"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+  <symbol id="i-card" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="5" rx="2"/><path d="M2 10h20"/></symbol>
+  <symbol id="i-scale" viewBox="0 0 24 24"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></symbol>
+  <symbol id="i-trend" viewBox="0 0 24 24"><path d="M22 7 13.5 15.5 8.5 10.5 2 17"/><path d="M16 7h6v6"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/></symbol>
+  <symbol id="i-printer" viewBox="0 0 24 24"><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 9V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6"/><rect x="6" y="14" width="12" height="8" rx="1"/></symbol>
+  <symbol id="i-ruler" viewBox="0 0 24 24"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></symbol>
+  <symbol id="i-briefcase" viewBox="0 0 24 24"><path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/><rect width="20" height="14" x="2" y="6" rx="2"/></symbol>
+  <symbol id="i-projector" viewBox="0 0 24 24"><path d="M5 7 3 5"/><path d="M9 6V3"/><path d="m13 7 2-2"/><circle cx="9" cy="13" r="3"/><path d="M11.83 12H20a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h2.17"/><path d="M16 16h2"/></symbol>
+  <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-team" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m16 11 2 2 4-4"/></symbol>
+  <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></symbol>
+  <symbol id="i-sort" viewBox="0 0 24 24"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-table" viewBox="0 0 24 24"><path d="M12 3v18"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/></symbol>
+  <symbol id="i-cash" viewBox="0 0 24 24"><rect width="20" height="12" x="2" y="6" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/></symbol>
+  <symbol id="i-columns" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></symbol>
+  <symbol id="i-compare" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/></symbol>
+  <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-2.12 6.36-6.36 2.12 2.12-6.36z"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-sheetfile" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h2"/><path d="M14 13h2"/><path d="M8 17h2"/><path d="M14 17h2"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-eyeoff" viewBox="0 0 24 24"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/></symbol>
+  <symbol id="i-tick" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></symbol>
+  <symbol id="i-dn" viewBox="0 0 24 24"><path d="m7 7 10 10"/><path d="M17 7v10H7"/></symbol>
+  <symbol id="i-truck" viewBox="0 0 24 24"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></symbol>
+  <symbol id="i-wallet" viewBox="0 0 24 24"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></symbol>
+</svg>
+
+<!-- ============ the direction ============ -->
+<header class="deck">
+  <div class="eyebrow"><span class="mark"></span>Reactor, a direction</div>
+  <h1>The mix</h1>
+  <p class="lede">Calm's quiet sheet, Data-forward's figures and Brand-bold's focal points. Explanations wait behind small info buttons.</p>
+  <div class="from">
+    <div>
+      <h3><i class="k-calm"></i>From Calm workspace</h3>
+      <ul>
+        <li>One white sheet; only the band and the counters are boxed</li>
+        <li>Sections are a title and space; lists are rows split by hairlines</li>
+        <li>Teal marks what is chosen, links and the one primary action</li>
+        <li>A line between orders instead of a box round each one</li>
+      </ul>
+    </div>
+    <div>
+      <h3><i class="k-data"></i>From Data-forward</h3>
+      <ul>
+        <li>Every change carries an arrow, not just a colour</li>
+        <li>Taken, Still expected and Plan keep one colour on every screen</li>
+        <li>Chart details on hover or tap, and a Compare methods switch</li>
+        <li>One How it works button holds the method pages</li>
+      </ul>
+    </div>
+    <div>
+      <h3><i class="k-bold"></i>From Brand-bold</h3>
+      <ul>
+        <li>An ink frame around the sheet</li>
+        <li>Forecast's month figure leads, its range drawn as one bar</li>
+        <li>Queue counters you can read across the bench</li>
+        <li>Bricolage for page titles; an icon tile on each band label</li>
+      </ul>
+    </div>
+  </div>
+  <div class="deck-foot">
+    <div class="swatches">
+      <span class="sw"><i class="k-ink"></i><b>Ink</b> #121212</span>
+      <span class="sw"><i class="k-teal"></i><b>Teal</b> #13B7C0</span>
+      <span class="sw"><i class="k-teal-line"></i><b>Teal line</b> #0F9097</span>
+      <span class="sw"><i class="k-teal-text"></i><b>Teal text</b> #0B6B71</span>
+      <span class="sw"><i class="k-taken"></i><b>Taken</b> #08484C</span>
+      <span class="sw"><i class="k-still"></i><b>Still expected</b> teal at 45%</span>
+      <span class="sw"><i class="k-range"></i><b>Likely range</b> #B8E9EC, teal at 15% in the chart</span>
+      <span class="sw"><i class="k-plan"></i><b>Plan</b> #334FB4</span>
+      <span class="sw"><i class="k-band"></i><b>Band</b> #D3F1F3 to #F2FBFB</span>
+      <span class="sw"><i class="k-fill"></i><b>Fill</b> #F3F4F5</span>
+    </div>
+  </div>
+</header>
+
+<!-- ============ 01 Forecast, desktop ============ -->
+<div class="cap"><b>Forecast</b><span>Desktop, 1440px wide. Hover the chart.</span></div>
+<div class="desk-wrap"><div class="desk">
+<div class="app">
+  <a class="skip btn" href="#page-forecast">Skip to page</a>
+  <aside class="side" data-active="forecast"></aside>
+  <main class="sheet" id="page-forecast" tabindex="-1">
+    <div class="topbar">
+      <div class="crumbs">Finance<svg class="i sm" aria-hidden="true"><use href="#i-right"/></svg><b>Forecast</b></div>
+      <button type="button" class="find" aria-keyshortcuts="Meta+J"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg><span>Search</span><kbd>⌘J</kbd></button>
+    </div>
+
+    <div class="phead">
+      <div>
+        <h1 class="ptitle">Forecast <span class="beta">Beta</span></h1>
+        <div class="sub">October 2026<span class="dot-sep"></span>Run as of 1 Oct</div>
+      </div>
+      <div class="actions">
+        <button class="btn" aria-expanded="false"><svg class="i" aria-hidden="true"><use href="#i-help"/></svg>How it works</button>
+        <button class="btn"><svg class="i" aria-hidden="true"><use href="#i-upload"/></svg>Upload workbook</button>
+      </div>
+    </div>
+
+    <div class="tabsrow">
+      <nav class="tabs" aria-label="Finance pages">
+        <a class="tab" href="#">Liability</a><a class="tab" href="#">Reconciliation</a><a class="tab on" href="#" aria-current="page">Forecast</a><a class="tab" href="#">Xero sync</a>
+      </nav>
+      <div class="actions">
+        <span class="ctl-label">Plan</span>
+        <div class="seg" role="group" aria-label="Plan"><button class="on" aria-pressed="true">Algorithm 1</button><button aria-pressed="false">Algorithm 2</button><button aria-pressed="false">Algorithm 3</button></div>
+      </div>
+    </div>
+
+    <div class="body">
+      <section class="fband">
+        <div class="fmain">
+          <div class="fh"><span class="tile"><svg class="i" aria-hidden="true"><use href="#i-trend"/></svg></span><span class="fl">Expected this month</span><button class="info" aria-label="How sure this is" aria-haspopup="dialog" aria-expanded="false"><svg class="i" aria-hidden="true"><use href="#i-info"/></svg></button></div>
+          <div class="hero"><b class="fig">£53,691</b><i class="chip up"><svg class="i sm" aria-hidden="true"><use href="#i-up"/></svg><span class="sr">up </span>42.9%</i><span class="fs">against plan</span></div>
+          <div class="range" style="--at-lo:28.3%;--at-hi:90.1%;--at-exp:59.2%;--at-plan:18.9%">
+            <span class="rl t">Plan £37,566</span>
+            <div class="rtrack"><div class="rfill"></div><div class="rplan"></div><div class="rexp"></div></div>
+            <span class="rl b" style="--at:28.3%">£41,327</span>
+            <span class="rl b mid" style="--at:59.2%">Likely range</span>
+            <span class="rl b" style="--at:90.1%">£66,054</span>
+          </div>
+        </div>
+        <div class="vr"></div>
+        <div class="side-figs">
+          <div class="sf">
+            <div class="fh"><span class="tile"><svg class="i" aria-hidden="true"><use href="#i-wallet"/></svg></span><span class="fl">Taken so far</span></div>
+            <div class="sf-num"><b class="fig">£5,116</b><span class="fs">Day 1 of 31</span></div>
+            <div class="prog"><i class="taken" style="--w:9.5%"></i><i class="still" style="--at:9.5%"></i><i class="plan" style="--at:70%"></i></div>
+          </div>
+          <div class="sf">
+            <div class="fh"><span class="tile"><svg class="i" aria-hidden="true"><use href="#i-flag"/></svg></span><span class="fl">Year lands at</span></div>
+            <div class="sf-num"><b class="fig">£372,285</b><i class="chip up"><svg class="i sm" aria-hidden="true"><use href="#i-up"/></svg><span class="sr">up </span>29.9%</i><span class="fs">Plan £286,687</span></div>
+            <div class="prog"><i class="taken" style="--w:66.4%"></i><i class="still" style="--at:66.4%"></i><i class="plan" style="--at:77%"></i></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sec-h">
+          <div class="sec-t"><h2>Cash in</h2><button class="info" aria-label="About this chart" aria-haspopup="dialog" aria-expanded="false"><svg class="i" aria-hidden="true"><use href="#i-info"/></svg></button></div>
+          <div class="tools">
+            <button type="button" class="switch" role="switch" aria-checked="false"><i></i>Compare methods</button>
+            <div class="seg" role="group" aria-label="Range"><button aria-pressed="false">Today</button><button aria-pressed="false">Week</button><button class="on" aria-pressed="true">Month</button><button aria-pressed="false">3 months</button><button aria-pressed="false">12 months</button><button aria-pressed="false">Months ahead</button><button aria-pressed="false" aria-label="Custom range" title="Custom range"><svg class="i" aria-hidden="true"><use href="#i-calendar"/></svg></button></div>
+          </div>
+        </div>
+        <div class="legend key"><span><i class="lg-dot"></i>Taken</span><span><i class="lg-line"></i>Expected</span><span><i class="lg-band"></i>Likely range</span></div>
+        <div class="chart" data-h="268" data-tip="14"></div>
+      </section>
+
+      <div class="cols">
+        <section class="sec">
+          <div class="sec-h">
+            <h2>Worth looking at<span class="n">6<span class="sr"> months</span></span></h2>
+            <a class="link" href="#">Show all<svg class="i sm" aria-hidden="true"><use href="#i-right"/></svg></a>
+          </div>
+          <div class="wl">
+            <div class="h"><span>Month</span><span class="ra">Expected</span><span class="ra">Plan</span><span class="ra">Against plan</span><span>Likely range</span><span>Outlook</span></div>
+            <div class="r"><span class="mo">Oct 2026</span><span class="ra v">£53,691</span><span class="ra muted">£37,566</span><span class="ra"><i class="chip up"><svg class="i sm" aria-hidden="true"><use href="#i-up"/></svg><span class="sr">up </span>42.9%</i></span><span><span class="rg" role="img" aria-label="Likely £41,327 to £66,054, plan £37,566" style="--at-lo:42.7%;--at-hi:92.1%;--at-plan:35.1%;--at-exp:67.4%"><i class="band"></i><i class="plan"></i><i class="exp"></i></span></span><span class="muted">Safely ahead</span></div>
+            <div class="r"><span class="mo">Nov 2026</span><span class="ra v">£45,044</span><span class="ra muted">£35,860</span><span class="ra"><i class="chip up"><svg class="i sm" aria-hidden="true"><use href="#i-up"/></svg><span class="sr">up </span>25.6%</i></span><span><span class="rg" role="img" aria-label="Likely £34,690 to £55,980, plan £35,860" style="--at-lo:29.4%;--at-hi:72%;--at-plan:31.7%;--at-exp:50.1%"><i class="band"></i><i class="plan"></i><i class="exp"></i></span></span><span class="muted">Likely ahead</span></div>
+            <div class="r"><span class="mo">Dec 2026</span><span class="ra v">£31,420</span><span class="ra muted">£38,750</span><span class="ra"><i class="chip down"><svg class="i sm" aria-hidden="true"><use href="#i-dn"/></svg><span class="sr">down </span>18.9%</i></span><span><span class="rg" role="img" aria-label="Likely £24,180 to £39,960, plan £38,750" style="--at-lo:8.4%;--at-hi:40%;--at-plan:37.5%;--at-exp:22.8%"><i class="band"></i><i class="plan"></i><i class="exp"></i></span></span><span class="muted">Likely behind</span></div>
+          </div>
+        </section>
+
+        <section class="sec">
+          <div class="sec-h">
+            <div class="sec-t"><h2>Why £53,691</h2><button class="info" aria-label="How this is worked out" aria-haspopup="dialog" aria-expanded="false"><svg class="i" aria-hidden="true"><use href="#i-info"/></svg></button></div>
+          </div>
+          <div class="split"><i class="a" style="--w:9.5%"></i><i class="b"></i></div>
+          <div class="kv">
+            <div><i class="sq taken"></i><span class="k">Taken so far</span><span class="v">£5,116</span></div>
+            <div><i class="sq still"></i><span class="k">Still expected</span><span class="v">£48,575</span></div>
+            <div class="tot"><span class="k">Expected this month</span><span class="v">£53,691</span></div>
+          </div>
+          <p class="foot">Rest of October forecast by the <b>Big orders counted apart</b> method.</p>
+        </section>
+      </div>
+
+      <section class="sec">
+        <div class="sec-h"><h2>The numbers behind it</h2></div>
+        <nav class="list" aria-label="The numbers behind it">
+          <a href="#"><svg class="i" aria-hidden="true"><use href="#i-table"/></svg><span class="lbl">Month by month against Algorithm 1</span><span class="n">12<span class="sr"> months</span></span><svg class="i sm" aria-hidden="true"><use href="#i-right"/></svg></a>
+          <a href="#"><svg class="i" aria-hidden="true"><use href="#i-cash"/></svg><span class="lbl">Cash under Algorithm 1</span><span class="n">12<span class="sr"> months</span></span><svg class="i sm" aria-hidden="true"><use href="#i-right"/></svg></a>
+          <a href="#"><svg class="i" aria-hidden="true"><use href="#i-columns"/></svg><span class="lbl">Every method, side by side</span><span class="n">13<span class="sr"> methods</span></span><svg class="i sm" aria-hidden="true"><use href="#i-right"/></svg></a>
+          <a href="#"><svg class="i" aria-hidden="true"><use href="#i-compare"/></svg><span class="lbl">What each method said, and what came in</span><svg class="i sm" aria-hidden="true"><use href="#i-right"/></svg></a>
+        </nav>
+      </section>
+    </div>
+  </main>
+</div>
+</div></div>
+
+<!-- ============ 02 Production Manager, desktop ============ -->
+<div class="cap"><b>Production Manager</b><span>Desktop, 1440px wide. To make, with one label open. The rows, their actions and the label are the app's own; only the look around them changes.</span></div>
+<div class="desk-wrap"><div class="desk">
+<div class="app">
+  <a class="skip btn" href="#page-pm">Skip to page</a>
+  <aside class="side" data-active="pm"></aside>
+  <main class="sheet" id="page-pm" tabindex="-1">
+    <div class="topbar">
+      <div class="crumbs">Operations<svg class="i sm" aria-hidden="true"><use href="#i-right"/></svg><b>Production Manager</b></div>
+      <button type="button" class="find" aria-keyshortcuts="Meta+J"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg><span>Search</span><kbd>⌘J</kbd></button>
+    </div>
+
+    <div class="phead">
+      <div>
+        <h1 class="ptitle">Production Manager</h1>
+        <div class="sub"><span class="live"></span>Updated just now<button class="info" aria-label="Refresh"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg></button></div>
+      </div>
+      <div class="actions">
+        <button class="btn"><svg class="i" aria-hidden="true"><use href="#i-calendar"/></svg>Collections</button>
+        <button class="btn"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg>New shipment</button>
+        <button class="btn" aria-haspopup="menu" aria-expanded="false">More<svg class="i chev" aria-hidden="true"><use href="#i-down"/></svg></button>
+      </div>
+    </div>
+
+    <nav class="queues" aria-label="Queues">
+      <a class="q" href="#"><span class="ql">Unprocessed</span><b class="fig">4</b></a>
+      <svg class="i sm qsep" aria-hidden="true"><use href="#i-right"/></svg>
+      <a class="q on" href="#" aria-current="page"><span class="ql">To make</span><b class="fig">6</b></a>
+      <svg class="i sm qsep" aria-hidden="true"><use href="#i-right"/></svg>
+      <a class="q" href="#"><span class="ql">To ship</span><b class="fig">5</b></a>
+      <div class="qrest">
+        <a class="qt" href="#"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>Complete</a>
+        <a class="qt" href="#"><svg class="i" aria-hidden="true"><use href="#i-package"/></svg>Custom shipments</a>
+      </div>
+    </nav>
+
+    <div class="pm">
+      <div class="toolbar">
+        <label class="field"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg><input type="search" placeholder="Find order, customer or tracking" aria-label="Find order, customer or tracking"></label>
+        <div class="seg" role="group" aria-label="Show"><button class="on" aria-pressed="true">All <span class="n">6</span></button><button aria-pressed="false">Unprinted <span class="n">6</span></button><button aria-pressed="false">Not made <span class="n">6</span></button></div>
+        <div class="actions tb-end">
+          <button class="btn"><svg class="i" aria-hidden="true"><use href="#i-printer"/></svg>Print all (6)</button>
+          <button class="btn"><svg class="i" aria-hidden="true"><use href="#i-sort"/></svg>Newest first</button>
+          <button class="btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Label size, 4 × 4 in (102 × 102 mm) (default)">4 × 4 in (102 × 102 mm) (default)<svg class="i chev" aria-hidden="true"><use href="#i-down"/></svg></button>
+        </div>
+      </div>
+      <div class="orders" id="q-desk"></div>
+    </div>
+  </main>
+</div>
+</div></div>
+
+<!-- ============ details ============ -->
+<div class="cap"><b>Three details</b><span>An empty queue, How it works opened, and an info button opened.</span></div>
+<div class="details">
+  <div class="inset">
+    <div class="sheet">
+      <nav class="qrest detail-q" aria-label="Queues">
+        <a class="qt" href="#"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>Complete</a>
+        <a class="qt on" href="#" aria-current="page"><svg class="i" aria-hidden="true"><use href="#i-package"/></svg>Custom shipments</a>
+      </nav>
+      <div class="empty">
+        <span class="empty-ic"><svg class="i" aria-hidden="true"><use href="#i-package"/></svg></span>
+        <p>No custom shipments yet</p>
+        <button class="btn"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg>New shipment</button>
+      </div>
+    </div>
+  </div>
+  <div class="inset">
+    <div class="sheet">
+      <div class="demo">
+        <div class="head">
+          <h1 class="ptitle">Forecast <span class="beta">Beta</span></h1>
+          <div>
+            <button class="btn" aria-expanded="true" aria-controls="how-menu"><svg class="i" aria-hidden="true"><use href="#i-help"/></svg>How it works</button>
+            <nav class="pop menu" id="how-menu" aria-label="How it works">
+              <a href="#"><svg class="i" aria-hidden="true"><use href="#i-compass"/></svg>Which method is running, and why</a>
+              <a href="#"><svg class="i" aria-hidden="true"><use href="#i-target"/></svg>How each one works, and how right it has been<span class="n">13<span class="sr"> methods</span></span></a>
+              <a href="#"><svg class="i" aria-hidden="true"><use href="#i-shield"/></svg>How much to trust it</a>
+              <a href="#"><svg class="i" aria-hidden="true"><use href="#i-sheetfile"/></svg>The plan it is judged against</a>
+              <hr>
+              <a class="link" href="#">The Forecast in the Guide<svg class="i sm" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+            </nav>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="inset">
+    <div class="sheet">
+      <div class="demo">
+        <div class="sec-h"><div class="sec-t"><h2>Why £53,691</h2><button class="info" aria-label="How this is worked out" aria-haspopup="dialog" aria-expanded="true" aria-controls="why-pop"><svg class="i" aria-hidden="true"><use href="#i-info"/></svg></button></div></div>
+        <div class="pop ipop" id="why-pop" role="dialog" aria-label="Big orders counted apart">
+          <h3>Big orders counted apart</h3>
+          <p>Each month is split into orders under £2,000 and big orders. The smaller ones follow last year's same month, scaled by how this year is trading. The big ones are taken as their average month over the last year.</p>
+          <p>It misleads when big orders start arriving much more or less often than last year.</p>
+          <a class="link" href="#">More in the Guide<svg class="i sm" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ phones ============ -->
+<div class="cap"><b>On a phone</b><span>Phone, 390px wide. Every target at least 40px for the bench; the sidebar is a drawer behind the menu button.</span></div>
+<div class="phones">
+  <div class="device"><div class="screen">
+    <div class="status" data-status></div>
+    <div class="m-top">
+      <button class="btn icon ghost" aria-label="Menu"><svg class="i" aria-hidden="true"><use href="#i-menu"/></svg></button>
+      <span class="crumb">Finance</span>
+      <button class="btn icon ghost" aria-label="Search"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg></button>
+    </div>
+    <div class="m-sheet">
+      <div class="m-head">
+        <div>
+          <h1 class="ptitle">Forecast <span class="beta">Beta</span></h1>
+          <div class="sub">October 2026<span class="dot-sep"></span>Run as of 1 Oct</div>
+        </div>
+      </div>
+      <div class="m-acts"><button class="btn" aria-expanded="false"><svg class="i" aria-hidden="true"><use href="#i-help"/></svg>How it works</button><button class="btn"><svg class="i" aria-hidden="true"><use href="#i-upload"/></svg>Upload workbook</button></div>
+      <div class="m-tabs"><nav class="tabs" aria-label="Finance pages"><a class="tab" href="#">Liability</a><a class="tab" href="#">Reconciliation</a><a class="tab on" href="#" aria-current="page">Forecast</a><a class="tab" href="#">Xero sync</a></nav></div>
+      <div class="m-plan"><span>Plan</span><div class="seg" role="group" aria-label="Plan"><button class="on" aria-pressed="true">Algorithm 1</button><button aria-pressed="false">Algorithm 2</button><button aria-pressed="false">Algorithm 3</button></div></div>
+
+      <section class="m-band">
+        <div class="fmain">
+          <div class="fh"><span class="tile"><svg class="i" aria-hidden="true"><use href="#i-trend"/></svg></span><span class="fl">Expected this month</span><button class="info" aria-label="How sure this is" aria-haspopup="dialog" aria-expanded="false"><svg class="i" aria-hidden="true"><use href="#i-info"/></svg></button></div>
+          <div class="hero"><b class="fig">£53,691</b><i class="chip up"><svg class="i sm" aria-hidden="true"><use href="#i-up"/></svg><span class="sr">up </span>42.9%</i><span class="fs">against plan</span></div>
+          <div class="range" style="--at-lo:28.3%;--at-hi:90.1%;--at-exp:59.2%;--at-plan:18.9%">
+            <span class="rl t">Plan £37,566</span>
+            <div class="rtrack"><div class="rfill"></div><div class="rplan"></div><div class="rexp"></div></div>
+            <span class="rl b" style="--at:28.3%">£41,327</span>
+            <span class="rl b mid" style="--at:59.2%">Likely range</span>
+            <span class="rl b" style="--at:90.1%">£66,054</span>
+          </div>
+        </div>
+        <div class="side-figs">
+          <div class="sf">
+            <div class="fh"><span class="tile"><svg class="i" aria-hidden="true"><use href="#i-wallet"/></svg></span><span class="fl">Taken so far</span></div>
+            <div class="sf-num"><b class="fig">£5,116</b><span class="fs">Day 1 of 31</span></div>
+            <div class="prog"><i class="taken" style="--w:9.5%"></i><i class="still" style="--at:9.5%"></i><i class="plan" style="--at:70%"></i></div>
+          </div>
+          <div class="sf">
+            <div class="fh"><span class="tile"><svg class="i" aria-hidden="true"><use href="#i-flag"/></svg></span><span class="fl">Year lands at</span></div>
+            <div class="sf-num"><b class="fig">£372,285</b><i class="chip up"><svg class="i sm" aria-hidden="true"><use href="#i-up"/></svg><span class="sr">up </span>29.9%</i><span class="fs">Plan £286,687</span></div>
+            <div class="prog"><i class="taken" style="--w:66.4%"></i><i class="still" style="--at:66.4%"></i><i class="plan" style="--at:77%"></i></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="m-sec">
+        <div class="sec-h">
+          <div class="sec-t"><h2>Cash in</h2><button class="info" aria-label="About this chart" aria-haspopup="dialog" aria-expanded="false"><svg class="i" aria-hidden="true"><use href="#i-info"/></svg></button></div>
+          <button class="btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Chart range, Month"><svg class="i" aria-hidden="true"><use href="#i-calendar"/></svg>Month<svg class="i chev" aria-hidden="true"><use href="#i-down"/></svg></button>
+        </div>
+        <div class="legend key"><span><i class="lg-dot"></i>Taken</span><span><i class="lg-line"></i>Expected</span><span><i class="lg-band"></i>Likely range</span></div>
+        <div class="chart" data-h="200"></div>
+        <button type="button" class="switch" role="switch" aria-checked="false"><i></i>Compare methods</button>
+      </section>
+
+      <section class="m-sec">
+        <div class="sec-h"><h2>Worth looking at<span class="n">6<span class="sr"> months</span></span></h2><a class="link" href="#">Show all<svg class="i sm" aria-hidden="true"><use href="#i-right"/></svg></a></div>
+        <div class="m-wl">
+          <div class="h"><span>Month</span><span>Likely range</span><span class="ra">Expected</span></div>
+          <div><span><b>Oct 2026</b><small>Safely ahead</small></span><span class="rg" role="img" aria-label="Likely £41,327 to £66,054, plan £37,566" style="--at-lo:42.7%;--at-hi:92.1%;--at-plan:35.1%;--at-exp:67.4%"><i class="band"></i><i class="plan"></i><i class="exp"></i></span><span class="rt"><b>£53,691</b><i class="chip up"><svg class="i sm" aria-hidden="true"><use href="#i-up"/></svg><span class="sr">up </span>42.9%</i></span></div>
+          <div><span><b>Nov 2026</b><small>Likely ahead</small></span><span class="rg" role="img" aria-label="Likely £34,690 to £55,980, plan £35,860" style="--at-lo:29.4%;--at-hi:72%;--at-plan:31.7%;--at-exp:50.1%"><i class="band"></i><i class="plan"></i><i class="exp"></i></span><span class="rt"><b>£45,044</b><i class="chip up"><svg class="i sm" aria-hidden="true"><use href="#i-up"/></svg><span class="sr">up </span>25.6%</i></span></div>
+          <div><span><b>Dec 2026</b><small>Likely behind</small></span><span class="rg" role="img" aria-label="Likely £24,180 to £39,960, plan £38,750" style="--at-lo:8.4%;--at-hi:40%;--at-plan:37.5%;--at-exp:22.8%"><i class="band"></i><i class="plan"></i><i class="exp"></i></span><span class="rt"><b>£31,420</b><i class="chip down"><svg class="i sm" aria-hidden="true"><use href="#i-dn"/></svg><span class="sr">down </span>18.9%</i></span></div>
+        </div>
+      </section>
+
+      <section class="m-sec">
+        <div class="sec-h"><div class="sec-t"><h2>Why £53,691</h2><button class="info" aria-label="How this is worked out" aria-haspopup="dialog" aria-expanded="false"><svg class="i" aria-hidden="true"><use href="#i-info"/></svg></button></div></div>
+        <div class="split"><i class="a" style="--w:9.5%"></i><i class="b"></i></div>
+        <div class="kv">
+          <div><i class="sq taken"></i><span class="k">Taken so far</span><span class="v">£5,116</span></div>
+          <div><i class="sq still"></i><span class="k">Still expected</span><span class="v">£48,575</span></div>
+          <div class="tot"><span class="k">Expected this month</span><span class="v">£53,691</span></div>
+        </div>
+        <p class="foot">Rest of October forecast by the <b>Big orders counted apart</b> method.</p>
+      </section>
+
+      <section class="m-sec">
+        <div class="sec-h"><h2>The numbers behind it</h2></div>
+        <nav class="m-list-1" aria-label="The numbers behind it">
+          <a href="#"><svg class="i" aria-hidden="true"><use href="#i-table"/></svg><span class="lbl">Month by month against Algorithm 1</span><span class="n">12<span class="sr"> months</span></span><svg class="i sm" aria-hidden="true"><use href="#i-right"/></svg></a>
+          <a href="#"><svg class="i" aria-hidden="true"><use href="#i-cash"/></svg><span class="lbl">Cash under Algorithm 1</span><span class="n">12<span class="sr"> months</span></span><svg class="i sm" aria-hidden="true"><use href="#i-right"/></svg></a>
+          <a href="#"><svg class="i" aria-hidden="true"><use href="#i-columns"/></svg><span class="lbl">Every method, side by side</span><span class="n">13<span class="sr"> methods</span></span><svg class="i sm" aria-hidden="true"><use href="#i-right"/></svg></a>
+          <a href="#"><svg class="i" aria-hidden="true"><use href="#i-compare"/></svg><span class="lbl">What each method said, and what came in</span><svg class="i sm" aria-hidden="true"><use href="#i-right"/></svg></a>
+        </nav>
+      </section>
+    </div>
+  </div></div>
+
+  <div class="device"><div class="screen">
+    <div class="status" data-status></div>
+    <div class="m-top">
+      <button class="btn icon ghost" aria-label="Menu"><svg class="i" aria-hidden="true"><use href="#i-menu"/></svg></button>
+      <span class="crumb">Operations</span>
+      <button class="btn icon ghost" aria-label="Search"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg></button>
+    </div>
+    <div class="m-sheet">
+      <div class="m-head">
+        <div>
+          <h1 class="ptitle">Production Manager</h1>
+          <div class="sub"><span class="live"></span>Updated just now</div>
+        </div>
+        <div class="actions">
+          <button class="btn icon" aria-label="Refresh"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg></button>
+          <button class="btn icon" aria-label="More" aria-haspopup="menu" aria-expanded="false"><svg class="i" aria-hidden="true"><use href="#i-more"/></svg></button>
+        </div>
+      </div>
+      <div class="m-acts"><button class="btn"><svg class="i" aria-hidden="true"><use href="#i-calendar"/></svg>Collections</button><button class="btn"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg>New shipment</button></div>
+      <nav aria-label="Queues">
+      <div class="m-queues">
+        <a class="q" href="#"><span class="ql">Unprocessed</span><b class="fig">4</b></a>
+        <a class="q on" href="#" aria-current="page"><span class="ql">To make</span><b class="fig">6</b></a>
+        <a class="q" href="#"><span class="ql">To ship</span><b class="fig">5</b></a>
+      </div>
+      <div class="m-rest"><a class="qt" href="#"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>Complete</a><a class="qt" href="#"><svg class="i" aria-hidden="true"><use href="#i-package"/></svg>Custom shipments</a></div>
+      </nav>
+      <div class="m-tools"><label class="field"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg><input type="search" placeholder="Find order, customer or tracking" aria-label="Find order, customer or tracking"></label></div>
+      <div class="m-filter"><div class="seg" role="group" aria-label="Show"><button class="on" aria-pressed="true">All <span class="n">6</span></button><button aria-pressed="false">Unprinted <span class="n">6</span></button><button aria-pressed="false">Not made <span class="n">6</span></button></div></div>
+      <div class="m-two"><button class="btn"><svg class="i" aria-hidden="true"><use href="#i-printer"/></svg>Print all (6)</button><button class="btn"><svg class="i" aria-hidden="true"><use href="#i-sort"/></svg>Newest first</button></div>
+      <button class="btn m-size" aria-haspopup="listbox" aria-expanded="false" aria-label="Label size, 4 × 4 in (102 × 102 mm) (default)">4 × 4 in (102 × 102 mm) (default)<svg class="i chev" aria-hidden="true"><use href="#i-down"/></svg></button>
+      <div class="m-orders" id="q-phone"></div>
+    </div>
+  </div></div>
+</div>
+
+<script>
+/* ---------- sidebar, built once from one list ---------- */
+const NAV = [
+  ['Dashboards', [['overview','Overview','grid'],['seo','SEO','globe'],['keywords','Keywords','tag'],['products','Products','package'],['customers','Customers','users']]],
+  ['Finance', [['liability','Liability','card'],['recon','Reconciliation','scale',1],['forecast','Forecast','trend',1],['xero','Xero sync','swap',1]]],
+  ['Operations', [['pm','Production Manager','printer'],['size','Size list','ruler'],['crm','CRM','briefcase',1],['loan','Loan units','projector'],['inbox','Inbox','inbox'],['files','Files','folder']]],
+  ['Workspace', [['team','Team','team'],['memory','Memory','bookmark'],['skills','Skills','book'],['chat','Chat','chat'],['guide','Guide','help']]],
+];
+const ic = (id, cls='') => `<svg class="i${cls ? ' ' + cls : ''}" aria-hidden="true"><use href="#i-${id}"/></svg>`;
+document.querySelectorAll('.side').forEach(el => {
+  const on = el.dataset.active;
+  let h = `<div class="brand"><span class="mark"></span><b>Reactor</b><button class="btn icon ghost sm" aria-label="Hide sidebar">${ic('panel')}</button></div>`;
+  NAV.forEach(([g, items]) => {
+    h += `<nav class="navg" aria-label="${g}"><span class="navg-h" aria-hidden="true">${g}</span>`;
+    items.forEach(([k, label, icon, beta]) => {
+      h += `<a class="nav${k === on ? ' on' : ''}" href="#"${k === on ? ' aria-current="page"' : ''}>${ic(icon)}<span class="lbl">${label}</span>${beta ? '<span class="beta">Beta</span>' : ''}</a>`;
+    });
+    h += `</nav>`;
+  });
+  h += `<div class="who"><span class="avatar">C</span><span class="nm"><b>Cameron</b><span>Master admin</span></span><button class="btn icon ghost sm" aria-label="Account">${ic('more')}</button></div>`;
+  el.innerHTML = h;
+});
+document.querySelectorAll('[data-status]').forEach(el => {
+  el.innerHTML = `<span>9:41</span><svg width="66" height="12" viewBox="0 0 66 12" aria-hidden="true"><g fill="currentColor"><rect x="0" y="8" width="3" height="4" rx=".8"/><rect x="5" y="6" width="3" height="6" rx=".8"/><rect x="10" y="3" width="3" height="9" rx=".8"/><rect x="15" y="0" width="3" height="12" rx=".8"/><path d="M31 3.2a9 9 0 0 1 11 0l-1.3 1.5a7 7 0 0 0-8.4 0zM33.5 6a5 5 0 0 1 6 0L38.2 7.5a3 3 0 0 0-3.4 0zM36.5 8.6l1.4 1.6-1.4 1.6-1.4-1.6z"/><rect x="45.5" y=".5" width="18" height="11" rx="3" fill="none" stroke="currentColor" opacity=".45"/><rect x="47.5" y="2.5" width="12" height="7" rx="1.5"/><rect x="64.5" y="4" width="1.5" height="4" rx=".75" opacity=".45"/></g></svg>`;
+});
+
+
+/* ---------- the To make queue: the app's own rows (sample orders through its label builder) ---------- */
+const ORDERS = [
+  {no:'104538', who:'Hartley Events',    meta:'Company · 1 item · 2 pcs',  date:'5 Oct', open:true, note:'First order from this customer.'},
+  {no:'104536', who:'Northgate Theatre', meta:'Company · 2 items · 5 pcs', date:'4 Oct'},
+  {no:'104533', who:'Hannah Lowe',       meta:'Customer · 2 items · 3 pcs', date:'3 Oct'},
+  {no:'104527', who:'Kestrel Hotels',    meta:'Company · 1 item · 10 pcs', date:'2 Oct'},
+  {no:'104529', who:'Apex Staging',      meta:'Company · 1 item · 6 pcs',  date:'2 Oct'},
+  {no:'104521', who:'Pemberton School',  meta:'Company · 1 item · 1 pc',   date:'1 Oct', age:'4d'},
+];
+const LABEL = `<figure class="lab"><img src="label-real.png" width="384" height="385" alt="The production label for order #104538, as Reactor prints it"><figcaption>Actual size preview: 4 × 4 in (102 × 102 mm).</figcaption></figure>`;
+/* the actions, with their words on every device. The toggle holds both words so it
+   keeps one width; Print on the open order is the screen's one primary action; the two
+   that change an order's state start a group of their own. */
+const acts = (o, pre) => {
+  const toggle = `<span class="swap"><span${o.open ? ' aria-hidden="true"' : ''}>${ic('eye')}Preview</span><span${o.open ? '' : ' aria-hidden="true"'}>${ic('eyeoff')}Hide</span></span>`;
+  return `<button class="btn" aria-expanded="${!!o.open}"${o.open ? ` aria-controls="${pre}p-${o.no}"` : ''}>${toggle}</button>`
+    + `<button class="btn">${ic('pen')}Edit</button>`
+    + `<button class="btn${o.open ? ' primary' : ''}">${ic('printer')}Print</button>`
+    + `<button class="btn grp">${ic('truck')}Dispatch</button>`
+    + `<button class="btn">${ic('tick')}Mark made</button>`;
+};
+const days = t => { const n = parseInt(t, 10); return `waiting ${n} day${n === 1 ? '' : 's'}`; };
+const age = o => o.age ? `<i class="age"><span aria-hidden="true">${o.age}</span><span class="sr">${days(o.age)}</span></i>` : '';
+document.getElementById('q-desk').innerHTML = ORDERS.map(o => `
+  <div class="orow${o.open ? ' open' : ''}">
+    <a class="ono" id="o-${o.no}" href="#">#${o.no}</a>
+    <span class="oc"><b>${o.who}${age(o)}</b><small>${o.meta}</small></span>
+    <span class="dt">${o.date}</span>
+    <span class="acts" role="group" aria-labelledby="o-${o.no}">${acts(o, '')}</span>
+  </div>${o.open ? `<div class="opreview" id="p-${o.no}"><p>${o.note}</p>${LABEL}</div>` : ''}`).join('');
+document.getElementById('q-phone').innerHTML = ORDERS.map(o => `
+  <div class="m-orow${o.open ? ' open' : ''}">
+    <div class="top"><a class="ono" id="m-o-${o.no}" href="#">#${o.no}</a><span class="dt">${o.date}</span></div>
+    <b>${o.who}${age(o)}</b><small>${o.meta}</small>
+    <div class="acts" role="group" aria-labelledby="m-o-${o.no}">${acts(o, 'm-')}</div>
+  </div>${o.open ? `<div class="m-preview" id="m-p-${o.no}"><p>${o.note}</p>${LABEL}</div>` : ''}`).join('');
+
+/* ---------- small behaviours: links stay put, switches switch ---------- */
+document.addEventListener('click', e => { if (e.target.closest('a[href="#"]')) e.preventDefault(); });
+document.addEventListener('touchstart', () => {}, { passive: true }); /* lets iOS Safari show :active on a tap */
+document.querySelectorAll('.switch').forEach(s => s.addEventListener('click', () => s.setAttribute('aria-checked', String(s.getAttribute('aria-checked') !== 'true'))));
+
+/* ---------- October, day by day: adds up to £48,575 still expected ---------- */
+function octData() {
+  const base = {1:2420, 2:2310, 3:2240, 4:2180, 5:2020};
+  const days = [];
+  for (let d = 1; d <= 31; d++) {
+    const w = (4 + d - 1) % 7, we = (w === 0 || w === 6);
+    let e = d === 1 ? 5116 : we ? (w === 6 ? 440 : 360) : base[w] * (1 + 0.07 * Math.sin(d * 1.9));
+    days.push({d, w, we, e});
+  }
+  const rest = days.filter(o => o.d > 1);
+  const weSum = rest.filter(o => o.we).reduce((a, o) => a + o.e, 0);
+  const wdSum = rest.filter(o => !o.we).reduce((a, o) => a + o.e, 0);
+  const k = (48575 - weSum) / wdSum;
+  rest.forEach(o => { if (!o.we) o.e *= k; });
+  days.forEach(o => {
+    if (o.d === 1) { o.lo = o.hi = o.e; return; }
+    const g = (o.d - 2) / 29;
+    if (o.we) { o.lo = o.e * (0.3 - 0.1 * g); o.hi = o.e * (2.0 + 0.4 * g); }
+    else { o.lo = o.e * (0.6 - 0.12 * g); o.hi = Math.min(o.e * (1.72 + 0.22 * g), 4700); }
+  });
+  return days;
+}
+function smooth(pts) {
+  const n = pts.length, dx = [], m = [], t = [];
+  for (let i = 0; i < n - 1; i++) { dx[i] = pts[i + 1][0] - pts[i][0]; m[i] = (pts[i + 1][1] - pts[i][1]) / dx[i]; }
+  t[0] = m[0]; t[n - 1] = m[n - 2];
+  for (let i = 1; i < n - 1; i++) t[i] = m[i - 1] * m[i] <= 0 ? 0 : (m[i - 1] + m[i]) / 2;
+  for (let i = 0; i < n - 1; i++) {
+    if (m[i] === 0) { t[i] = t[i + 1] = 0; continue; }
+    const a = t[i] / m[i], b = t[i + 1] / m[i], s = a * a + b * b;
+    if (s > 9) { const q = 3 / Math.sqrt(s); t[i] = q * a * m[i]; t[i + 1] = q * b * m[i]; }
+  }
+  const f = v => v.toFixed(1);
+  let d = `M${f(pts[0][0])},${f(pts[0][1])}`;
+  for (let i = 0; i < n - 1; i++) {
+    const h = dx[i] / 3;
+    d += `C${f(pts[i][0] + h)},${f(pts[i][1] + t[i] * h)} ${f(pts[i + 1][0] - h)},${f(pts[i + 1][1] - t[i + 1] * h)} ${f(pts[i + 1][0])},${f(pts[i + 1][1])}`;
+  }
+  return d;
+}
+const DAYS = octData();
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const gbp = v => '£' + Math.round(v).toLocaleString('en-GB');
+function drawChart(el) {
+  const W = Math.round(el.clientWidth), H = +el.dataset.h || 256, small = W < 520;
+  const P = {l: small ? 36 : 44, r: 0, t: 10, b: 26};
+  const iw = W - P.l - P.r, ih = H - P.t - P.b;
+  const X = d => P.l + (d - 1) * iw / 30, Y = v => P.t + ih * (1 - v / 6000);
+  const money = v => v === 0 ? '£0' : '£' + (v / 1000) + 'k';
+  let s = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true">`;
+  (small ? [0, 3000, 6000] : [0, 1500, 3000, 4500, 6000]).forEach(v => {
+    s += `<line class="${v ? 'grid' : 'ax0'}" x1="${P.l}" x2="${W - P.r}" y1="${Y(v) + .5}" y2="${Y(v) + .5}"/>`;
+    s += `<text class="tk" x="${P.l - 10}" y="${Y(v) + 4.5}" text-anchor="end">${money(v)}</text>`;
+  });
+  [1, 8, 15, 22, 29].forEach(d => {
+    s += `<text class="tk" x="${X(d)}" y="${H - 6}" text-anchor="${d === 1 ? 'start' : 'middle'}">${d} Oct</text>`;
+  });
+  const up = DAYS.map(o => [X(o.d), Y(o.hi)]), lo = DAYS.map(o => [X(o.d), Y(o.lo)]).reverse();
+  s += `<path class="band" d="${smooth(up)}L${lo[0][0].toFixed(1)},${lo[0][1].toFixed(1)}${smooth(lo).replace(/^M[^C]+/, '')}Z"/>`;
+  s += `<path class="exp" d="${smooth(DAYS.map(o => [X(o.d), Y(o.e)]))}"/>`;
+  const tx = X(1), ty = Y(5116);
+  s += `<circle class="dot" cx="${tx}" cy="${ty}" r="4"/>`;
+  s += `<text class="tk-b" x="${tx + 10}" y="${ty - 6}">£5,116</text>`;
+  s += `<g class="hover" visibility="hidden"><line class="cross" x1="0" x2="0" y1="${P.t}" y2="${P.t + ih}"/><circle class="rdot hi" r="3"/><circle class="rdot lo" r="3"/><circle class="hdot" r="5"/></g>`;
+  s += `</svg>`;
+  el.innerHTML = s;
+  el.tabIndex = 0;
+  /* a group, not an image, so the readout below reaches a screen reader as the day changes */
+  el.setAttribute('role', 'group');
+  el.setAttribute('aria-roledescription', 'chart');
+  el.setAttribute('aria-label', 'Cash in for October, day by day. Tap a day, or use the arrow keys.');
+  /* On a phone there is no room beside a point, and a box above it covered the legend, so the
+     legend row itself reads out the day while one is held, and returns when the chart rests. */
+  const key = small && el.previousElementSibling && el.previousElementSibling.classList.contains('legend') ? el.previousElementSibling : null;
+  if (key) { if (!key.dataset.rest) key.dataset.rest = key.innerHTML; key.innerHTML = key.dataset.rest; key.classList.remove('reading'); }
+  const tip = document.createElement('div'); tip.className = 'tip'; tip.hidden = true; tip.setAttribute('aria-hidden', 'true'); el.appendChild(tip);
+  const live = document.createElement('p'); live.className = 'sr'; live.setAttribute('role', 'status'); el.appendChild(live);
+  const tw = parseFloat(getComputedStyle(tip).width);
+  const tok = n => parseFloat(getComputedStyle(el).getPropertyValue(n));
+  const beside = tok('--s-4'), off = tok('--off-pop');
+  const g = el.querySelector('.hover');
+  let cur = +el.dataset.tip || 0;
+  const show = d => {
+    cur = d;
+    const o = DAYS[d - 1], x = X(d), cx = Math.floor(x) + .5; /* the hairline on a pixel, the dots on the day */
+    g.setAttribute('visibility', 'visible');
+    g.querySelector('.cross').setAttribute('x1', cx); g.querySelector('.cross').setAttribute('x2', cx);
+    const put = (c, v) => { c.setAttribute('cx', x); c.setAttribute('cy', Y(v)); };
+    put(g.querySelector('.hdot'), o.e); put(g.querySelector('.hi'), o.hi); put(g.querySelector('.lo'), o.lo);
+    const w = (4 + d - 1) % 7;
+    tip.innerHTML = d === 1
+      ? `<b>Thu 1 Oct</b><div class="r"><i class="lg-dot"></i><span>Taken</span><span>£5,116</span></div>`
+      : `<b>${DOW[w]} ${d} Oct</b><div class="r"><i class="lg-line"></i><span>Expected</span><span>${gbp(o.e)}</span></div><div class="r"><i class="lg-band"></i><span>Likely range</span><span>${gbp(o.lo)} to ${gbp(o.hi)}</span></div>`;
+    const said = d === 1 ? 'Thu 1 Oct, taken £5,116' : `${DOW[w]} ${d} Oct, expected ${gbp(o.e)}, likely ${gbp(o.lo)} to ${gbp(o.hi)}`;
+    if (live.textContent !== said) live.textContent = said;
+    if (key) {
+      key.innerHTML = d === 1
+        ? `<b>Thu 1 Oct</b><span><i class="lg-dot"></i>Taken £5,116</span>`
+        : `<b>${DOW[w]} ${d} Oct</b><span><i class="lg-line"></i>${gbp(o.e)}</span><span><i class="lg-band"></i>${gbp(o.lo)} to ${gbp(o.hi)}</span>`;
+      key.classList.add('reading');
+      return;
+    }
+    tip.hidden = false;
+    /* beside the point, its first row level with the day's dot; never below the axis */
+    const th = tip.offsetHeight, row = tok('--pad-tip') + tok('--lh-cap') + tok('--s-1') + tok('--lh-body') / 2;
+    let left = x + beside, top = Y(o.e) - row;
+    if (left + tw > W) left = x - beside - tw;
+    if (left < 0) {
+      /* no room beside the point (a phone): sit above it, clear of the day's markers */
+      left = Math.max(0, Math.min(x - tw / 2, W - tw));
+      top = Y(o.hi) - off - th;
+    } else top = Math.max(0, Math.min(top, Y(0) - th));
+    tip.style.left = Math.round(left) + 'px'; tip.style.top = Math.round(top) + 'px';
+  };
+  const hide = () => { g.setAttribute('visibility', 'hidden'); tip.hidden = true; if (key) { key.innerHTML = key.dataset.rest; key.classList.remove('reading'); } };
+  const at = ev => {
+    const r = el.getBoundingClientRect();
+    const x = (ev.clientX - r.left) / (r.width / W);
+    show(Math.min(31, Math.max(1, Math.round((x - P.l) / (iw / 30)) + 1)));
+  };
+  el.onpointermove = at;
+  /* a finger keeps the chart while it drags across the days */
+  el.onpointerdown = ev => { at(ev); if (ev.pointerType !== 'mouse') el.setPointerCapture(ev.pointerId); };
+  const start = +el.dataset.tip || 0;
+  el.onpointerleave = ev => { if (ev.pointerType !== 'mouse') return; if (start) show(start); else hide(); };
+  el.onkeydown = ev => {
+    if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') { ev.preventDefault(); show(Math.min(31, Math.max(1, (cur || 1) + (ev.key === 'ArrowRight' ? 1 : -1)))); }
+    else if (ev.key === 'Escape') { if (start) show(start); else hide(); }
+  };
+  el._rest = () => { if (start) show(start); else hide(); };
+  if (start) show(start);
+}
+/* a tap elsewhere or a scroll puts a chart back to rest; only a chart driven by the keyboard
+   keeps its day while the page scrolls (a tap also focuses the chart, so focus alone is not enough) */
+document.addEventListener('pointerdown', e => document.querySelectorAll('.chart').forEach(c => { if (!c.contains(e.target) && c._rest) c._rest(); }));
+addEventListener('scroll', () => document.querySelectorAll('.chart').forEach(c => { if (c._rest && !c.matches(':focus-visible')) c._rest(); }), { passive: true });
+
+/* ---------- keep the 1440 mockups whole on any screen ---------- */
+function fit() {
+  document.querySelectorAll('.desk-wrap').forEach(w => {
+    const d = w.firstElementChild, avail = w.clientWidth;
+    if (avail < 1280) {
+      const k = avail / 1440;
+      d.style.width = '1440px'; d.style.transform = `scale(${k})`; d.style.transformOrigin = '0 0';
+      w.style.height = (d.offsetHeight * k) + 'px';
+    } else { d.style.width = ''; d.style.transform = ''; w.style.height = ''; }
+  });
+  document.querySelectorAll('.chart').forEach(drawChart);
+}
+fit();
+addEventListener('resize', fit);
+document.fonts && document.fonts.ready.then(fit);
+</script>
+</body>
+</html>
