@@ -25270,6 +25270,88 @@ def t_a_redact_a_store_refused_is_said_and_retried():
     with_mail(go)
 
 
+@test
+def t_a_redact_that_stops_part_way_through_the_crm_leaves_nothing_half_made_in_memory():
+    """An erasure changes the CRM in memory (the tombstone, the sweep, the
+    leads) and writes it last. A step that raised before the write left the
+    half-made erasure in the cached store: it was served as saved, and the
+    next unrelated CRM save wrote it to disk."""
+    def go():
+        ensure_auth(); crm_wipe()
+        addr = "kim@x.com"
+        d = copilot._load_crm()
+        d["persons"]["p1"] = {"id": "p1", "name": "Kim Lee", "emails": [addr]}
+        d["leads"]["l1"] = {"id": "l1", "title": "Kim Lee lead", "person_id": "p1"}
+        copilot._write_crm(d)
+        def stops(*a, **k):
+            raise RuntimeError("the erasure stopped part way")
+        saved = copilot._erase_remember          # the last step before the write
+        copilot._erase_remember = stops
+        try:
+            out = copilot._redact_customer(addr, "9")
+        finally:
+            copilot._erase_remember = saved
+        eq(out["failed"], ["the CRM"], "the CRM is said to have failed")
+        d = copilot._load_crm()
+        ok("p1" in d["persons"] and "l1" in d["leads"],
+           "the CRM read next is the one on disk: " + str(sorted(d["persons"])) + str(sorted(d["leads"])))
+        eq(post("/api/crm/contact", {"op": "org_add", "name": "Typed by hand"}).status_code, 200)
+        on_disk = json.load(open(copilot.CRM_PATH))["crm"]
+        ok("p1" in on_disk["persons"] and "l1" in on_disk["leads"],
+           "and the next save does not write half an erasure")
+        eq(copilot._redact_customer(addr, "9", retry=True)["failed"], [], "the hourly retry finishes it")
+        d = copilot._load_crm()
+        ok("p1" not in d["persons"] and "l1" not in d["leads"], "and she is gone")
+    with_mail(go)
+
+
+@test
+def t_a_redact_that_stops_part_way_through_the_mailbox_leaves_nothing_half_made_in_memory():
+    """The same for the mailbox: their threads came off the board in memory,
+    and a scrub that raised before the write left the board showing an
+    erasure that was never saved, until the mail loop's next save wrote it."""
+    def go():
+        ensure_auth(); crm_wipe()
+        addr = "kim@x.com"
+        _seed_thread("k1", frm=("Kim Lee", addr))
+        _seed_thread("b1", frm=("Bob", "bob@venue.com"))
+        copilot._write_mail(copilot._load_mail())
+        def stops(*a, **k):
+            raise RuntimeError("the scrub stopped part way")
+        saved = copilot._mail_erased_rx          # runs after their threads are taken off
+        copilot._mail_erased_rx = stops
+        try:
+            out = copilot._redact_customer(addr, "9")
+        finally:
+            copilot._mail_erased_rx = saved
+        eq(out["failed"], ["the mailbox"], "the mailbox is said to have failed")
+        ok("k1" in copilot._load_mail()["threads"], "the board read next is the one on disk")
+        eq(copilot._redact_customer(addr, "9", retry=True)["failed"], [], "the hourly retry finishes it")
+        ok("k1" not in copilot._load_mail()["threads"], "and her thread is gone")
+    with_mail(go)
+
+
+@test
+def t_a_redact_that_stops_part_way_through_the_bookings_leaves_nothing_half_made_in_memory():
+    """And the bookings kept by law: each is stamped in memory with when the
+    request came in, and written last. A record the stamping could not read
+    stopped it part way, and the bookings already stamped stayed stamped in
+    the cached store, for the next booking saved to write."""
+    def go():
+        ensure_auth(); crm_wipe(); reset_dispatch()
+        addr = "kim@x.com"
+        with open(copilot.DISPATCH_STATE_PATH, "w", encoding="utf-8") as fh:
+            json.dump({"orders": {"4242": {"email": addr, "tracking_number": "T-42"},
+                                  "4243": "not a booking"}}, fh)
+        try:
+            copilot._redact_customer(addr, "9")
+            ok(not copilot._load_dispatch()["4242"].get("redacted_request_at"),
+               "the bookings read next are the ones on disk")
+        finally:
+            reset_dispatch()
+    with_mail(go)
+
+
 def _open_order(i, tags=""):
     return {"id": i, "name": "#%d" % i, "order_number": i, "created_at": "2026-09-%02dT10:00:00Z" % (1 + i % 20),
             "tags": tags, "cancelled_at": None, "fulfillment_status": None, "financial_status": "paid",
