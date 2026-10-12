@@ -2236,6 +2236,24 @@ def t_the_crm_lists_are_tables_and_its_extras_wait_in_more():
 
 
 @test
+def t_loan_units_lends_from_its_header_and_chases_from_out_now():
+    """Cameron's Loan units screenshot (12 Oct 2026) and the mockup: the one
+    teal is the header's Loan out, which asks which unit; the chase limit sits
+    in Out now's head, beside the rows it colours, not in a card of its own;
+    with no units at all the page has one empty state, the register's; and a
+    unit's history is a small table."""
+    fn = fn_src("function renderLoans(")
+    ok("const lend = shelf.length ? el('button', 'btn btn-sm btn-primary') : null;" in fn and "actions: lend ? [lend] : []" in fn and "loanOutModal(null, shelf)" in fn,
+       "the header's teal Loan out")
+    mo = fn_src("function loanOutModal(")
+    ok("function loanOutModal(unit, choices) {" in SCRIPT and "crmField(grid, 'Unit', unitSel);" in mo, "which asks which unit, from the shelf")
+    ok("'chasing'" not in fn and "'No due date: amber after'" in fn and "oHead.append(chase);" in fn, "the chase limit is in Out now's head")
+    ok("if (units.length) box.append(widget(oCard, 'out'));" in fn, "with no units, only the register says so")
+    hm = fn_src("async function loanHistoryModal(")
+    ok("dtable([{ head: 'With' }, { head: 'Out' }, { head: 'Back' }]" in hm, "a unit's history is a small table")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left
@@ -11778,7 +11796,8 @@ def t_the_size_list_and_loan_units_wear_the_mix():
                  "'ready to go'", "nothing past its date", "Longest out first.", "Every loan unit the shop owns.",
                  "start tracking it", "worth a chase", "A loan with no due date turns amber"):
         ok(gone not in SCRIPT, "cut: " + gone)
-    for new in ("'Nothing is out.'", "'No loan units yet.'", "'No due date'", "'Turns amber after this many days without a due date.'"):
+    # 12 Oct 2026: with no units the register says it once, and the chase limit reads as its own label in Out now's head.
+    for new in ("'Everything is on the shelf.'", "'No loan units yet.'", "'No due date'", "'No due date: amber after'"):
         ok(new in SCRIPT, "says: " + new)
 
 

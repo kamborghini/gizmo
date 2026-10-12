@@ -2647,6 +2647,10 @@
            the register, every action in a column of its own. */
         .dt-loans-out { --dt-cols: minmax(0, 1.6fr) minmax(0, 1.2fr) max-content minmax(0, 1fr) max-content; }
         .dt-loans-reg { --dt-cols: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.2fr) max-content max-content; }
+        .dt-loan-hist { --dt-cols: minmax(0, 1fr) max-content max-content; }
+        /* The chase limit in Out now's head: its words, the field, days, Save. */
+        .loan-chase { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+        .loan-chase .loan-chase-days { width: 5rem; }
         .lbl-row { display: flex; align-items: center; gap: var(--sp-2-5); padding: var(--sp-2-5) var(--sp-3); background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default);
             border-radius: var(--radius-inset); margin-bottom: var(--sp-2); cursor: pointer; transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease); text-align: left; width: 100%; }
         @media (hover: hover) { .lbl-row:hover { background: var(--surface-secondary); border-color: var(--border-strong); } }
@@ -15078,9 +15082,16 @@ Projected Image UK"></textarea>
             return { overlay: overlay, modal: modal, body: body, close: close };
         }
         function loanDays(n) { return n === 1 ? '1 day out' : n + ' days out'; }
-        function loanOutModal(unit) {
-            const m = sheetModal('Loan out ' + (unit.name || 'a unit'));
+        function loanOutModal(unit, choices) {
+            const m = sheetModal(unit ? 'Loan out ' + (unit.name || 'a unit') : 'Loan out a unit');
             const grid = el('div', 'disp-addr-grid'); m.body.append(grid);
+            /* From the header (12 Oct 2026): which unit is going, from those on the shelf. */
+            let unitSel = null;
+            if (!unit) {
+                unitSel = el('select', 'disp-text');
+                (choices || []).forEach(u => unitSel.append(new Option(u.name + (u.model ? ' (' + u.model + ')' : ''), String(u.id))));
+                crmField(grid, 'Unit', unitSel);
+            }
             const whoIn = crmText('', 'Company or person');
             /* Type freely; matching CRM contacts are offered, and picking one
                links the loan to that record so a company's history is one
@@ -15108,13 +15119,15 @@ Projected Image UK"></textarea>
             const go = el('button', 'btn btn-primary', 'Loan it out');
             go.onclick = async () => {
                 if (!whoIn.value.trim()) { toastError('Say who it is going to.'); return; }
+                const chosen = unit || (choices || []).find(u => String(u.id) === unitSel.value);
+                if (!chosen) return;
                 go.disabled = true;
                 try {
-                    await api('/api/loans', { op: 'out', unit_id: unit.id,
+                    await api('/api/loans', { op: 'out', unit_id: chosen.id,
                         who_name: whoIn.value.trim(), phone: phoneIn.value.trim(),
                         due_at: dueIn.value || '', note: noteIn.value.trim(),
                         crm_person_id: pickedPerson, crm_org_id: pickedOrg });
-                    m.close(); toastOk((unit.name || 'The unit') + ' is out with ' + whoIn.value.trim() + '.');
+                    m.close(); toastOk((chosen.name || 'The unit') + ' is out with ' + whoIn.value.trim() + '.');
                     loadLoans(true);
                 } catch (e) { go.disabled = false; toastError(e.message); }
             };
@@ -15237,13 +15250,11 @@ Projected Image UK"></textarea>
             m.body.innerHTML = '';
             const rows = r.history || [];
             if (!rows.length) { m.body.append(el('div', 'empty', 'This one has never been out.')); return; }
-            rows.forEach(h => {
-                const row = el('div', 'lbl-row');
-                row.append(el('span', null, h.who_name || 'Someone'));
-                row.append(el('span', 'lbl-meta', fmtDate(h.out_at)
-                    + (h.back_at ? ' to ' + fmtDate(h.back_at) : ' · still out')));
-                m.body.append(row);
-            });
+            /* A small table (12 Oct 2026): who had it, when it went, when it came back. */
+            m.body.append(dtable([{ head: 'With' }, { head: 'Out' }, { head: 'Back' }],
+                rows.map(h => ({ cells: [h.who_name || 'Someone', fmtDate(h.out_at),
+                    h.back_at ? fmtDate(h.back_at) : el('span', 'dt-warn', 'Still out')] })),
+                { cls: 'dt-loan-hist', label: (unit.name || 'Unit') + ' history', stop: 's' }));
         }
         /* The serial sticker. Built like a production label so it prints on the
            same printer and through the same font gate, but always at 4x4:
@@ -15330,7 +15341,18 @@ Projected Image UK"></textarea>
             const d = loansCache || {}; const box = $('loans-content'); box.innerHTML = '';
             /* Under the header every block is a card the grid can move, each
                spanning the row; the header's action slot is where Customize goes. */
-            box.append(pageHead({ view: 'loans', title: 'Loan units', line: 'Projectors out on loan, and for how long.' }));
+            const units = d.units || [];
+            /* The page's one teal (12 Oct 2026): Loan out, which asks which unit
+               is going, from those on the shelf. Each shelf row keeps its own,
+               secondary. */
+            const shelf = units.filter(u => u.status === 'in');
+            const lend = shelf.length ? el('button', 'btn btn-sm btn-primary') : null;
+            if (lend) {
+                lend.type = 'button';
+                lend.append(ico(I.logOut), document.createTextNode('Loan out'));
+                lend.onclick = () => loanOutModal(null, shelf);
+            }
+            box.append(pageHead({ view: 'loans', title: 'Loan units', line: 'Projectors out on loan, and for how long.', actions: lend ? [lend] : [] }));
             const counts = d.counts || { out: 0, in: 0, late: 0 };
             /* Three stats, three columns: on the shared four-column grid the
                empty fourth cell read as a KPI that had failed to load. */
@@ -15345,6 +15367,25 @@ Projected Image UK"></textarea>
             const oCard = el('div', 'card');
             const oHead = el('div', 'card-head');
             oHead.append(el('h3', 'card-title', 'Out now'));
+            if (d.can_manage) {
+                /* The chase limit, beside the rows it colours (12 Oct 2026): it
+                   was a card of its own under the register. */
+                const chase = el('div', 'card-act loan-chase');
+                const days = document.createElement('input');
+                days.type = 'number'; days.min = '1'; days.max = '365'; days.className = 'field-sm loan-chase-days';
+                days.value = String((d.settings || {}).chase_days || 28);
+                days.setAttribute('aria-label', 'Amber after this many days without a due date');
+                const save = el('button', 'btn btn-sm', 'Save'); save.type = 'button';
+                save.onclick = async () => {
+                    save.disabled = true;
+                    try { await api('/api/loans', { op: 'settings', chase_days: Number(days.value) });
+                          toastOk('Saved.'); loadLoans(true); }
+                    catch (e) { toastError(e.message); }
+                    save.disabled = false;
+                };
+                chase.append(el('span', 'lbl-meta', 'No due date: amber after'), days, el('span', 'lbl-meta', 'days'), save);
+                oHead.append(chase);
+            }
             oCard.append(oHead);
             const out = d.out || [];
             const outHead = el('span', 'dt-sorted'); outHead.append(document.createTextNode('Out'), ico(I.arrowDown));
@@ -15374,11 +15415,10 @@ Projected Image UK"></textarea>
                                 r.state === 'late' ? 'bad' : r.state === 'due' ? 'warn' : 'ok'),
                             who, r.days_out === 1 ? '1 day' : r.days_out + ' days', due, back] };
                 }),
-                { cls: 'dt-loans-out', label: 'Out now', empty: el('div', 'empty',
-                    /* 'Everything is on the shelf' beside 'On the shelf 0' when there
-                       is nothing in the register at all. */
-                    (d.units || []).length ? 'Everything is on the shelf.' : 'Nothing is out.') }));
-            box.append(widget(oCard, 'out'));
+                { cls: 'dt-loans-out', label: 'Out now', empty: el('div', 'empty', 'Everything is on the shelf.') }));
+            /* With no units at all the register's empty state is the page's one:
+               'Nothing is out' over 'No loan units yet' said it twice. */
+            if (units.length) box.append(widget(oCard, 'out'));
 
             /* ---- the register: a table, every action in a column of its own ---- */
             const rCard = el('div', 'card');
@@ -15391,7 +15431,6 @@ Projected Image UK"></textarea>
                 const act = el('div', 'card-act'); act.append(add); rHead.append(act);
             }
             rCard.append(rHead);
-            const units = d.units || [];
             const withWhom = {};
             out.forEach(r => { if (r.unit && r.unit.id) withWhom[r.unit.id] = r.who_name || ''; });
             let emptyReg;
@@ -15469,34 +15508,6 @@ Projected Image UK"></textarea>
                 { cls: 'dt-loans-reg', label: 'The register', empty: emptyReg }));
             box.append(widget(rCard, 'register'));
 
-            if (d.can_manage) {
-                /* The card head its two siblings use, and a plain row for the
-                   one setting: it was the production queue's row shell, a
-                   1,363px bordered box holding one field, under a title 16px
-                   from its own description. */
-                const sCard = el('div', 'card');
-                const sHead = el('div', 'card-head');
-                sHead.append(el('h3', 'card-title', 'Chasing'));
-                sHead.append(el('p', 'card-desc', 'Turns amber after this many days without a due date.'));
-                sCard.append(sHead);
-                const wrap = el('div', 'act-row');
-                const days = document.createElement('input');
-                days.type = 'number'; days.min = '1'; days.max = '365'; days.className = 'field-sm';
-                days.style.maxWidth = 'var(--field-w-md)';
-                days.value = String((d.settings || {}).chase_days || 28);
-                days.setAttribute('aria-label', 'Chase after this many days');
-                const save = el('button', 'btn btn-sm', 'Save');
-                save.onclick = async () => {
-                    save.disabled = true;
-                    try { await api('/api/loans', { op: 'settings', chase_days: Number(days.value) });
-                          toastOk('Saved.'); loadLoans(true); }
-                    catch (e) { toastError(e.message); }
-                    save.disabled = false;
-                };
-                wrap.append(days, el('span', 'lbl-meta', 'days'), save);
-                sCard.append(wrap);
-                box.append(widget(sCard, 'chasing', 'full', 'Chasing'));
-            }
         }
 
         /* The connector's reconcile modes, in words. 'warn', 'strict' and
