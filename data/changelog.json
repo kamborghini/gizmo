@@ -2,6 +2,16 @@
  "releases": [
   {
    "date": "2026-10-12",
+   "title": "Sign-in timing",
+   "items": [
+    {
+     "kind": "fixed",
+     "text": "A refused sign-in now takes the same time whatever the reason. An account that was paused after too many wrong passwords, switched off, or holding an expired temporary password was turned away faster than a username that does not exist, so once five wrong guesses had paused an account, the wait showed the username was real. The message is unchanged, and a paused account still cannot sign in with the right password."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-12",
    "title": "Xero sync settings save",
    "items": [
     {
