@@ -16157,6 +16157,7 @@ def _redact_customer(email: str, customer_id="", retry: bool = False,
         _write_crm(d)
     except Exception:
         logger.exception("redact: CRM")
+        _forget_store(CRM_PATH)   # a half-made change must not be served
         erased = before
         failed.append("the CRM")
 
@@ -16209,6 +16210,7 @@ def _redact_customer(email: str, customer_id="", retry: bool = False,
         _write_mail(store)
     except Exception:
         logger.exception("redact: mailbox")
+        _drop_memory_stores({MAILBOX_PATH})   # a half-made change must not be served
         erased = before
         failed.append("the mailbox")
 
@@ -16225,6 +16227,7 @@ def _redact_customer(email: str, customer_id="", retry: bool = False,
         _write_dispatch(orders)
     except Exception:
         logger.exception("redact: dispatch")
+        _forget_store(DISPATCH_STATE_PATH)   # a half-made change must not be served
 
     # A retry that fails again adds nothing to the record: the first attempt
     # already said what is owed, and an hourly line would bury the log.

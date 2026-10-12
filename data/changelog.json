@@ -2,6 +2,16 @@
  "releases": [
   {
    "date": "2026-10-12",
+   "title": "An erasure that stops part way leaves nothing half done",
+   "items": [
+    {
+     "kind": "fixed",
+     "text": "When erasing a customer's records stopped part way through, Reactor could go on showing the CRM or the Inbox as if the erasure had happened, and the next save of anything else could store that half-finished erasure for good. Reactor now goes back to what was really saved, the erasure is still listed as not yet done, and the hourly retry finishes it properly. The same goes for the note added to the bookings kept by law."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-12",
    "title": "The Production Manager keeps its orders between clicks",
    "items": [
     {
