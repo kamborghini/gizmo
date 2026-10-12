@@ -2379,10 +2379,12 @@
         .wpair-in { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); column-gap: var(--gap-cols); row-gap: var(--page-rhythm); align-items: start; }
         .wpair.even > .wpair-in { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .wpair.flip > .wpair-in { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
+        /* A table at its natural width, and the other half takes the rest (Xero sync's runs). */
+        .wpair.fit > .wpair-in { grid-template-columns: minmax(0, max-content) minmax(0, 1fr); }
         .wpair-in > * { min-width: 0; margin: 0; }
         /* The two halves' headings stand level. */
         .wpair-in > * > .section-title:first-child { margin-top: 0; }
-        @container wpair (max-width: 64rem) { .wpair > .wpair-in, .wpair.even > .wpair-in, .wpair.flip > .wpair-in { grid-template-columns: minmax(0, 1fr); } }
+        @container wpair (max-width: 64rem) { .wpair > .wpair-in, .wpair.even > .wpair-in, .wpair.flip > .wpair-in, .wpair.fit > .wpair-in { grid-template-columns: minmax(0, 1fr); } }
         /* what-changed digest */
         .changes-strip { margin: var(--sp-0-5) 0 var(--sp-6); }
         /* Beside the summary it is a short list, two columns of the measure and
@@ -2531,20 +2533,33 @@
         .dt-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; font-weight: var(--weight-medium); color: var(--text-primary); }
         .dt-amt { font-weight: var(--weight-medium); color: var(--text-primary); white-space: nowrap; }
         .dt-row.settled :is(.dt-what, .dt-amt, .dt-name) { color: var(--text-secondary); }
-        /* The band: the counters, a hairline, the sources. A line the sources
-           wrap to starts on the text edge: the clip keeps its hairline outside
-           (the figure group's rule). */
-        .recon-band-row { display: flex; flex-wrap: wrap; align-items: stretch; column-gap: var(--sp-8); row-gap: var(--sp-5);
+        /* A BAND (12 Oct 2026): a page's figures, a hairline, and what they
+           come from (Reconciliation's sources, Xero sync's connection and Auto
+           Run), each line a dot and a name, its value right after, and an
+           action at its end. A line the sources wrap to starts on the text
+           edge: the clip keeps its hairline outside (the figure group's rule). */
+        .band-row { display: flex; flex-wrap: wrap; align-items: stretch; column-gap: var(--sp-8); row-gap: var(--sp-5);
             overflow: clip; overflow-clip-margin: var(--sp-1); }
-        .recon-src { position: relative; flex: 1 1 20rem; min-width: 0; display: grid; grid-template-columns: max-content minmax(0, max-content);
-            align-content: center; column-gap: var(--sp-6); row-gap: var(--sp-2); }
-        .recon-src::before { content: ""; position: absolute; top: 0; bottom: 0; left: calc(-0.5 * var(--sp-8)); width: var(--bw-hairline); background: var(--border-default); }
-        .recon-src-l { display: contents; }
-        .recon-src-k { display: flex; align-items: center; gap: var(--sp-2); font-weight: var(--weight-medium); white-space: nowrap; }
-        .recon-src-k.ind { padding-left: calc(var(--dot-md) + var(--sp-2)); }
-        .recon-src-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
-        .recon-src-v.bad { color: var(--error); font-weight: var(--weight-medium); }
-        .recon-notice { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-4) 0 0; color: var(--error); font-weight: var(--weight-medium); }
+        .band-row > .metrics { margin-bottom: 0; }
+        .band-src { position: relative; flex: 1 1 30rem; min-width: 0; display: grid; grid-template-columns: max-content minmax(0, max-content) max-content;
+            align-content: center; align-items: center; column-gap: var(--sp-6); row-gap: var(--sp-2); }
+        .band-src::before { content: ""; position: absolute; top: 0; bottom: 0; left: calc(-0.5 * var(--sp-8)); width: var(--bw-hairline); background: var(--border-default); }
+        .band-src-l { display: contents; }
+        .band-src-h { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--sp-1); font-weight: var(--weight-semibold); color: var(--text-primary); }
+        .band-src-k { grid-column: 1; display: flex; align-items: center; gap: var(--sp-2); font-weight: var(--weight-medium); white-space: nowrap; }
+        .band-src-k.ind { padding-left: calc(var(--dot-md) + var(--sp-2)); }
+        .band-src-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+        .band-src-v.bad { color: var(--error); font-weight: var(--weight-medium); }
+        .band-src-e { display: flex; align-items: center; gap: var(--sp-2); }
+        .band-src-e > .info { margin: 0; }
+        .band-notice { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-4) 0 0; color: var(--error); font-weight: var(--weight-medium); }
+        /* A BAND ON A PHONE: a value wraps under nothing, beside its name,
+           and a line's action goes under its value. */
+        @media (max-width: 640px) {
+            .band-src { grid-template-columns: max-content minmax(0, 1fr); }
+            .band-src-v { white-space: normal; overflow-wrap: anywhere; }
+            .band-src-e { grid-column: 2; }
+        }
         /* The sweep's line on the tab row, and its Notes (n) disclosure. */
         .recon-sweep { display: flex; align-items: center; gap: var(--sp-2); white-space: nowrap; font-size: var(--text-xs); line-height: var(--lh-caption);
             color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
@@ -2643,7 +2658,7 @@
            a narrow card could not hold. The tiles stretch to one height. */
         .cx-card { container: cxcard / inline-size; }
         .cx-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4) var(--sp-8); align-items: stretch; margin-top: var(--sp-4); }
-        @container cxcard (min-width: 900px) { .cx-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        @container cxcard (min-width: 60rem) { .cx-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
         .cx-card > .cx-grid { padding-top: var(--sp-4); border-top: var(--bw-hairline) solid var(--border-default); }
         /* A tile is a small form on the card's grid, no box of its own (the mix, spec 3): its title and
            controls sit on the same text edge as the rest of the card. */
@@ -2738,37 +2753,36 @@
         /* The payout note, and a quarantine reason, word for word: text that
            wraps, at the table's own size, never narrower than a phrase. */
         .ktable td.cx-note { line-height: var(--lh-control); min-width: 28ch; }
-        /* The connection's three facts, named. */
-        .cx-facts { margin: 0; font-size: var(--text-body); }
-        /* On a phone a name sits over its value: side by side, 'Credentials
-           and account mapping' took the width and pushed its value off the
-           card. */
-        @media (max-width: 640px) {
-            .cx-facts { grid-template-columns: minmax(0, 1fr); row-gap: 0; }
-            .cx-facts dd { margin-bottom: var(--sp-2); }
-        }
-        .cx-tile .cx-row input, .cx-tile .cx-row select { flex: 1 1 100%; width: auto; max-width: none; height: var(--control-h); }
-        .cx-tile .cx-row .btn { flex: 1 1 0; justify-content: center; }
-        /* Without the send button (not an admin) the one button takes the
-           row: at half width under a full-width box it read as a gap. */
-        .cx-tile .cx-row .btn:only-of-type { flex: 1 1 100%; }
-        /* The card's own notice about the last run: full width, its own
-           colour, one line and then the reasons. */
-        .cx-health { border-radius: var(--radius-inset); padding: var(--sp-3) var(--sp-4); margin: var(--sp-3) 0 0; font-size: var(--text-body); }
-        .cx-health.bad { background: var(--error-bg); color: var(--error); }
-        .cx-health.ok { background: var(--success-bg); color: var(--success); }
-        .cx-health.warn { background: var(--warning-bg); color: var(--warning); }
-        .cx-health-line { font-weight: var(--weight-medium); }
-        .cx-health-item { font-size: var(--text-xs); line-height: var(--lh-caption); margin-top: var(--sp-1); opacity: .9; }
-        .cx-auto { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); padding-top: var(--sp-3); border-top: var(--bw-hairline) solid var(--border-default); }
-        .cx-auto > .btn { margin-left: auto; flex: none; }
-        @media (min-width: 641px) { .cx-auto { flex-wrap: nowrap; } .cx-auto > .lr-what { flex: 1 1 0; } }
-        /* A flex item is as wide as its longest unbreakable line, and the
-           status line under Auto Run is .lbl-meta, which never wraps: 418px
-           in a 299px card on a phone. The text shrinks to the row and wraps. */
-        .cx-auto > .lr-what { min-width: 0; overflow-wrap: anywhere; }
-        .cx-auto .lbl-meta { white-space: normal; }
-        .cx-chips { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+        /* The three checks (12 Oct 2026): one line each, the box and then its
+           buttons at their words' width. */
+        .cx-tile .cx-row input, .cx-tile .cx-row select { flex: 1 1 8rem; min-width: 0; width: auto; max-width: 24rem; height: var(--control-h); }
+        .cx-tile .cx-row .btn { flex: none; justify-content: center; }
+        /* Review and send's one status line, then the matrix at its natural
+           width with Needs attention beside it, each thing said once. */
+        .cx-statl { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); margin-top: var(--sp-1);
+            color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+        .cx-statl b { font-weight: var(--weight-semibold); color: var(--text-primary); }
+        .cx-statl .t-warn { color: var(--warning); font-weight: var(--weight-medium); }
+        .cx-statl .t-bad { color: var(--error); font-weight: var(--weight-medium); }
+        .cx-rv { display: grid; grid-template-columns: minmax(0, max-content) minmax(18rem, 1fr); align-items: start; gap: var(--sp-4) var(--sp-8); margin-top: var(--sp-4); }
+        .cx-rv > :only-child { grid-column: 1 / -1; }
+        @container cxcard (max-width: 56rem) { .cx-rv { grid-template-columns: minmax(0, 1fr); } }
+        .cx-mx { width: fit-content; max-width: 100%; margin: 0; }
+        .cx-mx td.zero { color: var(--text-tertiary); }
+        .cx-att { min-width: 0; display: flex; flex-direction: column; }
+        .cx-att-h { display: flex; align-items: center; min-height: var(--control-h); border-bottom: var(--bw-hairline) solid var(--border-default);
+            font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary); }
+        .cx-att-r { display: flex; align-items: baseline; gap: var(--sp-2); padding-block: var(--sp-2); border-bottom: var(--bw-hairline) solid var(--border-default);
+            color: var(--text-primary); }
+        .cx-att-r > .dt-dot { translate: 0 calc(-1 * var(--sp-0-5)); }
+        /* The runs at their natural width; a quarantined document over why. */
+        .dt-runs { --dt-cols: repeat(6, max-content); }
+        .dt-quar { --dt-cols: minmax(0, 1fr); }
+        .dt-why { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); white-space: normal; overflow-wrap: anywhere; }
+        /* The settings: two columns of names, each value right after its own. */
+        .cx-setcard { container: cxset / inline-size; }
+        .conn-pairs.cx-set { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content minmax(0, 1fr); column-gap: var(--sp-4); row-gap: var(--sp-2); }
+        @container cxset (max-width: 44rem) { .conn-pairs.cx-set { grid-template-columns: max-content minmax(0, 1fr); } }
         .conn-doc { width: 100%; border-collapse: collapse; margin-top: var(--sp-3); }
         .conn-doc th { text-align: left; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary);
             font-weight: var(--weight-semibold); padding: var(--sp-1-5) var(--sp-2); border-bottom: var(--bw-hairline) solid var(--border-default); }
@@ -8990,7 +9004,7 @@ Projected Image UK"></textarea>
         function pairNodes(left, right, id, label, o) {
             o = o || {};
             if (!left || !right) return null;
-            const pair = el('div', 'wpair' + (o.even ? ' even' : '') + (o.flip ? ' flip' : ''));
+            const pair = el('div', 'wpair' + (o.even ? ' even' : '') + (o.flip ? ' flip' : '') + (o.fit ? ' fit' : ''));
             const inner = el('div', 'wpair-in');
             left.before(pair);
             [left, right].forEach(n => ['data-widget', 'data-size', 'data-widget-label'].forEach(a => n.removeAttribute(a)));
@@ -15445,10 +15459,15 @@ Projected Image UK"></textarea>
             const box = $('connector-content'); box.innerHTML = '';
             /* One line (copy plan, Xero sync #1). Whether Auto Run is on is the
                Connection card's tag, and with it on that tag says so. */
-            box.append(pageHead({ view: 'connector', title: 'Xero sync', line: 'Shopify orders, refunds and customers, sent into Xero.' }));
+            /* Refresh reloads the page's data, so it is the header's, worded
+               (12 Oct 2026); it sat in the Connection card's head. */
+            const rf = el('button', 'btn btn-sm'); rf.type = 'button';
+            rf.append(ico(I.refresh), document.createTextNode('Refresh'));
+            rf.onclick = () => { rf.disabled = true; refreshConnector().finally(() => { rf.disabled = false; }); };
+            box.append(pageHead({ view: 'connector', title: 'Xero sync', line: 'Shopify orders, refunds and customers, sent into Xero.', actions: [rf] }));
             const lastRun = (connRuns || [])[0];
             box.append(financeTabs('connector',
-                lastRun ? ('Last run ' + fmtDate(lastRun.finishedAt)) : ''));
+                lastRun ? ('Last run ' + fmtDate(lastRun.finishedAt) + ', ' + londonHM(lastRun.finishedAt)) : ''));
             if (!connCache) { box.append(el('div', 'empty', 'Loading\u2026')); return; }
             if (connCache.available === false) {
                 /* The same card shape as Forecast's own setup card beside it,
@@ -15507,54 +15526,49 @@ Projected Image UK"></textarea>
             const running = !!st.running;
             if (running) connStartWatch();
 
-            /* ---- the ledger at a glance ---- */
+            /* ---- the band (12 Oct 2026) ----
+               The ledger's figures, then after a hairline the connection: Xero
+               linked and its store, and the Auto Run line with its button. The
+               figures stood 460px apart over a Connection card that said again
+               what a box under it said. The band has a widget id of its own, so
+               a layout that hid the old figures or card does not hide it. */
             const led0 = st.ledger || {};
             const kpis = [];
             const kpi = (label, key, note, warnWhen) => {
                 if (led0[key] == null) return;
-                kpis.push({ label: label, value: String(led0[key]), note: note, tone: (warnWhen && led0[key] > 0) ? 'warn' : null });
+                kpis.push({ label: label, value: Number(led0[key]).toLocaleString('en-GB'), note: note, tone: (warnWhen && led0[key] > 0) ? 'warn' : null });
             };
-            /* The labels say it; the notes that repeated them went (copy plan,
-               Xero sync #6 to #8). */
             /* The connector's ledger counts contacts with documents, as one
                figure, so the figure says so rather than pass for invoices. */
             kpi('Synced', 'synced', 'Invoices, credit notes and contacts');
             kpi('Failed', 'failed', null, true);
-            kpi('Quarantined', 'quarantined', null, true);
-            /* No 'Blocked' tile: the connector's ledger counts synced, failed
-               and quarantined documents only, so the tile could never show
-               and its word disagreed with 'Left alone' in the tables. */
-            if (kpis.length) box.append(widget(metricsStrip(kpis), 'ledger', 'full', 'The ledger at a glance'));
-
-            /* ---- status ---- */
-            const sCard = el('div', 'card');
-            const sHead = el('div', 'card-head card-head-stat');
-            sHead.append(el('div', 'card-title', 'Connection'));
-            /* A state, so a tag (copy plan, Xero sync #9). */
-            sHead.append(el('span', 'lbl-chip ' + (cfg.dryOnly ? 'note' : cfg.shop ? 'made' : 'warn'),
-                cfg.dryOnly ? 'Reviews only' : (cfg.shop ? 'Xero linked' : 'Not configured')));
-            const sAct = el('div', 'card-act');
-            const rf = el('button', 'btn btn-sm'); rf.append(ico(I.refresh), document.createTextNode('Refresh'));
-            rf.onclick = () => { rf.disabled = true; refreshConnector().finally(() => { rf.disabled = false; }); };
-            sAct.append(rf); sHead.append(sAct); sCard.append(sHead);
-            /* Three facts, each with its name. As one line joined by dots they
-               read as one run-on sentence: 'Shopify x · when a total
-               disagrees: send it and report the difference · credentials and
-               mapping live on the connector service'. */
-            const facts = el('dl', 'conn-pairs cx-facts');
-            const fact = (k, v) => { if (v) facts.append(el('dt', null, k), el('dd', null, v)); };
-            fact('Store', cfg.shop || 'Not set on the service');
-            /* The status reply carries the mode and not the tolerance; the
-               health reply carries both, as the guards that will apply. */
-            const tol = cfg.reconcileTolerance != null ? cfg.reconcileTolerance
-                : ((connHealth && connHealth.guards) || {}).reconcileTolerance;
-            if (cfg.reconcileMode) fact('When a total disagrees', (CX_MODE[cfg.reconcileMode] || cfg.reconcileMode)
-                + (tol != null && cfg.reconcileMode !== 'off'
-                    ? ', if out by more than ' + money(Number(tol) || 0, 'GBP', 2) : ''));
-            fact('Credentials and account mapping', cfg.dryOnly ? 'Incomplete on the connector service, so it can only review'
-                : 'Held on the connector service, not here');
-            sCard.append(facts);
-
+            /* The ledger counts what is held now and the log every document
+               held, so when they differ the figure says which is which. */
+            kpi('Quarantined', 'quarantined', st.quarantineCount != null && st.quarantineCount !== led0.quarantined
+                ? st.quarantineCount + ' in the log' : null, true);
+            /* No 'Blocked' figure: the connector's ledger counts synced, failed
+               and quarantined documents only. */
+            const band = el('div', 'band');
+            const bandRow = el('div', 'band-row');
+            if (kpis.length) bandRow.append(metricsStrip(kpis));
+            const src = el('div', 'band-src');
+            /* A state, so a dot and its word; the credentials sentence waits
+               behind the heading's (i). */
+            const srcHead = el('div', 'band-src-h', 'Connection');
+            srcHead.append(infoButton('About the connection', { title: 'Connection', body: cfg.dryOnly
+                ? 'Credentials and account mapping are incomplete on the connector service, so it can only review.'
+                : 'Credentials and account mapping are held on the connector service, not here.' }));
+            src.append(srcHead);
+            const srcLine = (dot, k, v, end) => {
+                const r = el('div', 'band-src-l');
+                const kk = el('span', 'band-src-k'); kk.append(el('span', 'dt-dot ' + dot), document.createTextNode(k));
+                const vv = el('span', 'band-src-v', v); vv.title = v;
+                r.append(kk, vv);
+                if (end && end.length) { const ee = el('span', 'band-src-e'); end.forEach(x => ee.append(x)); r.append(ee); }
+                src.append(r);
+            };
+            srcLine(cfg.dryOnly ? '' : cfg.shop ? 'ok' : 'warn', cfg.dryOnly ? 'Reviews only' : (cfg.shop ? 'Xero linked' : 'Not configured'),
+                cfg.shop || 'Not set on the service');
             /* ---- Auto Run ----
                The state shown is the SERVICE's, fetched every load. A toggle
                reflecting what this tab last clicked would read ON after a
@@ -15562,18 +15576,9 @@ Projected Image UK"></textarea>
                over unattended writing into the accounts must not tell. */
             if (connAuto) {
                 const on = !!connAuto.enabled;
-                const ar = el('div', 'cx-auto');
-                const w = el('div', 'lr-what');
-                const line = el('div');
-                /* A state, not a success: neutral either way, the words say which. */
-                line.append(el('span', 'lbl-chip note', on ? 'Auto Run on' : 'Auto Run off'));
-                line.append(document.createTextNode('  ' + (on
-                    ? 'Checking for new orders every '
-                      + (connAuto.intervalMinutes || 10) + ' minutes and sending them to Xero.'
-                    : 'Orders go only when ' + (connIsAdmin() ? 'you send' : 'an admin sends') + ' them.')));
-                w.append(line);
                 const bits = [];
-                if (connAuto.lastTickAt) bits.push('last check ' + fmtWhen(connAuto.lastTickAt));
+                if (on) bits.push('Every ' + (connAuto.intervalMinutes || 10) + ' minutes');
+                if (on && connAuto.lastTickAt) bits.push('last check ' + fmtWhen(connAuto.lastTickAt));
                 if (on && connAuto.nextTickAt) {
                     /* A next-tick time that has passed means the tab has been
                        open a while, or a check is running. "next 5 hours ago"
@@ -15581,26 +15586,24 @@ Projected Image UK"></textarea>
                     bits.push(Date.parse(connAuto.nextTickAt) > Date.now()
                         ? 'next ' + fmtWhen(connAuto.nextTickAt) : 'next check due now');
                 }
-                if (connAuto.ticks) bits.push(connAuto.ticks + ' checks so far');
+                const words = on ? bits.join(' \u00b7 ')
+                    : 'Orders go only when ' + (connIsAdmin() ? 'you send' : 'an admin sends') + ' them.';
+                /* The checks so far and the last outcome wait behind its (i). */
+                const more = [];
+                if (!on && connAuto.lastTickAt) more.push('The last check was ' + fmtWhen(connAuto.lastTickAt) + '.');
+                if (connAuto.ticks) more.push(connAuto.ticks + ' checks so far.');
                 /* The connector's own line has its own separator dots and a
                    '· 2 needing attention' tail; it is said in words here. */
                 if (connAuto.lastOutcome && !(connAuto.lastOutcome === 'failed' && connAuto.lastError)) {
                     const parts = String(connAuto.lastOutcome).replace(/^skipped:\s*/i, 'skipped because ').split(' \u00b7 ');
                     const need = /^(\d+) needing attention$/.exec(parts[parts.length - 1] || '');
                     const head = cxPlain((need ? parts.slice(0, -1) : parts).join(', '));
-                    bits.push('last outcome: ' + head.charAt(0).toLowerCase() + head.slice(1)
-                        + (need ? ' (' + need[1] + (need[1] === '1' ? ' needs' : ' need') + ' attention)' : ''));
+                    more.push('Last outcome: ' + head.charAt(0).toLowerCase() + head.slice(1)
+                        + (need ? ' (' + need[1] + (need[1] === '1' ? ' needs' : ' need') + ' attention)' : '') + '.');
                 }
-                if (bits.length) {
-                    const t2 = bits.join(' \u00b7 ');
-                    w.append(el('div', 'lbl-meta', t2.charAt(0).toUpperCase() + t2.slice(1)));
-                }
-                if (connAuto.lastError) {
-                    w.append(el('div', 'lbl-meta', 'The last check failed. ' + cxDetail(connAuto.lastError) + ' It keeps trying.'));
-                }
-                ar.append(w);
-                /* The switch sits on the row it switches, not in the card's
-                   header beside Refresh, where it read as part of the card. */
+                const end = [];
+                if (more.length) end.push(infoButton('About Auto Run', { title: on ? 'Auto Run on' : 'Auto Run off', body: more }));
+                /* The switch sits on the line it switches. */
                 if (connIsAdmin()) {
                     const t = el('button', 'btn btn-sm', on ? 'Turn Auto Run off' : 'Turn Auto Run on');
                     t.onclick = async () => {
@@ -15617,66 +15620,20 @@ Projected Image UK"></textarea>
                             await refreshConnector();
                         } catch (e) { t.disabled = false; toastError(e.message); }
                     };
-                    ar.append(t);
+                    end.push(t);
                 }
-                sCard.append(ar);
+                /* A state, not a success: a filled dot when on, a hollow one when off. */
+                srcLine(on ? 'ok' : 'off', on ? 'Auto Run on' : 'Auto Run off', words, end);
             }
-            /* ---- what the last run left behind ---- */
-            /* It says WHEN, and which kind of run. The verdict is on the last
-               run the service recorded, which may be weeks old: checks of one
-               order or a tag are not runs and do not replace it. Undated, a
-               red box from 5 Sep read as today's news. The connector's line
-               ends '· 1 needing attention', which is the list under it,
-               counted; the list is what is shown. */
-            /* A review writes nothing, so a review that needs attention is a
-               caution, not an alarm: amber, and it says how to clear it. Red
-               is kept for a send, which touched the accounts. A limit that has
-               changed since the run is said, so the box cannot contradict the
-               Settings card under it. */
-            if (connHealth && connHealth.lastRunAt) {
-                const bad = !!connHealth.needsAttention;
-                const kind = connHealth.lastRunDryRun === true ? 'review' : connHealth.lastRunDryRun === false ? 'send' : 'run';
-                const when = ', on ' + fmtDate(connHealth.lastRunAt);
-                const head = cxPlain(String(connHealth.line || '').split(' \u00b7 ')[0]).replace(/[.\s]+$/, '');
-                const h = !bad ? el('div', 'cx-health ok')
-                    : kind === 'review' ? el('div', 'cx-health warn') : el('div', 'cx-health bad');
-                if (bad) {
-                    h.append(el('div', 'cx-health-line', 'The last ' + kind + when + ', needs attention.'
-                        + (kind === 'review' ? ' A review writes nothing.' : '')));
-                    const probs = connHealth.problems || [];
-                    /* 'The run failed before it could report' over 'run failed:
-                       ...' said it twice; the problem is the one with news. */
-                    if (head && !(/^The run failed/i.test(head) && probs.some(p2 => /^run failed:/i.test(p2)))) {
-                        h.append(el('div', 'cx-health-item', head + '.'));
-                    }
-                    const ctx = { guards: connHealth.guards, admin: connIsAdmin() };
-                    probs.slice(0, 8).forEach(p2 => h.append(el('div', 'cx-health-item', cxProblem(p2, ctx))));
-                    if (probs.length > 8) h.append(el('div', 'cx-health-item', 'And ' + (probs.length - 8) + ' more.'));
-                    if (kind === 'review') h.append(el('div', 'cx-health-item', 'Run a review to replace this.'));
-                } else {
-                    h.append(el('div', 'cx-health-line', (head || 'It finished') + '.'));
-                    h.append(el('div', 'cx-health-item', 'The last ' + kind + when + '.'));
-                }
-                sCard.append(h);
-            } else if (connHealth) {
-                /* No run yet is not a success: no green box for it. */
-                sCard.append(el('p', 'card-sub', 'Nothing has run yet.'));
+            bandRow.append(src);
+            band.append(bandRow);
+            if (connAuto && connAuto.lastError) {
+                const n = el('p', 'band-notice');
+                n.append(el('span', 'dt-dot bad'), el('span', null, 'The last Auto Run check failed. ' + cxDetail(connAuto.lastError) + ' It keeps trying.'));
+                band.append(n);
             }
-            const chipRow = el('div', 'cx-chips');
-            if (st.quarantineCount) chipRow.append(el('span', 'lbl-chip warn', st.quarantineCount + ' in quarantine'));
-            /* Says WHAT is running: every job holds the same flag, and a tag
-               check read as 'A run is in progress'. */
-            if (running) chipRow.append(el('span', 'lbl-chip note', connTagBusy === 'check' ? 'A tag check is in progress\u2026'
-                : connTagBusy === 'send' ? 'Sending tagged orders\u2026' : connBusy === 'review' ? 'A review is in progress\u2026'
-                : connBusy === 'send' ? 'Sending to Xero\u2026' : connBusy === 'retry' ? 'Retrying\u2026'
-                : 'The connector is busy\u2026'));
-            /* A failed tag check sets the same error; its own section says so,
-               under the tag, so it is not repeated here as a failed run. */
-            const tagErr = st.tagJob && st.tagJob.error;
-            const boxSaysIt = !!(connHealth && connHealth.needsAttention && connHealth.lastRunAt);
-            if (st.lastError && st.lastError !== tagErr && !boxSaysIt) chipRow.append(el('span', 'lbl-chip bad', 'Last run failed'));
-            if (chipRow.childNodes.length) sCard.append(chipRow);
-            box.append(widget(sCard, 'connection'));
+            box.append(widget(band, 'band', 'full', 'Figures and connection'));
+
 
             /* ---- review and send ---- */
             const admin = connIsAdmin();
@@ -15741,79 +15698,121 @@ Projected Image UK"></textarea>
                 host.append(sec);
                 return sec;
             };
-            /* ---- the latest review, right under Run review ----
-               It was a card of its own after every check's results, 2,000px
-               below the button that asked for it. */
+            /* ONE STATUS LINE (12 Oct 2026): a dot, which review or run it is
+               and when, what it read, and how many need attention, with the
+               list of them beside the matrix. The health box, the chip row and
+               the section's own sentence told the same event three times. */
             const ctx = { guards: connHealth && connHealth.guards, admin: admin };
-            if (running && (connBusy === 'review' || connBusy === 'send' || connBusy === 'retry')) {
-                const sec = cxSection(rCard, 'review', 'Latest review');
-                const t = el('div', 'thinking'); t.append(loader(),
-                    el('span', null, connBusy === 'send' ? 'Sending to Xero…'
-                        : connBusy === 'retry' ? 'Retrying failed documents…'
-                        : 'Reviewing… this reads every eligible order and writes nothing.'));
-                sec.append(t);
-            } else if (connReview && connReview.result) {
-                const r = connReview.result;
-                const nOrd = (r.ordersFetched || 0) + ((r.ordersFetched === 1) ? ' order' : ' orders');
-                /* A review that stopped leads with the stop, in red, and its
-                   table is what it found before stopping: it used to open on
-                   a green 'This is what Send will do'. */
-                const sec = cxSection(rCard, 'review', 'Latest review, ' + fmtDate(connReview.finishedAt),
-                    revAborted ? 'It read ' + nOrd + ' and stopped before it finished. Nothing was written.'
-                        : 'It read ' + nOrd + ' and wrote nothing. This is what Send will do:');
-                if (r.aborted) sec.append(el('div', 'msg error',
-                    cxProblem('run aborted: ' + r.aborted, ctx) + ' Nothing should be sent until that is resolved.'));
-                if (r.aborted) sec.append(el('p', 'cx-res-sum', 'What it found before it stopped:'));
-                /* In the words the document tables use. 'Skipped' added up
-                   five different things: already in Xero, no Xero contact
-                   yet, test orders, cancelled orders, and contacts that
-                   exist. A column is drawn only when some row has a figure;
-                   a cell that does not apply to that kind is left empty. */
-                const cols = [['create', 'Will create'], ['update', 'Will update'], ['inXero', 'Already in Xero'],
-                    ['noContact', 'Needs a Xero contact'], ['nothing', 'Nothing to send'], ['voided', 'Will void'],
-                    ['keptPaid', 'Edited after payment, left as it is'], ['quarantined', 'Quarantined'], ['failed', 'Failed']];
+            const statl = el('div', 'cx-statl');
+            const sWords = (t, cls) => {
+                if (!t) return;
+                if (statl.childNodes.length > 1) { const s2 = el('span', 'dot-sep'); s2.setAttribute('aria-hidden', 'true'); statl.append(s2); }
+                statl.append(el('span', cls || null, t));
+            };
+            const sLead = (word, iso) => { const l = el('span'); l.append(el('b', null, word)); if (iso) l.append(document.createTextNode(' ' + fmtDate(iso) + ', ' + londonHM(iso))); statl.append(l); };
+            /* Says WHAT is running: every job holds the same flag, and a tag
+               check read as 'A run is in progress'. */
+            const busyWords = !running ? '' : connTagBusy === 'check' ? 'A tag check is in progress\u2026'
+                : connTagBusy === 'send' ? 'Sending tagged orders\u2026' : connBusy === 'review' ? 'A review is in progress\u2026'
+                : connBusy === 'send' ? 'Sending to Xero\u2026' : connBusy === 'retry' ? 'Retrying\u2026'
+                : 'The connector is busy\u2026';
+            const reviewBusy = running && (connBusy === 'review' || connBusy === 'send' || connBusy === 'retry');
+            const r = !reviewBusy && connReview && connReview.result;
+            const attn = [];
+            if (reviewBusy) {
+                statl.append(loader(), el('span', null, connBusy === 'send' ? 'Sending to Xero\u2026'
+                    : connBusy === 'retry' ? 'Retrying failed documents\u2026'
+                    : 'Reviewing\u2026 this reads every eligible order and writes nothing.'));
+            } else {
+                const dotEl = el('span', 'dt-dot'); statl.append(dotEl);
+                let dot = '';
+                if (r) {
+                    /* A review that stopped leads with the stop, in red, and its
+                       matrix is what it found before stopping. */
+                    const warns = r.warnings || [];
+                    const nOrd = (r.ordersFetched || 0) + ((r.ordersFetched === 1) ? ' order' : ' orders');
+                    sLead('Latest review', connReview.finishedAt);
+                    sWords(revAborted ? nOrd + ' read, then it stopped; nothing was written' : nOrd + ' read, nothing written');
+                    if (r.aborted) attn.push(['bad', cxProblem('run aborted: ' + r.aborted, ctx) + ' Nothing should be sent until that is resolved.']);
+                    warns.forEach(w => attn.push(['warn', cxProblem(w)]));
+                    dot = r.aborted ? 'bad' : warns.length ? 'warn' : 'ok';
+                } else if (lastRun && !lastRun.dryRun) {
+                    /* No review since the last send: the line is about that send. */
+                    const lr = lastRun.result || {};
+                    const inv = connCounts(lr, 'invoices'), cn = connCounts(lr, 'creditNotes');
+                    sLead('Last send', lastRun.finishedAt);
+                    if (lastRun.error) attn.push(['bad', 'It failed. ' + cxDetail(lastRun.error)]);
+                    else sWords((lastRun.ok ? '' : 'It had failures. ') + inv.created + (inv.created === 1 ? ' invoice' : ' invoices')
+                        + ' and ' + cn.created + (cn.created === 1 ? ' credit note' : ' credit notes') + ' written');
+                    sWords('No review since');
+                    dot = lastRun.ok ? 'ok' : 'bad';
+                } else if (connHealth && connHealth.lastRunAt) {
+                    /* What the last run left behind, dated: undated, a red box
+                       from 5 Sep read as today's news. A review writes nothing,
+                       so one that needs attention is amber; red is kept for a
+                       send, which touched the accounts. */
+                    const bad = !!connHealth.needsAttention;
+                    const kind = connHealth.lastRunDryRun === true ? 'review' : connHealth.lastRunDryRun === false ? 'send' : 'run';
+                    const head = cxPlain(String(connHealth.line || '').split(' \u00b7 ')[0]).replace(/[.\s]+$/, '');
+                    const tone = kind === 'review' ? 'warn' : 'bad';
+                    sLead('Last ' + kind, connHealth.lastRunAt);
+                    if (bad) {
+                        const probs = connHealth.problems || [];
+                        /* 'The run failed before it could report' over 'run
+                           failed: ...' said it twice; the problem is the one
+                           with news. */
+                        if (head && !(/^The run failed/i.test(head) && probs.some(p2 => /^run failed:/i.test(p2)))) attn.push([tone, head + '.']);
+                        probs.forEach(p2 => attn.push([tone, cxProblem(p2, ctx)]));
+                        if (kind === 'review') sWords('A review writes nothing; run one to replace this');
+                        dot = tone;
+                    } else { sWords(head || 'It finished'); dot = 'ok'; }
+                } else {
+                    sWords('No review yet');
+                }
+                if (attn.length) sWords(attn.length + (attn.length === 1 ? ' needs attention' : ' need attention'), dot === 'bad' ? 't-bad' : 't-warn');
+                /* A failed run says so here unless the list already does; a
+                   failed tag check says it under its own tag. */
+                const tagErr = st.tagJob && st.tagJob.error;
+                if (st.lastError && st.lastError !== tagErr && !attn.length) { sWords('Last run failed', 't-bad'); dot = 'bad'; }
+                sWords(busyWords);
+                dotEl.className = 'dt-dot' + (dot ? ' ' + dot : '');
+            }
+            rCard.append(statl);
+            /* The matrix at its natural width, in the words the document tables
+               use, and Needs attention beside it, each thing said once. A
+               column is drawn only when some row has a figure; a zero is grey. */
+            const rv = el('div', 'cx-rv');
+            if (r) {
+                const cols = [['create', 'Create'], ['update', 'Update'], ['inXero', 'Already in Xero'],
+                    ['noContact', 'Needs a Xero contact'], ['nothing', 'Nothing to send'], ['voided', 'Void'],
+                    ['keptPaid', 'Left alone', 'Edited after payment, left as it is'], ['quarantined', 'Quarantined'], ['failed', 'Failed']];
                 const rowsR = [['Invoices', 'invoices'], ['Credit notes', 'creditNotes'], ['Contacts', 'contacts']]
                     .map(([lab2, k]) => [lab2, cxReviewCounts(r, k)]);
                 const shown = cols.filter(([k]) => k === 'create' || rowsR.some(([, c]) => c[k]));
-                const wrapT = el('div', 'ktable-wrap');
+                const wrapT = el('div', 'ktable-wrap cx-mx');
                 const tb = el('table', 'ktable');
-                const thr = el('tr'); thr.append(el('th'));
-                shown.forEach(([, h]) => thr.append(el('th', 'num', h)));
+                const thr = el('tr'); thr.append(el('th', null, 'Send will'));
+                shown.forEach(([, h, long]) => { const th = el('th', 'num', h); if (long) th.title = long; thr.append(th); });
                 const thead = el('thead'); thead.append(thr); tb.append(thead);
                 const tbody = el('tbody');
                 rowsR.forEach(([lab2, c]) => {
                     const tr = el('tr');
                     tr.append(el('td', 'kw', lab2));
-                    shown.forEach(([k]) => tr.append(el('td', 'num', c[k] == null ? '' : String(c[k]))));
+                    shown.forEach(([k]) => tr.append(el('td', 'num' + (c[k] === 0 ? ' zero' : ''), c[k] == null ? '' : String(c[k]))));
                     tbody.append(tr);
                 });
-                tb.append(tbody); wrapT.append(tb); sec.append(wrapT);
-                /* The warnings as one list in one box, all of them counted: it
-                   was eight amber boxes and a pointer to a run record that
-                   holds no warnings. */
-                const warns = r.warnings || [];
-                if (warns.length) {
-                    const wb = el('div', 'disp-warn cx-warns');
-                    wb.append(el('div', 'cx-warns-head', warns.length + (warns.length === 1 ? ' warning' : ' warnings')));
-                    warns.slice(0, 8).forEach(w => wb.append(el('div', null, cxProblem(w))));
-                    if (warns.length > 8) wb.append(el('div', null, 'And ' + (warns.length - 8) + ' more.'));
-                    sec.append(wb);
-                }
-            } else if (lastRun && !lastRun.dryRun) {
-                /* No review since the last send: the section is about that
-                   send, and says so in its heading. */
-                const r = lastRun.result || {};
-                const inv = connCounts(r, 'invoices'), cn = connCounts(r, 'creditNotes');
-                const sec = cxSection(rCard, 'review', 'Last send, ' + fmtDate(lastRun.finishedAt));
-                sec.append(el('div', lastRun.ok ? 'disp-ok-line' : 'msg error', lastRun.error
-                    ? 'It failed. ' + cxDetail(lastRun.error)
-                    : (lastRun.ok ? '' : 'It had failures. ')
-                      + inv.created + (inv.created === 1 ? ' invoice' : ' invoices')
-                      + ' and ' + cn.created + (cn.created === 1 ? ' credit note were' : ' credit notes were') + ' written.'));
-                sec.append(el('p', 'cx-res-sum', 'No review since. Run one to see what a new send would do.'));
-            } else {
-                cxSection(rCard, 'review', 'Latest review', 'No review yet.');
+                tb.append(tbody); wrapT.append(tb); rv.append(wrapT);
             }
+            if (attn.length) {
+                const att = el('div', 'cx-att');
+                att.append(el('div', 'cx-att-h', 'Needs attention'));
+                attn.slice(0, 8).forEach(([tone, words]) => {
+                    const row = el('div', 'cx-att-r'); row.append(el('span', 'dt-dot ' + tone), el('span', null, words)); att.append(row);
+                });
+                if (attn.length > 8) att.append(el('div', 'cx-att-r', 'And ' + (attn.length - 8) + ' more.'));
+                rv.append(att);
+            }
+            if (rv.childNodes.length) rCard.append(rv);
 
             /* The three narrower ways in sit side by side as tiles, each with
                its hint, its box and its buttons, all three the same shape.
@@ -15889,7 +15888,7 @@ Projected Image UK"></textarea>
             onEnter(oneIn, oneChk);
             oneWrap.append(oneIn, oneChk);
             if (admin) {
-                const oneSend = cxBtn('btn btn-primary', 'Send', 'Send this order');
+                const oneSend = cxBtn('btn', 'Send', 'Send this order');
                 /* Armed only by a check of exactly this order that found it
                    and found something to write. A check that did not find
                    the order, failed, or found nothing to write armed it
@@ -16038,7 +16037,7 @@ Projected Image UK"></textarea>
             onEnter(tagIn, tagChk);
             tagWrap.append(tagIn, tagChk);
             if (admin) {
-                const tagSend = cxBtn('btn btn-primary', 'Send', 'Send every order with this tag');
+                const tagSend = cxBtn('btn', 'Send', 'Send every order with this tag');
                 /* Armed only by an unspent check of exactly this tag that found
                    orders and something to write. */
                 const tagReady = () => {
@@ -16116,7 +16115,7 @@ Projected Image UK"></textarea>
             onEnter(paySince, payChk);
             payWrap.append(paySince, payChk);
             if (admin) {
-                const payGo = cxBtn('btn btn-primary', 'Write notes', 'Write notes on the checked invoices');
+                const payGo = cxBtn('btn', 'Write notes', 'Write notes on the checked invoices');
                 /* Armed by a check of exactly the date in the box, the same
                    rule the one-order send follows: nothing is written that
                    nobody has looked at first. Retyping the date disarms it,
@@ -16213,7 +16212,7 @@ Projected Image UK"></textarea>
                credential stay environment variables on the service, where a
                browser cannot reach them; the server refuses anything not on
                its own list rather than trusting this form. */
-            const xCard = el('div', 'card');
+            const xCard = el('div', 'card cx-setcard');
             if (connSettings && connIsAdmin()) {
                 const xHead = el('div', 'card-head');
                 /* The security note, word for word, behind the title (copy plan,
@@ -16229,7 +16228,8 @@ Projected Image UK"></textarea>
                 const xAct = el('div', 'card-act'); xAct.append(toggle); xHead.append(xAct); xCard.append(xHead);
                 if (!connSettingsOpen) {
                     /* The values as they stand, read before anything is opened. */
-                    const dl = el('dl', 'conn-pairs');
+                    /* Two columns of names, each value right after its name (12 Oct 2026). */
+                    const dl = el('dl', 'conn-pairs cx-set');
                     [['RECONCILE_MODE', 'When a total disagrees'], ['RECONCILE_TOLERANCE', 'Tolerance'],
                      ['MAX_DOCS_PER_RUN', 'Most documents in one run'], ['RUNAWAY_ABORT_ABOVE', 'Stop entirely above'],
                      ['ORDERS_SINCE', 'Only orders since'],
@@ -16285,7 +16285,8 @@ Projected Image UK"></textarea>
                     add('CUSTOMER_REF_METAFIELD_KEY', 'Customer reference key',
                         'Where the reference on the document view is read from.');
                     xCard.append(grid);
-                    const save = el('button', 'btn btn-primary', 'Save settings');
+                    /* Plain: Send to Xero is the page's one teal action. */
+                    const save = el('button', 'btn', 'Save settings');
                     save.onclick = async () => {
                         const out = {};
                         Object.keys(fields).forEach(k => { out[k] = fields[k].value.trim(); });
@@ -16303,48 +16304,38 @@ Projected Image UK"></textarea>
             }
             box.append(widget(rCard, 'review'));
 
-            /* ---- recent runs ---- */
+            /* ---- runs, beside the quarantine log (12 Oct 2026) ---- */
+            let hCard = null, qCard = null;
             if ((connRuns || []).length) {
-                const hCard = el('div', 'card');
+                hCard = el('div', 'card');
                 const hHead = el('div', 'card-head');
-                hHead.append(el('h3', 'card-title', connRuns.length
-                    + (connRuns.length === 1 ? ' run kept' : ' runs kept')));
-                hCard.append(hHead);
-                const wrapT = el('div', 'ktable-wrap');
-                const tb = el('table', 'ktable');
-                tb.innerHTML = '<thead><tr><th>When</th><th>Mode</th><th>Outcome</th>'
-                    + '<th class="num">Invoices</th><th class="num">Credit notes</th><th class="num">Contacts</th></tr></thead>';
-                const tbody = el('tbody');
-                connRuns.slice(0, 12).forEach(run => {
-                    const r = run.result || {};
-                    const tr = el('tr');
-                    tr.append(el('td', 'kw', fmtDate(run.finishedAt)));
-                    /* Colour is spent on the outcome only: a Send is not a success. */
-                    const md = el('td'); md.append(el('span', 'lbl-chip note',
-                        run.dryRun ? 'Review' : 'Send'));
-                    tr.append(md);
-                    /* A run that stopped itself did not 'have failures': it
-                       stopped, and one that threw failed. */
-                    const oc = el('td'); oc.append(el('span', 'lbl-chip ' + (run.ok ? 'made' : 'bad'),
-                        run.ok ? 'Clean' : run.error ? 'Failed' : (r.aborted ? 'Stopped' : 'Had failures')));
-                    tr.append(oc);
-                    tr.append(el('td', 'num', String(connCounts(r, 'invoices').created)),
-                        el('td', 'num', String(connCounts(r, 'creditNotes').created)),
-                        el('td', 'num', String(connCounts(r, 'contacts').created)));
-                    tbody.append(tr);
-                });
-                tb.append(tbody); wrapT.append(tb); hCard.append(wrapT);
-                box.append(widget(hCard, 'runs'));
+                const hTitle = el('h3', 'card-title', 'Runs');
+                hTitle.append(el('span', 'card-n', String(connRuns.length)));
+                hHead.append(hTitle); hCard.append(hHead);
+                /* When with its time, the mode, the outcome as a dot and a word
+                   (colour is spent on the outcome only: a Send is not a
+                   success), and what each wrote, at the table's natural width. */
+                hCard.append(dtable([{ head: 'When' }, { head: 'Mode' }, { head: 'Outcome' }, { head: 'Invoices', cls: 'num' },
+                                     { head: 'Credit notes', cls: 'num' }, { head: 'Contacts', cls: 'num' }],
+                    connRuns.slice(0, 12).map(run => {
+                        const r2 = run.result || {};
+                        /* A run that stopped itself did not 'have failures': it
+                           stopped, and one that threw failed. */
+                        const oc = el('span', 'dt-sev');
+                        oc.append(el('span', 'dt-dot ' + (run.ok ? 'ok' : 'bad')),
+                            document.createTextNode(run.ok ? 'Clean' : run.error ? 'Failed' : (r2.aborted ? 'Stopped' : 'Had failures')));
+                        return { cells: [fmtDate(run.finishedAt) + ', ' + londonHM(run.finishedAt), run.dryRun ? 'Review' : 'Send', oc,
+                                         String(connCounts(r2, 'invoices').created), String(connCounts(r2, 'creditNotes').created),
+                                         String(connCounts(r2, 'contacts').created)] };
+                    }), { cls: 'dt-runs', label: 'Runs', stop: 's' }));
+                box.append(widget(hCard, 'runs', 'full', 'Runs'));
             }
-
-            /* ---- quarantine ---- */
             if (st.quarantineCount) {
-                const qCard = el('div', 'card');
+                qCard = el('div', 'card');
                 const qHead = el('div', 'card-head');
-                qHead.append(el('h3', 'card-title', st.quarantineCount
-                    + (st.quarantineCount === 1 ? ' document quarantined' : ' documents quarantined')));
-                qHead.append(el('p', 'card-desc',
-                    'Held back for bad data. Fix the cause, then retry.'));
+                const qt = el('h3', 'card-title', 'Quarantine log');
+                qt.append(el('span', 'card-n', String(st.quarantineCount)));
+                qHead.append(titleInfo(qt, infoButton('About quarantine', { title: 'Quarantine log', body: 'Held back for bad data. Fix the cause, then retry.' })));
                 if (connIsAdmin()) {
                     const qAct = el('div', 'card-act');
                     const rt = el('button', 'btn btn-sm');
@@ -16365,26 +16356,21 @@ Projected Image UK"></textarea>
                 if (connQuar === false) qHost.append(el('div', 'sub', 'The quarantine list could not be read.'));
                 else if (connQuar && !connQuar.length) qHost.append(el('div', 'sub', 'Empty now. Refresh to update the count.'));
                 else if (connQuar) {
-                    const rows = connQuar;
-                    const wrapT = el('div', 'ktable-wrap');
-                    const tb = el('table', 'ktable cx-docs cx-quar');
-                    tb.innerHTML = '<thead><tr><th>Kind</th><th>Document</th><th>Why it was held</th></tr></thead>';
-                    const tbody = el('tbody');
-                    rows.slice(0, 30).forEach(q2 => {
-                        const tr = el('tr');
-                        const kw = { invoice: 'Invoice', creditnote: 'Credit note', contact: 'Contact' };
-                        /* The whole reason, in plain words: cut at 140
-                           characters it stopped mid-word. The kind and the
-                           key stay on one line; the reason takes the rest. */
-                        tr.append(el('td', 'cx-kind', kw[q2.kind] || cap(String(q2.kind || ''))), el('td', 'cx-ord', q2.key || q2.order || ''),
-                            el('td', 'cx-note', cxDetail(q2.reason || q2.message || (q2.errors || []).join('; ') || '')));
-                        tbody.append(tr);
-                    });
-                    tb.append(tbody); wrapT.append(tb); qHost.append(wrapT);
-                    if (rows.length > 30) qHost.append(el('div', 'sub', (rows.length - 30) + ' more held.'));
+                    /* Each document over why it was held, the whole reason in
+                       plain words: cut at 140 characters it stopped mid-word. */
+                    const kw = { invoice: 'Invoice', creditnote: 'Credit note', contact: 'Contact' };
+                    qHost.append(dtable([{ head: 'Document', cls: 'stack' }], connQuar.slice(0, 30).map(q2 => {
+                        const f = document.createDocumentFragment();
+                        f.append(el('span', 'dt-name', (kw[q2.kind] || cap(String(q2.kind || ''))) + ' ' + (q2.key || q2.order || '')),
+                            el('span', 'dt-why', cxDetail(q2.reason || q2.message || (q2.errors || []).join('; ') || '')));
+                        return { cells: [f] };
+                    }), { cls: 'dt-quar', label: 'Quarantine log', stop: 's' }));
+                    if (connQuar.length > 30) qHost.append(el('div', 'sub', (connQuar.length - 30) + ' more held.'));
                 }
-                box.append(widget(qCard, 'quarantine'));
+                box.append(widget(qCard, 'quarantine', 'full', 'Quarantine log'));
             }
+            /* Side by side when both have something to show. */
+            pairNodes(hCard, qCard, 'runs', 'Runs and quarantine', { fit: true });
             if (xCard.childNodes.length) box.append(widget(xCard, 'settings'));
             cardifySections(box);
             /* A filter or a page turn redraws the page; focus goes back to the
@@ -18516,7 +18502,7 @@ Projected Image UK"></textarea>
                Sweep now, the one teal action while Xero and the mailbox need
                nothing. They sat in a connection card under the tabs. */
             const heads = [];
-            const band = el('div', 'recon-band');
+            const band = el('div', 'band');
             if (rPainting) {
                 /* Disconnecting has to be possible, and has to mean it: the token
                    is revoked at the provider, not merely forgotten here. It lives
@@ -18632,7 +18618,7 @@ Projected Image UK"></textarea>
                said once, under the band. It has a widget id of its own, so a
                layout that hid the old severity tiles or connection card does not
                hide it. */
-            const bandRow = el('div', 'recon-band-row');
+            const bandRow = el('div', 'band-row');
             const counts = st.open_counts || {};
             const amounts = st.open_amounts || {};
             const mets = el('div', 'fcs recon-sev');
@@ -18642,13 +18628,13 @@ Projected Image UK"></textarea>
                     money: typeof amounts[k] === 'number' ? money(amounts[k] / 100, st.currency || 'GBP', 2) : '',
                     onClick: () => { reconFilter.severity = reconFilter.severity === k ? '' : k; refreshReconList(); } }));
             });
-            const src = el('div', 'recon-src');
+            const src = el('div', 'band-src');
             const srcLine = (dot, k, v, bad) => {
-                const r = el('div', 'recon-src-l');
-                const kk = el('span', 'recon-src-k' + (dot === null ? ' ind' : ''));
+                const r = el('div', 'band-src-l');
+                const kk = el('span', 'band-src-k' + (dot === null ? ' ind' : ''));
                 if (dot !== null) kk.append(el('span', 'dt-dot ' + dot));
                 kk.append(document.createTextNode(k));
-                const vv = el('span', 'recon-src-v' + (bad ? ' bad' : ''), v); vv.title = v;
+                const vv = el('span', 'band-src-v' + (bad ? ' bad' : ''), v); vv.title = v;
                 r.append(kk, vv); src.append(r);
             };
             /* A link Xero refused is connected in name only: red, and saying
@@ -18656,14 +18642,14 @@ Projected Image UK"></textarea>
             srcLine(xs.needs_reconnect ? 'bad' : xs.connected ? 'ok' : 'off', 'Xero',
                 xs.needs_reconnect ? 'Needs reconnecting' : xs.connected ? (xs.tenant || 'Connected') : 'Not connected', !!xs.needs_reconnect);
             srcLine(mb.connected ? 'ok' : 'warn', 'Accounts mailbox', mb.connected ? (mb.address || 'Connected') : 'Not connected');
-            if (mb.connected || st.docs) srcLine(null, 'Documents read', String(st.docs || 0));
+            if (mb.connected || st.docs) srcLine(null, 'Documents read', Number(st.docs || 0).toLocaleString('en-GB'));
             bandRow.append(mets, src);
             band.append(bandRow);
             /* A token that could not be saved is a connection with a fuse
                burning: Xero honours the previous one for about half an hour and
                then the link is gone. Anyone but the master is told who can mend
                a refused link. */
-            const notice = (t) => { const n = el('p', 'recon-notice'); n.append(el('span', 'dt-dot bad'), el('span', null, t)); band.append(n); };
+            const notice = (t) => { const n = el('p', 'band-notice'); n.append(el('span', 'dt-dot bad'), el('span', null, t)); band.append(n); };
             if (xs.needs_reconnect) {
                 notice(['Xero refused the link, so its checks are skipped until it is reconnected.',
                         !teamMe || teamMe.role === 'master' ? '' : 'Ask the master account to reconnect Xero.'].filter(Boolean).join(' '));

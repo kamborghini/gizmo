@@ -2085,7 +2085,7 @@ def t_reconciliation_is_a_band_a_sweep_line_and_a_table():
        "Manage and Sweep now are the header's actions")
     ok("'connection'" not in fn and "widget(band, 'band', 'full', 'Open and sources')" in fn,
        "one band, not a connection card over the severity tiles")
-    ok("el('div', 'recon-src')" in fn and "'Documents read'" in fn and "'Needs reconnecting'" in fn,
+    ok("el('div', 'band-src')" in fn and "'Documents read'" in fn and "'Needs reconnecting'" in fn,
        "the sources sit beside the counters, a refused link in red")
     ok("financeTabs('recon', '', [reconSweepLine(st, xs)])" in fn, "the sweep's line is on the tab row")
     sl = fn_src("function reconSweepLine(") if "function reconSweepLine(" in SCRIPT else ""
@@ -2109,6 +2109,38 @@ def t_reconciliation_is_a_band_a_sweep_line_and_a_table():
 
 
 @test
+def t_xero_sync_is_a_band_a_status_line_and_its_tables():
+    """Cameron's Xero sync screenshot (12 Oct 2026) and the approved mockup:
+    three figures 460px apart, a Connection card saying again what a green box
+    under it said, a chip row, and four cards stacked. Now the figures and the
+    connection share one band; Review and send has one status line, the matrix
+    at its natural width and Needs attention beside it; the three checks are a
+    line each with plain buttons, so Send to Xero is the one teal; the runs
+    sit beside the quarantine log; and the settings are two columns."""
+    fn = fn_src("function renderConnector() {")
+    ok("actions: [rf]" in fn and "rf.append(ico(I.refresh), document.createTextNode('Refresh'))" in fn, "Refresh is worded in the header")
+    ok("'Last run ' + fmtDate(lastRun.finishedAt) + ', ' + londonHM(lastRun.finishedAt)" in fn, "the stamp has its time")
+    ok("widget(band, 'band', 'full', 'Figures and connection')" in fn and "'ledger'" not in fn
+       and "widget(sCard, 'connection')" not in fn, "one band, not the ledger's row over a Connection card")
+    ok("el('div', 'band-src')" in fn and "'Xero linked'" in fn and "'Auto Run off'" in fn, "the connection and Auto Run lines beside the figures")
+    ok("value: Number(led0[key]).toLocaleString('en-GB')" in fn, "the ledger's figures carry thousands separators")
+    ok("flex: 1 1 30rem" in CSS.split(".band-src {")[1].split("}")[0], "the band's lines drop under the figures before they are cut")
+    ok("cx-health" not in fn and "cx-chips" not in fn, "no health box or chip row: the status line says it once")
+    ok("el('div', 'cx-statl')" in fn and "'Latest review'" in fn, "one status line")
+    ok("el('div', 'cx-rv')" in fn and "'Needs attention'" in fn and "'Send will'" in fn, "the matrix beside Needs attention")
+    ok("cxBtn('btn btn-primary'" not in fn and "'btn btn-primary'" not in fn and fn.count("'btn btn-sm btn-primary'") == 1,
+       "Send to Xero is the one teal")
+    ok("pairNodes(hCard, qCard, 'runs', 'Runs and quarantine', { fit: true })" in fn and "'Quarantine log'" in fn,
+       "the runs beside the quarantine log, at the runs' natural width")
+    ok("(o.fit ? ' fit' : '')" in fn_src("function pairNodes(")
+       and ".wpair.fit > .wpair-in { grid-template-columns: minmax(0, max-content) minmax(0, 1fr); }" in CSS
+       and ".wpair.fit > .wpair-in" in CSS.split("@container wpair (max-width: 64rem)")[1].split("}")[0],
+       "a fit pair gives its left half its natural width, and stacks on a phone like the rest")
+    ok("el('dl', 'conn-pairs cx-set')" in fn and ".conn-pairs.cx-set {" in CSS
+       and "grid-template-columns" in CSS.split(".conn-pairs.cx-set {")[1].split("}")[0], "the settings in two columns")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left
@@ -2120,7 +2152,7 @@ def t_a_report_pairs_its_short_blocks():
     pin = CSS.split("\n        .wpair-in {")[1].split("}")[0] if "\n        .wpair-in {" in CSS else ""
     ok("grid-template-columns: minmax(0, 7fr) minmax(0, 5fr)" in pin and "align-items: start" in pin, "seven twelfths and five, each as tall as itself")
     ok(".wpair { container: wpair / inline-size; }" in CSS
-       and "@container wpair (max-width: 64rem) { .wpair > .wpair-in, .wpair.even > .wpair-in, .wpair.flip > .wpair-in { grid-template-columns: minmax(0, 1fr);" in CSS,
+       and "@container wpair (max-width: 64rem) { .wpair > .wpair-in, .wpair.even > .wpair-in, .wpair.flip > .wpair-in, .wpair.fit > .wpair-in { grid-template-columns: minmax(0, 1fr);" in CSS,
        "and one above the other when the pair is narrow, whatever its split: a plain .wpair-in rule lost to the 5:7 split, and Products' totals ran off a phone")
     ok("pairNodes(sumW, cs, 'summary'" in (fn_src("function summaryAndChanges(") if "function summaryAndChanges(" in SCRIPT else ""),
        "the summary sits beside What changed")
@@ -2822,9 +2854,9 @@ def t_a_xero_token_warning_reaches_the_screen():
     ok("xs.warning" in fn, "the page reads the warning the server sends")
     # 12 Oct 2026: said under the band, as the refused link is, in red with a
     # dot (the mockup), not in an amber box.
-    ok("} else if (xs.warning) notice(xs.warning);" in fn and "el('p', 'recon-notice')" in fn,
+    ok("} else if (xs.warning) notice(xs.warning);" in fn and "el('p', 'band-notice')" in fn,
        "and paints it as a warning, not as ordinary help text")
-    ok("color: var(--error)" in CSS.split(".recon-notice {")[1].split("}")[0], "in the error colour")
+    ok("color: var(--error)" in CSS.split(".band-notice {")[1].split("}")[0], "in the error colour")
 
 
 @test
@@ -5997,22 +6029,24 @@ def t_the_xero_page_fits_a_phone():
     And the Auto Run status line is .lbl-meta, which never wraps, so the flex
     item holding it was 418px wide."""
     fn = fn_src("function renderConnector(")
-    ok("el('div', 'cx-auto')" in fn and "el('div', 'lr-what')" in fn,
-       "the Auto Run row is still built from the classes the rules below style")
+    # 12 Oct 2026: Auto Run is a line of the band, beside the figures.
+    ok("srcLine(on ? 'ok' : 'off', on ? 'Auto Run on' : 'Auto Run off', words, end);" in fn,
+       "the Auto Run line is built from the band's parts, which the rules below style")
     grid = re.search(r"\.cx-grid \{[^}]*grid-template-columns:([^;]*);", CSS)
     ok(grid and grid.group(1).strip() == "minmax(0, 1fr)",
        "one tile per row until the card has room for three: a tile never has a floor wider than the card")
-    ok("@container cxcard (min-width: 900px) { .cx-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }" in CSS,
+    # 12 Oct 2026: each check is one line (box, Check, Send), which needs a third of 60rem.
+    ok("@container cxcard (min-width: 60rem) { .cx-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }" in CSS,
        "three across only when the card, not the window, has room")
     row = re.search(r"\.cx-tile \.cx-row \{([^}]*)\}", CSS)
     ok(row and "flex-wrap: wrap" in row.group(1) and "1fr 1fr" not in row.group(1),
        "the buttons stack when their labels do not fit side by side")
-    ok(re.search(r"\.cx-tile \.cx-row \.btn \{[^}]*flex: 1 1 0", CSS),
-       "and share the line when they do")
-    ok(re.search(r"\.cx-auto > \.lr-what \{[^}]*min-width: 0", CSS),
-       "the Auto Run text shrinks to its row")
-    ok(re.search(r"\.cx-auto \.lbl-meta \{[^}]*white-space: normal", CSS),
-       "and its status line wraps")
+    # 12 Oct 2026: one line each (the mockup), the box taking what the buttons leave.
+    ok(re.search(r"\.cx-tile \.cx-row \.btn \{[^}]*flex: none", CSS) and re.search(r"\.cx-tile \.cx-row input, \.cx-tile \.cx-row select \{[^}]*flex: 1 1 8rem; min-width: 0", CSS),
+       "and share the line with the box when they fit")
+    ph = CSS.split("/* A BAND ON A PHONE")[1].split("\n        }")[0] if "/* A BAND ON A PHONE" in CSS else ""
+    ok(".band-src-v { white-space: normal;" in ph, "the Auto Run sentence wraps on a phone")
+    ok(".band-src-e { grid-column: 2; }" in ph, "and its button goes under it")
 
 
 @test
@@ -6778,6 +6812,10 @@ def t_a_saved_layout_naming_merged_widgets_still_loads():
     hid either old card loads with the band shown, at its default place."""
     ids = re.findall(r"widget\(\w+, '([a-z0-9-]+)'", fn_src("function renderRecon() {"))
     ok(ids and "connection" not in ids and "severity" not in ids, "the band has an id of its own: " + " ".join(ids))
+    # Xero sync's ledger figures and Connection card became one band the same way.
+    xids = re.findall(r"widget\(\w+, '([a-z0-9-]+)'", fn_src("function renderConnector() {"))
+    ok(xids and "connection" not in xids and "ledger" not in xids and "band" in xids,
+       "Xero sync's band has an id of its own: " + " ".join(xids))
     if not any(os.access(os.path.join(p, "node"), os.X_OK) for p in os.environ.get("PATH", "").split(os.pathsep)):
         print("       (node unavailable, skipped)")
         return
@@ -8413,7 +8451,7 @@ def t_the_reconciliation_card_keeps_status_and_actions_apart():
     fn = fn_src("function renderRecon()")
     # 12 Oct 2026: the card went. The sources sit in the band beside the
     # counters and the actions in the page header, the mockup's split.
-    ok("el('div', 'recon-src')" in fn and "actions: heads" in fn, "status on one side, actions on the other")
+    ok("el('div', 'band-src')" in fn and "actions: heads" in fn, "status on one side, actions on the other")
     ok("dropMenu(manage, [" in fn and "label: 'Disconnect Xero'" in fn,
        "disconnecting is in a menu, not a button beside the sweep")
     sl = fn_src("function reconSweepLine(")
@@ -8639,18 +8677,20 @@ def t_the_run_health_box_says_when_and_in_words():
     since-removed guard stopped (connector c3a2ee5, 7 Sep), and nothing on it
     said so: no date, and the problem in environment-variable names."""
     fn = fn_src("function renderConnector(")
-    ok("const when = ', on ' + fmtDate(connHealth.lastRunAt);" in fn, "it gives the date of the run it judges")
+    # 12 Oct 2026: the box became the status line, which dates it to the minute.
+    ok("sLead('Last ' + kind, connHealth.lastRunAt);" in fn and "fmtDate(iso) + ', ' + londonHM(iso)" in fn,
+       "it gives the date of the run it judges")
     ok("connHealth.lastRunDryRun === true ? 'review'" in fn, "and whether that run was a review or a send")
     ok("cxProblem(p2, ctx)" in fn, "each problem in plain words")
     ok("cxProblem('run aborted: ' + r.aborted, ctx)" in fn and "cxProblem(w)" in fn,
        "and the latest review says its stop and its warnings the same way")
     ok(".slice(0, 140)" not in fn and "cxDetail(q2.reason" in fn, "a quarantine reason is whole, not cut mid-word")
-    # The Connection card: its facts named, the switch on the row it switches.
-    ok("el('dl', 'conn-pairs cx-facts')" in fn and "fact('Store'" in fn, "the connection's facts each have a name")
+    # The connection, now lines in the band (12 Oct 2026): each named, the switch on its line.
+    ok("el('div', 'band-src-h', 'Connection')" in fn and "cfg.shop || 'Not set on the service'" in fn, "the connection's lines each have a name")
     ok("credentials and mapping live on the connector service" not in fn, "not one run-on line of dots")
     i = fn.index("const t = el('button', 'btn btn-sm', on ? 'Turn Auto Run off' : 'Turn Auto Run on');")
-    ok("ar.append(t);" in fn[i:i + 1600] and "sAct.append(t);" not in fn, "the Auto Run switch sits on the Auto Run row")
-    ok(".cx-auto > .btn { margin-left: auto;" in CSS, "at its right-hand end")
+    ok("end.push(t);" in fn[i:i + 1600] and "sAct.append(t);" not in fn, "the Auto Run switch sits on the Auto Run line")
+    ok(".band-src-e {" in CSS, "at its end")
 
 
 @test
@@ -8721,7 +8761,8 @@ def t_the_page_agrees_with_itself_after_a_run():
     ok("connHealth = (await connOp({ op: 'health' })).data" in watch and "connAuto = (await connOp({ op: 'autorun' })).data" in watch,
        "a finished run re-reads the health and Auto Run")
     fn = fn_src("function renderConnector(")
-    ok("st.lastError !== tagErr && !boxSaysIt" in fn, "the chip does not repeat the tag section or the box")
+    # 12 Oct 2026: the chip and the box became the status line and its list.
+    ok("st.lastError && st.lastError !== tagErr && !attn.length" in fn, "the failure does not repeat the tag section or the list")
     ok("op: 'quarantine'" not in fn and "connQuar" in fn, "the quarantine list is painted from what was read with the status")
     ok("connTagBusy === 'check' ? 'A tag check is in progress" in fn, "and the busy chip says what is running")
     ok("connFocus = { sec: 'tag', on: 'tab' };" in fn and "sec.querySelector('.segmented > button.on')" in fn,
@@ -8734,8 +8775,8 @@ def t_the_xero_page_keeps_the_details_the_last_check_found():
     one line that holds it."""
     fn = fn_src("function renderConnector(")
     ok(".ktable.cx-docs td { vertical-align: top; }" in CSS, "rows are top-aligned; the bare .cx-docs td rule lost to .ktable td")
-    ok("'Nothing has run yet.'" in fn, "no run is not a green box")
-    ok("((connHealth && connHealth.guards) || {}).reconcileTolerance" in fn, "the tolerance comes from the health guards")
+    # 12 Oct 2026: the status line's grey dot; the tolerance is said once, in Settings.
+    ok("sWords('No review yet');" in fn and "let dot = '';" in fn, "no run is not a green box")
     ok("connTagPending" in fn and "connTagPending = '';" in fn_src("function connStartWatch("),
        "the tag in flight names the busy section and is cleared when collected")
     ok("if (kept.length > 20) sec.append(tablePager(" in fn and "if (order.length > 20) sec.append(tablePager(" in fn,
@@ -11555,13 +11596,13 @@ def t_xero_sync_wears_the_mix():
     settings note behind their titles' info buttons; the shorter lines."""
     ok("function renderConnector() {" in SCRIPT, "renderConnector exists")
     fn = fn_src("function renderConnector() {")
-    ok("pageHead({ view: 'connector', title: 'Xero sync', line: 'Shopify orders, refunds and customers, sent into Xero.' })" in fn,
+    ok("pageHead({ view: 'connector', title: 'Xero sync', line: 'Shopify orders, refunds and customers, sent into Xero.', actions: [rf] })" in fn,
        "the one header and its line")
     ok("el('div', 'ov-hero')" not in fn and "hero.append(heroAct(''))" not in fn, "nothing built by hand")
     for part in ("infoButton('Linking the connector'", "infoButton('About review and send'", "infoButton('About these settings'",
                  "if (hint) t.append(infoButton(title, { title: title, body: hint }))", "'An admin needs to link this.'",
-                 "el('span', 'lbl-chip ' + (cfg.dryOnly ? 'note' : cfg.shop ? 'made' : 'warn')", "'Nothing has run yet.'",
-                 "'No review yet.'", "'Held back for bad data. Fix the cause, then retry.'", "'Empty now. Refresh to update the count.'"):
+                 "cfg.dryOnly ? 'Reviews only' : (cfg.shop ? 'Xero linked' : 'Not configured')",
+                 "'No review yet'", "'Held back for bad data. Fix the cause, then retry.'", "'Empty now. Refresh to update the count.'"):
         ok(part in fn, "Xero sync: " + part)
     ok("\n        .card-head > .lbl-chip { justify-self: start; }" in CSS
        and CSS.index("\n        .card-head > .lbl-chip { justify-self: start; }") > CSS.index("\n        .lbl-chip.warn {"),
