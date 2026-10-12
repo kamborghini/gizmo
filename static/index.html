@@ -2178,14 +2178,26 @@
         /* A list that matched nothing (a search, a filter): one quiet line,
            centred where its rows would be. A space with nothing in it at all is
            the empty state below. */
-        .empty { background: transparent; border: 0; border-radius: 0; width: 100%; max-width: calc(var(--measure) + 2 * var(--sp-4)); margin-inline: auto;
-            padding: var(--sp-6) var(--sp-4);
-            color: var(--text-tertiary); font-size: var(--text-body); line-height: var(--lh-control); text-align: center; }
-        /* THE EMPTY STATE (the mix, spec 6): a 40 tile with the screen's own
-           icon on the fill, one line in the head step, its action; centred in
-           its space, 16 apart. No illustration and no box. */
-        .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-4);
-            text-align: center; padding: var(--sp-10) 0; }
+        /* 12 Oct 2026 (R8): on the left, where the rows would start, not centred
+           in a band across the row. */
+        .empty { background: transparent; border: 0; border-radius: 0; width: 100%; max-width: none; margin: 0;
+            padding: var(--sp-4) 0;
+            color: var(--text-tertiary); font-size: var(--text-body); line-height: var(--lh-control); text-align: left; }
+        /* THE EMPTY STATE (12 Oct 2026, R8): one line under its heading, not a
+           tall centred box across the row (the mix had it centred in its space:
+           at 2,200 that was an icon and a line in the middle of a 248px band).
+           The 40 tile with the screen's own icon, the line in the head step and
+           a grey line under it when there is more to say, then the action
+           straight after the words. No illustration and no box. */
+        .empty-state { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: var(--sp-4);
+            text-align: left; padding: var(--sp-4) 0; }
+        .empty-txt { display: flex; flex-direction: column; gap: var(--sp-0-5); min-width: 0; }
+        .empty-sub { margin: 0; color: var(--text-tertiary); font-size: var(--text-body); line-height: var(--lh-control); max-width: var(--measure); }
+        .empty-state > :not(.empty-ic, .empty-txt) { margin-left: var(--sp-4); flex: none; }
+        @media (max-width: 640px) {
+            .empty-state { flex-wrap: wrap; }
+            .empty-state > :not(.empty-ic, .empty-txt) { margin-left: calc(var(--box-2xl) + var(--sp-4)); }
+        }
         .empty-ic { width: var(--box-2xl); height: var(--box-2xl); border-radius: var(--radius-control); background: var(--surface-tertiary);
             color: var(--text-tertiary); display: grid; place-items: center; flex: none; }
         .empty-ic svg { width: var(--icon-md); height: var(--icon-md); }
@@ -4271,7 +4283,9 @@
         /* run-task gate (tabs stay idle until the user starts the task) */
         /* A run gate is an empty state under its page's header (renderRunGate).
            Customers builds its own until Task 36 moves it onto the same builder. */
-        .run-gate { text-align: center; display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); padding: var(--sp-10) 0; }
+        /* One line under the header, as every empty state is (12 Oct 2026): the
+           tile, what a run costs and what it reads, then Run. */
+        .run-gate { text-align: left; display: flex; flex-direction: row; align-items: center; gap: var(--sp-4); padding: var(--sp-4) 0; }
         /* 7vh is for a page that is only the gate. Under a card it is stacked
            on the card's own margin, which measured 65 to 71px of nothing. */
         .ov-wrap > * + .run-gate { margin-top: 0; }
@@ -7046,7 +7060,10 @@ Projected Image UK"></textarea>
         function emptyState(o) {
             const box = el('div', 'empty-state' + (o.cls ? ' ' + o.cls : ''));
             const t = el('span', 'empty-ic'); t.setAttribute('aria-hidden', 'true'); t.append(ico(o.icon || I.grid));
-            box.append(t, el('p', 'empty-line', o.text));
+            const txt = el('div', 'empty-txt');
+            txt.append(el('p', 'empty-line', o.text));
+            if (o.sub) txt.append(el('p', 'empty-sub', o.sub));
+            box.append(t, txt);
             if (o.action) box.append(o.action);
             return box;
         }
@@ -10501,7 +10518,7 @@ Projected Image UK"></textarea>
             const btn = el('button', 'btn btn-primary rg-btn'); btn.textContent = o.cta; btn.onclick = o.onRun;
             box.append(pageHead({ view: o.view, title: o.title, line: o.desc,
                 info: o.more ? infoButton('About this run', { title: o.title, body: o.more }) : null }),
-                emptyState({ icon: o.icon, text: o.note, action: btn, cls: 'run-gate' }));
+                emptyState({ icon: o.icon, text: o.note, sub: o.covers, action: btn, cls: 'run-gate' }));
         }
         /* A paid report run in flight, by report. While one runs, its tab keeps
            the loading screen when you come back to it, and Run or Refresh
@@ -10510,12 +10527,12 @@ Projected Image UK"></textarea>
         function showOverviewView() {
             if (reportRuns.overview) return;
             if (overviewCache) { renderOverview(overviewCache); return; }
-            renderRunGate('ov-content', { icon: I.grid, title: 'Overview', desc: 'Live figures and an AI summary of the store.', cta: 'Run overview', note: RUN_COST, onRun: () => loadOverview(true) });
+            renderRunGate('ov-content', { icon: I.grid, title: 'Overview', desc: 'Live figures and an AI summary of the store.', cta: 'Run overview', note: RUN_COST, covers: 'Shopify orders, Google Analytics 4 and Search Console.', onRun: () => loadOverview(true) });
         }
         function showSeoView() {
             if (reportRuns.seo) return;
             if (seoCache) { renderSEO(seoCache); return; }
-            renderRunGate('seo-content', { icon: I.search, title: 'SEO', desc: 'Crawl the store and rank fixes by revenue.', cta: 'Run SEO audit', note: RUN_COST, more: 'Takes up to a minute.', onRun: () => loadSEO(true) });
+            renderRunGate('seo-content', { icon: I.search, title: 'SEO', desc: 'Crawl the store and rank fixes by revenue.', cta: 'Run SEO audit', note: RUN_COST, covers: 'Indexation, structured data, metadata and alt text.', more: 'Takes up to a minute.', onRun: () => loadSEO(true) });
         }
         function showProductsView() {
             if (productPlanRun) return;   // a plan is being built: coming back keeps its loading screen
@@ -10801,7 +10818,7 @@ Projected Image UK"></textarea>
             if (keywordsCache) { renderKeywords(keywordsCache); return; }
             renderRunGate('keywords-content', { icon: I.tag, title: 'Keywords',
                 desc: 'Your keywords and ad spend, with a ranked plan.',
-                cta: 'Run keyword analysis', note: RUN_COST, more: 'Reads Search Console and Analytics.',
+                cta: 'Run keyword analysis', note: RUN_COST, covers: 'Search Console keywords and Google Ads.', more: 'Reads Search Console and Analytics.',
                 onRun: () => loadKeywords(true) });
         }
         async function loadKeywords(force) {
@@ -11031,7 +11048,7 @@ Projected Image UK"></textarea>
             const comp = seg === SEG_ALL;
             const btn = el('button', 'btn btn-primary'); btn.type = 'button';
             btn.textContent = comp ? 'Run comprehensive audit' : ('Run ' + seg + ' audit'); btn.onclick = () => loadCustomers(true, seg);
-            return emptyState({ icon: I.users, text: RUN_COST, action: btn, cls: 'run-gate' });
+            return emptyState({ icon: I.users, text: RUN_COST, sub: 'Your customers and 12 months of orders.', action: btn, cls: 'run-gate' });
         }
         function sectorComparisonTable(rows, cur) {
             const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');

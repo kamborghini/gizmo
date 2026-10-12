@@ -2039,6 +2039,32 @@ def t_an_order_missing_its_terms_is_flagged_on_the_queue_row():
 
 
 @test
+def t_an_empty_state_is_one_line_under_its_heading():
+    """R8, 12 Oct 2026. An empty state was a tall centred box across the row
+    (Memory, Skills and Requests: an icon and one line in the middle of a
+    248px band, the same action in the head as well), and every report met
+    a centred Run button over 900px of white at 2,200. Now it is one line under
+    its heading: the 40 tile, the line, a grey line when there is more to say,
+    then the action straight after the words."""
+    es = CSS.split("\n        .empty-state {")[1].split("}")[0]
+    ok("flex-direction: row" in es and "text-align: left" in es and "justify-content: flex-start" in es,
+       "a row, on the left, under its heading: " + es[:120])
+    ok("padding: var(--sp-10)" not in es and "min-height" not in es, "and not a tall band")
+    gate = CSS.split("\n        .run-gate {")[1].split("}")[0]
+    ok("text-align: left" in gate and "flex-direction: row" in gate, "the run gate is the same one line")
+    fn = fn_src("function emptyState(")
+    ok("o.sub" in fn and "'empty-sub'" in fn, "a grey line under it when there is more to say")
+    ok("sub: o.covers" in fn_src("function renderRunGate("), "the gate says what the report covers")
+    for covers in ("covers: 'Shopify orders, Google Analytics 4 and Search Console.'",
+                   "covers: 'Indexation, structured data, metadata and alt text.'",
+                   "covers: 'Search Console keywords and Google Ads.'"):
+        ok(covers in SCRIPT, "a gate says what it reads: " + covers)
+    plain = CSS.split("\n        .empty {")[1].split("}")[0]
+    ok("text-align: left" in plain and "margin-inline: auto" not in plain,
+       "a list that matched nothing says so on the left, where its rows start")
+
+
+@test
 def t_lists_are_tables_whose_rows_share_columns():
     """Cameron's first screenshot, 12 Oct 2026: every Loan units row was a name
     at the far left and its status and buttons at the far right, 800px of
@@ -10423,13 +10449,15 @@ def t_an_empty_space_is_a_tile_a_line_and_its_action():
     line = CSS.split("\n        .empty-line {")[1].split("}")[0]
     ok("font-size: var(--text-head)" in line and "font-weight: var(--weight-semibold)" in line, "one line in the head step")
     st = CSS.split("\n        .empty-state {")[1].split("}")[0]
-    ok("align-items: center" in st and "text-align: center" in st and "border" not in st and "background" not in st, "centred, no box")
+    ok("align-items: center" in st and "text-align: left" in st and "border" not in st and "background" not in st,
+       "one line on the left under its heading (12 Oct 2026, R8), no box")
     gate = fn_src("function renderRunGate(boxId, o) {")
-    ok("pageHead({ view: o.view, title: o.title, line: o.desc," in gate and "emptyState({ icon: o.icon, text: o.note, action: btn, cls: 'run-gate' })" in gate,
+    ok("pageHead({ view: o.view, title: o.title, line: o.desc," in gate and "emptyState({ icon: o.icon, text: o.note, sub: o.covers, action: btn, cls: 'run-gate' })" in gate,
        "a run gate is the header (with its extra words behind an info button) and an empty state")
     ok("rg-ic" not in gate and "illustration" not in gate, "no drawn tile of its own")
     e = CSS.split("\n        .empty {")[1].split("}")[0]
-    ok("text-align: center" in e and "font-size: var(--text-body)" in e and "border: 0" in e, "a list that matched nothing says so quietly")
+    ok("text-align: left" in e and "font-size: var(--text-body)" in e and "border: 0" in e,
+       "a list that matched nothing says so quietly, on the left where its rows start")
     ok(".ov-wrap > .empty, .ov-wrap > .widget-group > .empty, .card-grid > .empty { background" not in CSS, "with no box round it")
 
 
@@ -11274,7 +11302,7 @@ def t_keywords_products_and_customers_wear_the_mix():
         ok("el('div', 'ov-hero')" not in fn, fname + ": none built by hand")
     ok("function customerGate(seg) {" in SCRIPT, "the Customers gate exists")
     gate = fn_src("function customerGate(seg) {")
-    ok("emptyState({ icon: I.users, text: RUN_COST, action: btn, cls: 'run-gate' })" in gate,
+    ok("emptyState({ icon: I.users, text: RUN_COST, sub: 'Your customers and 12 months of orders.', action: btn, cls: 'run-gate' })" in gate,
        "the Customers gate is the run gate's empty state, its cost in the words every gate uses")
     ok("'rg-ic'" not in SCRIPT and "'rg-note'" not in SCRIPT, "no run gate draws its own tile or note")
     ok("infoButton('The two Google sources'" in SCRIPT and "infoButton('Linking Google Ads'" in SCRIPT, "the Google steps wait behind info buttons")
@@ -11989,8 +12017,8 @@ def t_what_the_app_measure_found_stays_fixed():
     ok("li.append(el('code', 'setup-code', x))" in SCRIPT and "font-family" not in CSS.split("\n        .setup-scopes {")[1].split("}")[0],
        "the permission scopes are code in a list, not a list set in monospace")
     e = CSS.split("\n        .empty {")[1].split("}")[0]
-    ok("calc((100%" not in e and "margin-inline: auto" in e and "max-width: calc(var(--measure) + 2 * var(--sp-4))" in e and "padding: var(--sp-6) var(--sp-4)" in e,
-       "an empty line centres by width, its padding the 16 gutter")
+    ok("calc((100%" not in e and "margin-inline: auto" not in e and "text-align: left" in e and "padding: var(--sp-4) 0" in e,
+       "an empty line sits on the left where the rows start (12 Oct 2026, R8), no fractional centring")
     ok("margin: 0; overflow: hidden; clip: rect(0 0 0 0)" in CSS.split("\n        .sr-only {")[1].split("}")[0], "hidden text has no margin of its own")
     ok(_token_raw("control-pad-y") == "var(--sp-1)", "a field's vertical padding is 4: its 32 is the min-height's and the line centres in it")
     ok(CSS.count("calc((100% - var(--measure)) / 2)") == 0, "and no rule pads by a share of its container")
