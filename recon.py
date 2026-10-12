@@ -1846,6 +1846,8 @@ async def _sweep_inner(deep_docs: bool) -> dict:
     # stopped at its limit. Either way their Xero invoices would read as sales
     # with no Shopify order, so that check sits this sweep out.
     orders_short = False
+    unread: dict = {}       # Shopify Payments reads that did not answer: payouts | disputes -> why
+    fees_short = False      # a payout's fees could not be read
     if _registry is not None and _tool_json is not None:
         try:
             fetched, since_id = 0, 0
@@ -1891,14 +1893,17 @@ async def _sweep_inner(deep_docs: bool) -> dict:
                          "with no Shopify order was skipped.")
             logger.exception("recon sweep: shopify orders failed")
         # Payouts: present only when the scope is granted and the store uses
-        # Shopify Payments. Absence is recorded, never silently skipped.
+        # Shopify Payments. Absence is recorded, never silently skipped, and a
+        # read that did not answer takes its check out of the sweep: run on the
+        # copy cached by earlier sweeps, the check counted as having run, so a
+        # sweep that saw no payout settled open payout findings.
+        unread.update(payouts="missing", disputes="missing")   # until each answers
         try:
             d = await _tool_json(_registry, "shopify_list_payouts", {})
             if d.get("_failed") or d.get("available") is False:
-                cache.setdefault("shopify", {}).setdefault("payouts", {})
-                notes.append("Shopify payouts are not readable (scope not granted, or the store "
-                             "does not use Shopify Payments); payout checks did not run.")
+                unread["payouts"] = "failed" if d.get("_failed") else "refused"
             else:
+                unread.pop("payouts")
                 bucket = cache.setdefault("shopify", {}).setdefault("payouts", {})
                 for p in d.get("payouts") or []:
                     s = slim_payout(p)
@@ -1911,19 +1916,39 @@ async def _sweep_inner(deep_docs: bool) -> dict:
                     ft = await _tool_json(_registry, "shopify_payout_transactions",
                                           {"payout_id": int(p["id"])} if str(p["id"]).isdigit() else {})
                     if ft.get("_failed") or ft.get("available") is False:
+                        fees_short = True
                         break
                     fees = sum(abs(pence(t.get("fee")) or 0)
                                for t in (ft.get("transactions") or []))
                     p["fees_pence"] = fees
             d2 = await _tool_json(_registry, "shopify_list_disputes", {})
-            if not (d2.get("_failed") or d2.get("available") is False):
+            if d2.get("_failed") or d2.get("available") is False:
+                unread["disputes"] = "failed" if d2.get("_failed") else "refused"
+            else:
+                unread.pop("disputes")
                 bucket2 = cache.setdefault("shopify", {}).setdefault("disputes", {})
                 for row in d2.get("disputes") or []:
                     sd = slim_dispute(row)
                     if sd["id"]:
                         bucket2[sd["id"]] = sd
         except KeyError:
-            notes.append("Payout tools are not on this server build.")
+            pass      # the tools are not on this build: what has not answered stays unread
+        # One note per reason: a store not on Shopify Payments refuses payouts
+        # and disputes alike, and as two notes the page said that twice.
+        for why, said in (("refused", "are not readable (scope not granted, or the store "
+                                      "does not use Shopify Payments)"),
+                          ("failed", "could not be read this sweep"),
+                          ("missing", "cannot be read by this version of the app")):
+            names = [n for n in ("payouts", "disputes") if unread.get(n) == why]
+            if names:
+                checks = " and ".join({"payouts": "payout", "disputes": "chargeback"}[n]
+                                      for n in names)
+                notes.append(f"Shopify {' and '.join(names)} {said}, so the {checks} checks "
+                             "did not run and what they found before stays as it was.")
+        if fees_short:
+            notes.append("Shopify's fees could not be read for some payouts, so a deposit short "
+                         "of its payout by the fees may show as missing until a later sweep "
+                         "reads them.")
 
     # --- The accounts mailbox, a bounded batch per sweep --------------------
     mailbox_linked = bool(_mail_connected()) if _mail_connected else (_mail_search is not None)
@@ -2068,6 +2093,12 @@ async def _sweep_inner(deep_docs: bool) -> dict:
                      "checks were skipped rather than reporting everything as missing.")
     if orders_short:
         checks_to_run = [c for c in checks_to_run if c is not check_xero_orphan_sales]
+    # A Shopify read that did not answer is not an empty feed either: its
+    # check sits the sweep out, so what it found before stays as it was.
+    if "payouts" in unread:
+        checks_to_run = [c for c in checks_to_run if c is not check_payouts_vs_bank]
+    if "disputes" in unread:
+        checks_to_run = [c for c in checks_to_run if c is not check_disputes]
     if xero_failed:
         # A read that failed is not a current ledger. Run on the copy from the
         # last good sweep, each order since then read as a sale missing from
