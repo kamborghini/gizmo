@@ -2,6 +2,22 @@
  "releases": [
   {
    "date": "2026-10-12",
+   "title": "Payout checks that could not run",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": "recon",
+     "text": "When Shopify will not let Reactor read your payouts, a sweep now leaves the payout checks out, as its note always said. Before, it checked the copies it had read on earlier days, so a payout discrepancy could be marked no longer detected by a sweep that never saw a payout. It now stays open until a sweep can read payouts again."
+    },
+    {
+     "kind": "fixed",
+     "tab": "recon",
+     "text": "Chargebacks work the same way: when Shopify's disputes cannot be read, the chargeback check sits that sweep out and the sweep says so, where before it ran on old copies without a word. A sweep that cannot read a payout's fees now says so too, as a deposit short of its payout by the fees may show as missing until they are read."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-12",
    "title": "Prints started close together",
    "items": [
     {
