@@ -2492,7 +2492,7 @@
             .dt-s > .dtable { display: block; }
             .dt-s > .dtable > .dt-head { display: none; }
             .dt-s > .dtable > .dt-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--sp-3); row-gap: var(--sp-1); }
-            .dt-s > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; }
+            .dt-s > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; order: -1; }
             .dt-s > .dtable > .dt-row > .dt-c:not(.dt-main, .act) { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
             .dt-s > .dtable > .dt-row > .dt-c:empty { display: none; }
             .dt-s > .dtable > .dt-row > .dt-c.go { display: none; }
@@ -2501,7 +2501,7 @@
             .dt-m > .dtable { display: block; }
             .dt-m > .dtable > .dt-head { display: none; }
             .dt-m > .dtable > .dt-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--sp-3); row-gap: var(--sp-1); }
-            .dt-m > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; }
+            .dt-m > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; order: -1; }
             .dt-m > .dtable > .dt-row > .dt-c:not(.dt-main, .act) { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
             .dt-m > .dtable > .dt-row > .dt-c:empty { display: none; }
             .dt-m > .dtable > .dt-row > .dt-c.go { display: none; }
@@ -2510,7 +2510,7 @@
             .dt-l > .dtable { display: block; }
             .dt-l > .dtable > .dt-head { display: none; }
             .dt-l > .dtable > .dt-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--sp-3); row-gap: var(--sp-1); }
-            .dt-l > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; }
+            .dt-l > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; order: -1; }
             .dt-l > .dtable > .dt-row > .dt-c:not(.dt-main, .act) { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
             .dt-l > .dtable > .dt-row > .dt-c:empty { display: none; }
             .dt-l > .dtable > .dt-row > .dt-c.go { display: none; }
@@ -2518,6 +2518,84 @@
         /* Liability (12 Oct 2026): every customer owing in one table, what they
            owe straight after their name. */
         .dt-owing { --dt-cols: minmax(12rem, 2fr) max-content max-content minmax(7rem, 1fr) max-content max-content minmax(6rem, 1fr) minmax(6rem, 1fr) max-content; }
+        /* Reconciliation (12 Oct 2026): the severity, a short What with its
+           tags, the record and who it is with, the date, a status tag, the
+           amount. The Record is as wide as it needs, the date straight after
+           it, and What takes the rest (at least 12rem); a long What or a long
+           name ends in an ellipsis, and the tags take a second line before
+           they push the row wider. */
+        .dt-recon { --dt-cols: max-content minmax(12rem, 1fr) minmax(0, max-content) max-content max-content max-content max-content; }
+        .dt-recon .dt-c:nth-child(2) { flex-wrap: wrap; row-gap: var(--sp-1); }
+        .dt-recon .dt-c > :is(.lbl-chip) { flex: none; }
+        .dt-sev { display: flex; align-items: center; gap: var(--sp-2); white-space: nowrap; }
+        .dt-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; font-weight: var(--weight-medium); color: var(--text-primary); }
+        .dt-amt { font-weight: var(--weight-medium); color: var(--text-primary); white-space: nowrap; }
+        .dt-row.settled :is(.dt-what, .dt-amt, .dt-name) { color: var(--text-secondary); }
+        /* The band: the counters, a hairline, the sources. A line the sources
+           wrap to starts on the text edge: the clip keeps its hairline outside
+           (the figure group's rule). */
+        .recon-band-row { display: flex; flex-wrap: wrap; align-items: stretch; column-gap: var(--sp-8); row-gap: var(--sp-5);
+            overflow: clip; overflow-clip-margin: var(--sp-1); }
+        .recon-src { position: relative; flex: 1 1 20rem; min-width: 0; display: grid; grid-template-columns: max-content minmax(0, max-content);
+            align-content: center; column-gap: var(--sp-6); row-gap: var(--sp-2); }
+        .recon-src::before { content: ""; position: absolute; top: 0; bottom: 0; left: calc(-0.5 * var(--sp-8)); width: var(--bw-hairline); background: var(--border-default); }
+        .recon-src-l { display: contents; }
+        .recon-src-k { display: flex; align-items: center; gap: var(--sp-2); font-weight: var(--weight-medium); white-space: nowrap; }
+        .recon-src-k.ind { padding-left: calc(var(--dot-md) + var(--sp-2)); }
+        .recon-src-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+        .recon-src-v.bad { color: var(--error); font-weight: var(--weight-medium); }
+        .recon-notice { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-4) 0 0; color: var(--error); font-weight: var(--weight-medium); }
+        /* The sweep's line on the tab row, and its Notes (n) disclosure. */
+        .recon-sweep { display: flex; align-items: center; gap: var(--sp-2); white-space: nowrap; font-size: var(--text-xs); line-height: var(--lh-caption);
+            color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+        .disc { display: inline-flex; align-items: center; gap: var(--sp-1); height: var(--control-h); padding: 0 var(--sp-1); border: 0; border-radius: var(--radius-control);
+            background: none; font: inherit; font-weight: var(--weight-medium); color: var(--text-secondary); cursor: pointer; white-space: nowrap; }
+        @media (hover: hover) { .disc:hover { background: var(--surface-tertiary); color: var(--text-primary); } }
+        .disc svg { width: var(--icon-sm); height: var(--icon-sm); }
+        .disc[aria-expanded="true"] svg { rotate: 180deg; }
+        .disc-n { color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+        .recon-notes ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+        .recon-notes li { display: flex; align-items: baseline; gap: var(--sp-2); color: var(--text-secondary); }
+        .recon-notes li > .dt-dot { translate: 0 calc(-1 * var(--sp-0-5)); }
+        .card-title > .card-n { margin-left: var(--sp-2); font-weight: var(--weight-regular); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+        /* An opened discrepancy: its sentence and X across it, then what it is
+           and what to do on the left, what it rests on at the right; one column
+           when the table is narrow. */
+        .rd { container: rd / inline-size; }
+        .rd-lead { display: flex; align-items: center; gap: var(--sp-3); min-height: var(--control-h); margin-bottom: var(--sp-2); font-weight: var(--weight-medium); color: var(--text-primary); }
+        .rd-lead > .rd-title { flex: 1 1 auto; min-width: 0; }
+        .rd-cols { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 4fr); column-gap: var(--sp-8); row-gap: var(--sp-6); }
+        .rd .segmented > button { flex: 0 0 auto; }
+        @container rd (max-width: 48rem) { .rd-cols { grid-template-columns: minmax(0, 1fr); } }
+        .rd-col { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); }
+        .rd-col > :is(.ktable-wrap, .rd-evlist, .rd-facts, .rd-p) { align-self: stretch; }
+        .rd-h { display: flex; align-items: center; gap: var(--sp-2); align-self: stretch; min-height: var(--control-h); margin-top: var(--sp-4); font-weight: var(--weight-semibold); color: var(--text-primary); }
+        .rd-col > .rd-h:first-child { margin-top: 0; }
+        .rd-h > .disc { margin-left: auto; }
+        .rd-n { color: var(--text-tertiary); font-weight: var(--weight-regular); font-variant-numeric: tabular-nums; }
+        .rd-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: var(--sp-4); row-gap: var(--sp-2); margin: 0; }
+        .rd-facts dt { color: var(--text-tertiary); }
+        .rd-facts dd { margin: 0; color: var(--text-primary); }
+        .rd-sum { margin: 0; width: fit-content; }
+        .rd-sum > div { display: grid; grid-template-columns: 8rem 7rem; column-gap: var(--sp-4); align-items: center; min-height: var(--control-h);
+            border-bottom: var(--bw-hairline) solid var(--border-default); }
+        .rd-sum dt { color: var(--text-secondary); }
+        .rd-sum dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+        .rd-sum > .tot { border-bottom: 0; font-weight: var(--weight-semibold); }
+        .rd-sum > .tot dt { color: var(--text-primary); }
+        .rd-hist { margin: 0; color: var(--text-secondary); }
+        .rd-hist > span { color: var(--text-tertiary); }
+        .rd-err { margin: 0; color: var(--error); font-size: var(--text-xs); line-height: var(--lh-caption); }
+        .rd-ev { background: transparent; }
+        .rd-ev th { white-space: normal; }
+        .rd-evname { margin: 0; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); overflow-wrap: anywhere; }
+        .rd-ev td.rd-k { color: var(--text-tertiary); white-space: nowrap; }
+        .rd-ev td.rd-diff { color: var(--error); font-weight: var(--weight-medium); }
+        .rd-verdict { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
+        .rd-meter { position: relative; width: 6rem; height: var(--sp-1-5); border-radius: var(--radius-full); background: var(--border-default); overflow: hidden; }
+        .rd-meter > i { position: absolute; inset: 0 auto 0 0; background: var(--border-selected); border-radius: inherit; }
+        .rd-muted { color: var(--text-tertiary); }
+        .rd-orphan { margin-top: var(--sp-4); padding: var(--sp-4); border-radius: var(--radius-tile); background: var(--action-selected); }
         .lia-detail-head { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); }
         .lia-detail-head .icon-btn { margin-left: auto; }
         .lia-detail .ktable { background: transparent; }
@@ -7324,7 +7402,9 @@ Projected Image UK"></textarea>
            CSS (.dt-<name> { --dt-cols }). rows: [{ cells, cls }] with the cells
            in column order, each a Node or a string. opts.empty is what an empty
            list shows instead: its one line, no head over nothing. opts.stop is
-           the width its rows turn two-line at: s, m (the default) or l. */
+           the width its rows turn two-line at: s, m (the default) or l.
+           opts.main is the column whose cell leads a two-line row (the first
+           unless said). */
         function dtable(cols, rows, opts) {
             opts = opts || {};
             if (!rows.length) return opts.empty || el('div', 'empty', 'Nothing here yet.');
@@ -7345,7 +7425,7 @@ Projected Image UK"></textarea>
                 if (r.onClick) { row.classList.add('click'); row.onclick = r.onClick; }
                 if (r.open) row.classList.add('open');
                 r.cells.forEach((c, i) => {
-                    const cell = el('div', 'dt-c' + (i === 0 ? ' dt-main' : '') + (cols[i] && cols[i].cls ? ' ' + cols[i].cls : ''));
+                    const cell = el('div', 'dt-c' + (i === (opts.main || 0) ? ' dt-main' : '') + (cols[i] && cols[i].cls ? ' ' + cols[i].cls : ''));
                     cell.setAttribute('role', 'cell');
                     if (c !== null && c !== undefined && c !== '') cell.append(c);
                     row.append(cell);
@@ -18358,6 +18438,60 @@ Projected Image UK"></textarea>
             if (!isFinite(n)) return disp || '';
             return money(m[1] === '-' ? -n : n, m[3] || ({ '\u00a3': 'GBP', '$': 'USD', '\u20ac': 'EUR' })[m[2]], 2);
         }
+        /* The short What for each kind of discrepancy (12 Oct 2026): the row
+           names the problem in a few words and its Record column names the
+           record; the server's full sentence heads the opened detail. */
+        const RECON_WHAT = {
+            shopify_sale_missing: 'Sale missing in Xero', order_invoice_amount_mismatch: 'Totals differ',
+            order_invoice_tax_mismatch: 'VAT differs', shopify_refund_missing: 'Refund missing in Xero',
+            payout_missing_from_bank: 'Payout not in the bank', payout_bank_unreconciled: 'Payout deposit not reconciled',
+            payout_explained_by_fees: 'Payout short by its fees', stale_unreconciled: 'Bank line unreconciled',
+            duplicate_bill_number: 'Duplicate bill number', possible_duplicate_bill: 'Possible duplicate bill',
+            overpaid_invoice: 'Invoice over-allocated', chargeback_missing_from_xero: 'Chargeback missing in Xero',
+            xero_sale_without_shopify: 'Xero sale, no Shopify order', invoice_numbering_unlinked: 'Invoice numbers unlinked',
+            gmail_doc_missing_from_xero: 'Document missing in Xero', remittance_unknown_invoice: 'Remittance names an unknown invoice',
+            remittance_amount_mismatch: 'Remittance amount differs', remittance_payment_missing: 'Remittance not paid in Xero',
+        };
+        /* A sweep note saying something went wrong, as against one saying what
+           the sweep tidied away: the first kind turns the sweep's dot amber. */
+        const RECON_NOTE_BAD = /could not|failed|crashed|skipped|partial|stopped|not connected|not readable|missing|empty/i;
+        /* The sweep's status line, on the tab row (12 Oct 2026): a dot (amber
+           when a note holds a failure, red when Xero was skipped), when it ran,
+           and its notes behind Notes (n). The notes were a list in a connection
+           card, under the same sentence the tab row already said. */
+        function reconSweepLine(st, xs) {
+            if (!st || st.last_sync === undefined) return null;
+            const line = el('div', 'recon-sweep');
+            /* The band says a refusal once; the sweep's own note saying the
+               same is left out while it stands. */
+            const notes = (st.sweep_notes || []).filter(n => !(xs.needs_reconnect && /refused the refresh token/i.test(String(n))));
+            const bad = notes.some(n => RECON_NOTE_BAD.test(String(n)));
+            const partial = notes.some(n => /\bpartial\b/i.test(String(n)));
+            line.append(el('span', 'dt-dot ' + (xs.needs_reconnect ? 'bad' : bad ? 'warn' : st.last_sync ? 'ok' : '')));
+            line.append(el('span', null, [st.last_sync ? 'Last sweep ' + fmtDate(st.last_sync) + ', ' + londonHM(st.last_sync) : 'Never swept',
+                xs.needs_reconnect ? 'Xero skipped' : partial ? 'Partial' : ''].filter(Boolean).join(' \u00b7 ')));
+            if (notes.length) {
+                const b = el('button', 'disc'); b.type = 'button';
+                b.setAttribute('aria-haspopup', 'dialog');
+                b.append(document.createTextNode('Notes'), el('span', 'disc-n', String(notes.length)), ico(I.chevDown));
+                b.onclick = (ev) => {
+                    ev.stopPropagation();
+                    dropPanel(b, (p) => {
+                        p.classList.add('ipop', 'recon-notes');
+                        p.append(el('h3', null, 'Notes from the last sweep' + (st.last_sync ? ', ' + fmtDate(st.last_sync) : '')));
+                        const ul = el('ul');
+                        notes.forEach(n => {
+                            const li = el('li');
+                            li.append(el('span', 'dt-dot' + (RECON_NOTE_BAD.test(String(n)) ? ' warn' : '')), el('span', null, n));
+                            ul.append(li);
+                        });
+                        p.append(ul);
+                    });
+                };
+                line.append(b);
+            }
+            return line;
+        }
         function renderRecon() {
             const box = $('recon-content');
             /* The search box being typed in is about to be rebuilt: keep its
@@ -18375,85 +18509,89 @@ Projected Image UK"></textarea>
                spend the entrance the first real paint is owed. */
             const rPainting = !!reconCache && !reconCache.error;
             box.classList.toggle('no-intro', !(rPainting && firstPaint('recon')));
-            /* "Read only" is the safety point and stays in the line (copy plan,
-               Reconciliation #1). */
-            box.append(pageHead({ view: 'recon', title: 'Reconciliation', line: 'Checks Shopify, Xero and the inbox agree. Read only.' }));
-            /* Freshness is stated in the tabs slot and nowhere else, as the
-               Liability tab states it: the connection card printed the same
-               sentence again 78px below this one. */
-            const rSt = (reconCache && reconCache.st) || null;
-            box.append(financeTabs('recon', rSt
-                ? (rSt.last_sync ? 'Last sweep ' + fmtDate(rSt.last_sync) : 'Never swept') : ''));
-            if (!reconCache) { box.append(el('div', 'empty', 'Loading\u2026')); return; }
-            if (reconCache.error) { box.append(loadFailure('The reconciliation state could not be read. ' + reconCache.error, refreshRecon)); return; }
-            /* Past the loading and failure states the page is cards the grid
-               can move, each spanning the row, so the header gets the action
-               slot Customize goes in. Added here rather than with the header,
-               so a page that is only a loading line keeps its header as it was. */
-            const st = reconCache.st || {};
-            /* Connection + sweep card. What is connected on the left, what can
-               be done on the right, and the last sweep's notes as a list under
-               both. The chips, a bare count and three buttons used to share
-               one wrapping row, with Disconnect weighted the same as the sweep
-               beside it, and each note was a form-help line with a field's
-               spacing under it. */
-            const card = el('div', 'card');
-            const row = el('div', 'recon-conn');
-            const status = el('div', 'recon-conn-status');
-            const acts = el('div', 'recon-conn-acts');
+            const st = (rPainting && reconCache.st) || {};
             const xs = st.xero || {};
-            /* A link Xero refused is connected in name only: red, and saying
-               what it needs, not a green tag over a sentence. */
-            status.append(el('span', 'lbl-chip ' + (xs.connected && !xs.needs_reconnect ? 'made' : 'bad'),
-                xs.needs_reconnect ? 'Xero needs reconnecting'
-                    : xs.connected ? ('Xero \u00b7 ' + (xs.tenant || 'Connected')) : 'Xero not connected'));
             const mb = st.mailbox || {};
-            status.append(el('span', 'lbl-chip ' + (mb.connected ? 'made' : 'warn'),
-                mb.connected ? ('Accounts mailbox \u00b7 ' + (mb.address || 'Connected'))
-                             : 'Accounts mailbox not connected'));
-            if (st.docs) status.append(el('span', 'recon-conn-count', st.docs + ' documents read'));
-            /* Disconnecting has to be possible, and has to mean it: the token
-               is revoked at the provider, not merely forgotten here. It lives
-               in a menu, because it is the rarest thing on the card and the
-               one that cannot be taken back. */
-            let disconnecting = false;
-            const disconnect = async (what) => {
-                if (disconnecting) return;
-                const msg = what === 'xero'
-                    ? 'Disconnect Xero? The connection is revoked at Xero, and the cached '
-                      + 'copy of your accounting records is deleted. Discrepancies already '
-                      + 'found are kept as your audit trail.'
-                    : 'Disconnect the accounts mailbox? The documents read from it are '
-                      + 'deleted. Nothing in the mailbox itself is touched.';
-                if (!await uiConfirm(msg, { title: 'Disconnect', okText: 'Disconnect', danger: true })) return;
-                disconnecting = true;
-                const go = async (force) => {
-                    const r = await api('/api/recon/disconnect', force ? { what, force: 1 } : { what });
-                    (r.notes || []).forEach(n => addToast(n));
-                    toastOk('Disconnected.');
-                    refreshRecon();
+            /* The page's actions are in its header (12 Oct 2026): Manage, then
+               Sweep now, the one teal action while Xero and the mailbox need
+               nothing. They sat in a connection card under the tabs. */
+            const heads = [];
+            const band = el('div', 'recon-band');
+            if (rPainting) {
+                /* Disconnecting has to be possible, and has to mean it: the token
+                   is revoked at the provider, not merely forgotten here. It lives
+                   in a menu, because it is the rarest thing on the page and the
+                   one that cannot be taken back. */
+                let disconnecting = false;
+                const disconnect = async (what) => {
+                    if (disconnecting) return;
+                    const msg = what === 'xero'
+                        ? 'Disconnect Xero? The connection is revoked at Xero, and the cached '
+                          + 'copy of your accounting records is deleted. Discrepancies already '
+                          + 'found are kept as your audit trail.'
+                        : 'Disconnect the accounts mailbox? The documents read from it are '
+                          + 'deleted. Nothing in the mailbox itself is touched.';
+                    if (!await uiConfirm(msg, { title: 'Disconnect', okText: 'Disconnect', danger: true })) return;
+                    disconnecting = true;
+                    const go = async (force) => {
+                        const r = await api('/api/recon/disconnect', force ? { what, force: 1 } : { what });
+                        (r.notes || []).forEach(n => addToast(n));
+                        toastOk('Disconnected.');
+                        refreshRecon();
+                    };
+                    try { await go(false); }
+                    catch (e) {
+                        if (!e.canForce) { toastError(e.message); disconnecting = false; return; }
+                        /* Xero would not accept the revocation, so the token is
+                           still live there. Forgetting it here would leave that
+                           connection alive with no way left to end it, so this
+                           asks rather than assumes. */
+                        const ok2 = await uiConfirm(e.message + '\n\nForget the connection here anyway?',
+                            { title: 'Could not revoke at Xero', okText: 'Forget it anyway', danger: true });
+                        if (!ok2) { disconnecting = false; return; }
+                        try { await go(true); }
+                        catch (e2) { toastError(e2.message); }
+                    }
+                    disconnecting = false;
                 };
-                try { await go(false); }
-                catch (e) {
-                    if (!e.canForce) { toastError(e.message); disconnecting = false; return; }
-                    /* Xero would not accept the revocation, so the token is
-                       still live there. Forgetting it here would leave that
-                       connection alive with no way left to end it, so this
-                       asks rather than assumes. */
-                    const ok2 = await uiConfirm(e.message + '\n\nForget the connection here anyway?',
-                        { title: 'Could not revoke at Xero', okText: 'Forget it anyway', danger: true });
-                    if (!ok2) { disconnecting = false; return; }
-                    try { await go(true); }
-                    catch (e2) { toastError(e2.message); }
+                if (xs.connected || mb.connected) {
+                    const manage = el('button', 'btn btn-sm');
+                    manage.type = 'button';
+                    /* Name first, caret last: the house menu trigger. */
+                    manage.append(document.createTextNode('Manage'), ico(I.chevDown));
+                    manage.onclick = () => dropMenu(manage, [
+                        xs.connected && { label: 'Disconnect Xero', icon: I.x, onClick: () => disconnect('xero') },
+                        mb.connected && { label: 'Disconnect the accounts mailbox', icon: I.x, onClick: () => disconnect('mailbox') },
+                    ]);
+                    heads.push(manage);
                 }
-                disconnecting = false;
-            };
-            /* With the link refused, Reconnect is the one teal action and a
-               sweep is a plain one: it still reads the mailbox and Shopify,
-               and skips Xero's checks. Only the master account may start the
-               walk, as with Connect. */
-            if (xs.needs_reconnect) {
-                if (!teamMe || teamMe.role === 'master') {
+                /* Teal only while nothing else needs doing first: a refused link
+                   makes Reconnect the teal action, and a mailbox the master can
+                   still connect makes that card's Connect it. A sweep then still
+                   reads what it can, and skips the rest. */
+                const swTeal = xs.connected && !xs.needs_reconnect && (mb.connected || !mb.can_connect);
+                const sw = el('button', 'btn btn-sm' + (swTeal ? ' btn-primary' : ''));
+                sw.type = 'button';
+                /* The busy word swaps in at the same width, keeping its icon. */
+                const swIdle = el('span'), swBusy = el('span');
+                swIdle.append(ico(I.refresh), document.createTextNode('Sweep now'));
+                swBusy.append(ico(I.refresh), document.createTextNode('Sweeping\u2026'));
+                const swSwap = el('span', 'swap'); swSwap.append(swIdle, swBusy); sw.append(swSwap);
+                const swBusySet = (on) => { swIdle.setAttribute('aria-hidden', on ? 'true' : 'false'); swBusy.setAttribute('aria-hidden', on ? 'false' : 'true'); };
+                swBusySet(!!st.sweeping);
+                sw.disabled = !!st.sweeping || !xs.connected;
+                if (!xs.connected) sw.title = 'Connect Xero first';
+                sw.onclick = async () => { sw.disabled = true; swBusySet(true);
+                    try { await api('/api/recon/sweep', {}); toastOk('Sweep finished.'); }
+                    catch (e) { toastError(e.message); }
+                    refreshRecon(); };
+                heads.push(sw);
+                /* A sweep started elsewhere (the nightly one, or another person)
+                   is asked about until it ends, or "Sweeping..." would stay for good. */
+                if (st.sweeping) watchReconSweep();
+                /* With the link refused, Reconnect is the one teal action. Only
+                   the master account may start the walk, as with Connect. */
+                if (xs.needs_reconnect && (!teamMe || teamMe.role === 'master')) {
                     const rc = el('button', 'btn btn-sm btn-primary');
                     rc.type = 'button';
                     rc.append(ico(I.logIn), document.createTextNode('Reconnect Xero'));
@@ -18469,7 +18607,7 @@ Projected Image UK"></textarea>
                                          + 'organisation. This page updates when it lands.', 'good');
                                 watchReconXero(true);
                             } else {
-                                reconConnectFallback(card, r.url, 'xero', true);
+                                reconConnectFallback(band, r.url, 'xero', true);
                             }
                         } catch (e) {
                             if (tab) tab.close();
@@ -18477,59 +18615,60 @@ Projected Image UK"></textarea>
                         }
                         rc.disabled = false;
                     };
-                    acts.append(rc);
+                    heads.push(rc);
                 }
             }
-            const sw = el('button', 'btn btn-sm' + (xs.needs_reconnect ? '' : ' btn-primary'));
-            const swWord = document.createTextNode(st.sweeping ? 'Sweeping\u2026' : 'Sweep now');
-            sw.append(ico(I.refresh), swWord);
-            sw.disabled = !!st.sweeping || !xs.connected;
-            if (!xs.connected) sw.title = 'Connect Xero first';
-            sw.onclick = async () => { sw.disabled = true; swWord.nodeValue = 'Sweeping\u2026';
-                try { await api('/api/recon/sweep', {}); toastOk('Sweep finished.'); }
-                catch (e) { toastError(e.message); }
-                refreshRecon(); };
-            acts.append(sw);
-            /* A sweep started elsewhere (the nightly one, or another person)
-               is asked about until it ends, or "Sweeping..." would stay for good. */
-            if (st.sweeping) watchReconSweep();
-            if (xs.connected || mb.connected) {
-                const manage = el('button', 'btn btn-sm');
-                manage.type = 'button';
-                /* Name first, caret last: the house menu trigger. */
-                manage.append(document.createTextNode('Manage'), ico(I.chevDown));
-                manage.onclick = () => dropMenu(manage, [
-                    xs.connected && { label: 'Disconnect Xero', icon: I.x, onClick: () => disconnect('xero') },
-                    mb.connected && { label: 'Disconnect the accounts mailbox', icon: I.x, onClick: () => disconnect('mailbox') },
-                ]);
-                acts.append(manage);
-            }
-            row.append(status, acts);
-            card.append(row);
+            /* "Read only" is the safety point and stays in the line (copy plan,
+               Reconciliation #1). */
+            box.append(pageHead({ view: 'recon', title: 'Reconciliation', line: 'Checks Shopify, Xero and the inbox agree. Read only.', actions: heads }));
+            box.append(financeTabs('recon', '', [reconSweepLine(st, xs)]));
+            if (!reconCache) { box.append(el('div', 'empty', 'Loading\u2026')); return; }
+            if (reconCache.error) { box.append(loadFailure('The reconciliation state could not be read. ' + reconCache.error, refreshRecon)); return; }
+            /* ONE BAND (12 Oct 2026, Cameron's screenshot: four tiles with 291px
+               of nothing in each, under a connection card). The open
+               discrepancies by severity, each a counter that filters the list
+               with the money at stake beside its figure, then after a hairline
+               the sources the sweep reads. A refused link or an unsaved token is
+               said once, under the band. It has a widget id of its own, so a
+               layout that hid the old severity tiles or connection card does not
+               hide it. */
+            const bandRow = el('div', 'recon-band-row');
+            const counts = st.open_counts || {};
+            const amounts = st.open_amounts || {};
+            const mets = el('div', 'fcs recon-sev');
+            [['critical', 'Critical', 'bad'], ['high', 'High', 'bad'],
+             ['medium', 'Medium', 'warn'], ['low', 'Low', '']].forEach(([k, lab, tone]) => {
+                mets.append(counterTile(lab, String(counts[k] || 0), { dot: tone, on: reconFilter.severity === k,
+                    money: typeof amounts[k] === 'number' ? money(amounts[k] / 100, st.currency || 'GBP', 2) : '',
+                    onClick: () => { reconFilter.severity = reconFilter.severity === k ? '' : k; refreshReconList(); } }));
+            });
+            const src = el('div', 'recon-src');
+            const srcLine = (dot, k, v, bad) => {
+                const r = el('div', 'recon-src-l');
+                const kk = el('span', 'recon-src-k' + (dot === null ? ' ind' : ''));
+                if (dot !== null) kk.append(el('span', 'dt-dot ' + dot));
+                kk.append(document.createTextNode(k));
+                const vv = el('span', 'recon-src-v' + (bad ? ' bad' : ''), v); vv.title = v;
+                r.append(kk, vv); src.append(r);
+            };
+            /* A link Xero refused is connected in name only: red, and saying
+               what it needs. */
+            srcLine(xs.needs_reconnect ? 'bad' : xs.connected ? 'ok' : 'off', 'Xero',
+                xs.needs_reconnect ? 'Needs reconnecting' : xs.connected ? (xs.tenant || 'Connected') : 'Not connected', !!xs.needs_reconnect);
+            srcLine(mb.connected ? 'ok' : 'warn', 'Accounts mailbox', mb.connected ? (mb.address || 'Connected') : 'Not connected');
+            if (mb.connected || st.docs) srcLine(null, 'Documents read', String(st.docs || 0));
+            bandRow.append(mets, src);
+            band.append(bandRow);
             /* A token that could not be saved is a connection with a fuse
                burning: Xero honours the previous one for about half an hour and
-               then the link is gone. A log line nobody reads is not a warning. */
-            /* A refused link is said once, here, with what follows from it;
-               the server's own sentence points at this tab, where the button
-               now is. Anyone but the master is told who can mend it. */
+               then the link is gone. Anyone but the master is told who can mend
+               a refused link. */
+            const notice = (t) => { const n = el('p', 'recon-notice'); n.append(el('span', 'dt-dot bad'), el('span', null, t)); band.append(n); };
             if (xs.needs_reconnect) {
-                card.append(el('div', 'mail-viewwarn recon-conn-warn',
-                    ['Xero refused the link, so its checks are skipped until it is reconnected.',
-                     !teamMe || teamMe.role === 'master' ? '' : 'Ask the master account to reconnect Xero.']
-                        .filter(Boolean).join(' ')));
-            } else if (xs.warning) card.append(el('div', 'mail-viewwarn recon-conn-warn', xs.warning));
-            /* The band above says the refusal once; the sweep's own note
-               saying the same is left out while it stands. */
-            const notes = (st.sweep_notes || []).filter(n => !(xs.needs_reconnect && /refused the refresh token/i.test(String(n))));
-            if (notes.length) {
-                const nb = el('div', 'recon-notes');
-                nb.append(el('div', 'recon-notes-h', 'Notes from the last sweep' + (st.last_sync ? ', ' + fmtDate(st.last_sync) : '')));
-                const ul = el('ul');
-                notes.forEach(n => ul.append(el('li', null, n)));
-                nb.append(ul);
-                card.append(nb);
-            }
-            box.append(widget(card, 'connection', 'full', 'Connection'));
+                notice(['Xero refused the link, so its checks are skipped until it is reconnected.',
+                        !teamMe || teamMe.role === 'master' ? '' : 'Ask the master account to reconnect Xero.'].filter(Boolean).join(' '));
+            } else if (xs.warning) notice(xs.warning);
+            box.append(widget(band, 'band', 'full', 'Open and sources'));
             /* The accounts mailbox: a SEPARATE Google account from the Inbox
                tab's, so the card names both to make a wrong consent obvious. */
             if (!mb.connected) {
@@ -18596,7 +18735,9 @@ Projected Image UK"></textarea>
                     const who = el('input', 'field-sm setup-field');
                     who.placeholder = 'accounts@yourdomain.com'; who.type = 'email'; who.setAttribute('aria-label', 'Accounts mailbox address'); who.spellcheck = false;
                     who.value = mb.last_try || '';
-                    const go = el('button', 'btn btn-primary btn-sm');
+                    /* Teal while Xero needs nothing, so Sweep now steps down for it;
+                       Connect Xero or Reconnect is the teal action while Xero does. */
+                    const go = el('button', 'btn btn-sm' + (xs.connected && !xs.needs_reconnect ? ' btn-primary' : ''));
                     go.append(ico(I.mail), document.createTextNode('Connect the accounts mailbox'));
                     go.onclick = async () => {
                         /* The tab is opened SYNCHRONOUSLY, inside the click, and
@@ -18733,40 +18874,19 @@ Projected Image UK"></textarea>
                 }
                 box.append(widget(su, 'xero-setup', 'full', 'Connect Xero'));
             }
-            /* Severity summary: the same KPI card the Liability tab opens with,
-               and the same severity tones the rows below already carry, so the
-               page stops asserting severity in one place and withholding it in
-               the other. Each card is also the filter for its own severity, so
-               it has to show when it is the one that is set. */
-            const counts = st.open_counts || {};
-            const amounts = st.open_amounts || {};
-            /* Counters, one per severity (12 Oct 2026): a dot, the word, the
-               open count and, when the sweep sends it, the money at stake. They
-               count what is still OPEN; the list under them shows every status,
-               and its head says how many are open. */
-            const mets = el('div', 'fcs recon-sev');
-            [['critical', 'Critical', 'bad'], ['high', 'High', 'bad'],
-             ['medium', 'Medium', 'warn'], ['low', 'Low', '']].forEach(([k, lab, tone]) => {
-                mets.append(counterTile(lab, String(counts[k] || 0), { dot: tone, on: reconFilter.severity === k,
-                    money: typeof amounts[k] === 'number' ? money(amounts[k], st.currency || 'GBP') : '',
-                    onClick: () => { reconFilter.severity = reconFilter.severity === k ? '' : k; refreshReconList(); } }));
-            });
-            box.append(widget(mets, 'severity', 'full', 'Severity'));
-            /* The discrepancies, in one card composed like the reference's list
-               pages: a counted title, a line saying what it is, the export on
-               the right of the header, and the search and status on a toolbar.
+            /* The discrepancies (12 Oct 2026): a counted title, the search, the
+               status and the export on a toolbar, and one table under heads.
                The filters render even when the list is empty, or a filter that
                hides everything also hides the way to undo it. */
             const ex = (reconCache.ex || {}).exceptions || [];
             const list = el('div', 'card');
             const rHead = el('div', 'card-head');
             const exOpen = ex.filter(e => RECON_OPEN[e.status]).length;
-            rHead.append(el('h3', 'card-title', ex.length
-                + (ex.length === 1 ? ' discrepancy' : ' discrepancies')
-                + (ex.length && exOpen < ex.length ? ', ' + exOpen + ' open' : '')));
+            const rTitle = el('h3', 'card-title', 'Discrepancies');
+            if (ex.length) rTitle.append(el('span', 'card-n', ex.length + (exOpen < ex.length ? ' \u00b7 ' + exOpen + ' open' : '')));
+            rHead.append(rTitle);
             /* On the toolbar, not in the card header: the same class of
-               control sits on the toolbar one tab away, and a header action
-               here left the other tab's header with an empty action track. */
+               control sits on the toolbar one tab away. */
             const exp = el('button', 'btn btn-sm'); exp.append(ico(I.download), document.createTextNode('Export CSV'));
             exp.onclick = reconCSV;
             list.append(rHead);
@@ -18783,18 +18903,24 @@ Projected Image UK"></textarea>
             const baseInput = searchWrap.input.oninput;
             searchWrap.input.oninput = (e) => { if (e && e.isComposing) return; baseInput(); };
             searchWrap.input.addEventListener('compositionend', () => baseInput());
-            /* The Liability tab's filter chip, not a flat tab strip. In the same
-               toolbar slot one page drew bordered pills and the other drew bare
-               text, and the bare text sat 400px under the page tabs it is
-               within 2px of - two strips that look alike, one of which changes
-               the view and one of which filters a list.
-               The first option is labelled for what the server actually does
-               with an empty status, which is not to filter by status at all. */
+            /* The Liability tab's filter chip. The first option is labelled for
+               what the server actually does with an empty status, which is not
+               to filter by status at all. */
             const statusChip = filterChip('Status', [['', 'All statuses']].concat(
                 ['new', 'investigating', 'explained', 'confirmed_error', 'corrected', 'ignored']
                     .map(k => [k, RECON_STATUS[k]])),
                 reconFilter.status, v => { reconFilter.status = v; refreshReconList(); });
-            list.append(tableTools([searchWrap, statusChip], [exp]));
+            /* The chosen severity also shows on the toolbar, with its X, beside
+               the filters that are said there. */
+            let sevTag = null;
+            if (reconFilter.severity) {
+                sevTag = el('button', 'btn btn-sm'); sevTag.type = 'button';
+                const sevWord = (RECON_SEV[reconFilter.severity] || [reconFilter.severity])[0];
+                sevTag.append(document.createTextNode(sevWord), ico(I.x));
+                sevTag.setAttribute('aria-label', 'Show every severity, not only ' + sevWord);
+                sevTag.onclick = () => { reconFilter.severity = ''; refreshReconList(); };
+            }
+            list.append(tableTools([searchWrap, statusChip].concat(sevTag ? [sevTag] : []), [exp]));
             box.append(widget(list, 'discrepancies', 'full', 'Discrepancies'));
             /* Back into the new box at once, in the same task as the redraw,
                so no key pressed meanwhile lands on the page instead. */
@@ -18823,58 +18949,49 @@ Projected Image UK"></textarea>
                     };
                     list.append(emptyState({ icon: I.search, text: 'Nothing matches these filters.', action: clr }));
                 } else {
-                    list.append(el('div', 'empty', xs.connected
-                        ? 'Nothing needs attention.'
-                        : 'Connect Xero above, then run the first sweep.'));
+                    list.append(xs.connected ? emptyState({ icon: I.check, text: 'Nothing needs attention.' })
+                        : emptyState({ icon: I.logIn, text: 'Connect Xero above, then run the first sweep.' }));
                 }
+                if (reconOpen) { const orphan = el('div', 'rd-orphan'); orphan.append(reconDetailNode()); list.append(orphan); }
                 return;
             }
-            /* The rows go in a host of their own, exactly as renderLiability
-               builds its list. As direct children of the card they took the
-               gutter as MARGIN on top of a box that was already the card's full
-               inner width, so every row ran 16px past the card's right edge and
-               the amount ended 1px off the border; and the card's own 16px gap
-               opened between them, giving the same row component an 89px pitch
-               here against 73px one tab away. */
-            const rHost = el('div', 'lbl-rows'); list.append(rHost);
-            let openShown = false;
-            ex.forEach(e => {
-                const r = el('div', 'lbl-row');
-                r.setAttribute('role', 'button'); r.tabIndex = 0;
-                r.addEventListener('keydown', (ev) => { if (ev.target !== r) return; if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); r.click(); } });
-                const [lab, cls] = RECON_SEV[e.severity] || ['?', 'note'];
-                r.append(el('span', 'lbl-chip rec-sev ' + cls, lab));
-                const mid = el('div', 'lbl-who');
-                const line = el('span', 'lbl-nameline');
-                line.append(el('span', 'lbl-name', e.title));
-                if (e.basis === 'ai_extraction') line.append(el('span', 'lbl-chip warn', RECON_AI_SCAN));
-                if (e.has_ai) line.append(el('span', 'lbl-chip note', 'AI verdict'));
-                if (e.stale) line.append(el('span', 'lbl-chip note', 'No longer detected'));
-                mid.append(line);
-                mid.append(el('span', 'sub', (e.systems || []).join(' + ') + '  \u00b7  ' + fmtDate(e.date)
-                    + (e.status !== 'new' ? '  \u00b7  ' + reconStatusWord(e.status) : '')));
-                r.append(mid);
-                r.append(el('div', 'lbl-meta fig', reconMoney(e.amount_disp)));
-                /* Click to open, click again to close, and the detail opens
-                   UNDER the row, which is what the identical row on the other
-                   finance tab does. It used to append the panel to the bottom
-                   of the page and leave no row marked, so the same-looking row
-                   answered the same gesture two different ways. */
-                r.onclick = () => {
-                    if (reconOpen && reconOpen.id === e.id) { reconOpen = null; renderRecon(); }
-                    else openReconExc(e.id);
-                };
-                rHost.append(r);
-                if (reconOpen && reconOpen.id === e.id) {
-                    r.classList.add('on');
-                    paintReconDetail(rHost);
-                    openShown = true;
-                }
-            });
+            /* One row per discrepancy (12 Oct 2026, Cameron's screenshot: each
+               a sentence at the far left and its amount 1,022px away): the
+               severity, a short What with its tags, the record and who it is
+               with, the date, a status tag for every status but New, and the
+               amount, each under its head. A settled one goes grey with a
+               hollow dot. Click to open, click again to close; the detail opens
+               under its row. */
+            list.append(dtable([{ head: 'Severity' }, { head: 'What' }, { head: 'Record' }, { head: 'Date' }, { head: 'Status' }, { head: 'Amount', cls: 'num' }, { head: '', cls: 'act go' }],
+                ex.map(e => {
+                    const open = !!(reconOpen && reconOpen.id === e.id);
+                    const toggle = () => { if (open) { reconOpen = null; renderRecon(); } else openReconExc(e.id); };
+                    const [lab, tone] = RECON_SEV[e.severity] || ['?', 'note'];
+                    const sev = el('span', 'dt-sev');
+                    sev.append(el('span', 'dt-dot ' + (RECON_OPEN[e.status] ? (tone === 'note' ? '' : tone) : 'off')), document.createTextNode(lab));
+                    /* The What is the button a keyboard reaches; the sentence it
+                       stands for is its title, and heads the detail. */
+                    const what = el('button', 'dt-link dt-what', RECON_WHAT[e.kind] || e.title); what.type = 'button';
+                    what.title = e.title || ''; what.setAttribute('aria-expanded', String(open));
+                    what.onclick = (ev) => { ev.stopPropagation(); toggle(); };
+                    const whatCell = document.createDocumentFragment(); whatCell.append(what);
+                    if (e.has_ai) whatCell.append(el('span', 'lbl-chip note', 'AI verdict'));
+                    if (e.basis === 'ai_extraction') whatCell.append(el('span', 'lbl-chip warn', RECON_AI_SCAN));
+                    if (e.stale) whatCell.append(el('span', 'lbl-chip note', 'No longer detected'));
+                    const rec = el('span', 'dt-name', e.record || '');
+                    if (e.counterparty) rec.append(el('span', 'dt-muted', e.counterparty));
+                    rec.title = [e.record, e.counterparty].filter(Boolean).join(' \u00b7 ');
+                    const go = el('span', 'prod-go'); go.innerHTML = open ? I.chevDown : I.chevLeft; go.setAttribute('aria-hidden', 'true');
+                    return { cls: RECON_OPEN[e.status] ? '' : 'settled', open, onClick: toggle,
+                             cells: [sev, whatCell, rec, fmtDate(e.date), e.status !== 'new' ? el('span', 'lbl-chip note', reconStatusWord(e.status)) : '',
+                                     el('span', 'dt-amt', reconMoney(e.amount_disp)), go],
+                             after: reconOpen && reconOpen.id === e.id ? reconDetailNode() : null };
+                }),
+                { cls: 'dt-recon', label: 'Discrepancies', main: 1 }));
             /* An open discrepancy the current filters no longer list still has
-               to be readable: it goes at the end of the same host rather than
-               vanishing with its row. */
-            if (reconOpen && !openShown) paintReconDetail(rHost);
+               to be readable: it goes under the table rather than vanishing
+               with its row. */
+            if (reconOpen && !ex.some(e => e.id === reconOpen.id)) { const orphan = el('div', 'rd-orphan'); orphan.append(reconDetailNode()); list.append(orphan); }
         }
         function reconPrivateLink(card, absUrl) {
             if (card.querySelector('.recon-priv')) return;
@@ -19026,106 +19143,188 @@ Projected Image UK"></textarea>
             if (/^\d{4}-\d{2}-\d{2}(T|$)/.test(str)) return fmtDate(str);
             return str;
         }
-        function paintReconDetail(box) {
-            const e = reconOpen; if (!e) return;
-            const d = el('div', 'lbl-drill'); d.id = 'recon-detail';
-            /* The row directly above already says what this is, where it came
-               from, when and how much: the panel adds only what the row does
-               not, and the way to close it. */
-            const head = el('div', 'recon-drill-head');
-            if (e.basis === 'ai_extraction') head.append(el('span', 'lbl-chip warn', RECON_AI_SCAN));
-            const x = el('button', 'btn btn-sm recon-drill-close'); x.textContent = 'Close';
-            x.onclick = () => { reconOpen = null; renderRecon(); };
-            head.append(x); d.append(head);
-            const h = (t) => d.append(el('div', 'rd-h', t));
-            const p = (t, cls) => d.append(el('p', 'rd-p' + (cls ? ' ' + cls : ''), t));
-            h('Why this was flagged'); p(e.why || '');
-            if (e.suggestion) { h('Recommended action'); p(e.suggestion); }
-            if ((e.computed || []).length) {
-                h('The arithmetic');
-                (e.computed || []).forEach(c => p(c, 'fig'));
-                p('Worked out from the records, deterministic, not AI.', 'quiet');
-            }
-            if ((e.evidence || []).length) {
-                h('Evidence');
-                (e.evidence || []).forEach(v => {
+        /* "£3960.00 (Shopify) - £3300.00 (Xero) = £660.00", or the same with
+           "VAT: " in front: the two sides and their difference, set as a sum. */
+        const RECON_SUM = /^(?:([A-Za-z ]+): )?(-?\S+) \(([^)]+)\) - (-?\S+) \(([^)]+)\) = (-?\S+)$/;
+        function reconDetailNode() {
+            const host = el('div', 'rd-host');
+            paintReconDetail(host);
+            return host;
+        }
+        /* The evidence side by side (12 Oct 2026): a column per record, a row
+           per field, the fields the records share first and the values that
+           differ in red; Every field opens the rest. More than three records (a
+           bill and its payments) stay a list, one record each. */
+        function reconEvidence(evs, head) {
+            const recs = evs.map(v => v.record && typeof v.record === 'object' ? v.record : { value: v.record });
+            if (evs.length > 3) {
+                const lst = el('div', 'rd-evlist');
+                evs.forEach((v, i) => {
                     const evc = el('details', 'know-body');
                     const sm = el('summary');
                     /* The id stays, quietly: the AI's citations refer to it. */
                     sm.append(el('span', 'ev-id', v.eid), document.createTextNode(cap(v.system) + ' \u00b7 ' + v.label));
                     const dl = el('dl', 'conn-pairs');
-                    const rec = v.record && typeof v.record === 'object' ? v.record : { value: v.record };
-                    Object.keys(rec).forEach(k => {
-                        const val = reconValue(k, rec[k]);
+                    Object.keys(recs[i]).forEach(k => {
+                        const val = reconValue(k, recs[i][k]);
                         if (val === '') return;
                         dl.append(el('dt', null, reconKey(k)), el('dd', null, val));
                     });
-                    evc.append(sm, dl); d.append(evc);
+                    evc.append(sm, dl); lst.append(evc);
+                });
+                return lst;
+            }
+            const keys = [];
+            recs.forEach(r => Object.keys(r).forEach(k => { if (keys.indexOf(k) < 0 && reconValue(k, r[k]) !== '') keys.push(k); }));
+            const shared = keys.filter(k => recs.filter(r => reconValue(k, r[k]) !== '').length > 1);
+            const first = recs.length > 1 && shared.length ? shared : keys.slice(0, 6);
+            const wrap = el('div', 'ktable-wrap');
+            const tb = el('table', 'ktable rd-ev');
+            const evName = (v) => v.eid + ' \u00b7 ' + cap(v.system) + ' ' + v.label;
+            /* One record is named in a caption over its fields; two or three
+               head a column each. */
+            if (evs.length === 1) wrap.append(el('p', 'rd-evname', evName(evs[0])));
+            else {
+                const thead = el('thead'); const htr = el('tr'); htr.append(el('th'));
+                evs.forEach(v => htr.append(el('th', null, evName(v))));
+                thead.append(htr); tb.append(thead);
+            }
+            const tbody = el('tbody'); tb.append(tbody); wrap.append(tb);
+            const paint = (all) => {
+                tbody.innerHTML = '';
+                (all ? keys : first).forEach(k => {
+                    const vals = recs.map(r => reconValue(k, r[k]));
+                    const got = vals.filter(v => v !== '');
+                    const differ = got.length > 1 && got.some(v => v !== got[0]);
+                    const tr = el('tr'); tr.append(el('td', 'rd-k', reconKey(k)));
+                    vals.forEach(v => tr.append(el('td', differ && v !== '' ? 'rd-diff' : null, v)));
+                    tbody.append(tr);
+                });
+            };
+            paint(false);
+            if (keys.length > first.length) {
+                const more = el('button', 'disc'); more.type = 'button'; more.setAttribute('aria-expanded', 'false');
+                more.append(document.createTextNode('Every field'), ico(I.chevDown));
+                more.onclick = () => { const on = more.getAttribute('aria-expanded') !== 'true'; more.setAttribute('aria-expanded', String(on)); paint(on); };
+                head.append(more);
+            }
+            return wrap;
+        }
+        /* An opened discrepancy (12 Oct 2026, the mockup): one line across it,
+           the server's sentence and the X that closes it, then two columns:
+           what it is and what to do about it on the left (why, what to do, the
+           arithmetic, the status and its history), and what it rests on at
+           the right (the evidence side by side, and the AI's reading of it).
+           The disclaimers and the model's name wait behind (i) buttons. */
+        function paintReconDetail(box) {
+            const e = reconOpen; if (!e) return;
+            const d = el('div', 'rd'); d.id = 'recon-detail';
+            const lead = el('div', 'rd-lead');
+            lead.append(el('span', 'rd-title', e.title || ''));
+            if (e.basis === 'ai_extraction') lead.append(el('span', 'lbl-chip warn', RECON_AI_SCAN));
+            const x = el('button', 'icon-btn'); x.type = 'button'; x.innerHTML = I.x;
+            x.setAttribute('aria-label', 'Close');
+            x.onclick = (ev) => { ev.stopPropagation(); reconOpen = null; renderRecon(); };
+            lead.append(x); d.append(lead);
+            const cols = el('div', 'rd-cols');
+            const left = el('div', 'rd-col'), right = el('div', 'rd-col');
+            cols.append(left, right); d.append(cols);
+            let at = left;
+            const h = (t) => { const hh = el('div', 'rd-h', t); at.append(hh); return hh; };
+            const p = (t, cls) => { const pp = el('p', 'rd-p' + (cls ? ' ' + cls : ''), t); at.append(pp); return pp; };
+            const facts = el('dl', 'rd-facts');
+            facts.append(el('dt', null, 'Why'), el('dd', null, e.why || ''));
+            if (e.suggestion) facts.append(el('dt', null, 'What to do'), el('dd', null, e.suggestion));
+            left.append(facts);
+            if ((e.computed || []).length) {
+                const arH = h('The arithmetic');
+                arH.append(infoButton('How this is worked out', { title: 'The arithmetic', body: 'Worked out from the records, deterministic, not AI.' }));
+                (e.computed || []).forEach(c => {
+                    const m = RECON_SUM.exec(String(c));
+                    if (!m) { p(c, 'fig'); return; }
+                    const sum = el('dl', 'rd-sum');
+                    const line = (k, v, cls) => { const r = el('div', cls || null); r.append(el('dt', null, k), el('dd', null, reconMoney(v))); sum.append(r); };
+                    line(m[3] + (m[1] ? ' ' + m[1] : ''), m[2]);
+                    line(m[5] + (m[1] ? ' ' + m[1] : ''), m[4]);
+                    line('Difference', m[6], 'tot');
+                    at.append(sum);
                 });
             }
-            h('AI interpretation');
-            if (e.ai) {
-                const conf = e.ai.confidence || 0;
-                const aiBox = el('div', 'rd-ai');
-                aiBox.title = 'Model: ' + (e.ai.model || 'unknown');
-                aiBox.append(el('div', 'rd-ai-t', cap(String(e.ai.classification || '').replace(/_/g, ' '))
-                    + ', ' + conf + '% confident'));
-                aiBox.append(el('p', 'rd-p', e.ai.explanation || ''));
-                if ((e.ai.cites || []).length) aiBox.append(el('p', 'rd-p', 'Evidence cited: ' + e.ai.cites.join(', ')));
-                if (e.ai.recommended_action) aiBox.append(el('p', 'rd-p', 'Recommended: ' + e.ai.recommended_action));
-                aiBox.append(el('p', 'rd-p quiet', 'This is the model\u2019s interpretation of the evidence above, not an accounting fact.'));
-                d.append(aiBox);
-            } else {
-                const row = el('div', 'rd-row');
-                const inv = el('button', 'btn'); inv.append(ico(I.spark), document.createTextNode('Investigate with AI'));
-                inv.onclick = async () => { inv.disabled = true; inv.textContent = 'Investigating\u2026';
-                    try { const r = await api('/api/recon/exception', { id: e.id, op: 'investigate' }); reconOpen = r.exception; renderRecon(); }
-                    catch (er) { toastError(er.message); inv.disabled = false; } };
-                row.append(inv); d.append(row);
-                p('The AI reads only the evidence shown above, must cite what it relies on, and its answer is recorded as interpretation, never as fact.', 'quiet');
-            }
             h('Status');
-            const stbar = el('div', 'rd-row');
-            ['investigating', 'explained', 'confirmed_error', 'corrected', 'ignored'].forEach(k => {
-                const b = el('button', 'btn btn-sm' + (e.status === k ? ' on' : ''));
-                b.textContent = k === 'ignored' ? 'Ignore\u2026' : RECON_STATUS[k];
-                b.setAttribute('aria-pressed', e.status === k ? 'true' : 'false');
-                b.onclick = async () => {
-                    if (k === 'ignored') {
-                        /* Native dialogs no longer exist inside a
-                           cross-origin iframe, which is exactly where this
-                           app lives. An inline field, reason still required. */
-                        reasonRow.hidden = false;
-                        reasonIn.focus();
-                        return;
-                    }
-                    try { const r = await api('/api/recon/exception', { id: e.id, op: 'status', status: k, note: '' });
-                        reconOpen = r.exception; refreshRecon(); }
-                    catch (er) { toastError(er.message); }
-                };
-                stbar.append(b);
-            });
-            d.append(stbar);
+            /* The house chooser: Ignore stays marked while its reason is asked for. */
+            const stbar = segmented(['investigating', 'explained', 'confirmed_error', 'corrected', 'ignored']
+                .map(k => [k, k === 'ignored' ? 'Ignore\u2026' : RECON_STATUS[k]]), e.status, async (k) => {
+                if (k === e.status) return;
+                if (k === 'ignored') {
+                    /* Native dialogs no longer exist inside a cross-origin
+                       iframe, which is exactly where this app lives. An inline
+                       field, reason still required. */
+                    reasonRow.hidden = false;
+                    reasonIn.focus();
+                    return;
+                }
+                try { const r = await api('/api/recon/exception', { id: e.id, op: 'status', status: k, note: '' });
+                    reconOpen = r.exception; refreshRecon(); }
+                catch (er) { toastError(er.message); }
+            }, { label: 'Status' });
+            left.append(stbar);
             const reasonRow = el('div', 'rd-row'); reasonRow.hidden = true;
             const reasonIn = el('input', 'field-sm rd-reason');
             reasonIn.type = 'text';
             reasonIn.placeholder = 'Why is this being ignored? (required)'; reasonIn.setAttribute('aria-label', 'Reason for ignoring');
-            const reasonGo = el('button', 'btn btn-sm', 'Ignore with this reason');
+            const reasonErr = el('p', 'rd-err', 'Say why it is being ignored.'); reasonErr.hidden = true; reasonErr.id = 'rd-reason-err';
+            const reasonGo = el('button', 'btn btn-sm', 'Ignore with this reason'); reasonGo.type = 'button';
             reasonGo.onclick = async () => {
-                if (!reasonIn.value.trim()) { markInvalid(reasonIn, true); reasonIn.focus(); return; }
-                markInvalid(reasonIn, false);
+                if (!reasonIn.value.trim()) { markInvalid(reasonIn, true); reasonIn.setAttribute('aria-describedby', reasonErr.id); reasonErr.hidden = false; reasonIn.focus(); return; }
+                markInvalid(reasonIn, false); reasonErr.hidden = true;
                 try { const r = await api('/api/recon/exception',
                         { id: e.id, op: 'status', status: 'ignored', note: reasonIn.value.trim() });
                     reasonRow.hidden = true; reconOpen = r.exception; refreshRecon(); }
                 catch (er) { toastError(er.message); }
             };
             reasonRow.append(reasonIn, reasonGo);
-            d.append(reasonRow);
-            if ((e.history || []).length) {
-                h('History');
-                (e.history || []).forEach(hh => p(fmtDate(hh.at) + '  \u00b7  ' + hh.by + '  \u00b7  '
-                    + reconStatusWord(hh.from) + ' \u2192 ' + reconStatusWord(hh.to)
-                    + (hh.note ? '  \u00b7  ' + hh.note : '')));
+            left.append(reasonRow, reasonErr);
+            (e.history || []).forEach(hh => {
+                const hl = el('p', 'rd-hist');
+                hl.append(el('span', null, fmtDate(hh.at) + ', ' + londonHM(hh.at) + ' \u00b7 ' + hh.by + ' \u00b7 '),
+                    document.createTextNode(reconStatusWord(hh.from) + ' \u2192 ' + reconStatusWord(hh.to) + (hh.note ? ' \u00b7 ' + hh.note : '')));
+                left.append(hl);
+            });
+            at = right;
+            if ((e.evidence || []).length) {
+                const evH = h('Evidence');
+                evH.append(el('span', 'rd-n', String(e.evidence.length)));
+                right.append(reconEvidence(e.evidence, evH));
+            }
+            const aiH = h('AI interpretation');
+            if (e.ai) {
+                const conf = Math.max(0, Math.min(100, e.ai.confidence || 0));
+                aiH.append(infoButton('What the AI may and may not do', { title: 'AI interpretation', body: [
+                    'This is the model\u2019s interpretation of the evidence above, not an accounting fact.',
+                    'Model: ' + (e.ai.model || 'unknown')] }));
+                const v = el('div', 'rd-verdict');
+                v.append(el('span', 'lbl-chip ' + (e.ai.classification === 'genuine_error' ? 'bad' : 'note'),
+                    cap(String(e.ai.classification || '').replace(/_/g, ' '))));
+                const meter = el('span', 'rd-meter'); meter.setAttribute('aria-hidden', 'true');
+                const fill = el('i'); fill.style.width = conf + '%'; meter.append(fill);
+                v.append(meter, el('span', 'fig', conf + '% confident'));
+                if ((e.ai.cites || []).length) v.append(el('span', 'rd-muted', 'Cites ' + e.ai.cites.join(', ')));
+                right.append(v);
+                p(e.ai.explanation || '');
+                if (e.ai.recommended_action) { const rp = p(''); rp.append(el('b', null, 'Recommended: '), document.createTextNode(e.ai.recommended_action)); }
+            } else {
+                aiH.append(infoButton('What the AI may and may not do', { title: 'AI interpretation', body:
+                    'The AI reads only the evidence shown, must cite what it relies on, and its answer is recorded as interpretation, never as fact.' }));
+                const inv = el('button', 'btn btn-sm'); inv.type = 'button';
+                const invIdle = el('span'), invBusy = el('span');
+                invIdle.append(ico(I.spark), document.createTextNode('Investigate with AI'));
+                invBusy.append(ico(I.spark), document.createTextNode('Investigating\u2026'));
+                invBusy.setAttribute('aria-hidden', 'true');
+                const invSwap = el('span', 'swap'); invSwap.append(invIdle, invBusy); inv.append(invSwap);
+                inv.onclick = async () => { inv.disabled = true; invIdle.setAttribute('aria-hidden', 'true'); invBusy.setAttribute('aria-hidden', 'false');
+                    try { const r = await api('/api/recon/exception', { id: e.id, op: 'investigate' }); reconOpen = r.exception; renderRecon(); }
+                    catch (er) { toastError(er.message); inv.disabled = false; invIdle.setAttribute('aria-hidden', 'false'); invBusy.setAttribute('aria-hidden', 'true'); } };
+                right.append(inv);
             }
             box.append(d);
         }

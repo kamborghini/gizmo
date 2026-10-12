@@ -2058,6 +2058,56 @@ def t_liability_owing_is_a_table_with_the_account_opened_beside_its_email():
     ok("actions: [liaRefresh]" in fn, "Refresh is worded in the header, as on Xero sync")
 
 
+RECON_WHAT_LABELS = {
+    "shopify_sale_missing": "Sale missing in Xero", "order_invoice_amount_mismatch": "Totals differ",
+    "order_invoice_tax_mismatch": "VAT differs", "shopify_refund_missing": "Refund missing in Xero",
+    "payout_missing_from_bank": "Payout not in the bank", "payout_bank_unreconciled": "Payout deposit not reconciled",
+    "payout_explained_by_fees": "Payout short by its fees", "stale_unreconciled": "Bank line unreconciled",
+    "duplicate_bill_number": "Duplicate bill number", "possible_duplicate_bill": "Possible duplicate bill",
+    "overpaid_invoice": "Invoice over-allocated", "chargeback_missing_from_xero": "Chargeback missing in Xero",
+    "xero_sale_without_shopify": "Xero sale, no Shopify order", "invoice_numbering_unlinked": "Invoice numbers unlinked",
+    "gmail_doc_missing_from_xero": "Document missing in Xero", "remittance_unknown_invoice": "Remittance names an unknown invoice",
+    "remittance_amount_mismatch": "Remittance amount differs", "remittance_payment_missing": "Remittance not paid in Xero",
+}
+
+
+@test
+def t_reconciliation_is_a_band_a_sweep_line_and_a_table():
+    """Cameron's Reconciliation screenshot (12 Oct 2026) and the approved
+    mockup: a connection card over four tiles with 291px of nothing in each,
+    and every discrepancy a sentence at the far left with its amount 1,022px
+    away. Now the counters, with the money at stake, share one band with the
+    sources; the sweep's line, with its time, is on the tab row with its notes
+    behind Notes (n); the discrepancies are a table with a short What and a
+    Record; and an opened one is two columns, closed by an X."""
+    fn = fn_src("function renderRecon() {")
+    ok("actions: heads" in fn and "heads.push(manage)" in fn and "heads.push(sw)" in fn,
+       "Manage and Sweep now are the header's actions")
+    ok("'connection'" not in fn and "widget(band, 'band', 'full', 'Open and sources')" in fn,
+       "one band, not a connection card over the severity tiles")
+    ok("el('div', 'recon-src')" in fn and "'Documents read'" in fn and "'Needs reconnecting'" in fn,
+       "the sources sit beside the counters, a refused link in red")
+    ok("financeTabs('recon', '', [reconSweepLine(st, xs)])" in fn, "the sweep's line is on the tab row")
+    sl = fn_src("function reconSweepLine(") if "function reconSweepLine(" in SCRIPT else ""
+    ok("londonHM(st.last_sync)" in sl and "'Partial'" in sl and "'Xero skipped'" in sl, "with its time, and what was partial or skipped")
+    ok("dropPanel(" in sl and "'Notes from the last sweep'" in sl and "'Notes'" in sl, "its notes behind Notes (n), in a popover")
+    ok("dtable([{ head: 'Severity' }, { head: 'What' }, { head: 'Record' }, { head: 'Date' }, { head: 'Status' }, { head: 'Amount', cls: 'num' }" in fn,
+       "the discrepancies are a table under heads")
+    ok("'lbl-row'" not in fn and "'lbl-rows'" not in fn, "not list rows")
+    ok("RECON_WHAT[e.kind]" in fn and "e.record" in fn and "e.counterparty" in fn, "What is the short label, Record the record and who")
+    for kind, label in RECON_WHAT_LABELS.items():
+        ok(kind + ": '" + label + "'" in SCRIPT, "the short What for " + kind)
+    ok("cls: 'dt-recon'" in fn and ".dt-recon { --dt-cols:" in CSS, "the table has its own tracks")
+    ok("cls: RECON_OPEN[e.status] ? '' : 'settled'" in fn, "a settled row goes grey with a hollow dot")
+    ok("after: reconOpen && reconOpen.id === e.id ? reconDetailNode() : null" in fn, "an opened one opens under its row")
+    rd = fn_src("function paintReconDetail(")
+    ok("el('div', 'rd-cols')" in rd and ".rd-cols { display: grid;" in CSS, "the detail is two columns")
+    ok("x.setAttribute('aria-label', 'Close')" in rd and "x.innerHTML = I.x" in rd, "closed by an X beside its sentence")
+    ok("const stbar = segmented(" in rd, "status is the house chooser")
+    ok("el('dl', 'rd-sum')" in rd, "the arithmetic is an aligned sum")
+    ok("el('div', 'rd-verdict')" in rd and "'rd-meter'" in rd, "the verdict is a tag and a confidence meter")
+
+
 @test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
@@ -2768,11 +2818,13 @@ def t_a_xero_token_warning_reaches_the_screen():
     """The one warning that has a clock on it: Xero honours the previous
     refresh token for about thirty minutes after a failed save, and after that
     the connection is simply gone. It cannot live only in the server log."""
-    fn = SCRIPT.split("function renderRecon")[1].split("\n        function ")[0]
-    ok("xs.warning" in fn, "the status card reads the warning the server sends")
-    i = fn.index("xs.warning")
-    ok("mail-viewwarn" in fn[i:i + 400],
+    fn = fn_src("function renderRecon() {")
+    ok("xs.warning" in fn, "the page reads the warning the server sends")
+    # 12 Oct 2026: said under the band, as the refused link is, in red with a
+    # dot (the mockup), not in an amber box.
+    ok("} else if (xs.warning) notice(xs.warning);" in fn and "el('p', 'recon-notice')" in fn,
        "and paints it as a warning, not as ordinary help text")
+    ok("color: var(--error)" in CSS.split(".recon-notice {")[1].split("}")[0], "in the error colour")
 
 
 @test
@@ -3692,9 +3744,9 @@ def t_a_rows_keydown_never_steals_an_inner_controls_keypress():
     handlers = _re2.findall(r"addEventListener\('keydown', \((e|ev)\) => \{[^\n]*(?:Enter)[^\n]*\}\);", SCRIPT)
     hits = _re2.findall(r"addEventListener\('keydown', \((?:e|ev)\) => \{ if \((?:e|ev)\.target !== \w+\) return;", SCRIPT)
     rowish = _re2.findall(r"(row|tr|r|card)\.(?:addEventListener\('keydown'|onkeydown)", SCRIPT)
-    # Rows that became tables (12 Oct 2026: Liability, the filter counters) open from a real
-    # button in the row, which needs no keydown of its own, so fewer handlers remain to guard.
-    ok(len(hits) >= 4, "the container handlers carry the target guard (%d)" % len(hits))
+    # Rows that became tables (12 Oct 2026: Liability, Reconciliation, the filter counters) open
+    # from a real button in the row, which needs no keydown of its own, so fewer handlers remain.
+    ok(len(hits) >= 3, "the container handlers carry the target guard (%d)" % len(hits))
     ok("if (e.target !== card) return;" in SCRIPT, "the deal card too")
     # The two leaf handlers (the follow-up ticks) have no children to steal from
     # and legitimately omit the guard.
@@ -6719,6 +6771,34 @@ def t_a_saved_layout_keeps_every_rendered_widget_exactly_once():
 
 
 @test
+def t_a_saved_layout_naming_merged_widgets_still_loads():
+    """Review Focus 5 of the blank-space build: a person's saved Customise
+    layout outlives the cards it names. Reconciliation's connection card and
+    severity tiles became one band with an id of its own, so a layout that
+    hid either old card loads with the band shown, at its default place."""
+    ids = re.findall(r"widget\(\w+, '([a-z0-9-]+)'", fn_src("function renderRecon() {"))
+    ok(ids and "connection" not in ids and "severity" not in ids, "the band has an id of its own: " + " ".join(ids))
+    if not any(os.access(os.path.join(p, "node"), os.X_OK) for p in os.environ.get("PATH", "").split(os.pathsep)):
+        print("       (node unavailable, skipped)")
+        return
+    js = (_WG_HARNESS.split("const ran = {}")[0]
+          + "console.log(JSON.stringify(W.wgMergeOrder(JSON.parse(process.argv[3]), JSON.parse(process.argv[4]))));")
+    saved = {"order": ["discrepancies", "severity", "connection"], "hidden": ["severity", "connection"]}
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(js)
+        path = fh.name
+    try:
+        r = subprocess.run(["node", path, os.path.join(ROOT, "static", "index.html"), json.dumps(ids), json.dumps(saved)],
+                           capture_output=True, text=True, timeout=60)
+    finally:
+        os.unlink(path)
+    got = json.loads((r.stdout or "{}").strip() or "{}")
+    ok(got.get("hidden") == [], "nothing the old layout hid hides the band: " + str(got))
+    ok(got.get("order", [None])[0] == ids[0] and sorted(got.get("order", [])) == sorted(ids),
+       "and every card is placed once, the band at its default place: " + str(got))
+
+
+@test
 def t_a_keyboard_move_goes_one_place_and_stops_at_either_end():
     """Alt with an arrow moves a card one place, and at the first or last place
     it stays put, returning the same array so nothing is announced as moved."""
@@ -8331,10 +8411,13 @@ def t_the_reconciliation_card_keeps_status_and_actions_apart():
     buttons in one wrapping row, Disconnect weighted like Sweep now, and the
     sweep's notes as form-help lines with a field's gap under each."""
     fn = fn_src("function renderRecon()")
-    ok("'recon-conn-status'" in fn and "'recon-conn-acts'" in fn, "status on one side, actions on the other")
+    # 12 Oct 2026: the card went. The sources sit in the band beside the
+    # counters and the actions in the page header, the mockup's split.
+    ok("el('div', 'recon-src')" in fn and "actions: heads" in fn, "status on one side, actions on the other")
     ok("dropMenu(manage, [" in fn and "label: 'Disconnect Xero'" in fn,
        "disconnecting is in a menu, not a button beside the sweep")
-    ok("el('div', 'field-help', n)" not in fn and "ul.append(el('li', null, n))" in fn,
+    sl = fn_src("function reconSweepLine(")
+    ok("el('div', 'field-help', n)" not in sl and "ul.append(li);" in sl,
        "the notes are one list")
     ok("danger: true" in fn.split("const disconnect = async")[1][:1400], "and the confirm is marked destructive")
     ok("text-wrap: pretty" in re.search(r"(?m)^\s*body \{([^}]*)\}", CSS).group(1), "no word stranded on a last line")
@@ -12629,12 +12712,12 @@ def t_reconciliation_tells_the_truth_about_its_links_filters_and_sweeps():
     - a sweep started elsewhere showed "Sweeping..." for good, because the page
       never asked again."""
     fn = fn_src("function renderRecon(")
-    ok("xs.needs_reconnect" in fn and "'Xero needs reconnecting'" in fn,
-       "a refused link turns the Xero tag red and says what it needs")
+    ok("xs.needs_reconnect" in fn and "xs.needs_reconnect ? 'Needs reconnecting'" in fn and "'Not connected', !!xs.needs_reconnect);" in fn,
+       "a refused link turns the Xero source red and says what it needs")
     ok("'Reconnect Xero'" in fn and "api('/api/recon/xero-link', {})" in fn,
        "and offers Reconnect through the same walk as Connect")
     ok("'Ask the master account to reconnect Xero.'" in fn, "which only the master account may start, so others are told who")
-    ok("'btn btn-sm' + (xs.needs_reconnect ? '' : ' btn-primary')" in fn,
+    ok("const swTeal = xs.connected && !xs.needs_reconnect" in fn and "'btn btn-sm' + (swTeal ? ' btn-primary' : '')" in fn,
        "Reconnect is then the one teal action and Sweep now steps down")
     watch = fn_src("function watchReconXero(")
     ok("st.xero.connected && !st.xero.needs_reconnect" in watch,
@@ -12656,11 +12739,12 @@ def t_reconciliation_tells_the_truth_about_its_links_filters_and_sweeps():
        "and focus returns in a microtask: after the rows, so the page does not jump, before any key, so none is lost")
     ok("if (e && e.isComposing) return; baseInput();" in fn and "isComposing" not in fn_src("function tableSearch("),
        "a word being composed waits here, where the box is rebuilt, and nowhere else")
-    ok("        .recon-conn-acts { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }" in CSS,
-       "the three buttons of a refused link wrap on a phone instead of running off the card")
-    ok("!(xs.needs_reconnect && /refused the refresh token/i.test(String(n)))" in fn,
+    # 12 Oct 2026: the buttons are the page header's, whose action row wraps.
+    ok("            .ov-hero-act { max-width: 100%; flex-wrap: wrap; justify-content: flex-end; }" in CSS,
+       "the three buttons of a refused link wrap on a phone instead of running off the page")
+    ok("!(xs.needs_reconnect && /refused the refresh token/i.test(String(n)))" in fn_src("function reconSweepLine("),
        "the refusal is said once: the sweep note saying the same is left out while the band shows")
-    ok("ico(I.logIn)" in fn and "reconConnectFallback(card, r.url, 'xero', true)" in fn,
+    ok("ico(I.logIn)" in fn and "reconConnectFallback(band, r.url, 'xero', true)" in fn,
        "Reconnect has its own icon, and a blocked tab gets the shared fallback")
     fb = fn_src("function reconConnectFallback(")
     ok("card.querySelector('.recon-fallback')" in fb and "'Open the Xero sign-in here'" in fb and "watchReconXero(reconnect)" in fb,
