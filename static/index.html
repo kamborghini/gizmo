@@ -307,7 +307,7 @@
             /* The content column, moved here from a second :root block that sat
                three hundred lines further down: a global value must have one
                place to be looked up. */
-            --wrap: 1536px; --wrap-pad: var(--sp-8);   /* the gutter: 40 on a desktop, 16 on a phone (re-pointed at 640) */
+            --wrap: 1280px; --wrap-pad: var(--sp-8);   /* 1,200 of content and the gutter: 40 on a desktop, 16 on a phone (re-pointed at 640) */
             --radius-full: 999px;    /* round ends: only a switch, a progress bar, a dot */
             --radius-circle: 50%;    /* a dot or avatar: a square made round */
             --bw-hairline: 1px; --bw-strong: 2px; --bw-marker: 3px;
@@ -641,8 +641,13 @@
         }
         /* With the sidebar folded away the frame closes round the sheet's left edge too. */
         @media screen and (min-width: 901px) { body.sidebar-collapsed .main { margin-left: var(--frame-inset); } }
+        /* The bar's row sits on the page column, so the breadcrumb starts on the
+           title's edge and Search ends on the page's right edge at every width.
+           On a wide monitor the bar ran the sheet's width while the page was a
+           centred column, and the margins read as a mistake (12 Oct 2026). */
         .topbar { height: var(--topbar-h); flex-shrink: 0; background: var(--surface-primary);
-            display: flex; align-items: center; gap: var(--control-gap); padding: 0 var(--wrap-pad); position: relative; z-index: 5; }
+            display: flex; align-items: center; gap: var(--control-gap); position: relative; z-index: 5;
+            padding-inline: max(var(--wrap-pad), calc((100% - var(--wrap)) / 2 + var(--wrap-pad))); }
         /* Where you are: the section in ink-3, a 14 chevron, the page in ink. */
         .crumbs { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-1); color: var(--text-tertiary);
             font-size: var(--text-body); line-height: var(--lh-control); }
@@ -765,8 +770,9 @@
            actually notices - tabs that do not line up as you move between them.
            The ladder is min-width only, deliberately: a print page is never
            1500px, so paper keeps the 1120 measure it was designed against. */
-        /* The reference's default content layout is CENTERED: the dashboard
-           layout gives every page max-w-screen-2xl (1536px) and mx-auto, with
+        /* The content layout is CENTERED: one column, 1,200 of content inside
+           the 40 gutters (Cameron, 12 Oct 2026; the reference's 1536 left a
+           row's actions a page away from its words on a 2,200 monitor), with
            the page gutter inside it, and the cards grow to fill that column.
            (Its "Full width" preference drops the cap; the default is what a
            merchant sees.) An earlier reading of a demo had it full bleed, and

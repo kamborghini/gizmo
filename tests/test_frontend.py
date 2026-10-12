@@ -2039,6 +2039,18 @@ def t_an_order_missing_its_terms_is_flagged_on_the_queue_row():
 
 
 @test
+def t_one_page_column_with_the_top_bar_on_it():
+    """Cameron's 2,200 monitor, 12 Oct 2026: the breadcrumb sat at the sheet's
+    left edge, well left of the page's title, and Search past the page's right
+    edge, so the top bar and the page read as two layouts and the margins as a
+    mistake. The bar's row now sits on the page column at every width."""
+    bar = CSS.split("        .topbar {")[1].split("}")[0]
+    ok("padding-inline: max(var(--wrap-pad), calc((100% - var(--wrap)) / 2 + var(--wrap-pad)))" in bar,
+       "the crumbs start and Search ends on the page column's edges: " + bar[:160])
+    ok("padding: 0 var(--wrap-pad)" not in bar, "not the sheet's own gutter")
+
+
+@test
 def t_the_page_uses_the_whole_screen():
     """A fixed 1120px wrap left a third of a 1920 monitor and half of a 2560
     iMac as empty margin, while the rows inside it were the crowded part. The
@@ -2054,7 +2066,9 @@ def t_the_page_uses_the_whole_screen():
        "move between them")
     rule = re.search(r"\.ov-wrap \{[^}]*\}", CSS).group(0)
     ok("max-width: var(--wrap)" in rule, "the wrap reads the token")
-    ok(re.search(r"--wrap:\s*1536px", CSS), "which is the reference's max-w-screen-2xl")
+    ok(re.search(r"--wrap:\s*1280px", CSS),
+       "1,200 of content and the two 40 gutters (Cameron, 12 Oct 2026): at 1,456 a row's actions "
+       "drifted a page away from its words on a 2,200 monitor")
     ok("margin: 0 auto" in rule, "and the column is centred, as the reference's default layout is")
     for stop in ("1500px", "1900px", "2400px"):
         ok("min-width: " + stop + " ) { :root { --wrap" not in CSS.replace(" ", " "),
@@ -9547,7 +9561,8 @@ def t_the_spacing_pass_holds():
     ok("@media (min-width: 641px) { .crm-pipeline > .crm-col { flex: 1 1 0; min-width: calc(var(--sp-8) * 4); } }" in CSS,
        "the pipeline's stages share the board instead of one sitting past its edge")
     ok(".sidebar.open { margin-left: 0; box-shadow: var(--shadow-lg); }" in CSS, "a closed drawer paints no shadow on the page")
-    ok("padding: 0 var(--wrap-pad);" in CSS.split(".topbar {")[1].split("}")[0], "the top bar keeps the page's gutter")
+    ok("padding-inline: max(var(--wrap-pad), " in CSS.split(".topbar {")[1].split("}")[0],
+       "the top bar keeps the page's gutter as its least, and the page column beyond it")
     ok(".ov-hero-act:not(:has(> :not([hidden]))) { display: none; }" in CSS, "an empty header rail takes no line")
     ok(".card > .ktable-wrap + .tbl-foot { margin-top: 0; }" in CSS and ".card > .metrics { margin-bottom: 0; }" in CSS
        and ".card > .tabs { margin-bottom: 0; }" in CSS and ".card > .load-failed { margin-top: 0; }" in CSS,
@@ -9821,7 +9836,8 @@ def t_the_top_bar_says_where_you_are_and_finds_anything():
     ok("setViewCrumb(v);" in sv and "document.body.dataset.view = v;" in sv, "and set with the page on every move")
     ok("$('view-title').append(" not in SCRIPT, "the crumbs carry no Beta: the page title does")
     bar = CSS.split("\n        .topbar {")[1].split("}")[0]
-    ok("border-bottom" not in bar and "padding: 0 var(--wrap-pad)" in bar, "no rule under the bar, on the page's gutter")
+    ok("border-bottom" not in bar and "padding-inline: max(var(--wrap-pad), " in bar,
+       "no rule under the bar, on the page's gutter or the page column, whichever is further in")
     find = CSS.split("\n        .topbar-search {")[1].split("}")[0]
     for prop in ("height: var(--control-h)", "width: var(--find-w)", "background: var(--surface-tertiary)",
                  "border-radius: var(--radius-control)"):
