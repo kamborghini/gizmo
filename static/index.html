@@ -2634,6 +2634,9 @@
         /* The document window's contact line: an address and a Xero id run
            past a phone's window unless they may break anywhere. */
         .lbl-meta:is(.cx-contact, .conn-doc-meta) { white-space: normal; overflow-wrap: anywhere; }
+        /* A message box's detail line is a sentence, not a figure: the payout
+           note's reason ran off the document window on one line, cut mid-word. */
+        .msg > .lbl-meta { white-space: normal; overflow-wrap: anywhere; }
         /* The row's own figure, one treatment on both finance pages: the money
            ends the row at the right edge in 14px medium ink. The meta column's
            12px muted type is right for a date and wrong for the number the row
@@ -13919,9 +13922,9 @@ Projected Image UK"></textarea>
                 m.body.append(el('h4', 'card-title', 'Payout note'));
                 if (pay.state === 'unavailable') {
                     const b = el('div', 'msg error');
-                    b.append(el('div', null, 'The payout could not be looked up, '
-                        + 'so no note can be shown. The invoice itself is unaffected.'));
-                    if (pay.message) b.append(el('div', 'lbl-meta', pay.message));
+                    const why = cxPayoutWhy(pay, { auth: ((connCache.data || {}).config || {}).shopifyAuth, admin: connIsAdmin() });
+                    b.append(el('div', null, why.lead));
+                    if (why.detail) b.append(el('div', 'lbl-meta', why.detail));
                     m.body.append(b);
                 } else if (pay.state === 'not_yet') {
                     m.body.append(el('div', 'field-help',
@@ -14100,6 +14103,92 @@ Projected Image UK"></textarea>
                 }
                 return cxEnd(cxPlain(part));
             }).filter(Boolean).join(' ');
+        }
+        /* Why a payout could not be named, as {lead, detail}. The connector
+           gives the reason as a field (reason, needs) from its October 2026
+           version; before that only in words, and its single-order lookup
+           passed Shopify's own JSON through, which reached the document window
+           as one clipped line. Shopify's JSON never reaches the page now, and
+           neither does a client's error string. Only the connector's payout
+           wording is read as a payout failure: the payout pass also carries
+           errors that have nothing to do with Shopify ("A sync is already
+           running", a volume's "permission denied"), and those keep their own
+           words. ctx: {auth, admin, pass}. auth is how the connector signs in
+           to Shopify (client_credentials is Reactor's own app, static one of
+           its own), and pass is the payout pass rather than one document. */
+        const CX_PAY_SCOPES = { read_shopify_payments_accounts: 'Shopify Payments accounts',
+            read_shopify_payments_payouts: 'Shopify Payments payouts' };
+        function cxPayoutWhy(pay, ctx) {
+            pay = pay || {}; ctx = ctx || {};
+            const msg = String(pay.message || pay.error || '');
+            const pass = !!ctx.pass;
+            const unaffected = pass ? '' : ' The invoice itself is unaffected.';
+            const payoutWords = /^Could not read payouts:|Shopify refused the payouts query|^This shop has no Shopify Payments account|^More than [\d,]+ /.test(msg);
+            const reason = pay.reason || pay.errorReason
+                || (!payoutWords ? 'other'
+                    : /Shopify refused the payouts query|Access denied for|Required access|not approved to access/i.test(msg) ? 'refused'
+                    : /^This shop has no Shopify Payments account/.test(msg) ? 'no_account'
+                    : /^More than [\d,]+ /.test(msg) ? 'too_many' : 'failed');
+            if (reason === 'other') {
+                return { lead: pass ? 'No notes were written.' : 'The payout could not be looked up, so no note can be shown.' + unaffected,
+                    detail: msg ? cxDetail(msg) : '' };
+            }
+            if (reason === 'refused') {
+                let needs = (pay.needs || []).filter(k => CX_PAY_SCOPES[k]);
+                if (!needs.length) needs = Object.keys(CX_PAY_SCOPES).filter(k => msg.indexOf(k) >= 0);
+                if (!needs.length) needs = Object.keys(CX_PAY_SCOPES);
+                const what = 'view ' + needs.map(k => CX_PAY_SCOPES[k]).join(' and ') + ' (' + needs.join(', ') + ')';
+                const lead = (pass ? 'Shopify would not show the payouts, so no notes can be written.'
+                    : 'Shopify would not show this order’s payout, so no note can be shown.') + unaffected;
+                const one = needs.length === 1 ? 'that permission' : 'those permissions';
+                /* Shopify refuses the account before the payouts under it, so a
+                   refusal there names only the accounts permission. Settings
+                   shows Reactor's whole grant; an app of its own cannot be seen
+                   from here, so the second permission is named as well. */
+                const also = needs.indexOf('read_shopify_payments_payouts') < 0
+                    ? ' Payout notes also need ' + CX_PAY_SCOPES.read_shopify_payments_payouts
+                      + ' (read_shopify_payments_payouts), so add that too if it is missing.' : '';
+                let detail;
+                if (ctx.auth === 'client_credentials') {
+                    detail = 'The Xero sync signs in to Shopify as Reactor, and Reactor is not allowed to ' + what + '.'
+                        + (ctx.admin ? ' Settings, under Connections, says which permissions Reactor is missing and how to add them.' : ' An admin can add ' + one + '.');
+                } else if (ctx.auth === 'static') {
+                    detail = 'The Xero sync signs in to Shopify with an app of its own, which is not allowed to ' + what + '.'
+                        + (ctx.admin ? ' In Shopify, open Settings, then Apps, find that app under Legacy custom apps, add ' + one + ', and save.' + also
+                            : ' An admin can add ' + one + '.');
+                } else {
+                    detail = 'The Shopify app the Xero sync signs in with is not allowed to ' + what + '.'
+                        + (ctx.admin ? ' If it signs in as Reactor, Settings, under Connections, says how to add ' + one
+                            + '; if it has an app of its own, add ' + one + ' to that app in Shopify.' + also
+                            : ' An admin can add ' + one + '.');
+                }
+                return { lead: lead, detail: detail };
+            }
+            if (reason === 'no_account') {
+                return { lead: 'This store has no Shopify Payments account, so there ' + (pass ? 'are no payouts to write.' : 'is no payout to name.') + unaffected, detail: '' };
+            }
+            const lead = (pass ? 'The payouts could not be looked up, so no notes were written.'
+                : 'The payout could not be looked up, so no note can be shown.') + unaffected;
+            const again = 'Shopify did not answer properly. Try again in a few minutes.';
+            let t = msg.replace(/^Could not read payouts:\s*/i, '');
+            let m;
+            if ((m = /^Shopify GraphQL errors: (\[.*\])$/s.exec(t))) {
+                let said = '';
+                try { said = JSON.parse(m[1]).map(x => String((x && x.message) || '').trim()).filter(Boolean).join(' '); } catch (e) {}
+                t = said ? 'Shopify said: ' + said : 'Shopify’s reply could not be read.';
+            } else if ((m = /^Shopify HTTP (\d{3})/.exec(t))) {
+                const code = Number(m[1]);
+                t = code === 429 || code >= 500 ? 'Shopify did not answer properly (error ' + code + '). Try again in a few minutes.'
+                    : code === 401 ? 'Shopify did not accept the Xero sync’s sign-in (error 401), so its Shopify credentials need checking.'
+                    : 'Shopify refused the request (error ' + code + ').';
+            } else if (/^Shopify query cost exceeded/.test(t)) {
+                t = 'Shopify said the lookup asked for too much at once.';
+            } else if (/^Shopify GraphQL: (empty data|exhausted retries)|^fetch failed|ECONN|ETIMEDOUT|ENOTFOUND|socket hang up/i.test(t)) {
+                t = again;
+            }
+            /* Whatever is left, never a JSON blob. */
+            if (/[\[{]\s*"/.test(t)) t = 'Shopify’s reply could not be read.';
+            return { lead: lead, detail: t ? cxEnd(cxPlain(t)) : '' };
         }
         /* One run problem as a sentence. ctx: {guards, admin} from the
            health reply, so a limit that has changed since is said, and
@@ -15619,7 +15708,10 @@ Projected Image UK"></textarea>
                         const r = await connOp({ op: 'payouts', since: connPayResult.since || connPayBox || '' });
                         connPayResult = (r && r.data) || {};
                         const k = connPayResult.annotated || 0, bad = connPayResult.failed || 0;
-                        if (connPayResult.error) toastError('No notes were written. ' + cxDetail(connPayResult.error));
+                        if (connPayResult.error) {
+                            const why = cxPayoutWhy(connPayResult, { auth: ((connCache.data || {}).config || {}).shopifyAuth, admin: connIsAdmin(), pass: true });
+                            toastError(why.lead + (why.detail ? ' ' + why.detail : ''));
+                        }
                         else if (bad) toastError('Wrote ' + k + (k === 1 ? ' note' : ' notes') + '; ' + bad + ' could not be written. The list says which.');
                         else toastOk('Wrote ' + k + (k === 1 ? ' note' : ' notes') + ' to Xero.');
                     } catch (e) { toastError(e.message); }
@@ -15634,7 +15726,14 @@ Projected Image UK"></textarea>
                 const d = connPayResult;
                 if (!d) return;
                 const title = 'Payouts' + (d.since ? ' since ' + fmtDate(d.since) : '') + (d.dryRun === false ? ', written' : '');
-                if (d.error) { cxSection(results, 'pay', title).append(el('div', 'msg error', cxDetail(d.error))); return; }
+                if (d.error) {
+                    const why = cxPayoutWhy(d, { auth: ((connCache.data || {}).config || {}).shopifyAuth, admin: connIsAdmin(), pass: true });
+                    const b = el('div', 'msg error');
+                    b.append(el('div', null, why.lead));
+                    if (why.detail) b.append(el('div', 'lbl-meta', why.detail));
+                    cxSection(results, 'pay', title).append(b);
+                    return;
+                }
                 const notes = d.notes || [];
                 const k = d.dryRun ? notes.length : (d.annotated || 0);
                 const paid = d.ordersWithPayouts || 0;
@@ -31122,14 +31221,18 @@ Projected Image UK"></textarea>
                 host.append(connRow('Shopify permissions', 'mid',
                     'Shopify did not say what the app is allowed to do, so this could not be checked.', CR_PERM));
             } else if (miss.length) {
+                /* Each permission with what it is for. The app is installed the
+                   managed way, so a new permission needs no reinstall: Shopify
+                   asks for it the next time Reactor opens after the release. */
+                const one = miss.length === 1;
                 host.append(connRow('Shopify permissions', 'off',
-                    miss.length + (miss.length === 1 ? ' permission is' : ' permissions are')
-                    + ' missing, so ' + Object.values(sc.missing).join('; ')
-                    + ' cannot work. Add ' + miss.join(', ')
-                    + ' in your Shopify app, then release and reinstall it.', CR_PERM));
+                    miss.length + (one ? ' permission is' : ' permissions are') + ' missing: '
+                    + miss.map(k => k + ', for ' + sc.missing[k]).join('; ')
+                    + '. Make sure the app\u2019s configuration lists ' + (one ? 'it' : 'them') + ', release a new version, '
+                    + 'and approve ' + (one ? 'it' : 'them') + ' when Shopify asks, the next time Reactor opens.', CR_PERM));
             } else if (sc.checked) {
                 host.append(connRow('Shopify permissions', 'on',
-                    'Everything the app writes is permitted.', CR_PERM));
+                    'Everything the app writes, and the payouts it reads, is permitted.', CR_PERM));
             }
             // Live updates: Shopify pushing order events to the app. Without them
             // everything still works off the short cache and the Refresh button.

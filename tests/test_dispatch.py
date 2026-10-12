@@ -3278,9 +3278,12 @@ def t_the_permissions_settings_shows_are_read_from_shopify():
         got = run(server.shopify_granted_scopes())
         ok("currentAppInstallation" in seen[0][2] and seen[0][:2] == ("POST", "graphql.json"), seen)
         eq(got["error"], "")
-        eq(set(got["missing"]), {"write_merchant_managed_fulfillment_orders", "write_payment_terms"},
-           "each missing write is named")
+        eq(set(got["missing"]), {"write_merchant_managed_fulfillment_orders", "write_payment_terms",
+                                 "read_shopify_payments_payouts", "read_shopify_payments_accounts"},
+           "each missing write is named, and each read a feature needs")
         ok(all(got["missing"].values()), "with what it is for")
+        ok("Xero sync" in got["missing"]["read_shopify_payments_accounts"],
+           "the accounts scope is named for the payout note it holds up")
         run(server.shopify_granted_scopes())
         eq(len(seen), 1, "a good answer is kept rather than asked again")
         server._granted_scopes.update({"at": 0.0, "scopes": None, "error": ""})
@@ -13293,7 +13296,8 @@ def _recon_world(fx, orders):
             if args.get("since_id"):
                 return {"orders": []}
             return {"orders": list(orders)}
-        if name == "shopify_list_payouts":
+        if name in ("shopify_list_payouts", "shopify_list_disputes"):
+            # A store not on Shopify Payments refuses both alike.
             return {"available": False, "reason": "not on Shopify Payments"}
         return {"_failed": True}
     import copy as _copy
@@ -13346,7 +13350,7 @@ def t_a_full_sweep_finds_the_missing_sale_and_statuses_survive_resweeps():
         missing = [e for e in exs.values() if e["kind"] == "shopify_sale_missing"]
         eq(len(missing), 1, "only #104276 is missing")
         ok("#104276" in missing[0]["title"])
-        ok(any("payout checks did not run" in n for n in r["notes"]),
+        ok(_did_not_run(r["notes"], "payout") and _did_not_run(r["notes"], "chargeback"),
            "a check that could not run says so instead of reading as clean: %s" % r["notes"])
         xid = missing[0]["id"]
         # A person marks it explained; the next sweep must not undo that.
@@ -13368,6 +13372,169 @@ def t_a_full_sweep_finds_the_missing_sale_and_statuses_survive_resweeps():
         _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
                       mail_thread=None, load_store=None, write_store=None,
                       load_cache=None, write_cache=None, load_docs=None, write_docs=None)
+
+
+def _did_not_run(notes, check):
+    """The sweep said this check sat it out ("payout", "chargeback")."""
+    return any(check in n and "checks did not run" in n for n in notes)
+
+
+def _raw_btxn(bid, typ, total, day):
+    return {"BankTransactionID": bid, "Type": typ, "Status": "AUTHORISED",
+            "DateString": day + "T00:00:00", "Total": total, "CurrencyCode": "GBP",
+            "IsReconciled": False, "Contact": {"Name": "Shopify"}, "Reference": "",
+            "BankAccount": {"Name": "Current"}}
+
+
+def _payments_world(fx, answers):
+    """_recon_world with Shopify Payments reads that a test switches between
+    answering and not. `answers` maps a tool to its reply, or to a callable for
+    one that raises; a tool left out answers as a failed read."""
+    orders = [_raw_order(104275, "#104275", "842.00")]
+    stores = _recon_world(fx, orders)
+    async def tool_json(reg, name, args):
+        if name == "shopify_list_orders":
+            return {"orders": [] if args.get("since_id") else list(orders)}
+        a = answers.get(name, {"_failed": True})
+        return a() if callable(a) else a
+    _rc.configure(tool_json=tool_json)
+    return stores
+
+
+def _unconfigure_recon():
+    _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
+                  mail_thread=None, load_store=None, write_store=None,
+                  load_cache=None, write_cache=None, load_docs=None, write_docs=None)
+
+
+@test
+def t_a_sweep_that_cannot_read_payouts_leaves_the_payout_findings_alone():
+    """The payouts read was refused and the note said the payout checks did not
+    run, but the check ran anyway on the payouts cached by earlier sweeps and
+    counted as having run. So a sweep that saw no payout at all marked an open
+    payout finding "no longer detected": once when the deposit landed in Xero
+    while the cached payout was the only copy, and again with no copy left."""
+    import copy as _copy
+    day = _rc._cutoff_day(10)
+    payout = {"id": 7001, "date": day, "amount": "312.40", "currency": "GBP", "status": "paid"}
+
+    def missing_tools():
+        raise KeyError("shopify_list_payouts")
+    for how, unreadable in (
+            ("refused", {"available": False, "reason": "The access token lacks the Shopify "
+                                                       "Payments read scopes."}),
+            ("failed", {"_failed": True}),
+            ("not on this build", missing_tools)):
+        fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
+        answers = {"shopify_list_payouts": {"payouts": [payout]},
+                   "shopify_payout_transactions": {"transactions": []},
+                   "shopify_list_disputes": {"disputes": []}}
+        stores = _payments_world(fx, answers)
+        try:
+            run_async(_rc.sweep())
+            exs = stores["store"]["exceptions"]
+            found = [x for x, e in exs.items() if e["kind"] == "payout_missing_from_bank"]
+            eq(len(found), 1, how + ": a paid payout with no deposit is found while payouts read")
+            xid = found[0]
+            exs[xid]["status"] = "investigating"
+            before = _copy.deepcopy(exs[xid])
+            # Payouts stop answering, and meanwhile the deposit lands in Xero.
+            answers["shopify_list_payouts"] = unreadable
+            fx.bank.append(_raw_btxn("BT-7001", "RECEIVE", "312.40", day))
+            r2 = run_async(_rc.sweep())
+            ok(_did_not_run(r2["notes"], "payout"), (how, r2["notes"]))
+            after = stores["store"]["exceptions"][xid]
+            ok(not after.get("stale"), how + ": a sweep that read no payouts did not see it go")
+            eq(after["status"], "investigating", how)
+            eq(after["history"], before["history"], how + ": and wrote nothing on its history")
+            payout_kinds = _rc.CHECK_KINDS["check_payouts_vs_bank"]
+            eq([x for x, e in stores["store"]["exceptions"].items() if e["kind"] in payout_kinds],
+               [xid], how + ": nor raised anything new from the old copy")
+            ok("7001" in stores["cache"]["shopify"]["payouts"],
+               how + ": and the payout it was built from is still held")
+            # Months on and still unreadable: the cached payout is now older
+            # than the window the check matches in, and than the cache keeps.
+            stores["cache"]["shopify"]["payouts"]["7001"]["date"] = _rc._cutoff_day(_rc.CACHE_KEEP_DAYS + 5)
+            run_async(_rc.sweep())
+            ok(not stores["store"]["exceptions"][xid].get("stale"),
+               how + ": an aged copy of payouts that could not be read settles nothing")
+            ok("7001" in stores["cache"]["shopify"]["payouts"],
+               how + ": nor is the record an open finding rests on pruned")
+            # With no cached copy left either, it is still not a reason.
+            stores["cache"]["shopify"]["payouts"] = {}
+            run_async(_rc.sweep())
+            ok(not stores["store"]["exceptions"][xid].get("stale"),
+               how + ": an empty copy of payouts that could not be read settles nothing")
+            # Readable again: the check runs, finds the deposit and settles it.
+            answers["shopify_list_payouts"] = {"payouts": [payout]}
+            r4 = run_async(_rc.sweep())
+            ok(not _did_not_run(r4["notes"], "payout"), (how, r4["notes"]))
+            ok(stores["store"]["exceptions"][xid]["stale"],
+               how + ": a sweep that did read payouts settles it as before")
+        finally:
+            _unconfigure_recon()
+
+
+@test
+def t_a_sweep_that_cannot_read_disputes_leaves_the_chargeback_findings_alone():
+    """The disputes read failed with no word at all, and the chargeback check
+    ran on the disputes cached by earlier sweeps, so a sweep that saw no
+    dispute could settle an open chargeback finding."""
+    import copy as _copy
+    day = _rc._cutoff_day(10)
+    dispute = {"id": 8001, "order_id": 104275, "type": "chargeback", "amount": "95.00",
+               "currency": "GBP", "reason": "fraudulent", "status": "lost", "initiated_at": day}
+    for how, unreadable in (
+            ("refused", {"available": False, "reason": "The access token lacks the Shopify "
+                                                       "Payments read scopes."}),
+            ("failed", {"_failed": True})):
+        fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
+        answers = {"shopify_list_payouts": {"payouts": []},
+                   "shopify_list_disputes": {"disputes": [dispute]}}
+        stores = _payments_world(fx, answers)
+        try:
+            run_async(_rc.sweep())
+            exs = stores["store"]["exceptions"]
+            found = [x for x, e in exs.items() if e["kind"] == "chargeback_missing_from_xero"]
+            eq(len(found), 1, how + ": a chargeback with no Xero record is found while disputes read")
+            xid = found[0]
+            before = _copy.deepcopy(exs[xid])
+            answers["shopify_list_disputes"] = unreadable
+            fx.bank.append(_raw_btxn("BT-8001", "SPEND", "95.00", day))
+            r2 = run_async(_rc.sweep())
+            after = stores["store"]["exceptions"][xid]
+            ok(not after.get("stale"), how + ": a sweep that read no disputes did not see it go")
+            eq(after["history"], before["history"], how)
+            ok(_did_not_run(r2["notes"], "chargeback"), (how, r2["notes"]))
+            answers["shopify_list_disputes"] = {"disputes": [dispute]}
+            r3 = run_async(_rc.sweep())
+            ok(not _did_not_run(r3["notes"], "chargeback"), (how, r3["notes"]))
+            ok(stores["store"]["exceptions"][xid]["stale"],
+               how + ": a sweep that did read disputes settles it as before")
+        finally:
+            _unconfigure_recon()
+
+
+@test
+def t_payout_fees_that_cannot_be_read_are_said_so():
+    """A fee lookup that failed stopped the fee reads with no word, and a
+    deposit short of its payout by the fees then read as a missing deposit."""
+    day = _rc._cutoff_day(10)
+    payout = {"id": 7002, "date": day, "amount": "100.00", "currency": "GBP", "status": "paid"}
+    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
+    answers = {"shopify_list_payouts": {"payouts": [payout]},
+               "shopify_payout_transactions": {"_failed": True},
+               "shopify_list_disputes": {"disputes": []}}
+    _payments_world(fx, answers)
+    try:
+        r = run_async(_rc.sweep())
+        ok(any("fees could not be read" in n for n in r["notes"]), r["notes"])
+        answers["shopify_payout_transactions"] = {"transactions": [{"fee": "2.50"}]}
+        r2 = run_async(_rc.sweep())
+        ok(not any("fees could not be read" in n for n in r2["notes"]),
+           "fees read on a later sweep say nothing: %s" % r2["notes"])
+    finally:
+        _unconfigure_recon()
 
 
 @test

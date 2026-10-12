@@ -36,6 +36,38 @@
   },
   {
    "date": "2026-10-12",
+   "title": "Payout notes say what is missing",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": "connector",
+     "text": "When Shopify will not show the Xero sync an order's payout, the invoice window now says so in words, with the permission that is missing and where to add it. It showed Shopify's own reply in code, cut off at the edge of the box. The payout pass on the Xero sync page says it the same way."
+    },
+    {
+     "kind": "fixed",
+     "tab": "connector",
+     "text": "Reactor's Shopify app now includes permission to view Shopify Payments accounts, which payout notes need as well as payouts themselves. Shopify asks for it once the new version of the app is released. Until it is approved, Settings, under Connections, says that this permission is missing and what it is for; it said every permission was granted, because it only checked what Reactor writes."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-12",
+   "title": "Payout checks that could not run",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": "recon",
+     "text": "When Shopify will not let Reactor read your payouts, a sweep now leaves the payout checks out, as its note always said. Before, it checked the copies it had read on earlier days, so a payout discrepancy could be marked no longer detected by a sweep that never saw a payout. It now stays open until a sweep can read payouts again."
+    },
+    {
+     "kind": "fixed",
+     "tab": "recon",
+     "text": "Chargebacks work the same way: when Shopify's disputes cannot be read, the chargeback check sits that sweep out and the sweep says so, where before it ran on old copies without a word. A sweep that cannot read a payout's fees now says so too, as a deposit short of its payout by the fees may show as missing until they are read."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-12",
    "title": "Prints started close together",
    "items": [
     {
