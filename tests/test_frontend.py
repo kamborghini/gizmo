@@ -8405,6 +8405,9 @@ def t_show_more_keeps_the_keyboard_and_a_row_just_named_is_shown():
     fn = SCRIPT.split("function renderFilesBrowser(host) {")[1]
     fn = fn[:fn.index("\n        function ")]
     ok("filesRowCap = filesCapFor(" in fn, "the folder's count is raised to show a row just named")
+    pl = fn[fn.index("function paintList() {"):]
+    ok("filesHitCap = filesCapFor(" in pl, "and the search's count, for a hit just renamed")
+    ok(pl.count("filesReveal.clear()") == 2, "and what was to be shown is forgotten in either view, never lingering")
     ok(fn.count("filesReveal.add(") >= 3, "for a new folder, a renamed folder and a renamed file")
     if not _node_ok():
         print("       (node unavailable, skipped)")

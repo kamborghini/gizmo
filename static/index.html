@@ -29890,6 +29890,7 @@ Projected Image UK"></textarea>
                     const ql = filesQ.toLowerCase();
                     const hits = sortFiles(Object.entries(fmap)
                         .filter(([, f]) => f.name.toLowerCase().includes(ql)));
+                    if (filesReveal.size) { filesHitCap = filesCapFor(hits.map(e => e[0]), filesHitCap, filesReveal); filesReveal.clear(); }
                     if (!hits.length) list.append(el('div', 'files-empty', 'No file matches that search.'));
                     else list.append(filesHeadRow('Modified'));
                     /* Painted in pages, the way the CRM contacts list already

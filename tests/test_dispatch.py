@@ -28696,6 +28696,92 @@ def t_uploads_during_a_storage_retry_wait_for_its_answer():
 
 
 @test
+def t_an_upload_holding_files_never_waits_on_a_storage_setup():
+    """Re-check of the review fixes. An upload that passed the setup check
+    while a failure was fresh, then queued for the store's lock, set the
+    bucket up again once inside it: with another upload's retry under way
+    it waited for that retry holding the lock, and every change to Files and
+    the Finder drive waited with it. Signing under the lock now only signs;
+    the setup happens before the lock is taken."""
+    import threading
+
+    def go(fake):
+        copilot._files_ready.update({"bucket": False, "cors": False,
+                                     "error": "RuntimeError: an earlier outage", "at": time.time()})
+
+        async def scenario(ac):
+            await copilot._files_lock.acquire()          # the hourly sweep holds the store
+            sign = asyncio.ensure_future(ac.post("/api/files/upload-url", json={"name": "c.pdf", "size": 10}))
+            await asyncio.sleep(0.3)                     # it passed the fresh failure and queued
+            copilot._files_ready["at"] = time.time() - 120   # the minute is up: another upload retries
+            busy = threading.Thread(target=lambda: (copilot._files_setup_lock.acquire(), time.sleep(1.5),
+                                                    copilot._files_setup_lock.release()))
+            busy.start()
+            await asyncio.sleep(0.05)
+            copilot._files_lock.release()
+            await asyncio.sleep(0.05)
+            t0 = time.monotonic()
+            f = await ac.post("/api/files/folder", json={"op": "add", "name": "Meanwhile"})
+            waited = time.monotonic() - t0
+            c = await sign
+            busy.join()
+            return c, f, waited
+        (c, f, waited), = _files_race(scenario)
+        eq(f.status_code, 200, f.text)
+        ok(waited < 0.5, "the folder did not wait on another upload's storage retry: %.2f s" % waited)
+        eq(c.status_code, 502, "the upload that met a storage not yet set up is refused at once: " + c.text[:120])
+    with_files(go)
+
+
+@test
+def t_while_storage_hangs_an_upload_is_refused_without_waiting_out_the_retry():
+    """Re-check of the review fixes. With storage hanging, one retry of the
+    setup takes up to a minute (short timeouts, but three tries of two
+    calls), and every upload arriving meanwhile waited the whole of it for
+    a refusal. A setup another caller is running is waited for only a few
+    seconds; a quick recovery is still waited for and taken."""
+    import threading
+
+    class Hanging(FakeS3):
+        def __init__(self):
+            super().__init__()
+            self.release = threading.Event()
+
+        def head_bucket(self, Bucket):
+            self.release.wait(3)
+            raise RuntimeError("storage did not answer")
+
+        def create_bucket(self, Bucket):
+            raise RuntimeError("storage did not answer")
+    hang = Hanging()
+
+    def go(fake):
+        copilot._files_ready.update({"bucket": False, "cors": False,
+                                     "error": "RuntimeError: an earlier outage", "at": time.time() - 120})
+        saved = copilot.FILES_SETUP_WAIT
+        copilot.FILES_SETUP_WAIT = 0.3
+        took = {}
+
+        def sign(n, delay):
+            async def go_(ac):
+                await asyncio.sleep(delay)
+                t0 = time.monotonic()
+                r = await ac.post("/api/files/upload-url", json={"name": f"h{n}.pdf", "size": 10})
+                took[n] = time.monotonic() - t0
+                if n == 2:
+                    fake.release.set()
+                return r
+            return go_
+        try:
+            rs = _files_race(sign(1, 0), sign(2, 0.2))
+        finally:
+            copilot.FILES_SETUP_WAIT = saved
+        eq([r.status_code for r in rs], [502, 502], [r.text[:80] for r in rs])
+        ok(took[2] < 1.0, "the second upload was refused without waiting out the retry: %.2f s" % took[2])
+    with_files(go, s3=hang)
+
+
+@test
 def t_one_upload_confirmed_twice_at_once_is_one_file():
     """With storage asked outside the lock, two confirmations of one upload (a
     retry while the first is still answering) can both be in flight. The

@@ -12621,7 +12621,11 @@ _files_ready = {"bucket": False, "cors": False, "error": "", "at": 0.0}
 # Uploads now set the bucket up before taking the store's lock, so three at
 # once can reach the setup together; one sets it up and the others wait for
 # its answer, rather than each creating the bucket and two reporting failure.
+# They wait a few seconds at most: against a storage that hangs, one setup
+# runs for up to a minute (short timeouts, but three tries of two calls), and
+# an upload is refused sooner than that by the failure that stands.
 _files_setup_lock = threading.Lock()
+FILES_SETUP_WAIT = 5.0
 # One writer at a time: every route that loads, mutates and writes the store
 # holds this across the whole exchange. The browser deliberately runs three
 # uploads at once, so without it two upload-url calls interleave around their
@@ -12662,12 +12666,17 @@ def _files_ensure_bucket(page_origin: str) -> None:
     starts. Never raises; failures surface in the status block."""
     if _files_ready["bucket"] and _files_ready["cors"]:
         return
-    # A failing bucket is not probed on every presign: one attempt a minute,
-    # so a dead R2 costs each upload one fast refusal, not a retry storm.
+    # A failing bucket is not probed on every presign: one attempt a minute
+    # after the last one failed, so a dead R2 costs each upload a quick
+    # refusal, not a retry storm.
     if _files_ready["error"] and time.time() - float(_files_ready.get("at") or 0) < 60:
         return
-    with _files_setup_lock:
+    if not _files_setup_lock.acquire(timeout=FILES_SETUP_WAIT):
+        return
+    try:
         _files_ensure_bucket_locked(page_origin)
+    finally:
+        _files_setup_lock.release()
 
 
 def _files_ensure_bucket_locked(page_origin: str) -> None:
@@ -13065,15 +13074,19 @@ def _files_endpoint() -> str:
     return os.environ.get("R2_ENDPOINT") or f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
 
-def _files_sign_put(key: str, ctype: str, size: int = 0) -> str:
-    """Blocking (network on first use); call off the event loop.
+def _files_sign_put(key: str, ctype: str, size: int = 0, setup: bool = True) -> str:
+    """Blocking (network on first use); call off the event loop. A caller
+    holding the store's lock passes setup=False, having set the bucket up
+    before it took the lock: this then only signs, and never waits on a
+    setup (its own, or another upload's retry) with the lock held.
 
     The signature BINDS the length when one is known: without it the URL
     authorised a PUT of any size R2 accepts, so a client could declare 1KB,
     pass the quota check, and then store gigabytes against a record that says
     1KB - and the presign stayed valid for a quarter of an hour after the
     upload was confirmed, long enough to swap the object afterwards."""
-    _files_ensure_bucket(_files_origin())
+    if setup:
+        _files_ensure_bucket(_files_origin())
     if not _files_ready["bucket"]:
         raise RuntimeError(_files_ready["error"] or "bucket unavailable")
     params = {"Bucket": R2_BUCKET, "Key": key, "ContentType": ctype}
@@ -24550,7 +24563,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 ctype = str(body.get("type") or "application/octet-stream").strip()[:100] \
                     or "application/octet-stream"
                 try:
-                    url = await asyncio.to_thread(_files_sign_put, key, ctype, size)
+                    url = await asyncio.to_thread(_files_sign_put, key, ctype, size, False)
                 except RuntimeError as e:
                     logger.warning("files: presign failed: %s", e)
                     return _json({"error": "Storage isn't reachable right now. Check the R2 "
