@@ -11463,8 +11463,10 @@ async def recon_summary(params: ReconEmptyInput) -> str:
     """Reconciliation health: open discrepancy counts by severity, the biggest open items, when the books were last swept, and any parts of the last sweep that could not run."""
     d = _load_recon()
     top = [_recon_exc_public(e) for e in _recon_filter(d.get("exceptions", {}))[:10]]
+    # Counted live, as the page counts them: the sweep's snapshot goes stale
+    # the moment someone marks one Explained (final review M-7).
     return json.dumps({"last_sync": d.get("last_sync") or "never",
-                       "open_counts": d.get("open_counts") or {},
+                       "open_counts": _recon_open_summary(d)[0],
                        "sweep_notes": d.get("last_notes") or [],
                        "largest_open": top}, default=str)
 

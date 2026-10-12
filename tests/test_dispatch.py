@@ -15789,6 +15789,28 @@ def t_recon_reports_money_at_stake_by_severity():
 
 
 @test
+def t_the_ai_counts_open_discrepancies_as_the_page_does():
+    """Final review M-7, 12 Oct 2026: the page counts open discrepancies live,
+    but the AI's reconciliation summary still read the last sweep's snapshot,
+    so after someone marked one Explained, chat could say 3 critical were open
+    while the page said 2."""
+    import asyncio
+    import copilot as _cp
+    keep = json.loads(json.dumps(_cp._load_recon()))
+    try:
+        d = {"exceptions": {}, "watermarks": {}, "open_counts": {"critical": 3, "high": 0, "medium": 0, "low": 0}}
+        for i, status in enumerate(("new", "investigating", "explained")):
+            e = _rc.make_exc("shopify_sale_missing", "critical", "ai " + str(i), ["ai" + str(i)], amount=1000)
+            e["status"] = status
+            d["exceptions"][e["id"]] = e
+        _cp._write_recon(d)
+        got = json.loads(asyncio.run(_cp.recon_summary(_cp.ReconEmptyInput())))
+        eq(got["open_counts"], {"critical": 2, "high": 0, "medium": 0, "low": 0}, "the AI's count is the page's, not the sweep's snapshot")
+    finally:
+        _cp._write_recon(keep)
+
+
+@test
 def t_a_discrepancy_names_its_record_and_who_it_is_with():
     """12 Oct 2026: the discrepancies table's Record column, from the evidence
     the list never sent: the record a person would look up, and who it is with
