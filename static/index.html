@@ -2101,6 +2101,19 @@
            short of the row above left a stripe of card between two highlights,
            where the reference's rows share one edge. */
         .actions { padding: 0; gap: 0; overflow: visible; }
+        /* RECOMMENDED ACTIONS ARE A TABLE (12 Oct 2026, R3): the tick, the
+           action (the flexible track, where its sentence wraps), its priority
+           and Track, every row on the same columns under Action and Priority.
+           It was a short sentence at the left with its tag and button 900px
+           away at the far edge (DF-02). An answer in chat adds a copy column. */
+        .card.actions { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content max-content; column-gap: var(--sp-3); }
+        .card.actions:has(.act-copy) { grid-template-columns: max-content minmax(0, 1fr) max-content max-content max-content; }
+        .card.actions > :is(.action, .action-head) { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start; }
+        /* The action's sentence fills its column: balanced, a two-line action
+           broke in its middle and left half the column empty before Priority. */
+        .card.actions .action .text { max-width: none; text-wrap: pretty; }
+        .action-head { padding-bottom: var(--sp-2); border-bottom: var(--bw-hairline) solid var(--border-default);
+            font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary); }
         .action { display: flex; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-3) 0; }
         .action + .action { border-top: var(--bw-hairline) solid var(--border-default); }
         @media (hover: hover) { .action:hover { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); } }
@@ -2127,7 +2140,6 @@
            row: the pill and the button sat mid-row with 591px of nothing to
            their right. The auto margin goes on whichever child FOLLOWS the
            text, because an Overview follow-up row has no pill. */
-        .action .text + .pill, .action .text + .track-btn { margin-left: auto; }
         /* And one width for the three priorities that ship, or the buttons rag
            by 25px behind pills of 36, 40 and 61px. 64 is the widest of them
            (medium, 60.83) taken up to the 4px grid the rest of the page is on. */
@@ -2139,9 +2151,12 @@
            under it, lined up with it: squeezed beside them it ran to three
            lines of three words with an orphan. */
         @media (max-width: 640px) {
+            .card.actions { display: block; }
+            .card.actions > .action-head, .action > .pill-none { display: none; }
+            .card.actions > .action { display: flex; }
             .action { flex-wrap: wrap; row-gap: var(--sp-2); }
             .action .text { flex: 1 1 calc(100% - var(--box-xs) - var(--sp-3)); }
-            .action .text + .pill, .action .text + .track-btn { margin-left: calc(var(--box-xs) + var(--sp-3)); }
+            .action .text + :is(.pill, .track-btn), .action .text + .pill-none + .track-btn { margin-left: calc(var(--box-xs) + var(--sp-3)); }
             .action .track-btn { margin-top: 0; }
         }
         @media (max-width: 640px) {
@@ -2330,8 +2345,28 @@
         .pchat-send svg { width: var(--icon-md); height: var(--icon-md); }
         /* customer sector selector */
         .seclink { background: transparent; border: 0; font: inherit; font-weight: var(--weight-medium); cursor: pointer; padding: 0; text-align: left; }
+        /* TWO BLOCKS SIDE BY SIDE (12 Oct 2026, R6). A short block beside the
+           block it belongs with (the summary and What changed, the actions and
+           the findings, two short tables), seven twelfths and five, each only
+           as tall as itself; one widget the grid moves as one. Under 64rem of
+           its own width the two stack. */
+        .wpair { container: wpair / inline-size; }
+        .wpair-in { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); column-gap: var(--gap-cols); row-gap: var(--page-rhythm); align-items: start; }
+        .wpair.even > .wpair-in { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .wpair-in > * { min-width: 0; margin: 0; }
+        /* The two halves' headings stand level. */
+        .wpair-in > * > .section-title:first-child { margin-top: 0; }
+        @container wpair (max-width: 64rem) { .wpair-in { grid-template-columns: minmax(0, 1fr); } }
         /* what-changed digest */
         .changes-strip { margin: var(--sp-0-5) 0 var(--sp-6); }
+        /* Beside the summary it is a short list, two columns of the measure and
+           its change, under the same heading size as the summary's. */
+        .wpair .changes-strip { margin: 0; }
+        .wpair .changes-head { font-size: var(--text-head); line-height: var(--lh-control); font-weight: var(--weight-semibold); color: var(--text-primary); margin-bottom: var(--sp-3); }
+        .wpair .changes-strip .impact-deltas { grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); column-gap: var(--sp-6); row-gap: 0; }
+        .wpair .changes-strip .idelta { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--sp-3); background: none; border-radius: 0;
+            padding: var(--sp-1-5) 0; border-bottom: var(--bw-hairline) solid var(--border-default); min-width: 0; }
+        .wpair .changes-strip .idelta .il { font-size: var(--text-body); color: var(--text-secondary); font-weight: var(--weight-regular); }
         .changes-head { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-tertiary); display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
         .changes-head svg { width: var(--icon-sm); height: var(--icon-sm); }
         /* scheduled-change alerts */
@@ -5010,27 +5045,15 @@
            keeps one rhythm: a flat 16 between its rows left them closer than the gap under the
            full-width hero. The 16 stays where it is a GUTTER, between the two cards sitting
            side by side. */
-        .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(max(274px, calc(50% - var(--sp-2))), 1fr)); row-gap: var(--sp-6); column-gap: var(--sp-4); margin-bottom: var(--sp-3); }
+        .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(max(274px, calc(50% - var(--sp-2))), 1fr)); row-gap: var(--sp-6); column-gap: var(--sp-4); margin-bottom: var(--sp-3); align-items: start; }
         /* A grid row already carries the page's own gap under it. The card's own
            bottom margin, meant for the standalone case, added a phantom 16px
            row to every grid and turned one 24px rhythm into 24, 39, 40. */
         .charts-grid > .chart-card { margin-bottom: 0; }
         .charts-grid > .chart-top { align-self: start; }
-        /* Ultra-wide: six tracks, two per chart, so a row's leftovers can fill
-           it. One chart left over takes the row and two take half each; a grid
-           of exactly two or four charts reads as pairs, not as a row of three
-           with a hole (the SEO page builds two grids of two). */
-        @media (min-width: 1800px) {
-            .charts-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-            .charts-grid > .chart-card { grid-column: span 2; }
-            .charts-grid > .chart-card:last-child:nth-child(odd) { grid-column: span 2; }
-            .charts-grid > .chart-card:only-child { grid-column: 1 / -1; }
-            .charts-grid > .chart-card:nth-child(3n+1):last-child { grid-column: 1 / -1; }
-            .charts-grid > .chart-card:nth-child(3n+1):nth-last-child(2),
-            .charts-grid > .chart-card:nth-child(3n+2):last-child { grid-column: span 3; }
-            .charts-grid:has(> :nth-child(2):last-child) > .chart-card,
-            .charts-grid:has(> :nth-child(4):last-child) > .chart-card { grid-column: span 3; }
-        }
+        /* Two by two at every width (12 Oct 2026): the page column stops at
+           1,200, so the 1,800px rule that put three charts in a row and spread
+           a short last row only ever left holes (DF-05). */
         .charts-grid > .chart-card:only-child { grid-column: 1 / -1; }  /* no orphan half-width charts */
         /* The same rule one row down: an odd count would sit the last chart
            beside a hole, which reads as a chart that failed to render. */
@@ -8739,6 +8762,12 @@ Projected Image UK"></textarea>
            made a second copy. */
         function actionsCard(actions, source, state, persist) {
             const card = el('div', 'card actions');
+            /* The table's heads, on a page (an answer in chat keeps its list). */
+            if (!state) {
+                const h = el('div', 'action-head');
+                h.append(el('span'), el('span', null, 'Action'), el('span', null, 'Priority'), el('span'));
+                card.append(h);
+            }
             actions.forEach((a, i) => {
                 const row = el('div', 'action');
                 const ck = el('div', 'check'); ck.innerHTML = I.check;
@@ -8758,6 +8787,7 @@ Projected Image UK"></textarea>
                 };
                 row.append(ck, el('div', 'text', a.text || ''));
                 if (a.priority) { const p = el('span', 'pill ' + a.priority, cap(a.priority)); p.title = cap(a.priority) + ' priority'; row.append(p); }
+                else row.append(el('span', 'pill-none'));   // keeps Track in its column
                 const track = el('button', 'track-btn'); track.type = 'button';
                 const tracking = () => { track.replaceChildren(ico(I.check), document.createTextNode('Tracking')); track.classList.add('on'); track.setAttribute('aria-pressed', 'true'); track.title = 'Measured under Tracked changes in Memory'; };
                 if (state && state.tracked && state.tracked[i]) tracking();
@@ -8808,6 +8838,32 @@ Projected Image UK"></textarea>
         /* The AI summary (the mix, spec 8.3): a section of its own at the top
            of a report, out of the header, with the skills it followed under it.
            Nothing when the run gave neither. */
+        /* TWO BLOCKS SIDE BY SIDE (see .wpair). left and right are the two
+           nodes, left already on the page; the pair takes left's place as one
+           full-row widget, and the halves stop being widgets of their own. A
+           missing half leaves the other where it is. */
+        function pairNodes(left, right, id, label, o) {
+            o = o || {};
+            if (!left || !right) return null;
+            const pair = el('div', 'wpair' + (o.even ? ' even' : ''));
+            const inner = el('div', 'wpair-in');
+            left.before(pair);
+            [left, right].forEach(n => ['data-widget', 'data-size', 'data-widget-label'].forEach(a => n.removeAttribute(a)));
+            inner.append(left, right);
+            pair.append(inner);
+            return widget(pair, id, 'full', label);
+        }
+        /* Traffic by channel: every month fetched, so it does not follow the
+           range chooser, which is why it can leave the chart grid to sit beside
+           Sales by sector (12 Oct 2026). */
+        function channelsCard(trends) {
+            if (!trends || !Array.isArray(trends.channels) || !trends.channels.length) return null;
+            const span = Math.min(24, Math.max(1, ...['sessions', 'revenue', 'orders'].map(k => (trends[k] || []).length)));
+            const cb = catBars({ title: 'Traffic by channel', source: 'Google Analytics 4', period: rangeLabel(span), color: CH[0],
+                                 items: trends.channels, format: fmtCompact, noIntro: true, height: 280 });
+            cb.classList.add('chart-top');
+            return cb;
+        }
         function summarySection(text, followed) {
             if (!text && !followed) return null;
             const sec = el('section', 'ai-summary widget-bare');
@@ -9665,7 +9721,8 @@ Projected Image UK"></textarea>
         const rangeLabel = (r) => 'last ' + r + ' months';
         /* Said once for both position charts (copy plan, pattern 15). */
         const POSITION_HELP = 'Lower is better. Position 1 is the top of search results.';
-        function renderTrendsBlock(box, trends, currency, range, onRange, intro, id) {
+        function renderTrendsBlock(box, trends, currency, range, onRange, intro, id, o) {
+            o = o || {};
             const has = (k) => trends && trends[k] && trends[k].length;
             const bare = !trends || !(has('revenue') || has('orders') || has('sessions') || has('clicks'));
             const money = (n) => moneyShort(n, currency);
@@ -9718,7 +9775,7 @@ Projected Image UK"></textarea>
                    cover every month fetched, so the card says that span rather
                    than borrowing the control's. It keeps its own height beside
                    a taller neighbour instead of stretching to 237px of white. */
-                if (has('channels')) {
+                if (has('channels') && !o.noChannels) {
                     const span = Math.min(24, Math.max(1, ...['sessions', 'revenue', 'orders'].map(k => (trends[k] || []).length)));
                     const cb = catBars(ga({ title: 'Traffic by channel', source: 'Google Analytics 4', period: rangeLabel(span), color: CH[0], items: trends.channels, format: fmtCompact }));
                     cb.classList.add('chart-top'); g.append(cb);
@@ -10383,7 +10440,8 @@ Projected Image UK"></textarea>
                 const v = ta.value; ta.value = ''; ta.style.height = 'auto'; pageAsk(page, v, data);
             };
             ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!e.repeat) sendIt(); } });
-            const btn = el('button', 'btn btn-primary pchat-send'); btn.innerHTML = I.send; btn.title = 'Ask';
+            /* Plain, not teal (12 Oct 2026): a report's one teal is its own action, and Ask is a side door. */
+            const btn = el('button', 'btn pchat-send'); btn.innerHTML = I.send; btn.title = 'Ask';
             btn.onclick = sendIt;
             row.append(ta, btn); card.append(row); wrap.append(card);
             return wrap;
@@ -10677,9 +10735,15 @@ Projected Image UK"></textarea>
                the first card the grid can move: one between two cards would take
                the arrangement (and Customise) down. The AI summary is that first
                card, the page's first section (the mix, spec 8.3). */
-            { const cs = changesStrip(data.changes, data.changes_since); if (cs) box.append(cs); }
-            { const sum = summarySection(data.structured && data.structured.summary, followedNote(data.structured));
-              if (sum) box.append(widget(sum, 'summary', 'full', 'Summary')); }
+            /* The summary and What changed are one pair (12 Oct 2026); without a
+               summary the strip keeps its fixed place before the first card. */
+            const byId = (id) => [...box.children].find(n => n.dataset && n.dataset.widget === id) || null;
+            { const cs = changesStrip(data.changes, data.changes_since);
+              const sum = summarySection(data.structured && data.structured.summary, followedNote(data.structured));
+              const sumW = sum ? widget(sum, 'summary', 'full', 'Summary') : null;
+              if (sumW) box.append(sumW);
+              if (cs && sumW) pairNodes(sumW, cs, 'summary', 'Summary and what changed');
+              else if (cs) box.append(cs); }
             const ofu = memories.filter(m => m.type === 'followup' && m.status === 'open');
             /* Every block from here to the page chat is a card the grid can
                move. The alerts banner, the header and the changes strip above
@@ -10706,14 +10770,25 @@ Projected Image UK"></textarea>
             /* Each KPI is a card of its own, straight on the page, so a tile
                can be moved or hidden by itself. No heading over them: once
                they can be scattered, a heading above the first labels nothing. */
+            /* A figure with a trend keeps its own tile, so Customise still moves
+               and hides each one; the counts with no trend are one figure group,
+               not four tiles over holes (12 Oct 2026, DF-06). */
             if (Array.isArray(data.metrics) && data.metrics.length) {
-                withSparks(data.metrics, data.trends).forEach((m, i) => box.append(widget(statCard(m, i), wgKpiId(m.label), 'sm', m.label)));
+                const all = withSparks(data.metrics, data.trends);
+                const plain = all.filter(m => !m.spark);
+                all.filter(m => m.spark).forEach((m, i) => box.append(widget(statCard(m, i), wgKpiId(m.label), 'sm', m.label)));
+                if (plain.length) box.append(widget(metricsStrip(plain), 'kpi-counts', 'full', 'Counts'));
             }
             if (Array.isArray(data.sector_sales) && data.sector_sales.length) {
-                box.append(widget(cardSection('Sales by sector', null,
-                    sectorSalesTable(data.sector_sales, data.currency)), 'sectors'));
+                const secW = widget(cardSection('Sales by sector', null,
+                    sectorSalesTable(data.sector_sales, data.currency)), 'sectors');
+                box.append(secW);
+                pairNodes(secW, channelsCard(data.trends), 'sectors', 'Sales by sector and traffic by channel');
+            } else {
+                const ch = channelsCard(data.trends);
+                if (ch) box.append(widget(ch, 'channels', 'full', 'Traffic by channel'));
             }
-            renderTrendsBlock(box, data.trends, data.currency, ovRange, (v) => { ovRange = v; }, intro, 'trends');
+            renderTrendsBlock(box, data.trends, data.currency, ovRange, (v) => { ovRange = v; }, intro, 'trends', { noChannels: true });
             const s = Object.assign({}, data.structured); delete s.summary;
             /* The heading used to stand only over insights, which left figures
                or sections sent without any as a bare block between two cards,
@@ -10730,8 +10805,13 @@ Projected Image UK"></textarea>
                 box.append(widget(el('div', 'section-title', 'Details'), 'details'));
                 secs.forEach(sec => box.append(sectionCard(sec)));
             }
-            box.append(pageChatPanel('overview', data));
+            const chat = pageChatPanel('overview', data);
+            box.append(chat);
             cardifySections(box);
+            /* The actions beside what is notable, the details beside the page's
+               questions (12 Oct 2026, R6). */
+            pairNodes(byId('actions'), byId('notable'), 'actions', 'Recommended actions and what is notable');
+            pairNodes(byId('details'), chat, 'details', 'Details and questions');
             syncPrintBtn();
         }
 

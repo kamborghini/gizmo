@@ -2039,6 +2039,39 @@ def t_an_order_missing_its_terms_is_flagged_on_the_queue_row():
 
 
 @test
+def t_a_report_pairs_its_short_blocks():
+    """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
+    so a three-line summary, four findings or a short table sat in the left
+    third with the rest of the row empty (DF-02, DF-03, DF-04, DF-07, DF-09).
+    A short block now sits beside the block it belongs with, as one widget the
+    grid moves as one, and the two stack when the pair is narrower than 64rem."""
+    fn = fn_src("function pairNodes(") if "function pairNodes(" in SCRIPT else ""
+    ok("el('div', 'wpair-in')" in fn and "widget(pair, id, 'full', label)" in fn, "a pair is one full-row widget holding the two")
+    pin = CSS.split("\n        .wpair-in {")[1].split("}")[0] if "\n        .wpair-in {" in CSS else ""
+    ok("grid-template-columns: minmax(0, 7fr) minmax(0, 5fr)" in pin and "align-items: start" in pin, "seven twelfths and five, each as tall as itself")
+    ok(".wpair { container: wpair / inline-size; }" in CSS and "@container wpair (max-width: 64rem) { .wpair-in { grid-template-columns: minmax(0, 1fr);" in CSS,
+       "and one above the other when the pair is narrow")
+    ov = fn_src("function renderOverview(")
+    for pair in ("pairNodes(sumW, cs, 'summary'", "pairNodes(secW, channelsCard(data.trends), 'sectors'",
+                 "pairNodes(byId('actions'), byId('notable'), 'actions'", "pairNodes(byId('details'), chat, 'details'"):
+        ok(pair in ov, "Overview pairs: " + pair)
+    ok("noChannels: true" in ov, "Traffic by channel leaves the chart grid to sit beside Sales by sector")
+    ok("el('button', 'btn pchat-send')" in SCRIPT and "btn-primary pchat-send" not in SCRIPT,
+       "the page chat's send is plain: one teal per screen, and Ask is a side door")
+    ok("widget(metricsStrip(plain), 'kpi-counts', 'full', 'Counts')" in ov,
+       "the four counts with no trend are one figure group, not four tiles over holes")
+    act = CSS.split("\n        .card.actions {")[1].split("}")[0] if "\n        .card.actions {" in CSS else ""
+    ok("display: grid" in act and "minmax(0, 1fr)" in act, "Recommended actions is a table: the tick, the action, its priority and Track")
+    ok(".card.actions > :is(.action, .action-head) { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid;" in CSS,
+       "every action on the same columns")
+    ok(".action .text + .pill, .action .text + .track-btn { margin-left: auto; }" not in CSS,
+       "the priority and Track follow their column, not the far edge 900px from the sentence")
+    ok("el('div', 'action-head')" in fn_src("function actionsCard("), "under heads that say Action and Priority")
+    ok("@media (min-width: 1800px) {\n            .charts-grid" not in CSS and "align-items: start" in CSS.split("\n        .charts-grid {")[1].split("}")[0],
+       "charts stay two by two at every width, each only as tall as its own chart")
+
+
+@test
 def t_an_empty_state_is_one_line_under_its_heading():
     """R8, 12 Oct 2026. An empty state was a tall centred box across the row
     (Memory, Skills and Requests: an icon and one line in the middle of a
@@ -6819,7 +6852,7 @@ def t_every_widget_id_is_well_formed_and_named_once_per_renderer():
         found += [(m.start(), v) for v in re.findall(r":\s*'([^']*)'", m.group(1))]
     found += [(-1, v) for v in re.findall(r'data-widget="([^"]*)"', HTML)]
     # The id a group's caller passes in, like the Overview's and SEO's 'trends', is a literal too.
-    for m in re.finditer(r"render(?:TrendsBlock|SeoTrends)\([^\n]*, '([^']*)'\);", SCRIPT):
+    for m in re.finditer(r"render(?:TrendsBlock|SeoTrends)\([^\n]*?, '([^']*)'(?:, \{[^}]*\})?\);", SCRIPT):
         found.append((m.start(), m.group(1)))
     ok(len(found) >= 5, "found the Overview's ids (%d)" % len(found))
     for _, v in found:
@@ -6972,7 +7005,7 @@ def t_a_card_heading_carries_its_widget_to_the_card_and_a_group_is_built_by_its_
     ok("const group = el('div', 'widget-group');" in trends and "if (id) widget(group, id, 'full', 'Performance over time');" in trends
        and "trendsSection(group, " in trends and "cardifySections(group);" in trends,
        "the trends heading and its charts are one group, with the id its caller passes")
-    ok(SCRIPT.count("renderTrendsBlock(") == 2 and "intro, 'trends');" in fn_src("function renderOverview("),
+    ok(SCRIPT.count("renderTrendsBlock(") == 2 and "intro, 'trends', { noChannels: true });" in fn_src("function renderOverview("),
        "the Overview is its one caller and names it")
     calls = [args for _, args in _wg_calls(SCRIPT, "renderStructured") if len(args) > 2 and "ids:" in args[2]]
     ok(len(calls) == 1 and calls[0][0] == "box", "only the Overview passes ids to renderStructured")
