@@ -2660,7 +2660,8 @@ def t_a_report_pairs_its_short_blocks():
     A short block now sits beside the block it belongs with, as one widget the
     grid moves as one, and the two stack when the pair is narrower than 64rem."""
     fn = fn_src("function pairNodes(") if "function pairNodes(" in SCRIPT else ""
-    ok("el('div', 'wpair-in')" in fn and "widget(pair, id, 'full', label)" in fn, "a pair is one full-row widget holding the two")
+    ok("el('div', 'wpair-in')" in fn and "widget(pair, id + '-pair', 'full', label)" in fn,
+       "a pair is one full-row widget holding the two, with an id of its own (final review I-1)")
     pin = CSS.split("\n        .wpair-in {")[1].split("}")[0] if "\n        .wpair-in {" in CSS else ""
     ok("grid-template-columns: minmax(0, 7fr) minmax(0, 5fr)" in pin and "align-items: start" in pin, "seven twelfths and five, each as tall as itself")
     ok(".wpair { container: wpair / inline-size; }" in CSS
@@ -7360,6 +7361,36 @@ def t_a_saved_layout_naming_merged_widgets_still_loads():
     ok(got.get("hidden") == [], "nothing the old layout hid hides the band: " + str(got))
     ok(got.get("order", [None])[0] == ids[0] and sorted(got.get("order", [])) == sorted(ids),
        "and every card is placed once, the band at its default place: " + str(got))
+
+
+@test
+def t_an_old_layout_never_hides_what_a_pair_brought_in():
+    """Final review I-1, 12 Oct 2026: a pair took its left half's old id, so a
+    layout that once hid Details now hid Details and questions (the report's
+    question box, which could not be hidden before), one that hid Summary hid
+    What changed with it, and SEO's Checks took the score. Each pair, and the
+    score with its checks, now has an id of its own: an old layout's id for a
+    half is dropped, and the pair shows at its default place."""
+    ok("return widget(pair, id + '-pair', 'full', label);" in fn_src("function pairNodes("), "a pair has an id of its own")
+    ok("widget(strip, 'score-checks', 'full', 'Score and checks')" in SCRIPT and "widget(strip, 'checks'," not in SCRIPT, "and so do SEO's score and checks")
+    if not any(os.access(os.path.join(p, "node"), os.X_OK) for p in os.environ.get("PATH", "").split(os.pathsep)):
+        print("       (node unavailable, skipped)")
+        return
+    js = (_WG_HARNESS.split("const ran = {}")[0]
+          + "console.log(JSON.stringify(W.wgMergeOrder(JSON.parse(process.argv[3]), JSON.parse(process.argv[4]))));")
+    ids = ["summary-pair", "kpis-pair", "trends", "opportunities-pair", "details-pair"]
+    saved = {"order": ["details", "summary", "kpis", "trends", "opportunities"], "hidden": ["details", "summary", "kpis"]}
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(js)
+        path = fh.name
+    try:
+        r = subprocess.run(["node", path, os.path.join(ROOT, "static", "index.html"), json.dumps(ids), json.dumps(saved)],
+                           capture_output=True, text=True, timeout=60)
+    finally:
+        os.unlink(path)
+    got = json.loads((r.stdout or "{}").strip() or "{}")
+    ok(got.get("hidden") == [], "nothing an old layout hid hides a pair: " + str(got))
+    ok(sorted(got.get("order", [])) == sorted(ids), "and every block is placed once: " + str(got))
 
 
 @test

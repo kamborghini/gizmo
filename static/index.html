@@ -9262,7 +9262,9 @@ Projected Image UK"></textarea>
             inner.append(left, right);
             pair.append(inner);
             if (o.plain) return pair;   // a page that is not arranged (a product's plan)
-            return widget(pair, id, 'full', label);
+            /* An id of its own: with the left half's, a layout that once hid
+               Details hid the question box paired with it (final review I-1). */
+            return widget(pair, id + '-pair', 'full', label);
         }
         /* The card cardifySections made from a heading with these words, or null. */
         function cardTitled(box, words) {
@@ -11292,7 +11294,8 @@ Projected Image UK"></textarea>
                 if (sm && sm.detail && (sm.detail.items || []).length) statOpens(sc, sm);
                 strip.prepend(sc);
             }
-            if (strip) box.append(widget(strip, 'checks', 'full', 'Score and checks'));
+            /* Its own id: a layout that hid the old Checks must not hide the score with them. */
+            if (strip) box.append(widget(strip, 'score-checks', 'full', 'Score and checks'));
             renderSeoTrends(box, data.trends, seoRange, (v) => { seoRange = v; }, intro, 'trends');
             // Lead with money opportunities, then findings, then supporting detail
             if (Array.isArray(s.actions) && s.actions.length) {
