@@ -2250,7 +2250,7 @@ def t_loan_units_lends_from_its_header_and_chases_from_out_now():
     ok("'chasing'" not in fn and "'No due date: amber after'" in fn and "oHead.append(chase);" in fn, "the chase limit is in Out now's head")
     ok("if (units.length) box.append(widget(oCard, 'out'));" in fn, "with no units, only the register says so")
     hm = fn_src("async function loanHistoryModal(")
-    ok("dtable([{ head: 'With' }, { head: 'Out' }, { head: 'Back' }]" in hm, "a unit's history is a small table")
+    ok("dtable([{ head: 'With' }, { head: 'Out', cap: true }, { head: 'Back', cap: true }]" in hm, "a unit's history is a small table, its dates named on a phone")
 
 
 @test
@@ -2308,8 +2308,8 @@ def t_team_is_tables_with_the_admin_actions_in_a_menu():
     Saves; Work's three cards stretched six short columns across the page; and
     Activity put the area 700px from the action it labels."""
     pp = fn_src("function renderTeamPeople(")
-    ok("dtable([{ head: 'Person', cls: 'stack' }, { head: 'Role' }, { head: 'Made', cls: 'num' }, { head: 'Dispatched', cls: 'num' }, "
-       "{ head: 'Files', cls: 'num' }, { head: 'Sales', cls: 'num' }, { head: 'Last login' }" in pp, "People is a table (WS-13)")
+    ok("dtable([{ head: 'Person', cls: 'stack' }, { head: 'Role' }, { head: 'Made', cls: 'num', cap: true }, { head: 'Dispatched', cls: 'num', cap: true }, "
+       "{ head: 'Files', cls: 'num', cap: true }, { head: 'Sales', cls: 'num', cap: true }, { head: 'Last login', cap: true }" in pp, "People is a table (WS-13), its counts named on a phone")
     ok("'Made, dispatched, files and sales are the last 30 days.'" in pp and "'Switched off'" in pp and "'Never logged in'" in pp, "in the mockup's words")
     ok("dropMenu(more, items)" in pp and "label: 'Delete account', icon: I.trash, danger: true" in pp and "label: 'Reset password'" in pp,
        "the admin actions are in the row's menu, Delete account in red (WS-14)")
@@ -2326,7 +2326,7 @@ def t_team_is_tables_with_the_admin_actions_in_a_menu():
     ok("@container dt (max-width: 24rem) {\n            .dt-xs > .dtable { display: block; }" in CSS, "a small table's own two-line stop")
     ok("#team-content .wpair-in > .card { margin-top: 0; }" in CSS and "#team-content .wpair + .card { margin-top: var(--page-rhythm); }" in CSS,
        "the pair's two heads share a line, and the sessions keep the page's rhythm under them")
-    ok("dtable([{ head: 'Person' }, { head: 'Date' }, { head: 'Clock in' }, { head: 'Clock out' }, { head: 'Hours', cls: 'num' }, { head: 'Actions', cls: 'num' }" in wk
+    ok("dtable([{ head: 'Person' }, { head: 'Date' }, { head: 'Clock in' }, { head: 'Clock out' }, { head: 'Hours', cls: 'num' }, { head: 'Actions', cls: 'num', cap: true }" in wk
        and "el('span', 'tm-daytrack')" in wk, "the sessions are a table with the day line, 07:00 to 17:00 (WS-10)")
     fd = fn_src("function renderTeamFeed(")
     ok("dtable([{ head: 'Time' }, { head: 'Area' }, { head: 'Who' }, { head: 'What' }]" in fd, "Activity is a table (WS-11)")
@@ -2457,6 +2457,107 @@ def t_customise_puts_its_controls_on_the_blocks_first_line():
     ok(":not(:has(> .card-head)) { padding-top: var(--sp-8); }" not in CSS, "with no band reserved for it")
     ok(".ov-wrap.wg-editing > [data-widget] > .wg-grip {" in CSS and "gripVertical: SV(" in SCRIPT, "the grip in the gutter left of the block")
     ok("n.querySelectorAll(':scope > .wg-grip').forEach(b => b.remove());" in fn_src("function wgUndecorate("), "and both go when Customise ends")
+
+
+PHONE_ONE = ".ov-hero:not(.pm-head):has(> .ov-hero-act > :is(button, .btn):not([data-wg-customize], [hidden])):not(:has(> .ov-hero-act > :not([data-wg-customize], [hidden]) ~ :not([data-wg-customize], [hidden])))"
+
+
+@test
+def t_a_phone_header_keeps_a_lone_action_on_the_title_line():
+    """R13, 12 Oct 2026: on a phone every header's actions took a row under the
+    title, so a page with one action (Refresh all, Refresh, More, Loan out) left
+    it alone on that row under the gear at the title's right. One button now
+    sits on the title's line, beside the gear; two or more keep their row, and
+    so does a stamp with its Refresh (the Size list's: beside the title it
+    squeezed "Size list" onto two lines)."""
+    ph = CSS.split("@media (max-width: 640px) {\n            /* 32px gutters spend 64px")[1].split("\n        }\n")[0]
+    ok(PHONE_ONE + " { flex-wrap: nowrap; }" in ph, "a header with one action keeps one line")
+    ok(PHONE_ONE + " > .ov-hero-act { flex: none; flex-basis: auto; }" in ph, "the action at its own width")
+    ok(PHONE_ONE + ":has(> .ov-hero-act > [data-wg-customize]) > .ov-hero-act { margin-right: calc(var(--control-h-lg) + var(--sp-2)); }" in ph
+       and PHONE_ONE + ":has(> .ov-hero-act > [data-wg-customize]) > .ph-text { padding-right: 0; }" in ph,
+       "left of the gear, which keeps its place at the right")
+
+
+KT = ".ktable:not(.sizes-table, .mem-table, .cx-docs)"
+
+
+@test
+def t_a_phone_reads_every_table_as_two_line_rows():
+    """R13, 12 Oct 2026: on a phone the house tables kept their columns and
+    scrolled sideways inside their cards (Keywords, the trade radar, Sector
+    comparison, Customer segments, CRM contacts, Hours per person), or squeezed
+    an email into a column one word wide. Each row is now two lines: the cell
+    that leads it, then the others, each after its column's head."""
+    sh = fn_src("function syncTableHeads(") if "function syncTableHeads(" in SCRIPT else ""
+    ok("table.ktable > :is(tbody, tfoot) > tr:not([data-kh])" in sh and "td.dataset.h = h" in sh and "td.classList.add('kt-main')" in sh,
+       "each body cell carries its column's head, and the head marked kt-main names the cell that leads")
+    ok("syncToggles(); syncDialogs(); syncTableHeads();" in SCRIPT, "stamped in the one batched pass, wherever a table is built")
+    ph = CSS.split("/* R13: on a phone a table's rows are two lines")[1].split("\n        }\n")[0] if "/* R13: on a phone a table's rows are two lines" in CSS else ""
+    ok(KT + " { display: block; min-width: 0; }" in ph and KT + " > thead { display: none; }" in ph, "no head row and no sideways scroll")
+    ok(KT + " > :is(tbody, tfoot) > tr { display: flex; flex-wrap: wrap;" in ph, "a row wraps its cells")
+    ok(KT + " > :is(tbody, tfoot) > tr:not(:has(> .kt-main)) > td:first-child, " + KT + " > :is(tbody, tfoot) > tr > td.kt-main { flex: 1 1 100%; order: -1;" in ph,
+       "the leading cell has the first line")
+    ok(KT + " > :is(tbody, tfoot) > tr > td[data-h]::before { content: attr(data-h);" in ph, "every other value follows its head")
+    ok("th.kt-main" not in CSS, "a table marks its leading column on the head cell, not in CSS")
+    ok(KT + " > :is(tbody, tfoot) > tr[hidden], " + KT + " > :is(tbody, tfoot) > tr > td[hidden] { display: none; }" in ph,
+       "a hidden row stays hidden (Keywords' rows past 15 showed on a phone)")
+    ok(".kw-more { display: flex; flex-wrap: wrap;" in CSS, "and Keywords' count goes under Show all rather than off the screen")
+    ok("cols.push('<th class=\"kt-main\">Name</th>');" in SCRIPT, "CRM contacts lead with the name, not the tick box")
+    ok("['Segment', 'kt-main']" in fn_src("function segTable("), "the segments lead with the segment, not its count")
+    ok("heads.push(th.colSpan > 1 ? null : th)" in fn_src("function syncTableHeads("), "a selection bar across the head names no column")
+
+
+@test
+def t_a_two_line_row_names_its_bare_numbers():
+    """R13, 12 Oct 2026: a table's two-line rows dropped its head, so a phone
+    read Liability's "5 87 days", the runs' "1 0 0", Team's "5 8 11 17" and
+    Products' "336" with nothing saying what each counts. A column marked cap
+    now shows its head before its value once its row is two lines."""
+    dt = fn_src("function dtable(")
+    ok("if (cols[i] && cols[i].cap) cell.dataset.h = cols[i].cap === true ? cols[i].head : cols[i].cap;" in dt, "a cap column's cells carry its head")
+    for s in ("xs", "s", "m", "l"):
+        ok(".dt-%s > .dtable > .dt-row > .dt-c[data-h]::before { content: attr(data-h); margin-right: var(--sp-1); color: var(--text-tertiary); }" % s in CSS
+           and ".dt-%s > .dtable > .dt-row > .dt-c[data-h] { color: var(--text-secondary); }" % s in CSS, "and shows it when its rows are two lines (%s)" % s)
+    ok("{ head: 'Orders', cls: 'num', cap: true }, { head: 'Oldest', cls: 'num', cap: true }" in SCRIPT, "Liability's orders and oldest")
+    ok("{ head: 'Invoices', cls: 'num', cap: true }" in SCRIPT and "{ head: 'Contacts', cls: 'num', cap: true }" in SCRIPT, "the runs' three counts")
+    ok("{ head: 'Units', cls: 'num', cap: true }, { head: 'Revenue', cls: 'num', cap: true }" in SCRIPT, "Products' units and revenue")
+    ok("{ head: 'Since', cap: true }, { head: 'So far', cap: true }" in SCRIPT, "and the clock's two times")
+
+
+@test
+def t_a_phone_figure_group_fits_its_figures():
+    """R13, 12 Oct 2026: on a phone a figure group kept the desk's 40px gap,
+    so three across left 93px a figure and £63,820 (CRM), £66,477 (Liability)
+    ran past their tile while "115 days" broke in two, with the hairline drawn
+    for the phone's 16 (8px before the next figure, not in the middle). And
+    the half-row rule for five figures (three then two at their own widths)
+    outranked the phone's, so Keywords' paid search ran 73px past the screen
+    and was cut off."""
+    ph = CSS.split("/* A FIGURE GROUP ON A PHONE:")[1].split("\n        }\n")[0]
+    ok(".metrics.metrics-strip { display: grid; width: auto; column-gap: var(--sp-4); grid-template-columns: repeat(2, minmax(0, 1fr)); }" in ph,
+       "the phone's 16 between figures, the hairline in its middle")
+    ok("@media (min-width: 641px) { .wpair .metrics.metrics-strip:has(> :nth-child(5):last-child) { display: grid; grid-template-columns: repeat(3, max-content); } }" in CSS
+       and "\n        .wpair .metrics.metrics-strip:has(> :nth-child(5):last-child) {" not in CSS,
+       "three then two at their own widths only off a phone")
+
+
+@test
+def t_every_phone_target_is_a_finger_wide():
+    """R13, 12 Oct 2026: on a phone Track was 32 tall, an action's tick reached
+    32 with its hit area, and three text links (a sector's name, a skill's Show
+    all, What's new's Open) were 15 to 20 tall. Each keeps its look and gets an
+    invisible 40 high target, as Claim and the clear buttons already have."""
+    ok(":is(.track-btn, .seclink, .sk-more, .rel-open) { position: relative; }" in CSS
+       and ":is(.track-btn, .seclink, .sk-more, .rel-open)::after { content: \"\"; position: absolute; left: 0; right: 0; top: 50%; height: var(--control-h-lg); margin-top: calc(var(--control-h-lg) / -2); }" in CSS,
+       "Track and the three links get a 40 high target across their own width")
+    ok(".action .check::after { content: \"\"; position: absolute; inset: calc(-1 * var(--sp-3)); }" in CSS, "and the tick's reaches 40")
+
+
+@test
+def t_a_phone_keeps_scan_beside_its_field():
+    """R13, 12 Oct 2026: on a phone Keywords' Scan sat alone on a line under its
+    field, the field's 18rem basis and the button being wider than 358."""
+    ok("@media (max-width: 640px) { .scan-card > .act-row { flex-wrap: nowrap; } .scan-card .scan-url { flex-basis: 0; } }" in CSS, "the field and Scan share the line")
 
 
 @test

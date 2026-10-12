@@ -971,6 +971,14 @@
                 width: var(--control-h-lg); min-width: var(--control-h-lg); justify-content: center; }
             [data-wg-customize] .wg-txt { display: none; }
             #view-forecast .ov-hero-act > .btn:not([data-wg-customize]) { flex: 1 1 0; min-width: 0; }
+            /* R13: one action (Refresh all, Refresh, More, Loan out) stays on the title's line, beside the
+               gear, not alone on a row under it. Two or more keep their row under the title, and so does a
+               stamp with its Refresh (the Size list's), which is a line of its own. */
+            .ov-hero:not(.pm-head):has(> .ov-hero-act > :is(button, .btn):not([data-wg-customize], [hidden])):not(:has(> .ov-hero-act > :not([data-wg-customize], [hidden]) ~ :not([data-wg-customize], [hidden]))) { flex-wrap: nowrap; }
+            .ov-hero:not(.pm-head):has(> .ov-hero-act > :is(button, .btn):not([data-wg-customize], [hidden])):not(:has(> .ov-hero-act > :not([data-wg-customize], [hidden]) ~ :not([data-wg-customize], [hidden]))) > .ph-text { flex: 1 1 0; }
+            .ov-hero:not(.pm-head):has(> .ov-hero-act > :is(button, .btn):not([data-wg-customize], [hidden])):not(:has(> .ov-hero-act > :not([data-wg-customize], [hidden]) ~ :not([data-wg-customize], [hidden]))) > .ov-hero-act { flex: none; flex-basis: auto; }
+            .ov-hero:not(.pm-head):has(> .ov-hero-act > :is(button, .btn):not([data-wg-customize], [hidden])):not(:has(> .ov-hero-act > :not([data-wg-customize], [hidden]) ~ :not([data-wg-customize], [hidden]))):has(> .ov-hero-act > [data-wg-customize]) > .ov-hero-act { margin-right: calc(var(--control-h-lg) + var(--sp-2)); }
+            .ov-hero:not(.pm-head):has(> .ov-hero-act > :is(button, .btn):not([data-wg-customize], [hidden])):not(:has(> .ov-hero-act > :not([data-wg-customize], [hidden]) ~ :not([data-wg-customize], [hidden]))):has(> .ov-hero-act > [data-wg-customize]) > .ph-text { padding-right: 0; }
         }
         /* KPI cards: uppercase micro-label + large figure + colored delta */
         /* A floor AND a ceiling. auto-fill with only a floor turned a 2,560px
@@ -1337,12 +1345,14 @@
         .metrics-strip > .stat:has(.stat-spark) { width: var(--fig-spark-w); }
         /* Five figures in half a row run three then two, never four and one
            alone (Keywords' paid search, beside the keyword table). */
-        .wpair .metrics.metrics-strip:has(> :nth-child(5):last-child) { display: grid; grid-template-columns: repeat(3, max-content); }
+        @media (min-width: 641px) { .wpair .metrics.metrics-strip:has(> :nth-child(5):last-child) { display: grid; grid-template-columns: repeat(3, max-content); } }
         /* A FIGURE GROUP ON A PHONE: two across, and three across for three,
            five and six, so no figure sits alone on a row; a figure with a
-           sparkline takes the row (the .metrics phone rule). */
+           sparkline takes the row (the .metrics phone rule). The phone's 16
+           between them, as .metrics has there: the desk's 40 left three money
+           figures 93px each, and their hairline is drawn for 16. */
         @media (max-width: 640px) {
-            .metrics.metrics-strip { display: grid; width: auto; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .metrics.metrics-strip { display: grid; width: auto; column-gap: var(--sp-4); grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .metrics.metrics-strip:has(> :nth-child(3):last-child),
             .metrics.metrics-strip:has(> :nth-child(5):last-child),
             .metrics.metrics-strip:has(> :nth-child(6):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -2391,7 +2401,7 @@
         .pchat-send svg { width: var(--icon-md); height: var(--icon-md); }
         /* customer sector selector */
         .seclink { background: transparent; border: 0; font: inherit; font-weight: var(--weight-medium); cursor: pointer; padding: 0; text-align: left; }
-        .kw-more { display: flex; align-items: center; gap: var(--sp-3); padding-top: var(--sp-3); }
+        .kw-more { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); padding-top: var(--sp-3); }
         /* Two short tables side by side in one card (Customers' top customers,
            the trade radar's two lists), one above the other when narrow. */
         .duo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--gap-cols); row-gap: var(--sp-6); align-items: start; }
@@ -2534,6 +2544,8 @@
             .dt-xs > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; order: -1; }
             .dt-xs > .dtable > .dt-row > .dt-c:not(.dt-main, .act) { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
             .dt-xs > .dtable > .dt-row > .dt-c:empty { display: none; }
+            .dt-xs > .dtable > .dt-row > .dt-c[data-h] { color: var(--text-secondary); }
+            .dt-xs > .dtable > .dt-row > .dt-c[data-h]::before { content: attr(data-h); margin-right: var(--sp-1); color: var(--text-tertiary); }
         }
         @container dt (max-width: 40rem) {
             .dt-s > .dtable { display: block; }
@@ -2542,6 +2554,8 @@
             .dt-s > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; order: -1; }
             .dt-s > .dtable > .dt-row > .dt-c:not(.dt-main, .act) { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
             .dt-s > .dtable > .dt-row > .dt-c:empty { display: none; }
+            .dt-s > .dtable > .dt-row > .dt-c[data-h] { color: var(--text-secondary); }
+            .dt-s > .dtable > .dt-row > .dt-c[data-h]::before { content: attr(data-h); margin-right: var(--sp-1); color: var(--text-tertiary); }
             .dt-s > .dtable > .dt-row > .dt-c.go { display: none; }
         }
         @container dt (max-width: 56rem) {
@@ -2551,6 +2565,8 @@
             .dt-m > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; order: -1; }
             .dt-m > .dtable > .dt-row > .dt-c:not(.dt-main, .act) { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
             .dt-m > .dtable > .dt-row > .dt-c:empty { display: none; }
+            .dt-m > .dtable > .dt-row > .dt-c[data-h] { color: var(--text-secondary); }
+            .dt-m > .dtable > .dt-row > .dt-c[data-h]::before { content: attr(data-h); margin-right: var(--sp-1); color: var(--text-tertiary); }
             .dt-m > .dtable > .dt-row > .dt-c.go { display: none; }
         }
         @container dt (max-width: 72rem) {
@@ -2560,6 +2576,8 @@
             .dt-l > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; order: -1; }
             .dt-l > .dtable > .dt-row > .dt-c:not(.dt-main, .act) { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
             .dt-l > .dtable > .dt-row > .dt-c:empty { display: none; }
+            .dt-l > .dtable > .dt-row > .dt-c[data-h] { color: var(--text-secondary); }
+            .dt-l > .dtable > .dt-row > .dt-c[data-h]::before { content: attr(data-h); margin-right: var(--sp-1); color: var(--text-tertiary); }
             .dt-l > .dtable > .dt-row > .dt-c.go { display: none; }
         }
         /* Liability (12 Oct 2026): every customer owing in one table, what they
@@ -4611,6 +4629,28 @@
         .ktable :is(th, td):first-child { padding-left: 0; }
         .ktable :is(th, td):last-child { padding-right: 0; }
         .ktable tr:last-child td { border-bottom: 0; }
+        /* R13: on a phone a table's rows are two lines, never a sideways scroll:
+           the cell that leads it (the first, or the one its head marks kt-main)
+           on the first line, then the others, each after its column's head
+           (stamped as data-h by syncTableHeads). The size list, Memory's notes
+           and Xero sync's documents keep phone layouts of their own. */
+        @media (max-width: 640px) {
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) { display: block; min-width: 0; }
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > thead { display: none; }
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) { display: block; }
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-3); row-gap: var(--sp-0-5);
+                padding: var(--sp-2-5) 0; border-bottom: var(--bw-hairline) solid var(--border-soft); }
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr:last-child { border-bottom: 0; }
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr > td { display: block; height: auto; padding: 0; border: 0; min-width: 0; max-width: 100%; text-align: left; white-space: normal;
+                font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); }
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr > td:empty { display: none; }
+            /* A row a list hides (Keywords' past fifteen) stays hidden: the flex above outranks [hidden]. */
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr[hidden], .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr > td[hidden] { display: none; }
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr:not(:has(> .kt-main)) > td:first-child, .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr > td.kt-main { flex: 1 1 100%; order: -1;
+                font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-primary); }
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr > td[data-h]::before { content: attr(data-h); margin-right: var(--sp-1); color: var(--text-tertiary); }
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr:not(:has(> .kt-main)) > td:first-child::before, .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr > td.kt-main::before { content: none; }
+        }
         /* The CRM's two tables are the house table: a 32 head and 44 rows, 12
            between columns, the outer columns on the text edge. (They carried a
            16px cell of their own, which made a 53px row and beat the outer-column
@@ -4780,7 +4820,7 @@
             .chart-expand { min-width: var(--control-h-sm); }
             /* The 16px tick keeps its look; its hit area is a finger wide. */
             .action .check { position: relative; }
-            .action .check::after { content: ""; position: absolute; inset: calc(-1 * var(--sp-2)); }
+            .action .check::after { content: ""; position: absolute; inset: calc(-1 * var(--sp-3)); }
         }
         input.field-sm, select.field-sm { height: var(--control-h); min-height: var(--control-h);
             padding-block: 0; font-size: var(--text-body); line-height: var(--lh-control); border-radius: var(--radius-field); }
@@ -5031,6 +5071,8 @@
         .kbadge { display: inline-flex; align-items: center; height: var(--tag-h); font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; padding: 0 var(--sp-2); border-radius: var(--radius-tag); margin-left: var(--sp-2); background: var(--warning-bg); color: var(--warning); vertical-align: middle; flex: none; }
         .kbadge.win { background: var(--success-bg); color: var(--success); }
         .scan-url { flex: 1 1 18rem; min-width: 0; }
+        /* R13: on a phone the field gives way, so Scan stays beside it rather than alone under it. */
+        @media (max-width: 640px) { .scan-card > .act-row { flex-wrap: nowrap; } .scan-card .scan-url { flex-basis: 0; } }
         .scan-out { display: flex; flex-direction: column; gap: var(--sp-2); }
         .scan-out:empty { display: none; }
         /* The findings bleed to the card's edges as rows; the summary and the
@@ -6131,6 +6173,10 @@
             .mail-tick::after, .mail-claim::after { content: ""; position: absolute; height: var(--control-h-lg); }
             .mail-tick::after { left: 50%; top: 50%; width: var(--control-h-lg); margin: calc(var(--control-h-lg) / -2) 0 0 calc(var(--control-h-lg) / -2); }
             .mail-claim::after { left: 0; right: 0; top: 50%; margin-top: calc(var(--control-h-lg) / -2); }
+            /* Track, a sector's name, a skill's Show all and What's new's Open keep their look and get the same invisible
+               40 high target across their own width (R13: they were 15 to 32 tall). */
+            :is(.track-btn, .seclink, .sk-more, .rel-open) { position: relative; }
+            :is(.track-btn, .seclink, .sk-more, .rel-open)::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: var(--control-h-lg); margin-top: calc(var(--control-h-lg) / -2); }
             /* The Size list's A to Z is one swipeable line of 40 squares rather than four rows of them. */
             .az { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; margin-inline: calc(-1 * var(--sp-1)); padding-inline: var(--sp-1); }
             .az::-webkit-scrollbar { display: none; }
@@ -7589,7 +7635,8 @@ Projected Image UK"></textarea>
            list shows instead: its one line, no head over nothing. opts.stop is
            the width its rows turn two-line at: xs, s, m (the default) or l.
            opts.main is the column whose cell leads a two-line row (the first
-           unless said). */
+           unless said). A column with cap (true, or its own word) names its
+           value in a two-line row, where the head is gone: "Orders 5", not "5". */
         function dtable(cols, rows, opts) {
             opts = opts || {};
             if (!rows.length) return opts.empty || el('div', 'empty', 'Nothing here yet.');
@@ -7612,6 +7659,7 @@ Projected Image UK"></textarea>
                 r.cells.forEach((c, i) => {
                     const cell = el('div', 'dt-c' + (i === (opts.main || 0) ? ' dt-main' : '') + (cols[i] && cols[i].cls ? ' ' + cols[i].cls : ''));
                     cell.setAttribute('role', 'cell');
+                    if (cols[i] && cols[i].cap) cell.dataset.h = cols[i].cap === true ? cols[i].head : cols[i].cap;
                     if (c !== null && c !== undefined && c !== '') cell.append(c);
                     row.append(cell);
                 });
@@ -11671,7 +11719,7 @@ Projected Image UK"></textarea>
         function segTable(segments, cur) {
             const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
             const thead = el('thead'); const htr = el('tr');
-            [['Customers', 1], ['Segment'], ['Lifetime revenue', 1]].forEach(([h, num]) => htr.append(el('th', num ? 'num' : null, h)));
+            [['Customers', 'num'], ['Segment', 'kt-main'], ['Lifetime revenue', 'num']].forEach(([h, c]) => htr.append(el('th', c, h)));
             thead.append(htr); tbl.append(thead); const tb = el('tbody');
             (segments || []).forEach(s => {
                 const tr = el('tr');
@@ -12083,8 +12131,8 @@ Projected Image UK"></textarea>
                    in the order chosen, and says when it stopped. The catalogue is
                    a table (12 Oct 2026): every fact in a headed column, the
                    figures straight after the words, the row opening its plan. */
-                const cols = [{ head: 'Product' }, { head: 'Type' }, { head: 'Price', cls: 'num' }, { head: 'Stock' }, { head: 'Status' },
-                              { head: 'Units', cls: 'num' }, { head: 'Revenue', cls: 'num' }];
+                const cols = [{ head: 'Product' }, { head: 'Type' }, { head: 'Price', cls: 'num', cap: true }, { head: 'Stock' }, { head: 'Status' },
+                              { head: 'Units', cls: 'num', cap: true }, { head: 'Revenue', cls: 'num', cap: true }];
                 if (pState.compare) cols.push({ head: 'Change', cls: 'num' });
                 cols.push({ head: '', cls: 'act go' });   // the chevron: decoration, gone in two-line rows
                 const STOCK_DOT = { in: 'ok', low: 'warn', out: 'bad', untracked: 'off' };
@@ -14121,8 +14169,8 @@ Projected Image UK"></textarea>
                 clearAll.onclick = () => clr.click();
                 const none = d.total > 0 ? emptyState({ icon: I.search, text: 'Nothing matches these filters.', action: clearAll })
                     : el('div', 'empty', 'Nothing is owed.');
-                host.append(dtable([{ head: 'Customer' }, { head: 'Owed', cls: 'num' }, { head: 'Overdue', cls: 'num' }, { head: 'Status' },
-                                    { head: 'Orders', cls: 'num' }, { head: 'Oldest', cls: 'num' }, { head: 'Terms' }, { head: 'Last chased' },
+                host.append(dtable([{ head: 'Customer' }, { head: 'Owed', cls: 'num', cap: true }, { head: 'Overdue', cls: 'num', cap: true }, { head: 'Status' },
+                                    { head: 'Orders', cls: 'num', cap: true }, { head: 'Oldest', cls: 'num', cap: true }, { head: 'Terms' }, { head: 'Last chased', cap: 'Chased' },
                                     { head: '', cls: 'act go' }],
                     custs.map(({ c, rows }) => {
                         const key = c.name;
@@ -15430,7 +15478,7 @@ Projected Image UK"></textarea>
             const rows = r.history || [];
             if (!rows.length) { m.body.append(el('div', 'empty', 'This one has never been out.')); return; }
             /* A small table (12 Oct 2026): who had it, when it went, when it came back. */
-            m.body.append(dtable([{ head: 'With' }, { head: 'Out' }, { head: 'Back' }],
+            m.body.append(dtable([{ head: 'With' }, { head: 'Out', cap: true }, { head: 'Back', cap: true }],
                 rows.map(h => ({ cells: [h.who_name || 'Someone', fmtDate(h.out_at),
                     h.back_at ? fmtDate(h.back_at) : el('span', 'dt-warn', 'Still out')] })),
                 { cls: 'dt-loan-hist', label: (unit.name || 'Unit') + ' history', stop: 's' }));
@@ -16552,8 +16600,8 @@ Projected Image UK"></textarea>
                 /* When with its time, the mode, the outcome as a dot and a word
                    (colour is spent on the outcome only: a Send is not a
                    success), and what each wrote, at the table's natural width. */
-                hCard.append(dtable([{ head: 'When' }, { head: 'Mode' }, { head: 'Outcome' }, { head: 'Invoices', cls: 'num' },
-                                     { head: 'Credit notes', cls: 'num' }, { head: 'Contacts', cls: 'num' }],
+                hCard.append(dtable([{ head: 'When' }, { head: 'Mode' }, { head: 'Outcome' }, { head: 'Invoices', cls: 'num', cap: true },
+                                     { head: 'Credit notes', cls: 'num', cap: true }, { head: 'Contacts', cls: 'num', cap: true }],
                     connRuns.slice(0, 12).map(run => {
                         const r2 = run.result || {};
                         /* A run that stopped itself did not 'have failures': it
@@ -26633,7 +26681,7 @@ Projected Image UK"></textarea>
                 const wrapT = el('div', 'ktable-wrap');
                 const tb = el('table', 'ktable crm-table crm-contact-table');
                 const cols = master ? ['<th class="tick"></th>'] : [];
-                cols.push('<th>Name</th>');
+                cols.push('<th class="kt-main">Name</th>');
                 if (people) cols.push('<th>Organisation</th>', '<th>Email</th>', '<th>Phone</th>');
                 else cols.push('<th>Website</th>', '<th>Address</th>');
                 cols.push('<th class="num crm-deals">Deals</th>', '<th class="crm-label">Label</th>');
@@ -31247,7 +31295,7 @@ Projected Image UK"></textarea>
                the last login, then Tabs and a menu holding the admin actions
                (WS-14). The facts were one sentence pushed against four buttons. */
             const nf = (n) => n ? String(n) : el('span', 'dt-muted', '0');
-            card.append(dtable([{ head: 'Person', cls: 'stack' }, { head: 'Role' }, { head: 'Made', cls: 'num' }, { head: 'Dispatched', cls: 'num' }, { head: 'Files', cls: 'num' }, { head: 'Sales', cls: 'num' }, { head: 'Last login' },
+            card.append(dtable([{ head: 'Person', cls: 'stack' }, { head: 'Role' }, { head: 'Made', cls: 'num', cap: true }, { head: 'Dispatched', cls: 'num', cap: true }, { head: 'Files', cls: 'num', cap: true }, { head: 'Sales', cls: 'num', cap: true }, { head: 'Last login', cap: true },
                                 { head: '', cls: 'act' }],
                 d.users.map(u => {
                     const mine = u.id === d.me;
@@ -31395,7 +31443,7 @@ Projected Image UK"></textarea>
                 if (!d.open.length) {
                     const none = el('div', 'tm-none'); none.append(el('span', 'dt-dot off'), el('span', null, 'Nobody is clocked in.'));
                     c1.append(none);
-                } else c1.append(dtable([{ head: 'Person' }, { head: 'Since' }, { head: 'So far' }, { head: '', cls: 'act' }],
+                } else c1.append(dtable([{ head: 'Person' }, { head: 'Since', cap: true }, { head: 'So far', cap: true }, { head: '', cls: 'act' }],
                     d.open.map(ws => {
                         const res = el('button', 'btn btn-sm', 'Close this session'); res.type = 'button';
                         res.onclick = async () => {
@@ -31452,7 +31500,7 @@ Projected Image UK"></textarea>
                 const scale = el('span', 'tm-dayscale');
                 scale.append(el('span', null, '07:00'), el('span', null, '12:00'), el('span', null, '17:00'));
                 if (!d.sessions.length) c3.append(el('div', 'empty', 'No completed sessions yet.'));
-                else c3.append(dtable([{ head: 'Person' }, { head: 'Date' }, { head: 'Clock in' }, { head: 'Clock out' }, { head: 'Hours', cls: 'num' }, { head: 'Actions', cls: 'num' }, { head: scale }],
+                else c3.append(dtable([{ head: 'Person' }, { head: 'Date' }, { head: 'Clock in' }, { head: 'Clock out' }, { head: 'Hours', cls: 'num' }, { head: 'Actions', cls: 'num', cap: true }, { head: scale }],
                     d.sessions.slice(0, 40).map(s => {
                         const line = el('span', 'tm-daytrack');
                         const a0 = mins(s.start), a1 = mins(s.end);
@@ -31867,11 +31915,36 @@ Projected Image UK"></textarea>
             // Batched: whole tabs repaint at once, and a sync per mutation would
             // run hundreds of times for one render.
             if (togglePass) return;
-            togglePass = requestAnimationFrame(() => { togglePass = 0; syncToggles(); syncDialogs(); });
+            togglePass = requestAnimationFrame(() => { togglePass = 0; syncToggles(); syncDialogs(); syncTableHeads(); });
         }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
         /* Modals are built in thirteen places; the dialog semantics are stamped
            in one, the same way the switches get theirs above. The label comes
            from the modal's own heading. */
+        /* R13: a table's heads, copied onto its body cells as data-h, so on a
+           phone each row reads as two lines with every value named (see
+           .ktable's phone rule). Tables are built in twenty places; they are
+           stamped in one, as the switches and dialogs are. A head cell marked
+           kt-main names the cell that leads its row; the first leads otherwise. */
+        function syncTableHeads() {
+            document.querySelectorAll('table.ktable > :is(tbody, tfoot) > tr:not([data-kh])').forEach(tr => {
+                tr.dataset.kh = '';
+                const hd = tr.closest('table').tHead, hr = hd && hd.rows[hd.rows.length - 1];
+                if (!hr) return;
+                const heads = [];
+                /* A cell across several columns (a selection bar in the head) names none of them. */
+                [...hr.cells].forEach(th => { for (let k = 0; k < (th.colSpan || 1); k++) heads.push(th.colSpan > 1 ? null : th); });
+                let i = 0;
+                [...tr.cells].forEach(td => {
+                    const th = heads[i];
+                    if (th && (td.colSpan || 1) === 1) {
+                        const h = th.textContent.replace(/\s+/g, ' ').trim();
+                        if (h && !td.hasAttribute('data-h')) td.dataset.h = h;
+                        if (th.classList.contains('kt-main')) td.classList.add('kt-main');
+                    }
+                    i += td.colSpan || 1;
+                });
+            });
+        }
         function syncDialogs() {
             document.querySelectorAll('.modal-overlay .modal').forEach(m => {
                 if (m.getAttribute('role') === 'dialog') return;
