@@ -3003,6 +3003,9 @@
         /* The document window's contact line: an address and a Xero id run
            past a phone's window unless they may break anywhere. */
         .lbl-meta:is(.cx-contact, .conn-doc-meta) { white-space: normal; overflow-wrap: anywhere; }
+        /* A message box's detail line is a sentence, not a figure: the payout
+           note's reason ran off the document window on one line, cut mid-word. */
+        .msg > .lbl-meta { white-space: normal; overflow-wrap: anywhere; }
         /* The row's own figure, one treatment on both finance pages: the money
            ends the row at the right edge in 14px medium ink. The meta column's
            12px muted type is right for a date and wrong for the number the row
@@ -14527,6 +14530,7 @@ Projected Image UK"></textarea>
         let connHealth = null;
         let connSettings = null;
         let connSettingsOpen = false;
+        let connSettingsEdits = {};   // what has been typed in the open form, so a repaint keeps it
         /* The document a dry run says it would send, laid out the way it will
            appear in Xero. Nothing here writes: it is the last look before the
            accounts are touched, so it shows the fields that decide what lands
@@ -14750,11 +14754,19 @@ Projected Image UK"></textarea>
             const pay = p.payout;
             if (pay) {
                 m.body.append(el('h4', 'card-title', 'Payout note'));
-                if (pay.state === 'unavailable') {
+                if (pay.state === 'unavailable' && pay.reason === 'not_shopify_payments') {
+                    /* Paid by PayPal, bank transfer, on account or marked as
+                       paid: no Shopify payout will ever carry it. Nothing
+                       failed, so it is a plain line, in the connector's words,
+                       which name how the order is paid. */
+                    m.body.append(el('div', 'field-help', pay.message
+                        || 'Shopify Payments took no payment for this order, so no Shopify '
+                        + 'payout will include it and there is no payout note to add.'));
+                } else if (pay.state === 'unavailable') {
                     const b = el('div', 'msg error');
-                    b.append(el('div', null, 'The payout could not be looked up, '
-                        + 'so no note can be shown. The invoice itself is unaffected.'));
-                    if (pay.message) b.append(el('div', 'lbl-meta', pay.message));
+                    const why = cxPayoutWhy(pay, { auth: ((connCache.data || {}).config || {}).shopifyAuth, admin: connIsAdmin() });
+                    b.append(el('div', null, why.lead));
+                    if (why.detail) b.append(el('div', 'lbl-meta', why.detail));
                     m.body.append(b);
                 } else if (pay.state === 'not_yet') {
                     m.body.append(el('div', 'field-help',
@@ -14933,6 +14945,92 @@ Projected Image UK"></textarea>
                 }
                 return cxEnd(cxPlain(part));
             }).filter(Boolean).join(' ');
+        }
+        /* Why a payout could not be named, as {lead, detail}. The connector
+           gives the reason as a field (reason, needs) from its October 2026
+           version; before that only in words, and its single-order lookup
+           passed Shopify's own JSON through, which reached the document window
+           as one clipped line. Shopify's JSON never reaches the page now, and
+           neither does a client's error string. Only the connector's payout
+           wording is read as a payout failure: the payout pass also carries
+           errors that have nothing to do with Shopify ("A sync is already
+           running", a volume's "permission denied"), and those keep their own
+           words. ctx: {auth, admin, pass}. auth is how the connector signs in
+           to Shopify (client_credentials is Reactor's own app, static one of
+           its own), and pass is the payout pass rather than one document. */
+        const CX_PAY_SCOPES = { read_shopify_payments_accounts: 'Shopify Payments accounts',
+            read_shopify_payments_payouts: 'Shopify Payments payouts' };
+        function cxPayoutWhy(pay, ctx) {
+            pay = pay || {}; ctx = ctx || {};
+            const msg = String(pay.message || pay.error || '');
+            const pass = !!ctx.pass;
+            const unaffected = pass ? '' : ' The invoice itself is unaffected.';
+            const payoutWords = /^Could not read payouts:|Shopify refused the payouts query|^This shop has no Shopify Payments account|^More than [\d,]+ /.test(msg);
+            const reason = pay.reason || pay.errorReason
+                || (!payoutWords ? 'other'
+                    : /Shopify refused the payouts query|Access denied for|Required access|not approved to access/i.test(msg) ? 'refused'
+                    : /^This shop has no Shopify Payments account/.test(msg) ? 'no_account'
+                    : /^More than [\d,]+ /.test(msg) ? 'too_many' : 'failed');
+            if (reason === 'other') {
+                return { lead: pass ? 'No notes were written.' : 'The payout could not be looked up, so no note can be shown.' + unaffected,
+                    detail: msg ? cxDetail(msg) : '' };
+            }
+            if (reason === 'refused') {
+                let needs = (pay.needs || []).filter(k => CX_PAY_SCOPES[k]);
+                if (!needs.length) needs = Object.keys(CX_PAY_SCOPES).filter(k => msg.indexOf(k) >= 0);
+                if (!needs.length) needs = Object.keys(CX_PAY_SCOPES);
+                const what = 'view ' + needs.map(k => CX_PAY_SCOPES[k]).join(' and ') + ' (' + needs.join(', ') + ')';
+                const lead = (pass ? 'Shopify would not show the payouts, so no notes can be written.'
+                    : 'Shopify would not show this order’s payout, so no note can be shown.') + unaffected;
+                const one = needs.length === 1 ? 'that permission' : 'those permissions';
+                /* Shopify refuses the account before the payouts under it, so a
+                   refusal there names only the accounts permission. Settings
+                   shows Reactor's whole grant; an app of its own cannot be seen
+                   from here, so the second permission is named as well. */
+                const also = needs.indexOf('read_shopify_payments_payouts') < 0
+                    ? ' Payout notes also need ' + CX_PAY_SCOPES.read_shopify_payments_payouts
+                      + ' (read_shopify_payments_payouts), so add that too if it is missing.' : '';
+                let detail;
+                if (ctx.auth === 'client_credentials') {
+                    detail = 'The Xero sync signs in to Shopify as Reactor, and Reactor is not allowed to ' + what + '.'
+                        + (ctx.admin ? ' Settings, under Connections, says which permissions Reactor is missing and how to add them.' : ' An admin can add ' + one + '.');
+                } else if (ctx.auth === 'static') {
+                    detail = 'The Xero sync signs in to Shopify with an app of its own, which is not allowed to ' + what + '.'
+                        + (ctx.admin ? ' In Shopify, open Settings, then Apps, find that app under Legacy custom apps, add ' + one + ', and save.' + also
+                            : ' An admin can add ' + one + '.');
+                } else {
+                    detail = 'The Shopify app the Xero sync signs in with is not allowed to ' + what + '.'
+                        + (ctx.admin ? ' If it signs in as Reactor, Settings, under Connections, says how to add ' + one
+                            + '; if it has an app of its own, add ' + one + ' to that app in Shopify.' + also
+                            : ' An admin can add ' + one + '.');
+                }
+                return { lead: lead, detail: detail };
+            }
+            if (reason === 'no_account') {
+                return { lead: 'This store has no Shopify Payments account, so there ' + (pass ? 'are no payouts to write.' : 'is no payout to name.') + unaffected, detail: '' };
+            }
+            const lead = (pass ? 'The payouts could not be looked up, so no notes were written.'
+                : 'The payout could not be looked up, so no note can be shown.') + unaffected;
+            const again = 'Shopify did not answer properly. Try again in a few minutes.';
+            let t = msg.replace(/^Could not read payouts:\s*/i, '');
+            let m;
+            if ((m = /^Shopify GraphQL errors: (\[.*\])$/s.exec(t))) {
+                let said = '';
+                try { said = JSON.parse(m[1]).map(x => String((x && x.message) || '').trim()).filter(Boolean).join(' '); } catch (e) {}
+                t = said ? 'Shopify said: ' + said : 'Shopify’s reply could not be read.';
+            } else if ((m = /^Shopify HTTP (\d{3})/.exec(t))) {
+                const code = Number(m[1]);
+                t = code === 429 || code >= 500 ? 'Shopify did not answer properly (error ' + code + '). Try again in a few minutes.'
+                    : code === 401 ? 'Shopify did not accept the Xero sync’s sign-in (error 401), so its Shopify credentials need checking.'
+                    : 'Shopify refused the request (error ' + code + ').';
+            } else if (/^Shopify query cost exceeded/.test(t)) {
+                t = 'Shopify said the lookup asked for too much at once.';
+            } else if (/^Shopify GraphQL: (empty data|exhausted retries)|^fetch failed|ECONN|ETIMEDOUT|ENOTFOUND|socket hang up/i.test(t)) {
+                t = again;
+            }
+            /* Whatever is left, never a JSON blob. */
+            if (/[\[{]\s*"/.test(t)) t = 'Shopify’s reply could not be read.';
+            return { lead: lead, detail: t ? cxEnd(cxPlain(t)) : '' };
         }
         /* One run problem as a sentence. ctx: {guards, admin} from the
            health reply, so a limit that has changed since is said, and
@@ -15300,7 +15398,9 @@ Projected Image UK"></textarea>
         function loansWarmCrm() {
             if (crmCache && crmCache.persons) return;
             api('/api/crm/board', {}).then(r => {
-                if (r && r.crm && !crmCache) { crmCache = r.crm; }
+                /* Dated like any other load: at zero, the next CRM visit took
+                   the copy for ancient and fetched the whole board again. */
+                if (r && r.crm && !crmCache) { crmCache = r.crm; crmRev = r.rev || ''; crmLoadedAt = Date.now(); }
             }).catch(() => {});
         }
         async function loadLoans(quiet) {
@@ -15761,6 +15861,67 @@ Projected Image UK"></textarea>
         /* The connector's reconcile modes, in words. 'warn', 'strict' and
            'off' reached the screen as they are stored. */
         const CX_MODE = { warn: 'Send it and report the difference', strict: 'Hold it back', off: 'Do not check' };
+        /* The Settings card sends only what was changed in it. The connector
+           keeps a value the same as its default or its variable as no choice
+           at all, so the whole form posted back would clear any choice saved
+           on the connector's own tab that this form showed out of date. */
+        function connSettingsChanges(shown, now) {
+            const out = {};
+            Object.keys(now).forEach(k => {
+                const v = String(now[k] == null ? '' : now[k]).trim();
+                if (v !== String(shown[k] == null ? '' : shown[k]).trim()) out[k] = v;
+            });
+            return out;
+        }
+        /* As the connector compares: numbers by value (0.020 is 0.02), the rest exactly. */
+        function cxSameSetting(key, a, b) {
+            return a === b || (['RECONCILE_TOLERANCE', 'MAX_DOCS_PER_RUN', 'RUNAWAY_ABORT_ABOVE'].includes(key)
+                && a !== '' && b !== '' && !isNaN(a) && !isNaN(b) && Number(a) === Number(b));
+        }
+        /* Where a setting's value comes from, under its field: every field
+           shows the value as it applies, so without this the default, the
+           service's variable and a choice saved on the connector look the
+           same. Once the field is changed, what Save will make of it. A
+           connector that says nothing of sources gets no note (null). A saved
+           choice carries its way back: what applies with nothing saved. */
+        function connSettingNote(key, shown, now, s) {
+            const from = s && s.sources && s.sources[key];
+            const fb = s && s.fallbacks && s.fallbacks[key];
+            if (!from || !fb) return null;
+            const fbv = String(fb.value == null ? '' : fb.value).trim();
+            const without = fb.from === 'env' ? 'Set by ' + key + ' on the connector service'
+                : fbv ? 'The default' : 'Not set';
+            const v = String(now == null ? '' : now).trim();
+            if (v === String(shown == null ? '' : shown).trim()) {
+                return from === 'settings' ? { text: 'Saved on the connector', back: fb } : { text: without };
+            }
+            return { text: (v === '' || cxSameSetting(key, v, fbv) ? without : 'Saved on the connector') + ' once you save' };
+        }
+        /* The form starts from the connector's settings as they are now, read
+           again as it opens: the copy read with the page is never refreshed by
+           the polling, and a choice made on the connector's own tab since
+           would show here out of date. Settings that cannot be read are not
+           opened. */
+        async function connOpenSettings() {
+            const d = (await connOp({ op: 'settings' })).data;
+            if (!d) throw new Error('The connector sent no settings back.');
+            connSettings = d; connSettingsEdits = {}; connSettingsOpen = true;
+        }
+        /* Sends what was changed, or nothing. "Saved" only for what the
+           connector holds afterwards: it answered ok for a save it never kept,
+           so the server reads the settings back and names what did not stick. */
+        async function connSaveSettings(shown, now, labels) {
+            const changes = connSettingsChanges(shown, now);
+            const keys = Object.keys(changes);
+            if (!keys.length) { toastOk('Nothing has changed, so there was nothing to save.'); return false; }
+            const r = await connOp({ op: 'settings_save', fields: changes });
+            const missed = (r && r.unapplied) || [];
+            if (!missed.length) { toastOk('Saved. They apply to the next run.'); return true; }
+            toastError('The connector did not keep ' + missed.map(k => labels[k] || k).join(', ') + '.'
+                + (missed.length < keys.length ? ' The rest was saved.' : '')
+                + ' Open the settings again to see what it holds.');
+            return true;
+        }
         function renderConnector() {
             const box = $('connector-content'); box.innerHTML = '';
             /* One line (copy plan, Xero sync #1). Whether Auto Run is on is the
@@ -16446,7 +16607,10 @@ Projected Image UK"></textarea>
                         const r = await connOp({ op: 'payouts', since: connPayResult.since || connPayBox || '' });
                         connPayResult = (r && r.data) || {};
                         const k = connPayResult.annotated || 0, bad = connPayResult.failed || 0;
-                        if (connPayResult.error) toastError('No notes were written. ' + cxDetail(connPayResult.error));
+                        if (connPayResult.error) {
+                            const why = cxPayoutWhy(connPayResult, { auth: ((connCache.data || {}).config || {}).shopifyAuth, admin: connIsAdmin(), pass: true });
+                            toastError(why.lead + (why.detail ? ' ' + why.detail : ''));
+                        }
                         else if (bad) toastError('Wrote ' + k + (k === 1 ? ' note' : ' notes') + '; ' + bad + ' could not be written. The list says which.');
                         else toastOk('Wrote ' + k + (k === 1 ? ' note' : ' notes') + ' to Xero.');
                     } catch (e) { toastError(e.message); }
@@ -16461,7 +16625,14 @@ Projected Image UK"></textarea>
                 const d = connPayResult;
                 if (!d) return;
                 const title = 'Payouts' + (d.since ? ' since ' + fmtDate(d.since) : '') + (d.dryRun === false ? ', written' : '');
-                if (d.error) { cxSection(results, 'pay', title).append(el('div', 'msg error', cxDetail(d.error))); return; }
+                if (d.error) {
+                    const why = cxPayoutWhy(d, { auth: ((connCache.data || {}).config || {}).shopifyAuth, admin: connIsAdmin(), pass: true });
+                    const b = el('div', 'msg error');
+                    b.append(el('div', null, why.lead));
+                    if (why.detail) b.append(el('div', 'lbl-meta', why.detail));
+                    cxSection(results, 'pay', title).append(b);
+                    return;
+                }
                 const notes = d.notes || [];
                 const k = d.dryRun ? notes.length : (d.annotated || 0);
                 const paid = d.ordersWithPayouts || 0;
@@ -16530,7 +16701,17 @@ Projected Image UK"></textarea>
                 xHead.append(titleInfo(xt, xtInfo));
                 const toggle = el('button', 'btn btn-sm',
                                   connSettingsOpen ? 'Hide settings' : 'Change settings');
-                toggle.onclick = () => { connSettingsOpen = !connSettingsOpen; renderConnector(); };
+                toggle.onclick = async () => {
+                    if (connSettingsOpen) { connSettingsOpen = false; connSettingsEdits = {}; renderConnector(); return; }
+                    toggle.disabled = true;
+                    try { await connOpenSettings(); }
+                    catch (e) {
+                        toggle.disabled = false;
+                        toastError('The settings could not be read again, so they were not opened. ' + e.message);
+                        return;
+                    }
+                    renderConnector();
+                };
                 const xAct = el('div', 'card-act'); xAct.append(toggle); xHead.append(xAct); xCard.append(xHead);
                 if (!connSettingsOpen) {
                     /* The values as they stand, read before anything is opened. */
@@ -16553,26 +16734,61 @@ Projected Image UK"></textarea>
                 if (connSettingsOpen) {
                     const grid = el('div', 'disp-addr-grid');
                     const fields = {};
+                    /* shown: each value as this form drew it, before anything
+                       typed. Save sends only what differs from it. */
+                    const shown = {}, labels = {};
                     const add = (key, label, help, opts) => {
                         let input;
+                        /* A value a list does not have (a variable set to
+                           "Strict") is added to it and selected, so it shows
+                           as it is and reads as unchanged. */
+                        const put = (v) => {
+                            if (opts && ![...input.options].some(o => o.value === v)) input.add(new Option(CX_MODE[v] || v, v), 0);
+                            input.value = v;
+                        };
                         if (opts) {
                             input = document.createElement('select');
                             input.className = 'crm-input';
-                            opts.forEach(o => {
-                                const op = document.createElement('option');
-                                op.value = o; op.textContent = CX_MODE[o] || o; input.append(op);
-                            });
-                            input.value = connSettings[key] || opts[0];
+                            opts.forEach(o => input.add(new Option(CX_MODE[o] || o, o)));
+                            put(connSettings[key] || opts[0]);
                         } else {
                             input = crmText(connSettings[key] || '', '');
                         }
                         fields[key] = input;
                         crmField(grid, label, input);
+                        shown[key] = input.value; labels[key] = label;
+                        if (key in connSettingsEdits) put(connSettingsEdits[key]);
                         /* The help belongs to its field, in the same grid cell.
                            As a cell of its own it pushed every field after it
                            one place along, so the grid alternated field-help
                            and field-field. */
                         if (help) input.parentElement.append(el('span', 'field-help', help));
+                        const src = el('span', 'field-help');
+                        const paint = () => {
+                            const n = connSettingNote(key, shown[key], input.value, connSettings);
+                            src.textContent = n ? n.text : '';
+                            src.hidden = !n;
+                            if (!n || !n.back) return;
+                            const fv = String(n.back.value == null ? '' : n.back.value);
+                            const said = key === 'RECONCILE_MODE' ? (CX_MODE[fv] || fv) : fv;
+                            const back = el('button', 'linkish', n.back.from === 'env' ? 'Use the service’s value (' + said + ')'
+                                : fv ? 'Use the default (' + said + ')' : 'Clear it');
+                            back.type = 'button';
+                            /* Puts back what applies with nothing saved; Save then
+                               sends it, and the connector lets go of its copy. */
+                            back.onclick = (ev) => {
+                                ev.preventDefault();
+                                put(fv);
+                                connSettingsEdits[key] = fv;
+                                paint();
+                            };
+                            src.append(' ', back);
+                        };
+                        const edited = () => { connSettingsEdits[key] = input.value; paint(); };
+                        input.addEventListener('input', edited);
+                        input.addEventListener('change', edited);
+                        paint();
+                        input.parentElement.append(src);
                     };
                     add('RECONCILE_MODE', 'When a total disagrees with Shopify',
                         'Sending anyway once let a discounted invoice through, out by \u00a333.50.',
@@ -16594,13 +16810,12 @@ Projected Image UK"></textarea>
                     /* Plain: Send to Xero is the page's one teal action. */
                     const save = el('button', 'btn', 'Save settings');
                     save.onclick = async () => {
-                        const out = {};
-                        Object.keys(fields).forEach(k => { out[k] = fields[k].value.trim(); });
+                        const now = {};
+                        Object.keys(fields).forEach(k => { now[k] = fields[k].value; });
                         save.disabled = true;
                         try {
-                            await connOp({ op: 'settings_save', fields: out });
-                            toastOk('Saved. They apply to the next run.');
-                            connSettingsOpen = false;
+                            if (!(await connSaveSettings(shown, now, labels))) { save.disabled = false; return; }
+                            connSettingsOpen = false; connSettingsEdits = {};
                             await refreshConnector();
                         } catch (e) { save.disabled = false; toastError(e.message); }
                     };
@@ -24971,6 +25186,11 @@ Projected Image UK"></textarea>
            Shopify is read-only here and the AI never sees any of it.
            ================================================================== */
         let crmCache = null, crmSeg = 'deals', crmDealsMode = 'board';
+        /* The revision of the board in crmCache, and of the one last drawn.
+           The poll sends crmRev and an unchanged board comes back as
+           {same: true}, not 400 KB (the 2026-10-12 speed audit, S1). Every
+           line that sets crmCache sets crmRev with it, or clears it. */
+        let crmRev = '', crmPaintedRev = '';
         let crmQ = '', crmStatus = 'open', crmLeadsMode = 'active', crmContactsMode = 'people';
         let crmActPeriod = 'upcoming', crmActTypesOff = {}, crmActMine = false;
         let crmLabelF = '', crmOwnerF = '', crmContactsQ = '', crmContactsPage = 1, crmContactsSize = 25;
@@ -25040,7 +25260,7 @@ Projected Image UK"></textarea>
             box.append(t);
             try {
                 const r = await api('/api/crm/board', {});
-                crmCache = r.crm; crmLoadedAt = Date.now();
+                crmCache = r.crm; crmRev = r.rev || ''; crmLoadedAt = Date.now();
                 renderCRM();
             } catch (e) {
                 box.innerHTML = '';
@@ -25067,8 +25287,17 @@ Projected Image UK"></textarea>
             };
             if (typing()) return;
             try {
-                const r = await api('/api/crm/board', {});
-                crmCache = r.crm; crmLoadedAt = Date.now();
+                const r = await api('/api/crm/board', crmRev ? { rev: crmRev } : {});
+                crmLoadedAt = Date.now();
+                if (r && r.same) {
+                    /* Nothing moved. Draw only if the last board that came
+                       was never drawn (it arrived under someone's typing),
+                       and not one emptied while this poll was out (the
+                       Pipedrive import empties it and loads it again). */
+                    if (crmCache && crmPaintedRev !== crmRev && !typing()) renderCRM();
+                    return;
+                }
+                crmCache = r.crm; crmRev = r.rev || '';
                 if (!typing()) renderCRM();
             } catch (e) { /* stale is better than an error bar mid-work */ }
         }
@@ -25076,8 +25305,16 @@ Projected Image UK"></textarea>
         setInterval(crmMaybeRefresh, 90000);
         async function crmOp(path, body) {
             /* Every write returns the fresh state, so the UI never guesses. */
-            const r = await api(path, body);
-            if (r && r.crm) { crmCache = r.crm; crmLoadedAt = Date.now(); }
+            let r;
+            try { r = await api(path, body); }
+            catch (e) {
+                /* What the page shows may have gone ahead of the board (a
+                   ticked box, a dragged card): the next poll redraws it, even
+                   when it hears that nothing changed. */
+                crmPaintedRev = '';
+                throw e;
+            }
+            if (r && r.crm) { crmCache = r.crm; crmRev = r.rev || ''; crmLoadedAt = Date.now(); }
             return r;
         }
         /* The deal's notes and changelog stay out of the board payload at
@@ -25119,6 +25356,7 @@ Projected Image UK"></textarea>
         }
 
         function renderCRM() {
+            crmPaintedRev = crmRev;
             const box = $('crm-content');
             /* A re-render must not throw the reader back to the top, or snap
                the board back to stage 1: every op repaints the whole tab. */
@@ -25383,7 +25621,7 @@ Projected Image UK"></textarea>
             if (go) {
                 btn.textContent = 'Import again';
                 toastOk('Imported. The CRM tab now holds your Pipedrive data.');
-                crmCache = null;
+                crmCache = null; crmRev = '';
                 loadCRM();
                 return;
             }
@@ -26304,7 +26542,7 @@ Projected Image UK"></textarea>
                        opens a fresh scheduler pre-linked to that deal. It nags,
                        it never blocks: closing it is always allowed. */
                     if (res.followup_deal_id) crmActivityForm({ deal_id: res.followup_deal_id, followup: true }, refresh);
-                } catch (e) { toastError(e.message); }
+                } catch (e) { cb.checked = !!a.done; toastError(e.message); }
             };
             return cb;
         }
@@ -27629,16 +27867,26 @@ Projected Image UK"></textarea>
             else if (e.key === 'c' && cur) { e.preventDefault(); const b = cur.querySelector('.mail-claim'); if (b && !b.disabled) b.click(); }
         });
         function showMailView() {
-            if (mailCache) { renderMail(); refreshMailQuiet(); } else { loadMail(); }
-            if (!mailTimer) mailTimer = setInterval(() => {
-                if (document.querySelector('#view-mail.active')) refreshMailQuiet();
-            }, 60000);
+            if (mailCache) { renderMail(); refreshMailQuiet(false, true); } else { loadMail(); }
+            if (!mailTimer) {
+                /* Not in a hidden tab: the minute's poll fetched and redrew the
+                   whole board for nobody (the 2026-10-12 speed audit, P1).
+                   Coming back to the tab catches up at once if a minute has
+                   gone. */
+                mailTimer = setInterval(() => {
+                    if (document.querySelector('#view-mail.active') && !document.hidden) refreshMailQuiet(false, true);
+                }, 60000);
+                document.addEventListener('visibilitychange', () => {
+                    if (!document.hidden && mailCache && document.querySelector('#view-mail.active')
+                        && Date.now() - mailFetchedAt >= 60000) refreshMailQuiet(false, true);
+                });
+            }
         }
         async function loadMail() {
             const box = $('mail-content'); box.innerHTML = '';
             const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Opening the inbox…'));
             box.append(t);
-            try { mailCache = await api('/api/mail/board', {}); renderMail(); }
+            try { mailCache = await api('/api/mail/board', {}); mailFetchedAt = Date.now(); renderMail(); }
             catch (e) {
                 box.innerHTML = '';
                 box.append(el('div', 'msg error', e.message || 'Could not load the inbox.'));
@@ -27650,19 +27898,55 @@ Projected Image UK"></textarea>
             return !!(a && a.closest && a.closest('#mail-content')
                 && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA'));
         }
-        async function refreshMailQuiet(force) {
+        let mailFetchedAt = 0;
+        async function refreshMailQuiet(force, poll) {
             const seq = ++mailFetchSeq;
             let ok = true;
             try {
                 const d = await api('/api/mail/board', force ? { force: true } : {});
                 if (seq !== mailFetchSeq) return true;   // an action's fresher fetch already landed
+                mailFetchedAt = Date.now();
+                /* A poll (the minute's tick, a revisit) redraws only when the
+                   board moved: rebuilding up to 5,800 elements to show the
+                   same board was most of the Inbox's cost. On a quiet minute
+                   only the time of the sync changes, and that one line moves
+                   in place. A sync error always redraws, so its own "since"
+                   stays true; an action always redraws. */
+                const same = poll && !d.sync_error && !mailFound && mailBoardKey(d) === mailPaintedKey
+                    && mailAgeKey(d) === mailPaintedAges;
                 mailCache = d;
                 // Never yank the keyboard out from under someone: while an
                 // input in this view holds focus, keep the data and skip the
                 // repaint; the next tick or action paints it.
-                if (document.querySelector('#view-mail.active') && !mailInputBusy()) renderMail();
+                if (document.querySelector('#view-mail.active') && !mailInputBusy()) {
+                    if (same) mailPaintSynced(d); else renderMail();
+                }
             } catch (e) { ok = false; /* keep the last good board */ }
             return ok;
+        }
+        function mailBoardKey(d) { return JSON.stringify(Object.assign({}, d, { synced_at: '' })); }
+        /* What time alone changes on screen: each row's age as written and
+           which of the 4 h, 8 h and 24 h marks it has passed (amber, red, and
+           quiet for over a day). A poll redraws when this moved since the
+           last drawing, so a quiet board still ages and escalates on time. */
+        function mailAgeKey(d) {
+            return (d.threads || []).map(t => mailAgo(t.last_at)
+                + (mailHours(t.last_at) > 4 ? 'a' : '') + (mailHours(t.last_at) > 8 ? 'b' : '')
+                + (mailHours(t.state_at > t.last_at ? t.state_at : t.last_at) > 24 ? 'c' : '')).join(',')
+                /* and a send that may have gone out says how long ago */
+                + '|' + (d.outbound_pending || []).map(p => mailAgo(p.at)).join(',');
+        }
+        /* What is on screen, compared by the poll: not the page's copy, which
+           a poll skipped under someone's typing has already moved on. */
+        let mailPaintedKey = '', mailPaintedAges = '';
+        function mailNotePainted(d) { mailPaintedKey = mailBoardKey(d); mailPaintedAges = mailAgeKey(d); }
+        function mailSyncedLine(d) {
+            return (d.address || 'The mailbox the team answers')
+                + (d.synced_at ? ' \u00b7 synced ' + mailAgoLong(d.synced_at) : ' \u00b7 never synced');
+        }
+        function mailPaintSynced(d) {
+            const line = document.querySelector('#mail-content [data-mail-synced]');
+            if (line) line.textContent = mailSyncedLine(d);
         }
         async function mailAct(path, body) {
             const r = await api(path, body);
@@ -27682,6 +27966,7 @@ Projected Image UK"></textarea>
         function renderMail() {
             const box = $('mail-content'); box.innerHTML = '';
             const d = mailCache;
+            mailNotePainted(d);
             const hero = mailHero(box);
             if (!d.connected) {
                 /* The setup card is built from the parts Reconciliation's own
@@ -27865,8 +28150,9 @@ Projected Image UK"></textarea>
             const mHead = el('div', 'card-head');
             const lab = (text, n) => text + (n ? ' (' + n + ')' : '');
             mHead.append(el('h3', 'card-title', lab('Shared inbox', counts.open)));
-            mHead.append(el('p', 'card-desc', (d.address || 'The mailbox the team answers')
-                + (d.synced_at ? ' \u00b7 synced ' + mailAgoLong(d.synced_at) : ' \u00b7 never synced')));
+            const mSynced = el('p', 'card-desc', mailSyncedLine(d));
+            mSynced.dataset.mailSynced = '';      // mailPaintSynced moves it on a quiet poll
+            mHead.append(mSynced);
             const mAct = el('div', 'card-act');
             const filt = el('button', 'btn btn-sm', 'Filters' + (d.rules ? ' (' + d.rules + ')' : ''));
             filt.title = 'Rules that sort mail as it arrives';
@@ -29420,6 +29706,7 @@ Projected Image UK"></textarea>
             m.body.append(el('div', 'setting-sub',
                 'This one is older than the board keeps, so it is read only here.'));
             const gm = el('a', 'setting-sub', 'Open in Gmail');
+            gm.dataset.mailReadonly = '';     // reading, so closing need not reload the board
             gm.href = 'https://mail.google.com/mail/u/?authuser='
                 + encodeURIComponent(mailCache.address || '')
                 + '#all/' + encodeURIComponent(t.id);
@@ -29451,13 +29738,31 @@ Projected Image UK"></textarea>
             const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
             const body = el('div', 'modal-body');
             modal.append(head, body); overlay.append(modal); document.body.append(overlay);
-            const close = () => {
+            /* Anything pressed or typed inside the window is why the board is
+               fetched again on close. A window that sets onQuietClose (the
+               email reader) changes nothing if it was only read, so it puts
+               its own row right instead of downloading the whole board (the
+               2026-10-12 speed audit, P1). */
+            let touched = false;
+            /* A control marked data-mail-readonly (reading the full text,
+               opening the email in Gmail) and the X itself are reading. */
+            const touches = (t) => {
+                if (!t || x.contains(t) || !t.closest) return false;
+                const c = t.closest('button, a, input, select, textarea, label, [contenteditable]');
+                return !!c && !('mailReadonly' in c.dataset);
+            };
+            overlay.addEventListener('click', (e) => { if (touches(e.target)) touched = true; }, true);
+            overlay.addEventListener('input', () => { touched = true; }, true);
+            overlay.addEventListener('keydown', (e) => { if (e.key === 'Enter' && touches(e.target)) touched = true; }, true);
+            const m = { body: body, overlay: overlay, onQuietClose: null };
+            m.close = () => {
                 overlay.remove();
                 if (overlay._timer) clearInterval(overlay._timer);
-                if (document.querySelector('#view-mail.active')) refreshMailQuiet();
+                if (!document.querySelector('#view-mail.active')) return;
+                if (touched || !m.onQuietClose) refreshMailQuiet(); else m.onQuietClose();
             };
-            x.onclick = close;   /* the X is the only way out, as everywhere else */
-            return { body: body, close: close, overlay: overlay };
+            x.onclick = m.close;   /* the X is the only way out, as everywhere else */
+            return m;
         }
         /* The email being fetched to open: a double click (the gesture every
            mail client teaches) or a held Enter sent two reads and stacked two
@@ -29472,6 +29777,16 @@ Projected Image UK"></textarea>
             finally { mailOpening.delete(id); }
             const m = mailModal('Email');
             m.overlay.querySelector('.modal').classList.add('mreader');
+            /* Only read: the server tells Gmail behind its answer, so the one
+               change to the board is this row's unread mark. */
+            m.onQuietClose = () => {
+                const row = mailCache && (mailCache.threads || []).find(t => t.id === id);
+                if (row && row.unread) {
+                    row.unread = false;
+                    ++mailFetchSeq;    // a poll already in flight carries the board from before the read
+                    if (!mailInputBusy()) renderMail();
+                }
+            };
             paintMailThread(m, r);
             m.overlay._timer = setInterval(async () => {
                 try {
@@ -29529,7 +29844,7 @@ Projected Image UK"></textarea>
                 a.onclick = async () => {
                     m.close();
                     setView('crm');
-                    if (!crmCache) { try { const rr = await api('/api/crm/board', {}); crmCache = rr.crm; crmLoadedAt = Date.now(); } catch (e) { toastError(e.message); return; } }
+                    if (!crmCache) { try { const rr = await api('/api/crm/board', {}); crmCache = rr.crm; crmRev = rr.rev || ''; crmLoadedAt = Date.now(); } catch (e) { toastError(e.message); return; } }
                     renderCRM();
                     crmDealModal(t.crm_deal_id);
                 };
@@ -29626,6 +29941,7 @@ Projected Image UK"></textarea>
             m.body.append(orders);
             mailLoadOrders(orders, t, m);
             const gm = el('a', 'setting-sub', 'Open in Gmail');
+            gm.dataset.mailReadonly = '';     // reading, so closing need not reload the board
             gm.href = 'https://mail.google.com/mail/u/?authuser='
                 + encodeURIComponent(mailCache.address || '')
                 + '#all/' + encodeURIComponent(t.id);
@@ -29723,6 +30039,7 @@ Projected Image UK"></textarea>
                demand and never kept: it is customer correspondence, and the
                board has no need to hold it. */
             const full = el('button', 'linkish', 'Read the full emails');
+            full.dataset.mailReadonly = '';   // the text is fetched and never kept: still only reading
             full.onclick = async () => {
                 full.disabled = true; full.textContent = 'Reading\u2026';
                 let r;
@@ -29801,6 +30118,12 @@ Projected Image UK"></textarea>
            30-day trash, never instant.
            ================================================================== */
         let filesCache = null, filesFolder = '', filesQ = '', filesSeg = 'files';
+        /* The revision of the store in filesCache, and of the one last drawn.
+           A look at the tree sends filesRev and an unchanged store comes back
+           as {same: true} (the 2026-10-12 speed audit, S9). A copy patched
+           from a delta answer is no revision the server named, so it holds
+           none, and the next look fetches the store whole. */
+        let filesRev = '', filesPaintedRev = '';
         let filesHeroAct = null;   // the page header's action slot, filled by the browser
         /* The Finder drive takes a password of its own, made here after a full
            sign-in and shown once. The Reactor password no longer opens it: the
@@ -29853,10 +30176,44 @@ Projected Image UK"></textarea>
                 api('/api/files/drive', {}).then(st => paint(st), e => { body.replaceChildren(el('p', 'drive-note', e.message)); });
             });
         }
-        /* How many search hits are painted at a time. The remainder is never
-           hidden: the count of what is left sits on the Show more button. */
+        /* How many search hits, or rows of a folder, are painted at a time.
+           The remainder is never hidden: the count of what is left sits on
+           the Show more button. A folder keeps its count while it is open,
+           so a redraw after an upload does not fold the list back up. */
         const FILES_HIT_STEP = 60;
-        let filesHitCap = FILES_HIT_STEP;
+        let filesHitCap = FILES_HIT_STEP, filesRowCap = FILES_HIT_STEP, filesRowCapFor = null;
+        let filesPagedFocus = -1;
+        const filesReveal = new Set();   // ids just made or renamed here, shown however they sort
+        function filesPaged(list, rows, cap, makeRow, more) {
+            /* A thousand files is about 34,000 elements, 155 to 237 ms of a
+               desktop's main thread for every open (the 2026-10-12 speed
+               audit, P2). Only the rows on the page are ever built. */
+            rows.slice(0, cap).forEach((r, i) => {
+                const n = makeRow(r);
+                list.append(n);
+                /* Show more draws the list again under the button, which took
+                   the keyboard with it to the top of the page: it goes to the
+                   first row Show more brought instead, once the list is in. */
+                if (i === filesPagedFocus) {
+                    const f = n.querySelector('.files-name') || n;
+                    setTimeout(() => f.focus(), 0);
+                }
+            });
+            filesPagedFocus = -1;
+            if (rows.length > cap) {
+                const b = el('button', 'btn', 'Show more (' + (rows.length - cap) + ' remaining)');
+                b.style.cssText = 'margin:var(--sp-2) auto;display:block';
+                b.onclick = () => { filesPagedFocus = cap; more(); };
+                list.append(b);
+            }
+        }
+        function filesCapFor(ids, cap, reveal) {
+            /* How many rows to draw so that every id in reveal is among them,
+               a whole page at a time, and never fewer than are drawn now. */
+            let need = cap;
+            ids.forEach((id, i) => { if (reveal.has(id)) need = Math.max(need, Math.ceil((i + 1) / FILES_HIT_STEP) * FILES_HIT_STEP); });
+            return need;
+        }
         let filesSort = 'name', filesSel = new Set();
         let filesUploads = [], filesQueue = [], filesActive = 0, filesNewFolder = false;
 
@@ -29873,10 +30230,18 @@ Projected Image UK"></textarea>
                tab quietly re-reads it; a repaint only happens when something
                actually changed and no one is mid-typing in a rename box. */
             try {
-                const r = await api('/api/files/tree', {});
-                if (JSON.stringify(r.store) === JSON.stringify(filesCache)) return;
-                filesCache = r.store;
-                if (!filesInputBusy() && document.querySelector('#view-files.active')) renderFiles();
+                const r = await api('/api/files/tree', filesRev ? { rev: filesRev } : {});
+                const quiet = () => !filesInputBusy() && document.querySelector('#view-files.active');
+                if (r && r.same) {
+                    /* Nothing moved. Draw only if the last store that came
+                       was never drawn (it arrived under someone's typing). */
+                    if (filesCache && filesPaintedRev !== filesRev && quiet()) renderFiles();
+                    return;
+                }
+                const drawn = JSON.stringify(r.store) === JSON.stringify(filesCache) && filesPaintedRev === filesRev;
+                filesCache = r.store; filesRev = r.rev || '';
+                if (drawn) { filesPaintedRev = filesRev; return; }
+                if (quiet()) renderFiles();
             } catch (e) { /* the cached view stands until the next visit */ }
         }
         async function loadFiles() {
@@ -29885,7 +30250,7 @@ Projected Image UK"></textarea>
             box.append(t);
             try {
                 const r = await api('/api/files/tree', {});
-                filesCache = r.store;
+                filesCache = r.store; filesRev = r.rev || '';
                 renderFiles();
             } catch (e) {
                 box.innerHTML = '';
@@ -29893,10 +30258,52 @@ Projected Image UK"></textarea>
             }
         }
         async function filesOp(path, body) {
-            /* Every write returns the fresh store, so the UI never guesses. */
+            /* Every write returns the fresh store, or, asked with delta, only
+               what changed, which is patched in: either way the UI never
+               guesses. */
             const r = await api(path, body);
-            if (r && r.store) filesCache = r.store;
+            if (r && r.store) { filesCache = r.store; filesRev = r.rev || ''; }
+            else if (r && r.delta) filesPatch(r.delta);
             return r;
+        }
+        function filesPatch(delta) {
+            /* A record is set or, sent as null, removed; a folder likewise; a
+               trash entry replaces any with its id; the space used is taken
+               as sent. The server shapes each exactly as the whole store. */
+            const c = filesCache;
+            if (!c || !delta) return;
+            Object.entries(delta.files || {}).forEach(([k, v]) => { if (v) c.files[k] = v; else delete c.files[k]; });
+            Object.entries(delta.folders || {}).forEach(([k, v]) => { if (v) c.folders[k] = v; else delete c.folders[k]; });
+            const tr = delta.trash || {};
+            if (Object.keys(tr).length) {
+                c.trash = (c.trash || []).filter(t => !(t.id in tr));
+                Object.values(tr).forEach(v => { if (v) c.trash.push(v); });
+            }
+            if (delta.used != null) c.used = delta.used;
+            if ('setup_error' in delta) c.setup_error = delta.setup_error;
+            if (delta.names) c.names = delta.names;
+            filesRev = '';
+        }
+        let filesRepaintT = 0, filesRepaintLast = 0;
+        function filesRepaintSoon() {
+            /* Finished uploads redraw the view at most every 300 ms, so files
+               that finish together are drawn together: every file redrew it,
+               and in a thousand-file folder each redraw was most of a second.
+               A full redraw keeps the storage meter honest too; skipped while
+               someone is typing in a rename box, where the list alone is
+               redrawn. */
+            if (filesRepaintT) return;
+            filesRepaintT = setTimeout(() => {
+                filesRepaintT = 0; filesRepaintLast = Date.now();
+                if (!filesInputBusy() && document.querySelector('#view-files.active')) renderFiles();
+                else if (renderFilesBrowser._paintList) renderFilesBrowser._paintList();
+            }, Math.max(0, 300 - (Date.now() - filesRepaintLast)));
+        }
+        function filesProgress(u) {
+            /* A progress tick moves one bar and one number. It rebuilt every
+               row of the upload panel, many times a second per upload. */
+            if (u._fill && u._label) { u._fill.style.width = u.pct + '%'; u._label.textContent = u.pct + '%'; return; }
+            if (renderFilesBrowser._paintUploads) renderFilesBrowser._paintUploads();
         }
         function fmtBytes(n) {
             n = Number(n) || 0;
@@ -29962,6 +30369,7 @@ Projected Image UK"></textarea>
         }
 
         function renderFiles() {
+            filesPaintedRev = filesRev;
             const box = $('files-content'); box.innerHTML = '';
             const d = filesCache;
             /* One line (copy plan, Files #1); the trash keeps its 30 days on the
@@ -30346,7 +30754,7 @@ Projected Image UK"></textarea>
                 const acts = el('div', 'files-acts');
                 const rn = el('button', 'icon-btn'); rn.innerHTML = I.edit; rn.title = 'Rename folder';
                 rn.onclick = () => inlineRename(row, name, f.name, async (v) => {
-                    try { await filesOp('/api/files/folder', { op: 'rename', id: fid, name: v }); } catch (e) { toastError(e.message); }
+                    try { await filesOp('/api/files/folder', { op: 'rename', id: fid, name: v }); filesReveal.add(fid); } catch (e) { toastError(e.message); }
                     paintList();
                 });
                 const del = el('button', 'icon-btn'); del.innerHTML = I.trash; del.title = 'Delete folder (must be empty)';
@@ -30409,7 +30817,7 @@ Projected Image UK"></textarea>
                     // A rename must not quietly cost the file its type.
                     const oldExt = f.name.includes('.') ? f.name.split('.').pop() : '';
                     if (oldExt && !v.includes('.')) v = v + '.' + oldExt;
-                    try { await filesOp('/api/files/file', { op: 'rename', id: fid, name: v }); } catch (e) { toastError(e.message); }
+                    try { await filesOp('/api/files/file', { op: 'rename', id: fid, name: v }); filesReveal.add(fid); } catch (e) { toastError(e.message); }
                     paintList();
                 });
                 const del = el('button', 'icon-btn'); del.innerHTML = I.trash; del.title = 'Move to trash';
@@ -30520,19 +30928,14 @@ Projected Image UK"></textarea>
                     const ql = filesQ.toLowerCase();
                     const hits = sortFiles(Object.entries(fmap)
                         .filter(([, f]) => f.name.toLowerCase().includes(ql)));
+                    if (filesReveal.size) { filesHitCap = filesCapFor(hits.map(e => e[0]), filesHitCap, filesReveal); filesReveal.clear(); }
                     if (!hits.length) list.append(el('div', 'files-empty', 'No file matches that search.'));
                     else list.append(filesHeadRow('Modified'));
                     /* Painted in pages, the way the CRM contacts list already
                        is. The count of what is not on screen is ON screen, so
                        nobody is ever shown fewer matches than there are. */
-                    hits.slice(0, filesHitCap).forEach(([fid, f]) => list.append(fileRow(fid, f, true)));
-                    if (hits.length > filesHitCap) {
-                        const more = el('button', 'btn',
-                            'Show more (' + (hits.length - filesHitCap) + ' remaining)');
-                        more.style.cssText = 'margin:var(--sp-2) auto;display:block';
-                        more.onclick = () => { filesHitCap += FILES_HIT_STEP; paintList(); };
-                        list.append(more);
-                    }
+                    filesPaged(list, hits, filesHitCap, ([fid, f]) => fileRow(fid, f, true),
+                        () => { filesHitCap += FILES_HIT_STEP; paintList(); });
                     listHost.append(list);
                     return;
                 }
@@ -30553,7 +30956,7 @@ Projected Image UK"></textarea>
                         if (done) return; done = true; filesNewFolder = false;
                         const v = inp.value.trim();
                         if (commit && v) {
-                            try { await filesOp('/api/files/folder', { op: 'add', name: v, parent_id: filesFolder }); }
+                            try { const r = await filesOp('/api/files/folder', { op: 'add', name: v, parent_id: filesFolder, delta: 1 }); if (r && r.id) filesReveal.add(r.id); }
                             catch (e) { toastError(e.message || 'Could not create the folder.'); }
                         }
                         paintList();
@@ -30564,8 +30967,18 @@ Projected Image UK"></textarea>
                     list.append(row);
                     setTimeout(() => inp.focus(), 0);
                 }
-                folders.forEach(([fid, f]) => list.append(folderRow(fid, f)));
-                files.forEach(([fid, f]) => list.append(fileRow(fid, f, false)));
+                /* A folder is painted a page at a time too, its own folders
+                   first. Its count starts again only in another folder. */
+                if (filesRowCapFor !== filesFolder) { filesRowCapFor = filesFolder; filesRowCap = FILES_HIT_STEP; }
+                /* A folder just made, or a row just renamed, is shown wherever
+                   it sorts: the one row somebody is looking for. */
+                if (filesReveal.size) {
+                    filesRowCap = filesCapFor(folders.map(e => e[0]).concat(files.map(e => e[0])), filesRowCap, filesReveal);
+                    filesReveal.clear();
+                }
+                filesPaged(list, folders.map(e => ['d', e]).concat(files.map(e => ['f', e])), filesRowCap,
+                    ([kind, [fid, f]]) => kind === 'd' ? folderRow(fid, f) : fileRow(fid, f, false),
+                    () => { filesRowCap += FILES_HIT_STEP; paintList(); });
                 if (!folders.length && !files.length && !filesNewFolder)
                     list.append(emptyState({ icon: I.folder, text: 'No files here yet.', action: (() => {
                         const u = el('button', 'btn'); u.type = 'button'; u.append(ico(I.upload), document.createTextNode('Upload'));
@@ -30586,7 +30999,10 @@ Projected Image UK"></textarea>
                         : u.state === 'signing' ? 'Starting…'
                         : u.state === 'confirming' ? 'Finishing…'
                         : u.state === 'done' ? 'Done' : u.pct + '%';
-                    row.append(el('span', 'upstate', label));
+                    const labelEl = el('span', 'upstate', label);
+                    row.append(labelEl);
+                    // Only a sending row's bar and number move between states.
+                    if (u.state === 'sending') { u._fill = fill; u._label = labelEl; } else { u._fill = u._label = null; }
                     if (u.state === 'failed') {
                         const rt = el('button', 'btn', 'Try again');
                         rt.onclick = () => { u.state = 'waiting'; u.pct = 0; u.err = ''; filesQueue.push(u.job); paintUploads(); filesPump(); };
@@ -30660,7 +31076,7 @@ Projected Image UK"></textarea>
                 const hit = Object.entries(filesCache.folders).find(([, f]) =>
                     String(f.parent_id || '') === String(parent) && f.name.toLowerCase() === seg.toLowerCase());
                 if (hit) { memo[key] = hit[0]; parent = hit[0]; continue; }
-                const r = await filesOp('/api/files/folder', { op: 'add', name: seg, parent_id: parent });
+                const r = await filesOp('/api/files/folder', { op: 'add', name: seg, parent_id: parent, delta: 1 });
                 memo[key] = r.id; parent = r.id;
             }
             return parent;
@@ -30711,15 +31127,17 @@ Projected Image UK"></textarea>
             try {
                 row.state = 'signing'; paint();
                 const ctype = file.type || 'application/octet-stream';
+                /* delta: each answer is what changed, not the whole store
+                   (twice per file, about 85 KB each at 2,000 files). */
                 const r = await filesOp('/api/files/upload-url',
-                    { name: file.name, size: file.size, type: ctype, folder_id: folder });
+                    { name: file.name, size: file.size, type: ctype, folder_id: folder, delta: 1 });
                 row.state = 'sending'; paint();
                 await new Promise((resolve, reject) => {
                     const x = new XMLHttpRequest();
                     x.open('PUT', r.url);
                     x.setRequestHeader('Content-Type', ctype);
                     x.upload.onprogress = (ev) => {
-                        if (ev.lengthComputable) { row.pct = Math.round(ev.loaded * 100 / ev.total); paint(); }
+                        if (ev.lengthComputable) { row.pct = Math.round(ev.loaded * 100 / ev.total); filesProgress(row); }
                     };
                     x.onload = () => (x.status >= 200 && x.status < 300) ? resolve()
                         : reject(new Error('Storage refused the upload (status ' + x.status + ').'));
@@ -30727,14 +31145,10 @@ Projected Image UK"></textarea>
                     x.send(file);
                 });
                 row.state = 'confirming'; paint();
-                await filesOp('/api/files/complete', { id: r.id });
+                await filesOp('/api/files/complete', { id: r.id, delta: 1 });
                 row.state = 'done'; row.pct = 100;
                 paint();
-                // A full repaint keeps the storage meter honest too; skipped
-                // while someone is typing in a rename box, where the list
-                // alone refreshes instead.
-                if (!filesInputBusy() && document.querySelector('#view-files.active')) renderFiles();
-                else if (renderFilesBrowser._paintList) renderFilesBrowser._paintList();
+                filesRepaintSoon();
             } catch (e) {
                 row.state = 'failed'; row.err = e.message || 'Upload failed.';
                 paint();
@@ -32053,6 +32467,23 @@ Projected Image UK"></textarea>
         /* words: what the pill says for this row, [on, mid, off]. A row that
            is not a connection (the secrets, the backups, the disk) said
            'Connected' or 'Not connected' about something that is neither. */
+        /* Each route's typical time and its slowest twentieth since Reactor
+           last started, slowest first (the server keeps them, perf.summary):
+           live numbers, so a slow page is named before anybody has to
+           describe it. Nothing timed yet, no row. */
+        function timingRow(rows) {
+            /* Under a millisecond has nothing to say about slowness. */
+            const top = (rows || []).filter(r => r && r.count && r.p95 >= 1).slice(0, 5);
+            if (!top.length) return null;
+            const slow = top.some(r => r.count >= 20 && r.p95 > 2000);
+            const name = r => String(r.route || '').replace(/^\/api\//, '').replace(/[\/_-]+/g, ' ');
+            const ms = v => v < 1 ? 'under 1 ms' : Math.round(v) + ' ms';
+            /* "1 in 20" only from at least 20 answers; fewer cannot say it. */
+            return connRow('Response times', slow ? 'mid' : 'on',
+                'Slowest since Reactor last started: ' + top.map(r => name(r) + ' usually ' + ms(r.p50)
+                    + (r.count >= 20 ? ', 1 in 20 over ' + ms(r.p95) : '')).join(' \u00b7 ')
+                    + (slow ? '. Worth mentioning if a page feels slow.' : ''), ['Fine', 'Slow', '']);
+        }
         /* A connection: its name with its state beside it, then its line
            (12 Oct 2026). The state sat at the row's far edge, which is the
            controls' place. */
@@ -32128,14 +32559,18 @@ Projected Image UK"></textarea>
                 host.append(connRow('Shopify permissions', 'mid',
                     'Shopify did not say what the app is allowed to do, so this could not be checked.', CR_PERM));
             } else if (miss.length) {
+                /* Each permission with what it is for. The app is installed the
+                   managed way, so a new permission needs no reinstall: Shopify
+                   asks for it the next time Reactor opens after the release. */
+                const one = miss.length === 1;
                 host.append(connRow('Shopify permissions', 'off',
-                    miss.length + (miss.length === 1 ? ' permission is' : ' permissions are')
-                    + ' missing, so ' + Object.values(sc.missing).join('; ')
-                    + ' cannot work. Add ' + miss.join(', ')
-                    + ' in your Shopify app, then release and reinstall it.', CR_PERM));
+                    miss.length + (one ? ' permission is' : ' permissions are') + ' missing: '
+                    + miss.map(k => k + ', for ' + sc.missing[k]).join('; ')
+                    + '. Make sure the app\u2019s configuration lists ' + (one ? 'it' : 'them') + ', release a new version, '
+                    + 'and approve ' + (one ? 'it' : 'them') + ' when Shopify asks, the next time Reactor opens.', CR_PERM));
             } else if (sc.checked) {
                 host.append(connRow('Shopify permissions', 'on',
-                    'Everything the app writes is permitted.', CR_PERM));
+                    'Everything the app writes, and the payouts it reads, is permitted.', CR_PERM));
             }
             // Live updates: Shopify pushing order events to the app. Without them
             // everything still works off the short cache and the Refresh button.
@@ -32229,6 +32664,8 @@ Projected Image UK"></textarea>
                         + (r.parse_ms != null ? ' (read in ' + Math.round(r.parse_ms) + ' ms)' : '')).join(' \u00b7 ')
                     + (slow ? '. A save on a store this size rewrites all of it; worth mentioning.' : ''), ['Fine', 'Large', '']));
             }
+            const timing = timingRow(s.timing);
+            if (timing) host.append(timing);
             // Email alerts
             host.append(connRow('Email alerts', s.email_alerts && s.email_alerts.ok ? 'on' : 'mid',
                 s.email_alerts && s.email_alerts.ok ? 'Alerts and failures also reach your inbox.'
@@ -32848,7 +33285,9 @@ Projected Image UK"></textarea>
         loadProfile();  // pull the saved store profile from the server (for the Settings modal)
         loadMemory('notes');   // the notes alone: Overview shows the open follow-ups; the Memory tab reads the rest when opened
         loadAnalysisCache();  // restore last AI-tab results (no tokens spent)
-        loadAlerts();         // any change alerts from scheduled refreshes
+        /* The alerts are not read here: authBoot reads them once it knows
+           who is signed in. A read here ran beside that one, so every boot
+           asked twice, or asked signed out and read nothing. */
 
         // Demo hook for visual testing (no data exposed).
         /* A skill body is the one thing here worth minutes of typing, and it

@@ -3385,8 +3385,8 @@ def t_the_files_search_is_debounced_and_paged():
     i = fn.index("q.oninput")
     seg = fn[i:i + 400]
     ok("clearTimeout(q._t)" in seg and "setTimeout(" in seg, "typing is debounced")
-    ok("FILES_HIT_STEP" in SCRIPT and "filesHitCap" in fn, "and the hits are paged")
-    ok("remaining)" in fn,
+    ok("FILES_HIT_STEP" in SCRIPT and "filesPaged(list, hits, filesHitCap" in fn, "and the hits are paged")
+    ok("remaining)" in fn_src("function filesPaged("),
        "with the number NOT shown on screen, so nothing is quietly dropped")
 
 
@@ -3912,7 +3912,8 @@ def t_the_inbox_is_composed_like_the_reference():
     fn = SCRIPT.split("function renderMail() {")[1]
     fn = fn[:fn.index("\n        function ")]
     ok("lab('Shared inbox', counts.open)" in fn, "the title carries the open count")
-    ok("d.address || 'The mailbox the team answers'" in fn,
+    ok("mailSyncedLine(d)" in fn
+       and "d.address || 'The mailbox the team answers'" in fn_src("function mailSyncedLine("),
        "the mailbox and its last sweep are the line under it")
     ok("mCard.append(tableTools([sWrap, states], [viewSeg]))" in fn,
        "search and states left, the view switch right")
@@ -6398,7 +6399,7 @@ def t_an_unpaid_order_and_a_failed_lookup_read_differently():
     ordinary answer for anything recent. Showing it as an error would teach
     people to ignore a box that also reports missing scopes."""
     fn = fn_src("function connDocModal(")
-    i = fn.find("pay.state === 'unavailable'")
+    i = fn.find("} else if (pay.state === 'unavailable')")
     ok(i > 0, "a failed lookup has its own branch")
     ok("msg error" in fn[i:i + 400], "and that one is an error")
     j = fn.find("pay.state === 'not_yet'")
@@ -6406,8 +6407,27 @@ def t_an_unpaid_order_and_a_failed_lookup_read_differently():
     seg = fn[j:j + 600]
     ok("msg error" not in seg, "which is NOT an error")
     ok("field-help" in seg, "just a note saying to come back to it")
-    ok("The invoice itself is unaffected" in fn,
+    ok("The invoice itself is unaffected" in fn_src("function cxPayoutWhy(") and "cxPayoutWhy(pay" in fn,
        "and a payout that cannot be read never implies the invoice is wrong")
+
+
+@test
+def t_an_order_paid_another_way_is_not_shown_as_a_failed_lookup():
+    """An order paid by PayPal, by bank transfer, on account or marked as paid
+    never reaches a Shopify payout. The connector says so as unavailable with
+    the reason not_shopify_payments (a new state would read here as a note to
+    add), and every unavailable payout was a red failed lookup. Nothing
+    failed: it is a plain line saying why there is no note."""
+    fn = fn_src("function connDocModal(")
+    i = fn.find("pay.state === 'unavailable' && pay.reason === 'not_shopify_payments'")
+    ok(i > 0, "the reason has its own branch")
+    j = fn.find("} else if (pay.state === 'unavailable')")
+    ok(0 < i < j, "taken before the failed lookup, so it never lands in the red box")
+    seg = fn[i:j]
+    ok("field-help" in seg and "msg error" not in seg, "a plain line, not an error")
+    ok("pay.message" in seg, "in the connector's words, which name how the order is paid")
+    ok("Shopify Payments" in seg, "with a sentence of its own if the connector sends none")
+    ok("not been paid out" not in seg, "and never the words that were wrong for it")
 
 
 @test
@@ -8426,6 +8446,254 @@ async function run(first, second, at) {
 
 
 @test
+def t_the_inbox_poll_rests_in_a_hidden_tab_and_redraws_only_on_change():
+    """The 2026-10-12 speed audit, P1. While the Inbox was the open page, the
+    minute's poll downloaded the whole board and rebuilt the whole Inbox (up
+    to 5,800 elements) whether anything had changed or not, and kept doing it
+    in a tab nobody was looking at. Now it rests while the tab is hidden and
+    catches up as soon as the tab is back, and a minute in which nothing on
+    screen would change updates only the "synced" line. An action still
+    always redraws.
+
+    The review of #15 (PAGE1, PAGE2): the comparison is with what is ON
+    SCREEN, not with the page's copy, so a redraw skipped while someone was
+    typing is drawn on the next poll; and the ages and the 4 h amber and 8 h
+    red marks are part of it, so time passing on a quiet board still moves
+    them. Run for real, in node."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    for f in ("function mailBoardKey(", "function mailSyncedLine(", "function mailPaintSynced(",
+              "function mailAgeKey(", "function mailNotePainted("):
+        ok(f in SCRIPT, "the page compares what it drew and moves the synced line on its own: " + f)
+    ok("mailNotePainted(d)" in fn_src("function renderMail("), "and every redraw notes what it drew")
+    js = MINIDOM + r"""
+let now = Date.parse('2026-10-12T09:30:00Z'); Date.now = () => now;
+const ticks = []; function setInterval(f, ms) { ticks.push(f); return ticks.length; }
+let viewActive = true, busy = false;
+const synced = el('p'); synced.dataset.mailSynced = '';
+document.querySelector = (sel) => sel === '#view-mail.active' ? (viewActive ? {} : null)
+    : sel === '#mail-content [data-mail-synced]' ? synced : null;
+let mailCache = null, mailTimer = null, mailFetchSeq = 0, mailFetchedAt = 0, paints = 0, calls = [], mailFound = null;
+function mailInputBusy() { return busy; }
+const board = () => ({ connected: true, address: 'sales@shop.test', synced_at: '2026-10-12T09:00:00Z',
+                       sync_error: '', threads: [{ id: 't1', unread: true, state: 'unassigned',
+                                                   last_at: '2026-10-12T09:20:00Z', state_at: '2026-10-12T09:20:00Z' }] });
+let next = board();
+async function api(path, body) { calls.push(path + (body && body.force ? ' force' : '')); return JSON.parse(JSON.stringify(next)); }
+function renderMail() { paints += 1; mailNotePainted(mailCache); }
+function loadMail() {}
+function mailAgoLong(iso) { return 'at ' + iso.slice(11, 16); }
+""" + "\n".join(fn_src(f) for f in ("function mailAgo(", "function mailHours(", "function showMailView(",
+                                     "async function refreshMailQuiet(", "function mailBoardKey(",
+                                     "function mailAgeKey(", "function mailNotePainted(",
+                                     "function mailSyncedLine(", "function mailPaintSynced(")) + r"""
+const settle = () => new Promise(r => setImmediate(r));
+(async () => {
+  const out = {};
+  mailCache = board(); renderMail(); paints = 0;
+  showMailView(); await settle();
+  out.visit = { calls: calls.length, paints };              // drawn from the copy; the same board is not drawn twice
+  calls = []; paints = 0;
+  document.hidden = true; ticks[0](); await settle();
+  out.hiddenTick = calls.length;
+  document.hidden = false; now += 30000; dispatch(document, new Ev('visibilitychange')); await settle();
+  out.backSoon = calls.length;                                // back within the minute: nothing to catch up
+  now += 61000; dispatch(document, new Ev('visibilitychange')); await settle();
+  out.backLate = calls.length;                                // back after a minute: catches up at once
+  next = board(); next.synced_at = '2026-10-12T09:05:00Z';
+  paints = 0; ticks[0](); await settle();
+  out.quiet = { paints, line: synced.textContent };
+  next = board(); next.threads.push({ id: 't2', unread: true, state: 'unassigned', last_at: '2026-10-12T09:31:00Z' });
+  busy = true; paints = 0; ticks[0](); await settle();
+  out.whileTyping = paints;                                   // never under someone's keyboard
+  busy = false; ticks[0](); await settle();
+  out.afterTyping = paints;                                   // the board they missed is drawn on the next poll
+  paints = 0; now += 5 * 3600 * 1000; ticks[0](); await settle();
+  out.hoursLater = paints;                                    // the same board, five hours on: ages and amber move
+  paints = 0; ticks[0](); await settle();
+  out.nextMinute = paints;
+  next = JSON.parse(JSON.stringify(next)); next.sync_error = 'quota';
+  paints = 0; ticks[0](); await settle();
+  out.failing = paints;
+  paints = 0; await refreshMailQuiet();
+  out.action = paints;
+  // A send stamped and never confirmed ages too, on a board whose rows do not.
+  next = board(); next.threads[0].last_at = '2026-10-09T09:00:00Z'; next.threads[0].state = 'done';
+  next.outbound_pending = [{ id: 'p1', at: new Date(now - 120000).toISOString() }];
+  await refreshMailQuiet(); paints = 0;
+  now += 30 * 60000; ticks[0](); await settle();
+  out.pendingAges = paints;
+  // While whole-mailbox search results are showing, they are drawn every time.
+  paints = 0; mailFound = { q: 'x', rows: [] }; ticks[0](); await settle();
+  out.searching = paints; mailFound = null;
+  console.log(JSON.stringify(out));
+})();
+"""
+    got = _run_node(js)
+    ok(got["visit"] == {"calls": 1, "paints": 1}, "a revisit draws the copy once and not the same board again: %r" % got)
+    ok(got["hiddenTick"] == 0, "a hidden tab does not poll")
+    ok(got["backSoon"] == 0, "and coming back within the minute fetches nothing")
+    ok(got["backLate"] == 1, "but coming back after it catches up at once")
+    ok(got["quiet"]["paints"] == 0, "a quiet minute does not redraw the Inbox: %r" % got)
+    ok("09:05" in got["quiet"]["line"], "it only moves the synced line: %r" % got["quiet"])
+    ok(got["whileTyping"] == 0, "nothing is redrawn under someone typing")
+    ok(got["afterTyping"] == 1, "and the board they missed is drawn on the next poll: %r" % got)
+    ok(got["hoursLater"] == 1, "time passing on a quiet board still moves the ages and the amber: %r" % got)
+    ok(got["nextMinute"] == 0, "and once drawn, the next quiet minute is quiet again")
+    ok(got["failing"] == 1, "a sync error always redraws, so what it says stays true")
+    ok(got["action"] == 1, "and an action always redraws")
+    ok(got["pendingAges"] == 1, "a send that may have gone out keeps its age honest: %r" % got)
+    ok(got["searching"] == 1, "and search results are redrawn, as before")
+
+
+@test
+def t_closing_an_email_only_read_fetches_nothing():
+    """The 2026-10-12 speed audit, P1. Closing any email downloaded and redrew
+    the whole board, though reading one changes nothing on it but its unread
+    mark. If nothing inside the window was pressed or typed, closing now
+    marks that row read on the page's own copy. Anything done inside it
+    refreshes the board on close, as before. Run for real, in node."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+const I = { x: '<svg></svg>' };
+// One class, depth first: all openMailThread asks of its own window.
+Node_.prototype.querySelector = function (sel) {
+  const c = sel.replace(/^\./, '');
+  const walk = (n) => { for (const k of n.children || []) { if (k.classList.contains(c)) return k; const f = walk(k); if (f) return f; } return null; };
+  return walk(this);
+};
+// closest() by tag name, as a browser answers 'button, a, input, ...'.
+Node_.prototype.closest = function (sel) {
+  const tags = sel.split(',').map(x => x.trim().toUpperCase());
+  for (let n = this; n && n.tagName; n = n.parentNode) if (tags.indexOf(n.tagName) >= 0) return n;
+  return null;
+};
+const ticks = []; function setInterval(f) { ticks.push(f); return ticks.length; } function clearInterval() {}
+document.querySelector = (sel) => sel === '#view-mail.active' ? {} : null;
+let mailCache = { threads: [{ id: 't1', unread: true }, { id: 't2', unread: false }] };
+let calls = [], paints = 0, mailFetchSeq = 0;
+async function api(path) { calls.push(path); return { thread: { id: 'x' } }; }
+function toastError() {}
+function renderMail() { paints += 1; }
+function mailInputBusy() { return false; }
+async function refreshMailQuiet() { calls.push('/api/mail/board'); }
+function paintMailThread(m) {
+  const full = el('button', 'linkish', 'Read the full emails'); full.dataset.mailReadonly = '';
+  m.body.append(el('button', 'btn', 'Reply'), full);
+}
+""" + "\n".join(fn_src(f) for f in ("function mailModal(", "async function openMailThread(")) + r"""
+const settle = () => new Promise(r => setImmediate(r));
+const top = () => document.body.children[document.body.children.length - 1];
+const closeX = () => top().children[0].children[0].children[1];
+(async () => {
+  const out = {};
+  await openMailThread('t1'); await settle();
+  calls = [];
+  const seq0 = mailFetchSeq;
+  closeX().click(); await settle();
+  out.readOnly = { calls: calls.slice(), paints, unread: mailCache.threads[0].unread, dropsInFlight: mailFetchSeq > seq0 };
+  await openMailThread('t2'); await settle();
+  calls = []; paints = 0;
+  closeX().click(); await settle();
+  out.alreadyRead = { calls: calls.slice(), paints };
+  await openMailThread('t2'); await settle();
+  calls = [];
+  top().children[0].children[1].children[1].click();          // Read the full emails
+  dispatch(closeX(), new Ev('keydown', { key: 'Enter', bubbles: true }));
+  closeX().click(); await settle();
+  out.readingOnly = calls.slice();
+  await openMailThread('t2'); await settle();
+  calls = [];
+  const body = top().children[0].children[1];
+  body.children[0].click();
+  closeX().click(); await settle();
+  out.pressed = calls.slice();
+  console.log(JSON.stringify(out));
+})();
+"""
+    got = _run_node(js)
+    ok(got["readOnly"]["calls"] == [], "closing an email only read fetches nothing: %r" % got)
+    ok(got["readOnly"]["unread"] == False, "the row it was is marked read on the page's copy")
+    ok(got["readOnly"]["paints"] == 1, "and drawn once from it")
+    ok(got["readOnly"]["dropsInFlight"], "a poll already in flight is dropped, so it cannot draw the email unread again")
+    ok(got["readingOnly"] == [], "reading the full text, opening it in Gmail or Enter on the X is still only reading: %r" % got)
+    ok(got["alreadyRead"] == {"calls": [], "paints": 0}, "an email already read changes nothing at all")
+    ok(got["pressed"] == ["/api/mail/board"], "pressing anything inside it refreshes the board on close, as before")
+
+
+@test
+def t_the_boot_asks_for_the_alerts_once():
+    """The 2026-10-12 speed audit, P7. The boot asked for /api/alerts at the
+    top level and again in authBoot, which is the call that runs with a
+    session; the top-level one ran signed out or duplicated it."""
+    boot = SCRIPT[SCRIPT.index("renderSidebar(); renderChat(); authBoot();"):]
+    boot = boot[:boot.index("// Demo hook")]
+    ok("loadAlerts()" not in boot, "the boot does not ask for the alerts itself")
+    ab = fn_src("async function authBoot(")
+    ok(ab.count("loadAlerts();") == 1, "authBoot asks once it knows who is signed in")
+    ok("loadAlerts();       // the boot-time read ran signed out, and read nothing" in SCRIPT,
+       "and a fresh sign-in asks too")
+
+
+@test
+def t_warming_the_crm_for_loans_counts_as_loading_it():
+    """The 2026-10-12 speed audit, P8. Opening Loans fetches the whole CRM
+    board for the borrower suggestions but left its time at zero, so the
+    next visit to the CRM thought its copy ancient and fetched it all again."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = r"""
+let crmCache = null, crmLoadedAt = 0, reads = 0;
+async function api() { reads += 1; return { crm: { persons: {} } }; }
+""" + fn_src("function loansWarmCrm(") + r"""
+(async () => {
+  loansWarmCrm(); await new Promise(r => setImmediate(r));
+  console.log(JSON.stringify({ reads, has: !!crmCache, stamped: crmLoadedAt > 0 }));
+})();
+"""
+    got = _run_node(js)
+    ok(got == {"reads": 1, "has": True, "stamped": True}, "the warmed copy is dated: %r" % got)
+
+
+@test
+def t_settings_names_the_slowest_routes():
+    """Speed design 4.1. The server keeps each route's typical and slowest
+    time since it started (perf.summary, in /api/status); an admin's
+    Settings shows the slowest few beside the store sizes, in words."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    ok("function timingRow(" in SCRIPT, "Settings has a row for the route times")
+    js = MINIDOM + fn_src("function connRow(") + "\n" + fn_src("function timingRow(") + r"""
+const none = timingRow([]);
+const row = timingRow([{ route: '/api/crm/board', count: 40, p50: 52.4, p95: 140.2 },
+                       { route: '/api/production-labels', count: 29, p50: 900, p95: 4100 },
+                       { route: '/api/alerts', count: 30, p50: 0.2, p95: 0.4 },
+                       { route: '/api/auth/state', count: 30, p50: 0.3, p95: 1.4 },
+                       { route: '/api/loans', count: 3, p50: 20, p95: 30 }]);
+console.log(JSON.stringify({ none: none === null, text: row.textContent }));
+"""
+    got = _run_node(js)
+    ok(got["none"], "nothing timed yet, no row")
+    ok("Response times" in got["text"], "the row is named: %r" % got["text"])
+    ok("crm board usually 52 ms" in got["text"], "routes in words with their typical time: %r" % got["text"])
+    ok("1 in 20 over 4100 ms" in got["text"], "and their slowest twentieth")
+    ok("Slow" in got["text"], "a route whose slowest twentieth is over two seconds marks it slow")
+    ok("alerts" not in got["text"] and " 0 ms" not in got["text"],
+       "a route that answers in under a millisecond has nothing to say here: %r" % got["text"])
+    ok("auth state usually under 1 ms" in got["text"], "a typical time under a millisecond says so: %r" % got["text"])
+    ok("loans usually 20 ms" in got["text"] and "over 30 ms" not in got["text"],
+       "and a route seen fewer than 20 times has no '1 in 20' to quote")
+    ok("timingRow(s.timing)" in SCRIPT, "and Settings draws it from the status answer")
+    for word in ("—", "–", "Railway", "gizmo", "API"):
+        ok(word not in fn_src("function timingRow("), "house rules: no %r in the row's words" % word)
+
+
+@test
 def t_bulk_undo_puts_back_every_batch_and_says_how_many():
     """A13 in the 2026-09-22 bug audit. A bulk action over 150 emails is sent
     in batches, each with its own undo token; the page kept only the last, so
@@ -8824,7 +9092,7 @@ def t_the_crm_refresh_waits_for_someone_typing_in_it():
         print("       (node unavailable, skipped)")
         return
     js = MINIDOM + r"""
-let reads = 0, paints = 0, crmCache = {}, crmLoadedAt = 0, onRead = null;
+let reads = 0, paints = 0, crmCache = {}, crmLoadedAt = 0, onRead = null, crmRev = '', crmPaintedRev = '';
 const setInterval = () => 0;
 document.querySelector = (sel) => sel === '#view-crm.active' ? el('div') : null;
 async function api() { reads += 1; if (onRead) onRead(); crmLoadedAt = 0; return { crm: {} }; }
@@ -8846,6 +9114,300 @@ search.closest = (sel) => sel === '#crm-content' ? host : null;
     ok(got["typing"] == {"reads": 0, "paints": 0}, "no refresh under the search box: %r" % got)
     ok(got["startedMidRead"] == {"reads": 1, "paints": 0}, "nor when typing starts while it reads: %r" % got)
     ok(got["idle"] == {"reads": 2, "paints": 1}, "and it refreshes once nobody is typing: %r" % got)
+
+
+@test
+def t_the_crm_poll_sends_its_revision_and_redraws_only_on_change():
+    """The 2026-10-12 speed audit, S1. Every 90 seconds and on every return to
+    the tab, each open CRM downloaded the whole board (about 400 KB) and
+    redrew it. The page now sends the revision it holds; an unchanged board
+    comes back as {same: true} and nothing is drawn. A board whose redraw was
+    skipped under someone's typing is drawn on the next quiet poll, and every
+    load and write keeps the revision beside the board it describes."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    ok("let crmRev = ''" in SCRIPT, "the page keeps the board's revision")
+    for f in ("async function loadCRM(", "async function crmOp("):
+        ok("crmRev = " in fn_src(f), f + " keeps the revision beside the board")
+    ok("crmPaintedRev = crmRev" in fn_src("function renderCRM("), "and a drawing notes the revision it drew")
+    js = MINIDOM + r"""
+let reads = [], paints = 0, crmCache = { deals: {} }, crmLoadedAt = 0, crmRev = 'r1', crmPaintedRev = 'r1';
+let next = null;
+const setInterval = () => 0;      // the slice carries the page's own 90 s poll
+document.querySelector = (sel) => sel === '#view-crm.active' ? el('div') : null;
+document.activeElement = null;
+let api = async (path, body) => { reads.push(body.rev || ''); crmLoadedAt = 0; return next; };
+function renderCRM() { paints += 1; crmPaintedRev = crmRev; }
+""" + fn_src("async function crmMaybeRefresh(") + r"""
+(async () => {
+  const out = {};
+  next = { same: true, rev: 'r1' };
+  await crmMaybeRefresh();
+  out.same = { sent: reads.slice(), paints };
+  next = { crm: { deals: { d1: {} } }, rev: 'r2' };
+  crmLoadedAt = 0; await crmMaybeRefresh();  // a minute on
+  out.moved = { paints, rev: crmRev, has: !!crmCache.deals.d1 };
+  crmPaintedRev = 'r1';                     // that drawing was skipped under someone's typing
+  next = { same: true, rev: 'r2' }; paints = 0;
+  crmLoadedAt = 0; await crmMaybeRefresh();
+  out.catchUp = paints;
+  // The Pipedrive import empties the board while a poll is out, and the poll's
+  // "same" lands before the import's own load does.
+  next = { same: true, rev: 'r2' }; paints = 0;
+  api = async (path, body) => { reads.push(body.rev || ''); crmCache = null; crmRev = ''; crmLoadedAt = 0; return next; };
+  crmLoadedAt = 0; await crmMaybeRefresh();
+  out.emptied = paints;
+  console.log(JSON.stringify(out));
+})();
+"""
+    got = _run_node(js)
+    ok(got["same"] == {"sent": ["r1"], "paints": 0}, "the poll sends its revision and an unchanged board draws nothing: %r" % got)
+    ok(got["moved"] == {"paints": 1, "rev": "r2", "has": True}, "a board that moved is kept, with its revision, and drawn")
+    ok(got["catchUp"] == 1, "and a drawing skipped earlier is made on the next quiet poll")
+    ok(got["emptied"] == 0, "but never a board emptied while the poll was out: %r" % got)
+
+
+@test
+def t_a_failed_crm_write_does_not_stay_on_the_page():
+    """PR review, 2026-10-12. Ticking an activity done ticks its box before
+    the server answers. When the write failed the box stayed ticked, and the
+    poll that used to redraw the whole board every 90 seconds, and so put it
+    right, now hears that nothing changed and draws nothing. The box goes
+    back when the write fails, and any failed CRM write has the next poll
+    redraw the board even when it is told nothing changed."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+let crmCache = { deals: {}, activities: {} }, crmLoadedAt = 0, crmRev = 'r1', crmPaintedRev = 'r1', paints = 0, toasts = 0;
+let fail = true, next = { same: true, rev: 'r1' };
+const setInterval = () => 0;
+document.querySelector = (sel) => sel === '#view-crm.active' ? el('div') : null;
+document.activeElement = null;
+async function api(path, body) { crmLoadedAt = 0; if (path !== '/api/crm/board' && fail) throw new Error('Couldn\'t save.'); return next; }
+function renderCRM() { paints += 1; crmPaintedRev = crmRev; }
+function toastError() { toasts += 1; }
+const ico = () => el('i'), crmTypeIcon = () => 'phone', crmPerson = () => null, crmMulti = () => false;
+const crmUname = () => '', fmtDate = (x) => x, cap = (x) => x, crmActivityForm = () => {};
+""" + fn_src("async function crmMaybeRefresh(") + fn_src("async function crmOp(") + fn_src("function crmActTick(") + fn_src("function crmActRow(") + r"""
+(async () => {
+  const row = crmActRow({ id: 'a1', type: 'call', subject: 'Call', done: false, state: 'today' }, () => {});
+  const cb = row.children[0];
+  cb.checked = true; await cb.onchange();
+  const out = { box: cb.checked, toasts };
+  await crmMaybeRefresh();
+  out.redrawn = paints;
+  console.log(JSON.stringify(out));
+})();
+"""
+    got = _run_node(js)
+    ok(got["box"] is False and got["toasts"] == 1, "a failed tick is unticked, and says why: %r" % got)
+    ok(got["redrawn"] == 1, "and the next poll redraws though nothing changed: %r" % got)
+
+
+@test
+def t_a_big_folder_is_drawn_a_page_at_a_time():
+    """The 2026-10-12 speed audit, P2. A folder was drawn whole: a thousand
+    files is about 34,000 elements, 155 to 237 ms of a desktop's main thread
+    (four times that on a phone) for every open, revisit and cleared search.
+    A folder now draws its first 60 rows and a Show more that says how many
+    are left, the way search already did; the count stays per folder, so a
+    redraw after an upload does not fold the list back up."""
+    for f in ("function filesPaged(",):
+        ok(f in SCRIPT, f + " exists")
+    fn = SCRIPT.split("function renderFilesBrowser(host) {")[1]
+    fn = fn[:fn.index("\n        function ")]
+    pl = fn[fn.index("function paintList() {"):]
+    ok(pl.count("filesPaged(list, ") == 2, "search and the folder are both drawn a page at a time")
+    ok("filesRowCap" in pl and "filesRowCapFor !== filesFolder" in pl, "a folder's count starts again only in another folder")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + "let filesPagedFocus = -1;\n" + fn_src("function filesPaged(") + r"""
+const rows = Array.from({ length: 150 }, (_, i) => 'r' + i);
+const list = el('div'); let more = 0;
+filesPaged(list, rows, 60, (r) => el('div', 'files-row', r), () => { more += 1; });
+const btn = list.children[list.children.length - 1];
+btn.onclick();
+const few = el('div');
+filesPaged(few, rows.slice(0, 40), 60, (r) => el('div', 'files-row', r), () => {});
+console.log(JSON.stringify({ n: list.children.length, last: btn.textContent, more,
+  first: list.children[0].textContent, few: few.children.length }));
+"""
+    got = _run_node(js)
+    ok(got["n"] == 61 and got["first"] == "r0", "60 rows and the button: %r" % got)
+    ok(got["last"] == "Show more (90 remaining)" and got["more"] == 1, "which says what is left and shows more: %r" % got)
+    ok(got["few"] == 40, "a small folder is drawn whole, with no button: %r" % got)
+
+
+@test
+def t_show_more_keeps_the_keyboard_and_a_row_just_named_is_shown():
+    """Review of the fourth speed PR. Show more draws the list again under the
+    button, which took the keyboard to the top of the page; it now goes to
+    the first row Show more brought. And a folder made or a row renamed so
+    that it sorts past the rows on screen was hidden behind Show more; the
+    page now shows down to it."""
+    for f in ("function filesPaged(", "function filesCapFor("):
+        ok(f in SCRIPT, f + " exists")
+    fn = SCRIPT.split("function renderFilesBrowser(host) {")[1]
+    fn = fn[:fn.index("\n        function ")]
+    ok("filesRowCap = filesCapFor(" in fn, "the folder's count is raised to show a row just named")
+    pl = fn[fn.index("function paintList() {"):]
+    ok("filesHitCap = filesCapFor(" in pl, "and the search's count, for a hit just renamed")
+    ok(pl.count("filesReveal.clear()") == 2, "and what was to be shown is forgotten in either view, never lingering")
+    ok(fn.count("filesReveal.add(") >= 3, "for a new folder, a renamed folder and a renamed file")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + fn_src("function filesPaged(") + fn_src("function filesCapFor(") + r"""
+const FILES_HIT_STEP = 60;
+let filesPagedFocus = -1;
+const rows = Array.from({ length: 150 }, (_, i) => 'r' + i);
+const host = el('div'); document.append(host);
+const mk = (r) => { const n = el('div', 'files-row'); const b = el('button', 'files-name', r); n.append(b);
+                    n.querySelector = (s) => s === '.files-name' ? b : null; return n; };
+let cap = 60;
+const paint = () => { host.innerHTML = ''; const list = el('div', 'files-list'); host.append(list);
+                      filesPaged(list, rows, cap, mk, () => { cap += 60; paint(); }); return list; };
+paint();
+const btn = host.children[0].children[60];
+btn.focus(); btn.onclick();
+setTimeout(() => {
+  const ids = rows.map(r => r);
+  console.log(JSON.stringify({ focused: document.activeElement && document.activeElement.textContent,
+    capNone: filesCapFor(ids, 60, new Set()), capNear: filesCapFor(ids, 60, new Set(['r59'])),
+    capFar: filesCapFor(ids, 60, new Set(['r130'])), capKept: filesCapFor(ids, 180, new Set(['r2'])) }));
+}, 0);
+"""
+    got = _run_node(js)
+    ok(got["focused"] == "r60", "the keyboard goes to the first row Show more brought: %r" % got)
+    ok(got["capNone"] == 60 and got["capNear"] == 60, "nothing to show, or already on screen: the count stands: %r" % got)
+    ok(got["capFar"] == 180, "a row just named at 131st is shown, a whole page at a time: %r" % got)
+    ok(got["capKept"] == 180, "and the count never shrinks for it: %r" % got)
+
+
+@test
+def t_finished_uploads_redraw_once_per_batch_and_progress_moves_one_bar():
+    """The 2026-10-12 speed audit, P2 and S9. Every finished upload redrew the
+    whole Files view (about 720 ms per file in a thousand-file folder), every
+    progress tick rebuilt every row of the upload panel, and each upload was
+    signed for and confirmed with the whole store sent back twice. Now the
+    page asks for only what changed and patches its copy, finished uploads
+    redraw the view once per batch, and a progress tick moves one bar."""
+    for f in ("function filesPatch(", "function filesRepaintSoon(", "function filesProgress(",
+              "async function filesOp(", "async function filesSend("):
+        ok(f in SCRIPT, f + " exists")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+let filesCache = { files: {}, folders: {}, trash: [], used: 0 }, filesRev = 'r1', filesPaintedRev = 'r1';
+let calls = [], renders = 0, full = 0, rows = [];
+const renderFilesBrowser = { _paintUploads: () => { full += 1; rows.forEach(u => { u._fill = el('i'); u._label = el('span'); }); },
+                             _paintList: () => {} };
+function renderFiles() { renders += 1; }
+function filesInputBusy() { return false; }
+document.querySelector = (sel) => sel === '#view-files.active' ? el('div') : null;
+let n = 0;
+async function api(path, body) {
+  calls.push([path, body.delta || 0]);
+  if (path === '/api/files/upload-url') { n += 1; return { ok: true, id: 'f' + n, url: 'https://r2.test/' + n, replaces: false, delta: { used: n * 10 } }; }
+  return { ok: true, id: body.id, delta: { files: { [body.id]: { name: body.id + '.pdf', status: 'active', size: 10 } }, trash: {}, folders: {}, used: 30 } };
+}
+class XMLHttpRequest {
+  constructor() { this.upload = {}; }
+  open() {} setRequestHeader() {}
+  send() { setTimeout(() => { for (let i = 1; i <= 5; i++) this.upload.onprogress({ lengthComputable: true, loaded: i, total: 5 }); this.status = 200; this.onload(); }, 5); }
+}
+""" + fn_src("function filesPatch(") + fn_src("function filesRepaintSoon(") + fn_src("function filesProgress(") \
+        + fn_src("async function filesOp(") + fn_src("async function filesSend(") + r"""
+(async () => {
+  rows = [1, 2, 3].map(i => ({ name: 'u' + i + '.pdf', pct: 0, state: 'waiting', err: '' }));
+  await Promise.all(rows.map(u => filesSend({ file: { name: u.name, size: 10, type: 'application/pdf' }, row: u, folder: '' })));
+  await new Promise(r => setTimeout(r, 450));
+  console.log(JSON.stringify({ renders, full, calls, files: Object.keys(filesCache.files).sort(), used: filesCache.used,
+    rev: filesRev, states: rows.map(u => u.state), bar: rows[0]._fill && rows[0]._fill.style.width }));
+})();
+"""
+    got = _run_node(js)
+    ok(all(d == 1 for _p, d in got["calls"]) and len(got["calls"]) == 6, "signing and confirming ask for what changed: %r" % got["calls"])
+    ok(got["files"] == ["f1", "f2", "f3"] and got["used"] == 30, "and the page's copy is patched with it: %r" % got)
+    ok(got["rev"] == "", "a patched copy is no named revision: the next look fetches the store")
+    ok(got["states"] == ["done"] * 3, "every upload finished: %r" % got["states"])
+    ok(got["renders"] == 1, "three uploads finishing together redraw the view once: %r" % got["renders"])
+    ok(got["full"] == 12, "the panel is rebuilt only when an upload changes state, not per tick: %r" % got["full"])
+
+
+@test
+def t_a_files_delta_patches_the_page_copy_exactly():
+    """The page's half of the delta answers: a record is set or removed, a
+    folder likewise, a trash entry replaces any with its id, and the space
+    used is taken as sent."""
+    ok("function filesPatch(" in SCRIPT, "filesPatch exists")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = fn_src("function filesPatch(") + r"""
+let filesRev = 'r9';
+let filesCache = { files: { f1: { name: 'a' }, f2: { name: 'b' } }, folders: { d1: { name: 'Jobs' } },
+                   trash: [{ id: 'f0', name: 'z' }], used: 5 };
+filesCache.setup_error = 'RuntimeError: an earlier outage'; filesCache.names = { u1: 'Cameron' };
+filesPatch({ files: { f1: null, f3: { name: 'c' } }, trash: { f1: { id: 'f1', name: 'a' }, f0: null },
+             folders: { d1: null, d2: { name: 'New' } }, used: 9, setup_error: '', names: { u1: 'Cameron', u2: 'Ann' } });
+console.log(JSON.stringify({ c: filesCache, rev: filesRev }));
+"""
+    got = _run_node(js)
+    eq_ = lambda a, b, m: ok(a == b, m + ": %r" % (a,))
+    eq_(got["c"]["files"], {"f2": {"name": "b"}, "f3": {"name": "c"}}, "records set and removed")
+    eq_(got["c"]["folders"], {"d2": {"name": "New"}}, "folders set and removed")
+    eq_(got["c"]["trash"], [{"id": "f1", "name": "a"}], "the trash entry replaces, and one gone is gone")
+    eq_(got["c"]["used"], 9, "the space used")
+    eq_(got["c"]["setup_error"], "", "a storage error that has cleared clears on the page too")
+    eq_(got["c"]["names"], {"u1": "Cameron", "u2": "Ann"}, "and a teammate added since is named")
+    eq_(got["rev"], "", "and the copy no longer claims a revision")
+
+
+@test
+def t_the_files_tree_sends_its_revision_and_redraws_only_on_change():
+    """Each visit to Files re-read the whole store. The page now sends the
+    revision it holds and an unchanged store comes back as {same: true}. A
+    redraw skipped while someone typed in a rename box is made on the next
+    quiet look, which it never was before (an equal store returned early)."""
+    for f in ("async function refreshFilesQuiet(", "async function loadFiles(", "function renderFiles("):
+        ok(f in SCRIPT, f + " exists")
+    ok("filesRev = " in fn_src("async function loadFiles("), "a load keeps the store's revision")
+    ok("filesPaintedRev = filesRev" in fn_src("function renderFiles("), "and a drawing notes what it drew")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+let filesCache = { files: { f1: {} } }, filesRev = 'r1', filesPaintedRev = 'r1', sent = [], paints = 0, next = null, busy = false;
+document.querySelector = (sel) => sel === '#view-files.active' ? el('div') : null;
+function filesInputBusy() { return busy; }
+function renderFiles() { paints += 1; filesPaintedRev = filesRev; }
+async function api(path, body) { sent.push(body.rev || ''); return next; }
+""" + fn_src("async function refreshFilesQuiet(") + r"""
+(async () => {
+  const out = {};
+  next = { same: true, rev: 'r1' }; await refreshFilesQuiet();
+  out.same = { sent: sent.slice(), paints };
+  next = { store: { files: { f1: {}, f2: {} } }, rev: 'r2' }; busy = true; await refreshFilesQuiet();
+  out.typing = { paints, rev: filesRev, has: !!filesCache.files.f2 };
+  busy = false; next = { same: true, rev: 'r2' }; await refreshFilesQuiet();
+  out.catchUp = paints;
+  filesRev = ''; filesPaintedRev = '';            // a patched copy, drawn
+  next = { store: { files: { f1: {}, f2: {} } }, rev: 'r2' }; await refreshFilesQuiet();
+  out.equal = { paints, rev: filesRev, painted: filesPaintedRev, sent: sent[sent.length - 1] };
+  console.log(JSON.stringify(out));
+})();
+"""
+    got = _run_node(js)
+    ok(got["same"] == {"sent": ["r1"], "paints": 0}, "the look sends its revision and an unchanged store draws nothing: %r" % got)
+    ok(got["typing"] == {"paints": 0, "rev": "r2", "has": True}, "a moved store is kept, undrawn while someone types: %r" % got)
+    ok(got["catchUp"] == 1, "and drawn on the next quiet look: %r" % got)
+    ok(got["equal"] == {"paints": 1, "rev": "r2", "painted": "r2", "sent": ""},
+       "a patched copy asks without a revision, and an equal store is not drawn again: %r" % got)
 
 
 @test
@@ -9035,6 +9597,104 @@ def _run_js(src):
         return r.stdout
     finally:
         os.unlink(path)
+
+
+@test
+def t_a_refused_payout_lookup_says_which_permission_and_never_shows_json():
+    """Cameron's screenshot of 2026-10-12: the document window's Payout note
+    read 'Could not read payouts: Shopify GraphQL errors: [{"message":"Access
+    denied for shopifyPaymentsAccount field. Requi' and stopped at the box's
+    edge. The connector's single-order lookup passed Shopify's JSON through
+    unguarded, the page printed it on a line that cannot wrap, and nothing
+    said the cause: the app asked Shopify for payouts but not for the
+    accounts they hang off. The inputs are the connector's real strings, old
+    and new; the helper is run, not read."""
+    i = SCRIPT.index("        const CX_SETTING_WORDS")
+    helpers = SCRIPT[i:SCRIPT.index("        /* One run problem as a sentence.")]
+    req = "the `read_shopify_payments` or the `read_shopify_payments_accounts` access scope"
+    shopify_json = json.dumps([{"message": "Access denied for shopifyPaymentsAccount field. Required access: " + req + ".",
+                                "locations": [{"line": 3, "column": 3}], "path": ["shopifyPaymentsAccount"],
+                                "extensions": {"code": "ACCESS_DENIED", "documentation": "https://shopify.dev/api/usage/access-scopes",
+                                               "requiredAccess": req}}])
+    old_pass = ("Shopify refused the payouts query. The app needs the read_shopify_payments_payouts and "
+                "read_shopify_payments_accounts scopes, and the shop must use Shopify Payments.")
+    cases = {
+        "prod": [{"state": "unavailable", "message": "Could not read payouts: Shopify GraphQL errors: " + shopify_json}, {}],
+        "reactor": [{"state": "unavailable", "reason": "refused", "needs": ["read_shopify_payments_accounts"],
+                     "message": "Shopify refused the payouts query: the app needs read_shopify_payments_accounts."},
+                    {"auth": "client_credentials", "admin": True}],
+        "own": [{"state": "unavailable", "reason": "refused", "needs": ["read_shopify_payments_accounts"]},
+                {"auth": "static", "admin": True}],
+        "unknown_admin": [{"state": "unavailable", "message": "Could not read payouts: Shopify GraphQL errors: " + shopify_json},
+                          {"admin": True}],
+        "pass_old": [{"error": old_pass}, {"pass": True, "admin": True, "auth": "client_credentials"}],
+        "no_account": [{"state": "unavailable", "message": "This shop has no Shopify Payments account, so there are no payouts to read."}, {}],
+        "http500": [{"state": "unavailable", "message": "Could not read payouts: Shopify HTTP 500 after 5 attempts"}, {}],
+        "other_gql": [{"state": "unavailable", "message": "Could not read payouts: Shopify GraphQL errors: "
+                       + json.dumps([{"message": "Field 'payouts' doesn't exist on type 'Shop'"}])}, {}],
+        "too_many": [{"error": "More than 2,500 payouts since 2026-09-01: narrow the date and run again.",
+                      "errorReason": "too_many"}, {"pass": True}],
+        # The payout pass carries errors that are not about payouts at all.
+        "busy": [{"error": "A sync is already running"}, {"pass": True, "admin": True}],
+        "volume": [{"error": "EACCES: permission denied, open '/data/state/ledger.json'"}, {"pass": True, "admin": True}],
+        # The client's own failures, each in words and never as JSON.
+        "http401": [{"state": "unavailable", "message": "Could not read payouts: Shopify HTTP 401: [API] Invalid API key or access token (unrecognized login or wrong password)"}, {}],
+        "cost": [{"state": "unavailable", "message": "Could not read payouts: Shopify query cost exceeded: "
+                  + json.dumps([{"message": "Query cost is 1200, which exceeds the single query max cost limit (1000).", "extensions": {"code": "MAX_COST_EXCEEDED"}}])}, {}],
+        "empty": [{"state": "unavailable", "message": "Could not read payouts: Shopify GraphQL: empty data"}, {}],
+        "network": [{"state": "unavailable", "message": "Could not read payouts: fetch failed"}, {}],
+    }
+    js = ("const money = (n, cur, dp) => '£' + Number(n).toFixed(dp);\n" + helpers
+          + "\nconst C = " + json.dumps(cases) + ";\nconst out = {};\n"
+          + "for (const k in C) out[k] = cxPayoutWhy(C[k][0], C[k][1]);\n"
+          + "console.log(JSON.stringify(out));\n")
+    raw = _run_js(js)
+    if raw is None:
+        print("       (node unavailable, skipped)")
+        return
+    o = json.loads(raw)
+    for k, v in o.items():
+        both = v["lead"] + " " + v["detail"]
+        ok(not re.search(r'\[\{|"message"|`|GraphQL|JSON|[‒-―]', both), "%s: no JSON, code marks or dashes: %r" % (k, both))
+    ok(o["prod"]["lead"] == "Shopify would not show this order’s payout, so no note can be shown. The invoice itself is unaffected.",
+       "the production case leads with what happened: %r" % o["prod"]["lead"])
+    ok("view Shopify Payments accounts (read_shopify_payments_accounts)" in o["prod"]["detail"]
+       and "payouts (read" not in o["prod"]["detail"], "and names the one permission Shopify named: %r" % o["prod"]["detail"])
+    ok(o["prod"]["detail"].endswith("An admin can add that permission."), "a member is told who can fix it")
+    ok(o["reactor"]["detail"].startswith("The Xero sync signs in to Shopify as Reactor, and Reactor is not allowed to view Shopify Payments accounts")
+       and "Settings, under Connections" in o["reactor"]["detail"], "signing in as Reactor points an admin at Settings: %r" % o["reactor"]["detail"])
+    ok("an app of its own" in o["own"]["detail"] and "Settings, then Apps, find that app under Legacy custom apps" in o["own"]["detail"]
+       and "Develop apps" not in o["own"]["detail"], "its own app points at Shopify's current place for it: %r" % o["own"]["detail"])
+    ok("If it signs in as Reactor" in o["unknown_admin"]["detail"], "not knowing how it signs in, both ways are said")
+    ok("also need Shopify Payments payouts" in o["unknown_admin"]["detail"] and "also need" not in o["reactor"]["detail"],
+       "Shopify names only the accounts permission when both are missing, so an app Settings cannot see is told both")
+    ok(o["busy"]["lead"] == "No notes were written." and o["busy"]["detail"] == "A sync is already running.",
+       "a busy connector is not a payout lookup: %r" % o["busy"])
+    ok(o["volume"]["lead"] == "No notes were written." and "Shopify" not in o["volume"]["detail"] + o["volume"]["lead"],
+       "nor is a file's permission a Shopify refusal: %r" % o["volume"])
+    ok(o["http401"]["detail"].startswith("Shopify did not accept the Xero sync\u2019s sign-in (error 401)")
+       and "Try again" not in o["http401"]["detail"], "a refused sign-in is not told to wait: %r" % o["http401"])
+    ok(o["cost"]["detail"] == "Shopify said the lookup asked for too much at once.", o["cost"])
+    ok(o["empty"]["detail"] == o["network"]["detail"] == "Shopify did not answer properly. Try again in a few minutes.",
+       "a client error string never reaches the page: %r" % [o["empty"], o["network"]])
+    ok(o["pass_old"]["lead"] == "Shopify would not show the payouts, so no notes can be written."
+       and "Shopify Payments accounts and Shopify Payments payouts" in o["pass_old"]["detail"],
+       "the payout pass, from the connector as it is today, names both: %r" % o["pass_old"])
+    ok(o["no_account"]["lead"].startswith("This store has no Shopify Payments account") and not o["no_account"]["detail"], o["no_account"])
+    ok(o["http500"]["detail"] == "Shopify did not answer properly (error 500). Try again in a few minutes.", o["http500"])
+    ok(o["other_gql"]["detail"].startswith("Shopify said: Field 'payouts' doesn't exist"), "another refusal is Shopify's words, unwrapped: %r" % o["other_gql"])
+    ok(o["too_many"]["lead"] == "The payouts could not be looked up, so no notes were written."
+       and "More than 2,500 payouts since 2026-09-01" in o["too_many"]["detail"], o["too_many"])
+    # Every place a payout failure is shown goes through it, and the line wraps.
+    block = SCRIPT[SCRIPT.index("if (pay.state === 'unavailable') {"):][:500]
+    ok("cxPayoutWhy(pay, { auth: ((connCache.data || {}).config || {}).shopifyAuth, admin: connIsAdmin() })" in block
+       and "pay.message" not in block, "the document window shows the translation, never the connector's raw message")
+    ok("cxDetail(d.error)" not in SCRIPT and "cxDetail(connPayResult.error)" not in SCRIPT
+       and SCRIPT.count("cxPayoutWhy(") >= 4, "and so do the payout pass and its toast")
+    ok(".msg > .lbl-meta { white-space: normal; overflow-wrap: anywhere; }" in CSS, "a message box's detail line wraps")
+    perm = SCRIPT[SCRIPT.index("host.append(connRow('Shopify permissions', 'off',"):][:700]
+    ok("sc.missing[k]" in perm and "approve" in perm and "reinstall" not in perm,
+       "Settings names each missing permission with what it is for, and the managed install needs approving, not reinstalling")
 
 
 @test
@@ -13372,6 +14032,103 @@ def t_xero_sync_offers_no_setting_the_connector_will_not_keep():
     its SETTING_FIELDS) and never returns it, so nothing was kept. It is set on
     the connector service itself, so the page no longer offers it."""
     ok("SHOP_TIMEZONE" not in SCRIPT, "no Shop timezone field, and none in the values read back")
+
+
+@test
+def t_xero_sync_settings_send_only_what_was_changed_from_settings_read_on_opening():
+    """Found 2026-10-12: the Settings card posted all ten fields from a copy of
+    the connector's settings read when the page opened, and polling never read
+    them again. The connector keeps a value the same as its default or its
+    variable as no choice at all, so a stale default in that copy would clear
+    a choice saved on the connector's own tab: strict back to warn, or the
+    orders-since date cleared, which widens the sync window. The form now
+    starts from settings read as it opens and sends only what was changed in
+    it; nothing changed sends nothing. Run for real, in node."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    mode = re.search(r"const CX_MODE = \{.*?\};", SCRIPT).group(0)
+    js = mode + "\n" + "\n".join(fn_src(f) for f in (
+        "function connSettingsChanges(", "function cxSameSetting(", "function connSettingNote(",
+        "async function connOpenSettings(", "async function connSaveSettings(")) + r"""
+let connSettings = { RECONCILE_MODE: 'warn' }, connSettingsOpen = false, connSettingsEdits = { RECONCILE_MODE: 'off' };
+const calls = [], toasts = [];
+let answer = null;
+const connOp = async (b) => { calls.push(b); if (answer instanceof Error) throw answer; return answer; };
+const toastOk = (m) => toasts.push(['ok', m]);
+const toastError = (m) => toasts.push(['bad', m]);
+const shown = { RECONCILE_MODE: 'strict', RECONCILE_TOLERANCE: '0.02', ORDERS_SINCE: '2026-08-01', XERO_SALES_ACCOUNT_CODE: '4000 ' };
+const s = { sources: { RECONCILE_MODE: 'settings', RECONCILE_TOLERANCE: 'default', ORDERS_SINCE: 'env', XERO_SALES_ACCOUNT_CODE: 'default' },
+            fallbacks: { RECONCILE_MODE: { value: 'warn', from: 'default' }, RECONCILE_TOLERANCE: { value: '0.02', from: 'default' },
+                         ORDERS_SINCE: { value: '2026-08-01', from: 'env' }, XERO_SALES_ACCOUNT_CODE: { value: '4000', from: 'default' } } };
+const w = (o) => Object.assign({}, shown, o);
+(async () => {
+  const out = {};
+  out.none = connSettingsChanges(shown, w({}));
+  out.one = connSettingsChanges(shown, w({ RECONCILE_TOLERANCE: ' 0.5 ' }));
+  out.spaces = connSettingsChanges(shown, w({ XERO_SALES_ACCOUNT_CODE: '4000' }));
+  out.cleared = connSettingsChanges(shown, w({ ORDERS_SINCE: '' }));
+  out.notes = {
+    saved: connSettingNote('RECONCILE_MODE', 'strict', 'strict', s),
+    env: connSettingNote('ORDERS_SINCE', '2026-08-01', '2026-08-01', s),
+    dflt: connSettingNote('RECONCILE_TOLERANCE', '0.02', '0.02', s),
+    toChoice: connSettingNote('RECONCILE_TOLERANCE', '0.02', '0.5', s),
+    sameNumber: connSettingNote('RECONCILE_MODE', 'strict', 'warn', s),
+    blankToEnv: connSettingNote('ORDERS_SINCE', '2026-08-01', '', s),
+    older: connSettingNote('RECONCILE_MODE', 'strict', 'strict', { RECONCILE_MODE: 'strict' }),
+    tol: connSettingNote('RECONCILE_TOLERANCE', '0.5', '0.020', s),
+  };
+  answer = { data: { RECONCILE_MODE: 'strict' } };
+  await connOpenSettings();
+  out.opened = { calls: calls.splice(0), settings: connSettings, open: connSettingsOpen, edits: connSettingsEdits };
+  connSettingsOpen = false; answer = new Error('unreachable');
+  try { await connOpenSettings(); out.failedOpen = 'opened'; } catch (e) { out.failedOpen = connSettingsOpen; }
+  calls.length = 0;
+  out.saveNothing = await connSaveSettings(shown, w({}), {});
+  out.saveNothingCalls = calls.splice(0);
+  answer = { data: { ok: true }, unapplied: [] };
+  out.saveOne = await connSaveSettings(shown, w({ ORDERS_SINCE: '2026-09-01' }), {});
+  out.saveOneCalls = calls.splice(0);
+  answer = { data: { ok: true }, unapplied: ['ORDERS_SINCE'] };
+  await connSaveSettings(shown, w({ ORDERS_SINCE: '2026-09-01', RECONCILE_TOLERANCE: '0.5' }), { ORDERS_SINCE: 'Only orders since' });
+  out.toasts = toasts;
+  console.log(JSON.stringify(out));
+})();
+"""
+    got = _run_node(js)
+    eq(got["none"], {}, "nothing changed, nothing to send")
+    eq(got["one"], {"RECONCILE_TOLERANCE": "0.5"}, "only the field changed, trimmed")
+    eq(got["spaces"], {}, "spaces round a value are no change")
+    eq(got["cleared"], {"ORDERS_SINCE": ""}, "a box emptied is a change: it clears a choice")
+    n = got["notes"]
+    eq(n["saved"]["text"], "Saved on the connector", "a saved choice says so")
+    eq(n["saved"]["back"], {"value": "warn", "from": "default"}, "and offers the way back to the default")
+    eq(n["env"], {"text": "Set by ORDERS_SINCE on the connector service"}, "a variable is named")
+    eq(n["dflt"], {"text": "The default"}, "the default says so")
+    eq(n["toChoice"], {"text": "Saved on the connector once you save"}, "once changed, what Save will make of it")
+    eq(n["sameNumber"], {"text": "The default once you save"}, "the default chosen again is no choice")
+    eq(n["blankToEnv"], {"text": "Set by ORDERS_SINCE on the connector service once you save"},
+       "a box emptied goes back to the variable")
+    eq(n["tol"], {"text": "The default once you save"}, "0.020 is the default 0.02, as the connector compares")
+    eq(n["older"], None, "a connector that says nothing of sources gets no note")
+    o = got["opened"]
+    eq(o["calls"], [{"op": "settings"}], "opening reads the settings again")
+    eq(o["settings"], {"RECONCILE_MODE": "strict"}, "and the form starts from them")
+    ok(o["open"] is True and o["edits"] == {}, "with nothing typed carried over")
+    eq(got["failedOpen"], False, "settings that cannot be read are not opened")
+    eq(got["saveNothing"], False, "a save with nothing changed")
+    eq(got["saveNothingCalls"], [], "makes no request")
+    eq(got["saveOneCalls"], [{"op": "settings_save", "fields": {"ORDERS_SINCE": "2026-09-01"}}],
+       "a save sends only the field changed")
+    t = got["toasts"]
+    eq(t[0][0], "ok", "nothing changed is said")
+    eq(t[1], ["ok", "Saved. They apply to the next run."], "a kept save says Saved")
+    eq(t[2][0], "bad", "a value the connector did not keep is a problem")
+    ok("Only orders since" in t[2][1] and "The rest was saved" in t[2][1], t[2][1])
+    card = fn_src("function renderConnector(")
+    ok("await connOpenSettings()" in card and "await connSaveSettings(shown, now, labels)" in card,
+       "the card opens and saves through them")
+    ok("op: 'settings_save', fields: out" not in SCRIPT, "the whole form is never posted")
 
 
 @test

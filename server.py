@@ -16,7 +16,6 @@ Token Management:
   - Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET (recommended for OAuth apps)
   - Falls back to static SHOPIFY_ACCESS_TOKEN if client credentials not set
 """
-import gzip
 import re
 import sys
 import urllib.parse
@@ -29,6 +28,7 @@ import secrets
 from typing import Optional, List, Dict, Any
 from enum import Enum
 import httpx
+import perf
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 from mcp.server.mcpserver import MCPServer
 from starlette.responses import JSONResponse
@@ -225,6 +225,11 @@ def _http() -> httpx.AsyncClient:
 
 GZIP_MIN_BYTES = _env_num(int, os.environ.get("GZIP_MIN_BYTES", "1024"), "1024", "GZIP_MIN_BYTES")
 GZIP_LEVEL = _env_num(int, os.environ.get("GZIP_LEVEL", "6"), "6", "GZIP_LEVEL")
+perf.GZIP_LEVEL = GZIP_LEVEL
+# A body this big is compressed in a worker thread. zlib and zstd both let go
+# of the GIL while they work, so the event loop keeps serving everyone else;
+# below this the hand-off costs more than it saves.
+COMPRESS_THREAD_MIN = 64 * 1024
 # What is worth compressing. Everything here is text; images, PDFs and the
 # stored label files are already compressed and would only cost CPU.
 _COMPRESSIBLE = ("application/json", "application/javascript", "application/xml",
@@ -247,7 +252,12 @@ class CompressionMiddleware:
 
     Measured on this app's own routes: the Complete production queue goes from
     1,117 KB to 30 KB, the CRM board from 1,162 KB to 309 KB, and app.js from
-    819 KB to 196 KB, for single-digit milliseconds of CPU."""
+    819 KB to 196 KB, for single-digit milliseconds of CPU.
+
+    zstd where the browser asks for it, gzip otherwise (perf.pick_encoding).
+    On a 2.4 MB CRM board gzip took 32 ms of the event loop and zstd 5 ms for
+    the same size on the wire, and a body over COMPRESS_THREAD_MIN is done in
+    a worker thread, so nobody else's request waits behind it."""
 
     def __init__(self, app):
         self.app = app
@@ -257,7 +267,9 @@ class CompressionMiddleware:
             await self.app(scope, receive, send)
             return
         raw = scope.get("headers") or []
-        accepts = any(k == b"accept-encoding" and b"gzip" in v.lower() for k, v in raw)
+        enc = perf.pick_encoding(b",".join(v for k, v in raw if k == b"accept-encoding")
+                                 .decode("latin-1"))
+        accepts = bool(enc)
 
         state: dict = {"start": None}
         chunks: list = []
@@ -287,11 +299,19 @@ class CompressionMiddleware:
                 chunks.append(message.get("body", b""))
                 if message.get("more_body"):
                     return
-                body = gzip.compress(b"".join(chunks), GZIP_LEVEL)
+                data = b"".join(chunks)
+                t0 = time.perf_counter()
+                if len(data) >= COMPRESS_THREAD_MIN:
+                    body = await asyncio.to_thread(perf.compress, data, enc)
+                else:
+                    body = perf.compress(data, enc)
+                zip_ms = (time.perf_counter() - t0) * 1000
                 head = state["start"]
                 hdrs = MutableHeaders(raw=head["headers"])
-                hdrs["content-encoding"] = "gzip"
+                hdrs["content-encoding"] = enc
                 hdrs["content-length"] = str(len(body))
+                if hdrs.get("server-timing"):
+                    hdrs["server-timing"] = hdrs["server-timing"] + f", zip;dur={zip_ms:.1f}"
                 state["start"] = None
                 await send(head)
                 await send({"type": "http.response.body", "body": body, "more_body": False})
@@ -299,6 +319,48 @@ class CompressionMiddleware:
             await send(message)
 
         await self.app(scope, receive, send_wrapper)
+
+
+class TimingMiddleware:
+    """Server-Timing on /api/ answers, and each route's recent times.
+
+    Opens the request's marks (perf.start) so the door, the stores, the
+    Shopify and Claude calls inside it can add to them, then writes them into
+    the answer's head as it leaves. Sits inside CompressionMiddleware, which
+    adds its own "zip" mark before the head goes out.
+
+    Only for a request the door let in on a live session (perf.admit): a
+    sign-in's marks told a real username from a made-up one, and refused
+    requests in the table washed out the real times. A refusal (any 4xx,
+    a 404 included) and an answer long by design (perf.no_record) are not
+    counted."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        path = scope.get("path") or ""
+        if scope.get("type") != "http" or not path.startswith("/api/"):
+            await self.app(scope, receive, send)
+            return
+        marks, token = perf.start()
+        t0 = time.perf_counter()
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start" and marks.get("_door"):
+                marks["app"] = (time.perf_counter() - t0) * 1000
+                MutableHeaders(raw=message["headers"])["server-timing"] = perf.header(marks)
+                status = message.get("status") or 0
+                # A refusal (401, 403, 409 and the like) is not a time worth
+                # counting, even signed in: it only dilutes the real ones.
+                if (status < 400 or status >= 500) and not marks.get("_skip"):
+                    perf.record(path, marks["app"])
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            perf.stop(token)
 
 
 def _boot_report() -> None:
@@ -367,6 +429,7 @@ def build_app():
         logger.exception("files: junk rescue failed; continuing")
     app = mcp.streamable_http_app(**MCP_HTTP)
     app.add_middleware(MCPAuthMiddleware)
+    app.add_middleware(TimingMiddleware)
     # Added last, so it wraps outermost and sees every response, including the
     # static assets and the print pages.
     app.add_middleware(CompressionMiddleware)
@@ -529,6 +592,7 @@ _shopify_gate = asyncio.Semaphore(_env_num(int, os.environ.get("SHOPIFY_MAX_CONC
 _RETRY_STATUS = {429, 500, 502, 503, 504}
 
 
+@perf.timed("shop")      # Server-Timing: how long this request waited on Shopify
 async def _request(
     method: str,
     path: str,
@@ -739,6 +803,7 @@ class ListOrdersInput(BaseModel):
     created_at_min:      Optional[str] = Field(default=None, description="ISO 8601 date, e.g. 2024-01-01T00:00:00Z")
     created_at_max:      Optional[str] = Field(default=None)
     fields:              Optional[str] = Field(default=None)
+    ids:                 Optional[str] = Field(default=None, description="Comma-separated order IDs")
 
 
 @mcp.tool(
@@ -749,7 +814,8 @@ async def shopify_list_orders(params: ListOrdersInput) -> str:
     """List orders with optional filters for status, financial/fulfillment status, and date range."""
     try:
         p: Dict[str, Any] = {"limit": params.limit, "status": params.status}
-        for field in ["financial_status", "fulfillment_status", "since_id", "created_at_min", "created_at_max", "fields"]:
+        for field in ["financial_status", "fulfillment_status", "since_id", "created_at_min", "created_at_max",
+                      "fields", "ids"]:
             val = getattr(params, field)
             if val is not None:
                 p[field] = val
@@ -1233,6 +1299,16 @@ REQUIRED_WRITE_SCOPES = {
     "write_merchant_managed_fulfillment_orders": "fulfilling and holding orders",
     "write_payment_terms": "putting an unpaid purchase order on 30-day terms",
 }
+# The reads a feature cannot do without, checked the same way. Asked for in
+# shopify.app.toml is not the same as granted: the Xero sync's payout note
+# was refused "Access denied for shopifyPaymentsAccount field" because the app
+# asked for payouts and never for accounts, and Settings, which only checked
+# writes, said everything was permitted. With the client id and secret the
+# connector signs in as this app, so what this install lacks, it lacks too.
+REQUIRED_READ_SCOPES = {
+    "read_shopify_payments_payouts": "Reconciliation's payout checks, and payout notes on Xero sync when it signs in as Reactor",
+    "read_shopify_payments_accounts": "payout notes on Xero sync when it signs in as Reactor",
+}
 _granted_scopes: dict = {"at": 0.0, "scopes": None, "error": ""}
 
 
@@ -1261,7 +1337,8 @@ async def shopify_granted_scopes(max_age: float = 900.0) -> dict:
             # absent because the lookup itself failed.
             return {"scopes": [], "missing": {}, "error": str(e)[:200]}
     return {"scopes": got, "error": "",
-            "missing": {k: v for k, v in REQUIRED_WRITE_SCOPES.items() if k not in got}}
+            "missing": {k: v for k, v in {**REQUIRED_WRITE_SCOPES, **REQUIRED_READ_SCOPES}.items()
+                        if k not in got}}
 
 
 # The forecast job's reads of the store, made here with the app's own credential

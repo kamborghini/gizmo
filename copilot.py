@@ -48,6 +48,7 @@ import anthropic
 import httpx
 import jwt
 import eori
+import perf
 import google_data
 import mailmime
 import google_mail
@@ -1831,6 +1832,7 @@ PRODUCTION_STATE_MAX = _env_num(int, os.environ.get("PRODUCTION_STATE_MAX", "100
 _poisoned_stores: set = set()
 
 
+@perf.timed("store")      # Server-Timing: reading a store from disk
 def _load_json_store(path: str, key, default):
     try:
         with open(path, "r", encoding="utf-8") as fh:
@@ -1942,6 +1944,10 @@ def _load_json_cached(path: str, key, default, prepare=None):
 def _forget_store(path: str) -> None:
     """Drop the cached copy: the next read comes from disk."""
     _json_cache.pop(path, None)
+    if path == CRM_PATH:
+        # The kept board may have been built from the store in memory after a
+        # change that was then never saved, so it goes with it.
+        _crm_board_forget()
 
 
 def _memory_stores() -> dict:
@@ -1966,6 +1972,7 @@ def _drop_memory_stores(paths=None) -> None:
             _forget_store(path)
 
 
+@perf.timed("store")      # Server-Timing: writing a store to disk
 def _write_json_store(path: str, key: Optional[str], data, *, private: bool = False) -> None:
     """The one way a store reaches disk.
 
@@ -3459,12 +3466,14 @@ def _fallback_for(model: str, e: Exception) -> str:
     return fb
 
 
+@perf.timed("ai")           # Server-Timing: how long this request waited on Claude
 async def _xcreate(client, **kwargs):
     """Every model call. A forced tool call is asked for in words on a model
     that refuses to be forced, and asked for once more if the answer came
     back as prose, so each caller still finds its tool block. A call the
     model fails at Anthropic is asked of the fallback model once, and the
     failure is kept for the usage panel either way."""
+    perf.no_record()        # long by design: out of the slowest-routes table
     must = None
     if _forces_tool(kwargs) and not _can_force_tool(kwargs.get("model", "")):
         must = _unforce(kwargs)
@@ -5074,12 +5083,16 @@ def _month_axis(months: int) -> list:
 # only in a local tag filter. One snapshot therefore serves all three, and a
 # tab flip drops from ~30 sequential Shopify calls to none.
 #
-# Freshness rests on two mechanisms because they cover different mutations:
-#   - every write THIS app makes bumps _orders_epoch, retiring every snapshot
-#     at once (see the four writer call sites, each with a _bust_orders() note);
-#   - a short TTL bounds how long a change made in the Shopify admin, such as
-#     the merchant tagging an order by hand, can stay invisible. There are no
-#     webhooks, so the clock is the only thing that can ever catch those.
+# Freshness rests on three mechanisms because they cover different mutations:
+#   - every write THIS app makes to an order, and Shopify's order webhook,
+#     names the order (_orders_changed): each snapshot keeps the rest of the
+#     store and reads that order again, by id, before it answers anyone. Each
+#     used to retire every snapshot, so one Production Manager action cost two
+#     full sweeps (the 2026-10-12 speed audit, X1);
+#   - Refresh, and a change nobody can name, still retire every snapshot at
+#     once (_bust_orders), as everything did before;
+#   - a short TTL bounds how long a change Shopify never told us about can stay
+#     invisible: webhooks are at-least-once and occasionally late or lost.
 #
 # Two things are deliberately NOT cached. A failed sweep, because "nothing
 # owed" must never be an artefact of a throttled fetch. And the shaped label
@@ -5089,17 +5102,24 @@ def _month_axis(months: int) -> list:
 # How long a swept order list may be reused. Every queue segment needs the SAME
 # sweep, so at 45 seconds a merchant who read one screen before clicking the
 # next paid the whole 8-page fan-out again. Correctness does not rest on the
-# TTL: _bust_orders() clears these the moment an order webhook lands or the app
-# writes a tag, so a real change is never waited out.
+# TTL: an order webhook or a write by the app names its order, which every
+# snapshot reads again before it answers (_orders_changed), and Refresh retires
+# them all (_bust_orders), so a real change is never waited out.
 ORDER_CACHE_SECS = _env_num(int, os.environ.get("ORDER_CACHE_SECS", "180"), "180", "ORDER_CACHE_SECS")
 # Distinct (days, fields) sweeps kept. There are about seven in the codebase,
 # so with a longer TTL this became the binding constraint rather than the
 # clock: at 6, an Overview or Margins run could evict the production queue's
 # entry and make the next click cold again.
 ORDER_CACHE_MAX  = 8
-_orders_cache: dict = {}      # (days, fields) -> {"at", "epoch", "orders", "meta"}
+_orders_cache: dict = {}      # (days, fields) -> {"at", "orders", "meta", "pending"}
 _orders_inflight: dict = {}   # (days, fields) -> the Task sweeping, so concurrent misses share one fetch
-_orders_epoch = 0             # bumped by every write that changes what a sweep returns
+_orders_refreshing: dict = {}  # (days, fields) -> the Task reading its pending orders again, by id
+_orders_flight: dict = {}     # (days, fields) -> ids that changed while that key's sweep was in flight
+_orders_epoch = 0             # bumped by every change, named (_orders_changed) or not (_bust_orders)
+_orders_full_epoch = 0        # bumped only by _bust_orders: what retires every snapshot
+# More changed orders than this at once and one sweep is cheaper than reading
+# them again one by one (Shopify's ids filter takes at most 250 a page).
+ORDER_REFRESH_MAX = 50
 
 
 # ---------------------------------------------------------------------------
@@ -5108,10 +5128,11 @@ _orders_epoch = 0             # bumped by every write that changes what a sweep 
 # Without these the app is blind between reads: the order snapshot has a 45s
 # TTL, and an edit made in the Shopify admin (a payment landing, a tag changed,
 # a refund) stays invisible until the clock runs out. Shopify POSTs order
-# events here instead; each verified event retires the snapshot, so the next
-# read of any tab reflects reality within seconds. The TTL stays as the
-# backstop, because webhooks are at-least-once, unordered and occasionally
-# late; the payload is treated purely as a trigger and never as state.
+# events here instead; each verified event names its order, which every
+# snapshot reads again from Shopify before it answers, so the next read of any
+# tab reflects reality within seconds. The TTL stays as the backstop, because
+# webhooks are at-least-once, unordered and occasionally late; the payload only
+# says which order to read again and is never used as state.
 # ---------------------------------------------------------------------------
 WEBHOOK_MAX_BYTES = 1024 * 1024        # a full order payload, with headroom
 # version: the Shopify version the last event was sent in, from its own header.
@@ -5163,31 +5184,158 @@ def _bust_orders() -> None:
     answer the Refresh with the picture from before their edit, which on the
     liability ledger means chasing an invoice that has just been paid. Anyone
     already awaiting it keeps their own reference and still gets an answer; it
-    simply stops being the answer for callers that arrive after the write."""
-    global _orders_epoch
+    simply stops being the answer for callers that arrive after the write.
+
+    Still the blunt instrument, deliberately: Refresh, and any change nobody
+    can name (an order event whose body cannot be read). Where the app knows
+    WHICH order changed it says so with _orders_changed, which keeps the
+    snapshots and reads that order again instead (the 2026-10-12 speed audit,
+    X1: one Production Manager action used to cost two full sweeps)."""
+    global _orders_epoch, _orders_full_epoch
     _orders_epoch += 1
+    _orders_full_epoch += 1
     _orders_cache.clear()
     _orders_inflight.clear()
+    _orders_refreshing.clear()
+    _orders_flight.clear()
+
+
+def _orders_changed(order_ids) -> None:
+    """These orders changed: a write this app has just made to them, or
+    Shopify's webhook saying so. Every snapshot is kept, and each of these
+    orders is read again from Shopify, by id, before any snapshot is used
+    again (_orders_snapshot), so no answer can carry the order as it was.
+
+    That holds for a sweep still in flight too: the ids are recorded against
+    it, so its result is kept and then put right rather than thrown away, and
+    a caller who joins it after the change is answered with the order as it
+    is now. Ids that cannot be read as order ids fall back to _bust_orders."""
+    ids = set()
+    for i in order_ids or ():
+        try:
+            ids.add(int(i))
+        except (TypeError, ValueError, OverflowError):
+            pass
+    if not ids or ORDER_CACHE_SECS <= 0:
+        # Nothing cached to put right (the cache switched off): detach any
+        # sweep in flight, exactly as every change used to.
+        _bust_orders()
+        return
+    global _orders_epoch
+    _orders_epoch += 1
+    for entry in _orders_cache.values():
+        entry["pending"].update(ids)
+    for flight in _orders_flight.values():
+        flight.update(ids)
 
 
 async def _sweep_orders(registry: dict, days: int, fields: str, key) -> tuple:
     """One shared sweep: fetches, stores if it is worth storing, and returns
-    (orders, meta) to every caller waiting on it."""
-    epoch = _orders_epoch          # the state of the store this sweep is a picture of
+    (orders, meta, ids named as changed while it ran) to every caller waiting
+    on it."""
+    full_epoch = _orders_full_epoch    # retired by _bust_orders, or not
+    flight: set = set()                # orders named as changed while this runs
+    _orders_flight[key] = flight
     meta: dict = {}
     try:
         orders = await _paginate_orders(registry, days=days, fields=fields, meta=meta)
-        # Store only a complete sweep taken since the last write: "nothing owed"
-        # must never be a cached artefact of a throttled fetch.
-        if ORDER_CACHE_SECS > 0 and not meta.get("failed") and _orders_epoch == epoch:
-            _orders_cache[key] = {"at": time.monotonic(), "epoch": epoch,
-                                  "orders": orders, "meta": dict(meta)}
+        # Store only a complete sweep not retired meanwhile: "nothing owed"
+        # must never be a cached artefact of a throttled fetch. Orders named
+        # as changed while it ran are stored as pending, to be read again.
+        if ORDER_CACHE_SECS > 0 and not meta.get("failed") and _orders_full_epoch == full_epoch:
+            _orders_cache[key] = {"at": time.monotonic(), "orders": orders,
+                                  "meta": dict(meta), "pending": set(flight), "reading": set()}
             while len(_orders_cache) > ORDER_CACHE_MAX:
                 _orders_cache.pop(min(_orders_cache, key=lambda k: _orders_cache[k]["at"]), None)
-        return orders, meta
+        return orders, meta, flight
     finally:
+        if _orders_flight.get(key) is flight:
+            _orders_flight.pop(key, None)
         if _orders_inflight.get(key) is asyncio.current_task():
             _orders_inflight.pop(key, None)
+
+
+def _order_created(o: dict):
+    try:
+        t = datetime.fromisoformat(str(o.get("created_at") or "").replace("Z", "+00:00"))
+        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+async def _refresh_orders(registry: dict, key) -> bool:
+    """Read a snapshot's pending orders again, by id, and put them in place:
+    the order as Shopify has it now, with the same fields the sweep asked
+    for, inserted if it is new to the window, dropped if it is gone or older
+    than the window. True when the snapshot is current again; False when it
+    was dropped (the read failed, too many changed at once, or everything was
+    retired meanwhile), and the caller sweeps instead."""
+    entry = _orders_cache.get(key)
+    if entry is None:
+        return False
+    ids = sorted(entry["pending"])
+    if not ids:
+        return True
+    if len(ids) > ORDER_REFRESH_MAX or entry["meta"].get("truncated"):
+        # Too many for one read, or a sweep the page cap cut short: that holds
+        # the oldest orders only, and adding a newer one an event named would
+        # make a list no sweep returns. One sweep is the honest answer.
+        _orders_cache.pop(key, None)
+        return False
+    # Taken off the to-read list, but held as being read until they land: a
+    # load arriving meanwhile must wait for this read, not take the snapshot
+    # for current (_orders_snapshot checks both).
+    entry["pending"] = set()
+    entry["reading"] = set(ids)
+    try:
+        return await _refresh_orders_read(registry, key, entry, ids)
+    except BaseException:
+        if _orders_cache.get(key) is entry:
+            _orders_cache.pop(key, None)    # half put right is not put right
+        raise
+
+
+async def _refresh_orders_read(registry: dict, key, entry: dict, ids: list) -> bool:
+    days, fields = key
+    names = [f for f in fields.split(",") if f]
+    full_epoch = _orders_full_epoch
+    res = await _tool_json(registry, "shopify_list_orders",
+                           {"status": "any", "ids": ",".join(str(i) for i in ids), "limit": 250,
+                            "fields": ",".join(names + ([] if "created_at" in names else ["created_at"]))})
+    if _orders_full_epoch != full_epoch or _orders_cache.get(key) is not entry:
+        return False                   # retired, or replaced, while this was reading
+    if not _ok(res):
+        _orders_cache.pop(key, None)   # never leave the old order standing in for the new
+        return False
+    # The same cut _paginate_orders makes with created_at_min, so an order the
+    # sweep would not have returned is not kept either.
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    fresh = {}
+    for o in res.get("orders") or []:
+        try:
+            oid = int(o.get("id"))
+        except (TypeError, ValueError):
+            continue
+        if oid in ids:
+            fresh[oid] = o
+    rows = {}
+    for o in entry["orders"]:
+        try:
+            rows[int(o.get("id"))] = o
+        except (TypeError, ValueError):
+            continue
+    for oid in ids:
+        o = fresh.get(oid)
+        made = _order_created(o) if o else None
+        if o is None or made is None or made < cutoff:
+            rows.pop(oid, None)        # deleted, or outside the window the sweep reads
+            continue
+        if "created_at" not in names:
+            o = {k: v for k, v in o.items() if k != "created_at"}
+        rows[oid] = o
+    entry["orders"] = [rows[i] for i in sorted(rows)]   # ascending id, as the sweep pages them
+    entry["reading"] = set()
+    return True
 
 
 async def _orders_snapshot(registry: dict, days: int,
@@ -5211,21 +5359,79 @@ async def _orders_snapshot(registry: dict, days: int,
         for k, v in list(_orders_cache.items()):
             if now - v["at"] >= ORDER_CACHE_SECS:
                 _orders_cache.pop(k, None)
-        if ORDER_CACHE_SECS > 0:
-            hit = _orders_cache.get(key)
-            if hit and hit["epoch"] == _orders_epoch:
-                if meta is not None:
-                    meta.update(hit["meta"])
-                return hit["orders"]
-    task = _orders_inflight.get(key)
-    if task is None or task.done():
-        task = asyncio.ensure_future(_sweep_orders(registry, days, fields, key))
-        _orders_inflight[key] = task   # no await between the read and the write, so these cannot interleave
-    # Shielded: a browser hanging up must not cancel the sweep others are waiting on.
-    orders, m = await asyncio.shield(task)
-    if meta is not None:
-        meta.update(m)
-    return orders
+
+    async def swept() -> tuple:
+        """(orders, meta, ids named while it ran, whether THIS caller started
+        it). A starter's request predates every change named while its sweep
+        ran, so answering it from that sweep is what every read always did; a
+        caller that joined a running sweep may have arrived after a change."""
+        task = _orders_inflight.get(key)
+        mine = task is None or task.done()
+        if mine:
+            task = asyncio.ensure_future(_sweep_orders(registry, days, fields, key))
+            _orders_inflight[key] = task   # no await between the read and the write, so these cannot interleave
+        # Shielded: a browser hanging up must not cancel the sweep others are waiting on.
+        return (*await asyncio.shield(task), mine)
+
+    async def refreshed() -> None:
+        task = _orders_refreshing.get(key)
+        if task is None or task.done():
+            task = asyncio.ensure_future(_refresh_orders(registry, key))
+            _orders_refreshing[key] = task
+        await asyncio.shield(task)
+        if _orders_refreshing.get(key) is task:
+            _orders_refreshing.pop(key, None)
+
+    def answer(orders, m):
+        if meta is not None:
+            meta.update(m)
+        return orders
+
+    # A snapshot with orders named as changed (_orders_changed) is put right,
+    # by id, before it answers anyone: it is current only when nothing is
+    # pending AND nothing is being read. Bounded: a change landing during each
+    # read could otherwise keep this going; after three rounds the answer is
+    # one fresh sweep, which is what every read used to be.
+    last = None        # a sweep this caller may be answered from (see swept)
+    for rnd in range(4):
+        hit = _orders_cache.get(key) if ORDER_CACHE_SECS > 0 else None
+        if hit is not None and not hit["pending"] and not hit["reading"]:
+            return answer(hit["orders"], hit["meta"])
+        if rnd == 3:
+            break
+        if hit is not None:
+            if last is not None and (len(hit["pending"]) > ORDER_REFRESH_MAX
+                                     or hit["meta"].get("truncated")):
+                # Too many changes to read one by one, or a sweep cut short:
+                # the caller that started this sweep is answered from it, as
+                # it always was, and the changes wait for the next load.
+                return answer(*last)
+            await refreshed()
+            continue
+        orders, m, flight, mine = await swept()
+        # A joiner of a sweep that saw a change is never answered from it.
+        last = (orders, m) if (mine or not flight) else None
+        if key not in _orders_cache:
+            # Not stored: the cache is off, the sweep failed (said in meta),
+            # or everything was retired while it ran. Its callers keep its
+            # answer, as they always have, except a caller that joined it
+            # while an order was named as changed: that one may hold the
+            # order as it was, and sweeps again rather than being answered.
+            if last is None and rnd < 2:
+                continue
+            return answer(orders, m)
+    # Still changing after three rounds. One more read by id when that can
+    # put the snapshot right, then one fresh sweep, which is what every read
+    # used to be (it starts after this caller arrived, so it is current).
+    hit = _orders_cache.get(key) if ORDER_CACHE_SECS > 0 else None
+    if hit is not None and len(hit["pending"]) <= ORDER_REFRESH_MAX and not hit["meta"].get("truncated"):
+        await refreshed()
+        hit = _orders_cache.get(key)
+        if hit is not None and not hit["pending"] and not hit["reading"]:
+            return answer(hit["orders"], hit["meta"])
+    _orders_cache.pop(key, None)
+    orders, m, _flight, _mine = await swept()
+    return answer(orders, m)
 
 
 async def _paginate_orders(registry: dict, days: int, max_pages: int = ORDER_PAGE_CAP,
@@ -6386,9 +6592,9 @@ async def _sync_order_tags(registry: dict, order_id, add=(), remove=(), unless=(
                 await _order_tag_writer(int(order_id), ", ".join(new))
             finally:
                 # The queues are filtered on tags, so this write changes what a
-                # sweep returns. Bust on the way out even if the write raised:
-                # a half-applied change must not leave a snapshot behind.
-                _bust_orders()
+                # sweep returns. On the way out even if the write raised: a
+                # half-applied change must not leave the old order behind.
+                _orders_changed([order_id])
             return True, ""
     except httpx.HTTPStatusError as e:
         if e.response is not None and e.response.status_code in (401, 403):
@@ -6637,7 +6843,7 @@ async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
                 # The answer was lost, not necessarily the change: read the order
                 # and see. "Shopify refused the change" was said over edits that
                 # had landed, and the retry then found nothing to do.
-                _bust_orders()
+                _orders_changed([order_id])
                 again = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
                 if _ok(again) and again.get("id"):
                     now_there = dict(_ship_to(again))
@@ -6668,13 +6874,13 @@ async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
                 _update_dispatch(order_id, lambda e: e.update(
                     {"address_changed_at": datetime.now(timezone.utc).isoformat()}))
     except Exception:
-        # A write may have landed before this raised, so the snapshot is suspect.
-        _bust_orders()
+        # A write may have landed before this raised, so the order is suspect.
+        _orders_changed([order_id])
         logger.exception("order edit failed for order %s", order_id)
         return False, "The order couldn't be changed. Check the server logs.", [], name, []
-    # The queues read the address straight off the cached sweep, so leaving the
-    # snapshot in place would show the old address until the next refresh.
-    _bust_orders()
+    # The queues read the address straight off the cached sweep, so the order
+    # is read again before the snapshot answers anyone.
+    _orders_changed([order_id])
     return True, "", changed, name, warn
 
 
@@ -6829,10 +7035,10 @@ async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = N
                 tracking_url=None,
                 notify_customer=do_notify,
             )
-            _bust_orders()   # fulfillment_status is a swept field
+            _orders_changed([order_id])   # fulfillment_status is a swept field
         except Exception:
             logger.exception("fulfillment failed for order %s", oid)
-            _bust_orders()   # it may still have landed before the error
+            _orders_changed([order_id])   # it may still have landed before the error
             fulfillment = {"ok": False, "reason": "error",
                            "detail": "Shopify fulfillment failed; the label is still valid. "
                                      "You can fulfill the order manually in Shopify."}
@@ -6902,14 +7108,14 @@ async def _unfulfill_dispatch(registry: dict, order_id) -> str:
     if fid and _fulfillment_canceler is not None:
         try:
             fc = await _fulfillment_canceler(int(fid))
-            _bust_orders()   # fulfillment_status is a swept field
+            _orders_changed([order_id])   # fulfillment_status is a swept field
             note = ("" if fc.get("ok") else
                     "The order is still marked fulfilled in Shopify (" + (fc.get("detail") or "")
                     + "). Cancel that fulfillment in Shopify so the customer is not left with "
                       "tracking for something that has not shipped.")
         except Exception:
             logger.exception("fulfillment cancel failed for order %s", oid)
-            _bust_orders()   # it may still have landed before the error
+            _orders_changed([order_id])   # it may still have landed before the error
             note = ("The order is still marked fulfilled in Shopify. Cancel that fulfillment "
                     "there so the customer is not left with tracking for an unshipped order.")
     # Re-read here: the store may have gained a booking while Shopify was thinking,
@@ -10802,7 +11008,50 @@ def _etag_matches(header: Optional[str], etag: str) -> bool:
     return False
 
 
-def _asset_response(kind: str, version: str = ""):
+# (kind, content hash, encoding) -> the asset compressed at the strongest
+# level. Keyed on the hash of the bytes that were packed, never on whatever
+# _asset_hashes says at that moment, so a page swapped mid-pack (the tests
+# do it) can never put one build's bytes under another build's URL.
+_asset_packed: dict = {}
+_asset_packing: set = set()     # content hashes whose packing has started
+
+
+def _pack_assets() -> None:
+    """Compress the page's assets once per build, zstd and gzip at their
+    strongest levels. Runs in a thread (see _pack_assets_soon): zstd at level
+    19 is about half a second on app.js, which no request should wait for."""
+    _shell, assets = _page_parts()
+    live = set()
+    for kind, (_media, blob) in list(assets.items()):
+        h = hashlib.sha256(blob).hexdigest()[:12]
+        live.add(h)
+        for enc in ("zstd", "gzip"):
+            if (kind, h, enc) not in _asset_packed:
+                try:
+                    _asset_packed[(kind, h, enc)] = perf.compress(blob, enc, strong=True)
+                except ValueError:
+                    pass                # no zstd on this Python: gzip alone
+    for key in [k for k in _asset_packed if k[1] not in live]:
+        _asset_packed.pop(key, None)    # an earlier build's copies
+
+
+def _pack_assets_soon() -> None:
+    """Start _pack_assets in a thread, once per build. Until it lands, the
+    middleware compresses each request at its quick level, as before."""
+    h = _asset_hashes.get("js", "")
+    if not h or h in _asset_packing:
+        return
+    _asset_packing.add(h)
+
+    def run():
+        try:
+            _pack_assets()
+        except Exception:
+            logger.exception("assets: packing failed; serving them compressed per request")
+    threading.Thread(target=run, name="asset-pack", daemon=True).start()
+
+
+def _asset_response(kind: str, version: str = "", accept: str = ""):
     """The app's own CSS or JS. Static bytes with no data and no auth, and the
     URL carries a content hash, so a year of caching is safe: a new build asks
     for a new URL and there is nothing to invalidate.
@@ -10810,14 +11059,26 @@ def _asset_response(kind: str, version: str = ""):
     The hash must match. The page itself 404s outside the Shopify admin, and
     without this check these two URLs would hand the app's whole client source
     to anyone who guessed the path. The shell always sends the current hash,
-    and it is revalidated on every open, so it can never send a stale one."""
+    and it is revalidated on every open, so it can never send a stale one.
+
+    Served from the build's packed copy when there is one in an encoding the
+    browser takes. Compressing app.js again on every uncached request cost
+    about 50 ms of the event loop per first open, bunched after each update
+    when everybody reloads (the 2026-10-12 audit, D3)."""
     _shell, assets = _page_parts()
     asset = assets.get(kind)
     if not asset or version != _asset_hashes.get(kind, ""):
         return PlainTextResponse("Not found", status_code=404, headers=_API_HEADERS)
     media, blob = asset
-    return Response(blob, media_type=media,
-                    headers={**_API_HEADERS, "Cache-Control": "public, max-age=31536000, immutable"})
+    headers = {**_API_HEADERS, "Cache-Control": "public, max-age=31536000, immutable"}
+    enc = perf.pick_encoding(accept)
+    packed = _asset_packed.get((kind, version, enc)) if enc else None
+    if packed is None:
+        _pack_assets_soon()
+        return Response(blob, media_type=media, headers=headers)
+    # The middleware leaves an answer that already has an encoding alone, and
+    # still adds Vary: Accept-Encoding to it.
+    return Response(packed, media_type=media, headers={**headers, "Content-Encoding": enc})
 
 
 _SHOP_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\.myshopify\.com$")
@@ -10936,12 +11197,18 @@ def _connector_url_safe(url: str) -> bool:
                 or (u.hostname or "") in ("localhost", "127.0.0.1", "::1"))
 
 
-async def _connector_call(method: str, path: str, params: Optional[dict] = None):
+async def _connector_call(method: str, path: str, params: Optional[dict] = None,
+                          json_body: Optional[dict] = None):
     """One call to the connector service. The service's own token rides in the
     Authorization header and NEVER leaves this process; X-Connector is its CSRF
     header for anything mutating. Transport failure raises, so the route can
     say plainly that the service is unreachable, as opposed to the service
-    answering with an error of its own (returned as-is)."""
+    answering with an error of its own (returned as-is).
+
+    params go in the query string, which is where most of the service's doors
+    read them. json_body goes as a JSON body, for a door that reads only its
+    body: POST /api/settings does, and a save sent as params was answered ok
+    and kept nothing, from the day the page was built to 12 Oct 2026."""
     headers = {}
     token = os.environ.get("CONNECTOR_TOKEN") or ""
     if token and not _connector_url_safe(_connector_url()):
@@ -10952,7 +11219,8 @@ async def _connector_call(method: str, path: str, params: Optional[dict] = None)
     if method == "POST":
         headers["X-Connector"] = "1"
     async with httpx.AsyncClient(timeout=25.0) as cx:
-        r = await cx.request(method, _connector_url() + path, params=params, headers=headers)
+        r = await cx.request(method, _connector_url() + path, params=params, json=json_body,
+                             headers=headers)
     try:
         body = r.json()
     except Exception:
@@ -10964,6 +11232,29 @@ async def _connector_call(method: str, path: str, params: Optional[dict] = None)
 def _json(data: dict, status: int = 200) -> JSONResponse:
     return JSONResponse(data, status_code=status,
                         headers={**_API_HEADERS, "X-App-Build": _build_id()})
+
+
+def _json_dumps_like_starlette(data) -> bytes:
+    """The bytes JSONResponse would send for `data`, made once so a board that
+    has not changed is not serialised again for every reader."""
+    return json.dumps(data, ensure_ascii=False, allow_nan=False, indent=None,
+                      separators=(",", ":")).encode("utf-8")
+
+
+def _json_body(raw: bytes, status: int = 200) -> Response:
+    """An answer made of bytes _json_dumps_like_starlette made, with the
+    headers every _json answer carries."""
+    return Response(raw, status_code=status, media_type="application/json",
+                    headers={**_API_HEADERS, "X-App-Build": _build_id()})
+
+
+def _json_spliced(head: dict, field: str, raw: bytes) -> Response:
+    """`head` with `raw`, bytes _json_dumps_like_starlette already made,
+    spliced in as `field`, so a big object serialised once (to fingerprint
+    it) is not serialised again inside the answer that carries it."""
+    first = _json_dumps_like_starlette(head)
+    return _json_body(first[:-1] + (b"," if len(first) > 2 else b"")
+                      + _json_dumps_like_starlette(field) + b":" + raw + b"}")
 
 
 # ---------------------------------------------------------------------------
@@ -11253,6 +11544,7 @@ def _ai_slot() -> Optional[JSONResponse]:
     return None
 
 
+@perf.timed("auth")       # Server-Timing: the door, reading the body included
 async def _guard(request: Request, *, ai: bool = False, min_level: int = 0,
                  max_body: Optional[int] = None, cap: Optional[int] = None,
                  body: bool = True):
@@ -11272,6 +11564,9 @@ async def _guard(request: Request, *, ai: bool = False, min_level: int = 0,
     if not ok:
         return _json({"error": AUTH_REFUSALS.get(reason, "Unauthorized"), "reason": reason or "session"}, 401), None, ""
     uid = str(who or "")
+    perf.admit()            # Server-Timing is for people the door let in
+    if ai:
+        perf.no_record()    # a Claude answer is long by design
     if min_level and _team_level(uid) < min_level:
         return _json({"error": "Only an admin can do that."}, 403), None, ""
     if ai:
@@ -12031,6 +12326,9 @@ def _write_crm(d: dict) -> None:
     if not _store_writable(CRM_PATH):
         _forget_store(CRM_PATH)
         raise RuntimeError("CRM store is not writable")
+    # The board is found again by the file's key, and a file rewritten inside
+    # one tick of the clock at the same size can come back with the same key.
+    _crm_board_forget()
     _write_json_store(CRM_PATH, "crm", d)
 
 
@@ -12242,6 +12540,63 @@ def _crm_shape(d: dict) -> dict:
                             for v in trash[:50]]}
 
 
+# The board, built once per version of what it is built from (the 2026-10-12
+# speed audit, S1): every read rebuilt and serialised the whole board on the
+# one event loop, about 50 ms at production size while every other request
+# waited, and each open CRM tab read it again every 90 seconds. _crm_shape
+# reads the CRM store, the users store (the team list and its names), today's
+# London date (what is due) and the clock (a deal rots N days after it was
+# last touched), so the key holds each: the two stores by their file (a write,
+# a restore or a hand repair is a new file), the date, and the hour, which is
+# as late as a rotting flag can come. A write warms it with the board it built.
+# What is kept is the board as sent, serialised once, and its revision is a
+# fingerprint of those bytes, not of the key: the key also moves on every
+# sign-in and wrong password (both write the users store) and stays put across
+# an update that shapes the same files another way, and a page is only ever
+# told "same" when what it would be sent is the same.
+_crm_board_cache: dict = {"key": None, "raw": None, "rev": ""}
+
+
+def _crm_board_forget() -> None:
+    _crm_board_cache.update(key=None, raw=None, rev="")
+
+
+def _crm_board_key():
+    return (_stat_key(CRM_PATH), _stat_key(USERS_PATH), _crm_today().isoformat(),
+            datetime.now(timezone.utc).strftime("%Y-%m-%dT%H"))
+
+
+def _crm_board_build(d: dict, key) -> tuple:
+    """(raw, revision) for the store `d`, kept under `key`, which the caller
+    takes BEFORE building (taken after, a board built in one hour or day was
+    kept under the next). It is kept only when `d` is the store as read for
+    that key: a read that failed hands back an empty CRM from a file that has
+    not changed, and a kept empty board would be served until the next write."""
+    raw = _json_dumps_like_starlette(_crm_shape(d))
+    rev = hashlib.blake2b(raw, digest_size=8).hexdigest()
+    hit = _json_cache.get(CRM_PATH)
+    if (key[0] is not None and CRM_PATH not in _poisoned_stores
+            and hit is not None and hit[0] == key[0] and hit[1] is d):
+        _crm_board_cache.update(key=key, raw=raw, rev=rev)
+    return raw, rev
+
+
+def _crm_board() -> tuple:
+    """(raw, revision): the shaped CRM as JSON bytes, built only when
+    something it is built from has changed."""
+    key = _crm_board_key()
+    c = _crm_board_cache
+    if key[0] is not None and c["key"] == key:
+        return c["raw"], c["rev"]
+    return _crm_board_build(_load_crm(), key)
+
+
+def _crm_answer(raw: bytes, rev: str, head: Optional[dict] = None) -> Response:
+    """An answer that carries the board: `head` and the revision, with the
+    board's own bytes spliced in as "crm"."""
+    return _json_spliced({**(head or {}), "rev": rev}, "crm", raw)
+
+
 def _crm_team_list() -> list:
     """Accounts that can open the CRM tab: the owner pick-list. Small on
     purpose — a name and an id, nothing an account page holds."""
@@ -12327,6 +12682,14 @@ FILES_TRASH_DAYS = 30
 _files_s3_client = None
 _files_s3_birth = threading.Lock()   # boto3's default session is not thread-safe to build on
 _files_ready = {"bucket": False, "cors": False, "error": "", "at": 0.0}
+# Uploads now set the bucket up before taking the store's lock, so three at
+# once can reach the setup together; one sets it up and the others wait for
+# its answer, rather than each creating the bucket and two reporting failure.
+# They wait a few seconds at most: against a storage that hangs, one setup
+# runs for up to a minute (short timeouts, but three tries of two calls), and
+# an upload is refused sooner than that by the failure that stands.
+_files_setup_lock = threading.Lock()
+FILES_SETUP_WAIT = 5.0
 # One writer at a time: every route that loads, mutates and writes the store
 # holds this across the whole exchange. The browser deliberately runs three
 # uploads at once, so without it two upload-url calls interleave around their
@@ -12367,11 +12730,27 @@ def _files_ensure_bucket(page_origin: str) -> None:
     starts. Never raises; failures surface in the status block."""
     if _files_ready["bucket"] and _files_ready["cors"]:
         return
-    # A failing bucket is not probed on every presign: one attempt a minute,
-    # so a dead R2 costs each upload one fast refusal, not a retry storm.
+    # A failing bucket is not probed on every presign: one attempt a minute
+    # after the last one failed, so a dead R2 costs each upload a quick
+    # refusal, not a retry storm.
     if _files_ready["error"] and time.time() - float(_files_ready.get("at") or 0) < 60:
         return
-    _files_ready["at"] = time.time()
+    if not _files_setup_lock.acquire(timeout=FILES_SETUP_WAIT):
+        return
+    try:
+        _files_ensure_bucket_locked(page_origin)
+    finally:
+        _files_setup_lock.release()
+
+
+def _files_ensure_bucket_locked(page_origin: str) -> None:
+    # Looked at again under the lock: a call that waited here while another
+    # set the bucket up, or failed to, takes that answer rather than asking
+    # storage a second time.
+    if _files_ready["bucket"] and (_files_ready["cors"] or not page_origin) and not _files_ready["error"]:
+        return
+    if _files_ready["error"] and time.time() - float(_files_ready.get("at") or 0) < 60:
+        return
     s3 = _files_s3()
     try:
         if not _files_ready["bucket"]:
@@ -12389,6 +12768,10 @@ def _files_ensure_bucket(page_origin: str) -> None:
             _files_ready["cors"] = True
         _files_ready["error"] = ""
     except Exception as e:
+        # Stamped when an attempt FAILS, not when it starts: uploads arriving
+        # while a retry is still asking storage wait on the lock for its
+        # answer, instead of taking the retry for a failure a moment ago.
+        _files_ready["at"] = time.time()
         _files_ready["error"] = f"{type(e).__name__}: {e}"[:200]
         logger.warning("files: bucket setup failed: %s", _files_ready["error"])
 
@@ -12614,7 +12997,7 @@ def _files_folder_ok(d: dict, folder_id: str) -> bool:
     return folder_id == "" or folder_id in d["folders"]
 
 
-def _files_supersede(d: dict, fid: str) -> int:
+def _files_supersede(d: dict, fid: str) -> list:
     """The file just completed is THE file of its name in its folder: every
     other active one goes to the bin. Decided at completion, not when the
     upload was reserved: two uploads of one name whose reservations overlapped
@@ -12625,13 +13008,13 @@ def _files_supersede(d: dict, fid: str) -> int:
     name = str(f.get("name") or "").lower()
     folder = str(f.get("folder_id") or "")
     now = datetime.now(timezone.utc).isoformat()
-    n = 0
+    gone = []
     for k, v in d["files"].items():
         if k != fid and v.get("status") == "active" and not v.get("hidden") \
                 and str(v.get("name") or "").lower() == name and str(v.get("folder_id") or "") == folder:
             v["status"], v["trashed_at"] = "trashed", now
-            n += 1
-    return n
+            gone.append(k)
+    return gone
 
 
 def _files_purge(d: dict) -> None:
@@ -12684,6 +13067,34 @@ def _files_reap(d: dict, s3) -> bool:
     return False
 
 
+def _files_sent(d: dict) -> tuple:
+    """(raw, revision): the store as the page is sent it, and a fingerprint of
+    those bytes. The page sends the revision back and an unchanged store is
+    not sent again; like the CRM's, it moves only when what would be sent
+    moves (the 2026-10-12 speed audit, S9)."""
+    raw = _json_dumps_like_starlette(_files_shape(d))
+    return raw, hashlib.blake2b(raw, digest_size=8).hexdigest()
+
+
+def _files_delta(d: dict, files=(), folders=()) -> dict:
+    """What a page that asked for it (delta) needs to bring its copy of the
+    store up to date after a change to these records, shaped exactly as
+    _files_shape shapes them: each record as it now shows (None when it no
+    longer shows), each one's trash entry likewise, the space used, and the
+    two things a page's copy holds that change without a record changing:
+    the storage error (an upload is often what finds storage back) and the
+    names of the people who uploaded."""
+    out = {"files": {}, "trash": {}, "folders": {}, "used": _files_usage(d),
+           "setup_error": _files_ready["error"], "names": _team_names()}
+    for k in files:
+        v = d["files"].get(k)
+        out["files"][k] = v if v and v.get("status") == "active" and not v.get("hidden") else None
+        out["trash"][k] = {**v, "id": k} if v and v.get("trashed_at") else None
+    for k in folders:
+        out["folders"][k] = d["folders"].get(k)
+    return out
+
+
 def _files_shape(d: dict) -> dict:
     used = _files_usage(d)
     return {"folders": d["folders"],
@@ -12727,15 +13138,19 @@ def _files_endpoint() -> str:
     return os.environ.get("R2_ENDPOINT") or f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
 
-def _files_sign_put(key: str, ctype: str, size: int = 0) -> str:
-    """Blocking (network on first use); call off the event loop.
+def _files_sign_put(key: str, ctype: str, size: int = 0, setup: bool = True) -> str:
+    """Blocking (network on first use); call off the event loop. A caller
+    holding the store's lock passes setup=False, having set the bucket up
+    before it took the lock: this then only signs, and never waits on a
+    setup (its own, or another upload's retry) with the lock held.
 
     The signature BINDS the length when one is known: without it the URL
     authorised a PUT of any size R2 accepts, so a client could declare 1KB,
     pass the quota check, and then store gigabytes against a record that says
     1KB - and the presign stayed valid for a quarter of an hour after the
     upload was confirmed, long enough to swap the object afterwards."""
-    _files_ensure_bucket(_files_origin())
+    if setup:
+        _files_ensure_bucket(_files_origin())
     if not _files_ready["bucket"]:
         raise RuntimeError(_files_ready["error"] or "bucket unavailable")
     params = {"Bucket": R2_BUCKET, "Key": key, "ContentType": ctype}
@@ -12757,6 +13172,14 @@ def _files_sign_get(key: str, name: str, inline: bool = False) -> str:
         # extension, and only from the safe list.
         params["ResponseContentType"] = _files_preview_mime(name) or "application/octet-stream"
     return _files_s3().generate_presigned_url("get_object", Params=params, ExpiresIn=300)
+
+
+def _r2_call(method: str, **kw):
+    """One storage call, client and all. For asyncio.to_thread: building the
+    client is itself a blocking call (the first use after a deploy imports
+    and configures boto3), so `to_thread(_files_s3().get_object, ...)` ran
+    that part on the event loop."""
+    return getattr(_files_s3(), method)(Bucket=R2_BUCKET, **kw)
 
 
 def _files_head(key: str):
@@ -13217,14 +13640,14 @@ async def _mail_fetch_parts(files: list, uid: str, inline_keys: list = None):
         # object in memory to discover it was too big - on a single worker,
         # which takes dispatch, labels and the inbox down with the inbox.
         try:
-            size = _files_head(key)
+            size = await asyncio.to_thread(_files_head, key)
         except Exception:
             size = None
         if size is not None and size > budget:
             raise ValueError(f"{_mail_part_name(key)} does not fit: attachments come to "
                              "more than 25MB in total.")
         try:
-            obj = await asyncio.to_thread(_files_s3().get_object, Bucket=R2_BUCKET, Key=key)
+            obj = await asyncio.to_thread(_r2_call, "get_object", Key=key)
             return await asyncio.to_thread(obj["Body"].read)
         except Exception as e:
             raise ValueError(f"{_mail_part_name(key)} is missing from storage.") from e
@@ -13298,7 +13721,7 @@ async def _mail_logo_part(key: str):
     if not key or not _files_configured():
         return None
     try:
-        obj = await asyncio.to_thread(_files_s3().get_object, Bucket=R2_BUCKET, Key=key)
+        obj = await asyncio.to_thread(_r2_call, "get_object", Key=key)
         data = await asyncio.to_thread(obj["Body"].read)
     except Exception as e:
         logger.warning("mail: the footer logo could not be read (%s); "
@@ -14193,6 +14616,114 @@ async def _mail_sync_labels(t: dict, owner_name: str = "") -> bool:
     # cached label ids: both must reach disk.
     return True
 
+
+
+# The board read never waits for Gmail (the 2026-10-12 speed audit, X10): it
+# answers from what it holds and, when that is stale, starts one sync behind.
+# The mail loop already syncs every minute, so this only matters after a
+# deploy (the loop starts 20 s in) or while the loop is failing, and it is
+# rate-limited so a failing Gmail is not asked again by every open tab.
+_mail_bg_sync = {"t": 0.0}
+MAIL_BG_SYNC_GAP = 60
+
+
+def _mail_stale(store: dict) -> bool:
+    try:
+        age = (datetime.now(timezone.utc)
+               - datetime.fromisoformat(store["synced_at"])).total_seconds()
+        return age >= MAIL_SYNC_SECONDS
+    except (KeyError, TypeError, ValueError):
+        return True
+
+
+def _mail_sync_soon() -> bool:
+    """Start one sync behind the answer when the picture is stale. False when
+    one is running, the picture is fresh, or one was started under a minute
+    ago."""
+    if _mail_lock.locked() or not _mail_stale(_load_mail()):
+        return False
+    now = time.monotonic()
+    if now - _mail_bg_sync["t"] < MAIL_BG_SYNC_GAP:
+        return False
+    _mail_bg_sync["t"] = now
+    return _spawn_bg(_mail_sync_now())
+
+
+_mail_read_lock = asyncio.Lock()    # read-state changes, one at a time
+
+
+async def _mail_mark_read_later(tid: str) -> None:
+    """Opening an email is reading it, so Gmail is told, after the window has
+    opened. The board already shows it read (the thread route marks it so in
+    memory, because the person has read it). Unless Gmail confirms, it goes
+    back to unread, saved, rather than showing a read state Gmail does not
+    have; and the next sync re-reads the truth from Gmail either way.
+
+    Under _mail_read_lock, which Mark read/unread takes too, and standing
+    down if the email was marked unread meanwhile: that is how somebody
+    undoes an accidental open, and a late mark-read must not undo it."""
+    try:
+        async with _mail_read_lock:
+            store = _load_mail()
+            t = store.get("threads", {}).get(tid)
+            if t is None or t.get("unread"):
+                return
+            res = await _mail_set_unread(store, [tid], False)
+            if not res.get("changed"):
+                t["unread"] = True
+            if _mail_mem is store:
+                _write_mail(store)
+    except Exception:
+        logger.exception("mail: marking read on open failed")
+
+
+MAIL_LABEL_LOCK_WAIT = 2.0     # seconds a relabel waits for a running sync
+
+
+def _mail_labels_soon(tid: str) -> None:
+    if google_mail.connected():
+        _spawn_bg(_mail_labels_later(tid))
+
+
+async def _mail_labels_later(tid: str) -> None:
+    """The Gmail half of a claim, assign or state change, after the answer.
+
+    The move is already on disk (durable first, Gmail second); this only
+    carries it into Gmail as a label, so the person no longer waits for a
+    Gmail round trip over a fresh connection to see their click land.
+
+    Under _mail_lock, the sync's own lock: two quick moves on one thread, or
+    a move and the sync's label catch-up, would otherwise each read the old
+    label, and the thread could end up wearing both owners' labels in Gmail.
+    The owner is read again here, so the label is the thread's state now,
+    not the state when the click was made."""
+    try:
+        # Briefly. A sync holding the lock runs the same label catch-up
+        # (_mail_label_reconcile) before it lets go, so waiting it out only
+        # queued Refresh and the mail loop behind a burst of clicks.
+        try:
+            async with asyncio.timeout(MAIL_LABEL_LOCK_WAIT):
+                await _mail_lock.acquire()
+        except TimeoutError:
+            # First in line for that catch-up: an earlier failure's back-off
+            # or a backlog of never-tried threads would otherwise keep a
+            # fresh move's label wrong for minutes.
+            t = _load_mail().get("threads", {}).get(tid)
+            if t is not None:
+                t.pop("label_retry_at", None)
+                t["label_tried_at"] = 0
+            return
+        try:
+            store = _load_mail()
+            t = store.get("threads", {}).get(tid)
+            if not t:
+                return
+            if await _mail_sync_labels(t, _team_name(t.get("owner") or "")) and _mail_mem is store:
+                _write_mail(store)
+        finally:
+            _mail_lock.release()
+    except Exception:
+        logger.exception("mail: the Gmail label after a move failed")
 
 # What the board is FOR: live work, plus recently closed conversations for
 # context. Two years of finished mail belongs behind search, not in a payload
@@ -15837,6 +16368,7 @@ def _redact_customer(email: str, customer_id="", retry: bool = False,
         _write_crm(d)
     except Exception:
         logger.exception("redact: CRM")
+        _forget_store(CRM_PATH)   # a half-made change must not be served
         erased = before
         failed.append("the CRM")
 
@@ -15889,6 +16421,7 @@ def _redact_customer(email: str, customer_id="", retry: bool = False,
         _write_mail(store)
     except Exception:
         logger.exception("redact: mailbox")
+        _drop_memory_stores({MAILBOX_PATH})   # a half-made change must not be served
         erased = before
         failed.append("the mailbox")
 
@@ -15905,6 +16438,7 @@ def _redact_customer(email: str, customer_id="", retry: bool = False,
         _write_dispatch(orders)
     except Exception:
         logger.exception("redact: dispatch")
+        _forget_store(DISPATCH_STATE_PATH)   # a half-made change must not be served
 
     # A retry that fails again adds nothing to the record: the first attempt
     # already said what is owed, and an hourly line would bury the log.
@@ -16812,6 +17346,9 @@ async def _net30_on_release(registry: dict, order_id) -> dict:
         logger.exception("net30: attach failed for %s", order_id)
         return {"account": True, "ok": False,
                 "note": "Released, but the 30-day payment terms could not be added."}
+    finally:
+        # The ledger reads payment_terms; it may have landed whatever came back.
+        _orders_changed([order_id])
     _terms_flag(order_id, ok=bool(r.get("ok")), note=str(r.get("detail") or ""))
     if r.get("ok"):
         # Say what actually happened to the order, not what was hoped for. The
@@ -18125,6 +18662,40 @@ _CONNECTOR_SETTABLE = {
     "XERO_TAX_TYPE_STANDARD", "XERO_TAX_TYPE_ZERO",
     "CUSTOMER_REF_METAFIELD_NAMESPACE", "CUSTOMER_REF_METAFIELD_KEY",
 }
+# Kept as numbers by the connector, so 0.50 comes back as 0.5.
+_CONNECTOR_NUMERIC = {"RECONCILE_TOLERANCE", "MAX_DOCS_PER_RUN", "RUNAWAY_ABORT_ABOVE"}
+
+
+def _connector_settings_unapplied(sent: dict, now: dict) -> list:
+    """The fields a save sent that the connector's settings, read straight
+    after, do not show. The page said "Saved" for as long as the connector
+    answered ok, and that answer came for a save that kept nothing, so a save
+    is now judged by what the connector holds afterwards.
+
+    A value is kept when it reads back the same (numbers by value, as the
+    connector stores them in their own form). A blank clears a saved choice,
+    so it is kept when the field no longer comes from a saved choice; a
+    connector too old to say where values come from cannot show that, and a
+    blank is taken on trust there."""
+    sources = now.get("sources") if isinstance(now.get("sources"), dict) else None
+    missed = []
+    for k in sorted(sent):
+        v = str(sent[k] or "").strip()
+        if not v:
+            if sources is not None and sources.get(k) == "settings":
+                missed.append(k)
+            continue
+        got = str(now.get(k) if now.get(k) is not None else "").strip()
+        if got == v:
+            continue
+        if k in _CONNECTOR_NUMERIC:
+            try:
+                if float(got) == float(v):
+                    continue
+            except ValueError:
+                pass
+        missed.append(k)
+    return missed
 
 
 # ---- helpers add_routes kept to itself -------------------------------------
@@ -18533,10 +19104,8 @@ def _crm_ok(d: dict, extra: Optional[dict] = None, action: str = "",
     _write_crm(d)
     if action:
         _track(who, "crm", action, detail)
-    out = {"ok": True, "crm": _crm_shape(d)}
-    if extra:
-        out.update(extra)
-    return _json(out)
+    raw, rev = _crm_board_build(d, _crm_board_key())
+    return _crm_answer(raw, rev, {"ok": True, **(extra or {})})
 
 def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
     """Merge a Pipedrive export into the CRM store.
@@ -18973,14 +19542,16 @@ async def _files_guard(request: Request):
     return await _guard(request)
 
 def _files_ok(d: dict, extra: Optional[dict] = None, action: str = "",
-              detail: str = "", who: str = "") -> JSONResponse:
+              detail: str = "", who: str = "", delta: Optional[dict] = None) -> Response:
+    """Save, then answer the whole store with its revision; or, for a page
+    that asked (delta), only what changed, which it patches into its copy."""
     _write_files(d)
     if action:
         _track(who, "files", action, detail)
-    out = {"ok": True, "store": _files_shape(d)}
-    if extra:
-        out.update(extra)
-    return _json(out)
+    if delta is not None:
+        return _json({"ok": True, **(extra or {}), "delta": delta})
+    raw, rev = _files_sent(d)
+    return _json_spliced({"ok": True, **(extra or {}), "rev": rev}, "store", raw)
 
 # ---- Auth + Team routes -----------------------------------------------
 # The app's own front door. Every route here still demands the Shopify
@@ -19346,15 +19917,18 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/assets/app.css", methods=["GET"])
     async def app_css(request: Request):
-        return _asset_response("css", request.query_params.get("v", ""))
+        return _asset_response("css", request.query_params.get("v", ""),
+                               request.headers.get("accept-encoding", ""))
 
     @mcp.custom_route("/assets/app.js", methods=["GET"])
     async def app_js(request: Request):
-        return _asset_response("js", request.query_params.get("v", ""))
+        return _asset_response("js", request.query_params.get("v", ""),
+                               request.headers.get("accept-encoding", ""))
 
     @mcp.custom_route("/assets/composer.js", methods=["GET"])
     async def composer_js(request: Request):
-        return _asset_response("composer", request.query_params.get("v", ""))
+        return _asset_response("composer", request.query_params.get("v", ""),
+                               request.headers.get("accept-encoding", ""))
 
     @mcp.custom_route("/webhooks/orders", methods=["POST"])
     async def order_webhook(request: Request):
@@ -19399,7 +19973,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         delivery = str(request.headers.get("x-shopify-webhook-id") or "")
         if delivery and not _webhook_note_delivery(delivery):
             return PlainTextResponse("ok", status_code=200)   # a redelivery, already handled
-        _bust_orders()
+        # The order this event is about is read again from Shopify on the next
+        # load; the payload names it and is never used as state. One that
+        # cannot be read retires every snapshot, as every event used to.
+        try:
+            _event_order = json.loads(raw).get("id")
+            if not _event_order:
+                raise ValueError("no order id")
+            _orders_changed([_event_order])
+        except Exception:
+            _bust_orders()
         _webhook_state["last_at"] = time.time()
         _webhook_state["last_topic"] = str(request.headers.get("x-shopify-topic") or "")
         _webhook_state["version"] = str(request.headers.get("x-shopify-api-version") or "")[:16]
@@ -20807,10 +21390,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return err
         try:
             if google_mail.connected():
-                await _mail_sync_now(force=bool(body.get("force"))
-                                     and time.monotonic() - _mail_last_force["t"] > 15)
+                # Refresh (force) syncs while the person waits, as before: a
+                # forced sync at most every 15 s, and in between only a stale
+                # picture is re-read. Opening the page and the minute's poll
+                # answer from what the board holds and sync behind it.
                 if body.get("force"):
+                    perf.no_record()     # a whole Gmail walk: long by design
+                    await _mail_sync_now(force=time.monotonic() - _mail_last_force["t"] > 15)
                     _mail_last_force["t"] = time.monotonic()
+                else:
+                    _mail_sync_soon()
             store = _load_mail()
             # Setup aids, master only: which Cloud project this app's existing
             # OAuth client lives in, and the EXACT callback the server will
@@ -20857,15 +21446,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # Opening the thread IS the viewing heartbeat: the collision warning
         # never depends on the modal's poll having started.
         # Opening it here IS reading it, so Gmail is told, the same as if the
-        # person had opened it there. Bounded and best effort: a Gmail hiccup
-        # must not stop somebody looking at their email, and the next sync
-        # re-reads the truth from Gmail anyway.
+        # person had opened it there. After the answer: a Gmail round trip and
+        # a whole-mailbox save stood between the click and the window, and a
+        # Gmail hiccup must not stop somebody looking at their email.
         if t.get("unread") and not body.get("peek"):
-            try:
-                await _mail_set_unread(_load_mail(), [t["id"]], False)
-                _write_mail(_load_mail())
-            except Exception:
-                logger.exception("mail: marking read on open failed")
+            t["unread"] = False    # what the person now sees; put back if Gmail refuses
+            _spawn_bg(_mail_mark_read_later(t["id"]))
         now = time.monotonic()
         v = _mail_viewers.setdefault(t["id"], {})
         v[who] = now
@@ -20932,10 +21518,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         t["done_at"] = ""
         _mail_log(t, who, "claimed")
         # Durable FIRST, Gmail second: the ownership change must survive a
-        # restart even if the label trip hangs or fails.
+        # restart even if the label trip hangs or fails. The label follows
+        # after the answer (_mail_labels_later).
         _write_mail(_load_mail())
-        if await _mail_sync_labels(t, _team_name(who)):
-            _write_mail(_load_mail())
+        _mail_labels_soon(t["id"])
         _track(who, "mail", "claimed an email", (t.get("subject") or "")[:60])
         return _json({"ok": True})
 
@@ -20979,8 +21565,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         else:
             _mail_log(t, who, "released", ("note: " + note[:80]) if note else "")
         _write_mail(_load_mail())
-        if await _mail_sync_labels(t, _team_name(target) if target else ""):
-            _write_mail(_load_mail())
+        _mail_labels_soon(t["id"])
         _track(who, "mail",
                ("assigned an email to " + (_team_name(target) or "someone")) if target
                else "released an email",
@@ -21013,8 +21598,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         _mail_log(t, who, {"assigned": "moved it back to assigned", "progress": "started work",
                            "waiting": "is waiting on the customer", "done": "marked it done"}[state])
         _write_mail(_load_mail())
-        if await _mail_sync_labels(t, _team_name(t.get("owner") or "")):
-            _write_mail(_load_mail())
+        _mail_labels_soon(t["id"])
         _track(who, "mail", "email " + ("done" if state == "done" else "moved to " + state),
                (t.get("subject") or "")[:60])
         return _json({"ok": True})
@@ -21351,7 +21935,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             okv, why = False, f"{name} is not an image, so it cannot go inline."
         if not okv:
             try:
-                await asyncio.to_thread(_files_s3().delete_object, Bucket=R2_BUCKET, Key=key)
+                await asyncio.to_thread(_r2_call, "delete_object", Key=key)
             except Exception:
                 logger.warning("mail: refused attachment %s could not be removed", key)
             _track(who, "mail", "refused an attachment", why[:200])
@@ -22006,8 +22590,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not ids:
             return _json({"error": "Nothing was selected."}, 400)
         unread = bool(body.get("unread"))
-        out = await _mail_set_unread(_load_mail(), ids, unread)
-        _write_mail(_load_mail())
+        async with _mail_read_lock:      # after any read-on-open still at Gmail
+            out = await _mail_set_unread(_load_mail(), ids, unread)
+            _write_mail(_load_mail())
         if out["changed"]:
             _track(who, "mail", "marked " + str(out["changed"]) + " email"
                    + ("" if out["changed"] == 1 else "s")
@@ -22144,7 +22729,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 return _json({"error": "Storage did not answer; try again."}, 502)
             if _sniff_kind(head) not in _IMAGE_EXT.values():
                 try:
-                    await asyncio.to_thread(_files_s3().delete_object, Bucket=R2_BUCKET, Key=key)
+                    await asyncio.to_thread(_r2_call, "delete_object", Key=key)
                 except Exception:
                     pass
                 return _json({"error": "That file is not a PNG, JPG, GIF or WebP image."}, 400)
@@ -22545,6 +23130,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         regions: fresh volume, first-run setup, restore, sign back in. Only
         the volume's own JSON/CSV files are accepted, by basename, so a
         crafted zip cannot write anywhere else."""
+        perf.no_record()        # long by design: out of the slowest-routes table
         big = 120 * 1024 * 1024
         err, _body, who = await _guard(request, max_body=big, body=False)
         if err:
@@ -22729,6 +23315,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def backup_route(request: Request):
         """Everything the app has learned lives as files on one volume; this hands
         the merchant a zip of it. JSON and CSV only, fonts and code excluded."""
+        perf.no_record()        # long by design: out of the slowest-routes table
         err, _body, who = await _guard(request, body=False)
         if err:
             return err
@@ -23123,11 +23710,18 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/crm/board", methods=["POST"])
     async def crm_board_route(request: Request):
-        err, _body, _who = await _crm_guard(request)
+        err, body, _who = await _crm_guard(request)
         if err:
             return err
         try:
-            return _json({"crm": _crm_shape(_load_crm())})
+            raw, rev = _crm_board()
+            # The page sends the revision it holds; an unchanged board is not
+            # sent again (about 400 KB at production size, every 90 seconds
+            # per open tab). A page that sends none, one still open from
+            # before this update, gets the whole board as it always did.
+            if str((body or {}).get("rev") or "") == rev:
+                return _json({"same": True, "rev": rev})
+            return _crm_answer(raw, rev)
         except Exception:
             logger.exception("CRM board failed")
             return _json({"error": "Couldn't load the CRM."}, 500)
@@ -23589,7 +24183,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if rep["linked"]:
                     _track(actor, "crm", "linked contacts to Shopify",
                            str(rep["linked"]) + " matched by email")
-                return _json({"ok": True, "report": rep, "crm": _crm_shape(_load_crm())})
+                raw, rev = _crm_board()
+                return _crm_answer(raw, rev, {"ok": True, "report": rep})
 
             if op in ("person_merge", "org_merge"):
                 # 1,951 imported people guarantee duplicates, and deleting the
@@ -23907,11 +24502,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/files/tree", methods=["POST"])
     async def files_tree_route(request: Request):
-        err, _body, _who = await _files_guard(request)
+        err, body, _who = await _files_guard(request)
         if err:
             return err
         try:
-            return _json({"store": _files_shape(_load_files())})
+            raw, rev = _files_sent(_load_files())
+            # A page that holds this revision is told so, not sent the store
+            # again. One with none, open from before this update, gets it.
+            if str((body or {}).get("rev") or "") == rev:
+                return _json({"same": True, "rev": rev})
+            return _json_spliced({"rev": rev}, "store", raw)
         except Exception:
             logger.exception("files tree failed")
             return _json({"error": "Couldn't load the files."}, 500)
@@ -23937,7 +24537,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     fid = _files_id(d, "d")
                     d["folders"][fid] = {"name": name, "parent_id": parent,
                                          "created_at": datetime.now(timezone.utc).isoformat()}
-                    return _files_ok(d, {"id": fid}, action="made a folder", detail=name, who=_who)
+                    return _files_ok(d, {"id": fid}, action="made a folder", detail=name, who=_who,
+                                     delta=_files_delta(d, folders=[fid]) if body.get("delta") else None)
                 if op == "rename":
                     fid = str(body.get("id") or "")
                     if fid not in d["folders"]:
@@ -24007,6 +24608,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "That file is over the 4GB single-file limit."}, 400)
         folder = str(body.get("folder_id") or "")
         try:
+            # Setting the bucket up is network (the first upload after a
+            # deploy, and once a minute while storage is failing), so it runs
+            # before the lock is taken: inside it, every other change to Files
+            # and the Finder drive waited on storage. Under the lock the
+            # signing below is then local work.
+            await asyncio.to_thread(_files_ensure_bucket, _files_origin())
             async with _files_lock:
                 d = _load_files()
                 if not _files_folder_ok(d, folder):
@@ -24020,7 +24627,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 ctype = str(body.get("type") or "application/octet-stream").strip()[:100] \
                     or "application/octet-stream"
                 try:
-                    url = await asyncio.to_thread(_files_sign_put, key, ctype, size)
+                    url = await asyncio.to_thread(_files_sign_put, key, ctype, size, False)
                 except RuntimeError as e:
                     logger.warning("files: presign failed: %s", e)
                     return _json({"error": "Storage isn't reachable right now. Check the R2 "
@@ -24039,7 +24646,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if dup:
                     rec["replaces"] = dup
                 d["files"][fid] = rec
-                return _files_ok(d, {"id": fid, "url": url, "replaces": bool(dup)})
+                return _files_ok(d, {"id": fid, "url": url, "replaces": bool(dup)},
+                                 delta=_files_delta(d) if body.get("delta") else None)
         except RuntimeError:
             return _json({"error": _FILES_STORE_FAIL}, 500)
         except Exception:
@@ -24058,55 +24666,73 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 f = d["files"].get(fid)
                 if not f or f.get("status") != "pending":
                     return _json({"error": "That upload is no longer expected."}, 400)
-                try:
-                    true_size = await asyncio.to_thread(_files_head, f["r2_key"])
-                except RuntimeError:
-                    # A storage wobble is not a lost upload: keep the record
-                    # pending so a retry can finish the same upload.
-                    return _json({"error": "Storage isn't answering right now. Wait a "
-                                           "moment and try again; the upload is not lost."}, 502)
-                if true_size is None:
-                    return _json({"error": "The file never arrived in storage. Try the "
-                                           "upload again."}, 400)
+                key = f["r2_key"]
+            # Storage is asked outside the store's lock (the 2026-10-12 speed
+            # audit, S9). Held across these two round trips, it made every
+            # other change to Files and the Finder drive wait on storage, and
+            # a batch's uploads were confirmed one at a time. The record is
+            # read again under the lock before anything is kept.
+            try:
+                true_size = await asyncio.to_thread(_files_head, key)
+            except RuntimeError:
+                # A storage wobble is not a lost upload: keep the record
+                # pending so a retry can finish the same upload.
+                return _json({"error": "Storage isn't answering right now. Wait a "
+                                       "moment and try again; the upload is not lost."}, 502)
+            if true_size is None:
+                return _json({"error": "The file never arrived in storage. Try the "
+                                       "upload again."}, 400)
+            try:
+                head = await asyncio.to_thread(_files_head_bytes, key)
+            except Exception:
+                logger.exception("files: could not read the head of %s", key)
+                return _json({"error": "Storage did not answer; try again."}, 502)
+            refused = ""
+            async with _files_lock:
+                d = _load_files()
+                f = d["files"].get(fid)
+                # Confirmed by another call (a retry) or gone while storage
+                # answered: exactly what a second confirmation was told before.
+                if not f or f.get("status") != "pending" or f.get("r2_key") != key:
+                    return _json({"error": "That upload is no longer expected."}, 400)
                 # The browser's claimed size opened the door; what actually
                 # landed is what counts against the space.
                 f["size"] = true_size
-                try:
-                    head = await asyncio.to_thread(_files_head_bytes, f["r2_key"])
-                except Exception:
-                    logger.exception("files: could not read the head of %s", f["r2_key"])
-                    return _json({"error": "Storage did not answer; try again."}, 502)
                 okv, why, safe = _file_verdict(f.get("name"), f.get("type"), head)
                 if not okv:
                     # Refused whole: the bytes go, the record goes, and the
                     # person is told why rather than left with a phantom file.
                     d["files"].pop(fid, None)
                     _write_files(d)
-                    try:
-                        await asyncio.to_thread(_files_s3().delete_object, Bucket=R2_BUCKET, Key=f["r2_key"])
-                    except Exception:
-                        logger.warning("files: refused upload %s could not be removed", f["r2_key"])
-                    _track(_who, "files", "refused an upload", why[:200])
-                    return _json({"error": "Refused: " + why + " The upload was removed."}, 400)
-                f["type"], f["sniffed"] = safe, _sniff_kind(head)
-                if true_size > FILES_MAX_UPLOAD \
-                        or _files_usage(d) > int(FILES_QUOTA_GB * 1024 * 1024 * 1024):
-                    _write_files(d)   # keep the honest size; the sweep clears it
-                    return _json({"error": "The file is bigger than the storage space "
-                                           "allows, so it has not been kept."}, 400)
-                f["status"] = "active"
-                f["uploaded_at"] = datetime.now(timezone.utc).isoformat()
-                if f.get("folder_id") and not _files_folder_ok(d, str(f.get("folder_id"))):
-                    # The folder went while the bytes were in flight. A file
-                    # in a folder that does not exist is counted, invisible
-                    # and unreachable on the drive; the top level is where a
-                    # restore puts one too.
-                    f["folder_id"] = ""
-                f.pop("replaces", None)
-                replaced = " (replaced the previous version)" if _files_supersede(d, fid) else ""
-                return _files_ok(d, action="uploaded a file",
-                                 detail=(f"{f.get('name')} ({true_size} bytes)" + replaced)[:200],
-                                 who=_who)
+                    refused = why
+                else:
+                    f["type"], f["sniffed"] = safe, _sniff_kind(head)
+                    if true_size > FILES_MAX_UPLOAD \
+                            or _files_usage(d) > int(FILES_QUOTA_GB * 1024 * 1024 * 1024):
+                        _write_files(d)   # keep the honest size; the sweep clears it
+                        return _json({"error": "The file is bigger than the storage space "
+                                               "allows, so it has not been kept."}, 400)
+                    f["status"] = "active"
+                    f["uploaded_at"] = datetime.now(timezone.utc).isoformat()
+                    if f.get("folder_id") and not _files_folder_ok(d, str(f.get("folder_id"))):
+                        # The folder went while the bytes were in flight. A file
+                        # in a folder that does not exist is counted, invisible
+                        # and unreachable on the drive; the top level is where a
+                        # restore puts one too.
+                        f["folder_id"] = ""
+                    f.pop("replaces", None)
+                    gone = _files_supersede(d, fid)
+                    replaced = " (replaced the previous version)" if gone else ""
+                    return _files_ok(d, action="uploaded a file",
+                                     detail=(f"{f.get('name')} ({true_size} bytes)" + replaced)[:200],
+                                     who=_who,
+                                     delta=_files_delta(d, [fid] + gone) if body.get("delta") else None)
+            try:
+                await asyncio.to_thread(_r2_call, "delete_object", Key=key)
+            except Exception:
+                logger.warning("files: refused upload %s could not be removed", key)
+            _track(_who, "files", "refused an upload", refused[:200])
+            return _json({"error": "Refused: " + refused + " The upload was removed."}, 400)
         except RuntimeError:
             return _json({"error": _FILES_STORE_FAIL}, 500)
         except Exception:
@@ -26474,7 +27100,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if fid and _fulfillment_canceler is not None:
                 try:
                     fc = await _fulfillment_canceler(int(fid))
-                    _bust_orders()   # fulfillment_status is a swept field
+                    _orders_changed([oid])   # fulfillment_status is a swept field
                     if fc.get("ok"):
                         # The fulfilment is genuinely gone, so the record must stop
                         # claiming otherwise: a stale fulfillment_id makes a later
@@ -27120,11 +27746,26 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                          for k, v in fields.items() if k in _CONNECTOR_SETTABLE}
                 if not clean:
                     return _json({"error": "None of those are settings this page can change."}, 400)
-                code, data = await _connector_call("POST", "/api/settings", clean)
-                if code < 400:
-                    _track(who, "connector", "changed connector settings",
-                           ", ".join(sorted(clean)))
-                return _json({"available": True, "data": data}, code if code >= 400 else 200)
+                # As a JSON body: the connector reads this door's body and
+                # nothing else. The page sends only the fields changed in it,
+                # from settings read as it opened, because the connector keeps
+                # a value the same as its default or variable as no choice,
+                # so an unchanged stale value would clear a choice saved on
+                # the connector's own tab.
+                code, data = await _connector_call("POST", "/api/settings", json_body=clean)
+                if code >= 400:
+                    return _json({"available": True, "data": data}, code)
+                unapplied = []
+                try:
+                    code2, now = await _connector_call("GET", "/api/settings")
+                    if code2 < 400 and isinstance(now, dict):
+                        unapplied = _connector_settings_unapplied(clean, now)
+                except Exception:
+                    pass   # the save itself was answered; the page reads the settings again anyway
+                kept = sorted(set(clean) - set(unapplied))
+                if kept:
+                    _track(who, "connector", "changed connector settings", ", ".join(kept))
+                return _json({"available": True, "data": data, "unapplied": unapplied})
 
             if op == "payouts":
                 # Telling an invoice which payout paid it. A DRY RUN lists the
@@ -27797,6 +28438,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                        # the stores are read from disk per request, so this is
                        # what a slow CRM save would show up as, before it does.
                        "stores": _store_report()},
+            # Each route's typical and slowest time since this process
+            # started (perf.summary), slowest first: the live numbers the
+            # 2026-10-12 speed audit could only model.
+            "timing": perf.summary(),
             "email_alerts": {"ok": bool(RESEND_API_KEY and ALERT_EMAIL_TO)},
             # Whether the long-lived credentials on the volume are encrypted.
             # Read from the FILES, not from the environment: a key that is set

@@ -3278,9 +3278,12 @@ def t_the_permissions_settings_shows_are_read_from_shopify():
         got = run(server.shopify_granted_scopes())
         ok("currentAppInstallation" in seen[0][2] and seen[0][:2] == ("POST", "graphql.json"), seen)
         eq(got["error"], "")
-        eq(set(got["missing"]), {"write_merchant_managed_fulfillment_orders", "write_payment_terms"},
-           "each missing write is named")
+        eq(set(got["missing"]), {"write_merchant_managed_fulfillment_orders", "write_payment_terms",
+                                 "read_shopify_payments_payouts", "read_shopify_payments_accounts"},
+           "each missing write is named, and each read a feature needs")
         ok(all(got["missing"].values()), "with what it is for")
+        ok("Xero sync" in got["missing"]["read_shopify_payments_accounts"],
+           "the accounts scope is named for the payout note it holds up")
         run(server.shopify_granted_scopes())
         eq(len(seen), 1, "a good answer is kept rather than asked again")
         server._granted_scopes.update({"at": 0.0, "scopes": None, "error": ""})
@@ -3873,7 +3876,7 @@ def t_a_tag_write_retires_the_snapshot_immediately():
             first = calls["n"]
             run(copilot.run_production_labels({}, tag="IP"))
             eq(calls["n"], first, "a repeat load costs nothing")
-            copilot._bust_orders()          # what every tag/fulfilment write does
+            copilot._bust_orders()          # Refresh, or a change nobody can name
             run(copilot.run_production_labels({}, tag="IP"))
             eq(calls["n"], first + 1, "and the write forced a re-read")
         with_cache(go)
@@ -4486,12 +4489,18 @@ def wh_headers(raw, secret=SECRET, topic="orders/updated", delivery="d1",
 
 @test
 def t_a_signed_order_event_retires_the_order_snapshot():
+    # Since 2026-10-12 a named order is read again rather than every snapshot
+    # retired (_orders_changed); the event must still reach it.
     copilot._webhook_seen.clear()
     raw = json.dumps({"id": 1}).encode()
-    before = copilot._orders_epoch
-    r = client.post("/webhooks/orders", content=raw, headers=wh_headers(raw, delivery="ev1"))
+    named, saved = [], copilot._orders_changed
+    copilot._orders_changed = lambda ids: (named.append(list(ids)), saved(ids))
+    try:
+        r = client.post("/webhooks/orders", content=raw, headers=wh_headers(raw, delivery="ev1"))
+    finally:
+        copilot._orders_changed = saved
     eq(r.status_code, 200, r.text)
-    ok(copilot._orders_epoch > before, "the snapshot was retired")
+    eq(named, [[1]], "the event's order is named, so every snapshot reads it again")
     ok(copilot._webhook_state["count"] >= 1, "and the event was counted")
 
 @test
@@ -9288,13 +9297,15 @@ def t_mail_sync_pipeline_and_history_short_circuit():
             eq(j["threads"][0]["subject"], "Order query")
             eq(calls["get"], 1)
             # Same historyId again: the listing is enough, no thread fetch.
+            # (A board read no longer syncs inline, so the sync is run here.)
             copilot._load_mail()["synced_at"] = ""     # force staleness
-            post("/api/mail/board", {})
+            run_async(copilot._mail_sync_now())
+            eq(calls["list"], 2, "the sync did run")
             eq(calls["get"], 1, "an unchanged thread costs nothing to re-sync")
             # A bumped historyId is fetched again.
             listing[0]["historyId"] = "h2"
             copilot._load_mail()["synced_at"] = ""
-            post("/api/mail/board", {})
+            run_async(copilot._mail_sync_now())
             eq(calls["get"], 2)
         finally:
             _gm.list_threads, _gm.get_thread = saved
@@ -13291,7 +13302,8 @@ def _recon_world(fx, orders):
             if args.get("since_id"):
                 return {"orders": []}
             return {"orders": list(orders)}
-        if name == "shopify_list_payouts":
+        if name in ("shopify_list_payouts", "shopify_list_disputes"):
+            # A store not on Shopify Payments refuses both alike.
             return {"available": False, "reason": "not on Shopify Payments"}
         return {"_failed": True}
     import copy as _copy
@@ -13344,7 +13356,7 @@ def t_a_full_sweep_finds_the_missing_sale_and_statuses_survive_resweeps():
         missing = [e for e in exs.values() if e["kind"] == "shopify_sale_missing"]
         eq(len(missing), 1, "only #104276 is missing")
         ok("#104276" in missing[0]["title"])
-        ok(any("payout checks did not run" in n for n in r["notes"]),
+        ok(_did_not_run(r["notes"], "payout") and _did_not_run(r["notes"], "chargeback"),
            "a check that could not run says so instead of reading as clean: %s" % r["notes"])
         xid = missing[0]["id"]
         # A person marks it explained; the next sweep must not undo that.
@@ -13366,6 +13378,169 @@ def t_a_full_sweep_finds_the_missing_sale_and_statuses_survive_resweeps():
         _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
                       mail_thread=None, load_store=None, write_store=None,
                       load_cache=None, write_cache=None, load_docs=None, write_docs=None)
+
+
+def _did_not_run(notes, check):
+    """The sweep said this check sat it out ("payout", "chargeback")."""
+    return any(check in n and "checks did not run" in n for n in notes)
+
+
+def _raw_btxn(bid, typ, total, day):
+    return {"BankTransactionID": bid, "Type": typ, "Status": "AUTHORISED",
+            "DateString": day + "T00:00:00", "Total": total, "CurrencyCode": "GBP",
+            "IsReconciled": False, "Contact": {"Name": "Shopify"}, "Reference": "",
+            "BankAccount": {"Name": "Current"}}
+
+
+def _payments_world(fx, answers):
+    """_recon_world with Shopify Payments reads that a test switches between
+    answering and not. `answers` maps a tool to its reply, or to a callable for
+    one that raises; a tool left out answers as a failed read."""
+    orders = [_raw_order(104275, "#104275", "842.00")]
+    stores = _recon_world(fx, orders)
+    async def tool_json(reg, name, args):
+        if name == "shopify_list_orders":
+            return {"orders": [] if args.get("since_id") else list(orders)}
+        a = answers.get(name, {"_failed": True})
+        return a() if callable(a) else a
+    _rc.configure(tool_json=tool_json)
+    return stores
+
+
+def _unconfigure_recon():
+    _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
+                  mail_thread=None, load_store=None, write_store=None,
+                  load_cache=None, write_cache=None, load_docs=None, write_docs=None)
+
+
+@test
+def t_a_sweep_that_cannot_read_payouts_leaves_the_payout_findings_alone():
+    """The payouts read was refused and the note said the payout checks did not
+    run, but the check ran anyway on the payouts cached by earlier sweeps and
+    counted as having run. So a sweep that saw no payout at all marked an open
+    payout finding "no longer detected": once when the deposit landed in Xero
+    while the cached payout was the only copy, and again with no copy left."""
+    import copy as _copy
+    day = _rc._cutoff_day(10)
+    payout = {"id": 7001, "date": day, "amount": "312.40", "currency": "GBP", "status": "paid"}
+
+    def missing_tools():
+        raise KeyError("shopify_list_payouts")
+    for how, unreadable in (
+            ("refused", {"available": False, "reason": "The access token lacks the Shopify "
+                                                       "Payments read scopes."}),
+            ("failed", {"_failed": True}),
+            ("not on this build", missing_tools)):
+        fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
+        answers = {"shopify_list_payouts": {"payouts": [payout]},
+                   "shopify_payout_transactions": {"transactions": []},
+                   "shopify_list_disputes": {"disputes": []}}
+        stores = _payments_world(fx, answers)
+        try:
+            run_async(_rc.sweep())
+            exs = stores["store"]["exceptions"]
+            found = [x for x, e in exs.items() if e["kind"] == "payout_missing_from_bank"]
+            eq(len(found), 1, how + ": a paid payout with no deposit is found while payouts read")
+            xid = found[0]
+            exs[xid]["status"] = "investigating"
+            before = _copy.deepcopy(exs[xid])
+            # Payouts stop answering, and meanwhile the deposit lands in Xero.
+            answers["shopify_list_payouts"] = unreadable
+            fx.bank.append(_raw_btxn("BT-7001", "RECEIVE", "312.40", day))
+            r2 = run_async(_rc.sweep())
+            ok(_did_not_run(r2["notes"], "payout"), (how, r2["notes"]))
+            after = stores["store"]["exceptions"][xid]
+            ok(not after.get("stale"), how + ": a sweep that read no payouts did not see it go")
+            eq(after["status"], "investigating", how)
+            eq(after["history"], before["history"], how + ": and wrote nothing on its history")
+            payout_kinds = _rc.CHECK_KINDS["check_payouts_vs_bank"]
+            eq([x for x, e in stores["store"]["exceptions"].items() if e["kind"] in payout_kinds],
+               [xid], how + ": nor raised anything new from the old copy")
+            ok("7001" in stores["cache"]["shopify"]["payouts"],
+               how + ": and the payout it was built from is still held")
+            # Months on and still unreadable: the cached payout is now older
+            # than the window the check matches in, and than the cache keeps.
+            stores["cache"]["shopify"]["payouts"]["7001"]["date"] = _rc._cutoff_day(_rc.CACHE_KEEP_DAYS + 5)
+            run_async(_rc.sweep())
+            ok(not stores["store"]["exceptions"][xid].get("stale"),
+               how + ": an aged copy of payouts that could not be read settles nothing")
+            ok("7001" in stores["cache"]["shopify"]["payouts"],
+               how + ": nor is the record an open finding rests on pruned")
+            # With no cached copy left either, it is still not a reason.
+            stores["cache"]["shopify"]["payouts"] = {}
+            run_async(_rc.sweep())
+            ok(not stores["store"]["exceptions"][xid].get("stale"),
+               how + ": an empty copy of payouts that could not be read settles nothing")
+            # Readable again: the check runs, finds the deposit and settles it.
+            answers["shopify_list_payouts"] = {"payouts": [payout]}
+            r4 = run_async(_rc.sweep())
+            ok(not _did_not_run(r4["notes"], "payout"), (how, r4["notes"]))
+            ok(stores["store"]["exceptions"][xid]["stale"],
+               how + ": a sweep that did read payouts settles it as before")
+        finally:
+            _unconfigure_recon()
+
+
+@test
+def t_a_sweep_that_cannot_read_disputes_leaves_the_chargeback_findings_alone():
+    """The disputes read failed with no word at all, and the chargeback check
+    ran on the disputes cached by earlier sweeps, so a sweep that saw no
+    dispute could settle an open chargeback finding."""
+    import copy as _copy
+    day = _rc._cutoff_day(10)
+    dispute = {"id": 8001, "order_id": 104275, "type": "chargeback", "amount": "95.00",
+               "currency": "GBP", "reason": "fraudulent", "status": "lost", "initiated_at": day}
+    for how, unreadable in (
+            ("refused", {"available": False, "reason": "The access token lacks the Shopify "
+                                                       "Payments read scopes."}),
+            ("failed", {"_failed": True})):
+        fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
+        answers = {"shopify_list_payouts": {"payouts": []},
+                   "shopify_list_disputes": {"disputes": [dispute]}}
+        stores = _payments_world(fx, answers)
+        try:
+            run_async(_rc.sweep())
+            exs = stores["store"]["exceptions"]
+            found = [x for x, e in exs.items() if e["kind"] == "chargeback_missing_from_xero"]
+            eq(len(found), 1, how + ": a chargeback with no Xero record is found while disputes read")
+            xid = found[0]
+            before = _copy.deepcopy(exs[xid])
+            answers["shopify_list_disputes"] = unreadable
+            fx.bank.append(_raw_btxn("BT-8001", "SPEND", "95.00", day))
+            r2 = run_async(_rc.sweep())
+            after = stores["store"]["exceptions"][xid]
+            ok(not after.get("stale"), how + ": a sweep that read no disputes did not see it go")
+            eq(after["history"], before["history"], how)
+            ok(_did_not_run(r2["notes"], "chargeback"), (how, r2["notes"]))
+            answers["shopify_list_disputes"] = {"disputes": [dispute]}
+            r3 = run_async(_rc.sweep())
+            ok(not _did_not_run(r3["notes"], "chargeback"), (how, r3["notes"]))
+            ok(stores["store"]["exceptions"][xid]["stale"],
+               how + ": a sweep that did read disputes settles it as before")
+        finally:
+            _unconfigure_recon()
+
+
+@test
+def t_payout_fees_that_cannot_be_read_are_said_so():
+    """A fee lookup that failed stopped the fee reads with no word, and a
+    deposit short of its payout by the fees then read as a missing deposit."""
+    day = _rc._cutoff_day(10)
+    payout = {"id": 7002, "date": day, "amount": "100.00", "currency": "GBP", "status": "paid"}
+    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
+    answers = {"shopify_list_payouts": {"payouts": [payout]},
+               "shopify_payout_transactions": {"_failed": True},
+               "shopify_list_disputes": {"disputes": []}}
+    _payments_world(fx, answers)
+    try:
+        r = run_async(_rc.sweep())
+        ok(any("fees could not be read" in n for n in r["notes"]), r["notes"])
+        answers["shopify_payout_transactions"] = {"transactions": [{"fee": "2.50"}]}
+        r2 = run_async(_rc.sweep())
+        ok(not any("fees could not be read" in n for n in r2["notes"]),
+           "fees read on a later sweep say nothing: %s" % r2["notes"])
+    finally:
+        _unconfigure_recon()
 
 
 @test
@@ -17843,9 +18018,13 @@ def t_an_inbox_click_writes_the_mailbox_once_not_twice():
            "a label already correct is not rewritten")
     finally:
         copilot._write_mail = saved
+    # Since 2026-10-12 the label trip runs after the answer, in one place
+    # (_mail_labels_later), and that is where the follow-up write is guarded.
     src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
-    eq(src.count("if await _mail_sync_labels("), 3,
-       "every route guards its follow-up write on there being something to write")
+    eq(src.count("if await _mail_sync_labels("), 1,
+       "the one follow-up write is guarded on there being something to write")
+    eq(src.count('_mail_labels_soon(t["id"])'), 3,
+       "and claim, assign and state all hand the label to it")
     ok("await _mail_sync_labels(t, _team_name(who))\n        _write_mail" not in src,
        "and none of them writes unconditionally any more")
 
@@ -19939,8 +20118,8 @@ def t_only_operational_settings_can_be_changed_from_the_page():
     ensure_auth()
     seen = []
     real = copilot._connector_call
-    async def fake(method, path, params=None):
-        seen.append((method, path, dict(params or {})))
+    async def fake(method, path, params=None, json_body=None):
+        seen.append((method, path, dict(json_body or params or {})))
         return 200, {"ok": True}
     copilot._connector_call = fake
     old_url = os.environ.get("CONNECTOR_URL")
@@ -19952,7 +20131,7 @@ def t_only_operational_settings_can_be_changed_from_the_page():
             "SHOPIFY_SHOP": "someone-elses.myshopify.com",
             "DASHBOARD_TOKEN": "nope"}})
         eq(r.status_code, 200, r.text)
-        sent = seen[-1][2]
+        sent = [s for s in seen if s[0] == "POST"][-1][2]
         eq(sent.get("RECONCILE_MODE"), "strict", "the operational one goes through")
         for blocked in ("XERO_CLIENT_SECRET", "SHOPIFY_SHOP", "DASHBOARD_TOKEN"):
             ok(blocked not in sent, blocked + " must not be settable from a browser")
@@ -19961,6 +20140,76 @@ def t_only_operational_settings_can_be_changed_from_the_page():
            "a save of nothing settable is refused rather than sent as empty")
     finally:
         copilot._connector_call = real
+        if old_url is None:
+            os.environ.pop("CONNECTOR_URL", None)
+        else:
+            os.environ["CONNECTOR_URL"] = old_url
+
+
+@test
+def t_a_settings_save_reaches_the_connector_as_a_body_of_only_what_changed():
+    """Live fault, found 2026-10-12: the Settings card on the Xero sync page
+    had never saved anything. The save went as a query string with no body,
+    the connector reads POST /api/settings from its body only, so it answered
+    ok, kept nothing, and the page said "Saved". The test above swaps
+    _connector_call out, so it never saw the wire. This one answers where the
+    connector does, at the transport: a body is read, a query string is not.
+    What goes is only what the page changed, nothing filled in beside it, and
+    a save the settings read straight after do not show is reported, so the
+    page cannot say Saved over nothing again."""
+    ensure_auth()
+    defaults = {"RECONCILE_MODE": "warn", "RECONCILE_TOLERANCE": "0.02", "ORDERS_SINCE": ""}
+    saved = {"RECONCILE_MODE": "strict"}
+    wire = []
+    keeps = {"on": True}
+    def connector(request):
+        if request.url.host != "conn.railway.internal" or request.url.path != "/api/settings":
+            raise _httpx.ConnectError("the test suite does not reach " + request.url.host, request=request)
+        if request.method == "GET":
+            return _httpx.Response(200, json={
+                **{k: saved.get(k) or v for k, v in defaults.items()},
+                "sources": {k: "settings" if k in saved else "default" for k in defaults}})
+        body = json.loads(request.content) if request.content else {}
+        wire.append({"query": dict(request.url.params), "type": request.headers.get("content-type", ""),
+                     "csrf": request.headers.get("x-connector"), "body": body})
+        if keeps["on"]:
+            for k, v in body.items():
+                if v == "":
+                    saved.pop(k, None)
+                else:   # stored in its rule's form, as the connector does: 0.50 is kept as 0.5
+                    saved[k] = str(float(v)) if k == "RECONCILE_TOLERANCE" else v
+        return _httpx.Response(200, json={"ok": True})
+    real_httpx = copilot.httpx
+    copilot.httpx = _RoutedHttpx(connector)
+    old_url = os.environ.get("CONNECTOR_URL")
+    os.environ["CONNECTOR_URL"] = "http://conn.railway.internal:8899"
+    save = lambda fields: post("/api/connector", {"op": "settings_save", "fields": fields})
+    try:
+        r = save({"RECONCILE_TOLERANCE": "0.50", "SHOPIFY_SHOP": "someone-elses.myshopify.com"})
+        eq(r.status_code, 200, r.text)
+        eq(len(wire), 1, "one save, one request")
+        eq(wire[0]["query"], {}, "nothing in the query string, which the connector does not read")
+        ok("application/json" in wire[0]["type"], "the fields go as a JSON body: " + wire[0]["type"])
+        eq(wire[0]["csrf"], "1", "with the connector's CSRF header")
+        eq(wire[0]["body"], {"RECONCILE_TOLERANCE": "0.50"},
+           "exactly the field the page changed: no other field filled in, and none off the list")
+        eq(saved.get("RECONCILE_TOLERANCE"), "0.5", "and the connector kept it")
+        eq(r.json().get("unapplied"), [], "kept in its own form (0.5 for 0.50) is still kept")
+        eq(saved.get("RECONCILE_MODE"), "strict", "a choice the page did not touch is left alone")
+
+        r = save({"RECONCILE_MODE": ""})
+        eq(wire[-1]["body"], {"RECONCILE_MODE": ""}, "a blank goes too: it clears a saved choice")
+        ok("RECONCILE_MODE" not in saved and r.json().get("unapplied") == [], r.text)
+
+        keeps["on"] = False   # a connector that answers ok and keeps nothing, as before this fix
+        r = save({"ORDERS_SINCE": "2026-09-01", "RECONCILE_TOLERANCE": "0.5"})
+        eq(r.json().get("unapplied"), ["ORDERS_SINCE"],
+           "a value the connector does not show back is named, so the page does not say Saved")
+        saved["RECONCILE_MODE"] = "strict"
+        r = save({"RECONCILE_MODE": ""})
+        eq(r.json().get("unapplied"), ["RECONCILE_MODE"], "and a clear that left the choice in place is named too")
+    finally:
+        copilot.httpx = real_httpx
         if old_url is None:
             os.environ.pop("CONNECTOR_URL", None)
         else:
@@ -20329,7 +20578,9 @@ def t_the_name_an_attachment_is_SENT_under_gets_the_same_gate_as_the_upload():
     ok("_DANGEROUS_EXT" in src,
        "the outgoing name is checked, not only the uploaded one")
     ok("_file_ext(nm)" in src, "by its extension")
-    ok("_files_head(key)" in src, "and the object is measured before it is read")
+    ok("asyncio.to_thread(_files_head, key)" in src
+       and src.index("_files_head") < src.index('"get_object"'),
+       "and the object is measured before it is read (off the event loop since 2026-10-12)")
 
 
 @test
@@ -25085,6 +25336,88 @@ def t_a_redact_a_store_refused_is_said_and_retried():
     with_mail(go)
 
 
+@test
+def t_a_redact_that_stops_part_way_through_the_crm_leaves_nothing_half_made_in_memory():
+    """An erasure changes the CRM in memory (the tombstone, the sweep, the
+    leads) and writes it last. A step that raised before the write left the
+    half-made erasure in the cached store: it was served as saved, and the
+    next unrelated CRM save wrote it to disk."""
+    def go():
+        ensure_auth(); crm_wipe()
+        addr = "kim@x.com"
+        d = copilot._load_crm()
+        d["persons"]["p1"] = {"id": "p1", "name": "Kim Lee", "emails": [addr]}
+        d["leads"]["l1"] = {"id": "l1", "title": "Kim Lee lead", "person_id": "p1"}
+        copilot._write_crm(d)
+        def stops(*a, **k):
+            raise RuntimeError("the erasure stopped part way")
+        saved = copilot._erase_remember          # the last step before the write
+        copilot._erase_remember = stops
+        try:
+            out = copilot._redact_customer(addr, "9")
+        finally:
+            copilot._erase_remember = saved
+        eq(out["failed"], ["the CRM"], "the CRM is said to have failed")
+        d = copilot._load_crm()
+        ok("p1" in d["persons"] and "l1" in d["leads"],
+           "the CRM read next is the one on disk: " + str(sorted(d["persons"])) + str(sorted(d["leads"])))
+        eq(post("/api/crm/contact", {"op": "org_add", "name": "Typed by hand"}).status_code, 200)
+        on_disk = json.load(open(copilot.CRM_PATH))["crm"]
+        ok("p1" in on_disk["persons"] and "l1" in on_disk["leads"],
+           "and the next save does not write half an erasure")
+        eq(copilot._redact_customer(addr, "9", retry=True)["failed"], [], "the hourly retry finishes it")
+        d = copilot._load_crm()
+        ok("p1" not in d["persons"] and "l1" not in d["leads"], "and she is gone")
+    with_mail(go)
+
+
+@test
+def t_a_redact_that_stops_part_way_through_the_mailbox_leaves_nothing_half_made_in_memory():
+    """The same for the mailbox: their threads came off the board in memory,
+    and a scrub that raised before the write left the board showing an
+    erasure that was never saved, until the mail loop's next save wrote it."""
+    def go():
+        ensure_auth(); crm_wipe()
+        addr = "kim@x.com"
+        _seed_thread("k1", frm=("Kim Lee", addr))
+        _seed_thread("b1", frm=("Bob", "bob@venue.com"))
+        copilot._write_mail(copilot._load_mail())
+        def stops(*a, **k):
+            raise RuntimeError("the scrub stopped part way")
+        saved = copilot._mail_erased_rx          # runs after their threads are taken off
+        copilot._mail_erased_rx = stops
+        try:
+            out = copilot._redact_customer(addr, "9")
+        finally:
+            copilot._mail_erased_rx = saved
+        eq(out["failed"], ["the mailbox"], "the mailbox is said to have failed")
+        ok("k1" in copilot._load_mail()["threads"], "the board read next is the one on disk")
+        eq(copilot._redact_customer(addr, "9", retry=True)["failed"], [], "the hourly retry finishes it")
+        ok("k1" not in copilot._load_mail()["threads"], "and her thread is gone")
+    with_mail(go)
+
+
+@test
+def t_a_redact_that_stops_part_way_through_the_bookings_leaves_nothing_half_made_in_memory():
+    """And the bookings kept by law: each is stamped in memory with when the
+    request came in, and written last. A record the stamping could not read
+    stopped it part way, and the bookings already stamped stayed stamped in
+    the cached store, for the next booking saved to write."""
+    def go():
+        ensure_auth(); crm_wipe(); reset_dispatch()
+        addr = "kim@x.com"
+        with open(copilot.DISPATCH_STATE_PATH, "w", encoding="utf-8") as fh:
+            json.dump({"orders": {"4242": {"email": addr, "tracking_number": "T-42"},
+                                  "4243": "not a booking"}}, fh)
+        try:
+            copilot._redact_customer(addr, "9")
+            ok(not copilot._load_dispatch()["4242"].get("redacted_request_at"),
+               "the bookings read next are the ones on disk")
+        finally:
+            reset_dispatch()
+    with_mail(go)
+
+
 def _open_order(i, tags=""):
     return {"id": i, "name": "#%d" % i, "order_number": i, "created_at": "2026-09-%02dT10:00:00Z" % (1 + i % 20),
             "tags": tags, "cancelled_at": None, "fulfillment_status": None, "financial_status": "paid",
@@ -26715,6 +27048,1838 @@ def t_a_door_service_that_lists_nearby_shops_is_still_a_door_service():
     finally:
         worldoptions._soap_call = saved
 
+
+# =========================== speed: live timing, compression, the loop ==========
+# The first speed pull request after the 2026-10-12 audit. Each test fails on
+# the code before it.
+
+def _server_timing(r) -> dict:
+    """Server-Timing as {name: milliseconds}."""
+    out = {}
+    for part in (r.headers.get("server-timing") or "").split(","):
+        name, _, dur = part.strip().partition(";dur=")
+        if name and dur:
+            out[name] = float(dur)
+    return out
+
+
+@test
+def t_every_api_answer_says_where_its_time_went():
+    """Speed design 4.1. Production's console cannot be read from here, so
+    every Shopify and Gmail wait in the 2026-10-12 audit was a model. Every
+    API answer now carries its own Server-Timing (the browser's DevTools shows
+    it on the Reactor frame), and an admin's Settings shows each route's
+    typical and slowest time since the last start."""
+    import perf
+
+    def go():
+        perf.ROUTES.clear()
+        r = post("/api/crm/contact", {"op": "person_add", "name": "Timing Probe",
+                                      "emails": ["probe@example.com"]})
+        eq(r.status_code, 200, r.text[:200])
+        marks = _server_timing(r)
+        ok(marks.get("app", 0) > 0, "the whole request is timed: %r" % r.headers.get("server-timing"))
+        ok(marks.get("auth", 0) > 0, "and the door: %r" % marks)
+        ok(marks.get("store", 0) > 0, "and the save to the store: %r" % marks)
+        for i in range(3):
+            post("/api/no-such-route-%d" % i, {})
+        ok(not [k for k in perf.ROUTES if "no-such-route" in k],
+           "a path nobody serves is not remembered, so probing cannot grow the table")
+        s = post("/api/status", {})
+        eq(s.status_code, 200, s.text[:200])
+        rows = {x["route"]: x for x in s.json().get("timing") or []}
+        ok("/api/crm/contact" in rows, "an admin's Settings can show it: %s" % sorted(rows)[:6])
+        row = rows["/api/crm/contact"]
+        ok(row["count"] >= 1 and row["p95"] >= row["p50"] > 0, "typical and slowest: %r" % row)
+    with_accounts(go)
+
+
+@test
+def t_time_waiting_on_shopify_is_its_own_mark():
+    """The audit's biggest desk wait (X1) is Shopify order sweeps, and how
+    long a page waits on Shopify is exactly the number nobody had. Every
+    Shopify call goes through server._request, so that is where it is timed."""
+    import perf
+
+    class _Resp:
+        status_code = 200
+        headers = {}
+
+        def json(self):
+            return {"shop": {"name": "Test"}}
+
+        def raise_for_status(self):
+            pass
+
+    class _Client:
+        async def request(self, method, url, **kw):
+            await asyncio.sleep(0.02)
+            return _Resp()
+
+    async def _hdr():
+        return {}
+
+    saved = (server._http, server._headers, server.SHOPIFY_STORE)
+    server.SHOPIFY_STORE = server.SHOPIFY_STORE or "test-store"
+    server._http, server._headers = (lambda: _Client()), _hdr
+    try:
+        async def go():
+            marks, token = perf.start()
+            try:
+                await server._request("GET", "shop.json")
+            finally:
+                perf.stop(token)
+            return marks
+        marks = run_async(go())
+        ok(marks.get("shop", 0) >= 15, "the 20 ms Shopify wait is marked: %r" % marks)
+    finally:
+        server._http, server._headers, server.SHOPIFY_STORE = saved
+
+
+@test
+def t_big_answers_go_out_as_zstd_compressed_off_the_loop():
+    """The audit's S2. gzip at level 6 ran on the event loop for every big
+    answer: half of a CRM click, during which nobody else's request moved.
+    Python's own zstd at level 3 does the same job six to twelve times
+    cheaper and Chrome, which runs the Shopify admin, asks for it; anything
+    that does not still gets gzip. A body over 64 KB is compressed in a
+    worker thread, so the loop keeps serving everyone else meanwhile."""
+    import threading
+    import perf
+    from compression import zstd as _z
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse as _JR
+    from starlette.routing import Route
+
+    big = {"rows": [{"id": i, "name": "Northern Stage Ltd", "note": "gobo %d" % i} for i in range(3000)]}
+    mid = {"rows": [{"id": i, "name": "Northern Stage Ltd"} for i in range(100)]}
+    seen = {}
+
+    async def _big(request):
+        seen["loop"] = threading.get_ident()
+        return _JR(big)
+
+    async def _mid(request):
+        seen["loop"] = threading.get_ident()
+        return _JR(mid)
+
+    app = Starlette(routes=[Route("/big", _big), Route("/mid", _mid)])
+    app.add_middleware(server.CompressionMiddleware)
+    c = TestClient(app)
+    calls = []
+    real = perf.compress
+
+    def spy(body, enc, *a, **k):
+        calls.append((enc, threading.get_ident()))
+        return real(body, enc, *a, **k)
+
+    def decoded(r):
+        raw = r.content
+        return json.loads(raw if raw[:1] == b"{" else _z.decompress(raw))
+
+    perf.compress = spy
+    try:
+        r = c.get("/big", headers={"Accept-Encoding": "gzip, deflate, br, zstd"})
+        eq(r.headers.get("content-encoding"), "zstd", "a browser that reads zstd is sent zstd")
+        eq(decoded(r), big, "and it is the same data on the other side")
+        ok(calls and calls[-1][1] != seen["loop"], "a big body is compressed off the loop thread")
+        ok("accept-encoding" in (r.headers.get("vary") or "").lower(), "and says what it varies on")
+        calls.clear()
+        r = c.get("/mid", headers={"Accept-Encoding": "zstd"})
+        eq(r.headers.get("content-encoding"), "zstd")
+        ok(calls and calls[-1][1] == seen["loop"], "a small one is cheaper to do in place")
+        r = c.get("/big", headers={"Accept-Encoding": "gzip, deflate"})
+        eq(r.headers.get("content-encoding"), "gzip", "a browser without zstd still gets gzip")
+        eq(r.json(), big)
+        r = c.get("/big", headers={"Accept-Encoding": "zstd;q=0, gzip"})
+        eq(r.headers.get("content-encoding"), "gzip", "zstd refused by q=0 is not sent")
+        r = c.get("/big", headers={"Accept-Encoding": "identity"})
+        eq(r.headers.get("content-encoding"), None, "and nothing is forced on a client that asks for none")
+    finally:
+        perf.compress = real
+
+
+@test
+def t_the_page_assets_are_compressed_once_per_build():
+    """The audit's D3. app.js and app.css were gzipped again on every
+    uncached request, about 50 ms of the event loop per first open, bunched
+    after each update when everyone reloads. Each build's assets are now
+    packed once, at the strongest levels, away from any request, and served
+    as they are."""
+    import gzip as _gz
+    import perf
+    from compression import zstd as _z
+
+    shell, assets = copilot._page_parts()
+    h = copilot._asset_hashes["js"]
+    blob = assets["js"][1]
+    kicked, calls = [], []
+    real_soon, real = copilot._pack_assets_soon, perf.compress
+
+    def spy(body, enc, *a, **k):
+        calls.append(enc)
+        return real(body, enc, *a, **k)
+
+    copilot._asset_packed.clear()
+    copilot._pack_assets_soon = lambda: kicked.append(1)
+    perf.compress = spy
+    try:
+        r1 = client.get("/assets/app.js?v=" + h, headers={"Accept-Encoding": "gzip, zstd"})
+        eq(r1.status_code, 200)
+        ok(kicked, "the first request starts the packing")
+        eq(r1.headers.get("content-encoding"), "zstd", "and is still served compressed meanwhile")
+        copilot._pack_assets()          # what the background thread runs
+        calls.clear()
+        r2 = client.get("/assets/app.js?v=" + h, headers={"Accept-Encoding": "gzip, zstd"})
+        eq(r2.headers.get("content-encoding"), "zstd")
+        eq(calls, [], "served from the pack: nothing is compressed per request")
+        # The test client may already have decoded it; the wire size is the
+        # Content-Length either way.
+        eq(r2.content if r2.content == blob else _z.decompress(r2.content), blob, "the same bytes")
+        wire1, wire2 = int(r1.headers["content-length"]), int(r2.headers["content-length"])
+        ok(wire2 < wire1, "and smaller than the quick per-request level: %d against %d" % (wire2, wire1))
+        ok("max-age=31536000" in (r2.headers.get("cache-control") or ""), "still cached for a year")
+        r3 = client.get("/assets/app.js?v=" + h, headers={"Accept-Encoding": "gzip"})
+        eq(r3.headers.get("content-encoding"), "gzip")
+        eq(calls, [], "the gzip copy is packed too")
+        eq(r3.content, blob, "and arrives as the same bytes")
+        r4 = client.get("/assets/app.js?v=" + h, headers={"Accept-Encoding": "identity"})
+        eq(r4.headers.get("content-encoding"), None)
+        eq(r4.content, blob, "a client that asks for none gets the plain file")
+        eq(client.get("/assets/app.js?v=000000000000",
+                      headers={"Accept-Encoding": "zstd"}).status_code, 404,
+           "the hash still has to match")
+    finally:
+        copilot._pack_assets_soon, perf.compress = real_soon, real
+
+
+@test
+def t_an_attachment_is_measured_off_the_event_loop():
+    """The audit's S8. Drafting or sending with an attachment asked storage
+    for its size with a blocking call on the event loop, so every other
+    request in the app waited for the round trip, and for up to about 45 s
+    when storage was slow."""
+    import threading
+    seen = {}
+
+    class _Body:
+        def read(self):
+            seen["read"] = threading.get_ident()
+            return b"%PDF-1.4 a quote"
+
+    class _S3:
+        def get_object(self, Bucket, Key):
+            seen["get"] = threading.get_ident()
+            return {"Body": _Body()}
+
+    def head(key):
+        seen["head"] = threading.get_ident()
+        return 16
+
+    def s3():
+        seen.setdefault("client", threading.get_ident())
+        return _S3()
+
+    saved = (copilot._files_head, copilot._files_s3, copilot._mail_attachment_ok)
+    copilot._files_head, copilot._files_s3 = head, s3
+    copilot._mail_attachment_ok = lambda key, uid: True
+    try:
+        async def go():
+            seen["loop"] = threading.get_ident()
+            return await copilot._mail_fetch_parts([{"key": "files/u1/quote.pdf", "name": "quote.pdf",
+                                                     "type": "application/pdf"}], "u1")
+        files, _inline, _total = run_async(go())
+        eq(files[0]["data"], b"%PDF-1.4 a quote")
+        for k in ("head", "client", "get", "read"):
+            ok(seen[k] != seen["loop"], "the %s call ran off the event loop" % k)
+    finally:
+        copilot._files_head, copilot._files_s3, copilot._mail_attachment_ok = saved
+
+
+def _capture_spawn():
+    """Swap _spawn_bg for a recorder. Returns (coroutines, restore)."""
+    got, saved = [], copilot._spawn_bg
+
+    def spawn(coro):
+        got.append(coro)
+        return True
+    copilot._spawn_bg = spawn
+
+    def restore():
+        copilot._spawn_bg = saved
+        for c in got:
+            c.close()
+    return got, restore
+
+
+@test
+def t_the_inbox_answers_from_memory_and_syncs_behind():
+    """The audit's X10. A board read synced Gmail inline whenever the
+    picture was over two minutes old: after every deploy, and on every open
+    and 60 s poll while Gmail was failing, each waiting up to 25 s per call
+    before the board it already held was shown. It now answers from what it
+    holds and starts one sync behind, at most once a minute. Refresh still
+    syncs while the person waits."""
+    def go():
+        ensure_auth()
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        copilot._load_mail()["synced_at"] = "2026-01-01T00:00:00+00:00"
+        inline = []
+
+        async def fake_sync(force=False):
+            inline.append(force)
+            return ""
+        saved_sync = copilot._mail_sync_now
+        copilot._mail_sync_now = fake_sync
+        copilot._mail_bg_sync["t"] = 0.0
+        copilot._mail_last_force["t"] = 0.0
+        got, restore = _capture_spawn()
+        try:
+            r = post("/api/mail/board", {})
+            eq(r.status_code, 200, r.text[:200])
+            eq(inline, [], "the answer did not wait for Gmail")
+            eq([c.cr_code.co_name for c in got], ["fake_sync"], "one sync was started behind it")
+            ok(any(t["id"] == "t1" for t in r.json()["threads"]), "and the board it holds was shown")
+            post("/api/mail/board", {})
+            eq(len(got), 1, "a second read within the minute starts no second sync")
+            r = post("/api/mail/board", {"force": True})
+            eq(r.status_code, 200)
+            eq(inline, [True], "Refresh still syncs while the person waits")
+        finally:
+            restore()
+            copilot._mail_sync_now = saved_sync
+    with_mail(go)
+
+
+@test
+def t_opening_and_claiming_email_do_not_wait_for_gmail():
+    """The audit's X10 and S4. Opening an unread email waited for Gmail to
+    mark it read and a whole-mailbox save before the window could open, and
+    every claim, assign and state change waited for Gmail to relabel the
+    thread over a fresh connection. Both now happen after the answer: the
+    ownership is still on disk first, Gmail second, and the relabel waits
+    for any sync that is running so two passes never interleave on one
+    thread."""
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        copilot._load_mail()["threads"]["t1"]["unread"] = True
+        calls = []
+
+        async def modify(tid, add=None, remove=None):
+            calls.append(("modify", tid, tuple(add or ()), tuple(remove or ())))
+
+        async def ensure(name, known):
+            calls.append(("ensure", name))
+            known[name] = "L-" + name
+            return known[name]
+        saved = (_gm.modify_thread, _gm.ensure_label, copilot._mail_lock)
+        _gm.modify_thread, _gm.ensure_label = modify, ensure
+        got, restore = _capture_spawn()
+        try:
+            r = post_s(sess, "/api/mail/thread", {"id": "t1"})
+            eq(r.status_code, 200, r.text[:200])
+            eq(calls, [], "the email opened without waiting for Gmail")
+            eq(len(got), 1, "marking it read was started behind")
+            run_async(got.pop())
+            eq(calls, [("modify", "t1", (), ("UNREAD",))], "Gmail is told it was read")
+            ok(not copilot._load_mail()["threads"]["t1"]["unread"], "and the board follows")
+            with open(copilot.MAILBOX_PATH, encoding="utf-8") as fh:
+                ok(not json.load(fh)["mailbox"]["threads"]["t1"]["unread"], "on disk too")
+            calls.clear()
+            r = post_s(sess, "/api/mail/claim", {"id": "t1"})
+            eq(r.status_code, 200, r.text[:200])
+            eq(calls, [], "the claim answered before Gmail was asked")
+            with open(copilot.MAILBOX_PATH, encoding="utf-8") as fh:
+                ok(json.load(fh)["mailbox"]["threads"]["t1"].get("owner"), "and was on disk first")
+            eq(len(got), 1, "the relabel was started behind")
+            copilot._mail_lock = asyncio.Lock()     # a fresh lock for this test's own loop
+
+            async def held():
+                await copilot._mail_lock.acquire()
+                job = asyncio.ensure_future(got.pop())
+                await asyncio.sleep(0.05)
+                waited = not calls
+                copilot._mail_lock.release()
+                await job
+                return waited
+            ok(run_async(held()), "the relabel waits for a sync that is running")
+            ok(("ensure", "Copilot/Ann") in calls, "and then labels the thread: %r" % calls)
+            t = copilot._load_mail()["threads"]["t1"]
+            eq(t.get("gmail_label"), "Copilot/Ann")
+            with open(copilot.MAILBOX_PATH, encoding="utf-8") as fh:
+                eq(json.load(fh)["mailbox"]["threads"]["t1"].get("gmail_label"), "Copilot/Ann",
+                   "and the label reached the disk")
+        finally:
+            restore()
+            _gm.modify_thread, _gm.ensure_label, copilot._mail_lock = saved
+    with_mail(go)
+
+
+# ---- review of #15 --------------------------------------------------------
+
+@test
+def t_only_a_signed_in_request_sees_or_counts_its_timing():
+    """Review of #15 (SERVER1, COMPAT1, COMPAT3). The header went on every
+    /api/ answer. A wrong-password sign-in for a real name saves a failure
+    count (a store mark) and one for a made-up name saves nothing, so the two
+    vague 401s differed: a clean yes or no on whether a username exists,
+    undoing the sign-in's levelling. And refused requests were counted, so
+    anyone could wash a route's real times out of Settings. Only a request
+    that passed the door with a live session now gets the header or counts."""
+    import perf
+
+    def go():
+        ensure_auth()
+        ready_user("Ruth", "ruth")
+        perf.ROUTES.clear()
+        h = {"Authorization": "Bearer " + tok()}
+        for p in (copilot._rl_hits, copilot._rl_global, copilot._login_hits):
+            p.clear()
+        real = client.post("/api/auth/login", json={"username": "ruth", "password": "wrong-password-1"}, headers=h)
+        fake = client.post("/api/auth/login", json={"username": "nobody-here", "password": "wrong-password-1"},
+                           headers=h)
+        eq((real.status_code, fake.status_code), (401, 401))
+        eq(real.headers.get("server-timing"), None, "a sign-in answer carries no breakdown")
+        eq(fake.headers.get("server-timing"), None)
+        names = lambda r: sorted(k for k in r.headers.keys() if k not in ("content-length", "date"))
+        eq(names(real), names(fake), "and the two answers carry the same headers")
+        for _ in range(5):
+            copilot._rl_hits.clear(); copilot._rl_global.clear()
+            r = client.post("/api/crm/board", json={}, headers=h)     # no session
+            eq(r.status_code, 401)
+            eq(r.headers.get("server-timing"), None, "a refused request learns nothing from the timing")
+        ok("/api/crm/board" not in perf.ROUTES, "and is not counted")
+        r = post("/api/crm/board", {})
+        ok(_server_timing(r).get("app", 0) > 0, "a signed-in request still gets it")
+        ok("/api/crm/board" in perf.ROUTES, "and is counted")
+        _uid, msess, _ = ready_user("Mo", "mo")
+        eq(post_s(msess, "/api/status", {}).status_code, 403)
+        ok("/api/status" not in perf.ROUTES, "a refusal, even signed in, is not a time worth counting")
+    with_accounts(go)
+
+
+@test
+def t_a_claude_call_is_timed_and_kept_out_of_the_table():
+    """Review of #15 (PAGE3, COMPAT4). Answers that call Claude take seconds
+    by design; counted, they filled the Response times row and pinned it at
+    Slow for the life of the process, pushing out the desk pages it exists to
+    name. Every model call goes through _xcreate, which now marks its time as
+    "ai" and keeps its request out of the table."""
+    import perf, types
+    saved = copilot._xcreate_once
+
+    async def fake_once(client, kwargs):
+        await asyncio.sleep(0.01)
+        return types.SimpleNamespace(stop_reason="end_turn", content=[])
+    copilot._xcreate_once = fake_once
+    try:
+        async def go():
+            marks, token = perf.start()
+            try:
+                await copilot._xcreate(None, model="claude-test", messages=[], max_tokens=10)
+            finally:
+                perf.stop(token)
+            return marks
+        marks = run_async(go())
+        ok(marks.get("ai", 0) >= 5, "the model's time is its own mark: %r" % marks)
+        ok(marks.get("_skip"), "and the request is kept out of the slowest-routes table")
+        eq(perf.header(marks).count("_"), 0, "the flags never reach the header")
+    finally:
+        copilot._xcreate_once = saved
+
+
+@test
+def t_the_slowest_twentieth_is_the_slowest_twentieth():
+    """Review of #15 (SERVER2). With 20 samples p95 picked the maximum, so
+    Settings said '1 in 20 over X ms' when nothing was over X."""
+    import perf
+    saved = dict(perf.ROUTES)
+    perf.ROUTES.clear()
+    try:
+        for i in range(1, 21):
+            perf.record("/api/x", float(i))
+        for i in range(1, 101):
+            perf.record("/api/y", float(i))
+        rows = {r["route"]: r for r in perf.summary()}
+        eq(rows["/api/x"]["p95"], 19.0, "one of twenty is over it")
+        eq(rows["/api/y"]["p95"], 95.0, "five of a hundred are over it")
+        eq(rows["/api/y"]["p50"], 50.0)
+    finally:
+        perf.ROUTES.clear()
+        perf.ROUTES.update(saved)
+
+
+@test
+def t_a_relabel_steps_aside_for_a_running_sync():
+    """Review of #15 (SERVER3). Each click's relabel queued on _mail_lock, so a
+    burst of claims during a slow Gmail held the mail loop and anyone's
+    Refresh behind every one of them. A relabel now waits briefly for the
+    lock and otherwise leaves the thread to the sync's own label catch-up,
+    which already runs under the lock and compares the label it wants with
+    the one it has."""
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        calls = []
+
+        async def modify(tid, add=None, remove=None):
+            calls.append(tid)
+
+        async def ensure(name, known):
+            known[name] = "L-" + name
+            return known[name]
+        saved = (_gm.modify_thread, _gm.ensure_label, copilot._mail_lock, copilot.MAIL_LABEL_LOCK_WAIT)
+        _gm.modify_thread, _gm.ensure_label = modify, ensure
+        copilot.MAIL_LABEL_LOCK_WAIT = 0.05
+        got, restore = _capture_spawn()
+        try:
+            eq(post_s(sess, "/api/mail/claim", {"id": "t1"}).status_code, 200)
+            copilot._mail_lock = asyncio.Lock()
+
+            async def busy_sync():
+                await copilot._mail_lock.acquire()
+                try:
+                    await got.pop()          # the relabel, while a sync holds the lock
+                finally:
+                    copilot._mail_lock.release()
+            t = copilot._load_mail()["threads"]["t1"]
+            t["label_retry_at"] = time.time() + 400     # an earlier failure's back-off
+            t["label_tried_at"] = time.time()
+            run_async(busy_sync())
+            eq(calls, [], "it did not wait out the sync")
+            ok(copilot._mail_want_label(t) != (t.get("gmail_label") or ""),
+               "so the sync's catch-up sees the label is owed: %r" % t.get("gmail_label"))
+            ok("label_retry_at" not in t and t.get("label_tried_at") == 0,
+               "and takes it first, back-off or not: %r" % {k: t.get(k) for k in ("label_retry_at", "label_tried_at")})
+        finally:
+            restore()
+            _gm.modify_thread, _gm.ensure_label, copilot._mail_lock, copilot.MAIL_LABEL_LOCK_WAIT = saved
+    with_mail(go)
+
+
+@test
+def t_an_opened_email_reads_as_read_at_once_unless_gmail_refuses():
+    """Review of #15 (PAGE4). The board followed only once Gmail confirmed the
+    read, so a poll landing between the window opening and Gmail answering
+    showed the email unread again after the person had read it. It now reads
+    as read at once, and goes back to unread if Gmail refuses."""
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        copilot._load_mail()["threads"]["t1"]["unread"] = True
+
+        async def refuse(tid, add=None, remove=None):
+            raise _gm.GmailError("backend error")
+        saved = _gm.modify_thread
+        _gm.modify_thread = refuse
+        got, restore = _capture_spawn()
+        try:
+            eq(post_s(sess, "/api/mail/thread", {"id": "t1"}).status_code, 200)
+            rows = {t["id"]: t for t in post_s(sess, "/api/mail/board", {}).json()["threads"]}
+            eq(rows["t1"]["unread"], False, "read as soon as it is opened")
+            run_async(got.pop(0))
+            eq(copilot._load_mail()["threads"]["t1"]["unread"], True, "and unread again when Gmail refuses")
+        finally:
+            restore()
+            _gm.modify_thread = saved
+    with_mail(go)
+
+
+@test
+def t_a_read_on_open_never_outlives_what_gmail_says():
+    """The re-check of #15's fixes (PAGE4). Three edges of reading on open:
+    a mark-read Gmail never answered left the board saying read; the put-back
+    after a refusal was never saved, so a store written in between kept the
+    read on disk; and Mark unread pressed while the mark-read was still at
+    Gmail was undone by it, though that is how somebody undoes an accidental
+    open."""
+    def go():
+        ensure_auth()
+        _uid, sess, _ = ready_user("Ann", "ann")
+        _gm.save_connection("rt-test", MBOX)
+        _seed_thread("t1")
+        copilot._load_mail()["threads"]["t1"]["unread"] = True
+        calls = []
+
+        async def modify(tid, add=None, remove=None):
+            calls.append((tuple(add or ()), tuple(remove or ())))
+        saved = (_gm.modify_thread, copilot._mail_set_unread)
+        got, restore = _capture_spawn()
+        try:
+            # Gmail never answers: put back, and saved even though another
+            # writer saved the optimistic read in between.
+            async def silent(store, ids, unread):
+                return {"changed": 0, "failed": 0}
+            copilot._mail_set_unread = silent
+            eq(post_s(sess, "/api/mail/thread", {"id": "t1"}).status_code, 200)
+            copilot._write_mail(copilot._load_mail())          # another writer, mid-flight
+            run_async(got.pop(0))
+            eq(copilot._load_mail()["threads"]["t1"]["unread"], True, "unanswered is not confirmed")
+            with open(copilot.MAILBOX_PATH, encoding="utf-8") as fh:
+                eq(json.load(fh)["mailbox"]["threads"]["t1"]["unread"], True, "and the disk says so too")
+            # Mark unread pressed while the mark-read is still to run: it wins.
+            copilot._mail_set_unread = saved[1]
+            _gm.modify_thread = modify
+            eq(post_s(sess, "/api/mail/thread", {"id": "t1"}).status_code, 200)
+            eq(post_s(sess, "/api/mail/read", {"id": "t1", "unread": True}).status_code, 200)
+            calls.clear()
+            run_async(got.pop(0))
+            eq(calls, [], "the late mark-read stands down")
+            eq(copilot._load_mail()["threads"]["t1"]["unread"], True, "and the email stays unread, as asked")
+        finally:
+            restore()
+            _gm.modify_thread, copilot._mail_set_unread = saved
+    with_mail(go)
+
+
+def _written_off(e):
+    """The sweep wrote this finding off as gone."""
+    return any("No longer detected" in h.get("note", "") for h in e.get("history") or [])
+
+
+def _left_as_it_was(stores, xid, before, why):
+    """An open finding a sweep did not see go: still open, nothing written."""
+    e = stores["store"]["exceptions"][xid]
+    ok(not e.get("stale") and not _written_off(e), why + ": %s" % e["history"][-1:])
+    eq(e["status"], before["status"], why)
+    eq(e["history"], before["history"], why + ": and nothing written on its history")
+
+
+@test
+def t_an_open_payout_finding_is_not_settled_by_ageing_past_the_window():
+    """Every read answered, and still an open payout finding was marked "No
+    longer detected" once its payout aged past the window the check matches
+    in. The check leaves out a payout older than the bank lines it holds, and
+    the merge read that as the discrepancy going away. It keeps watching the
+    payout an open finding rests on instead, so the finding closes only when a
+    sweep sees the deposit."""
+    import copy as _copy
+    payout = {"id": 7101, "date": _rc._cutoff_day(10), "amount": "312.40",
+              "currency": "GBP", "status": "paid"}
+    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
+    answers = {"shopify_list_payouts": {"payouts": [payout]},
+               "shopify_payout_transactions": {"transactions": []},
+               "shopify_list_disputes": {"disputes": []}}
+    stores = _payments_world(fx, answers)
+    try:
+        run_async(_rc.sweep())
+        exs = stores["store"]["exceptions"]
+        found = [x for x, e in exs.items() if e["kind"] == "payout_missing_from_bank"]
+        eq(len(found), 1, "a paid payout with no deposit is found")
+        xid = found[0]
+        exs[xid]["status"] = "investigating"
+        before = _copy.deepcopy(exs[xid])
+        # Months on, the deposit never found, and Shopify still lists the payout.
+        aged = _rc._cutoff_day(_rc.FETCH_DAYS + 5)
+        payout["date"] = aged
+        for n in (1, 2):
+            r = run_async(_rc.sweep())
+            ok(not _did_not_run(r["notes"], "payout"), "every read answered: %s" % r["notes"])
+            _left_as_it_was(stores, xid, before, "sweep %d: a payout past the window is not a "
+                                                  "deposit found" % n)
+            ok("7101" in stores["cache"]["shopify"]["payouts"], "the payout it rests on is still held")
+        # Still watched: the deposit turns up, and the sweep that sees it settles it.
+        fx.bank.append(_raw_btxn("BT-7101", "RECEIVE", "312.40", aged))
+        run_async(_rc.sweep())
+        e = stores["store"]["exceptions"][xid]
+        ok(e["stale"] and _written_off(e), "a sweep that sees the deposit settles it")
+    finally:
+        _unconfigure_recon()
+
+
+@test
+def t_an_open_chargeback_finding_is_not_settled_by_ageing_past_the_window():
+    """The chargeback check leaves out disputes older than the books it holds,
+    by the same rule as payouts, with the same result for an open finding."""
+    import copy as _copy
+    dispute = {"id": 8101, "order_id": 104275, "type": "chargeback", "amount": "95.00",
+               "currency": "GBP", "reason": "fraudulent", "status": "lost",
+               "initiated_at": _rc._cutoff_day(10)}
+    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
+    answers = {"shopify_list_payouts": {"payouts": []},
+               "shopify_list_disputes": {"disputes": [dispute]}}
+    stores = _payments_world(fx, answers)
+    try:
+        run_async(_rc.sweep())
+        exs = stores["store"]["exceptions"]
+        found = [x for x, e in exs.items() if e["kind"] == "chargeback_missing_from_xero"]
+        eq(len(found), 1, "a chargeback with no Xero record is found")
+        xid = found[0]
+        exs[xid]["status"] = "investigating"
+        before = _copy.deepcopy(exs[xid])
+        aged = _rc._cutoff_day(_rc.FETCH_DAYS + 5)
+        dispute["initiated_at"] = aged
+        for n in (1, 2):
+            r = run_async(_rc.sweep())
+            ok(not _did_not_run(r["notes"], "chargeback"), "every read answered: %s" % r["notes"])
+            _left_as_it_was(stores, xid, before, "sweep %d: a dispute past the window is not one "
+                                                  "recorded" % n)
+            ok("8101" in stores["cache"]["shopify"]["disputes"], "the dispute it rests on is still held")
+        fx.bank.append(_raw_btxn("BT-8101", "SPEND", "95.00", aged))
+        run_async(_rc.sweep())
+        e = stores["store"]["exceptions"][xid]
+        ok(e["stale"] and _written_off(e), "a sweep that sees it recorded settles it")
+    finally:
+        _unconfigure_recon()
+
+
+@test
+def t_an_open_xero_sale_finding_is_not_settled_by_ageing_past_the_window():
+    """The check for Xero sales with no Shopify order looks only at the last
+    WINDOW_DAYS of invoices, a shorter horizon than the cache keeps, so an
+    open finding went "no longer detected" two months before retention could
+    even have touched its invoice."""
+    import copy as _copy
+    stray = dict(_raw_xinv("INV-9001", "77.00", contact="Walk-in Trade"),
+                 DateString=_rc._cutoff_day(10) + "T00:00:00")
+    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00"), stray])
+    stores = _payments_world(fx, {})
+    try:
+        run_async(_rc.sweep())
+        exs = stores["store"]["exceptions"]
+        found = [x for x, e in exs.items() if e["kind"] == "xero_sale_without_shopify"]
+        eq(len(found), 1, "an invoice no order explains is found")
+        xid = found[0]
+        exs[xid]["status"] = "investigating"
+        before = _copy.deepcopy(exs[xid])
+        stray["DateString"] = _rc._cutoff_day(_rc.WINDOW_DAYS + 5) + "T00:00:00"
+        for n in (1, 2):
+            run_async(_rc.sweep())
+            _left_as_it_was(stores, xid, before, "sweep %d: an invoice past the window is not "
+                                                  "one explained" % n)
+            ok("XR-INV-9001" in stores["cache"]["xero"]["invoices"], "the invoice it rests on is still held")
+        stray["Status"] = "VOIDED"
+        run_async(_rc.sweep())
+        e = stores["store"]["exceptions"][xid]
+        ok(e["stale"] and _written_off(e), "a sweep that sees it voided settles it")
+    finally:
+        _unconfigure_recon()
+
+
+@test
+def t_an_open_xero_sale_past_the_window_does_not_tip_the_numbering_finding():
+    """An invoice watched past the window only for its own open finding is not
+    one of the recent invoices the numbering finding is a share of: eleven old
+    ones must not turn one recent, properly referenced invoice into "most
+    invoices reference no Shopify order"."""
+    orders = {"1": _ord(104275, "#104275", 84200, date=_rc._cutoff_day(10))}
+    xinv = {"XI-INV-104275": _inv("INV-104275", 84200, date=_rc._cutoff_day(10))}
+    old = _rc._cutoff_day(_rc.WINDOW_DAYS + 5)
+    for i in range(11):
+        v = _inv("INV-90%02d" % i, 7700 + i, contact="Walk-in Trade", date=old)
+        xinv[v["id"]] = v
+    cache = {"shopify": {"orders": orders}, "xero": {"invoices": xinv}}
+    eq(_rc.check_xero_orphan_sales(cache), [], "past the window and watched by nothing: not looked at")
+    watched = frozenset(v["id"] for v in xinv.values() if v["contact"] == "Walk-in Trade")
+    kinds = [e["kind"] for e in _rc.check_xero_orphan_sales(cache, open_refs=watched)]
+    eq(kinds, ["xero_sale_without_shopify"] * 11, "each watched invoice is its own finding still")
+
+
+@test
+def t_an_open_mailbox_finding_is_not_settled_by_its_document_ageing_out():
+    """Retention keeps the Xero and Shopify records an open finding rests on,
+    but not the mailbox document behind one: the document was dropped, and the
+    next sweep, finding nothing, wrote the finding off as no longer detected."""
+    import copy as _copy
+    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
+    stores = _recon_world(fx, [_raw_order(104275, "#104275", "842.00")])
+    stores["docs"]["m9:a9"] = {
+        "doc_type": "supplier_invoice", "invoice_numbers": ["SUP-4410"], "total_pence": 48000,
+        "amounts": [48000], "currency": "GBP", "invoice_lines": [], "counterparty": "Acme Glass",
+        "extracted_by": "text", "verified": True, "source_key": "m9:a9", "filename": "sup.pdf",
+        "from": "accounts@acmeglass.example", "date": _rc._cutoff_day(10)}
+    stores["docs"]["m8:a8"] = dict(stores["docs"]["m9:a9"], source_key="m8:a8",
+                                   invoice_numbers=["INV-104275"])
+    try:
+        run_async(_rc.sweep())
+        exs = stores["store"]["exceptions"]
+        found = [x for x, e in exs.items() if e["kind"] == "gmail_doc_missing_from_xero"]
+        eq(len(found), 1, "a bill in the mailbox and not in Xero is found")
+        xid = found[0]
+        exs[xid]["status"] = "investigating"
+        before = _copy.deepcopy(exs[xid])
+        for k in ("m9:a9", "m8:a8"):
+            stores["docs"][k]["date"] = _rc._cutoff_day(_rc.DOCS_KEEP_DAYS + 5)
+        for n in (1, 2, 3):
+            run_async(_rc.sweep())
+            _left_as_it_was(stores, xid, before, "sweep %d: a document past retention is not a "
+                                                  "bill entered" % n)
+            ok("m9:a9" in stores["docs"], "the document it rests on is still held")
+        ok("m8:a8" not in stores["docs"], "one no open finding rests on is dropped as before")
+        fx.invoices.append(_raw_xinv("SUP-4410", "480.00", typ="ACCPAY", contact="Acme Glass"))
+        run_async(_rc.sweep())
+        e = stores["store"]["exceptions"][xid]
+        ok(e["stale"] and _written_off(e), "a sweep that sees the bill in Xero settles it")
+    finally:
+        _unconfigure_recon()
+
+
+@test
+def t_an_open_sale_or_refund_finding_outlives_the_window():
+    """The sale and refund checks have no date horizon of their own, and
+    retention keeps the order an open finding rests on, so an order older than
+    the window Shopify is read for is still checked from the copy held."""
+    refunded = dict(_raw_order(104275, "#104275", "842.00"),
+                    refunds=[{"id": 5501, "created_at": _rc._cutoff_day(10),
+                              "transactions": [{"kind": "refund", "status": "success",
+                                                "amount": "20.00"}]}])
+    orders = [refunded, _raw_order(104276, "#104276", "120.00")]
+    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
+    stores = _recon_world(fx, orders)
+    try:
+        run_async(_rc.sweep())
+        exs = stores["store"]["exceptions"]
+        kinds = ("shopify_sale_missing", "shopify_refund_missing")
+        found = sorted(x for x, e in exs.items() if e["kind"] in kinds)
+        eq(len(found), 2, "the missing sale and the unrecorded refund are both found")
+        for xid in found:
+            exs[xid]["status"] = "investigating"
+        # Both orders pass the window: Shopify no longer lists them, the cache
+        # still holds them.
+        old = _rc._cutoff_day(_rc.FETCH_DAYS + 5)
+        for o in stores["cache"]["shopify"]["orders"].values():
+            o["created_at"] = old
+        orders.clear()
+        run_async(_rc.sweep())
+        for xid in found:
+            e = stores["store"]["exceptions"][xid]
+            ok(not e.get("stale") and not _written_off(e), e["kind"] + " stays open")
+        ok({"104275", "104276"} <= set(stores["cache"]["shopify"]["orders"]), "both orders are held")
+    finally:
+        _unconfigure_recon()
+
+
+# =========================== speed: the order snapshot survives a known change ==
+# The second speed pull request (the 2026-10-12 audit, X1). Every write this
+# app made, and Shopify's webhook echoing it, retired every cached sweep, so
+# one Production Manager action cost two full sweeps of the store. An order
+# the app knows has changed is now read again by itself; _bust_orders stays as
+# blunt as it was for everything else (Refresh, an unreadable event).
+
+class _FakeShop:
+    """Orders as Shopify keeps them, answering shopify_list_orders with its
+    real filters: status=any, created_at_min, since_id (ascending, 250 a
+    page), ids and fields."""
+
+    def __init__(self, orders, other=None):
+        # Deep copies: one order's address is not another's.
+        self.orders = {o["id"]: json.loads(json.dumps(o)) for o in orders}
+        self.calls = []                    # ("sweep" | "ids", args)
+        self.delay = 0.0
+        self.fail_ids = False
+        self.fail_sweeps = False
+        self.on_call = None                # (kind, n) -> None, run as each call arrives
+        self.other = other                 # everything that is not an order list
+
+    async def tools(self, registry, name, args):
+        if name != "shopify_list_orders":
+            return await self.other(registry, name, args) if self.other else {}
+        kind = "ids" if args.get("ids") else "sweep"
+        self.calls.append((kind, dict(args)))
+        if self.on_call:
+            self.on_call(kind, len(self.calls))
+        fail = (kind == "ids" and self.fail_ids) or (kind == "sweep" and self.fail_sweeps)
+        rows = sorted(self.orders.values(), key=lambda o: o["id"])
+        if kind == "ids":
+            want = {int(x) for x in str(args["ids"]).split(",") if x}
+            rows = [o for o in rows if o["id"] in want]
+        else:
+            lo = args.get("created_at_min") or ""
+            rows = [o for o in rows if o["created_at"] >= lo and o["id"] > int(args.get("since_id") or 0)]
+        rows = rows[:int(args.get("limit") or 50)]
+        keep = [f for f in str(args.get("fields") or "").split(",") if f]
+        if keep:
+            rows = [{k: v for k, v in o.items() if k in keep or k == "id"} for o in rows]
+        # The store as it was when the request arrived: a change made while
+        # the answer is on its way is not in it, as with Shopify.
+        answer = {"orders": [json.loads(json.dumps(o)) for o in rows]}
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        return {"_failed": True} if fail else answer
+
+    def kinds(self):
+        return [k for k, _ in self.calls]
+
+
+def _ago(days):
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+
+def _shop_orders():
+    base = {"line_items": [], "customer": {"first_name": "Jo"}, "shipping_address": {"city": "Leeds"},
+            "financial_status": "pending", "cancelled_at": None, "fulfillment_status": None}
+    return [dict(base, id=777, order_number=1, name="#1", created_at=_ago(3), tags="IP"),
+            dict(base, id=888, order_number=2, name="#2", created_at=_ago(5), tags="PC"),
+            dict(base, id=999, order_number=3, name="#3", created_at=_ago(9), tags="Unprocessed"),
+            dict(base, id=1000, order_number=4, name="#4", created_at=_ago(400), tags="IP")]
+
+
+def _with_shop(fn, orders=None):
+    saved = copilot._tool_json
+    shop = _FakeShop(orders or _shop_orders(), other=saved)
+    copilot._tool_json = shop.tools
+    try:
+        return with_cache(lambda: fn(shop))
+    finally:
+        copilot._tool_json = saved
+
+
+@test
+def t_one_production_action_reads_one_order_not_the_whole_store():
+    """X1. A tag write, then Shopify's own webhook echoing it a moment later:
+    each used to retire every snapshot, so the next two loads swept the
+    whole store. Each now reads the one order again, by id."""
+    def go(shop):
+        run(copilot.run_production_labels({}, tag="IP"))
+        eq(shop.kinds(), ["sweep"], "the first load sweeps")
+        shop.calls.clear()
+        run(copilot._sync_order_tags({}, 777, add=["PC"], remove=["IP"]))
+        shop.orders[777]["tags"] = "PC"                    # what Shopify now holds
+        ip = run(copilot.run_production_labels({}, tag="IP"))
+        copilot._orders_changed([777])                     # the webhook echoing the write
+        pc = run(copilot.run_production_labels({}, tag="PC"))
+        eq(shop.kinds(), ["ids", "ids"], "two reads of one order, no sweep: %r" % shop.kinds())
+        eq([o["id"] for o in ip["orders"]], [], "the order left To make")
+        eq(sorted(o["id"] for o in pc["orders"]), [777, 888], "and is in To ship")
+    _with_shop(go)
+
+
+@test
+def t_a_snapshot_patched_by_id_is_exactly_a_full_sweep():
+    """The Production Manager queue's content and order are frozen, and the
+    ledger must never say a paid invoice is owed. After every kind of change
+    the patched snapshot is compared with a fresh full sweep of the store,
+    order by order, and the queue built from each is compared too."""
+    fields = ("id,order_number,name,created_at,tags,email,customer,billing_address,"
+              "shipping_address,line_items,note,cancelled_at,fulfillment_status,"
+              "financial_status,shipping_lines,taxes_included")
+
+    def go(shop):
+        def full():
+            return run(copilot._paginate_orders({}, days=180, fields=fields))
+        changes = [
+            ("a tag moved", lambda: shop.orders[777].update(tags="PC"), [777]),
+            ("paid", lambda: shop.orders[888].update(financial_status="paid"), [888]),
+            ("cancelled", lambda: shop.orders[999].update(cancelled_at=_ago(0)), [999]),
+            ("an address edited", lambda: shop.orders[888]["shipping_address"].update(city="York"), [888]),
+            ("a new order", lambda: shop.orders.update({1001: dict(shop.orders[777], id=1001, name="#5",
+                                                                   created_at=_ago(0), tags="IP")}), [1001]),
+            ("an old order touched", lambda: shop.orders[1000].update(tags="PC"), [1000]),
+            ("deleted", lambda: shop.orders.pop(999), [999]),
+            ("two at once", lambda: (shop.orders[777].update(tags="IP"), shop.orders[888].update(tags="IP")), [777, 888]),
+        ]
+        run(copilot._orders_snapshot({}, days=180, fields=fields))
+        for what, change, ids in changes:
+            change()
+            copilot._orders_changed(ids)
+            shop.calls.clear()
+            got = run(copilot._orders_snapshot({}, days=180, fields=fields))
+            eq(shop.kinds(), ["ids"], what + ": read by id only: %r" % shop.kinds())
+            eq(got, full(), what + ": the patched snapshot is the full sweep, order for order")
+            for tag in ("IP", "PC", copilot.DISPATCHED_TAG):
+                cached = run(copilot.run_production_labels({}, tag=tag))
+                copilot._bust_orders()
+                fresh = run(copilot.run_production_labels({}, tag=tag))
+                eq((cached["orders"], cached.get("counts")), (fresh["orders"], fresh.get("counts")),
+                   what + ": the %s queue is the same either way" % tag)
+    _with_shop(go)
+
+
+@test
+def t_a_change_during_a_sweep_is_caught_not_thrown_away():
+    """X1's second sweep: the reload after a write was still sweeping when the
+    webhook landed, so its result was thrown away and the next load swept
+    again. The sweep is now kept and the changed order read again by id, and
+    nobody, however early they joined it, is answered with the old order."""
+    def go(shop):
+        shop.delay = 0.05
+
+        async def scenario():
+            early = asyncio.ensure_future(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+            await asyncio.sleep(0.01)                  # the sweep is in flight
+            shop.orders[777]["tags"] = "PC"
+            copilot._orders_changed([777])
+            late = asyncio.ensure_future(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+            return await early, await late
+        early, late = run(scenario())
+        for who, got in (("an early caller", early), ("a late one", late)):
+            eq({o["id"]: o["tags"] for o in got}[777], "PC", who + " sees the change")
+        eq(shop.kinds(), ["sweep", "ids"], "one sweep, kept, then one order: %r" % shop.kinds())
+        shop.calls.clear()
+        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        eq(shop.kinds(), [], "and the next load costs nothing")
+    _with_shop(go)
+
+
+@test
+def t_a_failed_read_by_id_falls_back_to_a_full_sweep():
+    """A read of one order that fails must not leave the old one in place:
+    the snapshot is dropped and the store swept, as before."""
+    def go(shop):
+        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        shop.orders[777]["tags"] = "PC"
+        shop.fail_ids = True
+        copilot._orders_changed([777])
+        shop.calls.clear()
+        meta = {}
+        got = run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags", meta=meta))
+        eq(shop.kinds(), ["ids", "sweep"], "tried the order, then swept: %r" % shop.kinds())
+        eq({o["id"]: o["tags"] for o in got}[777], "PC", "and the answer is current")
+        ok(not meta.get("failed"), "and complete")
+    _with_shop(go)
+
+
+@test
+def t_an_order_event_names_its_order_and_a_garbled_one_retires_everything():
+    """Shopify's order webhook carries the order's id; that order is read
+    again on the next load. An event whose body cannot be read retires every
+    snapshot, as every event used to."""
+    def go(shop):
+        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        copilot._webhook_seen.clear()
+        raw = json.dumps({"id": 777, "tags": "ignored: the payload is never state"}).encode()
+        r = client.post("/webhooks/orders", content=raw, headers=wh_headers(raw, delivery="x1-a"))
+        eq(r.status_code, 200, r.text)
+        shop.calls.clear()
+        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        eq(shop.kinds(), ["ids"], "the event's order is read by id: %r" % shop.kinds())
+        eq(shop.calls[0][1]["ids"], "777")
+        raw = b"not json"
+        r = client.post("/webhooks/orders", content=raw, headers=wh_headers(raw, delivery="x1-b"))
+        eq(r.status_code, 200, r.text)
+        shop.calls.clear()
+        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        eq(shop.kinds(), ["sweep"], "an unreadable event still retires everything: %r" % shop.kinds())
+    _with_shop(go)
+
+
+@test
+def t_adding_payment_terms_rereads_the_order():
+    """The ledger reads payment_terms. Attaching 30-day terms retired nothing,
+    so for up to the cache's three minutes the ledger could show the order
+    without them; the order is now read again on the next load."""
+    def go(shop):
+        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        saved = (copilot._payment_terms_writer, ORDER.get("tags"))
+
+        async def writer(oid):
+            return {"ok": True}
+        copilot._payment_terms_writer, ORDER["tags"] = writer, copilot.PO_UNPAID_TAG
+        try:
+            run(copilot._net30_on_release({}, 777))
+        finally:
+            copilot._payment_terms_writer, ORDER["tags"] = saved
+        shop.calls.clear()
+        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        ok(("ids" in shop.kinds()) and "777" in [c[1].get("ids") for c in shop.calls],
+           "the order with new terms is read again: %r" % shop.calls)
+    try:
+        _with_shop(go)
+    finally:
+        reset_prod()
+
+
+# ---- review of the order-cache change ---------------------------------------
+
+@test
+def t_a_load_during_a_read_by_id_waits_for_it():
+    """Review CONC1 (high). The changed order was taken off the to-read list
+    before Shopify answered, so a second load arriving during the read found a
+    clean-looking snapshot and was answered with the old order: on the ledger,
+    a paid invoice still owed."""
+    def go(shop):
+        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,financial_status"))
+        shop.orders[888]["financial_status"] = "paid"
+        copilot._orders_changed([888])
+        shop.delay = 0.05
+
+        async def two():
+            a = asyncio.ensure_future(copilot._orders_snapshot({}, days=180, fields="id,created_at,financial_status"))
+            await asyncio.sleep(0.01)              # the read by id is in flight
+            b = await copilot._orders_snapshot({}, days=180, fields="id,created_at,financial_status")
+            return await a, b
+        a, b = run(two())
+        for who, got in (("the first load", a), ("a load during its read", b)):
+            eq({o["id"]: o["financial_status"] for o in got}[888], "paid", who + " sees it paid")
+        eq(shop.kinds().count("ids"), 1, "one read, shared")
+    _with_shop(go)
+
+
+@test
+def t_with_the_cache_off_a_named_change_detaches_the_sweep():
+    """Review CONC2. With the cache switched off, a sweep in flight is still
+    shared; a write used to detach it, so the reload after the write swept
+    afresh. A named change does the same again."""
+    shop = _FakeShop(_shop_orders())
+    saved, was = copilot._tool_json, copilot.ORDER_CACHE_SECS
+    copilot._tool_json, copilot.ORDER_CACHE_SECS = shop.tools, 0
+    copilot._bust_orders()
+    try:
+        shop.delay = 0.05
+
+        async def scenario():
+            early = asyncio.ensure_future(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+            await asyncio.sleep(0.01)
+            shop.orders[777]["tags"] = "PC"
+            copilot._orders_changed([777])
+            late = await copilot._orders_snapshot({}, days=180, fields="id,created_at,tags")  # early still sweeping
+            return await early, late
+        _early, late = run(scenario())
+        eq({o["id"]: o["tags"] for o in late}[777], "PC", "the reload after the write sees it")
+        eq(shop.kinds(), ["sweep", "sweep"], "because it swept afresh, as before")
+    finally:
+        copilot._tool_json, copilot.ORDER_CACHE_SECS = saved, was
+        copilot._bust_orders()
+
+
+@test
+def t_a_late_joiner_is_never_answered_from_a_sweep_that_was_not_kept():
+    """Review CONC3/EQUIV1. A load that joined a sweep after a named change was
+    answered with that sweep's list when it was not kept (Refresh pressed
+    elsewhere meanwhile, or a page failed), so the changed order showed as it
+    was. It now sweeps again instead."""
+    def go(shop):
+        shop.delay = 0.05
+
+        async def scenario():
+            first = asyncio.ensure_future(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+            await asyncio.sleep(0.01)
+            shop.orders[777]["tags"] = "PC"
+            copilot._orders_changed([777])
+            late = asyncio.ensure_future(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+            await asyncio.sleep(0.01)
+            copilot._bust_orders()                 # Refresh pressed on another page
+            return await first, await late
+        _first, late = run(scenario())
+        eq({o["id"]: o["tags"] for o in late}[777], "PC", "the late load sees the change")
+    _with_shop(go)
+
+
+@test
+def t_a_snapshot_made_current_is_not_thrown_away():
+    """Review COMPAT3. After its third read by id the loop dropped a snapshot
+    it had just made current and swept the whole store anyway."""
+    def go(shop):
+        def hook(kind, n):
+            if n in (1, 2):
+                copilot._orders_changed([777])     # the write during the sweep, its echo during the read
+        shop.on_call = hook
+        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        eq(shop.kinds(), ["sweep", "ids", "ids"], "no sweep after it is current: %r" % shop.kinds())
+    _with_shop(go)
+
+
+@test
+def t_a_storm_of_changes_costs_one_sweep_not_two():
+    """Review CONC4. More changes than can be read by id at once, arriving
+    while a sweep ran, made one load sweep twice."""
+    def go(shop):
+        saved = copilot.ORDER_REFRESH_MAX
+        copilot.ORDER_REFRESH_MAX = 2
+        try:
+            shop.on_call = lambda kind, n: copilot._orders_changed([777, 888, 999])
+            run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+            eq(shop.kinds().count("sweep"), 1, "one sweep: %r" % shop.kinds())
+        finally:
+            copilot.ORDER_REFRESH_MAX = saved
+    _with_shop(go)
+
+
+@test
+def t_a_cut_short_sweep_is_swept_again_not_added_to():
+    """Review EQUIV2. A sweep stopped by the page cap holds the oldest orders;
+    adding a newer one an event named made a list no sweep would return."""
+    orders = [dict(_shop_orders()[0], id=10000 + i, name="#%d" % i, created_at=_ago(2)) for i in range(260)]
+
+    def go(shop):
+        saved = copilot._paginate_orders
+        copilot._paginate_orders = lambda *a, **k: saved(*a, **{**k, "max_pages": 1})
+        try:
+            meta = {}
+            got = run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags", meta=meta))
+            ok(meta.get("truncated") and len(got) == 250, "the sweep was cut short")
+            copilot._orders_changed([10259])       # an order past the cut
+            shop.calls.clear()
+            got = run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+            eq(shop.kinds(), ["sweep"], "swept again: %r" % shop.kinds())
+            ok(10259 not in {o["id"] for o in got}, "and nothing a sweep would not return")
+        finally:
+            copilot._paginate_orders = saved
+    _with_shop(go, orders)
+
+
+@test
+def t_an_order_event_with_a_number_too_big_still_retires_everything():
+    """Review COMPAT1. An id like 1e400 raised out of the webhook after the
+    delivery was recorded, so Shopify's retry was taken as handled and
+    nothing was retired."""
+    def go(shop):
+        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        copilot._webhook_seen.clear()
+        raw = b'{"id": 1e400}'
+        r = client.post("/webhooks/orders", content=raw, headers=wh_headers(raw, delivery="big-1"))
+        eq(r.status_code, 200, r.text)
+        shop.calls.clear()
+        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        eq(shop.kinds(), ["sweep"], "every snapshot was retired: %r" % shop.kinds())
+    _with_shop(go)
+
+
+# ---- re-check of the review fixes ---------------------------------------------
+
+@test
+def t_a_load_that_joined_a_cut_short_sweep_after_a_payment_sees_it_paid():
+    """Re-check of #20 (high). The ledger's two-year sweep can be cut short by
+    the page cap. A load that joined such a sweep after a payment was named
+    was answered from it, so the paid invoice showed as owed; before this
+    change the event detached the sweep and the load swept afresh. Only the
+    load that STARTED a sweep, whose request predates every change named
+    while it ran, is answered from it."""
+    orders = [dict(_shop_orders()[0], id=10000 + i, name="#%d" % i, created_at=_ago(2),
+                   financial_status="pending") for i in range(260)]
+
+    def go(shop):
+        saved = copilot._paginate_orders
+        copilot._paginate_orders = lambda *a, **k: saved(*a, **{**k, "max_pages": 1})
+        shop.delay = 0.05
+        try:
+            async def scenario():
+                first = asyncio.ensure_future(
+                    copilot._orders_snapshot({}, days=730, fields="id,created_at,financial_status"))
+                await asyncio.sleep(0.01)                   # the long sweep is under way
+                shop.orders[10005]["financial_status"] = "paid"
+                copilot._orders_changed([10005])            # Shopify says it was paid
+                joined = await copilot._orders_snapshot({}, days=730, fields="id,created_at,financial_status")
+                await first
+                return joined
+            joined = run(scenario())
+            eq({o["id"]: o["financial_status"] for o in joined}[10005], "paid",
+               "a load joining after the payment sees it paid")
+        finally:
+            copilot._paginate_orders = saved
+    _with_shop(go, orders)
+
+
+@test
+def t_the_reload_after_a_write_is_never_answered_from_before_it():
+    """Re-check of #20 (medium). During a burst of order events too big to read
+    one by one, the Production Manager's reload after its own tag write joined
+    a sweep that started before the write and was answered from it: the order
+    stayed in the queue it had just left."""
+    def go(shop):
+        saved = copilot.ORDER_REFRESH_MAX
+        copilot.ORDER_REFRESH_MAX = 2
+        shop.delay = 0.05
+        try:
+            async def scenario():
+                other = asyncio.ensure_future(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+                await asyncio.sleep(0.01)                   # another tab's sweep is under way
+                shop.orders[777]["tags"] = "PC"
+                copilot._orders_changed([777, 888, 999])    # the write, and a burst of events
+                reload = await copilot._orders_snapshot({}, days=180, fields="id,created_at,tags")
+                await other
+                return reload
+            reload = run(scenario())
+            eq({o["id"]: o["tags"] for o in reload}[777], "PC", "the reload sees its own write")
+        finally:
+            copilot.ORDER_REFRESH_MAX = saved
+    _with_shop(go)
+
+
+@test
+def t_a_failing_shopify_is_not_asked_again_by_the_load_that_started_the_sweep():
+    """Re-check of #20 (low). With Shopify failing and an order event during
+    each sweep, one load swept three or four times into a throttled store.
+    The load that started a sweep is answered from it (failed, so the ledger
+    says it cannot read), as it always was."""
+    def go(shop):
+        shop.fail_sweeps = True
+        shop.on_call = lambda kind, n: copilot._orders_changed([777])
+        meta = {}
+        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags", meta=meta))
+        eq(shop.kinds(), ["sweep"], "one sweep: %r" % shop.kinds())
+        ok(meta.get("failed"), "and the failure is said")
+    _with_shop(go)
+
+
+# =========================== speed: the CRM board, built once per version =====
+# The third speed pull request (the 2026-10-12 audit, S1). Every board read
+# rebuilt, serialised and compressed the whole board on the one event loop
+# (about 50 ms at production size, while every other request waited), and
+# every open CRM tab read it again every 90 seconds.
+
+@test
+def t_the_crm_board_is_built_once_per_version_of_what_it_shows():
+    """The board is the CRM store shaped with the team list, today's date and
+    the clock (a deal rots N days after it was last touched). It is now built
+    once per version of those and reused, and a write warms it for the next
+    read. A change to the CRM, the team, the date or the hour builds it
+    again, so nobody is shown a board older than what it is built from."""
+    def go():
+        post("/api/crm/contact", {"op": "person_add", "name": "Board Probe", "emails": ["bp@example.com"]})
+        built, real = [], copilot._crm_shape
+
+        def spy(d):
+            built.append(1)
+            return real(d)
+        saved_today = copilot._crm_today
+        copilot._crm_shape = spy
+        copilot._crm_board_cache["key"] = None       # a cold start, as after a deploy
+        try:
+            a = post("/api/crm/board", {}).json()
+            b = post("/api/crm/board", {}).json()
+            eq(len(built), 1, "two reads, one build")
+            eq(a, b, "and the same board both times")
+            ok(a.get("rev"), "with a revision to compare against")
+            built.clear()
+            w = post("/api/crm/contact", {"op": "person_add", "name": "Second Probe", "emails": ["sp@example.com"]})
+            eq(w.status_code, 200, w.text[:200])
+            c = post("/api/crm/board", {}).json()
+            eq(len(built), 1, "the write built it once, and the read after it reused that")
+            ok(any(p.get("name") == "Second Probe" for p in c["crm"]["persons"].values()), "and it shows the write")
+            ok(c["rev"] != a["rev"] and c["rev"] == w.json().get("rev"), "under a new revision, which the write answered")
+            built.clear()
+            ready_user("Board Teammate", "boardmate")
+            d = post("/api/crm/board", {}).json()
+            eq(len(built), 1, "a change to the team builds it again")
+            ok(any(r["name"] == "Board Teammate" for r in d["crm"]["team"]), "and the new name is on it")
+            built.clear()
+            copilot._crm_today = lambda: saved_today() + timedelta(days=1)
+            e = post("/api/crm/board", {}).json()
+            eq(len(built), 1, "a new day builds it again")
+            eq(e["crm"]["today"], (saved_today() + timedelta(days=1)).isoformat())
+        finally:
+            copilot._crm_shape, copilot._crm_today = real, saved_today
+    with_accounts(go)
+
+
+@test
+def t_an_unchanged_crm_board_is_not_sent_again():
+    """Each open CRM tab asks for the board every 90 seconds and on every
+    return to the tab: about 400 KB each time at production size, redrawn in
+    full. The page now sends the revision it holds and an unchanged board
+    answers {same: true}. A page that sends no revision (one still open from
+    before this update) gets the whole board as it always has."""
+    def go():
+        post("/api/crm/contact", {"op": "person_add", "name": "Rev Probe", "emails": ["rp@example.com"]})
+        full = post("/api/crm/board", {}).json()
+        rev = full["rev"]
+        same = post("/api/crm/board", {"rev": rev}).json()
+        eq(same, {"same": True, "rev": rev}, "nothing changed, nothing sent")
+        old_page = post("/api/crm/board", {}).json()
+        ok("crm" in old_page, "an older page that sends no revision still gets the board")
+        post("/api/crm/contact", {"op": "person_add", "name": "Rev Probe 2", "emails": ["rp2@example.com"]})
+        moved = post("/api/crm/board", {"rev": rev}).json()
+        ok("crm" in moved and moved["rev"] != rev, "a board that moved is sent, with its new revision")
+        stale = post("/api/crm/board", {"rev": "not-a-revision"}).json()
+        ok("crm" in stale, "an unknown revision gets the board")
+    with_accounts(go)
+
+
+@test
+def t_forgetting_the_crm_forgets_its_board():
+    """The kept board may have been built from the CRM store in memory after
+    a change that a failed write then never saved. A write that fails forgets
+    the store so the next read comes from disk; the board must go with it,
+    all of it, or the unsaved change could be served from the board."""
+    def go():
+        post("/api/crm/contact", {"op": "person_add", "name": "Forget Probe", "emails": ["fp@example.com"]})
+        copilot._crm_board()
+        ok(copilot._crm_board_cache["key"] is not None, "the board is kept")
+        copilot._forget_store(copilot.CRM_PATH)
+        eq(copilot._crm_board_cache["key"], None, "and forgotten with the store")
+        ok(all(not v for v in copilot._crm_board_cache.values()),
+           "all of it, not only its key: %r" % sorted(k for k, v in copilot._crm_board_cache.items() if v))
+    with_accounts(go)
+
+
+@test
+def t_a_crm_write_never_leaves_the_board_from_before_it():
+    """The kept board is found again by its key, and a CRM file is known by
+    its time, size and inode. Written twice inside the clock's tick at the
+    same size, with the inode handed back, the file has the same key after a
+    write as before it, so a write that did not build the board itself (the
+    Shopify link sweep) left the old one to be served. Writing the CRM now
+    lets the board go first."""
+    def go():
+        post("/api/crm/contact", {"op": "person_add", "name": "Tick Probe", "emails": ["tick@example.com"]})
+        real_stat = copilot._stat_key
+        copilot._stat_key = lambda p: ("same", 1, 1) if p == copilot.CRM_PATH else real_stat(p)
+        try:
+            copilot._crm_board_cache["key"] = None
+            post("/api/crm/board", {})
+            d = copilot._load_crm()
+            for p in d["persons"].values():
+                if p.get("name") == "Tick Probe":
+                    p["name"] = "Tock Probe"          # the same size on disk
+            copilot._write_crm(d)
+            after = post("/api/crm/board", {}).json()
+        finally:
+            copilot._stat_key = real_stat
+        names = {p.get("name") for p in after["crm"]["persons"].values()}
+        ok("Tock Probe" in names and "Tick Probe" not in names, "the board after the write is built from it: %r" % names)
+    with_accounts(go)
+
+
+@test
+def t_a_crm_read_that_failed_is_not_kept_as_the_board():
+    """A read of the CRM that fails hands back an empty CRM (the poison guard
+    keeps the file for repair). The board built from it must not be kept: the
+    file has not changed, so a kept empty board was served to everyone until
+    the next write, long after the file read again."""
+    def go():
+        post("/api/crm/contact", {"op": "person_add", "name": "Flaky Probe", "emails": ["flaky@example.com"]})
+        real = copilot._load_json_store
+
+        def once(path, key, default):
+            if path == copilot.CRM_PATH:
+                copilot._load_json_store = real
+                copilot._poisoned_stores.add(path)
+                return default
+            return real(path, key, default)
+        copilot._forget_store(copilot.CRM_PATH)       # the next read comes from disk
+        copilot._load_json_store = once
+        try:
+            bad = post("/api/crm/board", {}).json()
+        finally:
+            copilot._load_json_store = real
+        named = lambda r: any(p.get("name") == "Flaky Probe" for p in r["crm"]["persons"].values())
+        ok(not named(bad), "the failed read gave an empty CRM")
+        good = post("/api/crm/board", {}).json()
+        ok(named(good), "and the next read, with the file readable again, shows what it holds")
+        ok(good["rev"] != bad["rev"], "under its own revision")
+    with_accounts(go)
+
+
+@test
+def t_a_crm_write_keeps_its_board_under_the_day_it_was_built_for():
+    """A write builds the board and keeps it. The key it is kept under is
+    taken before the board is built: taken after, a write at the turn of the
+    hour or the day kept a board built for the old one under the new one, and
+    it was served all through the new hour."""
+    def go():
+        saved, real = copilot._crm_today, copilot._crm_shape
+        turned = []
+
+        def shape(d):
+            out = real(d)
+            if not turned:
+                turned.append(1)
+                copilot._crm_today = lambda: saved() + timedelta(days=1)   # midnight, while it is built
+            return out
+        copilot._crm_shape = shape
+        try:
+            w = post("/api/crm/contact", {"op": "person_add", "name": "Midnight Probe", "emails": ["mp@example.com"]})
+            eq(w.status_code, 200, w.text[:200])
+            copilot._crm_shape = real
+            b = post("/api/crm/board", {}).json()
+            eq(b["crm"]["today"], (saved() + timedelta(days=1)).isoformat(),
+               "the read after midnight is built for the new day")
+        finally:
+            copilot._crm_shape, copilot._crm_today = real, saved
+    with_accounts(go)
+
+
+@test
+def t_the_crm_revision_is_the_board_itself():
+    """The revision the page compares against is a fingerprint of the board
+    as sent, not of the files it is built from. Made from the files, it did
+    not change when a new version of the app shaped the same files another
+    way, so a page open across the update was told nothing had changed and
+    kept the old board; and it changed on every sign-in and every wrong
+    password (both write the team's file), sending the whole board to every
+    open CRM for nothing and telling each of them someone had tried to sign
+    in."""
+    def go():
+        _uid, _s, pw = ready_user("Print Probe", "printprobe")
+        post("/api/crm/contact", {"op": "person_add", "name": "Print Probe", "emails": ["pp@example.com"]})
+        rev = post("/api/crm/board", {}).json()["rev"]
+        before = copilot._stat_key(copilot.USERS_PATH)
+        eq(login("printprobe", "not-the-password-1").status_code, 401, "a wrong password")
+        eq(login("printprobe", pw).status_code, 200, "and a sign-in")
+        ok(copilot._stat_key(copilot.USERS_PATH) != before, "both written to the team's file")
+        eq(post("/api/crm/board", {"rev": rev}).json(), {"same": True, "rev": rev},
+           "and the board, which neither changed, is not sent again")
+        real = copilot._crm_shape
+        copilot._crm_shape = lambda d: {**real(d), "shaped_by": "the next version"}
+        copilot._crm_board_cache["key"] = None        # a restart into the next version
+        try:
+            moved = post("/api/crm/board", {"rev": rev}).json()
+        finally:
+            copilot._crm_shape = real
+        ok("crm" in moved and moved["rev"] != rev and moved["crm"].get("shaped_by"),
+           "a board shaped another way from the same files is sent: %r" % {k: moved[k] for k in moved if k != "crm"})
+    with_accounts(go)
+
+
+
+# =========================== speed: Files, instant actions =====================
+# The fourth speed pull request (the 2026-10-12 audit, S9 and P2). Every upload
+# saved and sent back the whole Files store twice, held the store's lock while
+# storage answered, and the page redrew the whole folder after every file.
+
+def _files_key(up):
+    return up["url"].split("?")[0].replace("https://fake-r2.test/", "")
+
+
+def _files_apply(store, delta):
+    """What the page does with a delta answer (filesPatch in the page)."""
+    for k, v in (delta.get("files") or {}).items():
+        if v:
+            store["files"][k] = v
+        else:
+            store["files"].pop(k, None)
+    for k, v in (delta.get("folders") or {}).items():
+        if v:
+            store["folders"][k] = v
+        else:
+            store["folders"].pop(k, None)
+    tr = delta.get("trash") or {}
+    if tr:
+        store["trash"] = [t for t in store["trash"] if t["id"] not in tr] + [v for v in tr.values() if v]
+    if delta.get("used") is not None:
+        store["used"] = delta["used"]
+    if "setup_error" in delta:
+        store["setup_error"] = delta["setup_error"]
+    if delta.get("names"):
+        store["names"] = delta["names"]
+
+
+async def _files_wait_for(event, gate, secs=10.0):
+    """Wait for a fake's call to begin, failing (and freeing it) rather than
+    spinning for ever when a change means storage is never asked."""
+    for _ in range(int(secs / 0.01)):
+        if event.is_set():
+            return
+        await asyncio.sleep(0.01)
+    gate.set()
+    raise AssertionError("storage was never asked")
+
+
+def _files_race(*calls):
+    """Requests raced on ONE loop through the real ASGI stack, as production
+    runs them (TestClient threads would each bring their own loop)."""
+    import httpx
+
+    async def race():
+        copilot._rl_hits.clear(); copilot._rl_global.clear()
+        transport = httpx.ASGITransport(app=server.mcp.streamable_http_app(**server.MCP_HTTP))
+        headers = {"Authorization": "Bearer " + tok(), "X-App-Session": ensure_auth()}
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver",
+                                     headers=headers, timeout=30) as ac:
+            return await asyncio.gather(*[c(ac) for c in calls])
+    return run(race())
+
+
+@test
+def t_an_unchanged_files_tree_is_not_sent_again():
+    """Every visit to Files re-read the whole store (about 85 KB at 2,000
+    files, four times that at 8,000) to find, most times, nothing new. The
+    store now comes with a revision, a fingerprint of what was sent; the
+    page sends it back and an unchanged store answers {same: true}. A page
+    with no revision (one open from before this update) gets the store."""
+    def go(fake):
+        t = post("/api/files/tree", {}).json()
+        ok(t.get("store") and t.get("rev"), "the store comes with its revision")
+        eq(post("/api/files/tree", {"rev": t["rev"]}).json(), {"same": True, "rev": t["rev"]},
+           "nothing changed, nothing sent")
+        ok("store" in post("/api/files/tree", {}).json(), "an older page still gets the store")
+        f = post("/api/files/folder", {"op": "add", "name": "Jobs"}).json()
+        ok(f.get("store") and f.get("rev") and f["rev"] != t["rev"], "a change answers the store under a new revision")
+        moved = post("/api/files/tree", {"rev": t["rev"]}).json()
+        ok(moved.get("store") and moved["rev"] == f["rev"], "and the tree sends the store that moved, under that revision")
+        ok("store" in post("/api/files/tree", {"rev": "not-a-revision"}).json(), "an unknown revision gets the store")
+    with_files(go)
+
+
+@test
+def t_an_upload_answers_what_changed_when_the_page_asks():
+    """Each upload answered the whole store twice, once to sign for it and once
+    to confirm it (about 20 ms of the server's one thread and 170 KB per file
+    at 2,000 files). A page that sends delta gets only what changed: the
+    records, the trash and the space used. Patching its copy with them gives
+    exactly the store the tree answers, through a replacement into the trash.
+    Without delta the answers are the whole store, as before."""
+    def go(fake):
+        # Storage had failed when the page last read the store: its banner says
+        # so, and the first upload that finds storage back must clear it.
+        copilot._files_ready.update({"error": "RuntimeError: an earlier outage", "at": 0.0})
+        mine = post("/api/files/tree", {}).json()["store"]
+        ok(mine["setup_error"], "the page's copy shows the earlier failure")
+        mine["names"] = {}                     # read before a teammate was added
+        nf = post("/api/files/folder", {"op": "add", "name": "Jobs", "delta": 1}).json()
+        ok("store" not in nf and nf.get("id") and nf.get("delta"), "a new folder answers itself: %r" % nf)
+        _files_apply(mine, nf["delta"])
+
+        def upload(name, size):
+            a = post("/api/files/upload-url", {"name": name, "size": size, "folder_id": nf["id"], "delta": 1}).json()
+            ok("store" not in a and a.get("id") and a.get("url"), "signing answers the upload, not the store: %r" % list(a))
+            _files_apply(mine, a["delta"])
+            fake.objects[_files_key(a)] = size
+            c = post("/api/files/complete", {"id": a["id"], "delta": 1})
+            eq(c.status_code, 200, c.text)
+            ok("store" not in c.json(), "and confirming answers what changed")
+            _files_apply(mine, c.json()["delta"])
+            return a, c.json()
+        upload("proof.pdf", 10)
+        upload("Proof.PDF", 12)                  # replaces the first, which goes to the trash
+        upload("notes.pdf", 7)
+        full = post("/api/files/tree", {}).json()["store"]
+        in_order = lambda st: {**st, "trash": sorted(st["trash"], key=lambda t: t["id"])}
+        eq(in_order(mine), in_order(full), "the patched copy is exactly the store, field for field")
+        eq(len(full["trash"]), 1, "the replaced proof is in the trash")
+        eq(full["setup_error"], "", "storage recovered, and the patched copy says so too")
+        ok(mine["names"].get(full["files"][next(iter(full["files"]))]["by"]), "and it names the uploader")
+        old = post("/api/files/upload-url", {"name": "old-page.pdf", "size": 5}).json()
+        ok(old.get("store") is not None, "a page that does not ask still gets the whole store")
+    with_files(go)
+
+
+@test
+def t_confirming_an_upload_does_not_hold_files_while_storage_answers():
+    """Confirming an upload asks storage twice (what really landed and its
+    first bytes) and held the store's lock across both, so every other change
+    to Files and the Finder drive waited on storage, and a batch's uploads
+    were confirmed one at a time. Storage is now asked outside the lock and
+    the record checked again before it is kept."""
+    import threading
+
+    class SlowHead(FakeS3):
+        def __init__(self):
+            super().__init__()
+            self.entered, self.gate = threading.Event(), threading.Event()
+
+        def head_object(self, Bucket, Key):
+            self.entered.set()
+            self.gate.wait(3)
+            return super().head_object(Bucket, Key)
+    slow = SlowHead()
+
+    def go(fake):
+        up = post("/api/files/upload-url", {"name": "slow.pdf", "size": 10}).json()
+        fake.objects[_files_key(up)] = 10
+        order = []
+
+        async def complete(ac):
+            r = await ac.post("/api/files/complete", json={"id": up["id"]})
+            order.append("complete")
+            return r
+
+        async def folder(ac):
+            await _files_wait_for(fake.entered, fake.gate)
+            r = await ac.post("/api/files/folder", json={"op": "add", "name": "Meanwhile"})
+            order.append("folder")
+            fake.gate.set()
+            return r
+        rc, rf = _files_race(complete, folder)
+        eq(rc.status_code, 200, rc.text)
+        eq(rf.status_code, 200, rf.text)
+        eq(order, ["folder", "complete"], "a folder was made while storage was still answering")
+        eq(copilot._load_files()["files"][up["id"]]["status"], "active", "and the upload was still kept")
+    with_files(go, s3=slow)
+
+
+@test
+def t_signing_an_upload_does_not_hold_files_while_storage_is_set_up():
+    """The first upload after a deploy, or one a minute while storage is
+    failing, sets the bucket up over the network before it signs. That ran
+    under the store's lock, so everything else in Files waited on it. It now
+    runs before the lock is taken."""
+    import threading
+
+    class SlowSetup(FakeS3):
+        def __init__(self):
+            super().__init__()
+            self.entered, self.gate = threading.Event(), threading.Event()
+
+        def head_bucket(self, Bucket):
+            self.entered.set()
+            self.gate.wait(3)
+            return super().head_bucket(Bucket)
+    slow = SlowSetup()
+
+    def go(fake):
+        order = []
+
+        async def sign(ac):
+            r = await ac.post("/api/files/upload-url", json={"name": "first.pdf", "size": 10})
+            order.append("sign")
+            return r
+
+        async def folder(ac):
+            await _files_wait_for(fake.entered, fake.gate)
+            r = await ac.post("/api/files/folder", json={"op": "add", "name": "Meanwhile"})
+            order.append("folder")
+            fake.gate.set()
+            return r
+        rs, rf = _files_race(sign, folder)
+        eq(rs.status_code, 200, rs.text)
+        eq(rf.status_code, 200, rf.text)
+        eq(order, ["folder", "sign"], "a folder was made while storage was being set up")
+    with_files(go, s3=slow)
+
+
+@test
+def t_uploads_during_a_storage_retry_wait_for_its_answer():
+    """Setting the bucket up moved out of the store's lock, and a retry after
+    a failure stamped its start time before it asked storage, so uploads
+    arriving during the retry read it as a failure a moment ago and were
+    refused (502) while it was about to succeed. They now wait for its
+    answer: three uploads at once after storage comes back all sign."""
+    import threading
+
+    class SlowBucket(FakeS3):
+        def __init__(self):
+            super().__init__()
+            self.heads = 0
+
+        def head_bucket(self, Bucket):
+            self.heads += 1
+            time.sleep(0.4)
+            return super().head_bucket(Bucket)
+    slow = SlowBucket()
+
+    def go(fake):
+        fake.bucket_exists = True
+        copilot._files_ready.update({"bucket": False, "cors": False,
+                                     "error": "RuntimeError: an earlier outage", "at": time.time() - 120})
+
+        def sign(n):
+            return lambda ac: ac.post("/api/files/upload-url", json={"name": f"back{n}.pdf", "size": 10})
+        rs = _files_race(sign(1), sign(2), sign(3))
+        eq([r.status_code for r in rs], [200, 200, 200], [r.text[:120] for r in rs])
+        eq(fake.heads, 1, "storage was asked once, and the others took its answer")
+        eq(copilot._files_ready["error"], "", "and the failure is cleared")
+    with_files(go, s3=slow)
+
+
+@test
+def t_an_upload_holding_files_never_waits_on_a_storage_setup():
+    """Re-check of the review fixes. An upload that passed the setup check
+    while a failure was fresh, then queued for the store's lock, set the
+    bucket up again once inside it: with another upload's retry under way
+    it waited for that retry holding the lock, and every change to Files and
+    the Finder drive waited with it. Signing under the lock now only signs;
+    the setup happens before the lock is taken."""
+    import threading
+
+    def go(fake):
+        copilot._files_ready.update({"bucket": False, "cors": False,
+                                     "error": "RuntimeError: an earlier outage", "at": time.time()})
+
+        async def scenario(ac):
+            await copilot._files_lock.acquire()          # the hourly sweep holds the store
+            sign = asyncio.ensure_future(ac.post("/api/files/upload-url", json={"name": "c.pdf", "size": 10}))
+            await asyncio.sleep(0.3)                     # it passed the fresh failure and queued
+            copilot._files_ready["at"] = time.time() - 120   # the minute is up: another upload retries
+            busy = threading.Thread(target=lambda: (copilot._files_setup_lock.acquire(), time.sleep(1.5),
+                                                    copilot._files_setup_lock.release()))
+            busy.start()
+            await asyncio.sleep(0.05)
+            copilot._files_lock.release()
+            await asyncio.sleep(0.05)
+            t0 = time.monotonic()
+            f = await ac.post("/api/files/folder", json={"op": "add", "name": "Meanwhile"})
+            waited = time.monotonic() - t0
+            c = await sign
+            busy.join()
+            return c, f, waited
+        (c, f, waited), = _files_race(scenario)
+        eq(f.status_code, 200, f.text)
+        ok(waited < 0.5, "the folder did not wait on another upload's storage retry: %.2f s" % waited)
+        eq(c.status_code, 502, "the upload that met a storage not yet set up is refused at once: " + c.text[:120])
+    with_files(go)
+
+
+@test
+def t_while_storage_hangs_an_upload_is_refused_without_waiting_out_the_retry():
+    """Re-check of the review fixes. With storage hanging, one retry of the
+    setup takes up to a minute (short timeouts, but three tries of two
+    calls), and every upload arriving meanwhile waited the whole of it for
+    a refusal. A setup another caller is running is waited for only a few
+    seconds; a quick recovery is still waited for and taken."""
+    import threading
+
+    class Hanging(FakeS3):
+        def __init__(self):
+            super().__init__()
+            self.release = threading.Event()
+
+        def head_bucket(self, Bucket):
+            self.release.wait(3)
+            raise RuntimeError("storage did not answer")
+
+        def create_bucket(self, Bucket):
+            raise RuntimeError("storage did not answer")
+    hang = Hanging()
+
+    def go(fake):
+        copilot._files_ready.update({"bucket": False, "cors": False,
+                                     "error": "RuntimeError: an earlier outage", "at": time.time() - 120})
+        saved = copilot.FILES_SETUP_WAIT
+        copilot.FILES_SETUP_WAIT = 0.3
+        took = {}
+
+        def sign(n, delay):
+            async def go_(ac):
+                await asyncio.sleep(delay)
+                t0 = time.monotonic()
+                r = await ac.post("/api/files/upload-url", json={"name": f"h{n}.pdf", "size": 10})
+                took[n] = time.monotonic() - t0
+                if n == 2:
+                    fake.release.set()
+                return r
+            return go_
+        try:
+            rs = _files_race(sign(1, 0), sign(2, 0.2))
+        finally:
+            copilot.FILES_SETUP_WAIT = saved
+        eq([r.status_code for r in rs], [502, 502], [r.text[:80] for r in rs])
+        ok(took[2] < 1.0, "the second upload was refused without waiting out the retry: %.2f s" % took[2])
+    with_files(go, s3=hang)
+
+
+@test
+def t_one_upload_confirmed_twice_at_once_is_one_file():
+    """With storage asked outside the lock, two confirmations of one upload (a
+    retry while the first is still answering) can both be in flight. The
+    record is checked again under the lock: one is kept, the other is told
+    the upload is no longer expected, and the space is counted once."""
+    import threading
+
+    class SlowHead(FakeS3):
+        def __init__(self):
+            super().__init__()
+            self.n, self.gate = 0, threading.Event()
+
+        def head_object(self, Bucket, Key):
+            self.n += 1
+            if self.n >= 2:
+                self.gate.set()
+            self.gate.wait(3)
+            return super().head_object(Bucket, Key)
+    slow = SlowHead()
+
+    def go(fake):
+        up = post("/api/files/upload-url", {"name": "twice.pdf", "size": 10}).json()
+        fake.objects[_files_key(up)] = 10
+
+        def complete(ac):
+            return ac.post("/api/files/complete", json={"id": up["id"]})
+        a, b = _files_race(complete, complete)
+        eq(sorted([a.status_code, b.status_code]), [200, 400], (a.text, b.text))
+        d = copilot._load_files()
+        eq([v["status"] for v in d["files"].values()], ["active"], "one file")
+        eq(copilot._files_usage(d), 10, "counted once")
+    with_files(go, s3=slow)
 
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The

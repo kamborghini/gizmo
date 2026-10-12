@@ -2,7 +2,7 @@
 
 (The repository and the Railway service are still called gizmo.)
 
-The back office for Projected Image UK's Shopify store: the dispatch desk,
+The back office for a Shopify store: the dispatch desk,
 production labels, the sales records, the shared inbox, the file drive, the
 team, loan units, reconciliation against Xero, and an assistant that can read
 the store and never write to it. It runs embedded inside Shopify admin and as
@@ -100,8 +100,12 @@ password, once.
 says which one and what it turns off.
 
 **Reads from Shopify fail (401 / 403).** The access token is wrong, expired, or
-missing a scope. Settings → Connections shows the scopes the install actually
-has, read from Shopify rather than from the config file.
+missing a scope. Settings → Connections checks the scopes the install actually
+has, read from Shopify rather than from the config file, against every scope
+the app writes with and the payout reads (`read_shopify_payments_payouts`,
+`read_shopify_payments_accounts`); a missing one is named with what it holds
+up. A scope added to `shopify.app.toml` takes `shopify app deploy`, a release,
+and approving it in the Shopify admin when Reactor next opens.
 
 **A store is "unreadable" in the log and nothing saves to it.** The poison
 guard found a file that does not parse and refuses to overwrite it, so the
