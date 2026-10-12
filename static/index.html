@@ -1793,7 +1793,10 @@
         /* The filter fields are a row of controls on the section, not a panel
            round them (the mix, spec 3): no box, and on the text edge. */
         .pfilters { display: none; flex-wrap: wrap; gap: var(--sp-3) var(--sp-3); padding: 0; border: 0; border-radius: 0; background: none; }
-        .pfilters.show { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+        /* Six across, so the filters fill their rows (12 Oct 2026, DF-14). */
+        .pfilters.show { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+        @media (max-width: 1100px) { .pfilters.show { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        @media (max-width: 640px) { .pfilters.show { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         .pfield { display: flex; flex-direction: column; gap: var(--sp-1); }
         /* The wrapper IS the label now (implicit association); caption is a span. */
         .pfield label, .pfield > span { font-size: var(--text-body); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-primary); }
@@ -2375,10 +2378,11 @@
         .wpair { container: wpair / inline-size; }
         .wpair-in { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); column-gap: var(--gap-cols); row-gap: var(--page-rhythm); align-items: start; }
         .wpair.even > .wpair-in { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .wpair.flip > .wpair-in { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
         .wpair-in > * { min-width: 0; margin: 0; }
         /* The two halves' headings stand level. */
         .wpair-in > * > .section-title:first-child { margin-top: 0; }
-        @container wpair (max-width: 64rem) { .wpair-in { grid-template-columns: minmax(0, 1fr); } }
+        @container wpair (max-width: 64rem) { .wpair > .wpair-in, .wpair.even > .wpair-in, .wpair.flip > .wpair-in { grid-template-columns: minmax(0, 1fr); } }
         /* what-changed digest */
         .changes-strip { margin: var(--sp-0-5) 0 var(--sp-6); }
         /* Beside the summary it is a short list, two columns of the measure and
@@ -2482,6 +2486,7 @@
             .dt-s > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; }
             .dt-s > .dtable > .dt-row > .dt-c:not(.dt-main, .act) { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
             .dt-s > .dtable > .dt-row > .dt-c:empty { display: none; }
+            .dt-s > .dtable > .dt-row > .dt-c.go { display: none; }
         }
         @container dt (max-width: 56rem) {
             .dt-m > .dtable { display: block; }
@@ -2490,6 +2495,7 @@
             .dt-m > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; }
             .dt-m > .dtable > .dt-row > .dt-c:not(.dt-main, .act) { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
             .dt-m > .dtable > .dt-row > .dt-c:empty { display: none; }
+            .dt-m > .dtable > .dt-row > .dt-c.go { display: none; }
         }
         @container dt (max-width: 72rem) {
             .dt-l > .dtable { display: block; }
@@ -2498,7 +2504,14 @@
             .dt-l > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; }
             .dt-l > .dtable > .dt-row > .dt-c:not(.dt-main, .act) { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
             .dt-l > .dtable > .dt-row > .dt-c:empty { display: none; }
+            .dt-l > .dtable > .dt-row > .dt-c.go { display: none; }
         }
+        /* Products (12 Oct 2026): the catalogue as one table whose columns share
+           the row, the figures straight after the words. */
+        .dt-products { --dt-cols: minmax(14rem, 2.4fr) minmax(6rem, 1fr) max-content minmax(7rem, 1fr) max-content max-content max-content max-content; }
+        .dt-products.cmp { --dt-cols: minmax(14rem, 2.4fr) minmax(6rem, 1fr) max-content minmax(7rem, 1fr) max-content max-content max-content max-content max-content; }
+        .dt-link { border: 0; background: none; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; min-width: 0; }
+        .dt-c .prod-thumb { flex: none; }
         /* Loan units' two tables (the mockup): what is out, longest first, and
            the register, every action in a column of its own. */
         .dt-loans-out { --dt-cols: minmax(0, 1.6fr) minmax(0, 1.2fr) max-content minmax(0, 1fr) max-content; }
@@ -7303,6 +7316,9 @@ Projected Image UK"></textarea>
             t.append(h);
             rows.forEach(r => {
                 const row = el('div', 'dt-row' + (r.cls ? ' ' + r.cls : '')); row.setAttribute('role', 'row');
+                /* A row that opens what it lists: the whole row answers a pointer,
+                   and its main cell carries the button a keyboard reaches. */
+                if (r.onClick) { row.classList.add('click'); row.onclick = r.onClick; }
                 r.cells.forEach((c, i) => {
                     const cell = el('div', 'dt-c' + (i === 0 ? ' dt-main' : '') + (cols[i] && cols[i].cls ? ' ' + cols[i].cls : ''));
                     cell.setAttribute('role', 'cell');
@@ -8867,7 +8883,7 @@ Projected Image UK"></textarea>
         function pairNodes(left, right, id, label, o) {
             o = o || {};
             if (!left || !right) return null;
-            const pair = el('div', 'wpair' + (o.even ? ' even' : ''));
+            const pair = el('div', 'wpair' + (o.even ? ' even' : '') + (o.flip ? ' flip' : ''));
             const inner = el('div', 'wpair-in');
             left.before(pair);
             [left, right].forEach(n => ['data-widget', 'data-size', 'data-widget-label'].forEach(a => n.removeAttribute(a)));
@@ -11646,9 +11662,8 @@ Projected Image UK"></textarea>
             const pCard = el('div', 'card');
             const pHead = el('div', 'card-head card-head-stat');
             const pDesc = el('p', 'card-desc');
-            const summary = el('p', 'card-sub');
             const pAct = el('div', 'card-act');
-            pHead.append(el('h3', 'card-title', 'Products'), pDesc, summary, pAct);
+            pHead.append(el('h3', 'card-title', 'Products'), pDesc, pAct);
             pCard.append(pHead);
             const tools = el('div', 'ptools');
             const searchWrap = tableSearch('Search products…', pState.q, (v) => { pState.q = v; drawList(); });
@@ -11698,19 +11713,28 @@ Projected Image UK"></textarea>
                refills Top products on every search and leaves it empty when
                fewer than two products earned; the layer takes an empty card
                out of the arrangement and puts it back when it fills. */
+            /* The totals beside Top products by revenue, one band above the
+               table (12 Oct 2026, R6); both refill as the search narrows. */
             const topHost = widget(el('div'), 'top-products', 'full', 'Top products by revenue');
-            const listWrap = el('div', 'card-bleed prod-rows'); pCard.append(listWrap);
+            const totalsW = widget(el('div', 'prod-totals'), 'totals', 'full', 'Totals');
+            const listWrap = el('div', 'card-bleed'); pCard.append(listWrap);
             const footHost = el('div', 'card-bleed'); pCard.append(footHost);
-            box.append(topHost, widget(pCard, 'catalog'));
+            box.append(totalsW, widget(pCard, 'catalog'));
+            const bandW = pairNodes(totalsW, topHost, 'top-products', 'Totals and top products by revenue', { flip: true });
             xbtn.onclick = () => { const { rows } = pComputeRows(); if (rows.length) exportCSV(rows); };
 
             function drawList() {
                 const { rows } = pComputeRows();
-                summary.innerHTML = '';
                 const totRev = rows.reduce((a, r) => a + r.revenue, 0), totUnits = rows.reduce((a, r) => a + r.units, 0);
                 const all = ((productList && productList.products) || []).length;
                 pDesc.textContent = rows.length + ' product' + (rows.length === 1 ? '' : 's');
-                const s2 = el('span'); s2.append(el('b', null, fmtMoney(totRev, cur)), document.createTextNode(' revenue · ' + totUnits.toLocaleString() + ' units · ' + pPeriodLabel())); summary.append(s2);
+                totalsW.innerHTML = '';
+                totalsW.append(metricsStrip([{ label: 'Revenue', value: fmtMoney(totRev, cur), note: pPeriodLabel() },
+                                             { label: 'Units', value: totUnits.toLocaleString(), note: pPeriodLabel() }]));
+                /* A search that matches nothing hides the band: no empty ranking
+                   and no totals of nothing over one line that says so. */
+                topHost.hidden = !rows.length;
+                if (bandW) bandW.hidden = !rows.length;
                 footHost.innerHTML = '';
                 const foot = el('div', 'tbl-foot');
                 foot.append(el('div', 'tbl-count', (rows.length > P_ROWS_MAX
@@ -11741,30 +11765,45 @@ Projected Image UK"></textarea>
                     topHost.append(tc);
                 }
                 listWrap.innerHTML = '';
-                if (!rows.length) { listWrap.append(el('div', 'empty', 'No products match these filters.')); return; }
+                /* One line and the way back when nothing matches (12 Oct 2026). */
+                const none = el('div', 'empty-state');
+                const clr = el('button', 'btn btn-sm'); clr.type = 'button'; clr.textContent = 'Clear search';
+                clr.onclick = () => { pState.q = ''; rerender(); };
+                const nt = el('div', 'empty-txt'); nt.append(el('p', 'empty-line', 'No products match these filters.'));
+                const ni = el('span', 'empty-ic'); ni.setAttribute('aria-hidden', 'true'); ni.append(ico(I.search));
+                none.append(ni, nt); if (pState.q) none.append(clr);
                 /* The whole catalogue arrives so search and filters reach every
                    product; the page draws the first P_ROWS_MAX of what matches,
-                   in the order chosen, and says when it stopped. */
-                rows.slice(0, P_ROWS_MAX).forEach(r => {
-                    const p = r.p, row = el('button', 'prod-row');
+                   in the order chosen, and says when it stopped. The catalogue is
+                   a table (12 Oct 2026): every fact in a headed column, the
+                   figures straight after the words, the row opening its plan. */
+                const cols = [{ head: 'Product' }, { head: 'Type' }, { head: 'Price', cls: 'num' }, { head: 'Stock' }, { head: 'Status' },
+                              { head: 'Units', cls: 'num' }, { head: 'Revenue', cls: 'num' }];
+                if (pState.compare) cols.push({ head: 'Change', cls: 'num' });
+                cols.push({ head: '', cls: 'act go' });   // the chevron: decoration, gone in two-line rows
+                const STOCK_DOT = { in: 'ok', low: 'warn', out: 'bad', untracked: 'off' };
+                listWrap.append(dtable(cols, rows.slice(0, P_ROWS_MAX).map(r => {
+                    const p = r.p;
                     const safeImg = (p.image && /^https:\/\//i.test(p.image)) ? p.image : null;
                     const th = document.createElement(safeImg ? 'img' : 'div'); th.className = 'prod-thumb';
                     if (safeImg) { th.src = safeImg; th.alt = ''; th.loading = 'lazy'; }
-                    const main = el('div', 'prod-main');
-                    const pn = el('div', 'prod-name', p.title || 'Untitled'); pn.title = p.title || '';
-                    main.append(pn);
-                    const bits = [P_STATUS[p.status] || cap(p.status || '')]; if (p.price) bits.push(fmtMoney(p.price, cur)); if (p.product_type) bits.push(p.product_type); if (p.vendor) bits.push(p.vendor);
-                    main.append(el('div', 'prod-sub', bits.filter(Boolean).join(' · ')));
-                    const chips = el('div', 'prod-chips');
-                    const c1 = el('div', 'prod-chip units'); c1.append(el('div', 'n', r.units.toLocaleString()), el('div', 'l', 'units'));
-                    const c2 = el('div', 'prod-chip rev'); c2.append(el('div', 'n', fmtMoney(r.revenue, cur)), el('div', 'l', 'revenue'));
-                    if (pState.compare && r.prevRevenue != null) { const d = pctDelta(r.revenue, r.prevRevenue); c2.append(el('span', 'cmp ' + d.cls, d.txt)); }
-                    chips.append(c1, c2);
-                    const go = el('span', 'prod-go'); go.innerHTML = I.chevLeft;
-                    row.append(th, main, chips, go);
-                    row.onclick = () => openProduct(p.id, p.title);
-                    listWrap.append(row);
-                });
+                    const open = () => openProduct(p.id, p.title);
+                    const nm = el('button', 'dt-link dt-name', p.title || 'Untitled'); nm.type = 'button'; nm.title = p.title || '';
+                    nm.onclick = (e) => { e.stopPropagation(); open(); };
+                    const main = document.createDocumentFragment(); main.append(th, nm);
+                    const st = el('span', 'dt-name');
+                    if (p.stock_status) st.append(el('span', 'dt-dot ' + (STOCK_DOT[p.stock_status] || '')), document.createTextNode(P_STOCK[p.stock_status] || cap(p.stock_status)));
+                    const status = p.status === 'active' ? (P_STATUS.active) : el('span', 'lbl-chip note', P_STATUS[p.status] || cap(p.status || ''));
+                    const cells = [main, p.product_type || '', p.price ? fmtMoney(p.price, cur) : '', st, status,
+                                   r.units.toLocaleString(), fmtMoney(r.revenue, cur)];
+                    if (pState.compare) {
+                        if (r.prevRevenue != null) { const d = pctDelta(r.revenue, r.prevRevenue); cells.push(el('span', 'cmp ' + d.cls, d.txt)); }
+                        else cells.push('');
+                    }
+                    const go = el('span', 'prod-go'); go.innerHTML = I.chevLeft; go.setAttribute('aria-hidden', 'true');
+                    cells.push(go);
+                    return { cells, onClick: open };
+                }), { cls: 'dt-products' + (pState.compare ? ' cmp' : ''), label: 'Products', empty: none }));
             }
             drawList();
             /* The PDF button followed only a tab switch, so after Load

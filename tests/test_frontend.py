@@ -2049,8 +2049,9 @@ def t_a_report_pairs_its_short_blocks():
     ok("el('div', 'wpair-in')" in fn and "widget(pair, id, 'full', label)" in fn, "a pair is one full-row widget holding the two")
     pin = CSS.split("\n        .wpair-in {")[1].split("}")[0] if "\n        .wpair-in {" in CSS else ""
     ok("grid-template-columns: minmax(0, 7fr) minmax(0, 5fr)" in pin and "align-items: start" in pin, "seven twelfths and five, each as tall as itself")
-    ok(".wpair { container: wpair / inline-size; }" in CSS and "@container wpair (max-width: 64rem) { .wpair-in { grid-template-columns: minmax(0, 1fr);" in CSS,
-       "and one above the other when the pair is narrow")
+    ok(".wpair { container: wpair / inline-size; }" in CSS
+       and "@container wpair (max-width: 64rem) { .wpair > .wpair-in, .wpair.even > .wpair-in, .wpair.flip > .wpair-in { grid-template-columns: minmax(0, 1fr);" in CSS,
+       "and one above the other when the pair is narrow, whatever its split: a plain .wpair-in rule lost to the 5:7 split, and Products' totals ran off a phone")
     ok("pairNodes(sumW, cs, 'summary'" in (fn_src("function summaryAndChanges(") if "function summaryAndChanges(" in SCRIPT else ""),
        "the summary sits beside What changed")
     ov = fn_src("function renderOverview(")
@@ -2084,6 +2085,15 @@ def t_a_report_pairs_its_short_blocks():
        "the radar's two lists sit side by side, the long text under each name")
     ok("@container radar (max-width: 64rem) { .radar-cols { grid-template-columns: minmax(0, 1fr); } }" in CSS
        and ".duo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));" in CSS, "and stack when narrow")
+    pl = fn_src("function renderProductList(")
+    ok("pairNodes(totalsW, topHost, 'top-products'" in pl and "{ flip: true }" in pl, "the totals sit beside Top products by revenue")
+    ok("dtable(" in pl and "'prod-row'" not in pl and "'dt-products'" in pl, "the catalogue is a table, not rows of chips")
+    for head in ("'Product'", "'Type'", "'Price'", "'Stock'", "'Status'", "'Units'", "'Revenue'"):
+        ok(head in pl, "with a column " + head)
+    ok("head: 'Vendor'" not in pl, "and no Vendor column while every product says Projected Image")
+    ok("'Clear search'" in pl and "topHost.hidden = !rows.length" in pl, "a search that matches nothing is one line with Clear search, and the empty ranking goes")
+    ok(".pfilters.show { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }" in CSS, "the filters run six across")
+    ok("r.onClick" in fn_src("function dtable("), "a table row can open what it lists")
     kt = fn_src("function keywordTable(")
     ok("i >= 15" in kt and "'Show all ' + n + ' keywords'" in kt, "fifteen keywords, then Show all")
     ok("noChannels: true" in ov, "Traffic by channel leaves the chart grid to sit beside Sales by sector")
@@ -3576,7 +3586,7 @@ def t_truncated_text_is_recoverable():
     carry title now, so hover recovers what the ellipsis ate."""
     ok("mfrom.title = t.from_name || t.from_email || ''" in SCRIPT, "mail sender")
     ok("subj.title = t.subject || ''" in SCRIPT, "mail subject")
-    ok("pn.title = p.title || ''" in SCRIPT, "product title")
+    ok("nm.title = p.title || ''" in SCRIPT, "product title")
     ok("name.title = f.name;" in SCRIPT, "file name")
 
 
@@ -7377,7 +7387,7 @@ def t_the_products_page_searches_everything_and_draws_a_bounded_list():
     matches, and says so, rather than a button row per product in a large
     catalogue on every filter change."""
     ok("const P_ROWS_MAX = 300;" in SCRIPT, "a bound on rows drawn")
-    ok("rows.slice(0, P_ROWS_MAX).forEach(r => {" in SCRIPT, "the list draws within it")
+    ok("rows.slice(0, P_ROWS_MAX).map(r => {" in SCRIPT, "the list draws within it")
     ok("'Showing ' + P_ROWS_MAX + ' of ' + rows.length + '. Search or filter for more.'" in SCRIPT,
        "and says when it stopped, in a line (the mix's copy plan, Products #6)")
 
