@@ -2502,8 +2502,16 @@
            turns each row into two lines (its main cell, then the rest after it
            in grey, its actions straight after them rather than out at the far
            edge) and drops its head, never a
-           sideways scroll. Each table picks the width its columns need: s at
-           40rem, m at 56rem, l at 72rem; a phone is under all three. */
+           sideways scroll. Each table picks the width its columns need: xs at
+           24rem (a three-column table), s at 40rem, m at 56rem, l at 72rem. */
+        @container dt (max-width: 24rem) {
+            .dt-xs > .dtable { display: block; }
+            .dt-xs > .dtable > .dt-head { display: none; }
+            .dt-xs > .dtable > .dt-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--sp-3); row-gap: var(--sp-1); }
+            .dt-xs > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; order: -1; }
+            .dt-xs > .dtable > .dt-row > .dt-c:not(.dt-main, .act) { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+            .dt-xs > .dtable > .dt-row > .dt-c:empty { display: none; }
+        }
         @container dt (max-width: 40rem) {
             .dt-s > .dtable { display: block; }
             .dt-s > .dtable > .dt-head { display: none; }
@@ -5768,6 +5776,9 @@
         /* Team's cards are spaced like every page's: the Work tab's three sat
            edge to edge in plain divs. */
         #team-content .card + .card { margin-top: var(--page-rhythm); }
+        /* Work's pair (12 Oct 2026): its two heads share a line, and the sessions keep the rhythm under it. */
+        #team-content .wpair-in > .card { margin-top: 0; }
+        #team-content .wpair + .card { margin-top: var(--page-rhythm); }
         /* A 12px time beside a 14px sentence shares its baseline. */
         #team-content .tm-row:not(:has(> .files-acts)) { align-items: baseline; }
         /* An activity line wraps rather than ending in '...' with no way to
@@ -5810,8 +5821,46 @@
         /* Stacked on a phone, the two fields start at one x; side by side each
            label keeps its own width. */
         @media (max-width: 640px) { .tm-date > span { min-width: var(--sp-7); } }
-        .tm-panel { display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-4);
+        .tm-panel { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-4) var(--sp-8); align-items: start; padding: var(--sp-4);
             background: var(--surface-secondary); border-top: var(--bw-hairline) solid var(--border-default); }
+        /* Under its row in the People table (12 Oct 2026): the open row's wash
+           is its ground, and one Save runs under all three groups. */
+        .dtable > .dt-detail > .tm-panel { padding: 0; background: none; border-top: 0; }
+        .tm-panel > .tm-panel-save { grid-column: 1 / -1; }
+        @media (max-width: 900px) { .tm-panel { grid-template-columns: minmax(0, 1fr); } }
+        /* People: the person over their username, then the facts under heads,
+           the spare width shared between the columns. Their floors are fixed:
+           an opened Tabs panel spans every column, and a content floor handed
+           its whole width to the flexible ones. */
+        .dt-people { --dt-cols: minmax(12rem, 2fr) minmax(7.5rem, 1fr) repeat(4, minmax(5rem, 1fr)) minmax(7rem, 1fr) max-content; }
+        .dmenu-item.danger, .dmenu-item.danger .ic { color: var(--error); }
+        /* Team, Work (12 Oct 2026): the clock and the hours at their natural
+           widths side by side, the sessions under heads with a day line. */
+        .dt-clock { --dt-cols: repeat(4, max-content); }
+        .tm-none { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-tertiary); }
+        .tm-hours .ktable { width: auto; }
+        .tm-export { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-2); }
+        .dt-sessions { --dt-cols: max-content max-content max-content max-content max-content max-content minmax(10rem, 1fr); }
+        .tm-dayscale { display: flex; justify-content: space-between; width: 100%; font-variant-numeric: tabular-nums; }
+        .tm-daytrack { position: relative; display: block; width: 100%; height: var(--sp-2); border-radius: var(--radius-full); background: var(--surface-tertiary); }
+        .tm-daytrack > i { position: absolute; top: 0; bottom: 0; border-radius: var(--radius-full); background: var(--fill-mark); }
+        /* Team, Activity (12 Oct 2026): the feed takes the flexible track and
+           the Who and Area lists sit in a 248px column beside it. */
+        .tm-feedwrap { display: grid; grid-template-columns: minmax(0, 1fr) 15.5rem; gap: var(--sp-8); align-items: start; }
+        @media (max-width: 900px) { .tm-feedwrap { grid-template-columns: minmax(0, 1fr); } .tm-feedwrap > .tm-filters { order: -1; } }
+        .dt-feed { --dt-cols: max-content max-content max-content minmax(0, 1fr); }
+        .tm-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tm-filters { display: flex; flex-direction: column; gap: var(--sp-1); }
+        .tm-filter-h { margin-top: var(--sp-3); font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary); }
+        .tm-filter-h:first-child { margin-top: 0; }
+        .tm-filter-list { display: flex; flex-direction: column; }
+        .tm-filter { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: var(--control-h); padding: 0 var(--sp-2);
+            border: 0; border-radius: var(--radius-control); background: none; font: inherit; color: var(--text-primary); text-align: left; cursor: pointer; }
+        @media (hover: hover) { .tm-filter:hover { background: var(--surface-tertiary); } }
+        .tm-filter.on { background: var(--action-selected); box-shadow: inset var(--bw-strong) 0 0 var(--border-selected); }
+        .tm-filter.none { color: var(--text-tertiary); }
+        .tm-filter-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tm-filter > .cnt { color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
         .tm-group { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
         .tm-legend { display: flex; align-items: center; gap: var(--sp-3); padding: 0; margin-bottom: var(--sp-2);
             font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); }
@@ -7491,7 +7540,7 @@ Projected Image UK"></textarea>
            CSS (.dt-<name> { --dt-cols }). rows: [{ cells, cls }] with the cells
            in column order, each a Node or a string. opts.empty is what an empty
            list shows instead: its one line, no head over nothing. opts.stop is
-           the width its rows turn two-line at: s, m (the default) or l.
+           the width its rows turn two-line at: xs, s, m (the default) or l.
            opts.main is the column whose cell leads a two-line row (the first
            unless said). */
         function dtable(cols, rows, opts) {
@@ -8593,7 +8642,7 @@ Projected Image UK"></textarea>
             (items || []).filter(Boolean).forEach(it => {
                 if (it === '-') { panel.append(el('div', 'dmenu-sep')); return; }
                 if (it.heading) { panel.append(el('div', 'dmenu-label', it.label)); return; }
-                const b = el('button', 'dmenu-item');
+                const b = el('button', 'dmenu-item' + (it.danger ? ' danger' : ''));
                 b.type = 'button';
                 /* A choice that is on or off says so, not by a tick alone. */
                 if (typeof it.checked === 'boolean') { b.setAttribute('role', 'menuitemcheckbox'); b.setAttribute('aria-checked', String(it.checked)); }
@@ -30803,7 +30852,7 @@ Projected Image UK"></textarea>
         }
         const TEAM_AREAS = [['production', 'Production'], ['dispatch', 'Dispatch'], ['files', 'Files'],
                             ['crm', 'Sales desk'], ['chase', 'Chasing'], ['sizes', 'Size list'],
-                            ['settings', 'Settings'], ['team', 'Team'], ['mcp', 'Desktop AI']];
+                            ['settings', 'Settings'], ['team', 'Team'], ['mcp', 'Desktop AI'], ['auth', 'Sign-in']];
         function renderTeam() {
             const box = $('team-content'); box.innerHTML = '';
             const d = teamCache;
@@ -30842,6 +30891,167 @@ Projected Image UK"></textarea>
             modal.append(head, body, foot); overlay.append(modal); document.body.append(overlay);
             inp.onclick = () => inp.select();
         }
+        /* An account's Tabs panel (12 Oct 2026, WS-15): what they can open,
+           what they may do beyond that, and how they appear in the Inbox, side
+           by side under their row. The tabs are in the sidebar's order, under
+           its own group names; the colour still saves as it is picked. */
+        function teamTabsPanel(u, manageable) {
+        const panel = el('div', 'tm-panel');
+        const NAMES = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords',
+            products: 'Products', customers: 'Customers', liability: 'Liability',
+            crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', labels: 'Production Manager',
+            memory: 'Memory', skills: 'Skills', chat: 'Chat',
+            recon: 'Reconciliation', forecast: 'Forecast', connector: 'Xero sync',
+            sizes: 'Size list' };
+        const GROUPS = [['Dashboards', ['overview', 'seo', 'keywords', 'products', 'customers']],
+                        ['Finance', ['liability', 'recon', 'forecast', 'connector']],
+                        ['Operations', ['labels', 'sizes', 'crm', 'loans', 'mail', 'files']],
+                        ['Workspace', ['memory', 'skills', 'chat']]];
+        const chosen = new Set(Array.isArray(u.tabs) ? u.tabs : DEFAULT_TABS);
+        const boxes = [];
+        const open = el('fieldset', 'tm-group');
+        const lg = el('legend', 'tm-legend');
+        lg.append(document.createTextNode('Can open'));
+        const all = el('button', 'btn btn-sm', 'Tick all');
+        all.type = 'button';
+        all.onclick = () => boxes.forEach(b => { b.checked = true; });
+        lg.append(all);
+        open.append(lg);
+        const listed = new Set();
+        GROUPS.forEach(([gname, keys]) => {
+            const ks = keys.filter(k => TAB_KEYS.indexOf(k) >= 0);
+            if (!ks.length) return;
+            const row = el('div', 'tm-picks');
+            row.append(el('span', 'tm-sub', gname));
+            ks.forEach(k => {
+                listed.add(k);
+                const lab = el('label', 'tm-tabpick');
+                const cb = document.createElement('input');
+                cb.type = 'checkbox'; cb.checked = chosen.has(k); cb.dataset.k = k;
+                boxes.push(cb);
+                lab.append(cb, document.createTextNode(NAMES[k] || k));
+                row.append(lab);
+            });
+            open.append(row);
+        });
+        /* A tab added later and not yet in a group still gets its box. */
+        const rest = TAB_KEYS.filter(k => !listed.has(k));
+        if (rest.length) {
+            const row = el('div', 'tm-picks');
+            row.append(el('span', 'tm-sub', 'Other'));
+            rest.forEach(k => {
+                const lab = el('label', 'tm-tabpick');
+                const cb = document.createElement('input');
+                cb.type = 'checkbox'; cb.checked = chosen.has(k); cb.dataset.k = k;
+                boxes.push(cb);
+                lab.append(cb, document.createTextNode(NAMES[k] || k));
+                row.append(lab);
+            });
+            open.append(row);
+        }
+        open.setAttribute('aria-label', 'Tabs ' + (u.name || 'this account') + ' can open');
+        panel.append(open);
+        /* A capability, not a tab: seeing Production Manager is not
+           the same as being allowed to decide the glass an order is
+           cut from. Admins hold it by rank, so they get a statement
+           rather than a switch that would not actually revoke it. */
+        const perm = el('fieldset', 'tm-group');
+        perm.append(el('legend', 'tm-legend', 'Permissions'));
+        let sizeBox = null;
+        if (u.sizes_by_rank) {
+            perm.append(el('p', 'tm-note', 'Can edit the size list (every admin can).'));
+        } else {
+            const sl = el('label', 'tm-tabpick');
+            sizeBox = document.createElement('input');
+            sizeBox.type = 'checkbox'; sizeBox.checked = !!u.can_sizes;
+            sl.append(sizeBox, document.createTextNode('Can edit the size list'));
+            perm.append(sl);
+        }
+        /* The other capability that reaches outside the app, and
+           the heavier of the two: this one talks to customers in
+           the company's name. Same rank rule as the size list. */
+        let sendBox = null;
+        if (u.send_by_rank) {
+            perm.append(el('p', 'tm-note', 'Can send email from the Inbox (every admin can).'));
+        } else {
+            const el2 = el('label', 'tm-tabpick');
+            sendBox = document.createElement('input');
+            sendBox.type = 'checkbox'; sendBox.checked = !!u.can_send;
+            el2.append(sendBox, document.createTextNode('Can send email from the Inbox'));
+            perm.append(el2);
+        }
+        panel.append(perm);
+        /* How they appear in the Inbox: the colour saves as it is
+           picked, the sign-off with its own Save. The master's own
+           colour is editable too: they appear in the Inbox like
+           everyone else. */
+        const inbox = el('fieldset', 'tm-group');
+        inbox.append(el('legend', 'tm-legend', 'Inbox'));
+        const cl = el('label', 'pfield');
+        cl.append(el('span', null, 'Colour'));
+        const csel = el('select', 'psel tm-colour');
+        TEAM_TINTS.forEach(t => {
+            const o = el('option', null, t.charAt(0).toUpperCase() + t.slice(1));
+            o.value = t; if (t === u.colour) o.selected = true;
+            csel.append(o);
+        });
+        csel.onchange = async () => {
+            try { await api('/api/team/user',
+                            { op: 'colour', id: u.id, colour: csel.value }); }
+            catch (e) { toastError(e.message); return; }
+            toastOk('Colour changed.');
+            loadTeam();
+        };
+        cl.append(csel); inbox.append(cl);
+        let sta = null;
+        if (manageable) {
+            const sw = el('div');
+            const sl2 = el('label', 'pfield');
+            sl2.append(el('span', null, 'Sign-off on their email'));
+            sta = document.createElement('textarea');
+            sta.className = 'mail-draft-text'; sta.rows = 3;
+            sta.value = u.sign_off || '';
+            sta.setAttribute('aria-label',
+                'Sign-off for ' + (u.name || 'this account'));
+            sl2.append(sta); sw.append(sl2);
+            inbox.append(sw);
+        }
+        panel.append(inbox);
+        /* One Save under all three (12 Oct 2026, WS-15): the tabs, the two
+           permissions and the sign-off together. There were two Saves, one
+           between the groups. */
+        const save = el('button', 'btn btn-primary btn-sm', 'Save'); save.type = 'button';
+        save.onclick = async () => {
+            save.disabled = true;
+            const picked = boxes.filter(b => b.checked).map(b => b.dataset.k);
+            try {
+                /* Always the explicit list. This used to collapse a fully
+                   ticked panel to null, meaning "no list of its own", which the
+                   server now reads as the DEFAULT tabs. Since Reconciliation is
+                   not in the default set, ticking every box and saving withheld
+                   the one tab the admin had just ticked, and the activity
+                   ledger recorded the opposite. */
+                await api('/api/team/user', { op: 'tabs', id: u.id, tabs: picked });
+                /* Only when it actually changed. Sending it every time would
+                   write a grant into the activity ledger that nobody made. */
+                if (sizeBox && sizeBox.checked !== !!u.can_sizes) {
+                    await api('/api/team/user', { op: 'sizes', id: u.id, can_sizes: sizeBox.checked });
+                }
+                if (sendBox && sendBox.checked !== !!u.can_send) {
+                    await api('/api/team/user', { op: 'send', id: u.id, can_send: sendBox.checked });
+                }
+                if (sta && sta.value !== (u.sign_off || '')) {
+                    await api('/api/team/user', { op: 'sign_off', id: u.id, text: sta.value });
+                }
+                teamTabsOpen = '';
+            } catch (e) { toastError(e.message); save.disabled = false; return; }
+            toastOk('Saved.');
+            loadTeam();
+        };
+        const saveRow = el('div', 'act-row tm-panel-save'); saveRow.append(save);
+        panel.append(saveRow);
+        return panel;
+        }
         function renderTeamPeople(host) {
             const d = teamCache;
             const lvl = { master: 3, admin: 2, member: 1 };
@@ -30852,7 +31062,8 @@ Projected Image UK"></textarea>
             const head = el('div', 'card-head');
             /* The security note, word for word, behind the title (copy plan,
                Team #2 and #3). */
-            const pt = el('h3', 'card-title', 'People (' + d.users.length + ')');
+            const pt = el('h3', 'card-title', 'People');
+            pt.append(el('span', 'card-n', String(d.users.length)));
             const ptInfo = infoButton('About accounts', { title: 'People', body:
                 'Accounts belong to the app, not Shopify. New accounts get a starter password '
                 + 'shown once; everyone chooses their own on first sign-in. Tabs controls which '
@@ -30862,9 +31073,11 @@ Projected Image UK"></textarea>
             const act = el('div', 'card-act');
             const add = el('button', 'btn btn-sm btn-primary'); add.append(ico(I.plus), document.createTextNode('New account'));
             add.onclick = () => { teamNewOpen = !teamNewOpen; renderTeam(); };
+            head.append(el('p', 'card-desc', 'Made, dispatched, files and sales are the last 30 days.'));
             act.append(add); head.append(act); card.append(head);
-            const list = el('div', 'files-list card-bleed tm-list');
+            /* The new account's row, unchanged in content, over the table. */
             if (teamNewOpen) {
+                const list = el('div', 'files-list card-bleed tm-list');
                 const row = el('div', 'files-row tm-row tm-new');
                 const inName = document.createElement('input');
                 inName.className = 'tm-field'; inName.placeholder = 'Name'; inName.setAttribute('aria-label', 'Name');
@@ -30887,64 +31100,75 @@ Projected Image UK"></textarea>
                 [inName, inUser].forEach(i => i.onkeydown = (e) => { if (e.key === 'Enter') go.click(); });
                 row.append(inName, inUser, roleSel, go);
                 list.append(row);
+                card.append(list);
             }
-            d.users.forEach(u => {
-                const row = el('div', 'files-row tm-row');
-                const mine = u.id === d.me;
-                const theirLevel = lvl[u.role] || 1;
-                const manageable = u.role !== 'master' && (myLevel >= 3 || myLevel > theirLevel);
-                const nameBtn = el('button', 'files-name');
-                nameBtn.textContent = u.name + (mine ? ' (you)' : '');
-                nameBtn.title = 'Rename';
-                if (mine || manageable) nameBtn.onclick = () => {
-                    const inp = document.createElement('input');
-                    inp.className = 'files-rename'; inp.value = u.name;
-                    let done = false;
-                    const finish = async (commit) => {
-                        if (done) return; done = true;
-                        const v = inp.value.trim();
-                        if (commit && v && v !== u.name) {
-                            try { await api('/api/team/user', { op: 'rename', id: u.id, name: v }); }
+            /* One table (12 Oct 2026, WS-13): the person over their username,
+               the role, the last 30 days' counts under heads with zeros in grey,
+               the last login, then Tabs and a menu holding the admin actions
+               (WS-14). The facts were one sentence pushed against four buttons. */
+            const nf = (n) => n ? String(n) : el('span', 'dt-muted', '0');
+            card.append(dtable([{ head: 'Person', cls: 'stack' }, { head: 'Role' }, { head: 'Made', cls: 'num' }, { head: 'Dispatched', cls: 'num' }, { head: 'Files', cls: 'num' }, { head: 'Sales', cls: 'num' }, { head: 'Last login' },
+                                { head: '', cls: 'act' }],
+                d.users.map(u => {
+                    const mine = u.id === d.me;
+                    const theirLevel = lvl[u.role] || 1;
+                    const manageable = u.role !== 'master' && (myLevel >= 3 || myLevel > theirLevel);
+                    const who = document.createDocumentFragment();
+                    const nameLine = el('span', 'dt-name');
+                    if (mine || manageable) {
+                        const nameBtn = el('button', 'dt-link', u.name + (mine ? ' (you)' : '')); nameBtn.type = 'button';
+                        nameBtn.title = 'Rename';
+                        nameBtn.onclick = () => {
+                            const inp = document.createElement('input');
+                            inp.className = 'files-rename'; inp.value = u.name;
+                            let done = false;
+                            const finish = async (commit) => {
+                                if (done) return; done = true;
+                                const v = inp.value.trim();
+                                if (commit && v && v !== u.name) {
+                                    try { await api('/api/team/user', { op: 'rename', id: u.id, name: v }); }
+                                    catch (e) { toastError(e.message); }
+                                }
+                                loadTeam();
+                            };
+                            inp.onkeydown = (e) => { if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); };
+                            inp.onblur = () => finish(true);
+                            nameBtn.replaceWith(inp);
+                            inp.focus(); inp.select();
+                        };
+                        nameLine.append(nameBtn);
+                    } else nameLine.append(document.createTextNode(u.name));
+                    who.append(nameLine);
+                    const sub = el('span', 'dt-sub', u.username);
+                    who.append(sub);
+                    if (u.active === false) who.append(el('span', 'lbl-chip note', 'Switched off'));
+                    let roleCell;
+                    if (u.role === 'master') roleCell = el('span', 'lbl-chip note', 'Master admin');
+                    else {
+                        const role = el('select', 'lbl-size'); role.setAttribute('aria-label', 'Role for ' + (u.name || u.username));
+                        [['admin', 'Admin'], ['member', 'Member'], ['parttime', 'Part-time']].forEach(([v, lab]) => {
+                            const o = el('option', null, lab); o.value = v;
+                            if (u.role === v) o.selected = true; role.append(o);
+                        });
+                        role.disabled = myLevel < 3;
+                        role.onchange = async () => {
+                            try { await api('/api/team/user', { op: 'role', id: u.id, role: role.value }); }
                             catch (e) { toastError(e.message); }
-                        }
-                        loadTeam();
-                    };
-                    inp.onkeydown = (e) => { if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); };
-                    inp.onblur = () => finish(true);
-                    row.replaceChild(inp, nameBtn);
-                    inp.focus(); inp.select();
-                }; else nameBtn.classList.add('still');
-                row.append(nameBtn);
-                const c = (d.counts || {})[u.id] || {};
-                const bits = [['made', c.made], ['dispatched', c.dispatched], ['files', c.files],
-                              ['sales', c.crm]].filter(([, n]) => n > 0).map(([lab, n]) => n + ' ' + lab);
-                row.append(el('span', 'files-meta',
-                    u.username + ' · '
-                    + (bits.length ? bits.join(' · ') + ' in 30 days · ' : '')
-                    + (u.last_login_at ? 'last login ' + fmtDate(u.last_login_at) : 'never logged in')));
-                const acts = el('div', 'files-acts'); acts.style.opacity = '1';
-                if (u.role === 'master') {
-                    /* A control-height slot where the others have a role
-                       select, so this row is as tall as theirs. The meta
-                       lines end together because the list shares one set of
-                       columns (.tm-list), not because this slot is wide. */
-                    acts.append(el('span', 'tm-role-fixed', 'Master admin'));
-                } else {
-                    const role = el('select', 'lbl-size'); role.setAttribute('aria-label', 'Role for ' + (u.name || u.username));
-                    [['admin', 'Admin'], ['member', 'Member'], ['parttime', 'Part-time']].forEach(([v, lab]) => {
-                        const o = el('option', null, lab); o.value = v;
-                        if (u.role === v) o.selected = true; role.append(o);
-                    });
-                    role.disabled = myLevel < 3;
-                    role.onchange = async () => {
-                        try { await api('/api/team/user', { op: 'role', id: u.id, role: role.value }); }
-                        catch (e) { toastError(e.message); }
-                        loadTeam();
-                    };
-                    acts.append(role);
+                            loadTeam();
+                        };
+                        roleCell = role;
+                    }
+                    const c = (d.counts || {})[u.id] || {};
+                    const acts = document.createDocumentFragment();
                     if (manageable) {
-                        const rp = el('button', 'btn', 'Reset password');
-                        rp.onclick = async () => {
+                        const tb = el('button', 'btn btn-sm' + (teamTabsOpen === u.id ? ' on' : ''), 'Tabs'); tb.type = 'button';
+                        tb.setAttribute('aria-pressed', String(teamTabsOpen === u.id));
+                        tb.onclick = () => { teamTabsOpen = teamTabsOpen === u.id ? '' : u.id; renderTeam(); };
+                        acts.append(tb);
+                    }
+                    const items = [];
+                    if (manageable) {
+                        items.push({ label: 'Reset password', icon: I.refresh, onClick: async () => {
                             if (!(await uiConfirm('Reset ' + u.name + '\'s password? Their current '
                                 + 'one stops working immediately.', { title: 'Reset ' + u.name + '\'s password', okText: 'Reset password' }))) return;
                             try {
@@ -30952,224 +31176,41 @@ Projected Image UK"></textarea>
                                 showStarterPw(u.name, r.starter_password);
                             } catch (e) { toastError(e.message); }
                             loadTeam();
-                        };
-                        const off = el('button', 'btn', u.active === false ? 'Restore' : 'Switch off');
-                        off.onclick = async () => {
+                        } });
+                        if (u.mfa) items.push({ label: 'Reset 2-step', icon: I.shield, onClick: async () => {
+                            if (!(await uiConfirm('Reset ' + u.name + '\'s two-step sign-in? '
+                                + 'Their password alone signs them in until they set it up again.', { title: 'Reset two-step sign-in', okText: 'Reset two-step' }))) return;
+                            try { await api('/api/team/user', { op: 'reset_mfa', id: u.id }); }
+                            catch (e) { toastError(e.message); }
+                            loadTeam();
+                        } });
+                        items.push({ label: u.active === false ? 'Restore' : 'Switch off', icon: u.active === false ? I.check : I.x, onClick: async () => {
                             const on = u.active === false;
                             if (!on && !(await uiConfirm('Switch off ' + u.name + '\'s access? They '
                                 + 'are signed out immediately and cannot sign back in until restored.', { title: 'Switch off ' + u.name, okText: 'Switch off' }))) return;
                             try { await api('/api/team/user', { op: 'active', id: u.id, active: on }); }
                             catch (e) { toastError(e.message); }
                             loadTeam();
-                        };
-                        acts.append(rp);
-                        if (u.mfa) {
-                            const rm = el('button', 'btn', 'Reset 2-step');
-                            rm.onclick = async () => {
-                                if (!(await uiConfirm('Reset ' + u.name + '\'s two-step sign-in? '
-                                    + 'Their password alone signs them in until they set it up again.', { title: 'Reset two-step sign-in', okText: 'Reset two-step' }))) return;
-                                try { await api('/api/team/user', { op: 'reset_mfa', id: u.id }); }
-                                catch (e) { toastError(e.message); }
-                                loadTeam();
-                            };
-                            acts.append(rm);
-                        }
-                        acts.append(off);
+                        } });
                     }
-                    if (manageable) {
-                        const tb = el('button', 'btn', 'Tabs');
-                        tb.onclick = () => { teamTabsOpen = teamTabsOpen === u.id ? '' : u.id; renderTeam(); };
-                        acts.append(tb);
-                    }
-                    if (myLevel >= 3) {
-                        const del = el('button', 'icon-btn'); del.innerHTML = I.trash; del.title = 'Delete account';
-                        del.onclick = async () => {
-                            if (!(await uiConfirm('Delete ' + u.name + '\'s account for good? Their '
-                                + 'history keeps their name, but they can never sign in again.',
-                                { title: 'Delete ' + u.name + '\'s account', okText: 'Delete the account' }))) return;
-                            try { await api('/api/team/user', { op: 'delete', id: u.id }); }
-                            catch (e) { toastError(e.message); }
-                            loadTeam();
-                        };
-                        acts.append(del);
-                    }
-                }
-                row.append(acts);
-                if (u.active === false) { row.style.opacity = '.55'; }
-                list.append(row);
-                if (teamTabsOpen === u.id && u.role !== 'master') {
-                    /* Three labelled groups: what they can open, what they may
-                       do beyond that, and how they appear in the Inbox. It was
-                       one wrapping row of inline-styled pieces, a 1,360px select
-                       for a colour, and Everything and Save 380px below the
-                       boxes they act on. The tabs are in the sidebar's order,
-                       under its own group names. */
-                    const panel = el('div', 'tm-panel');
-                    const NAMES = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords',
-                        products: 'Products', customers: 'Customers', liability: 'Liability',
-                        crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', labels: 'Production Manager',
-                        memory: 'Memory', skills: 'Skills', chat: 'Chat',
-                        recon: 'Reconciliation', forecast: 'Forecast', connector: 'Xero sync',
-                        sizes: 'Size list' };
-                    const GROUPS = [['Dashboards', ['overview', 'seo', 'keywords', 'products', 'customers']],
-                                    ['Finance', ['liability', 'recon', 'forecast', 'connector']],
-                                    ['Operations', ['labels', 'sizes', 'crm', 'loans', 'mail', 'files']],
-                                    ['Workspace', ['memory', 'skills', 'chat']]];
-                    const chosen = new Set(Array.isArray(u.tabs) ? u.tabs : DEFAULT_TABS);
-                    const boxes = [];
-                    const open = el('fieldset', 'tm-group');
-                    const lg = el('legend', 'tm-legend');
-                    lg.append(document.createTextNode('Can open'));
-                    const all = el('button', 'btn btn-sm', 'Tick all');
-                    all.type = 'button';
-                    all.onclick = () => boxes.forEach(b => { b.checked = true; });
-                    lg.append(all);
-                    open.append(lg);
-                    const listed = new Set();
-                    GROUPS.forEach(([gname, keys]) => {
-                        const ks = keys.filter(k => TAB_KEYS.indexOf(k) >= 0);
-                        if (!ks.length) return;
-                        const row = el('div', 'tm-picks');
-                        row.append(el('span', 'tm-sub', gname));
-                        ks.forEach(k => {
-                            listed.add(k);
-                            const lab = el('label', 'tm-tabpick');
-                            const cb = document.createElement('input');
-                            cb.type = 'checkbox'; cb.checked = chosen.has(k); cb.dataset.k = k;
-                            boxes.push(cb);
-                            lab.append(cb, document.createTextNode(NAMES[k] || k));
-                            row.append(lab);
-                        });
-                        open.append(row);
-                    });
-                    /* A tab added later and not yet in a group still gets its box. */
-                    const rest = TAB_KEYS.filter(k => !listed.has(k));
-                    if (rest.length) {
-                        const row = el('div', 'tm-picks');
-                        row.append(el('span', 'tm-sub', 'Other'));
-                        rest.forEach(k => {
-                            const lab = el('label', 'tm-tabpick');
-                            const cb = document.createElement('input');
-                            cb.type = 'checkbox'; cb.checked = chosen.has(k); cb.dataset.k = k;
-                            boxes.push(cb);
-                            lab.append(cb, document.createTextNode(NAMES[k] || k));
-                            row.append(lab);
-                        });
-                        open.append(row);
-                    }
-                    open.setAttribute('aria-label', 'Tabs ' + (u.name || 'this account') + ' can open');
-                    panel.append(open);
-                    /* A capability, not a tab: seeing Production Manager is not
-                       the same as being allowed to decide the glass an order is
-                       cut from. Admins hold it by rank, so they get a statement
-                       rather than a switch that would not actually revoke it. */
-                    const perm = el('fieldset', 'tm-group');
-                    perm.append(el('legend', 'tm-legend', 'Permissions'));
-                    let sizeBox = null;
-                    if (u.sizes_by_rank) {
-                        perm.append(el('p', 'tm-note', 'Can edit the size list (every admin can).'));
-                    } else {
-                        const sl = el('label', 'tm-tabpick');
-                        sizeBox = document.createElement('input');
-                        sizeBox.type = 'checkbox'; sizeBox.checked = !!u.can_sizes;
-                        sl.append(sizeBox, document.createTextNode('Can edit the size list'));
-                        perm.append(sl);
-                    }
-                    /* The other capability that reaches outside the app, and
-                       the heavier of the two: this one talks to customers in
-                       the company's name. Same rank rule as the size list. */
-                    let sendBox = null;
-                    if (u.send_by_rank) {
-                        perm.append(el('p', 'tm-note', 'Can send email from the Inbox (every admin can).'));
-                    } else {
-                        const el2 = el('label', 'tm-tabpick');
-                        sendBox = document.createElement('input');
-                        sendBox.type = 'checkbox'; sendBox.checked = !!u.can_send;
-                        el2.append(sendBox, document.createTextNode('Can send email from the Inbox'));
-                        perm.append(el2);
-                    }
-                    panel.append(perm);
-                    const save = el('button', 'btn btn-primary btn-sm', 'Save access');
-                    save.onclick = async () => {
-                        save.disabled = true;
-                        const picked = boxes.filter(b => b.checked).map(b => b.dataset.k);
-                        try {
-                            /* Always the explicit list. This used to collapse a
-                               fully ticked panel to null, meaning "no list of
-                               its own", which the server now reads as the
-                               DEFAULT tabs. Since Reconciliation is not in the
-                               default set, ticking every box and saving
-                               withheld the one tab the admin had just ticked,
-                               and the activity ledger recorded the opposite. */
-                            await api('/api/team/user', { op: 'tabs', id: u.id, tabs: picked });
-                            /* Only when it actually changed. Sending it every
-                               time would write a grant into the activity ledger
-                               that nobody made. */
-                            if (sizeBox && sizeBox.checked !== !!u.can_sizes) {
-                                await api('/api/team/user',
-                                    { op: 'sizes', id: u.id, can_sizes: sizeBox.checked });
-                            }
-                            if (sendBox && sendBox.checked !== !!u.can_send) {
-                                await api('/api/team/user',
-                                    { op: 'send', id: u.id, can_send: sendBox.checked });
-                            }
-                            teamTabsOpen = '';
-                        } catch (e) { toastError(e.message); save.disabled = false; return; }
+                    if (myLevel >= 3 && u.role !== 'master') items.push({ label: 'Delete account', icon: I.trash, danger: true, onClick: async () => {
+                        if (!(await uiConfirm('Delete ' + u.name + '\'s account for good? Their '
+                            + 'history keeps their name, but they can never sign in again.',
+                            { title: 'Delete ' + u.name + '\'s account', okText: 'Delete the account' }))) return;
+                        try { await api('/api/team/user', { op: 'delete', id: u.id }); }
+                        catch (e) { toastError(e.message); }
                         loadTeam();
-                    };
-                    const saveRow = el('div', 'act-row'); saveRow.append(save);
-                    panel.append(saveRow);
-                    /* How they appear in the Inbox: the colour saves as it is
-                       picked, the sign-off with its own Save. The master's own
-                       colour is editable too: they appear in the Inbox like
-                       everyone else. */
-                    const inbox = el('fieldset', 'tm-group');
-                    inbox.append(el('legend', 'tm-legend', 'Inbox'));
-                    const cl = el('label', 'pfield');
-                    cl.append(el('span', null, 'Colour'));
-                    const csel = el('select', 'psel tm-colour');
-                    TEAM_TINTS.forEach(t => {
-                        const o = el('option', null, t.charAt(0).toUpperCase() + t.slice(1));
-                        o.value = t; if (t === u.colour) o.selected = true;
-                        csel.append(o);
-                    });
-                    csel.onchange = async () => {
-                        try { await api('/api/team/user',
-                                        { op: 'colour', id: u.id, colour: csel.value }); }
-                        catch (e) { toastError(e.message); return; }
-                        toastOk('Colour changed.');
-                        loadTeam();
-                    };
-                    cl.append(csel); inbox.append(cl);
-                    if (manageable) {
-                        const sw = el('div');
-                        const sl2 = el('label', 'pfield');
-                        sl2.append(el('span', null, 'Sign-off on their email'));
-                        const sta = document.createElement('textarea');
-                        sta.className = 'mail-draft-text'; sta.rows = 3;
-                        sta.value = u.sign_off || '';
-                        sta.setAttribute('aria-label',
-                            'Sign-off for ' + (u.name || 'this account'));
-                        sl2.append(sta); sw.append(sl2);
-                        const ssave = el('button', 'btn btn-sm', 'Save sign-off');
-                        ssave.onclick = async () => {
-                            ssave.disabled = true;
-                            try {
-                                await api('/api/team/user',
-                                          { op: 'sign_off', id: u.id, text: sta.value });
-                            } catch (e) { toastError(e.message); ssave.disabled = false; return; }
-                            toastOk('Sign-off saved.');
-                            ssave.disabled = false;
-                            loadTeam();
-                        };
-                        const srow = el('div', 'act-row tm-sign-save'); srow.append(ssave); sw.append(srow);
-                        inbox.append(sw);
+                    } });
+                    if (items.length) {
+                        const more = el('button', 'icon-btn'); more.type = 'button'; more.innerHTML = I.moreH;
+                        more.setAttribute('aria-label', 'More for ' + (u.name || u.username)); more.setAttribute('aria-haspopup', 'menu');
+                        more.onclick = (e) => { e.stopPropagation(); dropMenu(more, items); };
+                        acts.append(more);
                     }
-                    panel.append(inbox);
-                    list.append(panel);
-                }
-            });
-            card.append(list);
+                    return { cls: u.active === false ? 'settled' : '', cells: [who, roleCell, nf(c.made), nf(c.dispatched), nf(c.files), nf(c.crm),
+                                u.last_login_at ? fmtDate(u.last_login_at) : el('span', 'dt-muted', 'Never logged in'), acts],
+                             after: teamTabsOpen === u.id && u.role !== 'master' ? teamTabsPanel(u, manageable) : null };
+                }), { cls: 'dt-people', label: 'People', stop: 'l' }));
             host.append(card);
         }
         function renderTeamWork(host) {
@@ -31195,31 +31236,41 @@ Projected Image UK"></textarea>
                     if (act) { const a2 = el('div', 'card-act'); a2.append(act); h.append(a2); }
                     c.append(h); wrap.append(c); return c;
                 };
+                const uids = Object.keys(d.totals);
+                /* No part-time accounts: the whole tab is one line, with the way
+                   to make one (12 Oct 2026, WS-16). It was three cards, two of
+                   them empty, and an export of nothing. */
+                if (!uids.length && !d.open.length && !d.sessions.length) {
+                    const goPeople = el('button', 'btn', 'Open People'); goPeople.type = 'button';
+                    goPeople.onclick = () => { teamSeg = 'people'; renderTeam(); };
+                    wrap.append(emptyState({ icon: I.clock, text: 'No part-time accounts yet.',
+                        sub: 'Set someone\'s role to Part-time and the clock appears for them the next time they open the app.', action: goPeople }));
+                    return;
+                }
+                const counted = (c, n) => { const t = c.querySelector('.card-title'); if (t) t.append(el('span', 'card-n', String(n))); };
+                /* Who is on the clock, as a small table at its natural width with
+                   Close this session straight after the figures (WS-10). */
                 const c1 = cardOf('On the clock now');
-                const openList = el('div', 'files-list card-bleed');
-                if (!d.open.length) openList.append(el('div', 'files-empty', 'Nobody is clocked in.'));
-                d.open.forEach(ws => {
-                    const row = el('div', 'files-row tm-row');
-                    const name = el('span', 'files-name still'); name.textContent = nm(ws.uid);
-                    row.append(name, el('span', 'files-meta',
-                        'since ' + londonHM(ws.start) + ' · ' + fd(ws.secs) + ' so far'));
-                    const acts = el('div', 'files-acts'); acts.style.opacity = '1';
-                    const res = el('button', 'btn', 'Close this session');
-                    res.onclick = async () => {
-                        if (!(await uiConfirm('Close ' + nm(ws.uid) + '\'s open session now? Use this '
-                            + 'when someone forgot to clock out. The closure is recorded as a '
-                            + 'correction under your name.', { title: 'Close this session', okText: 'Close session' }))) return;
-                        try { await api('/api/work/resolve', { uid: ws.uid }); } catch (e) { toastError(e.message); }
-                        renderTeam();
-                    };
-                    acts.append(res);
-                    row.append(acts);
-                    openList.append(row);
-                });
-                c1.append(openList);
+                counted(c1, d.open.length);
+                if (!d.open.length) {
+                    const none = el('div', 'tm-none'); none.append(el('span', 'dt-dot off'), el('span', null, 'Nobody is clocked in.'));
+                    c1.append(none);
+                } else c1.append(dtable([{ head: 'Person' }, { head: 'Since' }, { head: 'So far' }, { head: '', cls: 'act' }],
+                    d.open.map(ws => {
+                        const res = el('button', 'btn btn-sm', 'Close this session'); res.type = 'button';
+                        res.onclick = async () => {
+                            if (!(await uiConfirm('Close ' + nm(ws.uid) + '\'s open session now? Use this '
+                                + 'when someone forgot to clock out. The closure is recorded as a '
+                                + 'correction under your name.', { title: 'Close this session', okText: 'Close session' }))) return;
+                            try { await api('/api/work/resolve', { uid: ws.uid }); } catch (e) { toastError(e.message); }
+                            renderTeam();
+                        };
+                        return { cells: [dtMain(nm(ws.uid), null, 'ok'), londonHM(ws.start), fd(ws.secs), res] };
+                    }), { cls: 'dt-clock', label: 'On the clock now', stop: 'xs' }));
+                /* Hours per person at its natural width, beside the clock (WS-12). */
                 const c2 = cardOf('Hours per person', 'Set someone\'s role to Part-time and the clock '
                     + 'appears for them the next time they open the app.');
-                const uids = Object.keys(d.totals);
+                c2.classList.add('tm-hours');
                 if (!uids.length) c2.append(el('div', 'empty', 'No part-time accounts yet.'));
                 else {
                     const bleed = el('div', 'card-bleed');
@@ -31229,7 +31280,9 @@ Projected Image UK"></textarea>
                         [0, 1, 1, 1, 1, 1]));
                     c2.append(bleed);
                 }
-                const bar = el('div', 'act-row');
+                pairNodes(c1, c2, null, null, { plain: true, flip: true });
+                /* The export's dates and button at the head's right end, over a
+                   table that reaches that edge. */
                 const dateF = (label) => { const w = el('label', 'pfield tm-date'); w.append(el('span', null, label));
                     const i2 = document.createElement('input'); i2.type = 'date'; i2.className = 'field-sm'; w.append(i2); return [w, i2]; };
                 const [frmL, frm] = dateF('From'), [toL, to] = dateF('To');
@@ -31247,84 +31300,108 @@ Projected Image UK"></textarea>
                     } catch (e) { toastError(e.message); }
                     exp.disabled = false;
                 };
-                bar.append(frmL, toL, exp);
+                const tools = el('div', 'tm-export'); tools.append(frmL, toL, exp);
                 const c3 = cardOf('Recent sessions', 'The export covers the chosen dates, or everything kept when left blank. '
-                    + 'Each row is one session: date, clock in, clock out, hours, actions, and whether an admin closed it.');
-                c3.append(bar);
-                const sl = el('div', 'files-list card-bleed');
-                if (!d.sessions.length) sl.append(el('div', 'files-empty', 'No completed sessions yet.'));
-                d.sessions.slice(0, 40).forEach(s => {
-                    const row = el('div', 'files-row tm-row');
-                    const name = el('span', 'files-name still');
-                    name.textContent = nm(s.uid) + (s.corrected ? ' (closed by ' + nm(s.corrected_by) + ')' : '');
-                    row.append(name, el('span', 'files-meta',
-                        fmtDate(s.start) + ' · ' + londonHM(s.start) + ' to '
-                        + londonHM(s.end) + ' · ' + fd(s.secs || 0) + ' · '
-                        + ((d.event_counts || {})[s.id] || 0) + ' actions'));
-                    sl.append(row);
-                });
-                c3.append(sl);
+                    + 'Each row is one session: date, clock in, clock out, hours, actions, and whether an admin closed it.', d.sessions.length ? tools : null);
+                counted(c3, d.sessions.length);
+                /* Each session under heads, and the spare width a day line: the
+                   session drawn from clock in to clock out on 07:00 to 17:00, so
+                   shift patterns read at a glance (WS-10). */
+                const mins = (iso) => { const m = /^(\d\d):(\d\d)/.exec(londonHM(iso) || ''); return m ? (+m[1]) * 60 + (+m[2]) : null; };
+                const pos = (m) => Math.max(0, Math.min(1, (m - 420) / 600));
+                const scale = el('span', 'tm-dayscale');
+                scale.append(el('span', null, '07:00'), el('span', null, '12:00'), el('span', null, '17:00'));
+                if (!d.sessions.length) c3.append(el('div', 'empty', 'No completed sessions yet.'));
+                else c3.append(dtable([{ head: 'Person' }, { head: 'Date' }, { head: 'Clock in' }, { head: 'Clock out' }, { head: 'Hours', cls: 'num' }, { head: 'Actions', cls: 'num' }, { head: scale }],
+                    d.sessions.slice(0, 40).map(s => {
+                        const line = el('span', 'tm-daytrack');
+                        const a0 = mins(s.start), a1 = mins(s.end);
+                        if (a0 != null && a1 != null) {
+                            const bar = el('i');
+                            bar.style.left = (pos(a0) * 100) + '%';
+                            bar.style.width = (Math.max(0.01, pos(a1) - pos(a0)) * 100) + '%';
+                            line.append(bar);
+                        }
+                        line.setAttribute('aria-hidden', 'true');
+                        return { cells: [dtMain(nm(s.uid), s.corrected ? 'Closed by ' + nm(s.corrected_by) : ''), fmtDate(s.start), londonHM(s.start), londonHM(s.end),
+                                         fd(s.secs || 0), String((d.event_counts || {})[s.id] || 0), line] };
+                    }), { cls: 'dt-sessions', label: 'Recent sessions' }));
             }).catch(e => { wrap.innerHTML = ''; wrap.append(loadFailure('The clock could not be read. ' + (e.message || ''), () => renderTeam())); });
         }
         function renderTeamFeed(host) {
             const d = teamCache;
-            const bar = el('div', 'lbl-toolbar');
-            const whoSel = el('select', 'lbl-size'); whoSel.setAttribute('aria-label', 'Filter by person');
-            const optAll = el('option', null, 'Everyone'); optAll.value = ''; whoSel.append(optAll);
-            d.users.forEach(u => {
-                const o = el('option', null, u.name || 'Not named yet'); o.value = u.sub;
-                if (teamFilterWho === u.sub) o.selected = true;
-                whoSel.append(o);
-            });
-            whoSel.onchange = () => { teamFilterWho = whoSel.value; renderTeam(); };
-            const areaSel = el('select', 'lbl-size'); areaSel.setAttribute('aria-label', 'Filter by area');
-            const aAll = el('option', null, 'Everything'); aAll.value = ''; areaSel.append(aAll);
-            TEAM_AREAS.forEach(([v, lab]) => {
-                const o = el('option', null, lab); o.value = v;
-                if (teamFilterArea === v) o.selected = true;
-                areaSel.append(o);
-            });
-            areaSel.onchange = () => { teamFilterArea = areaSel.value; renderTeam(); };
-            /* A card like the other two tabs': a titled head, the filters on a
-               toolbar, the note as its description, then the feed. */
-            const card = el('div', 'card');
-            const head = el('div', 'card-head');
-            const at = el('h3', 'card-title', 'Activity');
-            const atInfo = infoButton('How much is kept', { title: 'Activity', body: 'Newest first. The feed shows the last 600 actions; the full ledger keeps 8,000 and is in every backup.' });
-            head.append(titleInfo(at, atInfo));
-            card.append(head, tableTools([whoSel, areaSel], []));
-            host.append(card);
-            const rows = (d.events || []).filter(e =>
+            const evs = d.events || [];
+            /* Each list's counts, from the feed already sent. */
+            const byWho = {}, byArea = {};
+            evs.forEach(e => { byWho[e.sub] = (byWho[e.sub] || 0) + 1; byArea[e.area] = (byArea[e.area] || 0) + 1; });
+            /* An account is sent as its id, and each event names its account by
+               that id as sub. The filter offered a field the server does not
+               send, so picking anyone showed nothing. */
+            const rows = evs.filter(e =>
                 (!teamFilterWho || e.sub === teamFilterWho)
                 && (!teamFilterArea || e.area === teamFilterArea));
-            const list = el('div', 'files-list card-bleed');
-            if (!rows.length) list.append(el('div', 'files-empty', 'Nothing recorded for that view yet.'));
+            const card = el('div', 'card');
+            const head = el('div', 'card-head');
+            const at = el('h3', 'card-title', 'Activity'); at.append(el('span', 'card-n', String(evs.length)));
+            const atInfo = infoButton('How much is kept', { title: 'Activity', body: 'Newest first. The feed shows the last 600 actions; the full ledger keeps 8,000 and is in every backup.' });
+            head.append(titleInfo(at, atInfo));
+            card.append(head);
+            const areaName = (a) => (TEAM_AREAS.find(x => x[0] === a) || ['', a])[1];
+            const personName = (id) => { const u = d.users.find(x => x.id === id); return (u && u.name) || (d.names || {})[id] || 'Not named yet'; };
+            const clearAll = () => { teamFilterWho = ''; teamFilterArea = ''; renderTeam(); };
+            /* A filter that is on shows over the feed as a tag you can clear. */
+            const tags = [];
+            const tag = (words, clear) => { const b = el('button', 'btn btn-sm'); b.type = 'button'; b.append(document.createTextNode(words), ico(I.x));
+                b.setAttribute('aria-label', 'Clear the filter ' + words); b.onclick = clear; tags.push(b); };
+            if (teamFilterWho) tag(personName(teamFilterWho), () => { teamFilterWho = ''; renderTeam(); });
+            if (teamFilterArea) tag(areaName(teamFilterArea), () => { teamFilterArea = ''; renderTeam(); });
+            /* One table (12 Oct 2026, WS-11): the time, the area beside what it
+               labels, who, and what they did, with day heads. The area sat alone
+               at the row's far end. */
+            const tableRows = [];
             let lastDay = '';
             rows.forEach(e => {
-                const dt = new Date(e.t);
                 const day = fmtDate(e.t);
-                if (day !== lastDay) {
-                    lastDay = day;
-                    const h = el('div', 'files-row tm-row tm-day');
-                    h.append(el('span', 'files-meta', day));
-                    list.append(h);
-                }
-                const row = el('div', 'files-row tm-row');
-                /* London time, as the Work tab gives it: the browser's own
-                   clock put the two tabs an hour apart for a viewer abroad. */
-                const hh = isNaN(dt) ? '' : londonHM(e.t);
-                row.append(el('span', 'files-meta', hh));
-                const nm = e.src === 'system' ? 'System' : ((d.names || {})[e.sub] || 'Not named yet');
-                const line = el('span', 'files-name'); line.classList.add('still');
-                line.textContent = nm + ' ' + e.action + (e.detail ? ': ' + e.detail : '')
-                    + (e.ws ? ' · on the clock' : '');
-                line.title = line.textContent;
-                row.append(line);
-                row.append(el('span', 'files-meta',
-                    (TEAM_AREAS.find(a => a[0] === e.area) || ['', e.area])[1]));
-                list.append(row);
+                if (day !== lastDay) { lastDay = day; tableRows.push({ cls: 'dt-grp', cells: [el('span', 'crm-group', day)] }); }
+                const said = e.action + (e.detail ? ': ' + e.detail : '');
+                const what = el('span', 'tm-what', said); what.title = said;
+                const whatCell = document.createDocumentFragment(); whatCell.append(what);
+                if (e.ws) whatCell.append(el('span', 'lbl-chip note', 'On the clock'));
+                /* London time, as the Work tab gives it. */
+                tableRows.push({ cells: [isNaN(new Date(e.t)) ? '' : londonHM(e.t), areaName(e.area),
+                                         e.src === 'system' ? 'System' : personName(e.sub), whatCell] });
             });
-            card.append(list);
+            const clr = el('button', 'btn btn-sm', 'Clear filters'); clr.type = 'button'; clr.onclick = clearAll;
+            const feed = el('div', 'tm-feed');
+            if (tags.length) feed.append(tableTools(tags, []));
+            feed.append(dtable([{ head: 'Time' }, { head: 'Area' }, { head: 'Who' }, { head: 'What' }], tableRows,
+                { cls: 'dt-feed', label: 'Activity', main: 3,
+                  empty: emptyState({ icon: I.search, text: 'Nothing recorded for that view yet.', action: (teamFilterWho || teamFilterArea) ? clr : null }) }));
+            /* Who and Area as two short lists beside the feed, each with its
+               count; the chosen one has the teal edge, and a person with nothing
+               is grey. They were two selects over the feed. */
+            const filters = el('div', 'tm-filters');
+            const list = (title, items) => {
+                filters.append(el('div', 'tm-filter-h', title));
+                const g = el('div', 'tm-filter-list'); g.setAttribute('role', 'group'); g.setAttribute('aria-label', title);
+                items.forEach(it => {
+                    const b = el('button', 'tm-filter' + (it.on ? ' on' : '') + (it.n ? '' : ' none')); b.type = 'button';
+                    b.setAttribute('aria-pressed', String(!!it.on));
+                    b.append(el('span', 'tm-filter-l', it.label), el('span', 'cnt', String(it.n)));
+                    b.onclick = it.pick;
+                    g.append(b);
+                });
+                filters.append(g);
+            };
+            list('Who', [{ label: 'Everyone', n: evs.length, on: !teamFilterWho, pick: () => { teamFilterWho = ''; renderTeam(); } }]
+                .concat(d.users.map(u => ({ label: u.name || 'Not named yet', n: byWho[u.id] || 0, on: teamFilterWho === u.id,
+                                            pick: () => { teamFilterWho = u.id; renderTeam(); } }))));
+            list('Area', [{ label: 'Everything', n: evs.length, on: !teamFilterArea, pick: () => { teamFilterArea = ''; renderTeam(); } }]
+                .concat(TEAM_AREAS.map(([v, lab]) => ({ label: lab, n: byArea[v] || 0, on: teamFilterArea === v,
+                                                        pick: () => { teamFilterArea = v; renderTeam(); } }))));
+            const both = el('div', 'tm-feedwrap'); both.append(feed, filters);
+            card.append(both);
+            host.append(card);
         }
         /* The bar shows one line of it; the tooltip carries all of it. */
         function setViewTitle(text) { const h = $('view-title'); h.textContent = text; h.title = text; }

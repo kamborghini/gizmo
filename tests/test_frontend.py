@@ -2289,6 +2289,53 @@ def t_files_is_one_table_with_its_meter_on_the_tab_row():
 
 
 @test
+def t_the_team_activity_filters_on_the_account_id_the_board_sends():
+    """Found building the mockup (12 Oct 2026): the person filter's options
+    carried u.sub, which /api/team/board never sends, so picking anyone showed
+    "Nothing recorded for that view yet." The board sends each account as id,
+    and each event names its account by that id as sub."""
+    srv = open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()
+    ok('return {"id": uid, "name": u.get("name") or ""' in srv, "an account is sent with its id")
+    fd = fn_src("function renderTeamFeed(")
+    ok("u.sub" not in fd, "no person is offered by a field the server never sends")
+    ok("teamFilterWho = u.id" in fd and "e.sub === teamFilterWho" in fd, "the Who list filters on the account id")
+
+
+@test
+def t_team_is_tables_with_the_admin_actions_in_a_menu():
+    """WS-10 to WS-16, 12 Oct 2026: People's facts ran as one sentence pushed
+    against four admin buttons; the Tabs panel stacked three groups with two
+    Saves; Work's three cards stretched six short columns across the page; and
+    Activity put the area 700px from the action it labels."""
+    pp = fn_src("function renderTeamPeople(")
+    ok("dtable([{ head: 'Person', cls: 'stack' }, { head: 'Role' }, { head: 'Made', cls: 'num' }, { head: 'Dispatched', cls: 'num' }, "
+       "{ head: 'Files', cls: 'num' }, { head: 'Sales', cls: 'num' }, { head: 'Last login' }" in pp, "People is a table (WS-13)")
+    ok("'Made, dispatched, files and sales are the last 30 days.'" in pp and "'Switched off'" in pp and "'Never logged in'" in pp, "in the mockup's words")
+    ok("dropMenu(more, items)" in pp and "label: 'Delete account', icon: I.trash, danger: true" in pp and "label: 'Reset password'" in pp,
+       "the admin actions are in the row's menu, Delete account in red (WS-14)")
+    tp = fn_src("function teamTabsPanel(")
+    ok("'Save access'" not in SCRIPT and "'Save sign-off'" not in SCRIPT and "toastOk('Saved.')" in tp and "op: 'sign_off'" in tp,
+       "the Tabs panel has one Save, the sign-off saved with the rest (WS-15)")
+    ok("\n        .tm-panel { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);" in CSS,
+       "its three groups side by side, Can open with two shares so its groups keep a line each")
+    tr = CSS.split("\n        .dt-people {")[1].split("}")[0]
+    ok("max-content, 1fr" not in tr, "no flexible column takes a content minimum: the open panel spans them, and its whole width went into them (2,206px)")
+    wk = fn_src("function renderTeamWork(")
+    ok("pairNodes(c1, c2, null, null, { plain: true, flip: true })" in wk and "{ cls: 'dt-clock', label: 'On the clock now', stop: 'xs' }" in wk,
+       "On the clock now beside Hours per person, its one line kept down to 24rem (WS-12)")
+    ok("@container dt (max-width: 24rem) {\n            .dt-xs > .dtable { display: block; }" in CSS, "a small table's own two-line stop")
+    ok("#team-content .wpair-in > .card { margin-top: 0; }" in CSS and "#team-content .wpair + .card { margin-top: var(--page-rhythm); }" in CSS,
+       "the pair's two heads share a line, and the sessions keep the page's rhythm under them")
+    ok("dtable([{ head: 'Person' }, { head: 'Date' }, { head: 'Clock in' }, { head: 'Clock out' }, { head: 'Hours', cls: 'num' }, { head: 'Actions', cls: 'num' }" in wk
+       and "el('span', 'tm-daytrack')" in wk, "the sessions are a table with the day line, 07:00 to 17:00 (WS-10)")
+    fd = fn_src("function renderTeamFeed(")
+    ok("dtable([{ head: 'Time' }, { head: 'Area' }, { head: 'Who' }, { head: 'What' }]" in fd, "Activity is a table (WS-11)")
+    ok("el('div', 'tm-filters')" in fd and "list('Who', [" in fd and "list('Area', [" in fd and "el('span', 'cnt', String(it.n))" in fd,
+       "with the Who and Area lists beside it, counted")
+    ok("['auth', 'Sign-in']" in SCRIPT, "the raw area 'auth' reads Sign-in")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left
@@ -2414,8 +2461,9 @@ def t_lists_are_tables_whose_rows_share_columns():
        "only an email or web address may break anywhere: a phone number or a figure never splits")
     ok("border-radius" not in base.split(".dt-row {")[1].split("}")[0] if ".dt-row {" in base else False,
        "a row is a hairline, not a box")
-    narrow = CSS.split("/* ONE TABLE, NARROW")[1][:2400] if "/* ONE TABLE, NARROW" in CSS else ""
-    for stop in ("40rem", "56rem", "72rem"):
+    # 12 Oct 2026: xs (24rem) joined for a three-column table, so the block is longer.
+    narrow = CSS.split("/* ONE TABLE, NARROW")[1][:3400] if "/* ONE TABLE, NARROW" in CSS else ""
+    for stop in ("24rem", "40rem", "56rem", "72rem"):
         ok("@container dt (max-width: %s)" % stop in narrow, "a table can turn its rows to two lines at %s" % stop)
     ok(".dt-m > .dtable > .dt-head { display: none; }" in narrow, "and then drops its head row")
     ok("' main'" not in fn and "' dt-main'" in fn,
@@ -5052,7 +5100,8 @@ def t_the_send_grant_is_switched_from_the_team_tab():
     # Was a fixed 5,200-character window, which the sign-off field pushed the
     # send op out of. Bounded by the function instead, so it neither expires
     # the next time the panel grows nor reaches past it into another one.
-    people = fn_src("function renderTeamPeople(")
+    # 12 Oct 2026: the panel is its own function, teamTabsPanel, under its row in the People table.
+    people = fn_src("function teamTabsPanel(")
     ok("if (u.sizes_by_rank) {" in people, "the size grant is still the pattern")
     seg = people[people.index("if (u.sizes_by_rank) {"):]
     ok("if (u.send_by_rank) {" in seg, "rank is read before the switch is drawn")
@@ -5448,13 +5497,13 @@ def t_the_compose_and_reply_boxes_keep_the_class_that_sizes_them():
 def t_an_admin_sets_someone_elses_sign_off_beside_their_other_switches():
     """A new starter's replies go out unsigned until somebody sets it for them,
     and that somebody is whoever already manages the account."""
-    fn = fn_src("function renderTeamPeople(")
+    # 12 Oct 2026: the panel is teamTabsPanel, its sign-off saved by the panel's one Save.
+    fn = fn_src("function teamTabsPanel(")
     ok("op: 'sign_off'" in fn, "the team panel posts the contract's op")
     i = fn.index("op: 'sign_off'")
     ok("'/api/team/user'" in fn[:i], "to the team route")
     ok("id: u.id" in fn[i:i + 140], "for the account whose panel it is")
-    panel = fn.index("teamTabsOpen === u.id")
-    ok("if (manageable)" in fn[panel:i],
+    ok("if (manageable)" in fn[:i] and "teamTabsPanel(u, manageable)" in fn_src("function renderTeamPeople("),
        "and only where the size and send switches beside it are shown")
 
 
