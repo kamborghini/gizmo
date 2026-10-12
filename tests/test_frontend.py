@@ -2561,6 +2561,82 @@ def t_a_phone_keeps_scan_beside_its_field():
 
 
 @test
+def t_a_phone_size_card_keeps_its_tag_beside_the_model():
+    """R13, 12 Oct 2026: on a phone a model's status tag (Needs review) took a
+    third line of its own under the maker, and the model's button kept the 40
+    touch height inside a card the whole of which opens it, so each model was
+    89px tall to the mockup's 60."""
+    sz = CSS.split("@container sizes (max-width: 520px) {")[1].split("\n        }\n")[0]
+    ok("grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto;" in sz
+       and 'grid-template-areas: "model status fig" "maker maker fig";' in sz, "the tag on the model's line, the maker under both")
+    ok(".ktable.sizes-table td.sizes-status { grid-area: status; justify-self: start; align-self: center; white-space: normal; }" in sz, "the tag right after the name")
+    ok(".ktable.sizes-table tr.sizes-row .sizes-open { min-height: 0; }" in sz, "the card is the target, so the name keeps its own height")
+
+
+@test
+def t_a_phone_filters_activity_with_two_selects():
+    """R13, 12 Oct 2026: on a phone Activity's Who and Area lists (nine people,
+    ten areas) ran 800px down the screen before the first event. A phone
+    shows them as two selects side by side over the feed, as the mockup
+    draws; wider screens keep the lists."""
+    fd = fn_src("function renderTeamFeed(")
+    ok("const s = el('select', 'field-sm'); s.setAttribute('aria-label', title);" in fd
+       and "s.onchange = () => items[+s.value].pick();" in fd and "it.label + ' (' + it.n + ')'" in fd,
+       "each list is also a select of the same choices, with their counts")
+    ok("both.append(sels, feed, filters);" in fd, "over the feed")
+    ok(".tm-filter-sels { display: none; }" in CSS
+       and "@media (max-width: 640px) { .tm-feedwrap > .tm-filters { display: none; } .tm-filter-sels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--control-gap); } }" in CSS,
+       "the selects on a phone, the lists elsewhere")
+
+
+@test
+def t_a_phone_keeps_a_lone_control_beside_the_search():
+    """R13, 12 Oct 2026: on a phone a toolbar's search took a whole line, so a
+    toolbar of a search and one control left that control alone on the line
+    under it (Files' Sort). The two now share the line; a choice track still
+    takes one of its own."""
+    ok("@media (max-width: 640px) { .tbl-tools:has(> .tbl-tools-l > .tbl-search:only-child):has(> .tbl-tools-r > :only-child:not(.segmented)) .tbl-search { flex: 1 1 0; } }" in CSS, "the search gives way to its one neighbour")
+
+
+@test
+def t_a_phone_shows_finder_drive_as_an_icon_at_the_title():
+    """R13, 12 Oct 2026: on a phone Files' three header buttons ran 356px of
+    358, so Upload, the page's main button, sat alone on a second line. As
+    the mockup draws, Finder drive is a 40 icon at the title's right there,
+    and New folder and Upload share the row under the title."""
+    rf = fn_src("function renderFilesBrowser(")
+    ok("const drv = el('button', 'btn files-drv'); drv.append(ico(I.hardDrive), el('span', 'drv-txt', 'Finder drive'));" in rf
+       and "drv.setAttribute('aria-label', 'Finder drive');" in rf, "the button keeps its name when only its icon shows")
+    ph = CSS.split("/* R13: on a phone Finder drive is a 40 icon")[1].split("\n        }\n")[0] if "/* R13: on a phone Finder drive is a 40 icon" in CSS else ""
+    ok(".ov-hero-act > .files-drv { position: absolute;" in ph and ".files-drv > .drv-txt { display: none; }" in ph
+       and ".ov-hero:has(> .ov-hero-act > .files-drv) > .ph-text { padding-right: calc(var(--control-h-lg) + var(--sp-2)); }" in ph,
+       "at the title's right, its words hidden, the title kept clear of it")
+
+
+@test
+def t_a_phone_shipment_row_stays_on_the_screen():
+    """R13, 12 Oct 2026: on a phone Custom shipments scrolled sideways. Each
+    row's buttons are a six-track grid, and the flex row's max-content floor
+    on them made that grid 423px in a 347px row. Two buttons (Copy tracking,
+    Reprint label) now take half the line each, as the mockup draws."""
+    q = CSS.split("/* The number and the date on one line, the name 4 under it, the buttons 12 under that (the mockup's .m-orow). */")[1].split("\n        }\n")[0]
+    ok(".lbl-qrow .lbl-actions { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--control-gap); min-width: 0; }" in q,
+       "the buttons' grid is the row's width")
+    ok(".lbl-qrow .lbl-actions > .btn:first-child:nth-last-child(2), .lbl-qrow .lbl-actions > .btn:first-child:nth-last-child(2) ~ .btn { grid-column: span 3; }" in q,
+       "and two buttons share it in halves")
+
+
+@test
+def t_a_phone_overview_pairs_its_trend_figures():
+    """R13, 12 Oct 2026: on a phone each of Overview's eight trend figures took
+    a row of its own (a figure, its change and a sparkline across 358px), 1,300px
+    of the screen before Sales by sector. They pair two across, as the mockup
+    draws: the widget grid is two columns on a phone and each is one column."""
+    ok(".ov-wrap.wgrid > .stat[data-widget]:has(.stat-spark) { grid-column: 1 / -1; }" not in CSS, "a trend figure no longer takes the row")
+    ok("if (viewportWidth <= 640) return 2;" in fn_src("function wgColumns("), "the grid is two columns on a phone")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left
@@ -3176,7 +3252,8 @@ def t_a_size_list_row_opens_in_place_and_fits_a_phone():
     ok("setBtn.onclick = () => sizesInlineRule(acts, r, setBtn);" in det, "Set size is in the details")
     ok("['Status']" in paint and "['']" not in paint.split("const cols =")[1][:300], "and no longer a column of buttons")
     q = CSS.split("@container sizes (max-width: 520px) {")[1].split("\n        }")[0]
-    ok('grid-template-areas: "model fig" "maker fig" "status fig";' in q and ".ktable.sizes-table thead { display: none; }" in q,
+    # 12 Oct 2026 (R13): the status tag moved up beside the model (t_a_phone_size_card_keeps_its_tag_beside_the_model).
+    ok('grid-template-areas: "model status fig" "maker maker fig";' in q and ".ktable.sizes-table thead { display: none; }" in q,
        "a narrow card reads each model as a card")
     ok(".ktable.sizes-table tr.sizes-row > :is(td.sizes-glass, td.sizes-image, td.sizes-under, td.sizes-notes) { display: none; }" in q,
        "the other figures go to the details, at a weight that beats the card's own cells")
@@ -8923,8 +9000,8 @@ def t_the_reviewers_last_findings_stay_closed():
        "each chart's empty line is its own")
     # The queue shares its tracks from the width the date appears at.
     ok("@container queue (min-width: 560px) {\n            .lbl-grid { display: grid;" in CSS, "a refunded row's date stays in line on a tablet")
-    # Phone Overview: a sparkline tile takes the row in the widget grid too.
-    ok(".ov-wrap.wgrid > .stat[data-widget]:has(.stat-spark) { grid-column: 1 / -1; }" in CSS, "the phone KPI rule reaches the grid")
+    # Phone Overview: 12 Oct 2026 (R13), the trend tiles pair two across, as the approved mockup draws
+    # (t_a_phone_overview_pairs_its_trend_figures); they no longer take the row.
 
 
 def _run_js(src):

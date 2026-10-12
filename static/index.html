@@ -1284,8 +1284,9 @@
             .ktable.sizes-table thead { display: none; }
             .ktable.sizes-table, .ktable.sizes-table tbody, .ktable.sizes-table tr.ktable-grp, .ktable.sizes-table tr.ktable-grp > th,
             .ktable.sizes-table tr.sizes-detail, .ktable.sizes-table tr.sizes-detail > td { display: block; }
-            .ktable.sizes-table tr.sizes-row { display: grid; grid-template-columns: minmax(0, 1fr) auto;
-                grid-template-areas: "model fig" "maker fig" "status fig"; column-gap: var(--sp-3); row-gap: var(--sp-1);
+            /* R13: a status tag sits on the model's line, as a tag beside its name, not on a line of its own. */
+            .ktable.sizes-table tr.sizes-row { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto;
+                grid-template-areas: "model status fig" "maker maker fig"; column-gap: var(--sp-3); row-gap: var(--sp-1);
                 padding: var(--sp-3) 0; border-bottom: var(--bw-hairline) solid var(--border-default); }
             .ktable.sizes-table tr.sizes-row.open { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); }
             @media (hover: hover) { .ktable.sizes-table tr.sizes-row:hover { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); } }
@@ -1294,7 +1295,9 @@
             .ktable.sizes-table tr.sizes-row.open > td { box-shadow: none; }
             .ktable.sizes-table td.sizes-model { grid-area: model; }
             .ktable.sizes-table td.sizes-maker { grid-area: maker; color: var(--text-secondary); font-size: var(--text-xs); line-height: var(--lh-caption); }
-            .ktable.sizes-table td.sizes-status { grid-area: status; white-space: normal; }
+            .ktable.sizes-table td.sizes-status { grid-area: status; justify-self: start; align-self: center; white-space: normal; }
+            /* The whole card opens the model, so its name keeps its own height (the 40 touch floor made each card 89). */
+            .ktable.sizes-table tr.sizes-row .sizes-open { min-height: 0; }
             .ktable.sizes-table tr.sizes-row > td.sizes-status:empty { display: none; }
             .ktable.sizes-table td.sizes-fig { grid-area: fig; align-self: center; font-size: var(--fig-s); font-weight: var(--weight-semibold); letter-spacing: var(--tr-fig); line-height: var(--lh-none); }
             .ktable.sizes-table td.sizes-fig .sizes-unit { display: inline; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }
@@ -1474,12 +1477,9 @@
            its answer) takes no row: in the flow its margins collapsed through
            it, but an empty grid item still costs a row and a gap. */
         .ov-wrap.wgrid > [data-widget]:empty { display: none; }
-        /* The phone KPI rule for tiles the widget grid places: a tile that
-           carries a sparkline takes the row, so a label-and-figure tile pairs
-           with its own kind rather than stretching beside a chart. */
-        @media (max-width: 640px) {
-            .ov-wrap.wgrid > .stat[data-widget]:has(.stat-spark) { grid-column: 1 / -1; }
-        }
+        /* On a phone the grid is two columns and a trend figure (a tile with a
+           sparkline) is one of them, so Overview's eight pair up as the mockup
+           draws (R13, 12 Oct 2026). They each took the row: 1,300px of figures. */
         /* A tab strip belongs to the header above it, so it keeps the 20 under it
            there rather than the gap between two blocks, as
            .ov-hero:has(+ .page-tabs) gives it in the flow. */
@@ -3175,9 +3175,12 @@
             .lbl-qrow > .lbl-meta { grid-area: 1 / 2; justify-self: end; width: auto; margin: 0; padding: 0; }
             .lbl-qrow > .lbl-who { grid-column: 1 / -1; }
             .lbl-qrow > .lbl-actions { grid-column: 1 / -1; margin-top: var(--sp-2); }
-            .lbl-qrow .lbl-actions { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--control-gap); }
+            /* No max-content floor here (the flex row's, above): with six equal tracks it made the grid 423 in a 347 row. */
+            .lbl-qrow .lbl-actions { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--control-gap); min-width: 0; }
             .lbl-qrow .lbl-actions > .btn { grid-column: span 2; padding: 0 var(--sp-2); justify-content: center; }
             .lbl-qrow .lbl-actions > .btn:nth-child(n+4) { grid-column: span 3; }
+            /* Two buttons (a shipment's Copy tracking and Reprint label) take half the line each. */
+            .lbl-qrow .lbl-actions > .btn:first-child:nth-last-child(2), .lbl-qrow .lbl-actions > .btn:first-child:nth-last-child(2) ~ .btn { grid-column: span 3; }
             .lbl-qrow .lbl-actions > .grp { margin-left: 0; }
             .lbl-qrow .lbl-actions .lbl-btn-txt { display: inline; }
             .lbl-qrow .lbl-actions .lbl-btn-txt.swap { display: inline-grid; }
@@ -4736,6 +4739,17 @@
             .tbl-tools { gap: var(--sp-2); }
             .tbl-tools-l, .tbl-tools-r { display: contents; }
             .tbl-tools .tbl-search { flex: 1 1 100%; } }
+        /* R13: a search with one control (Files' Sort) shares its line with it, not leaving it alone under the search. */
+        /* R13: on a phone Finder drive is a 40 icon at the title's right (the mockup), so New folder and Upload
+           share the row under the title rather than Upload, the main button, sitting alone on a second. */
+        @media (max-width: 640px) {
+            .ov-hero:has(> .ov-hero-act > .files-drv) { position: relative; }
+            .ov-hero:has(> .ov-hero-act > .files-drv) > .ph-text { padding-right: calc(var(--control-h-lg) + var(--sp-2)); }
+            .ov-hero-act > .files-drv { position: absolute; top: calc((var(--lh-title) - var(--control-h-lg)) / 2); right: 0; margin: 0;
+                width: var(--control-h-lg); min-width: var(--control-h-lg); padding: 0; justify-content: center; }
+            .files-drv > .drv-txt { display: none; }
+        }
+        @media (max-width: 640px) { .tbl-tools:has(> .tbl-tools-l > .tbl-search:only-child):has(> .tbl-tools-r > :only-child:not(.segmented)) .tbl-search { flex: 1 1 0; } }
         /* The Production Manager's toolbar buttons are an equal pair on a phone (the mockup's .m-two), Print all beside Newest
            first, each half the line less half the gap, so a third button cannot be squeezed in beside them: Print shipping
            labels (its words are the widest) takes a whole line under the pair, and the size choice the line after it. The
@@ -5930,6 +5944,8 @@
         .dt-feed { --dt-cols: max-content max-content max-content minmax(0, 1fr); }
         .tm-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .tm-filters { display: flex; flex-direction: column; gap: var(--sp-1); }
+        .tm-filter-sels { display: none; }
+        @media (max-width: 640px) { .tm-feedwrap > .tm-filters { display: none; } .tm-filter-sels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--control-gap); } }
         .tm-filter-h { margin-top: var(--sp-3); font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary); }
         .tm-filter-h:first-child { margin-top: 0; }
         .tm-filter-list { display: flex; flex-direction: column; }
@@ -30191,8 +30207,8 @@ Projected Image UK"></textarea>
             };
             const nf = el('button', 'btn'); nf.append(ico(I.folderPlus), document.createTextNode('New folder'));
             nf.onclick = () => { filesNewFolder = true; paintList(); };
-            const drv = el('button', 'btn'); drv.append(ico(I.hardDrive), document.createTextNode('Finder drive'));
-            drv.title = 'Open these files as a drive on a Mac';
+            const drv = el('button', 'btn files-drv'); drv.append(ico(I.hardDrive), el('span', 'drv-txt', 'Finder drive'));
+            drv.title = 'Open these files as a drive on a Mac'; drv.setAttribute('aria-label', 'Finder drive');
             drv.onclick = () => openDrivePanel(drv);
             if (filesHeroAct) { filesHeroAct.innerHTML = ''; filesHeroAct.append(drv, nf, up, fi); }
             fCard.append(fHead);
@@ -31568,7 +31584,7 @@ Projected Image UK"></textarea>
             /* Who and Area as two short lists beside the feed, each with its
                count; the chosen one has the teal edge, and a person with nothing
                is grey. They were two selects over the feed. */
-            const filters = el('div', 'tm-filters');
+            const filters = el('div', 'tm-filters'), sels = el('div', 'tm-filter-sels');
             const list = (title, items) => {
                 filters.append(el('div', 'tm-filter-h', title));
                 const g = el('div', 'tm-filter-list'); g.setAttribute('role', 'group'); g.setAttribute('aria-label', title);
@@ -31580,6 +31596,11 @@ Projected Image UK"></textarea>
                     g.append(b);
                 });
                 filters.append(g);
+                /* On a phone the list is a select of the same choices over the feed: the two lists ran 800px first. */
+                const s = el('select', 'field-sm'); s.setAttribute('aria-label', title);
+                items.forEach((it, k) => { const o = el('option', null, it.label + ' (' + it.n + ')'); o.value = String(k); o.selected = !!it.on; s.append(o); });
+                s.onchange = () => items[+s.value].pick();
+                sels.append(s);
             };
             list('Who', [{ label: 'Everyone', n: evs.length, on: !teamFilterWho, pick: () => { teamFilterWho = ''; renderTeam(); } }]
                 .concat(d.users.map(u => ({ label: u.name || 'Not named yet', n: byWho[u.id] || 0, on: teamFilterWho === u.id,
@@ -31587,7 +31608,7 @@ Projected Image UK"></textarea>
             list('Area', [{ label: 'Everything', n: evs.length, on: !teamFilterArea, pick: () => { teamFilterArea = ''; renderTeam(); } }]
                 .concat(TEAM_AREAS.map(([v, lab]) => ({ label: lab, n: byArea[v] || 0, on: teamFilterArea === v,
                                                         pick: () => { teamFilterArea = v; renderTeam(); } }))));
-            const both = el('div', 'tm-feedwrap'); both.append(feed, filters);
+            const both = el('div', 'tm-feedwrap'); both.append(sels, feed, filters);
             card.append(both);
             host.append(card);
         }
