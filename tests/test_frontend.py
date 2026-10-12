@@ -2053,7 +2053,8 @@ def t_liability_owing_is_a_table_with_the_account_opened_beside_its_email():
     ok("el('div', 'duo')" in det and "chasePanel(c, cur)" in det and "'Value and paid'" in det and "'Terms and channel'" in det,
        "its orders beside the chase email, two-line cells so both fit")
     ok("aria-label', 'Close ' + c.name" in det, "and an X beside its name closes it")
-    ok("text: 'Nothing is owed.', sub: 'Checked just now.'" in fn, "nothing owed is one line, not six £0 tiles and a card")
+    # Final review I-3: the line keeps the paid-but-tagged strip and drops its stale stamp (t_nothing_owed_still_says_what_is_paid_but_tagged).
+    ok("'Nothing is owed.'" in fn and "emptyState({ icon: I.wallet," in fn, "nothing owed is one line, not six £0 tiles and a card")
     ok("r.after" in fn_src("function dtable("), "a table row can carry its detail under it")
     ok("actions: [liaRefresh]" in fn, "Refresh is worded in the header, as on Xero sync")
 
@@ -2665,6 +2666,22 @@ def t_a_phone_keeps_the_crm_selection_bar():
     ok(".ktable.crm-contact-table > thead > tr.crm-selhead ~ tr { display: none; }" in CSS, "and stay hidden while the bar shows")
     ok("@media (max-width: 640px) { .ktable.crm-contact-table > thead:has(> tr.crm-selhead), .ktable.crm-contact-table > thead > tr.crm-selhead, .ktable.crm-contact-table > thead > tr.crm-selhead > th { display: block; } }" in CSS,
        "a phone shows the head that holds Delete and Clear selection")
+
+
+@test
+def t_nothing_owed_still_says_what_is_paid_but_tagged():
+    """Final review I-3, 12 Oct 2026: Liability's one-line "Nothing is owed."
+    returned before the Paid but still tagged strip was built, and the day
+    nothing is owed is the likeliest day every tagged order has been paid but
+    still carries its tag; the line also said so when the server sent no
+    total, and "Checked just now." on figures read hours before."""
+    rl = fn_src("function renderLiability(")
+    e = rl.index("if (!(d.customers || []).length && !(d.total > 0)) {")
+    ok("const staleW = (d.stale_tagged || []).length ?" in rl[:e], "the strip is made before the empty check")
+    blk = rl[e:rl.index("return;", e)]
+    ok("if (staleW) box.append(staleW);" in blk, "and shown under the one line")
+    ok("typeof d.total === 'number' ? 'Nothing is owed.' : 'No unpaid orders are listed.'" in blk and "Checked just now." not in rl,
+       "nothing is owed only on a total of zero the server sent, and no stale stamp")
 
 
 @test

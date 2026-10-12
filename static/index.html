@@ -13967,8 +13967,30 @@ Projected Image UK"></textarea>
             box.append(financeTabs('liability', freshLabel(liabilityCache.at), []));
             /* Nothing owed is one line, not six £0 tiles over a card that says
                so (12 Oct 2026, DF-20). */
+            /* Paid but still tagged is made first: the day nothing is owed is the
+               likeliest day every tagged order is paid and still tagged, and
+               the empty line below must not drop it (final review I-3). */
+            const staleW = (d.stale_tagged || []).length ? (() => {
+                const s = el('div', 'miss-strip inline');
+                const head = el('div', 'miss-head');
+                const nst = d.stale_tagged.length;
+                head.append(ico(I.warning), el('b', null, 'Paid but still tagged'),
+                    el('span', 'miss-sub', nst + (nst === 1 ? ' settled order still carries' : ' settled orders still carry')
+                        + ' an unpaid tag and ' + (nst === 1 ? 'is' : 'are') + ' left out of the totals. Untag '
+                        + (nst === 1 ? 'it' : 'them') + ' in Shopify.'));
+                s.append(head);
+                d.stale_tagged.forEach(m => {
+                    const row = el('div', 'miss-row');
+                    row.append(orderA(m.name, m.admin_url, 'miss-open'));
+                    s.append(row);
+                });
+                return widget(s, 'stale-tags', 'full', 'Paid but still tagged');
+            })() : null;
+            /* A total the server did not send is not a zero: then the line says
+               only that nothing is listed. The tab row says when it was read. */
             if (!(d.customers || []).length && !(d.total > 0)) {
-                box.append(emptyState({ icon: I.wallet, text: 'Nothing is owed.', sub: 'Checked just now.' }));
+                box.append(emptyState({ icon: I.wallet, text: typeof d.total === 'number' ? 'Nothing is owed.' : 'No unpaid orders are listed.' }));
+                if (staleW) box.append(staleW);
                 return;
             }
             /* Under the header and its tabs every block is a card the grid can
@@ -14055,22 +14077,7 @@ Projected Image UK"></textarea>
                 box.append(widget(bcard, 'aged-debt'));
             }
 
-            if ((d.stale_tagged || []).length) {
-                const s = el('div', 'miss-strip inline');
-                const head = el('div', 'miss-head');
-                const nst = d.stale_tagged.length;
-                head.append(ico(I.warning), el('b', null, 'Paid but still tagged'),
-                    el('span', 'miss-sub', nst + (nst === 1 ? ' settled order still carries' : ' settled orders still carry')
-                        + ' an unpaid tag and ' + (nst === 1 ? 'is' : 'are') + ' left out of the totals. Untag '
-                        + (nst === 1 ? 'it' : 'them') + ' in Shopify.'));
-                s.append(head);
-                d.stale_tagged.forEach(m => {
-                    const row = el('div', 'miss-row');
-                    row.append(orderA(m.name, m.admin_url, 'miss-open'));
-                    s.append(row);
-                });
-                box.append(widget(s, 'stale-tags', 'full', 'Paid but still tagged'));
-            }
+            if (staleW) box.append(staleW);
 
             /* The filters, sorted the way the reference sorts them: the search
                and the few that get changed daily on the bar, the date range and
