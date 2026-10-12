@@ -5584,7 +5584,7 @@ def t_an_unpaid_order_and_a_failed_lookup_read_differently():
     ordinary answer for anything recent. Showing it as an error would teach
     people to ignore a box that also reports missing scopes."""
     fn = fn_src("function connDocModal(")
-    i = fn.find("pay.state === 'unavailable'")
+    i = fn.find("} else if (pay.state === 'unavailable')")
     ok(i > 0, "a failed lookup has its own branch")
     ok("msg error" in fn[i:i + 400], "and that one is an error")
     j = fn.find("pay.state === 'not_yet'")
@@ -5594,6 +5594,25 @@ def t_an_unpaid_order_and_a_failed_lookup_read_differently():
     ok("field-help" in seg, "just a note saying to come back to it")
     ok("The invoice itself is unaffected" in fn,
        "and a payout that cannot be read never implies the invoice is wrong")
+
+
+@test
+def t_an_order_paid_another_way_is_not_shown_as_a_failed_lookup():
+    """An order paid by PayPal, by bank transfer, on account or marked as paid
+    never reaches a Shopify payout. The connector says so as unavailable with
+    the reason not_shopify_payments (a new state would read here as a note to
+    add), and every unavailable payout was a red failed lookup. Nothing
+    failed: it is a plain line saying why there is no note."""
+    fn = fn_src("function connDocModal(")
+    i = fn.find("pay.state === 'unavailable' && pay.reason === 'not_shopify_payments'")
+    ok(i > 0, "the reason has its own branch")
+    j = fn.find("} else if (pay.state === 'unavailable')")
+    ok(0 < i < j, "taken before the failed lookup, so it never lands in the red box")
+    seg = fn[i:j]
+    ok("field-help" in seg and "msg error" not in seg, "a plain line, not an error")
+    ok("pay.message" in seg, "in the connector's words, which name how the order is paid")
+    ok("Shopify Payments" in seg, "with a sentence of its own if the connector sends none")
+    ok("not been paid out" not in seg, "and never the words that were wrong for it")
 
 
 @test

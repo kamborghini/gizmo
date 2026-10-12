@@ -13917,7 +13917,15 @@ Projected Image UK"></textarea>
             const pay = p.payout;
             if (pay) {
                 m.body.append(el('h4', 'card-title', 'Payout note'));
-                if (pay.state === 'unavailable') {
+                if (pay.state === 'unavailable' && pay.reason === 'not_shopify_payments') {
+                    /* Paid by PayPal, bank transfer, on account or marked as
+                       paid: no Shopify payout will ever carry it. Nothing
+                       failed, so it is a plain line, in the connector's words,
+                       which name how the order is paid. */
+                    m.body.append(el('div', 'field-help', pay.message
+                        || 'Shopify Payments took no payment for this order, so no Shopify '
+                        + 'payout will include it and there is no payout note to add.'));
+                } else if (pay.state === 'unavailable') {
                     const b = el('div', 'msg error');
                     b.append(el('div', null, 'The payout could not be looked up, '
                         + 'so no note can be shown. The invoice itself is unaffected.'));
