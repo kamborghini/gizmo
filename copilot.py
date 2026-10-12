@@ -5079,12 +5079,16 @@ def _month_axis(months: int) -> list:
 # only in a local tag filter. One snapshot therefore serves all three, and a
 # tab flip drops from ~30 sequential Shopify calls to none.
 #
-# Freshness rests on two mechanisms because they cover different mutations:
-#   - every write THIS app makes bumps _orders_epoch, retiring every snapshot
-#     at once (see the four writer call sites, each with a _bust_orders() note);
-#   - a short TTL bounds how long a change made in the Shopify admin, such as
-#     the merchant tagging an order by hand, can stay invisible. There are no
-#     webhooks, so the clock is the only thing that can ever catch those.
+# Freshness rests on three mechanisms because they cover different mutations:
+#   - every write THIS app makes to an order, and Shopify's order webhook,
+#     names the order (_orders_changed): each snapshot keeps the rest of the
+#     store and reads that order again, by id, before it answers anyone. Each
+#     used to retire every snapshot, so one Production Manager action cost two
+#     full sweeps (the 2026-10-12 speed audit, X1);
+#   - Refresh, and a change nobody can name, still retire every snapshot at
+#     once (_bust_orders), as everything did before;
+#   - a short TTL bounds how long a change Shopify never told us about can stay
+#     invisible: webhooks are at-least-once and occasionally late or lost.
 #
 # Two things are deliberately NOT cached. A failed sweep, because "nothing
 # owed" must never be an artefact of a throttled fetch. And the shaped label
@@ -5102,9 +5106,15 @@ ORDER_CACHE_SECS = _env_num(int, os.environ.get("ORDER_CACHE_SECS", "180"), "180
 # clock: at 6, an Overview or Margins run could evict the production queue's
 # entry and make the next click cold again.
 ORDER_CACHE_MAX  = 8
-_orders_cache: dict = {}      # (days, fields) -> {"at", "epoch", "orders", "meta"}
+_orders_cache: dict = {}      # (days, fields) -> {"at", "orders", "meta", "pending"}
 _orders_inflight: dict = {}   # (days, fields) -> the Task sweeping, so concurrent misses share one fetch
-_orders_epoch = 0             # bumped by every write that changes what a sweep returns
+_orders_refreshing: dict = {}  # (days, fields) -> the Task reading its pending orders again, by id
+_orders_flight: dict = {}     # (days, fields) -> ids that changed while that key's sweep was in flight
+_orders_epoch = 0             # bumped by every change, named (_orders_changed) or not (_bust_orders)
+_orders_full_epoch = 0        # bumped only by _bust_orders: what retires every snapshot
+# More changed orders than this at once and one sweep is cheaper than reading
+# them again one by one (Shopify's ids filter takes at most 250 a page).
+ORDER_REFRESH_MAX = 50
 
 
 # ---------------------------------------------------------------------------
@@ -5168,31 +5178,138 @@ def _bust_orders() -> None:
     answer the Refresh with the picture from before their edit, which on the
     liability ledger means chasing an invoice that has just been paid. Anyone
     already awaiting it keeps their own reference and still gets an answer; it
-    simply stops being the answer for callers that arrive after the write."""
-    global _orders_epoch
+    simply stops being the answer for callers that arrive after the write.
+
+    Still the blunt instrument, deliberately: Refresh, and any change nobody
+    can name (an order event whose body cannot be read). Where the app knows
+    WHICH order changed it says so with _orders_changed, which keeps the
+    snapshots and reads that order again instead (the 2026-10-12 speed audit,
+    X1: one Production Manager action used to cost two full sweeps)."""
+    global _orders_epoch, _orders_full_epoch
     _orders_epoch += 1
+    _orders_full_epoch += 1
     _orders_cache.clear()
     _orders_inflight.clear()
+    _orders_refreshing.clear()
+    _orders_flight.clear()
+
+
+def _orders_changed(order_ids) -> None:
+    """These orders changed: a write this app has just made to them, or
+    Shopify's webhook saying so. Every snapshot is kept, and each of these
+    orders is read again from Shopify, by id, before any snapshot is used
+    again (_orders_snapshot), so no answer can carry the order as it was.
+
+    That holds for a sweep still in flight too: the ids are recorded against
+    it, so its result is kept and then put right rather than thrown away, and
+    a caller who joins it after the change is answered with the order as it
+    is now. Ids that cannot be read as order ids fall back to _bust_orders."""
+    ids = set()
+    for i in order_ids or ():
+        try:
+            ids.add(int(i))
+        except (TypeError, ValueError):
+            pass
+    if not ids:
+        _bust_orders()
+        return
+    global _orders_epoch
+    _orders_epoch += 1
+    for entry in _orders_cache.values():
+        entry["pending"].update(ids)
+    for flight in _orders_flight.values():
+        flight.update(ids)
 
 
 async def _sweep_orders(registry: dict, days: int, fields: str, key) -> tuple:
     """One shared sweep: fetches, stores if it is worth storing, and returns
     (orders, meta) to every caller waiting on it."""
-    epoch = _orders_epoch          # the state of the store this sweep is a picture of
+    full_epoch = _orders_full_epoch    # retired by _bust_orders, or not
+    flight: set = set()                # orders named as changed while this runs
+    _orders_flight[key] = flight
     meta: dict = {}
     try:
         orders = await _paginate_orders(registry, days=days, fields=fields, meta=meta)
-        # Store only a complete sweep taken since the last write: "nothing owed"
-        # must never be a cached artefact of a throttled fetch.
-        if ORDER_CACHE_SECS > 0 and not meta.get("failed") and _orders_epoch == epoch:
-            _orders_cache[key] = {"at": time.monotonic(), "epoch": epoch,
-                                  "orders": orders, "meta": dict(meta)}
+        # Store only a complete sweep not retired meanwhile: "nothing owed"
+        # must never be a cached artefact of a throttled fetch. Orders named
+        # as changed while it ran are stored as pending, to be read again.
+        if ORDER_CACHE_SECS > 0 and not meta.get("failed") and _orders_full_epoch == full_epoch:
+            _orders_cache[key] = {"at": time.monotonic(), "orders": orders,
+                                  "meta": dict(meta), "pending": set(flight)}
             while len(_orders_cache) > ORDER_CACHE_MAX:
                 _orders_cache.pop(min(_orders_cache, key=lambda k: _orders_cache[k]["at"]), None)
         return orders, meta
     finally:
+        if _orders_flight.get(key) is flight:
+            _orders_flight.pop(key, None)
         if _orders_inflight.get(key) is asyncio.current_task():
             _orders_inflight.pop(key, None)
+
+
+def _order_created(o: dict):
+    try:
+        t = datetime.fromisoformat(str(o.get("created_at") or "").replace("Z", "+00:00"))
+        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+async def _refresh_orders(registry: dict, key) -> bool:
+    """Read a snapshot's pending orders again, by id, and put them in place:
+    the order as Shopify has it now, with the same fields the sweep asked
+    for, inserted if it is new to the window, dropped if it is gone or older
+    than the window. True when the snapshot is current again; False when it
+    was dropped (the read failed, too many changed at once, or everything was
+    retired meanwhile), and the caller sweeps instead."""
+    entry = _orders_cache.get(key)
+    if entry is None:
+        return False
+    ids = sorted(entry["pending"])
+    entry["pending"] = set()           # changes from here on are pending again
+    if not ids:
+        return True
+    if len(ids) > ORDER_REFRESH_MAX:
+        _orders_cache.pop(key, None)
+        return False
+    days, fields = key
+    names = [f for f in fields.split(",") if f]
+    full_epoch = _orders_full_epoch
+    res = await _tool_json(registry, "shopify_list_orders",
+                           {"status": "any", "ids": ",".join(str(i) for i in ids), "limit": 250,
+                            "fields": ",".join(names + ([] if "created_at" in names else ["created_at"]))})
+    if _orders_full_epoch != full_epoch or _orders_cache.get(key) is not entry:
+        return False                   # retired, or replaced, while this was reading
+    if not _ok(res):
+        _orders_cache.pop(key, None)   # never leave the old order standing in for the new
+        return False
+    # The same cut _paginate_orders makes with created_at_min, so an order the
+    # sweep would not have returned is not kept either.
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    fresh = {}
+    for o in res.get("orders") or []:
+        try:
+            oid = int(o.get("id"))
+        except (TypeError, ValueError):
+            continue
+        if oid in ids:
+            fresh[oid] = o
+    rows = {}
+    for o in entry["orders"]:
+        try:
+            rows[int(o.get("id"))] = o
+        except (TypeError, ValueError):
+            continue
+    for oid in ids:
+        o = fresh.get(oid)
+        made = _order_created(o) if o else None
+        if o is None or made is None or made < cutoff:
+            rows.pop(oid, None)        # deleted, or outside the window the sweep reads
+            continue
+        if "created_at" not in names:
+            o = {k: v for k, v in o.items() if k != "created_at"}
+        rows[oid] = o
+    entry["orders"] = [rows[i] for i in sorted(rows)]   # ascending id, as the sweep pages them
+    return True
 
 
 async def _orders_snapshot(registry: dict, days: int,
@@ -5216,18 +5333,44 @@ async def _orders_snapshot(registry: dict, days: int,
         for k, v in list(_orders_cache.items()):
             if now - v["at"] >= ORDER_CACHE_SECS:
                 _orders_cache.pop(k, None)
-        if ORDER_CACHE_SECS > 0:
-            hit = _orders_cache.get(key)
-            if hit and hit["epoch"] == _orders_epoch:
-                if meta is not None:
-                    meta.update(hit["meta"])
-                return hit["orders"]
-    task = _orders_inflight.get(key)
-    if task is None or task.done():
-        task = asyncio.ensure_future(_sweep_orders(registry, days, fields, key))
-        _orders_inflight[key] = task   # no await between the read and the write, so these cannot interleave
-    # Shielded: a browser hanging up must not cancel the sweep others are waiting on.
-    orders, m = await asyncio.shield(task)
+
+    async def swept() -> tuple:
+        task = _orders_inflight.get(key)
+        if task is None or task.done():
+            task = asyncio.ensure_future(_sweep_orders(registry, days, fields, key))
+            _orders_inflight[key] = task   # no await between the read and the write, so these cannot interleave
+        # Shielded: a browser hanging up must not cancel the sweep others are waiting on.
+        return await asyncio.shield(task)
+
+    # A snapshot with orders named as changed (_orders_changed) is put right,
+    # by id, before it answers anyone. Bounded: a change landing during each
+    # read could otherwise keep this going; after three rounds the answer is
+    # one fresh sweep, which is what every read used to be.
+    for _ in range(3):
+        hit = _orders_cache.get(key) if ORDER_CACHE_SECS > 0 else None
+        if hit is not None and not hit["pending"]:
+            if meta is not None:
+                meta.update(hit["meta"])
+            return hit["orders"]
+        if hit is not None:
+            task = _orders_refreshing.get(key)
+            if task is None or task.done():
+                task = asyncio.ensure_future(_refresh_orders(registry, key))
+                _orders_refreshing[key] = task
+            await asyncio.shield(task)
+            if _orders_refreshing.get(key) is task:
+                _orders_refreshing.pop(key, None)
+            continue
+        orders, m = await swept()
+        if key not in _orders_cache:
+            # Not stored: the cache is off, the sweep failed (said in meta),
+            # or everything was retired while it ran. Its callers keep its
+            # answer, as they always have.
+            if meta is not None:
+                meta.update(m)
+            return orders
+    _orders_cache.pop(key, None)
+    orders, m = await swept()
     if meta is not None:
         meta.update(m)
     return orders
@@ -6391,9 +6534,9 @@ async def _sync_order_tags(registry: dict, order_id, add=(), remove=(), unless=(
                 await _order_tag_writer(int(order_id), ", ".join(new))
             finally:
                 # The queues are filtered on tags, so this write changes what a
-                # sweep returns. Bust on the way out even if the write raised:
-                # a half-applied change must not leave a snapshot behind.
-                _bust_orders()
+                # sweep returns. On the way out even if the write raised: a
+                # half-applied change must not leave the old order behind.
+                _orders_changed([order_id])
             return True, ""
     except httpx.HTTPStatusError as e:
         if e.response is not None and e.response.status_code in (401, 403):
@@ -6642,7 +6785,7 @@ async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
                 # The answer was lost, not necessarily the change: read the order
                 # and see. "Shopify refused the change" was said over edits that
                 # had landed, and the retry then found nothing to do.
-                _bust_orders()
+                _orders_changed([order_id])
                 again = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
                 if _ok(again) and again.get("id"):
                     now_there = dict(_ship_to(again))
@@ -6673,13 +6816,13 @@ async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
                 _update_dispatch(order_id, lambda e: e.update(
                     {"address_changed_at": datetime.now(timezone.utc).isoformat()}))
     except Exception:
-        # A write may have landed before this raised, so the snapshot is suspect.
-        _bust_orders()
+        # A write may have landed before this raised, so the order is suspect.
+        _orders_changed([order_id])
         logger.exception("order edit failed for order %s", order_id)
         return False, "The order couldn't be changed. Check the server logs.", [], name, []
-    # The queues read the address straight off the cached sweep, so leaving the
-    # snapshot in place would show the old address until the next refresh.
-    _bust_orders()
+    # The queues read the address straight off the cached sweep, so the order
+    # is read again before the snapshot answers anyone.
+    _orders_changed([order_id])
     return True, "", changed, name, warn
 
 
@@ -6834,10 +6977,10 @@ async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = N
                 tracking_url=None,
                 notify_customer=do_notify,
             )
-            _bust_orders()   # fulfillment_status is a swept field
+            _orders_changed([order_id])   # fulfillment_status is a swept field
         except Exception:
             logger.exception("fulfillment failed for order %s", oid)
-            _bust_orders()   # it may still have landed before the error
+            _orders_changed([order_id])   # it may still have landed before the error
             fulfillment = {"ok": False, "reason": "error",
                            "detail": "Shopify fulfillment failed; the label is still valid. "
                                      "You can fulfill the order manually in Shopify."}
@@ -6907,14 +7050,14 @@ async def _unfulfill_dispatch(registry: dict, order_id) -> str:
     if fid and _fulfillment_canceler is not None:
         try:
             fc = await _fulfillment_canceler(int(fid))
-            _bust_orders()   # fulfillment_status is a swept field
+            _orders_changed([order_id])   # fulfillment_status is a swept field
             note = ("" if fc.get("ok") else
                     "The order is still marked fulfilled in Shopify (" + (fc.get("detail") or "")
                     + "). Cancel that fulfillment in Shopify so the customer is not left with "
                       "tracking for something that has not shipped.")
         except Exception:
             logger.exception("fulfillment cancel failed for order %s", oid)
-            _bust_orders()   # it may still have landed before the error
+            _orders_changed([order_id])   # it may still have landed before the error
             note = ("The order is still marked fulfilled in Shopify. Cancel that fulfillment "
                     "there so the customer is not left with tracking for an unshipped order.")
     # Re-read here: the store may have gained a booking while Shopify was thinking,
@@ -16935,6 +17078,9 @@ async def _net30_on_release(registry: dict, order_id) -> dict:
         logger.exception("net30: attach failed for %s", order_id)
         return {"account": True, "ok": False,
                 "note": "Released, but the 30-day payment terms could not be added."}
+    finally:
+        # The ledger reads payment_terms; it may have landed whatever came back.
+        _orders_changed([order_id])
     _terms_flag(order_id, ok=bool(r.get("ok")), note=str(r.get("detail") or ""))
     if r.get("ok"):
         # Say what actually happened to the order, not what was hoped for. The
@@ -19559,7 +19705,17 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         delivery = str(request.headers.get("x-shopify-webhook-id") or "")
         if delivery and not _webhook_note_delivery(delivery):
             return PlainTextResponse("ok", status_code=200)   # a redelivery, already handled
-        _bust_orders()
+        # The order this event is about is read again from Shopify on the next
+        # load; the payload names it and is never used as state. One that
+        # cannot be read retires every snapshot, as every event used to.
+        try:
+            _event_order = json.loads(raw).get("id")
+        except Exception:
+            _event_order = None
+        if _event_order:
+            _orders_changed([_event_order])
+        else:
+            _bust_orders()
         _webhook_state["last_at"] = time.time()
         _webhook_state["last_topic"] = str(request.headers.get("x-shopify-topic") or "")
         _webhook_state["version"] = str(request.headers.get("x-shopify-api-version") or "")[:16]
@@ -26638,7 +26794,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if fid and _fulfillment_canceler is not None:
                 try:
                     fc = await _fulfillment_canceler(int(fid))
-                    _bust_orders()   # fulfillment_status is a swept field
+                    _orders_changed([oid])   # fulfillment_status is a swept field
                     if fc.get("ok"):
                         # The fulfilment is genuinely gone, so the record must stop
                         # claiming otherwise: a stale fulfillment_id makes a later

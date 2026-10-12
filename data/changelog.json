@@ -2,6 +2,22 @@
  "releases": [
   {
    "date": "2026-10-12",
+   "title": "The Production Manager keeps its orders between clicks",
+   "items": [
+    {
+     "kind": "improved",
+     "tab": "labels",
+     "text": "Marking an order, moving it between queues, changing its address or dispatching it no longer makes Reactor download every order again from Shopify. Only the order you changed is read again, so the next queue opens straight away instead of waiting for the whole store. The same goes when Shopify says an order has changed, and for the ledger and the other pages that read orders."
+    },
+    {
+     "kind": "fixed",
+     "tab": "liability",
+     "text": "Adding 30-day payment terms on release now shows on the ledger straight away. It could take up to three minutes."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-12",
    "title": "A quicker Inbox, and response times in Settings",
    "items": [
     {

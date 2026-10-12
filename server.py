@@ -803,6 +803,7 @@ class ListOrdersInput(BaseModel):
     created_at_min:      Optional[str] = Field(default=None, description="ISO 8601 date, e.g. 2024-01-01T00:00:00Z")
     created_at_max:      Optional[str] = Field(default=None)
     fields:              Optional[str] = Field(default=None)
+    ids:                 Optional[str] = Field(default=None, description="Comma-separated order IDs")
 
 
 @mcp.tool(
@@ -813,7 +814,8 @@ async def shopify_list_orders(params: ListOrdersInput) -> str:
     """List orders with optional filters for status, financial/fulfillment status, and date range."""
     try:
         p: Dict[str, Any] = {"limit": params.limit, "status": params.status}
-        for field in ["financial_status", "fulfillment_status", "since_id", "created_at_min", "created_at_max", "fields"]:
+        for field in ["financial_status", "fulfillment_status", "since_id", "created_at_min", "created_at_max",
+                      "fields", "ids"]:
             val = getattr(params, field)
             if val is not None:
                 p[field] = val
