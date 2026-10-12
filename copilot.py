@@ -11248,6 +11248,15 @@ def _json_body(raw: bytes, status: int = 200) -> Response:
                     headers={**_API_HEADERS, "X-App-Build": _build_id()})
 
 
+def _json_spliced(head: dict, field: str, raw: bytes) -> Response:
+    """`head` with `raw`, bytes _json_dumps_like_starlette already made,
+    spliced in as `field`, so a big object serialised once (to fingerprint
+    it) is not serialised again inside the answer that carries it."""
+    first = _json_dumps_like_starlette(head)
+    return _json_body(first[:-1] + (b"," if len(first) > 2 else b"")
+                      + _json_dumps_like_starlette(field) + b":" + raw + b"}")
+
+
 # ---------------------------------------------------------------------------
 # Abuse / cost controls — in-memory rate limiting + request-size guards
 # ---------------------------------------------------------------------------
@@ -12520,10 +12529,8 @@ def _crm_board() -> tuple:
 
 def _crm_answer(raw: bytes, rev: str, head: Optional[dict] = None) -> Response:
     """An answer that carries the board: `head` and the revision, with the
-    board's own bytes spliced in as "crm", so a board already serialised is
-    not serialised again inside a bigger answer."""
-    first = _json_dumps_like_starlette({**(head or {}), "rev": rev})
-    return _json_body(first[:-1] + b',"crm":' + raw + b"}")
+    board's own bytes spliced in as "crm"."""
+    return _json_spliced({**(head or {}), "rev": rev}, "crm", raw)
 
 
 def _crm_team_list() -> list:
@@ -12611,6 +12618,14 @@ FILES_TRASH_DAYS = 30
 _files_s3_client = None
 _files_s3_birth = threading.Lock()   # boto3's default session is not thread-safe to build on
 _files_ready = {"bucket": False, "cors": False, "error": "", "at": 0.0}
+# Uploads now set the bucket up before taking the store's lock, so three at
+# once can reach the setup together; one sets it up and the others wait for
+# its answer, rather than each creating the bucket and two reporting failure.
+# They wait a few seconds at most: against a storage that hangs, one setup
+# runs for up to a minute (short timeouts, but three tries of two calls), and
+# an upload is refused sooner than that by the failure that stands.
+_files_setup_lock = threading.Lock()
+FILES_SETUP_WAIT = 5.0
 # One writer at a time: every route that loads, mutates and writes the store
 # holds this across the whole exchange. The browser deliberately runs three
 # uploads at once, so without it two upload-url calls interleave around their
@@ -12651,11 +12666,27 @@ def _files_ensure_bucket(page_origin: str) -> None:
     starts. Never raises; failures surface in the status block."""
     if _files_ready["bucket"] and _files_ready["cors"]:
         return
-    # A failing bucket is not probed on every presign: one attempt a minute,
-    # so a dead R2 costs each upload one fast refusal, not a retry storm.
+    # A failing bucket is not probed on every presign: one attempt a minute
+    # after the last one failed, so a dead R2 costs each upload a quick
+    # refusal, not a retry storm.
     if _files_ready["error"] and time.time() - float(_files_ready.get("at") or 0) < 60:
         return
-    _files_ready["at"] = time.time()
+    if not _files_setup_lock.acquire(timeout=FILES_SETUP_WAIT):
+        return
+    try:
+        _files_ensure_bucket_locked(page_origin)
+    finally:
+        _files_setup_lock.release()
+
+
+def _files_ensure_bucket_locked(page_origin: str) -> None:
+    # Looked at again under the lock: a call that waited here while another
+    # set the bucket up, or failed to, takes that answer rather than asking
+    # storage a second time.
+    if _files_ready["bucket"] and (_files_ready["cors"] or not page_origin) and not _files_ready["error"]:
+        return
+    if _files_ready["error"] and time.time() - float(_files_ready.get("at") or 0) < 60:
+        return
     s3 = _files_s3()
     try:
         if not _files_ready["bucket"]:
@@ -12673,6 +12704,10 @@ def _files_ensure_bucket(page_origin: str) -> None:
             _files_ready["cors"] = True
         _files_ready["error"] = ""
     except Exception as e:
+        # Stamped when an attempt FAILS, not when it starts: uploads arriving
+        # while a retry is still asking storage wait on the lock for its
+        # answer, instead of taking the retry for a failure a moment ago.
+        _files_ready["at"] = time.time()
         _files_ready["error"] = f"{type(e).__name__}: {e}"[:200]
         logger.warning("files: bucket setup failed: %s", _files_ready["error"])
 
@@ -12898,7 +12933,7 @@ def _files_folder_ok(d: dict, folder_id: str) -> bool:
     return folder_id == "" or folder_id in d["folders"]
 
 
-def _files_supersede(d: dict, fid: str) -> int:
+def _files_supersede(d: dict, fid: str) -> list:
     """The file just completed is THE file of its name in its folder: every
     other active one goes to the bin. Decided at completion, not when the
     upload was reserved: two uploads of one name whose reservations overlapped
@@ -12909,13 +12944,13 @@ def _files_supersede(d: dict, fid: str) -> int:
     name = str(f.get("name") or "").lower()
     folder = str(f.get("folder_id") or "")
     now = datetime.now(timezone.utc).isoformat()
-    n = 0
+    gone = []
     for k, v in d["files"].items():
         if k != fid and v.get("status") == "active" and not v.get("hidden") \
                 and str(v.get("name") or "").lower() == name and str(v.get("folder_id") or "") == folder:
             v["status"], v["trashed_at"] = "trashed", now
-            n += 1
-    return n
+            gone.append(k)
+    return gone
 
 
 def _files_purge(d: dict) -> None:
@@ -12968,6 +13003,34 @@ def _files_reap(d: dict, s3) -> bool:
     return False
 
 
+def _files_sent(d: dict) -> tuple:
+    """(raw, revision): the store as the page is sent it, and a fingerprint of
+    those bytes. The page sends the revision back and an unchanged store is
+    not sent again; like the CRM's, it moves only when what would be sent
+    moves (the 2026-10-12 speed audit, S9)."""
+    raw = _json_dumps_like_starlette(_files_shape(d))
+    return raw, hashlib.blake2b(raw, digest_size=8).hexdigest()
+
+
+def _files_delta(d: dict, files=(), folders=()) -> dict:
+    """What a page that asked for it (delta) needs to bring its copy of the
+    store up to date after a change to these records, shaped exactly as
+    _files_shape shapes them: each record as it now shows (None when it no
+    longer shows), each one's trash entry likewise, the space used, and the
+    two things a page's copy holds that change without a record changing:
+    the storage error (an upload is often what finds storage back) and the
+    names of the people who uploaded."""
+    out = {"files": {}, "trash": {}, "folders": {}, "used": _files_usage(d),
+           "setup_error": _files_ready["error"], "names": _team_names()}
+    for k in files:
+        v = d["files"].get(k)
+        out["files"][k] = v if v and v.get("status") == "active" and not v.get("hidden") else None
+        out["trash"][k] = {**v, "id": k} if v and v.get("trashed_at") else None
+    for k in folders:
+        out["folders"][k] = d["folders"].get(k)
+    return out
+
+
 def _files_shape(d: dict) -> dict:
     used = _files_usage(d)
     return {"folders": d["folders"],
@@ -13011,15 +13074,19 @@ def _files_endpoint() -> str:
     return os.environ.get("R2_ENDPOINT") or f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
 
-def _files_sign_put(key: str, ctype: str, size: int = 0) -> str:
-    """Blocking (network on first use); call off the event loop.
+def _files_sign_put(key: str, ctype: str, size: int = 0, setup: bool = True) -> str:
+    """Blocking (network on first use); call off the event loop. A caller
+    holding the store's lock passes setup=False, having set the bucket up
+    before it took the lock: this then only signs, and never waits on a
+    setup (its own, or another upload's retry) with the lock held.
 
     The signature BINDS the length when one is known: without it the URL
     authorised a PUT of any size R2 accepts, so a client could declare 1KB,
     pass the quota check, and then store gigabytes against a record that says
     1KB - and the presign stayed valid for a quarter of an hour after the
     upload was confirmed, long enough to swap the object afterwards."""
-    _files_ensure_bucket(_files_origin())
+    if setup:
+        _files_ensure_bucket(_files_origin())
     if not _files_ready["bucket"]:
         raise RuntimeError(_files_ready["error"] or "bucket unavailable")
     params = {"Bucket": R2_BUCKET, "Key": key, "ContentType": ctype}
@@ -19411,14 +19478,16 @@ async def _files_guard(request: Request):
     return await _guard(request)
 
 def _files_ok(d: dict, extra: Optional[dict] = None, action: str = "",
-              detail: str = "", who: str = "") -> JSONResponse:
+              detail: str = "", who: str = "", delta: Optional[dict] = None) -> Response:
+    """Save, then answer the whole store with its revision; or, for a page
+    that asked (delta), only what changed, which it patches into its copy."""
     _write_files(d)
     if action:
         _track(who, "files", action, detail)
-    out = {"ok": True, "store": _files_shape(d)}
-    if extra:
-        out.update(extra)
-    return _json(out)
+    if delta is not None:
+        return _json({"ok": True, **(extra or {}), "delta": delta})
+    raw, rev = _files_sent(d)
+    return _json_spliced({"ok": True, **(extra or {}), "rev": rev}, "store", raw)
 
 # ---- Auth + Team routes -----------------------------------------------
 # The app's own front door. Every route here still demands the Shopify
@@ -24369,11 +24438,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/files/tree", methods=["POST"])
     async def files_tree_route(request: Request):
-        err, _body, _who = await _files_guard(request)
+        err, body, _who = await _files_guard(request)
         if err:
             return err
         try:
-            return _json({"store": _files_shape(_load_files())})
+            raw, rev = _files_sent(_load_files())
+            # A page that holds this revision is told so, not sent the store
+            # again. One with none, open from before this update, gets it.
+            if str((body or {}).get("rev") or "") == rev:
+                return _json({"same": True, "rev": rev})
+            return _json_spliced({"rev": rev}, "store", raw)
         except Exception:
             logger.exception("files tree failed")
             return _json({"error": "Couldn't load the files."}, 500)
@@ -24399,7 +24473,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     fid = _files_id(d, "d")
                     d["folders"][fid] = {"name": name, "parent_id": parent,
                                          "created_at": datetime.now(timezone.utc).isoformat()}
-                    return _files_ok(d, {"id": fid}, action="made a folder", detail=name, who=_who)
+                    return _files_ok(d, {"id": fid}, action="made a folder", detail=name, who=_who,
+                                     delta=_files_delta(d, folders=[fid]) if body.get("delta") else None)
                 if op == "rename":
                     fid = str(body.get("id") or "")
                     if fid not in d["folders"]:
@@ -24469,6 +24544,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "That file is over the 4GB single-file limit."}, 400)
         folder = str(body.get("folder_id") or "")
         try:
+            # Setting the bucket up is network (the first upload after a
+            # deploy, and once a minute while storage is failing), so it runs
+            # before the lock is taken: inside it, every other change to Files
+            # and the Finder drive waited on storage. Under the lock the
+            # signing below is then local work.
+            await asyncio.to_thread(_files_ensure_bucket, _files_origin())
             async with _files_lock:
                 d = _load_files()
                 if not _files_folder_ok(d, folder):
@@ -24482,7 +24563,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 ctype = str(body.get("type") or "application/octet-stream").strip()[:100] \
                     or "application/octet-stream"
                 try:
-                    url = await asyncio.to_thread(_files_sign_put, key, ctype, size)
+                    url = await asyncio.to_thread(_files_sign_put, key, ctype, size, False)
                 except RuntimeError as e:
                     logger.warning("files: presign failed: %s", e)
                     return _json({"error": "Storage isn't reachable right now. Check the R2 "
@@ -24501,7 +24582,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if dup:
                     rec["replaces"] = dup
                 d["files"][fid] = rec
-                return _files_ok(d, {"id": fid, "url": url, "replaces": bool(dup)})
+                return _files_ok(d, {"id": fid, "url": url, "replaces": bool(dup)},
+                                 delta=_files_delta(d) if body.get("delta") else None)
         except RuntimeError:
             return _json({"error": _FILES_STORE_FAIL}, 500)
         except Exception:
@@ -24520,55 +24602,73 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 f = d["files"].get(fid)
                 if not f or f.get("status") != "pending":
                     return _json({"error": "That upload is no longer expected."}, 400)
-                try:
-                    true_size = await asyncio.to_thread(_files_head, f["r2_key"])
-                except RuntimeError:
-                    # A storage wobble is not a lost upload: keep the record
-                    # pending so a retry can finish the same upload.
-                    return _json({"error": "Storage isn't answering right now. Wait a "
-                                           "moment and try again; the upload is not lost."}, 502)
-                if true_size is None:
-                    return _json({"error": "The file never arrived in storage. Try the "
-                                           "upload again."}, 400)
+                key = f["r2_key"]
+            # Storage is asked outside the store's lock (the 2026-10-12 speed
+            # audit, S9). Held across these two round trips, it made every
+            # other change to Files and the Finder drive wait on storage, and
+            # a batch's uploads were confirmed one at a time. The record is
+            # read again under the lock before anything is kept.
+            try:
+                true_size = await asyncio.to_thread(_files_head, key)
+            except RuntimeError:
+                # A storage wobble is not a lost upload: keep the record
+                # pending so a retry can finish the same upload.
+                return _json({"error": "Storage isn't answering right now. Wait a "
+                                       "moment and try again; the upload is not lost."}, 502)
+            if true_size is None:
+                return _json({"error": "The file never arrived in storage. Try the "
+                                       "upload again."}, 400)
+            try:
+                head = await asyncio.to_thread(_files_head_bytes, key)
+            except Exception:
+                logger.exception("files: could not read the head of %s", key)
+                return _json({"error": "Storage did not answer; try again."}, 502)
+            refused = ""
+            async with _files_lock:
+                d = _load_files()
+                f = d["files"].get(fid)
+                # Confirmed by another call (a retry) or gone while storage
+                # answered: exactly what a second confirmation was told before.
+                if not f or f.get("status") != "pending" or f.get("r2_key") != key:
+                    return _json({"error": "That upload is no longer expected."}, 400)
                 # The browser's claimed size opened the door; what actually
                 # landed is what counts against the space.
                 f["size"] = true_size
-                try:
-                    head = await asyncio.to_thread(_files_head_bytes, f["r2_key"])
-                except Exception:
-                    logger.exception("files: could not read the head of %s", f["r2_key"])
-                    return _json({"error": "Storage did not answer; try again."}, 502)
                 okv, why, safe = _file_verdict(f.get("name"), f.get("type"), head)
                 if not okv:
                     # Refused whole: the bytes go, the record goes, and the
                     # person is told why rather than left with a phantom file.
                     d["files"].pop(fid, None)
                     _write_files(d)
-                    try:
-                        await asyncio.to_thread(_r2_call, "delete_object", Key=f["r2_key"])
-                    except Exception:
-                        logger.warning("files: refused upload %s could not be removed", f["r2_key"])
-                    _track(_who, "files", "refused an upload", why[:200])
-                    return _json({"error": "Refused: " + why + " The upload was removed."}, 400)
-                f["type"], f["sniffed"] = safe, _sniff_kind(head)
-                if true_size > FILES_MAX_UPLOAD \
-                        or _files_usage(d) > int(FILES_QUOTA_GB * 1024 * 1024 * 1024):
-                    _write_files(d)   # keep the honest size; the sweep clears it
-                    return _json({"error": "The file is bigger than the storage space "
-                                           "allows, so it has not been kept."}, 400)
-                f["status"] = "active"
-                f["uploaded_at"] = datetime.now(timezone.utc).isoformat()
-                if f.get("folder_id") and not _files_folder_ok(d, str(f.get("folder_id"))):
-                    # The folder went while the bytes were in flight. A file
-                    # in a folder that does not exist is counted, invisible
-                    # and unreachable on the drive; the top level is where a
-                    # restore puts one too.
-                    f["folder_id"] = ""
-                f.pop("replaces", None)
-                replaced = " (replaced the previous version)" if _files_supersede(d, fid) else ""
-                return _files_ok(d, action="uploaded a file",
-                                 detail=(f"{f.get('name')} ({true_size} bytes)" + replaced)[:200],
-                                 who=_who)
+                    refused = why
+                else:
+                    f["type"], f["sniffed"] = safe, _sniff_kind(head)
+                    if true_size > FILES_MAX_UPLOAD \
+                            or _files_usage(d) > int(FILES_QUOTA_GB * 1024 * 1024 * 1024):
+                        _write_files(d)   # keep the honest size; the sweep clears it
+                        return _json({"error": "The file is bigger than the storage space "
+                                               "allows, so it has not been kept."}, 400)
+                    f["status"] = "active"
+                    f["uploaded_at"] = datetime.now(timezone.utc).isoformat()
+                    if f.get("folder_id") and not _files_folder_ok(d, str(f.get("folder_id"))):
+                        # The folder went while the bytes were in flight. A file
+                        # in a folder that does not exist is counted, invisible
+                        # and unreachable on the drive; the top level is where a
+                        # restore puts one too.
+                        f["folder_id"] = ""
+                    f.pop("replaces", None)
+                    gone = _files_supersede(d, fid)
+                    replaced = " (replaced the previous version)" if gone else ""
+                    return _files_ok(d, action="uploaded a file",
+                                     detail=(f"{f.get('name')} ({true_size} bytes)" + replaced)[:200],
+                                     who=_who,
+                                     delta=_files_delta(d, [fid] + gone) if body.get("delta") else None)
+            try:
+                await asyncio.to_thread(_r2_call, "delete_object", Key=key)
+            except Exception:
+                logger.warning("files: refused upload %s could not be removed", key)
+            _track(_who, "files", "refused an upload", refused[:200])
+            return _json({"error": "Refused: " + refused + " The upload was removed."}, 400)
         except RuntimeError:
             return _json({"error": _FILES_STORE_FAIL}, 500)
         except Exception:
