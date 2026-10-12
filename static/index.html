@@ -14712,13 +14712,16 @@ Projected Image UK"></textarea>
             rule.textContent = labelPrintCss(dims);
             box.append(loanStickerSheet(d));
             const cleanup = () => {
+                /* The button and the row are this print's own, whichever
+                   print holds the box now, so an overtaken sticker gives them
+                   back too; returning first left the button dead. */
+                btn.disabled = false;
+                loadLoans(true);      /* the tag is minted now; the row says Reprint */
                 if (seq !== printSeq) return;
                 document.body.classList.remove('printing-label');
                 box.innerHTML = '';
                 const r = $('label-page-rule');
                 if (r && r.parentNode) r.parentNode.removeChild(r);
-                btn.disabled = false;
-                loadLoans(true);      /* the tag is minted now; the row says Reprint */
             };
             /* The codes are images: printing before they decode prints blank
                squares. Wait for them and for the label typeface, both capped. */
@@ -14733,8 +14736,14 @@ Projected Image UK"></textarea>
             await Promise.race([Promise.all([ready, labelFontReady()]),
                                 new Promise(res => setTimeout(res, 3000))])
                 .catch(() => {});
+            /* Another print may have started during that wait. The box and
+               the page rule are its now: printing here would print its page,
+               and it opens its own dialog. */
+            if (seq !== printSeq) { cleanup(); return; }
             document.body.classList.add('printing-label');
-            setTimeout(() => { window.print(); setTimeout(cleanup, 800); }, 40);
+            setTimeout(() => {
+                if (seq !== printSeq) { cleanup(); return; }
+                window.print(); setTimeout(cleanup, 800); }, 40);
         }
         function renderLoans() {
             const d = loansCache || {}; const box = $('loans-content'); box.innerHTML = '';
@@ -20329,6 +20338,7 @@ Projected Image UK"></textarea>
             };
             if (window.onafterprint !== undefined) window.addEventListener('afterprint', cleanup, { once: true });
             labelFontReady().then(() => setTimeout(() => {
+                if (seq !== printSeq) return;   // a newer print has the box; it opens its own dialog
                 window.print(); setTimeout(cleanup, 800); }, 40), () => cleanup());
         }
         function openStockUsage() {
@@ -20558,6 +20568,7 @@ Projected Image UK"></textarea>
             };
             if (window.onafterprint !== undefined) window.addEventListener('afterprint', cleanup, { once: true });
             labelFontReady().then(() => setTimeout(() => {
+                if (seq !== printSeq) return;   // a newer print has the box; it opens its own dialog
                 window.print(); setTimeout(cleanup, 800); }, 40), () => cleanup());
         }
         /* One A4 cut list of everything live and not yet made: sizes and glass
@@ -20632,6 +20643,7 @@ Projected Image UK"></textarea>
             };
             if (window.onafterprint !== undefined) window.addEventListener('afterprint', cleanup, { once: true });
             labelFontReady().then(() => setTimeout(() => {
+                if (seq !== printSeq) return;   // a newer print has the box; it opens its own dialog
                 window.print(); setTimeout(cleanup, 800); }, 40), () => cleanup());
         }
 
@@ -23129,7 +23141,9 @@ Projected Image UK"></textarea>
                 sheets.forEach(fitLabel);
                 document.body.classList.add('printing-label');
                 if (window.onafterprint !== undefined) window.addEventListener('afterprint', cleanup, { once: true });
-                setTimeout(() => { window.print(); setTimeout(cleanup, 800); }, 40);
+                setTimeout(() => {
+                    if (seq !== printSeq) return;   // taken over in the 40ms since
+                    window.print(); setTimeout(cleanup, 800); }, 40);
             }, () => cleanup());
         }
 
@@ -23959,6 +23973,7 @@ Projected Image UK"></textarea>
             };
             if (window.onafterprint !== undefined) window.addEventListener('afterprint', cleanup, { once: true });
             labelFontReady().then(() => setTimeout(() => {
+                if (seq !== printSeq) return;   // a newer print has the box; it opens its own dialog
                 window.print(); setTimeout(cleanup, 800); }, 40), () => cleanup());
         }
 

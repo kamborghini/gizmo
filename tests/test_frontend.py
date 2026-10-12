@@ -7457,6 +7457,127 @@ const settle = (p) => Promise.race([p.then(v => v), new Promise(r => setTimeout(
 
 
 @test
+def t_a_print_overtaken_by_a_newer_one_opens_no_dialog():
+    """Every print stages its page in one box (#label-print) under one page
+    rule, and a newer print takes both over, counted by printSeq. The
+    2026-09-30 review found the serial sticker and the four A4 sheets never
+    asked whether they had been overtaken before opening the dialog: the older
+    print opened it over the newer print's page, so that page printed twice,
+    and an overtaken sticker's tidy-up bailed out before re-enabling its
+    button, which then stayed dead. Run for real, in node, for every pair of
+    print paths on a clock the test drives: overtaken while waiting for the
+    typeface, in the moment before the dialog, and after the dialog but before
+    the tidy-up."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    ok("let printSeq = 0;" in SCRIPT, "the print paths share one sequence counter")
+    paths = ["function labelFontReady(", "function labelPrintCss(", "function printLabels(",
+             "async function loanPrintSticker(", "function printDispatchManifest(", "function printStockUsage(",
+             "function printDaySheet(", "function printGuide("]
+    lays = re.search(r"const PRINT_LAYS_LABELS = .*", SCRIPT)
+    ok(lays, "the label prints say whether they lay the labels out themselves")
+    js = MINIDOM + r"""
+// A clock the test drives, so the typeface wait, the 40ms before the dialog
+// and the 800ms tidy-up happen in a known order and take no real time.
+let now = 0, tid = 0, timers = [];
+const setTimeout = (f, ms) => { timers.push({ at: now + (ms || 0), f, id: ++tid }); return tid; };
+const tick = () => new Promise(r => setImmediate(r));
+async function until(t) {
+  await tick();
+  for (;;) {
+    timers.sort((a, b) => a.at - b.at || a.id - b.id);
+    const next = timers[0];
+    if (!next || next.at > t) break;
+    timers.shift(); now = next.at; next.f(); await tick();
+  }
+  now = t;
+}
+Node_.prototype.removeChild = function (n) { n.remove(); return n; };
+document.head = new Node_('head'); document.head.parentNode = document;
+const printBox = el('div'); printBox.id = 'label-print'; document.body.append(printBox);
+const $ = (id) => { const walk = (n) => { if (n.id === id) return n;
+  for (const c of n.children || []) { const f = walk(c); if (f) return f; } return null; };
+  return walk(document.head) || walk(document.body); };
+// The typeface lands 100ms after it is asked for.
+document.fonts = { load: () => new Promise(res => setTimeout(res, 100)) };
+// The dialog: note which page it shows, then fire afterprint as Chrome does.
+const prints = []; let afterprint = [];
+const window = {
+  onafterprint: null,
+  addEventListener(t, f) { if (t === 'afterprint') afterprint.push(f); },
+  print() {
+    const r = $('label-page-rule');
+    prints.push({ page: printBox.textContent + ' | ' + (r ? r.textContent : 'no page rule'),
+                  mode: document.body.classList.contains('printing-label') });
+    afterprint.splice(0).forEach(f => f());
+  },
+};
+let printSeq = 0;
+const LABEL_SIZES = {};
+const labelDims = () => ({ w: 101.6, h: 50.8 });
+const stickerDims = () => ({ w: 101.6, h: 101.6 });
+const labelSheet = (o) => el('div', 'label-sheet', 'Label ' + o.name);
+const fitLabel = () => {}, stampPrinted = () => {}, loadLoans = () => {}, addToast = () => {}, toastError = () => {};
+const api = async () => ({ tag: 'PI-0001', barcode: '', qr: '' });
+const loanStickerSheet = (d) => el('div', 'loan-sticker', 'Sticker ' + d.tag);
+const labelOrders = () => [{ id: 1, name: '#1001', items: [{ production_size: '37.5', glass_type: 'Clear', quantity: 2 }] }];
+const prodStateOf = () => ({}), orderNo = (o) => o.name, fmtDate = (s) => s.slice(0, 10), guideText = (d) => String(d);
+const navigator = { vendor: 'Google Inc.' };
+""" + lays.group(0) + "\n" + "\n".join(fn_src(p) for p in paths) + r"""
+let stickerBtn;
+const PATHS = {
+  labels: () => printLabels([{ id: 1, name: '#1001' }]),
+  sticker: () => loanPrintSticker({ id: 'u1' }, stickerBtn),
+  manifest: () => printDispatchManifest({ date: '2026-09-30', totals: { shipments: 1 }, rows: [] }),
+  usage: () => printStockUsage({ date: '2026-09-30', orders: 1, pieces: 2, rows: [], unresolved: [], stock: [], order_names: ['#1001'] }),
+  daysheet: () => printDaySheet(),
+  guide: () => printGuide([{ h: 'Printing', body: [['Labels', 'Print them.']] }]),
+};
+async function run(first, second, at) {
+  prints.length = 0; afterprint = []; timers = []; now = 0;
+  stickerBtn = el('button');
+  PATHS[first]();
+  if (second) { await until(at); PATHS[second](); }
+  await until(20000);
+  return { prints: prints.slice(), clean: !document.body.classList.contains('printing-label')
+             && !$('label-page-rule') && !printBox.children.length && !printBox.textContent,
+           buttonLive: !stickerBtn.disabled };
+}
+(async () => {
+  const names = Object.keys(PATHS), sig = {}, fails = [];
+  for (const n of names) {
+    const r = await run(n);
+    if (r.prints.length !== 1 || !r.prints[0].mode || !r.clean || !r.buttonLive)
+      fails.push(n + ' on its own: ' + JSON.stringify(r));
+    else sig[r.prints[0].page] = n;
+  }
+  if (Object.keys(sig).length !== names.length) fails.push('two paths print the same page: ' + JSON.stringify(sig));
+  // The first print starts at 0: its typeface lands at 100, its dialog opens
+  // at 140 and its timed tidy-up runs at 940.
+  const when = { 'while waiting for the typeface': 50, 'just before the dialog': 120, 'after the dialog': 500 };
+  for (const [moment, at] of Object.entries(when)) {
+    for (const a of names) for (const b of names) {
+      if (a === b) continue;
+      const r = await run(a, b, at);
+      const shown = r.prints.map(p => sig[p.page] || ('an unknown page: ' + p.page));
+      const want = at === 500 ? [a, b] : [b];
+      const bad = [];
+      if (JSON.stringify(shown) !== JSON.stringify(want)) bad.push('printed ' + JSON.stringify(shown));
+      if (r.prints.some(p => !p.mode)) bad.push('opened a dialog outside label mode');
+      if (!r.clean) bad.push('left the page in label mode or the box full');
+      if (!r.buttonLive) bad.push('left the sticker button dead');
+      if (bad.length) fails.push(a + ' overtaken by ' + b + ' ' + moment + ' ' + bad.join(' and '));
+    }
+  }
+  console.log(JSON.stringify({ fails }));
+})();
+"""
+    fails = _run_node(js)["fails"]
+    ok(not fails, "%d of 96 runs went wrong, first: %s" % (len(fails), "; ".join(fails[:4])))
+
+
+@test
 def t_bulk_undo_puts_back_every_batch_and_says_how_many():
     """A13 in the 2026-09-22 bug audit. A bulk action over 150 emails is sent
     in batches, each with its own undo token; the page kept only the last, so
@@ -9489,16 +9610,19 @@ def t_the_printed_sheets_do_not_change():
     here is a change to paper: undo it, or ask Cameron first."""
     import hashlib
     h = lambda t: hashlib.sha256(t.encode("utf-8")).hexdigest()[:16]
+    # 2026-10-12: the six print paths that share the staging box gained their
+    # sequence checks, so an overtaken print opens no dialog (Cameron: "open a
+    # PR for the print fix"). Nothing they build, size or style changed.
     funcs = {
         "function prodSize(": "c8b194be336787e3", "function carrierDims(": "560211cb05b49d72",
         "function stickerDims(": "b65799c062e28ec8", "function labelFontReady(": "e90e9106a39a03f4",
         "function labelDims(": "a3e5c994043b70d4", "function labelPrintCss(": "061bc8a8862da9f0",
         "function fitLabel(": "b8bebb1841f753aa", "function loanStickerSheet(": "4e84233802eb448d",
-        "async function loanPrintSticker(": "d7705852736415ca", "function labelSheet(": "68217ade25de37e2",
-        "function printDispatchManifest(": "7298fb528556d1bb", "function printStockUsage(": "87dcb3552a1cd72e",
-        "function printDaySheet(": "59667d1651a03de6", "function printShippingLabelsFor(": "1574f28f689be7a0",
-        "function printLabelImages(": "b5f3da205c85e60b", "function printLabels(": "4f2e020a18b82af7",
-        "function printGuide(": "d169080c58a6a3f6", "const LABEL_SIZES = {": "aaba502d9fc95f0f",
+        "async function loanPrintSticker(": "4a189b1c5dc561ce", "function labelSheet(": "68217ade25de37e2",
+        "function printDispatchManifest(": "201f519b02240216", "function printStockUsage(": "925866a99c5abee1",
+        "function printDaySheet(": "ad4c8109bf351ddf", "function printShippingLabelsFor(": "1574f28f689be7a0",
+        "function printLabelImages(": "b5f3da205c85e60b", "function printLabels(": "9f0c0c7984c62d96",
+        "function printGuide(": "ca6a40b9b220aff5", "const LABEL_SIZES = {": "aaba502d9fc95f0f",
     }
     for sig, want in funcs.items():
         ok(sig in SCRIPT, "the print code is still there: " + sig)
