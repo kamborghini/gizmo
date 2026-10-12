@@ -4221,6 +4221,9 @@
            the card header and the toolbar above it are both built from. */
         .crm-selbar { display: flex; align-items: center; gap: var(--control-gap); }
         .ktable tr.crm-selhead > th { padding: 0; }
+        .ktable.crm-contact-table > thead > tr.crm-selhead ~ tr { display: none; }
+        /* A phone hides every table's head, but not the one holding Delete and Clear selection (final review I-2). */
+        @media (max-width: 640px) { .ktable.crm-contact-table > thead:has(> tr.crm-selhead), .ktable.crm-contact-table > thead > tr.crm-selhead, .ktable.crm-contact-table > thead > tr.crm-selhead > th { display: block; } }
         .crm-act-row .crm-mid { flex: 1; min-width: 0; cursor: pointer; }
         /* The contacts table's tick is the same gesture as the activity row's,
            so it is drawn here rather than hand-sized at the call site. Both are
@@ -26949,7 +26952,9 @@ Projected Image UK"></textarea>
                 cols.push('<th class="num crm-deals">Deals</th>', '<th class="crm-label">Label</th>');
                 if (bar2) {
                     const thead = el('thead'); const tr0 = el('tr', 'crm-selhead'); const th0 = el('th'); th0.colSpan = cols.length;
-                    th0.append(bar2); tr0.append(th0); thead.append(tr0); tb.append(thead);
+                    th0.append(bar2); tr0.append(th0);
+                    /* The column heads stay after the bar, hidden, so a phone's two-line rows still name their values. */
+                    thead.innerHTML = '<tr class="crm-colhead">' + cols.join('') + '</tr>'; thead.prepend(tr0); tb.append(thead);
                 } else tb.innerHTML = '<thead><tr>' + cols.join('') + '</tr></thead>';
                 const tbody = el('tbody');
                 const pageCount = Math.max(1, Math.ceil(items.length / crmContactsSize));

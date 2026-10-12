@@ -2653,6 +2653,21 @@ def t_a_phone_keeps_three_small_things_on_shared_lines():
 
 
 @test
+def t_a_phone_keeps_the_crm_selection_bar():
+    """Final review I-2, 12 Oct 2026: ticking CRM contacts puts Delete and
+    Clear selection in the table's head row, and the phone rule hides every
+    table's head, so on a phone the bar vanished; with the bar as the only
+    head row the rows lost their labels too and the tick box took the name's
+    line. The column heads stay as a hidden row after the bar, and a phone
+    shows a head that holds the bar."""
+    rc = SCRIPT[SCRIPT.index("const tb = el('table', 'ktable crm-table crm-contact-table');"):][:1500]
+    ok("thead.innerHTML = '<tr class=\"crm-colhead\">' + cols.join('') + '</tr>'; thead.prepend(tr0);" in rc, "the column heads follow the bar, for the labels")
+    ok(".ktable.crm-contact-table > thead > tr.crm-selhead ~ tr { display: none; }" in CSS, "and stay hidden while the bar shows")
+    ok("@media (max-width: 640px) { .ktable.crm-contact-table > thead:has(> tr.crm-selhead), .ktable.crm-contact-table > thead > tr.crm-selhead, .ktable.crm-contact-table > thead > tr.crm-selhead > th { display: block; } }" in CSS,
+       "a phone shows the head that holds Delete and Clear selection")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left
