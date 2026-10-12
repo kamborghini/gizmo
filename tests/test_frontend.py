@@ -2361,6 +2361,30 @@ def t_memory_shows_what_it_learned_and_lines_its_parts_up():
 
 
 @test
+def t_skills_read_in_two_columns_with_their_use_on_top():
+    """WS-30 to WS-34, 12 Oct 2026: a skill's title sat alone at the left, its
+    buttons alone at the top right and Have Reactor read it alone at the bottom
+    right; its reading was a bordered box the list's width; the forms spread
+    across the page; How they are used sat at the foot in half a card; and the
+    empty list was a centred line with its actions only in the head."""
+    rs = fn_src("function renderSkills(")
+    ok("box.append(skHost.use, skHost.card);" in rs, "How they are used comes first")
+    su = fn_src("function paintSkillUse(")
+    ok("el('div', 'sk-use-band')" in su and "\n        .sk-use-band { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));" in CSS, "as one band of three across (WS-33)")
+    si = fn_src("function skillItem(")
+    ok("el('div', 'sk-main')" in si and "el('div', 'sk-side')" in si and "\n        .sk-item { display: grid; grid-template-columns: minmax(0, 35rem) minmax(0, 1fr);" in CSS,
+       "each skill is two columns: the body at its measure, then the actions, the use and the reading (WS-30)")
+    ok("side.append(el('span', 'sk-meta', skillUse(s)))" in si and "'Edited '" in si and "'Added '" in si, "the use and the edit on two lines")
+    ok("first.textContent.trim().toLowerCase() === String(s.title || '').trim().toLowerCase()" in si, "a body's first heading is not drawn when it repeats the title")
+    ok(".sk-reading { border: 0;" in CSS, "the reading is a line in the right column, no box (WS-31)")
+    ok(".sk-editor { max-width: 720px; }" in CSS and ".sk-up-list { display: grid; gap: var(--sp-3) var(--sp-8); grid-template-columns: repeat(2, minmax(0, 1fr)); }" in CSS,
+       "the form keeps to 720 and the files being added sit two across (WS-32)")
+    ps = fn_src("function paintSkills(")
+    ok("if (canEditInstructions() && skills.length) acts.append(add);" in ps and "emptyState({ icon: I.book, text: 'No skills yet.', action: firstActs })" in ps,
+       "an empty list is one line carrying both actions (WS-34)")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left
@@ -9622,7 +9646,9 @@ console.log(JSON.stringify(out));
 @test
 def t_only_the_master_sees_the_upload_and_a_long_skill_can_be_edited():
     paint = fn_src("function paintSkills(")
-    ok("if (skillCaps.upload) acts.append(up, fi);" in paint, "Upload Markdown is the master's alone")
+    # 12 Oct 2026: with no skills the empty line carries the upload too, behind the same check.
+    ok("if (skillCaps.upload && skills.length) acts.append(up);" in paint and "if (skillCaps.upload) {\n                        const up2" in paint,
+       "Upload Markdown is the master's alone")
     ok("(skillCaps.upload ? ' Drop Markdown files here to add them.' : '')" in paint, "and the card only offers a drop to the master")
     start = fn_src("function startUpload(")
     ok(start.index("if (!skillCaps.upload)") < start.index("readSkillFiles("), "a drop from anyone else reads no file")
@@ -12039,7 +12065,7 @@ def t_team_memory_and_skills_wear_the_mix():
                  "infoButton('About notes'", "infoButton('About tracked changes'", "infoButton('How skills are used'",
                  "infoButton('About skills'", "'Uses AI credits. Reads up to 12 pages, once.'",
                  "el('span', 'lbl-chip warn', 'Waiting for an admin')", "el('span', 'lbl-chip note', 'Not read with answers')",
-                 "emptyState({ icon: I.bookmark, text: 'No notes yet.', action: first })", "emptyState({ icon: I.book, text: 'No skills yet.' })"):
+                 "emptyState({ icon: I.bookmark, text: 'No notes yet.', action: first })", "emptyState({ icon: I.book, text: 'No skills yet.', action: firstActs })"):
         ok(part in SCRIPT, "says: " + part)
     for gone in ("'tm-foot'", "Who can sign in, what each may open", "No part-time accounts yet. Set", "keeps in mind with every answer",
                  "Learning the store is an AI run", "Reactor keeps a note when something", "Reactor does not read it yet",

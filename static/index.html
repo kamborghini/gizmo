@@ -2256,11 +2256,22 @@
            for a new one, and grows with what is typed. */
         .sk-list { list-style: none; margin: 0; padding: 0; }
         .card > .sk-list { padding-inline: 0; }
-        .sk-item { padding: var(--sp-4) 0; border-top: var(--bw-hairline) solid var(--border-default); }
+        .sk-item { display: grid; grid-template-columns: minmax(0, 35rem) minmax(0, 1fr); column-gap: calc(var(--sp-8) * 2); row-gap: var(--sp-3); align-items: start;
+            padding: var(--sp-4) 0; border-top: var(--bw-hairline) solid var(--border-default); }
+        .sk-item:has(> .sk-editor) { display: block; }
+        @media (max-width: 900px) { .sk-item { grid-template-columns: minmax(0, 1fr); } }
+        .sk-main { min-width: 0; }
+        .sk-side { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); }
+        /* How they are used, one band of three (12 Oct 2026, WS-33). */
+        .sk-use-band { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-4) var(--sp-8); }
+        @media (max-width: 900px) { .sk-use-band { grid-template-columns: minmax(0, 1fr); } }
+        .sk-use-k { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary); }
+        .sk-use-v { margin-top: var(--sp-1); font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-primary); }
         .sk-item:first-child { border-top: 0; padding-top: 0; }
         .sk-item:last-child { padding-bottom: 0; }
         .sk-list > .empty { list-style: none; }
         .sk-editor { display: grid; gap: var(--sp-1); }
+        .sk-editor { max-width: 720px; }
         .sk-form-title { font-size: var(--text-body); font-weight: var(--weight-medium); margin: 0 0 var(--sp-2); }
         .sk-field { display: block; margin-bottom: var(--sp-3); }
         .sk-field > span { display: block; font-size: var(--text-body); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-primary); margin-bottom: var(--sp-1); }
@@ -2296,8 +2307,10 @@
         .sk-upload-cost { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
         /* One column that never grows past the card: a preview's table
            scrolls inside its wrapper instead of pushing the row off screen. */
-        .sk-up-list { display: grid; gap: var(--sp-3); grid-template-columns: minmax(0, 1fr); }
-        .sk-up { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); padding: var(--sp-3); display: grid; gap: var(--sp-1); grid-template-columns: minmax(0, 1fr); }
+        /* Files being added sit two across, each under a hairline (12 Oct 2026, WS-32). */
+        .sk-up-list { display: grid; gap: var(--sp-3) var(--sp-8); grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        @media (max-width: 900px) { .sk-up-list { grid-template-columns: minmax(0, 1fr); } }
+        .sk-up { border: 0; border-top: var(--bw-hairline) solid var(--border-default); border-radius: 0; padding: var(--sp-3) 0 0; display: grid; gap: var(--sp-1); grid-template-columns: minmax(0, 1fr); }
         .sk-up-warn { margin: var(--sp-1) 0 0; color: var(--text-primary); }
         .sk-check { display: flex; align-items: flex-start; gap: var(--sp-2); font-size: var(--text-body); margin: 0 0 var(--sp-3); flex-wrap: wrap; }
         .sk-check input { margin-top: var(--sp-0-5); }
@@ -2320,12 +2333,13 @@
         .sk-preview[open] summary::before, .sk-reading[open] summary::before { transform: rotate(90deg); }
         .sk-preview-doc { margin-top: var(--sp-2); padding-top: var(--sp-2); border-top: var(--bw-hairline) solid var(--border-default); }
         /* How Reactor reads a skill: what it will do, where, and what to check. */
-        .sk-reading { margin-top: var(--sp-3); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-3); }
+        /* How Reactor reads it, a line in the right column, no box (12 Oct 2026, WS-31). */
+        .sk-reading { border: 0; border-radius: 0; padding: 0; margin: 0; align-self: stretch; }
         .sk-reading-body { display: grid; gap: var(--sp-3); padding: var(--sp-2) 0 var(--sp-1); }
         .sk-rules, .sk-questions { margin: 0; padding-left: var(--sp-5); display: grid; gap: var(--sp-1); }
         .sk-examples { display: flex; flex-wrap: wrap; gap: var(--sp-1-5); }
         .sk-examples .chip { text-align: left; }
-        .sk-reading-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-2); }
+        .sk-reading-foot { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: var(--sp-3); }
         /* Markdown, drawn: a skill, a prose answer, what Reactor learned. */
         :is(.md, .prose, .know-text) :is(p, ul, ol, pre, blockquote, .prose-table) { margin: 0 0 var(--sp-2); }
         :is(.md, .prose, .know-text) :is(ul, ol) { padding-left: var(--sp-5); }
@@ -12986,7 +13000,8 @@ Projected Image UK"></textarea>
             box.append(pageHead({ view: 'skills', title: 'Skills', line: 'Playbooks Reactor follows in chat, reports and email drafts.' }));
             skHost.card = widget(el('div', 'card sk-card'), 'saved', 'full', 'Skills');
             skHost.use = widget(el('div', 'card sk-use'), 'usage', 'full', 'How they are used');
-            box.append(skHost.card, skHost.use);
+            /* How they are used first, one band of three (12 Oct 2026, WS-33). */
+            box.append(skHost.use, skHost.card);
             /* Markdown files dropped anywhere on the card come in to be checked. */
             const card = skHost.card;
             const hasFiles = (e) => e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
@@ -13021,8 +13036,8 @@ Projected Image UK"></textarea>
             const used = skills.filter(x => Number(x.used || 0) > 0).sort((a, b) => (b.used || 0) - (a.used || 0));
             const never = skills.filter(x => !Number(x.used || 0));
             const unread = skills.filter(x => !x.reading || x.reading.stale);
-            const facts = el('dl', 'sk-facts');
-            const fact = (k, v) => { facts.append(el('dt', null, k), el('dd', null, v)); };
+            const band = el('div', 'sk-use-band');
+            const fact = (k, v) => { const b = el('div', 'sk-use-b'); b.append(el('div', 'sk-use-k', k), el('div', 'sk-use-v', v)); band.append(b); };
             fact('Followed most', used.length ? used.slice(0, 3).map(x => x.title + ' (' + x.used + ')').join(', ') : 'None yet');
             if (never.length && used.length) {
                 fact('Not followed yet', never.slice(0, 5).map(x => x.title).join(', ') + (never.length > 5 ? ' and ' + (never.length - 5) + ' more' : ''));
@@ -13033,7 +13048,7 @@ Projected Image UK"></textarea>
                 uHelp.push('Having it read shows you what Reactor will do with each, and gives it a short version to use when a skill is too long to show in full.');
             }
             titleInfo(ut, infoButton('How skills are used', { title: 'How they are used', body: uHelp }));
-            card.append(facts);
+            card.append(band);
         }
         function skillsDirty() {
             const f = skHost.card && [...skHost.card.querySelectorAll('.sk-input, .sk-textarea')];
@@ -13050,7 +13065,8 @@ Projected Image UK"></textarea>
             const card = skHost.card; if (!card) return;
             card.replaceChildren();
             const head = el('div', 'card-head');
-            const yt = el('h3', 'card-title', 'Your skills' + (skills.length ? ' (' + skills.length + ')' : ''));
+            const yt = el('h3', 'card-title', 'Your skills');
+            if (skills.length) yt.append(el('span', 'card-n', String(skills.length)));
             const ytInfo = infoButton('About skills', { title: 'Your skills', body: 'Rules and playbooks, each with a title and a note of when it applies.'
                     + (skillCaps.upload ? ' Drop Markdown files here to add them.' : '')
                     + (canEditInstructions() ? '' : ' Only an admin can add, change or delete a skill.') });
@@ -13069,10 +13085,11 @@ Projected Image UK"></textarea>
                that is already there. */
             add.disabled = up.disabled = !!skillsLoadErr || skView.adding || !!skView.uploads;
             add.onclick = () => { if (!skillGuard()) return; skView.adding = true; skView.editId = null; skView.draft = null; paintSkills(); };
-            /* Only the master account uploads files. */
-            if (skillCaps.upload) acts.append(up, fi);
-            if (canEditInstructions()) acts.append(add);
-            head.append(acts); card.append(head);
+            /* Only the master account uploads files. With no skills the empty
+               line carries both actions instead (12 Oct 2026, WS-34). */
+            if (skillCaps.upload && skills.length) acts.append(up);
+            if (canEditInstructions() && skills.length) acts.append(add);
+            head.append(acts); card.append(head, fi);
             paintSkillUse();
             if (skillsLoadErr) {
                 card.append(loadFailure('Your skills could not be loaded, so they cannot be shown yet. '
@@ -13082,8 +13099,19 @@ Projected Image UK"></textarea>
             if (skView.uploads) card.append(skillUploads());
             if (skView.adding) card.append(skillEditor(null));
             if (!skills.length) {
-                /* One line; New skill and Upload are the card head's (copy plan, Skills #3). */
-                if (!skView.adding && !skView.uploads) card.append(emptyState({ icon: I.book, text: 'No skills yet.' }));
+                /* One line, carrying both actions (12 Oct 2026, WS-34). */
+                if (!skView.adding && !skView.uploads) {
+                    const firstActs = el('div', 'act-row');
+                    if (skillCaps.upload) {
+                        const up2 = el('button', 'btn'); up2.type = 'button'; up2.append(ico(I.upload), document.createTextNode('Upload Markdown'));
+                        up2.title = up.title; up2.onclick = () => fi.click(); firstActs.append(up2);
+                    }
+                    if (canEditInstructions()) {
+                        const add2 = el('button', 'btn'); add2.type = 'button'; add2.append(ico(I.plus), document.createTextNode('New skill'));
+                        add2.onclick = add.onclick; firstActs.append(add2);
+                    }
+                    card.append(emptyState({ icon: I.book, text: 'No skills yet.', action: firstActs }));
+                }
                 return;
             }
             if (skills.length > 4) {
@@ -13403,9 +13431,18 @@ Projected Image UK"></textarea>
             document.body.append(a); a.click(); a.remove();
             setTimeout(() => URL.revokeObjectURL(a.href), 2000);
         }
+        /* A skill in two columns (12 Oct 2026, WS-30): on the left its title,
+           when it applies and the body at its measure; on the right its
+           actions, how it is used, when it was edited, and how Reactor reads
+           it. The title sat alone at the left with its buttons alone at the
+           right edge and Have Reactor read it alone at the foot. */
         function skillItem(li, s) {
+            const main = el('div', 'sk-main'), side = el('div', 'sk-side');
             const head = el('div', 'sk-head');
             const t = el('h4', 'sk-title', s.title || 'Untitled skill');
+            head.append(t);
+            if (s.always) head.append(el('span', 'lbl-chip note sk-always', 'Every answer'));
+            main.append(head);
             const acts = el('div', 'sk-acts');
             const use = el('button', 'btn btn-sm'); use.type = 'button';
             use.append(ico(I.chat), document.createTextNode('Use in chat'));
@@ -13438,27 +13475,28 @@ Projected Image UK"></textarea>
                 /* Another skill is being written: the row goes and the count
                    changes in place, and the editor is left alone. */
                 li.remove();
-                const h = skHost.card.querySelector('.card-title'); if (h) h.textContent = 'Your skills (' + skills.length + ')';
+                const n = skHost.card.querySelector('.card-title .card-n'); if (n) n.textContent = String(skills.length);
             };
             acts.append(use, dl);
             if (canEditInstructions()) acts.append(edit, del);
-            head.append(t);
-            if (s.always) head.append(el('span', 'lbl-chip note sk-always', 'Every answer'));
-            head.append(acts); li.append(head);
+            side.append(acts);
             const when = s.when || (s.reading && s.reading.when) || '';
             /* Said whose words they are: Reactor's reading fills it until
                the merchant writes one. */
-            if (when) li.append(el('p', 'sk-when', (s.when_from === 'reading' || !s.when ? 'When it applies, as Reactor read it: ' : 'When it applies: ') + when));
+            if (when) main.append(el('p', 'sk-when', (s.when_from === 'reading' || !s.when ? 'When it applies, as Reactor read it: ' : 'When it applies: ') + when));
             /* The skill as the document it is: headings, lists, tables and
                emphasis, not the marks that make them. */
             const body = el('div', 'sk-body md');
             body.append(mdNodes(s.content || ''));
+            /* A body that opens with its own title ('# Quoting custom gobos')
+               does not say it a second time under the title. */
+            const first = body.firstElementChild;
+            if (first && first.classList.contains('md-h') && first.textContent.trim().toLowerCase() === String(s.title || '').trim().toLowerCase()) first.remove();
             body.id = 'skb-' + s.id;
             const long = (s.content || '').length > 320 || (s.content || '').split('\n').length > 6;
             const open = skView.open.has(s.id);
             if (long && !open) body.classList.add('clamped');
-            li.append(body);
-            const foot = el('div', 'sk-foot');
+            main.append(body);
             if (long) {
                 const more = el('button', 'sk-more'); more.type = 'button';
                 more.textContent = open ? 'Show less' : 'Show all ' + nf((s.content || '').length) + ' characters';
@@ -13470,23 +13508,26 @@ Projected Image UK"></textarea>
                     more.textContent = now ? 'Show less' : 'Show all ' + nf((s.content || '').length) + ' characters';
                     more.setAttribute('aria-expanded', String(now));
                 };
-                foot.append(more);
+                main.append(more);
             }
-            const meta = [skillUse(s)];
+            /* How it is used, then when it was edited and where it came from,
+               a line each. */
+            side.append(el('span', 'sk-meta', skillUse(s)));
             const stamp = s.updated || s.created;
-            if (stamp) meta.push((s.updated && s.updated !== s.created ? 'edited ' : 'added ') + fmtDate(stamp));
-            if (s.file) meta.push('from ' + s.file);
-            foot.append(el('span', 'sk-meta', meta.join(' · ')));
+            const made = [];
+            if (stamp) made.push((s.updated && s.updated !== s.created ? 'Edited ' : 'Added ') + fmtDate(stamp));
+            if (s.file) made.push('from ' + s.file);
+            if (made.length) side.append(el('span', 'sk-meta', made.join(' \u00b7 ')));
             if (!s.reading && canEditInstructions()) {
                 const rd = el('button', 'btn btn-sm sk-read'); rd.type = 'button';
                 rd.append(ico(I.book), document.createTextNode('Have Reactor read it'));
                 rd.title = 'An AI run: Reactor reads the skill closely and writes down when it applies and what it will do.';
                 if (skView.reading[s.id]) setBusy(rd, true);
                 rd.onclick = () => readSkill(s.id, rd);
-                foot.append(rd);
+                side.append(rd);
             }
-            li.append(foot);
-            if (s.reading) li.append(readingPanel(s));
+            if (s.reading) side.append(readingPanel(s));
+            li.append(main, side);
         }
         function autoGrow(ta) {
             const fit = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight + 2, Math.round(window.innerHeight * 0.7)) + 'px'; };
