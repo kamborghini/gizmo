@@ -2711,6 +2711,89 @@ def t_a_table_beside_its_neighbour_keeps_its_natural_width():
 
 
 @test
+def t_the_seo_score_keeps_its_meter_off_its_words():
+    """Final visual review M1, 12 Oct 2026: on a phone a figure tile is three
+    rows of its group's subgrid (label, figure, note), and the score's meter
+    was a fourth child, drawn across "out of 100". The note and the meter are
+    one foot, so the tile is three rows at every width."""
+    rs = fn_src("function renderSEO(")
+    ok("const foot = el('div', 'seo-foot'); foot.append(el('p', 'stat-note', scored ? 'out of 100' : data.score_note));" in rs
+       and "foot.append(bar);" in rs and "sc.append(foot);" in rs, "the note and the meter share the tile's third row")
+    ok(".seo-foot { display: grid; row-gap: var(--sp-1); }" in CSS, "one under the other")
+
+
+@test
+def t_a_table_in_half_a_row_wraps_its_heads_rather_than_its_edge():
+    """Final visual review M2, 12 Oct 2026: at 1440 Customers' Sector
+    comparison read "Lifetime revenu" and "£143,11", and Top customers' last
+    order "75d ag": a table in half a row could not shrink below its one-line
+    heads, so its last column ran under the half's edge. In a pair or a duo
+    a head may wrap, standing on its foot, so the table fits its half."""
+    ok(":is(.wpair, .duo) .ktable > thead th { white-space: normal; vertical-align: bottom; padding-block: var(--sp-1); }" in CSS,
+       "heads wrap in half a row")
+
+
+@test
+def t_a_figure_group_never_leaves_one_figure_alone():
+    """Final visual review M4 and M5, 12 Oct 2026 (R2): at 1440 SEO's eight
+    figures ran seven then one, Pages indexed alone with 1,000px beside it,
+    and Customers' four in half a row ran three then one, At risk alone. The
+    eight run four and four, and four in half a row two by two, when a line
+    cannot hold them."""
+    rs = fn_src("function renderSEO(")
+    ok("const host = el('div', 'fig-host'); host.append(strip); box.append(widget(host, 'score-checks', 'full', 'Score and checks'));" in rs,
+       "SEO's figures sit in a host that knows its width")
+    ok(".fig-host { container: fighost / inline-size; }" in CSS
+       and "@container fighost (min-width: 41rem) and (max-width: 72rem) { .fig-host > .metrics.metrics-strip:has(> :nth-child(8):last-child) { display: grid; grid-template-columns: repeat(4, max-content); } }" in CSS,
+       "eight run four and four when one line cannot hold them")
+    ok("@container wpair (min-width: 64rem) and (max-width: 74rem) { .wpair .metrics.metrics-strip:has(> :nth-child(4):last-child) { display: grid; grid-template-columns: repeat(2, max-content); } }" in CSS,
+       "and four in half a row two by two")
+
+
+@test
+def t_tracked_changes_line_up_and_keep_no_figure_alone():
+    """Final visual review M6, 12 Oct 2026: a tracked change's fourth figure
+    (Conversion) dropped alone onto a second row, so the three changes'
+    Conclude buttons stood at different heights. Four figures go two by two,
+    and the three changes share their rows (title, line, figures, actions)."""
+    ok(".impact-deltas:has(> .idelta:nth-child(4):last-child) { grid-template-columns: repeat(2, minmax(0, 1fr)); }" in CSS, "four go two by two")
+    ok("@media (min-width: 901px) { .impact-row { display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: var(--sp-2); align-content: start; } }" in CSS,
+       "and the three changes' parts line up across the row")
+
+
+@test
+def t_a_chat_answer_sets_its_figures_at_their_own_width():
+    """Final visual review M7, 12 Oct 2026: a chat answer's four figures sat in
+    equal cells across the reading column, Sales 25px above the others and an
+    (i) on a line of its own. As the Chat notes say, they are the figure group
+    every page uses: each at its own width, hairlines between, one baseline."""
+    ok("b.append(metricsStrip(s.metrics)); container.append(as(b, 'metrics'));" in SCRIPT and "chat ? metricsGrid(s.metrics)" not in SCRIPT,
+       "a chat answer's figures are a figure group")
+    ok(".chat-metrics .stat { min-height: 0; padding: 0; }" in CSS, "with no padding of their own, so their hairlines sit in the gap")
+
+
+@test
+def t_a_phone_chooser_wraps_only_when_its_labels_need_it():
+    """Final visual review M8, 12 Oct 2026: on a phone Overview's and SEO's 3M,
+    6M, 12M, 24M ran three, then 24M alone: four or more choices each took an
+    84px basis, a little more than the card left them. Each now starts from
+    its own label's width, so short labels share one line and longer sets
+    wrap only as far as they must."""
+    ok(".segmented:has(> :nth-child(4)) > * { flex: 1 1 0; min-width: max-content; } }" in CSS, "a choice is as wide as its label, then shares the line")
+
+
+@test
+def t_a_search_shows_its_whole_hint():
+    """Final visual review M9, 12 Oct 2026: Inbox's search read "Search, then
+    Enter for tl" (its input kept a fixed width inside a wider field) and CRM
+    contacts' "Search name, email, phone, compan" (a 280 field for a longer
+    hint). The input fills its field, and a long hint gets a sentence's width."""
+    ok(".tbl-search .mail-search { flex: 1 1 auto; min-width: 0; max-width: none; }" in CSS, "Inbox's input fills its field")
+    ok(".tbl-search.search-long { width: var(--field-w-xl); max-width: 100%; }" in CSS and "sWrap.classList.add('search-long');" in SCRIPT
+       and "q.classList.add('search-long');" in SCRIPT, "and a long hint has a sentence's width")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left
@@ -6632,6 +6715,8 @@ def t_the_xero_page_fits_a_phone():
     ph = CSS.split("/* A BAND ON A PHONE")[1].split("\n        }")[0] if "/* A BAND ON A PHONE" in CSS else ""
     ok(".band-src-v { white-space: normal;" in ph, "the Auto Run sentence wraps on a phone")
     ok(".band-src-e { grid-column: 2; }" in ph, "and its button goes under it")
+    # Final visual review M3: at 2200 and 1440 the Auto Run line ended "next in 6 minut…". A value wraps at every width.
+    ok(".band-src-v { min-width: 0; overflow-wrap: anywhere; color: var(--text-tertiary);" in CSS, "a band's value wraps rather than being cut")
 
 
 @test
@@ -7430,7 +7515,7 @@ def t_an_old_layout_never_hides_what_a_pair_brought_in():
     score with its checks, now has an id of its own: an old layout's id for a
     half is dropped, and the pair shows at its default place."""
     ok("return widget(pair, id + '-pair', 'full', label);" in fn_src("function pairNodes("), "a pair has an id of its own")
-    ok("widget(strip, 'score-checks', 'full', 'Score and checks')" in SCRIPT and "widget(strip, 'checks'," not in SCRIPT, "and so do SEO's score and checks")
+    ok("widget(host, 'score-checks', 'full', 'Score and checks')" in SCRIPT and "widget(strip, 'checks'," not in SCRIPT, "and so do SEO's score and checks")
     if not any(os.access(os.path.join(p, "node"), os.X_OK) for p in os.environ.get("PATH", "").split(os.pathsep)):
         print("       (node unavailable, skipped)")
         return
@@ -14231,7 +14316,7 @@ def t_xero_sync_holds_together_on_a_phone_and_names_its_synced_figure():
       right, and the contact line ran past the window's edge.
     And "Synced 1214" counted contacts too, which the connector's ledger
     reports as one figure: it now says what it counts."""
-    phone = CSS.split(".segmented:has(> :nth-child(4)) > * { flex: 1 1 calc(var(--sp-7) * 3); } }", 1)
+    phone = CSS.split(".segmented:has(> :nth-child(4)) > * { flex: 1 1 0; min-width: max-content; } }", 1)
     ok(len(phone) == 2 and "@media (max-width: 640px) { .cx-res > .segmented { flex: none; } }" in phone[1],
        "the tag filter keeps its own height, after the phone rule it overrides")
     ok(".ktable.cx-docs td { display: block; padding: 0; border: 0; width: auto; min-width: 0; height: auto; }" in CSS,

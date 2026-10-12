@@ -1350,6 +1350,11 @@
         /* Five figures in half a row run three then two, never four and one
            alone (Keywords' paid search, beside the keyword table). */
         @media (min-width: 641px) { .wpair .metrics.metrics-strip:has(> :nth-child(5):last-child) { display: grid; grid-template-columns: repeat(3, max-content); } }
+        /* No figure alone on a line (R2): eight run four and four, and four in half
+           a row two by two, when one line cannot hold them (SEO and Customers at 1440). */
+        .fig-host { container: fighost / inline-size; }
+        @container fighost (min-width: 41rem) and (max-width: 72rem) { .fig-host > .metrics.metrics-strip:has(> :nth-child(8):last-child) { display: grid; grid-template-columns: repeat(4, max-content); } }
+        @container wpair (min-width: 64rem) and (max-width: 74rem) { .wpair .metrics.metrics-strip:has(> :nth-child(4):last-child) { display: grid; grid-template-columns: repeat(2, max-content); } }
         /* A FIGURE GROUP ON A PHONE: two across, and three across for three,
            five and six, so no figure sits alone on a row; a figure with a
            sparkline takes the row (the .metrics phone rule). The phone's 16
@@ -1646,6 +1651,7 @@
         /* As the first figure of the checks group (12 Oct 2026): label, figure,
            out of 100, and the meter under them at the figure's width. */
         .metrics-strip > .seo-score .bar { flex: none; width: 100%; min-width: var(--fig-min); margin-top: var(--sp-1); }
+        .seo-foot { display: grid; row-gap: var(--sp-1); }
         .seo-score.good .value { color: var(--success); }
         .seo-score.mid .value { color: var(--warning); }
         .seo-score.low .value { color: var(--error); }
@@ -2408,6 +2414,10 @@
         .duo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--gap-cols); row-gap: var(--sp-6); align-items: start; }
         .card:has(> .card-bleed > .duo), .card:has(> .duo) { container: duo / inline-size; }
         @container duo (max-width: 64rem) { .duo { grid-template-columns: minmax(0, 1fr); } }
+        /* A table in half a row wraps a long head rather than running its last
+           column under the half's edge ("Lifetime revenu" at 1440); heads stand
+           on their foot, so one-line and two-line heads line up. */
+        :is(.wpair, .duo) .ktable > thead th { white-space: normal; vertical-align: bottom; padding-block: var(--sp-1); }
         /* The overdue accounts have six columns and the untagged three, so they share the row seven to five. */
         .radar-cols { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); column-gap: var(--gap-cols); row-gap: var(--sp-6); align-items: start; }
         .card:has(> .radar-cols) { container: radar / inline-size; }
@@ -2616,7 +2626,8 @@
         .band-src-h { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--sp-1); font-weight: var(--weight-semibold); color: var(--text-primary); }
         .band-src-k { grid-column: 1; display: flex; align-items: center; gap: var(--sp-2); font-weight: var(--weight-medium); white-space: nowrap; }
         .band-src-k.ind { padding-left: calc(var(--dot-md) + var(--sp-2)); }
-        .band-src-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+        /* A value wraps, at every width: the Auto Run line was cut "next in 6 minut…" (final visual review M3). */
+        .band-src-v { min-width: 0; overflow-wrap: anywhere; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
         .band-src-v.bad { color: var(--error); font-weight: var(--weight-medium); }
         .band-src-e { display: flex; align-items: center; gap: var(--sp-2); }
         .band-src-e > .info { margin: 0; }
@@ -3731,7 +3742,9 @@
            `none`, or the one field in the app that opts out is also the one
            that cannot shrink out of the card on a phone. */
         .mail-search { flex: 1 1 160px; max-width: 260px; }
-        .tbl-search .mail-search { flex: none; max-width: 100%; }
+        .tbl-search .mail-search { flex: 1 1 auto; min-width: 0; max-width: none; }
+        /* A search whose hint is a sentence has a sentence's width (Inbox, CRM contacts: final visual review M9). */
+        .tbl-search.search-long { width: var(--field-w-xl); max-width: 100%; }
         /* Wraps rather than scrolls. As a full-bleed strip it ran to the
            card's own border, so the person who did not fit was SLICED by
            that line - a bordered card cut in half at the card edge, with a
@@ -5086,12 +5099,13 @@
             .segmented { display: flex; align-self: stretch; flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
             .segmented::-webkit-scrollbar { display: none; }
             .segmented > * { flex: 1 0 auto; justify-content: center; }
-            /* Four or more choices do not fit a phone's line, and scrolled they
+            /* Four or more choices may not fit a phone's line, and scrolled they
                hid the last one (CRM's Done) with nothing to say it was there.
-               They wrap into even rows instead, about three to a line, each
-               never narrower than its own label. */
+               They wrap instead, each starting from its own label's width, so
+               short labels (3M 6M 12M 24M) share one line and longer sets wrap
+               only as far as they must (an 84px basis left 24M alone). */
             .segmented:has(> :nth-child(4)) { flex-wrap: wrap; overflow-x: visible; }
-            .segmented:has(> :nth-child(4)) > * { flex: 1 1 calc(var(--sp-7) * 3); } }
+            .segmented:has(> :nth-child(4)) > * { flex: 1 1 0; min-width: max-content; } }
         /* In the Xero sync check's column the chooser keeps its own height:
            flex: 1 1 100% stretched it DOWN the column into a 789px slab. */
         @media (max-width: 640px) { .cx-res > .segmented { flex: none; } }
@@ -5136,6 +5150,10 @@
         .impact-acts { display: flex; align-items: center; gap: var(--sp-1); flex: none; }
         .impact-sub { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); margin: 0; }
         .impact-deltas { display: grid; grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr)); gap: var(--sp-2) var(--sp-4); }
+        /* Four figures go two by two, never three and one alone (final visual review M6). */
+        .impact-deltas:has(> .idelta:nth-child(4):last-child) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        /* Three across, the changes share their rows, so titles, figures and Conclude line up. */
+        @media (min-width: 901px) { .impact-row { display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: var(--sp-2); align-content: start; } }
         /* Small figures, no tiles: rises green, falls red. */
         .impact-deltas .idelta { background: none; padding: 0; min-width: 0; border-radius: 0; }
         .idelta { display: flex; flex-direction: column; gap: 0; background: var(--surface-tertiary); border: 0; border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-3); min-width: 86px; }
@@ -5541,7 +5559,7 @@
         .chat-metrics .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 0; gap: var(--sp-3); }
         .chat-metrics .metrics > .stat::before { left: calc(-0.5 * var(--sp-3)); }
         @container (min-width: 600px) { .chat-metrics .metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-        .chat-metrics .stat { min-height: 0; padding: var(--sp-3); }
+        .chat-metrics .stat { min-height: 0; padding: 0; }
         .chat-metrics .stat-ic { display: none; }
         .chat-metrics .stat .value { font-size: var(--fig-s); }
         .chat-metrics .stat-row { flex-wrap: wrap; row-gap: var(--sp-1); }
@@ -9506,9 +9524,9 @@ Projected Image UK"></textarea>
             }
             if (Array.isArray(s.metrics) && s.metrics.length) {
                 const b = el('div', 'block' + (chat ? ' chat-metrics' : ''));
-                /* The chat column keeps its compact two-up figures; a page gets
-                   the one figure card every other page uses. */
-                b.append(chat ? metricsGrid(s.metrics) : metricsStrip(s.metrics)); container.append(as(b, 'metrics'));
+                /* The figure group every page uses, in a chat answer too: each at its
+                   own width on one baseline (final visual review M7). */
+                b.append(metricsStrip(s.metrics)); container.append(as(b, 'metrics'));
             }
             if (Array.isArray(s.insights) && s.insights.length) {
                 const b = el('div', 'block insights'); s.insights.forEach((ins, i) => b.append(insightCard(ins, i))); container.append(as(b, 'insights'));
@@ -11290,12 +11308,15 @@ Projected Image UK"></textarea>
                 const sc = el('div', 'stat seo-score' + tier);
                 sc.append(el('div', 'label', 'SEO score'));
                 const row = el('div', 'stat-row'); row.append(el('div', 'value', scored ? String(data.score) : 'n/a')); sc.append(row);
-                sc.append(el('p', 'stat-note', scored ? 'out of 100' : data.score_note));
+                /* The note and the meter are one foot: on a phone a tile is three rows of its
+                   group's subgrid, and a fourth child was drawn across "out of 100". */
+                const foot = el('div', 'seo-foot'); foot.append(el('p', 'stat-note', scored ? 'out of 100' : data.score_note));
                 if (scored) {
                     const bar = el('div', 'bar'); const fill = el('i');
                     fill.style.width = Math.max(0, Math.min(100, data.score)) + '%'; bar.append(fill);
-                    sc.append(bar);
+                    foot.append(bar);
                 }
+                sc.append(foot);
                 /* The score opens its own breakdown, like the seven checks under
                    it: the server sends how the score is made, and the one figure
                    on the page that could not be opened was the headline. */
@@ -11304,7 +11325,8 @@ Projected Image UK"></textarea>
                 strip.prepend(sc);
             }
             /* Its own id: a layout that hid the old Checks must not hide the score with them. */
-            if (strip) box.append(widget(strip, 'score-checks', 'full', 'Score and checks'));
+            /* In a host that knows its width, so eight figures run four and four when a line cannot hold them. */
+            if (strip) { const host = el('div', 'fig-host'); host.append(strip); box.append(widget(host, 'score-checks', 'full', 'Score and checks')); }
             renderSeoTrends(box, data.trends, seoRange, (v) => { seoRange = v; }, intro, 'trends');
             // Lead with money opportunities, then findings, then supporting detail
             if (Array.isArray(s.actions) && s.actions.length) {
@@ -26876,6 +26898,7 @@ Projected Image UK"></textarea>
             const q = tableSearch('Search name, email, phone, company…', crmContactsQ, (v) => {
                 crmContactsQ = v; crmContactsPage = 1; paint();
             });
+            q.classList.add('search-long');
             const people = crmContactsMode === 'people';
             /* One card holding the lot, the way the reference builds a list
                page: a counted title and a line saying what it is, the actions
@@ -28225,6 +28248,7 @@ Projected Image UK"></textarea>
             };
             search.placeholder = 'Search, then Enter for the whole mailbox';
             const sWrap = el('div', 'tbl-search');
+            sWrap.classList.add('search-long');
             sWrap.append(ico(I.search), search);
             const states = segmented([['open', lab('Open', counts.open)],
                                        ['unread', lab('Unread', counts.unread)],
