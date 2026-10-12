@@ -28238,16 +28238,137 @@ def t_an_unchanged_crm_board_is_not_sent_again():
 
 @test
 def t_forgetting_the_crm_forgets_its_board():
-    """The cached board shares some collections with the CRM store in memory
-    (the leads, the stages, the settings). A write that fails forgets the
-    store so the next read comes from disk; its board must go with it, or a
-    change that was never saved could be served from the board."""
+    """The kept board may have been built from the CRM store in memory after
+    a change that a failed write then never saved. A write that fails forgets
+    the store so the next read comes from disk; the board must go with it,
+    all of it, or the unsaved change could be served from the board."""
     def go():
         post("/api/crm/contact", {"op": "person_add", "name": "Forget Probe", "emails": ["fp@example.com"]})
         copilot._crm_board()
         ok(copilot._crm_board_cache["key"] is not None, "the board is kept")
         copilot._forget_store(copilot.CRM_PATH)
         eq(copilot._crm_board_cache["key"], None, "and forgotten with the store")
+        ok(all(not v for v in copilot._crm_board_cache.values()),
+           "all of it, not only its key: %r" % sorted(k for k, v in copilot._crm_board_cache.items() if v))
+    with_accounts(go)
+
+
+@test
+def t_a_crm_write_never_leaves_the_board_from_before_it():
+    """The kept board is found again by its key, and a CRM file is known by
+    its time, size and inode. Written twice inside the clock's tick at the
+    same size, with the inode handed back, the file has the same key after a
+    write as before it, so a write that did not build the board itself (the
+    Shopify link sweep) left the old one to be served. Writing the CRM now
+    lets the board go first."""
+    def go():
+        post("/api/crm/contact", {"op": "person_add", "name": "Tick Probe", "emails": ["tick@example.com"]})
+        real_stat = copilot._stat_key
+        copilot._stat_key = lambda p: ("same", 1, 1) if p == copilot.CRM_PATH else real_stat(p)
+        try:
+            copilot._crm_board_cache["key"] = None
+            post("/api/crm/board", {})
+            d = copilot._load_crm()
+            for p in d["persons"].values():
+                if p.get("name") == "Tick Probe":
+                    p["name"] = "Tock Probe"          # the same size on disk
+            copilot._write_crm(d)
+            after = post("/api/crm/board", {}).json()
+        finally:
+            copilot._stat_key = real_stat
+        names = {p.get("name") for p in after["crm"]["persons"].values()}
+        ok("Tock Probe" in names and "Tick Probe" not in names, "the board after the write is built from it: %r" % names)
+    with_accounts(go)
+
+
+@test
+def t_a_crm_read_that_failed_is_not_kept_as_the_board():
+    """A read of the CRM that fails hands back an empty CRM (the poison guard
+    keeps the file for repair). The board built from it must not be kept: the
+    file has not changed, so a kept empty board was served to everyone until
+    the next write, long after the file read again."""
+    def go():
+        post("/api/crm/contact", {"op": "person_add", "name": "Flaky Probe", "emails": ["flaky@example.com"]})
+        real = copilot._load_json_store
+
+        def once(path, key, default):
+            if path == copilot.CRM_PATH:
+                copilot._load_json_store = real
+                copilot._poisoned_stores.add(path)
+                return default
+            return real(path, key, default)
+        copilot._forget_store(copilot.CRM_PATH)       # the next read comes from disk
+        copilot._load_json_store = once
+        try:
+            bad = post("/api/crm/board", {}).json()
+        finally:
+            copilot._load_json_store = real
+        named = lambda r: any(p.get("name") == "Flaky Probe" for p in r["crm"]["persons"].values())
+        ok(not named(bad), "the failed read gave an empty CRM")
+        good = post("/api/crm/board", {}).json()
+        ok(named(good), "and the next read, with the file readable again, shows what it holds")
+        ok(good["rev"] != bad["rev"], "under its own revision")
+    with_accounts(go)
+
+
+@test
+def t_a_crm_write_keeps_its_board_under_the_day_it_was_built_for():
+    """A write builds the board and keeps it. The key it is kept under is
+    taken before the board is built: taken after, a write at the turn of the
+    hour or the day kept a board built for the old one under the new one, and
+    it was served all through the new hour."""
+    def go():
+        saved, real = copilot._crm_today, copilot._crm_shape
+        turned = []
+
+        def shape(d):
+            out = real(d)
+            if not turned:
+                turned.append(1)
+                copilot._crm_today = lambda: saved() + timedelta(days=1)   # midnight, while it is built
+            return out
+        copilot._crm_shape = shape
+        try:
+            w = post("/api/crm/contact", {"op": "person_add", "name": "Midnight Probe", "emails": ["mp@example.com"]})
+            eq(w.status_code, 200, w.text[:200])
+            copilot._crm_shape = real
+            b = post("/api/crm/board", {}).json()
+            eq(b["crm"]["today"], (saved() + timedelta(days=1)).isoformat(),
+               "the read after midnight is built for the new day")
+        finally:
+            copilot._crm_shape, copilot._crm_today = real, saved
+    with_accounts(go)
+
+
+@test
+def t_the_crm_revision_is_the_board_itself():
+    """The revision the page compares against is a fingerprint of the board
+    as sent, not of the files it is built from. Made from the files, it did
+    not change when a new version of the app shaped the same files another
+    way, so a page open across the update was told nothing had changed and
+    kept the old board; and it changed on every sign-in and every wrong
+    password (both write the team's file), sending the whole board to every
+    open CRM for nothing and telling each of them someone had tried to sign
+    in."""
+    def go():
+        _uid, _s, pw = ready_user("Print Probe", "printprobe")
+        post("/api/crm/contact", {"op": "person_add", "name": "Print Probe", "emails": ["pp@example.com"]})
+        rev = post("/api/crm/board", {}).json()["rev"]
+        before = copilot._stat_key(copilot.USERS_PATH)
+        eq(login("printprobe", "not-the-password-1").status_code, 401, "a wrong password")
+        eq(login("printprobe", pw).status_code, 200, "and a sign-in")
+        ok(copilot._stat_key(copilot.USERS_PATH) != before, "both written to the team's file")
+        eq(post("/api/crm/board", {"rev": rev}).json(), {"same": True, "rev": rev},
+           "and the board, which neither changed, is not sent again")
+        real = copilot._crm_shape
+        copilot._crm_shape = lambda d: {**real(d), "shaped_by": "the next version"}
+        copilot._crm_board_cache["key"] = None        # a restart into the next version
+        try:
+            moved = post("/api/crm/board", {"rev": rev}).json()
+        finally:
+            copilot._crm_shape = real
+        ok("crm" in moved and moved["rev"] != rev and moved["crm"].get("shaped_by"),
+           "a board shaped another way from the same files is sent: %r" % {k: moved[k] for k in moved if k != "crm"})
     with_accounts(go)
 
 

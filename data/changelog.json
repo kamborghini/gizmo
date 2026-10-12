@@ -7,7 +7,7 @@
     {
      "kind": "improved",
      "tab": "crm",
-     "text": "The CRM's board is now put together once each time something on it changes, not for every person and every refresh, so it opens quicker and nobody else's clicks wait while it is built."
+     "text": "The CRM's board is now put together once and shared, not built again for every person and every refresh, so it usually opens quicker and other people's clicks spend less time waiting behind it."
     },
     {
      "kind": "improved",

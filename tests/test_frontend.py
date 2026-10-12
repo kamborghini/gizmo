@@ -8314,6 +8314,44 @@ function renderCRM() { paints += 1; crmPaintedRev = crmRev; }
 
 
 @test
+def t_a_failed_crm_write_does_not_stay_on_the_page():
+    """PR review, 2026-10-12. Ticking an activity done ticks its box before
+    the server answers. When the write failed the box stayed ticked, and the
+    poll that used to redraw the whole board every 90 seconds, and so put it
+    right, now hears that nothing changed and draws nothing. The box goes
+    back when the write fails, and any failed CRM write has the next poll
+    redraw the board even when it is told nothing changed."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+let crmCache = { deals: {}, activities: {} }, crmLoadedAt = 0, crmRev = 'r1', crmPaintedRev = 'r1', paints = 0, toasts = 0;
+let fail = true, next = { same: true, rev: 'r1' };
+const setInterval = () => 0;
+document.querySelector = (sel) => sel === '#view-crm.active' ? el('div') : null;
+document.activeElement = null;
+async function api(path, body) { crmLoadedAt = 0; if (path !== '/api/crm/board' && fail) throw new Error('Couldn\'t save.'); return next; }
+function renderCRM() { paints += 1; crmPaintedRev = crmRev; }
+function toastError() { toasts += 1; }
+const ico = () => el('i'), crmTypeIcon = () => 'phone', crmPerson = () => null, crmMulti = () => false;
+const crmUname = () => '', fmtDate = (x) => x, cap = (x) => x, crmActivityForm = () => {};
+""" + fn_src("async function crmMaybeRefresh(") + fn_src("async function crmOp(") + fn_src("function crmActRow(") + r"""
+(async () => {
+  const row = crmActRow({ id: 'a1', type: 'call', subject: 'Call', done: false, state: 'today' }, () => {});
+  const cb = row.children[0];
+  cb.checked = true; await cb.onchange();
+  const out = { box: cb.checked, toasts };
+  await crmMaybeRefresh();
+  out.redrawn = paints;
+  console.log(JSON.stringify(out));
+})();
+"""
+    got = _run_node(js)
+    ok(got["box"] is False and got["toasts"] == 1, "a failed tick is unticked, and says why: %r" % got)
+    ok(got["redrawn"] == 1, "and the next poll redraws though nothing changed: %r" % got)
+
+
+@test
 def t_team_shift_times_are_london_clock_times():
     """A46 in the 2026-09-22 bug audit. Clock-in and clock-out were sliced out
     of UTC stamps, an hour early all summer."""
