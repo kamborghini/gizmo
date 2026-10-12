@@ -2039,6 +2039,39 @@ def t_an_order_missing_its_terms_is_flagged_on_the_queue_row():
 
 
 @test
+def t_lists_are_tables_whose_rows_share_columns():
+    """Cameron's first screenshot, 12 Oct 2026: every Loan units row was a name
+    at the far left and its status and buttons at the far right, 800px of
+    nothing between, each row in its own box. A list whose rows share fields is
+    one grid: a head row and the rows share its tracks (subgrid), so columns
+    line up down the list, the spare width is shared across headed columns, and
+    rows are hairlines in one list, not boxes. A narrow table turns its rows
+    into two-line rows by its own width, never by sideways scroll."""
+    fn = fn_src("function dtable(") if "function dtable(" in SCRIPT else ""
+    ok("if (!rows.length) return opts.empty" in fn, "an empty list is its one line, with no head over nothing")
+    for need in ("'dt-head'", "'dt-row", "el('div', 'dt dt-' + (opts.stop || 'm')", "'dtable '"):
+        ok(need in fn, "the table builds " + need)
+    rule = CSS.split("\n        .dtable > :is(.dt-head, .dt-row) {")[1].split("}")[0] if "\n        .dtable > :is(.dt-head, .dt-row) {" in CSS else ""
+    ok("grid-template-columns: subgrid" in rule and "grid-column: 1 / -1" in rule, "every row shares the table's columns")
+    base = CSS.split("/* ONE TABLE")[1].split("/* ONE TABLE, NARROW")[0] if "/* ONE TABLE, NARROW" in CSS else ""
+    ok(base and "flex: 1" not in base, "no column takes the spare width and shoves the rest to the far edge")
+    ok(".dt-c { min-width: 0;" in base, "a cell can shrink, so a long name wraps or ends in an ellipsis inside its column")
+    ok(base.count("overflow-wrap: anywhere") == 1 and ".dt-c.email { overflow-wrap: anywhere; }" in base,
+       "only an email or web address may break anywhere: a phone number or a figure never splits")
+    ok("border-radius" not in base.split(".dt-row {")[1].split("}")[0] if ".dt-row {" in base else False,
+       "a row is a hairline, not a box")
+    narrow = CSS.split("/* ONE TABLE, NARROW")[1][:2400] if "/* ONE TABLE, NARROW" in CSS else ""
+    for stop in ("40rem", "56rem", "72rem"):
+        ok("@container dt (max-width: %s)" % stop in narrow, "a table can turn its rows to two lines at %s" % stop)
+    ok(".dt-m > .dtable > .dt-head { display: none; }" in narrow, "and then drops its head row")
+    ok("' main'" not in fn and "' dt-main'" in fn,
+       "the first cell is .dt-main: plain .main is the page sheet, and a cell wearing it clipped its own first letter")
+    lo = fn_src("function renderLoans(")
+    ok(lo.count("dtable(") == 2 and "'lbl-row loan-row" not in lo,
+       "Loan units' two lists are tables now, not boxed rows")
+
+
+@test
 def t_figures_sit_together_at_their_own_width():
     """Cameron's screenshots, 12 Oct 2026: Out now 1, On the shelf 2 and
     Overdue 0 each at the left of a third of a 1,450px row; Synced, Failed and
@@ -11402,7 +11435,7 @@ def t_the_size_list_and_loan_units_wear_the_mix():
                  "'ready to go'", "nothing past its date", "Longest out first.", "Every loan unit the shop owns.",
                  "start tracking it", "worth a chase", "A loan with no due date turns amber"):
         ok(gone not in SCRIPT, "cut: " + gone)
-    for new in ("'Nothing is out.'", "'No loan units yet.'", "'no due date'", "'Turns amber after this many days without a due date.'"):
+    for new in ("'Nothing is out.'", "'No loan units yet.'", "'No due date'", "'Turns amber after this many days without a due date.'"):
         ok(new in SCRIPT, "says: " + new)
 
 

@@ -2352,6 +2352,88 @@
         .lbl-count { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
         /* One order opened from Shopify says so over the toolbar. */
         .q-note { margin: 0; color: var(--text-tertiary); }
+        /* ONE TABLE (12 Oct 2026). A list whose rows share fields is one grid:
+           its head and its rows share the grid's column tracks (subgrid), so
+           every column lines up down the list and the spare width is shared
+           across headed columns. Cameron's first screenshot was the other way:
+           a name at the far left of a boxed row and its buttons at the far
+           right, 800px of nothing between. A row is a hairline in one list; its
+           state is a dot, never a box. Each table's tracks are its own class
+           (.dt-<name> { --dt-cols }), set with its page. */
+        .dt { container: dt / inline-size; }
+        .dtable { display: grid; grid-template-columns: var(--dt-cols); column-gap: var(--sp-4); }
+        .dtable > :is(.dt-head, .dt-row) { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; position: relative; }
+        .dt-head { min-height: var(--control-h); border-bottom: var(--bw-hairline) solid var(--border-default);
+            font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary); }
+        .dt-row { min-height: var(--row-h); padding-block: var(--sp-2); border-bottom: var(--bw-hairline) solid var(--border-default); }
+        .dt-row.two { min-height: var(--order-row-h); }
+        .dt-c { min-width: 0; display: flex; align-items: center; gap: var(--sp-2); }
+        .dt-c.num { justify-content: flex-end; text-align: right; font-variant-numeric: tabular-nums; }
+        .dt-c.stack { flex-direction: column; align-items: flex-start; justify-content: center; gap: 0; }
+        .dt-c.act { justify-content: flex-end; gap: var(--control-gap); }
+        .dt-c.email { overflow-wrap: anywhere; }
+        .dt-head .dt-c.sort { color: var(--text-secondary); }
+        .dt-head .dt-c svg { width: var(--icon-sm); height: var(--icon-sm); }
+        .dt-name { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; font-weight: var(--weight-medium); color: var(--text-primary); }
+        /* The clip starts a hairline left of the text (and the text a hairline
+           in), so a first letter on a half pixel keeps its stem. */
+        .dt-sub { max-width: calc(100% + var(--bw-hairline)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            margin-left: calc(-1 * var(--bw-hairline)); padding-left: var(--bw-hairline);
+            font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        /* A button whose word swaps keeps one width, the wider word's, so the
+           buttons after it line up down the column. */
+        .swap { display: inline-grid; }
+        .swap > * { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: var(--control-gap); }
+        .swap > [aria-hidden="true"] { visibility: hidden; }
+        .dt-c.ind > .dt-sub { padding-left: calc(var(--dot-md) + var(--sp-2)); }
+        .dt-muted { color: var(--text-tertiary); }
+        /* A name beside a status (Out, then who has it) ends in an ellipsis
+           rather than pushing past its column. */
+        .dt-name > .dt-muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .dt-bad { color: var(--error); font-weight: var(--weight-semibold); }
+        .dt-warn { color: var(--warning); }
+        .dt-dot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); flex: none; background: var(--border-emphasis); }
+        .dt-dot.bad { background: var(--error); }
+        .dt-dot.warn { background: var(--warning); }
+        .dt-dot.ok { background: var(--success); }
+        .dt-dot.off { background: transparent; box-shadow: inset 0 0 0 var(--bw-hairline) var(--border-emphasis); }
+        .dt-row.settled .dt-c { color: var(--text-tertiary); }
+        .dt-row.click { cursor: pointer; }
+        @media (hover: hover) { .dt-row.click:hover { background: var(--surface-secondary); } }
+        /* ONE TABLE, NARROW: a table whose columns no longer fit its own width
+           turns each row into two lines (its main cell, then the rest after it
+           in grey, its actions straight after them rather than out at the far
+           edge) and drops its head, never a
+           sideways scroll. Each table picks the width its columns need: s at
+           40rem, m at 56rem, l at 72rem; a phone is under all three. */
+        @container dt (max-width: 40rem) {
+            .dt-s > .dtable { display: block; }
+            .dt-s > .dtable > .dt-head { display: none; }
+            .dt-s > .dtable > .dt-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--sp-3); row-gap: var(--sp-1); }
+            .dt-s > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; }
+            .dt-s > .dtable > .dt-row > .dt-c:not(.dt-main, .act) { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+            .dt-s > .dtable > .dt-row > .dt-c:empty { display: none; }
+        }
+        @container dt (max-width: 56rem) {
+            .dt-m > .dtable { display: block; }
+            .dt-m > .dtable > .dt-head { display: none; }
+            .dt-m > .dtable > .dt-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--sp-3); row-gap: var(--sp-1); }
+            .dt-m > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; }
+            .dt-m > .dtable > .dt-row > .dt-c:not(.dt-main, .act) { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+            .dt-m > .dtable > .dt-row > .dt-c:empty { display: none; }
+        }
+        @container dt (max-width: 72rem) {
+            .dt-l > .dtable { display: block; }
+            .dt-l > .dtable > .dt-head { display: none; }
+            .dt-l > .dtable > .dt-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--sp-3); row-gap: var(--sp-1); }
+            .dt-l > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; }
+            .dt-l > .dtable > .dt-row > .dt-c:not(.dt-main, .act) { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+            .dt-l > .dtable > .dt-row > .dt-c:empty { display: none; }
+        }
+        /* Loan units' two tables (the mockup): what is out, longest first, and
+           the register, every action in a column of its own. */
+        .dt-loans-out { --dt-cols: minmax(0, 1.6fr) minmax(0, 1.2fr) max-content minmax(0, 1fr) max-content; }
+        .dt-loans-reg { --dt-cols: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.2fr) max-content max-content; }
         .lbl-row { display: flex; align-items: center; gap: var(--sp-2-5); padding: var(--sp-2-5) var(--sp-3); background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default);
             border-radius: var(--radius-inset); margin-bottom: var(--sp-2); cursor: pointer; transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease); text-align: left; width: 100%; }
         @media (hover: hover) { .lbl-row:hover { background: var(--surface-secondary); border-color: var(--border-strong); } }
@@ -6091,6 +6173,9 @@ Projected Image UK"></textarea>
             loader: SV('<path d="M21 12a9 9 0 1 1-6.219-8.56"></path>'),
             refresh: SV('<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>'),
             send: SV('<line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>'),
+            history: SV('<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>'),
+            archive: SV('<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>'),
+            archiveRestore: SV('<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h2"/><path d="M20 8v11a2 2 0 0 1-2 2h-2"/><path d="m9 15 3-3 3 3"/><path d="M12 12v9"/>'),
             trash: SV('<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line>'),
             chev: SV('<path d="m9 18 6-6-6-6"/>'),
             inbox: SV('<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>'),
@@ -6100,6 +6185,7 @@ Projected Image UK"></textarea>
                chevron is the app's "next", and it read as navigation. */
             chevDown: SV('<path d="m6 9 6 6 6-6"/>'),
             up: SV('<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline>'),
+            arrowDown: SV('<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>'),
             down: SV('<polyline points="23 18 13.5 8.5 8.5 13.5 1 6"></polyline><polyline points="17 18 23 18 23 12"></polyline>'),
             check: SV('<path d="M20 6 9 17l-5-5"/>'),
             eyeOff: SV('<path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"></path><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"></path><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"></path><path d="m2 2 20 20"></path>'),
@@ -7005,7 +7091,7 @@ Projected Image UK"></textarea>
             return b;
         }
         function statCard(m, i) {
-            const c = el('div', 'stat' + (m.tone === 'warn' ? ' warn' : ''));
+            const c = el('div', 'stat' + (m.tone === 'warn' ? ' warn' : m.tone === 'bad' ? ' bad' : ''));
             c.style.animationDelay = (i * 40) + 'ms';
             /* Decoration, and the label right under it already names the metric,
                so it is hidden from the reader that would otherwise announce a
@@ -7133,6 +7219,49 @@ Projected Image UK"></textarea>
             g.classList.add('metrics-strip');
             if (finance) g.classList.add('metrics-finance');
             return g;
+        }
+        /* ONE TABLE (see .dtable). cols: [{ head, cls }] in order, cls one of
+           stack, num, act, sort, email, ind; the tracks come from opts.cls in
+           CSS (.dt-<name> { --dt-cols }). rows: [{ cells, cls }] with the cells
+           in column order, each a Node or a string. opts.empty is what an empty
+           list shows instead: its one line, no head over nothing. opts.stop is
+           the width its rows turn two-line at: s, m (the default) or l. */
+        function dtable(cols, rows, opts) {
+            opts = opts || {};
+            if (!rows.length) return opts.empty || el('div', 'empty', 'Nothing here yet.');
+            const wrap = el('div', 'dt dt-' + (opts.stop || 'm'));
+            const t = el('div', 'dtable ' + (opts.cls || ''));
+            t.setAttribute('role', 'table');
+            if (opts.label) t.setAttribute('aria-label', opts.label);
+            const h = el('div', 'dt-head'); h.setAttribute('role', 'row');
+            cols.forEach(c => {
+                const x = el('div', 'dt-c' + (c.cls ? ' ' + c.cls : '')); x.setAttribute('role', 'columnheader');
+                if (c.head) x.append(c.head); h.append(x);
+            });
+            t.append(h);
+            rows.forEach(r => {
+                const row = el('div', 'dt-row' + (r.cls ? ' ' + r.cls : '')); row.setAttribute('role', 'row');
+                r.cells.forEach((c, i) => {
+                    const cell = el('div', 'dt-c' + (i === 0 ? ' dt-main' : '') + (cols[i] && cols[i].cls ? ' ' + cols[i].cls : ''));
+                    cell.setAttribute('role', 'cell');
+                    if (c !== null && c !== undefined && c !== '') cell.append(c);
+                    row.append(cell);
+                });
+                t.append(row);
+            });
+            wrap.append(t);
+            return wrap;
+        }
+        /* A table's main cell: a dot when the row has a state, the name, and its
+           grey second line. */
+        function dtMain(name, sub, dot) {
+            const f = document.createDocumentFragment();
+            const n = el('span', 'dt-name');
+            if (dot !== undefined) n.append(el('span', 'dt-dot' + (dot ? ' ' + dot : '')));
+            n.append(document.createTextNode(name || ''));
+            f.append(n);
+            if (sub) f.append(el('span', 'dt-sub', sub));
+            return f;
         }
         /* ---------- widget layout (pure) ---------- */
         /* The arithmetic behind the widget grid, ported from the React component
@@ -14794,39 +14923,29 @@ Projected Image UK"></textarea>
             const mgrid = metricsStrip([
                 { label: 'Out now', value: String(counts.out) },
                 { label: 'On the shelf', value: String(counts.in) },
-                { label: 'Overdue', value: String(counts.late),
-                  note: counts.late ? 'past the date agreed' : null,
-                  trend: counts.late ? 'down' : '' }]);
+                /* Red when there is one; the rows' Overdue tags say what it means. */
+                { label: 'Overdue', value: String(counts.late), tone: counts.late ? 'bad' : '' }]);
             box.append(widget(mgrid, 'counts', 'full', 'Loan counts'));
 
-            /* ---- what is out ---- */
+            /* ---- what is out: a table, longest out first (12 Oct 2026) ---- */
             const oCard = el('div', 'card');
             const oHead = el('div', 'card-head');
             oHead.append(el('h3', 'card-title', 'Out now'));
             oCard.append(oHead);
             const out = d.out || [];
-            if (!out.length) {
-                /* 'Everything is on the shelf' beside 'On the shelf 0' when there
-                   is nothing in the register at all. */
-                oCard.append(el('div', 'empty', (d.units || []).length
-                    ? 'Everything is on the shelf.' : 'Nothing is out.'));
-            } else {
-                out.forEach(r => {
-                    const row = el('div', 'lbl-row loan-row' + (r.state === 'late' ? ' is-late'
-                        : r.state === 'due' ? ' is-due' : ''));
-                    const who = el('div', 'lr-what');
-                    who.append(el('div', null, r.unit.name + (r.unit.model ? ' · ' + r.unit.model : '')));
-                    who.append(el('div', 'lbl-meta', 'with ' + (r.who_name || 'someone')
-                        + (r.phone ? ' · ' + r.phone : '')));
-                    row.append(who);
-                    const when = el('div', 'lr-when');
-                    when.append(el('div', null, loanDays(r.days_out)));
-                    when.append(el('div', 'lbl-meta', r.due_at
-                        ? (r.state === 'late' ? 'due back ' + fmtDate(r.due_at) + ', overdue'
-                            : 'due back ' + fmtDate(r.due_at))
-                        : 'no due date'));
-                    row.append(when);
-                    const back = el('button', 'btn btn-sm', 'Book back in');
+            const outHead = el('span', 'dt-sorted'); outHead.append(document.createTextNode('Out'), ico(I.arrowDown));
+            oCard.append(dtable([{ head: 'Unit', cls: 'stack ind' }, { head: 'With', cls: 'stack' }, { head: outHead, cls: 'sort' },
+                                 { head: 'Due back' }, { head: '', cls: 'act' }],
+                out.map(r => {
+                    const due = el('span', 'dt-name');
+                    if (r.state === 'late' && r.due_at) due.append(el('span', 'dt-bad', fmtDate(r.due_at)), el('span', 'lbl-chip bad', 'Overdue'));
+                    else if (r.due_at) due.append(document.createTextNode(fmtDate(r.due_at)));
+                    else due.append(el('span', r.state === 'due' ? 'dt-warn' : 'dt-muted', 'No due date'));
+                    const who = document.createDocumentFragment();
+                    who.append(el('span', 'dt-name', r.who_name || 'Someone'));
+                    if (r.phone) who.append(el('span', 'dt-sub', r.phone));
+                    const back = el('button', 'btn btn-sm');
+                    back.append(ico(I.logIn), document.createTextNode('Book back in'));
                     back.onclick = async () => {
                         if (!await uiConfirm((r.unit.name || 'This unit') + ' is back from '
                             + (r.who_name || 'the customer') + '?',
@@ -14837,13 +14956,17 @@ Projected Image UK"></textarea>
                               loadLoans(true); }
                         catch (e) { back.disabled = false; toastError(e.message); }
                     };
-                    row.append(back);
-                    oCard.append(row);
-                });
-            }
+                    return { cls: 'two', cells: [dtMain(r.unit.name, r.unit.model,
+                                r.state === 'late' ? 'bad' : r.state === 'due' ? 'warn' : 'ok'),
+                            who, r.days_out === 1 ? '1 day' : r.days_out + ' days', due, back] };
+                }),
+                { cls: 'dt-loans-out', label: 'Out now', empty: el('div', 'empty',
+                    /* 'Everything is on the shelf' beside 'On the shelf 0' when there
+                       is nothing in the register at all. */
+                    (d.units || []).length ? 'Everything is on the shelf.' : 'Nothing is out.') }));
             box.append(widget(oCard, 'out'));
 
-            /* ---- the register ---- */
+            /* ---- the register: a table, every action in a column of its own ---- */
             const rCard = el('div', 'card');
             const rHead = el('div', 'card-head');
             rHead.append(el('h3', 'card-title', 'The register'));
@@ -14855,53 +14978,62 @@ Projected Image UK"></textarea>
             }
             rCard.append(rHead);
             const units = d.units || [];
-            if (!units.length) {
-                if (d.can_manage) {
-                    const first = el('button', 'btn'); first.type = 'button';
-                    first.append(ico(I.plus), document.createTextNode('Add a unit'));
-                    first.onclick = () => loanUnitModal(null);
-                    rCard.append(emptyState({ icon: I.box, text: 'No loan units yet.', action: first }));
-                } else rCard.append(el('div', 'empty', 'No units in the register yet.'));
-            } else {
-                units.forEach(u => {
-                    const row = el('div', 'lbl-row loan-row');
-                    const left = el('div', 'lr-what');
-                    left.append(el('div', null, u.name));
-                    left.append(el('div', 'lbl-meta', [u.model, u.serial].filter(Boolean).join(' · ')
-                        || 'no model or serial recorded'));
-                    row.append(left);
-                    row.append(el('span', 'mrule-tag', u.status === 'out' ? 'Out'
-                        : u.status === 'retired' ? 'Retired' : 'On the shelf'));
-                    const hist = el('button', 'btn btn-sm', 'History');
+            const withWhom = {};
+            out.forEach(r => { if (r.unit && r.unit.id) withWhom[r.unit.id] = r.who_name || ''; });
+            let emptyReg;
+            if (d.can_manage) {
+                const first = el('button', 'btn'); first.type = 'button';
+                first.append(ico(I.plus), document.createTextNode('Add a unit'));
+                first.onclick = () => loanUnitModal(null);
+                emptyReg = emptyState({ icon: I.box, text: 'No loan units yet.', action: first });
+            } else emptyReg = el('div', 'empty', 'No units in the register yet.');
+            rCard.append(dtable([{ head: 'Unit', cls: 'stack' }, { head: 'Asset tag', cls: 'stack' }, { head: 'Status' },
+                                 { head: '', cls: 'act' }, { head: '', cls: 'act' }],
+                units.map(u => {
+                    const tag = document.createDocumentFragment();
+                    tag.append(u.asset_tag ? el('span', 'dt-name', u.asset_tag) : el('span', 'dt-muted', 'No tag'));
+                    if (u.serial) tag.append(el('span', 'dt-sub', 'S/N ' + u.serial));
+                    const st = el('span', 'dt-name');
+                    st.append(el('span', 'dt-dot' + (u.status === 'in' ? ' ok' : u.status === 'retired' ? ' off' : '')),
+                              document.createTextNode(u.status === 'out' ? 'Out' : u.status === 'retired' ? 'Retired' : 'On the shelf'));
+                    if (u.status === 'out' && withWhom[u.id]) st.append(el('span', 'dt-muted', withWhom[u.id]));
+                    let outB = '';
+                    if (u.status === 'in') {
+                        /* Secondary: the page's one teal is the header's Loan out. */
+                        outB = el('button', 'btn btn-sm');
+                        outB.append(ico(I.logOut), document.createTextNode('Loan out'));
+                        outB.onclick = () => loanOutModal(u);
+                    }
+                    const acts = document.createDocumentFragment();
+                    const hist = el('button', 'btn btn-sm');
+                    hist.append(ico(I.history), document.createTextNode('History'));
                     hist.onclick = () => loanHistoryModal(u);
-                    row.append(hist);
+                    acts.append(hist);
                     if (d.can_manage || u.asset_tag) {
                         /* Minting happens once, so the button says which it is
                            doing: a first print assigns the number, every one
                            after is the same sticker again. Assigning the number
                            is an admin's; REPRINTING a tag that already exists is
                            anyone's, because a peeled label is found by whoever
-                           is holding the projector. */
-                        const st = el('button', 'btn btn-sm',
-                            u.asset_tag ? 'Reprint ' + u.asset_tag : 'Serial sticker');
-                        st.title = u.asset_tag
+                           is holding the projector. The tag is its own column. */
+                        const sk = el('button', 'btn btn-sm');
+                        const sw = el('span', 'swap');
+                        const w1 = el('span'); w1.append(ico(I.printer), document.createTextNode('Reprint'));
+                        const w2 = el('span'); w2.append(ico(I.printer), document.createTextNode('Serial sticker'));
+                        (u.asset_tag ? w2 : w1).setAttribute('aria-hidden', 'true');
+                        sw.append(w1, w2); sk.append(sw);
+                        sk.title = u.asset_tag
                             ? 'Print the sticker for ' + u.asset_tag + ' again'
                             : 'Assign this unit an asset tag and print its sticker';
-                        st.onclick = () => loanPrintSticker(u, st);
-                        row.append(st);
-                    }
-                    if (u.status === 'in') {
-                        const outB = el('button', 'btn btn-sm btn-primary', 'Loan out');
-                        outB.onclick = () => loanOutModal(u);
-                        row.append(outB);
+                        sk.onclick = () => loanPrintSticker(u, sk);
+                        acts.append(sk);
                     }
                     if (d.can_manage) {
-                        const icons = el('span', 'loan-icons');
                         const ed = el('button', 'icon-btn'); ed.innerHTML = I.edit;
                         ed.title = 'Edit this unit'; ed.setAttribute('aria-label', 'Edit ' + u.name);
                         ed.onclick = () => loanUnitModal(u);
-                        icons.append(ed); row.append(icons);
-                        const rt = el('button', 'icon-btn'); rt.innerHTML = I.trash;
+                        /* Retiring keeps the history, so its mark is an archive box, not a bin. */
+                        const rt = el('button', 'icon-btn'); rt.innerHTML = u.status === 'retired' ? I.archiveRestore : I.archive;
                         rt.title = u.status === 'retired' ? 'Put it back in the register' : 'Retire this unit';
                         rt.setAttribute('aria-label', (u.status === 'retired' ? 'Unretire ' : 'Retire ') + u.name);
                         rt.onclick = async () => {
@@ -14915,11 +15047,12 @@ Projected Image UK"></textarea>
                                   loadLoans(true); }
                             catch (e) { toastError(e.message); }
                         };
-                        icons.append(rt);
+                        acts.append(ed, rt);
                     }
-                    rCard.append(row);
-                });
-            }
+                    return { cls: 'two' + (u.status === 'retired' ? ' settled' : ''), cells: [
+                        dtMain(u.name, u.model || (u.serial ? '' : 'no model or serial recorded')), tag, st, outB, acts] };
+                }),
+                { cls: 'dt-loans-reg', label: 'The register', empty: emptyReg }));
             box.append(widget(rCard, 'register'));
 
             if (d.can_manage) {
