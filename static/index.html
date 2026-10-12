@@ -1284,8 +1284,9 @@
             .ktable.sizes-table thead { display: none; }
             .ktable.sizes-table, .ktable.sizes-table tbody, .ktable.sizes-table tr.ktable-grp, .ktable.sizes-table tr.ktable-grp > th,
             .ktable.sizes-table tr.sizes-detail, .ktable.sizes-table tr.sizes-detail > td { display: block; }
-            /* R13: a status tag sits on the model's line, as a tag beside its name, not on a line of its own. */
-            .ktable.sizes-table tr.sizes-row { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto;
+            /* R13: a status tag sits on the model's line, as a tag beside its name, not on a line of its own. Its
+               column is never narrower than the tag, so a long name wraps rather than the tag running over the size. */
+            .ktable.sizes-table tr.sizes-row { display: grid; grid-template-columns: minmax(0, max-content) minmax(min-content, 1fr) auto;
                 grid-template-areas: "model status fig" "maker maker fig"; column-gap: var(--sp-3); row-gap: var(--sp-1);
                 padding: var(--sp-3) 0; border-bottom: var(--bw-hairline) solid var(--border-default); }
             .ktable.sizes-table tr.sizes-row.open { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); }
@@ -5085,6 +5086,10 @@
         .kbadge { display: inline-flex; align-items: center; height: var(--tag-h); font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; padding: 0 var(--sp-2); border-radius: var(--radius-tag); margin-left: var(--sp-2); background: var(--warning-bg); color: var(--warning); vertical-align: middle; flex: none; }
         .kbadge.win { background: var(--success-bg); color: var(--success); }
         .scan-url { flex: 1 1 18rem; min-width: 0; }
+        /* R13: on a phone Products' Export CSV is its icon, so it shares the line with Filters and Compare periods. */
+        @media (max-width: 640px) { .btn.p-export { width: var(--control-h); padding: 0; justify-content: center; } .p-export > .p-export-txt { display: none; } }
+        /* R13: a CRM contact's tick box sits before its name on a phone, not at the start of the line under it. */
+        @media (max-width: 640px) { .ktable.crm-contact-table > tbody > tr > td.tick { order: -2; } .ktable.crm-contact-table > tbody > tr > td.kt-main { flex: 1 1 calc(100% - var(--sp-8) - var(--sp-3)); } }
         /* R13: on a phone the field gives way, so Scan stays beside it rather than alone under it. */
         @media (max-width: 640px) { .scan-card > .act-row { flex-wrap: nowrap; } .scan-card .scan-url { flex-basis: 0; } }
         .scan-out { display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -12043,7 +12048,7 @@ Projected Image UK"></textarea>
             sort.onchange = () => { pState.sort = sort.value; drawList(); };
             const fbtn = el('button', 'btn btn-sm' + (pState.showFilters ? ' on' : '')); fbtn.append(ico(I.sliders), document.createTextNode('Filters')); fbtn.onclick = () => { pState.showFilters = !pState.showFilters; rerender(); };
             const cbtn = el('button', 'btn btn-sm' + (pState.compare ? ' on' : '')); cbtn.textContent = 'Compare periods'; cbtn.onclick = () => { pState.compare = !pState.compare; rerender(); };
-            const xbtn = el('button', 'btn btn-sm'); xbtn.append(ico(I.download), document.createTextNode('Export CSV'));
+            const xbtn = el('button', 'btn btn-sm p-export'); xbtn.append(ico(I.download), el('span', 'p-export-txt', 'Export CSV')); xbtn.setAttribute('aria-label', 'Export CSV');
             pAct.append(fbtn, cbtn, xbtn);
             pCard.append(tableTools([searchWrap, periodSeg], [sort]));
 
@@ -31598,7 +31603,8 @@ Projected Image UK"></textarea>
                 filters.append(g);
                 /* On a phone the list is a select of the same choices over the feed: the two lists ran 800px first. */
                 const s = el('select', 'field-sm'); s.setAttribute('aria-label', title);
-                items.forEach((it, k) => { const o = el('option', null, it.label + ' (' + it.n + ')'); o.value = String(k); o.selected = !!it.on; s.append(o); });
+                /* Everyone and Everything without the total: it is the heading's count, and it cut the select's words off. */
+                items.forEach((it, k) => { const o = el('option', null, k ? it.label + ' (' + it.n + ')' : it.label); o.value = String(k); o.selected = !!it.on; s.append(o); });
                 s.onchange = () => items[+s.value].pick();
                 sels.append(s);
             };

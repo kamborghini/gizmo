@@ -2567,8 +2567,9 @@ def t_a_phone_size_card_keeps_its_tag_beside_the_model():
     touch height inside a card the whole of which opens it, so each model was
     89px tall to the mockup's 60."""
     sz = CSS.split("@container sizes (max-width: 520px) {")[1].split("\n        }\n")[0]
-    ok("grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto;" in sz
-       and 'grid-template-areas: "model status fig" "maker maker fig";' in sz, "the tag on the model's line, the maker under both")
+    ok("grid-template-columns: minmax(0, max-content) minmax(min-content, 1fr) auto;" in sz
+       and 'grid-template-areas: "model status fig" "maker maker fig";' in sz,
+       "the tag on the model's line, the maker under both; a long name wraps rather than the tag running over the size")
     ok(".ktable.sizes-table td.sizes-status { grid-area: status; justify-self: start; align-self: center; white-space: normal; }" in sz, "the tag right after the name")
     ok(".ktable.sizes-table tr.sizes-row .sizes-open { min-height: 0; }" in sz, "the card is the target, so the name keeps its own height")
 
@@ -2634,6 +2635,21 @@ def t_a_phone_overview_pairs_its_trend_figures():
     draws: the widget grid is two columns on a phone and each is one column."""
     ok(".ov-wrap.wgrid > .stat[data-widget]:has(.stat-spark) { grid-column: 1 / -1; }" not in CSS, "a trend figure no longer takes the row")
     ok("if (viewportWidth <= 640) return 2;" in fn_src("function wgColumns("), "the grid is two columns on a phone")
+
+
+@test
+def t_a_phone_keeps_three_small_things_on_shared_lines():
+    """R13, 12 Oct 2026, from the phone shots after the shared fixes: Products'
+    Export CSV sat alone under Filters and Compare periods; a CRM contact's
+    tick box opened the second line, away from the name it ticks; and
+    Activity's "Everything (261)" was cut off in its select, its total being
+    the heading's count already."""
+    ok("const xbtn = el('button', 'btn btn-sm p-export'); xbtn.append(ico(I.download), el('span', 'p-export-txt', 'Export CSV')); xbtn.setAttribute('aria-label', 'Export CSV');" in SCRIPT
+       and "@media (max-width: 640px) { .btn.p-export { width: var(--control-h); padding: 0; justify-content: center; } .p-export > .p-export-txt { display: none; } }" in CSS,
+       "Export CSV is its icon on a phone, beside the other two")
+    ok("@media (max-width: 640px) { .ktable.crm-contact-table > tbody > tr > td.tick { order: -2; } .ktable.crm-contact-table > tbody > tr > td.kt-main { flex: 1 1 calc(100% - var(--sp-8) - var(--sp-3)); } }" in CSS,
+       "a contact's tick box sits before its name")
+    ok("const o = el('option', null, k ? it.label + ' (' + it.n + ')' : it.label);" in fn_src("function renderTeamFeed("), "Everyone and Everything without the total")
 
 
 @test
