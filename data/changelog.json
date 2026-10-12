@@ -2,6 +2,40 @@
  "releases": [
   {
    "date": "2026-10-12",
+   "title": "A quicker Inbox, and response times in Settings",
+   "items": [
+    {
+     "kind": "improved",
+     "tab": "mail",
+     "text": "The Inbox no longer waits on Gmail. Opening the page or an email shows what Reactor already holds straight away, and Gmail is told about a read, a claim, a hand-over or a move just after. Refresh still checks Gmail while you wait."
+    },
+    {
+     "kind": "improved",
+     "tab": "mail",
+     "text": "The Inbox's check every minute rests while its tab is hidden and catches up as soon as you come back, and a quiet minute no longer redraws the whole list. Closing an email you only read marks it read without reloading anything."
+    },
+    {
+     "kind": "fixed",
+     "tab": "mail",
+     "text": "Drafting or sending an email with attachments no longer pauses the whole app for everyone while each file is checked in storage."
+    },
+    {
+     "kind": "improved",
+     "text": "Answers are packed smaller and several times faster for browsers that read the newer format, big ones are packed without holding up anybody else's clicks, and Reactor's own page files are packed once per update instead of once for each person who opens it. Reactor also asks for its alerts once when it opens, not twice."
+    },
+    {
+     "kind": "added",
+     "text": "Settings shows how long the slowest parts of Reactor usually take to answer since it last started, and how slow the slowest answers get, so a page that feels slow can be named with a number."
+    },
+    {
+     "kind": "fixed",
+     "tab": "crm",
+     "text": "Opening Loan units and then the CRM no longer loads the CRM twice."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-12",
    "title": "Xero sync settings save",
    "items": [
     {
