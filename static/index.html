@@ -4694,6 +4694,8 @@
            hover, and after it in source order so it holds while hovered too:
            equal specificity, so the later rule wins. */
         .crm-contact-table tbody tr.sel td { background: var(--action-selected); }
+        /* On a phone the cells are a row's two lines, so the wash goes on the row, not behind each value. */
+        @media (max-width: 640px) { .crm-contact-table tbody tr.sel { background: var(--action-selected); } .crm-contact-table tbody tr.sel td { background: none; } }
         .ktable td.kw { color: var(--text-primary); font-weight: var(--weight-medium); }
         .ktable .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
         /* A LIST OF ROWS (the mix, spec 6): 44 tall, a 16 icon in ink-3 12 from

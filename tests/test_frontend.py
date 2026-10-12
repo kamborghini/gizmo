@@ -2666,6 +2666,8 @@ def t_a_phone_keeps_the_crm_selection_bar():
     ok(".ktable.crm-contact-table > thead > tr.crm-selhead ~ tr { display: none; }" in CSS, "and stay hidden while the bar shows")
     ok("@media (max-width: 640px) { .ktable.crm-contact-table > thead:has(> tr.crm-selhead), .ktable.crm-contact-table > thead > tr.crm-selhead, .ktable.crm-contact-table > thead > tr.crm-selhead > th { display: block; } }" in CSS,
        "a phone shows the head that holds Delete and Clear selection")
+    ok("@media (max-width: 640px) { .crm-contact-table tbody tr.sel { background: var(--action-selected); } .crm-contact-table tbody tr.sel td { background: none; } }" in CSS,
+       "and a ticked row's wash is the whole row, not a band behind each value (seen in the rig)")
 
 
 @test
