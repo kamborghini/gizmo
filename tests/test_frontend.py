@@ -8289,7 +8289,7 @@ let next = null;
 const setInterval = () => 0;      // the slice carries the page's own 90 s poll
 document.querySelector = (sel) => sel === '#view-crm.active' ? el('div') : null;
 document.activeElement = null;
-async function api(path, body) { reads.push(body.rev || ''); crmLoadedAt = 0; return next; }
+let api = async (path, body) => { reads.push(body.rev || ''); crmLoadedAt = 0; return next; };
 function renderCRM() { paints += 1; crmPaintedRev = crmRev; }
 """ + fn_src("async function crmMaybeRefresh(") + r"""
 (async () => {
@@ -8304,6 +8304,12 @@ function renderCRM() { paints += 1; crmPaintedRev = crmRev; }
   next = { same: true, rev: 'r2' }; paints = 0;
   crmLoadedAt = 0; await crmMaybeRefresh();
   out.catchUp = paints;
+  // The Pipedrive import empties the board while a poll is out, and the poll's
+  // "same" lands before the import's own load does.
+  next = { same: true, rev: 'r2' }; paints = 0;
+  api = async (path, body) => { reads.push(body.rev || ''); crmCache = null; crmRev = ''; crmLoadedAt = 0; return next; };
+  crmLoadedAt = 0; await crmMaybeRefresh();
+  out.emptied = paints;
   console.log(JSON.stringify(out));
 })();
 """
@@ -8311,6 +8317,7 @@ function renderCRM() { paints += 1; crmPaintedRev = crmRev; }
     ok(got["same"] == {"sent": ["r1"], "paints": 0}, "the poll sends its revision and an unchanged board draws nothing: %r" % got)
     ok(got["moved"] == {"paints": 1, "rev": "r2", "has": True}, "a board that moved is kept, with its revision, and drawn")
     ok(got["catchUp"] == 1, "and a drawing skipped earlier is made on the next quiet poll")
+    ok(got["emptied"] == 0, "but never a board emptied while the poll was out: %r" % got)
 
 
 @test

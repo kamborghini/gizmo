@@ -24307,8 +24307,10 @@ Projected Image UK"></textarea>
                 crmLoadedAt = Date.now();
                 if (r && r.same) {
                     /* Nothing moved. Draw only if the last board that came
-                       was never drawn (it arrived under someone's typing). */
-                    if (crmPaintedRev !== crmRev && !typing()) renderCRM();
+                       was never drawn (it arrived under someone's typing),
+                       and not one emptied while this poll was out (the
+                       Pipedrive import empties it and loads it again). */
+                    if (crmCache && crmPaintedRev !== crmRev && !typing()) renderCRM();
                     return;
                 }
                 crmCache = r.crm; crmRev = r.rev || '';
