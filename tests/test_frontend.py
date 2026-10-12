@@ -2070,6 +2070,20 @@ def t_a_report_pairs_its_short_blocks():
     ok("!/^Ad spend/i.test(m.label)" in kw, "the ad spend is said once, under Paid search")
     ok(".wpair .metrics.metrics-strip:has(> :nth-child(5):last-child) { display: grid; grid-template-columns: repeat(3, max-content); }" in CSS,
        "five figures in half a row go three then two, so ROAS is not alone on a line")
+    cu = fn_src("function renderCustomers(")
+    for pair in ("summaryAndChanges(box, data.changes, data.changes_since", "pairNodes(kpisW, ncGroup, 'kpis'",
+                 "pairNodes(wgChild(box, 'opportunities'), wgChild(box, 'findings'), 'opportunities'",
+                 "pairNodes(wgChild(box, 'sectors'), wgChild(box, 'segments'), 'sectors'",
+                 "pairNodes(wgChild(box, 'details'), chat, 'details'"):
+        ok(pair in cu, "Customers pairs: " + pair)
+    ok("segTable(data.segments, cur)" in cu and "segCards(" not in SCRIPT, "the segments are a table, not five cards")
+    tc = fn_src("function customersTable(")
+    ok("rows.slice(0, 10)" in tc and "rows.slice(10, 20)" in tc and "el('div', 'duo')" in tc, "top customers are two tables of ten, side by side")
+    rc = fn_src("function radarCard(")
+    ok("el('div', 'radar-cols')" in rc and "'Account and last bought'" in rc and "'Customer and why flagged'" in rc,
+       "the radar's two lists sit side by side, the long text under each name")
+    ok("@container radar (max-width: 64rem) { .radar-cols { grid-template-columns: minmax(0, 1fr); } }" in CSS
+       and ".duo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));" in CSS, "and stack when narrow")
     kt = fn_src("function keywordTable(")
     ok("i >= 15" in kt and "'Show all ' + n + ' keywords'" in kt, "fifteen keywords, then Show all")
     ok("noChannels: true" in ov, "Traffic by channel leaves the chart grid to sit beside Sales by sector")

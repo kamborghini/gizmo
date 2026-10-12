@@ -2355,6 +2355,18 @@
         /* customer sector selector */
         .seclink { background: transparent; border: 0; font: inherit; font-weight: var(--weight-medium); cursor: pointer; padding: 0; text-align: left; }
         .kw-more { display: flex; align-items: center; gap: var(--sp-3); padding-top: var(--sp-3); }
+        /* Two short tables side by side in one card (Customers' top customers,
+           the trade radar's two lists), one above the other when narrow. */
+        .duo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--gap-cols); row-gap: var(--sp-6); align-items: start; }
+        .card:has(> .card-bleed > .duo), .card:has(> .duo) { container: duo / inline-size; }
+        @container duo (max-width: 64rem) { .duo { grid-template-columns: minmax(0, 1fr); } }
+        /* The overdue accounts have six columns and the untagged three, so they share the row seven to five. */
+        .radar-cols { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); column-gap: var(--gap-cols); row-gap: var(--sp-6); align-items: start; }
+        .card:has(> .radar-cols) { container: radar / inline-size; }
+        /* What an account last bought wraps under its name rather than pushing
+           the table past its column. */
+        .radar-cols .ktable td.kw .prod-sub { white-space: normal; }
+        @container radar (max-width: 64rem) { .radar-cols { grid-template-columns: minmax(0, 1fr); } }
         /* TWO BLOCKS SIDE BY SIDE (12 Oct 2026, R6). A short block beside the
            block it belongs with (the summary and What changed, the actions and
            the findings, two short tables), seven twelfths and five, each only
@@ -11244,19 +11256,26 @@ Projected Image UK"></textarea>
             };
             const days = (n) => n + (n === 1 ? ' day' : ' days');
             const od = d.overdue || [];
-            card.append(el('div', 'radar-h', 'Overdue repeat accounts (' + od.length + ')'));
+            /* The two lists side by side (12 Oct 2026), each with its long text
+               under the name, so each fits half the width. */
+            const cols = el('div', 'radar-cols'); card.append(cols);
+            const colA = el('div', 'radar-col'), colB = el('div', 'radar-col'); cols.append(colA, colB);
+            colA.append(el('div', 'radar-h', 'Overdue repeat accounts (' + od.length + ')'));
             if (!od.length) {
-                card.append(el('p', 'card-sub', 'No repeat accounts overdue.'));
+                colA.append(el('p', 'card-sub', 'No repeat accounts overdue.'));
             } else {
-                card.append(table([['Account'], ['Orders', 1], ['Usually every', 1], ['Last order'], ['Overdue by', 1], ['Last bought'], ['']],
+                colA.append(table([['Account and last bought'], ['Orders', 1], ['Usually every', 1], ['Last order'], ['Overdue by', 1], ['']],
                     od.map(r => {
                         const tr = el('tr');
-                        tr.append(el('td', 'kw', r.name));
+                        const nm = el('td', 'kw', r.name);
+                        if ((r.last_items || []).length) nm.append(el('div', 'prod-sub', (r.last_items || []).join(', ')));
+                        tr.append(nm);
                         tr.append(el('td', 'num', String(r.orders)));
                         tr.append(el('td', 'num', days(r.median_days)));
-                        tr.append(el('td', null, (r.last_order || '') + (r.last_at ? ' \u00b7 ' + fmtDate(r.last_at) : '')));
+                        const lo = el('td', null, r.last_order || '');
+                        if (r.last_at) lo.append(el('div', 'prod-sub', fmtDate(r.last_at)));
+                        tr.append(lo);
                         tr.append(el('td', 'num', days(r.overdue_by)));
-                        tr.append(el('td', null, (r.last_items || []).join(', ')));
                         const tdm = el('td');
                         if (r.email) {
                             const a = el('a', 'miss-open', 'Email');
@@ -11269,20 +11288,21 @@ Projected Image UK"></textarea>
                     })));
             }
             const bb = d.untagged_b2b || [];
-            card.append(el('div', 'radar-h', 'Untagged likely-trade customers (' + bb.length + ')'));
+            colB.append(el('div', 'radar-h', 'Untagged likely-trade customers (' + bb.length + ')'));
             if (!bb.length) {
-                card.append(el('p', 'card-sub', 'Every trade customer is tagged.'));
+                colB.append(el('p', 'card-sub', 'Every trade customer is tagged.'));
             } else {
-                card.append(el('p', 'card-sub', 'Tag these in Shopify to count them as trade.'));
-                card.append(table([['Customer'], ['Orders', 1], ['Lifetime spend', 1], ['Why flagged']],
+                colB.append(table([['Customer and why flagged'], ['Orders', 1], ['Lifetime spend', 1]],
                     bb.map(r => {
                         const tr = el('tr');
-                        tr.append(el('td', 'kw', r.name));
+                        const nm = el('td', 'kw', r.name);
+                        if (r.reason) nm.append(el('div', 'prod-sub', r.reason));
+                        tr.append(nm);
                         tr.append(el('td', 'num', String(r.orders)));
                         tr.append(el('td', 'num', fmtMoney(r.spent || 0, cur)));
-                        tr.append(el('td', null, r.reason));
                         return tr;
                     })));
+                colB.append(el('p', 'card-sub', 'Tag these in Shopify to count them as trade.'));
             }
             return card;
         }
@@ -11324,24 +11344,38 @@ Projected Image UK"></textarea>
                 customersRuns.delete(seg);
             }
         }
-        function segCards(segments, cur) {
-            const wrap = el('div', 'segs');
+        /* The segments as a table (12 Oct 2026): how many, the segment and what
+           it means, and what it is worth, beside the sector comparison. */
+        function segTable(segments, cur) {
+            const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
+            const thead = el('thead'); const htr = el('tr');
+            [['Customers', 1], ['Segment'], ['Lifetime revenue', 1]].forEach(([h, num]) => htr.append(el('th', num ? 'num' : null, h)));
+            thead.append(htr); tbl.append(thead); const tb = el('tbody');
             (segments || []).forEach(s => {
-                const c = el('div', 'seg-card');
-                c.append(el('div', 'seg-n', (s.count || 0).toLocaleString()));
-                c.append(el('div', 'seg-name', s.name || ''));
-                c.append(el('div', 'seg-desc', s.desc || ''));
-                c.append(el('div', 'seg-rev', fmtMoney(s.revenue || 0, cur) + ' lifetime'));
-                wrap.append(c);
+                const tr = el('tr');
+                tr.append(el('td', 'num', (s.count || 0).toLocaleString()));
+                const nm = el('td', 'kw', s.name || '');
+                if (s.desc) nm.append(el('div', 'prod-sub', s.desc));
+                tr.append(nm);
+                tr.append(el('td', 'num', fmtMoney(s.revenue || 0, cur)));
+                tb.append(tr);
             });
-            return wrap;
+            tbl.append(tb); wrap.append(tbl); return wrap;
         }
+        /* Top customers as two tables of ten side by side (12 Oct 2026): one
+           column of 25 ran the page's length with the row half empty. */
         function customersTable(rows, cur) {
+            const duo = el('div', 'duo');
+            duo.append(customersHalf(rows.slice(0, 10), cur));
+            if (rows.length > 10) duo.append(customersHalf(rows.slice(10, 20), cur));
+            return duo;
+        }
+        function customersHalf(rows, cur) {
             const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
             const thead = el('thead'); const htr = el('tr');
             ['Customer', 'Orders', 'Lifetime spend', 'Last order'].forEach((h, i) => htr.append(el('th', i ? 'num' : null, h)));
             thead.append(htr); tbl.append(thead); const tb = el('tbody');
-            rows.slice(0, 25).forEach(r => {
+            rows.forEach(r => {
                 const tr = el('tr'); const c0 = el('td', 'kw'); c0.append(document.createTextNode(r.name || 'Customer'));
                 if (r.email) c0.append(el('div', 'prod-sub', r.email));
                 tr.append(c0);
@@ -11375,29 +11409,33 @@ Projected Image UK"></textarea>
                the row. The changes strip used to follow the radar, which would
                leave a fixed block between two cards, so it now comes first. */
             box.append(hero, sectorBar());
-            { const cs = changesStrip(data.changes, data.changes_since); if (cs) box.append(cs); }
-            { const sum = summarySection(s.summary, followedNote(s)); if (sum) box.append(widget(sum, 'summary', 'full', 'Summary')); }
+            summaryAndChanges(box, data.changes, data.changes_since, s.summary, followedNote(s));
+            /* The figures beside the new-customers chart, then the radar, then
+               the pairs (12 Oct 2026, R6). */
+            const kpisW = Array.isArray(data.metrics) && data.metrics.length ? widget(metricsStrip(data.metrics), 'kpis', 'full', 'Customer figures') : null;
+            if (kpisW) box.append(kpisW);
+            let ncGroup = null;
+            if (data.trends && data.trends.new_customers && data.trends.new_customers.length) {
+                const nc = data.trends.new_customers;
+                /* The chart is its own titled card in a group, so it can sit
+                   beside the figures as one half of a pair (12 Oct 2026). */
+                ncGroup = widget(el('div', 'widget-group'), 'new-customers', 'full', 'New customers by month');
+                box.append(ncGroup);
+                /* The chart names its window, as every other chart does; the KPI
+                   beside it counts thirty days and this counts the months drawn. */
+                /* Compact beside the figures (12 Oct 2026): at full height it left a hole under them. */
+                ncGroup.append(barChart({ title: 'New customers by month', source: 'Shopify customers', height: 120, period: rangeLabel(nc.length), yUnit: 'Customers', value: fmtCompact(sumv(nc)), labels: nc.map(x => monthLabel(x.label)), values: nc.map(x => +x.value || 0), format: fmtCompact }));
+                cardifySections(ncGroup);
+            }
+            pairNodes(kpisW, ncGroup, 'kpis', 'Customer figures and new customers');
             box.append(rslot); paintRadar();
-            if (Array.isArray(data.metrics) && data.metrics.length) box.append(widget(metricsStrip(data.metrics), 'kpis', 'full', 'Customer figures'));
             if (comp && Array.isArray(data.sector_comparison) && data.sector_comparison.length) {
                 box.append(widget(el('div', 'section-title', 'Sector comparison'), 'sectors'));
                 box.append(sectorComparisonTable(data.sector_comparison, cur));
             }
-            if (data.trends && data.trends.new_customers && data.trends.new_customers.length) {
-                const nc = data.trends.new_customers;
-                /* A heading over a chart card stays a label rather than folding,
-                   so the heading and its chart are one group built here. */
-                const ncGroup = widget(el('div', 'widget-group'), 'new-customers', 'full', 'New customers over time');
-                box.append(ncGroup);
-                ncGroup.append(el('div', 'section-title', 'New customers over time'));
-                /* The chart names its window, as every other chart does; the KPI
-                   beside it counts thirty days and this counts the months drawn. */
-                ncGroup.append(barChart({ title: 'By month', source: 'Shopify customers', period: rangeLabel(nc.length), yUnit: 'Customers', value: fmtCompact(sumv(nc)), labels: nc.map(x => monthLabel(x.label)), values: nc.map(x => +x.value || 0), format: fmtCompact, height: 220 }));
-                cardifySections(ncGroup);
-            }
             if (Array.isArray(data.segments) && data.segments.length) {
                 box.append(widget(el('div', 'section-title', 'Customer segments'), 'segments'));
-                box.append(segCards(data.segments, cur));
+                box.append(segTable(data.segments, cur));
             }
             if (Array.isArray(s.actions) && s.actions.length) { box.append(widget(el('div', 'section-title', 'Retention opportunities'), 'opportunities')); box.append(actionsCard(s.actions, 'customers')); }
             if (Array.isArray(s.insights) && s.insights.length) { box.append(widget(el('div', 'section-title', 'Findings'), 'findings')); const b = el('div', 'insights'); s.insights.forEach((x, i) => b.append(insightCard(x, i))); box.append(b); }
@@ -11406,8 +11444,12 @@ Projected Image UK"></textarea>
                 box.append(customersTable(data.top_customers, cur));
             }
             if (Array.isArray(s.sections) && s.sections.length) { box.append(widget(el('div', 'section-title', 'Details'), 'details')); s.sections.forEach(sec => box.append(sectionCard(sec))); }
-            box.append(pageChatPanel('customers', data));
+            const chat = pageChatPanel('customers', data);
+            box.append(chat);
             cardifySections(box);
+            pairNodes(wgChild(box, 'opportunities'), wgChild(box, 'findings'), 'opportunities', 'Retention opportunities and findings');
+            pairNodes(wgChild(box, 'sectors'), wgChild(box, 'segments'), 'sectors', 'Sector comparison and segments', { even: true });
+            pairNodes(wgChild(box, 'details'), chat, 'details', 'Details and questions');
             syncPrintBtn();
         }
 
