@@ -2395,6 +2395,26 @@ def t_the_chat_start_sits_in_the_optical_middle():
 
 
 @test
+def t_the_guide_reads_in_two_columns_and_lists_requests_as_a_table():
+    """WS-50 to WS-53, 12 Oct 2026: the Guide was one column under 1,330px
+    with each section's print icon at its far edge; What's new showed only the
+    unread release, then a void; and each request put its state select alone
+    at the far right, its details under the title."""
+    ok(".guide-grid { column-width: 29rem; column-count: 2;" in CSS, "two columns from about 1,000px (WS-53)")
+    gb = fn_src("function paintGuideBook(")
+    ok("tr.append(el('h3', 'card-title', sec.h), p);" in gb, "each section's print icon beside its title")
+    ok("emptyState({ icon: I.search, text: 'Nothing in the guide mentions" in gb and "'Clear'" in gb, "a search that finds nothing is one line with Clear")
+    rl = fn_src("function paintReleases(")
+    ok("const SHOW = 5;" in rl and "rels.slice(0, SHOW).forEach((r, i) => list.append(draw(r, i < unread)));" in rl, "always the last five, New on the unread ones (WS-50)")
+    ok("el('div', 'rel-rail')" in rl and "\n        .rel { display: grid; grid-template-columns: 10rem minmax(0, 1fr);" in CSS, "on a date rail")
+    rq = fn_src("function paintRequests(")
+    ok("dtable([{ head: 'Request', cls: 'stack' }, { head: 'Asked by', cls: 'stack' }, { head: 'Page' }, { head: 'State', cls: 'stack' }" in rq, "requests are a table (WS-51)")
+    ok("const reqView = { f: 'open'," in SCRIPT, "the default filter stays Open")
+    ok("emptyState({ icon: I.spark, text: 'Nothing asked for yet.', action: first })" in rq and "if (all.length) act.append(add);" in rq,
+       "nothing asked yet is one line with Ask for a feature, once (WS-52)")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left

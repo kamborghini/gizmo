@@ -3476,7 +3476,10 @@
            it, the notes under it. The headline was 12px grey beside a bolder
            date, and every release ever sat open in one 30,000px card. */
         .rel-list { display: grid; }
-        .rel { border-top: var(--bw-hairline) solid var(--border-default); padding-block: var(--sp-4); padding-inline: 0; }
+        .rel { display: grid; grid-template-columns: 10rem minmax(0, 1fr); column-gap: var(--sp-6); row-gap: var(--sp-2); align-items: start;
+            border-top: var(--bw-hairline) solid var(--border-default); padding-block: var(--sp-4); padding-inline: 0; }
+        @media (max-width: 640px) { .rel { grid-template-columns: minmax(0, 1fr); } }
+        .rel-rail { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); }
         .rel:first-child { border-top: 0; padding-top: 0; }
         .rel-head { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; margin-bottom: var(--sp-2); }
         .rel-title { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); margin: 0; }
@@ -3491,6 +3494,10 @@
         .card > .rel-more { align-self: flex-start; margin-left: var(--sp-4); }
         @media (max-width: 640px) { .rel-item { grid-template-columns: 1fr; gap: 0; } }
         .req-row { border-top: var(--bw-hairline) solid var(--border-default); padding-block: var(--sp-3); padding-inline: 0; }
+        /* Requests as one table (12 Oct 2026, WS-51). */
+        .dt-req { --dt-cols: minmax(16rem, 1fr) minmax(0, max-content) max-content max-content; }
+        .dt-req.triage { --dt-cols: minmax(16rem, 1fr) minmax(0, max-content) max-content max-content max-content; }
+        .dt-req .req-replyform { align-self: stretch; max-width: var(--measure); }
         .req-list > .req-row:first-child { border-top: 0; padding-top: 0; }
         .req-title { overflow-wrap: anywhere; min-width: 0; }
         .req-detail, .req-meta, .req-reply { overflow-wrap: anywhere; }
@@ -3546,7 +3553,7 @@
         .guide-rows > .guide-row[hidden] { display: none; }
         /* Columns, not a grid: a grid row was as tall as its taller card, so
            a short section beside Files left 541px of nothing. */
-        .guide-grid { column-width: calc(var(--sp-8) * 16); column-gap: var(--page-rhythm); }
+        .guide-grid { column-width: 29rem; column-count: 2; column-gap: var(--page-rhythm); }
         .guide-grid > .guide-card { break-inside: avoid; margin-bottom: var(--page-rhythm); }
         .guide-grid > .guide-card[hidden] { display: none; }
         .guide-t { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); }
@@ -24550,15 +24557,16 @@ Projected Image UK"></textarea>
             tools.append(lead, toc);
             host.append(tools);
             const grid = el('div', 'guide-grid'); host.append(grid);
-            const none = el('div', 'empty guide-none'); none.hidden = true; host.append(none);
+            const none = el('div', 'guide-none'); none.hidden = true; host.append(none);
             secs.forEach(sec => {
                 const card = el('section', 'card guide-card'); card.id = 'g-' + sec.id;
-                const head = el('div', 'card-head'); head.append(el('h3', 'card-title', sec.h));
-                const act = el('div', 'card-act');
+                /* The print icon beside the title (12 Oct 2026, WS-53): it sat at the card's far edge. */
+                const head = el('div', 'card-head');
                 const p = el('button', 'mem-btn'); p.type = 'button'; p.append(ico(I.printer));
                 p.title = 'Print this section'; p.setAttribute('aria-label', 'Print ' + sec.h);
                 p.onclick = () => printGuide([sec]);
-                act.append(p); head.append(act); card.append(head);
+                const tr = el('div', 'title-row'); tr.append(el('h3', 'card-title', sec.h), p);
+                head.append(tr); card.append(head);
                 const rows = el('dl', 'card-bleed guide-rows');
                 sec.body.forEach(([t, d]) => {
                     const row = el('div', 'guide-row');
@@ -24584,7 +24592,11 @@ Projected Image UK"></textarea>
                     card.hidden = !n; shown += n;
                 });
                 none.hidden = !!shown;
-                none.textContent = 'Nothing in the guide mentions \u201c' + guideView.q + '\u201d.';
+                if (!shown) {
+                    const clr = el('button', 'btn btn-sm', 'Clear'); clr.type = 'button';
+                    clr.onclick = () => { guideView.q = ''; search.input.value = ''; filterBook(); search.input.focus(); };
+                    none.replaceChildren(emptyState({ icon: I.search, text: 'Nothing in the guide mentions \u201c' + guideView.q + '\u201d.', action: clr }));
+                }
             };
             filterBook();
         }
@@ -24608,14 +24620,17 @@ Projected Image UK"></textarea>
             card.append(head);
             if (!rels.length) { card.append(el('div', 'empty', 'No release notes yet.')); host.append(card); return; }
             const unread = releaseBaseline(u.unread || {}, u.seen, rels.length).releases;
-            const fresh = Math.max(unread, 1);
+            /* Always the last five (12 Oct 2026, WS-50), the unread ones marked
+               New: only the unread was shown, which after a quiet spell was one
+               release and a void. */
+            const SHOW = 5;
             const list = el('div', 'rel-list');
             const draw = (r, isNew) => {
                 const sec = el('section', 'rel');
-                const h = el('div', 'rel-head');
-                h.append(el('h4', 'rel-title', r.title || fmtDate(r.date)));
+                /* A date rail: the date, then the title, beside the items. */
+                const h = el('div', 'rel-rail');
+                h.append(el('span', 'rel-date', fmtDate(r.date)), el('h4', 'rel-title', r.title || fmtDate(r.date)));
                 if (isNew) h.append(el('span', 'lbl-chip note', 'New'));
-                h.append(el('span', 'rel-date', fmtDate(r.date)));
                 sec.append(h);
                 const ul = el('ul', 'rel-items');
                 (r.items || []).forEach(it => {
@@ -24631,13 +24646,13 @@ Projected Image UK"></textarea>
                 sec.append(ul);
                 return sec;
             };
-            rels.slice(0, fresh).forEach(r => list.append(draw(r, unread > 0)));
+            rels.slice(0, SHOW).forEach((r, i) => list.append(draw(r, i < unread)));
             card.append(list);
-            if (rels.length > fresh) {
+            if (rels.length > SHOW) {
                 const more = el('button', 'btn btn-sm rel-more'); more.type = 'button';
-                more.textContent = 'Show older releases (' + (rels.length - fresh) + ')';
+                more.textContent = 'Show older releases (' + (rels.length - SHOW) + ')';
                 more.setAttribute('aria-expanded', 'false');
-                more.onclick = () => { rels.slice(fresh).forEach(r => list.append(draw(r, false))); more.remove(); };
+                more.onclick = () => { rels.slice(SHOW).forEach(r => list.append(draw(r, false))); more.remove(); };
                 card.append(more);
             }
             host.append(card);
@@ -24647,31 +24662,42 @@ Projected Image UK"></textarea>
         function paintRequests(host, u) {
             const card = el('div', 'card');
             const head = el('div', 'card-head');
+            const all = u.requests || [];
             /* An admin's how-to is the title's info button; a member keeps one
                line (copy plan, Guide #3 and #4). */
             const ft = el('h3', 'card-title', 'Feature requests');
+            if (all.length) ft.append(el('span', 'card-n', String(all.length)));
             head.append(u.can_triage ? titleInfo(ft, infoButton('About feature requests', { title: 'Feature requests',
                 body: 'What the team has asked for. Set each one Planned, Shipped or Declined with a reply, and the person who asked sees it here.' })) : ft);
             if (!u.can_triage) head.append(el('p', 'card-desc', 'Ask for what the app cannot do yet.'));
             const act = el('div', 'card-act');
-            const add = el('button', 'btn btn-sm btn-primary'); add.type = 'button';
+            /* One teal: while a reply is being written, Save reply is it. */
+            const add = el('button', 'btn btn-sm' + (reqView.reply ? '' : ' btn-primary')); add.type = 'button';
             add.append(ico(I.plus), document.createTextNode('Ask for a feature'));
             add.onclick = () => askFeature('guide');
-            act.append(add); head.append(act);
+            /* With nothing asked yet the empty line carries it, once (12 Oct 2026, WS-52). */
+            if (all.length) act.append(add);
+            head.append(act);
             card.append(head);
-            const all = u.requests || [];
-            if (!all.length) { card.append(el('div', 'empty', 'Nothing asked for yet.')); host.append(card); markSeen('requests'); return; }
+            if (!all.length) {
+                const first = el('button', 'btn'); first.type = 'button';
+                first.append(ico(I.plus), document.createTextNode('Ask for a feature'));
+                first.onclick = () => askFeature('guide');
+                card.append(emptyState({ icon: I.spark, text: 'Nothing asked for yet.', action: first }));
+                host.append(card); markSeen('requests'); return;
+            }
             const count = (k) => k === 'mine' ? all.filter(r => r.by === u.me).length : k === 'all' ? all.length : all.filter(r => (r.state || 'open') === k).length;
             const F = REQ_STATES.concat([['mine', 'Yours'], ['all', 'All']]).filter(([k]) => k === 'all' || count(k));
             if (!F.some(([k]) => k === reqView.f)) reqView.f = F[0][0];
             let tabs = null;
-            tabs = segmented(F.map(([k, l]) => [k, l + ' (' + count(k) + ')']), reqView.f, (k) => {
+            tabs = segmented(F.map(([k, l]) => ({ key: k, label: l, n: count(k) })), reqView.f, (k) => {
                 reqView.f = k; reqView.page = 1;
                 [...tabs.children].forEach((b, i) => { const on = F[i][0] === k; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
                 paintList();
             });
             const search = tableSearch('Search requests…', reqView.q, (v) => { reqView.q = v; reqView.page = 1; paintList(); });
-            card.append(tableTools([tabs], [search]));
+            /* The search straight after the filters, one toolbar line. */
+            card.append(tableTools([tabs, search], []));
             const listBox = el('div', 'req-list'); card.append(listBox);
             const paintList = () => {
                 listBox.replaceChildren();
@@ -24682,7 +24708,14 @@ Projected Image UK"></textarea>
                 const pages = Math.max(1, Math.ceil(rows.length / reqView.size));
                 if (reqView.page > pages) reqView.page = pages;
                 const from = (reqView.page - 1) * reqView.size;
-                rows.slice(from, from + reqView.size).forEach(r => listBox.append(reqRow(r, u)));
+                /* One table (12 Oct 2026, WS-51): the request with its detail and
+                   reply under it, who asked and when, the page, its state with
+                   when it was set, and the actions. The state select stood alone
+                   at the far right. */
+                listBox.append(dtable([{ head: 'Request', cls: 'stack' }, { head: 'Asked by', cls: 'stack' }, { head: 'Page' }, { head: 'State', cls: 'stack' }]
+                    .concat(u.can_triage ? [{ head: '', cls: 'act' }] : []),
+                    rows.slice(from, from + reqView.size).map(r => reqRow(r, u)),
+                    { cls: 'dt-req' + (u.can_triage ? ' triage' : ''), label: 'Feature requests', stop: 'l' }));
                 if (rows.length > 25) listBox.append(tablePager({ total: rows.length, page: reqView.page, pageSize: reqView.size, sizes: [25, 50, 100],
                     noun: 'requests', onPage: (k) => { reqView.page = k; paintList(); }, onSize: (k) => { reqView.size = k; reqView.page = 1; paintList(); } }));
             };
@@ -24691,56 +24724,64 @@ Projected Image UK"></textarea>
             host.append(card);
             markSeen('requests');
         }
+        /* One request as a table row: { cells }. */
         function reqRow(r, u) {
-            const row = el('div', 'req-row');
-            const h = el('div', 'req-head');
+            const what = document.createDocumentFragment();
+            const h = el('span', 'dt-name req-head');
             h.append(el('span', 'req-title', r.title));
             if (r.by === u.me) h.append(el('span', 'lbl-chip note', 'Yours'));
+            what.append(h);
+            if (r.detail) what.append(el('div', 'req-detail', r.detail));
+            if (r.note) {
+                const n = el('div', 'req-reply');
+                n.append(el('b', null, 'Reply' + ((u.names || {})[r.note_by] ? ' from ' + u.names[r.note_by] : '') + ': '), document.createTextNode(r.note));
+                what.append(n);
+            }
+            const who = (u.names || {})[r.by] || '';
+            const asked = document.createDocumentFragment();
+            asked.append(el('span', 'dt-name', who || 'Someone'), el('span', 'dt-sub', fmtDate(r.at)));
+            const state = document.createDocumentFragment();
             /* Neutral, unless the chip is a verdict worth colour: Shipped. */
             const tone = r.state === 'shipped' ? ' made' : ' note';
-            if (!u.can_triage) h.append(el('span', 'lbl-chip req-state' + tone, cap(r.state || 'open')));
+            if (!u.can_triage) state.append(el('span', 'lbl-chip req-state' + tone, cap(r.state || 'open')));
             else {
                 const sel = el('select', 'field-sm req-state'); sel.setAttribute('aria-label', 'State of ' + r.title);
                 REQ_STATES.forEach(([st, lab]) => { const o = el('option', null, lab); o.value = st; if ((r.state || 'open') === st) o.selected = true; sel.append(o); });
                 sel.dataset.req = r.id;
                 sel.onchange = () => reqWrite(r, { op: 'state', id: r.id, state: sel.value }, sel, 'select');
-                h.append(sel);
+                state.append(sel);
             }
-            row.append(h);
-            if (r.detail) row.append(el('div', 'req-detail', r.detail));
-            const who = (u.names || {})[r.by] || '';
-            const bits = [who ? 'Asked by ' + who : 'Asked', fmtDate(r.at)];
-            if (r.where) bits.push('from the ' + (PAGE_NAMES[r.where] || r.where) + ' page');
-            if (r.state_at && (r.state || 'open') !== 'open') bits.push(cap(r.state) + ' ' + fmtDate(r.state_at));
-            row.append(el('div', 'req-meta', bits.join(' · ')));
-            if (r.note) {
-                const n = el('div', 'req-reply');
-                n.append(el('b', null, 'Reply' + ((u.names || {})[r.note_by] ? ' from ' + u.names[r.note_by] : '') + ': '), document.createTextNode(r.note));
-                row.append(n);
-            }
+            if (r.state_at && (r.state || 'open') !== 'open') state.append(el('span', 'dt-sub', cap(r.state) + ' ' + fmtDate(r.state_at)));
+            const cells = [what, asked, PAGE_NAMES[r.where] || r.where || '', state];
             if (u.can_triage) {
-                const acts = el('div', 'act-row req-acts');
+                const acts = document.createDocumentFragment();
                 if (reqView.reply === r.id) {
+                    /* The reply is written in the request's own cell, at its measure. */
                     const ta = el('textarea', 'sk-textarea mem-ta'); ta.rows = 2; ta.maxLength = 400; ta.value = r.note || ''; ta.dataset.initial = ta.value;
                     ta.setAttribute('aria-label', 'Reply to ' + r.title);
                     const save = el('button', 'btn btn-sm btn-primary', 'Save reply'); save.type = 'button';
                     save.onclick = () => { ta.dataset.initial = ta.value; reqWrite(r, { op: 'state', id: r.id, state: r.state || 'open', note: ta.value.trim() }, save, 'reply'); };
                     const cancel = el('button', 'btn btn-sm', 'Cancel'); cancel.type = 'button';
                     cancel.onclick = () => { ta.dataset.initial = ta.value; reqView.reply = null; repaintRequests(); };
-                    const f = el('div', 'req-replyform'); f.append(ta); acts.append(save, cancel); row.append(f, acts);
+                    const f = el('div', 'req-replyform'); f.append(ta); what.append(f);
+                    acts.append(save, cancel);
                     requestAnimationFrame(() => ta.focus());
                 } else {
-                    const rep = el('button', 'btn btn-sm'); rep.type = 'button'; rep.textContent = r.note ? 'Change reply' : 'Reply'; rep.dataset.req = r.id;
+                    /* Reply and Change reply keep one width, so Remove lines up. */
+                    const rep = el('button', 'btn btn-sm'); rep.type = 'button'; rep.dataset.req = r.id;
+                    const sw = el('span', 'swap'); const w1 = el('span', null, 'Reply'), w2 = el('span', null, 'Change reply');
+                    (r.note ? w1 : w2).setAttribute('aria-hidden', 'true'); sw.append(w1, w2); rep.append(sw);
                     rep.onclick = () => { reqView.reply = r.id; repaintRequests(); };
                     const del = el('button', 'btn btn-sm'); del.type = 'button'; del.append(ico(I.trash), document.createTextNode('Remove'));
                     del.onclick = async () => {
                         if (!await uiConfirm('Remove the request "' + r.title + '"? Use this for duplicates; it cannot be brought back.', { title: 'Remove request', okText: 'Remove' })) return;
                         reqWrite(r, { op: 'delete', id: r.id }, del);
                     };
-                    acts.append(rep, del); row.append(acts);
+                    acts.append(rep, del);
                 }
+                cells.push(acts);
             }
-            return row;
+            return { cells: cells };
         }
         const PAGE_NAMES = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', recon: 'Reconciliation', forecast: 'Forecast', sizes: 'Size list', connector: 'Xero sync', crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', chat: 'Chat', guide: 'Guide' };
         /* A triage write patches the cached list and redraws the list alone. */
