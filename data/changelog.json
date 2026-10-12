@@ -2,6 +2,147 @@
  "releases": [
   {
    "date": "2026-10-12",
+   "title": "Every page uses its width",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "Every page keeps to one column 1,200 wide on a big screen, with the breadcrumb and Search on its edges, so nothing is spread across the whole of a wide monitor. Short blocks sit side by side, figures sit together at their own widths, and a block's buttons sit beside its words rather than out at the far edge."
+    },
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "Lists are tables with a heading over each column, the name on the left and the actions in a column of their own. An empty list, or a report not yet run, says one line and offers the next step instead of a tall empty box."
+    },
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "On a phone every table reads as rows of two lines, each figure after the name of its column, and nothing scrolls sideways. A page with one button keeps it beside the title, tags sit beside the names they belong to, and every button is a finger wide."
+    },
+    {
+     "kind": "changed",
+     "tab": "overview",
+     "text": "Overview sets its summary beside What changed and Sales by sector beside Traffic by channel, and the counts with no trend are one group of figures. On a phone the trend figures pair up two across."
+    },
+    {
+     "kind": "changed",
+     "tab": "seo",
+     "text": "SEO shows its score as the first of its checks, all on one line."
+    },
+    {
+     "kind": "changed",
+     "tab": "keywords",
+     "text": "Keywords shows your first 15 keywords, most clicks first, beside paid search, with Show all for the rest. On a phone Scan stays beside its address box."
+    },
+    {
+     "kind": "changed",
+     "tab": "products",
+     "text": "Products sets its totals beside Top products by revenue and lists the catalogue as one table, with Stock and Status in columns of their own. A search that finds nothing offers Clear search."
+    },
+    {
+     "kind": "changed",
+     "tab": "customers",
+     "text": "Customers sets its figures beside the new customers chart, the trade radar's two lists side by side, and Sector comparison beside the segments."
+    },
+    {
+     "kind": "changed",
+     "tab": "liability",
+     "text": "Liability lists who owes as one table with what each owes straight after the name, an opened account sets its orders beside the chase email, and when nothing is owed it says so in one line."
+    },
+    {
+     "kind": "changed",
+     "tab": "recon",
+     "text": "Reconciliation's severity counters show the money at stake beside the sources, the discrepancies are a table with a short name for each kind, and an opened one reads in two columns."
+    },
+    {
+     "kind": "changed",
+     "tab": "forecast",
+     "text": "Forecast's Why and its bar run the width of their column, and the plan and trust explanations open in a narrower window that is easier to read."
+    },
+    {
+     "kind": "changed",
+     "tab": "connector",
+     "text": "Xero sync puts its figures, the connection and Auto Run on one band, Review and send on one status line with Needs attention beside it, and the runs beside the quarantine log. Send to Xero is the page's one teal button."
+    },
+    {
+     "kind": "changed",
+     "tab": "labels",
+     "text": "Production Manager opens an order's label under its row at every width, the label on the left with its words and Print this label beside it. The queue, its buttons and the printed label are as they were."
+    },
+    {
+     "kind": "changed",
+     "tab": "sizes",
+     "text": "The Size list opens a model as one band lined up with the table, with Set size straight after Cut at. On a phone a model's status sits beside its name."
+    },
+    {
+     "kind": "changed",
+     "tab": "crm",
+     "text": "CRM's Leads and Activities are tables, Insights runs Won by month across the row as twelve columns, and Pipedrive import is in the header's More menu."
+    },
+    {
+     "kind": "changed",
+     "tab": "loans",
+     "text": "Loan units lends from the header's Loan out, which asks which unit, the chase limit sits in Out now's heading, and a unit's history is a small table."
+    },
+    {
+     "kind": "changed",
+     "tab": "mail",
+     "text": "In the Inbox, the box that ticks every email sits in the list's own head row, and Who is on today is one line of names, each over where they are and what they hold."
+    },
+    {
+     "kind": "changed",
+     "tab": "files",
+     "text": "Files is one table, with Owner, Modified and Size in columns of their own and the storage meter beside the tabs. On a phone Finder drive is the icon at the title."
+    },
+    {
+     "kind": "changed",
+     "tab": "team",
+     "text": "Team's People is a table with the admin actions in each row's menu, Work sets the clock beside the hours and draws each session on a day line from 07:00 to 17:00, and Activity filters by person and by area with a count beside each."
+    },
+    {
+     "kind": "changed",
+     "tab": "memory",
+     "text": "Memory shows what it learned whole, in three columns with the pages it read, and tracked changes sit three across with their actions under their figures."
+    },
+    {
+     "kind": "changed",
+     "tab": "skills",
+     "text": "Skills opens with how they are used, and each skill reads in two columns: its words, then its actions and how Reactor reads it."
+    },
+    {
+     "kind": "changed",
+     "tab": "chat",
+     "text": "Chat's start screen sits just above the middle, over the message box, and lists six recent conversations."
+    },
+    {
+     "kind": "changed",
+     "tab": "guide",
+     "text": "The Guide reads in two columns, What's new always shows the last five releases, and Requests is a table that opens on the open requests."
+    },
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "Settings is a narrower window whose sections share one rhythm, with each connection's state beside its name, and Secrets on the volume is now called Stored secrets. In Customise, a block's hide button and a grip to drag it sit on its first line."
+    },
+    {
+     "kind": "fixed",
+     "tab": "sizes",
+     "text": "On a phone an opened model's details no longer print over the next model; they push it down."
+    },
+    {
+     "kind": "fixed",
+     "tab": "team",
+     "text": "Choosing a person in Team's Activity now shows what they did. Before, it said nothing was recorded, whoever you chose."
+    },
+    {
+     "kind": "fixed",
+     "tab": null,
+     "text": "On a phone, the Store profile's boxes in Settings grow to fit their text instead of cutting it off."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-12",
    "title": "Prints started close together",
    "items": [
     {
