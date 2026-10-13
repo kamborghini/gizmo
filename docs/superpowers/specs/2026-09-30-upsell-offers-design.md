@@ -71,7 +71,7 @@ Taken with Cameron on 2026-09-30:
 10. **Cover starts at dispatch.** The extra years count from the end of the
     standard guarantee, which starts on the covered order's fulfilment date
     (its order date while unfulfilled).
-11. **The warranty is Projected Image's own repair promise** (a service
+11. **The warranty is the shop's own repair promise** (a service
     contract): warranty products are created taxable. The accountant confirms
     the VAT treatment before launch.
 
@@ -123,7 +123,7 @@ limit is 128 KB).
       "headline": "Time for a brighter projector?",
       "body": "Your Chauvet GoboZap is an entry-level unit. The 20 Watt LED is brighter and built for daily use.",
       "product": {"id": "8856159682856", "variant": "47481916653864",
-                  "title": "Projected Image 20 Watt LED Gobo Projector",
+                  "title": "[shop name] 20 Watt LED Gobo Projector",
                   "image": "https://cdn.shopify.com/...", "price": "335.00",
                   "price_after": "284.75"},
       "code": "K7Q2M9TX", "off": "15%", "ends": "2026-12-31"
@@ -132,7 +132,7 @@ limit is 128 KB).
   "warranties": {
     "8856159682856": {
       "skus": ["P220"],
-      "title": "Projected Image 20 Watt LED Gobo Projector",
+      "title": "[shop name] 20 Watt LED Gobo Projector",
       "standard_years": 1,
       "lengths": [{"years": 1, "variant": "4812...", "price": "29.00"},
                   {"years": 2, "variant": "4812...", "price": "49.00"}]
@@ -426,8 +426,8 @@ offers. Any change Cameron makes needs Publish.
 
 ## To check before launch
 
-1. **VAT and consumer rules (not legal advice).** The warranty is Projected
-   Image's own repair promise (decision 11), usually standard-rated for VAT;
+1. **VAT and consumer rules (not legal advice).** The warranty is the shop's
+   own repair promise (decision 11), usually standard-rated for VAT;
    the accountant confirms. For consumer sales of domestic electrical goods,
    the 2005 Extended Warranties Order may require a warranty's price and
    duration next to the product's price on the product page and gives

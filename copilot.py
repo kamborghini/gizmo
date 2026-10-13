@@ -21413,7 +21413,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 setup = {"project": google_mail.project_number(),
                          "redirect_uri": _gmail_redirect_uri(request)}
             rows = _mail_board_shape(store, window=True)
-            return _json({"connected": google_mail.connected(),
+            out = {"connected": google_mail.connected(),
                           "client": google_mail.client_configured(),
                           "address": google_mail.address() or None,
                           "setup": setup,
@@ -21431,8 +21431,18 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                           # They belong on the board, not in a log file: only
                           # somebody looking at the mailbox can settle them.
                           "outbound_pending": _mail_outbound_shape(store),
-                          "synced_at": store.get("synced_at") or "",
-                          "sync_error": store.get("sync_error") or ""})
+                          "sync_error": store.get("sync_error") or ""}
+            # The revision is a fingerprint of what this person is sent, less
+            # the time of the last sync, which the mail loop moves every
+            # minute (the 2026-10-12 speed audit, S6). A poll that holds it
+            # is sent that time alone; anything else gets the whole board,
+            # serialised once and the time and revision added to its end.
+            raw = _json_dumps_like_starlette(out)
+            rev = hashlib.blake2b(raw, digest_size=8).hexdigest()
+            synced = store.get("synced_at") or ""
+            if not body.get("force") and str(body.get("rev") or "") == rev:
+                return _json({"same": True, "rev": rev, "synced_at": synced})
+            return _json_body(raw[:-1] + b"," + _json_dumps_like_starlette({"synced_at": synced, "rev": rev})[1:])
         except Exception:
             logger.exception("mail board failed")
             return _json({"error": "Couldn't load the inbox board."}, 500)
