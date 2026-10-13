@@ -12127,6 +12127,16 @@ def t_panels_side_by_side_stand_equal():
 
 
 @test
+def t_a_products_charts_and_their_heading_are_one_panel():
+    """Panels (13 Oct 2026): a product's page set "Performance over time" as a
+    heading of its own over a bare grid of charts, the one heading on any page
+    left outside the block it names. The two are one group, so one panel."""
+    pd = fn_src("function renderProductDetail(")
+    ok("const perf = el('div', 'widget-group'); perf.append(el('div', 'section-title', 'Performance over time'));" in pd
+       and "perf.append(grid); box.append(perf);" in pd, "the heading and its charts are one group")
+
+
+@test
 def t_a_table_runs_to_its_panels_edges():
     """Panels (13 Oct 2026): a table, and any list ruled between its rows, runs
     to its panel's left and right edges, so its rows are the panel's list (a

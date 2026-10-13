@@ -12417,13 +12417,13 @@ Projected Image UK"></textarea>
             { const sum = summarySection(s.summary, null); if (sum) box.append(sum); }
             if (Array.isArray(d.metrics) && d.metrics.length) box.append(metricsStrip(d.metrics));
             if (d.trend && ((d.trend.revenue && d.trend.revenue.length) || (d.trend.units && d.trend.units.length))) {
-                box.append(el('div', 'section-title', 'Performance over time'));
+                const perf = el('div', 'widget-group'); perf.append(el('div', 'section-title', 'Performance over time'));
                 const grid = el('div', 'charts-grid');
                 const mShort = (n) => moneyShort(n, d.currency);
                 const win = (a) => rangeLabel(a.length);
                 if (d.trend.revenue && d.trend.revenue.length) { const r = d.trend.revenue; grid.append(trendChart({ title: 'Revenue', source: 'Shopify orders', period: win(r), yUnit: (d.currency || 'Revenue'), value: mShort(sumv(r)), labels: r.map(x => monthLabel(x.label)), series: [{ name: 'Revenue', color: CH[0], values: r.map(x => +x.value || 0) }], format: mShort, tickFormat: fmtCompact, height: 230 })); }
                 if (d.trend.units && d.trend.units.length) { const u = d.trend.units; grid.append(barChart({ title: 'Units sold', source: 'Shopify orders', period: win(u), yUnit: 'Units', value: fmtCompact(sumv(u)), labels: u.map(x => monthLabel(x.label)), values: u.map(x => +x.value || 0), format: fmtCompact, height: 230 })); }
-                box.append(grid);
+                perf.append(grid); box.append(perf);
             }
             if (Array.isArray(s.actions) && s.actions.length) { box.append(el('div', 'section-title', 'Top opportunities')); box.append(actionsCard(s.actions)); }
             if (Array.isArray(s.insights) && s.insights.length) { box.append(el('div', 'section-title', 'Findings')); const b = el('div', 'insights'); s.insights.forEach((x, i) => b.append(insightCard(x, i))); box.append(b); }
