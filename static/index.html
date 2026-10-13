@@ -3142,8 +3142,8 @@
            and the "Company - 3 items - 6 pcs" line become two real columns
            rather than two stacked lines with a growing void beside them. The
            width buys information, which is the only thing it is worth buying. */
-        /* 1152: 1200 less a panel's inset either side, the widest a panel gives the queue (13 Oct 2026). */
-        @container queue (min-width: 1152px) {
+        /* The widest a panel gives the queue is 1150, the 1200 column less a panel's inset and edge either side (13 Oct 2026). */
+        @container queue (min-width: 1140px) {
             .lbl-grid { grid-template-columns: var(--ono-w) minmax(220px, max-content) minmax(0, 1fr) max-content max-content; }
             .lbl-qrow .lbl-who { display: contents; }
             .lbl-qrow .lbl-who .sub { align-self: center; font-size: var(--text-xs); line-height: var(--lh-caption); overflow: hidden;
@@ -6413,7 +6413,7 @@
            The Production Manager's lists keep their own look. */
         @media screen {
             .panel .dtable > :last-child { border-bottom-color: transparent; }
-            :is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > :is(.ktable-wrap, .dt > .dtable) { margin-inline: calc(-1 * var(--panel-pad-x)); }
+            :is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > .ktable-wrap, :is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > .dt > .dtable { margin-inline: calc(-1 * var(--panel-pad-x)); }
             :is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > .ktable-wrap > .ktable :is(th, td):first-child { padding-left: var(--panel-pad-x); }
             :is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > .ktable-wrap > .ktable :is(th, td):last-child { padding-right: var(--panel-pad-x); }
             :is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > .dt > .dtable > :is(.dt-head, .dt-row, .dt-detail) { padding-inline: var(--panel-pad-x); }
@@ -6462,7 +6462,7 @@
             /* A two-column card (.duo, the trade radar's columns) stacks at 64rem of its own
                width; its tables then span the panel. Both cards are also a 'cols' container. */
             @container cols (max-width: 64rem) {
-                :is(.panel .duo, .panel .duo > .card-bleed, .panel .radar-col > .card-bleed) > :is(.ktable-wrap, .dt > .dtable) { margin-inline: calc(-1 * var(--panel-pad-x)); }
+                :is(.panel .duo, .panel .duo > .card-bleed, .panel .radar-col > .card-bleed) > .ktable-wrap, :is(.panel .duo, .panel .duo > .card-bleed, .panel .radar-col > .card-bleed) > .dt > .dtable { margin-inline: calc(-1 * var(--panel-pad-x)); }
                 :is(.panel .duo, .panel .duo > .card-bleed, .panel .radar-col > .card-bleed) > .ktable-wrap > .ktable :is(th, td):first-child { padding-left: var(--panel-pad-x); }
                 :is(.panel .duo, .panel .duo > .card-bleed, .panel .radar-col > .card-bleed) > .ktable-wrap > .ktable :is(th, td):last-child { padding-right: var(--panel-pad-x); }
                 :is(.panel .duo, .panel .duo > .card-bleed, .panel .radar-col > .card-bleed) > .dt > .dtable > :is(.dt-head, .dt-row, .dt-detail) { padding-inline: var(--panel-pad-x); }
@@ -6530,11 +6530,11 @@
             .chat-recent.panel > .chat-recent-row:last-child { box-shadow: none; }
             /* A panel's last block keeps no margin of its own: the panel's inset is the space under it. */
             .ov-wrap .panel > :last-child { margin-bottom: 0; }
-            /* Customise on panels (spec 7): the dashed edge on the panel's own edge, a group's hugging its
-               panels; the grip and the hide button inside the panel, on its first line. A figure group's
+            /* Customise on panels (spec 7): the dashed edge on the panel's own edge, a group's on its
+               panels' outer edges; the grip and the hide button inside the panel, on its first line. A figure group's
                inset is a border its clip cuts, so while arranging it shows its grip and drops the hairlines
                between its figures. */
-            .ov-wrap.wg-editing > [data-widget]:not(.panel):not(:focus-visible) { outline-offset: 0; }
+            .ov-wrap.wg-editing > [data-widget]:not(.panel):not(:focus-visible) { outline-offset: calc(-1 * var(--bw-hairline)); }
             .ov-wrap.wg-editing > [data-widget] > .wg-grip { top: calc(var(--panel-pad-y) - var(--sp-1)); left: calc((var(--panel-pad-x) - var(--icon-md)) / 2); }
             .ov-wrap.wg-editing > [data-widget] > .wg-hide { top: calc(var(--panel-pad-y) - var(--sp-1)); right: calc(var(--panel-pad-x) - var(--sp-1)); }
             .ov-wrap.wg-editing > .panel.metrics { overflow: visible; }

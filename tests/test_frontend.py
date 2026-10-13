@@ -3126,8 +3126,8 @@ def t_prose_is_capped_to_a_reading_measure():
 
 @test
 def t_the_queue_row_spends_width_on_columns_not_on_a_void():
-    # 13 Oct 2026 (panels): 1152, the 1200 column less a panel's inset either side, the widest a panel gives the queue.
-    f = re.search(r"@container queue \(min-width: 1152px\) \{\s*\.lbl-grid[\s\S]{0,600}?\n        \}", CSS)
+    # 13 Oct 2026 (panels): 1140; the widest a panel gives the queue is 1150 (the 1200 column less a panel's inset and edge either side).
+    f = re.search(r"@container queue \(min-width: 1140px\) \{\s*\.lbl-grid[\s\S]{0,600}?\n        \}", CSS)
     ok(f, "there is a wide rule for the queue row, keyed to the list's own width")
     ok("display: contents" in f.group(0),
        "the .lbl-who box dissolves so its two lines become two real columns")
@@ -12298,8 +12298,8 @@ def t_the_queue_and_every_list_end_on_their_panels_edges():
        and ".q-card.panel .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::before { inset: 0 calc(-1 * var(--panel-pad-x)); }" in fx
        and ".q-card.panel .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::after { inset-inline: calc(-1 * var(--panel-pad-x)); }" in fx
        and ".q-card.panel .lbl-list > .lbl-grid > :last-child::after { content: none; }" in fx, "the queue's bands end at its panel's edges")
-    ok("@container queue (min-width: 1152px) {" in CSS and "@container queue (min-width: 1200px) {" not in CSS,
-       "the queue's widest layout fires at the widest a panel gives it, 1200 less its inset")
+    ok("@container queue (min-width: 1140px) {" in CSS and "@container queue (min-width: 1200px) {" not in CSS,
+       "the queue's widest layout fires within the widest a panel gives it (1150: 1200 less its inset and edge either side)")
     ok(".panel:not(.q-card) > .lbl-list > .lbl-grid { margin-inline: calc(-1 * var(--panel-pad-x)); }" in fx
        and ".panel:not(.q-card) > .lbl-list > .lbl-grid > .lbl-qrow { padding-inline: var(--panel-pad-x); }" in fx
        and ".panel:not(.q-card) > .lbl-list > .lbl-grid > .lbl-qrow:last-child { box-shadow: none; }" in fx, "Custom shipments to the edges, its last row unruled")
@@ -12320,7 +12320,8 @@ def t_customise_arranges_panels_on_their_own_edges():
     tile's hide button). A figure group's inset is a border its clip cuts, so
     while arranging it shows its grip and drops the hairlines between figures."""
     fx = CSS.split("/* FROM THE FINAL REVIEWS (13 Oct 2026)")[1] if "/* FROM THE FINAL REVIEWS (13 Oct 2026)" in CSS else ""
-    ok(".ov-wrap.wg-editing > [data-widget]:not(.panel):not(:focus-visible) { outline-offset: 0; }" in fx, "a group's dashed edge hugs its panels")
+    ok(".ov-wrap.wg-editing > [data-widget]:not(.panel):not(:focus-visible) { outline-offset: calc(-1 * var(--bw-hairline)); }" in fx,
+       "a group's dashed edge lies on its panels' outer edges, not a line beside them")
     ok(".ov-wrap.wg-editing > [data-widget] > .wg-grip { top: calc(var(--panel-pad-y) - var(--sp-1)); left: calc((var(--panel-pad-x) - var(--icon-md)) / 2); }" in fx
        and ".ov-wrap.wg-editing > [data-widget] > .wg-hide { top: calc(var(--panel-pad-y) - var(--sp-1)); right: calc(var(--panel-pad-x) - var(--sp-1)); }" in fx,
        "grip and hide on the first line, inside the panel")
@@ -12350,7 +12351,10 @@ def t_a_table_runs_to_its_panels_edges():
     T = ":is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > "
     ok(".panel .dtable > :last-child { border-bottom-color: transparent; }" in b, "no rule under the last row")
     # Review (13 Oct 2026): a dtable bleeds, not its .dt, which is the size container its breakpoints measure.
-    ok(T + ":is(.ktable-wrap, .dt > .dtable) { margin-inline: calc(-1 * var(--panel-pad-x)); }" in b, "a table reaches the panel's edges, nested in a host or not")
+    # (A ':is(.ktable-wrap, .dt > .dtable)' after the '>' can never match a dtable: its parent would have to be the
+    # panel and the .dt at once. It shipped to the branch for an hour with every dtable on the inset.)
+    ok(T + ".ktable-wrap, " + T + ".dt > .dtable { margin-inline: calc(-1 * var(--panel-pad-x)); }" in b, "a table reaches the panel's edges, nested in a host or not")
+    ok(":is(.ktable-wrap, .dt > .dtable)" not in CSS, "and no selector puts the .dt step inside the :is()")
     ok(T + ".ktable-wrap > .ktable :is(th, td):first-child { padding-left: var(--panel-pad-x); }" in b
        and T + ".ktable-wrap > .ktable :is(th, td):last-child { padding-right: var(--panel-pad-x); }" in b, "a ktable's outer columns keep the panel's inset")
     ok(T + ".dt > .dtable > :is(.dt-head, .dt-row, .dt-detail) { padding-inline: var(--panel-pad-x); }" in b, "a dtable's rows too")
@@ -12384,7 +12388,7 @@ def t_a_table_runs_to_its_panels_edges():
     D = ":is(.panel .duo, .panel .duo > .card-bleed, .panel .radar-col > .card-bleed) > "
     ok(".card:has(> .card-bleed > .duo), .card:has(> .duo) { container: duo cols / inline-size; }" in CSS
        and ".card:has(> .radar-cols) { container: radar cols / inline-size; }" in CSS, "a two-column card is also a 'cols' container")
-    ok("@container cols (max-width: 64rem) {" in narrow and D + ":is(.ktable-wrap, .dt > .dtable) { margin-inline: calc(-1 * var(--panel-pad-x)); }" in narrow
+    ok("@container cols (max-width: 64rem) {" in narrow and D + ".ktable-wrap, " + D + ".dt > .dtable { margin-inline: calc(-1 * var(--panel-pad-x)); }" in narrow
        and D + ".ktable-wrap > .ktable :is(th, td):first-child { padding-left: var(--panel-pad-x); }" in narrow
        and D + ".ktable-wrap > .ktable :is(th, td):last-child { padding-right: var(--panel-pad-x); }" in narrow
        and D + ".dt > .dtable > :is(.dt-head, .dt-row, .dt-detail) { padding-inline: var(--panel-pad-x); }" in narrow,
