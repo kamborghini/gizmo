@@ -11,6 +11,27 @@
    ]
   },
   {
+   "date": "2026-10-13",
+   "title": "A lighter Inbox",
+   "items": [
+    {
+     "kind": "improved",
+     "tab": "mail",
+     "text": "Redrawing the Inbox after a change now leaves the emails scrolled out of sight until you scroll to them, which takes about a third of the work out of each redraw on a computer screen. Where you were reading stays put."
+    },
+    {
+     "kind": "improved",
+     "tab": "mail",
+     "text": "An open Inbox still checks for new email every minute, but when nothing has changed it no longer downloads the whole board, only the time of the last check."
+    },
+    {
+     "kind": "improved",
+     "tab": "mail",
+     "text": "Reactor now keeps its connection to Gmail open for half a minute between requests, so reading an email in full, opening its attachments and refreshing the Inbox wait less on setting up a new connection each time."
+    }
+   ]
+  },
+  {
    "date": "2026-10-12",
    "title": "Files keeps up with big folders and long uploads",
    "items": [
