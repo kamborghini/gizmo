@@ -6519,11 +6519,6 @@
             .q-card.panel .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::before { inset: 0 calc(-1 * var(--panel-pad-x)); }
             .q-card.panel .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::after { inset-inline: calc(-1 * var(--panel-pad-x)); }
             .q-card.panel .lbl-list > .lbl-grid > :last-child::after { content: none; }
-            /* Custom shipments runs to its panel's edges, as the queue beside it does. */
-            .panel:not(.q-card) > .lbl-list > .lbl-grid { margin-inline: calc(-1 * var(--panel-pad-x)); }
-            .panel:not(.q-card) > .lbl-list > .lbl-grid > .lbl-qrow { padding-inline: var(--panel-pad-x); }
-            @media (hover: hover) { .panel:not(.q-card) > .lbl-list > .lbl-grid > .lbl-qrow:hover { box-shadow: var(--rule-b-soft); } }
-            .panel:not(.q-card) > .lbl-list > .lbl-grid > .lbl-qrow:last-child { box-shadow: none; }
             /* The panel's edge closes a list: no rule above it under the last row. */
             :is(.changes-strip.panel, .panel .changes-strip) .impact-deltas { clip-path: inset(0 0 var(--bw-hairline) 0); }
             .fc-numbers.panel > .rlist { box-shadow: none; }
@@ -20645,7 +20640,8 @@ Projected Image UK"></textarea>
             head.classList.add('pm-head');      // the queue's phone head: Refresh is the 40 square at the title's right
             box.append(head);
             box.append(prodQueues((k) => { queueMode = k; labelsCache = null; labelSel = null; loadLabels(true); }));
-            const card = el('div', 'card');
+            /* The queue's own card, so its lines run as the queue's do, to its panel's edges (13 Oct 2026). */
+            const card = el('div', 'card q-card');
             let paint = () => {};
             const findWrap = tableSearch('Search reference, name or tracking', customQ, null);
             const find = findWrap.input;

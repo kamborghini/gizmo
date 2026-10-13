@@ -12301,9 +12301,10 @@ def t_the_queue_and_every_list_end_on_their_panels_edges():
        and ".q-card.panel .lbl-list > .lbl-grid > :last-child::after { content: none; }" in fx, "the queue's bands end at its panel's edges")
     ok("@container queue (min-width: 1140px) {" in CSS and "@container queue (min-width: 1200px) {" not in CSS,
        "the queue's widest layout fires within the widest a panel gives it (1150: 1200 less its inset and edge either side)")
-    ok(".panel:not(.q-card) > .lbl-list > .lbl-grid { margin-inline: calc(-1 * var(--panel-pad-x)); }" in fx
-       and ".panel:not(.q-card) > .lbl-list > .lbl-grid > .lbl-qrow { padding-inline: var(--panel-pad-x); }" in fx
-       and ".panel:not(.q-card) > .lbl-list > .lbl-grid > .lbl-qrow:last-child { box-shadow: none; }" in fx, "Custom shipments to the edges, its last row unruled")
+    # Custom shipments is the queue's own card, so it draws the queue's lines (padding its rows instead ran the
+    # reference number 6 into the name: its column is a fixed width).
+    ok("const card = el('div', 'card q-card');" in fn_src("function renderCustomQueue(") and ".panel:not(.q-card)" not in CSS,
+       "Custom shipments draws its lines as the queue beside it does, to the panel's edges, its last row unruled")
     ok(":is(.changes-strip.panel, .panel .changes-strip) .impact-deltas { clip-path: inset(0 0 var(--bw-hairline) 0); }" in fx, "What changed's last row")
     ok(".fc-numbers.panel > .rlist { box-shadow: none; }" in fx, "Forecast's numbers")
     ok(".chat-recent.panel > .chat-recent-row { width: auto; margin-inline: calc(-1 * var(--panel-pad-x)); padding-inline: var(--panel-pad-x); }" in fx
