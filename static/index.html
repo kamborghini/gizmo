@@ -16024,7 +16024,8 @@ Projected Image UK"></textarea>
                     const st = el('span', 'dt-name');
                     st.append(el('span', 'dt-dot' + (u.status === 'in' ? ' ok' : u.status === 'retired' ? ' off' : '')),
                               document.createTextNode(u.status === 'out' ? 'Out' : u.status === 'retired' ? 'Retired' : 'On the shelf'));
-                    if (u.status === 'out' && withWhom[u.id]) st.append(el('span', 'dt-muted', withWhom[u.id]));
+                    /* A long name ends in an ellipsis in its column; the whole name shows on hover (13 Oct 2026). */
+                    if (u.status === 'out' && withWhom[u.id]) { const who = el('span', 'dt-muted', withWhom[u.id]); who.title = withWhom[u.id]; st.append(who); }
                     let outB = '';
                     if (u.status === 'in') {
                         /* Secondary: the page's one teal is the header's Loan out. */

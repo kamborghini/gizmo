@@ -12189,6 +12189,11 @@ def t_on_a_phone_a_panels_rows_keep_their_words_and_buttons_inside():
     ok(".dt-clock { --dt-cols: repeat(3, max-content) minmax(max-content, 1fr); }" in CSS, "the clock table fills its panel, its button at the row's end")
     ok(".tm-hours .ktable { width: auto; }" not in CSS, "and Hours per person fills its own")
     ok("@media screen { .panel .ktable-wrap { box-shadow: none; } }" in CSS, "a table in a panel draws no frame of its own")
+    # At 1440 the panel's inset cut a long borrower's name in Loan units' register
+    # ("Marlowe Arts Cen...") with nothing to show the rest: the name keeps its
+    # ellipsis and carries itself as a tooltip.
+    ok("const who = el('span', 'dt-muted', withWhom[u.id]); who.title = withWhom[u.id]; st.append(who);" in fn_src("function renderLoans("),
+       "a cut name in the register shows in full on hover")
     # CRM's pipeline lanes share the board (160 at least) and inside the panel's
     # inset a card's value, label, owner and next step ran past its edge at 1280.
     # A board that scrolls sideways in a panel (CRM's pipeline, the Inbox board)
