@@ -12118,6 +12118,75 @@ def t_panels_side_by_side_stand_equal():
     ok("@media screen { :is(.wpair-in, .fc-cols) > .panel { margin-block: 0; } }" in CSS, "a half carries no margin of its own")
     ok("@media screen { .ov-wrap .panel.chart-card .chart-expand { top: var(--panel-pad-y); right: var(--panel-pad-x); } }" in CSS,
        "a chart that is a panel keeps its expand button on its title row, inside the panel's inset")
+    # CRM Insights holds its figures and a grid of charts: the same panel gap
+    # between all of them (it was 16, 24 and 32), and equal heights in a row.
+    crm = ("@media screen {\n            .crm-charts { gap: var(--panel-gap); align-items: stretch; }\n"
+           "            :is(.crm-seg, .crm-charts) > .panel { margin-block: 0; }\n"
+           "            .crm-seg > .panel + * { margin-top: var(--panel-gap); }\n        }")
+    ok(crm in CSS, "CRM Insights: a panel gap between its figures and charts, and charts in a row stand equal")
+
+
+@test
+def t_a_table_runs_to_its_panels_edges():
+    """Panels (13 Oct 2026): a table, and any list ruled between its rows, runs
+    to its panel's left and right edges, so its rows are the panel's list (a
+    card's dividers run so in Shopify's own admin), and its words keep the
+    panel's inset, so they line up with the heading. Every page alike: the
+    probe found Files, the Inbox, Skills, Memory's notes, the actions, the
+    findings, Forecast's lists, the Guide and What's new stopping at the inset
+    while the tables ran to the edge. A dtable row is a subgrid of its table,
+    so the same padding on every row keeps the columns in line, outside the dt
+    container queries so two-line rows keep it. On a phone a ktable's two-line
+    rows are flex rows of unpadded cells, so the row takes the inset there, not
+    its first and last cells. An opened row's teal edge sits on the panel's
+    edge, and the last row has no rule: the panel's edge closes the table."""
+    head = "/* TABLES AND LISTS IN PANELS (13 Oct 2026)"
+    b = CSS.split(head)[1].split("\n        }\n        @media screen and (max-width: 640px)")[0] if head in CSS else ""
+    phone = CSS.split(head)[1].split("@media screen and (max-width: 640px) {")[1].split("\n        }\n")[0] if head in CSS else ""
+    T = ":is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > "
+    ok(".panel .dtable > :last-child { border-bottom-color: transparent; }" in b, "no rule under the last row")
+    ok(T + ":is(.ktable-wrap, .dt) { margin-inline: calc(-1 * var(--panel-pad-x)); }" in b, "a table reaches the panel's edges, nested in a host or not")
+    ok(T + ".ktable-wrap > .ktable :is(th, td):first-child { padding-left: var(--panel-pad-x); }" in b
+       and T + ".ktable-wrap > .ktable :is(th, td):last-child { padding-right: var(--panel-pad-x); }" in b, "a ktable's outer columns keep the panel's inset")
+    ok(T + ".dt > .dtable > :is(.dt-head, .dt-row, .dt-detail) { padding-inline: var(--panel-pad-x); }" in b, "a dtable's rows too")
+    ok(T + ".dt > .dtable > :is(.dt-row.open, .dt-detail)::before { left: 0; }" in b, "an opened row's teal edge on the panel's edge")
+    lists = ".files-list, .mlist, .sk-list, .fc-wl, .fc-drive, .rel-list, .guide-rows, .insights"
+    ok(".panel :is(" + lists + "), .panel > #mail-bulk-host { margin-inline: calc(-1 * var(--panel-pad-x)); }" in b, "a ruled list reaches the edges")
+    ok(".ov-wrap .panel :is(.files-list > .files-row, .mlist > .mrow, .sk-list > .sk-item, .fc-wl > [role=\"row\"], .fc-drive > .fc-drive-row, "
+       ".rel-list > .rel, .guide-rows > .guide-row, .insights > .insight) { padding-inline: var(--panel-pad-x); }" in b, "its rows keep the inset")
+    ok(".ov-wrap :is(.panel.actions, .panel .actions) > :is(.action-head, .action), .ov-wrap .panel > .card-bleed > details.sect { margin-inline: calc(-1 * var(--panel-pad-x)); padding-inline: var(--panel-pad-x); }" in b,
+       "rows that sit in a full-width block (the actions, in their panel or a card in it; the Details) the same")
+    ok(".ov-wrap .panel > #mail-bulk-host > .mail-bulkbar { padding-inline: calc(var(--panel-pad-x) + var(--dot-md) + var(--sp-2-5)) var(--panel-pad-x); }" in b,
+       "the Inbox's bulk bar keeps its words over the rows' words")
+    ok(T + ".ktable-wrap > .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr { padding-inline: var(--panel-pad-x); }" in phone
+       and T + ".ktable-wrap > .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr > td { padding-inline: 0; }" in phone,
+       "on a phone a two-line row takes the inset, its cells none")
+    # A list that is a column on a wide screen and the panel's width on a narrow
+    # one takes the edges only when it spans the panel: Team's Activity feed (a
+    # column beside its filters over 900), Forecast's numbers (two columns over
+    # 1000 of their own width) and What changed (columns of 12rem, so one under 25.5rem).
+    narrow = CSS.split("/* NARROW LISTS IN PANELS (13 Oct 2026)")[1].split("\n        }\n        /*")[0] if "/* NARROW LISTS IN PANELS (13 Oct 2026)" in CSS else ""
+    ok("@media screen and (max-width: 900px) {" in narrow and ".panel .tm-feedwrap > .tm-feed > .dt { margin-inline: calc(-1 * var(--panel-pad-x)); }" in narrow
+       and ".panel .tm-feedwrap > .tm-feed > .dt > .dtable > :is(.dt-head, .dt-row, .dt-detail) { padding-inline: var(--panel-pad-x); }" in narrow,
+       "the Activity feed under 900")
+    ok("@container fcnumbers (max-width: 1000px) {" in narrow and ".panel .rlist.cols-2 { margin-inline: calc(-1 * var(--panel-pad-x)); }" in narrow
+       and ".panel .rlist.cols-2 > .rlist-row { padding-inline: var(--panel-pad-x); }" in narrow, "Forecast's numbers once they are one column")
+    ok(".wpair .changes-strip { container: changes / inline-size; }" in narrow and "@container changes (width < 25.5rem) {" in narrow
+       and ".wpair .changes-strip .impact-deltas { grid-template-columns: minmax(0, 1fr); }" in narrow
+       and ":is(.changes-strip.panel, .panel .changes-strip) .impact-deltas { margin-inline: calc(-1 * var(--panel-pad-x)); }" in narrow
+       and ":is(.changes-strip.panel, .panel .changes-strip) .impact-deltas > .idelta { padding-inline: var(--panel-pad-x); }" in narrow,
+       "What changed once it is one column (the strip is a pair's half, so the panel itself), and one column set outright there so the edges never meet two")
+    D = ":is(.panel .duo, .panel .duo > .card-bleed, .panel .radar-col > .card-bleed) > "
+    ok(".card:has(> .card-bleed > .duo), .card:has(> .duo) { container: duo cols / inline-size; }" in CSS
+       and ".card:has(> .radar-cols) { container: radar cols / inline-size; }" in CSS, "a two-column card is also a 'cols' container")
+    ok("@container cols (max-width: 64rem) {" in narrow and D + ":is(.ktable-wrap, .dt) { margin-inline: calc(-1 * var(--panel-pad-x)); }" in narrow
+       and D + ".ktable-wrap > .ktable :is(th, td):first-child { padding-left: var(--panel-pad-x); }" in narrow
+       and D + ".ktable-wrap > .ktable :is(th, td):last-child { padding-right: var(--panel-pad-x); }" in narrow
+       and D + ".dt > .dtable > :is(.dt-head, .dt-row, .dt-detail) { padding-inline: var(--panel-pad-x); }" in narrow,
+       "a two-column block's tables once it stacks (Customers' top customers and trade radar at 1280 and on a phone)")
+    ok(D + ".ktable-wrap > .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr { padding-inline: var(--panel-pad-x); }" in narrow
+       and D + ".ktable-wrap > .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr > td { padding-inline: 0; }" in narrow,
+       "and on a phone its two-line rows take the inset")
 
 
 @test
@@ -14262,7 +14331,9 @@ def t_the_numbers_behind_it_stack_with_the_pair_above_it():
     ok(stack and pair and stack.group(1) == pair.group(1) == "1000", "the list stacks at the same measure as the pair: 1000")
     ok(CSS.index(".rlist.cols-2 { grid-auto-flow: column;") < stack.start(), "after its base rule")
     ok("@media (max-width: 1100px) { .rlist.cols-2" not in CSS, "and no viewport rule stacks it any more")
-    ok(CSS.count("rlist.cols-2 {") == 2 and "cols: 2" in SCRIPT and SCRIPT.count("cols: 2") == 1, "only the forecast's numbers use the two-column list")
+    # 13 Oct 2026 (panels): the panel's own rule for the stacked list is not a second user of it.
+    ok(CSS.count("rlist.cols-2 {") - CSS.count(".panel .rlist.cols-2 {") == 2 and "cols: 2" in SCRIPT and SCRIPT.count("cols: 2") == 1,
+       "only the forecast's numbers use the two-column list")
 
 
 @test
