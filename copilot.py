@@ -9621,6 +9621,9 @@ async def run_missing_production(registry: dict, tag: Optional[str] = None) -> d
     hit = _missing_cache.get(tag)
     if hit and hit["epoch"] == _orders_epoch and time.monotonic() - hit["at"] < MISSING_CACHE_SECS:
         return hit["result"]
+    # It names customers: once it can no longer be served it is not held,
+    # even if the scan below fails.
+    _missing_cache.pop(tag, None)
     # Taken before the scan: a change during it makes what it finds stale.
     epoch = _orders_epoch
     result = await _missing_scan(registry, tag)
@@ -26459,6 +26462,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # tagged Unprocessed, and this button then put it back in To make.
             seen: dict = {}
             okd, note, released = await _release_tags(registry, oid, seen)
+            # This button sits on the missed-orders strip, and pressing it
+            # says that row may be wrong: an order cancelled or tagged in
+            # Shopify's admin before the app heard of it is read here, moves
+            # nothing and writes nothing, so no change was recorded and the
+            # kept strip would bring the row straight back.
+            _missing_cache.clear()
             if not okd:
                 return _json({"error": note or "Couldn't tag the order."}, 502)
             nm = re.sub(r"[^#\w-]", "", str(body.get("name") or ""))[:20] or f"order {oid}"

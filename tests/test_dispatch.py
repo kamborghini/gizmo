@@ -29153,6 +29153,83 @@ def t_the_missed_orders_check_is_not_scanned_again_until_an_order_changes():
         copilot._tool_json = saved
         copilot._missing_cache.clear()
 
+
+@test
+def t_adding_a_missed_order_to_the_queue_always_checks_the_strip_again():
+    """Review of the sixth speed PR (S1). An order on the missed-orders strip
+    that was cancelled, or tagged, in Shopify's admin before the app heard of
+    it: Add to queue reads it, finds nothing to move and writes nothing, so no
+    order was known to have changed and the kept strip came back with the
+    row in it for up to two minutes. Adding from the strip now always has the
+    strip checked again."""
+    def go():
+        ensure_auth()
+        reset_prod(); reset_dispatch()
+        state = {"cancelled": False}
+        scans = []
+        order9 = {"id": 9, "name": "#9", "created_at": "2026-10-01T10:00:00Z", "tags": "",
+                  "financial_status": "paid", "cancelled_at": None, "fulfillment_status": None,
+                  "line_items": [{"title": "Gobo", "properties": [{"name": "Manufacturer", "value": "Martin"}]}]}
+
+        def now9():
+            o = dict(order9)
+            if state["cancelled"]:
+                o["cancelled_at"] = "2026-10-13T08:00:00Z"
+            return o
+
+        async def tools(registry, name, args):
+            if name == "shopify_list_orders" and args.get("status") == "open":
+                scans.append(1)
+                return {"orders": [now9()]}
+            if name == "shopify_get_order":
+                return now9()
+            return await fake_tool_json(registry, name, args)
+        saved = copilot._tool_json
+        copilot._tool_json = tools
+        try:
+            first = run(copilot.run_missing_production({}))
+            eq([m["name"] for m in first["missing"]], ["#9"], "the strip lists it")
+            state["cancelled"] = True                  # cancelled in Shopify; no webhook yet
+            r = post("/api/production-labels/queue", {"order_id": 9, "name": "#9"})
+            eq(r.status_code, 200, r.text)
+            after = run(copilot.run_missing_production({}))
+            eq(len(scans), 2, "the strip was checked again after the click")
+            eq(after["missing"], [], "and the cancelled order is gone from it")
+        finally:
+            copilot._tool_json = saved
+            reset_prod()
+    with_accounts(go)
+
+
+@test
+def t_a_stale_missed_orders_answer_is_not_kept_in_memory():
+    """Review of the sixth speed PR (S2). The kept strip names customers and
+    companies; once it can no longer be served (an order changed, two
+    minutes passed) it is dropped at once, so a scan that then fails leaves
+    nothing of the old answer behind."""
+    async def ok_tools(registry, name, args):
+        if name == "shopify_list_orders" and args.get("status") == "open":
+            return {"orders": [{"id": 9, "name": "#9", "created_at": "2026-10-01T10:00:00Z", "tags": "",
+                                "financial_status": "paid", "line_items": [{"title": "Gobo", "properties": [
+                                    {"name": "Manufacturer", "value": "Martin"}]}]}]}
+        return {}
+
+    async def failing(registry, name, args):
+        return {"_failed": True}
+    saved = copilot._tool_json
+    copilot._missing_cache.clear()
+    try:
+        copilot._tool_json = ok_tools
+        run(copilot.run_missing_production({}))
+        ok(copilot._missing_cache, "an answer is kept")
+        copilot._orders_changed([9])
+        copilot._tool_json = failing
+        ok(run(copilot.run_missing_production({})).get("error"), "the scan after the change fails")
+        eq(copilot._missing_cache, {}, "and the old answer is not held")
+    finally:
+        copilot._tool_json = saved
+        copilot._missing_cache.clear()
+
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a

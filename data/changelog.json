@@ -7,7 +7,7 @@
     {
      "kind": "improved",
      "tab": "labels",
-     "text": "The Production Manager now learns the products in its queue (their option names and types, which the labels print) in one request to Shopify instead of one per product, so the first open after an update shows the queue in a second or two rather than several. The labels are exactly as before."
+     "text": "The Production Manager now learns the products in its queue (their option names and types, which the labels print) in one request to Shopify instead of one per product, so the first open after an update no longer waits on them one by one. The labels are exactly as before."
     },
     {
      "kind": "improved",
