@@ -11345,12 +11345,76 @@ async def _recon_ai_call(system: str, messages: list, tools: list, tool_choice: 
                           output_config={"effort": _effort_for(MODEL_RECON)})
 
 
+def _recon_open_summary(d: dict) -> tuple:
+    """Open discrepancies by severity: how many, and the money at stake (the size
+    of each difference whatever its sign, in pence). Open is new or
+    investigating and not stale, the sweep's own rule, worked out live so a
+    status changed since the sweep is counted as it is now, and a counter's
+    figure and its money always agree."""
+    counts = {s: 0 for s in recon_engine.SEVERITIES}
+    amounts = {s: 0 for s in recon_engine.SEVERITIES}
+    for e in (d.get("exceptions") or {}).values():
+        if not isinstance(e, dict) or e.get("stale") or e.get("status") not in ("new", "investigating"):
+            continue
+        sev = e.get("severity")
+        if sev not in counts:
+            continue
+        counts[sev] += 1
+        try:
+            amounts[sev] += abs(int(e.get("amount") or 0))
+        except (TypeError, ValueError):
+            pass
+    return counts, amounts
+
+
+def _recon_record(e: dict) -> tuple:
+    """The discrepancies table's Record column (12 Oct 2026), from the evidence:
+    the record a person would look up, and the other record it disagrees with or
+    who it is with. Nothing is invented when there is no evidence."""
+    evs = [x for x in (e.get("evidence") or []) if isinstance(x, dict)]
+    if not evs:
+        return "", ""
+
+    def short(x: dict) -> str:
+        r, k = x.get("record") or {}, x.get("kind")
+        if k == "order":
+            return str(r.get("name") or "")
+        if k in ("invoice", "bill"):
+            return str(r.get("number") or "")
+        if k == "payout":
+            return "Payout " + str(r.get("id") or "")
+        if k == "dispute":
+            return "Dispute " + str(r.get("id") or "")
+        if k == "bank_transaction":
+            return "Bank line"
+        if k == "payment":
+            return "Payment"
+        if k == "refund":
+            return "Refund"
+        if k == "document":
+            return str(r.get("doc_type") or "document").replace("_", " ").capitalize()
+        return str(x.get("label") or "")
+
+    def who(x: dict) -> str:
+        r = x.get("record") or {}
+        if x.get("kind") == "document":
+            m = re.search(r"(?:\bfrom\s+| - )(.+)$", str(r.get("subject") or ""))
+            return m.group(1).strip() if m else ""
+        return str(r.get("company") or r.get("contact") or r.get("customer") or "")
+
+    rec = short(evs[0])
+    other = next((short(x) for x in evs[1:] if x.get("kind") in ("invoice", "bill", "order")
+                  and short(x) and short(x) != rec), "")
+    return rec, other or who(evs[0])
+
+
 def _recon_exc_public(e: dict, full: bool = False) -> dict:
     out = {k: e.get(k) for k in ("id", "kind", "severity", "title", "amount", "currency",
                                  "date", "systems", "status", "status_note", "stale",
                                  "created", "updated", "basis")}
     out["amount_disp"] = recon_engine.money(e.get("amount"), e.get("currency") or "GBP")
     out["has_ai"] = bool(e.get("ai"))
+    out["record"], out["counterparty"] = _recon_record(e)
     if full:
         out.update({k: e.get(k) for k in ("why", "suggestion", "computed", "evidence",
                                           "ai", "history", "refs")})
@@ -11399,8 +11463,10 @@ async def recon_summary(params: ReconEmptyInput) -> str:
     """Reconciliation health: open discrepancy counts by severity, the biggest open items, when the books were last swept, and any parts of the last sweep that could not run."""
     d = _load_recon()
     top = [_recon_exc_public(e) for e in _recon_filter(d.get("exceptions", {}))[:10]]
+    # Counted live, as the page counts them: the sweep's snapshot goes stale
+    # the moment someone marks one Explained (final review M-7).
     return json.dumps({"last_sync": d.get("last_sync") or "never",
-                       "open_counts": d.get("open_counts") or {},
+                       "open_counts": _recon_open_summary(d)[0],
                        "sweep_notes": d.get("last_notes") or [],
                        "largest_open": top}, default=str)
 
@@ -27847,6 +27913,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                      "env_needed": ["XERO_CLIENT_ID", "XERO_CLIENT_SECRET"],
                      "configured": xs["configured"]}
         fin = google_mail.status(google_mail.FINANCE)
+        open_counts, open_amounts = _recon_open_summary(d)
         return _json({"xero": xs, "setup": setup,
                       "gmail": fin["connected"],
                       "mailbox": {"connected": fin["connected"],
@@ -27864,7 +27931,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                       "model": MODEL_RECON,
                       "last_sync": d.get("last_sync") or "",
                       "sweep_notes": d.get("last_notes") or [],
-                      "open_counts": d.get("open_counts") or {},
+                      "open_counts": open_counts,
+                      "open_amounts": open_amounts,
                       "docs": len(docs),
                       "sweeping": recon_engine._sweeping["on"]})
 
