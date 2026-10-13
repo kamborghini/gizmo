@@ -2534,7 +2534,10 @@
         .dt-c { min-width: 0; display: flex; align-items: center; gap: var(--sp-2); }
         .dt-c.num { justify-content: flex-end; text-align: right; font-variant-numeric: tabular-nums; }
         .dt-c.stack { flex-direction: column; align-items: flex-start; justify-content: center; gap: 0; }
-        .dt-c.act { justify-content: flex-end; gap: var(--control-gap); }
+        /* Actions wrap within their cell, still at its end: in a phone's two-line row a
+           panel's inset left less room than four buttons need, and end-aligned they
+           spilled out of the row on the left (13 Oct 2026). */
+        .dt-c.act { justify-content: flex-end; gap: var(--control-gap); flex-wrap: wrap; }
         .dt-c.email { overflow-wrap: anywhere; }
         /* An icon in a cell (an activity's type) has the house size: its drawing has none of its own. */
         .dt-c > .ic { color: var(--text-tertiary); }
@@ -2889,7 +2892,9 @@
             color: var(--text-primary); }
         .cx-att-r > .dt-dot { translate: 0 calc(-1 * var(--sp-0-5)); }
         /* The runs at their natural width; a quarantined document over why. */
-        .dt-runs { --dt-cols: repeat(6, max-content); }
+        /* The last column takes any spare width: stacked in a full-width panel the table
+           fills it; beside the queue the fitted half is still the table's own width (13 Oct 2026). */
+        .dt-runs { --dt-cols: repeat(5, max-content) minmax(max-content, 1fr); }
         .dt-quar { --dt-cols: minmax(0, 1fr); }
         .dt-why { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); white-space: normal; overflow-wrap: anywhere; }
         /* The settings: two columns of names, each value right after its own. */
@@ -3759,7 +3764,9 @@
         .crm-card.rotten { background: var(--error-bg); box-shadow: inset var(--bw-marker) 0 0 var(--error); }
         .crm-card-t { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); overflow-wrap: anywhere; }
         .crm-card-who { font-size: var(--text-body); color: var(--text-tertiary); margin-top: var(--sp-px); }
-        .crm-card-bot { display: flex; align-items: center; gap: var(--sp-1-5); margin-top: var(--sp-2); font-size: var(--text-body); }
+        /* It wraps inside the card: in a lane at its narrowest the value, label, owner and
+           next step ran past the card's edge (13 Oct 2026). */
+        .crm-card-bot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1-5); margin-top: var(--sp-2); font-size: var(--text-body); }
         .crm-card-val { font-weight: var(--weight-medium); }
         .crm-dot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); flex: none; }
         .crm-av { width: var(--box-sm); height: var(--box-sm); border-radius: var(--radius-circle); background: var(--surface-sunken);
@@ -4788,6 +4795,8 @@
         /* The count and the chevron follow the label (12 Oct 2026, DF-27): at the row's
            far end they sat 597px from it. */
         .rlist-row .lbl { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        /* On a phone a label wraps rather than hiding its words behind an ellipsis (13 Oct 2026). */
+        @media (max-width: 640px) { .rlist-row .lbl { white-space: normal; } }
         .rlist-row > .ic:last-child svg { width: var(--icon-sm); height: var(--icon-sm); stroke-width: var(--icon-stroke-s); }
         .rlist-row > .ic:not(:last-child) svg { width: var(--icon-md); height: var(--icon-md); }
         @media (hover: hover) { .rlist-row:hover, .rlist-row:hover :is(.ic, .cnt) { color: var(--text-link); } }
@@ -5071,6 +5080,13 @@
             :is(.ov-wrap, .ov-wrap.wgrid) > .page-tabs { margin-inline: 0; padding-inline: 0; }
             :is(.ov-wrap, .ov-wrap.wgrid) > .tabs { margin-inline: calc(-1 * var(--sp-2)); padding-inline: var(--sp-2); box-shadow: none;
                 background: linear-gradient(var(--border-default) 0 0) 50% 100% / calc(100% - 2 * var(--sp-2)) var(--bw-hairline) no-repeat; }
+        }
+        /* On a phone a strip that scrolls runs to the screen's edge, so a tab scrolled out
+           of view is cut there, not 8 into the gutter; its rule stays on the column. */
+        @media screen and (max-width: 640px) {
+            :is(.ov-wrap, .ov-wrap.wgrid) > .tabs { margin-inline: calc(-1 * var(--sp-4)); padding-inline: var(--sp-4);
+                background-size: calc(100% - 2 * var(--sp-4)) var(--bw-hairline); }
+            :is(.ov-wrap, .ov-wrap.wgrid) > .page-tabs > .tabs { margin-inline: calc(-1 * var(--sp-4)); padding-inline: var(--sp-4); }
         }
         .tab { position: relative; display: inline-flex; align-items: center; gap: var(--control-gap); flex: none;
             height: auto; padding: 0; border: 0; background: none;
@@ -6046,9 +6062,10 @@
         .dmenu-item.danger, .dmenu-item.danger .ic { color: var(--error); }
         /* Team, Work (12 Oct 2026): the clock and the hours at their natural
            widths side by side, the sessions under heads with a day line. */
-        .dt-clock { --dt-cols: repeat(4, max-content); }
+        /* Its last column, the button, takes any spare width, so in a panel the table
+           fills it and the button sits at the row's end (13 Oct 2026). */
+        .dt-clock { --dt-cols: repeat(3, max-content) minmax(max-content, 1fr); }
         .tm-none { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-tertiary); }
-        .tm-hours .ktable { width: auto; }
         .tm-export { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-2); }
         .dt-sessions { --dt-cols: max-content max-content max-content max-content max-content max-content minmax(10rem, 1fr); }
         .tm-dayscale { display: flex; justify-content: space-between; width: 100%; font-variant-numeric: tabular-nums; }
@@ -6408,6 +6425,16 @@
             :is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > .ktable-wrap > .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr { padding-inline: var(--panel-pad-x); }
             :is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > .ktable-wrap > .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr > td { padding-inline: 0; }
         }
+        /* A ktable draws a rule above and below itself; in a panel that was a frame inside
+           the panel, its lower line 20 above the panel's own edge. The panel's edge closes
+           the table, as it closes a dtable, and the head row keeps its own rule. */
+        @media screen { .panel .ktable-wrap { box-shadow: none; } }
+        /* SIDEWAYS SCROLLERS IN PANELS (13 Oct 2026): a board that scrolls sideways runs
+           to its panel's edges like a table, its first lane on the inset, so a lane cut
+           by the scroll is cut at the panel's edge, not short of it with white after it.
+           The Size list's A to Z swipes on a phone the same way. */
+        @media screen { .panel .crm-board { margin-inline: calc(-1 * var(--panel-pad-x)); padding-inline: var(--panel-pad-x); scroll-padding-inline: var(--panel-pad-x); } }
+        @media screen and (max-width: 640px) { .panel .az { margin-inline: calc(-1 * var(--panel-pad-x)); padding-inline: var(--panel-pad-x); } }
         /* NARROW LISTS IN PANELS (13 Oct 2026): a list that is a column on a wide
            screen and the panel's width on a narrow one takes the edges only when it
            spans the panel. Team's Activity feed is a column beside its filters over
@@ -32111,7 +32138,7 @@ Projected Image UK"></textarea>
                         };
                         return { cells: [dtMain(nm(ws.uid), null, 'ok'), londonHM(ws.start), fd(ws.secs), res] };
                     }), { cls: 'dt-clock', label: 'On the clock now', stop: 'xs' }));
-                /* Hours per person at its natural width, beside the clock (WS-12). */
+                /* Hours per person beside the clock (WS-12); in its panel it fills it (13 Oct 2026). */
                 const c2 = cardOf('Hours per person', 'Set someone\'s role to Part-time and the clock '
                     + 'appears for them the next time they open the app.');
                 c2.classList.add('tm-hours');
@@ -32613,8 +32640,9 @@ Projected Image UK"></textarea>
            its children, or of what they hold, is a panel, and the batched pass
            stamps .panel on them, so a page added next year is boxed without
            anyone wiring it. The header, tabs, choosers, notices, the queue's
-           counters and Forecast's own tinted band stay on the page. */
-        const PANEL_SKIP = ['ov-hero', 'page-tabs', 'tabs', 'seg-row', 'queues', 'segmented', 'back-btn', 'miss-strip', 'msg', 'alert', 'fband', 'guide-tools', 'sr-only'];
+           counters and Forecast's own tinted band stay on the page, and Customise's
+           grip and hide button, which a pair carries as children, are never panels. */
+        const PANEL_SKIP = ['ov-hero', 'page-tabs', 'tabs', 'seg-row', 'queues', 'segmented', 'back-btn', 'miss-strip', 'msg', 'alert', 'fband', 'guide-tools', 'sr-only', 'wg-grip', 'wg-hide'];
         const PANEL_HOLD = ['wpair', 'wpair-in', 'fc-pair', 'fc-cols', 'crm-seg', 'crm-charts', 'guide-host', 'guide-grid', 'ds-page'];
         function panelTargets(n) {
             if (!n || !n.classList || n.tagName === 'INPUT' || n.tagName === 'SCRIPT') return [];

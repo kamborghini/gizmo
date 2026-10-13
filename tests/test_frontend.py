@@ -12093,6 +12093,13 @@ def t_the_grey_page_reaches_every_edge_of_the_sheet():
               "            :is(.ov-wrap, .ov-wrap.wgrid) > .tabs { margin-inline: calc(-1 * var(--sp-2)); padding-inline: var(--sp-2); box-shadow: none;\n"
               "                background: linear-gradient(var(--border-default) 0 0) 50% 100% / calc(100% - 2 * var(--sp-2)) var(--bw-hairline) no-repeat; }\n        }")
     ok(strips in CSS, "a tab strip's rule ends on the column, drawn inside the tabs' own 8 of focus room")
+    # On a phone a tab strip that scrolls runs to the screen's edge, so a tab
+    # scrolled out of view is cut there and not 8 into the gutter; its rule
+    # stays on the column (the Finance strip's rule is the strip's own box).
+    phone = ("@media screen and (max-width: 640px) {\n            :is(.ov-wrap, .ov-wrap.wgrid) > .tabs { margin-inline: calc(-1 * var(--sp-4)); padding-inline: var(--sp-4);\n"
+             "                background-size: calc(100% - 2 * var(--sp-4)) var(--bw-hairline); }\n"
+             "            :is(.ov-wrap, .ov-wrap.wgrid) > .page-tabs > .tabs { margin-inline: calc(-1 * var(--sp-4)); padding-inline: var(--sp-4); }\n        }")
+    ok(phone in CSS and CSS.index(phone) > CSS.index(strips), "on a phone a scrolling strip runs to the screen's edge, its rule on the column")
     ok(strips in CSS and CSS.index(strips) > CSS.index(".ov-wrap > .tabs { margin-inline: calc(-1 * var(--wrap-pad));")
        and CSS.index(strips) > CSS.index(".ov-wrap.wgrid > :is(.tabs, .page-tabs) { margin-inline:"),
        "after the rules that bled the strips to the sheet's edges, so it wins at the same weight")
@@ -12134,6 +12141,66 @@ def t_a_products_charts_and_their_heading_are_one_panel():
     pd = fn_src("function renderProductDetail(")
     ok("const perf = el('div', 'widget-group'); perf.append(el('div', 'section-title', 'Performance over time'));" in pd
        and "perf.append(grid); box.append(perf);" in pd, "the heading and its charts are one group")
+
+
+@test
+def t_customises_grip_and_hide_button_are_never_panels():
+    """Panels (13 Oct 2026), found by the sweep: in Customise a pair carries its
+    grip and hide button as its own children, and a pair is a holder whose
+    children are panels, so the grip was stamped a panel and drew a white
+    padded box over the first half's heading ("ummary"). Controls are never
+    panels."""
+    ok("'wg-grip', 'wg-hide'" in SCRIPT[SCRIPT.index("const PANEL_SKIP"):SCRIPT.index("const PANEL_HOLD")], "the grip and the hide button are skipped")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + "\n" + SCRIPT[SCRIPT.index("const PANEL_SKIP"):SCRIPT.index("function syncPanels(")] + r"""
+const mk = (tag, cls, ...kids) => { const n = document.createElement(tag); if (cls) n.className = cls; kids.forEach(k => n.append(k)); return n; };
+const a = mk('div', 'card'), b = mk('div', 'card'), grip = mk('span', 'wg-grip'), hide = mk('button', 'icon-btn wg-hide');
+const got = [mk('div', 'wpair', mk('div', 'wpair-in', a, b), grip, hide)].flatMap(panelTargets);
+console.log(JSON.stringify({ halves: got.includes(a) && got.includes(b), grip: got.includes(grip), hide: got.includes(hide), n: got.length }));
+"""
+    got = _run_node(js)
+    ok(got["halves"] and not got["grip"] and not got["hide"] and got["n"] == 2, "a pair's halves are panels, its grip and hide button are not: %r" % got)
+
+
+@test
+def t_on_a_phone_a_panels_rows_keep_their_words_and_buttons_inside():
+    """Panels (13 Oct 2026), found by the every-page sweep at 390: the panel's
+    inset takes 32 from a phone's rows, so a row's actions (Loan units'
+    History, Reprint, edit and archive, 339 wide in 324) spilled out of the
+    row on the left, end-aligned; and Forecast's report links ("What each
+    method said, and what came in") were cut off with nothing to show the rest.
+    Actions wrap within their cell, still at its end, and a phone's list label
+    wraps rather than hiding its words."""
+    act = CSS.split("\n        .dt-c.act {")[1].split("}")[0]
+    ok("flex-wrap: wrap" in act and "justify-content: flex-end" in act, "a row's actions wrap within their cell, at its end")
+    ok("@media (max-width: 640px) { .rlist-row .lbl { white-space: normal; } }" in CSS, "on a phone a list label wraps, its words all there")
+    # At 1280 Xero sync's pair stacks and its Runs table, every column fitted
+    # to its content, stopped two thirds across a full-width panel: its last
+    # column takes the spare width, so its rules reach the panel's edge; side
+    # by side the fitted half is still the table's own width.
+    ok(".dt-runs { --dt-cols: repeat(5, max-content) minmax(max-content, 1fr); }" in CSS, "a stacked Runs table fills its panel")
+    # Team's Work: "On the clock now" and "Hours per person" kept their natural
+    # widths, so in a panel their rules stopped short (412 of 943 at 1280); and a
+    # ktable draws its own rule above and below, a frame inside the panel whose
+    # lower line sat 20 above the panel's edge. A table in a panel fills it and
+    # the panel's edge closes it, as a dtable's does.
+    ok(".dt-clock { --dt-cols: repeat(3, max-content) minmax(max-content, 1fr); }" in CSS, "the clock table fills its panel, its button at the row's end")
+    ok(".tm-hours .ktable { width: auto; }" not in CSS, "and Hours per person fills its own")
+    ok("@media screen { .panel .ktable-wrap { box-shadow: none; } }" in CSS, "a table in a panel draws no frame of its own")
+    # CRM's pipeline lanes share the board (160 at least) and inside the panel's
+    # inset a card's value, label, owner and next step ran past its edge at 1280.
+    # A board that scrolls sideways in a panel (CRM's pipeline, the Inbox board)
+    # ran its lanes under the panel's inset and cut the last one there, a strip
+    # of white after it; it runs to the panel's edges like a table, its first
+    # lane on the inset. So does the Size list's A to Z on a phone.
+    ok("@media screen { .panel .crm-board { margin-inline: calc(-1 * var(--panel-pad-x)); padding-inline: var(--panel-pad-x); scroll-padding-inline: var(--panel-pad-x); } }" in CSS,
+       "a sideways board runs to the panel's edges")
+    ok("@media screen and (max-width: 640px) { .panel .az { margin-inline: calc(-1 * var(--panel-pad-x)); padding-inline: var(--panel-pad-x); } }" in CSS,
+       "and the A to Z strip on a phone")
+    bot = CSS.split("\n        .crm-card-bot {")[1].split("}")[0]
+    ok("flex-wrap: wrap" in bot, "a board card's bottom line wraps inside the card")
 
 
 @test
