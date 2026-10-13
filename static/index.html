@@ -3447,6 +3447,26 @@
             position: relative; }
         /* The keyboard ring is drawn inside the row, so it is never cut away. */
         .mrow:focus-visible { outline-offset: -2px; }
+        /* Rows off screen are not laid out or painted until they come near
+           (the 2026-10-12 speed audit, P5): a Refresh of 400 rows went from
+           157-184 ms of a desktop's main thread to 101-125. Until it is drawn
+           a row stands at its real content height, so the reader's place
+           holds across a redraw: the row less its padding, its 32 px controls
+           on a touch screen (rows are 48 px there), or its own line where the
+           browser zooms text alone. Only where every row is one line: a list
+           560 px or narrower, or a window 640 px or narrower, wraps them to
+           two. Only on screen. The line is in a second rule of its own: a
+           browser without the lh unit keeps the first, where a value it
+           could not read would leave no size at all. */
+        @media screen and (min-width: 641px) {
+            @container mlist not (max-width: 560px) {
+                .mrow { content-visibility: auto;
+                    contain-intrinsic-size: auto max(calc(var(--row-h) - 2 * var(--sp-2)), var(--control-h-sm)); }
+                @supports (height: 1lh) {
+                    .mrow { contain-intrinsic-size: auto max(calc(var(--row-h) - 2 * var(--sp-2)), var(--control-h-sm), 1lh); }
+                }
+            }
+        }
         /* 16, the size every other tick in the app is drawn at (.fslot input,
            .tm-tabpick input, .sr-opt input). Two areas were a pixel either
            side of it for the same gesture. */
@@ -26788,6 +26808,10 @@ Projected Image UK"></textarea>
            One owner per thread, always. Unclaimed threads age visibly.
            ================================================================== */
         let mailCache = null, mailFilter = 'open', mailQ = '', mailTimer = null;
+        /* The revision of the board in mailCache. The minute's poll sends it
+           and an unchanged board comes back as {same: true} with the time of
+           the sync alone (the 2026-10-12 speed audit, S6). */
+        let mailRev = '';
         let mailListCap = 400;   /* render page size; the cache holds everything */
         /* List is the default: a real inbox arrives with weeks of history in
            it, and five columns of that is a wall, not a view. The board stays
@@ -26876,7 +26900,7 @@ Projected Image UK"></textarea>
             const box = $('mail-content'); box.innerHTML = '';
             const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Opening the inbox…'));
             box.append(t);
-            try { mailCache = await api('/api/mail/board', {}); mailFetchedAt = Date.now(); renderMail(); }
+            try { mailCache = await api('/api/mail/board', {}); mailRev = mailCache.rev || ''; mailFetchedAt = Date.now(); renderMail(); }
             catch (e) {
                 box.innerHTML = '';
                 box.append(el('div', 'msg error', e.message || 'Could not load the inbox.'));
@@ -26893,9 +26917,15 @@ Projected Image UK"></textarea>
             const seq = ++mailFetchSeq;
             let ok = true;
             try {
-                const d = await api('/api/mail/board', force ? { force: true } : {});
+                /* Refresh and actions ask for the board itself; a poll sends
+                   the revision it holds, and an unchanged board is the copy
+                   with the new time of the sync. */
+                let d = await api('/api/mail/board', force ? { force: true }
+                    : (poll && mailRev && mailCache ? { rev: mailRev } : {}));
                 if (seq !== mailFetchSeq) return true;   // an action's fresher fetch already landed
                 mailFetchedAt = Date.now();
+                if (d && d.same) d = Object.assign({}, mailCache, { synced_at: d.synced_at });
+                mailRev = d.rev || '';
                 /* A poll (the minute's tick, a revisit) redraws only when the
                    board moved: rebuilding up to 5,800 elements to show the
                    same board was most of the Inbox's cost. On a quiet minute
@@ -28767,6 +28797,11 @@ Projected Image UK"></textarea>
                 const row = mailCache && (mailCache.threads || []).find(t => t.id === id);
                 if (row && row.unread) {
                     row.unread = false;
+                    /* A copy the page has changed itself is no board the
+                       server named: if Gmail refuses the read, the server's
+                       board is the one this revision names again, and every
+                       poll would be told nothing changed. */
+                    mailRev = '';
                     ++mailFetchSeq;    // a poll already in flight carries the board from before the read
                     if (!mailInputBusy()) renderMail();
                 }
