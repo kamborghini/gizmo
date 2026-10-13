@@ -5159,6 +5159,73 @@ def t_no_em_or_en_dash_reaches_the_page():
             ok(ch not in src, "an " + name + " is in " + where)
 
 
+def _js_literals(src):
+    """Every string literal in a script, in order, with comments and regular
+    expressions stepped over: the words a page can show, and nothing a
+    developer wrote to another developer."""
+    out, i, n, prev, word = [], 0, len(src), "", ""
+    while i < n:
+        c = src[i]
+        if src.startswith("//", i):
+            j = src.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if src.startswith("/*", i):
+            j = src.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            continue
+        if c in "'\"`":
+            j = i + 1
+            while j < n and src[j] != c:
+                j += 2 if src[j] == "\\" else 1
+            out.append(src[i + 1:j])
+            i, prev, word = j + 1, c, ""
+            continue
+        if c == "/" and (prev in ("", "(", ",", "=", ":", "[", "!", "&", "|", "?", "{", "}", ";")
+                         or word in ("return", "typeof", "case")):
+            j, cls = i + 1, False
+            while j < n and (cls or src[j] != "/") and src[j] != "\n":
+                cls = (cls and src[j] != "]") or src[j] == "["
+                j += 2 if src[j] == "\\" else 1
+            i, prev, word = j + 1, "/", ""
+            continue
+        if not c.isspace():
+            word = word + c if (c.isalnum() or c in "_$") else ""
+            prev = c
+        i += 1
+    return out
+
+
+# The admin's setup walk-throughs, behind a title's info button, name the
+# hosting and the setting to type word for word: typing the exact name is
+# the step, so an admin sees them only on asking (the mix, 8.3). Nothing
+# else on the page may.
+_SETUP_STEPS = ("In Railway, open this app\\u2019s service and its Variables.",
+                "Set the connector service\\u2019s address on Railway\\u2019s private network. Its private domain ends ",
+                "Put the Client ID and Client Secret into the Railway variables ",
+                "XERO_CLIENT_ID and XERO_CLIENT_SECRET",
+                "Set FORECAST_INGEST_TOKEN on Reactor and, with the same value, on the forecasting "
+                "service; the service then posts here each night. The setup is in forecast/README.md.")
+
+
+@test
+def t_no_hosting_or_setting_name_reaches_the_page():
+    """House rule: the page's words never name the hosting (Railway), the code
+    name (gizmo) or a setting by its variable name (ALL_CAPS_WITH_UNDERSCORES).
+    The storage popover still said 'Three keys in Railway switch it on.'
+    on 12 Oct 2026. A bare name in quotes is a key the code looks up, not
+    words; the setup walk-throughs above are the one place a name is shown."""
+    lits = _js_literals(SCRIPT)
+    for step in _SETUP_STEPS:
+        ok(step in lits, "a setup step allowed to name a setting is still on the page: " + step[:60])
+    words = re.compile(r"\bRailway\b|\bgizmo\b|\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
+    bad = [s[:90] for s in lits if s not in _SETUP_STEPS
+           and not re.fullmatch(r"[A-Z][A-Z0-9_]*", s) and words.search(s)]
+    ok(not bad, "the page names the hosting, the code name or a setting: %s" % bad[:6])
+    markup = re.sub(r"<script>.*?</script>|<style>.*?</style>|<!--.*?-->", "", HTML, flags=re.S)
+    ok(not words.search(markup), "and so does the page's markup: %r" % (words.search(markup) or [""])[0])
+
+
 @test
 def t_a_list_never_leaves_the_editor_inside_a_paragraph():
     """Chromium's insertUnorderedList inside a <p> yields <p><ul>..</ul></p>
@@ -9269,6 +9336,8 @@ def t_the_release_notes_are_ui_copy_and_keep_up_with_the_app():
     bad = [t[:60] for t in texts if re.search("[‒-―]", t)]
     ok(not bad, "no em or en dashes in the notes: %s" % bad[:3])
     ok(not [t for t in texts if re.search(r"\bgizmo\b", t, re.I)], "and no code name")
+    ok(not [t for t in texts if re.search(r"\bRailway\b|\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b", t)],
+       "and no hosting or setting name")
     ok(not [t for t in texts if re.search(r"\b(API|webhook|callback URL|JSON)\b", t)], "and no developer words")
     views = set(re.search(r"const APP_VIEWS = \[([^\]]*)\]", SCRIPT).group(1).replace("'", "").replace(" ", "").split(","))
     tabs = {i.get("tab") for r in data["releases"] for i in r["items"] if i.get("tab")}
@@ -12938,7 +13007,7 @@ def t_the_copy_leftovers_are_cleared():
     ok("'Shopify fulfilment could not be completed.'" in SCRIPT and "' Fulfilment writer is not wired.'" in SCRIPT, "fulfilment, in the words a person reads")
     ok("res.fulfillment" in SCRIPT and "sh.fulfillment" in SCRIPT, "while the fields the server sends keep their names")
     ok(SCRIPT.count("'Not enough data in this range yet.'") == 2 and "range to chart yet" not in SCRIPT, "the chart's empty line is seven words")
-    ok("the Guide tab has the exact steps" not in SCRIPT and "'Three keys in Railway switch it on.'" in SCRIPT, "the storage popover claims no steps")
+    ok("the Guide tab has the exact steps" not in SCRIPT and "'Whoever looks after the app\\u2019s hosting switches it on with three keys.'" in SCRIPT, "the storage popover claims no steps")
     ok(".sizes-note" in CSS and "n.append(el('span', 'sizes-note', r.notes));" in SCRIPT, "the notes' ellipsis is the span's")
     ok(".ktable tr.sizes-row.open > td:first-child { box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary); }" in CSS
        and ".ktable tr.sizes-row.open > td:last-child { box-shadow: var(--sp-2) 0 0 var(--surface-secondary); }" in CSS, "so the open row's fill bleeds 8 either side")

@@ -26985,7 +26985,7 @@ Projected Image UK"></textarea>
                           + 'account to use: choose the shared mailbox, not your own account. Whichever '
                           + 'account you pick is the one this board reads. Google opens in a new tab, '
                           + 'and nothing is stored until you approve it there.'
-                        : 'The server needs GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET set first, '
+                        : 'The server needs Google\u2019s client ID and secret in the app\u2019s hosting settings first, '
                           + 'with the Gmail API enabled in the same Google Cloud project.');
                     if (d.client) {
                         const row = el('div', 'act-row');
@@ -29363,7 +29363,7 @@ Projected Image UK"></textarea>
                 const stInfo = infoButton('About the storage', { title: 'Connect the storage', guide: ['files', ''],
                     body: 'Files keeps its storage in a Cloudflare R2 bucket: durable, '
                     + 'priced in pennies, and the app signs every transfer so nothing is public. '
-                    + 'Three keys in Railway switch it on.' });
+                    + 'Whoever looks after the app\u2019s hosting switches it on with three keys.' });
                 head.append(titleInfo(st, stInfo));
                 head.append(el('p', 'card-desc', 'Storage is not set up yet.'));
                 card.append(head);

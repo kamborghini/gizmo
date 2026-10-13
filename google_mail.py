@@ -133,7 +133,7 @@ def save_connection(refresh_token: str, addr: str, acct: Account = SALES) -> Non
         # Writing here would land ON TOP of the sales inbox's token and take
         # that connection down with it. Refuse loudly.
         raise GmailError("The accounts mailbox shares a token file with the sales inbox. "
-                         "Set GMAIL_FINANCE_TOKEN_PATH to its own path before connecting.")
+                         "Give it its own token file in the app's hosting settings before connecting.")
     os.makedirs(os.path.dirname(acct.token_path) or ".", exist_ok=True)
     tmp = acct.token_path + ".tmp"
     # 0600, like the Xero token beside it: a refresh token in a world-readable
@@ -252,7 +252,7 @@ async def exchange_code(code: str, redirect_uri: str, acct: Account = SALES) -> 
 async def _token(acct: Account = SALES) -> str:
     if not acct.usable():
         raise GmailError("The accounts mailbox shares a token file with the sales inbox. "
-                         "Set GMAIL_FINANCE_TOKEN_PATH to its own path.")
+                         "Give it its own token file in the app's hosting settings.")
     rt = _load_token_file(acct).get("refresh_token", "")
     if not rt:
         raise GmailError("Gmail is not connected."

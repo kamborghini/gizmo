@@ -1910,7 +1910,7 @@ async def _sweep_inner(deep_docs: bool) -> dict:
                 notes.append(f"The Shopify read stopped at its limit of {fetched} orders in the "
                              f"{FETCH_DAYS}-day window, so the newest orders were not checked, and "
                              "the check for Xero sales with no Shopify order was skipped rather "
-                             "than flag their invoices. Raise RECON_ORDER_CAP to read them all.")
+                             "than flag their invoices. Raise the order limit in the app's hosting settings to read them all.")
         except Exception as e:
             orders_short = True
             notes.append(f"Shopify orders sync failed: {str(e)[:120]}; the check for Xero sales "

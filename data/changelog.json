@@ -1,6 +1,16 @@
 {
  "releases": [
   {
+   "date": "2026-10-13",
+   "title": "Setup messages say what to do in plain words",
+   "items": [
+    {
+     "kind": "improved",
+     "text": "When something is not set up yet, such as file storage, Pipedrive, Xero, the shared mailboxes or the Xero connector, its message now says what to add and that it goes in the app's hosting settings, instead of naming the hosting company or quoting a setting's internal name."
+    }
+   ]
+  },
+  {
    "date": "2026-10-12",
    "title": "Files keeps up with big folders and long uploads",
    "items": [
