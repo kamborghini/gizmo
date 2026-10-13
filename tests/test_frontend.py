@@ -4928,8 +4928,9 @@ def t_a_heading_keeps_its_12px_on_a_phone():
        "and both exceptions come after it")
     phone = [b for b in re.findall(r"@media \(max-width: 640px\) \{((?:[^{}]|\{[^{}]*\})*)\}", CSS)
              if re.search(r"(?<![\w-])\.ov-wrap \{", b)]
-    ok(phone and re.search(r"\.ov-wrap \{[^}]*--page-rhythm: var\(--sp-7\)", phone[0]),
-       "the phone gap is the property re-pointed to 32, not a margin rule")
+    # 13 Oct 2026 (panels): a phone's sections sit a panel gap apart, 12.
+    ok(phone and re.search(r"\.ov-wrap \{[^}]*--page-rhythm: var\(--panel-gap\)", phone[0]),
+       "the phone gap is the property re-pointed to the panel gap, not a margin rule")
 
 
 @test
@@ -11808,8 +11809,9 @@ def t_the_page_is_one_sheet_in_an_ink_frame():
     the chosen page teal at 18% with white words and a teal icon."""
     ok("@media screen {\n            #app { background: var(--surface-chrome); }" in CSS, "the frame is ink, on screen only")
     sheet = CSS.split("\n            .main { margin: var(--frame-inset) var(--frame-inset) var(--frame-inset) 0;")
+    # 13 Oct 2026 (panels): the page is a grey sheet for the panels.
     ok(len(sheet) == 2 and "border-radius: var(--radius-sheet)" in sheet[1].split("}")[0]
-       and "background: var(--surface-primary)" in sheet[1].split("}")[0], "the page is one white sheet, 8 in, 12 round")
+       and "background: var(--surface-canvas)" in sheet[1].split("}")[0], "the page is a grey sheet for the panels, 8 in, 12 round")
     ok(CSS.index("@media screen {\n            #app {") > CSS.index("\n        .main {"), "set after the base .main rule")
     side = CSS.split("\n        .sidebar {")[1].split("}")[0]
     ok("background: var(--surface-chrome)" in side and "border-right" not in side, "the sidebar is the ink, with no edge")
@@ -12039,7 +12041,9 @@ def t_a_section_is_a_title_and_space():
     one sheet, few boxes. A section is a 15/20 600 head, then its content 12
     under it, 48 from the next (32 on a phone); no edge, no fill, no padding,
     so its content runs on the page's own text edge. A chart sits in its
-    section without a frame either."""
+    section without a frame either. 13 Oct 2026: on screen a section is a
+    panel, 20 from the next (t_the_page_is_grey_...); .card itself stays flat
+    so nothing inside a panel is boxed twice; paper keeps 48 and no panels."""
     card = CSS.split("\n        .card {")[1].split("}")[0]
     for prop in ("background: none", "border: 0", "box-shadow: none", "padding: 0", "gap: var(--sp-3)"):
         ok(prop in card, ".card: " + prop)
@@ -12052,6 +12056,24 @@ def t_a_section_is_a_title_and_space():
     ok(re.search(r"\.ov-wrap \{[^}]*--page-rhythm: var\(--sp-9\)", CSS), "48 between sections")
     chart = CSS.split("\n        .chart-card {")[1].split("}")[0]
     ok("border: 0" in chart and "padding: 0" in chart and "background: none" in chart, "a chart has no frame of its own")
+
+
+@test
+def t_the_page_is_grey_and_its_sections_sit_a_panel_gap_apart():
+    """Panels (Cameron, 13 Oct 2026: "you aren't boxing things off"): the sheet
+    is a light grey page for white panels, and panels sit 20 apart (12 on a
+    phone), the gap that was 48 between bare sections."""
+    ok("--canvas: #F1F2F3;" in CSS and "--surface-canvas: var(--canvas);" in CSS, "a grey page, a tier 1 colour read through a tier 2 token")
+    ok("--shadow-panel: 0 1px 2px color-mix(in srgb, var(--ink) 6%, transparent), 0 1px 1px color-mix(in srgb, var(--ink) 3%, transparent);" in CSS,
+       "a panel's very soft shadow")
+    ok("--panel-pad-y: var(--sp-5); --panel-pad-x: var(--sp-6); --panel-gap: var(--sp-5);" in CSS, "20 and 24 inside, 20 between")
+    ok("@media (max-width: 640px) { :root { --panel-pad-y: var(--sp-4); --panel-pad-x: var(--sp-4); --panel-gap: var(--sp-3); } }" in CSS, "16 inside and 12 between on a phone")
+    sheet = CSS.split("\n            .main { margin: var(--frame-inset) var(--frame-inset) var(--frame-inset) 0;")[1].split("}")[0]
+    ok("background: var(--surface-canvas)" in sheet, "the sheet is the grey page")
+    ok("@media screen and (min-width: 641px) { .ov-wrap { --page-rhythm: var(--panel-gap); } }" in CSS, "on screen, sections sit a panel gap apart")
+    ok(re.search(r"@media \(max-width: 640px\) \{\s*(?:/\*[^*]*\*/\s*)?\.ov-wrap \{[^}]*--page-rhythm: var\(--panel-gap\)", CSS), "and on a phone")
+    ok(re.search(r"\n        \.ov-wrap \{[^}]*--page-rhythm: var\(--sp-9\)", CSS), "paper keeps its 48 between sections")
+    ok("@media screen { #view-chat { background: var(--surface-primary); } }" in CSS, "Chat keeps its white reading ground")
 
 
 @test
