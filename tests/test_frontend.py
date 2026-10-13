@@ -12101,6 +12101,26 @@ def t_the_grey_page_reaches_every_edge_of_the_sheet():
 
 
 @test
+def t_panels_side_by_side_stand_equal():
+    """Panels (13 Oct 2026, Cameron chose equal heights): two panels in a pair,
+    and Forecast's two columns, stretch to the taller, so a row has one top
+    edge and one bottom edge, a panel gap apart; stacked, each is as tall as
+    its content. Screen only: paper has no panels and keeps its 64 between
+    the halves."""
+    pin = CSS.split("\n        .wpair-in {")[1].split("}")[0]
+    ok("column-gap: var(--gap-cols)" in pin and "align-items: start" in pin, "paper keeps its 64 between the halves")
+    eq = "@media screen { :is(.wpair-in, .fc-cols) { column-gap: var(--panel-gap); align-items: stretch; } }"
+    ok(eq in CSS, "on screen, a pair and Forecast's two columns: a panel gap between, equal heights")
+    ok(eq in CSS and CSS.index(eq) > CSS.index("\n        .wpair-in {") and CSS.index(eq) > CSS.index("\n        .fc-cols {"),
+       "after both base rules, so it wins at their weight")
+    # A half's own margin sits outside its box, so a grid's stretch stops short
+    # by it: a chart card's 16 left Overview's Traffic by channel 16 shorter.
+    ok("@media screen { :is(.wpair-in, .fc-cols) > .panel { margin-block: 0; } }" in CSS, "a half carries no margin of its own")
+    ok("@media screen { .ov-wrap .panel.chart-card .chart-expand { top: var(--panel-pad-y); right: var(--panel-pad-x); } }" in CSS,
+       "a chart that is a panel keeps its expand button on its title row, inside the panel's inset")
+
+
+@test
 def t_each_section_of_a_page_is_a_panel():
     """Panels (13 Oct 2026): every top-level block of a page's content is a
     panel, a pair's halves and what a plain wrapper holds included; the
@@ -12136,8 +12156,8 @@ console.log(JSON.stringify({ n: got.length, card: got.includes(card), halves: go
        "in Customise a panel's dashed edge is its own edge")
     ok("@media screen { .ov-wrap > .queues .qc:not(.on) { background: var(--surface-primary); box-shadow: inset 0 0 0 var(--bw-hairline) var(--border-default); } }" in CSS,
        "the counters stay tiles on the grey page")
-    ok("@media screen { .ov-wrap > .segmented { background: var(--surface-sunken); } }" in CSS,
-       "a page's chooser keeps a track you can see on the grey (its own track is the grey's tone)")
+    ok("@media screen { :is(.ov-wrap, .page-tabs-end) > .segmented { background: var(--surface-sunken); } }" in CSS,
+       "a chooser on the grey (a page's, or Forecast's in the Finance strip) keeps a track you can see (its own track is the grey's tone)")
     ok("el('div', 'chat-recent panel')" in fn_src("function renderEmptyChat("), "Chat's recent list is a panel")
 
 

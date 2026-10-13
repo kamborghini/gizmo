@@ -2455,6 +2455,13 @@
            its own width the two stack. */
         .wpair { container: wpair / inline-size; }
         .wpair-in { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); column-gap: var(--gap-cols); row-gap: var(--page-rhythm); align-items: start; }
+        /* Panels side by side stand as one row, equal heights and a panel gap apart
+           (Cameron, 13 Oct 2026); stacked, each is its own height, its row's. Screen
+           only: paper has no panels and keeps the 64 above. Forecast's columns too. */
+        @media screen { :is(.wpair-in, .fc-cols) { column-gap: var(--panel-gap); align-items: stretch; } }
+        /* A half's own margin sits outside its box, where the stretch cannot reach: a
+           chart card's 16 left a half 16 short of its neighbour. The grid's gaps space them. */
+        @media screen { :is(.wpair-in, .fc-cols) > .panel { margin-block: 0; } }
         .wpair.even > .wpair-in { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .wpair.flip > .wpair-in { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
         /* A table at its natural width, and the other half takes the rest (Xero sync's runs). */
@@ -5125,9 +5132,10 @@
         .segmented { display: inline-flex; flex-wrap: wrap; align-items: stretch; align-self: flex-start; gap: var(--sp-0-5); max-width: 100%;
             padding: 0 var(--sp-0-5); background: var(--surface-tertiary); border: 0;
             border-radius: var(--radius-control); }
-        /* A page's chooser sits on the grey page, whose tone its track shares: one shade
-           deeper keeps the track, with the white chosen choice in it (13 Oct 2026). */
-        @media screen { .ov-wrap > .segmented { background: var(--surface-sunken); } }
+        /* A chooser on the grey page (a page's own, or Forecast's in the Finance strip)
+           shares the grey's tone: one shade deeper keeps its track, with the white
+           chosen choice in it (13 Oct 2026). */
+        @media screen { :is(.ov-wrap, .page-tabs-end) > .segmented { background: var(--surface-sunken); } }
         /* flex: 1 1 auto shares out the spare room of a line, which a track
            only has once it wraps: a wrapped track fills its lines rather than
            stranding one choice at the left of the second. On one line the track
@@ -5420,6 +5428,9 @@
         .chart-expand { position: absolute; top: 0; right: 0; z-index: 2; border: 0; background: transparent; color: var(--text-tertiary); width: var(--control-h); height: var(--control-h); border-radius: var(--radius-control); display: grid; place-items: center; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease); }
         @media (hover: hover) { .chart-expand:hover { background: var(--surface-tertiary); color: var(--text-primary); } }
         .chart-expand:active { background: var(--press); }
+        /* A chart that is a panel itself (a pair's half): the button sits on its title row,
+           inside the panel's inset, not in the corner of its padding (13 Oct 2026). */
+        @media screen { .ov-wrap .panel.chart-card .chart-expand { top: var(--panel-pad-y); right: var(--panel-pad-x); } }
         .chart-expand svg { width: var(--icon-md); height: var(--icon-md); display: block; }
         /* .modal's own 520px cap is declared 100 lines further down, so a
            single-class .cmodal lost to it on source order and the expand button
