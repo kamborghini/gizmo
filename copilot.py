@@ -5598,12 +5598,30 @@ OPTION_CACHE_MAX  = 500
 _option_names_cache: dict = {}   # product_id -> {"at": monotonic, "names": [...]}
 
 
+def _product_ids(product_ids) -> list:
+    """De-duped, blanks out, and bounded at 40: a line past the cap keeps the
+    generic text it always had."""
+    return [p for p in dict.fromkeys(product_ids) if p][:40]
+
+
 async def _product_meta(registry: dict, product_ids) -> dict:
-    """Map product_id -> {"names": its option names, "type": its product type},
-    fetched concurrently. One product read answers both, so the option names a
-    label prints and the type that tells a stock gobo from a custom one share a
-    cache entry and never cost two requests."""
-    ids = [p for p in dict.fromkeys(product_ids) if p][:40]   # de-duped and bounded
+    """Map product_id -> {"names": its option names, "type": its product type}.
+    One product read answers both, so the option names a label prints and the
+    type that tells a stock gobo from a custom one share a cache entry."""
+    return await _product_meta_fetch(registry, _product_ids(product_ids))
+
+
+async def _product_names_and_types(registry: dict, names_ids, type_ids) -> tuple:
+    """(option names by product, product types by product) for a queue: each
+    list bounded on its own as before, and everything either needs fetched
+    in one go. Asked separately, the types were a second round after the
+    names (the 2026-10-12 speed audit, X7)."""
+    a, b = _product_ids(names_ids), _product_ids(type_ids)
+    meta = await _product_meta_fetch(registry, list(dict.fromkeys(a + b)))
+    return ({p: meta[p]["names"] for p in a}, {p: meta[p]["type"] for p in b})
+
+
+async def _product_meta_fetch(registry: dict, ids: list) -> dict:
     if not ids:
         return {}
     now = time.monotonic()
@@ -5625,7 +5643,26 @@ async def _product_meta(registry: dict, product_ids) -> dict:
         return (pid, [str(o.get("name") or "").strip() for o in (d.get("options") or [])],
                 str(d.get("product_type") or "").strip(), True)
 
-    for pid, names, ptype, good in await asyncio.gather(*[one(i) for i in misses]):
+    async def all_at_once():
+        # One read for every product missing (the 2026-10-12 speed audit, X7).
+        # A product it did not return is blank this time and asked for again
+        # next time, as a failed single read was; if the read itself fails,
+        # the products are read one at a time as they always were.
+        got = {}
+        for i in range(0, len(misses), 100):
+            got.update(await _product_meta_reader(misses[i:i + 100]))
+        return [(pid, got[pid]["names"], got[pid]["type"], True) if pid in got else (pid, [], "", False)
+                for pid in misses]
+
+    answers = None
+    if _product_meta_reader is not None:
+        try:
+            answers = await all_at_once()
+        except Exception as e:
+            logger.warning("products read in one go failed (%s); reading them one at a time", type(e).__name__)
+    if answers is None:
+        answers = await asyncio.gather(*[one(i) for i in misses])
+    for pid, names, ptype, good in answers:
         out[pid] = {"names": names, "type": ptype}
         if good:   # a failed read is not an answer, so it is never cached
             _option_names_cache[pid] = {"at": time.monotonic(), "names": names, "type": ptype}
@@ -6511,6 +6548,7 @@ _order_tag_writer = None
 _payment_terms_writer = None
 _scope_reader = None
 _tax_id_reader = None
+_product_meta_reader = None
 _forecast_reader = None   # the forecast job's four store reads, made with the app's credential
 _install_checker = None   # "installed" / "gone" / "unknown": asked before a shop/redact erases
 _customer_checker = None  # "live" / "gone" / "unknown": asked before a customers/redact erases
@@ -6573,6 +6611,8 @@ async def _sync_order_tags(registry: dict, order_id, add=(), remove=(), unless=(
             o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
             if not _ok(o) or not o.get("id"):
                 return False, "Couldn't read the order to update its tags."
+            if outcome is not None:
+                outcome["order"] = o      # read once: a release's terms check uses it too
             if _order_status(o) and not allow_dead:
                 return True, ""   # cancelled/refunded/fulfilled: tags stay as they are
             cur = _order_tags(o)
@@ -6892,7 +6932,8 @@ async def _release_bg(registry: dict, order_ids: list) -> None:
     then disagree about which orders were released. Never raises."""
     async def once(oid) -> bool:
         try:
-            okd, note, released = await _release_tags(registry, oid)
+            seen: dict = {}
+            okd, note, released = await _release_tags(registry, oid, seen)
             if not okd:
                 logger.warning("background release: tag refused for order %s: %s", oid, note)
                 return False
@@ -6900,7 +6941,7 @@ async def _release_bg(registry: dict, order_ids: list) -> None:
                 return True       # already made or shipped: nothing to release
             # _net30_on_release records its own outcome on the order, so a
             # failure out here is not lost to the log: the queue row shows it.
-            await _net30_on_release(registry, oid)
+            await _net30_on_release(registry, oid, order=seen.get("order"))
             return True
         except Exception:
             logger.exception("background release failed for order %s", oid)
@@ -6931,7 +6972,7 @@ async def _dispatch_move_tags(registry: dict, order_id, allow_dead: bool = False
         remove=(UNPROCESSED_TAG, PRODUCTION_TAG, MADE_TAG), allow_dead=allow_dead)
 
 
-async def _release_tags(registry: dict, order_id) -> tuple:
+async def _release_tags(registry: dict, order_id, seen: Optional[dict] = None) -> tuple:
     """Unprocessed -> IP for an order going to the bench: (ok, note, released).
 
     An order already made or shipped is left where it is, with released
@@ -6952,6 +6993,8 @@ async def _release_tags(registry: dict, order_id) -> tuple:
                                        remove=[UNPROCESSED_TAG],
                                        unless=(MADE_TAG, DISPATCHED_TAG, *LEGACY_DISPATCHED_TAGS),
                                        outcome=out)
+    if seen is not None and out.get("order"):
+        seen["order"] = out["order"]
     return okd, note, bool(okd and not out.get("kept"))
 
 
@@ -7448,10 +7491,9 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
         if not _ok(o) or not o.get("id"):
             return {"tag": PRODUCTION_TAG, "days": 0, "count": 0, "orders": [],
                     "error_note": "Order not found.", "missing": _shopify_gone(o)}
-        names = await _product_option_names(
-            registry, [li.get("product_id") for li in (o.get("line_items") or []) if _variant_is_real(li)])
-        types = await _product_types(
-            registry, [li.get("product_id") for li in (o.get("line_items") or []) if not _line_has_model(li)])
+        names, types = await _product_names_and_types(
+            registry, [li.get("product_id") for li in (o.get("line_items") or []) if _variant_is_real(li)],
+            [li.get("product_id") for li in (o.get("line_items") or []) if not _line_has_model(li)])
         shaped = _shape_label_order(o, names, cache=_gobo_sizes(), types=types)
         oid = str(shaped["id"])
         st = state if state is not None else _load_prod_state()
@@ -7482,15 +7524,12 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
     counts = {key: sum(1 for o in orders if _has_tag(o, qtag))
               for key, qtag in (("unprocessed", UNPROCESSED_TAG), ("make", PRODUCTION_TAG), ("ship", MADE_TAG))}
 
-    names = await _product_option_names(
+    # Only lines that name no fixture need their product type, so that list
+    # stays small however long the queue is; a line past the cap simply keeps
+    # the CHECK it had, which is the safe direction.
+    names, types = await _product_names_and_types(
         registry,
         [li.get("product_id") for o in tagged for li in (o.get("line_items") or []) if _variant_is_real(li)],
-    )
-    # Only lines that name no fixture need their product type, so this stays
-    # small however long the queue is; a line past the cap simply keeps the
-    # CHECK it had, which is the safe direction.
-    types = await _product_types(
-        registry,
         [li.get("product_id") for o in tagged for li in (o.get("line_items") or []) if not _line_has_model(li)],
     )
     sheet = _gobo_sizes()   # one snapshot for the whole list
@@ -9565,11 +9604,32 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
     }
 
 
+# The missed-orders answer, per tag, kept until any order is known to have
+# changed or two minutes pass (the 2026-10-12 speed audit, X7). Every load of
+# the Make queue walked every open order in the shop for it. The app's own
+# writes, Shopify's order webhooks and Refresh all move _orders_epoch; the
+# two minutes catch anything that does not.
+MISSING_CACHE_SECS = 120
+_missing_cache: dict = {}
+
+
 async def run_missing_production(registry: dict, tag: Optional[str] = None) -> dict:
     """Paid, unfulfilled, not-cancelled orders that contain gobo items but never
     got the production tag: the ones that silently never reach the workbench.
     A plain Shopify read, no AI."""
     tag = (tag or PRODUCTION_TAG).strip() or PRODUCTION_TAG
+    hit = _missing_cache.get(tag)
+    if hit and hit["epoch"] == _orders_epoch and time.monotonic() - hit["at"] < MISSING_CACHE_SECS:
+        return hit["result"]
+    # Taken before the scan: a change during it makes what it finds stale.
+    epoch = _orders_epoch
+    result = await _missing_scan(registry, tag)
+    if not result.get("error"):
+        _missing_cache[tag] = {"at": time.monotonic(), "epoch": epoch, "result": result}
+    return result
+
+
+async def _missing_scan(registry: dict, tag: str) -> dict:
     # Every open order, paged: one page of 100 left the rest unchecked, and
     # the oldest, the ones longest at risk of never reaching the bench, were
     # the ones past it. The page is told when the read stopped at its cap.
@@ -17240,7 +17300,7 @@ def _terms_flag(order_id, ok: bool, note: str = "") -> None:
         logger.exception("could not record the payment-terms outcome for order %s", order_id)
 
 
-async def _net30_on_release(registry: dict, order_id) -> dict:
+async def _net30_on_release(registry: dict, order_id, order: Optional[dict] = None) -> dict:
     """Start an account order's 30-day clock when it is released to production.
 
     Every path that moves Unprocessed -> IP is a release: the Ready-to-make
@@ -17252,12 +17312,18 @@ async def _net30_on_release(registry: dict, order_id) -> dict:
     caller used to decide success by reading the note's first words, so the
     commonest outcome of all - terms UPDATED from due-on-receipt to Net 30 -
     came out as a red failure toast because its sentence starts differently.
-    Never raises: the release itself must not fail with this."""
+    Never raises: the release itself must not fail with this.
+
+    `order` is the order the release's tag move just read, when there was
+    one: its account tag and whether it is dead are what this checks, and
+    moving the workflow tags changes neither, so it is not read a second
+    time (the 2026-10-12 speed audit, X7)."""
     quiet = {"account": False, "ok": True, "note": ""}
     if _payment_terms_writer is None:
         return quiet
     try:
-        o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
+        o = order if isinstance(order, dict) and order.get("id") \
+            else await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
         if not _ok(o):
             # A read that FAILED is not proof the order is not on account.
             return {"account": True, "ok": False,
@@ -19752,14 +19818,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                fulfillment_canceler=None, webhook_ensurer=None,
                payment_terms_writer=None, order_writer=None,
                scope_reader=None, tax_id_reader=None, forecast_reader=None,
-               install_checker=None, customer_checker=None, api_version: str = "") -> None:
+               install_checker=None, customer_checker=None, product_meta_reader=None,
+               api_version: str = "") -> None:
     # The write capabilities the server hands over. None of them ever joins any
     # tool registry: the AI can read the store; only the app's own print / Mark
     # made / Dispatch actions can touch tags or fulfillments.
     global _order_tag_writer, _fulfillment_writer, _fulfillment_canceler, _webhook_ensurer
     global _payment_terms_writer, _order_writer, _scope_reader, _tax_id_reader, _forecast_reader
-    global _install_checker, _customer_checker, _api_version
+    global _install_checker, _customer_checker, _api_version, _product_meta_reader
     _api_version = api_version
+    _product_meta_reader = product_meta_reader
     _customer_checker = customer_checker
     _scope_reader = scope_reader
     _forecast_reader = forecast_reader
@@ -23364,13 +23432,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # so a 60-order batch done inline outlives the browser's patience.
                 head, tail = ids[:RELEASE_INLINE_MAX], ids[RELEASE_INLINE_MAX:]
                 for oid in head:
-                    okd, note, released = await _release_tags(registry, oid)
+                    seen: dict = {}
+                    okd, note, released = await _release_tags(registry, oid, seen)
                     if not okd and note:
                         notes.append(note)
                         continue
                     if not released:
                         continue      # a reprint of a made or shipped order is not a release
-                    tn = await _net30_on_release(registry, oid)
+                    tn = await _net30_on_release(registry, oid, order=seen.get("order"))
                     if tn["account"]:
                         # Per ORDER. Flattened to one boolean and the first
                         # three notes, a batch could show a red toast whose
@@ -26388,7 +26457,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # The one guarded release: an order already made or shipped stays
             # where it is. An Undo on a made order's reprint used to leave it
             # tagged Unprocessed, and this button then put it back in To make.
-            okd, note, released = await _release_tags(registry, oid)
+            seen: dict = {}
+            okd, note, released = await _release_tags(registry, oid, seen)
             if not okd:
                 return _json({"error": note or "Couldn't tag the order."}, 502)
             nm = re.sub(r"[^#\w-]", "", str(body.get("name") or ""))[:20] or f"order {oid}"
@@ -26401,7 +26471,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # primary action and must not fail with it, but a purchase order
             # silently missing its payment terms is an unpaid invoice nobody
             # chases. Shared with the print path so every release behaves alike.
-            terms = await _net30_on_release(registry, oid)
+            terms = await _net30_on_release(registry, oid, order=seen.get("order"))
             if terms["account"] and terms["ok"]:
                 _track(_who, "production", "put an account order on 30-day terms", nm)
             return _json({"ok": True, "po_unpaid": terms["account"],

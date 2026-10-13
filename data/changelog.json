@@ -2,6 +2,27 @@
  "releases": [
   {
    "date": "2026-10-13",
+   "title": "The Production Manager waits less on Shopify",
+   "items": [
+    {
+     "kind": "improved",
+     "tab": "labels",
+     "text": "The Production Manager now learns the products in its queue (their option names and types, which the labels print) in one request to Shopify instead of one per product, so the first open after an update shows the queue in a second or two rather than several. The labels are exactly as before."
+    },
+    {
+     "kind": "improved",
+     "tab": "labels",
+     "text": "Ready to make and printing a label no longer read each order from Shopify twice, once to move it and again to check its payment terms."
+    },
+    {
+     "kind": "improved",
+     "tab": "labels",
+     "text": "The check for paid orders that never reached the bench is no longer run again on every visit to To make: it is kept until an order changes, or for two minutes."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-13",
    "title": "A lighter Inbox",
    "items": [
     {

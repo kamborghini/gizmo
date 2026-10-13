@@ -311,6 +311,11 @@ copilot._scope_reader = _scopes_refused
 async def _tax_id_refused(order_id):
     return {"tax_id": "", "source": "", "error": "Shopify refused the suite's dummy token"}
 copilot._tax_id_reader = _tax_id_refused
+# The products read in one GraphQL call (the fourth speed audit item, X7): the
+# suite's dummy token is refused, so the per-product reads the tests stub stand.
+async def _product_meta_refused(product_ids):
+    raise RuntimeError("Shopify refused the suite's dummy token")
+copilot._product_meta_reader = _product_meta_refused
 # Google, likewise. The Gmail syncs that tests start post their dummy refresh
 # token to Google's token door, which refuses it; here that door gives the same
 # refusal word for word (asked once, 2 October 2026) and nothing else on Google
@@ -28931,12 +28936,232 @@ def t_a_dropped_gmail_connection_is_retried_but_an_email_is_never_sent_twice():
             eq(len(seen), want_calls, f"{method} {path} after {fail}: asked {want_calls} time(s)")
         _with_gmail_wire(handler, go)
 
+
+# =========================== speed: the Production Manager's follow-up calls ==
+# The sixth speed pull request (the 2026-10-12 audit, X7).
+
+def _meta_products():
+    """Products as REST shapes them (what the per-product read returned) and
+    as GraphQL shapes them (what the one read returns), from one fixture."""
+    fx = {pid: {"names": (["Gobo Size", "Glass"] if pid % 3 else ["Size"]), "type": ("Custom Gobo" if pid % 2 else "Gobo")}
+          for pid in range(1, 120)}
+    return fx
+
+
+@test
+def t_a_queue_learns_its_products_in_one_read():
+    """The 2026-10-12 speed audit, X7. The option names a label prints and the
+    product types that tell a stock gobo from a custom one were read one
+    product at a time, in two rounds (names, then the types the first round
+    had not covered), four at a time through the shop's gate: after each
+    deploy and every six hours, ten or more waves before a queue could show.
+    One read now answers every product a queue needs, each list keeps its own
+    cap of 40 (a line past it keeps the generic text it always had), and a
+    product the read did not return is not remembered as empty."""
+    fx = _meta_products()
+    reads, singles = [], []
+
+    async def reader(ids):
+        reads.append(list(ids))
+        return {pid: dict(fx[pid]) for pid in ids if pid != 50}      # 50 was deleted
+
+    async def tools(registry, name, args):
+        if name == "shopify_get_product":
+            singles.append(args["product_id"])
+        return {}
+    saved = (copilot._product_meta_reader, copilot._tool_json)
+    copilot._product_meta_reader, copilot._tool_json = reader, tools
+    copilot._option_names_cache.clear()
+    try:
+        names_ids = list(range(1, 46))            # 45: the first 40 count
+        type_ids = list(range(30, 80))            # 50, overlapping: the first 40 count
+        names, types = run(copilot._product_names_and_types({}, names_ids, type_ids))
+        eq(len(reads), 1, "one read for both lists")
+        eq(singles, [], "and no product read one at a time")
+        eq(sorted(reads[0]), sorted(set(range(1, 41)) | set(range(30, 70))), "for the first 40 of each")
+        eq(sorted(names), list(range(1, 41)), "names for the first 40 option-name lines")
+        eq(sorted(types), list(range(30, 70)), "types for the first 40 type lines")
+        eq(names[7], fx[7]["names"], "with what the product holds")
+        eq(types[31], fx[31]["type"])
+        eq((types.get(50), 50 in copilot._option_names_cache), ("", False),
+           "a product the read did not return is blank this time and asked for again next time")
+        reads.clear()
+        names2, types2 = run(copilot._product_names_and_types({}, names_ids, type_ids))
+        eq((names2, {k: v for k, v in types2.items() if k != 50}), (names, {k: v for k, v in types.items() if k != 50}),
+           "the same answer again")
+        eq(reads, [[50]], "from memory, but for the one it did not have")
+    finally:
+        copilot._product_meta_reader, copilot._tool_json = saved
+        copilot._option_names_cache.clear()
+
+
+@test
+def t_a_failed_products_read_falls_back_to_reading_them_one_by_one():
+    """The one read failing (Shopify busy, a scope missing) must never cost a
+    label its option names: the products are then read the way they always
+    were, one at a time, and the queue shows what it always showed."""
+    fx = _meta_products()
+    singles = []
+
+    async def reader(ids):
+        raise RuntimeError("Throttled")
+
+    async def tools(registry, name, args):
+        if name == "shopify_get_product":
+            pid = args["product_id"]
+            singles.append(pid)
+            return {"id": pid, "product_type": fx[pid]["type"],
+                    "options": [{"name": n, "position": i + 1} for i, n in enumerate(fx[pid]["names"])]}
+        return {}
+    saved = (copilot._product_meta_reader, copilot._tool_json)
+    copilot._product_meta_reader, copilot._tool_json = reader, tools
+    copilot._option_names_cache.clear()
+    try:
+        names, types = run(copilot._product_names_and_types({}, [1, 2, 3], [3, 4]))
+        eq(sorted(singles), [1, 2, 3, 4], "each product read once")
+        eq(names, {p: fx[p]["names"] for p in (1, 2, 3)})
+        eq(types, {p: fx[p]["type"] for p in (3, 4)})
+    finally:
+        copilot._product_meta_reader, copilot._tool_json = saved
+        copilot._option_names_cache.clear()
+
+
+@test
+def t_the_products_read_gives_what_the_product_reads_gave():
+    """The label is frozen: the one read must give exactly the option names
+    and product type the per-product reads did. REST gave a product's
+    options in position order, at most three of them; the GraphQL read asks
+    for the first three by position and orders them by it too. A product not
+    found is left out; an answer with errors is a failure, not an answer."""
+    sent = []
+
+    async def fake_request(method, path, params=None, body=None, idempotent=None, **kw):
+        sent.append(body)
+        return {"data": {"nodes": [
+            {"id": "gid://shopify/Product/11", "productType": " Custom Gobo ",
+             "options": [{"name": "Glass ", "position": 2}, {"name": " Gobo Size", "position": 1}]},
+            None,
+            {"id": "gid://shopify/Product/13", "productType": "", "options": [{"name": "Title", "position": 1}]},
+        ]}}
+    saved = server._request
+    server._request = fake_request
+    try:
+        got = run(server.shopify_product_meta([11, 12, 13]))
+        eq(got, {11: {"names": ["Gobo Size", "Glass"], "type": "Custom Gobo"},
+                 13: {"names": ["Title"], "type": ""}}, "names in position order, stripped; the missing one left out")
+        q = sent[0]["query"]
+        ok("nodes(ids: $ids)" in q and "options(first: 3)" in q and "productType" in q, q)
+        eq(sent[0]["variables"]["ids"], ["gid://shopify/Product/11", "gid://shopify/Product/12",
+                                         "gid://shopify/Product/13"])
+
+        async def throttled(method, path, params=None, body=None, idempotent=None, **kw):
+            return {"errors": [{"message": "Throttled", "extensions": {"code": "THROTTLED"}}]}
+        server._request = throttled
+        try:
+            run(server.shopify_product_meta([11]))
+            ok(False, "an answer with errors must raise")
+        except RuntimeError:
+            pass
+    finally:
+        server._request = saved
+
+
+@test
+def t_a_release_reads_its_order_once():
+    """Releasing an order read it to move its tags, then read it again to see
+    whether it is an account order needing 30-day terms: two Shopify reads of
+    one order on every Ready to make and every printed label. The terms check
+    now uses the read the tag move made; what it decides is unchanged."""
+    def go():
+        ensure_auth()
+        reset_prod(); reset_dispatch()
+        reads = []
+
+        async def counting(registry, name, args):
+            if name == "shopify_get_order":
+                reads.append(args.get("order_id"))
+            return await fake_tool_json(registry, name, args)
+        saved = (copilot._tool_json, copilot._payment_terms_writer, ORDER["tags"])
+
+        async def writer(order_id):
+            return {"ok": True, "updated": True, "was": "Due on receipt"}
+        copilot._tool_json, copilot._payment_terms_writer = counting, writer
+        ORDER["tags"] = "Unprocessed, purchase order unpaid"
+        try:
+            r = post("/api/production-labels/queue", {"order_id": 12345, "name": "#104239"}).json()
+            ok(r["po_unpaid"] and r["terms_ok"] and "Net 30" in r["terms_note"], r)
+            eq(reads, [12345], "the order was read once for the release and its terms")
+            reads.clear(); reset_prod()
+            ORDER["tags"] = "Unprocessed"
+            plain = post("/api/production-labels/queue", {"order_id": 12345}).json()
+            ok(not plain["po_unpaid"] and plain["terms_ok"], plain)
+            eq(reads, [12345], "an ordinary order too")
+        finally:
+            copilot._tool_json, copilot._payment_terms_writer, ORDER["tags"] = saved
+            reset_prod()
+    with_accounts(go)
+
+
+@test
+def t_the_missed_orders_check_is_not_scanned_again_until_an_order_changes():
+    """Every load of the Make queue walked every open order in the shop, with
+    their addresses and lines, to find paid orders that never reached the
+    bench, and no answer was ever kept. It is now kept until any order is
+    known to have changed (the app's own writes, Shopify's order webhooks and
+    Refresh all say so) or two minutes pass, and kept apart per tag."""
+    scans = []
+
+    async def tools(registry, name, args):
+        if name == "shopify_list_orders" and args.get("status") == "open":
+            scans.append(1)
+            return {"orders": [{"id": 9, "name": "#9", "created_at": "2026-10-01T10:00:00Z", "tags": "",
+                                "financial_status": "paid", "line_items": [{"title": "Gobo", "properties": [
+                                    {"name": "Manufacturer", "value": "Martin"}]}]}]}
+        return {}
+    saved = copilot._tool_json
+    copilot._tool_json = tools
+    copilot._missing_cache.clear()
+    try:
+        a = run(copilot.run_missing_production({}))
+        b = run(copilot.run_missing_production({}))
+        eq(len(scans), 1, "two looks, one scan")
+        eq(a, b, "the same answer")
+        copilot._orders_changed([9])
+        run(copilot.run_missing_production({}))
+        eq(len(scans), 2, "an order known to have changed scans again")
+        copilot._bust_orders()
+        run(copilot.run_missing_production({}))
+        eq(len(scans), 3, "and so does a Refresh")
+        run(copilot.run_missing_production({}, tag="Other"))
+        eq(len(scans), 4, "another tag is its own answer")
+        saved_ttl = copilot.MISSING_CACHE_SECS
+        copilot.MISSING_CACHE_SECS = 0
+        try:
+            run(copilot.run_missing_production({}))
+            eq(len(scans), 5, "and two minutes on, it scans again")
+        finally:
+            copilot.MISSING_CACHE_SECS = saved_ttl
+
+        async def failing(registry, name, args):
+            scans.append(1)
+            return {"_failed": True}
+        copilot._tool_json = failing
+        copilot._missing_cache.clear()
+        ok(run(copilot.run_missing_production({})).get("error"), "a failed scan says so")
+        ok(run(copilot.run_missing_production({})).get("error") and len(scans) == 7, "and is not kept")
+    finally:
+        copilot._tool_json = saved
+        copilot._missing_cache.clear()
+
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a
     # handful, which is what LOGIN_MAX_PER_MIN is sized for. The ceiling has
     # its own test rather than being weakened for everyone else's sake.
     copilot._login_hits.clear()
+    # A missed-orders answer is kept until an order changes, and one test's
+    # stubbed shop is not the next test's: nothing changes between them.
+    copilot._missing_cache.clear()
     reached = len(NET_REACHED)
     try:
         fn()
