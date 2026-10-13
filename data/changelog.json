@@ -1,7 +1,7 @@
 {
  "releases": [
   {
-   "date": "2026-10-12",
+   "date": "2026-10-13",
    "title": "Every page uses its width",
    "items": [
     {
@@ -138,6 +138,11 @@
      "kind": "fixed",
      "tab": null,
      "text": "On a phone, the Store profile's boxes in Settings grow to fit their text instead of cutting it off."
+    },
+    {
+     "kind": "fixed",
+     "tab": "labels",
+     "text": "On a phone an opened order's label no longer leaves a blank space under it: its size line and Print this label sit straight under the label. The printed label is as it was."
     }
    ]
   },

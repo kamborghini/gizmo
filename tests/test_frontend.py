@@ -2858,6 +2858,17 @@ def t_a_phone_release_puts_its_date_beside_its_title():
 
 
 @test
+def t_a_phone_label_preview_leaves_no_blank_under_it():
+    """Cameron, 13 Oct 2026 ("change the label rule too"): on a phone the
+    opened order's label was shrunk to 78% with a transform, which left its
+    full-size box in place, so 84px of blank sat under the label. zoom shrinks
+    the box with it. Only the on-screen preview changes: the printed label is
+    laid out in #label-print, which this rule never reaches."""
+    ok(".lbl-preview .label-sheet { zoom: .78; }" in CSS and ".lbl-preview .label-sheet { transform: scale(.78)" not in CSS,
+       "the preview's box shrinks with the label")
+
+
+@test
 def t_a_report_pairs_its_short_blocks():
     """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
     so a three-line summary, four findings or a short table sat in the left
@@ -11392,7 +11403,10 @@ def t_the_printed_sheets_do_not_change():
     pr = re.compile(r"label-sheet|day-sheet|loan-sticker|guide-print-row|#label-print|printing-label|@media print|@page")
     rules = [s + "{" + re.sub(r"\s+", " ", b).strip() + "}" for s, b in _rules(CSS) if pr.search(s)]
     eq(len(rules), 80, "the print rules are the same eighty")
-    eq(h("\n".join(rules)), "dd6dd5eed001305b", "and each is unchanged, in order")
+    # 13 Oct 2026, Cameron ("change the label rule too"): the phone's on-screen preview,
+    # @media (max-width: 640px) .lbl-preview .label-sheet, shrinks with zoom: .78 in place of
+    # transform: scale(.78), so no blank is left under it. The other 79 rules are as they were.
+    eq(h("\n".join(rules)), "4ae59112e066329a", "and each is unchanged, in order")
     ok('<div id="label-print"></div>' in HTML, "the print staging area is still a child of the page")
     ff = re.search(r"@font-face \{ font-family: 'Bricolage Grotesque';[^}]*\}", CSS)
     ok(ff, "the label face is still declared")

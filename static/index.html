@@ -4335,9 +4335,11 @@
             /* An actual-size label preview is 102mm (384px) or A4 (794px) wide:
                it juts past the card and drags the whole tab sideways. Scroll it
                inside its own box, and scale it down to fit the phone - the mm
-               geometry the printer uses is untouched. */
+               geometry the printer uses is untouched. zoom, not a transform, so
+               the box shrinks with the label and no blank is left under it
+               (Cameron, 13 Oct 2026). */
             .lbl-preview { overflow-x: auto; }
-            .lbl-preview .label-sheet { transform: scale(.78); transform-origin: top left; }
+            .lbl-preview .label-sheet { zoom: .78; }
         }
         .disp-pick { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2);
             margin: 0 0 var(--sp-2-5); padding-bottom: var(--sp-2-5); border-bottom: var(--bw-hairline) solid var(--border-default); }
