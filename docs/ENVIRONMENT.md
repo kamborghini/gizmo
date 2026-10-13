@@ -3,7 +3,7 @@
 Generated from the code by `tools/env_reference.py`; do not edit by hand.
 `make env-doc` rewrites it, and CI fails when it is stale.
 
-222 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document.
+222 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document. `[shop domain]` stands for the shop's own website domain, which those defaults carry.
 
 ## server.py
 
@@ -205,7 +205,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `MADE_TAG` | `"PC"` | copilot |  |
 | `OPTION_CACHE_SECS` | `"21600"` | copilot | 6 hours |
 | `PO_UNPAID_TAG` | `"purchase order unpaid"` | copilot |  |
-| `PROPOSAL_HOST` | `"quote.projectedimage.com"` | copilot |  |
+| `PROPOSAL_HOST` | `"quote.[shop domain]"` | copilot |  |
 | `SHOP_CACHE_SECS` | `"900"` | copilot |  |
 | `UNPROCESSED_TAG` | `"Unprocessed"` | copilot |  |
 
@@ -298,7 +298,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
-| `ENQUIRY_SENDERS` | `"shopifyemail.com,shopify.com,projectedimage.com"` | copilot |  |
+| `ENQUIRY_SENDERS` | `"shopifyemail.com,shopify.com,[shop domain]"` | copilot |  |
 | `MAIL_BOARD_DONE_DAYS` | `"90"` | copilot |  |
 | `MAIL_BOARD_MAX` | `"1500"` | copilot |  |
 

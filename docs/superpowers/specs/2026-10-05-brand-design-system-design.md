@@ -1,9 +1,9 @@
-# Reactor in Projected Image's brand: one source of truth
+# Reactor in the shop's brand: one source of truth
 
 Cameron, 5 October 2026: "we need to make app wide design improvements",
 "uniformity is key, all of the screens need to be cohesive and feel part of the
 same app and family", "one source of truth is also vitally important". They
-chose a refreshed look drawn from Projected Image's brand, kept inside Reactor,
+chose a refreshed look drawn from the shop's brand, kept inside Reactor,
 built as shared parts first and every screen rebuilt on them, pilot first. They
 approved the brand section below and said "build it".
 
@@ -30,7 +30,7 @@ outside `:root`.
 | Shape | 6px for every control and field (`--radius-control`, `--radius-field`); 8px cards, windows and menus (`--radius-card`); 6px for a box inside a card (`--radius-inset`); 4px for tags and badges (`--radius-tag`); round only where the shape means something (switch, progress bars, dots, avatars, the tab underline) | Cameron, 5 Oct: "Do not use pill-shaped UI unnecessarily", reversing the pilot's website pills; an inner corner is never rounder than its frame |
 | Shadows | none under what sits on the page; menus, dialogs, drawers keep theirs | |
 | Density | 32px controls, 14px body, compact tables | a working tool, not the airy website |
-| Identity | Projected Image wordmark, then "Reactor", top of the sidebar | |
+| Identity | The shop's wordmark, then "Reactor", top of the sidebar | |
 
 What counts as a title is ONE list, the `:is(...)` rule after `:root`.
 

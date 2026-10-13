@@ -9,7 +9,7 @@ It supersedes the values in section 5 of `2026-10-05-brand-design-system-design.
 
 Only the values, the parts and the words change.
 
-**Reference:** `docs/design/mix/mix.html` is a working mockup of Forecast and Production Manager on a desktop and a phone, with three details. Open it in a browser. Its `:root` block holds the exact tokens listed in section 4. `label-real.png` beside it is the production label as Reactor printed it from sample orders. It is a picture of the real thing, not a design.
+**Reference:** `docs/design/mix/mix.html` is a working mockup of Forecast and Production Manager on a desktop and a phone, with three details. Open it in a browser. Its `:root` block holds the exact tokens listed in section 4. `label-real.png` beside it is the production label as Reactor printed it from sample orders, with the logo blanked to a grey block for this public repository. It is a picture of the real thing, not a design.
 
 **Appendix:** `2026-10-06-reactor-mix-copy-plan.md` lists every piece of explanatory text in the app, 292 items, each with its proposal.
 

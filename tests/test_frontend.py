@@ -10228,7 +10228,7 @@ def t_two_choosers_and_nothing_else():
 
 
 @test
-def t_reactor_wears_projected_images_brand_from_one_place():
+def t_reactor_wears_the_shops_brand_from_one_place():
     """The brand (projectedimage.com's own theme settings, 2026-10-05) is set
     once, at the root, and every screen reads it."""
     for tok, v in (("teal-500", "#13B7C0"), ("ink", "#121212"), ("brand-blue", "#334FB4")):
