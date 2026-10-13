@@ -11212,7 +11212,7 @@ async def _connector_call(method: str, path: str, params: Optional[dict] = None,
     headers = {}
     token = os.environ.get("CONNECTOR_TOKEN") or ""
     if token and not _connector_url_safe(_connector_url()):
-        raise RuntimeError("CONNECTOR_URL is neither https nor a private Railway address, "
+        raise RuntimeError("The connector's address is neither https nor on the hosting's private network, "
                            "so the connector token will not be sent to it.")
     if token:
         headers["Authorization"] = "Bearer " + token
@@ -12109,7 +12109,7 @@ async def _scheduler_loop(registry: dict) -> None:
                     _save_watch(state)
                     await _send_alert_email("Reactor: background scheduler hit an error",
                                             ["The automatic refresh loop errored; it will keep retrying.",
-                                             "If alerts go quiet for days, check the Railway logs."])
+                                             "If alerts go quiet for days, check the server logs."])
             except Exception:
                 pass
         await asyncio.sleep(SCHEDULE_CHECK_SECS)
@@ -15231,7 +15231,7 @@ def _erase_import_blocker(d: dict) -> str:
     stale = _erase_stale_marks(d)
     if stale:
         return ("People erased on request are remembered under a different encryption key "
-                "(TOKEN_ENCRYPTION_KEY was changed or removed), so an import could not keep "
+                "(it was changed or removed in the app's hosting settings), so an import could not keep "
                 "them out. Put the previous key back before importing.")
     return ""
 
@@ -17523,7 +17523,7 @@ def _master_reset_check(d: dict) -> None:
                          # operator can read it - and deliberately NOT shipped to
                          # the log drain, which is a third party.
                          extra={"no_drain": True})
-            _track(uid, "auth", "master password reset", "via the MASTER_RESET variable")
+            _track(uid, "auth", "master password reset", "via the break-glass reset")
             return
 
 
@@ -20013,7 +20013,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         failed posts {"error": ...} so the tab can say so instead of showing a
         stale forecast as if it were fresh."""
         if not FORECAST_INGEST_TOKEN:
-            return _json({"error": "The forecast hook is switched off: set FORECAST_INGEST_TOKEN."}, 503)
+            return _json({"error": "The forecast hook is switched off: no hook token is set on this server."}, 503)
         if not _forecast_token_ok(request):
             return _json({"error": "Unauthorized"}, 401)
         # No session and no rate window, like the Shopify webhook receiver: the
@@ -20050,7 +20050,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         """The service fetches the workbook an admin uploaded in the tab, so the
         plan lives in one place and a revised sheet reaches the next run."""
         if not FORECAST_INGEST_TOKEN:
-            return _json({"error": "The forecast hook is switched off: set FORECAST_INGEST_TOKEN."}, 503)
+            return _json({"error": "The forecast hook is switched off: no hook token is set on this server."}, 503)
         if not _forecast_token_ok(request):
             return _json({"error": "Unauthorized"}, 401)
         wb = _forecast_state().get("workbook") or {}
@@ -20070,7 +20070,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         weigh its sources on their record rather than only on a backtest it
         computed itself a moment earlier."""
         if not FORECAST_INGEST_TOKEN:
-            return _json({"error": "The forecast hook is switched off: set FORECAST_INGEST_TOKEN."}, 503)
+            return _json({"error": "The forecast hook is switched off: no hook token is set on this server."}, 503)
         if not _forecast_token_ok(request):
             return _json({"error": "Unauthorized"}, 401)
         led = _forecast_state().get("ledger")
@@ -20086,7 +20086,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         else: the token that opens them cannot write, and cannot choose what
         is read beyond a date and a page."""
         if not FORECAST_INGEST_TOKEN:
-            return _json({"error": "The forecast hook is switched off: set FORECAST_INGEST_TOKEN."}, 503)
+            return _json({"error": "The forecast hook is switched off: no hook token is set on this server."}, 503)
         if not _forecast_token_ok(request):
             return _json({"error": "Unauthorized"}, 401)
         body = await _read_json_capped(request, cap=4096)
@@ -23204,7 +23204,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if info.file_size > BACKUP_FILE_MAX:
                 return _json({"error": base + " is larger than this app will restore ("
                                        + str(info.file_size // (1024 * 1024)) + "MB). Nothing "
-                                       "has been changed. Raise BACKUP_FILE_MAX and try again."}, 400)
+                                       "has been changed. Raise the backup file size limit in the "
+                                       "app's hosting settings and try again."}, 400)
             todo.append((info, base, target))
         if not todo:
             return _json({"error": "Nothing in that zip looked like this app's backup."}, 400)
@@ -23705,9 +23706,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if _team_role(who) != "master":
             return _json({"error": "Only the master account can look at Pipedrive."}, 403)
         if not pipedrive.configured():
-            return _json({"error": "No Pipedrive token is set on the server. Add "
-                                   "PIPEDRIVE_API_TOKEN in Railway, from an ADMIN's "
-                                   "Pipedrive account, then try again.",
+            return _json({"error": "No Pipedrive token is set on the server. Add one from an "
+                                   "admin's Pipedrive account in the app's hosting settings, "
+                                   "then try again.",
                           "configured": False}, 400)
         try:
             out = await pipedrive.survey()
@@ -24605,8 +24606,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if err:
             return err
         if not _files_configured():
-            return _json({"error": "File storage isn't connected yet. Add the Cloudflare R2 "
-                                   "keys in Railway to switch it on."}, 400)
+            return _json({"error": "File storage isn't connected yet. Add the storage keys "
+                                   "in the app's hosting settings to switch it on."}, 400)
         name = _files_clean_name(body.get("name"))
         if _file_ext(name) in _DANGEROUS_EXT:
             return _json({"error": f"{name} is a program, not a document."}, 400)
@@ -24642,8 +24643,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     url = await asyncio.to_thread(_files_sign_put, key, ctype, size, False)
                 except RuntimeError as e:
                     logger.warning("files: presign failed: %s", e)
-                    return _json({"error": "Storage isn't reachable right now. Check the R2 "
-                                           "keys in Railway, then try again."}, 502)
+                    return _json({"error": "Storage isn't reachable right now. Check the storage "
+                                           "keys in the app's hosting settings, then try again."}, 502)
                 rec = {"name": name, "folder_id": folder, "size": size,
                        "type": ctype, "r2_key": key, "status": "pending", "by": who,
                        "created_at": datetime.now(timezone.utc).isoformat()}
@@ -26360,8 +26361,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if err:
             return err
         if not _zeta_configured():
-            return _json({"error": "The stock app isn't connected (ZETA_URL and the sync "
-                                   "token are needed)."}, 400)
+            return _json({"error": "The stock app isn't connected: its address and sync "
+                                   "token are not set on the server."}, 400)
         date_str = str(body.get("date") or "")
         raw = body.get("lines")
         if not isinstance(raw, list) or not raw or len(raw) > 100:
@@ -26576,8 +26577,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # Credentials: only persist non-empty values, and only when not env-managed.
         if worldoptions and any(k in body for k in ("meter_number", "key", "password")):
             if _wo_creds_from_env():
-                return _json({"error": "World Options credentials are set on the server (WO_METER_NUMBER "
-                                       "etc.) and can't be changed from here."}, 400)
+                return _json({"error": "World Options credentials are set on the server "
+                                       "and can't be changed from here."}, 400)
             meter = body.get("meter_number"); key = body.get("key"); pw = body.get("password")
             meter = str(meter).strip() if isinstance(meter, str) and meter.strip() else None
             key = str(key).strip() if isinstance(key, str) and key.strip() else None
@@ -27646,7 +27647,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not _window_ok(_rl_hits.setdefault("oauth:" + _client_key(request), []), RATE_MAX_CLIENT, time.monotonic()):
             return PlainTextResponse("Too many requests", status_code=429, headers=_API_HEADERS)
         if not xero_api.client_configured():
-            return _oauth_page("Not configured", "Set XERO_CLIENT_ID / XERO_CLIENT_SECRET on the server first.")
+            return _oauth_page("Not configured", "Add Xero's client ID and secret in the app's hosting settings first.")
         # A single-use ticket from the app's own button, or the standing secret
         # as the recovery path. Handing someone a link with a placeholder where
         # the secret goes is not a way in, and asking them to paste a server
@@ -27700,9 +27701,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         op = str(body.get("op") or "status")
         if not _connector_url():
             return _json({"available": False,
-                          "note": "The connector service is not linked yet. Set CONNECTOR_URL "
-                                  "(and CONNECTOR_TOKEN) in Railway to the private address of "
-                                  "the shopify-xero-connector service."})
+                          "note": "The connector service is not linked yet. Add its private "
+                                  "address and token in the app's hosting settings."})
         # A URL with a scheme and a port but NO HOST. Railway resolves a
         # ${{service.VARIABLE}} reference to an empty string when it cannot
         # find that service, so "http://${{wrong.RAILWAY_PRIVATE_DOMAIN}}:8899"
@@ -27710,10 +27710,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # UnsupportedProtocol, which describes the symptom and hides the cause.
         if not urlparse(_connector_url()).hostname:
             return _json({"available": True,
-                          "error": "CONNECTOR_URL has no hostname in it (" + _connector_url()
-                                   + "). A ${{service.RAILWAY_PRIVATE_DOMAIN}} reference "
-                                     "resolves to nothing when it names a service Railway "
-                                     "cannot find, leaving just the scheme and the port. Copy "
+                          "error": "The connector's address has no hostname in it (" + _connector_url()
+                                   + "). A reference to another service's private domain "
+                                     "resolves to nothing when the hosting cannot find the "
+                                     "service it names, leaving just the scheme and the port. Copy "
                                      "the connector's private domain from its Settings, "
                                      "Networking, Private Networking and type it in full."},
                          502)
@@ -27876,13 +27876,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                        "service is running and stuck rather than missing. Its own logs "
                        "will say why.")
             elif unresolved:
-                why = ("That name does not resolve, so CONNECTOR_URL points at a service "
-                       "this Railway project does not have. Check the service name in it "
-                       "- a bare ${{RAILWAY_PRIVATE_DOMAIN}} resolves to gizmo itself.")
+                why = ("That name does not resolve, so the connector's address points at a "
+                       "service the hosting does not have. Check the service name in it: a "
+                       "private domain reference that names no service resolves to this app itself.")
             elif isinstance(e, httpx.ConnectError):
                 why = ("The name resolves but nothing is listening there. Either the port "
-                       "is wrong, or the service is bound to IPv4: Railway's private "
-                       "network is IPv6 only, so it needs HOST=:: to be reachable.")
+                       "is wrong, or the service is bound to IPv4: the hosting's private "
+                       "network is IPv6 only, so the connector has to listen on every "
+                       "address (::) to be reachable.")
             else:
                 why = "The connection failed (" + type(e).__name__ + ")."
             return _json({"available": True,
@@ -27944,8 +27945,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if _team_role(who) != "master":
             return _json({"error": "Only the master account can connect Xero."}, 403)
         if not xero_api.client_configured():
-            return _json({"error": "The server has no Xero credentials yet. Set XERO_CLIENT_ID "
-                                   "and XERO_CLIENT_SECRET in Railway, then redeploy."}, 400)
+            return _json({"error": "The server has no Xero credentials yet. Add Xero's client ID "
+                                   "and secret in the app's hosting settings, then redeploy."}, 400)
         now = time.time()
         for t, exp in list(_xero_connect_tickets.items()):
             if exp < now:
@@ -27970,10 +27971,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Request too large."}, 413)
         if not google_mail.client_configured():
             return _json({"error": "The server has no Google client configured yet. "
-                                   "Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET."}, 400)
+                                   "Add Google's client ID and secret in the app's hosting settings."}, 400)
         if not google_mail.FINANCE.usable():
             return _json({"error": "The accounts mailbox is set to the same token file as the "
-                                   "sales inbox. Give GMAIL_FINANCE_TOKEN_PATH its own path."}, 400)
+                                   "sales inbox. Give it its own token file in the app's hosting settings."}, 400)
         now = time.time()
         for t, exp in list(_fin_connect_tickets.items()):
             if exp < now:
@@ -28055,7 +28056,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 d.pop(k, None)      # what was read from that mailbox goes with it
             _write_recon(d)
             _track(who, "recon", "disconnected the accounts mailbox", " ".join(notes)[:120])
-            notes.append("Google keeps its own record of the grant: remove gizmo at "
+            notes.append("Google keeps its own record of the grant: remove this app's access at "
                          "myaccount.google.com/permissions to be certain it is gone.")
         else:
             return _json({"error": "Say what to disconnect: xero or mailbox."}, 400)
@@ -28151,7 +28152,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not _window_ok(_rl_hits.setdefault("oauth:" + _client_key(request), []), RATE_MAX_CLIENT, time.monotonic()):
             return PlainTextResponse("Too many requests", status_code=429, headers=_API_HEADERS)
         if not google_data.oauth_client_configured():
-            return _oauth_page("Not configured", "Set GOOGLE_OAUTH_CLIENT_ID / SECRET on the server first.")
+            return _oauth_page("Not configured", "Add Google's client ID and secret in the app's hosting settings first.")
         key = request.query_params.get("key", "")
         if not (google_data.CONNECT_SECRET and key and
                 secrets.compare_digest(key, google_data.CONNECT_SECRET)):
@@ -28206,7 +28207,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not _window_ok(_rl_hits.setdefault("oauth:" + _client_key(request), []), RATE_MAX_CLIENT, time.monotonic()):
             return PlainTextResponse("Too many requests", status_code=429, headers=_API_HEADERS)
         if not google_mail.client_configured():
-            return _oauth_page("Not configured", "Set GOOGLE_OAUTH_CLIENT_ID / SECRET on the server first.")
+            return _oauth_page("Not configured", "Add Google's client ID and secret in the app's hosting settings first.")
         # Two ways in: a single-use ticket minted for the master through the
         # app (the button), or the standing connect secret (the manual path,
         # kept so the mailbox is still recoverable when nobody can sign in).
@@ -28267,12 +28268,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                           RATE_MAX_CLIENT, time.monotonic()):
             return PlainTextResponse("Too many requests", status_code=429, headers=_API_HEADERS)
         if not google_mail.client_configured():
-            return _oauth_page("Not configured", "Set GOOGLE_OAUTH_CLIENT_ID / SECRET on the server first.")
+            return _oauth_page("Not configured", "Add Google's client ID and secret in the app's hosting settings first.")
         if not google_mail.FINANCE.usable():
             return _oauth_page("Not configured",
                                "The accounts mailbox is set to the same token file as the "
-                               "sales inbox. Give GMAIL_FINANCE_TOKEN_PATH its own path, "
-                               "then try again.")
+                               "sales inbox. Give it its own token file in the app's "
+                               "hosting settings, then try again.")
         # Two ways in, the same as the sales mailbox: a single-use ticket minted
         # for the master through the app (the button), or the standing connect
         # secret, kept so the mailbox is recoverable when nobody can sign in.
@@ -28360,7 +28361,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Only the master account can connect the mailbox."}, 403)
         if not google_mail.client_configured():
             return _json({"error": "The server has no Google client configured yet. "
-                                   "Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET."}, 400)
+                                   "Add Google's client ID and secret in the app's hosting settings."}, 400)
         now = time.time()
         for t, exp in list(_mail_connect_tickets.items()):
             if exp < now:

@@ -212,7 +212,7 @@ async def revoke(force: bool = False) -> dict:
         # try again or remove the app in Xero directly.
         return {"ok": False, "kept": True,
                 "note": note + " The connection was left in place so revoking can be retried. "
-                               "You can also remove gizmo under Connected Apps in Xero, then "
+                               "You can also remove this app under Connected Apps in Xero, then "
                                "disconnect here again."}
     disconnect()
     return {"ok": not note, "kept": False, "note": note}
