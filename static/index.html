@@ -3640,6 +3640,8 @@
         .guide-d .setup-code { word-break: normal; overflow-wrap: anywhere; }
         .guide-copy { margin-left: var(--sp-1); vertical-align: middle; }
         .guide-tools { display: grid; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+        /* As a panel (13 Oct 2026) it sits a panel gap above the cards, not the toolbar's 16. */
+        @media screen { .guide-host > .guide-tools.panel { margin-bottom: var(--panel-gap); } }
         /* Stretched by the grid, the search's box ran the width of the page
            and its clear button sat at the far end, 605px from the field. */
         /* Design, in the Guide: only the frame the gallery needs. The parts in

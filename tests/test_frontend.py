@@ -12223,6 +12223,7 @@ def t_notices_are_never_panels_and_the_guides_contents_are_one():
     ok("'alerts-banner', 'cx-health', 'mail-viewwarn', 'mail-sendwarn', 'disp-warn', 'disp-await', 'mail-note', 'mail-hidden-note', 'resp-note'" in sk,
        "every notice is skipped")
     ok("'alert'," not in sk and "'guide-tools'" not in sk, "no dead name, and the Guide's contents are a panel")
+    ok("@media screen { .guide-host > .guide-tools.panel { margin-bottom: var(--panel-gap); } }" in CSS, "a panel gap from the cards under it, not the toolbar's 16")
     if not _node_ok():
         print("       (node unavailable, skipped)")
         return
