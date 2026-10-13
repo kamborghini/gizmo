@@ -15764,6 +15764,94 @@ def t_a_refused_request_says_why_so_the_page_can_answer_it():
     ok(set(copilot.AUTH_REFUSALS) == {"token", "session", "inactive", "must_change"}, "four reasons, each with its own words")
 
 @test
+def t_recon_reports_money_at_stake_by_severity():
+    """12 Oct 2026: each severity counter shows the money at stake beside its
+    count. Both are worked out live from the same rule (open: new or
+    investigating, and not stale), so a counter's figure and its money always
+    agree; the count used to be a snapshot from the last sweep."""
+    import copilot as _cp
+    ensure_auth()
+    keep = json.loads(json.dumps(_cp._load_recon()))
+    try:
+        d = {"exceptions": {}, "watermarks": {}}
+        n = [0]
+        def put(sev, amount, status="new", stale=False):
+            n[0] += 1
+            e = _rc.make_exc("shopify_sale_missing", sev, "money " + str(n[0]), ["m" + str(n[0])], amount=amount)
+            e["status"] = status; e["stale"] = stale
+            d["exceptions"][e["id"]] = e
+        put("critical", 100000); put("critical", -25000); put("high", 5000, status="investigating")
+        put("high", 9900, status="explained"); put("medium", 700, stale=True); put("low", 1234)
+        put("low", None)
+        _cp._write_recon(d)
+        j = post("/api/recon/status", {}).json()
+        eq(j["open_amounts"], {"critical": 125000, "high": 5000, "medium": 0, "low": 1234},
+           "the money at stake: open, live, and the size of each difference whatever its sign")
+        eq(j["open_counts"], {"critical": 2, "high": 1, "medium": 0, "low": 2},
+           "counted by the same rule, so a counter's figure and its money agree")
+    finally:
+        _cp._write_recon(keep)
+
+
+@test
+def t_the_ai_counts_open_discrepancies_as_the_page_does():
+    """Final review M-7, 12 Oct 2026: the page counts open discrepancies live,
+    but the AI's reconciliation summary still read the last sweep's snapshot,
+    so after someone marked one Explained, chat could say 3 critical were open
+    while the page said 2."""
+    import asyncio
+    import copilot as _cp
+    keep = json.loads(json.dumps(_cp._load_recon()))
+    try:
+        d = {"exceptions": {}, "watermarks": {}, "open_counts": {"critical": 3, "high": 0, "medium": 0, "low": 0}}
+        for i, status in enumerate(("new", "investigating", "explained")):
+            e = _rc.make_exc("shopify_sale_missing", "critical", "ai " + str(i), ["ai" + str(i)], amount=1000)
+            e["status"] = status
+            d["exceptions"][e["id"]] = e
+        _cp._write_recon(d)
+        got = json.loads(asyncio.run(_cp.recon_summary(_cp.ReconEmptyInput())))
+        eq(got["open_counts"], {"critical": 2, "high": 0, "medium": 0, "low": 0}, "the AI's count is the page's, not the sweep's snapshot")
+    finally:
+        _cp._write_recon(keep)
+
+
+@test
+def t_a_discrepancy_names_its_record_and_who_it_is_with():
+    """12 Oct 2026: the discrepancies table's Record column, from the evidence
+    the list never sent: the record a person would look up, and who it is with
+    (or the other record it disagrees with)."""
+    import copilot as _cp
+    mk, E = _rc.make_exc, _rc.ev
+    cases = [
+        (mk("order_invoice_amount_mismatch", "high", "x", ["a"], evidence=[
+            E("shopify", "order", "Order #104477", {"name": "#104477", "company": "Okafor Lighting Hire"}, 1),
+            E("xero", "invoice", "Invoice INV-2217", {"number": "INV-2217", "contact": "Okafor Lighting Hire"}, 2)]), ("#104477", "INV-2217")),
+        (mk("shopify_sale_missing", "high", "x", ["b"], evidence=[
+            E("shopify", "order", "Order #104529", {"name": "#104529", "company": "Brightwell Weddings", "customer": "Priya Shah"}, 1)]),
+         ("#104529", "Brightwell Weddings")),
+        (mk("payout_missing_from_bank", "critical", "x", ["c"], evidence=[
+            E("shopify", "payout", "Payout 118340091", {"id": "118340091"}, 1)]), ("Payout 118340091", "")),
+        (mk("duplicate_bill_number", "high", "x", ["d"], evidence=[
+            E("xero", "bill", "Bill DS-7781", {"number": "DS-7781", "contact": "Dichroic Supplies Ltd"}, 1)]), ("DS-7781", "Dichroic Supplies Ltd")),
+        (mk("gmail_doc_missing_from_xero", "medium", "x", ["e"], evidence=[
+            E("gmail", "document", "supplier_invoice file", {"doc_type": "supplier_invoice", "subject": "Invoice LX-30418 from LEDXON Optics"}, 1)]),
+         ("Supplier invoice", "LEDXON Optics")),
+        (mk("remittance_payment_missing", "critical", "x", ["f"], evidence=[
+            E("gmail", "document", "remittance file", {"doc_type": "remittance", "subject": "Remittance advice - Marston Venues"}, 1)]),
+         ("Remittance", "Marston Venues")),
+        (mk("chargeback_missing_from_xero", "high", "x", ["g"], evidence=[
+            E("shopify", "dispute", "Dispute 84221775", {"id": "84221775"}, 1)]), ("Dispute 84221775", "")),
+        (mk("stale_unreconciled", "low", "x", ["h"], evidence=[
+            E("xero", "bank_transaction", "Bank txn e21a", {"contact": "", "date": "2026-09-03"}, 1)]), ("Bank line", "")),
+    ]
+    for e, want in cases:
+        pub = _cp._recon_exc_public(e)
+        eq((pub.get("record"), pub.get("counterparty")), want, e["kind"])
+    bare = _cp._recon_exc_public(mk("xero_sale_without_shopify", "low", "x", ["i"]))
+    eq((bare.get("record"), bare.get("counterparty")), ("", ""), "no evidence, nothing invented")
+
+
+@test
 def t_recon_routes_enforce_their_rules():
     def go():
         ensure_auth()

@@ -2039,6 +2039,1038 @@ def t_an_order_missing_its_terms_is_flagged_on_the_queue_row():
 
 
 @test
+def t_liability_owing_is_a_table_with_the_account_opened_beside_its_email():
+    """DF-18, DF-20, 12 Oct 2026: each customer owing was a name at the left,
+    an Overdue tag in the middle and the amount alone at the far edge, the row
+    Cameron's first screenshot showed on Loan units; nothing owed was six £0
+    tiles and a card holding one centred line."""
+    fn = fn_src("function renderLiability(")
+    ok("dtable(" in fn and "'dt-owing'" in fn and "'lia-name'" not in fn, "customers owing is a table")
+    for head in ("'Customer'", "'Owed'", "'Overdue'", "'Status'", "'Orders'", "'Oldest'", "'Terms'", "'Last chased'"):
+        ok("head: " + head in fn, "with a column " + head)
+    ok("after: liaOpen === key ? liaDetail(c, rows) : null" in fn, "an opened account opens under its own row")
+    det = fn_src("function liaDetail(") if "function liaDetail(" in SCRIPT else ""
+    ok("el('div', 'duo')" in det and "chasePanel(c, cur)" in det and "'Value and paid'" in det and "'Terms and channel'" in det,
+       "its orders beside the chase email, two-line cells so both fit")
+    ok("aria-label', 'Close ' + c.name" in det, "and an X beside its name closes it")
+    # Final review I-3: the line keeps the paid-but-tagged strip and drops its stale stamp (t_nothing_owed_still_says_what_is_paid_but_tagged).
+    ok("'Nothing is owed.'" in fn and "emptyState({ icon: I.wallet," in fn, "nothing owed is one line, not six £0 tiles and a card")
+    ok("r.after" in fn_src("function dtable("), "a table row can carry its detail under it")
+    ok("actions: [liaRefresh]" in fn, "Refresh is worded in the header, as on Xero sync")
+
+
+RECON_WHAT_LABELS = {
+    "shopify_sale_missing": "Sale missing in Xero", "order_invoice_amount_mismatch": "Totals differ",
+    "order_invoice_tax_mismatch": "VAT differs", "shopify_refund_missing": "Refund missing in Xero",
+    "payout_missing_from_bank": "Payout not in the bank", "payout_bank_unreconciled": "Payout deposit not reconciled",
+    "payout_explained_by_fees": "Payout short by its fees", "stale_unreconciled": "Bank line unreconciled",
+    "duplicate_bill_number": "Duplicate bill number", "possible_duplicate_bill": "Possible duplicate bill",
+    "overpaid_invoice": "Invoice over-allocated", "chargeback_missing_from_xero": "Chargeback missing in Xero",
+    "xero_sale_without_shopify": "Xero sale, no Shopify order", "invoice_numbering_unlinked": "Invoice numbers unlinked",
+    "gmail_doc_missing_from_xero": "Document missing in Xero", "remittance_unknown_invoice": "Remittance names an unknown invoice",
+    "remittance_amount_mismatch": "Remittance amount differs", "remittance_payment_missing": "Remittance not paid in Xero",
+}
+
+
+@test
+def t_reconciliation_is_a_band_a_sweep_line_and_a_table():
+    """Cameron's Reconciliation screenshot (12 Oct 2026) and the approved
+    mockup: a connection card over four tiles with 291px of nothing in each,
+    and every discrepancy a sentence at the far left with its amount 1,022px
+    away. Now the counters, with the money at stake, share one band with the
+    sources; the sweep's line, with its time, is on the tab row with its notes
+    behind Notes (n); the discrepancies are a table with a short What and a
+    Record; and an opened one is two columns, closed by an X."""
+    fn = fn_src("function renderRecon() {")
+    ok("actions: heads" in fn and "heads.push(manage)" in fn and "heads.push(sw)" in fn,
+       "Manage and Sweep now are the header's actions")
+    ok("'connection'" not in fn and "widget(band, 'band', 'full', 'Open and sources')" in fn,
+       "one band, not a connection card over the severity tiles")
+    ok("el('div', 'band-src')" in fn and "'Documents read'" in fn and "'Needs reconnecting'" in fn,
+       "the sources sit beside the counters, a refused link in red")
+    ok("financeTabs('recon', '', [reconSweepLine(st, xs)])" in fn, "the sweep's line is on the tab row")
+    sl = fn_src("function reconSweepLine(") if "function reconSweepLine(" in SCRIPT else ""
+    ok("londonHM(st.last_sync)" in sl and "'Partial'" in sl and "'Xero skipped'" in sl, "with its time, and what was partial or skipped")
+    ok("dropPanel(" in sl and "'Notes from the last sweep'" in sl and "'Notes'" in sl, "its notes behind Notes (n), in a popover")
+    ok("dtable([{ head: 'Severity' }, { head: 'What' }, { head: 'Record' }, { head: 'Date' }, { head: 'Status' }, { head: 'Amount', cls: 'num' }" in fn,
+       "the discrepancies are a table under heads")
+    ok("'lbl-row'" not in fn and "'lbl-rows'" not in fn, "not list rows")
+    ok("RECON_WHAT[e.kind]" in fn and "e.record" in fn and "e.counterparty" in fn, "What is the short label, Record the record and who")
+    for kind, label in RECON_WHAT_LABELS.items():
+        ok(kind + ": '" + label + "'" in SCRIPT, "the short What for " + kind)
+    ok("cls: 'dt-recon'" in fn and ".dt-recon { --dt-cols:" in CSS, "the table has its own tracks")
+    ok("cls: RECON_OPEN[e.status] ? '' : 'settled'" in fn, "a settled row goes grey with a hollow dot")
+    ok("after: reconOpen && reconOpen.id === e.id ? reconDetailNode() : null" in fn, "an opened one opens under its row")
+    rd = fn_src("function paintReconDetail(")
+    ok("el('div', 'rd-cols')" in rd and ".rd-cols { display: grid;" in CSS, "the detail is two columns")
+    ok("x.setAttribute('aria-label', 'Close')" in rd and "x.innerHTML = I.x" in rd, "closed by an X beside its sentence")
+    ok("const stbar = segmented(" in rd, "status is the house chooser")
+    ok("el('dl', 'rd-sum')" in rd, "the arithmetic is an aligned sum")
+    ok("el('div', 'rd-verdict')" in rd and "'rd-meter'" in rd, "the verdict is a tag and a confidence meter")
+
+
+@test
+def t_xero_sync_is_a_band_a_status_line_and_its_tables():
+    """Cameron's Xero sync screenshot (12 Oct 2026) and the approved mockup:
+    three figures 460px apart, a Connection card saying again what a green box
+    under it said, a chip row, and four cards stacked. Now the figures and the
+    connection share one band; Review and send has one status line, the matrix
+    at its natural width and Needs attention beside it; the three checks are a
+    line each with plain buttons, so Send to Xero is the one teal; the runs
+    sit beside the quarantine log; and the settings are two columns."""
+    fn = fn_src("function renderConnector() {")
+    ok("actions: [rf]" in fn and "rf.append(ico(I.refresh), document.createTextNode('Refresh'))" in fn, "Refresh is worded in the header")
+    ok("'Last run ' + fmtDate(lastRun.finishedAt) + ', ' + londonHM(lastRun.finishedAt)" in fn, "the stamp has its time")
+    ok("widget(band, 'band', 'full', 'Figures and connection')" in fn and "'ledger'" not in fn
+       and "widget(sCard, 'connection')" not in fn, "one band, not the ledger's row over a Connection card")
+    ok("el('div', 'band-src')" in fn and "'Xero linked'" in fn and "'Auto Run off'" in fn, "the connection and Auto Run lines beside the figures")
+    ok("value: Number(led0[key]).toLocaleString('en-GB')" in fn, "the ledger's figures carry thousands separators")
+    ok("flex: 1 1 30rem" in CSS.split(".band-src {")[1].split("}")[0], "the band's lines drop under the figures before they are cut")
+    ok("cx-health" not in fn and "cx-chips" not in fn, "no health box or chip row: the status line says it once")
+    ok("el('div', 'cx-statl')" in fn and "'Latest review'" in fn, "one status line")
+    ok("el('div', 'cx-rv')" in fn and "'Needs attention'" in fn and "'Send will'" in fn, "the matrix beside Needs attention")
+    ok("cxBtn('btn btn-primary'" not in fn and "'btn btn-primary'" not in fn and fn.count("'btn btn-sm btn-primary'") == 1,
+       "Send to Xero is the one teal")
+    ok("pairNodes(hCard, qCard, 'runs', 'Runs and quarantine', { fit: true })" in fn and "'Quarantine log'" in fn,
+       "the runs beside the quarantine log, at the runs' natural width")
+    ok("(o.fit ? ' fit' : '')" in fn_src("function pairNodes(")
+       and ".wpair.fit > .wpair-in { grid-template-columns: minmax(0, max-content) minmax(0, 1fr); }" in CSS
+       and ".wpair.fit > .wpair-in" in CSS.split("@container wpair (max-width: 64rem)")[1].split("}")[0],
+       "a fit pair gives its left half its natural width, and stacks on a phone like the rest")
+    ok("el('dl', 'conn-pairs cx-set')" in fn and ".conn-pairs.cx-set {" in CSS
+       and "grid-template-columns" in CSS.split(".conn-pairs.cx-set {")[1].split("}")[0], "the settings in two columns")
+
+
+@test
+def t_forecast_runs_to_its_columns_and_its_prose_windows_are_narrow():
+    """DF-26 to DF-28, 12 Oct 2026: Why £53,691 and its bar stopped at 62ch,
+    300px short of their column; each of the numbers behind it had 597px
+    between its label and its count; and two paragraphs opened in an 820px
+    window."""
+    ok("max-width" not in CSS.split("\n        .fc-split-bar {")[1].split("}")[0], "the split bar runs to the column's edge")
+    ok("flex: 0 1 auto" in CSS.split("\n        .rlist-row .lbl {")[1].split("}")[0], "each count and chevron follow the label")
+    pg = fn_src("function fcPage(")
+    ok("m.modal.classList.add(o && o.prose ? 'prose' : 'wide');" in pg and ".modal.disp-modal.prose { max-width: 520px; }" in CSS,
+       "a window is wide only for a table; paragraphs take the house window's 520")
+    hw = fn_src("function fcHowItWorks(")
+    ok("fcPage('The plan it is judged against', () => fcPlanJudged(c, latest), { prose: true })" in hw
+       and "fcPage('How much to trust it', () => fcTrust(latest), { prose: !(latest.metrics || []).length })" in hw,
+       "the plan's and the trust's paragraphs open narrow; the trust's backtest table stays wide")
+
+
+@test
+def t_the_production_manager_opens_an_order_under_its_row_at_every_width():
+    """Cameron's ruling, 12 Oct 2026: the opened order's label goes under its
+    row at every width, as a two-column band (the label, and beside it the
+    repeat-customer line, the size note and Print this label), and the page
+    stays on its 1,200 column: no side pane, no widening. One teal per screen:
+    Print new steps down while an order is open, and a custom shipment's
+    Reprint label is plain. The counters are 128, the name column is as wide
+    as its widest name (OPS-10), and the windows start on their first heading
+    (OPS-15). The queue's content, columns, statuses and actions do not change."""
+    fn = fn_src("function renderLabels(")
+    ok("wideSplit" not in fn and "'lbl-pane'" not in fn and "row.after(wrap);" in fn, "the label opens under its row at every width")
+    # Its two print rules stay as they were: the print CSS is frozen (t_the_printed_sheets_do_not_change).
+    ok(".lbl-pane { position: sticky" not in CSS and "            .lbl-split { display: grid;" not in CSS, "and the side pane's screen rules are gone")
+    pv = CSS.split("\n        .lbl-grid > .lbl-preview {")[1].split("}")[0]
+    ok("display: grid" in pv and "grid-template-columns: max-content minmax(0, 1fr)" in pv, "the band is two columns: the label, and its words")
+    ok("grid-template-rows: auto auto minmax(0, 1fr)" in pv, "the words stay together at the label's top, the last row taking the rest")
+    ok(".lbl-preview > .lbl-frame { grid-column: 1; grid-row: 1 / span 3; }" in CSS, "the label on the left, the words beside its top")
+    ok("pnBtn = el('button', 'btn btn-sm' + (labelSel ? '' : ' btn-primary'));" in SCRIPT, "Print new steps down while an order is open")
+    cq = fn_src("function renderCustomQueue(")
+    ok("const rp = el('button', 'btn btn-sm');" in cq and "'btn btn-sm btn-primary'" not in cq, "a custom shipment's Reprint label is plain")
+    ok("el('button', 'btn btn-sm lbl-slot')" in cq and ".lbl-actions .lbl-slot { visibility: hidden; }" in CSS,
+       "and a shipment with no tracking keeps an empty slot, so Reprint label lines up (OPS-11)")
+    ok(re.search(r"--qc-w:\s*128px;", CSS), "the counters are about as wide as their words")
+    ok("grid-template-columns: var(--ono-w) minmax(220px, max-content) minmax(0, 1fr) max-content max-content;" in CSS,
+       "the name column is as wide as its widest name, and the spare goes to the item line (OPS-10)")
+    ok(".disp-modal .modal-body > .section-title:first-child { margin-top: 0; }" in CSS, "a window starts on its first heading (OPS-15)")
+    ok("const host = el('div', 'coll-host');" in fn_src("async function openBookCollection(")
+       and ".coll-host > .section-title { margin-top: var(--sp-6); }" in CSS and ".coll-host > .section-title:first-child { margin-top: var(--sp-4); }" in CSS,
+       "and Collections has no band above Booked for today")
+
+
+@test
+def t_an_opened_size_is_one_band_and_never_prints_over_the_next_model():
+    """OPS-16 and OPS-17, 12 Oct 2026: an opened model was a 177px list of
+    every fact under the row, and on a phone its cells kept the table's 44px
+    height as blocks, so its details printed over the models under it. Now it
+    is one band lined up with the table: Cut at with Set size straight after
+    it, and the facts, under Maker to Produced as; the words (ruling, review,
+    notes, other names) under Status to Notes. On a phone every cell is as
+    tall as what it holds."""
+    sd = fn_src("function sizesDetail(")
+    ok("left.colSpan = span - 3;" in sd and "right.colSpan = 3;" in sd, "the band lines up with the table's own columns")
+    ok("el('div', 'sizes-cut')" in sd and "cut.append(el('span', 'k', 'Cut at'), acts)" in sd, "Cut at with Set size straight after it")
+    ok("el('div', 'sizes-facts')" in sd and "el('dl', 'sizes-dl')" in sd, "the facts on the left, the words on the right")
+    ph = CSS.split("@container sizes (max-width: 520px) {")[1].split("\n        }")[0]
+    ok("height: auto" in ph.split(".ktable.sizes-table tr.sizes-row > td {")[1].split("}")[0], "on a phone a model's cells are as tall as what they hold")
+    ok(".ktable.sizes-table tr.sizes-detail > td { height: auto; padding: 0 0 var(--sp-4); }" in ph, "and so are its details', which push the next model down (OPS-17)")
+    ir = fn_src("function sizesInlineRule(")
+    ok("const before = [...acts.childNodes];" in ir and "acts.replaceChildren(...before);" in ir, "Cancel puts the size and Set size back as they were")
+
+
+@test
+def t_the_crm_lists_are_tables_and_its_extras_wait_in_more():
+    """OPS-19 to OPS-25, 12 Oct 2026: a lead and an activity were each a
+    name at the left and their facts 800 to 1,200px away; Pipedrive import
+    was a link on the tab row; Insights' months were a ladder of bars beside
+    an empty half; and Contacts kept an empty 48px band for a selection bar."""
+    fn = fn_src("function renderCRM() {")
+    ok("actions: heads" in fn and "dropMenu(more, [" in fn and "'Pipedrive import'" in fn, "Pipedrive import is in the header's More menu (OPS-22)")
+    ok("crmPdOpen" not in SCRIPT and "function openPipedriveImport(" in SCRIPT, "and opens as a window, closed by its X")
+    ld = fn_src("function renderCRMLeads(")
+    ok("dtable([{ head: 'Lead' }, { head: 'Person' }, { head: 'Organisation' }, { head: 'Value', cls: 'num' }, { head: 'Arrived' }]" in ld,
+       "Leads is a table (OPS-20)")
+    ac = fn_src("function renderCRMActivities(")
+    ok("{ head: 'Activity', cls: 'stack' }, { head: 'Deal' }, { head: 'Person' }" in ac and "'No linked deal'" in ac and "{ head: 'Due' }" in ac,
+       "Activities is a table, the person beside the deal (OPS-19)")
+    ok("cls: 'dt-grp'" in ac and ".dt-row.dt-grp > .dt-c { grid-column: 1 / -1;" in CSS, "its day groups are rows with their counts")
+    ok(".dt-c > .ic svg { width: var(--icon-md); height: var(--icon-md); }" in CSS, "an icon in a table cell has its size (the type column drew nothing)")
+    ins = fn_src("function renderCRMInsights(")
+    ok("'card crm-wide'" in ins and "el('div', 'crm-months')" in ins and ".crm-charts > .crm-wide { grid-column: 1 / -1; }" in CSS,
+       "Won by month runs across the row as columns (OPS-24)")
+    ch = CSS.split("\n        .crm-charts {")[1].split("}")[0]
+    ok("align-items: start" in ch, "the others two by two in the page column, each only as tall as its chart")
+    ct = fn_src("function renderCRMContacts(")
+    ok("'lbl-toolbar crm-selbar'" not in ct and "el('tr', 'crm-selhead')" in ct, "a tick arms the table's head row in place: no empty band (OPS-25)")
+
+
+@test
+def t_loan_units_lends_from_its_header_and_chases_from_out_now():
+    """Cameron's Loan units screenshot (12 Oct 2026) and the mockup: the one
+    teal is the header's Loan out, which asks which unit; the chase limit sits
+    in Out now's head, beside the rows it colours, not in a card of its own;
+    with no units at all the page has one empty state, the register's; and a
+    unit's history is a small table."""
+    fn = fn_src("function renderLoans(")
+    ok("const lend = shelf.length ? el('button', 'btn btn-sm btn-primary') : null;" in fn and "actions: lend ? [lend] : []" in fn and "loanOutModal(null, shelf)" in fn,
+       "the header's teal Loan out")
+    mo = fn_src("function loanOutModal(")
+    ok("function loanOutModal(unit, choices) {" in SCRIPT and "crmField(grid, 'Unit', unitSel);" in mo, "which asks which unit, from the shelf")
+    ok("'chasing'" not in fn and "'No due date: amber after'" in fn and "oHead.append(chase);" in fn, "the chase limit is in Out now's head")
+    ok("if (units.length) box.append(widget(oCard, 'out'));" in fn, "with no units, only the register says so")
+    hm = fn_src("async function loanHistoryModal(")
+    ok("dtable([{ head: 'With' }, { head: 'Out', cap: true }, { head: 'Back', cap: true }]" in hm, "a unit's history is a small table, its dates named on a phone")
+
+
+@test
+def t_the_inbox_list_has_a_head_row_and_who_is_on_today_is_one_line():
+    """OPS-27, 12 Oct 2026: the bulk bar was a grey filled box over the list.
+    It is now the list's own head row, a hairline under it and no fill, armed
+    in place at the same height. Who is on today is one line of two-line
+    entries: a name over where they are and what they hold."""
+    bb = CSS.split("\n        .mail-bulkbar {")[1].split("}")[0]
+    ok("background: none" in bb and "border-bottom: var(--bw-hairline) solid var(--border-default)" in bb
+       and "margin-bottom: 0" in bb and "border-radius: 0" in bb, "the bulk bar is the list's head row")
+    ok("min-height: var(--row-h)" in bb, "idle and armed measure the same")
+    ok("padding: var(--sp-1) 0 var(--sp-1) calc(var(--dot-md) + var(--sp-2-5));" in bb, "its tick lines up with the rows' ticks, after the unread dot")
+    ok(".card > #mail-bulk-host:has(> .mail-bulkbar) { margin-bottom: calc(-1 * var(--sp-3)); }" in CSS, "and it sits straight on its rows")
+    fn = fn_src("function renderMail()")
+    ok("const txt = el('span', 'mail-who-txt');" in fn and ".mail-who-txt { display: flex; flex-direction: column;" in CSS,
+       "each person is a name over presence and load")
+
+
+@test
+def t_files_is_one_table_with_its_meter_on_the_tab_row():
+    """OPS-28 to OPS-31, 12 Oct 2026: the facts sat in fixed cells pushed to
+    the right of a stretching name, a folder's figures sat apart from the
+    files', the meter was a line of its own over the tabs, and on a phone four
+    40 targets fought a file name for the row."""
+    fn = fn_src("function renderFiles() {")
+    ok("const tabsRow = el('div', 'page-tabs');" in fn and "end.append(meter);" in fn, "the storage meter is at the tab row's right end (OPS-29)")
+    ok("#files-content .files-list:has(> .files-row) { display: grid; grid-template-columns: max-content minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, .6fr) max-content;" in CSS,
+       "the list is one grid: Name 2, Owner 1, Modified 1, Size 0.6, then the actions (OPS-28)")
+    ok("#files-content .files-list > .files-row > .files-cols { display: contents; }" in CSS, "each row's facts take the list's own columns")
+    br = fn_src("function renderFilesBrowser(")
+    ok("row.append(filesCols(byName(f.by), tot.at ? fmtDate(tot.at) : ''" in br, "a folder's Owner says who made it")
+    ok(br.count("filesMore(acts, [") == 2 and ".files-more { display: none; }" in CSS, "on a phone each row's actions wait behind its ••• (OPS-31)")
+    ok("            #files-content .files-acts:has(> .files-more) > :not(.files-more) { display: none; }\n            #files-content .files-acts > .files-more { display: inline-flex; }" in CSS,
+       "where the ••• shows and the buttons step aside")
+
+
+@test
+def t_the_team_activity_filters_on_the_account_id_the_board_sends():
+    """Found building the mockup (12 Oct 2026): the person filter's options
+    carried u.sub, which /api/team/board never sends, so picking anyone showed
+    "Nothing recorded for that view yet." The board sends each account as id,
+    and each event names its account by that id as sub."""
+    srv = open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()
+    ok('return {"id": uid, "name": u.get("name") or ""' in srv, "an account is sent with its id")
+    fd = fn_src("function renderTeamFeed(")
+    ok("u.sub" not in fd, "no person is offered by a field the server never sends")
+    ok("teamFilterWho = u.id" in fd and "e.sub === teamFilterWho" in fd, "the Who list filters on the account id")
+
+
+@test
+def t_team_is_tables_with_the_admin_actions_in_a_menu():
+    """WS-10 to WS-16, 12 Oct 2026: People's facts ran as one sentence pushed
+    against four admin buttons; the Tabs panel stacked three groups with two
+    Saves; Work's three cards stretched six short columns across the page; and
+    Activity put the area 700px from the action it labels."""
+    pp = fn_src("function renderTeamPeople(")
+    ok("dtable([{ head: 'Person', cls: 'stack' }, { head: 'Role' }, { head: 'Made', cls: 'num', cap: true }, { head: 'Dispatched', cls: 'num', cap: true }, "
+       "{ head: 'Files', cls: 'num', cap: true }, { head: 'Sales', cls: 'num', cap: true }, { head: 'Last login', cap: true }" in pp, "People is a table (WS-13), its counts named on a phone")
+    ok("'Made, dispatched, files and sales are the last 30 days.'" in pp and "'Switched off'" in pp and "'Never logged in'" in pp, "in the mockup's words")
+    ok("dropMenu(more, items)" in pp and "label: 'Delete account', icon: I.trash, danger: true" in pp and "label: 'Reset password'" in pp,
+       "the admin actions are in the row's menu, Delete account in red (WS-14)")
+    tp = fn_src("function teamTabsPanel(")
+    ok("'Save access'" not in SCRIPT and "'Save sign-off'" not in SCRIPT and "toastOk('Saved.')" in tp and "op: 'sign_off'" in tp,
+       "the Tabs panel has one Save, the sign-off saved with the rest (WS-15)")
+    ok("\n        .tm-panel { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);" in CSS,
+       "its three groups side by side, Can open with two shares so its groups keep a line each")
+    tr = CSS.split("\n        .dt-people {")[1].split("}")[0]
+    ok("max-content, 1fr" not in tr, "no flexible column takes a content minimum: the open panel spans them, and its whole width went into them (2,206px)")
+    wk = fn_src("function renderTeamWork(")
+    ok("pairNodes(c1, c2, null, null, { plain: true, flip: true })" in wk and "{ cls: 'dt-clock', label: 'On the clock now', stop: 'xs' }" in wk,
+       "On the clock now beside Hours per person, its one line kept down to 24rem (WS-12)")
+    ok("@container dt (max-width: 24rem) {\n            .dt-xs > .dtable { display: block; }" in CSS, "a small table's own two-line stop")
+    ok("#team-content .wpair-in > .card { margin-top: 0; }" in CSS and "#team-content .wpair + .card { margin-top: var(--page-rhythm); }" in CSS,
+       "the pair's two heads share a line, and the sessions keep the page's rhythm under them")
+    ok("dtable([{ head: 'Person' }, { head: 'Date' }, { head: 'Clock in' }, { head: 'Clock out' }, { head: 'Hours', cls: 'num' }, { head: 'Actions', cls: 'num', cap: true }" in wk
+       and "el('span', 'tm-daytrack')" in wk, "the sessions are a table with the day line, 07:00 to 17:00 (WS-10)")
+    fd = fn_src("function renderTeamFeed(")
+    ok("dtable([{ head: 'Time' }, { head: 'Area' }, { head: 'Who' }, { head: 'What' }]" in fd, "Activity is a table (WS-11)")
+    ok("el('div', 'tm-filters')" in fd and "list('Who', [" in fd and "list('Area', [" in fd and "el('span', 'cnt', String(it.n))" in fd,
+       "with the Who and Area lists beside it, counted")
+    ok("['auth', 'Sign-in']" in SCRIPT, "the raw area 'auth' reads Sign-in")
+
+
+@test
+def t_memory_shows_what_it_learned_and_lines_its_parts_up():
+    """WS-20 to WS-24, 12 Oct 2026: what Reactor learned sat behind a lone
+    link; each tracked change put its actions 800px from its figures; a note's
+    Kind cell held up to three tags; the new note's Kind sat at the far right;
+    and an empty Notes card offered Add a note twice."""
+    kp = fn_src("function knowledgeParts(")
+    ok("el('details', 'know-body')" not in kp and "el('div', 'know-grid')" in kp, "what it learned shows as a preview, no disclosure (WS-21)")
+    ok("n.classList && n.classList.contains('md-h')" in kp and "'Pages it read'" in kp, "a section per heading, Pages it read the last block")
+    ok("fresh.append(el('p', 'card-sub', 'Uses AI credits. Reads up to 12 pages, once.'), learnBtn || '');" in kp, "on a fresh store Learn my store follows its line (WS-23)")
+    ok("\n        .know-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));" in CSS, "three across")
+    ok("\n        .impact-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));" in CSS, "tracked changes three across (WS-20)")
+    ir = fn_src("function impactRow(")
+    ok(ir.index("row.append(chips)") < ir.index("row.append(acts)") and "'Concluded'" in ir, "each change's actions under its figures, a concluded one tagged")
+    ok("' \\u00b7 Tracked by '" in ir and "Change in your headline figures since then" not in ir, "the when line in one piece, the rest behind the (i)")
+    mr = fn_src("function memRow(")
+    ok("k.append(el('span', 'lbl-chip warn', 'Waiting for an admin'))" not in mr and "states.append(el('span', 'lbl-chip warn', 'Waiting for an admin'))" in mr,
+       "one kind tag; the states go under the note (WS-22)")
+    ok(".mem-add, .mem-edit { max-width: 720px; }" in CSS and "row.append(el('span', 'mem-edit-l', m ? 'Correct this note' : 'New note'), sel);" in fn_src("function memEditor("),
+       "the editor at 720 with Kind beside its label (WS-24)")
+    pn = fn_src("function paintNotes(")
+    ok("if (!memoryLoadErr && canEditInstructions() && memories.length)" in pn, "an empty Notes card offers Add a note once, in its empty line (WS-23)")
+    ok("{ key: k, label: l, n: groups[k] }" in pn, "the filters carry their counts without brackets")
+
+
+@test
+def t_skills_read_in_two_columns_with_their_use_on_top():
+    """WS-30 to WS-34, 12 Oct 2026: a skill's title sat alone at the left, its
+    buttons alone at the top right and Have Reactor read it alone at the bottom
+    right; its reading was a bordered box the list's width; the forms spread
+    across the page; How they are used sat at the foot in half a card; and the
+    empty list was a centred line with its actions only in the head."""
+    rs = fn_src("function renderSkills(")
+    ok("box.append(skHost.use, skHost.card);" in rs, "How they are used comes first")
+    su = fn_src("function paintSkillUse(")
+    ok("el('div', 'sk-use-band')" in su and "\n        .sk-use-band { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));" in CSS, "as one band of three across (WS-33)")
+    si = fn_src("function skillItem(")
+    ok("el('div', 'sk-main')" in si and "el('div', 'sk-side')" in si and "\n        .sk-item { display: grid; grid-template-columns: minmax(0, 35rem) minmax(0, 1fr);" in CSS,
+       "each skill is two columns: the body at its measure, then the actions, the use and the reading (WS-30)")
+    ok("side.append(el('span', 'sk-meta', skillUse(s)))" in si and "'Edited '" in si and "'Added '" in si, "the use and the edit on two lines")
+    ok("first.textContent.trim().toLowerCase() === String(s.title || '').trim().toLowerCase()" in si, "a body's first heading is not drawn when it repeats the title")
+    ok(".sk-reading { border: 0;" in CSS, "the reading is a line in the right column, no box (WS-31)")
+    ok(".sk-editor { max-width: 720px; }" in CSS and ".sk-up-list { display: grid; gap: var(--sp-3) var(--sp-8); grid-template-columns: repeat(2, minmax(0, 1fr)); }" in CSS,
+       "the form keeps to 720 and the files being added sit two across (WS-32)")
+    ps = fn_src("function paintSkills(")
+    ok("if (canEditInstructions() && skills.length) acts.append(add);" in ps and "emptyState({ icon: I.book, text: 'No skills yet.', action: firstActs })" in ps,
+       "an empty list is one line carrying both actions (WS-34)")
+
+
+@test
+def t_the_skill_forms_keep_their_buttons_beside_their_words():
+    """WS-32 (R7), 12 Oct 2026: New skill, Edit skill and the Markdown review put
+    a spacer between their words and their buttons, so Cancel and Add skill sat
+    at the form's far edge, 1,017px from the character count at 2200."""
+    ok("sk-spacer" not in SCRIPT and ".sk-spacer" not in CSS, "no spacer pushes a form's buttons away")
+    ok("row.append(count, splitBtn, cancel, save);" in fn_src("function skillEditor("), "the count, then Cancel and Add skill")
+    ok("row.append(more, fi, cancel, plain, read);" in fn_src("function skillUploads("), "More files, then Cancel and the two ways to add")
+    ok("\n        .sk-upload .sk-form-row .btn-primary { margin-left: auto; }" not in CSS
+       and "@media (max-width: 640px) { .sk-upload .sk-form-row .btn-primary { margin-left: auto; } }" in CSS,
+       "Read and add keeps to the right only on a phone, where the row wraps")
+
+
+@test
+def t_the_chat_start_sits_in_the_optical_middle():
+    """WS-40, 12 Oct 2026: the start block sat at the top of the conversation
+    column with a void under it, and listed three recent conversations."""
+    ec = fn_src("function renderEmptyChat(")
+    ok("convos.filter(x => x.turns.length).slice(0, 6)" in ec, "six recent conversations")
+    ok(".chat-inner:has(> .empty-chat) { min-height: 100%; }" in CSS, "the start fills the space above the box")
+    ok("padding-bottom: 12vh" in CSS.split("\n        .empty-chat {")[1].split("}")[0], "and sits a little above its middle")
+
+
+@test
+def t_the_guide_reads_in_two_columns_and_lists_requests_as_a_table():
+    """WS-50 to WS-53, 12 Oct 2026: the Guide was one column under 1,330px
+    with each section's print icon at its far edge; What's new showed only the
+    unread release, then a void; and each request put its state select alone
+    at the far right, its details under the title."""
+    ok(".guide-grid { column-width: 29rem; column-count: 2;" in CSS, "two columns from about 1,000px (WS-53)")
+    gb = fn_src("function paintGuideBook(")
+    ok("tr.append(el('h3', 'card-title', sec.h), p);" in gb, "each section's print icon beside its title")
+    ok("emptyState({ icon: I.search, text: 'Nothing in the guide mentions" in gb and "'Clear'" in gb, "a search that finds nothing is one line with Clear")
+    rl = fn_src("function paintReleases(")
+    ok("const SHOW = 5;" in rl and "rels.slice(0, SHOW).forEach((r, i) => list.append(draw(r, i < unread)));" in rl, "always the last five, New on the unread ones (WS-50)")
+    ok("el('div', 'rel-rail')" in rl and "\n        .rel { display: grid; grid-template-columns: 10rem minmax(0, 1fr);" in CSS, "on a date rail")
+    rq = fn_src("function paintRequests(")
+    ok("dtable([{ head: 'Request', cls: 'stack' }, { head: 'Asked by', cls: 'stack' }, { head: 'Page' }, { head: 'State', cls: 'stack' }" in rq, "requests are a table (WS-51)")
+    ok("const reqView = { f: 'open'," in SCRIPT, "the default filter stays Open")
+    ok("emptyState({ icon: I.spark, text: 'Nothing asked for yet.', action: first })" in rq and "if (all.length) act.append(add);" in rq,
+       "nothing asked yet is one line with Ask for a feature, once (WS-52)")
+
+
+@test
+def t_the_settings_window_keeps_one_rhythm_and_says_stored_secrets():
+    """The Settings window (12 Oct 2026): 488 wide with gaps set inline and
+    varying, each connection's state at the far edge, the vault row named for
+    where it lives, and on a phone the Store profile's boxes kept two lines
+    whatever their text, so it scrolled inside them."""
+    ok("'Secrets on the volume'" not in SCRIPT and SCRIPT.count("connRow('Stored secrets'") == 3, "the vault row reads Stored secrets (Cameron's ruling 6)")
+    ok("#settings-modal > .modal { max-width: 552px; }" in CSS, "a 552 document window")
+    sm = HTML.split('id="settings-modal"')[1].split('<div id="label-print">')[0] if '<div id="label-print">' in HTML.split('id="settings-modal"')[1] else HTML.split('id="settings-modal"')[1][:12000]
+    ok('class="section-title" style=' not in sm and 'class="section-title set-h"' in sm, "no section heading sets its own spacing")
+    ok("#settings-modal .set-h { margin: var(--sp-5) 0 var(--sp-2); padding-top: var(--sp-5); border-top: var(--bw-hairline) solid var(--border-default); }" in CSS,
+       "every section on one rhythm: a hairline with 20 above it, the heading, its rows")
+    cr = fn_src("function connRow(")
+    ok("tl.append(document.createTextNode(title), pill);" in cr, "each connection's state sits beside its name")
+    os_ = fn_src("function openSettings(")
+    ok("document.querySelectorAll('#settings-modal textarea.pf-input').forEach(" in os_ and "autoGrow(ta)" in os_, "the profile's boxes grow to fit their text")
+
+
+@test
+def t_customise_puts_its_controls_on_the_blocks_first_line():
+    """WS-60, 12 Oct 2026: in Customise a block with no heading took a 40px
+    band at its top to hold a bare x on the corner, and nothing said where to
+    take hold of a block to drag it."""
+    dec = fn_src("function wgDecorate(")
+    ok("x.append(ico(I.eyeOff));" in dec and "el('span', 'wg-grip')" in dec, "the hide control is an eye-off, and a grip says where to take hold")
+    hide = CSS.split(".ov-wrap.wg-editing > [data-widget] > .wg-hide {")[1].split("}")[0]
+    ok("top: 0; right: 0;" in hide, "the hide control sits on the block's first line")
+    ok(":not(:has(> .card-head)) { padding-top: var(--sp-8); }" not in CSS, "with no band reserved for it")
+    ok(".ov-wrap.wg-editing > [data-widget] > .wg-grip {" in CSS and "gripVertical: SV(" in SCRIPT, "the grip in the gutter left of the block")
+    ok("n.querySelectorAll(':scope > .wg-grip').forEach(b => b.remove());" in fn_src("function wgUndecorate("), "and both go when Customise ends")
+
+
+PHONE_ONE = ".ov-hero:not(.pm-head):has(> .ov-hero-act > :is(button, .btn):not([data-wg-customize], [hidden])):not(:has(> .ov-hero-act > :not([data-wg-customize], [hidden]) ~ :not([data-wg-customize], [hidden])))"
+
+
+@test
+def t_a_phone_header_keeps_a_lone_action_on_the_title_line():
+    """R13, 12 Oct 2026: on a phone every header's actions took a row under the
+    title, so a page with one action (Refresh all, Refresh, More, Loan out) left
+    it alone on that row under the gear at the title's right. One button now
+    sits on the title's line, beside the gear; two or more keep their row, and
+    so does a stamp with its Refresh (the Size list's: beside the title it
+    squeezed "Size list" onto two lines)."""
+    ph = CSS.split("@media (max-width: 640px) {\n            /* 32px gutters spend 64px")[1].split("\n        }\n")[0]
+    ok(PHONE_ONE + " { flex-wrap: nowrap; }" in ph, "a header with one action keeps one line")
+    ok(PHONE_ONE + " > .ov-hero-act { flex: none; flex-basis: auto; }" in ph, "the action at its own width")
+    ok(PHONE_ONE + ":has(> .ov-hero-act > [data-wg-customize]) > .ov-hero-act { margin-right: calc(var(--control-h-lg) + var(--sp-2)); }" in ph
+       and PHONE_ONE + ":has(> .ov-hero-act > [data-wg-customize]) > .ph-text { padding-right: 0; }" in ph,
+       "left of the gear, which keeps its place at the right")
+
+
+KT = ".ktable:not(.sizes-table, .mem-table, .cx-docs)"
+
+
+@test
+def t_a_phone_reads_every_table_as_two_line_rows():
+    """R13, 12 Oct 2026: on a phone the house tables kept their columns and
+    scrolled sideways inside their cards (Keywords, the trade radar, Sector
+    comparison, Customer segments, CRM contacts, Hours per person), or squeezed
+    an email into a column one word wide. Each row is now two lines: the cell
+    that leads it, then the others, each after its column's head."""
+    sh = fn_src("function syncTableHeads(") if "function syncTableHeads(" in SCRIPT else ""
+    ok("table.ktable > :is(tbody, tfoot) > tr:not([data-kh])" in sh and "td.dataset.h = h" in sh and "td.classList.add('kt-main')" in sh,
+       "each body cell carries its column's head, and the head marked kt-main names the cell that leads")
+    ok("syncToggles(); syncDialogs(); syncTableHeads();" in SCRIPT, "stamped in the one batched pass, wherever a table is built")
+    ph = CSS.split("/* R13: on a phone a table's rows are two lines")[1].split("\n        }\n")[0] if "/* R13: on a phone a table's rows are two lines" in CSS else ""
+    ok(KT + " { display: block; min-width: 0; }" in ph and KT + " > thead { display: none; }" in ph, "no head row and no sideways scroll")
+    ok(KT + " > :is(tbody, tfoot) > tr { display: flex; flex-wrap: wrap;" in ph, "a row wraps its cells")
+    ok(KT + " > :is(tbody, tfoot) > tr:not(:has(> .kt-main)) > td:first-child, " + KT + " > :is(tbody, tfoot) > tr > td.kt-main { flex: 1 1 100%; order: -1;" in ph,
+       "the leading cell has the first line")
+    ok(KT + " > :is(tbody, tfoot) > tr > td[data-h]::before { content: attr(data-h);" in ph, "every other value follows its head")
+    ok("th.kt-main" not in CSS, "a table marks its leading column on the head cell, not in CSS")
+    ok(KT + " > :is(tbody, tfoot) > tr[hidden], " + KT + " > :is(tbody, tfoot) > tr > td[hidden] { display: none; }" in ph,
+       "a hidden row stays hidden (Keywords' rows past 15 showed on a phone)")
+    ok(".kw-more { display: flex; flex-wrap: wrap;" in CSS, "and Keywords' count goes under Show all rather than off the screen")
+    ok("cols.push('<th class=\"kt-main\">Name</th>');" in SCRIPT, "CRM contacts lead with the name, not the tick box")
+    ok("['Segment', 'kt-main']" in fn_src("function segTable("), "the segments lead with the segment, not its count")
+    ok("heads.push(th.colSpan > 1 ? null : th)" in fn_src("function syncTableHeads("), "a selection bar across the head names no column")
+
+
+@test
+def t_a_two_line_row_names_its_bare_numbers():
+    """R13, 12 Oct 2026: a table's two-line rows dropped its head, so a phone
+    read Liability's "5 87 days", the runs' "1 0 0", Team's "5 8 11 17" and
+    Products' "336" with nothing saying what each counts. A column marked cap
+    now shows its head before its value once its row is two lines."""
+    dt = fn_src("function dtable(")
+    ok("if (cols[i] && cols[i].cap) cell.dataset.h = cols[i].cap === true ? cols[i].head : cols[i].cap;" in dt, "a cap column's cells carry its head")
+    for s in ("xs", "s", "m", "l"):
+        ok(".dt-%s > .dtable > .dt-row > .dt-c[data-h]::before { content: attr(data-h); margin-right: var(--sp-1); color: var(--text-tertiary); }" % s in CSS
+           and ".dt-%s > .dtable > .dt-row > .dt-c[data-h] { color: var(--text-secondary); }" % s in CSS, "and shows it when its rows are two lines (%s)" % s)
+    ok("{ head: 'Orders', cls: 'num', cap: true }, { head: 'Oldest', cls: 'num', cap: true }" in SCRIPT, "Liability's orders and oldest")
+    ok("{ head: 'Invoices', cls: 'num', cap: true }" in SCRIPT and "{ head: 'Contacts', cls: 'num', cap: true }" in SCRIPT, "the runs' three counts")
+    ok("{ head: 'Units', cls: 'num', cap: true }, { head: 'Revenue', cls: 'num', cap: true }" in SCRIPT, "Products' units and revenue")
+    ok("{ head: 'Since', cap: true }, { head: 'So far', cap: true }" in SCRIPT, "and the clock's two times")
+
+
+@test
+def t_a_phone_figure_group_fits_its_figures():
+    """R13, 12 Oct 2026: on a phone a figure group kept the desk's 40px gap,
+    so three across left 93px a figure and £63,820 (CRM), £66,477 (Liability)
+    ran past their tile while "115 days" broke in two, with the hairline drawn
+    for the phone's 16 (8px before the next figure, not in the middle). And
+    the half-row rule for five figures (three then two at their own widths)
+    outranked the phone's, so Keywords' paid search ran 73px past the screen
+    and was cut off."""
+    ph = CSS.split("/* A FIGURE GROUP ON A PHONE:")[1].split("\n        }\n")[0]
+    ok(".metrics.metrics-strip { display: grid; width: auto; column-gap: var(--sp-4); grid-template-columns: repeat(2, minmax(0, 1fr)); }" in ph,
+       "the phone's 16 between figures, the hairline in its middle")
+    ok("@media (min-width: 641px) { .wpair .metrics.metrics-strip:has(> :nth-child(5):last-child) { display: grid; grid-template-columns: repeat(3, max-content); } }" in CSS
+       and "\n        .wpair .metrics.metrics-strip:has(> :nth-child(5):last-child) {" not in CSS,
+       "three then two at their own widths only off a phone")
+
+
+@test
+def t_every_phone_target_is_a_finger_wide():
+    """R13, 12 Oct 2026: on a phone Track was 32 tall, an action's tick reached
+    32 with its hit area, and three text links (a sector's name, a skill's Show
+    all, What's new's Open) were 15 to 20 tall. Each keeps its look and gets an
+    invisible 40 high target, as Claim and the clear buttons already have."""
+    ok(":is(.track-btn, .seclink, .sk-more, .rel-open) { position: relative; }" in CSS
+       and ":is(.track-btn, .seclink, .sk-more, .rel-open)::after { content: \"\"; position: absolute; left: 0; right: 0; top: 50%; height: var(--control-h-lg); margin-top: calc(var(--control-h-lg) / -2); }" in CSS,
+       "Track and the three links get a 40 high target across their own width")
+    ok(".action .check::after { content: \"\"; position: absolute; inset: calc(-1 * var(--sp-3)); }" in CSS, "and the tick's reaches 40")
+
+
+@test
+def t_a_phone_keeps_scan_beside_its_field():
+    """R13, 12 Oct 2026: on a phone Keywords' Scan sat alone on a line under its
+    field, the field's 18rem basis and the button being wider than 358."""
+    ok("@media (max-width: 640px) { .scan-card > .act-row { flex-wrap: nowrap; } .scan-card .scan-url { flex-basis: 0; } }" in CSS, "the field and Scan share the line")
+
+
+@test
+def t_a_phone_size_card_keeps_its_tag_beside_the_model():
+    """R13, 12 Oct 2026: on a phone a model's status tag (Needs review) took a
+    third line of its own under the maker, and the model's button kept the 40
+    touch height inside a card the whole of which opens it, so each model was
+    89px tall to the mockup's 60."""
+    sz = CSS.split("@container sizes (max-width: 520px) {")[1].split("\n        }\n")[0]
+    ok("grid-template-columns: minmax(0, max-content) minmax(min-content, 1fr) auto;" in sz
+       and 'grid-template-areas: "model status fig" "maker maker fig";' in sz,
+       "the tag on the model's line, the maker under both; a long name wraps rather than the tag running over the size")
+    ok(".ktable.sizes-table td.sizes-status { grid-area: status; justify-self: start; align-self: center; white-space: normal; }" in sz, "the tag right after the name")
+    ok(".ktable.sizes-table tr.sizes-row .sizes-open { min-height: 0; }" in sz, "the card is the target, so the name keeps its own height")
+
+
+@test
+def t_a_phone_filters_activity_with_two_selects():
+    """R13, 12 Oct 2026: on a phone Activity's Who and Area lists (nine people,
+    ten areas) ran 800px down the screen before the first event. A phone
+    shows them as two selects side by side over the feed, as the mockup
+    draws; wider screens keep the lists."""
+    fd = fn_src("function renderTeamFeed(")
+    ok("const s = el('select', 'field-sm'); s.setAttribute('aria-label', title);" in fd
+       and "s.onchange = () => items[+s.value].pick();" in fd and "it.label + ' (' + it.n + ')'" in fd,
+       "each list is also a select of the same choices, with their counts")
+    ok("both.append(sels, feed, filters);" in fd, "over the feed")
+    ok(".tm-filter-sels { display: none; }" in CSS
+       and "@media (max-width: 640px) { .tm-feedwrap > .tm-filters { display: none; } .tm-filter-sels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--control-gap); } }" in CSS,
+       "the selects on a phone, the lists elsewhere")
+
+
+@test
+def t_a_phone_keeps_a_lone_control_beside_the_search():
+    """R13, 12 Oct 2026: on a phone a toolbar's search took a whole line, so a
+    toolbar of a search and one control left that control alone on the line
+    under it (Files' Sort). The two now share the line; a choice track still
+    takes one of its own."""
+    ok("@media (max-width: 640px) { .tbl-tools:has(> .tbl-tools-l > .tbl-search:only-child):has(> .tbl-tools-r > :only-child:not(.segmented)) .tbl-search { flex: 1 1 0; } }" in CSS, "the search gives way to its one neighbour")
+
+
+@test
+def t_a_phone_shows_finder_drive_as_an_icon_at_the_title():
+    """R13, 12 Oct 2026: on a phone Files' three header buttons ran 356px of
+    358, so Upload, the page's main button, sat alone on a second line. As
+    the mockup draws, Finder drive is a 40 icon at the title's right there,
+    and New folder and Upload share the row under the title."""
+    rf = fn_src("function renderFilesBrowser(")
+    ok("const drv = el('button', 'btn files-drv'); drv.append(ico(I.hardDrive), el('span', 'drv-txt', 'Finder drive'));" in rf
+       and "drv.setAttribute('aria-label', 'Finder drive');" in rf, "the button keeps its name when only its icon shows")
+    ph = CSS.split("/* R13: on a phone Finder drive is a 40 icon")[1].split("\n        }\n")[0] if "/* R13: on a phone Finder drive is a 40 icon" in CSS else ""
+    ok(".ov-hero-act > .files-drv { position: absolute;" in ph and ".files-drv > .drv-txt { display: none; }" in ph
+       and ".ov-hero:has(> .ov-hero-act > .files-drv) > .ph-text { padding-right: calc(var(--control-h-lg) + var(--sp-2)); }" in ph,
+       "at the title's right, its words hidden, the title kept clear of it")
+
+
+@test
+def t_a_phone_shipment_row_stays_on_the_screen():
+    """R13, 12 Oct 2026: on a phone Custom shipments scrolled sideways. Each
+    row's buttons are a six-track grid, and the flex row's max-content floor
+    on them made that grid 423px in a 347px row. Two buttons (Copy tracking,
+    Reprint label) now take half the line each, as the mockup draws."""
+    q = CSS.split("/* The number and the date on one line, the name 4 under it, the buttons 12 under that (the mockup's .m-orow). */")[1].split("\n        }\n")[0]
+    ok(".lbl-qrow .lbl-actions { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--control-gap); min-width: 0; }" in q,
+       "the buttons' grid is the row's width")
+    ok(".lbl-qrow .lbl-actions > .btn:first-child:nth-last-child(2), .lbl-qrow .lbl-actions > .btn:first-child:nth-last-child(2) ~ .btn { grid-column: span 3; }" in q,
+       "and two buttons share it in halves")
+
+
+@test
+def t_a_phone_overview_pairs_its_trend_figures():
+    """R13, 12 Oct 2026: on a phone each of Overview's eight trend figures took
+    a row of its own (a figure, its change and a sparkline across 358px), 1,300px
+    of the screen before Sales by sector. They pair two across, as the mockup
+    draws: the widget grid is two columns on a phone and each is one column."""
+    ok(".ov-wrap.wgrid > .stat[data-widget]:has(.stat-spark) { grid-column: 1 / -1; }" not in CSS, "a trend figure no longer takes the row")
+    ok("if (viewportWidth <= 640) return 2;" in fn_src("function wgColumns("), "the grid is two columns on a phone")
+
+
+@test
+def t_a_phone_keeps_three_small_things_on_shared_lines():
+    """R13, 12 Oct 2026, from the phone shots after the shared fixes: Products'
+    Export CSV sat alone under Filters and Compare periods; a CRM contact's
+    tick box opened the second line, away from the name it ticks; and
+    Activity's "Everything (261)" was cut off in its select, its total being
+    the heading's count already."""
+    ok("const xbtn = el('button', 'btn btn-sm p-export'); xbtn.append(ico(I.download), el('span', 'p-export-txt', 'Export CSV')); xbtn.setAttribute('aria-label', 'Export CSV');" in SCRIPT
+       and "@media (max-width: 640px) { .btn.p-export { width: var(--control-h); padding: 0; justify-content: center; } .p-export > .p-export-txt { display: none; } }" in CSS,
+       "Export CSV is its icon on a phone, beside the other two")
+    ok("@media (max-width: 640px) { .ktable.crm-contact-table > tbody > tr > td.tick { order: -2; } .ktable.crm-contact-table > tbody > tr > td.kt-main { flex: 1 1 calc(100% - var(--sp-8) - var(--sp-3)); } }" in CSS,
+       "a contact's tick box sits before its name")
+    ok("const o = el('option', null, k ? it.label + ' (' + it.n + ')' : it.label);" in fn_src("function renderTeamFeed("), "Everyone and Everything without the total")
+
+
+@test
+def t_a_phone_keeps_the_crm_selection_bar():
+    """Final review I-2, 12 Oct 2026: ticking CRM contacts puts Delete and
+    Clear selection in the table's head row, and the phone rule hides every
+    table's head, so on a phone the bar vanished; with the bar as the only
+    head row the rows lost their labels too and the tick box took the name's
+    line. The column heads stay as a hidden row after the bar, and a phone
+    shows a head that holds the bar."""
+    rc = SCRIPT[SCRIPT.index("const tb = el('table', 'ktable crm-table crm-contact-table');"):][:1500]
+    ok("thead.innerHTML = '<tr class=\"crm-colhead\">' + cols.join('') + '</tr>'; thead.prepend(tr0);" in rc, "the column heads follow the bar, for the labels")
+    ok(".ktable.crm-contact-table > thead > tr.crm-selhead ~ tr { display: none; }" in CSS, "and stay hidden while the bar shows")
+    ok("@media (max-width: 640px) { .ktable.crm-contact-table > thead:has(> tr.crm-selhead), .ktable.crm-contact-table > thead > tr.crm-selhead, .ktable.crm-contact-table > thead > tr.crm-selhead > th { display: block; } }" in CSS,
+       "a phone shows the head that holds Delete and Clear selection")
+    ok("@media (max-width: 640px) { .crm-contact-table tbody tr.sel { background: var(--action-selected); } .crm-contact-table tbody tr.sel td { background: none; } }" in CSS,
+       "and a ticked row's wash is the whole row, not a band behind each value (seen in the rig)")
+
+
+@test
+def t_nothing_owed_still_says_what_is_paid_but_tagged():
+    """Final review I-3, 12 Oct 2026: Liability's one-line "Nothing is owed."
+    returned before the Paid but still tagged strip was built, and the day
+    nothing is owed is the likeliest day every tagged order has been paid but
+    still carries its tag; the line also said so when the server sent no
+    total, and "Checked just now." on figures read hours before."""
+    rl = fn_src("function renderLiability(")
+    e = rl.index("if (!(d.customers || []).length && !(d.total > 0)) {")
+    ok("const staleW = (d.stale_tagged || []).length ?" in rl[:e], "the strip is made before the empty check")
+    blk = rl[e:rl.index("return;", e)]
+    ok("if (staleW) box.append(staleW);" in blk, "and shown under the one line")
+    ok("typeof d.total === 'number' ? 'Nothing is owed.' : 'No unpaid orders are listed.'" in blk and "Checked just now." not in rl,
+       "nothing is owed only on a total of zero the server sent, and no stale stamp")
+
+
+@test
+def t_team_people_keeps_one_teal():
+    """Final review M-3, 12 Oct 2026 (Cameron's ruling: one teal per screen):
+    New account stayed teal while a Tabs panel's Save or the new account's
+    Create, both teal, were open under it."""
+    rp = fn_src("function renderTeamPeople(")
+    ok("const busy = teamNewOpen || d.users.some(u => u.id === teamTabsOpen && u.role !== 'master');" in rp
+       and "const add = el('button', 'btn btn-sm' + (busy ? '' : ' btn-primary'));" in rp,
+       "New account steps down while a form under it has the teal")
+
+
+@test
+def t_a_table_beside_its_neighbour_keeps_its_natural_width():
+    """Found in Task 10's shots, 12 Oct 2026: Xero sync's runs table sat in an
+    88px column beside the quarantine log, each run a stack of six lines. The
+    pair gives the table its natural width (max-content), but a table's
+    wrapper is a size container, which measures as nothing; with it switched
+    off the column is 420px. While the pair stands side by side the table is
+    not a container, so it is measured; stacked, it is one again and turns
+    two-line when narrow."""
+    ok("@container wpair (min-width: 64rem) { .wpair.fit > .wpair-in > * .dt { container-type: normal; } }" in CSS,
+       "side by side, a fit pair's table is measured at its own width")
+
+
+@test
+def t_the_seo_score_keeps_its_meter_off_its_words():
+    """Final visual review M1, 12 Oct 2026: on a phone a figure tile is three
+    rows of its group's subgrid (label, figure, note), and the score's meter
+    was a fourth child, drawn across "out of 100". The note and the meter are
+    one foot, so the tile is three rows at every width."""
+    rs = fn_src("function renderSEO(")
+    ok("const foot = el('div', 'seo-foot'); foot.append(el('p', 'stat-note', scored ? 'out of 100' : data.score_note));" in rs
+       and "foot.append(bar);" in rs and "sc.append(foot);" in rs, "the note and the meter share the tile's third row")
+    ok(".seo-foot { display: grid; row-gap: var(--sp-1); }" in CSS, "one under the other")
+
+
+@test
+def t_a_table_in_half_a_row_wraps_its_heads_rather_than_its_edge():
+    """Final visual review M2, 12 Oct 2026: at 1440 Customers' Sector
+    comparison read "Lifetime revenu" and "£143,11", and Top customers' last
+    order "75d ag": a table in half a row could not shrink below its one-line
+    heads, so its last column ran under the half's edge. In a pair or a duo
+    a head may wrap, standing on its foot, so the table fits its half."""
+    ok(":is(.wpair, .duo) .ktable > thead th { white-space: normal; vertical-align: bottom; padding-block: var(--sp-1); }" in CSS,
+       "heads wrap in half a row")
+
+
+@test
+def t_a_figure_group_never_leaves_one_figure_alone():
+    """Final visual review M4 and M5, 12 Oct 2026 (R2): at 1440 SEO's eight
+    figures ran seven then one, Pages indexed alone with 1,000px beside it,
+    and Customers' four in half a row ran three then one, At risk alone. The
+    eight run four and four, and four in half a row two by two, when a line
+    cannot hold them."""
+    rs = fn_src("function renderSEO(")
+    ok("const host = el('div', 'fig-host'); host.append(strip); box.append(widget(host, 'score-checks', 'full', 'Score and checks'));" in rs,
+       "SEO's figures sit in a host that knows its width")
+    ok(".fig-host { container: fighost / inline-size; }" in CSS
+       and "@container fighost (min-width: 41rem) and (max-width: 72rem) { .fig-host > .metrics.metrics-strip:has(> :nth-child(8):last-child) { display: grid; grid-template-columns: repeat(4, max-content); } }" in CSS,
+       "eight run four and four when one line cannot hold them")
+    ok("@container wpair (min-width: 64rem) and (max-width: 74rem) { .wpair .metrics.metrics-strip:has(> :nth-child(4):last-child) { display: grid; grid-template-columns: repeat(2, max-content); } }" in CSS,
+       "and four in half a row two by two")
+
+
+@test
+def t_tracked_changes_line_up_and_keep_no_figure_alone():
+    """Final visual review M6, 12 Oct 2026: a tracked change's fourth figure
+    (Conversion) dropped alone onto a second row, so the three changes'
+    Conclude buttons stood at different heights. Four figures go two by two,
+    and the three changes share their rows (title, line, figures, actions)."""
+    ok(".impact-deltas:has(> .idelta:nth-child(4):last-child) { grid-template-columns: repeat(2, minmax(0, 1fr)); }" in CSS, "four go two by two")
+    ok("@media (min-width: 901px) { .impact-row { display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: var(--sp-2); align-content: start; } }" in CSS,
+       "and the three changes' parts line up across the row")
+
+
+@test
+def t_a_chat_answer_sets_its_figures_at_their_own_width():
+    """Final visual review M7, 12 Oct 2026: a chat answer's four figures sat in
+    equal cells across the reading column, Sales 25px above the others and an
+    (i) on a line of its own. As the Chat notes say, they are the figure group
+    every page uses: each at its own width, hairlines between, one baseline."""
+    ok("b.append(metricsStrip(s.metrics)); container.append(as(b, 'metrics'));" in SCRIPT and "chat ? metricsGrid(s.metrics)" not in SCRIPT,
+       "a chat answer's figures are a figure group")
+    ok(".chat-metrics .stat { min-height: 0; padding: 0; }" in CSS, "with no padding of their own, so their hairlines sit in the gap")
+
+
+@test
+def t_a_phone_chooser_wraps_only_when_its_labels_need_it():
+    """Final visual review M8, 12 Oct 2026: on a phone Overview's and SEO's 3M,
+    6M, 12M, 24M ran three, then 24M alone: four or more choices each took an
+    84px basis, a little more than the card left them. Each now starts from
+    its own label's width, so short labels share one line and longer sets
+    wrap only as far as they must."""
+    ok(".segmented:has(> :nth-child(4)) > * { flex: 1 1 0; min-width: max-content; } }" in CSS, "a choice is as wide as its label, then shares the line")
+
+
+@test
+def t_a_search_shows_its_whole_hint():
+    """Final visual review M9, 12 Oct 2026: Inbox's search read "Search, then
+    Enter for tl" (its input kept a fixed width inside a wider field) and CRM
+    contacts' "Search name, email, phone, compan" (a 280 field for a longer
+    hint). The input fills its field, and a long hint gets a sentence's width."""
+    ok(".tbl-search .mail-search { flex: 1 1 auto; min-width: 0; max-width: none; }" in CSS, "Inbox's input fills its field")
+    ok(".tbl-search.search-long { width: var(--field-w-xl); max-width: 100%; }" in CSS and "sWrap.classList.add('search-long');" in SCRIPT
+       and "q.classList.add('search-long');" in SCRIPT, "and a long hint has a sentence's width")
+
+
+@test
+def t_a_laptop_keeps_the_people_requests_and_activity_tables():
+    """Final visual review S1, 12 Oct 2026: at a 1440 window Team's People,
+    the Guide's Requests and Team's Activity dropped to two-line rows with no
+    column heads, where the mockups keep the table. People and Requests turned
+    at 72rem, wider than the 1,116 column a 1440 window gives; the feed at
+    56rem, in its 828 beside the filter lists. Each now turns where its own
+    columns stop fitting."""
+    ok("{ cls: 'dt-people', label: 'People', stop: 'm' }" in SCRIPT and ".dt-people { --dt-cols: minmax(12rem, 2fr) minmax(7.5rem, 1fr) repeat(4, minmax(4.5rem, 1fr)) minmax(7rem, 1fr) max-content; }" in CSS,
+       "People keeps its table to 56rem, its counts floored at 4.5rem so it fits there")
+    ok("label: 'Feature requests', stop: 'm' }" in SCRIPT, "Requests to 56rem")
+    ok("{ cls: 'dt-feed', label: 'Activity', main: 3, stop: 's'," in SCRIPT, "and the feed to 40rem")
+
+
+@test
+def t_a_phone_card_keeps_its_one_button_beside_its_title():
+    """Final visual review S3, 12 Oct 2026 (R13): on a phone a card head's one
+    worded button (+ Lead, + Activity, Add a unit, New account, Retry failed,
+    Change settings) took a line of its own under the title. Only an icon
+    button stayed beside it. Any single button now does."""
+    ok(".card-head:has(> .card-act > :only-child:is(button, .btn)) { grid-template-columns: 1fr auto; }" in CSS
+       and ".card-head > .card-act:has(> :only-child:is(button, .btn)) { grid-column: 2; grid-row: 1 / span 2; margin-top: 0; }" in CSS,
+       "one button stays on the title's line")
+
+
+@test
+def t_a_details_row_leads_with_its_marker():
+    """Final visual review S5, 12 Oct 2026 (R7): each Details row (Sales,
+    Stock, Traffic, Pages checked) ended in a chevron 480px from its words;
+    the notes have the marker lead the word, so no row ends in a stranded
+    chevron."""
+    ok("details.sect summary .chev { order: -1; transition: transform var(--dur) var(--ease); color: var(--text-tertiary); display: grid; }" in CSS,
+       "the chevron leads the row's words")
+
+
+@test
+def t_a_phone_crm_row_keeps_every_value():
+    """Final visual review S12, 12 Oct 2026: on a phone no CRM contact showed
+    its deals or label, and no deal its next activity or status: a September
+    rule hid those columns when the narrow table still scrolled sideways. In
+    two-line rows there is room, so a phone shows them, each after its name."""
+    ok("@media (max-width: 640px) { .ktable.crm-contact-table > tbody > tr > td:is(.crm-deals, .crm-label):not(:empty), .ktable.crm-deals-table > tbody > tr > td:is(:nth-child(5), :nth-child(6)):not(:empty) { display: block; } }" in CSS,
+       "a phone's two-line rows show the values the narrow table hid")
+
+
+@test
+def t_a_skills_tag_sits_beside_its_title():
+    """Final visual review S14, 12 Oct 2026 (R13): House style's Every answer
+    tag stood at the far end of its text column, 250px from the title, and on
+    a phone on a line of its own. The title is as wide as its words, so the
+    tag follows it, and wraps under it only when the line is full."""
+    ok(".sk-title { font-size: var(--text-body); font-weight: var(--weight-medium); flex: 0 1 auto;" in CSS, "the title is as wide as its words")
+    ok(".sk-title { flex-basis: 100%; }" not in CSS, "and a narrow card no longer puts the tag on a line of its own")
+
+
+@test
+def t_a_phone_release_puts_its_date_beside_its_title():
+    """Final visual review S16, 12 Oct 2026 (R13): on a phone each release in
+    What's new put its date alone on a line above its title; the mockup has
+    them share one line."""
+    ok("@media (max-width: 640px) { .rel-rail { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-2); } .rel-rail > .rel-title { order: -1; flex: 1 1 auto; } }" in CSS,
+       "the title, then its date, on one line")
+
+
+@test
+def t_a_phone_label_preview_leaves_no_blank_under_it():
+    """Cameron, 13 Oct 2026 ("change the label rule too"): on a phone the
+    opened order's label was shrunk to 78% with a transform, which left its
+    full-size box in place, so 84px of blank sat under the label. zoom shrinks
+    the box with it. Only the on-screen preview changes: the printed label is
+    laid out in #label-print, which this rule never reaches."""
+    ok(".lbl-preview .label-sheet { zoom: .78; }" in CSS and ".lbl-preview .label-sheet { transform: scale(.78)" not in CSS,
+       "the preview's box shrinks with the label")
+
+
+@test
+def t_a_report_pairs_its_short_blocks():
+    """R6, 12 Oct 2026: on a 2,200 monitor every report block ran the full row,
+    so a three-line summary, four findings or a short table sat in the left
+    third with the rest of the row empty (DF-02, DF-03, DF-04, DF-07, DF-09).
+    A short block now sits beside the block it belongs with, as one widget the
+    grid moves as one, and the two stack when the pair is narrower than 64rem."""
+    fn = fn_src("function pairNodes(") if "function pairNodes(" in SCRIPT else ""
+    ok("el('div', 'wpair-in')" in fn and "widget(pair, id + '-pair', 'full', label)" in fn,
+       "a pair is one full-row widget holding the two, with an id of its own (final review I-1)")
+    pin = CSS.split("\n        .wpair-in {")[1].split("}")[0] if "\n        .wpair-in {" in CSS else ""
+    ok("grid-template-columns: minmax(0, 7fr) minmax(0, 5fr)" in pin and "align-items: start" in pin, "seven twelfths and five, each as tall as itself")
+    ok(".wpair { container: wpair / inline-size; }" in CSS
+       and "@container wpair (max-width: 64rem) { .wpair > .wpair-in, .wpair.even > .wpair-in, .wpair.flip > .wpair-in, .wpair.fit > .wpair-in { grid-template-columns: minmax(0, 1fr);" in CSS,
+       "and one above the other when the pair is narrow, whatever its split: a plain .wpair-in rule lost to the 5:7 split, and Products' totals ran off a phone")
+    ok("pairNodes(sumW, cs, 'summary'" in (fn_src("function summaryAndChanges(") if "function summaryAndChanges(" in SCRIPT else ""),
+       "the summary sits beside What changed")
+    ov = fn_src("function renderOverview(")
+    for pair in ("summaryAndChanges(box, data.changes, data.changes_since", "pairNodes(secW, channelsCard(data.trends), 'sectors'",
+                 "pairNodes(wgChild(box, 'actions'), wgChild(box, 'notable'), 'actions'", "pairNodes(wgChild(box, 'details'), chat, 'details'"):
+        ok(pair in ov, "Overview pairs: " + pair)
+    seo = fn_src("function renderSEO(")
+    for pair in ("summaryAndChanges(box, data.changes, data.changes_since", "pairNodes(wgChild(box, 'opportunities'), wgChild(box, 'findings'), 'opportunities'",
+                 "pairNodes(wgChild(box, 'details'), chat, 'details'"):
+        ok(pair in seo, "SEO pairs: " + pair)
+    ok("strip.prepend(sc)" in seo and "'score'" not in seo, "SEO's score is the first figure of the checks, one group (DF-11)")
+    kw = fn_src("function renderKeywords(")
+    for pair in ("summaryAndChanges(box, data.changes, data.changes_since", "pairNodes(kpisW, wgChild(box, 'scan'), 'kpis'",
+                 "pairNodes(wgChild(box, 'opportunities'), wgChild(box, 'findings'), 'opportunities'",
+                 "pairNodes(wgChild(box, 'keywords'), paid, 'keywords'", "pairNodes(wgChild(box, 'details'), chat, 'details'"):
+        ok(pair in kw, "Keywords pairs: " + pair)
+    ok("!/^Ad spend/i.test(m.label)" in kw, "the ad spend is said once, under Paid search")
+    ok(".wpair .metrics.metrics-strip:has(> :nth-child(5):last-child) { display: grid; grid-template-columns: repeat(3, max-content); }" in CSS,
+       "five figures in half a row go three then two, so ROAS is not alone on a line")
+    cu = fn_src("function renderCustomers(")
+    for pair in ("summaryAndChanges(box, data.changes, data.changes_since", "pairNodes(kpisW, ncGroup, 'kpis'",
+                 "pairNodes(wgChild(box, 'opportunities'), wgChild(box, 'findings'), 'opportunities'",
+                 "pairNodes(wgChild(box, 'sectors'), wgChild(box, 'segments'), 'sectors'",
+                 "pairNodes(wgChild(box, 'details'), chat, 'details'"):
+        ok(pair in cu, "Customers pairs: " + pair)
+    ok("segTable(data.segments, cur)" in cu and "segCards(" not in SCRIPT, "the segments are a table, not five cards")
+    tc = fn_src("function customersTable(")
+    ok("rows.slice(0, 10)" in tc and "rows.slice(10, 20)" in tc and "el('div', 'duo')" in tc, "top customers are two tables of ten, side by side")
+    rc = fn_src("function radarCard(")
+    ok("el('div', 'radar-cols')" in rc and "'Account and last bought'" in rc and "'Customer and why flagged'" in rc,
+       "the radar's two lists sit side by side, the long text under each name")
+    ok("@container radar (max-width: 64rem) { .radar-cols { grid-template-columns: minmax(0, 1fr); } }" in CSS
+       and ".duo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));" in CSS, "and stack when narrow")
+    pd = fn_src("function renderProductDetail(")
+    ok("pairNodes(cardTitled(box, 'Top opportunities'), cardTitled(box, 'Findings'), null, null, { plain: true })" in pd,
+       "a product's plan sets its opportunities beside its findings, as a plain pair (that page is not arranged)")
+    ok("if (o.plain) return pair;" in fn_src("function pairNodes("), "a plain pair is not a widget")
+    pl = fn_src("function renderProductList(")
+    ok("pairNodes(totalsW, topHost, 'top-products'" in pl and "{ flip: true }" in pl, "the totals sit beside Top products by revenue")
+    ok("dtable(" in pl and "'prod-row'" not in pl and "'dt-products'" in pl, "the catalogue is a table, not rows of chips")
+    for head in ("'Product'", "'Type'", "'Price'", "'Stock'", "'Status'", "'Units'", "'Revenue'"):
+        ok(head in pl, "with a column " + head)
+    ok("head: 'Vendor'" not in pl, "and no Vendor column while every product says Projected Image")
+    ok("'Clear search'" in pl and "topHost.hidden = !rows.length" in pl, "a search that matches nothing is one line with Clear search, and the empty ranking goes")
+    ok(".pfilters.show { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }" in CSS, "the filters run six across")
+    ok("r.onClick" in fn_src("function dtable("), "a table row can open what it lists")
+    kt = fn_src("function keywordTable(")
+    ok("i >= 15" in kt and "'Show all ' + n + ' keywords'" in kt, "fifteen keywords, then Show all")
+    ok("noChannels: true" in ov, "Traffic by channel leaves the chart grid to sit beside Sales by sector")
+    ok("el('button', 'btn pchat-send')" in SCRIPT and "btn-primary pchat-send" not in SCRIPT,
+       "the page chat's send is plain: one teal per screen, and Ask is a side door")
+    ok("widget(metricsStrip(plain), 'kpi-counts', 'full', 'Counts')" in ov,
+       "the four counts with no trend are one figure group, not four tiles over holes")
+    act = CSS.split("\n        .card.actions {")[1].split("}")[0] if "\n        .card.actions {" in CSS else ""
+    ok("display: grid" in act and "minmax(0, 1fr)" in act, "Recommended actions is a table: the tick, the action, its priority and Track")
+    ok(".card.actions > :is(.action, .action-head) { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid;" in CSS,
+       "every action on the same columns")
+    ok(".action .text + .pill, .action .text + .track-btn { margin-left: auto; }" not in CSS,
+       "the priority and Track follow their column, not the far edge 900px from the sentence")
+    ok("el('div', 'action-head')" in fn_src("function actionsCard("), "under heads that say Action and Priority")
+    ok("@media (min-width: 1800px) {\n            .charts-grid" not in CSS and "align-items: start" in CSS.split("\n        .charts-grid {")[1].split("}")[0],
+       "charts stay two by two at every width, each only as tall as its own chart")
+
+
+@test
+def t_an_empty_state_is_one_line_under_its_heading():
+    """R8, 12 Oct 2026. An empty state was a tall centred box across the row
+    (Memory, Skills and Requests: an icon and one line in the middle of a
+    248px band, the same action in the head as well), and every report met
+    a centred Run button over 900px of white at 2,200. Now it is one line under
+    its heading: the 40 tile, the line, a grey line when there is more to say,
+    then the action straight after the words."""
+    es = CSS.split("\n        .empty-state {")[1].split("}")[0]
+    ok("flex-direction: row" in es and "text-align: left" in es and "justify-content: flex-start" in es,
+       "a row, on the left, under its heading: " + es[:120])
+    ok("padding: var(--sp-10)" not in es and "min-height" not in es, "and not a tall band")
+    gate = CSS.split("\n        .run-gate {")[1].split("}")[0]
+    ok("text-align: left" in gate and "flex-direction: row" in gate, "the run gate is the same one line")
+    fn = fn_src("function emptyState(")
+    ok("o.sub" in fn and "'empty-sub'" in fn, "a grey line under it when there is more to say")
+    ok("sub: o.covers" in fn_src("function renderRunGate("), "the gate says what the report covers")
+    for covers in ("covers: 'Shopify orders, Google Analytics 4 and Search Console.'",
+                   "covers: 'Indexation, structured data, metadata and alt text.'",
+                   "covers: 'Search Console keywords and Google Ads.'"):
+        ok(covers in SCRIPT, "a gate says what it reads: " + covers)
+    plain = CSS.split("\n        .empty {")[1].split("}")[0]
+    ok("text-align: left" in plain and "margin-inline: auto" not in plain,
+       "a list that matched nothing says so on the left, where its rows start")
+
+
+@test
+def t_lists_are_tables_whose_rows_share_columns():
+    """Cameron's first screenshot, 12 Oct 2026: every Loan units row was a name
+    at the far left and its status and buttons at the far right, 800px of
+    nothing between, each row in its own box. A list whose rows share fields is
+    one grid: a head row and the rows share its tracks (subgrid), so columns
+    line up down the list, the spare width is shared across headed columns, and
+    rows are hairlines in one list, not boxes. A narrow table turns its rows
+    into two-line rows by its own width, never by sideways scroll."""
+    fn = fn_src("function dtable(") if "function dtable(" in SCRIPT else ""
+    ok("if (!rows.length) return opts.empty" in fn, "an empty list is its one line, with no head over nothing")
+    for need in ("'dt-head'", "'dt-row", "el('div', 'dt dt-' + (opts.stop || 'm')", "'dtable '"):
+        ok(need in fn, "the table builds " + need)
+    rule = CSS.split("\n        .dtable > :is(.dt-head, .dt-row) {")[1].split("}")[0] if "\n        .dtable > :is(.dt-head, .dt-row) {" in CSS else ""
+    ok("grid-template-columns: subgrid" in rule and "grid-column: 1 / -1" in rule, "every row shares the table's columns")
+    base = CSS.split("/* ONE TABLE")[1].split("/* ONE TABLE, NARROW")[0] if "/* ONE TABLE, NARROW" in CSS else ""
+    ok(base and "flex: 1" not in base, "no column takes the spare width and shoves the rest to the far edge")
+    ok(".dt-c { min-width: 0;" in base, "a cell can shrink, so a long name wraps or ends in an ellipsis inside its column")
+    ok(base.count("overflow-wrap: anywhere") == 1 and ".dt-c.email { overflow-wrap: anywhere; }" in base,
+       "only an email or web address may break anywhere: a phone number or a figure never splits")
+    ok("border-radius" not in base.split(".dt-row {")[1].split("}")[0] if ".dt-row {" in base else False,
+       "a row is a hairline, not a box")
+    # 12 Oct 2026: xs (24rem) joined for a three-column table, so the block is longer.
+    narrow = CSS.split("/* ONE TABLE, NARROW")[1][:3400] if "/* ONE TABLE, NARROW" in CSS else ""
+    for stop in ("24rem", "40rem", "56rem", "72rem"):
+        ok("@container dt (max-width: %s)" % stop in narrow, "a table can turn its rows to two lines at %s" % stop)
+    ok(".dt-m > .dtable > .dt-head { display: none; }" in narrow, "and then drops its head row")
+    ok("' main'" not in fn and "' dt-main'" in fn,
+       "the first cell is .dt-main: plain .main is the page sheet, and a cell wearing it clipped its own first letter")
+    lo = fn_src("function renderLoans(")
+    ok(lo.count("dtable(") == 2 and "'lbl-row loan-row" not in lo,
+       "Loan units' two lists are tables now, not boxed rows")
+
+
+@test
+def t_figures_sit_together_at_their_own_width():
+    """Cameron's screenshots, 12 Oct 2026: Out now 1, On the shelf 2 and
+    Overdue 0 each at the left of a third of a 1,450px row; Synced, Failed and
+    Quarantined 460px apart. The strip was a 12-track grid that gave every
+    figure a share of the row whatever it held. A figure group is as wide as
+    its figures, each at least --fig-min, packed from the text edge with a
+    hairline between, and it wraps rather than squeezing."""
+    strip = CSS.split("\n        .metrics.metrics-strip {")[1].split("}")[0]
+    for need in ("display: flex", "flex-wrap: wrap", "width: fit-content", "max-width: 100%"):
+        ok(need in strip, "the group: " + need)
+    ok("repeat(12, minmax(0, 1fr))" not in CSS and not re.search(r"metrics-strip[^{]*\{ grid-column: span", CSS),
+       "no figure is given a share of the row")
+    ok(".metrics-strip > .stat { flex: 0 1 auto; min-width: var(--fig-min); }" in CSS, "each figure is its own width, at least 96")
+    ok(".metrics-strip > .stat:has(.stat-spark) { width: var(--fig-spark-w); }" in CSS, "a figure with a sparkline is the sparkline's 144")
+    ok("--fig-min: 96px;" in CSS and "--fig-spark-w: 144px;" in CSS, "both are tokens")
+    ok(not re.search(r"\.metrics-strip \.stat-row \{[^}]*container-type", CSS),
+       "the figure line is not a size container, which would leave it no width of its own to size the group by")
+    ok("/* A FIGURE GROUP ON A PHONE" in CSS, "the phone rule is there")
+    phone = CSS.split("/* A FIGURE GROUP ON A PHONE")[1].split("\n        }")[0] if "/* A FIGURE GROUP ON A PHONE" in CSS else ""
+    ok(all(":has(> :nth-child(%d):last-child)" % n in phone for n in (3, 5, 6)) and "repeat(3, minmax(0, 1fr))" in phone,
+       "on a phone three, five and six figures run three across, so none sits alone")
+
+
+@test
+def t_a_filter_figure_is_a_counter_not_a_circle():
+    """Cameron's third screenshot: each severity tile had an empty check circle
+    stranded at its far right edge, 300px from its word. A figure that filters
+    the list under it is a counter, the Production Manager's tile: a dot, the
+    word and the figure, the chosen one in the teal fill."""
+    fn = fn_src("function counterTile(") if "function counterTile(" in SCRIPT else ""
+    for need in ("el('button', 'fc", "fc-dot", "aria-pressed", "fc-l", "fc-v"):
+        ok(need in fn, "a counter carries " + need)
+    ok("statAct(I.check)" not in SCRIPT, "no filter figure carries the ring any more")
+    ok("counterTile(" in fn_src("function renderRecon(") and "counterTile(" in fn_src("function renderLiability("),
+       "Reconciliation's severities and Liability's buckets are counters")
+    sel = '\n        .fc:is(.on, [aria-pressed="true"]) {'
+    on = CSS.split(sel)[1].split("}")[0] if sel in CSS else ""
+    ok("background: var(--action-primary)" in on, "the chosen counter is the teal fill")
+    ok('.fc:is(.on, [aria-pressed="true"]) :is(.fc-l, .fc-v span) { color: var(--text-on-action); }' in CSS, "with ink words on it")
+    ok("'fcs fcs-money'" in fn_src("function renderLiability("), "Liability's counters hold money, and say so")
+    ok("/* COUNTERS ON A PHONE" in CSS, "the phone rule is there")
+    ph = CSS.split("/* COUNTERS ON A PHONE")[1].split("\n        }")[0] if "/* COUNTERS ON A PHONE" in CSS else ""
+    ok(".fcs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }" in ph,
+       "on a phone counters go two by two (Reconciliation's four), never off the edge")
+    ok(".fcs-money { grid-template-columns: minmax(0, 1fr); }" in ph and ".fcs-money .fc { flex-direction: row;" in ph,
+       "and counters whose figure is money are full-width rows, word left and figure right: three of them clipped £41,908")
+    ok(".metrics.metrics-strip > .fcs { order: 1; grid-column: 1 / -1; }" in ph,
+       "under the plain figures, which then share one row three across")
+
+
+@test
+def t_one_page_column_with_the_top_bar_on_it():
+    """Cameron's 2,200 monitor, 12 Oct 2026: the breadcrumb sat at the sheet's
+    left edge, well left of the page's title, and Search past the page's right
+    edge, so the top bar and the page read as two layouts and the margins as a
+    mistake. The bar's row now sits on the page column at every width."""
+    bar = CSS.split("        .topbar {")[1].split("}")[0]
+    ok("padding-inline: max(var(--wrap-pad), calc((100% - var(--wrap)) / 2 + var(--wrap-pad)))" in bar,
+       "the crumbs start and Search ends on the page column's edges: " + bar[:160])
+    ok("padding: 0 var(--wrap-pad)" not in bar, "not the sheet's own gutter")
+
+
+@test
 def t_the_page_uses_the_whole_screen():
     """A fixed 1120px wrap left a third of a 1920 monitor and half of a 2560
     iMac as empty margin, while the rows inside it were the crowded part. The
@@ -2054,7 +3086,9 @@ def t_the_page_uses_the_whole_screen():
        "move between them")
     rule = re.search(r"\.ov-wrap \{[^}]*\}", CSS).group(0)
     ok("max-width: var(--wrap)" in rule, "the wrap reads the token")
-    ok(re.search(r"--wrap:\s*1536px", CSS), "which is the reference's max-w-screen-2xl")
+    ok(re.search(r"--wrap:\s*1280px", CSS),
+       "1,200 of content and the two 40 gutters (Cameron, 12 Oct 2026): at 1,456 a row's actions "
+       "drifted a page away from its words on a 2,200 monitor")
     ok("margin: 0 auto" in rule, "and the column is centred, as the reference's default layout is")
     for stop in ("1500px", "1900px", "2400px"):
         ok("min-width: " + stop + " ) { :root { --wrap" not in CSS.replace(" ", " "),
@@ -2112,22 +3146,13 @@ def t_six_buttons_never_paint_over_the_date():
     # label preview open leaves the list 900px wide, and the labelled rail
     # painted over the item line and the date.
     ok(".lbl-list { container: queue / inline-size; }" in CSS, "the list is the container")
-    ok("const listBox = el('div', 'lbl-list')" in SCRIPT and "split.append(listBox, pane)" in SCRIPT,
-       "with or without the pane beside it")
+    # 12 Oct 2026: no pane any more (Cameron's ruling); the list is the card's own.
+    ok("const listBox = el('div', 'lbl-list')" in SCRIPT and "qCard.append(listBox);" in SCRIPT,
+       "and is the card's own")
     # And one set of tracks for every row: a refunded order's shorter rail or
     # a wider date moved its own row's columns by up to 121px.
     ok("grid-template-columns: subgrid" in CSS and ".lbl-grid > * { grid-column: 1 / -1; }" in CSS,
        "each row is a subgrid of the list, so the columns line up down the queue")
-
-
-@test
-def t_the_label_preview_sits_beside_the_queue_on_a_wide_screen():
-    """Opened inline it shoved every order below it down the page."""
-    ok(".lbl-split" in CSS and ".lbl-pane" in CSS, "the split layout is styled")
-    ok("lbl-split" in SCRIPT and "lbl-pane" in SCRIPT, "and built by the renderer")
-    ok("matchMedia('(min-width: 1500px)')" in SCRIPT, "decided once, above 1500")
-    ok("if (pane) pane.append(wrap); else row.after(wrap);" in SCRIPT,
-       "and it still falls back to inline where there is no room for a pane, under its own row")
 
 
 @test
@@ -2202,13 +3227,13 @@ def t_a_kpi_with_a_list_behind_it_opens_it():
     ok("name.target = '_blank'; name.rel = 'noopener'" in md, "an item with a url opens the page in a new tab, safely")
     ok("d.empty || 'Nothing to list.'" in md, "an empty list says so instead of showing nothing")
     ok("opener.focus()" in md, "closing hands focus back to the card")
-    ok("stat.append(statAct(I.check));" in SCRIPT and SCRIPT.count("stat.append(statAct(I.check));") == 2,
-       "both filter strips carry the ring")
+    ok("statAct(I.check)" not in SCRIPT and SCRIPT.count("counterTile(") >= 3,
+       "both filter strips are counters now (12 Oct 2026), not figures with a ring at the edge")
     ok(".stat.stat-open { cursor: pointer; }" in CSS, "an opener shows a pointer")
-    ok(".stat.stat-open:hover .label, .stat.stat-pick:hover .label { color: var(--text-primary); }" in CSS,
+    ok(".stat.stat-open:hover .label { color: var(--text-primary); }" in CSS,
        "and under the pointer its label darkens (the mix: a figure has no box to tint)")
-    ok(".stat-pick:is(.on, [aria-pressed=\"true\"]) > .stat-act { background: var(--action-primary);" in CSS,
-       "a set filter fills its ring")
+    ok('.fc:is(.on, [aria-pressed="true"]) { background: var(--action-primary);' in CSS,
+       "a set filter is the teal counter")
     ok(".chart-expand, .stat-act, .wg-hide, [data-wg-control]" in CSS, "the cue is screen furniture, hidden in print")
 
 @test
@@ -2460,7 +3485,8 @@ def t_a_size_list_row_opens_in_place_and_fits_a_phone():
     ok("setBtn.onclick = () => sizesInlineRule(acts, r, setBtn);" in det, "Set size is in the details")
     ok("['Status']" in paint and "['']" not in paint.split("const cols =")[1][:300], "and no longer a column of buttons")
     q = CSS.split("@container sizes (max-width: 520px) {")[1].split("\n        }")[0]
-    ok('grid-template-areas: "model fig" "maker fig" "status fig";' in q and ".ktable.sizes-table thead { display: none; }" in q,
+    # 12 Oct 2026 (R13): the status tag moved up beside the model (t_a_phone_size_card_keeps_its_tag_beside_the_model).
+    ok('grid-template-areas: "model status fig" "maker maker fig";' in q and ".ktable.sizes-table thead { display: none; }" in q,
        "a narrow card reads each model as a card")
     ok(".ktable.sizes-table tr.sizes-row > :is(td.sizes-glass, td.sizes-image, td.sizes-under, td.sizes-notes) { display: none; }" in q,
        "the other figures go to the details, at a weight that beats the card's own cells")
@@ -2546,11 +3572,13 @@ def t_a_xero_token_warning_reaches_the_screen():
     """The one warning that has a clock on it: Xero honours the previous
     refresh token for about thirty minutes after a failed save, and after that
     the connection is simply gone. It cannot live only in the server log."""
-    fn = SCRIPT.split("function renderRecon")[1].split("\n        function ")[0]
-    ok("xs.warning" in fn, "the status card reads the warning the server sends")
-    i = fn.index("xs.warning")
-    ok("mail-viewwarn" in fn[i:i + 400],
+    fn = fn_src("function renderRecon() {")
+    ok("xs.warning" in fn, "the page reads the warning the server sends")
+    # 12 Oct 2026: said under the band, as the refused link is, in red with a
+    # dot (the mockup), not in an amber box.
+    ok("} else if (xs.warning) notice(xs.warning);" in fn and "el('p', 'band-notice')" in fn,
        "and paints it as a warning, not as ordinary help text")
+    ok("color: var(--error)" in CSS.split(".band-notice {")[1].split("}")[0], "in the error colour")
 
 
 @test
@@ -3389,7 +4417,7 @@ def t_truncated_text_is_recoverable():
     carry title now, so hover recovers what the ellipsis ate."""
     ok("mfrom.title = t.from_name || t.from_email || ''" in SCRIPT, "mail sender")
     ok("subj.title = t.subject || ''" in SCRIPT, "mail subject")
-    ok("pn.title = p.title || ''" in SCRIPT, "product title")
+    ok("nm.title = p.title || ''" in SCRIPT, "product title")
     ok("name.title = f.name;" in SCRIPT, "file name")
 
 
@@ -3471,7 +4499,9 @@ def t_a_rows_keydown_never_steals_an_inner_controls_keypress():
     handlers = _re2.findall(r"addEventListener\('keydown', \((e|ev)\) => \{[^\n]*(?:Enter)[^\n]*\}\);", SCRIPT)
     hits = _re2.findall(r"addEventListener\('keydown', \((?:e|ev)\) => \{ if \((?:e|ev)\.target !== \w+\) return;", SCRIPT)
     rowish = _re2.findall(r"(row|tr|r|card)\.(?:addEventListener\('keydown'|onkeydown)", SCRIPT)
-    ok(len(hits) >= 5, "the container handlers carry the target guard (%d)" % len(hits))
+    # Rows that became tables (12 Oct 2026: Liability, Reconciliation, CRM leads, the filter counters)
+    # open from a real button in the row, which needs no keydown of its own, so fewer handlers remain.
+    ok(len(hits) >= 2, "the container handlers carry the target guard (%d)" % len(hits))
     ok("if (e.target !== card) return;" in SCRIPT, "the deal card too")
     # The two leaf handlers (the follow-up ticks) have no children to steal from
     # and legitimately omit the guard.
@@ -4606,7 +5636,8 @@ def t_the_send_grant_is_switched_from_the_team_tab():
     # Was a fixed 5,200-character window, which the sign-off field pushed the
     # send op out of. Bounded by the function instead, so it neither expires
     # the next time the panel grows nor reaches past it into another one.
-    people = fn_src("function renderTeamPeople(")
+    # 12 Oct 2026: the panel is its own function, teamTabsPanel, under its row in the People table.
+    people = fn_src("function teamTabsPanel(")
     ok("if (u.sizes_by_rank) {" in people, "the size grant is still the pattern")
     seg = people[people.index("if (u.sizes_by_rank) {"):]
     ok("if (u.send_by_rank) {" in seg, "rank is read before the switch is drawn")
@@ -5002,13 +6033,13 @@ def t_the_compose_and_reply_boxes_keep_the_class_that_sizes_them():
 def t_an_admin_sets_someone_elses_sign_off_beside_their_other_switches():
     """A new starter's replies go out unsigned until somebody sets it for them,
     and that somebody is whoever already manages the account."""
-    fn = fn_src("function renderTeamPeople(")
+    # 12 Oct 2026: the panel is teamTabsPanel, its sign-off saved by the panel's one Save.
+    fn = fn_src("function teamTabsPanel(")
     ok("op: 'sign_off'" in fn, "the team panel posts the contract's op")
     i = fn.index("op: 'sign_off'")
     ok("'/api/team/user'" in fn[:i], "to the team route")
     ok("id: u.id" in fn[i:i + 140], "for the account whose panel it is")
-    panel = fn.index("teamTabsOpen === u.id")
-    ok("if (manageable)" in fn[panel:i],
+    ok("if (manageable)" in fn[:i] and "teamTabsPanel(u, manageable)" in fn_src("function renderTeamPeople("),
        "and only where the size and send switches beside it are shown")
 
 
@@ -5397,13 +6428,13 @@ def t_loan_units_puts_three_stats_on_three_columns():
     """The shared grid is four columns wide. Three stats on it leave a hole where
     a fourth would be, which reads as a KPI that failed to load rather than as a
     row of three."""
-    # Since 2026-10-05 they are the one figure card every page uses: the strip,
-    # whose twelve tracks share any count across the row (three take a third each).
+    # Since 2026-10-05 they are the one figure group every page uses. Since
+    # 12 Oct 2026 the group is as wide as its figures: three thirds of a
+    # 1,450px row was the blank space in Cameron's first screenshot.
     fn = fn_src("function renderLoans(")
-    ok("const mgrid = metricsStrip([" in fn, "the counts are the app's one figure strip")
-    ok(".metrics-strip > .stat:nth-child(4n+3):last-child { grid-column: span 4; }" in CSS
-       and ".metrics.metrics-strip { grid-template-columns: repeat(12, minmax(0, 1fr)); }" in CSS,
-       "which seats three as thirds of its twelve tracks, no hole")
+    ok("const mgrid = metricsStrip([" in fn, "the counts are the app's one figure group")
+    ok(".metrics-strip > .stat { flex: 0 1 auto; min-width: var(--fig-min); }" in CSS,
+       "which sits the three side by side at their own width, no hole and no thirds")
     head = fn[fn.index("const mgrid = metricsStrip(["):]
     ok(head[:600].count("{ label: ") == 3, "and there are still exactly three stats")
 
@@ -5741,22 +6772,26 @@ def t_the_xero_page_fits_a_phone():
     And the Auto Run status line is .lbl-meta, which never wraps, so the flex
     item holding it was 418px wide."""
     fn = fn_src("function renderConnector(")
-    ok("el('div', 'cx-auto')" in fn and "el('div', 'lr-what')" in fn,
-       "the Auto Run row is still built from the classes the rules below style")
+    # 12 Oct 2026: Auto Run is a line of the band, beside the figures.
+    ok("srcLine(on ? 'ok' : 'off', on ? 'Auto Run on' : 'Auto Run off', words, end);" in fn,
+       "the Auto Run line is built from the band's parts, which the rules below style")
     grid = re.search(r"\.cx-grid \{[^}]*grid-template-columns:([^;]*);", CSS)
     ok(grid and grid.group(1).strip() == "minmax(0, 1fr)",
        "one tile per row until the card has room for three: a tile never has a floor wider than the card")
-    ok("@container cxcard (min-width: 900px) { .cx-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }" in CSS,
+    # 12 Oct 2026: each check is one line (box, Check, Send), which needs a third of 60rem.
+    ok("@container cxcard (min-width: 60rem) { .cx-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }" in CSS,
        "three across only when the card, not the window, has room")
     row = re.search(r"\.cx-tile \.cx-row \{([^}]*)\}", CSS)
     ok(row and "flex-wrap: wrap" in row.group(1) and "1fr 1fr" not in row.group(1),
        "the buttons stack when their labels do not fit side by side")
-    ok(re.search(r"\.cx-tile \.cx-row \.btn \{[^}]*flex: 1 1 0", CSS),
-       "and share the line when they do")
-    ok(re.search(r"\.cx-auto > \.lr-what \{[^}]*min-width: 0", CSS),
-       "the Auto Run text shrinks to its row")
-    ok(re.search(r"\.cx-auto \.lbl-meta \{[^}]*white-space: normal", CSS),
-       "and its status line wraps")
+    # 12 Oct 2026: one line each (the mockup), the box taking what the buttons leave.
+    ok(re.search(r"\.cx-tile \.cx-row \.btn \{[^}]*flex: none", CSS) and re.search(r"\.cx-tile \.cx-row input, \.cx-tile \.cx-row select \{[^}]*flex: 1 1 8rem; min-width: 0", CSS),
+       "and share the line with the box when they fit")
+    ph = CSS.split("/* A BAND ON A PHONE")[1].split("\n        }")[0] if "/* A BAND ON A PHONE" in CSS else ""
+    ok(".band-src-v { white-space: normal;" in ph, "the Auto Run sentence wraps on a phone")
+    ok(".band-src-e { grid-column: 2; }" in ph, "and its button goes under it")
+    # Final visual review M3: at 2200 and 1440 the Auto Run line ended "next in 6 minut…". A value wraps at every width.
+    ok(".band-src-v { min-width: 0; overflow-wrap: anywhere; color: var(--text-tertiary);" in CSS, "a band's value wraps rather than being cut")
 
 
 @test
@@ -5790,7 +6825,7 @@ def t_every_control_family_declares_its_states():
     ok("setBusy(btn, true)" in SCRIPT and "markInvalid(reasonIn, true)" in SCRIPT, "and uses them")
     for sel, attr in ((".nav-item", 'aria-current="page"'), (".btn", "aria-pressed"), (".tab", "aria-current"),
                       (".tab", "aria-pressed"), (".toggle", "aria-checked"), (".mrow", "aria-selected"),
-                      (".files-row", "aria-selected"), (".segmented > button", "aria-pressed"), (".stat.stat-pick", "aria-pressed")):
+                      (".files-row", "aria-selected"), (".segmented > button", "aria-pressed"), (".fc", "aria-pressed")):
         ok(re.search(re.escape(sel) + r":is\([^)]*" + attr, CSS), "%s's selected rule has its %s twin" % (sel, attr))
     ok("n.setAttribute('aria-current', 'page')" in SCRIPT, "and the nav actually sets aria-current")
 
@@ -6515,6 +7550,68 @@ def t_a_saved_layout_keeps_every_rendered_widget_exactly_once():
 
 
 @test
+def t_a_saved_layout_naming_merged_widgets_still_loads():
+    """Review Focus 5 of the blank-space build: a person's saved Customise
+    layout outlives the cards it names. Reconciliation's connection card and
+    severity tiles became one band with an id of its own, so a layout that
+    hid either old card loads with the band shown, at its default place."""
+    ids = re.findall(r"widget\(\w+, '([a-z0-9-]+)'", fn_src("function renderRecon() {"))
+    ok(ids and "connection" not in ids and "severity" not in ids, "the band has an id of its own: " + " ".join(ids))
+    # Xero sync's ledger figures and Connection card became one band the same way.
+    xids = re.findall(r"widget\(\w+, '([a-z0-9-]+)'", fn_src("function renderConnector() {"))
+    ok(xids and "connection" not in xids and "ledger" not in xids and "band" in xids,
+       "Xero sync's band has an id of its own: " + " ".join(xids))
+    if not any(os.access(os.path.join(p, "node"), os.X_OK) for p in os.environ.get("PATH", "").split(os.pathsep)):
+        print("       (node unavailable, skipped)")
+        return
+    js = (_WG_HARNESS.split("const ran = {}")[0]
+          + "console.log(JSON.stringify(W.wgMergeOrder(JSON.parse(process.argv[3]), JSON.parse(process.argv[4]))));")
+    saved = {"order": ["discrepancies", "severity", "connection"], "hidden": ["severity", "connection"]}
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(js)
+        path = fh.name
+    try:
+        r = subprocess.run(["node", path, os.path.join(ROOT, "static", "index.html"), json.dumps(ids), json.dumps(saved)],
+                           capture_output=True, text=True, timeout=60)
+    finally:
+        os.unlink(path)
+    got = json.loads((r.stdout or "{}").strip() or "{}")
+    ok(got.get("hidden") == [], "nothing the old layout hid hides the band: " + str(got))
+    ok(got.get("order", [None])[0] == ids[0] and sorted(got.get("order", [])) == sorted(ids),
+       "and every card is placed once, the band at its default place: " + str(got))
+
+
+@test
+def t_an_old_layout_never_hides_what_a_pair_brought_in():
+    """Final review I-1, 12 Oct 2026: a pair took its left half's old id, so a
+    layout that once hid Details now hid Details and questions (the report's
+    question box, which could not be hidden before), one that hid Summary hid
+    What changed with it, and SEO's Checks took the score. Each pair, and the
+    score with its checks, now has an id of its own: an old layout's id for a
+    half is dropped, and the pair shows at its default place."""
+    ok("return widget(pair, id + '-pair', 'full', label);" in fn_src("function pairNodes("), "a pair has an id of its own")
+    ok("widget(host, 'score-checks', 'full', 'Score and checks')" in SCRIPT and "widget(strip, 'checks'," not in SCRIPT, "and so do SEO's score and checks")
+    if not any(os.access(os.path.join(p, "node"), os.X_OK) for p in os.environ.get("PATH", "").split(os.pathsep)):
+        print("       (node unavailable, skipped)")
+        return
+    js = (_WG_HARNESS.split("const ran = {}")[0]
+          + "console.log(JSON.stringify(W.wgMergeOrder(JSON.parse(process.argv[3]), JSON.parse(process.argv[4]))));")
+    ids = ["summary-pair", "kpis-pair", "trends", "opportunities-pair", "details-pair"]
+    saved = {"order": ["details", "summary", "kpis", "trends", "opportunities"], "hidden": ["details", "summary", "kpis"]}
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(js)
+        path = fh.name
+    try:
+        r = subprocess.run(["node", path, os.path.join(ROOT, "static", "index.html"), json.dumps(ids), json.dumps(saved)],
+                           capture_output=True, text=True, timeout=60)
+    finally:
+        os.unlink(path)
+    got = json.loads((r.stdout or "{}").strip() or "{}")
+    ok(got.get("hidden") == [], "nothing an old layout hid hides a pair: " + str(got))
+    ok(sorted(got.get("order", [])) == sorted(ids), "and every block is placed once: " + str(got))
+
+
+@test
 def t_a_keyboard_move_goes_one_place_and_stops_at_either_end():
     """Alt with an arrow moves a card one place, and at the first or last place
     it stays put, returning the same array so nothing is announced as moved."""
@@ -6715,7 +7812,7 @@ def t_every_widget_id_is_well_formed_and_named_once_per_renderer():
         found += [(m.start(), v) for v in re.findall(r":\s*'([^']*)'", m.group(1))]
     found += [(-1, v) for v in re.findall(r'data-widget="([^"]*)"', HTML)]
     # The id a group's caller passes in, like the Overview's and SEO's 'trends', is a literal too.
-    for m in re.finditer(r"render(?:TrendsBlock|SeoTrends)\([^\n]*, '([^']*)'\);", SCRIPT):
+    for m in re.finditer(r"render(?:TrendsBlock|SeoTrends)\([^\n]*?, '([^']*)'(?:, \{[^}]*\})?\);", SCRIPT):
         found.append((m.start(), m.group(1)))
     ok(len(found) >= 5, "found the Overview's ids (%d)" % len(found))
     for _, v in found:
@@ -6868,7 +7965,7 @@ def t_a_card_heading_carries_its_widget_to_the_card_and_a_group_is_built_by_its_
     ok("const group = el('div', 'widget-group');" in trends and "if (id) widget(group, id, 'full', 'Performance over time');" in trends
        and "trendsSection(group, " in trends and "cardifySections(group);" in trends,
        "the trends heading and its charts are one group, with the id its caller passes")
-    ok(SCRIPT.count("renderTrendsBlock(") == 2 and "intro, 'trends');" in fn_src("function renderOverview("),
+    ok(SCRIPT.count("renderTrendsBlock(") == 2 and "intro, 'trends', { noChannels: true });" in fn_src("function renderOverview("),
        "the Overview is its one caller and names it")
     calls = [args for _, args in _wg_calls(SCRIPT, "renderStructured") if len(args) > 2 and "ids:" in args[2]]
     ok(len(calls) == 1 and calls[0][0] == "box", "only the Overview passes ids to renderStructured")
@@ -7209,7 +8306,7 @@ def t_the_products_page_searches_everything_and_draws_a_bounded_list():
     matches, and says so, rather than a button row per product in a large
     catalogue on every filter change."""
     ok("const P_ROWS_MAX = 300;" in SCRIPT, "a bound on rows drawn")
-    ok("rows.slice(0, P_ROWS_MAX).forEach(r => {" in SCRIPT, "the list draws within it")
+    ok("rows.slice(0, P_ROWS_MAX).map(r => {" in SCRIPT, "the list draws within it")
     ok("'Showing ' + P_ROWS_MAX + ' of ' + rows.length + '. Search or filter for more.'" in SCRIPT,
        "and says when it stopped, in a line (the mix's copy plan, Products #6)")
 
@@ -8560,7 +9657,7 @@ function renderCRM() { paints += 1; crmPaintedRev = crmRev; }
 function toastError() { toasts += 1; }
 const ico = () => el('i'), crmTypeIcon = () => 'phone', crmPerson = () => null, crmMulti = () => false;
 const crmUname = () => '', fmtDate = (x) => x, cap = (x) => x, crmActivityForm = () => {};
-""" + fn_src("async function crmMaybeRefresh(") + fn_src("async function crmOp(") + fn_src("function crmActRow(") + r"""
+""" + fn_src("async function crmMaybeRefresh(") + fn_src("async function crmOp(") + fn_src("function crmActTick(") + fn_src("function crmActRow(") + r"""
 (async () => {
   const row = crmActRow({ id: 'a1', type: 'call', subject: 'Call', done: false, state: 'today' }, () => {});
   const cb = row.children[0];
@@ -8875,7 +9972,8 @@ def t_the_forecast_explains_itself_once_and_in_plain_lines():
     dr = SCRIPT.split("function fcDriversCard(", 1)[1].split("\n        function ", 1)[0]
     order = [dr.index("'fc-drive-key "), dr.index("'fc-drive-lbl'"), dr.index("'fc-drive-amt'")]
     ok(order == sorted(order), "key, then words, then the amount at the right of the measure")
-    ok("max-width: var(--measure)" in CSS.split(".fc-drive {")[1].split("}")[0], "the statement is measured")
+    # 12 Oct 2026 (DF-26): the statement takes its column; at the measure it stopped 300px short of it.
+    ok("max-width" not in CSS.split(".fc-drive {")[1].split("}")[0], "the statement takes its column")
     ok("' forecast by the '" in dr and "' method.'" in dr, "and names the method it quotes, in a caption under the rows")
     simple = open(os.path.join(ROOT, "forecast", "simple.py"), encoding="utf-8").read()
     ok("The Theta method again" not in simple, "every source description stands on its own")
@@ -8887,10 +9985,13 @@ def t_the_reconciliation_card_keeps_status_and_actions_apart():
     buttons in one wrapping row, Disconnect weighted like Sweep now, and the
     sweep's notes as form-help lines with a field's gap under each."""
     fn = fn_src("function renderRecon()")
-    ok("'recon-conn-status'" in fn and "'recon-conn-acts'" in fn, "status on one side, actions on the other")
+    # 12 Oct 2026: the card went. The sources sit in the band beside the
+    # counters and the actions in the page header, the mockup's split.
+    ok("el('div', 'band-src')" in fn and "actions: heads" in fn, "status on one side, actions on the other")
     ok("dropMenu(manage, [" in fn and "label: 'Disconnect Xero'" in fn,
        "disconnecting is in a menu, not a button beside the sweep")
-    ok("el('div', 'field-help', n)" not in fn and "ul.append(el('li', null, n))" in fn,
+    sl = fn_src("function reconSweepLine(")
+    ok("el('div', 'field-help', n)" not in sl and "ul.append(li);" in sl,
        "the notes are one list")
     ok("danger: true" in fn.split("const disconnect = async")[1][:1400], "and the confirm is marked destructive")
     ok("text-wrap: pretty" in re.search(r"(?m)^\s*body \{([^}]*)\}", CSS).group(1), "no word stranded on a last line")
@@ -8938,14 +10039,14 @@ def t_the_reviewers_last_findings_stay_closed():
        "the team list shares its columns")
     ok(".tm-sign-save { margin-top: var(--sp-2); }" in CSS, "and Save sign-off stands off its field")
     # CRM Insights: each empty chart says what fills it.
-    ok("function bars(title, desc, rows, fmt, empty) {" in SCRIPT
+    ok("function bars(title, desc, rows, fmt, empty, o) {" in SCRIPT
        and "'Nothing done in the last 30 days.'" in SCRIPT
        and "'No expected close dates ahead.'" in SCRIPT,
        "each chart's empty line is its own")
     # The queue shares its tracks from the width the date appears at.
     ok("@container queue (min-width: 560px) {\n            .lbl-grid { display: grid;" in CSS, "a refunded row's date stays in line on a tablet")
-    # Phone Overview: a sparkline tile takes the row in the widget grid too.
-    ok(".ov-wrap.wgrid > .stat[data-widget]:has(.stat-spark) { grid-column: 1 / -1; }" in CSS, "the phone KPI rule reaches the grid")
+    # Phone Overview: 12 Oct 2026 (R13), the trend tiles pair two across, as the approved mockup draws
+    # (t_a_phone_overview_pairs_its_trend_figures); they no longer take the row.
 
 
 def _run_js(src):
@@ -9210,18 +10311,20 @@ def t_the_run_health_box_says_when_and_in_words():
     since-removed guard stopped (connector c3a2ee5, 7 Sep), and nothing on it
     said so: no date, and the problem in environment-variable names."""
     fn = fn_src("function renderConnector(")
-    ok("const when = ', on ' + fmtDate(connHealth.lastRunAt);" in fn, "it gives the date of the run it judges")
+    # 12 Oct 2026: the box became the status line, which dates it to the minute.
+    ok("sLead('Last ' + kind, connHealth.lastRunAt);" in fn and "fmtDate(iso) + ', ' + londonHM(iso)" in fn,
+       "it gives the date of the run it judges")
     ok("connHealth.lastRunDryRun === true ? 'review'" in fn, "and whether that run was a review or a send")
     ok("cxProblem(p2, ctx)" in fn, "each problem in plain words")
     ok("cxProblem('run aborted: ' + r.aborted, ctx)" in fn and "cxProblem(w)" in fn,
        "and the latest review says its stop and its warnings the same way")
     ok(".slice(0, 140)" not in fn and "cxDetail(q2.reason" in fn, "a quarantine reason is whole, not cut mid-word")
-    # The Connection card: its facts named, the switch on the row it switches.
-    ok("el('dl', 'conn-pairs cx-facts')" in fn and "fact('Store'" in fn, "the connection's facts each have a name")
+    # The connection, now lines in the band (12 Oct 2026): each named, the switch on its line.
+    ok("el('div', 'band-src-h', 'Connection')" in fn and "cfg.shop || 'Not set on the service'" in fn, "the connection's lines each have a name")
     ok("credentials and mapping live on the connector service" not in fn, "not one run-on line of dots")
     i = fn.index("const t = el('button', 'btn btn-sm', on ? 'Turn Auto Run off' : 'Turn Auto Run on');")
-    ok("ar.append(t);" in fn[i:i + 1600] and "sAct.append(t);" not in fn, "the Auto Run switch sits on the Auto Run row")
-    ok(".cx-auto > .btn { margin-left: auto;" in CSS, "at its right-hand end")
+    ok("end.push(t);" in fn[i:i + 1600] and "sAct.append(t);" not in fn, "the Auto Run switch sits on the Auto Run line")
+    ok(".band-src-e {" in CSS, "at its end")
 
 
 @test
@@ -9292,7 +10395,8 @@ def t_the_page_agrees_with_itself_after_a_run():
     ok("connHealth = (await connOp({ op: 'health' })).data" in watch and "connAuto = (await connOp({ op: 'autorun' })).data" in watch,
        "a finished run re-reads the health and Auto Run")
     fn = fn_src("function renderConnector(")
-    ok("st.lastError !== tagErr && !boxSaysIt" in fn, "the chip does not repeat the tag section or the box")
+    # 12 Oct 2026: the chip and the box became the status line and its list.
+    ok("st.lastError && st.lastError !== tagErr && !attn.length" in fn, "the failure does not repeat the tag section or the list")
     ok("op: 'quarantine'" not in fn and "connQuar" in fn, "the quarantine list is painted from what was read with the status")
     ok("connTagBusy === 'check' ? 'A tag check is in progress" in fn, "and the busy chip says what is running")
     ok("connFocus = { sec: 'tag', on: 'tab' };" in fn and "sec.querySelector('.segmented > button.on')" in fn,
@@ -9305,8 +10409,8 @@ def t_the_xero_page_keeps_the_details_the_last_check_found():
     one line that holds it."""
     fn = fn_src("function renderConnector(")
     ok(".ktable.cx-docs td { vertical-align: top; }" in CSS, "rows are top-aligned; the bare .cx-docs td rule lost to .ktable td")
-    ok("'Nothing has run yet.'" in fn, "no run is not a green box")
-    ok("((connHealth && connHealth.guards) || {}).reconcileTolerance" in fn, "the tolerance comes from the health guards")
+    # 12 Oct 2026: the status line's grey dot; the tolerance is said once, in Settings.
+    ok("sWords('No review yet');" in fn and "let dot = '';" in fn, "no run is not a green box")
     ok("connTagPending" in fn and "connTagPending = '';" in fn_src("function connStartWatch("),
        "the tag in flight names the busy section and is cleared when collected")
     ok("if (kept.length > 20) sec.append(tablePager(" in fn and "if (order.length > 20) sec.append(tablePager(" in fn,
@@ -9449,7 +10553,8 @@ def t_members_see_only_the_memory_buttons_the_server_allows():
     imp = fn_src("function impactRow(")
     ok("const mayAct = canEditInstructions() || (!!it.by_uid && !!teamMe && it.by_uid === String(teamMe.id || ''));" in imp,
        "Conclude and Delete for the tracker or an admin")
-    ok("if (mayAct) acts.append(del);" in imp and "' Tracked by ' + it.by" in imp, "and it says who tracked it")
+    # 12 Oct 2026: the actions sit under the figures, and the when line is one piece ("· Tracked by").
+    ok("if (mayAct) {" in imp and "acts.append(del);" in imp.split("if (mayAct) {")[-1] and "Tracked by ' + it.by" in imp, "and it says who tracked it")
     ok("if (!s.reading && canEditInstructions()) {" in SCRIPT and "if (canEditInstructions()) foot.append(again);" in SCRIPT,
        "a skill's reading is run by an admin")
 
@@ -9937,7 +11042,9 @@ console.log(JSON.stringify(out));
 @test
 def t_only_the_master_sees_the_upload_and_a_long_skill_can_be_edited():
     paint = fn_src("function paintSkills(")
-    ok("if (skillCaps.upload) acts.append(up, fi);" in paint, "Upload Markdown is the master's alone")
+    # 12 Oct 2026: with no skills the empty line carries the upload too, behind the same check.
+    ok("if (skillCaps.upload && skills.length) acts.append(up);" in paint and "if (skillCaps.upload) {\n                        const up2" in paint,
+       "Upload Markdown is the master's alone")
     ok("(skillCaps.upload ? ' Drop Markdown files here to add them.' : '')" in paint, "and the card only offers a drop to the master")
     start = fn_src("function startUpload(")
     ok(start.index("if (!skillCaps.upload)") < start.index("readSkillFiles("), "a drop from anyone else reads no file")
@@ -10086,7 +11193,8 @@ def t_the_app_wide_layout_sweep_holds():
         "@container cxcard (max-width: 560px) {\n            .ktable.cx-docs { min-width: 0; display: block; }": "Xero results stack by the card's width",
         ".conn-pairs { grid-template-columns: fit-content(40%) minmax(0, 1fr); }": "a value never runs out of its panel or goes to 0px",
         ".lbl-rows .lbl-nameline { flex-wrap: wrap; row-gap: var(--sp-1); }": "chips go under a title in lists",
-        "top: calc(-1 * var(--sp-3)); right: calc(-1 * var(--sp-3)); z-index: 1;": "a card's hide button is off its controls",
+        # 12 Oct 2026 (WS-60): the hide button sits on the block's first line, and every card head keeps it room.
+        ".ov-wrap.wg-editing > [data-widget] .card-head { padding-right: calc(var(--sp-4) + var(--sp-8)); }": "a card's hide button is off its controls",
         ".dpanel select { padding-right: var(--chevron-room); }": "a filter select's chevron is clear of its label",
     }
     for rule, why in rules.items():
@@ -10094,7 +11202,7 @@ def t_the_app_wide_layout_sweep_holds():
     ok("window.matchMedia('(max-width: 760px)')" not in SCRIPT and SCRIPT.count("window.matchMedia('(max-width: 900px)')") == 5
        and "window.innerWidth > 760" not in SCRIPT,
        "the script's sidebar checks moved with the stop")
-    ok("if (pane) pane.append(wrap); else row.after(wrap);" in SCRIPT, "a label preview opens under its own row")
+    ok("row.after(wrap);" in fn_src("function renderLabels(") and "wideSplit" not in SCRIPT, "a label preview opens under its own row")
     body = fn_src("function bodyToNodes(")
     ok("mdTableRule(lines[i + 1].trim())" in body and "pipeTable(rows)" in body, "a Markdown table in a report is a table")
     ok("else if (connQuar && !connQuar.length) qHost.append(" in SCRIPT, "an empty quarantine list says so")
@@ -10409,15 +11517,14 @@ def t_the_spacing_pass_holds():
        and "height: var(--control-h);" in CSS.split("\n        .segmented > button {")[1].split("}")[0],
        "a segmented track is a control's 32, level with the field beside it (its choice, 28, is drawn inside it)")
     ok("flex: 1 1 auto;" in CSS.split("\n        .segmented > button {")[1].split("}")[0], "and a wrapped track fills its lines")
-    ok(".metrics.metrics-strip { grid-template-columns: repeat(12, minmax(0, 1fr)); }" in CSS
-       and "calc(100% / 60)" not in CSS, "figures keep a 16 gap both ways at every width")
+    ok("column-gap: var(--sp-8); row-gap: var(--sp-6);" in CSS.split("\n        .metrics.metrics-strip {")[1].split("}")[0]
+       and "calc(100% / 60)" not in CSS, "a figure group keeps its 32 between figures and 24 between lines at every width")
     ok(".metrics-strip > .stat > .stat-row { margin-top: 0; }" in CSS, "a figure sits one distance under its label")
     ok("grid-row: span 3; grid-template-rows: subgrid;" in CSS, "and a row of tiles shares its label, figure and note rows")
-    # A tile that is a size container cannot share its parent's rows: the narrow
-    # check lives on the figure's line, never on the tile.
-    ok(".metrics-strip .stat-row { container-type: inline-size;" in CSS
-       and not re.search(r"\.metrics-strip > \.stat \{[^}]*container-type", CSS),
-       "the narrow-tile check is on the figure line, so the tile can still share rows")
+    # Neither the tile nor its figure line is a size container: a container
+    # has no width of its own, so a figure group could not be as wide as it.
+    ok(not re.search(r"\.metrics-strip[^{]*\{[^}]*container-type", CSS),
+       "no part of a figure group is a size container")
     ok(".tbl-tools-l, .tbl-tools-r { display: contents; }" in CSS and ".tbl-tools .tbl-search { flex: 1 1 100%; }" in CSS,
        "a phone toolbar flows as one row: the search and a track take a line, short controls pair up")
     ok("min-height: var(--row-h)" in CSS.split("\n        .tabs {")[1].split("}")[0], "every page's strip is the one 44 row")
@@ -10425,7 +11532,8 @@ def t_the_spacing_pass_holds():
     ok("@media (min-width: 641px) { .crm-pipeline > .crm-col { flex: 1 1 0; min-width: calc(var(--sp-8) * 4); } }" in CSS,
        "the pipeline's stages share the board instead of one sitting past its edge")
     ok(".sidebar.open { margin-left: 0; box-shadow: var(--shadow-lg); }" in CSS, "a closed drawer paints no shadow on the page")
-    ok("padding: 0 var(--wrap-pad);" in CSS.split(".topbar {")[1].split("}")[0], "the top bar keeps the page's gutter")
+    ok("padding-inline: max(var(--wrap-pad), " in CSS.split(".topbar {")[1].split("}")[0],
+       "the top bar keeps the page's gutter as its least, and the page column beyond it")
     ok(".ov-hero-act:not(:has(> :not([hidden]))) { display: none; }" in CSS, "an empty header rail takes no line")
     ok(".card > .ktable-wrap + .tbl-foot { margin-top: 0; }" in CSS and ".card > .metrics { margin-bottom: 0; }" in CSS
        and ".card > .tabs { margin-bottom: 0; }" in CSS and ".card > .load-failed { margin-top: 0; }" in CSS,
@@ -10513,7 +11621,10 @@ def t_the_printed_sheets_do_not_change():
     pr = re.compile(r"label-sheet|day-sheet|loan-sticker|guide-print-row|#label-print|printing-label|@media print|@page")
     rules = [s + "{" + re.sub(r"\s+", " ", b).strip() + "}" for s, b in _rules(CSS) if pr.search(s)]
     eq(len(rules), 80, "the print rules are the same eighty")
-    eq(h("\n".join(rules)), "dd6dd5eed001305b", "and each is unchanged, in order")
+    # 13 Oct 2026, Cameron ("change the label rule too"): the phone's on-screen preview,
+    # @media (max-width: 640px) .lbl-preview .label-sheet, shrinks with zoom: .78 in place of
+    # transform: scale(.78), so no blank is left under it. The other 79 rules are as they were.
+    eq(h("\n".join(rules)), "4ae59112e066329a", "and each is unchanged, in order")
     ok('<div id="label-print"></div>' in HTML, "the print staging area is still a child of the page")
     ff = re.search(r"@font-face \{ font-family: 'Bricolage Grotesque';[^}]*\}", CSS)
     ok(ff, "the label face is still declared")
@@ -10699,7 +11810,8 @@ def t_the_top_bar_says_where_you_are_and_finds_anything():
     ok("setViewCrumb(v);" in sv and "document.body.dataset.view = v;" in sv, "and set with the page on every move")
     ok("$('view-title').append(" not in SCRIPT, "the crumbs carry no Beta: the page title does")
     bar = CSS.split("\n        .topbar {")[1].split("}")[0]
-    ok("border-bottom" not in bar and "padding: 0 var(--wrap-pad)" in bar, "no rule under the bar, on the page's gutter")
+    ok("border-bottom" not in bar and "padding-inline: max(var(--wrap-pad), " in bar,
+       "no rule under the bar, on the page's gutter or the page column, whichever is further in")
     find = CSS.split("\n        .topbar-search {")[1].split("}")[0]
     for prop in ("height: var(--control-h)", "width: var(--find-w)", "background: var(--surface-tertiary)",
                  "border-radius: var(--radius-control)"):
@@ -11202,13 +12314,15 @@ def t_an_empty_space_is_a_tile_a_line_and_its_action():
     line = CSS.split("\n        .empty-line {")[1].split("}")[0]
     ok("font-size: var(--text-head)" in line and "font-weight: var(--weight-semibold)" in line, "one line in the head step")
     st = CSS.split("\n        .empty-state {")[1].split("}")[0]
-    ok("align-items: center" in st and "text-align: center" in st and "border" not in st and "background" not in st, "centred, no box")
+    ok("align-items: center" in st and "text-align: left" in st and "border" not in st and "background" not in st,
+       "one line on the left under its heading (12 Oct 2026, R8), no box")
     gate = fn_src("function renderRunGate(boxId, o) {")
-    ok("pageHead({ view: o.view, title: o.title, line: o.desc," in gate and "emptyState({ icon: o.icon, text: o.note, action: btn, cls: 'run-gate' })" in gate,
+    ok("pageHead({ view: o.view, title: o.title, line: o.desc," in gate and "emptyState({ icon: o.icon, text: o.note, sub: o.covers, action: btn, cls: 'run-gate' })" in gate,
        "a run gate is the header (with its extra words behind an info button) and an empty state")
     ok("rg-ic" not in gate and "illustration" not in gate, "no drawn tile of its own")
     e = CSS.split("\n        .empty {")[1].split("}")[0]
-    ok("text-align: center" in e and "font-size: var(--text-body)" in e and "border: 0" in e, "a list that matched nothing says so quietly")
+    ok("text-align: left" in e and "font-size: var(--text-body)" in e and "border: 0" in e,
+       "a list that matched nothing says so quietly, on the left where its rows start")
     ok(".ov-wrap > .empty, .ov-wrap > .widget-group > .empty, .card-grid > .empty { background" not in CSS, "with no box round it")
 
 
@@ -11225,8 +12339,8 @@ def t_a_figure_row_never_asks_more_gap_than_a_phone_has():
         blk = CSS.split(mk)[1][:900]
         ok(".metrics { column-gap: var(--sp-4); }" in blk, "a phone figure row has a 16 gap")
         ok(".metrics > .stat::before { left: calc(-0.5 * var(--sp-4)); }" in blk, "and its hairline is half of it before the figure")
-    ok(re.search(r"\.metrics\.metrics-strip \{ grid-template-columns: repeat\(12, minmax\(0, 1fr\)\); \}", CSS) is not None,
-       "the strip is still 12 tracks (the reason the gap has to shrink)")
+    ok("repeat(3, minmax(0, 1fr))" in CSS.split("/* A FIGURE GROUP ON A PHONE")[1][:900],
+       "a phone figure group is two or three across, so its gap is paid at most twice")
     ok(".chat-metrics .metrics > .stat::before { left: calc(-0.5 * var(--sp-3)); }" in CSS, "a chat answer's figure row moves its hairline to its own 12 gap")
 
 
@@ -11334,7 +12448,7 @@ def t_queue_counters_read_across_the_bench():
     ok("background: var(--action-primary)" in on and "box-shadow: var(--shadow-focal)" in on, "the chosen one is teal with the focal glow")
     qt = CSS.split("\n        .qt.on {")[1].split("}")[0]
     ok("box-shadow: var(--ring-chosen)" in qt and "background: var(--action-selected)" in qt, "a queue tab is chosen on the segment recipe")
-    eq(_token_raw("qc-w"), "184px", "--qc-w")
+    eq(_token_raw("qc-w"), "128px", "--qc-w (12 Oct 2026: about as wide as its word, the mockup's tiles)")
 
 
 @test
@@ -11525,7 +12639,8 @@ def t_the_forecast_header_is_the_mix_header():
     for t in ("'Which method is running, and why'", "'How each one works, and how right it has been'", "'How much to trust it'",
               "'The plan it is judged against'", "'The Forecast in the Guide'"):
         ok(t in how, "How it works holds " + t)
-    ok("fcPage(" in how and "function fcPage(title, build) {" in SCRIPT, "each opens in a window")
+    # 12 Oct 2026: fcPage takes o.prose, for the windows that are paragraphs.
+    ok("fcPage(" in how and "function fcPage(title, build, o) {" in SCRIPT, "each opens in a window")
     ok("'Upload workbook'" in fn_src("function forecastUploadButton()"), "the upload button says Upload workbook")
     ok("const MONTH_NAMES = ['January'," in SCRIPT, "the status line says the month in full")
 
@@ -11979,7 +13094,7 @@ def t_the_report_pages_wear_the_mix():
     for fname, view in (("function renderOverview(cache) {", "overview"), ("function renderSEO(cache) {", "seo")):
         ok(fname in SCRIPT, fname + " exists")
         fn = fn_src(fname)
-        ok("pageHead({ view: '" + view + "'" in fn and "live: cache.at" in fn and "summarySection(" in fn,
+        ok("pageHead({ view: '" + view + "'" in fn and "live: cache.at" in fn and ("summarySection(" in fn or "summaryAndChanges(" in fn),
            view + ": the one header, and the Summary section")
         ok("el('div', 'ov-hero')" not in fn and "'badge'" not in fn, view + ": no header built by hand")
     ok("function summarySection(text, followed) {" in SCRIPT, "one Summary builder")
@@ -12053,7 +13168,7 @@ def t_keywords_products_and_customers_wear_the_mix():
         ok("el('div', 'ov-hero')" not in fn, fname + ": none built by hand")
     ok("function customerGate(seg) {" in SCRIPT, "the Customers gate exists")
     gate = fn_src("function customerGate(seg) {")
-    ok("emptyState({ icon: I.users, text: RUN_COST, action: btn, cls: 'run-gate' })" in gate,
+    ok("emptyState({ icon: I.users, text: RUN_COST, sub: 'Your customers and 12 months of orders.', action: btn, cls: 'run-gate' })" in gate,
        "the Customers gate is the run gate's empty state, its cost in the words every gate uses")
     ok("'rg-ic'" not in SCRIPT and "'rg-note'" not in SCRIPT, "no run gate draws its own tile or note")
     ok("infoButton('The two Google sources'" in SCRIPT and "infoButton('Linking Google Ads'" in SCRIPT, "the Google steps wait behind info buttons")
@@ -12092,7 +13207,7 @@ def t_liability_and_reconciliation_wear_the_mix():
     for gone in ("Every unpaid order by how late it is", "Open one to see the orders behind the figure", "No orders currently carry an unpaid tag",
                  "Where Shopify, Xero and the inbox disagree", "That is the goal state."):
         ok(gone not in SCRIPT, "cut: " + gone)
-    ok(SCRIPT.count("'Nothing is owed.'") == 2 and "'Nothing needs attention.'" in SCRIPT, "the empty lines are short")
+    ok(SCRIPT.count("'Nothing is owed.'") >= 2 and "'Nothing needs attention.'" in SCRIPT, "the empty lines are short")
 
 
 @test
@@ -12123,13 +13238,13 @@ def t_xero_sync_wears_the_mix():
     settings note behind their titles' info buttons; the shorter lines."""
     ok("function renderConnector() {" in SCRIPT, "renderConnector exists")
     fn = fn_src("function renderConnector() {")
-    ok("pageHead({ view: 'connector', title: 'Xero sync', line: 'Shopify orders, refunds and customers, sent into Xero.' })" in fn,
+    ok("pageHead({ view: 'connector', title: 'Xero sync', line: 'Shopify orders, refunds and customers, sent into Xero.', actions: [rf] })" in fn,
        "the one header and its line")
     ok("el('div', 'ov-hero')" not in fn and "hero.append(heroAct(''))" not in fn, "nothing built by hand")
     for part in ("infoButton('Linking the connector'", "infoButton('About review and send'", "infoButton('About these settings'",
                  "if (hint) t.append(infoButton(title, { title: title, body: hint }))", "'An admin needs to link this.'",
-                 "el('span', 'lbl-chip ' + (cfg.dryOnly ? 'note' : cfg.shop ? 'made' : 'warn')", "'Nothing has run yet.'",
-                 "'No review yet.'", "'Held back for bad data. Fix the cause, then retry.'", "'Empty now. Refresh to update the count.'"):
+                 "cfg.dryOnly ? 'Reviews only' : (cfg.shop ? 'Xero linked' : 'Not configured')",
+                 "'No review yet'", "'Held back for bad data. Fix the cause, then retry.'", "'Empty now. Refresh to update the count.'"):
         ok(part in fn, "Xero sync: " + part)
     ok("\n        .card-head > .lbl-chip { justify-self: start; }" in CSS
        and CSS.index("\n        .card-head > .lbl-chip { justify-self: start; }") > CSS.index("\n        .lbl-chip.warn {"),
@@ -12150,6 +13265,9 @@ def t_fix_round_one_reports_and_the_phone_header():
     for fname in ("function renderOverview(cache) {", "function renderSEO(cache) {", "function renderKeywords(cache) {", "function renderCustomers(seg) {"):
         ok(fname in SCRIPT, fname + " exists")
         fn = fn_src(fname)
+        # Since 12 Oct 2026 a report builds both through summaryAndChanges, which pairs them as one
+        # widget, or leaves the strip in its fixed place before the first card when there is no summary.
+        if "summaryAndChanges(" in fn: fn = fn_src("function summaryAndChanges(")
         ok("changesStrip(" in fn and "summarySection(" in fn, fname + ": it builds both")
         ok(fn.index("changesStrip(") < fn.index("summarySection("), fname + ": the fixed strip comes before the first movable card")
     ok("note: 'Pulls live Shopify data. No AI credits used.'" in SCRIPT, "the Products gate keeps its cost note")
@@ -12214,7 +13332,8 @@ def t_the_size_list_and_loan_units_wear_the_mix():
                  "'ready to go'", "nothing past its date", "Longest out first.", "Every loan unit the shop owns.",
                  "start tracking it", "worth a chase", "A loan with no due date turns amber"):
         ok(gone not in SCRIPT, "cut: " + gone)
-    for new in ("'Nothing is out.'", "'No loan units yet.'", "'no due date'", "'Turns amber after this many days without a due date.'"):
+    # 12 Oct 2026: with no units the register says it once, and the chase limit reads as its own label in Out now's head.
+    for new in ("'Everything is on the shelf.'", "'No loan units yet.'", "'No due date'", "'No due date: amber after'"):
         ok(new in SCRIPT, "says: " + new)
 
 
@@ -12346,7 +13465,7 @@ def t_team_memory_and_skills_wear_the_mix():
                  "infoButton('About notes'", "infoButton('About tracked changes'", "infoButton('How skills are used'",
                  "infoButton('About skills'", "'Uses AI credits. Reads up to 12 pages, once.'",
                  "el('span', 'lbl-chip warn', 'Waiting for an admin')", "el('span', 'lbl-chip note', 'Not read with answers')",
-                 "emptyState({ icon: I.bookmark, text: 'No notes yet.', action: first })", "emptyState({ icon: I.book, text: 'No skills yet.' })"):
+                 "emptyState({ icon: I.bookmark, text: 'No notes yet.', action: first })", "emptyState({ icon: I.book, text: 'No skills yet.', action: firstActs })"):
         ok(part in SCRIPT, "says: " + part)
     for gone in ("'tm-foot'", "Who can sign in, what each may open", "No part-time accounts yet. Set", "keeps in mind with every answer",
                  "Learning the store is an AI run", "Reactor keeps a note when something", "Reactor does not read it yet",
@@ -12380,7 +13499,9 @@ const fmtDate = (d) => '5 Oct'; const ico = () => el('span'); const I = new Prox
 const canEditInstructions = () => true; const memOp = () => {}; const memGuard = () => true; const uiConfirm = async () => true;
 let memInject = 40; let memories = [];
 """ + fn_src("function memSentIds()") + "\n" + fn_src("function memRow(m, sent)") + r"""
-const kinds = (tr) => tr.children[0].children.map(c => c.textContent);
+// 12 Oct 2026 (WS-22): Kind holds one tag; the states sit under the note, in .mem-states.
+const kinds = (tr) => tr.children[0].children.map(c => c.textContent).concat(((tr.children[1].children.find(x => x.className === 'mem-states') || {}).children || []).map(c => c.textContent));
+const kindCell = (tr) => tr.children[0].children.map(c => c.textContent);
 const meta = (tr) => { const c = tr.children[1].children.find(x => x.className === 'mem-meta'); return c ? c.textContent : null; };
 const row = (m) => { memories = [m]; return memRow(m, memSentIds()); };
 const waitingPref = row({ id: 'a', type: 'preference', text: 'Trade accounts reorder.', source: 'chat', status: 'pending', by: 'Dee Pugh', created: 'x' });
@@ -12388,10 +13509,11 @@ const waitingFollow = row({ id: 'b', type: 'followup', text: 'Chase Acme.', sour
 const waitingNoBy = row({ id: 'c', type: 'fact', text: 'A fact.', source: 'chat', status: 'pending', created: 'x' });
 const live = row({ id: 'd', type: 'preference', text: 'Quote in working days.', source: 'chat', status: 'active', created: 'x' });
 const closed = row({ id: 'e', type: 'followup', text: 'Done thing.', source: 'chat', status: 'done', created: 'x' });
-console.log(JSON.stringify({ wp: kinds(waitingPref), wpMeta: meta(waitingPref), wf: kinds(waitingFollow), wfMeta: meta(waitingFollow), wn: kinds(waitingNoBy), wnMeta: meta(waitingNoBy),
+console.log(JSON.stringify({ wpKind: kindCell(waitingPref), wp: kinds(waitingPref), wpMeta: meta(waitingPref), wf: kinds(waitingFollow), wfMeta: meta(waitingFollow), wn: kinds(waitingNoBy), wnMeta: meta(waitingNoBy),
   live: kinds(live), liveMeta: meta(live), closed: kinds(closed) }));
 """
     got = _run_node(js)
+    ok(got["wpKind"] == ["Preference"], "Kind holds one tag: %s" % got["wpKind"])
     ok(got["wp"] == ["Preference", "Waiting for an admin", "Not read with answers"], got["wp"])
     ok(got["wpMeta"] == "From Dee Pugh", got["wpMeta"])
     ok(got["wf"] == ["Follow-up", "Waiting for an admin", "Not read with answers"], "a waiting follow-up is not read either: %s" % got["wf"])
@@ -12446,7 +13568,7 @@ def t_the_inbox_presence_row_is_names_not_boxes():
     ok("\n            .mail-who-card .mail-presence-pick { height: var(--control-h-lg); min-height: var(--control-h-lg); }" in CSS,
        "and your presence choice is a 40 target there")
     mw = fn_src("function renderMail() {")
-    for kept in ("'mail-who-card'", "'who-dot' + ownClass(m.colour)", "'mail-presence ' + (m.presence || 'office')", "'mail-who-name', m.name + ' (you)'",
+    for kept in ("'mail-who-card'", "'who-dot' + ownClass(m.colour)", "'mail-presence ' + (m.presence || 'office')", "'mail-who-name', m.name + (m.uid === d.me ? ' (you)' : '')",
                  "pick.className = 'mail-presence-pick';", "api('/api/mail/presence'", "el('span', 'mail-who-load',"):
         ok(kept in mw, "kept: " + kept)
 
@@ -12768,8 +13890,8 @@ def t_what_the_app_measure_found_stays_fixed():
     ok("li.append(el('code', 'setup-code', x))" in SCRIPT and "font-family" not in CSS.split("\n        .setup-scopes {")[1].split("}")[0],
        "the permission scopes are code in a list, not a list set in monospace")
     e = CSS.split("\n        .empty {")[1].split("}")[0]
-    ok("calc((100%" not in e and "margin-inline: auto" in e and "max-width: calc(var(--measure) + 2 * var(--sp-4))" in e and "padding: var(--sp-6) var(--sp-4)" in e,
-       "an empty line centres by width, its padding the 16 gutter")
+    ok("calc((100%" not in e and "margin-inline: auto" not in e and "text-align: left" in e and "padding: var(--sp-4) 0" in e,
+       "an empty line sits on the left where the rows start (12 Oct 2026, R8), no fractional centring")
     ok("margin: 0; overflow: hidden; clip: rect(0 0 0 0)" in CSS.split("\n        .sr-only {")[1].split("}")[0], "hidden text has no margin of its own")
     ok(_token_raw("control-pad-y") == "var(--sp-1)", "a field's vertical padding is 4: its 32 is the min-height's and the line centres in it")
     ok(CSS.count("calc((100% - var(--measure)) / 2)") == 0, "and no rule pads by a share of its container")
@@ -12978,14 +14100,12 @@ def t_the_queue_band_is_one_treatment_at_every_width():
     ok(".q-card .lbl-list > .lbl-grid::before" in CSS and ".q-card .lbl-list > .lbl-grid > :last-child::after" in CSS
        and ".q-card .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::after" in CSS, "the list's rule and every order's rule are the card's, split or not")
     ok(_winner(".q-card", "--q-bleed-end") == "var(--wrap-pad)", "the right end of a band is the gutter by default")
-    ok(_winner(".lbl-split:not(:has(.lbl-pane:empty)) > .lbl-list", "--q-bleed-end") == "var(--sp-2)",
-       "and half of the 16 between the list and its preview pane while the pane is open")
     for sel in (".q-card .lbl-list > .lbl-grid::before", ".q-card .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::after"):
         ok(_exact(sel, "inset-inline") == "calc(-1 * var(--wrap-pad)) calc(-1 * var(--q-bleed-end))", sel + " ends at the bleed")
     ok(_exact(".q-card .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::before", "inset") == "0 calc(-1 * var(--q-bleed-end)) 0 calc(-1 * var(--wrap-pad))",
        "and so does every order's wash")
     ok(_exact(".q-card .lbl-list > .lbl-grid > :is(.lbl-qrow:is(.on, [aria-selected=\"true\"]), .lbl-preview)::before", "box-shadow") == "var(--ring-selected)",
-       "the open order's wash keeps its 2px teal edge beside the pane")
+       "the open order's wash keeps its 2px teal edge")
 
 
 @test
@@ -13277,12 +14397,12 @@ def t_reconciliation_tells_the_truth_about_its_links_filters_and_sweeps():
     - a sweep started elsewhere showed "Sweeping..." for good, because the page
       never asked again."""
     fn = fn_src("function renderRecon(")
-    ok("xs.needs_reconnect" in fn and "'Xero needs reconnecting'" in fn,
-       "a refused link turns the Xero tag red and says what it needs")
+    ok("xs.needs_reconnect" in fn and "xs.needs_reconnect ? 'Needs reconnecting'" in fn and "'Not connected', !!xs.needs_reconnect);" in fn,
+       "a refused link turns the Xero source red and says what it needs")
     ok("'Reconnect Xero'" in fn and "api('/api/recon/xero-link', {})" in fn,
        "and offers Reconnect through the same walk as Connect")
     ok("'Ask the master account to reconnect Xero.'" in fn, "which only the master account may start, so others are told who")
-    ok("'btn btn-sm' + (xs.needs_reconnect ? '' : ' btn-primary')" in fn,
+    ok("const swTeal = xs.connected && !xs.needs_reconnect" in fn and "'btn btn-sm' + (swTeal ? ' btn-primary' : '')" in fn,
        "Reconnect is then the one teal action and Sweep now steps down")
     watch = fn_src("function watchReconXero(")
     ok("st.xero.connected && !st.xero.needs_reconnect" in watch,
@@ -13304,11 +14424,12 @@ def t_reconciliation_tells_the_truth_about_its_links_filters_and_sweeps():
        "and focus returns in a microtask: after the rows, so the page does not jump, before any key, so none is lost")
     ok("if (e && e.isComposing) return; baseInput();" in fn and "isComposing" not in fn_src("function tableSearch("),
        "a word being composed waits here, where the box is rebuilt, and nowhere else")
-    ok("        .recon-conn-acts { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }" in CSS,
-       "the three buttons of a refused link wrap on a phone instead of running off the card")
-    ok("!(xs.needs_reconnect && /refused the refresh token/i.test(String(n)))" in fn,
+    # 12 Oct 2026: the buttons are the page header's, whose action row wraps.
+    ok("            .ov-hero-act { max-width: 100%; flex-wrap: wrap; justify-content: flex-end; }" in CSS,
+       "the three buttons of a refused link wrap on a phone instead of running off the page")
+    ok("!(xs.needs_reconnect && /refused the refresh token/i.test(String(n)))" in fn_src("function reconSweepLine("),
        "the refusal is said once: the sweep note saying the same is left out while the band shows")
-    ok("ico(I.logIn)" in fn and "reconConnectFallback(card, r.url, 'xero', true)" in fn,
+    ok("ico(I.logIn)" in fn and "reconConnectFallback(band, r.url, 'xero', true)" in fn,
        "Reconnect has its own icon, and a blocked tab gets the shared fallback")
     fb = fn_src("function reconConnectFallback(")
     ok("card.querySelector('.recon-fallback')" in fb and "'Open the Xero sign-in here'" in fb and "watchReconXero(reconnect)" in fb,
@@ -13491,7 +14612,7 @@ def t_xero_sync_holds_together_on_a_phone_and_names_its_synced_figure():
       right, and the contact line ran past the window's edge.
     And "Synced 1214" counted contacts too, which the connector's ledger
     reports as one figure: it now says what it counts."""
-    phone = CSS.split(".segmented:has(> :nth-child(4)) > * { flex: 1 1 calc(var(--sp-7) * 3); } }", 1)
+    phone = CSS.split(".segmented:has(> :nth-child(4)) > * { flex: 1 1 0; min-width: max-content; } }", 1)
     ok(len(phone) == 2 and "@media (max-width: 640px) { .cx-res > .segmented { flex: none; } }" in phone[1],
        "the tag filter keeps its own height, after the phone rule it overrides")
     ok(".ktable.cx-docs td { display: block; padding: 0; border: 0; width: auto; min-width: 0; height: auto; }" in CSS,
