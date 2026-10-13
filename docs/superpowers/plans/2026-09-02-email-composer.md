@@ -304,13 +304,13 @@ Note: `EmailMessage.add_related` on the html part turns the alternative's html l
 def t_the_footer_renders_its_slots_and_nothing_else():
     import mailmime
     html, text = mailmime.render_footer(
-        {"company": "Projected Image UK Ltd", "address": "Unit 4, Bristol", "phone": "0117 000 0000",
-         "website": "https://projectedimage.co.uk", "legal": "Registered in England 01234567"},
+        {"company": "Example Trading Ltd", "address": "Unit 4, Bristol", "phone": "0117 000 0000",
+         "website": "https://example.co.uk", "legal": "Registered in England 01234567"},
         logo_cid="logo1")
     ok('<img src="cid:logo1"' in html and "<table" in html, "logo by cid, in an email-safe table")
-    ok('href="https://projectedimage.co.uk"' in html)
+    ok('href="https://example.co.uk"' in html)
     ok("<script" not in mailmime.render_footer({"company": "<script>x</script>"})[0])
-    eq(text, "Projected Image UK Ltd\nUnit 4, Bristol\n0117 000 0000\nhttps://projectedimage.co.uk\n"
+    eq(text, "Example Trading Ltd\nUnit 4, Bristol\n0117 000 0000\nhttps://example.co.uk\n"
              "Registered in England 01234567")
     eq(mailmime.render_footer({}), ("", ""), "no slots, no footer")
 
@@ -500,13 +500,13 @@ def t_the_old_footer_moves_into_the_legal_slot_and_leads_edit_the_slots():
         j = post("/api/mail/board", {}).json()
         eq(j["email"]["footer_slots"]["legal"], "Reg 01234567", "the free-text footer is not lost")
         ok("footer" not in copilot._load_mail()["email"], "and the old key is gone")
-        r = post("/api/mail/settings", {"op": "footer_slots", "slots": {"company": "PI Ltd", "website": "projectedimage.co.uk", "phone": "x" * 300}})
+        r = post("/api/mail/settings", {"op": "footer_slots", "slots": {"company": "EX Ltd", "website": "example.co.uk", "phone": "x" * 300}})
         eq(r.status_code, 400, "a slot over 200 chars is refused, not truncated silently")
-        r = post("/api/mail/settings", {"op": "footer_slots", "slots": {"company": "PI Ltd", "website": "projectedimage.co.uk"}})
+        r = post("/api/mail/settings", {"op": "footer_slots", "slots": {"company": "EX Ltd", "website": "example.co.uk"}})
         eq(r.status_code, 200)
         j = post("/api/mail/board", {}).json()["email"]
-        eq(j["footer_slots"]["company"], "PI Ltd")
-        ok("<b>PI Ltd</b>" in j["footer_html"] and "PI Ltd" in j["footer_text"], "the board carries the rendered preview")
+        eq(j["footer_slots"]["company"], "EX Ltd")
+        ok("<b>EX Ltd</b>" in j["footer_html"] and "EX Ltd" in j["footer_text"], "the board carries the rendered preview")
         _uid, sess, _ = ready_user("Ann", "ann")
         eq(post_s(sess, "/api/mail/settings", {"op": "footer_slots", "slots": {"company": "x"}}).status_code, 403)
     with_mail(go)
@@ -735,7 +735,7 @@ def t_a_rich_reply_goes_out_sanitised_with_its_twin_footer_and_quote():
         _seed_thread("t1", subject="Rush job")
         uid, sess, _ = ready_user("Ann", "ann"); post("/api/team/user", {"op": "send", "id": uid, "can_send": True})
         post("/api/team/user", {"op": "sign_off", "id": uid, "text": "Ann\nSales desk"})
-        post("/api/mail/settings", {"op": "footer_slots", "slots": {"company": "PI Ltd", "legal": "Reg 1"}})
+        post("/api/mail/settings", {"op": "footer_slots", "slots": {"company": "EX Ltd", "legal": "Reg 1"}})
         async def fake_read(tid, per_msg_chars=4000):
             return {"id": tid, "messages": [{"id": "m1", "from_name": "Jo", "from_email": "jo@c.test", "reply_to": "", "to": MBOX, "cc": "pat@c.test",
                      "subject": "Rush job", "message_id": "<abc@mail>", "references": "", "at": "2026-09-01T10:00:00+00:00",
@@ -758,10 +758,10 @@ def t_a_rich_reply_goes_out_sanitised_with_its_twin_footer_and_quote():
             html = next(p for p in m.walk() if p.get_content_type() == "text/html").get_content()
             ok("<script" not in html and "<b>Jo</b>" in html)
             ok("Ann<br>Sales desk" in html or "<p>Ann<br>Sales desk</p>" in html, "sign-off as lines")
-            ok("<b>PI Ltd</b>" in html and "Reg 1" in html, "footer slots rendered")
-            ok('class="gizmo-quote"' in html and "<b>rush</b>" in html and html.index("PI Ltd") < html.index("gizmo-quote"), "quote last")
+            ok("<b>EX Ltd</b>" in html and "Reg 1" in html, "footer slots rendered")
+            ok('class="gizmo-quote"' in html and "<b>rush</b>" in html and html.index("EX Ltd") < html.index("gizmo-quote"), "quote last")
             text = next(p for p in m.walk() if p.get_content_type() == "text/plain").get_content()
-            ok("Hi Jo" in text and "Ann\nSales desk" in text and "PI Ltd" in text and "> Can you rush it?" in text)
+            ok("Hi Jo" in text and "Ann\nSales desk" in text and "EX Ltd" in text and "> Can you rush it?" in text)
             eq([p.get_filename() for p in m.walk() if p.get_content_disposition() == "attachment"], ["quote.pdf"])
             t = copilot._load_mail()["threads"]["t1"]
             eq(t["sent_attachments"], [{"name": "quote.pdf", "size": 8}])

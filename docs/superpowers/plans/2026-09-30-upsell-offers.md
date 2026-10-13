@@ -31,6 +31,7 @@
 - **Server tests run coroutines with `run_async(...)`, never `run(...)`:** an earlier test's `asyncio.run()` leaves the thread without a loop, so `run(...)` passes alone under `ONLY=` and fails in the full suite. Every test that calls `upsell_reset()` is decorated `@upsell_test` under `@test` (Task 9), which puts back the scope reader `upsell_reset()` replaced.
 - **Page tests never crash the page suite:** `tests/test_frontend.py`'s `ok(cond, why)` needs its reason, and its `@test` decorator catches only `AssertionError`. So every `ok` has two arguments, and a test checks a function or file exists (`"function x(" in SCRIPT`, `os.path.isfile(...)`) before calling `fn_src`, `.index` or `open` on it.
 - **"Run it to see it fail" steps use `tail -3`:** the FAIL line is third from last (FAIL, a blank line, the summary).
+- **`[shop name]` in this plan's code** stands for the shop's own brand, kept out of this public repository. Replace it when building: `UPSELL_OWN_BRAND` is that brand as the size list (`data/gobo-sizes.csv`) spells its manufacturer, in lower case (it is compared through `_norm_key`), and the warranty `vendor` and the Task 10 test's `mark` use the size list's spelling. Never commit the placeholder itself.
 - **No literal invisible characters** in any tracked file, this plan included: `tools/sweep_tree.py` fails on them. Write them as `\u` escapes.
 
 ---
@@ -1480,7 +1481,7 @@ def _upsell_warranty_input(spec: dict) -> dict:
         return "%d year%s" % (y, "" if y == 1 else "s")
     lengths = sorted(spec["lengths"], key=lambda L: int(L["years"]))
     return {"title": spec["title"], "productType": "Warranty", "status": "UNLISTED",
-            "vendor": "Projected Image", "tags": ["reactor-warranty"],
+            "vendor": "[shop name]", "tags": ["reactor-warranty"],
             "productOptions": [{"name": "Length", "values": [{"name": name(int(L["years"]))} for L in lengths]}],
             "variants": [{"optionValues": [{"optionName": "Length", "name": name(int(L["years"]))}],
                           "price": _upsell_price(L["price"]),
@@ -2075,7 +2076,7 @@ def t_the_upsell_page_is_an_admins_and_checks_what_it_is_given():
         eq((new["on"], new["off_kind"], new["row"]["model"]), (False, "percent", "Spot 160"), "and starts switched off")
         rows = post("/api/upsell", {"op": "rows", "q": "source four junior"}).json()["rows"]
         ok(any(x["manufacturer"] == "ETC" for x in rows), "the size list can be searched for a model nobody has ordered for")
-        r = post("/api/upsell", {"op": "mark", "manufacturer": "Projected Image", "model": "20 Watt LED"})
+        r = post("/api/upsell", {"op": "mark", "manufacturer": "[shop name]", "model": "20 Watt LED"})
         eq(r.status_code, 400, "our own projector cannot be marked poor quality while warranties are on")
         bad = json.loads(json.dumps(v["offers"]))
         bad[0]["off"] = "95"
@@ -2115,7 +2116,7 @@ Expected: `FAIL ... 404` or `'/api/upsell' refused` (the route does not exist ye
 Add to the Upsell section:
 
 ```python
-UPSELL_OWN_BRAND = "projected image"
+UPSELL_OWN_BRAND = "[shop name]"
 _UPSELL_CODE_RE = re.compile(r"[A-Z0-9]{6,20}")
 _UPSELL_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _upsell_projectors_cache: dict = {"at": 0.0, "rows": []}
@@ -4667,7 +4668,7 @@ Create `docs/upsell-release.md`:
 
 Everything below is yours to do; Reactor cannot do it, and nothing shows to shoppers until the last step.
 
-1. **Accountant:** confirm the warranty is Projected Image's own repair promise and its VAT treatment, and
+1. **Accountant:** confirm the warranty is the shop's own repair promise and its VAT treatment, and
    choose the Xero account code for warranty sales. If you sell projectors to consumers, ask whether the
    2005 Extended Warranties Order applies: if it does, the warranty's price and length must also be shown on
    the projector's product page before any warranty is offered.
