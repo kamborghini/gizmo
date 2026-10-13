@@ -6614,7 +6614,12 @@ async def _sync_order_tags(registry: dict, order_id, add=(), remove=(), unless=(
             if outcome is not None:
                 outcome["order"] = o      # read once: a release's terms check uses it too
             if _order_status(o) and not allow_dead:
-                return True, ""   # cancelled/refunded/fulfilled: tags stay as they are
+                # Cancelled, refunded or fulfilled: tags stay as they are. The
+                # app may be finding this out here, before Shopify's webhook,
+                # and the queues and the missed-orders strip go on what they
+                # last saw until something says the order changed.
+                _orders_changed([order_id])
+                return True, ""
             cur = _order_tags(o)
             if unless:
                 # An order that already carries one of these is past the move
@@ -6623,6 +6628,7 @@ async def _sync_order_tags(registry: dict, order_id, add=(), remove=(), unless=(
                 if any(_norm_key(t) in keep for t in cur):
                     if outcome is not None:
                         outcome["kept"] = True   # told apart from a move, for the caller that cares
+                    _orders_changed([order_id])   # past the bench in Shopify: likewise
                     return True, ""
             drop = {_norm_key(t) for t in add} | {_norm_key(t) for t in remove}
             new = [t for t in cur if _norm_key(t) not in drop] + list(add)
@@ -9627,7 +9633,9 @@ async def run_missing_production(registry: dict, tag: Optional[str] = None) -> d
     # Taken before the scan: a change during it makes what it finds stale.
     epoch = _orders_epoch
     result = await _missing_scan(registry, tag)
-    if not result.get("error"):
+    # Kept only if no order changed while it read: one that did (a click on
+    # the strip, a webhook) made this answer stale before it landed.
+    if not result.get("error") and epoch == _orders_epoch:
         _missing_cache[tag] = {"at": time.monotonic(), "epoch": epoch, "result": result}
     return result
 
@@ -26466,8 +26474,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # says that row may be wrong: an order cancelled or tagged in
             # Shopify's admin before the app heard of it is read here, moves
             # nothing and writes nothing, so no change was recorded and the
-            # kept strip would bring the row straight back.
+            # kept strip would bring the row straight back. Saying the order
+            # changed also stops a strip scan already reading Shopify from
+            # keeping what it saw, and has the queues read it again.
             _missing_cache.clear()
+            _orders_changed([oid])
             if not okd:
                 return _json({"error": note or "Couldn't tag the order."}, 502)
             nm = re.sub(r"[^#\w-]", "", str(body.get("name") or ""))[:20] or f"order {oid}"

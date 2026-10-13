@@ -29230,6 +29230,82 @@ def t_a_stale_missed_orders_answer_is_not_kept_in_memory():
         copilot._tool_json = saved
         copilot._missing_cache.clear()
 
+
+@test
+def t_a_missed_orders_scan_that_saw_an_order_change_is_not_kept():
+    """Re-check of the sixth speed PR. A scan reads every open order from
+    Shopify over a few seconds; an order known to have changed meanwhile (a
+    click on the strip, a webhook) made its answer stale before it landed,
+    yet it was kept and served, names and all. It is now kept only when no
+    order changed while it ran."""
+    gate = {"ev": None}
+
+    async def slow(registry, name, args):
+        if name == "shopify_list_orders" and args.get("status") == "open":
+            await gate["ev"].wait()
+            return {"orders": [{"id": 9, "name": "#9", "created_at": "2026-10-01T10:00:00Z", "tags": "",
+                                "financial_status": "paid", "line_items": [{"title": "Gobo", "properties": [
+                                    {"name": "Manufacturer", "value": "Martin"}]}]}]}
+        return {}
+    saved = copilot._tool_json
+    copilot._tool_json = slow
+    copilot._missing_cache.clear()
+    try:
+        async def scenario():
+            gate["ev"] = asyncio.Event()
+            scan = asyncio.ensure_future(copilot.run_missing_production({}))
+            await asyncio.sleep(0.01)                  # the scan is reading Shopify
+            copilot._orders_changed([9])               # #9 changed meanwhile
+            gate["ev"].set()
+            return await scan
+        res = run(scenario())
+        eq([m["name"] for m in res["missing"]], ["#9"], "the scan still answers the look that asked")
+        eq(copilot._missing_cache, {}, "but its answer is not kept")
+    finally:
+        copilot._tool_json = saved
+        copilot._missing_cache.clear()
+
+
+@test
+def t_a_release_that_finds_shopify_ahead_of_the_app_says_the_order_changed():
+    """Re-check of the sixth speed PR. A release reads the order and may find
+    it cancelled, fulfilled, or already past the bench in Shopify's admin
+    before the app heard: nothing is written, so nothing said the order had
+    changed, and the kept strip and the queues went on showing what the app
+    had last seen (up to two and three minutes). Such a read now says so. An
+    order simply already where it was asked to go (every reprint) says
+    nothing, as before."""
+    def go():
+        ensure_auth()
+        reset_prod(); reset_dispatch()
+        saved = (copilot._tool_json, ORDER["tags"], ORDER.get("cancelled_at"))
+        try:
+            # cancelled in Shopify, the app not told
+            ORDER["tags"], ORDER["cancelled_at"] = "Unprocessed", "2026-10-13T08:00:00Z"
+            e0 = copilot._orders_epoch
+            ok_, note, released = run(copilot._release_tags({}, 12345))
+            ok(copilot._orders_epoch > e0, "a dead order found on release is an order that changed")
+            # tagged PC in Shopify's admin, the app not told
+            ORDER["tags"], ORDER["cancelled_at"] = "PC", None
+            e1 = copilot._orders_epoch
+            run(copilot._release_tags({}, 12345))
+            ok(copilot._orders_epoch > e1, "and so is one already past the bench")
+            # already in To make: an ordinary reprint
+            ORDER["tags"] = "IP"
+            e2 = copilot._orders_epoch
+            run(copilot._release_tags({}, 12345))
+            eq(copilot._orders_epoch, e2, "an order already where it was asked to go says nothing")
+            # and a click on the strip always does
+            e3 = copilot._orders_epoch
+            r = post("/api/production-labels/queue", {"order_id": 12345, "name": "#104239"})
+            eq(r.status_code, 200, r.text)
+            ok(copilot._orders_epoch > e3, "a click on the strip says the order changed")
+        finally:
+            copilot._tool_json = saved[0]
+            ORDER["tags"], ORDER["cancelled_at"] = saved[1], saved[2]
+            reset_prod()
+    with_accounts(go)
+
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a
