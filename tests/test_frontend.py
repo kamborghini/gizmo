@@ -3126,7 +3126,8 @@ def t_prose_is_capped_to_a_reading_measure():
 
 @test
 def t_the_queue_row_spends_width_on_columns_not_on_a_void():
-    f = re.search(r"@container queue \(min-width: 1200px\) \{\s*\.lbl-grid[\s\S]{0,600}?\n        \}", CSS)
+    # 13 Oct 2026 (panels): 1152, the 1200 column less a panel's inset either side, the widest a panel gives the queue.
+    f = re.search(r"@container queue \(min-width: 1152px\) \{\s*\.lbl-grid[\s\S]{0,600}?\n        \}", CSS)
     ok(f, "there is a wide rule for the queue row, keyed to the list's own width")
     ok("display: contents" in f.group(0),
        "the .lbl-who box dissolves so its two lines become two real columns")
@@ -12087,7 +12088,8 @@ def t_the_grey_page_reaches_every_edge_of_the_sheet():
     ok("@media screen { .topbar { background: transparent; } }" in CSS, "the bar sits on the grey")
     ok("@media screen and (min-width: 901px) { body:has(#view-chat.active) .topbar { background: var(--surface-primary); } }" in CSS,
        "Chat's bar stays on its white sheet")
-    ok("@media screen { .topbar-search { background: var(--surface-primary); box-shadow: inset 0 0 0 var(--bw-hairline) var(--border-default); } }" in CSS,
+    # Review (13 Oct 2026): over 900 only; under it the bar is the ink frame and the field had a ring there.
+    ok("@media screen and (min-width: 901px) { .topbar-search { background: var(--surface-primary); box-shadow: inset 0 0 0 var(--bw-hairline) var(--border-default); } }" in CSS,
        "Search is a white field on the grey (its own fill is the grey's tone)")
     strips = ("@media screen {\n            :is(.ov-wrap, .ov-wrap.wgrid) > .page-tabs { margin-inline: 0; padding-inline: 0; }\n"
               "            :is(.ov-wrap, .ov-wrap.wgrid) > .tabs { margin-inline: calc(-1 * var(--sp-2)); padding-inline: var(--sp-2); box-shadow: none;\n"
@@ -12180,7 +12182,8 @@ def t_on_a_phone_a_panels_rows_keep_their_words_and_buttons_inside():
     # to its content, stopped two thirds across a full-width panel: its last
     # column takes the spare width, so its rules reach the panel's edge; side
     # by side the fitted half is still the table's own width.
-    ok(".dt-runs { --dt-cols: repeat(5, max-content) minmax(max-content, 1fr); }" in CSS, "a stacked Runs table fills its panel")
+    # Review (13 Oct 2026): the last column taking the spare width left 500 of nothing before it; When takes it.
+    ok(".dt-runs { --dt-cols: minmax(max-content, 1fr) repeat(5, max-content); }" in CSS, "a stacked Runs table fills its panel, its first column wide")
     # Team's Work: "On the clock now" and "Hours per person" kept their natural
     # widths, so in a panel their rules stopped short (412 of 943 at 1280); and a
     # ktable draws its own rule above and below, a frame inside the panel whose
@@ -12188,7 +12191,8 @@ def t_on_a_phone_a_panels_rows_keep_their_words_and_buttons_inside():
     # the panel's edge closes it, as a dtable's does.
     ok(".dt-clock { --dt-cols: repeat(3, max-content) minmax(max-content, 1fr); }" in CSS, "the clock table fills its panel, its button at the row's end")
     ok(".tm-hours .ktable { width: auto; }" not in CSS, "and Hours per person fills its own")
-    ok("@media screen { .panel .ktable-wrap { box-shadow: none; } }" in CSS, "a table in a panel draws no frame of its own")
+    ok("@media screen { .panel .ktable-wrap:not(.prose-table, .pchat *) { box-shadow: none; } }" in CSS,
+       "a table in a panel draws no frame of its own (a table in written text, a skill's or a chat answer's, keeps its lines)")
     # At 1440 the panel's inset cut a long borrower's name in Loan units' register
     # ("Marlowe Arts Cen...") with nothing to show the rest: the name keeps its
     # ellipsis and carries itself as a tooltip.
@@ -12206,6 +12210,124 @@ def t_on_a_phone_a_panels_rows_keep_their_words_and_buttons_inside():
        "and the A to Z strip on a phone")
     bot = CSS.split("\n        .crm-card-bot {")[1].split("}")[0]
     ok("flex-wrap: wrap" in bot, "a board card's bottom line wraps inside the card")
+
+
+@test
+def t_notices_are_never_panels_and_the_guides_contents_are_one():
+    """Final review (13 Oct 2026): PANEL_SKIP named 'alert', which no element
+    carries, so Overview's alerts banner (a notice, tinted amber) was stamped a
+    white panel; every notice of the ONE NOTICE recipe is skipped. The Guide's
+    search and contents floated on the grey, six lines on a phone before the
+    first panel: they are a panel."""
+    sk = SCRIPT[SCRIPT.index("const PANEL_SKIP"):SCRIPT.index("const PANEL_HOLD")]
+    ok("'alerts-banner', 'cx-health', 'mail-viewwarn', 'mail-sendwarn', 'disp-warn', 'disp-await', 'mail-note', 'mail-hidden-note', 'resp-note'" in sk,
+       "every notice is skipped")
+    ok("'alert'," not in sk and "'guide-tools'" not in sk, "no dead name, and the Guide's contents are a panel")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + "\n" + SCRIPT[SCRIPT.index("const PANEL_SKIP"):SCRIPT.index("function syncPanels(")] + r"""
+const mk = (cls) => { const n = document.createElement('div'); n.className = cls; return n; };
+const ban = mk('alerts-banner'), tools = mk('guide-tools'), warn = mk('mail-sendwarn');
+const got = [ban, tools, warn].flatMap(panelTargets);
+console.log(JSON.stringify({ ban: got.includes(ban), tools: got.includes(tools), warn: got.includes(warn) }));
+"""
+    got = _run_node(js)
+    ok(not got["ban"] and not got["warn"] and got["tools"], "notices stay notices, the contents are a panel: %r" % got)
+
+
+@test
+def t_rows_keep_the_inset_wherever_they_sit():
+    """Final review (13 Oct 2026): words sat on a panel's edge where a row's own
+    rule outweighed the inset. Files' rows (an id rule set their sides to 0);
+    Memory's notes and the Size list when their rows stack (only the first and
+    last cells took the inset); Keywords' Show all inside the bled table; an
+    Inbox row on a phone gave its sender's name to a fixed Claim slot and age;
+    and a list in a report's chat answer was pulled past the thread's edge."""
+    ok("@media screen { #files-content .panel .files-list > .files-row { padding-inline: var(--panel-pad-x); } }" in CSS,
+       "Files' rows take the inset over the page's own zero sides")
+    fx = CSS.split("/* FROM THE FINAL REVIEWS (13 Oct 2026)")[1] if "/* FROM THE FINAL REVIEWS (13 Oct 2026)" in CSS else ""
+    ok("@container memcard (max-width: 700px) {" in fx and ".panel .mem-list > .ktable-wrap > .ktable.mem-table tr { padding-inline: var(--panel-pad-x); }" in fx
+       and ".panel .mem-list > .ktable-wrap > .ktable.mem-table td:nth-child(n) { padding-inline: 0; }" in fx, "Memory's stacked rows take the inset")
+    ok("@container sizes (max-width: 520px) {" in fx and ".panel > .ktable-wrap > .ktable.sizes-table tr.sizes-row { padding-inline: var(--panel-pad-x); }" in fx
+       and ".panel > .ktable-wrap > .ktable.sizes-table tr.sizes-row > td:nth-child(n) { padding-inline: 0; }" in fx
+       and ".panel > .ktable-wrap > .ktable.sizes-table tr.sizes-detail > td:nth-child(n) { padding-inline: var(--panel-pad-x); }" in fx
+       and ".panel > .ktable-wrap > .ktable.sizes-table tr.sizes-row.open { box-shadow: none; }" in fx
+       and "@media (hover: hover) { .panel > .ktable-wrap > .ktable.sizes-table tr.sizes-row:hover { box-shadow: none; } }" in fx, "and the Size list's")
+    ok(".panel .ktable tr.ktable-grp th { box-shadow: var(--rule-b); }" in fx and "@media (hover: hover) { .panel .ktable tr.ktable-grp:hover th { box-shadow: var(--rule-b); } }" in fx
+       and ".panel .ktable tr.sizes-row.open > td:is(:first-child, :last-child), .panel .ktable tr.sizes-detail > td { box-shadow: none; }" in fx,
+       "a band or an open row no longer reaches 8 past the panel's edge")
+    ok(":is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > .ktable-wrap > .kw-more { padding-inline: var(--panel-pad-x); }" in fx,
+       "Keywords' Show all takes the inset back")
+    ok("@container mlist (max-width: 560px) {" in fx and ".panel .mlist > .mrow > .mown-slot { min-width: 0; }" in fx
+       and ".panel .mlist > .mrow > .mage { flex: 0 0 auto; }" in fx, "an Inbox row on a phone keeps the sender's name")
+    ok(".panel.pchat > .pchat-input { padding: 0; background: none; border-top: 0; }" in fx, "the Ask box is a field in its panel, not a well in a box")
+    for stop, rem in (("xs", "24"), ("s", "40"), ("m", "56"), ("l", "72")):
+        ok("@container dt (max-width: %srem) { .dt-%s > .dtable > .dt-row > .dt-c.act { justify-content: flex-start; } }" % (rem, stop) in CSS,
+           "a two-line row's actions start on the inset (%s)" % stop)
+    ok("@media screen and (max-width: 640px) { .dt-c.act .swap > [aria-hidden=\"true\"] { display: none; } }" in CSS,
+       "on a phone each action is the width of its own words, so a register row's four fit one line")
+
+
+@test
+def t_controls_on_the_grey_answer_hover_and_press():
+    """Final review (13 Oct 2026): a control's hover was the grey's own tone, so
+    on the grey page the Production Manager's counters and queue links, the
+    header's icon buttons and info buttons, and the top bar's icons gave no
+    sign under the pointer; the counters lost even their press."""
+    fx = CSS.split("/* FROM THE FINAL REVIEWS (13 Oct 2026)")[1] if "/* FROM THE FINAL REVIEWS (13 Oct 2026)" in CSS else ""
+    ok(".ov-wrap > .queues :is(.qc:not(.on), .qt:not(.on)):hover { background: var(--surface-sunken); }" in fx, "the counters and queue links")
+    ok(".ov-wrap > :is(.ov-hero, .page-tabs) .icon-btn:hover { background: var(--surface-sunken); }" in fx
+       and ".ov-wrap > :is(.ov-hero, .page-tabs) .info:hover::before { background: var(--surface-sunken); }" in fx, "the header's icon and info buttons")
+    ok(".ov-wrap > .queues .qc:not(.on):active { background: var(--press-fill); }" in fx, "and a counter's press")
+    ok("@media screen and (min-width: 901px) { @media (hover: hover) { .topbar .icon-btn:hover { background: var(--surface-sunken); } } }" in CSS,
+       "the top bar's icons over 900 (under it the bar is the ink frame with its own)")
+
+
+@test
+def t_the_queue_and_every_list_end_on_their_panels_edges():
+    """Final review (13 Oct 2026): the Production Manager's bands were still
+    drawn by the old page gutter, 16 past each side of its panel (the line over
+    the toolbar on the panel's top edge, the open order's wash and teal bar
+    hanging off it), and its widest layout (name and company as two columns)
+    waited for a 1200 queue that a panel never gives. Custom shipments kept its
+    rules on the inset. What changed, Forecast's numbers, Chat's recent list
+    and the queues drew a rule above the panel's bottom edge."""
+    fx = CSS.split("/* FROM THE FINAL REVIEWS (13 Oct 2026)")[1] if "/* FROM THE FINAL REVIEWS (13 Oct 2026)" in CSS else ""
+    ok(".q-card.panel::before { content: none; }" in fx and ".q-card.panel .lbl-list > .lbl-grid::before { inset-inline: calc(-1 * var(--panel-pad-x)); }" in fx
+       and ".q-card.panel .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::before { inset: 0 calc(-1 * var(--panel-pad-x)); }" in fx
+       and ".q-card.panel .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::after { inset-inline: calc(-1 * var(--panel-pad-x)); }" in fx
+       and ".q-card.panel .lbl-list > .lbl-grid > :last-child::after { content: none; }" in fx, "the queue's bands end at its panel's edges")
+    ok("@container queue (min-width: 1152px) {" in CSS and "@container queue (min-width: 1200px) {" not in CSS,
+       "the queue's widest layout fires at the widest a panel gives it, 1200 less its inset")
+    ok(".panel:not(.q-card) > .lbl-list > .lbl-grid { margin-inline: calc(-1 * var(--panel-pad-x)); }" in fx
+       and ".panel:not(.q-card) > .lbl-list > .lbl-grid > .lbl-qrow { padding-inline: var(--panel-pad-x); }" in fx
+       and ".panel:not(.q-card) > .lbl-list > .lbl-grid > .lbl-qrow:last-child { box-shadow: none; }" in fx, "Custom shipments to the edges, its last row unruled")
+    ok(":is(.changes-strip.panel, .panel .changes-strip) .impact-deltas { clip-path: inset(0 0 var(--bw-hairline) 0); }" in fx, "What changed's last row")
+    ok(".fc-numbers.panel > .rlist { box-shadow: none; }" in fx, "Forecast's numbers")
+    ok(".chat-recent.panel > .chat-recent-row { width: auto; margin-inline: calc(-1 * var(--panel-pad-x)); padding-inline: var(--panel-pad-x); }" in fx
+       and ".chat-recent.panel > .chat-recent-row:last-child { box-shadow: none; }" in fx and ".chat-recent.panel > .chat-recent-h { padding-inline: 0; }" in fx,
+       "Chat's recent list runs to its panel's edges, its last row unruled")
+    ok(".ov-wrap .panel > :last-child { margin-bottom: 0; }" in fx, "a panel's last block keeps no margin of its own (SEO's figures sat 20 over and 45 under)")
+
+
+@test
+def t_customise_arranges_panels_on_their_own_edges():
+    """Final review (13 Oct 2026), spec 7: the dashed edge on the panel's own
+    edge, a group's hugging its panels (it stood 8 out and ate the gap); the
+    grip and the hide button inside the panel on its first line (the hide
+    button sat over the corner, the grip on the grey beside the previous
+    tile's hide button). A figure group's inset is a border its clip cuts, so
+    while arranging it shows its grip and drops the hairlines between figures."""
+    fx = CSS.split("/* FROM THE FINAL REVIEWS (13 Oct 2026)")[1] if "/* FROM THE FINAL REVIEWS (13 Oct 2026)" in CSS else ""
+    ok(".ov-wrap.wg-editing > [data-widget]:not(.panel):not(:focus-visible) { outline-offset: 0; }" in fx, "a group's dashed edge hugs its panels")
+    ok(".ov-wrap.wg-editing > [data-widget] > .wg-grip { top: calc(var(--panel-pad-y) - var(--sp-1)); left: calc((var(--panel-pad-x) - var(--icon-md)) / 2); }" in fx
+       and ".ov-wrap.wg-editing > [data-widget] > .wg-hide { top: calc(var(--panel-pad-y) - var(--sp-1)); right: calc(var(--panel-pad-x) - var(--sp-1)); }" in fx,
+       "grip and hide on the first line, inside the panel")
+    ok(".ov-wrap.wg-editing > .panel.metrics { overflow: visible; }" in fx and ".ov-wrap.wg-editing > .panel.metrics > .stat::before { content: none; }" in fx
+       and ".ov-wrap.wg-editing > .panel.metrics > .wg-grip { top: calc(-1 * var(--sp-1)); left: calc((var(--panel-pad-x) - var(--icon-md)) / 2 - var(--panel-pad-x)); }" in fx
+       and ".ov-wrap.wg-editing > .panel.metrics > .wg-hide { top: calc(-1 * var(--sp-1)); right: calc(-1 * var(--sp-1)); }" in fx,
+       "a figure group shows its grip while arranging")
 
 
 @test
@@ -12227,15 +12349,16 @@ def t_a_table_runs_to_its_panels_edges():
     phone = CSS.split(head)[1].split("@media screen and (max-width: 640px) {")[1].split("\n        }\n")[0] if head in CSS else ""
     T = ":is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > "
     ok(".panel .dtable > :last-child { border-bottom-color: transparent; }" in b, "no rule under the last row")
-    ok(T + ":is(.ktable-wrap, .dt) { margin-inline: calc(-1 * var(--panel-pad-x)); }" in b, "a table reaches the panel's edges, nested in a host or not")
+    # Review (13 Oct 2026): a dtable bleeds, not its .dt, which is the size container its breakpoints measure.
+    ok(T + ":is(.ktable-wrap, .dt > .dtable) { margin-inline: calc(-1 * var(--panel-pad-x)); }" in b, "a table reaches the panel's edges, nested in a host or not")
     ok(T + ".ktable-wrap > .ktable :is(th, td):first-child { padding-left: var(--panel-pad-x); }" in b
        and T + ".ktable-wrap > .ktable :is(th, td):last-child { padding-right: var(--panel-pad-x); }" in b, "a ktable's outer columns keep the panel's inset")
     ok(T + ".dt > .dtable > :is(.dt-head, .dt-row, .dt-detail) { padding-inline: var(--panel-pad-x); }" in b, "a dtable's rows too")
     ok(T + ".dt > .dtable > :is(.dt-row.open, .dt-detail)::before { left: 0; }" in b, "an opened row's teal edge on the panel's edge")
     lists = ".files-list, .mlist, .sk-list, .fc-wl, .fc-drive, .rel-list, .guide-rows, .insights"
-    ok(".panel :is(" + lists + "), .panel > #mail-bulk-host { margin-inline: calc(-1 * var(--panel-pad-x)); }" in b, "a ruled list reaches the edges")
+    ok(".panel :is(" + lists + "):not(.pchat *), .panel > #mail-bulk-host { margin-inline: calc(-1 * var(--panel-pad-x)); }" in b, "a ruled list reaches the edges (not one in a report's chat answer)")
     ok(".ov-wrap .panel :is(.files-list > .files-row, .mlist > .mrow, .sk-list > .sk-item, .fc-wl > [role=\"row\"], .fc-drive > .fc-drive-row, "
-       ".rel-list > .rel, .guide-rows > .guide-row, .insights > .insight) { padding-inline: var(--panel-pad-x); }" in b, "its rows keep the inset")
+       ".rel-list > .rel, .guide-rows > .guide-row, .insights > .insight):not(.pchat *) { padding-inline: var(--panel-pad-x); }" in b, "its rows keep the inset")
     ok(".ov-wrap :is(.panel.actions, .panel .actions) > :is(.action-head, .action), .ov-wrap .panel > .card-bleed > details.sect { margin-inline: calc(-1 * var(--panel-pad-x)); padding-inline: var(--panel-pad-x); }" in b,
        "rows that sit in a full-width block (the actions, in their panel or a card in it; the Details) the same")
     ok(".ov-wrap .panel > #mail-bulk-host > .mail-bulkbar { padding-inline: calc(var(--panel-pad-x) + var(--dot-md) + var(--sp-2-5)) var(--panel-pad-x); }" in b,
@@ -12248,7 +12371,7 @@ def t_a_table_runs_to_its_panels_edges():
     # column beside its filters over 900), Forecast's numbers (two columns over
     # 1000 of their own width) and What changed (columns of 12rem, so one under 25.5rem).
     narrow = CSS.split("/* NARROW LISTS IN PANELS (13 Oct 2026)")[1].split("\n        }\n        /*")[0] if "/* NARROW LISTS IN PANELS (13 Oct 2026)" in CSS else ""
-    ok("@media screen and (max-width: 900px) {" in narrow and ".panel .tm-feedwrap > .tm-feed > .dt { margin-inline: calc(-1 * var(--panel-pad-x)); }" in narrow
+    ok("@media screen and (max-width: 900px) {" in narrow and ".panel .tm-feedwrap > .tm-feed > .dt > .dtable { margin-inline: calc(-1 * var(--panel-pad-x)); }" in narrow
        and ".panel .tm-feedwrap > .tm-feed > .dt > .dtable > :is(.dt-head, .dt-row, .dt-detail) { padding-inline: var(--panel-pad-x); }" in narrow,
        "the Activity feed under 900")
     ok("@container fcnumbers (max-width: 1000px) {" in narrow and ".panel .rlist.cols-2 { margin-inline: calc(-1 * var(--panel-pad-x)); }" in narrow
@@ -12261,7 +12384,7 @@ def t_a_table_runs_to_its_panels_edges():
     D = ":is(.panel .duo, .panel .duo > .card-bleed, .panel .radar-col > .card-bleed) > "
     ok(".card:has(> .card-bleed > .duo), .card:has(> .duo) { container: duo cols / inline-size; }" in CSS
        and ".card:has(> .radar-cols) { container: radar cols / inline-size; }" in CSS, "a two-column card is also a 'cols' container")
-    ok("@container cols (max-width: 64rem) {" in narrow and D + ":is(.ktable-wrap, .dt) { margin-inline: calc(-1 * var(--panel-pad-x)); }" in narrow
+    ok("@container cols (max-width: 64rem) {" in narrow and D + ":is(.ktable-wrap, .dt > .dtable) { margin-inline: calc(-1 * var(--panel-pad-x)); }" in narrow
        and D + ".ktable-wrap > .ktable :is(th, td):first-child { padding-left: var(--panel-pad-x); }" in narrow
        and D + ".ktable-wrap > .ktable :is(th, td):last-child { padding-right: var(--panel-pad-x); }" in narrow
        and D + ".dt > .dtable > :is(.dt-head, .dt-row, .dt-detail) { padding-inline: var(--panel-pad-x); }" in narrow,
@@ -12300,8 +12423,9 @@ console.log(JSON.stringify({ n: got.length, card: got.includes(card), halves: go
     ok("@media screen {" in css and ".panel { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-card);" in css
        and "box-shadow: var(--shadow-panel); padding: var(--panel-pad-y) var(--panel-pad-x);" in css,
        "on screen only: white, a hairline edge, the card corner, the soft shadow and the panel's inset")
+    # Review (13 Oct 2026): the edge is an outline on the border box's own line, not a ring a pixel outside it.
     ok(".panel.metrics { padding: 0; border-style: solid; border-color: transparent; border-width: var(--panel-pad-y) var(--panel-pad-x);" in css
-       and "box-shadow: 0 0 0 var(--bw-hairline) var(--border-default), var(--shadow-panel); width: auto; }" in css,
+       and "box-shadow: var(--shadow-panel); outline: var(--bw-hairline) solid var(--border-default); outline-offset: calc(-1 * var(--bw-hairline)); width: auto; }" in css,
        "a figure group's inset is a transparent border, so its clip still hides the first hairline")
     ok(".ov-wrap.wg-editing > [data-widget].panel:not(:focus-visible) { outline-offset: calc(-1 * var(--bw-hairline)); }" in CSS,
        "in Customise a panel's dashed edge is its own edge")
