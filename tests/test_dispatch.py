@@ -1,7 +1,30 @@
 import os, sys, json, time, asyncio, glob, re, tempfile, base64, secrets
+import atexit, shutil, signal
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import xml.etree.ElementTree as ET
 SCRATCH = tempfile.mkdtemp(prefix="gizmo-dispatch-tests-")
+# Every run made one of these and nothing removed it, until 1,744 of them
+# (298 MB) filled the disk on 12 October 2026 and a run failed 80 tests on
+# "No space left on device". It goes when this interpreter exits - pass, fail,
+# Ctrl-C or a kill - and never sooner: the design rigs exec everything above
+# the first test and serve from this folder for as long as they are up. It is
+# registered before the app is imported because exit handlers run last-first,
+# so the app's own exit flush (the activity ledger) still has a folder to land
+# in. KEEP_SCRATCH=1 leaves it behind for a look afterwards.
+_SCRATCH_PID = os.getpid()
+def _drop_scratch():
+    if os.getpid() != _SCRATCH_PID:
+        return
+    if os.environ.get("KEEP_SCRATCH") == "1":
+        print("scratch kept: " + SCRATCH, file=sys.stderr)
+    else:
+        shutil.rmtree(SCRATCH, ignore_errors=True)
+atexit.register(_drop_scratch)
+# A plain kill (a timed-out run, a rig stopped from another shell) ends Python
+# without its exit handlers, so SIGTERM is made an ordinary exit. uvicorn puts
+# this handler back and raises the signal again once a rig has shut down.
+if signal.getsignal(signal.SIGTERM) == signal.SIG_DFL:
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
 os.makedirs(SCRATCH, exist_ok=True)
 for f in glob.glob(SCRATCH + "/*"):
     (os.remove(f) if os.path.isfile(f) else None)
@@ -3254,6 +3277,62 @@ def t_the_suite_cannot_reach_the_network():
            "no proxy or alternative service address is inherited")
     finally:
         del NET_REACHED[before:]
+
+
+@test
+def t_a_run_leaves_no_scratch_folder_behind():
+    """Each run made a gizmo-dispatch-tests-* folder in the system temp dir and
+    nothing removed it, until 1,744 of them filled the disk (12 October 2026).
+    Three children, each pointed at an empty temp dir of its own: one quick
+    test, the same with KEEP_SCRATCH=1, and the part above the first test as
+    a design rig runs it, which keeps its folder while it is up and drops it
+    when it is killed."""
+    import subprocess
+    here = os.path.abspath(__file__)
+    env = {k: v for k, v in os.environ.items() if k != "KEEP_SCRATCH"}
+    rig = ("import sys\nsrc = open(sys.argv[1], encoding='utf-8').read()\n"
+           "g = {'__name__': 'rig', '__file__': sys.argv[1]}\n"
+           "exec(compile(src[:src.index('\\n@test\\n')], 'harness', 'exec'), g)\n"
+           "print(g['SCRATCH'], flush=True)\nsys.stdin.readline()\n")
+    def child(argv, **extra):
+        tmp = tempfile.mkdtemp(dir=SCRATCH)
+        return tmp, subprocess.Popen([sys.executable] + argv, env=dict(env, TMPDIR=tmp, **extra),
+                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE, text=True)
+    runs = [child([here], ONLY="t_config_creds_write_only"),
+            child([here], ONLY="t_config_creds_write_only", KEEP_SCRATCH="1"),
+            child(["-c", rig, here])]
+    try:
+        tmp, p = runs[2]
+        held = p.stdout.readline().strip()
+        ok(held.startswith(tmp) and os.path.isdir(held),
+           "a rig still serving keeps its folder: %r %s" % (held, "" if held else p.communicate(timeout=60)[1][-800:]))
+        p.send_signal(signal.SIGTERM)
+        p.wait(timeout=60)
+        eq(p.returncode, 128 + signal.SIGTERM, "a kill ends it as an exit, so the cleanup runs")
+        eq(os.listdir(tmp), [], "and the killed rig's folder is gone")
+
+        tmp, p = runs[0]
+        out, err = p.communicate(timeout=120)
+        ok("1 passed, 0 failed" in out, out[-500:] + err[-800:])
+        eq(os.listdir(tmp), [], "a run leaves nothing in the temp dir")
+
+        tmp, p = runs[1]
+        out, err = p.communicate(timeout=120)
+        ok("1 passed, 0 failed" in out, out[-500:] + err[-800:])
+        kept = os.listdir(tmp)
+        ok(len(kept) == 1 and kept[0].startswith("gizmo-dispatch-tests-"), "KEEP_SCRATCH=1 keeps it: %r" % kept)
+        ok("scratch kept: " + os.path.join(tmp, kept[0]) in err, "and says where")
+    finally:
+        for _tmp, p in runs:
+            if p.poll() is None:
+                p.kill()
+                p.communicate()
+    # The folders single tests make for themselves sit inside the scratch, so
+    # they go with it; one made anywhere else is never removed.
+    for args in re.findall(r"mkdtemp\(([^)]*)\)", open(here, encoding="utf-8").read()):
+        ok(args in ('prefix="gizmo-dispatch-tests-"', "dir=SCRATCH"),
+           "a temp folder made outside the scratch, with %s" % (args or "no arguments"))
 
 
 @test
@@ -13790,7 +13869,7 @@ def t_the_forecast_pins_its_threads_to_the_cpu_it_actually_has():
     sys.path.insert(0, root)
     from forecast.cpu import _quota, cpu_budget, FALLBACK_MAX
     import tempfile
-    d = tempfile.mkdtemp()
+    d = tempfile.mkdtemp(dir=SCRATCH)
     with open(os.path.join(d, "cpu.max"), "w") as fh:
         fh.write("50000 100000")
     eq(_quota(d), 0.5, "cgroup v2: half a core is read as half a core")
@@ -17189,7 +17268,7 @@ def t_every_oauth_token_file_is_written_private():
     """Five files hold third-party refresh tokens that outlive any session.
     Four were created 0600; google_data.py wrote its one at the default 0644."""
     import google_data as _gd, tempfile, stat
-    d = tempfile.mkdtemp()
+    d = tempfile.mkdtemp(dir=SCRATCH)
     real = _gd.OAUTH_TOKEN_PATH
     _gd.OAUTH_TOKEN_PATH = os.path.join(d, "google_oauth.json")
     try:
@@ -17214,7 +17293,7 @@ def t_a_google_connection_says_which_permission_was_left_unticked():
     neither is not saved at all, since it could read nothing."""
     gd = _google_data
     real = (gd.OAUTH_TOKEN_PATH, gd.httpx, gd.GSC_SITE_URL, gd.GA4_PROPERTY_ID)
-    gd.OAUTH_TOKEN_PATH = os.path.join(tempfile.mkdtemp(), "google_oauth.json")
+    gd.OAUTH_TOKEN_PATH = os.path.join(tempfile.mkdtemp(dir=SCRATCH), "google_oauth.json")
     gd.GSC_SITE_URL, gd.GA4_PROPERTY_ID = "sc-domain:example.com", "123456789"
     answer = {}
     gd.httpx = _RoutedHttpx(lambda request: _httpx.Response(
@@ -20213,7 +20292,7 @@ def t_setting_the_key_encrypts_what_is_already_on_the_volume():
     plaintext indefinitely while the key made it look solved - which is worse
     than knowing it is unencrypted, because nobody goes back to check."""
     import tokenvault as _tv
-    d = tempfile.mkdtemp()
+    d = tempfile.mkdtemp(dir=SCRATCH)
     tok = os.path.join(d, "xero_oauth.json")
     with open(tok, "w", encoding="utf-8") as fh:
         json.dump({"refresh_token": "plain-refresh-abc", "tenant": "t1"}, fh)
@@ -20255,7 +20334,7 @@ def t_a_reseal_never_destroys_a_secret_it_cannot_handle():
     way it can fail must leave the file alone: a missing file, a corrupt one,
     an empty value. Losing a refresh token means reconnecting Xero by hand."""
     import tokenvault as _tv
-    d = tempfile.mkdtemp()
+    d = tempfile.mkdtemp(dir=SCRATCH)
     old_key = os.environ.get("TOKEN_ENCRYPTION_KEY")
     os.environ["TOKEN_ENCRYPTION_KEY"] = "a-long-random-key-for-the-test"
     _tv._key.cache_clear()
@@ -20309,7 +20388,7 @@ def t_the_app_can_say_whether_its_secrets_are_encrypted():
     token still sits in plaintext looks fine from the environment alone, and
     that is exactly the failure worth catching."""
     import tokenvault as _tv
-    d = tempfile.mkdtemp()
+    d = tempfile.mkdtemp(dir=SCRATCH)
     tok = os.path.join(d, "xero_oauth.json")
     old_key = os.environ.get("TOKEN_ENCRYPTION_KEY")
     old_path = copilot.xero_api.TOKEN_PATH
