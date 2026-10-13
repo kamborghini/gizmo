@@ -505,7 +505,7 @@ class TokenManager:
             elif not self._access_token:
                 raise RuntimeError(
                     "No valid token available. "
-                    "Set SHOPIFY_ACCESS_TOKEN in your environment variables."
+                    "Add the Shopify access token in the app's hosting settings."
                 )
 
         return self._access_token
@@ -513,8 +513,8 @@ class TokenManager:
     async def force_refresh(self) -> str:
         if not self._use_client_credentials:
             raise RuntimeError(
-                "Cannot refresh — using a static token. "
-                "Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET to enable auto-refresh."
+                "Cannot refresh: the app is using a fixed token. Add the Shopify "
+                "client ID and secret in the app's hosting settings to refresh it automatically."
             )
         async with self._lock:
             await self._refresh_token()
@@ -540,7 +540,7 @@ class TokenManager:
                 logger.error(f"Token refresh failed ({resp.status_code}): {resp.text[:500]}")
                 raise RuntimeError(
                     f"Token refresh failed ({resp.status_code}). "
-                    "Check SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET."
+                    "Check the Shopify client ID and secret in the app's hosting settings."
                 )
 
             data               = resp.json()
@@ -615,8 +615,8 @@ async def _request(
         idempotent = method.upper() != "POST"
     if not SHOPIFY_STORE:
         raise RuntimeError(
-            "Missing SHOPIFY_STORE environment variable. "
-            "Set it before starting the server."
+            "No Shopify store is set. Add the store's name "
+            "in the app's hosting settings before starting the server."
         )
 
     url     = f"{_base_url()}/{path}"
@@ -2053,7 +2053,7 @@ async def ensure_order_webhooks() -> dict:
     status dict for the Settings panel; never raises."""
     base = _app_public_url()
     if not base:
-        return {"ok": False, "detail": "No public URL (APP_URL/RAILWAY_PUBLIC_DOMAIN unset)."}
+        return {"ok": False, "detail": "The app has no public address yet, so Shopify has nowhere to send order updates."}
     address = base + "/webhooks/orders"
     ours = {_webhook_host(base)} | WEBHOOK_ALLOWED_HOSTS
     dom = _webhook_host(os.environ.get("RAILWAY_PUBLIC_DOMAIN", ""))

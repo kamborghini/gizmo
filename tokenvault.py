@@ -84,7 +84,7 @@ def unseal(value: str) -> str:
     if not k:
         # Sealed data and no key. Nothing sensible can be returned, and saying
         # so beats handing back an envelope that looks like a token.
-        raise VaultError("This token is encrypted but TOKEN_ENCRYPTION_KEY is not set.")
+        raise VaultError("This token is encrypted but its encryption key is not set in the app's hosting settings.")
     try:
         _, nonce_b64, ct_b64 = value.split(":", 2)
         nonce = base64.b64decode(nonce_b64)

@@ -6019,7 +6019,7 @@ def t_pipedrive_survey_is_master_only_and_reads_nothing_without_a_token():
         try:
             r = post("/api/crm/pipedrive", {})
             eq(r.status_code, 400)
-            ok("PIPEDRIVE_API_TOKEN" in r.json()["error"], r.text)
+            ok("hosting settings" in r.json()["error"] and "Railway" not in r.json()["error"], r.text)
             ok(r.json()["configured"] is False)
         finally:
             pipedrive.API_TOKEN = saved
@@ -7266,7 +7266,7 @@ def t_files_presign_failure_is_a_plain_answer_not_a_500():
         fake.fail = "credentials rejected"
         r = post("/api/files/upload-url", {"name": "a.pdf", "size": 10})
         eq(r.status_code, 502, r.text)
-        ok("Check the R2 keys" in r.json()["error"], r.text)
+        ok("Check the storage keys" in r.json()["error"] and "Railway" not in r.json()["error"], r.text)
         ok(copilot._load_files()["files"] == {}, "no phantom record was kept")
     with_files(go)
 
@@ -16159,7 +16159,7 @@ def t_one_token_file_cannot_serve_two_mailboxes():
             run_async(_gm._token(_gm.FINANCE))
             ok(False, "minting a token for a colliding account must raise")
         except _gm.GmailError as e:
-            ok("own path" in str(e), "and says how to fix it: " + str(e))
+            ok("its own token file" in str(e), "and says how to fix it: " + str(e))
         ok(_gm.SALES.usable(), "the sales inbox is unaffected")
     finally:
         _gm.FINANCE_TOKEN_PATH = saved
@@ -16457,7 +16457,7 @@ def t_a_shared_token_file_cannot_delete_the_sales_connection():
             _gm.save_connection("rt", "accounts@example.com", _gm.FINANCE)
             ok(False, "saving a colliding account must raise")
         except _gm.GmailError as e:
-            ok("own path" in str(e), str(e))
+            ok("its own token file" in str(e), str(e))
         # And disconnect must not remove the file it would be sharing.
         os.makedirs(os.path.dirname(_gm.TOKEN_PATH) or ".", exist_ok=True)
         with open(_gm.TOKEN_PATH, "w", encoding="utf-8") as fh:
@@ -20026,7 +20026,7 @@ def t_an_unreachable_connector_says_which_of_the_three_faults_it_is():
         (_hx.ConnectError("[Errno -2] Name or service not known"),
          ["does not resolve", "service name"]),
         (_hx.ConnectError("All connection attempts failed"),
-         ["nothing is listening", "IPv6", "HOST=::"]),
+         ["nothing is listening", "IPv6", "listen on every address"]),
         (_hx.ConnectTimeout("timed out"),
          ["did not reply in time"]),
     ]
@@ -28927,6 +28927,52 @@ def t_one_upload_confirmed_twice_at_once_is_one_file():
         eq([v["status"] for v in d["files"].values()], ["active"], "one file")
         eq(copilot._files_usage(d), 10, "counted once")
     with_files(go, s3=slow)
+
+
+@test
+def t_no_hosting_or_setting_name_reaches_a_person_from_the_server():
+    """House rule: what a person reads from the server (an error, a note, an
+    OAuth page, an emailed alert, the activity log, a sweep's notes) is plain
+    British English that never names the hosting (Railway), the code name
+    (gizmo) or a setting by its variable name. On 12 Oct 2026 errors still said
+    "Add PIPEDRIVE_API_TOKEN in Railway" and the like, so every string in the
+    server's files is read here, not only the ones somebody remembered to
+    check. Left out: docstrings, what goes to the log, the name a lookup
+    reads (a bare NAME), and the doors only a machine or the log reads."""
+    import ast
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    words = re.compile(r"\bRailway\b|\bgizmo\b|\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
+    quiet = re.compile(r"(logger|logging|log)\.\w+|print|os\.environ\.\w+|os\.getenv|_env_num")
+    # Naming the variable is the point where only the operator or a client reads it.
+    machine = {("server.py", "_boot_report"),           # the boot log's list of what is off
+               ("server.py", "_error"),                 # the MCP tools' answers, read by the model
+               ("server.py", "__call__"),               # the /mcp lock, read by an MCP client
+               ("copilot.py", "_verify_session_token")}  # its refusal is only logged
+    not_words = {"gizmo-build|", "gizmo"}                # a hash seed and a MIME boundary
+    bad = []
+
+    def visit(node, name, fn, hush):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            fn = node.name
+        if isinstance(node, ast.Call) and quiet.fullmatch(ast.unparse(node.func)):
+            hush = True
+        kids = list(ast.iter_child_nodes(node))
+        body = getattr(node, "body", None)
+        if (isinstance(body, list) and body and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str)):
+            kids.remove(body[0])                         # a docstring
+        if (isinstance(node, ast.Constant) and isinstance(node.value, str) and not hush
+                and (name, fn) not in machine and node.value not in not_words
+                and not re.fullmatch(r"[A-Z][A-Z0-9_]*", node.value) and words.search(node.value)):
+            bad.append("%s:%d %s" % (name, node.lineno, node.value[:80]))
+        for k in kids:
+            visit(k, name, fn, hush)
+    for name in ("copilot.py", "server.py", "recon.py", "xero.py", "google_mail.py", "google_data.py",
+                 "pipedrive.py", "tokenvault.py", "worldoptions.py", "eori.py"):
+        visit(ast.parse(open(os.path.join(root, name), encoding="utf-8").read()), name, "", False)
+    ok(not bad, "%d strings a person reads name the hosting, the code name or a setting: %s"
+       % (len(bad), "; ".join(bad[:8])))
+
 
 # =========================== speed: the Inbox, lighter =========================
 # The fifth speed pull request (the 2026-10-12 audit, S6 and X9).
