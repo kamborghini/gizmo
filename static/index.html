@@ -662,6 +662,11 @@
         .topbar { height: var(--topbar-h); flex-shrink: 0; background: var(--surface-primary);
             display: flex; align-items: center; gap: var(--control-gap); position: relative; z-index: 5;
             padding-inline: max(var(--wrap-pad), calc((100% - var(--wrap)) / 2 + var(--wrap-pad))); }
+        /* On the grey page the bar is the page's own ground, not a white strip of
+           its own (13 Oct 2026); Chat's bar stays on Chat's white sheet. Under 900
+           the bar is the ink frame (below). */
+        @media screen { .topbar { background: transparent; } }
+        @media screen and (min-width: 901px) { body:has(#view-chat.active) .topbar { background: var(--surface-primary); } }
         /* Where you are: the section in ink-3, a 14 chevron, the page in ink. */
         .crumbs { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-1); color: var(--text-tertiary);
             font-size: var(--text-body); line-height: var(--lh-control); }
@@ -689,6 +694,8 @@
             padding: 0 var(--sp-2) 0 var(--sp-3); border: 0; border-radius: var(--radius-control); background: var(--surface-tertiary);
             color: var(--text-tertiary); font: inherit; font-size: var(--text-body); line-height: var(--lh-control); text-align: start;
             cursor: pointer; transition: color var(--dur) var(--ease), background var(--dur) var(--ease); }
+        /* Its fill is the grey page's own tone, so on the page it is a white field with a hairline (13 Oct 2026). */
+        @media screen { .topbar-search { background: var(--surface-primary); box-shadow: inset 0 0 0 var(--bw-hairline) var(--border-default); } }
         @media (hover: hover) { .topbar-search:hover { background: var(--surface-sunken); } }
         .topbar-search:active { background: var(--press-fill); }
         .topbar-search svg { width: var(--icon-md); height: var(--icon-md); }
@@ -1561,6 +1568,8 @@
            Customize mode stands 8 clear of its content. */
         .ov-wrap.wg-editing > [data-widget]:not(:focus-visible) {
             outline: var(--bw-hairline) dashed var(--border-emphasis); outline-offset: var(--sp-2); }
+        /* A panel has an edge of its own, so its dashed edge in Customise is that edge. */
+        .ov-wrap.wg-editing > [data-widget].panel:not(:focus-visible) { outline-offset: calc(-1 * var(--bw-hairline)); }
         /* The held card follows the pointer by an inline translate the script
            writes, and floats: the large shadow, above its neighbours, and a
            step bigger unless motion is reduced (the script adds wg-lifted only
@@ -5039,6 +5048,15 @@
             background: linear-gradient(var(--border-default), var(--border-default)) center bottom / calc(100% - 2 * var(--sp-2)) var(--bw-hairline) no-repeat; }
         /* A page's own strip runs edge to edge across the sheet, its first tab on the gutter. */
         .ov-wrap > .tabs { margin-inline: calc(-1 * var(--wrap-pad)); padding-inline: var(--wrap-pad); max-width: none; }
+        /* On the grey page a tab strip's rule ends on the column, as the panels
+           under it do, and the tabs keep their own 8 of focus room (13 Oct 2026):
+           a standalone strip draws its rule inside that 8, not on its box.
+           After the rules above and the grid's, at the grid's weight, so it wins. */
+        @media screen {
+            :is(.ov-wrap, .ov-wrap.wgrid) > .page-tabs { margin-inline: 0; padding-inline: 0; }
+            :is(.ov-wrap, .ov-wrap.wgrid) > .tabs { margin-inline: calc(-1 * var(--sp-2)); padding-inline: var(--sp-2); box-shadow: none;
+                background: linear-gradient(var(--border-default) 0 0) 50% 100% / calc(100% - 2 * var(--sp-2)) var(--bw-hairline) no-repeat; }
+        }
         .tab { position: relative; display: inline-flex; align-items: center; gap: var(--control-gap); flex: none;
             height: auto; padding: 0; border: 0; background: none;
             border-radius: 0; font: inherit; font-size: var(--text-body); font-weight: var(--weight-medium);
@@ -5070,6 +5088,8 @@
         .qc-l { font-weight: var(--weight-medium); color: var(--text-secondary); white-space: nowrap; }
         .qc-n { font-size: var(--fig-l); font-weight: var(--weight-semibold); line-height: var(--lh-none); letter-spacing: var(--tr-fig); font-variant-numeric: tabular-nums; }
         .qc.on { background: var(--action-primary); box-shadow: var(--shadow-focal); }
+        /* On the grey page the counters are white tiles with a hairline, the chosen one teal (13 Oct 2026). */
+        @media screen { .ov-wrap > .queues .qc:not(.on) { background: var(--surface-primary); box-shadow: inset 0 0 0 var(--bw-hairline) var(--border-default); } }
         .qc.on .qc-l { color: var(--text-on-action); }
         @media (hover: hover) { .qc:not(.on):hover { background: var(--surface-sunken); } }
         .qc:not(.on):active { background: var(--press-fill); }
@@ -5105,6 +5125,9 @@
         .segmented { display: inline-flex; flex-wrap: wrap; align-items: stretch; align-self: flex-start; gap: var(--sp-0-5); max-width: 100%;
             padding: 0 var(--sp-0-5); background: var(--surface-tertiary); border: 0;
             border-radius: var(--radius-control); }
+        /* A page's chooser sits on the grey page, whose tone its track shares: one shade
+           deeper keeps the track, with the white chosen choice in it (13 Oct 2026). */
+        @media screen { .ov-wrap > .segmented { background: var(--surface-sunken); } }
         /* flex: 1 1 auto shares out the spare room of a line, which a track
            only has once it wraps: a wrapped track fills its lines rather than
            stranding one choice at the left of the second. On one line the track
@@ -5647,7 +5670,7 @@
            the page's own name. */
         @media screen and (max-width: 900px) {
             .main { margin: 0; border-radius: 0; background: transparent; overflow: visible; }
-            .view.active { background: var(--surface-primary); border-radius: var(--radius-sheet) var(--radius-sheet) 0 0; overflow: hidden; }
+            .view.active { background: var(--surface-canvas); border-radius: var(--radius-sheet) var(--radius-sheet) 0 0; overflow: hidden; }
             .topbar { background: transparent; padding: 0 var(--sp-1); }
             .crumbs { color: var(--nav-text); font-size: var(--text-body); }
             .topbar h1 { color: var(--nav-text); font-size: var(--text-body); }
@@ -6325,6 +6348,21 @@
         .guide-toc-link { font-size: var(--text-body); line-height: var(--lh-control); font-weight: var(--weight-regular); text-decoration-color: transparent; }
         .guide-toc-link:focus-visible { text-decoration-color: currentColor; }
         @media (hover: hover) { .guide-toc-link:hover { text-decoration-color: currentColor; } }
+
+        /* PANELS (13 Oct 2026): on screen, every section of a page is a white panel
+           on the grey page, its edge a hairline, its corner the card's, a very soft
+           shadow, 20 by 24 inside (16 on a phone). Paper keeps its plain page. A
+           figure group clips the hairline before its first figure at its own edge
+           (overflow: clip), so its inset is a transparent border, not padding, and
+           its edge a hairline drawn round it. Two classes of weight and the end
+           of the sheet, so no block's own flat rule (.chart-card, .band and the
+           rest, one or two classes each) can take a panel's paint away. */
+        @media screen {
+            .ov-wrap .panel, .chat-recent.panel { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-card);
+                box-shadow: var(--shadow-panel); padding: var(--panel-pad-y) var(--panel-pad-x); }
+            .ov-wrap .panel.metrics { padding: 0; border-style: solid; border-color: transparent; border-width: var(--panel-pad-y) var(--panel-pad-x);
+                box-shadow: 0 0 0 var(--bw-hairline) var(--border-default), var(--shadow-panel); width: auto; }
+        }
 
         /* A field under a finger is 16, or iOS zooms into the page when it takes focus. This is the LAST word on a field's
            size and the only place the stylesheet's 16 for a field is written: it comes after every field rule, and the
@@ -10544,7 +10582,7 @@ Projected Image UK"></textarea>
                list is far out of sight under the whole menu. */
             const recent = convos.filter(x => x.turns.length).slice(0, 6);
             if (recent.length) {
-                const r = el('div', 'chat-recent');
+                const r = el('div', 'chat-recent panel');
                 r.append(el('div', 'chat-recent-h', 'Recent'));
                 recent.forEach(x => {
                     const b = el('button', 'chat-recent-row'); b.type = 'button';
@@ -32458,7 +32496,7 @@ Projected Image UK"></textarea>
             // Batched: whole tabs repaint at once, and a sync per mutation would
             // run hundreds of times for one render.
             if (togglePass) return;
-            togglePass = requestAnimationFrame(() => { togglePass = 0; syncToggles(); syncDialogs(); syncTableHeads(); });
+            togglePass = requestAnimationFrame(() => { togglePass = 0; syncToggles(); syncDialogs(); syncTableHeads(); syncPanels(); });
         }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
         /* Modals are built in thirteen places; the dialog semantics are stamped
            in one, the same way the switches get theirs above. The label comes
@@ -32487,6 +32525,25 @@ Projected Image UK"></textarea>
                     i += td.colSpan || 1;
                 });
             });
+        }
+        /* PANELS (13 Oct 2026, docs/superpowers/specs/2026-10-13-panels-design.md):
+           every section of a page sits in a white panel on the grey page. A page's
+           content root (.ov-wrap) holds its sections; panelTargets says which of
+           its children, or of what they hold, is a panel, and the batched pass
+           stamps .panel on them, so a page added next year is boxed without
+           anyone wiring it. The header, tabs, choosers, notices, the queue's
+           counters and Forecast's own tinted band stay on the page. */
+        const PANEL_SKIP = ['ov-hero', 'page-tabs', 'tabs', 'seg-row', 'queues', 'segmented', 'back-btn', 'miss-strip', 'msg', 'alert', 'fband', 'guide-tools', 'sr-only'];
+        const PANEL_HOLD = ['wpair', 'wpair-in', 'fc-pair', 'fc-cols', 'crm-seg', 'crm-charts', 'guide-host', 'guide-grid', 'ds-page'];
+        function panelTargets(n) {
+            if (!n || !n.classList || n.tagName === 'INPUT' || n.tagName === 'SCRIPT') return [];
+            if (PANEL_SKIP.some(c => n.classList.contains(c))) return [];
+            if (!n.className || PANEL_HOLD.some(c => n.classList.contains(c))) return [...n.children].flatMap(panelTargets);
+            return [n];
+        }
+        function syncPanels() {
+            document.querySelectorAll('.ov-wrap').forEach(root => [...root.children].flatMap(panelTargets)
+                .forEach(t => { if (!t.classList.contains('panel')) t.classList.add('panel'); }));
         }
         function syncDialogs() {
             document.querySelectorAll('.modal-overlay .modal').forEach(m => {

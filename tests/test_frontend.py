@@ -11857,8 +11857,9 @@ def t_the_top_bar_says_where_you_are_and_finds_anything():
     ok("height: var(--tag-h)" in kbd and "font-size: var(--text-micro)" in kbd and "box-shadow: var(--ring-default)" in kbd,
        "the shortcut is a 20 key cap in micro type")
     phone = CSS.split("@media screen and (max-width: 900px) {")
-    ok(len(phone) > 1 and ".view.active { background: var(--surface-primary); border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;" in phone[1],
-       "on a phone the sheet rises under an ink bar")
+    # 13 Oct 2026 (panels): the sheet that rises under the bar is the grey page.
+    ok(len(phone) > 1 and ".view.active { background: var(--surface-canvas); border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;" in phone[1],
+       "on a phone the grey sheet rises under an ink bar")
 
 
 @test
@@ -12074,6 +12075,70 @@ def t_the_page_is_grey_and_its_sections_sit_a_panel_gap_apart():
     ok(re.search(r"@media \(max-width: 640px\) \{\s*(?:/\*[^*]*\*/\s*)?\.ov-wrap \{[^}]*--page-rhythm: var\(--panel-gap\)", CSS), "and on a phone")
     ok(re.search(r"\n        \.ov-wrap \{[^}]*--page-rhythm: var\(--sp-9\)", CSS), "paper keeps its 48 between sections")
     ok("@media screen { #view-chat { background: var(--surface-primary); } }" in CSS, "Chat keeps its white reading ground")
+
+
+@test
+def t_the_grey_page_reaches_every_edge_of_the_sheet():
+    """Panels (13 Oct 2026): the grey is the whole sheet, so the top bar sits
+    on it (not on a white strip of its own) with Search a white field, the
+    Finance strip's rule ends on the column like the panels under it, and at
+    900 and under, where the active view is the sheet, that view is grey too.
+    Chat keeps white: its bar over 900, its view at every width."""
+    ok("@media screen { .topbar { background: transparent; } }" in CSS, "the bar sits on the grey")
+    ok("@media screen and (min-width: 901px) { body:has(#view-chat.active) .topbar { background: var(--surface-primary); } }" in CSS,
+       "Chat's bar stays on its white sheet")
+    ok("@media screen { .topbar-search { background: var(--surface-primary); box-shadow: inset 0 0 0 var(--bw-hairline) var(--border-default); } }" in CSS,
+       "Search is a white field on the grey (its own fill is the grey's tone)")
+    strips = ("@media screen {\n            :is(.ov-wrap, .ov-wrap.wgrid) > .page-tabs { margin-inline: 0; padding-inline: 0; }\n"
+              "            :is(.ov-wrap, .ov-wrap.wgrid) > .tabs { margin-inline: calc(-1 * var(--sp-2)); padding-inline: var(--sp-2); box-shadow: none;\n"
+              "                background: linear-gradient(var(--border-default) 0 0) 50% 100% / calc(100% - 2 * var(--sp-2)) var(--bw-hairline) no-repeat; }\n        }")
+    ok(strips in CSS, "a tab strip's rule ends on the column, drawn inside the tabs' own 8 of focus room")
+    ok(strips in CSS and CSS.index(strips) > CSS.index(".ov-wrap > .tabs { margin-inline: calc(-1 * var(--wrap-pad));")
+       and CSS.index(strips) > CSS.index(".ov-wrap.wgrid > :is(.tabs, .page-tabs) { margin-inline:"),
+       "after the rules that bled the strips to the sheet's edges, so it wins at the same weight")
+    drawer = CSS.split("@media screen and (max-width: 900px) {\n            .main { margin: 0;")[1].split("\n        }")[0]
+    ok(".view.active { background: var(--surface-canvas);" in drawer, "under 900 the active view is the grey page")
+
+
+@test
+def t_each_section_of_a_page_is_a_panel():
+    """Panels (13 Oct 2026): every top-level block of a page's content is a
+    panel, a pair's halves and what a plain wrapper holds included; the
+    header, tabs, choosers, notices and the Production Manager's counters
+    stay on the grey page."""
+    ok("syncToggles(); syncDialogs(); syncTableHeads(); syncPanels();" in SCRIPT, "stamped in the one batched pass")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + "\n" + SCRIPT[SCRIPT.index("const PANEL_SKIP"):SCRIPT.index("function syncPanels(")] + r"""
+const mk = (cls, ...kids) => { const n = document.createElement('div'); if (cls) n.className = cls; kids.forEach(k => n.append(k)); return n; };
+const card = mk('card'), half1 = mk('block'), half2 = mk('card'), radar = mk('card'), gate = mk('run-gate'), err = mk('msg error');
+const root = mk('ov-wrap',
+  mk('ov-hero'), mk('page-tabs'), mk('tabs'), mk('queues'), mk('segmented'), mk('miss-strip inline'), mk('back-btn'), mk('fband'),
+  card, mk('wpair', mk('wpair-in', half1, half2)), mk('', radar), gate, err, mk('crm-seg', mk('crm-charts', mk('card'), mk('card'))));
+const got = [...root.children].flatMap(panelTargets);
+console.log(JSON.stringify({ n: got.length, card: got.includes(card), halves: got.includes(half1) && got.includes(half2),
+  radar: got.includes(radar), gate: got.includes(gate), err: got.includes(err),
+  skipped: got.some(n => ['ov-hero','page-tabs','tabs','queues','segmented','miss-strip','back-btn','fband'].some(c => n.classList.contains(c))) }));
+"""
+    got = _run_node(js)
+    ok(got["card"] and got["halves"] and got["radar"] and got["gate"], "a card, a pair's halves, what a plain wrapper holds and a run gate are panels: %r" % got)
+    ok(not got["err"] and not got["skipped"], "an error, the header, tabs, choosers, notices and counters are not: %r" % got)
+    ok(got["n"] == 7, "and CRM's charts each a panel of their own: %r" % got)
+    css = CSS.split("/* PANELS (13 Oct 2026)")[1].split("\n        }\n")[0] if "/* PANELS (13 Oct 2026)" in CSS else ""
+    ok("@media screen {" in css and ".panel { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-card);" in css
+       and "box-shadow: var(--shadow-panel); padding: var(--panel-pad-y) var(--panel-pad-x);" in css,
+       "on screen only: white, a hairline edge, the card corner, the soft shadow and the panel's inset")
+    ok(".panel.metrics { padding: 0; border-style: solid; border-color: transparent; border-width: var(--panel-pad-y) var(--panel-pad-x);" in css
+       and "box-shadow: 0 0 0 var(--bw-hairline) var(--border-default), var(--shadow-panel); width: auto; }" in css,
+       "a figure group's inset is a transparent border, so its clip still hides the first hairline")
+    ok(".ov-wrap.wg-editing > [data-widget].panel:not(:focus-visible) { outline-offset: calc(-1 * var(--bw-hairline)); }" in CSS,
+       "in Customise a panel's dashed edge is its own edge")
+    ok("@media screen { .ov-wrap > .queues .qc:not(.on) { background: var(--surface-primary); box-shadow: inset 0 0 0 var(--bw-hairline) var(--border-default); } }" in CSS,
+       "the counters stay tiles on the grey page")
+    ok("@media screen { .ov-wrap > .segmented { background: var(--surface-sunken); } }" in CSS,
+       "a page's chooser keeps a track you can see on the grey (its own track is the grey's tone)")
+    ok("el('div', 'chat-recent panel')" in fn_src("function renderEmptyChat("), "Chat's recent list is a panel")
 
 
 @test
