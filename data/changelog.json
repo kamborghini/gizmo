@@ -1,6 +1,47 @@
 {
  "releases": [
   {
+   "date": "2026-10-14",
+   "title": "Every section in a panel",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "Every page is now a light grey page with each section in its own white panel, so the parts of a page read as clear groups instead of floating on the page. Panels side by side line up as one row of the same height, a short gap apart."
+    },
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "Tables and lists run to the edges of their panel, with their words lined up under the panel's heading, on every page and on a phone. A board that scrolls sideways, such as the CRM pipeline or the Inbox board, runs to the panel's edge too."
+    },
+    {
+     "kind": "changed",
+     "tab": "labels",
+     "text": "The Production Manager's counters are white tiles on the grey page; the queue, its buttons and the printed label are as they were."
+    },
+    {
+     "kind": "changed",
+     "tab": "chat",
+     "text": "Chat keeps its white page for reading; its recent conversations sit in a panel."
+    },
+    {
+     "kind": "fixed",
+     "tab": "loans",
+     "text": "On a phone, a unit's History and Reprint buttons stay inside its row in the register."
+    },
+    {
+     "kind": "fixed",
+     "tab": "forecast",
+     "text": "On a phone, the reports under The numbers behind it show their whole names instead of being cut off."
+    },
+    {
+     "kind": "fixed",
+     "tab": "team",
+     "text": "On the clock now and Hours per person fill their panels, with Close this session at the end of its row."
+    }
+   ]
+  },
+  {
    "date": "2026-10-13",
    "title": "Setup messages say what to do in plain words",
    "items": [
