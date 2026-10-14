@@ -18,7 +18,14 @@ for (const s of SCREENS) {
     const w = S.watch(page, baseURL);
     await S.open(page, w);
     const h = S.helpers(page, w, info.project.name);
-    await s.go(page, h);
+    try {
+      await s.go(page, h);
+    } catch (e) {
+      // A screen that never reached its content usually broke on the way:
+      // say so, rather than leave only the timeout.
+      if (w.errors.length || w.failed.length) e.message += '\nscript errors: ' + JSON.stringify(w.errors) + '\nfailed requests: ' + JSON.stringify(w.failed);
+      throw e;
+    }
     await S.settle(page, w);
     const key = `${s.id}@${info.project.name}`;
     const shots = path.join(S.RUN, 'shots');

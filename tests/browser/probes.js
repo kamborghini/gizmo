@@ -15,9 +15,16 @@ async function measure(page) {
     const desc = n => (n.tagName.toLowerCase() + (n.id ? '#' + n.id : '') + ([...n.classList].length ? '.' + [...n.classList].join('.') : '')).slice(0, 80);
     const clips = s => /(auto|scroll|hidden|clip)/.test(s.overflowX);
 
-    // Sideways scroll: the document, or the app's own scrolling column.
-    const sideways = [document.scrollingElement, document.querySelector('.main')].filter(Boolean)
-      .filter(e => e.scrollWidth > e.clientWidth + 1 && !(e !== document.scrollingElement && clips(getComputedStyle(e))))
+    // Sideways: a page-level container whose content is wider than it. The
+    // document; .main, which clips for the rounded frame (wider content is
+    // cut off); and the active view and its .scroll, the column that scrolls.
+    // Scrolled or cut off, the page is wider than the screen either way.
+    // Deliberate sideways scrollers (a wide table, the CRM board) sit inside
+    // panels and are not page-level.
+    const sideways = [document.scrollingElement, document.querySelector('.main'),
+      ...document.querySelectorAll('.view.active, .view.active > .scroll')]
+      .filter((e, i, a) => e && a.indexOf(e) === i)
+      .filter(e => e.scrollWidth > e.clientWidth + 1)
       .map(e => desc(e) + ' ' + (e.scrollWidth - e.clientWidth) + 'px');
 
     const roots = [...document.querySelectorAll('.view.active .ov-wrap')];

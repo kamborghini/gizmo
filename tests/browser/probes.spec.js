@@ -26,7 +26,21 @@ test.describe('the probes', () => {
     const m = await P.measure(page);
     expect(m.spill.length).toBe(1);
     expect(m.spill[0]).toContain('div');
-    expect(m.sideways.length).toBe(1);
+    expect(m.sideways.length).toBeGreaterThanOrEqual(1);   // the document and the view: both are page-level
+  });
+
+  test('a panel wider than the page column is sideways scroll, inside the app\'s own frame', async ({ page }) => {
+    // As the app: .main clips (the rounded frame), the view's .scroll is the page column that scrolls.
+    await page.setContent(`<!doctype html><html><head><style>
+      body { margin: 0; height: 100vh; display: flex; } .main { flex: 1; min-width: 0; overflow: hidden; display: flex; }
+      .view { flex: 1; display: flex; flex-direction: column; min-width: 0; } .scroll { flex: 1; overflow-y: auto; }
+      .ov-wrap { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; padding: 20px; }
+      .panel { background: #fff; border: 1px solid #ddd; padding: 20px; }
+    </style></head><body><div class="main"><section class="view active"><div class="scroll"><div class="ov-wrap">
+      <section class="panel" style="min-width:2000px"><h2>Owed</h2></section></div></div></section></div></body></html>`);
+    const m = await P.measure(page);
+    expect(m.sideways.length).toBeGreaterThanOrEqual(1);
+    expect(m.sideways.join(' ')).toContain('scroll');
   });
 
   test('a section that is not a panel, a panel in a panel, and unequal neighbours are counted', async ({ page }) => {
