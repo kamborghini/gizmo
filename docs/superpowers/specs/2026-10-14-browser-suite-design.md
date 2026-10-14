@@ -88,14 +88,42 @@ run needs no internet. App Bridge's script is aborted (the stand-in replaces
 it). Anything else is aborted and fails the test that caused it, naming the
 host.
 
-**Data.** The dispatch world already fills most screens: orders, products,
-customers, the CRM, the inbox, files, the team. Screens whose data comes from
-an outside system the world does not model (reconciliation, Xero sync, the
-loan register, Overview's figures, the report screens) get their `/api/...`
-answers from invented JSON fixtures routed in the browser, as the rig does
-with its own. Every name, email, address and figure in a fixture is made up;
-a page-suite test fails if a fixture contains an address at a real-looking
-domain other than `example.com`/`example.org`, or the business's name.
+**Data.** Corrected 14 Oct after a probe: the bare dispatch world shows the
+empty state on almost every screen (only the Size list and the Guide have
+content), so the suite seeds its own world before serving. `tests/browser/seed/`
+runs in the same process after the dispatch setup and before uvicorn starts,
+and fills every screen through the app's real code:
+
+- **The app's own routes first** (`post(...)` with payloads from the dispatch
+  tests): accounts, the CRM, loan units, custom shipments, memory, skills,
+  requests.
+- **A store's own writer** where no route writes it: the work clock, the
+  activity ledger, the Xero token for reconciliation.
+- **An in-process stand-in for an outside system** only where the app reaches
+  one over the network: one fake Shopify store (about a thousand orders over
+  three years, customers, products, payouts, and the Production Manager's
+  queue orders), Google's search and analytics answers and a fake storefront,
+  used only while the saved reports are produced, the AI (the same, only while
+  seeding: every report on screen is a real saved run of the app's own code
+  over invented answers), Gmail, the file storage bucket, and the Xero
+  connector service (a loopback HTTP server in the same process).
+
+The background scheduler stays off for the whole run; left on, it reaches for
+Xero within a minute. Chat conversations live only in the browser, so the
+seed writes them to the auth file and the browser puts them in
+`localStorage` before the page loads. Two screens write as they paint (What's
+new and Requests mark themselves seen; Customise saves a layout when it
+closes): the browser swallows exactly those writes, so screens running in
+parallel never change each other.
+
+Every person, company, address and figure in the seed is made up. A page-suite
+test fails if the suite contains an email address outside the example domains,
+a phone number outside the 01632 960xxx drama range, or the shop's own name
+(read off the code's own default, so the test does not carry it).
+
+The forecast's run is produced by the forecast package itself, so the
+browser job installs `forecast/requirements-service.txt` beside the app's
+lock, from its hashes.
 
 ### The screens
 
@@ -105,7 +133,9 @@ sync, Production Manager (queue, an order open, Custom shipments), the Size
 list, CRM (Leads, Activities, Insights, Contacts), Loan units, Inbox, Files,
 Team (People, Work, Activity), Memory, Skills, Chat (new and a conversation),
 the Guide (contents, What's new, Requests, Design), and Customise on
-Customers and on Overview. Adding a screen is one entry in `screens.js`.
+Customers and on Overview; plus three dialogs measured like a screen (a CRM
+deal, a loan unit, and a size rule opened from the Production Manager's Size
+check), 36 states in all. Adding a screen is one entry in `screens.js`.
 
 Frozen areas are measured, never touched: the Production Manager's queue and
 the printed label are screens in the list like any other, and nothing in the
@@ -120,7 +150,7 @@ suite clicks Print, Mark made, Dispatch or any button that writes.
 | Sideways page scroll, or content wider than its panel | must be zero | must be zero |
 | Panel rules: each section a panel, panels side by side the same height, the gap between them, no panel inside a panel, tables running to their panel's edge | recorded | ratchet |
 | axe, WCAG 2.2 A and AA rules, every impact level | recorded | ratchet |
-| Keyboard: three dialogs (a CRM deal, a rule in the Size list, a loan unit) take focus, close on Escape and hand focus back, without saving anything | must pass | must pass |
+| Keyboard: three dialogs (a CRM deal, a loan unit, a size rule from the Production Manager's Size check) take focus, close on Escape and hand focus back, without saving anything | must pass | must pass |
 
 **The ratchet.** A record is `{screen@size: {rule: count}}`. A run fails if
 any count is above the record (a new problem) or below it (a fixed problem
@@ -140,7 +170,7 @@ when markup moves without the problem changing.
   4.13.0. Dev dependencies never reach the image, and `npm audit --omit=dev`
   is unchanged.
 - `.github/workflows/tests.yml` gains a `browser` job beside `test`: install
-  the Python lock and the node modules, `npx playwright install --with-deps
+  the Python lock, the forecast service's lock and the node modules, `npx playwright install --with-deps
   chromium`, run the suite, and upload the screenshots, the HTML report and
   any traces as an artefact, always, pass or fail.
 - **Cameron's setting:** the `browser` job blocks a merge only once it is
@@ -198,7 +228,7 @@ test pins that it is current, as the environment reference's does.
   If that setup changes shape, the browser job fails at start-up with a
   message naming the marker it could not find, never by serving a partial
   world.
-- **Run time.** Thirty-three screens at three sizes is 99 page
+- **Run time.** Thirty-six states at three sizes is 108 page
   states. Projects run in parallel workers; the budget is under eight minutes
   in CI, and the run time is reported in the pull request.
 
