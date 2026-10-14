@@ -48,7 +48,7 @@ The browser suite needs its node modules and Chromium once:
 `tests/test_dispatch.py` builds the app exactly as it is served
 (`server.build_app()`, real middleware) and drives it with a test client
 against scratch stores; nothing touches `/data` or the network.
-`tests/test_frontend.py` reads `static/index.html` and asserts the rules the
+`tests/test_frontend.py` reads the page (joined by `pagesource.py`) and asserts the rules the
 page has to keep — every one of them a regression that once reached the
 merchant. `tests/browser/` opens every screen in Chromium inside an invented
 world and checks what neither of the others can see: script errors, layout,
@@ -62,7 +62,7 @@ accessibility, the keyboard. All of them run on every push.
 | `copilot.py` | The app: every route, every domain, every store. Large; sectioned; the architecture note says where to look |
 | `worldoptions.py` `xero.py` `google_mail.py` `google_data.py` `pipedrive.py` `eori.py` `recon.py` | One module per external system. None of them knows about the app |
 | `tokenvault.py` `totp.py` `logdrain.py` `mailmime.py` | Small libraries: secrets at rest, one-time codes, off-box logging, mail parsing |
-| `static/index.html` `static/composer.js` | The single-page app, authored as one file and split into hashed assets at serve time |
+| `static/src/` `static/composer.js` | The single-page app: a shell and its stylesheet's and script's sections (`static/src/manifest.json`), joined by `pagesource.py` at start-up and split into hashed assets at serve time |
 | `data/` | Seed files that ship with the code: the size sheet, the rule files, the changelog, a font |
 | `extensions/` | The three Shopify admin actions (print label, print labels, dispatch) |
 | `tests/` `tools/` | The two suites; the credential sweep and the environment-reference generator |
