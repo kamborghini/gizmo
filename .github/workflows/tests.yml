@@ -70,6 +70,8 @@ jobs:
         run: python tools/sweep_tree.py
       - name: The environment reference is current
         run: python tools/env_reference.py --check
+      - name: The API route reference is current
+        run: python tools/route_reference.py --check
       - name: The AI tool registry stays read-only
         run: |
           python - <<'PY'
@@ -79,6 +81,40 @@ jobs:
           assert not bad, f"write-capable tool reachable by the AI: {bad}"
           print(f"{len(server.COPILOT_TOOLS)} tools, all reads")
           PY
+
+  # Every screen in Chromium, at three sizes, in an invented world (tests/browser).
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14'
+          cache: pip
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      # The forecast's seeded run is produced by the forecast package itself.
+      - run: pip install --require-hashes -r requirements.txt
+      - run: pip install --require-hashes -r forecast/requirements-service.txt
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - name: The browser suite's own units
+        run: node --test 'tests/browser/unit/*.test.js'
+      - name: The seeded world, without a browser
+        run: python tests/browser/test_world.py
+      - name: Every screen in a real browser
+        run: npx playwright test -c tests/browser/playwright.config.js
+        env:
+          CI: '1'
+          PY: python
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: browser-run
+          path: tests/browser/.run/
+          retention-days: 14
 
   # The forecast package has its own dependencies (the nightly service's
   # image), which the app never imports, so it gets its own job: installed

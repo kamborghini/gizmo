@@ -6,9 +6,11 @@
 #   make test           the dispatch suite (about a minute, no network)
 #   make test-frontend  the static guards on the single-page app (seconds)
 #   make test-forecast  the forecast package (skips itself without pandas)
+#   make test-browser   every screen in a real browser (needs npm ci and npx playwright install chromium)
 #   make sast           CI's blocking security scan (bandit, high severity)
 #   make check          everything CI runs that needs no network
 #   make env-doc        regenerate docs/ENVIRONMENT.md from the code
+#   make api-doc        regenerate docs/API.md from the route decorators
 #   make lock           compile the exact pins (*.in) into the hashed lock files
 #   make ext-check      build and type-check the Shopify extensions (needs npm ci)
 #   make shopify-deploy stage a new app version on Shopify (needs npm ci; releases nothing)
@@ -16,10 +18,10 @@
 
 PY ?= .venv/bin/python
 
-.PHONY: help install run test test-frontend test-forecast sweep sast env-doc check lock ext-check shopify-deploy shopify-release
+.PHONY: help install run test test-frontend test-forecast test-browser sweep sast env-doc api-doc check lock ext-check shopify-deploy shopify-release
 
 help:
-	@sed -n '4,16p' Makefile
+	@sed -n '4,18p' Makefile
 
 # requirements.in and forecast/requirements-service.in hold the direct pins;
 # the .txt beside each is every package installed, transitive ones included,
@@ -59,6 +61,15 @@ test-frontend:
 test-forecast:
 	$(PY) tests/test_forecast.py
 
+# Every screen in Chromium at three sizes, in an invented world (tests/browser).
+# Skips with a note when the node modules or Chromium are missing, as ext-check does.
+test-browser:
+	@node -e "require.resolve('@playwright/test')" 2>/dev/null || { echo "browser suite skipped: run npm ci, then npx playwright install chromium"; exit 0; }; \
+	node -e "process.exit(require('fs').existsSync(require('@playwright/test').chromium.executablePath()) ? 0 : 3)" || { echo "browser suite skipped: run npx playwright install chromium"; exit 0; }; \
+	node --test 'tests/browser/unit/*.test.js' && \
+	$(PY) tests/browser/test_world.py && \
+	PY=$(PY) npx playwright test -c tests/browser/playwright.config.js
+
 sweep:
 	python3 tools/sweep_tree.py
 
@@ -73,13 +84,17 @@ sast:
 env-doc:
 	$(PY) tools/env_reference.py --write
 
+api-doc:
+	$(PY) tools/route_reference.py --write
+
 # Skips with a note when node_modules are not installed; CI installs them and
 # passes --require.
 ext-check:
 	$(PY) tools/ext_check.py
 
-check: test-frontend test-forecast sweep sast ext-check
+check: test-frontend test-forecast sweep sast ext-check test-browser
 	$(PY) tools/env_reference.py --check
+	$(PY) tools/route_reference.py --check
 	$(PY) tests/test_dispatch.py
 
 # Shopify's own tool, at a version this repo names, so a new release of it

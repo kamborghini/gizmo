@@ -112,13 +112,32 @@ and what each turns off. Everything else defaults to "that feature is off".
   in `with_accounts(go)`; one that needs the file store in `with_files(go)`.
   Static guards on the page live in `tests/test_frontend.py`.
 
+## Tests
+
+| Suite | What it sees | What it cannot see |
+|---|---|---|
+| `tests/test_dispatch.py` | The server through its routes, built as it is served, against scratch stores and stand-ins for every outside system | Anything the page does with an answer |
+| `tests/test_frontend.py` | The page's source as text, and its logic run in node | Layout, rendering, a selector that matches nothing |
+| `tests/test_forecast.py` | The forecast package | The app |
+| `tests/browser/` | Every screen in Chromium at phone, laptop and wide sizes, in a world seeded through the app's own code: script errors, failed or outside requests, writes, sideways scroll, spill, the panel rules, accessibility (axe, WCAG 2.2 AA) and three windows by keyboard | Firefox and Safari; the Shopify admin frame itself |
+
+The browser suite holds panel-rule and accessibility findings in a ratchet
+(`tests/browser/record/`): a pull request fails if a count goes up, and if
+one goes down without the record being lowered to match.
+
 ## How to add
 
 **A route.** Register it inside `add_routes` under the prefix's section, add
 the prefix to `_TAB_ROUTES` (unmapped `/api/` routes are refused by design),
 open with `err, body, who = await _guard(request)`, call a domain function,
 return `_json`. Write the test first; `post()` and `post_s()` in the suite
-are the two ways to call it.
+are the two ways to call it. Then `make api-doc`: CI fails while
+`docs/API.md` does not list it.
+
+**A screen.** One entry in `tests/browser/screens.js` whose steps end by
+waiting for content only the seed puts there; if it needs data, add it in
+`tests/browser/seed/` through the app's own routes first, and a seeded text
+to `tests/browser/test_world.py`.
 
 **A store.** A `_PATH` constant with a `/data` default; a `_load_x` over
 `_load_json_store`; a `_write_x` over `_write_json_store` that states its

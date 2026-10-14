@@ -1,0 +1,209 @@
+{
+  "chat@laptop": {},
+  "chat@phone": {},
+  "chat@wide": {},
+  "chat~convo@laptop": {},
+  "chat~convo@phone": {},
+  "chat~convo@wide": {},
+  "connector@laptop": {
+    "inset": 1
+  },
+  "connector@phone": {
+    "inset": 1,
+    "short": 1
+  },
+  "connector@wide": {
+    "inset": 1
+  },
+  "crm~activities@laptop": {},
+  "crm~activities@phone": {},
+  "crm~activities@wide": {},
+  "crm~contacts@laptop": {},
+  "crm~contacts@phone": {
+    "inset": 1,
+    "short": 1
+  },
+  "crm~contacts@wide": {},
+  "crm~deal@laptop": {},
+  "crm~deal@phone": {
+    "inset": 2,
+    "short": 1
+  },
+  "crm~deal@wide": {},
+  "crm~insights@laptop": {},
+  "crm~insights@phone": {},
+  "crm~insights@wide": {},
+  "crm~leads@laptop": {},
+  "crm~leads@phone": {},
+  "crm~leads@wide": {},
+  "customers@laptop": {
+    "inset": 1
+  },
+  "customers@phone": {
+    "inset": 1
+  },
+  "customers@wide": {
+    "inset": 1,
+    "short": 1
+  },
+  "customers~customise@laptop": {
+    "inset": 1
+  },
+  "customers~customise@phone": {
+    "inset": 1
+  },
+  "customers~customise@wide": {
+    "inset": 1,
+    "short": 1
+  },
+  "files@laptop": {},
+  "files@phone": {},
+  "files@wide": {},
+  "forecast@laptop": {},
+  "forecast@phone": {},
+  "forecast@wide": {},
+  "guide@laptop": {},
+  "guide@phone": {},
+  "guide@wide": {},
+  "guide~design@laptop": {},
+  "guide~design@phone": {
+    "inset": 3,
+    "short": 2
+  },
+  "guide~design@wide": {},
+  "guide~new@laptop": {},
+  "guide~new@phone": {},
+  "guide~new@wide": {},
+  "guide~requests@laptop": {},
+  "guide~requests@phone": {
+    "inset": 1
+  },
+  "guide~requests@wide": {},
+  "keywords@laptop": {
+    "inset": 1
+  },
+  "keywords@phone": {
+    "inset": 1
+  },
+  "keywords@wide": {
+    "inset": 1,
+    "short": 1
+  },
+  "labels@laptop": {},
+  "labels@phone": {
+    "inset": 3
+  },
+  "labels@wide": {},
+  "labels~make-open@laptop": {},
+  "labels~make-open@phone": {
+    "inset": 3,
+    "short": 1
+  },
+  "labels~make-open@wide": {},
+  "labels~shipments@laptop": {},
+  "labels~shipments@phone": {
+    "inset": 1
+  },
+  "labels~shipments@wide": {},
+  "liability@laptop": {
+    "gaps": 1,
+    "inset": 1
+  },
+  "liability@phone": {
+    "gaps": 1,
+    "inset": 2
+  },
+  "liability@wide": {
+    "gaps": 1,
+    "inset": 1
+  },
+  "loans@laptop": {},
+  "loans@phone": {
+    "short": 1
+  },
+  "loans@wide": {},
+  "loans~unit@laptop": {},
+  "loans~unit@phone": {
+    "short": 1
+  },
+  "loans~unit@wide": {},
+  "mail@laptop": {},
+  "mail@phone": {
+    "inset": 1
+  },
+  "mail@wide": {},
+  "memory@laptop": {},
+  "memory@phone": {
+    "inset": 1,
+    "short": 1
+  },
+  "memory@wide": {},
+  "overview@laptop": {
+    "inset": 1
+  },
+  "overview@phone": {
+    "inset": 1
+  },
+  "overview@wide": {
+    "inset": 1,
+    "short": 1
+  },
+  "overview~customise@laptop": {
+    "inset": 1
+  },
+  "overview~customise@phone": {
+    "inset": 1
+  },
+  "overview~customise@wide": {
+    "inset": 1,
+    "short": 1
+  },
+  "products@laptop": {},
+  "products@phone": {
+    "inset": 2
+  },
+  "products@wide": {},
+  "recon@laptop": {},
+  "recon@phone": {
+    "inset": 1,
+    "short": 1
+  },
+  "recon@wide": {},
+  "seo@laptop": {
+    "inset": 1
+  },
+  "seo@phone": {
+    "inset": 1
+  },
+  "seo@wide": {
+    "inset": 1,
+    "short": 1
+  },
+  "sizes@laptop": {},
+  "sizes@phone": {
+    "inset": 2
+  },
+  "sizes@wide": {},
+  "sizes~rule@laptop": {},
+  "sizes~rule@phone": {
+    "inset": 3
+  },
+  "sizes~rule@wide": {},
+  "skills@laptop": {},
+  "skills@phone": {
+    "inset": 2,
+    "short": 1
+  },
+  "skills@wide": {},
+  "team~activity@laptop": {},
+  "team~activity@phone": {},
+  "team~activity@wide": {},
+  "team~people@laptop": {},
+  "team~people@phone": {},
+  "team~people@wide": {},
+  "team~work@laptop": {},
+  "team~work@phone": {
+    "short": 1
+  },
+  "team~work@wide": {}
+}

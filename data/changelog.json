@@ -2,6 +2,22 @@
  "releases": [
   {
    "date": "2026-10-14",
+   "title": "Windows and the keyboard",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": null,
+     "text": "Opening a window from the keyboard now puts you inside it, and closing it with its X puts you back on what you opened it from, instead of at the top of the page."
+    },
+    {
+     "kind": "fixed",
+     "tab": "crm",
+     "text": "Closing a deal from the keyboard keeps your place on the board: you land back on the same deal's card."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-14",
    "title": "Tighter locks",
    "items": [
     {
