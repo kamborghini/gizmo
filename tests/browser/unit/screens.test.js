@@ -8,7 +8,7 @@ test('36 states, each named once', () => {
 });
 const fs = require('fs');
 const path = require('path');
-const APP = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'static', 'index.html'), 'utf8');
+const APP = require('../page-source').join();
 const WORLD = fs.readFileSync(path.join(__dirname, '..', 'test_world.py'), 'utf8');
 
 // Run a screen's steps against stand-ins that record every wait for a text.
