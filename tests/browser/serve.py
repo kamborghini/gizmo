@@ -46,6 +46,11 @@ def build_world():
     g = {"__name__": "browser_world", "__file__": os.path.join(ROOT, "tests", "test_dispatch.py")}
     exec(compile(prelude_source_from(text), "tests/test_dispatch.py (setup)", "exec"), g)
     g["ensure_auth"]()
+    # The seed makes a few hundred requests through the setup's test client;
+    # one INFO line each would bury a real failure in the server's log.
+    import logging
+    for name in ("httpx", "httpx2"):
+        logging.getLogger(name).setLevel(logging.WARNING)
     from seed import seed
     g["SEEDED"] = seed(g)
     return g
