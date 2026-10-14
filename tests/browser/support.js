@@ -7,27 +7,56 @@ const RUN = process.env.BROWSER_RUN || path.join(__dirname, '.run');
 const INTER = require.resolve('@fontsource-variable/inter/files/inter-latin-wght-normal.woff2');
 const FONT_URL = 'https://fonts.gstatic.com/reactor-suite/inter.woff2';
 
-// A POST whose op names a change. The op is read word by word (snake_case or
-// camelCase), so settings is a read and settings_save a write. The suite looks
-// and never writes; the two writes the page makes by itself are swallowed in
-// prepare() and skipped here.
-const WRITE_VERBS = new Set(['add', 'save', 'create', 'update', 'delete', 'remove', 'set', 'done', 'undone', 'claim',
-  'release', 'send', 'book', 'cancel', 'print', 'mark', 'queue', 'archive', 'won', 'lost', 'move', 'merge', 'link',
-  'unlink', 'upload', 'reset', 'active', 'tabs', 'reply', 'state', 'request', 'seen', 'assign', 'snooze', 'dismiss',
-  'clear', 'edit', 'rename', 'restore', 'import', 'sync', 'run', 'review', 'retry', 'approve', 'reject']);
-const opWords = op => op.split(/[_\-\s]+|(?=[A-Z])/).map(w => w.toLowerCase()).filter(Boolean);
+// Deny by default: a POST is a write unless it is on this list of reads,
+// by route, op and the body fields it carries. The list is what the 36
+// states send (captured 14 Oct 2026); a route or op that is not on it fails
+// the screen that sent it, so a new read is added here on purpose and a new
+// write can never pass unseen. The fields matter: /api/profile with no
+// fields reads, with fields it saves.
+const R = (op, ...keys) => ({ op: op || null, keys });
+const READS = {
+  '/api/alerts': [R()], '/api/auth/state': [R()], '/api/cache': [R()], '/api/profile': [R()], '/api/memory': [R()],
+  '/api/learn': [R()], '/api/impact': [R()], '/api/skills': [R()], '/api/forecast': [R()], '/api/files/tree': [R()],
+  '/api/mail/board': [R()], '/api/crm/board': [R()], '/api/team/board': [R()], '/api/work/board': [R()],
+  '/api/customer-tags': [R()], '/api/reorder-radar': [R()], '/api/recon/status': [R()], '/api/gobo-sizes/list': [R()],
+  '/api/gobo-sizes/rules': [R()], '/api/production-labels/missing': [R()], '/api/layouts': [R()],
+  '/api/updates': [R(), R('version')],
+  '/api/connector': ['status', 'runs', 'quarantine', 'ledger', 'health', 'autorun', 'settings'].map(op => R(op)),
+  '/api/crm/deal': [R('detail', 'id')],
+  '/api/loans': [R('board'), R('history', 'unit_id')],
+  '/api/custom/list': [R(null, 'limit')],
+  '/api/customer-history': [R(null, 'customer_id')],
+  '/api/liability': [R(null, 'fresh')],
+  '/api/products': [R(null, 'months', 'fresh')],
+  '/api/production-labels': [R(null, 'tag', 'fresh')],
+  '/api/production-labels/coverage': [R(null, 'orders')],
+  '/api/recon/exceptions': [R(null, 'q', 'severity', 'status')],
+  '/api/recon/exception': [R(null, 'id')],
+};
+
+function isRead(route, b) {
+  const allowed = READS[route];
+  if (!allowed) return false;
+  const op = typeof b.op === 'string' ? b.op : null;
+  const keys = Object.keys(b).filter(k => k !== 'op');
+  return allowed.some(r => r.op === op && keys.every(k => r.keys.includes(k)));
+}
 
 function auth() {
   return JSON.parse(fs.readFileSync(path.join(RUN, 'auth.json'), 'utf8'));
 }
 
 function isWrite(url, method, body) {
-  if (method !== 'POST' || !body) return false;
-  let b;
-  try { b = JSON.parse(body); } catch (e) { return false; }
-  if (/\/api\/updates$/.test(url) && b.op === 'seen') return false;
-  if (/\/api\/layouts$/.test(url)) return false;
-  return typeof b.op === 'string' && opWords(b.op).some(w => WRITE_VERBS.has(w));
+  if (method !== 'POST') return false;
+  const route = new URL(url, 'http://app').pathname;
+  let b = {};
+  try { b = JSON.parse(body || '{}'); } catch (e) { return true; }   // a body that is not JSON (an upload) is a write
+  if (!b || typeof b !== 'object' || Array.isArray(b)) return true;
+  // The two writes a screen makes by being looked at: prepare() swallows them,
+  // so they never reach the server.
+  if (route === '/api/updates' && b.op === 'seen') return false;
+  if (route === '/api/layouts' && ['view', 'order', 'hidden', 'reset'].some(k => k in b)) return false;
+  return !isRead(route, b);
 }
 
 async function prepare(context, baseURL) {
@@ -163,4 +192,4 @@ function helpers(page, w, project) {
   };
 }
 
-module.exports = { RUN, auth, isWrite, prepare, watch, settle, open, helpers };
+module.exports = { RUN, READS, auth, isWrite, prepare, watch, settle, open, helpers };

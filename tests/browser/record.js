@@ -57,4 +57,17 @@ function write(kind, obj) {
   fs.writeFileSync(path.join(RECORD, kind + '.json'), JSON.stringify(sorted(obj), null, 2) + '\n');
 }
 
-module.exports = { RUN, RECORD, UPDATE, counts, compare, check, merge, write, load };
+// Every run starts empty: observations left by an earlier run would be merged
+// into this one's and could rewrite the record from stale counts.
+function fresh() {
+  fs.rmSync(path.join(RUN, 'observed'), { recursive: true, force: true });
+}
+
+// Whether a run saw every screen at every size; only such a run may rewrite.
+function complete(seen, screens, projects) {
+  const missing = [];
+  for (const s of screens) for (const p of projects) if (!(`${s.id}@${p}` in seen)) missing.push(`${s.id}@${p}`);
+  return { ok: missing.length === 0, missing };
+}
+
+module.exports = { RUN, RECORD, UPDATE, counts, compare, check, merge, write, load, fresh, complete };

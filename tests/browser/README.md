@@ -46,10 +46,12 @@ closes only by its X), Tab stays inside, the X closes it, and focus goes back.
 After fixing a problem, lower the record:
 
 ```bash
-BROWSER_EXPECTED_STATES=108 UPDATE_RECORD=1 make test-browser
+UPDATE_RECORD=1 make test-browser
 ```
 
-A partial run never rewrites it. The diff of `record/*.json` goes in the pull
+Each run starts with no observations from an earlier one, and only a run
+that saw every screen at every size rewrites the record; a filtered or
+failed run leaves it alone. The diff of `record/*.json` goes in the pull
 request; a count only goes up with the reason written there. Fonts render
 differently on a Mac and on CI's Linux, so when the two disagree, CI's
 `observed-a11y.json` / `observed-panels.json` in the artefact is the truth:
@@ -61,8 +63,7 @@ One entry in `screens.js`. Its steps must end by waiting for content only the
 seed puts there, so an empty state is never measured by mistake (a unit test
 checks every screen waits). Never click anything that writes: Save, Print,
 Mark made, Dispatch, Send, Claim, Delete, Won, Lost, a checkbox that completes.
-Opening a tab, a row or a window is fine. `BROWSER_EXPECTED_STATES` is the
-number of screens times three.
+Opening a tab, a row or a window is fine.
 
 ## Adding data
 

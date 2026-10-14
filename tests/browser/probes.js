@@ -21,8 +21,11 @@ async function measure(page) {
     // Scrolled or cut off, the page is wider than the screen either way.
     // Deliberate sideways scrollers (a wide table, the CRM board) sit inside
     // panels and are not page-level.
+    // An open window is measured as well: its body is its own scrolling column.
+    const win = [...document.querySelectorAll('.modal-overlay.show .modal')].filter(vis);
     const sideways = [document.scrollingElement, document.querySelector('.main'),
-      ...document.querySelectorAll('.view.active, .view.active > .scroll')]
+      ...document.querySelectorAll('.view.active, .view.active > .scroll'),
+      ...win, ...win.map(w => w.querySelector('.modal-body')).filter(Boolean)]
       .filter((e, i, a) => e && a.indexOf(e) === i)
       .filter(e => e.scrollWidth > e.clientWidth + 1)
       .map(e => desc(e) + ' ' + (e.scrollWidth - e.clientWidth) + 'px');
@@ -34,7 +37,7 @@ async function measure(page) {
 
     // Spill: a visible element wider than its panel, not held by a scroller or a clip.
     const spill = [], spilt = [];
-    for (const { n: pn, r: pr } of R) {
+    for (const { n: pn, r: pr } of [...R, ...win.map(n => ({ n, r: n.getBoundingClientRect() }))]) {
       if (clips(getComputedStyle(pn))) continue;
       for (const e of pn.querySelectorAll('*')) {
         if (!vis(e)) continue;

@@ -1,7 +1,7 @@
 # Dashboards seed for the browser suite. Proven 14 Oct 2026 against the
-# dispatch setup. Runs AFTER the test_dispatch.py prelude,
-# in the prelude's own globals (exec(src, g) where g already holds copilot, server,
-# xero_api, client, post, ensure_auth, tok, SCRATCH ...). Everything is invented:
+# dispatch setup. Runs AFTER the test_dispatch.py prelude, in its own copy of
+# the prelude's names (seed/__init__.py: copilot, server, xero_api, client,
+# post, ensure_auth, tok, SCRATCH ...), never in the prelude's globals. Everything is invented:
 # people, companies, emails at example.com / example.org, phones 01632 960xxx.
 # Nothing reaches the network: the outside systems (Shopify, Google, the AI, the
 # store website, Xero, the connector service) are stood in for in process.

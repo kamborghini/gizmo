@@ -26,8 +26,10 @@ draws screens, so this suite comes first.
 3. Accessibility is checked against WCAG 2.2 AA with axe, as a ratchet: today's
    problems are recorded; a pull request fails if it adds one, and fails if it
    removes one without lowering the record, so the record only ever tightens.
-4. A few keyboard journeys are proven: a dialog takes focus, Escape closes
-   it, focus returns to what opened it.
+4. A few keyboard journeys are proven, under the app's own rule that a window
+   holding work closes only by its X (corrected 14 Oct during the build): a
+   window takes focus, Escape leaves it open, Tab stays inside, the X pressed
+   from the keyboard closes it, and focus returns to what opened it.
 5. Nothing in the suite comes from the business: all data is invented and
    committed, and the browser reaches no host but the app.
 6. The API routes are listed in a generated `docs/API.md` that CI keeps
@@ -79,11 +81,11 @@ directory that the browser specs read. Nothing is written to the repo.
 | `tests/browser/keyboard.spec.js` | The dialog journeys. |
 | `tests/browser/record.js` | Reads and compares the record; rewrites it when asked. |
 | `tests/browser/record/a11y.json`, `record/panels.json` | The ratchet records. |
-| `tests/browser/fixtures/` | Invented answers for routes the dispatch world does not fill (below), and a committed Inter font file with its OFL licence. |
+| `tests/browser/seed/` | The invented world, seeded through the app's own code before it is served (below). Inter comes from the pinned dev package `@fontsource-variable/inter` (OFL), not a committed file. |
 
 **The network fence.** Every request to a host other than the app is
 answered or aborted in the browser. Google Fonts is answered with the
-committed Inter file, so text measures the same on every machine and the
+pinned Inter package's file, so text measures the same on every machine and the
 run needs no internet. App Bridge's script is aborted (the stand-in replaces
 it). Anything else is aborted and fails the test that caused it, naming the
 host.
@@ -150,7 +152,7 @@ suite clicks Print, Mark made, Dispatch or any button that writes.
 | Sideways page scroll, or content wider than its panel | must be zero | must be zero |
 | Panel rules: each section a panel, panels side by side the same height, the gap between them, no panel inside a panel, tables running to their panel's edge | recorded | ratchet |
 | axe, WCAG 2.2 A and AA rules, every impact level | recorded | ratchet |
-| Keyboard: three dialogs (a CRM deal, a loan unit, a size rule from the Production Manager's Size check) take focus, close on Escape and hand focus back, without saving anything | must pass | must pass |
+| Keyboard: three dialogs (a CRM deal, a loan unit, a size rule from the Production Manager's Size check) take focus, stay open on Escape (X only, the app's rule), close by the X from the keyboard and hand focus back, without saving anything | must pass | must pass |
 
 **The ratchet.** A record is `{screen@size: {rule: count}}`. A run fails if
 any count is above the record (a new problem) or below it (a fixed problem

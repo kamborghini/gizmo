@@ -34,3 +34,17 @@ test('the record is written sorted, so its diff in a pull request reads', () => 
   assert.strictEqual(fs.readFileSync(path.join(process.env.BROWSER_RECORD, 'panels.json'), 'utf8'),
     '{\n  "a@phone": {},\n  "b@wide": {\n    "a": 2,\n    "z": 1\n  }\n}\n');
 });
+test('a run starts with no observations left from an earlier one', () => {
+  const dir = path.join(process.env.BROWSER_RUN, 'observed', 'a11y');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'stale%40laptop.json'), '{}');
+  R.fresh();
+  assert.deepStrictEqual(R.merge('a11y'), {});
+});
+test('the record is rewritten only from a run that saw every screen at every size', () => {
+  const screens = [{ id: 'a' }, { id: 'b' }], projects = ['phone', 'laptop'];
+  const all = { 'a@phone': {}, 'a@laptop': {}, 'b@phone': {}, 'b@laptop': {} };
+  assert.deepStrictEqual(R.complete(all, screens, projects), { ok: true, missing: [] });
+  const part = { 'a@phone': {}, 'b@laptop': {} };
+  assert.deepStrictEqual(R.complete(part, screens, projects), { ok: false, missing: ['a@laptop', 'b@phone'] });
+});

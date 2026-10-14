@@ -43,6 +43,14 @@ test.describe('the probes', () => {
     expect(m.sideways.join(' ')).toContain('scroll');
   });
 
+  test('an open window is measured too: content wider than the window spills out of it', async ({ page }) => {
+    await page.setContent(shell('<section class="panel"><h2>Behind</h2></section>') .replace('</body>',
+      `<div class="modal-overlay show" style="position:fixed;inset:0"><div class="modal" style="width:360px;margin:40px auto;background:#fff;border:1px solid #ddd">
+        <div class="modal-head"><h3>Edit</h3></div><div class="modal-body" style="padding:16px"><div style="width:2000px">wide</div></div></div></div></body>`));
+    const m = await P.measure(page);
+    expect([...m.sideways, ...m.spill].join(' ')).toContain('modal');
+  });
+
   test('a section that is not a panel, a panel in a panel, and unequal neighbours are counted', async ({ page }) => {
     await page.setContent(shell('<section class="loose"><p>floating</p></section>'
       + '<section class="panel"><div class="panel">inner</div></section>'

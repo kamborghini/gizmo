@@ -44,32 +44,38 @@ def t_the_setup_is_found_or_the_server_refuses_to_start():
 
 @test
 def t_the_dashboards_are_filled():
-    has("/api/cache", {}, "Revenue is up on last week", "The store is indexable", "custom gobo", "Champions")
+    has("/api/cache", {}, "Revenue is up on last week", "The store is indexable", "custom gobo", "Champions",
+        "Custom gobo terms lead")
     has("/api/products", {"months": 24, "fresh": True}, "Walkway Safety Sign Gobo")
     has("/api/liability", {"fresh": True}, "Kestrel Logistics Ltd")
     has("/api/recon/exceptions", {}, "Kilnworth Glass Supplies Ltd")
-    has("/api/forecast", {}, "Algorithm 1", "Cash Flow plan.xlsx")
+    has("/api/forecast", {}, "Algorithm 1", "Algorithm 2", "Cash Flow plan.xlsx")
     has("/api/connector", {"op": "status"}, "test-store.myshopify.com")
 
 
 @test
 def t_the_operations_screens_are_filled():
     has("/api/production-labels", {"tag": "IP", "fresh": False}, "#210388", "Hartwell Events Ltd")
-    has("/api/custom/list", {"limit": 200}, "Replacement gobo")
-    has("/api/crm/board", {}, "Fernhill walkway safety signs", "Marcus Bell", "Rental stock enquiry")
-    has("/api/loans", {"op": "board"}, "Quayside Exhibitions")
+    has("/api/custom/list", {"limit": 200}, "Replacement gobo", "Loan projector return label")
+    has("/api/customer-history", {"customer_id": 502}, "#210351")
+    has("/api/production-labels/coverage", {"orders": 200}, "Moonbeam Profile 300")
+    has("/api/crm/board", {}, "Fernhill walkway safety signs", "Marcus Bell", "Rental stock enquiry",
+        "Site visit for window throw", "Too expensive")
+    has("/api/loans", {"op": "board"}, "Quayside Exhibitions", "Loan 1")
     has("/api/mail/board", {}, "Artwork for the autumn tour gobos")
-    has("/api/files/tree", {}, "Artwork")
+    has("/api/files/tree", {}, "Artwork", "price-list-2026.pdf")
 
 
 @test
 def t_the_workspace_screens_are_filled():
-    has("/api/team/board", {}, "Hattie Brennan", "Jonah Featherstone")
-    has("/api/work/board", {}, "Jonah Featherstone")
+    has("/api/team/board", {}, "Hattie Brennan", "Jonah Featherstone", "price-list-2026.pdf")
+    has("/api/work/board", {}, "Jonah Featherstone", "left the bench without clocking out")
     has("/api/memory", {}, "Chase the B-size glass blank reorder")
-    has("/api/skills", {}, "Quoting custom gobos")
-    has("/api/updates", {}, "Hattie Brennan")
-    ok("sc_convos_v1" in world()["SEEDED"]["localStorage"], "chat's conversations are handed to the browser")
+    has("/api/skills", {}, "Quoting custom gobos", "Replying to trade accounts")
+    has("/api/updates", {}, "Hattie Brennan", "Warn when a loan unit is overdue by a week")
+    convos = world()["SEEDED"]["localStorage"].get("sc_convos_v1") or ""
+    for t in ("How did September sales compare with August?", "September was up on August"):
+        ok(t in convos, "chat's conversations are handed to the browser with %r" % t)
 
 
 @test

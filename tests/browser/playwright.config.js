@@ -13,6 +13,7 @@ module.exports = defineConfig({
   testDir: __dirname,
   testMatch: /\.spec\.js$/,
   outputDir: path.join(RUN, 'results'),
+  globalSetup: path.join(__dirname, 'setup.js'),
   globalTeardown: path.join(__dirname, 'teardown.js'),
   timeout: 90000,
   expect: { timeout: 20000 },
