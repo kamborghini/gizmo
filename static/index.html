@@ -20401,10 +20401,15 @@ Projected Image UK"></textarea>
         let labelsMissing = null;   // { data, at } | null
         let labelsOldest = false;
         async function loadMissing() {
-            try {
-                const data = await api('/api/production-labels/missing', {});
-                labelsMissing = { data, at: Date.now() };
-            } catch (e) { labelsMissing = null; }
+            let data = null;
+            try { data = await api('/api/production-labels/missing', {}); } catch (e) { data = null; }
+            /* The server keeps this answer until an order changes, so most
+               loads bring back the strip already on screen; the queue is
+               drawn again only for one that differs (the 2026-10-12 speed
+               audit, X7). */
+            const same = !!(data && labelsMissing && JSON.stringify(labelsMissing.data) === JSON.stringify(data));
+            labelsMissing = data ? { data, at: Date.now() } : null;
+            if (same) return;
             if (!labelsLoading && labelsCache) renderLabels();
         }
         function missingStrip() {

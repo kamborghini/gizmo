@@ -1548,6 +1548,46 @@ async def shopify_customer_state(customer_id: str, email: str) -> str:
     return "unknown" if unaskable else "gone"
 
 
+# A label's option names and a line's product type, for many products in one
+# read (the 2026-10-12 speed audit, X7). They were read one product at a time,
+# up to eighty reads through the gate after every deploy. Listing products by
+# id over REST is deprecated (2024-04), so this is the GraphQL node read. The
+# first three options by position are what the REST read gave: it models at
+# most three. About 4 points a product, so 100 stay well inside the 1,000 a
+# single query may cost.
+PRODUCT_META_QUERY = ("query ProductMeta($ids: [ID!]!) { nodes(ids: $ids) {"
+                      " ... on Product { id productType options(first: 3) { name position } } } }")
+
+
+async def shopify_product_meta(product_ids: list) -> dict:
+    """{product_id: {"names": option names in position order, "type": product
+    type}} for the products found; a product that no longer exists is left
+    out. Raises when the read fails or Shopify answers with errors (a
+    throttle comes back as HTTP 200 with errors), so the caller can fall back
+    rather than take a failure for an answer."""
+    ids = [int(p) for p in product_ids][:100]
+    if not ids:
+        return {}
+    payload = await _request("POST", "graphql.json", idempotent=True, body={
+        "query": PRODUCT_META_QUERY,
+        "variables": {"ids": [f"gid://shopify/Product/{i}" for i in ids]}})
+    if payload.get("errors"):
+        raise RuntimeError("Shopify refused the products read: " + str(payload["errors"])[:200])
+    out = {}
+    for n in ((payload.get("data") or {}).get("nodes") or []):
+        if not isinstance(n, dict) or not n.get("id"):
+            continue
+        try:
+            pid = int(str(n["id"]).rsplit("/", 1)[-1])
+        except ValueError:
+            continue
+        opts = sorted((o for o in (n.get("options") or []) if isinstance(o, dict)),
+                      key=lambda o: int(o.get("position") or 0))
+        out[pid] = {"names": [str(o.get("name") or "").strip() for o in opts],
+                    "type": str(n.get("productType") or "").strip()}
+    return out
+
+
 async def shopify_order_tax_id(order_id: int) -> dict:
     """{"tax_id": str, "source": str} - the RECEIVER's tax / VAT id for a
     customs declaration, or empty when the customer has not given one.
@@ -2232,6 +2272,7 @@ try:
                        payment_terms_writer=set_order_payment_terms_net30,
                        scope_reader=shopify_granted_scopes,
                        tax_id_reader=shopify_order_tax_id,
+                       product_meta_reader=shopify_product_meta,
                        order_writer=update_order_fields,
                        forecast_reader=forecast_store_read,
                        install_checker=shopify_install_state,

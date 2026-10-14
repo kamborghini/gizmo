@@ -8940,6 +8940,41 @@ function mailAgoLong(iso) { return 'at ' + iso.slice(11, 16); }
 
 
 @test
+def t_an_unchanged_missed_orders_strip_does_not_redraw_the_queue():
+    """The 2026-10-12 speed audit, X7. Every load of the Make queue drew the
+    queue, then asked for the missed-orders strip and drew the whole queue
+    again when it came, changed or not. The strip's answer is now kept on the
+    server until an order changes, so most loads get the same one: the queue
+    is drawn again only when it differs from the strip already shown."""
+    ok("async function loadMissing(" in SCRIPT, "loadMissing exists")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = r"""
+let labelsMissing = null, labelsLoading = false, labelsCache = { data: {} }, paints = 0, next = null;
+function renderLabels() { paints += 1; }
+async function api() { return JSON.parse(JSON.stringify(next)); }
+""" + fn_src("async function loadMissing(") + r"""
+(async () => {
+  const out = {};
+  next = { tag: 'IP', missing: [{ id: 9, name: '#9' }], missing_total: 1, checked: 40 };
+  await loadMissing(); out.first = paints;
+  await loadMissing(); out.same = paints;
+  next = { tag: 'IP', missing: [], missing_total: 0, checked: 40 };
+  await loadMissing(); out.changed = paints;
+  api = async () => { throw new Error('offline'); };
+  await loadMissing(); out.failed = { paints, shown: labelsMissing };
+  console.log(JSON.stringify(out));
+})();
+"""
+    got = _run_node(js)
+    ok(got["first"] == 1, "the first strip is drawn: %r" % got)
+    ok(got["same"] == 1, "the same strip again draws nothing: %r" % got)
+    ok(got["changed"] == 2, "a strip that changed is drawn: %r" % got)
+    ok(got["failed"] == {"paints": 3, "shown": None}, "and a failed check takes the strip away, as before: %r" % got)
+
+
+@test
 def t_inbox_rows_off_screen_are_not_laid_out_on_a_wide_list():
     """The 2026-10-12 speed audit, P5. Every redraw of the Inbox laid out and
     painted every row, about 400 of them, though some twenty are on screen.
