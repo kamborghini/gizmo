@@ -257,6 +257,23 @@ def t_the_shop_is_named_the_same_either_way():
 
 
 @test
+def t_a_shop_that_is_not_a_shopify_store_is_refused():
+    """shop_host kept anything with a dot in it, so a mistyped SHOP such as
+    `example.com/x` or `user@host` became the address the job posted to,
+    carrying its token (8 Sept second pass). Only a myshopify.com store, or a
+    bare handle that becomes one, is ever an address."""
+    from forecast.ingest import shop_host
+    for given in ("example.com", "evil.com/projectedimage.myshopify.com", "user@projectedimage.myshopify.com",
+                  "projectedimage.myshopify.com.evil.com", "projectedimage.myshopify.com:8443",
+                  "https://projectedimage.myshopify.com/admin", "", "  ", "-bad.myshopify.com"):
+        try:
+            got = shop_host(given)
+        except ValueError:
+            continue
+        raise AssertionError("%r became the address %r" % (given, got))
+
+
+@test
 def t_the_job_reads_the_store_through_reactor_and_holds_no_shopify_secret():
     """The job used to take Reactor's client id and secret and mint its own
     Admin API token. That secret also signs every webhook Reactor trusts, so

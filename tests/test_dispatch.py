@@ -12409,6 +12409,27 @@ def t_chat_cannot_read_customers_a_tab_denies():
 
 
 @test
+def t_an_account_that_does_not_exist_opens_no_tab():
+    """_user_tabs answered None, the master's "everything", for an id that
+    named no live account. Harmless only while every caller had already
+    proven the account live (8 Sept second pass): the check fails closed."""
+    def go():
+        eq(copilot._user_tabs("u-nobody-has-this-id"), [], "an unknown account has no tabs")
+        r = post("/api/team/user", {"op": "create", "name": "Gone", "username": "gone",
+                                    "role": "member", "tabs": ["chat", "labels"]})
+        ok(r.status_code == 200, "made an account: " + r.text[:140])
+        uid = r.json().get("id") or ""
+        ok(copilot._uid_has_tab(uid, "chat"), "which can open its own tab")
+        r = post("/api/team/user", {"op": "delete", "id": uid})
+        ok(r.status_code == 200, "then deleted it: " + r.text[:140])
+        eq(copilot._user_tabs(uid), [], "a deleted account has no tabs")
+        ok(not copilot._uid_has_tab(uid, "chat"), "so it cannot reach one it once had")
+        master = next(k for k, u in copilot._load_users()["users"].items() if u.get("role") == "master")
+        eq(copilot._user_tabs(master), None, "the master still opens everything")
+    with_accounts(go)
+
+
+@test
 def t_the_chat_tool_gate_is_bound_per_run():
     """A shared "current asker" slot is only safe while nothing awaits between
     writing and reading it. A chat turn is minutes of awaits, so a second
@@ -14089,6 +14110,41 @@ def t_the_forecast_hook_takes_only_its_token_and_the_tab_reads_the_run():
         # the tab is a grant, opt-in like the books, and its routes are mapped to it
         ok("forecast" in copilot.TAB_KEYS and "forecast" in copilot.OPT_IN_TABS, "the tab is a grant nobody inherits")
         ok(any(p == "/api/forecast" and t == "forecast" for p, t in copilot._TAB_ROUTES), "its routes are claimed by it")
+    finally:
+        copilot.FORECAST_INGEST_TOKEN = saved
+
+
+@test
+def t_the_forecast_hook_keeps_only_a_date_and_a_figure_from_each_run():
+    """The run history kept each post's as_of verbatim, deduped by its exact
+    value, sixty deep, and its year figure as sent: sixty posts carrying
+    megabyte strings there would fill the volume until every other store's
+    write failed (8 Sept second pass, finding 5). It takes the hook's token,
+    so this is an insider or a compromised service, and still not a reason
+    for the disk to be the limit."""
+    ensure_auth()
+    saved = copilot.FORECAST_INGEST_TOKEN
+    try:
+        copilot.FORECAST_INGEST_TOKEN = "forecast-secret-for-tests"
+        h = {"X-Forecast-Token": "forecast-secret-for-tests"}
+        run = {"monthly": [], "scenarios": []}
+        for bad in ("x" * 200000, "yesterday", 20260908, None, ["2026-09-08"]):
+            r = client.post("/hooks/forecast/results", json={**run, "as_of": bad}, headers=h)
+            eq(r.status_code, 400, "as_of %r is refused" % (str(bad)[:20],))
+            r = client.post("/hooks/forecast/results", json={"as_of": bad, "error": "boom"}, headers=h)
+            eq(r.status_code, 400, "on a failed run too: %r" % (str(bad)[:20],))
+        for good in ("2026-09-08", "2026-09-08T03:10:00+00:00"):
+            r = client.post("/hooks/forecast/results", json={**run, "as_of": good}, headers=h)
+            eq(r.status_code, 200, "the service's own date shapes still arrive: " + good)
+        r = client.post("/hooks/forecast/results",
+                        json={**run, "as_of": "2026-09-10", "year": {"p50": "9" * 100000}}, headers=h)
+        eq(r.status_code, 200, r.text[:120])
+        last = copilot._forecast_state()["runs"][-1]
+        eq(last["as_of"], "2026-09-10", "the run is kept")
+        eq(last["year_p50"], None, "but a year figure that is not a number is not")
+        r = client.post("/hooks/forecast/results",
+                        json={**run, "as_of": "2026-09-11", "year": {"p50": 301060.123}}, headers=h)
+        eq(copilot._forecast_state()["runs"][-1]["year_p50"], 301060.12, "a real one is kept, to the penny")
     finally:
         copilot.FORECAST_INGEST_TOKEN = saved
 
@@ -17275,6 +17331,39 @@ def t_the_page_csp_does_not_allow_inline_script():
     inline = _re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", shell, _re.S)
     ok(not [b for b in inline if b.strip()], "the shell carries no inline script block")
     ok(not _re.search(r"\son[a-z]+\s*=\s*[\"']", shell), "and no inline event handler attribute")
+
+
+@test
+def t_only_the_configured_store_can_frame_the_app():
+    """frame-ancestors trusted any well-formed ?shop= and fell back to every
+    myshopify.com store, so a free development store could frame Reactor
+    under decoy buttons and steer a signed-in person's clicks (8 Sept
+    second pass, finding 2). With the store configured, the page names that
+    store and the admin, whatever the URL says."""
+    import copilot as _c
+    def ancestors(shop):
+        class _Req:
+            headers = {}
+            query_params = {"shop": shop} if shop is not None else {}
+            url = type("U", (), {"path": "/"})()
+        csp = _c._frame_headers(_Req())["Content-Security-Policy"]
+        return [d for d in csp.split(";") if d.strip().startswith("frame-ancestors")][0].split()[1:]
+    saved = _c.SHOPIFY_STORE
+    try:
+        for store in ("test-store", "test-store.myshopify.com"):
+            _c.SHOPIFY_STORE = store
+            for shop in ("evil-dev.myshopify.com", "test-store.myshopify.com", "not a shop", None):
+                eq(ancestors(shop), ["https://test-store.myshopify.com", "https://admin.shopify.com"],
+                   "store %r, ?shop=%r: only the store and the admin" % (store, shop))
+        # Unconfigured (a local run): the old behaviour, so a developer's
+        # own dev store can still embed it.
+        _c.SHOPIFY_STORE = ""
+        eq(ancestors("dev-one.myshopify.com"), ["https://dev-one.myshopify.com", "https://admin.shopify.com"],
+           "no store configured: a well-formed ?shop= is used")
+        eq(ancestors(None), ["https://admin.shopify.com", "https://*.myshopify.com"],
+           "and without one, the admin and any store")
+    finally:
+        _c.SHOPIFY_STORE = saved
 
 
 @test

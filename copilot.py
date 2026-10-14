@@ -2453,8 +2453,14 @@ def _build_backup_zip():
         os.path.basename(getattr(google_mail, "FINANCE_TOKEN_PATH", "gmail_finance_oauth.json")),
         os.path.basename(WO_SECRET_PATH),
         # Sessions are transient bearer state: never in a backup. The accounts
-        # register IS included: it holds only scrypt hashes, and restoring it
-        # is exactly what brings the team back after a lost volume.
+        # register IS included, because restoring it is exactly what brings the
+        # team back after a lost volume. It holds scrypt hashes and each
+        # account's two-step secret, sealed with tokenvault (plain only while
+        # the vault key is unset, as every sealed store is). The cash flow
+        # workbook rides in forecast.json and is included too, decided
+        # 14 Oct 2026: only the master downloads a backup, which already holds
+        # the CRM and the inbox, and a restore without it would leave the
+        # forecast without its cash flow until somebody uploaded it again.
         os.path.basename(SESSIONS_PATH),
     }
     buf = io.BytesIO()
@@ -11158,13 +11164,19 @@ _SHOP_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\.myshopify\.com$")
 def _frame_headers(request: Request) -> dict:
     """Headers for the chat page: allow the admin iframe (must NOT send
     X-Frame-Options) and block MIME sniffing / referrer leakage."""
+    # Who may frame the page. With the store configured, that store and the
+    # admin, whatever the URL says: trusting a well-formed ?shop= let any
+    # myshopify.com store, a free development one included, frame Reactor
+    # under decoy buttons and steer a signed-in person's clicks. Unconfigured
+    # (a local run), a well-formed ?shop= or the wildcard, as before, so a
+    # crafted value still cannot inject extra frame hosts.
     shop = request.query_params.get("shop", "")
-    # Only trust a well-formed myshopify domain in the CSP; otherwise fall back
-    # to the wildcard so a crafted ?shop= value cannot inject extra frame hosts.
-    ancestors = (
-        f"https://{shop} https://admin.shopify.com"
-        if _SHOP_RE.match(shop) else "https://admin.shopify.com https://*.myshopify.com"
-    )
+    if SHOPIFY_STORE:
+        ancestors = f"https://{SHOPIFY_STORE.split('.')[0]}.myshopify.com https://admin.shopify.com"
+    elif _SHOP_RE.match(shop):
+        ancestors = f"https://{shop} https://admin.shopify.com"
+    else:
+        ancestors = "https://admin.shopify.com https://*.myshopify.com"
     # Full CSP: lock down sources while allowing exactly what the page needs —
     # App Bridge (cdn.shopify.com), Google Fonts, same-origin API calls, and the
     # store/admin for the embed.
@@ -17663,9 +17675,14 @@ DEFAULT_TABS = tuple(k for k in TAB_KEYS if k not in OPT_IN_TABS)
 
 def _user_tabs(uid: Optional[str]):
     """None = everything, and only the master gets that. An account with no
-    tab list of its own gets the DEFAULT set, which is not the whole set."""
+    tab list of its own gets the DEFAULT set, which is not the whole set. An
+    id that names no live account (unknown, or deleted) gets nothing: this
+    check fails closed rather than trusting every caller to have proven the
+    account first."""
     u = _team_user(uid)
-    if not u or u.get("role") == "master":
+    if not u:
+        return []
+    if u.get("role") == "master":
         return None
     t = u.get("tabs")
     if not isinstance(t, list):
@@ -17684,8 +17701,11 @@ def _tab_denied(request: Request) -> Optional[JSONResponse]:
         if path.startswith(p) and len(p) > best:
             tab, best = t, len(p)
     uid = _session_uid(request.headers.get("x-app-session"))
-    if not uid:
-        return None            # not our concern here; _authorize answers 401
+    if not uid or not _team_user(uid):
+        # Not our concern here; _authorize answers 401. A session whose
+        # account is gone (deleted, or the register lost) must reach that 401,
+        # which sends the page to sign in or set up, not this gate's 403.
+        return None
     if not tab:
         # Deny by default. A route under /api/ that no tab claims is either on
         # the short list below (self-service and admin routes that carry their
@@ -18825,6 +18845,21 @@ def _forecast_state() -> dict:
 
 def _forecast_token_ok(request: Request) -> bool:
     return _secret_ok(str(request.headers.get("x-forecast-token") or ""), FORECAST_INGEST_TOKEN)
+
+# The run date the service posts: date.isoformat(), or a datetime's.
+_FORECAST_AS_OF_RE = re.compile(r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})?)?")
+
+
+def _forecast_figure(x) -> Optional[float]:
+    """A figure the run history keeps: a finite number to the penny, or None."""
+    import math
+    if isinstance(x, bool):
+        return None
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return round(v, 2) if math.isfinite(v) else None
 
 # Months scored before the ledger kept the source in use. September 2026 was
 # forecast by "Last year, adjusted for this year" (its run of 9 September was
@@ -20102,6 +20137,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Request too large."}, 413)
         if not isinstance(body, dict):
             return _json({"error": "A JSON object is required."}, 400)
+        # as_of is kept in the run history, deduped by its exact value, and in
+        # the ledger: a date (or the datetime the service may send), never
+        # whatever arrived, or sixty large ones would fill the volume.
+        if not (isinstance(body.get("as_of"), str) and _FORECAST_AS_OF_RE.fullmatch(body["as_of"])):
+            return _json({"error": "as_of must be the run's date, as YYYY-MM-DD."}, 400)
         state = _forecast_state()
         now = datetime.now(timezone.utc).isoformat()
         if body.get("error"):
@@ -20115,7 +20155,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             state.pop("last_error", None)
             runs = [r for r in state.get("runs", []) if r.get("as_of") != body.get("as_of")]
             runs.append({"as_of": body.get("as_of"), "received_at": now,
-                         "year_p50": (body.get("year") or {}).get("p50"), "alerts": len(body.get("alerts") or [])})
+                         "year_p50": _forecast_figure((body.get("year") if isinstance(body.get("year"), dict) else {}).get("p50")),
+                         "alerts": len(body.get("alerts") or [])})
             state["runs"] = runs[-60:]
             # Who said what, and who turned out to be right. Kept here rather
             # than in the service, because the service is stateless by design

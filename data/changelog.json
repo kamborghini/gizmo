@@ -2,6 +2,27 @@
  "releases": [
   {
    "date": "2026-10-14",
+   "title": "Tighter locks",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": null,
+     "text": "Reactor now opens only inside your own store's Shopify admin. Before, another Shopify store could show it inside a page of its own."
+    },
+    {
+     "kind": "fixed",
+     "tab": "team",
+     "text": "An account that has been deleted, or that Reactor does not recognise, can open no part of the app, rather than relying on the sign in to have stopped it first."
+    },
+    {
+     "kind": "fixed",
+     "tab": "forecast",
+     "text": "The nightly forecast is only kept when it carries a real date, and it only ever connects to your own Shopify store's address."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-14",
    "title": "Every section in a panel",
    "items": [
     {

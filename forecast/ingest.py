@@ -326,10 +326,21 @@ def fetch_refunds(store, since: date) -> Dict[str, list]:
 def shop_host(shop: str) -> str:
     """`projectedimage.myshopify.com` and `projectedimage` both name one shop.
     The app's own server holds the bare handle and builds the domain; this
-    package holds the domain and uses it as given. Both spellings arrive here."""
-    shop = shop.strip().rstrip("/")
-    shop = shop.split("://")[-1]
-    return shop if "." in shop else shop + ".myshopify.com"
+    package holds the domain and uses it as given. Both spellings arrive here.
+
+    Anything else is refused, not used: the result is the address the job
+    posts its token to, and keeping whatever had a dot in it would have sent
+    that token to a mistyped `example.com/x` or `user@host`."""
+    shop = shop.strip().rstrip("/").lower()
+    if shop.startswith("https://"):
+        shop = shop[len("https://"):]
+    host = shop if "." in shop else shop + ".myshopify.com"
+    if not _SHOP_HOST_RE.fullmatch(host):
+        raise ValueError("SHOP must be a store handle or its myshopify.com domain, not %r" % shop[:80])
+    return host
+
+
+_SHOP_HOST_RE = re.compile(r"[a-z0-9][a-z0-9-]*\.myshopify\.com")
 
 
 def _gql(shop: str, token: str, api_version: str, query: str, variables: Optional[dict] = None) -> dict:
