@@ -15143,6 +15143,47 @@ def t_settings_offer_no_switch_for_shop_delivery():
     ok("show_parcelshop: psCb.checked" not in SCRIPT, "and nothing saves it")
 
 
+def _page_root(shell, css, js):
+    """A throwaway static/src with the given shell and one section of each kind."""
+    root = tempfile.mkdtemp(prefix="pagesource-")
+    src = os.path.join(root, "static", "src")
+    os.makedirs(os.path.join(src, "css")); os.makedirs(os.path.join(src, "js"))
+    open(os.path.join(src, "shell.html"), "w", encoding="utf-8").write(shell)
+    open(os.path.join(src, "css", "a.css"), "w", encoding="utf-8").write(css)
+    open(os.path.join(src, "js", "a.js"), "w", encoding="utf-8").write(js)
+    json.dump({"shell": "shell.html", "css": ["css/a.css"], "js": ["js/a.js"]},
+              open(os.path.join(src, "manifest.json"), "w", encoding="utf-8"))
+    return root
+
+
+@test
+def t_the_page_is_its_shell_with_its_sections_in_place():
+    """pagesource.join puts the stylesheet's sections where the shell's css
+    marker line is and the script's where its js marker line is, end to end,
+    and nothing else: the server serves exactly what it joins."""
+    sys.path.insert(0, ROOT)
+    import pagesource
+    root = _page_root("<style>\n<!-- @css -->\n</style><script>\n<!-- @js -->\n</script>\n", "a{}\n", "x();\n")
+    ok(pagesource.join(root) == "<style>\na{}\n</style><script>\nx();\n</script>\n", pagesource.join(root))
+    ok(len(pagesource.sha256(root)) == 64, "and it has a fingerprint")
+
+
+@test
+def t_a_shell_without_its_markers_is_refused():
+    """A marker line edited by hand (indented, misspelt, doubled) would leave
+    a section with nowhere to go. The join refuses and names the file, so the
+    suites fail at once rather than the page being served without its script."""
+    sys.path.insert(0, ROOT)
+    import pagesource
+    for shell in ("<!-- @css -->\n  <!-- @js -->\n", "<!-- @css -->\n", "<!-- @css -->\n<!-- @css -->\n<!-- @js -->\n"):
+        try:
+            pagesource.join(_page_root(shell, "a{}\n", "x();\n"))
+        except ValueError as e:
+            ok("static/src/shell.html" in str(e), "the refusal names the shell: %s" % e)
+        else:
+            raise AssertionError("a shell without exactly one of each marker was joined: %r" % shell)
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()
