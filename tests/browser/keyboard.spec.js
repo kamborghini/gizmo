@@ -52,3 +52,24 @@ for (const s of SCREENS.filter(x => x.kind === 'dialog')) {
     expect(w.writes).toEqual([]);
   });
 }
+
+// On a phone a tap moves no focus, so the last control focused outside a
+// window can be a text field the person left long before. Closing a window
+// must not send focus back there: on an iPhone that raises the keyboard.
+test('a window opened without focus does not hand it back to a field left earlier', async ({ page, context, baseURL }, info) => {
+  test.skip(info.project.name !== 'laptop', 'checked once');
+  await S.prepare(context, baseURL);
+  const w = S.watch(page, baseURL);
+  await S.open(page, w);
+  const s = SCREENS.find(x => x.id === 'loans~unit');
+  await s.before(page, S.helpers(page, w, info.project.name));
+  const field = page.locator('input:visible').first();
+  await field.focus();
+  await page.evaluate(() => document.activeElement.blur());       // a tap on nothing in particular
+  await page.evaluate(sel => document.querySelector(sel).click(), s.opener.sel);   // a tap moves no focus
+  await page.waitForSelector('.modal-overlay.show .modal');
+  await page.evaluate(() => document.querySelector('.modal-overlay.show .modal-head button[title="Close"]').click());
+  await expect(page.locator('.modal-overlay.show')).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect(await field.evaluate(e => document.activeElement === e), 'focus stayed away from the old field').toBe(false);
+});

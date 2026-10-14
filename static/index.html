@@ -32802,6 +32802,13 @@ Projected Image UK"></textarea>
         document.addEventListener('focusin', (e) => {
             if (e.target && e.target.closest && !e.target.closest('.modal-overlay')) focusOutside = e.target;
         });
+        /* Focus that left for nowhere (a tap elsewhere; on a phone a tap moves
+           no focus) forgets that control: closing a window must not send focus
+           back to a field left long before, which on an iPhone raises the
+           keyboard. */
+        document.addEventListener('focusout', (e) => {
+            if (!e.relatedTarget && e.target === focusOutside) focusOutside = null;
+        });
         function dialogOpened(o) {
             const now = document.activeElement;
             const from = now && now !== document.body && !o.contains(now) ? now : focusOutside;
