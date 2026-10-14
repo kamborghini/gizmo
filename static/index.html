@@ -26187,6 +26187,7 @@ Projected Image UK"></textarea>
             bot.append(ai);
             card.append(bot);
             card.onclick = () => crmDealModal(x.id);
+            card.dataset.focusKey = 'deal-' + x.id;   /* the board is redrawn as a deal closes: focus finds the new card */
             /* A div because it has to be draggable between columns, so it gets
                the keyboard path a button would have given it for free. The whole
                board was otherwise mouse-only. */
@@ -32784,6 +32785,64 @@ Projected Image UK"></textarea>
             if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
             else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
         });
+        /* Focus into a window as it opens, and back to what opened it as it
+           closes, for every window in one place. Thirteen builders make
+           windows: sheetModal sent focus to its X, the rest left it on the
+           page behind, and none gave it back, so closing one dropped a
+           keyboard user at the top of the page. A window that redraws its
+           page as it closes (a CRM deal redraws the board) replaces the
+           control that opened it: the new one carries the same
+           data-focus-key, and focus goes there once it is drawn. */
+        const dialogOpeners = new WeakMap();
+        const DIALOG_FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+        /* The last control focused outside every window. The observer below
+           runs after the click that opened a window, and a builder that
+           focuses its own first field has moved focus inside by then. */
+        let focusOutside = null;
+        document.addEventListener('focusin', (e) => {
+            if (e.target && e.target.closest && !e.target.closest('.modal-overlay')) focusOutside = e.target;
+        });
+        function dialogOpened(o) {
+            const now = document.activeElement;
+            const from = now && now !== document.body && !o.contains(now) ? now : focusOutside;
+            if (from && from.isConnected && !o.contains(from)) dialogOpeners.set(o, from);
+            /* Two frames: a builder that focuses its own first field does so
+               in the first, and is left alone. */
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                if (!o.isConnected || !o.classList.contains('show') || o.contains(document.activeElement)) return;
+                const to = o.querySelector('.modal-head :is(button[title="Close"], button[aria-label="Close"])')
+                    || [...o.querySelectorAll(DIALOG_FOCUSABLE)].find(f => !f.disabled && f.getClientRects().length);
+                if (to) to.focus();
+            }));
+        }
+        function dialogClosed(o) {
+            const back = dialogOpeners.get(o);
+            dialogOpeners.delete(o);
+            if (!back) return;
+            const lost = () => !document.activeElement || document.activeElement === document.body || !document.activeElement.isConnected;
+            if (back.isConnected) { if (lost()) back.focus(); return; }
+            const key = back.dataset && back.dataset.focusKey;
+            if (!key) return;
+            let tries = 0;
+            const look = () => {
+                const twin = document.querySelector('[data-focus-key="' + CSS.escape(key) + '"]');
+                if (twin) { if (lost()) twin.focus(); return; }
+                if (++tries < 60) setTimeout(look, 50);
+            };
+            look();
+        }
+        new MutationObserver(records => {
+            for (const r of records) {
+                r.addedNodes.forEach(n => { if (n.classList && n.classList.contains('modal-overlay') && n.classList.contains('show')) dialogOpened(n); });
+                r.removedNodes.forEach(n => { if (n.classList && n.classList.contains('modal-overlay')) dialogClosed(n); });
+            }
+        }).observe(document.body, { childList: true });
+        /* The windows written into the page (Settings) open and close by
+           their show class instead of being added and removed. */
+        document.querySelectorAll('.modal-overlay').forEach(o => new MutationObserver(() => {
+            if (o.classList.contains('show')) { if (!dialogOpeners.has(o)) dialogOpened(o); }
+            else if (dialogOpeners.has(o)) dialogClosed(o);
+        }).observe(o, { attributes: true, attributeFilter: ['class'] }));
         document.addEventListener('keydown', (e) => {
             const t = e.target;
             if (t && t.classList && t.classList.contains('toggle') && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); t.click(); }
