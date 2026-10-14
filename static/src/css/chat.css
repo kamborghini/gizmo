@@ -1,0 +1,42 @@
+        /* ---------- Chat ---------- */
+        .chat-scroll { flex: 1; overflow-y: auto; }
+        .chat-inner { max-width: 780px; margin: 0 auto; padding: var(--sp-6) var(--sp-6) var(--sp-2); width: 100%; display: flex; flex-direction: column; gap: var(--sp-5); }
+        .msg { animation: fadeUp .35s ease backwards; }
+        .msg.user { align-self: flex-end; max-width: 80%; }
+        .msg.user .bubble { background: var(--action-selected); color: var(--text-primary); padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-card); font-size: var(--text-body); line-height: var(--lh-prose); white-space: pre-wrap; }
+        .msg.assistant { align-self: stretch; }
+        .resp-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+        .resp-head .av { width: var(--box-md); height: var(--box-md); border-radius: var(--radius-circle); background: var(--surface-tertiary); color: var(--text-primary); display: grid; place-items: center; }
+        .resp-head .av svg { width: var(--icon-sm); height: var(--icon-sm); }
+        .resp-head .who { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-primary); }
+        .resp-head .tag { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-brand); background: var(--action-soft); border: var(--bw-hairline) solid var(--action-line); border-radius: var(--radius-tag); padding: 0 var(--sp-2); text-transform: none; letter-spacing: normal; }
+        .summary { font-size: var(--text-head); font-weight: var(--weight-medium); line-height: var(--lh-control); letter-spacing: normal; margin-bottom: var(--sp-4); color: var(--text-primary); }
+        .block { margin-bottom: var(--sp-4); }
+        .msg.error .bubble { background: var(--error-bg); border: var(--bw-hairline) solid var(--border-default); color: var(--error); padding: var(--sp-2) var(--sp-2-5); border-radius: var(--radius-card); font-size: var(--text-body); }
+        /* Nineteen call sites build el('div','msg error', 'text') with no
+           .bubble child, and the rule above only ever styled the child - so a
+           real failure rendered as unstyled black body text in eight tabs. */
+        .msg.error:not(:has(.bubble)) { background: var(--error-bg); border: var(--bw-hairline) solid var(--border-default);
+            color: var(--error); padding: var(--sp-2) var(--sp-2-5); border-radius: var(--radius-card); font-size: var(--text-body); }
+
+        .load-failed, .pchat-err, .chat-err { display: flex; align-items: center; justify-content: space-between;
+            gap: var(--sp-3); flex-wrap: wrap; margin: var(--sp-1) 0 0; }
+        .card > .load-failed { margin-top: 0; }
+        .thinking { display: flex; align-items: center; gap: var(--sp-3); color: var(--text-secondary); font-size: var(--text-body); }
+        .thinking .spinner { flex: none; }
+        .spinner { display: inline-grid; place-items: center; width: var(--box-xs); height: var(--box-xs); color: var(--text-tertiary); }
+        .spinner svg { width: var(--icon-md); height: var(--icon-md); animation: navspin 1s linear infinite; }
+        /* The start in the optical middle of the space above the box (12 Oct
+           2026, WS-40): it sat at the top with a void under it. */
+        .chat-inner:has(> .empty-chat) { min-height: 100%; }
+        .empty-chat { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: var(--sp-7); padding-bottom: 12vh; }
+        .empty-chat .big { width: var(--box-2xl); height: var(--box-2xl); border-radius: var(--radius-inset); background: var(--surface-tertiary); color: var(--text-primary); display: grid; place-items: center; margin-bottom: var(--sp-4); }
+        .empty-chat .big svg { width: var(--icon-md); height: var(--icon-md); }
+        .empty-chat h2 { font-size: var(--text-head); margin: 0 0 var(--sp-2); font-weight: var(--weight-medium); letter-spacing: normal; line-height: var(--lh-control); }
+        .empty-chat p { color: var(--text-secondary); margin: 0 0 var(--sp-6); max-width: var(--measure); line-height: var(--lh-prose); }
+        /* One column as wide as the intro above it: every starter on one line, the
+           rows even, the edges on the paragraph's. */
+        .starters { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); width: 100%; max-width: var(--measure); }
+        .starters > .chip { justify-content: flex-start; }
+        @media (max-width: 640px) { .empty-chat { padding-inline: 0; } }
+

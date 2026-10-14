@@ -1,0 +1,53 @@
+        /* Files: preview + selection */
+        .fprev-body { text-align: center; }
+        .fprev-body img { max-width: 100%; max-height: 68vh; border-radius: var(--radius-inset); }
+        .fprev-body iframe { width: 100%; height: 68vh; border: 0; border-radius: var(--radius-inset); background: var(--surface-tertiary); }
+        .fprev-meta { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); margin-right: auto; }
+        /* One 24px box for whatever marks a row: a file's glyph (which doubles
+           as its tick), a folder's chip, a trashed file's glyph. The same box
+           on every kind of row is what starts every name at the same x. */
+        .fslot, .files-chip, .files-ic { width: var(--box-md); height: var(--box-md); flex: none;
+            display: grid; place-items: center; }
+        .fslot { position: relative; }
+        .fslot svg { width: var(--icon-md); height: var(--icon-md); color: var(--text-tertiary); display: block; }
+        .fslot input { position: absolute; inset: 4px; width: var(--box-xs); height: var(--box-xs); margin: 0;
+            accent-color: var(--control-accent); cursor: pointer; opacity: 0; }
+        /* The swap belongs to the row, not to the list: keyed to the list, one
+           tick anywhere stripped the type glyph off all twelve file rows and
+           left a column of empty boxes beside the folders that kept theirs.
+           A keyboard lands on the tick as well, so it shows for focus too. */
+        .files-row:is(.selected, [aria-selected="true"]) .fslot input, .fslot input:focus-visible { opacity: 1; }
+        @media (hover: hover) { .files-row:hover .fslot input { opacity: 1; } }
+        .files-row:is(.selected, [aria-selected="true"]) .fslot svg, .fslot:has(input:focus-visible) svg { opacity: 0; }
+        @media (hover: hover) { .files-row:hover .fslot svg { opacity: 0; } }
+        /* On touch the glyph is replaced by the tick permanently, and a 16px
+           tick is a miss. It takes the whole slot instead, which is where the
+           finger lands anyway. A mouse keeps the small one. */
+        @media (hover: none) {
+            .fslot input { opacity: 1; inset: 0; width: var(--box-md); height: var(--box-md); }
+            .fslot svg { opacity: 0; }
+        }
+        /* A folder is not a file, and the reference says so with a chip behind
+           its glyph rather than with a different ink. */
+        .files-chip { border-radius: var(--radius-inset); background: var(--surface-sunken); }
+        /* Hover is drawn later in this sheet and used to win at equal weight,
+           so pointing at the row you are about to act on made it the palest
+           row in the list. Selection outranks a hover on the same row. */
+        .files-row:is(.selected, [aria-selected="true"]) { background: var(--action-selected);
+            box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected); }
+        @media (hover: hover) { .files-row:is(.selected, [aria-selected="true"]):hover { background: var(--action-selected);
+            box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected); } }
+        /* The bar is a block of the card now, so the card's own 16px gap sets
+           its distance from the list; a margin here added to that gap. */
+        .files-bulk { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4);
+            border: var(--bw-hairline) solid var(--action-line); border-radius: var(--radius-inset); background: var(--action-soft);
+            font-size: var(--text-body); color: var(--text-brand); }
+        .fpick-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; text-align: left;
+            border: 0; background: none; font: inherit; font-size: var(--text-body); color: var(--text-primary);
+            padding: var(--sp-2) var(--sp-2-5); border-radius: var(--radius-row); cursor: pointer; }
+        /* A folder name with no spaces wraps rather than running past its row. */
+        .fpick-row { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+        @media (hover: hover) { .fpick-row:hover { background: var(--surface-secondary); } }
+        .fpick-row span { display: flex; flex: none; }
+        .fpick-row svg { width: var(--icon-md); height: var(--icon-md); color: var(--text-brand); }
+

@@ -8,7 +8,15 @@ through, so a regression fails here instead of at the dispatch desk.
 import json, os, re, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HTML = open(os.path.join(ROOT, "static", "index.html"), encoding="utf-8").read()
+sys.path.insert(0, ROOT)
+import pagesource
+HTML = pagesource.join(ROOT)
+# Node helpers that take a page file get the joined page in a temporary file.
+_PAGE_TMP = tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf-8")
+_PAGE_TMP.write(HTML); _PAGE_TMP.close()
+PAGE_FILE = _PAGE_TMP.name
+import atexit
+atexit.register(lambda: os.path.exists(PAGE_FILE) and os.remove(PAGE_FILE))
 SCRIPT = max(re.findall(r"<script>(.*?)</script>", HTML, re.S), key=len)
 # The stylesheet is a separate block; layout rules are asserted against this,
 # not against SCRIPT, which is the JS.
@@ -4851,7 +4859,7 @@ def t_a_curved_chart_never_draws_a_number_that_did_not_happen():
         fh.write(_CURVE_HARNESS)
         path = fh.name
     try:
-        r = subprocess.run(["node", path, os.path.join(ROOT, "static", "index.html")],
+        r = subprocess.run(["node", path, PAGE_FILE],
                            capture_output=True, text=True)
         ok(r.returncode == 0, "the curve harness failed: " + (r.stderr or "")[:200])
         out = (r.stdout or "").strip()
@@ -6185,7 +6193,7 @@ def t_no_em_or_en_dash_reaches_the_page():
     # Written out or escaped: "\u2014" in a string renders an em dash just the
     # same, and the literal-character check let one reach a toast (A48 in the
     # 2026-09-22 bug audit). The composer is page copy too.
-    for src, where in ((HTML, "static/index.html"), (COMPOSER, "static/composer.js")):
+    for src, where in ((HTML, "the page (static/src)"), (COMPOSER, "static/composer.js")):
         for ch, name in (("—", "em dash"), ("–", "en dash"), ("\\u2014", "escaped em dash"),
                          ("\\u2013", "escaped en dash"), ("&mdash;", "em dash entity"),
                          ("&ndash;", "en dash entity")):
@@ -7539,7 +7547,7 @@ def _wg_check(key, claim):
             fh.write(_WG_HARNESS)
             path = fh.name
         try:
-            r = subprocess.run(["node", path, os.path.join(ROOT, "static", "index.html")],
+            r = subprocess.run(["node", path, PAGE_FILE],
                                capture_output=True, text=True, timeout=120)
             _WG_RUN["out"] = (r.returncode, (r.stdout or "").strip(), r.stderr or "")
         except subprocess.TimeoutExpired:
@@ -7640,7 +7648,7 @@ def t_a_saved_layout_naming_merged_widgets_still_loads():
         fh.write(js)
         path = fh.name
     try:
-        r = subprocess.run(["node", path, os.path.join(ROOT, "static", "index.html"), json.dumps(ids), json.dumps(saved)],
+        r = subprocess.run(["node", path, PAGE_FILE, json.dumps(ids), json.dumps(saved)],
                            capture_output=True, text=True, timeout=60)
     finally:
         os.unlink(path)
@@ -7671,7 +7679,7 @@ def t_an_old_layout_never_hides_what_a_pair_brought_in():
         fh.write(js)
         path = fh.name
     try:
-        r = subprocess.run(["node", path, os.path.join(ROOT, "static", "index.html"), json.dumps(ids), json.dumps(saved)],
+        r = subprocess.run(["node", path, PAGE_FILE, json.dumps(ids), json.dumps(saved)],
                            capture_output=True, text=True, timeout=60)
     finally:
         os.unlink(path)
@@ -10708,7 +10716,7 @@ def t_the_release_notes_are_ui_copy_and_keep_up_with_the_app():
     ok(tabs <= views, "every note's Open goes to a real page: %s" % (tabs - views))
     newest = max(r["date"] for r in data["releases"])
     try:
-        last = subprocess.run(["git", "log", "-1", "--format=%cs", "--", "static/index.html", "copilot.py"],
+        last = subprocess.run(["git", "log", "-1", "--format=%cs", "--", "static/src", "pagesource.py", "copilot.py"],
                               cwd=ROOT, capture_output=True, text=True, timeout=20).stdout.strip()
     except Exception:
         last = ""
@@ -15182,6 +15190,56 @@ def t_a_shell_without_its_markers_is_refused():
             ok("static/src/shell.html" in str(e), "the refusal names the shell: %s" % e)
         else:
             raise AssertionError("a shell without exactly one of each marker was joined: %r" % shell)
+
+
+@test
+def t_the_manifest_and_the_sections_agree():
+    """A section file the manifest does not list is never served; an entry
+    whose file is gone takes the page down. Each is caught here, by name."""
+    sys.path.insert(0, ROOT)
+    import pagesource
+    m = pagesource.manifest(ROOT)
+    src = os.path.join(ROOT, pagesource.SRC)
+    for kind, ext in (("css", ".css"), ("js", ".js")):
+        on_disk = sorted(kind + "/" + f for f in os.listdir(os.path.join(src, kind)) if f.endswith(ext))
+        ok(sorted(m[kind]) == on_disk, "%s: in the folder, not the manifest: %s; in the manifest, not the folder: %s"
+           % (kind, sorted(set(on_disk) - set(m[kind])), sorted(set(m[kind]) - set(on_disk))))
+        ok(len(set(m[kind])) == len(m[kind]), "%s: a section listed twice" % kind)
+    stray = [f for f in os.listdir(src) if f not in ("css", "js", "manifest.json", m["shell"])]
+    ok(not stray, "static/src holds files nothing joins: %s" % stray)
+    ok(not os.path.exists(os.path.join(ROOT, "static", "index" + ".html")), "the old single file is gone")
+
+
+@test
+def t_every_page_section_is_whole_lines():
+    """A section saved without its last newline glues its last line to the
+    next file's first; a Windows line ending or a byte-order mark changes the
+    served bytes. Every section is plain UTF-8 lines ending in a newline."""
+    sys.path.insert(0, ROOT)
+    import pagesource
+    m = pagesource.manifest(ROOT)
+    for rel in m["css"] + m["js"] + [m["shell"]]:
+        raw = open(os.path.join(ROOT, pagesource.SRC, rel), "rb").read()
+        ok(raw.endswith(b"\n") and raw.strip(), "%s is empty or does not end with a newline" % rel)
+        ok(b"\r" not in raw, "%s has a Windows line ending" % rel)
+        ok(not raw.startswith(b"\xef\xbb\xbf"), "%s starts with a byte-order mark" % rel)
+
+
+@test
+def t_nothing_opens_a_page_file_but_the_reader():
+    """The page is read in one place (pagesource.py, and its JavaScript twin).
+    A tool still opening static/index.html would fail on a missing file; this
+    names it first."""
+    out = subprocess.run(["git", "ls-files", "*.py", "*.js", "*.yml", "Makefile", "Dockerfile"],
+                         cwd=ROOT, capture_output=True, text=True).stdout.split()
+    bad = []
+    for f in out:
+        if f.startswith(("docs/", "node_modules/")) or not os.path.isfile(os.path.join(ROOT, f)):
+            continue
+        text = open(os.path.join(ROOT, f), encoding="utf-8", errors="replace").read()
+        if re.search(r"""["']static/index\.html["']|["']static["']\s*,\s*["']index\.html["']""", text):
+            bad.append(f)
+    ok(not bad, "these still open the page file: %s" % bad)
 
 
 if __name__ == "__main__":

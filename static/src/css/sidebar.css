@@ -1,0 +1,187 @@
+        /* ---------- Sidebar ---------- */
+        .sidebar { width: var(--sidebar-w); flex-shrink: 0; position: relative; z-index: 2;
+            /* The mix: the sidebar is the ink frame itself, its words white at
+               72%, no edge. Folded away (Cmd+B, or Hide sidebar) it slides off
+               by its own width and the sheet takes the room. */
+            background: var(--surface-chrome); color: var(--nav-text);
+            display: flex; flex-direction: column; transition: margin-left .2s ease; }
+        @media (min-width: 901px) { body.sidebar-collapsed .sidebar { margin-left: calc(-1 * var(--sidebar-w)); } }
+        /* Header, body, footer. The body is the one scroller, so a long list of
+           conversations scrolls under a brand row and an account row that stay. */
+        .side-head { padding: var(--sp-3) var(--sp-3) 0; flex: none; display: flex; align-items: center; gap: var(--control-gap); }
+        .side-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+        .side-body { scrollbar-width: none; }
+        /* More below the fold says so: with the scrollbar hidden, the menu
+           seemed to end at CRM on a laptop, Workspace and all under it. */
+        .side-body.more-below { -webkit-mask-image: linear-gradient(180deg, var(--black) calc(100% - var(--sp-8)), transparent);
+            mask-image: linear-gradient(180deg, var(--black) calc(100% - var(--sp-8)), transparent); }
+        .side-body::-webkit-scrollbar { display: none; }
+        .side-foot { padding: 0 var(--sp-3) var(--sp-3); flex: none; display: flex; flex-direction: column; gap: var(--sp-2); }
+        .brand { display: flex; align-items: center; gap: var(--sp-1-5); flex: 1; min-width: 0; height: var(--control-h); padding: 0 var(--sp-1);
+            border: 0; border-radius: var(--radius-row); background: transparent; color: var(--text-on-chrome); text-align: left;
+            font-family: inherit; cursor: pointer; transition: background var(--dur) var(--ease); }
+        @media (hover: hover) { .brand:hover { background: var(--chrome-fill); } }
+        .brand:active { background: var(--chrome-press); }
+        /* Projected Image's logo at 24 tall (86 wide), its lettering white so
+           it holds on the ink, a hairline 6 either side, then the product's
+           name in the wordmark's Bricolage 600 at 16/20: 158 in all, inside
+           the 168 the row leaves beside Hide sidebar (160 on a phone). The
+           button's own label names both, so the logo is silent to a screen
+           reader. */
+        .brand .brand-logo { height: var(--box-md); width: auto; flex: none; display: block; }
+        .brand .brand-sep { width: var(--bw-hairline); align-self: stretch; margin: var(--sp-1-5) 0; flex: none; background: var(--chrome-rule); }
+        .brand-name { font-size: var(--text-md); line-height: var(--lh-control); font-weight: var(--weight-semibold); letter-spacing: var(--tr-title); }
+        /* Hide sidebar: the brand row's 28 ghost square. The top bar's menu
+           button brings the sidebar back, and opens the drawer on a phone. */
+        .side-hide { flex: none; }
+        /* The nav column: 12 in from each edge (an item's own 8 puts its words 20
+           from the frame) and 16 above the first group. */
+        .nav { padding: var(--sp-4) var(--sp-3) 0; display: flex; flex-direction: column; gap: 0; }
+        /* The reference's Finance page puts Dashboard / Accounts / Transactions
+           in one strip under the title, so the parts of the money area read as
+           one place rather than separate destinations. Liability and
+           Reconciliation are that same pair, and this is the strip that joins
+           them. Each still routes to its own view, so the permission that
+           gates Reconciliation keeps working - the tab simply is not built
+           for an account that cannot open it. */
+        /* A tab row with the page's own chooser at its right (Forecast's Plan):
+           one 44 row on one full-width rule, the strip's own rule given up. */
+        .page-tabs { display: none; align-items: center; justify-content: space-between; gap: var(--sp-6);
+            min-height: var(--row-h); box-shadow: var(--rule-b);
+            margin: 0 calc(-1 * var(--wrap-pad)) var(--sp-7); padding: 0 var(--wrap-pad); }
+        /* Its tabs and its chooser do not print, so the row does not either: a
+           printed Finance page carried an empty 44 band on a rule. Hidden here
+           and shown for a screen, as the info button is. */
+        @media screen { .page-tabs { display: flex; } }
+        .page-tabs > .tabs { margin-bottom: 0; }
+        /* The strip's own box runs 8 past the gutter at each end, so the focus
+           box drawn round a word has room and scrolling does not clip it on the
+           first and last tab: its padding takes the 8 back, so the words stay
+           on the gutter. */
+        .page-tabs > .tabs { margin: 0 calc(-1 * var(--sp-2)); padding: 0 var(--sp-2); max-width: none; box-shadow: none; align-self: stretch; min-height: 0; }
+        .page-tabs .spacer { flex: 1 1 auto; }
+        .page-tabs-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--control-gap); }
+        /* At 1100 and under (a phone, a tablet, and a narrow desktop with the
+           sidebar open) the stamp and its buttons take the row's first line (the
+           stamp at the page edge, the buttons at the right: the layout the page
+           header's own rail has there) and the strip keeps the line under them,
+           the whole row's rule beneath the tabs. In one nowrap row the strip was
+           squeezed to about 156 wide on a phone and cut "Reconciliation", and
+           Forecast's wider end (its stamp and the upload button) squeezed it
+           below about 745 on a tablet and below about 1010 with the sidebar open. */
+        @media (max-width: 1100px) {
+            .page-tabs { flex-wrap: wrap; row-gap: var(--sp-2); }
+            .page-tabs-end { order: -1; flex: 1 1 100%; margin-left: 0; justify-content: space-between; }
+            .page-tabs > .tabs { flex: 1 1 100%; min-height: var(--row-h); } }
+        .page-tabs .updated { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        /* One courier per row, two across where there is room: fourteen
+           carriers in a single column is a scroll, and in four columns the
+           labels stop lining up with their selects. */
+        /* One collection, per row: courier and chip on the first line, the
+           courier's reference under it, and the action at the end. Its own
+           layout because .disp-opt is a two-column grid built for a courier and
+           a price, and a third child there lands in the wrong cell. */
+        .coll-row { display: flex; flex-direction: column; gap: var(--sp-1);
+            padding: var(--sp-3) 0; box-shadow: var(--rule-b-soft); }
+        .coll-row-top { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+        .coll-row-name { font-weight: var(--weight-medium); }
+        .coll-row-sub { color: var(--text-tertiary); font-size: var(--text-xs); line-height: var(--lh-caption); }
+        .coll-row .linkish { align-self: flex-start; }
+        .coll-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: var(--sp-2) var(--sp-4); margin-top: var(--sp-2); }
+        @media (max-width: 900px) { .coll-grid { grid-template-columns: 1fr; } }
+        /* A group head is a caption in muted white (--nav-muted), 16 between groups and 4
+           above its first row. It stays the fold toggle Cameron asked for: the
+           whole row, a caret that turns, the choice remembered. */
+        .nav-group { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--nav-muted);
+            height: var(--control-h-sm); display: flex; align-items: center; padding: 0 var(--sp-2);
+            margin-top: var(--sp-4); margin-bottom: var(--sp-1);
+            width: 100%; background: none; border: 0; border-radius: var(--radius-row); text-align: left;
+            font-family: inherit; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease); }
+        @media (hover: hover) { .nav-group:hover { background: var(--chrome-fill); color: var(--text-on-chrome); } }
+        .nav-group:first-child { margin-top: 0; }
+        /* The chevron points right when the group is folded and turns to
+           point down when it is open: a 14 inline glyph at stroke 2. */
+        .nav-group .nav-caret { margin-left: auto; display: grid; place-items: center; color: var(--nav-muted);
+            transition: transform var(--dur) var(--ease), opacity var(--dur) var(--ease); opacity: 0; }
+        /* The caret is there when the group is shut, under the pointer or under focus: a head that folds, without a column of carets. */
+        .nav-group[aria-expanded="false"] .nav-caret, .nav-group:focus-visible .nav-caret { opacity: 1; }
+        @media (hover: hover) { .nav-group:hover .nav-caret { opacity: 1; } }
+        .nav-group .nav-caret svg { width: var(--icon-sm); height: var(--icon-sm); display: block; stroke-width: var(--icon-stroke-s); }
+        .nav-group[aria-expanded="true"] .nav-caret { transform: rotate(90deg); }
+        .nav-sect[hidden] { display: none; }
+        /* 32 tall. An item is the sidebar's text colour (--nav-text) at medium weight;
+           the chosen one is marked by the teal wash and white words, not by greying
+           the places you are not. */
+        .nav-item { display: flex; align-items: center; gap: var(--gap-row-icon); height: var(--control-h); padding: 0 var(--sp-2);
+            border-radius: var(--radius-row); border: 0; background: transparent; color: var(--nav-text);
+            font-size: var(--text-body); line-height: var(--lh-control); font-weight: var(--weight-medium); width: 100%; text-align: left; white-space: nowrap;
+            /* Brought into view clear of the sidebar's fade below. */
+            scroll-margin-block: var(--sp-8);
+            transition: background var(--dur) var(--ease), color var(--dur) var(--ease); }
+        @media (hover: hover) { .nav-item:hover { background: var(--chrome-fill); color: var(--text-on-chrome); } }
+        .nav-item:active { background: var(--chrome-press); }
+        /* Where you are: teal at 18% on the ink, white words, a teal icon.
+           Every other row keeps its 72% white; nothing else is dimmed. */
+        .nav-item:is(.active, [aria-current="page"]) { background: var(--nav-on-bg); color: var(--text-on-chrome); font-weight: var(--weight-medium); box-shadow: none; }
+        .nav-item svg { width: var(--icon-md); height: var(--icon-md); flex-shrink: 0; opacity: 1; color: var(--nav-muted); }
+        .nav-item:is(.active, [aria-current="page"]) svg { color: var(--nav-on-icon); }
+        .convo-head { display: flex; align-items: center; justify-content: space-between; height: var(--control-h); padding: 0 var(--sp-2); margin: var(--sp-4) var(--sp-3) 0; }
+        .convo-head span { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--nav-muted); }
+        .icon-btn { border: 0; background: transparent; color: var(--text-tertiary); padding: var(--sp-1); border-radius: var(--radius-control);
+            min-width: var(--control-h); min-height: var(--control-h); display: grid; place-items: center; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+        @media (hover: hover) { .icon-btn:hover { background: var(--surface-tertiary); color: var(--text-primary); } }
+        .icon-btn:active { background: var(--surface-sunken); }
+        /* Conversations' + on the column the group chevrons and the account dots share. */
+        .convo-head .icon-btn { margin-right: calc(-1 * var(--sp-1-5)); }
+        .icon-btn[aria-disabled="true"], .icon-btn:disabled { background: transparent; color: var(--text-disabled); cursor: not-allowed; }
+        .icon-btn svg { width: var(--icon-md); height: var(--icon-md); }
+        /* On the ink a sidebar icon button is a 28 ghost square in muted
+           white, white under the pointer. */
+        .sidebar .icon-btn { min-width: var(--control-h-md); min-height: var(--control-h-md); color: var(--nav-muted); }
+        @media (hover: hover) { .sidebar .icon-btn:hover { background: var(--chrome-fill); color: var(--text-on-chrome); } }
+        .sidebar .icon-btn:active { background: var(--chrome-press); }
+        .convos { flex: none; padding: 0 var(--sp-3) var(--sp-3); display: flex; flex-direction: column; gap: 0; }
+        .convo-head[hidden], .convos[hidden] { display: none; }
+        .convo-rows { display: flex; flex-direction: column; }
+        .convo-filter { margin: var(--sp-1) 0 var(--sp-2); width: 100%; }
+        .convo-band { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--nav-muted); padding: var(--sp-2) var(--sp-2) var(--sp-1); }
+        .convo-busy { display: grid; place-items: center; flex: none; }
+        .convo-dot { width: var(--sp-2); height: var(--sp-2); border-radius: var(--radius-circle); background: var(--nav-on-icon); flex: none; }
+        .convo { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--control-h); padding: 0 var(--sp-2); border-radius: var(--radius-row); color: var(--nav-text);
+            font-size: var(--text-body); line-height: var(--lh-control); cursor: pointer; border: 0; background: transparent; width: 100%; text-align: left; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
+        @media (hover: hover) { .convo:hover { background: var(--chrome-fill); color: var(--text-on-chrome); } }
+        .convo:active { background: var(--chrome-press); }
+        .convo:is(.active, [aria-current="true"]) { background: var(--nav-on-bg); color: var(--text-on-chrome); font-weight: var(--weight-medium); }
+        .convo .title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+            /* The padding is the hit area the whole-row button used to give;
+               the negative margin cancels its effect on the row height. */
+            padding: var(--sp-2); margin: calc(-1 * var(--sp-2)) 0 calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2)); }
+        .convo .del { opacity: 0; color: var(--nav-muted); padding: var(--sp-1); border-radius: var(--radius-control); display: grid; place-items: center; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease);
+            border: 0; background: transparent; min-width: var(--control-h-sm); min-height: var(--control-h-sm); }
+        .convo .del svg { width: var(--icon-sm); height: var(--icon-sm); }
+        .convo:focus-within .del { opacity: .65; }
+        @media (hover: hover) { .convo:hover .del { opacity: .65; } }
+        /* Hover-reveal alone leaves the trash invisible but still tappable. */
+        @media (hover: none) { .convo .del { opacity: .65; } }
+        @media (hover: hover) { .convo .del:hover { opacity: 1; color: var(--error); background: var(--error-bg); } }
+        .convo-empty { color: var(--nav-muted); font-size: var(--text-xs); line-height: var(--lh-caption); padding: var(--sp-2) var(--sp-2); }
+        /* The account: a 44 row, a 24 round initial on the chrome fill, the name
+           in white over the role in muted white, and the menu glyph; the menu holds
+           what were three loose buttons in the old footer strip. */
+        .side-user { display: flex; align-items: center; gap: var(--control-gap); width: 100%; height: var(--row-h); padding: 0 var(--sp-0-5) 0 var(--sp-1);
+            border: 0; border-radius: var(--radius-row); background: transparent; color: var(--text-on-chrome);
+            font: inherit; text-align: left; cursor: pointer; transition: background var(--dur) var(--ease); }
+        .side-user[aria-expanded="true"] { background: var(--chrome-fill); }
+        @media (hover: hover) { .side-user:hover { background: var(--chrome-fill); } }
+        .side-user:active { background: var(--chrome-press); }
+        .side-avatar { width: var(--box-md); height: var(--box-md); flex: none; border-radius: var(--radius-circle);
+            background: var(--chrome-fill); color: var(--text-on-chrome); display: grid; place-items: center;
+            font-size: var(--text-micro); line-height: var(--lh-caption); font-weight: var(--weight-medium); }
+        .side-user-text { flex: 1; min-width: 0; display: grid; gap: 0; }
+        .side-user-name { font-size: var(--text-body); line-height: var(--lh-control); font-weight: var(--weight-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .side-user-role { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--nav-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .side-user-more { margin-left: auto; color: var(--nav-muted); display: grid; place-items: center; flex: none; width: var(--control-h-md); height: var(--control-h-md); }
+        .side-user-more svg { width: var(--icon-md); height: var(--icon-md); }
+

@@ -1,0 +1,177 @@
+        /* ---------- Memory ----------
+           Notes are one table: kind, the note, where it came from and when,
+           newest first. They were four walls of cards with no dates, no
+           source and no way to correct one. */
+        .ktable.mem-table td { vertical-align: top; }
+        .ktable.mem-table td.mem-from, .ktable.mem-table td.mem-at { white-space: nowrap; }
+        .ktable.mem-table td.mem-from, .ktable.mem-table td.mem-at { color: var(--text-secondary); }
+        .ktable.mem-table td.mem-acts-cell { width: 1%; padding-block: var(--sp-2); }
+        .mem-text { font-size: var(--text-body); line-height: var(--lh-control); max-width: var(--measure); overflow-wrap: anywhere; }
+        .mem-table tr.done .mem-text { color: var(--text-tertiary); }
+        .mem-meta { font-size: var(--text-xs); color: var(--text-tertiary); margin-top: var(--sp-1); line-height: var(--lh-caption); }
+        .mem-when { display: none; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); margin-top: var(--sp-1); }
+        .mem-acts { display: flex; gap: var(--sp-1); justify-content: flex-end; }
+        .mem-btn { border: 0; background: transparent; color: var(--text-tertiary); padding: var(--sp-1); border-radius: var(--radius-control); display: grid; place-items: center; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
+        .mem-btn svg { width: var(--icon-md); height: var(--icon-md); }
+        .mem-btn > .ic { display: grid; place-items: center; }
+        /* A finger-sized target on a touch screen, with room between. */
+        @media (pointer: coarse) {
+            .mem-btn { min-width: var(--control-h); min-height: var(--control-h); }
+            .mem-acts, .sk-acts { gap: var(--sp-2); }
+        }
+        /* A skill's icon actions sit beside its Use in chat button, so they are that button's 32 (not the 24 a row of icons alone keeps). */
+        .sk-acts .mem-btn { min-width: var(--control-h); min-height: var(--control-h); }
+        @media (hover: hover) { .mem-btn:hover { background: var(--surface-tertiary); color: var(--text-primary); } }
+        .mem-btn:active { background: var(--surface-sunken); }
+        @media (hover: hover) { .mem-btn.ok:hover { color: var(--success); background: var(--success-bg); } }
+        @media (hover: hover) { .mem-btn.del:hover { color: var(--error); background: var(--error-bg); } }
+        .mem-edit, .mem-add { display: grid; gap: var(--sp-2); }
+        .mem-edit-top { display: flex; align-items: center; justify-content: flex-start; gap: var(--sp-3); }
+        /* The note editor at its measure, Kind beside its label (12 Oct 2026, WS-24). */
+        .mem-add, .mem-edit { max-width: 720px; }
+        .mem-states { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-1); }
+        .mem-edit-l { font-size: var(--text-body); font-weight: var(--weight-medium); }
+        .mem-ta { min-height: calc(var(--control-h) * 2); }
+        /* An inline message under the field it is about. */
+        .field-msg { font-size: var(--text-xs); color: var(--error); line-height: var(--lh-caption); margin-top: var(--sp-1); }
+        .field-msg[hidden] { display: none; }
+        /* .btn sets its own display, which beats the browser's [hidden]: a
+           Split into 0 skills and a Save as a skill showed on every editor. */
+        .btn[hidden], .mem-btn[hidden] { display: none; }
+        /* The note keeps a readable column: on an iPad it was a 54px ribbon,
+           one word a line, and the table scrolled its buttons out of view.
+           The stacked rows below are chosen by the card's width, not the
+           window's. */
+        .mem-card-list { container: memcard / inline-size; }
+        .ktable.mem-table td.mem-note { min-width: 12rem; }
+        @container memcard (max-width: 700px) {
+            /* A row stacks: kind and actions, the note across, then when and from. */
+            .mem-table thead { display: none; }
+            .mem-table, .mem-table tbody { display: block; }
+            /* The table's 460px floor is for columns; stacked rows have none. */
+            .ktable.mem-table { min-width: 0; }
+            .mem-table tr { display: grid; grid-template-columns: auto 1fr auto; column-gap: var(--sp-2);
+                grid-template-areas: "kind kind acts" "note note note";
+                padding: var(--sp-2) 0; border-bottom: var(--bw-hairline) solid var(--border-default); align-items: center; }
+            .mem-table tr:last-child { border-bottom: 0; }
+            /* A stacked cell is as tall as what it holds (the table's fixed row height is for columns). */
+            .ktable.mem-table td { display: block; border: 0; padding: 0; height: auto; }
+            /* A note can carry its kind and two state tags (Waiting for an admin, Not read with answers): they wrap
+               here rather than widen the row past the screen. */
+            .ktable.mem-table td.mem-kind { grid-area: kind; display: flex; flex-wrap: wrap; align-content: center; gap: var(--sp-1); white-space: normal; }
+            .ktable.mem-table td.mem-acts-cell { grid-area: acts; width: auto; padding: 0; }
+            .ktable.mem-table td.mem-note { grid-area: note; padding-block: var(--sp-1) var(--sp-1-5); min-width: 0; }
+            /* When and from are one quiet line under the note. */
+            .ktable.mem-table td.mem-at, .ktable.mem-table td.mem-from { display: none; }
+            .mem-table .mem-when { display: block; }
+            .mem-table tr.mem-edit-row { display: block; }
+            .mem-table tr.mem-edit-row > td { padding: var(--sp-2) 0; }
+        }
+        /* Store-knowledge card */
+        .know-edit { display: grid; gap: var(--sp-2); }
+        .know-fresh { align-items: center; } .know-fresh > .card-sub { margin: 0; }
+        /* What Reactor learned, three across (12 Oct 2026, WS-21). */
+        .know-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-6) var(--sp-8); align-items: start; }
+        @media (max-width: 900px) { .know-grid { grid-template-columns: minmax(0, 1fr); } }
+        .know-grid > .know-sec { margin: 0; max-width: none; }
+        .know-grid .md-h { margin-top: 0; }
+        .know-body { border-top: var(--bw-hairline) solid var(--border-default);
+            padding-block-start: var(--sp-3); padding-inline: 0; }
+        .know-body summary { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-brand); cursor: pointer; font-weight: var(--weight-medium); list-style: none;
+            display: inline-flex; align-items: center; gap: var(--sp-1); }
+        /* It is a disclosure, so it shows a caret that turns when it opens. */
+        .know-body summary::before { content: ""; width: 0; height: 0; border-left: var(--sp-1) solid currentColor;
+            border-top: var(--sp-1) solid transparent; border-bottom: var(--sp-1) solid transparent; transition: transform var(--dur) var(--ease); }
+        .know-body[open] summary::before { transform: rotate(90deg); }
+        .know-body summary::-webkit-details-marker { display: none; }
+        /* No box of its own to scroll: it is read like any other text on
+           the page, which scrolls. */
+        .know-text { margin-top: var(--sp-3); font-size: var(--text-body); color: var(--text-secondary); line-height: var(--lh-prose); max-width: var(--measure); }
+        .know-text .know-h { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); margin: var(--sp-4) 0 var(--sp-1); }
+        .know-text .know-h:first-child { margin-top: 0; }
+        .know-src-h { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-secondary); margin-top: var(--sp-4); }
+        .know-src { margin: var(--sp-1) 0 0; padding-left: var(--sp-5); font-size: var(--text-xs); line-height: var(--lh-caption); }
+        .know-src a { color: var(--text-secondary); overflow-wrap: anywhere; }
+        .know-text p { margin: 0 0 var(--sp-2); } .know-text ul { margin: 0 0 var(--sp-2); padding-left: var(--sp-5); } .know-text li { margin: var(--sp-1) 0; }
+        /* Products list */
+        .roas-under { color: var(--error); font-weight: var(--weight-medium); }
+        .roas-flag { display: block; font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); letter-spacing: normal;
+            text-transform: none; color: var(--error); }
+        .prod-search { width: 100%; border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-field); padding: var(--sp-2) var(--sp-3); font: inherit; font-size: var(--text-body); outline: none; margin-bottom: var(--sp-3); background: var(--surface-sunken); color: var(--text-primary); }
+        .prod-row { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2-5) 0; border: 0; border-radius: 0;
+            background: none; box-shadow: none; margin-bottom: 0; cursor: pointer; text-align: left; width: 100%; font: inherit; color: var(--text-primary); transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
+        .prod-row + .prod-row { border-top: var(--bw-hairline) solid var(--border-soft); }
+        @media (hover: hover) { .prod-row:hover { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); } }
+        .prod-thumb { width: var(--box-2xl); height: var(--box-2xl); border-radius: var(--radius-inset); object-fit: cover; background: var(--surface-sunken); flex-shrink: 0; }
+        .prod-main { flex: 1; min-width: 0; }
+        .prod-name { font-weight: var(--weight-medium); font-size: var(--text-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .prod-sub { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); margin-top: var(--sp-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .prod-chips { display: flex; gap: var(--sp-5); flex-shrink: 0; }
+        .prod-chip { text-align: right; } .prod-chip .n { font-weight: var(--weight-semibold); font-size: var(--text-body); } .prod-chip .l { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); text-transform: none; letter-spacing: normal; margin-top: 0; }
+        .prod-go { color: var(--text-tertiary); display: grid; flex-shrink: 0; } .prod-go svg { width: var(--icon-lg); height: var(--icon-lg); transform: rotate(180deg); }
+        /* Inside the products card the rows run edge to edge with a hairline
+           between them, the way the reference's orders table does. */
+        .card-bleed.prod-rows > .prod-row { border: 0; border-radius: 0; box-shadow: none; margin: 0;
+            border-top: var(--bw-hairline) solid var(--border-default); padding: var(--sp-3) 0; }
+        @media (hover: hover) { .card-bleed.prod-rows > .prod-row:hover { background: var(--surface-secondary); } }
+        .card > .ptools { margin-bottom: 0; }
+        .back-btn { margin-bottom: var(--sp-4); }
+        @media (max-width: 640px) { .prod-chips { gap: var(--sp-3); } .prod-chip.units { display: none; } }
+        /* A product row was a thumbnail, one very wide cell holding a title,
+           and a cluster of numbers pushed to the far edge. On a wide screen
+           the title cell reached 830px for a line of text that needs a third
+           of that, and the eye had to cross the gap to reach the figures.
+           Above 1500 the sub line becomes its own column and the numbers stop
+           drifting: same facts, read in steps rather than in one long jump. */
+        @media (min-width: 1500px) {
+            .prod-row { display: grid; align-items: center;
+                grid-template-columns: auto minmax(240px, 560px) minmax(0, max-content) 1fr auto; }
+            .prod-main { display: contents; }
+            /* The title is capped rather than given every spare pixel: 1fr on
+               the title made a 1,015px cell for a line that needs a third of
+               it. The slack goes to the empty track before the figures, so
+               units and revenue align down the list the way a table's numbers
+               do, which is what makes a list scannable. */
+            .prod-sub { align-self: center; margin-top: 0; }
+            .prod-chips { grid-column: 4; justify-self: end; }
+            .prod-go { grid-column: 5; }
+        }
+        /* Products toolbar + filters */
+        .ptools { display: flex; flex-direction: column; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+        .ptools .row1 { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
+        .ptools .grow { flex: 1; min-width: 200px; }
+        .psel { border-radius: var(--radius-field); padding: var(--control-pad-y) var(--sp-3); font-size: var(--text-body); min-height: var(--control-h); }
+        /* .psel's padding shorthand beat the select rule's room for the
+           caret, so a .psel select drew its caret over its own words. */
+        select.psel { cursor: pointer; padding-right: var(--chevron-room); } .pnum { width: 110px; }
+        /* A button that is on (a filter that is set) wears the chosen recipe:
+           the teal wash and edge, with ink words. */
+        .btn:is(.on, [aria-pressed="true"]) { background: var(--action-selected); border-color: var(--border-selected); color: var(--text-primary); font-weight: var(--weight-medium); }
+        @media (hover: hover) { .btn.ghost:hover { background: var(--surface-tertiary); } }
+        /* The filter fields are a row of controls on the section, not a panel
+           round them (the mix, spec 3): no box, and on the text edge. */
+        .pfilters { display: none; flex-wrap: wrap; gap: var(--sp-3) var(--sp-3); padding: 0; border: 0; border-radius: 0; background: none; }
+        /* Six across, so the filters fill their rows (12 Oct 2026, DF-14). */
+        .pfilters.show { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+        @media (max-width: 1100px) { .pfilters.show { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        @media (max-width: 640px) { .pfilters.show { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        .pfield { display: flex; flex-direction: column; gap: var(--sp-1); }
+        /* The wrapper IS the label now (implicit association); caption is a span. */
+        .pfield label, .pfield > span { font-size: var(--text-body); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-primary); }
+        .fchips { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+        .fchip { display: inline-flex; align-items: center; gap: var(--sp-1); background: var(--action-soft); border: var(--bw-hairline) solid var(--action-line); color: var(--text-brand); border-radius: var(--radius-control); padding: var(--sp-1) var(--sp-2) var(--sp-1) var(--sp-3); font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); }
+        /* The 12px glyph was the whole target; the box grows around it and the
+           negative margin keeps the chip the height it was. */
+        .fchip button { border: 0; background: transparent; color: inherit; display: grid; place-items: center; padding: 0; border-radius: var(--radius-circle); cursor: pointer;
+            min-width: var(--control-h-sm); min-height: var(--control-h-sm); margin: calc(-1 * var(--sp-1)) calc(-1 * var(--sp-1)); }
+        @media (hover: hover) { .fchip button:hover { background: var(--surface-sunken); } } .fchip button:active { background: var(--border-strong); } .fchip button svg { width: var(--icon-xs); height: var(--icon-xs); display: block; }
+        .prod-chip .cmp { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); padding: var(--sp-0-5) var(--sp-2); border-radius: var(--radius-tag); margin-top: var(--sp-1); display: inline-block; flex: none; }
+        .prod-chip .cmp.up { color: var(--text-primary); background: var(--surface-sunken); } .prod-chip .cmp.down { color: var(--error); background: var(--error-bg); } .prod-chip .cmp.flat { color: var(--text-tertiary); background: var(--surface-sunken); }
+        .barlist { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+        .barrow { display: grid; grid-template-columns: 170px 1fr 96px; gap: var(--sp-3); align-items: center; font-size: var(--text-xs); line-height: var(--lh-caption); }
+        .barrow .bn { color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .bartrack { height: 8px; background: var(--surface-sunken); border-radius: var(--radius-full); overflow: hidden; box-shadow: var(--ring-default); }
+        .bartrack > i { display: block; height: 100%; background: var(--action-active); border-radius: var(--radius-full); }
+        .barrow .bv { text-align: right; font-weight: var(--weight-medium); }
+        @media (max-width: 640px) { .barrow { grid-template-columns: 1fr 80px; } .barrow .bn { grid-column: 1 / -1; } }
+

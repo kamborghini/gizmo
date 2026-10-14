@@ -1,0 +1,130 @@
+        /* ---------- Keywords tab ---------- */
+        /* A table in the reference always sits inside a card, under a header,
+           and runs edge to edge within it. This wrapper IS that card: the
+           header above it is a .section-title, and the rows meet the card
+           border rather than floating inside a second inset box. */
+        /* A TABLE (the mix, spec 6): no box. A line above it and below it, one
+           under its head, a soft one between rows; it scrolls sideways when it
+           must, and its outer columns sit on the text edge. */
+        .ktable-wrap { overflow-x: auto; border: 0; border-radius: 0;
+            box-shadow: var(--rule-t), var(--rule-b); background: none; margin-bottom: var(--sp-6); }
+        /* Inside a card the table gets its OWN box, inset by the card's padding.
+           This used to be stripped flat on the reasoning that a card is already a
+           box; measuring the reference says otherwise - its table sits in a
+           second frame at the base 10px radius inside a 14px card, and that inset
+           edge is most of what makes its tables read the way they do. */
+        .card .ktable-wrap, .card-bleed .ktable-wrap { border-radius: var(--radius-inset);
+            margin-bottom: 0; }
+        /* Since 2026-10-05 the card is the table's frame: a second box 16px inside
+           it was a border directly inside a border. The table keeps the card's
+           gutter and its outer columns line up with the card's text; a table that
+           bleeds to the card's edges (.card-bleed, below) keeps its 16 inset. */
+        .card .ktable-wrap { border: 0; border-radius: 0; background: transparent; }
+        .card .ktable-wrap :is(th, td):first-child { padding-left: 0; }
+        .card .ktable-wrap :is(th, td):last-child { padding-right: 0; }
+        .card-bleed .ktable-wrap { border: 0; border-radius: 0; background: transparent; }
+        .card-bleed .ktable th:first-child, .card-bleed .ktable td:first-child { padding-left: 0; }
+        .card-bleed .ktable th:last-child, .card-bleed .ktable td:last-child { padding-right: 0; }
+        .ktable-wrap .ktable tr:last-child td { border-bottom: 0; }
+        .ktable-wrap .ktable:not(:has(tbody tr)) th { border-bottom: 0; }
+        .ktable { width: 100%; border-collapse: collapse; font-size: var(--text-body); background: none; min-width: min(460px, 100%); }
+        /* A figure is never split, the name column keeps 10ch, and an email
+           under a name wraps: in a 435px card on an iPad the numbers were cut
+           mid-figure at the card's edge ('£1,00', '12.') while the names were
+           four-line ribbons beside them. */
+        .ktable td.num { white-space: nowrap; }
+        .ktable td.kw { min-width: 10ch; }
+        .ktable td.kw .prod-sub { overflow-wrap: anywhere; }
+        /* 12px on every side, header and body alike: the reference pads its cells
+           square, and the row height comes from the content rather than the cell. */
+        .ktable th { text-align: left; font-size: var(--text-xs); text-transform: none; letter-spacing: normal; color: var(--text-tertiary); font-weight: var(--weight-medium); padding: 0 var(--sp-3); line-height: var(--lh-caption); border-bottom: 0; box-shadow: var(--rule-b); white-space: nowrap; height: var(--control-h); }
+        .ktable td { padding: 0 var(--sp-3); height: var(--row-h); border-bottom: var(--bw-hairline) solid var(--border-soft); color: var(--text-primary); font-size: var(--text-body); line-height: var(--lh-control); vertical-align: middle; }
+        .ktable :is(th, td):first-child { padding-left: 0; }
+        .ktable :is(th, td):last-child { padding-right: 0; }
+        .ktable tr:last-child td { border-bottom: 0; }
+        /* R13: on a phone a table's rows are two lines, never a sideways scroll:
+           the cell that leads it (the first, or the one its head marks kt-main)
+           on the first line, then the others, each after its column's head
+           (stamped as data-h by syncTableHeads). The size list, Memory's notes
+           and Xero sync's documents keep phone layouts of their own. */
+        @media (max-width: 640px) {
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) { display: block; min-width: 0; }
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > thead { display: none; }
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) { display: block; }
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-3); row-gap: var(--sp-0-5);
+                padding: var(--sp-2-5) 0; border-bottom: var(--bw-hairline) solid var(--border-soft); }
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr:last-child { border-bottom: 0; }
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr > td { display: block; height: auto; padding: 0; border: 0; min-width: 0; max-width: 100%; text-align: left; white-space: normal;
+                font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); }
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr > td:empty { display: none; }
+            /* A row a list hides (Keywords' past fifteen) stays hidden: the flex above outranks [hidden]. */
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr[hidden], .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr > td[hidden] { display: none; }
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr:not(:has(> .kt-main)) > td:first-child, .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr > td.kt-main { flex: 1 1 100%; order: -1;
+                font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-primary); }
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr > td[data-h]::before { content: attr(data-h); margin-right: var(--sp-1); color: var(--text-tertiary); }
+            .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr:not(:has(> .kt-main)) > td:first-child::before, .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr > td.kt-main::before { content: none; }
+        }
+        /* The CRM's two tables are the house table: a 32 head and 44 rows, 12
+           between columns, the outer columns on the text edge. (They carried a
+           16px cell of their own, which made a 53px row and beat the outer-column
+           rule, so the first word sat 16 in from the text.) */
+        .ktable.crm-table :is(th, td) { padding: 0 var(--sp-3); }
+        .ktable.crm-table :is(th, td):first-child { padding-left: 0; }
+        .ktable.crm-table :is(th, td):last-child { padding-right: 0; }
+        .ktable.crm-table td:is(.crm-email, .crm-web) { overflow-wrap: anywhere; }
+        .ktable.crm-table td.crm-phone { white-space: nowrap; }
+        /* One unbroken email set a 400px column and every other went to its
+           narrowest: titles over four lines, a phone number over three, and
+           the table scrolled its last columns out of the card. */
+        .ktable-wrap:has(> .crm-table) { container: crmtable / inline-size; }
+        @container crmtable (max-width: 640px) {
+            .ktable.crm-table :is(th, td) { padding: 0 var(--sp-2); }
+            .ktable.crm-deals-table :is(th, td):nth-child(5), .ktable.crm-deals-table :is(th, td):nth-child(6) { display: none; }
+            .ktable.crm-contact-table :is(.crm-deals, .crm-label) { display: none; }
+        }
+        /* A phone's two-line rows have room for what the narrow table hid (final visual review S12). */
+        @media (max-width: 640px) { .ktable.crm-contact-table > tbody > tr > td:is(.crm-deals, .crm-label):not(:empty), .ktable.crm-deals-table > tbody > tr > td:is(:nth-child(5), :nth-child(6)):not(:empty) { display: block; } }
+        /* Restated after the pair above, or the shorthand there would put 16px
+           back on the right of a column whose whole content is a 16px box. */
+        .ktable.crm-table th.tick, .ktable.crm-table td.tick { padding-right: 0; }
+        /* Half-strength muted, not muted: a full #f5f5f5 hover reads as selected. */
+        @media (hover: hover) { .ktable tbody tr:hover td { background: var(--surface-secondary); } }
+        /* A TICK MUST OUTRANK A HOVER. A selected contact row carried no
+           background at all, so a row merely under the pointer read as the
+           chosen one and the row actually chosen read as plain. One step above
+           hover, and after it in source order so it holds while hovered too:
+           equal specificity, so the later rule wins. */
+        .crm-contact-table tbody tr.sel td { background: var(--action-selected); }
+        /* On a phone the cells are a row's two lines, so the wash goes on the row, not behind each value. */
+        @media (max-width: 640px) { .crm-contact-table tbody tr.sel { background: var(--action-selected); } .crm-contact-table tbody tr.sel td { background: none; } }
+        .ktable td.kw { color: var(--text-primary); font-weight: var(--weight-medium); }
+        .ktable .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        /* A LIST OF ROWS (the mix, spec 6): 44 tall, a 16 icon in ink-3 12 from
+           its words, a count and a 14 chevron at the end; a line frames it and
+           a soft line divides it. Two columns read down where there is room,
+           so a phone's single column keeps the same order. */
+        .rlist { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: var(--gap-cols); }
+        .rlist.cols-2 { grid-auto-flow: column; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); grid-template-rows: repeat(var(--rows, 2), auto); }
+        .rlist-row { position: relative; display: flex; align-items: center; gap: var(--gap-row-icon); min-height: var(--row-h); width: 100%;
+            padding: 0; border: 0; background: none; font: inherit; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-primary);
+            text-align: left; cursor: pointer; box-shadow: var(--rule-t-soft); }
+        .rlist-row .ic { color: var(--text-tertiary); }
+        /* The count and the chevron follow the label (12 Oct 2026, DF-27): at the row's
+           far end they sat 597px from it. */
+        .rlist-row .lbl { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        /* On a phone a label wraps rather than hiding its words behind an ellipsis (13 Oct 2026). */
+        @media (max-width: 640px) { .rlist-row .lbl { white-space: normal; } }
+        .rlist-row > .ic:last-child svg { width: var(--icon-sm); height: var(--icon-sm); stroke-width: var(--icon-stroke-s); }
+        .rlist-row > .ic:not(:last-child) svg { width: var(--icon-md); height: var(--icon-md); }
+        @media (hover: hover) { .rlist-row:hover, .rlist-row:hover :is(.ic, .cnt) { color: var(--text-link); } }
+        .rlist-row:active, .rlist-row:active :is(.ic, .cnt) { color: var(--text-link-hover); }
+        .rlist-row:focus-visible { outline: 0; }
+        .rlist-row:focus-visible::before { content: ""; position: absolute; inset: var(--sp-0-5) calc(-1 * var(--sp-2)); border-radius: var(--radius-control);
+            box-shadow: inset 0 0 0 var(--bw-strong) var(--fill-mark); pointer-events: none; }
+        .rlist > .rlist-row:first-child, .rlist.cols-2 > .rlist-row:nth-child(odd) { box-shadow: var(--rule-t); }
+        .rlist { box-shadow: var(--rule-b); }
+        /* The 5 of the 7 to 5 split is too narrow for a row's words under 1000 of the list's own width, so the list stacks there
+           (its labels end in no ellipsis). The forecast's numbers block is the container, at the same measure as the pair
+           above it (.fc-pair), so the two stack together whatever the sidebar takes of the viewport. */
+        .fc-numbers { container: fcnumbers / inline-size; }
+        @container fcnumbers (max-width: 1000px) { .rlist.cols-2 { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; } }

@@ -1,0 +1,132 @@
+        /* No rule straight under a section heading: it came from the first
+           row's own border, so four sections had one and three did not. */
+        /* No rule straight under a section heading, whether its first row
+           follows the heading or opens a group of switches: Sign-in and
+           Preferences drew one and the other sections did not. */
+        /* A window starts on its first heading, and its sections sit 24 apart
+           (12 Oct 2026, OPS-15): the page's 48 opened a blank band under the
+           window's head. */
+        .disp-modal .modal-body .section-title { margin-top: var(--sp-6); }
+        .disp-modal .modal-body > .section-title:first-child { margin-top: 0; }
+        /* Collections: Booked for today 16 under the line over it, the next group 24 on. */
+        .coll-host > .section-title { margin-top: var(--sp-6); }
+        .coll-host > .section-title:first-child { margin-top: var(--sp-4); }
+        .modal-body .section-title + .setting-row,
+        .modal-body .section-title + * > .setting-row:first-child { border-top: 0; }
+        .toggle[aria-disabled="true"] { cursor: default; }
+        .toggle[aria-disabled="true"] .sw { background: var(--surface-tertiary); }
+        .toggle[aria-disabled="true"]:is(.on, [aria-checked="true"]) .sw { background: var(--border-strong); }
+        .settings-toggles { margin-top: var(--sp-1); }
+        .setting-row { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-3) 0; border-top: var(--bw-hairline) solid var(--border-default); }
+        .setting-row:has(> .row-acts) { flex-wrap: wrap; row-gap: var(--sp-3); }
+        .setting-row > .row-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); flex: 1 0 100%; }
+        .setting-row > div:first-child { flex: 1 1 12rem; }
+        /* The text keeps 12rem; a row too narrow for that and its controls
+           puts them under it. The Shipping row with its badge and button was
+           a 124px column on a phone. */
+        .setting-row { flex-wrap: wrap; }
+        .setting-title { font-size: var(--text-body); font-weight: var(--weight-medium); }
+        .setting-title.has-tag { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+        /* The Settings window (12 Oct 2026): a 552 document window, every
+           section on one rhythm: a hairline with 20 above it, the heading, then
+           its rows. The gaps were set inline and varied. */
+        #settings-modal > .modal { max-width: 552px; }
+        #settings-modal .set-h { margin: var(--sp-5) 0 var(--sp-2); padding-top: var(--sp-5); border-top: var(--bw-hairline) solid var(--border-default); }
+        #settings-modal .modal-body > .set-h:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+        #settings-modal .set-sub { margin-top: 0; }
+        #settings-modal .field-label { display: block; margin-top: var(--sp-3); }
+        .setting-sub { font-size: var(--text-xs); color: var(--text-secondary); margin-top: var(--sp-1); line-height: var(--lh-caption); }
+        .modal-foot { display: flex; justify-content: flex-end; gap: var(--sp-2); padding: var(--sp-4);
+            border-top: var(--bw-hairline) solid var(--border-default); background: var(--surface-secondary);
+            border-radius: 0 0 var(--radius-card) var(--radius-card); }
+        .g-badge { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); padding: var(--sp-1) var(--sp-3); border-radius: var(--radius-tag); white-space: nowrap; }
+        .g-badge.on { background: var(--success-bg); color: var(--success); }
+        .g-badge.off { background: var(--surface-sunken); color: var(--text-tertiary); }
+        .g-badge.mid { background: var(--warning-bg); color: var(--warning); }
+
+        /* THE PHONE (the mix, spec principle 6 and 4.3): every target is 40 and
+           every control and row title 14. The 16 gutter and the 32 between
+           sections are set where those live. A real field under a finger keeps
+           16 (the pointer: coarse rule), or iOS zooms into it. */
+        @media (max-width: 640px) {
+            :is(.btn, .btn-sm, .icon-btn, .chip, .toggle, .qt, .dmenu-item, .rlist-row, .nav-item, .nav-group, .convo, .tbl-search, .topbar-search,
+                input[type=text], input[type=number], input[type=date], input[type=search], input[type=email], input[type=password],
+                input[type=url], input[type=tel], input:not([type]), select, details.sect summary) { min-height: var(--control-h-lg); }
+            .tbl-search { height: var(--control-h-lg); }
+            .segmented > button { height: var(--control-h-lg); }
+            :is(.btn, .btn-sm, .segmented > button, .tab, .chip, .toggle, .qt, .dmenu-item, .nav-item, .convo, .rlist-row, details.sect summary) { font-size: var(--text-sm); }
+            :is(.icon-btn, .btn-sm.btn-icon, .topbar .icon-btn, .topbar-search) { min-width: var(--control-h-lg); }
+            :is(.tab, .tbl-step, .guide-toc-link, .toggle) { min-width: var(--control-h-lg); }
+            .toggle:has(> .sw:only-child) { justify-content: flex-end; }
+            .tbl-step { width: var(--control-h-lg); }
+            .tab { justify-content: center; }
+            .mail-bulkbar .btn { min-height: var(--control-h-lg); }
+            .mail-bulkbar { min-height: calc(var(--control-h-lg) + 2 * var(--sp-1)); }
+            .btn-sm.btn-icon { width: var(--control-h-lg); }
+            .section-title, .card-head { min-height: var(--control-h-lg); }
+            /* An info button keeps its 24 look; its 40 target grows up, down
+               and away from its words, so it never covers them. */
+            .info { width: var(--control-h-lg); height: var(--control-h-lg); padding-right: calc(var(--control-h-lg) - var(--control-h-sm));
+                margin-block: calc((var(--lh-control) - var(--control-h-lg)) / 2); margin-right: calc(var(--control-h-sm) - var(--control-h-lg)); }
+            .info::before { inset: auto; left: 0; top: 50%; width: var(--control-h-sm); height: var(--control-h-sm); margin-top: calc(var(--control-h-sm) / -2); }
+            /* That target reaches 10 under its title's line, so a line under the
+               title sits 12 below it (the card's 4 left a 6 overlap). */
+            .card-head:has(> :is(.card-title, .title-row) > .info) { row-gap: var(--sp-3); }
+            /* The status line's Refresh leans its target DOWN: 4 up reaches the title's own box and no further (the line's
+               margin-top), the rest below it into the 16 above the actions, so the title is never covered; the glyph stays
+               on the line's centre. */
+            .ph-sub > .info { margin-block: calc(-1 * var(--sp-1)) calc(var(--lh-control) - var(--control-h-lg) + var(--sp-1));
+                align-content: start; padding-top: calc(var(--sp-1) + (var(--lh-control) - var(--icon-md)) / 2); }
+            .ph-sub > .info::before { top: calc(var(--sp-1) + var(--lh-control) / 2); }
+            /* The rest of what a finger meets: the drawer's own icon buttons and brand row, an icon button in a row, a row's
+               name button, a standalone link, a summary, a maker's band and the chart's expand square. */
+            :is(.sidebar .icon-btn, .brand, .mem-btn, .crm-ticon, .crm-col-add, .sizes-open, .files-name, .guide-toc-link, .miss-open, .action-link, details summary) { min-height: var(--control-h-lg); }
+            .ktable tr.ktable-grp th { height: var(--control-h-lg); }
+            :is(.sidebar .icon-btn, .mem-btn, .crm-ticon) { min-width: var(--control-h-lg); }
+            /* Hide sidebar's 40 target leaves its glyph room enough, so 4 to it
+               keeps the brand row's logo, hairline and name whole. */
+            .side-head { gap: var(--sp-1); }
+            .chart-expand { width: var(--control-h-lg); height: var(--control-h-lg); }
+            :is(.guide-toc-link, .miss-open, .action-link) { display: inline-flex; align-items: center; }
+            :is(.sizes-open, .files-name) { align-items: center; }
+            /* The Guide's search row sized its grid track by the search's own width, which the 14px Print button pushed 7 past the screen. */
+            .guide-tools { grid-template-columns: minmax(0, 1fr); }
+            /* The chat's own controls (the composer's script and rules are Task 43's, so this is index.html only). */
+            .send { width: var(--control-h-lg); height: var(--control-h-lg); }
+            #input { min-height: var(--control-h-lg); }
+            /* A small close or clear glyph keeps its look, and its target grows to a 40 square centred on it (an invisible
+               hit area: no visible change, nothing moved). Reaching them on a touch screen is what a 390 scan without touch
+               emulation cannot show. */
+            :is(.convo .del, .toast-x, .tbl-search .tbl-clear, .alert-x, .sk-chip-x, .fchip button) { position: relative; }
+            :is(.toast-x, .alert-x, .sk-chip-x, .fchip button)::after,
+            :is(.convo .del, .tbl-search .tbl-clear, .ov-wrap.wg-editing > [data-widget] > .wg-hide)::after {
+                content: ""; position: absolute; height: var(--control-h-lg); }
+            :is(.toast-x, .alert-x, .sk-chip-x, .fchip button)::after {
+                left: 50%; top: 50%; width: var(--control-h-lg); margin: calc(var(--control-h-lg) / -2) 0 0 calc(var(--control-h-lg) / -2); }
+            /* A button with a neighbour on one side leans its square away from it: it never covers the search's input, the
+               conversation's title or a chart's expand square. The clear button's square starts at the button's left edge
+               and runs right to the field's own edge (29 wide for a 20 button, 40 for a 32 one), the delete's runs right (40),
+               and the Customise hide button's runs up and right as far as the page's gutter lets it (the button's own width
+               plus 4, by 40). All three are centred on the button's height or sit on its foot, so none is lower than 40. */
+            .tbl-search .tbl-clear::after { left: 0; top: 50%; margin: calc(var(--control-h-lg) / -2) 0 0; width: min(var(--control-h-lg), calc(100% + var(--sp-2) + var(--bw-hairline))); }
+            .convo .del::after { left: 0; top: 50%; width: var(--control-h-lg); margin: calc(var(--control-h-lg) / -2) 0 0; }
+            .ov-wrap.wg-editing > [data-widget] > .wg-hide::after { left: 0; bottom: 0; width: min(var(--control-h-lg), calc(100% + var(--sp-1))); }
+            /* The Inbox's tick and Claim keep their look and get an invisible 40 square: the tick's is centred on it (12 to
+               each side, in the row's own gap, clear of the sender), Claim's is its own width, so neither covers the other
+               nor the sender, and both sit inside the 44 row. */
+            /* A figure's open button (the corner arrow) keeps its look and gets the same invisible 40 square, centred on it. */
+            .stat-open-btn::after { content: ""; position: absolute; left: 50%; top: 50%; width: var(--control-h-lg); height: var(--control-h-lg);
+                margin: calc(var(--control-h-lg) / -2) 0 0 calc(var(--control-h-lg) / -2); }
+            .mail-claim { position: relative; }
+            .mail-tick::after, .mail-claim::after { content: ""; position: absolute; height: var(--control-h-lg); }
+            .mail-tick::after { left: 50%; top: 50%; width: var(--control-h-lg); margin: calc(var(--control-h-lg) / -2) 0 0 calc(var(--control-h-lg) / -2); }
+            .mail-claim::after { left: 0; right: 0; top: 50%; margin-top: calc(var(--control-h-lg) / -2); }
+            /* Track, a sector's name, a skill's Show all and What's new's Open keep their look and get the same invisible
+               40 high target across their own width (R13: they were 15 to 32 tall). */
+            :is(.track-btn, .seclink, .sk-more, .rel-open) { position: relative; }
+            :is(.track-btn, .seclink, .sk-more, .rel-open)::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: var(--control-h-lg); margin-top: calc(var(--control-h-lg) / -2); }
+            /* The Size list's A to Z is one swipeable line of 40 squares rather than four rows of them. */
+            .az { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; margin-inline: calc(-1 * var(--sp-1)); padding-inline: var(--sp-1); }
+            .az::-webkit-scrollbar { display: none; }
+            .az button { flex: none; height: var(--control-h-lg); min-width: var(--control-h-lg); }
+        }
