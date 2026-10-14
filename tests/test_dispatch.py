@@ -21810,6 +21810,46 @@ def t_the_environment_reference_does_not_name_the_shop():
 
 
 @test
+def t_the_api_reference_is_generated_from_the_code():
+    """A hundred and fifty routes and nothing listed them: the page and the
+    server agreed because each side's tests happened to. docs/API.md is built
+    from the route decorators themselves, and this fails when it is stale."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("route_reference", os.path.join(HERE, "tools", "route_reference.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    rows = mod.collect(HERE)
+    src = "".join(open(os.path.join(HERE, m + ".py"), encoding="utf-8").read() for m in mod.MODULES)
+    eq(len(rows), len(re.findall(r"@\w+\.custom_route\(", src)), "every route decorator is a row")
+    by = {r["path"]: r for r in rows}
+    eq(by["/api/backup"]["door"], "_guard", "the backup route opens with the one door")
+    ok("_team_role" in by["/api/backup"]["checks"], "and its own master check is named")
+    eq(by["/api/crm/deal"]["tab"], "crm", "a CRM route is opened by the CRM tab")
+    eq(by["/api/alerts"]["tab"], "any account", "an open route says so")
+    eq(by["/api/team/user"]["door"], "_team_guard", "a guard helper is named as the door")
+    eq(by["/api/team/user"]["terms"], "rank admin", "with the rank it asks for")
+    eq(by["/hooks/forecast/results"]["door"], "own check", "a hook has no session door")
+    ok("_forecast_token_ok" in by["/hooks/forecast/results"]["checks"], "and names the check it makes")
+    eq(mod.render(HERE), open(os.path.join(HERE, "docs", "API.md"), encoding="utf-8").read(),
+       "docs/API.md is stale: run `make api-doc`")
+
+
+@test
+def t_the_api_reference_does_not_name_the_shop():
+    """The repository is public. The route list carries the handlers'
+    docstrings, so it is checked for the shop's domain exactly as the
+    environment reference is, the domain read off the quote site's default."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("env_reference", os.path.join(HERE, "tools", "env_reference.py"))
+    env = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(env)
+    host = next(r[3] for r in env.collect(HERE) if r[0] == "PROPOSAL_HOST").strip("\"'")
+    domain = host.split(".", 1)[1]
+    text = open(os.path.join(HERE, "docs", "API.md"), encoding="utf-8").read()
+    ok(domain not in text, "docs/API.md names the shop's domain")
+
+
+@test
 def t_the_stores_are_measured_not_guessed():
     """Most stores are parsed from disk on every request that needs them. The
     audit could not say whether that costs anything, because the volume is
