@@ -17,3 +17,9 @@ test('the two writes a screen makes by being looked at are swallowed, not counte
   assert.ok(!isWrite('/api/layouts', 'POST', JSON.stringify({ view: 'overview', order: [] })));
   assert.ok(isWrite('/api/updates', 'POST', JSON.stringify({ op: 'request', text: 'x' })));
 });
+test('an op is read word by word, so settings is a read and settings_save a write', () => {
+  for (const op of ['settings', 'status', 'requests', 'runs', 'markers'])
+    assert.ok(!isWrite('/api/connector', 'POST', JSON.stringify({ op })), op + ' is a read');
+  for (const op of ['settings_save', 'autorun_set', 'set_status', 'markMade'])
+    assert.ok(isWrite('/api/connector', 'POST', JSON.stringify({ op })), op + ' is a write');
+});
