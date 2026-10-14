@@ -46,3 +46,4 @@ synthetic/
 catboost_info/
 # tools/ext_check.py's temporary type-check folders, removed after each run
 .ext-check-*/
+tests/browser/.run/

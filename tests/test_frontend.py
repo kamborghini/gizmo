@@ -10651,6 +10651,45 @@ def t_privacy_requests_are_an_admins_to_settle_in_settings():
 
 
 @test
+def t_the_browser_suites_world_is_invented():
+    """The repository is public and the browser suite commits a whole world
+    of invented people, orders and mail. Every address in it is at an
+    example domain (example.com, .org, .net and their subdomains, which RFC
+    2606 reserves too), and every phone number is in the range Ofcom keeps
+    for drama, so nothing in it can be a real person's."""
+    base = os.path.join(ROOT, "tests", "browser")
+    bad_mail, bad_phone = [], []
+    for dirpath, _dirs, files in os.walk(base):
+        if ".run" in dirpath or "node_modules" in dirpath:
+            continue
+        for f in files:
+            if not f.endswith((".py", ".js", ".json")):
+                continue
+            text = open(os.path.join(dirpath, f), encoding="utf-8").read()
+            for m in re.findall(r"[\w.+-]+@([\w-]+(?:\.[\w-]+)+)", text):
+                d = m.lower()
+                if not re.fullmatch(r"(?:[\w-]+\.)*example\.(?:com|org|net)|[\w.-]+\.example", d):
+                    bad_mail.append(f + ": @" + m)
+            for m in re.findall(r"(?<!\d)(?:\+44\s?|0)(\d{4}\s?\d{6})(?!\d)", text):
+                if not re.sub(r"\s", "", m).startswith("1632960"):
+                    bad_phone.append(f + ": " + m)
+    # The shop's own domain, read off the quote site's default so this test
+    # does not carry it either (as the environment reference's test does).
+    host = re.search(r'PROPOSAL_HOST = os\.environ\.get\("PROPOSAL_HOST", "([^"]+)"\)',
+                     open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()).group(1)
+    domain = host.split(".", 1)[1]
+    named = []
+    for dirpath, _dirs, files in os.walk(base):
+        if ".run" in dirpath or "node_modules" in dirpath:
+            continue
+        named += [f for f in files if f.endswith((".py", ".js", ".json", ".md"))
+                  and domain.split(".")[0].lower() in open(os.path.join(dirpath, f), encoding="utf-8").read().lower()]
+    ok(not named, "the browser suite names the shop: %s" % named)
+    ok(not bad_mail, "addresses outside the example domains: %s" % bad_mail[:5])
+    ok(not bad_phone, "phone numbers outside 01632 960xxx: %s" % bad_phone[:5])
+
+
+@test
 def t_the_release_notes_are_ui_copy_and_keep_up_with_the_app():
     """What's new stopped at 8 Sep while sixty changes shipped, and its notes
     carried 46 dashes, the code name and developer words. The notes are read
