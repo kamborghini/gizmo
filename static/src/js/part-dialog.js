@@ -62,10 +62,13 @@
            A page the window redrew as it closed (a CRM deal redraws the board)
            replaced that control: the new one carries the same data-focus-key,
            and focus goes there once it is drawn. */
-        function dialogGiveBack(back) {
+        function dialogGiveBack(back, leaving) {
             if (!back || !back.focus) return;
+            /* Lost: on nothing, on a control that is gone, or still inside the
+               window that is leaving (a window hidden rather than removed keeps
+               its X focused until the browser notices, a moment later). */
             const lost = () => !document.activeElement || document.activeElement === document.body
-                || document.activeElement.isConnected === false;
+                || document.activeElement.isConnected === false || (!!leaving && leaving.contains(document.activeElement));
             if (back.isConnected) { if (lost()) back.focus(); return; }
             const key = back.dataset && back.dataset.focusKey;
             if (!key) return;
@@ -135,7 +138,7 @@
             const at = dialogStack.findIndex(r => r.overlay === overlay);
             if (at < 0) return;
             const rec = dialogStack.splice(at, 1)[0];
-            dialogGiveBack(rec.opener);
+            dialogGiveBack(rec.opener, overlay);
         }
         document.addEventListener('keydown', (e) => {
             const top = dialogTop();
