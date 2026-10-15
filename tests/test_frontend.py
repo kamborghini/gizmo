@@ -8832,6 +8832,24 @@ def t_the_window_fixers_stay_gone():
 
 
 @test
+def t_the_design_rules_live_in_one_document():
+    """The rules were spread over four dated specs, each amending the last.
+    docs/DESIGN.md states them as they stand, names where every value lives,
+    and lists every part; a new part is added there with its guard."""
+    path = os.path.join(ROOT, "docs", "DESIGN.md")
+    ok(os.path.exists(path), "docs/DESIGN.md exists")
+    doc = open(path, encoding="utf-8").read()
+    for heading in ("## Principles", "## Tokens", "## Recipes", "## Layout", "## Parts", "### Windows", "## Adding a part"):
+        ok(heading in doc, "it has " + heading)
+    ok("static/src/css/tokens.css" in doc and "static/src/js/part-dialog.js" in doc, "it names where values and parts live")
+    for spec in ("2026-09-07-design-system-tokens-design.md", "2026-10-05-brand-design-system-design.md",
+                 "2026-10-06-reactor-mix-design.md", "2026-10-13-panels-design.md", "2026-10-15-window-part-design.md"):
+        ok(spec in doc, "it links " + spec)
+    for guard in ("t_every_corner_is_a_role", "t_every_defined_token_is_read", "t_every_window_is_built_and_closed_by_the_part"):
+        ok(guard in doc and ("def " + guard + "(") in open(__file__, encoding="utf-8").read(), "it names the guard " + guard)
+
+
+@test
 def t_a_print_overtaken_by_a_newer_one_opens_no_dialog():
     """Every print stages its page in one box (#label-print) under one page
     rule, and a newer print takes both over, counted by printSeq. The

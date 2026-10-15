@@ -138,6 +138,10 @@ are the two ways to call it. Then `make api-doc`: CI fails while
 lines ending in a newline, and its line in `static/src/manifest.json` where it
 belongs in the script's order or the cascade.
 
+**A window.** `dialog()` (`static/src/js/part-dialog.js`); never build or
+remove a `.modal-overlay` by hand (a page-suite guard fails). The design rules,
+windows included, are in `docs/DESIGN.md`.
+
 **A screen.** One entry in `tests/browser/screens.js` whose steps end by
 waiting for content only the seed puts there; if it needs data, add it in
 `tests/browser/seed/` through the app's own routes first, and a seeded text
