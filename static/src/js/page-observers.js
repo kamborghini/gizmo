@@ -117,21 +117,6 @@
            control that opened it: the new one carries the same
            data-focus-key, and focus goes there once it is drawn. */
         const dialogOpeners = new WeakMap();
-        const DIALOG_FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-        /* The last control focused outside every window. The observer below
-           runs after the click that opened a window, and a builder that
-           focuses its own first field has moved focus inside by then. */
-        let focusOutside = null;
-        document.addEventListener('focusin', (e) => {
-            if (e.target && e.target.closest && !e.target.closest('.modal-overlay')) focusOutside = e.target;
-        });
-        /* Focus that left for nowhere (a tap elsewhere; on a phone a tap moves
-           no focus) forgets that control: closing a window must not send focus
-           back to a field left long before, which on an iPhone raises the
-           keyboard. */
-        document.addEventListener('focusout', (e) => {
-            if (!e.relatedTarget && e.target === focusOutside) focusOutside = null;
-        });
         function dialogOpened(o) {
             const now = document.activeElement;
             const from = now && now !== document.body && !o.contains(now) ? now : focusOutside;
