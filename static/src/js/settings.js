@@ -473,7 +473,7 @@
             $('settings-save').hidden = !canEdit;
             $('settings-readonly').hidden = canEdit;
             settingsAtOpen = profileKey(profile);
-            $('settings-modal').classList.add('show');
+            dialogShow($('settings-modal'));
             /* The profile's boxes grow to fit their text (12 Oct 2026): on a
                phone two lines held a paragraph, scrolling inside the box. */
             document.querySelectorAll('#settings-modal textarea.pf-input').forEach(ta => {
@@ -615,7 +615,7 @@
         const profileKey = (p) => JSON.stringify([p.brand_voice || '', p.business_goals || '', p.strategy || '', p.notes || '',
             Object.keys(DEFAULT_PREFS).map(k => !!(p.prefs || {})[k])]);
         function closeSettings() {
-            $('settings-modal').classList.remove('show');
+            dialogHide($('settings-modal'));
             const changed = settingsAtOpen && profileKey(profile) !== settingsAtOpen;
             settingsAtOpen = '';
             /* Only an Overview that has been run is run again: one still on
