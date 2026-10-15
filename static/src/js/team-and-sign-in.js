@@ -333,10 +333,10 @@
         function showStarterPw(name, pw) {
             /* The one showing of a starter password. Copy it, hand it over,
                and the person is forced to change it on first login. */
-            const overlay = el('div', 'modal-overlay show confirm-overlay');
-            const modal = el('div', 'modal confirm-modal');
-            const head = el('div', 'modal-head'); head.append(el('h3', null, 'Starter password for ' + name));
-            const body = el('div', 'modal-body');
+            /* A notice with one answer (Done), so no X, like uiConfirm. */
+            const win = dialog({ title: 'Starter password for ' + name, size: 'confirm-modal',
+                                 overlayClass: 'confirm-overlay', x: false });
+            const { body } = win;
             body.append(el('p', 'confirm-msg', 'This is shown once and never again. Pass it on '
                 + 'privately; they must choose their own password the first time they sign in.'));
             /* An ordinary read-only field: the sign-in card's field left a 40px
@@ -345,16 +345,15 @@
             inp.type = 'text'; inp.readOnly = true; inp.value = pw; inp.className = 'starter-pw';
             inp.setAttribute('aria-label', 'Starter password');
             body.append(inp);
-            const foot = el('div', 'modal-foot');
+            const foot = win.foot();
             const copy = el('button', 'btn'); copy.append(ico(I.copy), document.createTextNode('Copy'));
             copy.onclick = async () => {
                 try { await navigator.clipboard.writeText(pw); copy.textContent = 'Copied'; }
                 catch (e) { inp.select(); document.execCommand('copy'); copy.textContent = 'Copied'; }
             };
             const done = el('button', 'btn btn-primary', 'Done');
-            done.onclick = () => overlay.remove();
+            done.onclick = win.close;
             foot.append(copy, done);
-            modal.append(head, body, foot); overlay.append(modal); document.body.append(overlay);
             inp.onclick = () => inp.select();
         }
         /* An account's Tabs panel (12 Oct 2026, WS-15): what they can open,

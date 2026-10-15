@@ -385,23 +385,16 @@
         const COURIER_LINE_CHARS = 35;
 
         async function openOrderEdit(o) {
-            const overlay = el('div', 'modal-overlay show');
-            const modal = el('div', 'modal disp-modal');
-            const head = el('div', 'modal-head');
-            const h = el('h3', null, 'Edit ');
+            const win = dialog({ title: 'Edit ', size: 'disp-modal' });
+            const { overlay, modal, head, x, body } = win;
+            const h = win.heading;
             h.append(orderA(orderNo(o), o.admin_url, 'modal-order-link'));
-            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close';
-            head.append(h, x);
-            const body = el('div', 'modal-body');
-            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
-            const prev = document.activeElement;
             let saving = false;
             const close = () => {
                 if (saving) { addToast('The change is still saving. Please wait.'); return; }
-                overlay.remove(); if (prev && prev.focus) prev.focus();
+                win.close();
             };
-            x.onclick = close;   // the X is the only way out: a misclick must not wipe a filled form
-            x.focus();
+            x.onclick = close;   // the part's X, held while a change is saving
 
             const load = el('div', 'thinking');
             load.append(loader(), el('span', null, 'Reading this order from Shopify…'));
@@ -525,7 +518,7 @@
                         loadLabels(true);
                     }
                     saving = false;
-                    overlay.remove(); if (prev && prev.focus) prev.focus();
+                    win.close();
                 } catch (e) {
                     saving = false; save.disabled = false; cancel.disabled = false;
                     save.textContent = 'Save changes';
@@ -536,16 +529,10 @@
         }
 
         async function openDispatch(o) {
-            const overlay = el('div', 'modal-overlay show');
-            const modal = el('div', 'modal disp-modal');
-            const head = el('div', 'modal-head');
-            const dh = el('h3', null, 'Dispatch · ');
+            const win = dialog({ title: 'Dispatch · ', size: 'disp-modal' });
+            const { overlay, modal, head, x, body } = win;
+            const dh = win.heading;
             dh.append(orderA(orderNo(o), o.admin_url, 'modal-order-link'));
-            head.append(dh);
-            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
-            const body = el('div', 'modal-body');
-            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
-            const prev = document.activeElement;
             let booking = false;    // set while money is being spent
             /* What THIS booking asked the courier to do about collection. It
                lives out here because renderResult reads it and is a sibling of
@@ -555,15 +542,9 @@
             let askedCollection = '';
             const close = () => {
                 if (booking) { addToast('The courier booking is still going through. Please wait.'); return; }
-                overlay.remove(); document.removeEventListener('keydown', esc);
-                if (prev && prev.focus) prev.focus();
+                win.close();
             };
-            function esc(e) { /* Escape deliberately does not close either: X only. */ }
-            x.onclick = close;
-            // Backdrop clicks never close: a misclick must not wipe a filled form.
-            // The X is the only way out (user rule).
-            document.addEventListener('keydown', esc);
-            x.focus();
+            x.onclick = close;   // the part's X, held while money is being spent
 
             const existing = dispatchStateOf(o);
             if (existing.tracking_number && !existing.canceled) { renderShipmentSummary(existing); return; }
@@ -1499,21 +1480,14 @@
             await dlg;
         }
         async function openCustomShip() {
-            const overlay = el('div', 'modal-overlay show');
-            const modal = el('div', 'modal disp-modal');
-            const head = el('div', 'modal-head');
-            head.append(el('h3', null, 'New shipment'));
-            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
-            const body = el('div', 'modal-body');
-            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
-            const prev = document.activeElement;
+            const win = dialog({ title: 'New shipment', size: 'disp-modal' });
+            const { overlay, modal, head, x, body } = win;
             let booking = false;
             const close = () => {
                 if (booking) { addToast('The courier booking is still going through. Please wait.'); return; }
-                overlay.remove(); if (prev && prev.focus) prev.focus();
+                win.close();
             };
-            x.onclick = close;   // the X is the only way out: a misclick must not wipe a filled form
-            x.focus();
+            x.onclick = close;   // the part's X, held while a booking is going through
 
             const shipId = 'cs' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
             // Declared up here, not beside the quote UI: building the parcel row
@@ -2057,20 +2031,9 @@
         }
 
         async function openShippingSettings() {
-            const overlay = el('div', 'modal-overlay show');
-            const modal = el('div', 'modal disp-modal');
-            const head = el('div', 'modal-head');
-            head.append(el('h3', null, 'Shipping settings'));
-            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
-            const body = el('div', 'modal-body');
-            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
-            const prev = document.activeElement;
-            const close = () => { overlay.remove(); document.removeEventListener('keydown', esc); if (prev && prev.focus) prev.focus(); };
-            function esc(e) { /* Escape deliberately does not close either: X only. */ }
-            x.onclick = close;
-            // Backdrop clicks never close: a misclick must not wipe a filled form.
-            // The X is the only way out (user rule).
-            document.addEventListener('keydown', esc);
+            const win = dialog({ title: 'Shipping settings', size: 'disp-modal' });
+            const { overlay, modal, head, x, body } = win;
+            const close = win.close;
 
             const load = el('div', 'thinking'); load.append(loader(), el('span', null, 'Loading…')); body.append(load);
             let cfg;

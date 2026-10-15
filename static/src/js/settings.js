@@ -311,56 +311,44 @@
         const composerAsk = (title, message, label, initial) => uiAskText(title, message, label, initial, 'Add link');
         function uiAskText(title, message, label, initial, okText) {
             return new Promise(resolve => {
-                const overlay = el('div', 'modal-overlay show');
-                const modal = el('div', 'modal');
-                const head = el('div', 'modal-head');
-                head.append(el('h3', null, title));
-                const finish = (v) => { overlay.remove(); resolve(v); };
-                const x = el('button', 'icon-btn'); x.innerHTML = I.x;
-                x.title = 'Close'; x.setAttribute('aria-label', 'Close');
-                x.onclick = () => finish(null);
-                head.append(x);
-                const body = el('div', 'modal-body');
+                /* A question typed into: it closes by its X or Cancel only. */
+                let answer = null;
+                const win = dialog({ title: title, onClose: () => resolve(answer) });
+                const body = win.body;
+                const finish = (v) => { answer = v; win.close(); };
                 if (message) body.append(el('p', 'field-help', message));
                 const f = el('label', 'pfield');
                 f.append(el('span', null, label || 'Value'));
                 const inp = el('input', 'psel'); inp.type = 'text'; inp.value = initial || '';
                 f.append(inp); body.append(f);
-                const foot = el('div', 'modal-foot');
+                const foot = win.foot();
                 const cancel = el('button', 'btn', 'Cancel'); cancel.onclick = () => finish(null);
                 const go = el('button', 'btn btn-primary', okText || 'Continue');
                 go.onclick = () => finish(inp.value);
                 inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); go.click(); } };
                 foot.append(cancel, go);
-                modal.append(head, body, foot); overlay.append(modal); document.body.append(overlay);
                 inp.focus(); inp.select();
             });
         }
 
         function uiAskPassword(title, message, okText) {
             return new Promise(resolve => {
-                const overlay = el('div', 'modal-overlay show');
-                const modal = el('div', 'modal');
-                const head = el('div', 'modal-head');
-                head.append(el('h3', null, title));
-                const finish = (v) => { overlay.remove(); resolve(v); };
-                const x = el('button', 'icon-btn'); x.innerHTML = I.x;
-                x.title = 'Close'; x.setAttribute('aria-label', 'Close');
-                x.onclick = () => finish(null);
-                head.append(x);
-                const body = el('div', 'modal-body');
+                /* A question typed into: it closes by its X or Cancel only. */
+                let answer = null;
+                const win = dialog({ title: title, onClose: () => resolve(answer) });
+                const body = win.body;
+                const finish = (v) => { answer = v; win.close(); };
                 if (message) body.append(el('p', 'field-help', message));
                 const f = el('label', 'pfield');
                 f.append(el('span', null, 'Your password'));
                 const inp = el('input', 'psel'); inp.type = 'password'; inp.autocomplete = 'current-password';
                 f.append(inp); body.append(f);
-                const foot = el('div', 'modal-foot');
+                const foot = win.foot();
                 const cancel = el('button', 'btn', 'Cancel'); cancel.onclick = () => finish(null);
                 const go = el('button', 'btn btn-primary', okText || 'Continue');
                 go.onclick = () => finish(inp.value);
                 inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); go.click(); } };
                 foot.append(cancel, go);
-                modal.append(head, body, foot); overlay.append(modal); document.body.append(overlay);
                 inp.focus();
             });
         }
@@ -423,16 +411,8 @@
             const pw = await uiAskPassword('Two-step sign-in',
                 'Confirm it is you before a second factor is added to this account.');
             if (pw === null) return;
-            const overlay = el('div', 'modal-overlay show');
-            const modal = el('div', 'modal');
-            const head = el('div', 'modal-head');
-            head.append(el('h3', null, 'Two-step sign-in'));
-            const x = el('button', 'icon-btn'); x.innerHTML = I.x;
-            x.title = 'Close'; x.setAttribute('aria-label', 'Close');
-            x.onclick = () => overlay.remove();
-            head.append(x);
-            const body = el('div', 'modal-body');
-            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
+            const win = dialog({ title: 'Two-step sign-in' });
+            const { overlay, modal, head, x, body } = win;
 
             (async () => {
                 let st;
@@ -451,7 +431,7 @@
                 inp.maxLength = 6; inp.placeholder = '000000';
                 f.append(inp); body.append(f);
                 const foot = el('div', 'modal-foot');
-                const cancel = el('button', 'btn', 'Cancel'); cancel.onclick = () => overlay.remove();
+                const cancel = el('button', 'btn', 'Cancel'); cancel.onclick = win.close;
                 const go = el('button', 'btn btn-primary', 'Turn it on');
                 go.onclick = async () => {
                     go.disabled = true;
@@ -470,7 +450,7 @@
                     body.append(list);
                     foot.innerHTML = '';
                     const done = el('button', 'btn btn-primary', 'I have saved them');
-                    done.onclick = () => { overlay.remove(); refreshMfaRow(); };
+                    done.onclick = () => { win.close(); refreshMfaRow(); };
                     foot.append(done);
                 };
                 foot.append(cancel, go); modal.append(foot);

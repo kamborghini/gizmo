@@ -68,43 +68,37 @@
            something must not look like one that saves something, and must not be
            answerable by the Enter reflex. */
         const DESTRUCTIVE = /\b(delete|remove|erase|wipe|discard|purge|reset|revoke|cancel shipment|for good|cannot be undone)\b/i;
-        const confirmStack = [];   // open confirm dialogs, topmost last
         function uiConfirm(message, opts) {
             opts = opts || {};
             const danger = opts.danger != null ? !!opts.danger
                 : DESTRUCTIVE.test([opts.okText, opts.title, message].filter(Boolean).join(' '));
             return new Promise(resolve => {
-                const overlay = el('div', 'modal-overlay show confirm-overlay');
-                const modal = el('div', 'modal confirm-modal' + (danger ? ' confirm-danger' : ''));
-                const head = el('div', 'modal-head'); head.append(el('h3', null, opts.title || 'Please confirm'));
-                const body = el('div', 'modal-body');
+                /* A question answered by its own buttons: no X, and Escape is
+                   No (dialog() hands Escape to the question on top alone). */
+                let answer = false;
+                const win = dialog({ title: opts.title || 'Please confirm',
+                    size: 'confirm-modal' + (danger ? ' confirm-danger' : ''), overlayClass: 'confirm-overlay', x: false,
+                    onEscape: () => done(false),
+                    onClose: () => { document.removeEventListener('keydown', key); resolve(answer); } });
+                const body = win.body;
                 /* A message may be a built panel rather than a sentence. el()
                    sets textContent, so handing it a node printed the string
                    "[object HTMLDivElement]" into the dialog - which is what the
                    Collections panel showed. */
                 if (message instanceof Node) body.append(message);
                 else body.append(el('p', 'confirm-msg', message));
-                const foot = el('div', 'modal-foot');
+                const foot = win.foot();
                 const no = el('button', 'btn'); no.textContent = opts.cancelText || 'Cancel';
                 const yes = el('button', 'btn ' + (danger ? 'btn-danger' : 'btn-primary'));
                 yes.textContent = opts.okText || 'Confirm';
                 /* A panel that only tells you something has one way out, not a
                    choice between two buttons that do the same thing. */
                 if (opts.hideCancel) foot.append(yes); else foot.append(no, yes);
-                modal.append(head, body, foot); overlay.append(modal); document.body.append(overlay);
-                const prev = document.activeElement;
-                confirmStack.push(overlay);
-                const done = (v) => {
-                    overlay.remove(); document.removeEventListener('keydown', key);
-                    const at = confirmStack.indexOf(overlay); if (at >= 0) confirmStack.splice(at, 1);
-                    if (prev && prev.focus) prev.focus();
-                    resolve(v);
-                };
+                const done = (v) => { answer = v; win.close(); };
                 function key(e) {
-                    /* Only the dialog on top answers: two stacked confirms each
-                       listen on the document, and one Escape closed both. */
-                    if (confirmStack[confirmStack.length - 1] !== overlay) return;
-                    if (e.key === 'Escape') { e.stopPropagation(); done(false); }
+                    /* Only the window on top answers: two stacked questions
+                       each listen on the document. */
+                    if (!win.isTop()) return;
                     // Enter is a reflex, so it answers only the reversible dialogs.
                     // A destructive one has to be clicked or tabbed to. And it is
                     // the focused button's answer: with Cancel focused, Enter is
