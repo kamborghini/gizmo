@@ -33,3 +33,14 @@ test('every screen waits for a text only the seed puts there, or says why it has
 test('a dialog names the control that opens it', () => {
   for (const s of SCREENS.filter(x => x.kind === 'dialog')) assert.ok(s.opener && s.opener.sel && s.before, s.id);
 });
+
+test('the keyboard journeys name how each window is reached, and no id twice', () => {
+  const WINDOWS = require('../windows');
+  const ids = new Set();
+  assert.ok(WINDOWS.length >= 10, 'at least ten windows beyond the three measured ones');
+  for (const w of WINDOWS) {
+    assert.ok(!ids.has(w.id), w.id + ' twice'); ids.add(w.id);
+    assert.ok(typeof w.before === 'function', w.id + ' says how to get to its screen');
+    assert.ok(!!w.opener !== !!w.menu, w.id + ' is opened by a button or by a menu item, one of the two');
+  }
+});

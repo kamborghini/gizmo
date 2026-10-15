@@ -8695,6 +8695,30 @@ console.log(JSON.stringify(out));
 
 
 @test
+def t_a_window_written_into_the_page_hands_focus_back_as_it_hides():
+    """Settings is hidden, not removed: when its X is pressed, the X still
+    has focus as dialogHide runs (the browser drops it a moment later), so
+    focus was judged not lost and stayed nowhere. Focus inside the window
+    that is hiding is lost, and goes back to what opened it."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + "\n" + dialog_harness() + r"""
+const opener = el('button', 'side-user'); opener.isConnected = true; document.body.append(opener);
+const overlay = el('div', 'modal-overlay'); overlay.isConnected = true; document.body.append(overlay);
+const x = el('button', 'icon-btn'); x.isConnected = true; overlay.append(x);
+opener.focus();
+dialogShow(overlay);
+x.focus();
+dialogHide(overlay);
+console.log(JSON.stringify({ back: document.activeElement === opener, hidden: !overlay.classList.contains('show') }));
+"""
+    got = _run_node(js)
+    ok(got["hidden"], "it hides")
+    ok(got["back"], "and focus goes back to what opened it: %r" % got)
+
+
+@test
 def t_every_window_is_built_and_closed_by_the_part():
     """Windows were built by hand in 23 places, each a copy of one shape with
     its own small differences, and made to behave alike afterwards by fixers.
