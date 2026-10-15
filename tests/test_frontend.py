@@ -2508,7 +2508,7 @@ def t_a_phone_reads_every_table_as_two_line_rows():
     sh = fn_src("function syncTableHeads(") if "function syncTableHeads(" in SCRIPT else ""
     ok("table.ktable > :is(tbody, tfoot) > tr:not([data-kh])" in sh and "td.dataset.h = h" in sh and "td.classList.add('kt-main')" in sh,
        "each body cell carries its column's head, and the head marked kt-main names the cell that leads")
-    ok("syncToggles(); syncDialogs(); syncTableHeads();" in SCRIPT, "stamped in the one batched pass, wherever a table is built")
+    ok("syncToggles(); syncTableHeads();" in SCRIPT, "stamped in the one batched pass, wherever a table is built")
     ph = CSS.split("/* R13: on a phone a table's rows are two lines")[1].split("\n        }\n")[0] if "/* R13: on a phone a table's rows are two lines" in CSS else ""
     ok(KT + " { display: block; min-width: 0; }" in ph and KT + " > thead { display: none; }" in ph, "no head row and no sideways scroll")
     ok(KT + " > :is(tbody, tfoot) > tr { display: flex; flex-wrap: wrap;" in ph, "a row wraps its cells")
@@ -4342,16 +4342,16 @@ def t_keyboard_focus_in_a_menu_does_not_look_like_a_hover():
 
 @test
 def t_every_modal_is_a_dialog_and_tab_stays_inside_it():
-    """Thirteen builders, one stamp: an observer gives every .modal role=dialog,
-    aria-modal and a label from its own heading - the same pattern the switches
-    already used. And one Tab fence keeps focus inside the top overlay, which
-    matters twice over here because Escape is deliberately not a way out."""
-    ok("function syncDialogs()" in SCRIPT, "the stamp exists")
-    ok("syncToggles(); syncDialogs();" in SCRIPT, "and rides the existing observer")
-    ok("m.setAttribute('aria-modal', 'true')" in SCRIPT, "modals say they are modal")
-    fence = SCRIPT.split("if (e.key !== 'Tab') return;")[1][:2200]
-    ok(".modal-overlay.show, .auth-overlay" in SCRIPT, "the fence covers app modals and the login card")
-    ok("e.shiftKey && document.activeElement === first" in fence, "and wraps both directions")
+    """Every window is built by dialog(), which makes it a modal dialog named by
+    its own title; one Tab fence in the part keeps focus inside the window on
+    top, which matters twice over here because Escape is deliberately not a
+    way out. The sign-in screen keeps a fence of its own."""
+    part = dialog_part()
+    ok("modal.setAttribute('role', 'dialog');" in part and "modal.setAttribute('aria-modal', 'true');" in part,
+       "windows say they are modal dialogs")
+    ok("modal.setAttribute('aria-labelledby', heading.id);" in part, "named by their own title")
+    fence = part.split("if (e.key !== 'Tab') return;")[1][:1600]
+    ok("e.shiftKey && document.activeElement === first" in fence, "and Tab wraps both ways inside the top window")
 
 
 @test
@@ -8792,6 +8792,22 @@ const settle = (p) => Promise.race([p.then(v => v), new Promise(r => setTimeout(
 
 
 @test
+def t_the_window_fixers_stay_gone():
+    """The fixers that made hand-built windows behave after they were drawn
+    (syncDialogs, the focus observer, the window Tab fence) are gone: dialog()
+    owns all of it. The sign-in screen, which is not a window, keeps a fence."""
+    ok("function syncDialogs(" not in SCRIPT and "syncDialogs()" not in SCRIPT, "no dialog stamp")
+    ok("function dialogOpened(" not in SCRIPT and "const dialogOpeners" not in SCRIPT, "no focus observer")
+    ok(SCRIPT.count("let focusOutside") == 1 and "let focusOutside" in dialog_part(), "one record of where focus was, in the part")
+    ok(".modal-overlay.show, .auth-overlay" not in SCRIPT, "no window fence outside the part")
+    ok("document.querySelectorAll('.auth-overlay')" in SCRIPT[SCRIPT.index("function syncTableHeads("):], "the sign-in screen's own fence")
+    ok("dialogShow($('settings-modal'))" in SCRIPT and "dialogHide($('settings-modal'))" in SCRIPT,
+       "Settings opens and closes through the part")
+    ok('<div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">' in HTML
+       and '<h3 id="settings-title">Settings</h3>' in HTML, "and is a dialog named by its title from the start")
+
+
+@test
 def t_a_print_overtaken_by_a_newer_one_opens_no_dialog():
     """Every print stages its page in one box (#label-print) under one page
     rule, and a newer print takes both over, counted by printSeq. The
@@ -12629,7 +12645,7 @@ def t_each_section_of_a_page_is_a_panel():
     panel, a pair's halves and what a plain wrapper holds included; the
     header, tabs, choosers, notices and the Production Manager's counters
     stay on the grey page."""
-    ok("syncToggles(); syncDialogs(); syncTableHeads(); syncPanels();" in SCRIPT, "stamped in the one batched pass")
+    ok("syncToggles(); syncTableHeads(); syncPanels();" in SCRIPT, "stamped in the one batched pass")
     if not _node_ok():
         print("       (node unavailable, skipped)")
         return
