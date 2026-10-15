@@ -398,15 +398,9 @@
             } catch (e) { toastError(e.message || 'Could not fetch the file.'); }
         }
         async function openPreview(fid, f) {
-            const overlay = el('div', 'modal-overlay show');
-            const modal = el('div', 'modal disp-modal');
-            const head = el('div', 'modal-head');
-            head.append(el('h3', null, f.name));
-            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close';
-            const close = () => overlay.remove();
-            x.onclick = close;   // Backdrop clicks never close a window here; the X is the way out.
-            head.append(x);
-            const body = el('div', 'modal-body fprev-body');
+            const win = dialog({ title: f.name, size: 'disp-modal', bodyClass: 'fprev-body' });
+            const { overlay, modal, head, x, body } = win;
+            const close = win.close;
             (function(){ const t = el('div', 'thinking');
                 t.append(loader(), el('span', null, 'Opening\u2026')); body.append(t); })();
             const foot = el('div', 'modal-foot');
@@ -416,7 +410,7 @@
             const dl = el('button', 'btn'); dl.append(ico(I.download), document.createTextNode('Download'));
             dl.onclick = () => download(fid);
             foot.append(dl);
-            modal.append(head, body, foot); overlay.append(modal); document.body.append(overlay);
+            modal.append(foot);
             try {
                 const r = await api('/api/files/download-url', { id: fid, preview: true });
                 body.innerHTML = '';
@@ -434,16 +428,11 @@
         }
         function openMovePicker(ids, after) {
             /* Pick a destination folder; works everywhere a drag cannot. */
-            const overlay = el('div', 'modal-overlay show confirm-overlay');
-            const modal = el('div', 'modal confirm-modal');
-            const head = el('div', 'modal-head');
-            head.append(el('h3', null, 'Move ' + (ids.length === 1 ? 'file' : ids.length + ' files') + ' to'));
-            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close';
-            x.onclick = () => overlay.remove();
-            head.append(x);
-            const body = el('div', 'modal-body');
+            const win = dialog({ title: 'Move ' + (ids.length === 1 ? 'file' : ids.length + ' files') + ' to',
+                                 size: 'confirm-modal', overlayClass: 'confirm-overlay' });
+            const { overlay, modal, head, x, body } = win;
             const pick = async (folderId) => {
-                overlay.remove();
+                win.close();
                 try {
                     const r = await filesOp('/api/files/file', ids.length === 1
                         ? { op: 'move', id: ids[0], folder_id: folderId }
@@ -476,8 +465,6 @@
                     });
             };
             walk('', 1);
-            modal.append(head, body);
-            overlay.append(modal); document.body.append(overlay);
         }
         function renderFilesBrowser(host) {
             // A folder that vanished (another machine deleted it) must not

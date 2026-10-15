@@ -692,22 +692,13 @@
            rules, same two-step send as the reply panel. */
         function openMailCompose() {
             if (!mailComposerReady()) return;
-            const overlay = el('div', 'modal-overlay show');
-            const modal = el('div', 'modal');
-            const head = el('div', 'modal-head');
-            head.append(el('h3', null, 'New email'));
-            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close';
-            x.setAttribute('aria-label', 'Close');
-            x.onclick = () => overlay.remove();
-            head.append(x);
-            // X only: a half-written email to a customer is not thrown away by
-            // a stray click on the backdrop.
+            // X only (dialog()): a half-written email to a customer is not
+            // thrown away by a stray click on the backdrop.
+            const win = dialog({ title: 'New email', bodyClass: 'stack-form' });
+            const { overlay, modal, head, x, body } = win;
             /* A form with a form's rhythm: the fields were stacked with 0 to
                2px between them, and the rule about addresses sat under Send,
                420px from the field it is about. */
-            const body = el('div', 'modal-body stack-form');
-            modal.append(head, body);
-            overlay.append(modal); document.body.append(overlay);
 
             body.append(el('p', 'card-sub', 'It goes out from '
                 + ((mailCache && mailCache.address) || 'the shared mailbox')
@@ -765,7 +756,7 @@
                                 bcc: folds.bcc.value.trim(), subject: subject.value.trim() },
                               mailComposerPayload(cmp)),
                 [send],
-                () => { overlay.remove(); refreshMailQuiet(); });
+                () => { win.close(); refreshMailQuiet(); });
             bodyL.append(el('span', 'field-help', 'Sent as shown, with your sign-off and the footer.'));
             bar.append(send);
             body.append(bar);
@@ -1015,13 +1006,12 @@
             });
         }
         function mailModal(title) {
-            const overlay = el('div', 'modal-overlay show');
-            const modal = el('div', 'modal disp-modal');
-            const head = el('div', 'modal-head');
-            head.append(el('h3', null, title));
-            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
-            const body = el('div', 'modal-body');
-            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
+            const win = dialog({ title: title, size: 'disp-modal', onClose: () => {
+                if (overlay._timer) clearInterval(overlay._timer);
+                if (!document.querySelector('#view-mail.active')) return;
+                if (touched || !m.onQuietClose) refreshMailQuiet(); else m.onQuietClose();
+            } });
+            const { overlay, modal, head, x, body } = win;
             /* Anything pressed or typed inside the window is why the board is
                fetched again on close. A window that sets onQuietClose (the
                email reader) changes nothing if it was only read, so it puts
@@ -1039,13 +1029,7 @@
             overlay.addEventListener('input', () => { touched = true; }, true);
             overlay.addEventListener('keydown', (e) => { if (e.key === 'Enter' && touches(e.target)) touched = true; }, true);
             const m = { body: body, overlay: overlay, onQuietClose: null };
-            m.close = () => {
-                overlay.remove();
-                if (overlay._timer) clearInterval(overlay._timer);
-                if (!document.querySelector('#view-mail.active')) return;
-                if (touched || !m.onQuietClose) refreshMailQuiet(); else m.onQuietClose();
-            };
-            x.onclick = m.close;   /* the X is the only way out, as everywhere else */
+            m.close = win.close;
             return m;
         }
         /* The email being fetched to open: a double click (the gesture every

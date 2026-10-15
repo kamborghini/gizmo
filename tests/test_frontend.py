@@ -122,12 +122,11 @@ def t_no_modal_closes_on_a_backdrop_click_or_escape():
 
 @test
 def t_every_modal_still_has_a_working_close():
-    """The rule above is only safe if each modal kept its X."""
-    sites = SCRIPT.count("Backdrop clicks never close")
-    ok(sites >= 5, "found the modals (%d)" % sites)
-    ok(SCRIPT.count("x.onclick = close") >= sites,
-       "each one wires its X to close (%d closes for %d modals)"
-       % (SCRIPT.count("x.onclick = close"), sites))
+    """The rule above is only safe if each modal kept its X. Every window is
+    built by dialog() now, which wires its X to close and names it."""
+    part = dialog_part()
+    ok("if (x) x.onclick = close;" in part, "the part wires its X to close")
+    ok("x.setAttribute('aria-label', 'Close')" in part, "and names it")
 
 
 @test
@@ -3244,7 +3243,7 @@ def t_a_kpi_with_a_list_behind_it_opens_it():
     md = re.search(r"function openStatDetail\(m, opener\) \{(.*?)\n        \}", SCRIPT, re.S).group(1)
     ok("name.target = '_blank'; name.rel = 'noopener'" in md, "an item with a url opens the page in a new tab, safely")
     ok("d.empty || 'Nothing to list.'" in md, "an empty list says so instead of showing nothing")
-    ok("opener.focus()" in md, "closing hands focus back to the card")
+    ok("opener: opener" in md, "closing hands focus back to the card (the window part's opener)")
     ok("statAct(I.check)" not in SCRIPT and SCRIPT.count("counterTile(") >= 3,
        "both filter strips are counters now (12 Oct 2026), not figures with a ring at the edge")
     ok(".stat.stat-open { cursor: pointer; }" in CSS, "an opener shows a pointer")
@@ -4531,9 +4530,9 @@ def t_the_fence_respects_stacking_and_open_menus():
     a session expiring while a modal was open trapped Tab in the invisible
     modal BEHIND the opaque login screen. And an open dropdown manages its own
     keys, so the fence stands down for it."""
-    fence = SCRIPT.split("if (e.key !== 'Tab') return;")[1][:1600]
-    ok("tops.find(o => o.classList.contains('auth-overlay'))" in fence,
-       "the login screen wins whenever it is up")
+    fence = dialog_part().split("if (e.key !== 'Tab') return;")[1][:1600]
+    ok("[...document.querySelectorAll('.auth-overlay')].some(o => o.getClientRects().length)) return;" in fence,
+       "the login screen wins whenever it is up: the window fence stands down for its own")
     ok("if (document.querySelector('.dmenu')) return;" in fence,
        "and an open menu is left to its own keys")
 
@@ -5628,9 +5627,7 @@ def t_the_compose_window_is_a_modal_of_the_house_kind():
     ok("function openMailCompose()" in SCRIPT, "the window exists")
     fn = SCRIPT[SCRIPT.index("function openMailCompose()"):]
     fn = fn[:fn.index("\n        async function ")]
-    ok("el('div', 'modal-overlay show')" in fn and "el('div', 'modal-head')" in fn,
-       "the house modal idiom")
-    ok("x.onclick = () => overlay.remove()" in fn, "with an X that closes it")
+    ok("dialog({ title: 'New email'" in fn, "built by the window part, whose X closes it")
     ok("e.target === overlay" not in fn and "Escape" not in fn,
        "and nothing else that closes it")
     ok("name@company.com, another@company.com" in fn, "To says the shape it takes")
@@ -5643,7 +5640,7 @@ def t_the_compose_window_is_a_modal_of_the_house_kind():
        "the cap and what gets added are stated where the message is typed, not "
        "discovered after a refusal")
     done = fn[fn.index("mailSendFlow(bar"):][:400]
-    ok("overlay.remove()" in done and "refreshMailQuiet()" in done,
+    ok("win.close()" in done and "refreshMailQuiet()" in done,
        "success closes the window and repaints the board")
 
 
@@ -8698,6 +8695,25 @@ console.log(JSON.stringify(out));
 
 
 @test
+def t_every_window_is_built_and_closed_by_the_part():
+    """Windows were built by hand in 23 places, each a copy of one shape with
+    its own small differences, and made to behave alike afterwards by fixers.
+    dialog() builds them all now; a window built or removed by hand would
+    escape its role, its focus and the part's stack."""
+    sys.path.insert(0, ROOT)
+    import pagesource
+    bad = []
+    for rel in pagesource.manifest(ROOT)["js"]:
+        if rel == "js/part-dialog.js":
+            continue
+        src = open(os.path.join(ROOT, pagesource.SRC, rel), encoding="utf-8").read()
+        for pat, what in ((r"el\('div', 'modal-overlay", "builds a window"), (r"overlay\.remove\(\)", "removes a window by hand")):
+            for m in re.finditer(pat, src):
+                bad.append("%s:%d %s" % (rel, src[:m.start()].count("\n") + 1, what))
+    ok(not bad, "outside the window part: %s" % bad)
+
+
+@test
 def t_a_confirm_dialog_answers_for_the_focused_button():
     """A12 in the 2026-09-22 bug audit. Enter was bound on the document and
     answered yes wherever focus was: Tab to Cancel, Enter, and Book & dispatch
@@ -8707,9 +8723,8 @@ def t_a_confirm_dialog_answers_for_the_focused_button():
         print("       (node unavailable, skipped)")
         return
     destr = re.search(r"const DESTRUCTIVE = /.*?/i;", SCRIPT).group(0)
-    stack = re.search(r"const confirmStack = \[\];", SCRIPT)
-    ok(stack, "the page keeps one stack of open confirms")
-    js = MINIDOM + "\n" + destr + "\n" + stack.group(0) + "\n" + fn_src("function uiConfirm(message, opts)") + r"""
+    ok("const confirmStack" not in SCRIPT, "the window part keeps the one stack of open windows")
+    js = MINIDOM + "\n" + dialog_harness() + "\n" + destr + "\n" + fn_src("function uiConfirm(message, opts)") + r"""
 const top = () => document.body.children[document.body.children.length - 1];
 const btns = () => top().children[0].children[2].children;
 const settle = (p) => Promise.race([p.then(v => v), new Promise(r => setTimeout(() => r('open'), 10))]);
@@ -8745,6 +8760,35 @@ const settle = (p) => Promise.race([p.then(v => v), new Promise(r => setTimeout(
     ok(got["inner"] is False and got["outer"] == "open", "one Escape closes only the dialog on top: %r" % got)
     ok(got["outerAfterSecond"] is False, "and the next closes the one under it")
     ok(got["dangerEnter"] is False, "a destructive dialog opens on Cancel, so Enter cancels it")
+
+
+@test
+def t_a_question_over_a_window_answers_escape_alone():
+    """A confirm asked from inside a window (the edit-order window asks before
+    it cancels a shipment): Escape answers the question, No, and leaves the
+    window under it open; a second Escape does nothing to that window."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    destr = re.search(r"const DESTRUCTIVE = /.*?/i;", SCRIPT).group(0)
+    js = MINIDOM + "\n" + dialog_harness() + "\n" + destr + "\n" + fn_src("function uiConfirm(message, opts)") + r"""
+const settle = (p) => Promise.race([p.then(v => v), new Promise(r => setTimeout(() => r('open'), 10))]);
+(async () => {
+  const out = {};
+  const w = dialog({ title: 'Edit #210388', size: 'disp-modal' });
+  const p = uiConfirm('Cancel this shipment?', { okText: 'Cancel shipment' });
+  pressKey('Escape');
+  out.answer = await settle(p);
+  out.windowOpen = w.overlay.parentNode === document.body && w.isTop();
+  pressKey('Escape');
+  out.stillOpen = w.overlay.parentNode === document.body;
+  console.log(JSON.stringify(out));
+})();
+"""
+    got = _run_node(js)
+    ok(got["answer"] is False, "Escape answers the question No: %r" % got)
+    ok(got["windowOpen"], "and the window under it stays open, on top again")
+    ok(got["stillOpen"], "and Escape never closes a window holding work")
 
 
 @test
@@ -9161,7 +9205,7 @@ async function api(path, body) {
   if (!body.force && body.rev === rev) return { same: true, rev, synced_at: syncedAt };
   return Object.assign(JSON.parse(JSON.stringify(server)), { synced_at: syncedAt, rev });
 }
-""" + "\n".join(fn_src(f) for f in ("function mailAgo(", "function mailHours(", "async function refreshMailQuiet(",
+""" + dialog_harness() + "\n" + "\n".join(fn_src(f) for f in ("function mailAgo(", "function mailHours(", "async function refreshMailQuiet(",
                                      "function mailBoardKey(", "function mailAgeKey(", "function mailNotePainted(",
                                      "function mailSyncedLine(", "function mailPaintSynced(", "function mailModal(",
                                      "async function openMailThread(")) + r"""
@@ -9225,7 +9269,7 @@ function paintMailThread(m) {
   const full = el('button', 'linkish', 'Read the full emails'); full.dataset.mailReadonly = '';
   m.body.append(el('button', 'btn', 'Reply'), full);
 }
-""" + "\n".join(fn_src(f) for f in ("function mailModal(", "async function openMailThread(")) + r"""
+""" + dialog_harness() + "\n" + "\n".join(fn_src(f) for f in ("function mailModal(", "async function openMailThread(")) + r"""
 const settle = () => new Promise(r => setImmediate(r));
 const top = () => document.body.children[document.body.children.length - 1];
 const closeX = () => top().children[0].children[0].children[1];
@@ -10555,8 +10599,8 @@ def t_the_document_window_opens():
     ok("money(v, cur || p.currency || 'GBP', 2)" in fn, "money2 still goes through the app's one money rule")
     ok(fn.count("money2(") >= 8, "and every figure in the window goes through money2")
     ok("const note = cxWhy(d, true);" in fn, "and the connector's note arrives in words, not '(dry run - not pushed)'")
-    sm = fn_src("function sheetModal(")
-    ok("x.focus()" in sm, "focus goes into the window when it opens")
+    ok("dialog({" in fn_src("function sheetModal("), "the house window")
+    ok("if (x) x.focus();" in dialog_part(), "and focus goes into the window when it opens")
 
 
 @test

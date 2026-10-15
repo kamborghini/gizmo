@@ -479,23 +479,12 @@
         const CHART_BUILDERS = { trend: (o) => trendChart(o), bar: (o) => barChart(o), cat: (o) => catBars(o) };
         function openChartModal(kind, opts) {
             const builder = CHART_BUILDERS[kind] || CHART_BUILDERS.trend;
-            const overlay = el('div', 'modal-overlay chart-modal show');
-            const modal = el('div', 'modal cmodal');
-            const head = el('div', 'modal-head'); head.append(el('h3', null, opts.title || 'Chart'));
-            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
-            const body = el('div', 'modal-body');
+            const win = dialog({ title: opts.title || 'Chart', size: 'cmodal', overlayClass: 'chart-modal' });
             /* The modal head already names the chart. Letting the rebuilt card
                print its own title too gave the same word twice, 43px apart, at
                two different weights. The value and the source line stay: the
                head carries neither. */
-            body.append(builder(Object.assign({}, opts, { height: 360, noExpand: true, title: null })));
-            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
-            const close = () => { overlay.remove(); document.removeEventListener('keydown', esc); };
-            function esc(e) { /* Escape deliberately does not close either: X only. */ }
-            x.onclick = close;
-            // Backdrop clicks never close: a misclick must not wipe a filled form.
-            // The X is the only way out (user rule).
-            document.addEventListener('keydown', esc);
+            win.body.append(builder(Object.assign({}, opts, { height: 360, noExpand: true, title: null })));
         }
 
         /* The chart ramp is monochrome, like the reference. A series is told

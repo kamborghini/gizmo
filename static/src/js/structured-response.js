@@ -312,12 +312,9 @@
         }
         function openStatDetail(m, opener) {
             const d = m.detail || {};
-            const overlay = el('div', 'modal-overlay chart-modal show');
-            const modal = el('div', 'modal smodal');  /* not .cmodal: the chart modal's 980px cap would win on source order */
-            modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true'); modal.setAttribute('aria-label', m.label);
-            const head = el('div', 'modal-head'); head.append(el('h3', null, m.label));
-            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
-            const body = el('div', 'modal-body');
+            /* .smodal, not .cmodal: the chart modal's 980px cap would win on source order. */
+            const win = dialog({ title: m.label, size: 'smodal', overlayClass: 'chart-modal', opener: opener });
+            const { body } = win;
             const sum = el('div', 'stat-detail-sum' + (m.tone === 'warn' ? ' warn' : ''));
             sum.append(el('div', 'value', m.value));
             if (d.title) sum.append(el('div', 'stat-detail-title', d.title));
@@ -337,10 +334,6 @@
                 body.append(rows);
                 if (d.total > items.length) body.append(el('p', 'drill-more', 'Showing the first ' + items.length + ' of ' + d.total + '.'));
             }
-            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
-            // The X is the only way out, like every other modal here (user rule).
-            x.onclick = () => { overlay.remove(); if (opener && opener.focus) opener.focus(); };
-            x.focus();
         }
         // Attach a 12-point sparkline to each KPI by matching its label to a trend series.
         function sparkFor(label, trends) {

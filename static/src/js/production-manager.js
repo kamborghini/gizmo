@@ -301,15 +301,11 @@
         /* Proposal/proof preview: the store's own quote page, embedded so the
            team can eyeball the artwork without leaving the order list. */
         function openProposal(o) {
-            const overlay = el('div', 'modal-overlay show');
-            const modal = el('div', 'modal cmodal proof-modal');
-            const head = el('div', 'modal-head');
-            head.append(el('h3', null, 'Proof · ' + orderNo(o)));
+            const win = dialog({ title: 'Proof · ' + orderNo(o), size: 'cmodal proof-modal', bodyClass: 'proof-body' });
+            const { overlay, modal, head, x, body } = win;
             const ext = el('a', 'proof-ext', 'Open in new tab');
             ext.href = o.proposal_url; ext.target = '_blank'; ext.rel = 'noopener';
-            head.append(ext);
-            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
-            const body = el('div', 'modal-body proof-body');
+            x.before(ext);
             const fr = document.createElement('iframe');
             fr.className = 'proof-frame';
             /* allow-same-origin is only safe while the framed page is on a
@@ -325,18 +321,6 @@
             fr.src = o.proposal_url;
             fr.title = 'Proposal proof';
             body.append(fr);
-            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
-            const prev = document.activeElement;
-            const close = () => {
-                overlay.remove(); document.removeEventListener('keydown', esc);
-                if (prev && prev.focus) prev.focus();   // back to where they were
-            };
-            function esc(e) { /* Escape deliberately does not close either: X only. */ }
-            x.onclick = close;
-            // Backdrop clicks never close: a misclick must not wipe a filled form.
-            // The X is the only way out (user rule).
-            document.addEventListener('keydown', esc);
-            x.focus();
         }
         /* "Repeat customer" line above the label preview, fetched once per customer. */
         const labelHistCache = {};
@@ -1090,18 +1074,9 @@
         }
 
         function openSizeRulesModal() {
-            const overlay = el('div', 'modal-overlay show');
-            const modal = el('div', 'modal');
-            const head = el('div', 'modal-head');
-            const srT = el('h3', null, 'Size rules');
-            head.append(srT);
-            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close';
-            x.setAttribute('aria-label', 'Close');
-            x.onclick = () => overlay.remove();
-            head.append(x);
-            const body = el('div', 'modal-body');
-            modal.append(head, body);
-            overlay.append(modal); document.body.append(overlay);
+            const win = dialog({ title: 'Size rules' });
+            const { overlay, modal, head, x, body } = win;
+            const srT = win.heading;
 
             const draw = async () => {
                 body.innerHTML = '';
@@ -1173,15 +1148,9 @@
         }
 
         function openSizeRuleModal(row, onSaved) {
-            const overlay = el('div', 'modal-overlay show');
-            const modal = el('div', 'modal');
-            const head = el('div', 'modal-head');
-            head.append(el('h3', null, 'Resolve ' + (row.model || 'this model')));
-            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close';
-            head.append(x);
-            const body = el('div', 'modal-body');
-            const close = () => overlay.remove();
-            x.onclick = close;
+            const win = dialog({ title: 'Resolve ' + (row.model || 'this model') });
+            const { overlay, modal, head, x, body } = win;
+            const close = win.close;
             // X only: a misclick must not discard a half-filled ruling.
 
             body.append(el('p', 'field-help',
@@ -1312,8 +1281,7 @@
                 if (onSaved) onSaved(res);
             };
             foot.append(cancel, save);
-            modal.append(head, body, foot);
-            overlay.append(modal); document.body.append(overlay);
+            modal.append(foot);
             (sizeIn || modal).focus();
         }
 
@@ -1446,12 +1414,8 @@
         /* Estimated stock usage: glass blanks consumed by everything marked made
            on a chosen day (UK time), summed by size and glass type. */
         function openMargins() {
-            const overlay = el('div', 'modal-overlay show');
-            const modal = el('div', 'modal disp-modal');
-            const head = el('div', 'modal-head');
-            head.append(el('h3', null, 'Margins'));
-            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
-            const body = el('div', 'modal-body');
+            const win = dialog({ title: 'Margins', size: 'disp-modal' });
+            const { overlay, modal, head, x, body } = win;
             const bar = el('div', 'lbl-toolbar');
             const sel = document.createElement('select'); sel.className = 'lbl-size'; sel.setAttribute('aria-label', 'Orders booked on');
             [[30, 'Last 30 days'], [60, 'Last 60 days'], [90, 'Last 90 days'], [365, 'Last year']]
@@ -1525,18 +1489,11 @@
                 }
             }
             sel.onchange = load;
-            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
-            const close = () => { overlay.remove(); };
-            x.onclick = close;
             load();
         }
         function openDispatchManifest() {
-            const overlay = el('div', 'modal-overlay show');
-            const modal = el('div', 'modal wide');
-            const head = el('div', 'modal-head');
-            head.append(el('h3', null, 'Dispatch manifest'));
-            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
-            const body = el('div', 'modal-body');
+            const win = dialog({ title: 'Dispatch manifest', size: 'wide' });
+            const { overlay, modal, head, x, body } = win;
             const bar = el('div', 'lbl-toolbar');
             const dt = document.createElement('input');
             dt.type = 'date'; dt.className = 'lbl-size';
@@ -1603,9 +1560,6 @@
             }
             pr.onclick = () => { if (current) printDispatchManifest(current); };
             dt.onchange = load;
-            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
-            const close = () => { overlay.remove(); };
-            x.onclick = close;
             load();
         }
         function printDispatchManifest(d) {
@@ -1656,12 +1610,8 @@
                 window.print(); setTimeout(cleanup, 800); }, 40), () => cleanup());
         }
         function openStockUsage() {
-            const overlay = el('div', 'modal-overlay show');
-            const modal = el('div', 'modal');
-            const head = el('div', 'modal-head');
-            head.append(el('h3', null, 'Estimated stock usage'));
-            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
-            const body = el('div', 'modal-body');
+            const win = dialog({ title: 'Estimated stock usage' });
+            const { overlay, modal, head, x, body } = win;
             const bar = el('div', 'lbl-toolbar');
             const dt = document.createElement('input');
             dt.type = 'date'; dt.className = 'lbl-size';
@@ -1831,13 +1781,6 @@
             }
             pr.onclick = () => { if (current) printStockUsage(current); };
             dt.onchange = load;
-            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
-            const close = () => { overlay.remove(); document.removeEventListener('keydown', esc); };
-            function esc(e) { /* Escape deliberately does not close either: X only. */ }
-            x.onclick = close;
-            // Backdrop clicks never close: a misclick must not wipe a filled form.
-            // The X is the only way out (user rule).
-            document.addEventListener('keydown', esc);
             load();
         }
         function printStockUsage(d) {

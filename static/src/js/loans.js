@@ -27,21 +27,7 @@
             renderLoans();
         }
         function sheetModal(title) {
-            const overlay = el('div', 'modal-overlay show');
-            const modal = el('div', 'modal disp-modal');
-            const head = el('div', 'modal-head');
-            head.append(el('h3', null, title));
-            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close';
-            x.setAttribute('aria-label', 'Close');
-            head.append(x);
-            const body = el('div', 'modal-body');
-            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
-            const close = () => overlay.remove();
-            x.onclick = close;      /* the X is the only way out, as everywhere else */
-            /* Focus goes into the window, so the Tab fence has somewhere to
-               start: it stayed on the page behind. */
-            requestAnimationFrame(() => { if (overlay.isConnected) x.focus(); });
-            return { overlay: overlay, modal: modal, body: body, close: close };
+            return dialog({ title: title, size: 'disp-modal' });
         }
         function loanDays(n) { return n === 1 ? '1 day out' : n + ' days out'; }
         function loanOutModal(unit, choices) {
