@@ -1,0 +1,959 @@
+        /* The two halves' headings stand level. */
+        .wpair-in > * > .section-title:first-child { margin-top: 0; }
+        @container wpair (max-width: 64rem) { .wpair > .wpair-in, .wpair.even > .wpair-in, .wpair.flip > .wpair-in, .wpair.fit > .wpair-in { grid-template-columns: minmax(0, 1fr); } }
+        /* Side by side, a fit pair's table is not a size container: one measures
+           as nothing, and Xero sync's runs sat in an 88px column. Stacked, it
+           is one again, so it turns two-line when narrow. */
+        @container wpair (min-width: 64rem) { .wpair.fit > .wpair-in > * .dt { container-type: normal; } }
+        /* what-changed digest */
+        .changes-strip { margin: var(--sp-0-5) 0 var(--sp-6); }
+        /* Beside the summary it is a short list, two columns of the measure and
+           its change, under the same heading size as the summary's. */
+        .wpair .changes-strip { margin: 0; }
+        .wpair .changes-head { font-size: var(--text-head); line-height: var(--lh-control); font-weight: var(--weight-semibold); color: var(--text-primary); margin-bottom: var(--sp-3); }
+        .wpair .changes-strip .impact-deltas { grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); column-gap: var(--sp-6); row-gap: 0; }
+        .wpair .changes-strip .idelta { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--sp-3); background: none; border-radius: 0;
+            padding: var(--sp-1-5) 0; border-bottom: var(--bw-hairline) solid var(--border-default); min-width: 0; }
+        .wpair .changes-strip .idelta .il { font-size: var(--text-body); color: var(--text-secondary); font-weight: var(--weight-regular); }
+        .changes-head { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-tertiary); display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+        .changes-head svg { width: var(--icon-sm); height: var(--icon-sm); }
+        /* scheduled-change alerts */
+        /* A warning notice: the tint, and the rest from the notice recipe (ONE NOTICE, below): no border. */
+        .alerts-banner { background: var(--warning-bg); margin-bottom: var(--sp-5); }
+        .alerts-head { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--warning); margin-bottom: var(--sp-2); }
+        .alerts-head svg { width: var(--icon-md); height: var(--icon-md); }
+        .alerts-clear { margin-left: auto; background: transparent; border: 0; color: var(--text-tertiary); font: inherit; font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); cursor: pointer; }
+        @media (hover: hover) { .alerts-clear:hover { color: var(--text-primary); } }
+        .alert-row { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) 0; border-top: var(--bw-hairline) solid var(--border-default); font-size: var(--text-body); }
+        .alert-row .adot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); flex-shrink: 0; }
+        .alert-row .adot.up { background: var(--success); } .alert-row .adot.down { background: var(--error); } .alert-row .adot.flat { background: var(--text-tertiary); }
+        .alert-row .a-tab { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-tertiary); }
+        .alert-row .a-metric { flex: 1; color: var(--text-primary); }
+        .alert-row .a-pct { font-weight: var(--weight-medium); font-variant-numeric: tabular-nums; }
+        .alert-row .a-pct.up { color: var(--success); } .alert-row .a-pct.down { color: var(--error); }
+        .alert-x { background: transparent; border: 0; color: var(--text-tertiary); padding: var(--sp-1); border-radius: var(--radius-control); display: grid; place-items: center; cursor: pointer; }
+        @media (hover: hover) { .alert-x:hover { color: var(--text-primary); background: var(--surface-tertiary); } } .alert-x svg { width: var(--icon-sm); height: var(--icon-sm); }
+        /* production labels */
+        .lbl-toolbar { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); flex-wrap: wrap; }
+        /* Reports and setup: reachable in one click, but visibly subordinate to the
+           controls used on every order. */
+        .lbl-tools { display: flex; align-items: center; gap: var(--sp-1); margin-bottom: var(--sp-4); flex-wrap: wrap;
+            padding-top: var(--sp-2); border-top: var(--bw-hairline) solid var(--border-default); }
+        .lbl-tools .btn { background: transparent; border-color: transparent; color: var(--text-secondary);
+            font-weight: var(--weight-medium); padding: var(--sp-1-5) var(--sp-2); }
+        @media (hover: hover) { .lbl-tools .btn:hover { background: var(--surface-tertiary); color: var(--text-primary); } }
+        .lbl-tools .btn svg { opacity: .7; }
+        .lbl-tools .lbl-count { margin-left: auto; }
+        .lbl-count { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        /* One order opened from Shopify says so over the toolbar. */
+        .q-note { margin: 0; color: var(--text-tertiary); }
+        /* ONE TABLE (12 Oct 2026). A list whose rows share fields is one grid:
+           its head and its rows share the grid's column tracks (subgrid), so
+           every column lines up down the list and the spare width is shared
+           across headed columns. Cameron's first screenshot was the other way:
+           a name at the far left of a boxed row and its buttons at the far
+           right, 800px of nothing between. A row is a hairline in one list; its
+           state is a dot, never a box. Each table's tracks are its own class
+           (.dt-<name> { --dt-cols }), set with its page. */
+        .dt { container: dt / inline-size; }
+        .dtable { display: grid; grid-template-columns: var(--dt-cols); column-gap: var(--sp-4); }
+        .dtable > :is(.dt-head, .dt-row) { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; position: relative; }
+        .dt-head { min-height: var(--control-h); border-bottom: var(--bw-hairline) solid var(--border-default);
+            font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary); }
+        .dt-row { min-height: var(--row-h); padding-block: var(--sp-2); border-bottom: var(--bw-hairline) solid var(--border-default); }
+        .dt-row.two { min-height: var(--order-row-h); }
+        .dt-c { min-width: 0; display: flex; align-items: center; gap: var(--sp-2); }
+        .dt-c.num { justify-content: flex-end; text-align: right; font-variant-numeric: tabular-nums; }
+        .dt-c.stack { flex-direction: column; align-items: flex-start; justify-content: center; gap: 0; }
+        /* Actions wrap within their cell, still at its end: in a phone's two-line row a
+           panel's inset left less room than four buttons need, and end-aligned they
+           spilled out of the row on the left (13 Oct 2026). */
+        .dt-c.act { justify-content: flex-end; gap: var(--control-gap); flex-wrap: wrap; }
+        .dt-c.email { overflow-wrap: anywhere; }
+        /* An icon in a cell (an activity's type) has the house size: its drawing has none of its own. */
+        .dt-c > .ic { color: var(--text-tertiary); }
+        .dt-c > .ic svg { width: var(--icon-md); height: var(--icon-md); }
+        .dt-head .dt-c.sort { color: var(--text-secondary); }
+        .dt-head .dt-c svg { width: var(--icon-sm); height: var(--icon-sm); }
+        .dt-name { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; font-weight: var(--weight-medium); color: var(--text-primary); }
+        /* The clip starts a hairline left of the text (and the text a hairline
+           in), so a first letter on a half pixel keeps its stem. */
+        .dt-sub { max-width: calc(100% + var(--bw-hairline)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            margin-left: calc(-1 * var(--bw-hairline)); padding-left: var(--bw-hairline);
+            font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        /* A button whose word swaps keeps one width, the wider word's, so the
+           buttons after it line up down the column. */
+        .swap { display: inline-grid; }
+        .swap > * { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: var(--control-gap); }
+        .swap > [aria-hidden="true"] { visibility: hidden; }
+        .dt-c.ind > .dt-sub { padding-left: calc(var(--dot-md) + var(--sp-2)); }
+        .dt-muted { color: var(--text-tertiary); }
+        /* A name beside a status (Out, then who has it) ends in an ellipsis
+           rather than pushing past its column. */
+        .dt-name > .dt-muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .dt-bad { color: var(--error); font-weight: var(--weight-semibold); }
+        .dt-warn { color: var(--warning); }
+        .dt-dot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); flex: none; background: var(--border-emphasis); }
+        .dt-dot.bad { background: var(--error); }
+        .dt-dot.warn { background: var(--warning); }
+        .dt-dot.ok { background: var(--success); }
+        .dt-dot.off { background: transparent; box-shadow: inset 0 0 0 var(--bw-hairline) var(--border-emphasis); }
+        .dt-row.settled .dt-c { color: var(--text-tertiary); }
+        /* An open row and its detail are one block: the teal wash, run 16 past
+           the text edge so the words stay on it, and the open edge. */
+        .dtable > .dt-detail { grid-column: 1 / -1; padding: var(--sp-2) 0 var(--sp-5); border-bottom: var(--bw-hairline) solid var(--border-default); }
+        .dt-row.open, .dtable > .dt-detail { background: var(--action-selected);
+            box-shadow: calc(-1 * var(--sp-4)) 0 0 var(--action-selected), var(--sp-4) 0 0 var(--action-selected); }
+        .dt-row.open { border-bottom-color: transparent; }
+        .dt-row.open::before { content: ""; position: absolute; top: 0; bottom: 0; left: calc(-1 * var(--sp-4)); width: var(--bw-strong); background: var(--border-selected); }
+        .dtable > .dt-detail { position: relative; }
+        .dtable > .dt-detail::before { content: ""; position: absolute; top: 0; bottom: 0; left: calc(-1 * var(--sp-4)); width: var(--bw-strong); background: var(--border-selected); }
+        .dt-row.click { cursor: pointer; }
+        @media (hover: hover) { .dt-row.click:hover { background: var(--surface-secondary); } }
+        /* ONE TABLE, NARROW: a table whose columns no longer fit its own width
+           turns each row into two lines (its main cell, then the rest after it
+           in grey, its actions straight after them rather than out at the far
+           edge) and drops its head, never a
+           sideways scroll. Each table picks the width its columns need: xs at
+           24rem (a three-column table), s at 40rem, m at 56rem, l at 72rem. */
+        @container dt (max-width: 24rem) {
+            .dt-xs > .dtable { display: block; }
+            .dt-xs > .dtable > .dt-head { display: none; }
+            .dt-xs > .dtable > .dt-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--sp-3); row-gap: var(--sp-1); }
+            .dt-xs > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; order: -1; }
+            .dt-xs > .dtable > .dt-row > .dt-c:not(.dt-main, .act) { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+            .dt-xs > .dtable > .dt-row > .dt-c:empty { display: none; }
+            .dt-xs > .dtable > .dt-row > .dt-c[data-h] { color: var(--text-secondary); }
+            .dt-xs > .dtable > .dt-row > .dt-c[data-h]::before { content: attr(data-h); margin-right: var(--sp-1); color: var(--text-tertiary); }
+        }
+        @container dt (max-width: 40rem) {
+            .dt-s > .dtable { display: block; }
+            .dt-s > .dtable > .dt-head { display: none; }
+            .dt-s > .dtable > .dt-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--sp-3); row-gap: var(--sp-1); }
+            .dt-s > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; order: -1; }
+            .dt-s > .dtable > .dt-row > .dt-c:not(.dt-main, .act) { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+            .dt-s > .dtable > .dt-row > .dt-c:empty { display: none; }
+            .dt-s > .dtable > .dt-row > .dt-c[data-h] { color: var(--text-secondary); }
+            .dt-s > .dtable > .dt-row > .dt-c[data-h]::before { content: attr(data-h); margin-right: var(--sp-1); color: var(--text-tertiary); }
+            .dt-s > .dtable > .dt-row > .dt-c.go { display: none; }
+        }
+        @container dt (max-width: 56rem) {
+            .dt-m > .dtable { display: block; }
+            .dt-m > .dtable > .dt-head { display: none; }
+            .dt-m > .dtable > .dt-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--sp-3); row-gap: var(--sp-1); }
+            .dt-m > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; order: -1; }
+            .dt-m > .dtable > .dt-row > .dt-c:not(.dt-main, .act) { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+            .dt-m > .dtable > .dt-row > .dt-c:empty { display: none; }
+            .dt-m > .dtable > .dt-row > .dt-c[data-h] { color: var(--text-secondary); }
+            .dt-m > .dtable > .dt-row > .dt-c[data-h]::before { content: attr(data-h); margin-right: var(--sp-1); color: var(--text-tertiary); }
+            .dt-m > .dtable > .dt-row > .dt-c.go { display: none; }
+        }
+        @container dt (max-width: 72rem) {
+            .dt-l > .dtable { display: block; }
+            .dt-l > .dtable > .dt-head { display: none; }
+            .dt-l > .dtable > .dt-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--sp-3); row-gap: var(--sp-1); }
+            .dt-l > .dtable > .dt-row > .dt-c.dt-main { flex: 1 1 100%; order: -1; }
+            .dt-l > .dtable > .dt-row > .dt-c:not(.dt-main, .act) { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+            .dt-l > .dtable > .dt-row > .dt-c:empty { display: none; }
+            .dt-l > .dtable > .dt-row > .dt-c[data-h] { color: var(--text-secondary); }
+            .dt-l > .dtable > .dt-row > .dt-c[data-h]::before { content: attr(data-h); margin-right: var(--sp-1); color: var(--text-tertiary); }
+            .dt-l > .dtable > .dt-row > .dt-c.go { display: none; }
+        }
+        /* Liability (12 Oct 2026): every customer owing in one table, what they
+           owe straight after their name. */
+        .dt-owing { --dt-cols: minmax(12rem, 2fr) max-content max-content minmax(7rem, 1fr) max-content max-content minmax(6rem, 1fr) minmax(6rem, 1fr) max-content; }
+        /* Reconciliation (12 Oct 2026): the severity, a short What with its
+           tags, the record and who it is with, the date, a status tag, the
+           amount. The Record is as wide as it needs, the date straight after
+           it, and What takes the rest (at least 12rem); a long What or a long
+           name ends in an ellipsis, and the tags take a second line before
+           they push the row wider. */
+        .dt-recon { --dt-cols: max-content minmax(12rem, 1fr) minmax(0, max-content) max-content max-content max-content max-content; }
+        .dt-recon .dt-c:nth-child(2) { flex-wrap: wrap; row-gap: var(--sp-1); }
+        .dt-recon .dt-c > :is(.lbl-chip) { flex: none; }
+        .dt-sev { display: flex; align-items: center; gap: var(--sp-2); white-space: nowrap; }
+        .dt-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; font-weight: var(--weight-medium); color: var(--text-primary); }
+        .dt-amt { font-weight: var(--weight-medium); color: var(--text-primary); white-space: nowrap; }
+        .dt-row.settled :is(.dt-what, .dt-amt, .dt-name) { color: var(--text-secondary); }
+        /* A BAND (12 Oct 2026): a page's figures, a hairline, and what they
+           come from (Reconciliation's sources, Xero sync's connection and Auto
+           Run), each line a dot and a name, its value right after, and an
+           action at its end. A line the sources wrap to starts on the text
+           edge: the clip keeps its hairline outside (the figure group's rule). */
+        .band-row { display: flex; flex-wrap: wrap; align-items: stretch; column-gap: var(--sp-8); row-gap: var(--sp-5);
+            overflow: clip; overflow-clip-margin: var(--sp-1); }
+        .band-row > .metrics { margin-bottom: 0; }
+        .band-src { position: relative; flex: 1 1 30rem; min-width: 0; display: grid; grid-template-columns: max-content minmax(0, max-content) max-content;
+            align-content: center; align-items: center; column-gap: var(--sp-6); row-gap: var(--sp-2); }
+        .band-src::before { content: ""; position: absolute; top: 0; bottom: 0; left: calc(-0.5 * var(--sp-8)); width: var(--bw-hairline); background: var(--border-default); }
+        .band-src-l { display: contents; }
+        .band-src-h { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--sp-1); font-weight: var(--weight-semibold); color: var(--text-primary); }
+        .band-src-k { grid-column: 1; display: flex; align-items: center; gap: var(--sp-2); font-weight: var(--weight-medium); white-space: nowrap; }
+        .band-src-k.ind { padding-left: calc(var(--dot-md) + var(--sp-2)); }
+        /* A value wraps, at every width: the Auto Run line was cut "next in 6 minut…" (final visual review M3). */
+        .band-src-v { min-width: 0; overflow-wrap: anywhere; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+        .band-src-v.bad { color: var(--error); font-weight: var(--weight-medium); }
+        .band-src-e { display: flex; align-items: center; gap: var(--sp-2); }
+        .band-src-e > .info { margin: 0; }
+        .band-notice { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-4) 0 0; color: var(--error); font-weight: var(--weight-medium); }
+        /* A BAND ON A PHONE: a value wraps under nothing, beside its name,
+           and a line's action goes under its value. */
+        @media (max-width: 640px) {
+            .band-src { grid-template-columns: max-content minmax(0, 1fr); }
+            .band-src-v { white-space: normal; overflow-wrap: anywhere; }
+            .band-src-e { grid-column: 2; }
+        }
+        /* The sweep's line on the tab row, and its Notes (n) disclosure. */
+        .recon-sweep { display: flex; align-items: center; gap: var(--sp-2); white-space: nowrap; font-size: var(--text-xs); line-height: var(--lh-caption);
+            color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+        .disc { display: inline-flex; align-items: center; gap: var(--sp-1); height: var(--control-h); padding: 0 var(--sp-1); border: 0; border-radius: var(--radius-control);
+            background: none; font: inherit; font-weight: var(--weight-medium); color: var(--text-secondary); cursor: pointer; white-space: nowrap; }
+        @media (hover: hover) { .disc:hover { background: var(--surface-tertiary); color: var(--text-primary); } }
+        .disc svg { width: var(--icon-sm); height: var(--icon-sm); }
+        .disc[aria-expanded="true"] svg { rotate: 180deg; }
+        .disc-n { color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+        .recon-notes ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+        .recon-notes li { display: flex; align-items: baseline; gap: var(--sp-2); color: var(--text-secondary); }
+        .recon-notes li > .dt-dot { translate: 0 calc(-1 * var(--sp-0-5)); }
+        .card-title > .card-n { margin-left: var(--sp-2); font-weight: var(--weight-regular); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+        /* An opened discrepancy: its sentence and X across it, then what it is
+           and what to do on the left, what it rests on at the right; one column
+           when the table is narrow. */
+        .rd { container: rd / inline-size; }
+        .rd-lead { display: flex; align-items: center; gap: var(--sp-3); min-height: var(--control-h); margin-bottom: var(--sp-2); font-weight: var(--weight-medium); color: var(--text-primary); }
+        .rd-lead > .rd-title { flex: 1 1 auto; min-width: 0; }
+        .rd-cols { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 4fr); column-gap: var(--sp-8); row-gap: var(--sp-6); }
+        .rd .segmented > button { flex: 0 0 auto; }
+        @container rd (max-width: 48rem) { .rd-cols { grid-template-columns: minmax(0, 1fr); } }
+        .rd-col { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); }
+        .rd-col > :is(.ktable-wrap, .rd-evlist, .rd-facts, .rd-p) { align-self: stretch; }
+        .rd-h { display: flex; align-items: center; gap: var(--sp-2); align-self: stretch; min-height: var(--control-h); margin-top: var(--sp-4); font-weight: var(--weight-semibold); color: var(--text-primary); }
+        .rd-col > .rd-h:first-child { margin-top: 0; }
+        .rd-h > .disc { margin-left: auto; }
+        .rd-n { color: var(--text-tertiary); font-weight: var(--weight-regular); font-variant-numeric: tabular-nums; }
+        .rd-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: var(--sp-4); row-gap: var(--sp-2); margin: 0; }
+        .rd-facts dt { color: var(--text-tertiary); }
+        .rd-facts dd { margin: 0; color: var(--text-primary); }
+        .rd-sum { margin: 0; width: fit-content; }
+        .rd-sum > div { display: grid; grid-template-columns: 8rem 7rem; column-gap: var(--sp-4); align-items: center; min-height: var(--control-h);
+            border-bottom: var(--bw-hairline) solid var(--border-default); }
+        .rd-sum dt { color: var(--text-secondary); }
+        .rd-sum dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+        .rd-sum > .tot { border-bottom: 0; font-weight: var(--weight-semibold); }
+        .rd-sum > .tot dt { color: var(--text-primary); }
+        .rd-hist { margin: 0; color: var(--text-secondary); }
+        .rd-hist > span { color: var(--text-tertiary); }
+        .rd-err { margin: 0; color: var(--error); font-size: var(--text-xs); line-height: var(--lh-caption); }
+        .rd-ev { background: transparent; }
+        .rd-ev th { white-space: normal; }
+        .rd-evname { margin: 0; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); overflow-wrap: anywhere; }
+        .rd-ev td.rd-k { color: var(--text-tertiary); white-space: nowrap; }
+        .rd-ev td.rd-diff { color: var(--error); font-weight: var(--weight-medium); }
+        .rd-verdict { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
+        .rd-meter { position: relative; width: 6rem; height: var(--sp-1-5); border-radius: var(--radius-full); background: var(--border-default); overflow: hidden; }
+        .rd-meter > i { position: absolute; inset: 0 auto 0 0; background: var(--border-selected); border-radius: inherit; }
+        .rd-muted { color: var(--text-tertiary); }
+        .rd-orphan { margin-top: var(--sp-4); padding: var(--sp-4); border-radius: var(--radius-tile); background: var(--action-selected); }
+        .lia-detail-head { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+        .lia-detail-head .icon-btn { margin-left: auto; }
+        .lia-detail .ktable { background: transparent; }
+        .ktable td.strong { font-weight: var(--weight-semibold); }
+        /* The orders take three fifths beside the chase email, their dates and
+           tags on one line. */
+        .lia-detail > .duo { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+        .lia-detail .ktable :is(td) { white-space: nowrap; }
+        /* Paid but still tagged: one line under the legend, the orders after
+           the words. */
+        .miss-strip.inline { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--sp-3); row-gap: var(--sp-1); }
+        .miss-strip.inline > .miss-row { padding: 0; border: 0; }
+        /* Products (12 Oct 2026): the catalogue as one table whose columns share
+           the row, the figures straight after the words. */
+        .dt-products { --dt-cols: minmax(14rem, 2.4fr) minmax(6rem, 1fr) max-content minmax(7rem, 1fr) max-content max-content max-content max-content; }
+        .dt-products.cmp { --dt-cols: minmax(14rem, 2.4fr) minmax(6rem, 1fr) max-content minmax(7rem, 1fr) max-content max-content max-content max-content max-content; }
+        .dt-link { border: 0; background: none; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; min-width: 0; }
+        .dt-c .prod-thumb { flex: none; }
+        /* Loan units' two tables (the mockup): what is out, longest first, and
+           the register, every action in a column of its own. */
+        .dt-loans-out { --dt-cols: minmax(0, 1.6fr) minmax(0, 1.2fr) max-content minmax(0, 1fr) max-content; }
+        .dt-loans-reg { --dt-cols: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.2fr) max-content max-content; }
+        .dt-loan-hist { --dt-cols: minmax(0, 1fr) max-content max-content; }
+        /* The chase limit in Out now's head: its words, the field, days, Save. */
+        .loan-chase { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+        .loan-chase .loan-chase-days { width: 5rem; }
+        .lbl-row { display: flex; align-items: center; gap: var(--sp-2-5); padding: var(--sp-2-5) var(--sp-3); background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default);
+            border-radius: var(--radius-inset); margin-bottom: var(--sp-2); cursor: pointer; transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease); text-align: left; width: 100%; }
+        @media (hover: hover) { .lbl-row:hover { background: var(--surface-secondary); border-color: var(--border-strong); } }
+        .lbl-row:is(.on, [aria-selected="true"]) { border-color: var(--border-selected); background: var(--surface-secondary); }
+        /* A loan past a date somebody agreed reads as a problem; one that is
+           simply old reads as a nudge. The stripe carries it, not the whole
+           row, so the text keeps its contrast on either state. */
+        /* The dry run's document, read as an invoice rather than as a status
+           word. The account code and the tax type get their own columns:
+           those are the two fields a wrong mapping gets wrong, and the two
+           a one-line summary can never show. */
+        .conn-pairs { display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-1-5) var(--sp-4);
+            font-size: var(--text-xs); line-height: var(--lh-caption); margin: var(--sp-3) 0; }
+        .conn-pairs dt { color: var(--text-tertiary); }
+        .conn-pairs dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+        .conn-pairs { grid-template-columns: fit-content(40%) minmax(0, 1fr); }
+        .conn-pairs dt { overflow-wrap: anywhere; }
+        /* The Xero sync page: the ways in as tiles, the Auto Run state as one
+           row, the state chips as one row. */
+        /* Three across when the card has room for three, otherwise one per
+           row: never two and a stranded third. Sized by the CARD, which is
+           a container for the purpose, not by the window, and with no floor
+           a narrow card could not hold. The tiles stretch to one height. */
+        .cx-card { container: cxcard / inline-size; }
+        .cx-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4) var(--sp-8); align-items: stretch; margin-top: var(--sp-4); }
+        @container cxcard (min-width: 60rem) { .cx-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        .cx-card > .cx-grid { padding-top: var(--sp-4); border-top: var(--bw-hairline) solid var(--border-default); }
+        /* A tile is a small form on the card's grid, no box of its own (the mix, spec 3): its title and
+           controls sit on the same text edge as the rest of the card. */
+        .cx-tile { border: 0; border-radius: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+        .cx-tile-title { font-size: var(--text-body); font-weight: var(--weight-medium); }
+        /* Inside a tile the row is a plain flex row: the label-row frame it
+           inherits drew a box within the tile, and its grid kept a tile from
+           shrinking below the sum of its box and both buttons. */
+        .cx-tile { min-width: 0; }
+        /* One shape for every tile: the box across the top of its row and
+           the two buttons side by side beneath it. Their labels are one word
+           ('Check', 'Send', 'Write notes'), so they fit any tile; wrapping
+           stays as the safety net, never the layout. */
+        .cx-tile .cx-row { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: auto; }
+        /* The three tiles share two row tracks (title, controls), so
+           the controls sit at one height across all three whatever their
+           titles' length. The ONE column is minmax(0, 1fr): a grid's implicit column
+           is auto, which grows to its widest content, and a result listed in
+           a tile once pushed that column 450px past the tile and the card.
+           Without subgrid the flex column stands. */
+        @supports (grid-template-rows: subgrid) {
+            .cx-tile { display: grid; grid-row: span 2; grid-template-rows: subgrid; grid-template-columns: minmax(0, 1fr); align-content: start; }
+            .cx-tile .cx-row { margin-top: 0; align-self: end; }
+        }
+        /* What the checks found, under the tiles and the width of the card:
+           one section per check, each a heading, one sentence and a table. */
+        .cx-results { display: flex; flex-direction: column; gap: var(--sp-8); padding-top: var(--sp-4);
+            border-top: var(--bw-hairline) solid var(--border-default); min-width: 0; }
+        .cx-res { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+        .cx-res > .ktable-wrap, .cx-res > .tbl-foot { margin: 0; }
+        .cx-res-title { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); margin: 0; }
+        .cx-res-sum { font-size: var(--text-body); color: var(--text-secondary); line-height: var(--lh-control); margin: var(--sp-1) 0 0; max-width: var(--measure); }
+        /* Top-aligned, every cell's first line on one baseline. The bare
+           .cx-docs td lost to .ktable td's middle, so the order and the
+           document sat 12px above the chip beside them. */
+        .ktable.cx-docs td { vertical-align: top; }
+        .cx-docs td.cx-state .lbl-chip, .cx-docs td.cx-kind { white-space: nowrap; }
+        .cx-docs td.cx-state { min-width: 16ch; }
+        .cx-warns { display: flex; flex-direction: column; gap: var(--sp-1); }
+        .cx-warns-head { font-weight: var(--weight-medium); }
+        .cx-docs td.cx-ord { font-weight: var(--weight-medium); white-space: nowrap; }
+        .cx-docs td.num { white-space: nowrap; }
+        .cx-docs td.cx-act { width: 1%; white-space: nowrap; text-align: right; padding-block: var(--sp-2); }
+        /* The outcome (or the note) takes the spare width, so the order and
+           the document sit together on the left and the money at the right,
+           rather than every column spread evenly across 1,400px. */
+        .cx-docs td.cx-out, .cx-docs td.cx-note { width: 100%; }
+        .cx-docs td:first-child { white-space: nowrap; }
+        .cx-docs .cx-why { font-size: var(--text-xs); color: var(--text-secondary); line-height: var(--lh-caption); margin-top: var(--sp-1); max-width: 60ch; }
+        /* An order's documents read as one group: no rule between them, and
+           the order named only on the first. */
+        .cx-docs tr:has(+ tr.cx-more) td { border-bottom-color: transparent; }
+        .cx-docs tr.cx-more td { padding-top: 0; }
+        /* On a phone a row is a small block: the order, then the document
+           and its amount, then the outcome and Open. As a table it scrolled
+           sideways with the amount and Open off the screen and the outcome
+           squeezed to four lines. The tabs scroll instead of wrapping. */
+        .card:has(.cx-docs) { container: cxcard / inline-size; }
+        @container cxcard (max-width: 560px) {
+            .ktable.cx-docs { min-width: 0; display: block; }
+            .cx-docs tbody { display: block; }
+            .cx-docs thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+            .cx-docs tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--sp-3); row-gap: var(--sp-1);
+                padding: var(--sp-3) 0; border-bottom: var(--bw-hairline) solid var(--border-default); }
+            .cx-docs tr:last-child { border-bottom: 0; }
+            .cx-docs tr:has(+ tr.cx-more) { border-bottom-color: transparent; }
+            .cx-docs tr.cx-more { padding-top: 0; }
+            .ktable.cx-docs td { display: block; padding: 0; border: 0; width: auto; min-width: 0; height: auto; }
+            .cx-docs td:empty { display: none; }
+            /* Named areas, not auto-placement: the cells come in the order
+               order, document, outcome, amount, Open, and placed one after
+               another the amount fell to the outcome's line and Open to a
+               line of its own. */
+            .cx-docs:not(.cx-pay):not(.cx-quar) tr { grid-template-areas: "ord ord" "kind num" "out act"; }
+            .cx-docs:not(.cx-pay):not(.cx-quar) tr.cx-more { grid-template-areas: "kind num" "out act"; }
+            .cx-docs td.cx-ord { grid-area: ord; }
+            .cx-docs td.cx-kind { grid-area: kind; }
+            .cx-docs td.num { grid-area: num; text-align: right; }
+            .cx-docs td.cx-out { grid-area: out; }
+            .cx-docs td.cx-act { grid-area: act; text-align: right; }
+            .cx-pay tr { grid-template-areas: "ord pay" "state state" "note note"; }
+            .cx-pay td.cx-payout { grid-area: pay; text-align: right; }
+            .cx-pay td.cx-payout::before { content: "Payout "; color: var(--text-tertiary); }
+            .cx-pay td.cx-state { grid-area: state; }
+            .cx-pay td.cx-note { grid-area: note; }
+            .cx-quar tr { grid-template-areas: "ord kind" "note note"; }
+            .cx-quar td.cx-kind { text-align: right; }
+            .cx-quar td.cx-note { grid-area: note; }
+            .cx-res .segmented { flex-wrap: nowrap; overflow-x: auto; }
+            .cx-docs.cx-one:not(.cx-pay) tr { grid-template-areas: "kind num" "out act"; }
+        }
+        /* The payout note, and a quarantine reason, word for word: text that
+           wraps, at the table's own size, never narrower than a phrase. */
+        .ktable td.cx-note { line-height: var(--lh-control); min-width: 28ch; }
+        /* The three checks (12 Oct 2026): one line each, the box and then its
+           buttons at their words' width. */
+        .cx-tile .cx-row input, .cx-tile .cx-row select { flex: 1 1 8rem; min-width: 0; width: auto; max-width: 24rem; height: var(--control-h); }
+        .cx-tile .cx-row .btn { flex: none; justify-content: center; }
+        /* Review and send's one status line, then the matrix at its natural
+           width with Needs attention beside it, each thing said once. */
+        .cx-statl { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); margin-top: var(--sp-1);
+            color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+        .cx-statl b { font-weight: var(--weight-semibold); color: var(--text-primary); }
+        .cx-statl .t-warn { color: var(--warning); font-weight: var(--weight-medium); }
+        .cx-statl .t-bad { color: var(--error); font-weight: var(--weight-medium); }
+        .cx-rv { display: grid; grid-template-columns: minmax(0, max-content) minmax(18rem, 1fr); align-items: start; gap: var(--sp-4) var(--sp-8); margin-top: var(--sp-4); }
+        .cx-rv > :only-child { grid-column: 1 / -1; }
+        @container cxcard (max-width: 56rem) { .cx-rv { grid-template-columns: minmax(0, 1fr); } }
+        .cx-mx { width: fit-content; max-width: 100%; margin: 0; }
+        .cx-mx td.zero { color: var(--text-tertiary); }
+        .cx-att { min-width: 0; display: flex; flex-direction: column; }
+        .cx-att-h { display: flex; align-items: center; min-height: var(--control-h); border-bottom: var(--bw-hairline) solid var(--border-default);
+            font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary); }
+        .cx-att-r { display: flex; align-items: baseline; gap: var(--sp-2); padding-block: var(--sp-2); border-bottom: var(--bw-hairline) solid var(--border-default);
+            color: var(--text-primary); }
+        .cx-att-r > .dt-dot { translate: 0 calc(-1 * var(--sp-0-5)); }
+        /* The runs at their natural width; a quarantined document over why. */
+        /* When takes any spare width: stacked in a full-width panel the table fills it; beside
+           the quarantine log the fitted half is still the table's own width (13 Oct 2026). */
+        .dt-runs { --dt-cols: minmax(max-content, 1fr) repeat(5, max-content); }
+        .dt-quar { --dt-cols: minmax(0, 1fr); }
+        .dt-why { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); white-space: normal; overflow-wrap: anywhere; }
+        /* The settings: two columns of names, each value right after its own. */
+        .cx-setcard { container: cxset / inline-size; }
+        .conn-pairs.cx-set { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content minmax(0, 1fr); column-gap: var(--sp-4); row-gap: var(--sp-2); }
+        @container cxset (max-width: 44rem) { .conn-pairs.cx-set { grid-template-columns: max-content minmax(0, 1fr); } }
+        .conn-doc { width: 100%; border-collapse: collapse; margin-top: var(--sp-3); }
+        .conn-doc th { text-align: left; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary);
+            font-weight: var(--weight-semibold); padding: var(--sp-1-5) var(--sp-2); border-bottom: var(--bw-hairline) solid var(--border-default); }
+        .conn-doc td { padding: var(--sp-2); border-bottom: var(--bw-hairline) solid var(--border-default);
+            vertical-align: top; font-size: var(--text-xs); line-height: var(--lh-caption); }
+        .conn-doc .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .conn-doc tfoot td { font-weight: var(--weight-semibold); border-bottom: 0; }
+        .conn-doc-wrap { overflow-x: auto; }
+        /* A line's quantity, unit, account and tax, under its description,
+           for a phone, where the columns would push the Amount and the total
+           off to the right of a 335px window. */
+        .conn-doc-meta { display: none; }
+        @media (max-width: 640px) {
+            /* The lines table only: the window's other two tables keep their
+               headings, which say what Xero holds now and what it would become. */
+            .conn-doc.cd-lines, .conn-doc.cd-lines tbody, .conn-doc.cd-lines tfoot { display: block; }
+            .conn-doc.cd-lines thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+            .conn-doc.cd-lines tr { display: flex; align-items: baseline; gap: var(--sp-3); padding: var(--sp-2) 0; border-bottom: var(--bw-hairline) solid var(--border-default); }
+            .conn-doc.cd-lines tfoot tr { border-bottom: 0; }
+            .conn-doc.cd-lines td { display: block; padding: 0; border: 0; }
+            .conn-doc.cd-lines td:first-child { flex: 1 1 auto; min-width: 0; }
+            .conn-doc.cd-lines td.cd-mid { display: none; }
+            .conn-doc.cd-lines .conn-doc-meta { display: block; }
+        }
+        /* ONE COLUMN for the Xero sync page.
+           Prose is capped at a 52ch reading measure, which is right. The
+           control rows were not capped at all, so at 1900px an input and two
+           buttons sat in a 1524px bordered box that was 71% empty - beside a
+           414px paragraph. And the result lists, built inside a .setting-sub,
+           inherited the PROSE cap and came out narrower than either. Three
+           different widths, none of them chosen.
+           The rows and results share a column now; prose keeps its own measure
+           inside it, sharing the same left edge. The space that is left over
+           sits OUTSIDE the column, where it reads as margin. */
+        #view-connector .card > .mail-statebar,
+        #view-connector .card > .disp-addr-grid { max-width: 56rem; }
+        /* The control bars hold an input and two buttons. Filling the column
+           left them half empty, which reads as a box waiting for something
+           that never arrives, so they shrink to what they hold. Their left
+           edge is the column's, so nothing drifts out of alignment. */
+        #view-connector .card > .lbl-row { width: fit-content; max-width: 100%; }
+        /* .card is a flex column with gap:16px, and a flex container does NOT
+           collapse margins - so every child's own vertical margins are ADDED to
+           that gap. A heading written for 24px above and a paragraph written
+           for 5px got 16+24 and 16+12+5, and the page paid for its spacing
+           twice: 33px between a heading and its own paragraph, 44 before the
+           control it introduces. The container owns the rhythm here - 16px
+           inside a section, 32 between them - and the children bring none. */
+        #view-connector .card > * { margin-top: 0; margin-bottom: 0; }
+        #view-connector .card > .section-title { margin-top: var(--sp-4); }
+        #view-connector .card > .section-title:first-of-type { margin-top: 0; }
+        /* A results container with nothing in it should take no space at all;
+           an empty one still contributed its margin, which is half of what
+           read as arbitrary gaps down the page. */
+        #view-connector .conn-results:empty { display: none; }
+        /* The note verbatim, as Xero will hold it: a quotation, not prose. */
+        /* The document reads top to bottom in sections, and h4.card-title
+           carries no top margin - so "Payout note" and "What Shopify says"
+           landed hard against the sentence above them while other blocks had
+           room to spare. One rhythm for the whole sheet. */
+        .modal-body h4.card-title { margin: var(--sp-5) 0 var(--sp-2); }
+        /* Consecutive alerts sat flush against each other. They are separate
+           statements - one about whether the totals agree, one about which
+           customer it lands on - and reading as a single block hid that. */
+        .modal-body .msg + .msg { margin-top: var(--sp-2); }
+        .modal-body h4.card-title:first-child { margin-top: 0; }
+        .modal-body .conn-pairs + .conn-doc-wrap { margin-top: var(--sp-2); }
+        .conn-note { font-family: var(--font-mono);
+            font-size: var(--text-xs); line-height: var(--lh-caption); background: var(--surface-tertiary); border: var(--bw-hairline) solid var(--border-default);
+            border-radius: var(--radius-inset); padding: var(--sp-2-5) var(--sp-3); margin: var(--sp-2) 0;
+            white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary, var(--text-primary)); }
+        /* Loan rows are a name, a state and a row of buttons. With nothing
+           flexible between them they all bunched against the left edge and
+           left half the row empty, which read as a layout that had not
+           finished loading. The name takes the slack instead. */
+        .loan-row .lr-what { flex: 1 1 auto; min-width: 0; }
+        .loan-row .lr-what > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        /* Edit and Retire travel together, and 'days out' is one column down the list. */
+        .loan-icons { display: inline-flex; gap: var(--sp-1); flex: none; }
+        .loan-row .lr-when { flex: 0 0 11rem; }
+        /* The unit's name gave way first and on an iPad it went to nothing,
+           with the status chip cut to 'On the' (an Inbox rule reached it) and
+           the bin hanging out of the row. By the card's width, a narrow card
+           puts the name on its own line and the chip and buttons under it. */
+        .card:has(> .loan-row) { container: loans / inline-size; }
+        @container loans (max-width: 620px) {
+            .loan-row { flex-wrap: wrap; }
+            .loan-row .lr-what { flex: 1 1 100%; }
+            .loan-row .lbl-actions { margin-left: auto; }
+        }
+        .lbl-row.is-late { border-color: var(--error); box-shadow: inset var(--bw-marker) 0 0 var(--error); }
+        .lbl-row.is-due { border-color: var(--warning); box-shadow: inset var(--bw-marker) 0 0 var(--warning); }
+        .lbl-row.is-late .lbl-meta { color: var(--error); }
+        .lbl-row.is-due .lbl-meta { color: var(--warning); }
+        /* A list INSIDE a card is content, not a stack of boxes: a white
+           bordered row on a white bordered card draws a second frame around
+           the same fill, and with a drill-down open the finance list stacked
+           four of them at 8/10/14/14px radii. The reference divides its rows
+           with a hairline and lets the card be the only frame. Opt-in by
+           wrapper, because the same row is a standalone card elsewhere. */
+        .lbl-rows .lbl-row { border-color: transparent; border-radius: 0; margin-bottom: 0;
+            box-shadow: inset 0 calc(-1 * var(--bw-hairline)) 0 var(--border-default); }
+        @media (hover: hover) { .lbl-rows .lbl-row:hover { border-color: transparent; } }
+        /* No divider under the last row: with nothing beneath it, it reads as a
+           rule the list does not need. When a drill-down is open the row is no
+           longer last, and the divider is right again. */
+        .lbl-rows > .lbl-row:last-child { box-shadow: none; }
+        /* A selected row is the wash, like every selected row: no stripe. */
+        .lbl-rows .lbl-row:is(.on, [aria-selected="true"]) { border-color: transparent; background: var(--action-selected);
+            box-shadow: inset 0 calc(-1 * var(--bw-hairline)) 0 var(--border-default); }
+        /* The row's first line is one height whatever fills it. Liability opens
+           with a 20px chip and Reconciliation with a 21px name, which made the
+           same row component 64px on one tab and 65px on the other. Only while
+           the row is one line: below 900 it wraps and its height comes from the
+           wrapped text, where the two already measured the same. */
+        @media (min-width: 901px) { .lbl-rows .lbl-nameline { min-height: 21px; } }
+        /* The reconciliation drill-down, in the shell the liability drill-down
+           already uses: the same bordered box directly under the row it belongs
+           to, at the rows' own width. It used to be appended to the bottom of
+           the page, so the same-looking row answered a click two different ways
+           one tab apart. */
+        .lbl-rows .lbl-drill { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset);
+            background: var(--surface-primary); margin: var(--sp-1) 0 var(--sp-4); padding: var(--sp-4); }
+        /* The reconciliation detail: its headings one step under the row's
+           title, never above it, and prose at the body size. */
+        .recon-drill-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+        .recon-drill-close { margin-left: auto; }
+        .rd-h { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary);
+            margin: var(--sp-4) 0 var(--sp-1-5); }
+        .rd-p { margin: 0 0 var(--sp-1); font-size: var(--text-body); color: var(--text-secondary); line-height: var(--lh-control); max-width: var(--measure); }
+        .rd-p.fig { font-variant-numeric: tabular-nums; }
+        .rd-p.quiet { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .rd-ai { background: var(--surface-secondary); border-radius: var(--radius-inset); padding: var(--sp-3); }
+        .rd-ai-t { font-size: var(--text-body); font-weight: var(--weight-medium); margin-bottom: var(--sp-1); }
+        .rd-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+        .rd-row[hidden] { display: none; }
+        .rd-row + .rd-row { margin-top: var(--sp-2); }
+        .rd-reason { flex: 1 1 16rem; max-width: var(--field-w-xl); }
+        .ev-id { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); margin-right: var(--sp-2); font-variant-numeric: tabular-nums; }
+        .lbl-drill details.know-body + details.know-body { margin-top: var(--sp-1-5); }
+        .lbl-drill details.know-body > .conn-pairs { margin-top: var(--sp-2); font-size: var(--text-body); }
+        .lbl-num { font-size: var(--text-body); font-weight: var(--weight-medium); font-variant-numeric: tabular-nums; min-width: 92px; }
+        /* min-width:120px stopped this flex child shrinking, so the ellipsis
+           never fired and the sub-line and status chips clipped mid-glyph.
+           A floor it can still fall below when the row is tight. */
+        .lbl-who { flex: 1 1 auto; min-width: 0; font-size: var(--text-body); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .lbl-who .sub { display: block; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .lbl-who .sub > .sub-line { display: block; overflow: hidden; text-overflow: ellipsis; }
+        .lbl-meta { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); white-space: nowrap; }
+        /* The document window's contact line: an address and a Xero id run
+           past a phone's window unless they may break anywhere. */
+        .lbl-meta:is(.cx-contact, .conn-doc-meta) { white-space: normal; overflow-wrap: anywhere; }
+        /* A message box's detail line is a sentence, not a figure: the payout
+           note's reason ran off the document window on one line, cut mid-word. */
+        .msg > .lbl-meta { white-space: normal; overflow-wrap: anywhere; }
+        /* The row's own figure, one treatment on both finance pages: the money
+           ends the row at the right edge in 14px medium ink. The meta column's
+           12px muted type is right for a date and wrong for the number the row
+           is being triaged by. */
+        .lbl-meta.fig { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary);
+            font-variant-numeric: tabular-nums; }
+        /* Narrow: on the production queues the date and the button words go
+           before the customer name does. A figure does NOT: it was the one
+           number a merchant triages a discrepancy by, and dropping the shared
+           class took it off the phone entirely with nowhere else to read it. */
+        @media (max-width: 900px) {
+            .lbl-rows .lbl-row { flex-wrap: wrap; }
+            /* The middle block always shares the first line, so rows in one
+               list do not zig-zag by the width of their chips. */
+            .lbl-rows .lbl-who { flex: 1 1 0; }
+            .lbl-rows .lbl-meta { width: 100%; order: 3; margin-top: var(--sp-1); text-align: left; }
+        }
+        /* THE QUEUE IS LAID OUT BY ITS OWN WIDTH, NOT THE WINDOW'S.
+           It used to switch on viewport breakpoints (1200 and 1500), which
+           was right until the label preview took 476px beside it: the list
+           shrank to 900px while the rules still dressed it as a 1,400px one,
+           and six labelled buttons painted over the item line and the date.
+           Each row was also its own grid with auto date and button tracks, so
+           a refunded order (fewer buttons) or a longer date shifted its row's
+           columns by up to 121px. Now the list is a container and ONE grid,
+           and every row is a subgrid of it: the tracks are sized by the widest
+           row and every row shares them.
+           .lbl-qrow, NOT .lbl-row: the row shell is shared by seven lists with
+           different children, and only the production queues opt in. */
+        .lbl-list { container: queue / inline-size; }
+        /* Below the shared tracks the row is flex: the rail reserves what it
+           needs and the name ellipsises instead. */
+        @container queue (max-width: 559px) { .lbl-qrow .lbl-actions { min-width: max-content; } }
+        /* A list this narrow is a phone's, whatever the window: a tablet with
+           the sidebar open gave the list 435px, the buttons kept their full
+           width beside the name, and the customer's name showed as "C". The
+           buttons take their own line, as they do on a phone. */
+        @container queue (max-width: 559px) {
+            .lbl-qrow { flex-wrap: wrap; }
+            .lbl-qrow .lbl-actions { flex: 1 1 100%; justify-content: flex-start; }
+        }
+        /* The name never gives way to nothing. Kept to one line below 860px
+           of list, a dispatched order's courier chip ("Dispatched, Parcelforce
+           Worldwide") took the whole column, and from 900 to 1,100px, and on a
+           tablet, the customer's name was 0px wide. The name line wraps at
+           every width, as it already did from 860px: the name shows in full
+           when it fits, and chips that do not fit beside it go under it. */
+        .lbl-qrow .lbl-nameline { flex-wrap: wrap; row-gap: var(--sp-1); }
+        /* Below 1,000px of list, the buttons drop to icons: every one keeps its
+           title, the row stays one line, and nothing overlaps. They are the
+           small control (28px, 36px on touch) like every button beside them
+           in the card: at 32px the rows' buttons stood taller than the card
+           head's and the toolbar's. */
+        @container queue (max-width: 999px) {
+            .lbl-actions .lbl-btn-txt { display: none; }
+            .lbl-actions .btn:has(> .lbl-btn-txt) { padding: 0; min-width: var(--control-h-md); justify-content: center; }
+        }
+        /* The shared tracks start as soon as the date shows (560px), so a
+           refunded order's shorter rail cannot pull its date out of line with
+           the rows around it. Up to 860px the name ellipsises, which is the
+           part that can afford to give; from there it wraps instead. */
+        @container queue (min-width: 560px) {
+            .lbl-grid { display: grid; grid-template-columns: var(--ono-w) minmax(0, 1fr) max-content max-content;
+                column-gap: var(--sp-2-5); }
+            .lbl-grid > * { grid-column: 1 / -1; }
+            .lbl-qrow { display: grid; grid-template-columns: subgrid; align-items: center; }
+            .lbl-qrow .lbl-meta { justify-self: end; padding-right: var(--sp-3); }
+            /* From the column's start: right-aligned, a refunded order's
+               shorter rail put Preview and Print a button to the right of
+               the rows around it. */
+            .lbl-qrow .lbl-actions { justify-self: start; }
+            /* The date and the buttons are the last two columns of the first
+               line, whatever else a row carries: auto-placed, a row with one
+               item too many wrapped its buttons into the 100px number column,
+               right-aligned, so they hung out of the row over the sidebar. */
+            .lbl-qrow > .lbl-meta { grid-row: 1; grid-column: -3 / -2; }
+            .lbl-qrow > .lbl-actions { grid-row: 1; grid-column: -2 / -1; }
+        }
+        @container queue (min-width: 860px) {
+            .lbl-qrow .lbl-who { overflow: visible; white-space: normal; }
+        }
+        /* Wider still: display:contents dissolves the .lbl-who box so the name
+           and the "Company - 3 items - 6 pcs" line become two real columns
+           rather than two stacked lines with a growing void beside them. The
+           width buys information, which is the only thing it is worth buying. */
+        /* The widest a panel gives the queue is 1150, the 1200 column less a panel's inset and edge either side (13 Oct 2026). */
+        @container queue (min-width: 1140px) {
+            .lbl-grid { grid-template-columns: var(--ono-w) minmax(220px, max-content) minmax(0, 1fr) max-content max-content; }
+            .lbl-qrow .lbl-who { display: contents; }
+            .lbl-qrow .lbl-who .sub { align-self: center; font-size: var(--text-xs); line-height: var(--lh-caption); overflow: hidden;
+                text-overflow: ellipsis; white-space: nowrap; }
+        }
+        .lbl-actions { display: flex; gap: var(--sp-2); align-items: center; flex: 0 1 auto; min-width: 0; justify-content: flex-end; }
+        /* THE ORDER ROW (the mix, spec 6 and 8.2): a hairline between orders
+           instead of a box round each, 64 tall; the open row and its preview
+           one block in the teal wash with the teal bar; Preview and Hide one
+           width; a state change starts its own group. The queue's content and
+           actions are its own and do not change. The words sit on the section's
+           text edge (the row-family ruling, 6 October 2026): the wash and the
+           hover bleed 8 past the column with box-shadow, the open order's bar is
+           drawn on the bleed's outer edge. */
+        .lbl-grid { box-shadow: var(--rule-t); }
+        .lbl-qrow { min-height: var(--order-row-h); padding: var(--sp-2) 0; margin-bottom: 0; border: 0; border-radius: 0;
+            background: none; box-shadow: var(--rule-b-soft); }
+        @media (hover: hover) { .lbl-qrow:hover { background: var(--surface-secondary); box-shadow: var(--rule-b-soft), calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); } }
+        .lbl-qrow:is(.on, [aria-selected="true"]) { background: var(--action-selected);
+            box-shadow: var(--rule-b-soft), calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected), calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected); }
+        /* Where its preview follows, the open row and the preview are one block: no hairline through it. */
+        .lbl-qrow:is(.on, [aria-selected="true"]):has(+ .lbl-preview) {
+            box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected), calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected); }
+        .lbl-qrow .lbl-name { font-size: var(--text-sm); font-weight: var(--weight-medium); }
+        /* An order's date reads as body (13/20), like the mockup's .dt; the lists that share .lbl-meta keep the caption. */
+        .lbl-qrow .lbl-meta { font-size: var(--text-body); line-height: var(--lh-control); font-variant-numeric: tabular-nums; }
+        .lbl-actions .grp { margin-left: calc(var(--gap-cluster) - var(--control-gap)); }
+        .lbl-actions .lbl-slot { visibility: hidden; }
+        .swap { display: inline-grid; }
+        .swap > span { grid-area: 1 / 1; text-align: center; }
+        .swap > .gone { visibility: hidden; }
+        .lbl-grid > .lbl-preview { display: grid; grid-template-columns: max-content minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr);
+            column-gap: var(--sp-6); align-items: start;
+            padding: 0 0 var(--sp-6); background: var(--action-selected);
+            box-shadow: var(--rule-b-soft), calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected), calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected); }
+        @container queue (min-width: 560px) {
+            .lbl-grid > .lbl-preview { padding-left: calc(var(--ono-w) + var(--sp-2-5)); }
+        }
+        /* The opened order (12 Oct 2026): the real label on the left at actual
+           size, and beside its top the repeat-customer line, the size note and
+           Print this label. One column in a narrow queue, as on a phone. */
+        .lbl-preview > .lbl-frame { grid-column: 1; grid-row: 1 / span 3; }
+        .lbl-preview > :not(.lbl-frame) { grid-column: 2; min-width: 0; }
+        .lbl-preview > .lbl-hist { margin: 0 0 var(--sp-2); }
+        .lbl-preview > .lbl-toolbar { margin: var(--sp-3) 0 0; }
+        @container queue (max-width: 559px) {
+            .lbl-grid > .lbl-preview { display: block; }
+            .lbl-preview > .lbl-hist { margin: 0 0 var(--sp-3); }
+        }
+        .lbl-frame { margin: 0; width: fit-content; max-width: 100%; border-radius: var(--radius-control); box-shadow: var(--shadow-label); }
+        /* The label draws its edge from --border-strong (a frozen rule). Whatever that shared grey becomes,
+           the label inside its frame keeps the edge it had. */
+        .lbl-frame { --border-strong: var(--paper-edge); }
+        /* THE QUEUE RUNS EDGE TO EDGE OF THE SHEET (the mockup's .pm and .orders; the Production Manager only, one treatment
+           at every width): on a desktop a rule above the toolbar with 16 clear
+           under it, the controls, 16 clear, then a rule above the list (the card's own gap is the 16), a rule under every
+           order across the sheet, and the open order's wash and its 2px teal edge spanning the sheet. A phone has no rule
+           above the search (the queue tabs sit 16 over it, as the mockup's .m-tools has). The words stay on the text edge;
+           the bands are drawn past it by the gutter on both sides (--q-bleed-end). */
+        .q-card { position: relative; gap: var(--sp-4); --q-bleed-end: var(--wrap-pad); }
+        @media (min-width: 641px) {
+            .q-card { border-top: var(--bw-hairline) solid transparent; padding-top: var(--sp-4); }
+            .q-card::before { content: ""; position: absolute; top: calc(-1 * var(--bw-hairline)); inset-inline: calc(-1 * var(--wrap-pad));
+                height: var(--bw-hairline); background: var(--border-default); pointer-events: none; }
+        }
+        @media (max-width: 640px) { .ov-wrap > .queues { margin-bottom: var(--sp-4); } }
+        .q-card .lbl-list > .lbl-grid::before { content: ""; position: absolute; top: 0; inset-inline: calc(-1 * var(--wrap-pad)) calc(-1 * var(--q-bleed-end));
+            height: var(--bw-hairline); background: var(--border-default); pointer-events: none; }
+        .q-card .lbl-list > .lbl-grid { position: relative; box-shadow: none; }
+        .q-card .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview) { position: relative; isolation: isolate; background: none; box-shadow: none; }
+        .q-card .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::before { content: ""; position: absolute; z-index: -1; inset: 0 calc(-1 * var(--q-bleed-end)) 0 calc(-1 * var(--wrap-pad)); pointer-events: none; }
+        .q-card .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::after { content: ""; position: absolute; bottom: 0; inset-inline: calc(-1 * var(--wrap-pad)) calc(-1 * var(--q-bleed-end));
+            height: var(--bw-hairline); background: var(--border-soft); pointer-events: none; }
+        .q-card .lbl-list > .lbl-grid > :last-child::after { background: var(--border-default); }
+        .q-card .lbl-list > .lbl-grid > .lbl-qrow:has(+ .lbl-preview)::after { display: none; }
+        @media (hover: hover) { .q-card .lbl-list > .lbl-grid > .lbl-qrow:hover::before { background: var(--surface-secondary); } }
+        .q-card .lbl-list > .lbl-grid > :is(.lbl-qrow:is(.on, [aria-selected="true"]), .lbl-preview)::before { background: var(--action-selected); box-shadow: var(--ring-selected); }
+        /* A list as narrow as a phone's: worded 40 buttons in a grid, three on
+           the first line and two on the second (the mix, spec 8.2); the label
+           is scaled there, so its frame draws no shadow. */
+        @container queue (max-width: 559px) {
+            /* The number and the date on one line, the name 4 under it, the buttons 12 under that (the mockup's .m-orow). */
+            .lbl-qrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; padding: var(--sp-3) 0; row-gap: var(--sp-1); }
+            .lbl-qrow > .lbl-num { grid-area: 1 / 1; justify-self: start; min-width: 0; }
+            .lbl-qrow > .lbl-meta { grid-area: 1 / 2; justify-self: end; width: auto; margin: 0; padding: 0; }
+            .lbl-qrow > .lbl-who { grid-column: 1 / -1; }
+            .lbl-qrow > .lbl-actions { grid-column: 1 / -1; margin-top: var(--sp-2); }
+            /* No max-content floor here (the flex row's, above): with six equal tracks it made the grid 423 in a 347 row. */
+            .lbl-qrow .lbl-actions { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--control-gap); min-width: 0; }
+            .lbl-qrow .lbl-actions > .btn { grid-column: span 2; padding: 0 var(--sp-2); justify-content: center; }
+            .lbl-qrow .lbl-actions > .btn:nth-child(n+4) { grid-column: span 3; }
+            /* Two buttons (a shipment's Copy tracking and Reprint label) take half the line each. */
+            .lbl-qrow .lbl-actions > .btn:first-child:nth-last-child(2), .lbl-qrow .lbl-actions > .btn:first-child:nth-last-child(2) ~ .btn { grid-column: span 3; }
+            .lbl-qrow .lbl-actions > .grp { margin-left: 0; }
+            .lbl-qrow .lbl-actions .lbl-btn-txt { display: inline; }
+            .lbl-qrow .lbl-actions .lbl-btn-txt.swap { display: inline-grid; }
+            .lbl-frame { box-shadow: none; }
+        }
+        /* THE PRODUCTION MANAGER'S PHONE HEADER (the mockup's): the title with its live line and Refresh, and
+           More as three dots beside it (its name stays "More", its menu and its handler are the same);
+           Print new, when there is one, on a full row; Collections and New shipment sharing one row at equal
+           widths. The rail's buttons are the head's own grid items, in the markup's order, so no button
+           stands alone beside empty space. */
+        .more-btn > .ic:nth-child(3) { display: none; }
+        @media (max-width: 640px) {
+            .ov-hero.pm-head { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--control-gap); align-items: start; }
+            .ov-hero.pm-head > .ph-text { grid-column: 1 / -1; grid-row: 1; margin-bottom: var(--control-gap);
+                padding-right: calc(var(--control-h-lg) + var(--control-gap) + var(--sp-2)); }
+            .ov-hero.pm-head > .ov-hero-act { display: contents; }
+            .ov-hero.pm-head > .ov-hero-act > .btn { margin: 0; }
+            .ov-hero.pm-head > .ov-hero-act > .btn-primary { grid-column: 1 / -1; }
+            .ov-hero.pm-head > .ov-hero-act > .more-btn { grid-column: 2; grid-row: 1; justify-self: end; align-self: start;
+                margin-top: calc((var(--lh-title) - var(--control-h-lg)) / 2);
+                width: var(--control-h-lg); min-width: var(--control-h-lg); padding: 0; }
+            /* Refresh and More are two 40 squares at the title's right, the status line keeping its words and no glyph
+               (the mockup's phone head). Refresh stays in the status line in the markup, so the tab order is unchanged. */
+            .ov-hero.pm-head { position: relative; }
+            .ov-hero.pm-head > .ph-text { padding-right: calc(2 * var(--control-h-lg) + var(--control-gap) + var(--sp-2)); }
+            .pm-head .ph-sub > .info { position: absolute; top: calc((var(--lh-title) - var(--control-h-lg)) / 2); right: calc(var(--control-h-lg) + var(--control-gap));
+                width: var(--control-h-lg); height: var(--control-h-lg); margin: 0; padding: 0; align-content: normal; place-items: center;
+                border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-control); background: var(--surface-primary); box-shadow: var(--shadow-control); }
+            .pm-head .ph-sub > .info::before { inset: 0; top: 0; width: auto; height: auto; margin: 0; border-radius: inherit; }
+            /* Custom shipments has no More: Refresh is the one square, at the edge, the title has that square's room, and its one
+               action (New shipment) takes the row. */
+            .ov-hero.pm-head:not(:has(.more-btn)) > .ph-text { padding-right: calc(var(--control-h-lg) + var(--sp-2)); }
+            .pm-head:not(:has(.more-btn)) .ph-sub > .info { right: 0; }
+            .ov-hero.pm-head > .ov-hero-act > .btn:only-child { grid-column: 1 / -1; }
+            /* The title has the squares' side to itself, as the mockup's has: the queue's (i), when there is one, rides on the
+               status line instead, so its 40 target never reaches Refresh. The markup order, and so the tab order, is unchanged. */
+            .ov-hero.pm-head > .ph-text { display: grid; grid-template-columns: auto auto auto minmax(0, 1fr); align-items: center; column-gap: var(--sp-2); row-gap: var(--sp-1); }
+            .pm-head .ph-title, .pm-head .ph-sub { display: contents; }
+            .pm-head .ph-title > h2 { grid-column: 1 / -1; grid-row: 1; }
+            /* With no (i) (To ship, Complete) the title is the grid's own child: it takes the row across as well, or it wraps in the first column. */
+            .ov-hero.pm-head > .ph-text > h2 { grid-column: 1 / -1; grid-row: 1; }
+            .pm-head .ph-sub > .live-dot { grid-row: 2; grid-column: 1; }
+            .pm-head .ph-sub > .ov-updated { grid-row: 2; grid-column: 2; }
+            /* Its 40 target leans DOWN as the status line's Refresh does (the shared header's construction): 4 above the 20 line
+               to 16 below it, the glyph centred on the line by padding, so the status line is 4 under the title with the target
+               never reaching the title's box. */
+            .pm-head .ph-title > .info { grid-row: 2; grid-column: 3; align-content: start;
+                margin-block: calc(-1 * var(--sp-1)) calc(var(--lh-control) - var(--control-h-lg) + var(--sp-1));
+                padding-top: calc(var(--sp-1) + (var(--lh-control) - var(--icon-md)) / 2); }
+            .pm-head .ph-title > .info::before { top: calc(var(--sp-1) + var(--lh-control) / 2); }
+            .pm-head .more-txt, .pm-head .more-btn > .ic:nth-child(2) { display: none; }
+            .pm-head .more-btn > .ic:nth-child(3) { display: inline-flex; }
+        }
+        /* The label is sized to the real label stock and shares the print document's
+           line-height and font stack exactly, so the preview is what prints.
+           All internal sizes are in em, so shrink-to-fit only has to change one
+           font-size on .label-sheet and the whole label scales with it. */
+        .label-sheet { background: var(--paper); color: var(--paper-ink); border: 1px solid var(--border-strong); border-radius: var(--radius-xs);
+            box-sizing: border-box; padding: 5mm 5.5mm; overflow: hidden; font-size: 15px; line-height: 1.22;
+            width: 100mm; height: 150mm; font-family: var(--font-print); }
+        /* The merchant's own design: logo over a big company name and a quiet
+           "Order:" line closed by a heavy 2px rule, then one-line item rows of
+           bold qty+size, an outlined glass-type chip, and the quoted artwork
+           title, separated by hairline rules. Chips stay plain black outlines:
+           printers strip backgrounds and tiny reversed type bleeds on thermal. */
+        .label-sheet .ls-top { border-bottom: var(--bw-strong) solid var(--paper-rule-strong); padding-bottom: .95em; margin-bottom: .9em; }
+        .label-sheet .ls-logo { margin-bottom: .7em; }
+        .label-sheet .ls-logo svg.lg { height: 3.4em; width: auto; max-width: 70%; display: block; }
+        .label-sheet .ls-company { font-size: 1.68em; font-weight: var(--weight-semibold); line-height: 1.15; overflow-wrap: break-word; }
+        .label-sheet .ls-ono { font-size: 1em; color: var(--paper-ink-4); margin-top: .3em; font-variant-numeric: tabular-nums; }
+        /* The serial sticker: the tag is the whole point, so it takes the
+           space, and the two codes share the foot. Sized in em like the rest
+           of the sheet, so the label scales as one. */
+        .loan-sticker { display: flex; flex-direction: column; }
+        .loan-sticker .ls-tag { font-size: 2.9em; font-weight: var(--weight-semibold); line-height: 1.05;
+            letter-spacing: .02em; text-align: center; margin: .35em 0 .1em;
+            font-variant-numeric: tabular-nums; }
+        .loan-sticker .ls-unit { text-align: center; }
+        .loan-sticker .ls-unit .ls-company { font-size: 1.15em; }
+        .loan-sticker .ls-codes { margin-top: auto; display: flex; align-items: flex-end;
+            justify-content: space-between; gap: .6em; }
+        .loan-sticker .ls-barcode { height: 3.1em; width: auto; max-width: 62%; }
+        .loan-sticker .ls-qr { height: 4.2em; width: 4.2em; }
+        .label-sheet ul { list-style: none; margin: 0; padding: 0; }
+        .label-sheet .ls-row { border-bottom: var(--bw-hairline) solid var(--paper-rule); padding: .45em 0;
+            page-break-inside: avoid; break-inside: avoid; }
+        .label-sheet .ls-row:last-child { border-bottom: none; }
+        .label-sheet .ls-it { display: flex; align-items: baseline; gap: .7em; font-size: .9em;
+            white-space: nowrap; overflow: hidden; }
+        .label-sheet .ls-iqs { font-weight: var(--weight-semibold); flex: none; font-variant-numeric: tabular-nums; min-width: 5.6em; }
+        .label-sheet .ls-chip { font-size: .85em; font-weight: var(--weight-semibold); letter-spacing: .03em; text-transform: none;
+            padding: .08em .55em; border: var(--bw-hairline) solid var(--paper-rule-strong); border-radius: 2px; flex: none; }
+        .label-sheet .ls-chip.fl { border-width: 2px; font-weight: var(--weight-semibold); }
+        .label-sheet .ls-desc { color: var(--paper-ink-4); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+        .label-sheet .ls-it.wrap { white-space: normal; overflow: visible; }
+        .label-sheet .ls-it.wrap .ls-desc { overflow: visible; text-overflow: clip; }
+        .label-sheet .ls-it.named .ls-iqs { min-width: 0; }
+        .label-sheet .ls-ctx { font-size: .78em; color: var(--paper-ink-3); margin-top: .12em; padding-left: 1.6em; }
+        .label-sheet.shed .ls-rate { display: none; }
+        /* Customer strip: follows the last item, rule directly beneath it. */
+        .label-sheet .ls-rate { margin-top: .6em; padding-top: .35em; border-top: var(--bw-hairline) solid var(--paper-rule);
+            display: flex; align-items: center; justify-content: flex-start; }
+        .label-sheet .ls-rt { font-size: .68em; font-weight: var(--weight-medium); text-align: left; }
+        .label-sheet .ls-r1 { font-weight: var(--weight-semibold); font-size: 1.06em; }
+        .label-sheet .ls-rate b { font-weight: var(--weight-semibold); }
+        /* Short stock (4 x 2 and similar): tighter padding, everything else scales by em. */
+        .label-sheet.compact { padding: 3.5mm 4mm; font-size: var(--text-sm); }
+        /* Sits in the same toolbar as .btn, so it matches .btn metrics exactly:
+           it read as a squashed "thin" control when it had its own padding. */
+        /* The house hairline, like every other control in the row: a select
+           carries this class while the input beside it takes the shared field
+           recipe, so --border-strong made two of six controls visibly darker. */
+        /* background-COLOR, not the shorthand. `background:` resets every
+           background longhand, which silently wiped the caret the base `select`
+           rule paints - so every filter select in the app rendered as a plain
+           bordered pill with no sign it opened anything. Same reason on hover:
+           a shorthand there made the caret vanish under the pointer. */
+        .lbl-size { background-color: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-field);
+            color: var(--text-primary); font: inherit; font-size: var(--text-body); font-weight: var(--weight-medium); padding: var(--control-pad-y) var(--sp-3);
+            line-height: var(--lh-control); cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); min-height: var(--control-h); }
+        /* The caret needs its gutter back too: the padding shorthand above
+           overrode the base rule's padding-right, so a restored glyph would
+           have been drawn on top of the label. Selects only - .lbl-size is
+           also worn by search and date inputs, which paint no caret. */
+        select.lbl-size { padding-right: var(--chevron-room); }
+        @media (hover: hover) { .lbl-size:hover { background-color: var(--surface-sunken); border-color: var(--border-emphasis); } }
+        .lbl-find { min-width: 190px; font-weight: var(--weight-regular); }
+        .lbl-nameline { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; max-width: 100%; }
+        /* In lists, chips that do not fit beside a title go under it, as in the queues. */
+        .lbl-rows .lbl-nameline { flex-wrap: wrap; row-gap: var(--sp-1); }
+        /* The customer name gives way first; status chips must never be cut in half. */
+        .lbl-nameline > .lbl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+        /* 20px, set rather than inherited from line box + padding, which gave
+           21.5 and left every chip a hair taller than the reference's badge. */
+        /* A chip given no tone is still a chip: the neutral tint is the base,
+           and each tone below replaces it. Without it, 'average' and 'No longer
+           detected' rendered as bare bold words floating beside a name. */
+        .lbl-chip { display: inline-flex; align-items: center; gap: var(--sp-1);
+            height: var(--tag-h); font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium);
+            letter-spacing: normal; padding: 0 var(--sp-2); border-radius: var(--radius-tag);
+            flex: none; text-transform: none; white-space: nowrap;
+            background: var(--surface-sunken); color: var(--text-secondary); border: var(--bw-hairline) solid transparent; }
+        /* A status mark is a TINT, not an outlined control. The reference's
+           badge is a coloured fill over a fully transparent border; these wore
+           a neutral grey ring over the tint, which at 12 pills down a Liability
+           list and 19 down Reconciliation made every status read as a small
+           button. The border stays in the box at 1px transparent so the
+           measured 20px height and 0/8px padding do not move. The neutral chip
+           steps to --surface-sunken, the ground the app's other ringless neutral
+           pills (.pill.low, .delta.flat) already sit on, because at --surface-tertiary
+           over white the ring was the only thing making it a chip at all. */
+        .lbl-chip.bad { background: var(--error-bg); color: var(--error); border: var(--bw-hairline) solid transparent; }
+        .lbl-chip.warn { background: var(--warning-bg); color: var(--warning); border: var(--bw-hairline) solid transparent; }
+        /* A tag in a card's head (Xero sync's Connection state) is its own width,
+           not the head's grid column. */
+        .card-head > .lbl-chip { justify-self: start; }
+        /* ---- Cancelled. Muted and struck through: a name, a line or a label for
+           something that will not now happen. ---- */
+        .is-cancelled, [data-status="cancelled"] { color: var(--text-tertiary); text-decoration: line-through; }
+        .lbl-chip.note { background: var(--surface-sunken); color: var(--text-secondary); border: var(--bw-hairline) solid transparent; }
+        .lbl-chip.made { background: var(--success-bg); color: var(--success); border: var(--bw-hairline) solid transparent; }
+        /* The severity chip is a reconciliation row's leading mark, so it takes
+           a fixed slot rather than sizing to its own word: shrink-to-fit, its
+           four labels are four widths and every title behind them zig-zagged
+           22px down the list. 72px clears "Medium", the widest of them. */
+        .rec-sev { flex: 0 0 72px; justify-content: center; }
+        /* The Reconciliation connection card: status left, actions right, as a
+           card header lays out its title and its actions. */
+        .recon-conn { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+            gap: var(--sp-3) var(--sp-4); }
+        .recon-conn-status { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); min-width: 0; }
+        .recon-conn-count { font-size: var(--text-body); color: var(--text-secondary); margin-left: var(--sp-1); }
+        .recon-conn-acts { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+        .recon-conn-warn { margin-bottom: 0; }
+        /* The last sweep's notes: one list with a list's rhythm, at the prose
+           measure, not a stack of field-help lines with a field's gap under
+           each one. */
+        .recon-notes-h { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary);
+            margin-bottom: var(--sp-1-5); }
+        .recon-notes ul { margin: 0; padding: 0 0 0 var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-1);
+            font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); max-width: var(--measure); }
+        .lbl-row.stale { opacity: .6; }
+        .lbl-hist { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); margin: 0 0 var(--sp-2); }
+        .proof-modal { max-width: 1080px; width: 94vw; }
+        /* The iframe scrolls its own content; the body must not reserve a
+           scrollbar gutter (Safari's persistent scrollbars showed as a gap). */
+        .proof-body { padding: 0 !important; overflow: hidden !important; }
+        .proof-frame { display: block; width: 100%; height: min(76vh, 820px); border: 0;
+            border-radius: 0 0 var(--radius-card) var(--radius-card); background: var(--surface-primary); }
+        .proof-ext { margin-left: auto; margin-right: var(--sp-3); font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); }

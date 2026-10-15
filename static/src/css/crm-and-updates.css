@@ -1,0 +1,271 @@
+        /* ------------------------------------------------------------------
+           CRM. The board is the Pipedrive silhouette: stage columns, cards
+           carrying the four-colour activity state, a drop bar that exists
+           only mid-drag, rotten deals tinted red as a whole card.
+           ------------------------------------------------------------------ */
+        /* Updates: release notes and the request box. */
+        /* The sidebar's one inset, 12px from each edge, is kept by .nav,
+           .convos and both buttons above. */
+        .nav-new-dot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); background: var(--nav-on-icon);
+            flex: none; margin-left: auto; }
+        /* Beta: quieter than a warning, louder than nothing. It sits where the
+           unread dot sits, so the nav keeps one right-hand column. */
+        /* Resolve-a-flagged-model dialog. One choice at a time: the three
+           rulings are mutually exclusive, and showing all three sets of fields
+           at once invites filling in the one you did not pick. */
+        .sr-opt { display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-2) 0;
+            font-size: var(--text-body); cursor: pointer; }
+        .sr-opt input { margin-top: var(--sp-1); flex: none; width: var(--box-xs); height: var(--box-xs);
+            accent-color: var(--control-accent); cursor: pointer; }
+        .sr-pane { padding: 0 0 var(--sp-3) var(--sp-6); }
+        .sr-hits { display: flex; flex-direction: column; gap: var(--sp-1); max-height: 190px;
+            overflow-y: auto; margin: var(--sp-2) 0; }
+        .sr-hit { justify-content: flex-start; text-align: left; width: 100%; }
+        .sr-hit.on { border-color: var(--border-selected); background: var(--action-selected); }
+        /* Off-screen until it takes focus, which is the only time it is for. */
+        .skip-link { position: fixed; top: 8px; left: 8px; z-index: 300;
+            transform: translateY(-200%); transition: transform var(--dur) var(--ease);
+            background: var(--surface-primary); color: var(--text-primary); border: var(--bw-hairline) solid var(--border-default);
+            border-radius: var(--radius-card); padding: var(--sp-2) var(--sp-3); font-size: var(--text-body);
+            font-weight: var(--weight-medium); text-decoration: none; box-shadow: var(--shadow-lg); }
+        .skip-link:focus { transform: translateY(0); }
+        #main:focus { outline: none; }
+        /* Beta is a word, not a box (the mix, spec 5): micro type after the
+           name, muted white in the sidebar, ink-3 beside a page title. */
+        .beta-tag { margin-left: auto; flex: none; display: inline; font-family: var(--font-sans); font-size: var(--text-micro); line-height: var(--lh-caption);
+            font-weight: var(--weight-medium); letter-spacing: normal; text-transform: none; color: var(--nav-muted); background: none;
+            border: 0; padding: 0; }
+        .nav-item:is(.active, [aria-current="page"]) .beta-tag { color: var(--nav-text); }
+        .ov-hero .beta-tag { margin-left: 0; color: var(--text-tertiary); }
+        /* A release is a section: its title a heading, the date quiet beside
+           it, the notes under it. The headline was 12px grey beside a bolder
+           date, and every release ever sat open in one 30,000px card. */
+        .rel-list { display: grid; }
+        .rel { display: grid; grid-template-columns: 10rem minmax(0, 1fr); column-gap: var(--sp-6); row-gap: var(--sp-2); align-items: start;
+            border-top: var(--bw-hairline) solid var(--border-default); padding-block: var(--sp-4); padding-inline: 0; }
+        @media (max-width: 640px) { .rel { grid-template-columns: minmax(0, 1fr); } }
+        .rel-rail { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); }
+        /* On a phone the title and its date share one line (R13), not the date alone above it. */
+        @media (max-width: 640px) { .rel-rail { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-2); } .rel-rail > .rel-title { order: -1; flex: 1 1 auto; } }
+        .rel:first-child { border-top: 0; padding-top: 0; }
+        .rel-head { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; margin-bottom: var(--sp-2); }
+        .rel-title { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); margin: 0; }
+        .rel-date { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .rel-items { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+        /* The kind is a quiet word in a column of its own: 'Fixed' in error
+           red made the history read as a list of faults. */
+        .rel-item { display: grid; grid-template-columns: calc(var(--sp-8) * 2.25) minmax(0, 75ch); gap: var(--sp-3);
+            font-size: var(--text-body); color: var(--text-secondary); line-height: var(--lh-control); }
+        .rel-kind { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary); padding-top: var(--sp-0-5); }
+        .rel-open { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-primary); white-space: nowrap; }
+        .card > .rel-more { align-self: flex-start; margin-left: var(--sp-4); }
+        @media (max-width: 640px) { .rel-item { grid-template-columns: 1fr; gap: 0; } }
+        .req-row { border-top: var(--bw-hairline) solid var(--border-default); padding-block: var(--sp-3); padding-inline: 0; }
+        /* Requests as one table (12 Oct 2026, WS-51). */
+        .dt-req { --dt-cols: minmax(16rem, 1fr) minmax(0, max-content) max-content max-content; }
+        .dt-req.triage { --dt-cols: minmax(16rem, 1fr) minmax(0, max-content) max-content max-content max-content; }
+        .dt-req .req-replyform { align-self: stretch; max-width: var(--measure); }
+        .req-list > .req-row:first-child { border-top: 0; padding-top: 0; }
+        .req-title { overflow-wrap: anywhere; min-width: 0; }
+        .req-detail, .req-meta, .req-reply { overflow-wrap: anywhere; }
+        .req-head > .req-state { margin-left: auto; }
+        .req-reply { font-size: var(--text-body); color: var(--text-primary); margin-top: var(--sp-2); line-height: var(--lh-control); max-width: var(--measure); }
+        .req-reply b { font-weight: var(--weight-medium); }
+        .req-replyform { margin-top: var(--sp-2); }
+        .req-acts { margin-top: var(--sp-2); }
+        .tab-dot { display: inline-block; width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); background: var(--fill-mark); margin-left: var(--sp-1-5); vertical-align: middle; }
+        .stack-form { display: flex; flex-direction: column; gap: var(--sp-4); }
+        .pfield > .field-help { margin: 0; font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-regular); color: var(--text-secondary); }
+        .stack-form > .linkish { align-self: flex-start; }
+        .stack-form .pf-input { margin: 0; }
+        .stack-form .pfield > :is(input, textarea) { width: 100%; }
+        .req-row:first-of-type { border-top: 0; }
+        .req-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+        .req-title { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); }
+        .req-detail { font-size: var(--text-body); color: var(--text-secondary); margin-top: var(--sp-1); white-space: pre-wrap; max-width: var(--measure); }
+        .req-meta { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); margin-top: var(--sp-1); }
+
+        /* The board earns the width; lists and charts read best at the house
+           measure, so every other segment caps itself back to it. */
+        .crm-seg { margin-top: var(--sp-3); }
+        /* Independent cards of similar size: let them sit side by side when
+           there is room. auto-FIT with a real floor means this needs no
+           breakpoint and collapses to one column on a phone and on paper;
+           a fill kept its empty tracks, so two cards in the 1536px page sat
+           beside a third of nothing. */
+        .card-grid { display: grid; gap: var(--sp-3); align-items: start;
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); }
+        /* A column of cards at the page's own rhythm, for a page that lists
+           sections one under another (the Guide). */
+        .card-stack { display: grid; gap: var(--page-rhythm); }
+        /* A segmented control with something quiet on its right. */
+        .seg-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
+        .seg-row > :is(.tabs, .segmented) { margin-bottom: 0; }
+        /* The CRM's tab row with its quiet link at the right is a page's tab
+           row: the same 44 on one full-width rule as .page-tabs, the strip's own
+           rule given up, its words on the gutter. */
+        .ov-wrap > .seg-row:has(> .tabs) { flex-wrap: nowrap; gap: var(--sp-6); min-height: var(--row-h); box-shadow: var(--rule-b);
+            margin-inline: calc(-1 * var(--wrap-pad)); padding-inline: var(--wrap-pad); }
+        .seg-row > .tabs { margin: 0 calc(-1 * var(--sp-2)); padding: 0 var(--sp-2); max-width: none; box-shadow: none; align-self: stretch; min-height: 0; }
+        /* On a phone the link takes the first line at the right and the strip
+           keeps the line under it, as in the Finance row. */
+        @media (max-width: 640px) {
+            .ov-wrap > .seg-row:has(> .tabs) { flex-wrap: wrap; row-gap: var(--sp-2); }
+            .seg-row:has(> .tabs) > :not(.tabs) { order: -1; flex: none; margin-left: auto; }
+            .seg-row > .tabs { flex: 1 1 100%; min-height: var(--row-h); } }
+        .guide-rows { margin: 0; }
+        .guide-rows > .guide-row { padding: var(--sp-3) 0; border-top: var(--bw-hairline) solid var(--border-default); }
+        /* The card head is never divided from its body: the first row sits on the card's 16 gap. */
+        .guide-rows > .guide-row:first-child { border-top: 0; padding-top: 0; }
+        .guide-rows > .guide-row[hidden] { display: none; }
+        /* Columns, not a grid: a grid row was as tall as its taller card, so
+           a short section beside Files left 541px of nothing. */
+        .guide-grid { column-width: 29rem; column-count: 2; column-gap: var(--page-rhythm); }
+        .guide-grid > .guide-card { break-inside: avoid; margin-bottom: var(--page-rhythm); }
+        .guide-grid > .guide-card[hidden] { display: none; }
+        .guide-t { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); }
+        .guide-d { margin: var(--sp-1) 0 0; font-size: var(--text-body); color: var(--text-secondary); line-height: var(--lh-control); max-width: var(--measure); overflow-wrap: anywhere; }
+        .guide-d .setup-code { word-break: normal; overflow-wrap: anywhere; }
+        .guide-copy { margin-left: var(--sp-1); vertical-align: middle; }
+        .guide-tools { display: grid; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+        /* As a panel (13 Oct 2026) it sits a panel gap above the cards, not the toolbar's 16. */
+        @media screen { .guide-host > .guide-tools.panel { margin-bottom: var(--panel-gap); } }
+        /* Stretched by the grid, the search's box ran the width of the page
+           and its clear button sat at the far end, 605px from the field. */
+        /* Design, in the Guide: only the frame the gallery needs. The parts in
+           it are styled by their own rules, never here. */
+        .ds-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--page-rhythm); }
+        .ds-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+        .ds-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--sp-8) * 6), 1fr)); gap: var(--sp-4); }
+        .ds-swatch { display: flex; align-items: flex-start; gap: var(--sp-3); min-width: 0; }
+        .ds-chip { flex: none; width: var(--box-2xl); height: var(--box-2xl); border-radius: var(--radius-inset); box-shadow: var(--ring-default); }
+        .ds-facts { min-width: 0; }
+        .ds-name { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); }
+        .ds-val { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+        .ds-use { font-size: var(--text-xs); color: var(--text-secondary); line-height: var(--lh-caption); margin-top: var(--sp-0-5); }
+        .ds-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--sp-8) * 6), 1fr)); gap: var(--sp-2) var(--sp-4); }
+        .ds-fields :is(input, select, textarea) { width: 100%; }
+        .ds-type-page { font-size: var(--text-title); font-weight: var(--weight-semibold); line-height: var(--lh-title); }
+        .ds-shape { flex: none; width: var(--box-2xl); height: var(--box-2xl); background: var(--surface-tertiary); border: var(--bw-hairline) solid var(--border-strong); }
+        .ds-space { display: grid; gap: var(--sp-2); }
+        .ds-rank { display: grid; gap: var(--sp-1); }
+        .ds-rank > :is(.section-title, .radar-h) { margin: 0; }
+        .ds-space-row { display: grid; grid-template-columns: var(--box-2xl) var(--box-2xl) minmax(0, 1fr); align-items: center; gap: var(--sp-3); }
+        .ds-space-bar { height: var(--sp-3); background: var(--fill-mark); border-radius: var(--radius-swatch); }
+        .guide-toc { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
+        .guide-card h3:focus { outline: 0; }
+        .guide-none[hidden] { display: none; }
+        .guide-print-row { margin: 0 0 var(--sp-2); }
+        .card-grid > .span-all { grid-column: 1 / -1; }
+        /* Insights (12 Oct 2026, OPS-23, OPS-24): Won by month across the row
+           as columns, the other four two by two, each only as tall as its chart. */
+        .crm-charts { display: grid; gap: var(--sp-4); align-items: start;
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); }
+        .crm-charts > .crm-wide { grid-column: 1 / -1; }
+        /* Panels (13 Oct 2026): Insights' figures and charts are panels, a panel gap apart
+           (they were 16, 24 and 32 from the grid's gap and each block's own margin), and
+           charts in a row stand equal. */
+        @media screen {
+            .crm-charts { gap: var(--panel-gap); align-items: stretch; }
+            :is(.crm-seg, .crm-charts) > .panel { margin-block: 0; }
+            .crm-seg > .panel + * { margin-top: var(--panel-gap); }
+        }
+        .crm-months { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--sp-2); height: 12rem; }
+        .crm-month { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; justify-items: center; gap: var(--sp-1); min-width: 0; }
+        .crm-month-track { display: flex; align-items: flex-end; width: 100%; max-width: 3rem; height: 100%; }
+        .crm-month-bar { width: 100%; min-height: 2px; border-radius: var(--radius-swatch) var(--radius-swatch) 0 0; background: var(--fill-mark); }
+        .crm-month-v { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .crm-month-l { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); white-space: nowrap; }
+        .crm-wide:has(> .crm-months) > .crm-bars { display: none; }
+        @media (max-width: 640px) { .crm-wide > .crm-months { display: none; } .crm-wide:has(> .crm-months) > .crm-bars { display: block; } }
+        /* Leads and Activities (12 Oct 2026, OPS-19, OPS-20): one table each. */
+        .dt-leads { --dt-cols: minmax(14rem, 2fr) minmax(0, 1fr) minmax(0, 1fr) max-content max-content; }
+        .dt-acts { --dt-cols: max-content max-content minmax(14rem, 2fr) minmax(0, 1fr) minmax(0, 1fr) max-content max-content; }
+        .dt-acts.multi { --dt-cols: max-content max-content minmax(14rem, 2fr) minmax(0, 1fr) minmax(0, 1fr) max-content max-content max-content; }
+        :is(.dt-leads, .dt-acts) .dt-link { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .dt-leads .dt-name > :is(.lbl-chip) { flex: none; }
+        .crm-unseen .dt-link { font-weight: var(--weight-semibold); }
+        /* A group row (Overdue, Today) spans the table, its count after it. */
+        .dt-row.dt-grp > .dt-c { grid-column: 1 / -1; }
+        .dt-row.dt-grp { min-height: var(--control-h); }
+        .dt-row.dt-grp .crm-group { display: flex; align-items: center; gap: var(--sp-2); margin: 0; }
+        .crm-contact-table td.tick, .crm-contact-table th.tick { width: 34px; padding-right: 0; }
+        .crm-contact-table td .lbl-chip { margin-left: var(--sp-2); }
+        /* The Pipedrive survey writes into a host that is appended whether or
+           not there is anything to say. Empty, it still took a 16px flex gap
+           and its own row, so the card carried 41px of dead space below the
+           button against 17px above the title. */
+        .pd-out:empty { display: none; }
+        /* A lead is a short form and an insight is a chart set: both read
+           better measured than stretched. Deals, contacts and activities are
+           data and take the whole wrap. */
+        /* The Leads and Insights sections take the page's width like every
+           other CRM section: capped, they ended short of the card above. */
+        /* Kept: older markup and the tests still name it. */
+
+        .crm-board { display: flex; gap: var(--sp-4); overflow-x: auto; align-items: flex-start;
+            padding-bottom: var(--sp-3); min-height: 300px; }
+        /* THE PIPELINE BOARD ONLY - the inbox reuses this board for its five
+           states and neither of these applies there. stretch, not flex-start:
+           the "+ Deal" at the foot of each column is pushed down by
+           margin-top:auto, so with columns free to be their own height the five
+           add buttons sat at four different y positions the moment any column
+           ran past the 380px floor. Equal-height lanes put every one of them
+           back on one line, whatever each column holds. */
+        .crm-pipeline { align-items: stretch; }
+        /* A lane is a tint with no outline (the mix, spec 8.3): the fill alone says where it is. */
+        .crm-col { min-width: 256px; flex: 1 0 256px; background: var(--surface-secondary); border: 0;
+            border-radius: var(--radius-inset); padding: 0 0 var(--sp-3); min-height: 380px; display: flex; flex-direction: column; }
+        .crm-col .crm-col-add { margin-top: auto; }
+        /* Above a phone the pipeline's lanes share the board: at 256px each and
+           unable to shrink, the fifth stage sat wholly past the card's edge at
+           1440 with nothing to say the board scrolls. A board too narrow for
+           five 200px lanes still scrolls, now with a lane visibly cut. */
+        @media (min-width: 641px) { .crm-pipeline > .crm-col { flex: 1 1 0; min-width: calc(var(--sp-8) * 4); } }
+        /* Where five lanes (nearly) fit, the board keeps no extra room under
+           them for a scrollbar: a lane's own 12px foot takes an overlay bar. */
+        @media (min-width: 1101px) { .crm-pipeline { padding-bottom: 0; } }
+        /* A drag over a lane still lights its edge, as a ring inside it (a lane has no border to recolour). */
+        .crm-col.dragover { box-shadow: inset 0 0 0 var(--bw-strong) var(--border-selected); background: var(--surface-sunken); }
+        .crm-col-name { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); line-height: var(--lh-control); padding: var(--sp-3) var(--sp-3) 0;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        /* Two lines' room, so a stage name that wraps at a narrow lane does not
+           start its lane's money line lower than its neighbours'. */
+        .crm-col-sum { font-size: var(--text-body); color: var(--text-tertiary); line-height: var(--lh-control); padding: 0 var(--sp-3) var(--sp-3); }
+        /* One line, always: a lane's name and its money line never wrap, so
+           every lane's first card starts on the same baseline without a floor
+           that left an empty line under every header that fitted. A long
+           value ends in an ellipsis; the name carries its full text on hover. */
+        .crm-pipeline .crm-col-sum { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .crm-col-note { font-size: var(--text-xs); color: var(--text-tertiary); padding: 0 var(--sp-3) var(--sp-3);
+            line-height: var(--lh-caption); }
+        /* A quiet ghost control at the foot of each lane: five bordered bars
+           were five more boxes on a board already made of boxes. */
+        .crm-col-add { width: auto; margin: 0 var(--sp-3); border: 0; background: none;
+            border-radius: var(--radius-control); color: var(--text-tertiary); font: inherit; font-size: var(--text-body); cursor: pointer;
+            display: flex; align-items: center; justify-content: center; gap: var(--control-gap);
+            min-height: var(--control-h-md); padding: 0; line-height: var(--lh-control); }
+        .crm-col-add svg { width: var(--icon-sm); height: var(--icon-sm); }
+        @media (hover: hover) { .crm-col-add:hover { color: var(--text-primary); background: var(--surface-tertiary); } }
+        /* A deal is a white tile on its lane's tint with no border (the mix, spec 8.3): the fill
+           difference separates them. Hover is a ring inside it and the red edge a shadow, so the
+           tile never changes size. */
+        .crm-card { background: var(--surface-primary); border: 0; border-radius: var(--radius-inset);
+            padding: var(--sp-4); margin: 0 var(--sp-3) var(--sp-3); box-shadow: none; cursor: grab; }
+        @media (hover: hover) { .crm-card:hover { box-shadow: inset 0 0 0 var(--bw-hairline) var(--border-emphasis); } }
+        .crm-card.rotten { background: var(--error-bg); box-shadow: inset var(--bw-marker) 0 0 var(--error); }
+        .crm-card-t { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); overflow-wrap: anywhere; }
+        .crm-card-who { font-size: var(--text-body); color: var(--text-tertiary); margin-top: var(--sp-px); }
+        /* It wraps inside the card: in a lane at its narrowest the value, label, owner and
+           next step ran past the card's edge (13 Oct 2026). */
+        .crm-card-bot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1-5); margin-top: var(--sp-2); font-size: var(--text-body); }
+        .crm-card-val { font-weight: var(--weight-medium); }
+        .crm-dot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); flex: none; }
+        .crm-av { width: var(--box-sm); height: var(--box-sm); border-radius: var(--radius-circle); background: var(--surface-sunken);
+            color: var(--text-secondary); font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); display: grid;
+            place-items: center; flex: none; }
+        .crm-ai { margin-left: auto; display: inline-flex; }
+        .crm-ai svg { width: var(--icon-md); height: var(--icon-md); }
+        .crm-ai.overdue { color: var(--error); }
+        .crm-ai.today { color: var(--success); }
+        .crm-ai.none { color: var(--warning); }

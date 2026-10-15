@@ -1,0 +1,704 @@
+        /* ---------- Overview ---------- */
+        /* ONE page width, every tab.
+           --wrap grows with the screen: this app is used on a 1920 monitor and
+           a 2560 iMac, where a fixed 1120 left a third to a half of the screen
+           as empty margin while the rows and tables inside it were the crowded
+           part.
+           There were briefly two tiers, reports held back at 1680 because a
+           stretched paragraph is unreadable. That risk now lives where it
+           belongs: prose caps ITSELF at a reading measure (the 52ch rule
+           below) whatever the container does. With text safe, a narrower
+           wrapper on some tabs bought nothing and cost the thing a person
+           actually notices - tabs that do not line up as you move between them.
+           The ladder is min-width only, deliberately: a print page is never
+           1500px, so paper keeps the 1120 measure it was designed against. */
+        /* The content layout is CENTERED: one column, 1,200 of content inside
+           the 40 gutters (Cameron, 12 Oct 2026; the reference's 1536 left a
+           row's actions a page away from its words on a 2,200 monitor), with
+           the page gutter inside it, and the cards grow to fill that column.
+           (Its "Full width" preference drops the cap; the default is what a
+           merchant sees.) An earlier reading of a demo had it full bleed, and
+           on a 2000px screen that stretched a KPI strip and a pair of charts
+           past anything the reference draws. --wrap is the one page-width
+           token; print and a handful of narrow panels also read it. */
+        .ov-wrap { max-width: var(--wrap); margin: 0 auto; width: 100%;
+            /* The page gutter (--wrap-pad: 40, 16 on a phone) on each side and 12
+               under the top bar. The bottom keeps 48 so a long scroll does not
+               end flush against the viewport. */
+            padding: var(--sp-3) var(--wrap-pad) var(--sp-9);
+            /* The gap between sections, 48 (32 on a phone: the mix, 4.4). A property
+               the phone query re-points, not a second margin rule: a later rule of
+               the same weight beat every exception below at 640px and under, so
+               headings sat the wrong distance above their blocks and the last block
+               added a gap to the wrap's own bottom padding. */
+            --page-rhythm: var(--sp-9); }
+        /* ONE RHYTHM DOWN THE PAGE (the mix, 4.4). Every block on a page is
+           separated by exactly one gap, --page-rhythm: on screen the panel gap,
+           20 (12 on a phone), since 13 Oct 2026; 48 on paper. The
+           blocks each carried their own bottom margin and arrived at six values
+           doing one job, which is what makes a page look unconsidered even when
+           nothing is obviously wrong.
+
+           :not(.run-gate) lifts this above the single-class component rules so
+           it actually wins, and spares the centred empty state its 7vh.
+           A .section-title keeps its asymmetry deliberately: the full gap above
+           from the block before it, 12 below, because a label belongs to the
+           thing under it rather than sitting midway between two. */
+        .ov-wrap > *:not(.run-gate) { margin-top: 0; margin-bottom: var(--page-rhythm); }
+        /* On screen, panels sit a panel gap apart (13 Oct 2026); paper keeps the 48 above. */
+        @media screen and (min-width: 641px) { .ov-wrap { --page-rhythm: var(--panel-gap); } }
+        .ov-wrap > .section-title { margin-bottom: var(--sp-3); }
+        /* The page header sits 32 above the body, or 20 above its tabs (below). */
+        .ov-wrap > .ov-hero { margin-bottom: var(--sp-7); }
+        /* A page's tab row sits 32 above the body. */
+        .ov-wrap > :is(.tabs, .page-tabs, .seg-row) { margin-bottom: var(--sp-7); }
+        /* Queue counters sit 20 under the header and 20 over the list. */
+        .ov-hero:has(+ .queues) { margin-bottom: var(--sp-5); }
+        .ov-wrap > .queues { margin-bottom: var(--sp-5); }
+        .ov-wrap > *:last-child { margin-bottom: 0; }
+        /* A Run gate with more of the page after it (Customers' trade radar)
+           keeps the page rhythm under it rather than touching the next card. */
+        .ov-wrap > .run-gate:not(:last-child) { margin-bottom: var(--page-rhythm); }
+        /* A heading that opens a wrapper (the page chat, renderStructured's
+           blocks, the Forecast sections) is not a direct child, so the rule
+           above never zeroes its 24px top margin, and with nothing between
+           them that margin collapses through the wrapper and replaces the
+           gap. The wrapper's own place in the rhythm spaces it instead. */
+        .ov-wrap > * > .section-title:first-child { margin-top: 0; }
+        /* Body copy inside any tab: measured, never the full wrap.
+           The cap is written in ch HERE rather than held in a custom property,
+           because ch resolves against the font size of whatever element uses
+           it: on :root that is 16px, so a 12px help line would inherit a flat
+           686px cap - 114 characters, the very thing being fixed. */
+        .measure { max-width: var(--measure); }
+        /* THE OTHER HALF OF THE WIDTH WORK. Widening the page without this
+           makes the app worse, not better: a help line or an AI finding set as
+           one 1,640px line is harder to read than the same text at 1,120, and
+           far harder than at a proper measure. Everything listed here is prose
+           that a person reads a sentence at a time, so it stops where the eye
+           wants it to. Data - tables, rows, boards, metric tiles - is
+           deliberately absent from this list and takes the width instead. */
+        .setting-sub, .field-help, .know-text,
+        .sk-body, .rel-text, .insight .d, .insight .t, .action .text,
+        .crm-act-note, .lbl-preview-note, .req-detail, .summary {
+            /* The one reading measure (--measure, set where the tokens are). */
+            max-width: var(--measure);
+        }
+        /* An insight or action is a flex row with an icon, so cap the text
+           block rather than the row, which owns the card's background. */
+        .insight > div:not(.ico), .action > div:not(.ico) { min-width: 0; }
+        .ov-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-6); margin-bottom: var(--sp-7); }
+        /* A tab strip belongs TO the header above it, so it sits 20 under it
+           rather than the section gap that separates one section from the next. */
+        .ov-hero:has(+ .page-tabs) { margin-bottom: var(--sp-5); }
+        /* Every screen's section tabs, not only Finance's: CRM, Production
+           Manager, Team and the Guide each sat at a different distance under
+           their header; every one is 20. */
+        .ov-hero:has(+ .tabs) { margin-bottom: var(--sp-5); }
+        .ov-hero:has(+ .seg-row) { margin-bottom: var(--sp-5); }
+        /* The Finance paragraph does not hold a three-line box: Forecast's intro
+           runs to four lines and a two-line intro (Xero sync) would carry an empty
+           line under it, so each page's header is as tall as its own words. */
+        /* The title: Bricolage 600 at 26/32, tracked -0.02em; Beta follows on
+           its baseline, 8 apart. One short line sits 4 under it. A title can be
+           data (a product's name, "X sector"), so it wraps, breaks a word longer
+           than the column, and Beta follows it onto the next line: a page never
+           scrolls sideways for a long name. */
+        .ov-hero h2 { font-size: var(--text-title); line-height: var(--lh-title); font-weight: var(--weight-semibold); letter-spacing: var(--tr-title); margin: 0;
+            display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; overflow-wrap: anywhere; }
+        .ov-hero p { margin: var(--sp-1) 0 0; color: var(--text-tertiary); font-size: var(--text-body); line-height: var(--lh-control); max-width: var(--measure); }
+        .ov-updated { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); margin-left: auto; white-space: nowrap; padding-top: var(--sp-1-5); }
+        .ov-hero-act { margin-left: auto; display: flex; align-items: center; gap: var(--control-gap); flex: none; padding-top: 0; }
+        /* Filled later or never (a page not yet set up), or holding only a
+           hidden button (Guide's Print on its other tabs): it takes no line,
+           which on a phone added 12 of dead air under the intro. */
+        .ov-hero-act:not(:has(> :not([hidden]))) { display: none; }
+        .ov-hero-act .ov-updated { margin-left: 0; padding-top: 0; }
+        /* The status line: words split by a 4 dot, or a live dot with its halo,
+           the stamp and a 24 Refresh. */
+        .ph-sub { margin-top: var(--sp-1); display: flex; align-items: center; gap: var(--sp-2); color: var(--text-tertiary);
+            font-size: var(--text-body); line-height: var(--lh-control); white-space: nowrap; }
+        .ph-sub .ov-updated { font-size: inherit; line-height: inherit; margin: 0; padding: 0; color: inherit; }
+        /* The live dot and the refresh glyph are for a screen: a report printed
+           to PDF has no stamp for them to sit beside. Hidden here, shown below. */
+        .ph-sub > :is(.live-dot, .info) { display: none; }
+        @media screen {
+            .ph-sub > .live-dot { display: block; }
+            .ph-sub > .info { display: inline-grid; }
+        }
+        .live-dot { width: var(--dot-md); height: var(--dot-md); margin-left: var(--sp-0-5); border-radius: var(--radius-circle);
+            background: var(--live-dot); box-shadow: var(--ring-live); flex: none; }
+        .dot-sep { width: var(--sp-1); height: var(--sp-1); border-radius: var(--radius-circle); background: var(--border-emphasis); flex: none; }
+        /* A 24 icon button inside a line of text: Refresh here, the info button
+           beside a heading (Task 12). It never grows its line: its fill and its
+           focus ring are drawn on ::before, so a phone grows the target without
+           growing what you see. Pulled 4 toward its words, as a count is. */
+        .info { position: relative; isolation: isolate; width: var(--control-h-sm); height: var(--control-h-sm);
+            margin-block: calc((var(--lh-control) - var(--control-h-sm)) / 2); margin-left: calc((var(--icon-md) - var(--control-h-sm)) / 2);
+            padding: 0; border: 0; background: none; display: none; place-items: center; color: var(--text-tertiary); flex: none; cursor: pointer; }
+        .info::before { content: ""; position: absolute; z-index: -1; inset: 0; border-radius: var(--radius-tag); }
+        .info svg { width: var(--icon-md); height: var(--icon-md); }
+        .info[aria-expanded="true"] { color: var(--text-primary); }
+        @media (hover: hover) { .info:hover { color: var(--text-primary); } }
+        .info[aria-expanded="true"]::before { background: var(--surface-tertiary); }
+        @media (hover: hover) { .info:hover::before { background: var(--surface-tertiary); } }
+        .info:active::before { background: var(--press); }
+        .info:focus-visible { outline: 0; }
+        .info:focus-visible::before { outline: var(--focus-outline); outline-offset: calc(-1 * var(--bw-strong)); }
+        /* A button that opens words is for a screen: a report printed to PDF
+           carries none, wherever the builder put it (a title, a section head). */
+        @media screen { .info { display: inline-grid; } }
+        /* A title with its info button: the glyph sits on the title's first line,
+           8 after the title and its Beta. The button is not inside the heading,
+           so the heading's name stays its title. */
+        .ph-title { display: flex; align-items: flex-start; gap: var(--sp-2); }
+        .ph-title > h2 { min-width: 0; }
+        .ph-title > .info { margin-block: calc((var(--lh-title) - var(--control-h-sm)) / 2) 0; }
+        /* Above a phone the rail kept its full width and the page's intro
+           gave way: at 768 on a tablet Overview's sentence was a column 122px
+           wide, SEO's 71px and Size list's 56px, and the rail's last button
+           hung up to 79px out of the header. The header wraps now: the text
+           keeps at least 22rem, a rail that does not fit beside it takes the
+           line below, still at the right, and a rail wider than the header
+           wraps inside itself, a long stamp included. */
+        @media (min-width: 641px) {
+            .ov-hero { flex-wrap: wrap; }
+            .ov-hero > div:not(.badge):not(.ov-hero-act):not(.ov-updated) { flex: 1 1 22rem; min-width: 0; }
+            .ov-hero-act { max-width: 100%; flex-wrap: wrap; justify-content: flex-end; }
+            .ov-hero-act > .ov-updated { white-space: normal; text-align: right; }
+        }
+        /* An icon-only small button is one control wide: a square at the control height (32; 40 on touch). */
+        .btn-sm.btn-icon { width: var(--control-h); padding: 0; justify-content: center; }
+        /* On a phone the badge, the gaps and this stamp left the heading and
+           its sentence 138px of a 300px row - a four-line ribbon. The stamp
+           takes its own line instead, and the text gets the width. */
+        @media (max-width: 640px) {
+            /* 32px gutters spend 64px of a 390px screen on nothing. */
+            .ov-wrap { padding: var(--sp-5) var(--sp-4) var(--sp-7); --page-rhythm: var(--panel-gap); }
+            .ov-hero { flex-wrap: wrap; gap: var(--sp-4); }
+            .ov-hero h2 { font-size: var(--text-2xl); }
+            /* The actions take a row of their own under the title, sharing it. */
+            .ov-hero-act > .btn:not(.btn-icon) { flex: 1 1 auto; }
+            .ov-hero > div:not(.badge):not(.ov-hero-act) { flex: 1 1 200px; min-width: 0; }
+            .ov-hero > .ov-hero-act { flex: 1 1 100%; }
+            /* The stamp takes its own line; the buttons stay together under it. */
+            .ov-hero-act > .ov-updated { flex: 1 1 100%; }
+            /* The 56px was clearing the hero badge, which is display: none on
+               every page. It left the stamp hanging on its own row, indented
+               against nothing, while the title and the sentence started at the
+               page inset. */
+            .ov-updated { margin-left: 0; padding-top: 0; flex-basis: 100%; white-space: normal; }
+            /* A status line's stamp is its own width, so Refresh sits beside it: the full-width basis above is for
+               a stamp alone in a rail, and pushed this line's Refresh to the far end of the row. */
+            .ph-sub > .ov-updated { flex: none; white-space: nowrap; }
+            .ov-hero-act { margin-left: 0; flex-basis: 100%; padding-top: 0; }
+            /* A rail of three words or more wraps rather than running past the gutter, each button at its
+               own width. A stamp and a Refresh stay on one line. */
+            .ov-hero-act:has(> .btn + .btn + .btn) { flex-wrap: wrap; }
+            .ov-hero-act:has(> .btn + .btn + .btn) > .btn:not(.btn-icon) { flex: none; }
+            /* With the widget grid's Customize beside Refresh the row is
+               fuller than the stamp's full-width basis leaves room for, and the
+               icon button was squeezed to 18px wide under its 28px height. On
+               a page that has the control, the buttons keep their size, the
+               stamp takes what is left, and in Customize mode, with Reset and
+               Done as well, the buttons that do not fit wrap under it. */
+            .ov-hero-act:has(> [data-wg-control]) { flex-wrap: wrap; }
+            .ov-hero-act:has(> [data-wg-control]) > .ov-updated { flex: 1 1 100%; }
+            .ov-hero-act:has(> [data-wg-control]) > .btn { flex: none; }
+            /* The widget grid's Customise is a 40 icon button at the title's right on a phone (named Customise by its
+               aria-label), as More is on the Production Manager; Forecast's two words are an equal pair (the mockup's .m-acts). */
+            .ov-hero:has(> .ov-hero-act > [data-wg-customize]) { position: relative; }
+            .ov-hero:has(> .ov-hero-act > [data-wg-customize]) > .ph-text { padding-right: calc(var(--control-h-lg) + var(--sp-2)); }
+            [data-wg-customize] { position: absolute; top: calc((var(--lh-title) - var(--control-h-lg)) / 2); right: 0; margin: 0; padding: 0;
+                width: var(--control-h-lg); min-width: var(--control-h-lg); justify-content: center; }
+            [data-wg-customize] .wg-txt { display: none; }
+            #view-forecast .ov-hero-act > .btn:not([data-wg-customize]) { flex: 1 1 0; min-width: 0; }
+            /* R13: one action (Refresh all, Refresh, More, Loan out) stays on the title's line, beside the
+               gear, not alone on a row under it. Two or more keep their row under the title, and so does a
+               stamp with its Refresh (the Size list's), which is a line of its own. */
+            .ov-hero:not(.pm-head):has(> .ov-hero-act > :is(button, .btn):not([data-wg-customize], [hidden])):not(:has(> .ov-hero-act > :not([data-wg-customize], [hidden]) ~ :not([data-wg-customize], [hidden]))) { flex-wrap: nowrap; }
+            .ov-hero:not(.pm-head):has(> .ov-hero-act > :is(button, .btn):not([data-wg-customize], [hidden])):not(:has(> .ov-hero-act > :not([data-wg-customize], [hidden]) ~ :not([data-wg-customize], [hidden]))) > .ph-text { flex: 1 1 0; }
+            .ov-hero:not(.pm-head):has(> .ov-hero-act > :is(button, .btn):not([data-wg-customize], [hidden])):not(:has(> .ov-hero-act > :not([data-wg-customize], [hidden]) ~ :not([data-wg-customize], [hidden]))) > .ov-hero-act { flex: none; flex-basis: auto; }
+            .ov-hero:not(.pm-head):has(> .ov-hero-act > :is(button, .btn):not([data-wg-customize], [hidden])):not(:has(> .ov-hero-act > :not([data-wg-customize], [hidden]) ~ :not([data-wg-customize], [hidden]))):has(> .ov-hero-act > [data-wg-customize]) > .ov-hero-act { margin-right: calc(var(--control-h-lg) + var(--sp-2)); }
+            .ov-hero:not(.pm-head):has(> .ov-hero-act > :is(button, .btn):not([data-wg-customize], [hidden])):not(:has(> .ov-hero-act > :not([data-wg-customize], [hidden]) ~ :not([data-wg-customize], [hidden]))):has(> .ov-hero-act > [data-wg-customize]) > .ph-text { padding-right: 0; }
+        }
+        /* KPI cards: uppercase micro-label + large figure + colored delta */
+        /* A floor AND a ceiling. auto-fill with only a floor turned a 2,560px
+           screen into eleven 170px strips with the labels wrapping; a metric
+           card wants to be read at a glance, so the tiles grow to a comfortable
+           size and then stop, and the row simply holds fewer of them. */
+        /* Four across, and four however wide the screen gets. The reference
+           does not keep adding columns as the monitor grows: a KPI row of eight
+           tiny tiles is a different thing from a KPI row. */
+        /* THE FIGURE ROW (the mix, spec 6): figures in one row split by
+           hairlines, no boxes. Each figure draws its hairline in the middle of
+           the gap before it; the first figure of a row draws it outside the
+           row, where the row clips it away, so every row starts on the text
+           edge however it wraps. The clip margin keeps a focus ring whole. */
+        .metrics { display: grid; column-gap: var(--sp-8); row-gap: var(--sp-6); margin-bottom: var(--sp-6);
+            grid-template-columns: repeat(4, minmax(0, 1fr)); overflow: clip; overflow-clip-margin: var(--sp-1); }
+        .metrics > .stat::before { content: ""; position: absolute; top: 0; bottom: 0; left: calc(-0.5 * var(--sp-8));
+            width: var(--bw-hairline); background: var(--border-default); }
+        /* A row of figures inside a card: the card's 16 gap, not the page's 24 on top. */
+        .card > .metrics { margin-bottom: 0; }
+        @media (max-width: 1100px) { .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        /* Two up on a phone, the Finance rule, for every KPI row: a tile that
+           carries a sparkline takes the row, a label and a figure take half,
+           and a tile with no sparkline is as tall as what it holds. */
+        @media (max-width: 640px) {
+            .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            /* A strip is a 12-track grid, so its gap is paid eleven times: at 40
+               that is 440, more than a phone's 347, and the second figure of
+               every row was cut off. 16 is 176, and the hairline moves to the
+               middle of the smaller gap. */
+            .metrics { column-gap: var(--sp-4); }
+            .metrics > .stat::before { left: calc(-0.5 * var(--sp-4)); }
+            .metrics > .stat:has(.stat-spark) { grid-column: 1 / -1; }
+            .stat:not(:has(.stat-spark)) { min-height: 0; }
+        }
+        .stat { position: relative; overflow: visible; background: none; border: 0; border-radius: 0;
+            padding: 0; box-shadow: none; animation: fadeUp .4s ease backwards;
+            display: flex; flex-direction: column; align-items: stretch; gap: var(--gap-fig);
+            min-height: 0; justify-content: flex-start; }
+        /* A figure the widget grid places on its own (Overview's) carries no
+           hairline and no padding: the grid's gap separates the figures, so each
+           row's first figure starts on the text edge. A .metrics strip keeps its
+           hairline-split row. */
+        /* The sparkline sinks to the bottom so every card's NUMBER lines up
+           with its neighbours, whatever length of label or note sits above. */
+        /* 8px of air over a 30px line: at 34px the svg hung 4px out of its own
+           box and left 12px under it against the card's 16px padding. */
+        .stat .stat-spark { margin-top: auto; padding-top: var(--sp-2); height: 38px; }
+        /* A figure reads label first, then number: the label is the body step in secondary ink at
+           medium weight, the number under it the figure step at 600. No icon tile on a figure (the
+           mix): the label names it. */
+        .stat-ic { display: none; }
+        .stat-ic svg { width: var(--icon-md); height: var(--icon-md); display: block; }
+        .stat .label { font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; margin-bottom: 0; position: relative; }
+        /* Number and change sit on ONE line in the reference, aligned, rather
+           than the change dropping to a row of its own beneath. */
+        .stat-row { display: flex; align-items: center; gap: var(--gap-fig); flex-wrap: wrap; }
+        .metrics > .stat { display: flex; flex-direction: column; }
+        .metrics > .stat > .stat-row { margin-top: auto; }
+        .stat .value { font-size: var(--fig-m); font-weight: var(--weight-semibold); letter-spacing: var(--tr-fig); line-height: var(--lh-none); font-variant-numeric: tabular-nums; position: relative; }
+        @media (max-width: 640px) { .stat .value { font-size: var(--fig-s); } }
+        /* The line of context the reference gives every KPI: what the number is
+           OF, in the same muted ink as the label above it. */
+        /* 12/16, as the reference sets the line under a KPI - it is metadata,
+           not body copy, and at 14 it competed with the label above. */
+        .stat .stat-note { margin-top: 0; }
+        .stat-note { margin: 0; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        /* The reference's positive delta is a solid #171717 pill with
+           near-white text - it never spends green on "up". Only the
+           negative badge is tinted. That is also the truer reading here,
+           where up on unfulfilled orders or at-risk customers is not good
+           news; green was asserting a judgement the number had not made. */
+        /* Still never green, and still the only tint on the page is the falling
+           one. But a solid near-black pill made the CHANGE the loudest mark in
+           a card whose subject is the number: three up chips read as three
+           black blocks over three grey figures. A neutral tint puts the chip
+           back under the value it annotates, and leaves the tinted down chip
+           as the one thing in the row that pulls the eye. */
+        /* In a tile whose figure is amber, a bad change is amber too: an amber
+           figure beside a red chip said two different things. */
+        .stat.warn .delta.bad { color: var(--warning); background: var(--warning-bg); }
+        .stat.warn .value { color: var(--warning); }
+        /* The other two tones the finance pages spend, beside the .warn the
+           Overview already has. Additive: nothing on Overview emits either. */
+        .stat.ok .value { color: var(--success); }
+        .stat.bad .value { color: var(--error); }
+        /* A figure the server never sent is not the answer to the card's
+           question, so it does not get the answer's size, weight or colour.
+           It used to arrive at 30px in the tone the card would have worn if
+           the number HAD come, which read "not reported" as good news. */
+        .stat .value.unknown { font-size: var(--text-body); font-weight: var(--weight-regular);
+            letter-spacing: normal; color: var(--text-tertiary); }
+        /* The 154px floor is sized for a card with a sparkline under the
+           number. A card with no spark left 75px of empty white below a
+           two-line fact, six or four times over. */
+        .metrics-flat .stat { min-height: 0; }
+        /* Each KPI in its own block, which is the reference's KPI card on its
+           Default, E-commerce and Finance pages (and what Cameron asked for on
+           2026-09-08, over the joined Analytics-style frame this used to be).
+           The block is the plain .stat card; only its content is the compact
+           strip kind - no icon, a 14px label over a 24px figure. */
+        .metrics-strip > .stat { min-height: 0; }
+        .metrics-strip .stat-ic { display: none; }
+        .metrics-strip .stat .value.unknown { font-size: var(--text-body); }
+        /* THE FEATURE BAND (the mix, spec 6): one per screen at most, for its
+           main question. A soft teal gradient with the band's 12 corner; the
+           main figure and its range on the left, a 1px rule, the side figures
+           stacked on the right. Bar positions arrive as percentages in custom
+           properties (--at-lo, --at-hi, --at-exp, --at-plan, --at, --w). */
+        .fband { border-radius: var(--radius-band); background: var(--band-bg); padding: var(--sp-6) var(--sp-7);
+            display: grid; grid-template-columns: minmax(0, 1.6fr) var(--bw-hairline) minmax(0, 1fr); gap: var(--sp-7); }
+        .fband > .fb-rule { background: var(--band-rule); }
+        .fb-main, .fb-sides { display: flex; flex-direction: column; min-width: 0; }
+        .fb-sides { justify-content: space-between; }
+        .fb-head { display: flex; align-items: center; gap: var(--control-gap); min-height: var(--control-h-md); }
+        .fb-tile { width: var(--control-h-md); height: var(--control-h-md); border-radius: var(--radius-control); background: var(--surface-primary);
+            color: var(--text-brand); display: grid; place-items: center; flex: none; box-shadow: var(--shadow-control); }
+        .fb-tile svg { width: var(--icon-md); height: var(--icon-md); }
+        .fb-label { font-weight: var(--weight-medium); color: var(--text-secondary); white-space: nowrap; }
+        .fb-note { color: var(--text-secondary); white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .fband .delta:is(.good, .bad, .flat) { background: var(--surface-primary); }
+        @media (hover: hover) { .fband .info:hover::before { background: var(--surface-primary); } }
+        .fb-fig { font-weight: var(--weight-semibold); line-height: var(--lh-none); letter-spacing: var(--tr-fig); font-variant-numeric: tabular-nums; }
+        .fb-hero { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-fig); margin: var(--gap-fig) 0 var(--sp-6); }
+        .fb-hero .fb-fig { font-size: var(--fig-xl); }
+        .fb-range { margin-top: auto; position: relative; padding: calc(var(--lh-caption) + var(--sp-3)) 0; }
+        .fb-track { position: relative; height: var(--sp-3); border-radius: var(--radius-full); background: var(--surface-primary); }
+        .fb-fill { position: absolute; top: 0; bottom: 0; left: var(--at-lo); width: calc(var(--at-hi) - var(--at-lo)); border-radius: var(--radius-full);
+            background: var(--c-range); box-shadow: inset 0 0 0 var(--bw-hairline) var(--c-range-edge); }
+        .fb-exp { position: absolute; top: 50%; left: var(--at-exp); width: var(--box-xs); height: var(--box-xs);
+            margin: calc(var(--box-xs) / -2) 0 0 calc(var(--box-xs) / -2); border-radius: var(--radius-circle);
+            background: var(--c-exp); box-shadow: 0 0 0 var(--bw-strong) var(--surface-primary); }
+        .fb-plan { position: absolute; left: var(--at-plan); top: calc(var(--sp-1) - var(--lh-caption) - var(--sp-3)); bottom: calc(-1 * var(--sp-1));
+            width: var(--bw-strong); margin-left: calc(var(--bw-strong) / -2); border-radius: var(--radius-swatch); background: var(--c-plan); }
+        .fb-rl { position: absolute; font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-secondary);
+            white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .fb-rl.t { top: 0; left: calc(var(--at-plan) + var(--sp-2)); color: var(--text-primary); }
+        .fb-rl.b { bottom: 0; left: var(--at); transform: translateX(-50%); }
+        .fb-rl.mid { color: var(--text-tertiary); }
+        .fb-side + .fb-side { margin-top: var(--sp-4); padding-top: var(--sp-4); box-shadow: var(--rule-t-band); }
+        .fb-num { display: flex; align-items: center; gap: var(--gap-fig); margin-top: var(--gap-fig); }
+        .fb-num .fb-fig { font-size: var(--fig-m); }
+        .fb-num .fb-note { margin-left: auto; }
+        .fb-meter { position: relative; height: var(--sp-1); border-radius: var(--radius-full); background: var(--band-rule); margin-top: var(--sp-3); }
+        .fb-meter i { position: absolute; top: 0; bottom: 0; border-radius: var(--radius-full); }
+        .fb-meter .taken { left: 0; width: var(--w); background: var(--c-taken); }
+        .fb-meter .still { left: calc(var(--at) + var(--sp-0-5)); width: calc(var(--end, 100%) - var(--at) - var(--sp-0-5)); background: var(--c-still); }
+        .fb-meter .plan { left: var(--at-plan); top: calc(-1 * var(--sp-1)); bottom: calc(-1 * var(--sp-1)); width: var(--bw-strong);
+            margin-left: calc(var(--bw-strong) / -2); background: var(--c-plan); }
+        /* Under 1100 the side figures go under the main one, as on a phone. */
+        @media (max-width: 1100px) {
+            .fband { grid-template-columns: minmax(0, 1fr); gap: 0; }
+            .fband > .fb-rule { display: none; }
+            .fb-sides { margin-top: var(--sp-4); padding-top: var(--sp-4); box-shadow: var(--rule-t-band); }
+        }
+        @media (max-width: 640px) {
+            .fband { padding: var(--sp-4); }
+            .fb-hero { margin-bottom: var(--sp-4); }
+            .fb-hero .fb-fig { font-size: var(--fig-l); }
+            .fb-num .fb-fig { font-size: var(--fig-s); }
+        }
+        /* WORTH LOOKING AT, AND WHY (the mix, spec 8.1 item 5): side by side at
+           7 to 5 while the pair is wide enough for the table, one under the
+           other when it is not. Laid out by the pair's own width. */
+        .fc-pair { container: fcpair / inline-size; }
+        .fc-cols { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); column-gap: var(--gap-cols);
+            row-gap: var(--page-rhythm); align-items: start; }
+        .fc-cols > section > .section-title:first-child { margin-top: 0; }
+        @container fcpair (max-width: 1000px) { .fc-cols { grid-template-columns: minmax(0, 1fr); } }
+        .fc-worth > .msg { margin-bottom: var(--sp-3); }
+        /* Show all opens a window: for a screen, and a 40 target under a finger. */
+        .fc-worth > .section-title > .sec-tools { display: none; }
+        @media screen { .fc-worth > .section-title > .sec-tools { display: flex; } }
+        .fc-wl-wrap { container: fcwl / inline-size; }
+        .fc-wl > [role="row"] { display: grid; grid-template-columns: var(--fc-wl-cols); grid-template-areas: "mo v plan chip rg ol";
+            column-gap: var(--sp-4); align-items: center; }
+        .fc-wl > .h { height: var(--control-h); box-shadow: var(--rule-b); font-size: var(--text-xs); line-height: var(--lh-caption);
+            font-weight: var(--weight-medium); color: var(--text-tertiary); }
+        .fc-wl > .r { height: var(--row-h); box-shadow: var(--rule-b-soft); }
+        .fc-wl > .r:last-child { box-shadow: var(--rule-b); }
+        .fc-wl > [role="row"] > span { display: flex; align-items: center; min-width: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .fc-wl .c-mo { grid-area: mo; } .fc-wl .c-v { grid-area: v; } .fc-wl .c-plan { grid-area: plan; }
+        .fc-wl .c-chip { grid-area: chip; } .fc-wl .c-rg { grid-area: rg; } .fc-wl .c-ol { grid-area: ol; }
+        .fc-wl .ra { justify-content: flex-end; }
+        .fc-wl > .r > :is(.c-mo, .c-v) { font-weight: var(--weight-medium); }
+        .fc-wl > .r > :is(.c-plan, .c-ol) { color: var(--text-tertiary); }
+        /* The likely range drawn small: a hairline track, the range as a band,
+           the plan as a blue tick, the expected figure as an ink dot. */
+        .rg { position: relative; width: 100%; height: var(--rg-h); }
+        .rg::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: var(--bw-strong); margin-top: calc(var(--bw-strong) / -2);
+            border-radius: var(--radius-full); background: var(--border-soft); }
+        .rg > i { position: absolute; z-index: 1; }
+        .rg > .rg-fill { top: calc((var(--rg-h) - var(--rg-band)) / 2); height: var(--rg-band); left: var(--at-lo); width: calc(var(--at-hi) - var(--at-lo));
+            border-radius: var(--radius-full); background: var(--c-range); box-shadow: inset 0 0 0 var(--bw-hairline) var(--c-range-edge); }
+        .rg > .rg-plan { top: 0; bottom: 0; left: var(--at-plan); width: var(--bw-strong); margin-left: calc(var(--bw-strong) / -2);
+            border-radius: var(--radius-swatch); background: var(--c-plan); }
+        .rg > .rg-exp { top: 50%; left: var(--at-exp); width: var(--dot-md); height: var(--dot-md); margin: calc(var(--dot-md) / -2) 0 0 calc(var(--dot-md) / -2);
+            border-radius: var(--radius-circle); background: var(--c-exp); box-shadow: 0 0 0 var(--bw-strong) var(--surface-primary); }
+        /* By the table's own width (a phone, or Show all's window on one):
+           month over its outlook, the range, the figure over its chip, in 60 rows. */
+        @container fcwl (max-width: 560px) {
+            .fc-wl > [role="row"] { grid-template-columns: var(--fc-wl-cols-m); grid-template-areas: "mo rg v" "ol rg chip"; }
+            .fc-wl > .h { grid-template-areas: "mo rg v"; }
+            .fc-wl > .h > :is(.c-plan, .c-chip, .c-ol), .fc-wl > .r > .c-plan { display: none; }
+            .fc-wl > .r { height: var(--row-h-2); row-gap: var(--sp-1); align-content: center; }
+        }
+        /* An inline size: the ruling is typed where the sheet's answer sat. */
+        .sizes-inp { width: calc(var(--sp-8) * 2.5); text-align: right; }
+        /* Chips wrap under each other when the column is pressed, rather than
+           push the table past its card. */
+        .ktable td.sizes-status { white-space: normal; }
+        /* The size list as a data table: numbers in tabular columns, the unit in
+           the heading, notes on one line, makers as foldable group rows, an A to
+           Z strip to jump by, and a paging rail in the footer. */
+        .ktable th.num, .ktable td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .ktable td.sizes-model { font-weight: var(--weight-medium); min-width: calc(var(--sp-8) * 6); }
+        /* Notes takes what the other columns leave (max-width 0 with width
+           100% in an auto table): at a fixed 440px the table never fitted its
+           card, Undercut was cut mid-number at 1280 and even 1728 scrolled. */
+        .ktable td.sizes-notes { color: var(--text-tertiary); font-size: var(--text-xs); line-height: var(--lh-caption); max-width: 0; width: 100%; }
+        /* The one line and its ellipsis are the inner span's, so the cell itself clips nothing and the open row's fill can bleed past it. */
+        .ktable td.sizes-notes > .sizes-note { display: block; width: 0; min-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        /* The list fits its card: a heading over a column of numbers takes
+           two lines rather than 137px, and a card under 860px gives the model
+           8rem and puts the notes away (they were 63px of '...' there; each
+           is on its model's hover). At 1280 the table was 996px in 913 and
+           Undercut was cut mid-figure at the card's edge. */
+        .ktable-wrap:has(> .sizes-table) { container: sizes / inline-size; }
+        @container sizes (max-width: 1000px) { .ktable.sizes-table th { white-space: normal; } }
+        @container sizes (max-width: 860px) {
+            .ktable.sizes-table td.sizes-model { min-width: 8rem; }
+            .ktable.sizes-table thead th:last-child, .ktable.sizes-table td.sizes-notes { display: none; }
+        }
+        @container sizes (max-width: 700px) {
+            .ktable.sizes-table :is(th, td) { padding-inline: var(--sp-2); }
+            .ktable.sizes-table thead th:nth-last-child(2), .ktable.sizes-table td.sizes-under { display: none; }
+        }
+        /* The fills in the Size list (a maker's band, an open model's detail panel) bleed 8 past the
+           column on each side, so the words stay on the text edge and never touch the fill's edge; the
+           list's wrapper lets them show. The open row itself stays flush: its last cell (the notes,
+           which ends in an ellipsis and so clips) would cut a bleed on its right. */
+        .ktable-wrap:has(> .sizes-table) { overflow: visible; }
+        .ktable tr.ktable-grp th { background: var(--surface-secondary); color: var(--text-primary); font-weight: var(--weight-medium); font-size: var(--text-body); line-height: var(--lh-control); padding: var(--sp-1-5) 0; cursor: pointer;
+            box-shadow: var(--rule-b), calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); }
+        @media (hover: hover) { .ktable tr.ktable-grp:hover th { background: var(--surface-tertiary); box-shadow: var(--rule-b), calc(-1 * var(--sp-2)) 0 0 var(--surface-tertiary), var(--sp-2) 0 0 var(--surface-tertiary); } }
+        .ktable tr.ktable-grp .grp-n { color: var(--text-tertiary); font-weight: var(--weight-regular); margin-left: var(--sp-2); }
+        /* A model's row opens in place. The model is its button, with a caret
+           that turns as a maker row's does, and the words a search matched
+           are marked where they sit. */
+        .ktable tr.sizes-row { cursor: pointer; }
+        .sizes-open { display: inline-flex; align-items: baseline; gap: var(--sp-1); max-width: 100%; padding: 0; border: 0;
+            background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+        .sizes-caret { display: inline-grid; place-items: center; align-self: center; flex: none; color: var(--text-tertiary);
+            transition: transform var(--dur) var(--ease); }
+        .sizes-caret svg { width: var(--icon-sm); height: var(--icon-sm); display: block; stroke-width: var(--icon-stroke-s); }
+        .sizes-open[aria-expanded="true"] .sizes-caret { transform: rotate(90deg); }
+        .sizes-name { min-width: 0; overflow-wrap: anywhere; }
+        mark.sizes-hit { background: var(--warning-bg); color: inherit; border-radius: var(--radius-tag); }
+        .sizes-aka { margin-top: var(--sp-0-5); padding-left: calc(var(--icon-sm) + var(--sp-1)); font-size: var(--text-xs); line-height: var(--lh-caption);
+            font-weight: var(--weight-regular); color: var(--text-secondary); }
+        .sizes-model .sizes-labeltag { display: table; margin-left: calc(var(--icon-sm) + var(--sp-1)); margin-top: var(--sp-1); }
+        .ktable tr.sizes-row.open td { background: var(--surface-secondary); border-bottom-color: transparent; }
+        /* The open row's fill bleeds 8 either side, like the detail under it and every other row of the family. */
+        .ktable tr.sizes-row.open > td:first-child { box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary); }
+        .ktable tr.sizes-row.open > td:last-child { box-shadow: var(--sp-2) 0 0 var(--surface-secondary); }
+        .ktable tr.sizes-detail > td { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary);
+            padding: 0 var(--sp-4) var(--sp-4) calc(var(--sp-3) + var(--icon-sm) + var(--sp-1)); }
+        @media (hover: hover) { .ktable tbody tr.sizes-detail:hover td { background: var(--surface-secondary); } }
+        .sizes-dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--sp-1) var(--sp-4);
+            margin: 0; max-width: 56rem; line-height: var(--lh-control); }
+        .sizes-dl dt { color: var(--text-secondary); }
+        .sizes-dl dd { margin: 0; white-space: normal; }
+        .sizes-detail-acts { margin-top: var(--sp-3); }
+        /* The opened model's band: Cut at and Set size on one line, the
+           measures under it, the words in the right-hand cell. */
+        .ktable tr.sizes-detail > td { vertical-align: top; }
+        .ktable tr.sizes-detail > td.sizes-d-r { padding-left: var(--sp-3); }
+        .sizes-cut { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); min-height: var(--control-h); }
+        .sizes-cut > .k { color: var(--text-secondary); }
+        .sizes-cut > .sizes-detail-acts { margin-top: 0; align-items: center; }
+        .sizes-cut b { font-weight: var(--weight-semibold); color: var(--text-primary); }
+        .sizes-facts { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-5); margin-top: var(--sp-1); color: var(--text-primary); }
+        .sizes-facts > span > span { margin-right: var(--sp-2); color: var(--text-secondary); }
+        .sizes-edit-unit { align-self: center; color: var(--text-secondary); font-size: var(--text-body); }
+        .sizes-unit { display: none; }
+        /* The label's answer for the name typed, and a search put right, each
+           one line over the list. */
+        .sizes-label-line { display: flex; gap: var(--sp-2); margin: 0 0 var(--sp-3); font-size: var(--text-body);
+            line-height: var(--lh-control); color: var(--text-primary); }
+        .sizes-label-line > .ic { flex: none; display: inline-grid; place-items: center; height: calc(var(--text-sm) * 1.5); color: var(--text-tertiary); }
+        .sizes-label-line > .ic svg { width: var(--icon-md); height: var(--icon-md); }
+        .sizes-label-line.quiet { color: var(--text-tertiary); }
+        /* On a phone the answer takes two lines as often as one: the place
+           kept for it is two, so the answer never moves the rows. */
+        @media (max-width: 640px) { .sizes-label-line { min-height: calc(var(--text-sm) * var(--lh-body) * 2); } }
+        .sizes-fixed { margin: 0 0 var(--sp-3); font-size: var(--text-body); color: var(--text-secondary); }
+        /* A narrow card reads each model as a line of its own with the size
+           to cut large at its right: on a phone the table put Produced as off
+           the card's edge, behind a sideways scroll. The other figures and the
+           notes are in the model's details. */
+        @container sizes (max-width: 520px) {
+            .ktable.sizes-table { min-width: 0; }
+            .ktable.sizes-table thead { display: none; }
+            .ktable.sizes-table, .ktable.sizes-table tbody, .ktable.sizes-table tr.ktable-grp, .ktable.sizes-table tr.ktable-grp > th,
+            .ktable.sizes-table tr.sizes-detail, .ktable.sizes-table tr.sizes-detail > td { display: block; }
+            /* R13: a status tag sits on the model's line, as a tag beside its name, not on a line of its own. Its
+               column is never narrower than the tag, so a long name wraps rather than the tag running over the size. */
+            .ktable.sizes-table tr.sizes-row { display: grid; grid-template-columns: minmax(0, max-content) minmax(min-content, 1fr) auto;
+                grid-template-areas: "model status fig" "maker maker fig"; column-gap: var(--sp-3); row-gap: var(--sp-1);
+                padding: var(--sp-3) 0; border-bottom: var(--bw-hairline) solid var(--border-default); }
+            .ktable.sizes-table tr.sizes-row.open { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); }
+            @media (hover: hover) { .ktable.sizes-table tr.sizes-row:hover { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); } }
+            .ktable.sizes-table tr.sizes-row.open { border-bottom-color: transparent; }
+            .ktable.sizes-table tr.sizes-row > td { display: block; height: auto; min-width: 0; padding: 0; border: 0; background: none; }
+            .ktable.sizes-table tr.sizes-row.open > td { box-shadow: none; }
+            .ktable.sizes-table td.sizes-model { grid-area: model; }
+            .ktable.sizes-table td.sizes-maker { grid-area: maker; color: var(--text-secondary); font-size: var(--text-xs); line-height: var(--lh-caption); }
+            .ktable.sizes-table td.sizes-status { grid-area: status; justify-self: start; align-self: center; white-space: normal; }
+            /* The whole card opens the model, so its name keeps its own height (the 40 touch floor made each card 89). */
+            .ktable.sizes-table tr.sizes-row .sizes-open { min-height: 0; }
+            .ktable.sizes-table tr.sizes-row > td.sizes-status:empty { display: none; }
+            .ktable.sizes-table td.sizes-fig { grid-area: fig; align-self: center; font-size: var(--fig-s); font-weight: var(--weight-semibold); letter-spacing: var(--tr-fig); line-height: var(--lh-none); }
+            .ktable.sizes-table td.sizes-fig .sizes-unit { display: inline; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }
+            .ktable.sizes-table tr.sizes-row > :is(td.sizes-glass, td.sizes-image, td.sizes-under, td.sizes-notes) { display: none; }
+            .ktable.sizes-table tr.sizes-detail > td { height: auto; padding: 0 0 var(--sp-4); }
+            .ktable.sizes-table tr.sizes-detail > td.sizes-d-l { padding-bottom: var(--sp-2); }
+            .sizes-dl { grid-template-columns: minmax(0, 1fr); gap: 0; }
+            .sizes-dl dd + dt { margin-top: var(--sp-2); }
+        }
+        .ktable tr.ktable-grp .grp-caret { display: inline-grid; place-items: center; vertical-align: middle; margin-right: var(--sp-2); color: var(--text-tertiary); transition: transform var(--dur) var(--ease); }
+        .ktable tr.ktable-grp .grp-caret svg { width: var(--sp-4); height: var(--sp-4); display: block; }
+        .ktable tr.ktable-grp[aria-expanded="true"] .grp-caret { transform: rotate(90deg); }
+        .az { display: flex; flex-wrap: wrap; gap: var(--sp-1); padding: 0 0 var(--sp-3); }
+        .az button { height: var(--control-h-sm); min-width: var(--control-h-sm); padding: 0 var(--sp-1-5); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--text-primary); font: inherit; font-size: var(--text-body); font-weight: var(--weight-medium); cursor: pointer; transition: background var(--dur) var(--ease); }
+        /* The letters are an index, so they are quiet text that takes a ground
+           only under the pointer: 27 bordered boxes read as a wall of controls. */
+        @media (hover: hover) { .az button:hover { background: var(--surface-tertiary); } }
+        .az button:disabled { color: var(--text-disabled); cursor: default; background: transparent; }
+        .tbl-pages { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+        .tbl-page { font-size: var(--text-body); color: var(--text-tertiary); }
+        /* One figure card everywhere (2026-10-05). Finance's tiles carried a
+           16px label and a 30px figure, Loan units an icon and a 30px figure,
+           the rest the strip's 14 over 24: three cards doing one job. */
+        /* Two up on a phone rather than one. A card with a sparkline and a
+           delta pill needs the full width; these carry a label and a figure,
+           and six of them stacked cost 686px of an 812px screen before the
+           aged-debt card had started. */
+        @media (max-width: 640px) { .metrics-flat { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        /* Six tiles do not divide into four tracks, and the half-empty second
+           row read as a layout that had run out of data. Under 1100 the shared
+           breakpoints take it to two and then one, which divide six as well. */
+        @media (min-width: 1101px) { .metrics.metrics-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        /* Two columns below that: the third tile takes the row, not a half
+           with an empty cell beside it that reads as a tile that failed. */
+        @media (max-width: 1100px) { .metrics.metrics-3 > :nth-child(3):last-child { grid-column: 1 / -1; } }
+        /* A FIGURE GROUP (12 Oct 2026). Cameron's 2,200 monitor: Out now 1, On
+           the shelf 2 and Overdue 0 each at the left of a third of a 1,450px
+           row, Synced 120 and Failed 0 460px apart. The strip was twelve tracks
+           that gave every figure a share of the row whatever it held. Now the
+           group is as wide as its figures: each one its own width (at least
+           --fig-min, a sparkline's when it has one), packed from the text edge,
+           a hairline in the middle of the gap before it. A row that runs out of
+           room wraps, and the clip on .metrics keeps the first hairline of every
+           line outside the group, so each line starts on the text edge. */
+        .metrics.metrics-strip { display: flex; flex-wrap: wrap; align-items: flex-start; width: fit-content; max-width: 100%;
+            column-gap: var(--sp-8); row-gap: var(--sp-6); }
+        .metrics-strip > .stat { flex: 0 1 auto; min-width: var(--fig-min); }
+        .metrics-strip > .stat:has(.stat-spark) { width: var(--fig-spark-w); }
+        /* Five figures in half a row run three then two, never four and one
+           alone (Keywords' paid search, beside the keyword table). */
+        @media (min-width: 641px) { .wpair .metrics.metrics-strip:has(> :nth-child(5):last-child) { display: grid; grid-template-columns: repeat(3, max-content); } }
+        /* No figure alone on a line (R2): eight run four and four, and four in half
+           a row two by two, when one line cannot hold them (SEO and Customers at 1440). */
+        .fig-host { container: fighost / inline-size; }
+        @container fighost (min-width: 41rem) and (max-width: 72rem) { .fig-host > .metrics.metrics-strip:has(> :nth-child(8):last-child) { display: grid; grid-template-columns: repeat(4, max-content); } }
+        @container wpair (min-width: 64rem) and (max-width: 74rem) { .wpair .metrics.metrics-strip:has(> :nth-child(4):last-child) { display: grid; grid-template-columns: repeat(2, max-content); } }
+        /* A FIGURE GROUP ON A PHONE: two across, and three across for three,
+           five and six, so no figure sits alone on a row; a figure with a
+           sparkline takes the row (the .metrics phone rule). The phone's 16
+           between them, as .metrics has there: the desk's 40 left three money
+           figures 93px each, and their hairline is drawn for 16. */
+        @media (max-width: 640px) {
+            .metrics.metrics-strip { display: grid; width: auto; column-gap: var(--sp-4); grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .metrics.metrics-strip:has(> :nth-child(3):last-child),
+            .metrics.metrics-strip:has(> :nth-child(5):last-child),
+            .metrics.metrics-strip:has(> :nth-child(6):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .metrics-strip > .stat { min-width: 0; }
+            .metrics-strip > .stat:has(.stat-spark) { width: auto; }
+        }
+        /* A figure sits under its label at one distance in every tile. Pinned
+           to the foot of the tile (margin-top: auto), a tile with a shorter note
+           or an unwrapped change pill dropped its figure lower than its
+           neighbours', and a row of figures stopped lining up. */
+        .metrics-strip > .stat > .stat-row { margin-top: 0; }
+        /* On a phone a row of tiles shares its label, figure and note rows
+           (subgrid), so a label that wraps in one tile moves every figure in the
+           row down with it and the figures stay level. Tiles with a sparkline
+           keep their own flow: the spark is a fourth part the shared rows do not
+           have. In the wider group the labels do not wrap, so it does not arise. */
+        .metrics-strip > .stat:not(:has(.stat-spark)) { display: grid; grid-row: span 3; grid-template-rows: subgrid;
+            grid-template-columns: minmax(0, 1fr); row-gap: var(--gap-fig); align-content: start; }
+        .metrics-strip:has(> .stat .stat-spark) > .stat { grid-row: auto; }
+        /* The figure's own line: a change pill wraps under the figure when the
+           figure and pill do not fit side by side. It is not a size container:
+           one gave the line no width of its own, so the group had nothing to be
+           as wide as. */
+        .metrics-strip .stat-row { row-gap: var(--sp-1); align-content: flex-start; }
+        /* COUNTERS (12 Oct 2026). A figure that filters the list under it is
+           the Production Manager's counter, not a figure with an empty ring at
+           its far edge (Cameron's third screenshot: each severity's circle sat
+           300px from its word): a fill tile, a dot and the word, the figure
+           under them with what it is worth beside it. The chosen one is the
+           teal fill with ink words. A group of them is one item in a figure
+           group, with the group's hairline before it. */
+        .fcs { display: flex; flex-wrap: wrap; align-items: stretch; gap: var(--control-gap); }
+        .metrics > .fcs { position: relative; }
+        .metrics > .fcs::before { content: ""; position: absolute; top: 0; bottom: 0; left: calc(-0.5 * var(--sp-8));
+            width: var(--bw-hairline); background: var(--border-default); }
+        .fc { min-width: var(--fc-w); padding: var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius-tile); background: var(--surface-tertiary);
+            display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); font: inherit; color: var(--text-primary); text-align: left; cursor: pointer; }
+        .fc-l { display: flex; align-items: center; gap: var(--sp-1-5); font-weight: var(--weight-medium); color: var(--text-secondary); white-space: nowrap; }
+        .fc-dot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); flex: none; background: var(--border-emphasis); }
+        .fc-dot.bad { background: var(--error); }
+        .fc-dot.warn { background: var(--warning); }
+        .fc-dot.ok { background: var(--success); }
+        .fc-v { display: flex; align-items: baseline; gap: var(--sp-2); }
+        .fc-v b { font-size: var(--fig-m); font-weight: var(--weight-semibold); line-height: var(--lh-none); letter-spacing: var(--tr-fig); font-variant-numeric: tabular-nums; }
+        .fc-v span { color: var(--text-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .fc:is(.on, [aria-pressed="true"]) { background: var(--action-primary); box-shadow: var(--shadow-focal); }
+        .fc:is(.on, [aria-pressed="true"]) :is(.fc-l, .fc-v span) { color: var(--text-on-action); }
+        @media (hover: hover) { .fc:not(.on):hover { background: var(--surface-sunken); } }
+        .fc:not(.on):active { background: var(--press-fill); }
+        /* COUNTERS ON A PHONE: two by two (Reconciliation's four, a count and its
+           money), and counters whose figure is money (Liability's buckets) full
+           width rows, the word left and the figure right, under the plain
+           figures, which then share one row: three money figures side by side ran
+           off a 390 screen. */
+        @media (max-width: 640px) {
+            .fcs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .fc { min-width: 0; padding: var(--sp-3); }
+            .fcs-money { grid-template-columns: minmax(0, 1fr); }
+            .fcs-money .fc { flex-direction: row; align-items: center; justify-content: space-between; }
+            .metrics.metrics-strip:has(> .fcs) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .metrics.metrics-strip > .fcs { order: 1; grid-column: 1 / -1; }
+            .metrics.metrics-strip > .fcs::before { display: none; }
+        }
+        /* An interactive KPI says so: a pointer, the hover the reference gives
+           its rows, and a corner cue. A card that opens a list carries the
+           reference's ArrowUpRight; a card that filters the list under it
+           carries a ring that fills with a tick when it is the filter set. */
+        .stat.stat-open { cursor: pointer; }
+        @media (hover: hover) { .stat.stat-open:hover .label { color: var(--text-primary); } }
+        .stat-act { position: absolute; top: calc((var(--lh-control) - var(--box-xs)) / 2); right: 0; width: var(--box-xs); height: var(--box-xs); display: grid; place-items: center; color: var(--text-tertiary); transition: color var(--dur) var(--ease), background var(--dur) var(--ease); }
+        .stat-act svg { width: var(--icon-md); height: var(--icon-md); display: block; }
+        .stat:focus-visible > .stat-act { color: var(--text-primary); }
+        @media (hover: hover) { .stat:hover > .stat-act { color: var(--text-primary); } }
+        .stat:has(> .stat-act) > .label { padding-right: var(--sp-6); }
+        /* The opener's corner mark is a real button (see statOpens): the mark's look and a button's reset; the house focus ring is the control rule's. */
+        .stat-open-btn { padding: 0; border: 0; background: none; font: inherit; cursor: pointer; }
+        @media (hover: hover) { .stat-open-btn:hover { color: var(--text-primary); } }
+        /* The list behind a KPI: the figure, what the list is, then the rows. */
+        .modal.smodal { max-width: 640px; }
+        /* Reading an email is prose, so it takes a narrower measure than the
+           dispatch form the mail modal is otherwise shaped like. A variant,
+           because three screens were each writing their own pixel into an
+           inline style - which is the one thing a component must not let its
+           callers do. */
+        .modal.mreader { max-width: 680px; }
+        .stat-detail-sum { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); margin-bottom: var(--sp-4); }
+        .stat-detail-sum .value { font-size: var(--fig-s); letter-spacing: var(--tr-fig); line-height: var(--lh-none); }
+        .stat-detail-sum.warn .value { color: var(--warning); }
+        .stat-detail-title { font-size: var(--text-body); color: var(--text-tertiary); }
+        .drill-rows { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); overflow: auto; max-height: 60vh; }
+        .drill-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-2-5) var(--sp-3); font-size: var(--text-body); }
+        .drill-row + .drill-row { border-top: var(--bw-hairline) solid var(--border-default); }
+        .drill-row a, .drill-row .drill-name { color: var(--text-primary); text-decoration: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        @media (hover: hover) { .drill-row a:hover { text-decoration: underline; } }
+        .drill-row .note { color: var(--text-tertiary); flex: none; font-variant-numeric: tabular-nums; }
+        .drill-more { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); margin-top: var(--sp-2); }
+        .stat-spark { margin-top: var(--sp-3); position: relative; opacity: .92; }
+        .stat-spark .spark { height: 30px; }

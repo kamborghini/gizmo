@@ -134,6 +134,10 @@ return `_json`. Write the test first; `post()` and `post_s()` in the suite
 are the two ways to call it. Then `make api-doc`: CI fails while
 `docs/API.md` does not list it.
 
+**A page section.** A file in `static/src/js` or `static/src/css`, whole
+lines ending in a newline, and its line in `static/src/manifest.json` where it
+belongs in the script's order or the cascade.
+
 **A screen.** One entry in `tests/browser/screens.js` whose steps end by
 waiting for content only the seed puts there; if it needs data, add it in
 `tests/browser/seed/` through the app's own routes first, and a seeded text
@@ -166,8 +170,13 @@ assistant gets tools for it — those tools in `_TOOL_TABS`.
   first, after the gate.
 - **JSON stores, not a database.** The trade-off is written down in the
   audit (§4). The trigger to revisit is a measured slow save.
-- **The page is one file.** No build step; the guards depend on it. The
-  split into assets happens at serve time.
+- **The page is one script in sections.** `static/src/` holds the shell, the
+  stylesheet's sections and the script's sections, in the order
+  `static/src/manifest.json` gives; `pagesource.py` joins them at start-up
+  into the one page the server has always served (one function scope, split
+  into two hashed assets at serve time). No build step. A screen's code is in
+  its own file (`js/crm.js`, `js/production-manager.js`); a page-suite guard
+  fails until a new file and its manifest line both exist.
 - **The container runs as root.** A written risk acceptance in the
   Dockerfile; the fix needs a scratch volume to prove.
 - **The test runner is our own.** Seven hundred tests in a minute through

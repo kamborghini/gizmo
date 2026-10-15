@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#121212" />
+    <!--APPBRIDGE-->
+    <title>Reactor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet" />
+    <style>
+<!-- @css -->
+    </style>
+</head>
+<body>
+    <!-- First thing in the tab order: sixteen nav items sit between the
+         top of the page and the content on every single view. -->
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div id="app">
+        <aside class="sidebar" id="sidebar">
+            <!-- Header, scrolling body, footer: the three parts of the reference's
+                 sidebar. The brand is a button like its logo row, and it goes home. -->
+            <div class="side-head">
+                <button class="brand" id="brand-home" type="button" aria-label="Reactor, by Projected Image: go to the Overview"><img class="brand-logo" src="/brand/logo-light.svg" alt="" width="144" height="40" /><span class="brand-sep" aria-hidden="true"></span><span class="brand-name">Reactor</span></button>
+                <button class="icon-btn side-hide" id="side-hide" type="button" title="Hide sidebar" aria-label="Hide sidebar" aria-keyshortcuts="Meta+B" aria-controls="sidebar" aria-expanded="true"></button>
+            </div>
+            <div class="side-body">
+                <div class="nav" role="navigation" aria-label="Sections">
+                    <!-- Grouped, like the reference's sidebar: a 12px medium label
+                         over each set. It also settles where Reconciliation lives -
+                         next to Liability under Finance, rather than as its own
+                         island halfway down a flat list of sixteen. -->
+                    <button class="nav-group" type="button" data-group="dashboards" aria-expanded="true" aria-controls="nav-sect-dashboards">Dashboards</button>
+                    <div class="nav-sect" id="nav-sect-dashboards">
+                    <button class="nav-item active" data-view="overview" id="nav-overview"></button>
+                    <button class="nav-item" data-view="seo" id="nav-seo"></button>
+                    <button class="nav-item" data-view="keywords" id="nav-keywords"></button>
+                    <button class="nav-item" data-view="products" id="nav-products"></button>
+                    <button class="nav-item" data-view="customers" id="nav-customers"></button>
+                    </div>
+                    <button class="nav-group" type="button" data-group="finance" aria-expanded="true" aria-controls="nav-sect-finance">Finance</button>
+                    <div class="nav-sect" id="nav-sect-finance">
+                    <button class="nav-item" data-view="liability" id="nav-liability"></button>
+                    <button class="nav-item" data-view="recon" id="nav-recon"></button>
+                    <button class="nav-item" data-view="forecast" id="nav-forecast"></button>
+                    <button class="nav-item" data-view="connector" id="nav-connector"></button>
+                    </div>
+                    <button class="nav-group" type="button" data-group="operations" aria-expanded="true" aria-controls="nav-sect-operations">Operations</button>
+                    <div class="nav-sect" id="nav-sect-operations">
+                    <button class="nav-item" data-view="labels" id="nav-labels"></button>
+                    <button class="nav-item" data-view="sizes" id="nav-sizes"></button>
+                    <button class="nav-item" data-view="crm" id="nav-crm"></button>
+                    <button class="nav-item" data-view="loans" id="nav-loans"></button>
+                    <button class="nav-item" data-view="mail" id="nav-mail"></button>
+                    <button class="nav-item" data-view="files" id="nav-files"></button>
+                    </div>
+                    <button class="nav-group" type="button" data-group="workspace" aria-expanded="true" aria-controls="nav-sect-workspace">Workspace</button>
+                    <div class="nav-sect" id="nav-sect-workspace">
+                    <button class="nav-item" data-view="team" id="nav-team" style="display:none"></button>
+                    <button class="nav-item" data-view="memory" id="nav-memory"></button>
+                    <button class="nav-item" data-view="skills" id="nav-skills"></button>
+                    <button class="nav-item" data-view="chat" id="nav-chat"></button>
+                    <button class="nav-item" data-view="guide" id="nav-guide"></button>
+                    </div>
+                </div>
+                <div class="convo-head"><span>Conversations</span>
+                    <button class="icon-btn" id="new-convo" title="New chat" aria-label="New chat"></button></div>
+                <div class="convos" id="convos"></div>
+            </div>
+            <div class="side-foot">
+                <!-- The account row: who is signed in, and a menu holding what
+                     used to be three loose buttons. -->
+                <button class="side-user" id="side-user" type="button" aria-haspopup="menu" aria-expanded="false">
+                    <span class="side-avatar" id="side-avatar" aria-hidden="true"></span>
+                    <span class="side-user-text"><span class="side-user-name" id="auth-account"></span><span class="side-user-role" id="auth-role"></span></span>
+                    <span class="side-user-more" id="side-user-more" aria-hidden="true"></span>
+                </button>
+                <!-- The controls that menu presses. Hidden, so their handlers and
+                     the role gating that shows or hides them stay exactly where
+                     they were. -->
+                <div class="side-foot-legacy" hidden>
+                    <button class="btn" id="clock-btn" style="display:none"></button>
+                    <button class="icon-btn" id="logout-btn" title="Log out" aria-label="Log out"></button>
+                    <button class="icon-btn" id="settings-btn" title="Settings" aria-label="Settings"></button>
+                </div>
+            </div>
+        </aside>
+        <div class="backdrop" id="backdrop"></div>
+
+        <main class="main" id="main" tabindex="-1">
+            <div class="topbar">
+                <!-- The mix: where you are (the section, then the page) on the left,
+                     search on the right. The menu button opens the phone's drawer,
+                     and on a desk brings back a sidebar folded away. -->
+                <button class="icon-btn menu-btn" id="menu-btn" title="Toggle sidebar" aria-label="Toggle sidebar" aria-keyshortcuts="Meta+B" aria-controls="sidebar" aria-expanded="true"></button>
+                <div class="crumbs"><span id="view-crumb"></span><span class="crumb-chev" id="crumb-chev" aria-hidden="true"></span><h1 id="view-title">Overview</h1></div>
+                <button class="topbar-search" id="topbar-search" type="button" aria-keyshortcuts="Meta+J" aria-label="Search pages and the guide"></button>
+                <button class="icon-btn" id="print-btn" title="Download as PDF" aria-label="Download as PDF"></button>
+                <button class="btn btn-sm" id="topbar-action"></button>
+            </div>
+            <div class="print-head" id="print-head"><span class="ph-brand">Reactor</span><span class="ph-meta" id="print-meta"></span></div>
+
+            <!-- Overview -->
+            <section class="view active" id="view-overview">
+                <div class="scroll"><div class="ov-wrap" id="ov-content"></div></div>
+            </section>
+
+            <!-- SEO -->
+            <section class="view" id="view-seo">
+                <div class="scroll"><div class="ov-wrap" id="seo-content"></div></div>
+            </section>
+
+            <!-- Keywords -->
+            <section class="view" id="view-keywords">
+                <div class="scroll"><div class="ov-wrap" id="keywords-content"></div></div>
+            </section>
+
+            <!-- Products -->
+            <section class="view" id="view-products">
+                <div class="scroll"><div class="ov-wrap" id="products-content"></div></div>
+            </section>
+
+            <!-- Customers -->
+            <section class="view" id="view-customers">
+                <div class="scroll"><div class="ov-wrap" id="customers-content"></div></div>
+            </section>
+
+            <!-- Liability / accounts receivable -->
+            <section class="view" id="view-liability">
+                <div class="scroll"><div class="ov-wrap" id="liability-content"></div></div>
+            </section>
+            <section class="view" id="view-recon">
+                <div class="scroll"><div class="ov-wrap" id="recon-content"></div></div>
+            </section>
+            <section class="view" id="view-forecast">
+                <div class="scroll"><div class="ov-wrap" id="forecast-content"></div></div>
+            </section>
+            <section class="view" id="view-sizes">
+                <div class="scroll"><div class="ov-wrap" id="sizes-content"></div></div>
+            </section>
+            <section class="view" id="view-connector">
+                <div class="scroll"><div class="ov-wrap" id="connector-content"></div></div>
+            </section>
+
+            <!-- Production labels -->
+            <section class="view" id="view-crm">
+                <div class="scroll"><div class="ov-wrap" id="crm-content"></div></div>
+            </section>
+
+            <!-- Loan units: which projectors are out, and with whom -->
+            <section class="view" id="view-loans">
+                <div class="scroll"><div class="ov-wrap" id="loans-content"></div></div>
+            </section>
+
+            <!-- Inbox: shared-mailbox ownership board -->
+            <section class="view" id="view-mail">
+                <div class="scroll"><div class="ov-wrap" id="mail-content"></div></div>
+            </section>
+
+            <!-- Files -->
+            <section class="view" id="view-files">
+                <div class="scroll"><div class="ov-wrap" id="files-content"></div></div>
+            </section>
+
+            <!-- Team -->
+            <section class="view" id="view-team">
+                <div class="scroll"><div class="ov-wrap" id="team-content"></div></div>
+            </section>
+            <section class="view" id="view-labels">
+                <div class="scroll"><div class="ov-wrap" id="labels-content"></div></div>
+            </section>
+
+            <!-- Memory -->
+            <section class="view" id="view-memory">
+                <div class="scroll"><div class="ov-wrap" id="memory-content"></div></div>
+            </section>
+
+            <!-- Skills -->
+            <section class="view" id="view-skills">
+                <div class="scroll"><div class="ov-wrap" id="skills-content"></div></div>
+            </section>
+
+            <section class="view" id="view-guide">
+                <div class="scroll"><div class="ov-wrap" id="guide-content"></div></div>
+            </section>
+
+            <!-- Chat -->
+            <section class="view" id="view-chat">
+                <div class="chat-scroll" id="chat-scroll"><div class="chat-inner" id="chat-log"></div></div>
+                <div class="sr-only" id="chat-status" role="status" aria-live="polite"></div>
+                <div class="composer-wrap">
+                    <div class="composer">
+                        <div class="composer-skills" id="composer-skills" hidden></div>
+                        <div class="box">
+                            <textarea id="input" rows="1" placeholder="Ask about your store…" aria-label="Ask Reactor"></textarea>
+                            <button class="send" id="send" title="Enter to send · Shift+Enter for a new line" aria-label="Send" disabled></button>
+                        </div>
+                        <div class="row">
+                            <button type="button" class="toggle" id="deep-toggle" role="switch" aria-checked="false" aria-describedby="deep-note" title="Reactor thinks for longer before it answers: slower, and costs more. For questions that need several reports at once."><span class="sw"></span> Deep analysis</button>
+                            <span class="deep-note" id="deep-note" hidden>Slower, and costs more. Kept for this conversation.</span>
+                            <button type="button" class="btn btn-sm skill-pick" id="skill-pick" aria-haspopup="menu"></button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Print target for production labels (screen-hidden; the only thing printed in label mode) -->
+    <div id="label-print"></div>
+
+    <div class="modal-overlay" id="settings-modal">
+        <div class="modal">
+            <div class="modal-head">
+                <h3>Settings</h3>
+                <button class="icon-btn" id="settings-close" title="Close" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="section-title set-h">Store profile</div>
+                <p class="field-help set-sub">Reactor reads this with every chat and report.</p>
+
+                <label class="field-label" for="pf-voice">Brand voice</label>
+                <textarea id="pf-voice" class="pf-input" rows="2" placeholder="e.g. Plain and friendly. We talk to lighting technicians, venues and event planners."></textarea>
+
+                <label class="field-label" for="pf-goals">Business goals</label>
+                <textarea id="pf-goals" class="pf-input" rows="2" placeholder="e.g. Grow trade reorders, reach £40k a month, win more wedding work."></textarea>
+
+                <label class="field-label" for="pf-strategy">Overall strategy</label>
+                <textarea id="pf-strategy" class="pf-input" rows="2" placeholder="e.g. Lead on turnaround and quality, not price; custom gobos first, projectors alongside."></textarea>
+
+                <label class="field-label" for="pf-notes">Other notes</label>
+                <textarea id="pf-notes" class="pf-input" rows="2" placeholder="Anything else Reactor should always know: business model, constraints, audience."></textarea>
+                <div class="mail-statebar">
+                    <button class="btn" id="settings-save" type="button">Save profile</button>
+                    <p class="field-help" id="settings-readonly" hidden>An admin sets the store profile and the preferences below.</p>
+                </div>
+
+                <div class="section-title set-h">Sign-in</div>
+                <div class="settings-toggles">
+                    <div class="setting-row">
+                        <div><div class="setting-title">Two-step sign-in</div><div class="setting-sub" id="mfa-sub">A code from your phone as well as your password.</div></div>
+                        <button class="btn" id="mfa-btn" type="button">Set up</button>
+                    </div>
+                </div>
+
+                <div id="signoff-row" style="display:none">
+                    <div class="section-title set-h">Your sign-off</div>
+                    <p class="field-help set-sub">Ends every email you send from the Inbox.</p>
+                    <textarea id="signoff-text" class="pf-input" rows="4" placeholder="e.g. Cameron
+Projected Image UK"></textarea>
+                    <div class="mail-statebar">
+                        <button class="btn" id="signoff-btn" type="button">Save sign-off</button>
+                    </div>
+                </div>
+
+                <div class="section-title set-h">Preferences</div>
+                <div class="settings-toggles">
+                    <div class="setting-row">
+                        <div><div class="setting-title">Track inventory</div><div class="setting-sub">Show low-stock figures and advice. Turn off for unlimited stock.</div></div>
+                        <div class="toggle" data-pref="track_inventory"><span class="sw"></span></div>
+                    </div>
+                    <div class="setting-row">
+                        <div><div class="setting-title">Concise responses</div><div class="setting-sub">Prefer short, skimmable answers.</div></div>
+                        <div class="toggle" data-pref="concise"><span class="sw"></span></div>
+                    </div>
+                    <div class="setting-row">
+                        <div><div class="setting-title">Proactive recommendations</div><div class="setting-sub">Always include actions and opportunities.</div></div>
+                        <div class="toggle" data-pref="proactive"><span class="sw"></span></div>
+                    </div>
+                    <div class="setting-row">
+                        <div><div class="setting-title">Flag anomalies</div><div class="setting-sub">Call out risks and unusual changes in the data.</div></div>
+                        <div class="toggle" data-pref="flag_anomalies"><span class="sw"></span></div>
+                    </div>
+                </div>
+                <div class="section-title set-h">Automatic refresh</div>
+                <div class="setting-row">
+                    <div><div class="setting-title">Auto-refresh reports</div><div class="setting-sub">Re-run audits on a schedule. Uses AI credits each run.</div></div>
+                    <div class="toggle" id="sched-toggle"><span class="sw"></span></div>
+                </div>
+                <div class="setting-row" id="sched-freq-row">
+                    <div><div class="setting-title">Frequency</div></div>
+                    <select id="sched-freq" class="psel" style="max-width:160px">
+                        <option value="24">Daily</option>
+                        <option value="72">Every 3 days</option>
+                        <option value="168">Weekly</option>
+                    </select>
+                </div>
+                <div id="privacy-sec" hidden>
+                    <div class="section-title set-h">Privacy requests</div>
+                    <div id="privacy-reqs"><div class="setting-sub">Checking requests…</div></div>
+                </div>
+                <div class="section-title set-h">Connections</div>
+                <div id="connections"><div class="setting-sub">Checking connections…</div></div>
+                <div class="section-title set-h">AI usage (last 30 days)</div>
+                <div id="usage"><div class="setting-sub">Loading usage…</div></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+<!-- @js -->
+    </script>
+</body>
+</html>

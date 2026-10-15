@@ -1,0 +1,19 @@
+        /* ---------- Settings modal ---------- */
+        .modal-overlay { display: none; position: fixed; inset: 0; background: var(--overlay-modal); z-index: 50;
+            align-items: center; justify-content: center; padding: var(--sp-5); backdrop-filter: blur(4px); }
+        .modal-overlay.show { display: flex; }
+        .modal { background: var(--surface-primary); border: 0; border-radius: var(--radius-pop); box-shadow: var(--shadow-pop); width: 100%; max-width: 520px;
+            max-height: 90vh; display: flex; flex-direction: column; animation: fadeUp .22s ease; }
+        /* Wide variant for the data tables that do not fit the reading-width default. */
+        .modal.wide { max-width: 900px; }
+        .modal-head { display: flex; align-items: center; padding: var(--sp-4); border-bottom: var(--bw-hairline) solid var(--border-default); }
+        .modal-head h3 { margin: 0; font-size: var(--text-head); font-weight: var(--weight-semibold); line-height: var(--lh-control); flex: 1; letter-spacing: normal; }
+        .modal-head > .title-row { flex: 1; }
+        .modal-head .title-row > h3 { flex: 0 1 auto; }
+        .modal-body { padding: var(--sp-4); overflow-y: auto; }
+        /* Under the top bar, not over it: the stack covered Search and New
+           chat, the controls a person reaches for after reading it. */
+        #toast-host { position: fixed; z-index: 100; display: flex;
+            top: calc(var(--topbar-h) + var(--sp-2) + env(safe-area-inset-top, 0px));
+            right: calc(14px + env(safe-area-inset-right, 0px));
+            flex-direction: column; gap: var(--sp-2); max-width: min(430px, 92vw); }

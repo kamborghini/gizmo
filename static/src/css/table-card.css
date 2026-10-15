@@ -1,0 +1,150 @@
+        /* ---------- the table card, to the reference's own measurements ----------
+           A toolbar above the table box and a pager below it, both sitting in
+           the card's 16px padding with the card's own 16px gap between them.
+           Every number here was read off the reference's rendered page. */
+        .tbl-tools { display: flex; align-items: center; justify-content: space-between;
+            gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; }
+        /* min-width: 0 on both rails and on the field's own wrapper. Without it
+           a flex item's automatic minimum is its CONTENT, so the 320px field
+           below propped the whole toolbar open at 320 and the card's 16px
+           gutter turned into a 5px overhang on a phone: the field's max-width
+           was resolving against a wrapper that could not shrink. */
+        .tbl-tools-l, .tbl-tools-r { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+            min-width: 0; max-width: 100%; }
+        /* On a phone a rail holding a segmented track takes the whole line, so
+           the track fills it as it does everywhere else, and an empty left rail
+           no longer pushes it to the right. */
+        /* An empty left rail takes no room, so a lone chooser starts on the
+           card's text edge under the title rather than hanging at the right. */
+        .tbl-tools-l:empty { display: none; }
+        /* On a phone the two rails flow as one wrapping row, so short controls
+           pair up (Status beside Export, Newest first beside its select) rather
+           than each stranded on a line of its own; the search and a choice
+           track still take a line each. */
+        @media (max-width: 640px) {
+            .tbl-tools { gap: var(--sp-2); }
+            .tbl-tools-l, .tbl-tools-r { display: contents; }
+            .tbl-tools .tbl-search { flex: 1 1 100%; } }
+        /* R13: a search with one control (Files' Sort) shares its line with it, not leaving it alone under the search. */
+        /* R13: on a phone Finder drive is a 40 icon at the title's right (the mockup), so New folder and Upload
+           share the row under the title rather than Upload, the main button, sitting alone on a second. */
+        @media (max-width: 640px) {
+            .ov-hero:has(> .ov-hero-act > .files-drv) { position: relative; }
+            .ov-hero:has(> .ov-hero-act > .files-drv) > .ph-text { padding-right: calc(var(--control-h-lg) + var(--sp-2)); }
+            .ov-hero-act > .files-drv { position: absolute; top: calc((var(--lh-title) - var(--control-h-lg)) / 2); right: 0; margin: 0;
+                width: var(--control-h-lg); min-width: var(--control-h-lg); padding: 0; justify-content: center; }
+            .files-drv > .drv-txt { display: none; }
+        }
+        @media (max-width: 640px) { .tbl-tools:has(> .tbl-tools-l > .tbl-search:only-child):has(> .tbl-tools-r > :only-child:not(.segmented)) .tbl-search { flex: 1 1 0; } }
+        /* The Production Manager's toolbar buttons are an equal pair on a phone (the mockup's .m-two), Print all beside Newest
+           first, each half the line less half the gap, so a third button cannot be squeezed in beside them: Print shipping
+           labels (its words are the widest) takes a whole line under the pair, and the size choice the line after it. The
+           markup's order, and so the tab order, is unchanged; the third button is only moved by `order`. */
+        @media (max-width: 640px) {
+            .q-card .tbl-tools-r > .btn { flex: 1 1 calc(50% - var(--sp-1)); min-width: 0; }
+            .q-card .tbl-tools-r > .btn.ship-btn { flex-basis: 100%; order: 1; }
+            .q-card .tbl-tools-r > select { flex: 1 1 100%; order: 2; }
+        }
+        /* THE SEARCH FIELD (the mix, spec 6): one 32 well, 280 wide, its 16
+           glyph 12 in and 8 from the words, the clear button at its end. The
+           input fills the field and runs under its two hairlines, so the whole
+           field is the target; the field is ringed as one while it has focus. */
+        .tbl-search { position: relative; display: flex; align-items: center; gap: var(--control-gap); height: var(--control-h); width: var(--search-w);
+            min-width: 0; max-width: 100%; padding: 0 var(--sp-3); border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-field);
+            background: var(--surface-primary); box-shadow: var(--shadow-control); color: var(--text-tertiary); }
+        .tbl-search input { flex: 1; min-width: 0; height: calc(100% + 2 * var(--bw-hairline)); min-height: 0; width: auto; max-width: none;
+            padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none;
+            font-size: var(--text-body); line-height: var(--lh-control); }
+        .tbl-search:focus-within { box-shadow: var(--focus-ring); }
+        .tbl-search input:focus { box-shadow: none; }
+        /* On a phone the search gives way so Print stays beside it. */
+        @media (max-width: 640px) {
+            .guide-tools > .act-row { flex-wrap: nowrap; }
+            .guide-tools > .act-row > .tbl-search { flex: 1 1 0; }
+            .guide-tools > .act-row > .tbl-search { width: auto; } }
+        .tbl-search .ic { flex: none; color: var(--text-tertiary); pointer-events: none; }
+        .tbl-search .ic svg { width: var(--icon-md); height: var(--icon-md); }
+        /* Chromium paints its own saturated-blue x inside a type=search field.
+           It was the only chromatic accent on either finance tab, on a palette
+           that is otherwise ink, CH greys and the three status tones - and it
+           is the browser's chrome, not the app's. Suppressed and redrawn in
+           house, in the same --text-tertiary as the search glyph opposite it, so the
+           clear gesture survives rather than being taken away. */
+        /* Everywhere, not only the table search: the page search, the queue
+           find and the inbox search each drew Chromium's saturated blue x, the
+           one chromatic mark on their panels. */
+        input[type=search]::-webkit-search-cancel-button,
+        input[type=search]::-webkit-search-decoration {
+            -webkit-appearance: none; appearance: none; }
+        .tbl-search .tbl-clear { flex: none; margin-right: calc(-1 * var(--sp-1));
+            width: var(--box-sm); height: var(--box-sm); min-height: 0; padding: 0; border: 0; background: none;
+            border-radius: var(--radius-tag); color: var(--text-tertiary); display: grid; place-items: center; }
+        @media (hover: hover) { .tbl-search .tbl-clear:hover { color: var(--text-primary); background: var(--surface-sunken); } }
+        .tbl-search .tbl-clear svg { width: var(--icon-sm); height: var(--icon-sm); }
+        /* The rule above sets display, which beats the browser's [hidden]:
+           the clear button showed in every empty search box. */
+        .tbl-search .tbl-clear[hidden] { display: none; }
+        /* A toolbar row is ONE height, the 32 the card actions above it are.
+           Two controls arrive carrying their own: a select has the 32px floor
+           every field has, and the segmented track has the 12px bottom margin
+           it needs when it stands alone, which sat it half a step above the
+           search beside it. Both are re-cut to the row here. */
+        /* The chevron's room on the right, not 10: the base rule draws its 16px caret at
+           `right 9px center`, so a symmetric padding put the label under it. */
+        .tbl-tools select { font-weight: var(--weight-regular); height: var(--control-h); min-height: var(--control-h); padding: 0 var(--chevron-room) 0 var(--sp-3);
+            border-radius: var(--radius-field); font-size: var(--text-body); line-height: var(--lh-control); }
+        /* On a phone each line of selects fills to the card's gutter rather
+           than ending wherever its words do. */
+        @media (max-width: 640px) { .tbl-tools-l > select, .tbl-tools-r > select { flex: 1 1 calc(var(--sp-8) * 3); } }
+        /* A variant that changes the gap must change the TOKEN, not the raw
+           padding: the thumb's radius is derived from it, so setting padding
+           directly left the thumb rounded for a 4px gap while sitting in a 2px
+           one. Setting the token keeps the corner concentric for free. */
+        /* The small button. The reference builds its card actions, its table
+           filters and its pager from this one size, which is why they line up. */
+        /* The mix has no 28 text button: btn-sm is the same 32 button, kept as
+           a name so its call sites need no change. */
+        .btn-sm { min-height: var(--control-h); padding: 0 var(--sp-3); font-size: var(--text-body); gap: var(--control-gap); border-radius: var(--radius-control); }
+        .btn-sm svg { width: var(--icon-md); height: var(--icon-md); }
+        /* A field that sits beside small buttons takes their height, not the
+           32px of a form field: 'Save' at 28 beside an input at 32 was on the
+           Loans chasing row, the size editor and the reconciliation reason. */
+        /* On a touch screen every control is a size a finger can hit: the
+           desk's 32/28/24 steps become 40/36/32, and the tabs and segments
+           that carry a literal height take the small step. */
+        @media (hover: none) and (pointer: coarse) {
+            :root { --control-h: 40px; --control-h-md: 36px; --control-h-sm: 32px; }
+            .tab { min-height: var(--control-h-sm); }
+            .tbl-search .tbl-clear { width: var(--control-h-sm); height: var(--control-h-sm); }
+            .track-btn, .chart-expand, .toggle { min-height: var(--control-h-sm); }
+            .chart-expand { min-width: var(--control-h-sm); }
+            /* The 16px tick keeps its look; its hit area is a finger wide. */
+            .action .check { position: relative; }
+            .action .check::after { content: ""; position: absolute; inset: calc(-1 * var(--sp-3)); }
+        }
+        input.field-sm, select.field-sm { height: var(--control-h); min-height: var(--control-h);
+            padding-block: 0; font-size: var(--text-body); line-height: var(--lh-control); border-radius: var(--radius-field); }
+        .tbl-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }
+        /* The pager is a sibling of the table inside a plain host div, so the
+           card's own 16px gap never reaches between them and the steps sat on
+           the table's bottom border. Fires only on that exact adjacency. */
+        .ktable-wrap + .tbl-foot { margin-top: var(--sp-4); }
+        .card > .ktable-wrap + .tbl-foot { margin-top: 0; }
+        .tbl-count { flex: 1 1 auto; font-size: var(--text-body); color: var(--text-tertiary); }
+        .tbl-pager { display: flex; align-items: center; gap: var(--sp-7); }
+        .tbl-rows { display: flex; align-items: center; gap: var(--sp-2);
+            font-size: var(--text-body); font-weight: var(--weight-medium); white-space: nowrap; }
+        .tbl-rows select { height: var(--control-h); min-height: var(--control-h); width: var(--field-w-sm); padding: 0 var(--chevron-room) 0 var(--sp-3);
+            border-radius: var(--radius-field); font-size: var(--text-body); line-height: var(--lh-control); }
+        .tbl-page { font-size: var(--text-body); font-weight: var(--weight-medium); white-space: nowrap; }
+        .tbl-steps { display: flex; align-items: center; gap: var(--sp-2); }
+        /* Square, and at the base radius rather than the control radius: the
+           reference's pager steps are 32px boxes, not small buttons. */
+        .tbl-step { width: var(--control-h); height: var(--control-h); min-height: var(--control-h); padding: 0; border-radius: var(--radius-control); }
+        .tbl-step svg { width: var(--icon-md); height: var(--icon-md); }
+        @media (max-width: 900px) {
+            .tbl-foot { flex-wrap: wrap; }
+            .tbl-count { flex: 1 1 100%; order: 2; }
+            .tbl-pager { gap: var(--sp-4); margin-left: auto; }
+            .tbl-rows { display: none; }
+        }

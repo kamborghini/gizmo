@@ -1,0 +1,83 @@
+        /* ---------- dropdown menu, to the reference's measurements ----------
+           The panel carries no border: its edge is the same 1px ring the cards
+           use, over a two-layer shadow. Items are 32px at the control radius,
+           padded 32px on the right so a tick has somewhere to sit. */
+        /* WHAT FLOATS (the mix, spec 6): a menu, a panel and a popover share a
+           10 corner and the pop shadow; a menu has 4 inside, a panel and a popover 16. */
+        .dmenu { position: fixed; z-index: 70; min-width: 128px; padding: var(--menu-pad);
+            background: var(--surface-primary); border-radius: var(--radius-pop);
+            box-shadow: var(--shadow-pop);
+            max-height: 70vh; overflow-y: auto; }
+        /* A menu is as wide as its longest item, up to the window: the Skills
+           picker grew to 666px for one long title, over the conversation list,
+           and ran 284px off a phone. */
+        .dmenu { max-width: min(420px, calc(100vw - 16px)); }
+        .dmenu-item > span:not(.ic):not(.dmenu-tick) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+        .dmenu-tick { flex: none; }
+        /* The size is what the item is for: the name gives way to it. */
+        .dmenu-item > .dsearch-sub { flex: none; margin-left: auto; padding-left: var(--sp-2); color: var(--text-tertiary); }
+        /* 12px, the size of the trigger it hangs off. Every menu in the app is
+           opened by a .btn-sm filter chip; at 14 the label grew two steps
+           between the button and its own list, so the control changed scale the
+           moment it opened. The 28px item height is unaffected - it is set. */
+        /* A menu row is a nav row (the mix, spec 6): 32 tall, a 6 corner, a 16
+           icon in ink-3 12 from its words, a count at its end; 32 clear on the
+           right for a tick, so a list of choices does not jump when one is made. */
+        .dmenu-item { display: flex; align-items: center; gap: var(--gap-row-icon); width: 100%;
+            min-height: var(--control-h); padding: 0 var(--sp-7) 0 var(--sp-2); border: 0; background: none;
+            border-radius: var(--radius-row); font: inherit; font-size: var(--text-body); line-height: var(--lh-control);
+            color: var(--text-primary); text-align: left; cursor: pointer; white-space: nowrap; }
+        @media (hover: hover) { .dmenu-item:hover { background: var(--surface-tertiary); } }
+        .dmenu-item:active { background: var(--press); }
+        .dmenu-item .cnt { margin-left: auto; padding-left: var(--sp-2); }
+        .dmenu-link { color: var(--text-link); }
+        .dmenu-item.dmenu-link .ic { color: inherit; }
+        .dmenu-item.dmenu-link svg { width: var(--icon-sm); height: var(--icon-sm); stroke-width: var(--icon-stroke-s); }
+        /* NOT grouped with hover: a grouped rule's outline:none outranks the
+           global :focus-visible baseline on specificity, which left keyboard
+           focus a 1.1:1 background tint nobody can see. Inset, so the ring is
+           not clipped by the panel's overflow. */
+        .dmenu-item:focus-visible { background: var(--surface-tertiary);
+            outline: var(--focus-outline); outline-offset: -2px; }
+        .dmenu-item[aria-disabled="true"], .dmenu-item[disabled] { color: var(--text-disabled); cursor: not-allowed; background: none; }
+        .chip:disabled { color: var(--text-disabled); cursor: not-allowed; }
+        .dmenu-item svg { width: var(--icon-md); height: var(--icon-md); flex: none; }
+        .dmenu-item .ic { color: var(--text-tertiary); }
+        .dmenu-sep { height: 1px; background: var(--border-default); margin: var(--sp-1) var(--sp-2); }
+        .dmenu-label { padding: var(--sp-2) var(--sp-2) var(--sp-1); font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .dmenu-tick { margin-left: auto; margin-right: calc(-1 * var(--sp-6)); color: var(--text-tertiary);
+            display: inline-flex; }
+        .dmenu-tick svg { width: var(--icon-sm); height: var(--icon-sm); }
+        /* A panel hung off a button rather than a list of items: the same box
+           and the same way out, holding a small form instead. */
+        /* A panel is padded once: the menu box round it gives up its own 4. */
+        .dpanel { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--pop-pad);
+            min-width: 240px; }
+        .dmenu:has(> .dpanel) { padding: 0; }
+        .dpanel-row { display: flex; align-items: center; gap: var(--sp-2); }
+        .dpanel-row > span { flex: 1 1 auto; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .dpanel.drive-panel { width: min(360px, calc(100vw - 16px)); }
+        /* A popover: the explanation an info button holds, then the Guide link. */
+        .dpanel.ipop { width: var(--pop-w); max-width: calc(100vw - 2 * var(--sp-4)); min-width: 0; padding: var(--pop-pad); gap: var(--sp-2); }
+        .ipop h3 { margin: 0; font-size: var(--text-body); line-height: var(--lh-control); font-weight: var(--weight-semibold); color: var(--text-primary); }
+        .ipop p { margin: 0; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }
+        .ipop .link { align-self: flex-start; margin-top: var(--sp-1); }
+        /* A standalone link ("Show all", "More in the Guide"): teal words at
+           500 with a 14 arrow 2 after them. Not underlined: it stands alone, so
+           the arrow carries what an underline does in running text. */
+        .link { display: inline-flex; align-items: center; gap: var(--sp-0-5); padding: 0; border: 0; background: none;
+            font: inherit; font-weight: var(--weight-medium); color: var(--text-link); text-decoration: none; cursor: pointer; border-radius: var(--radius-tag); }
+        .link svg { width: var(--icon-sm); height: var(--icon-sm); stroke-width: var(--icon-stroke-s); }
+        .link:active { color: var(--text-link-hover); }
+        @media (hover: hover) { .link:hover { color: var(--text-link-hover); } }
+        /* On a phone a standalone link is a 40 target (a link inside a sentence is not a .link). */
+        @media (max-width: 640px) { .link { min-height: var(--control-h-lg); } }
+        .drive-title { margin: 0; font-size: var(--text-body); font-weight: var(--weight-medium); }
+        .drive-p, .drive-note { margin: 0; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }
+        .drive-p b { color: var(--text-primary); font-weight: var(--weight-medium); overflow-wrap: anywhere; }
+        .drive-pw { display: flex; align-items: center; gap: var(--sp-2); }
+        .drive-pw code { flex: 1 1 auto; min-width: 0; padding: var(--sp-1-5) var(--sp-2); border: var(--bw-hairline) solid var(--border-default);
+            border-radius: var(--radius-inset); background: var(--surface-secondary); font-size: var(--text-body); overflow-wrap: anywhere; user-select: all; }
+        .dpanel input, .dpanel select { height: var(--control-h); padding: 0 var(--sp-3); border-radius: var(--radius-field);
+            font-size: var(--text-body); line-height: var(--lh-control); }
+        .dpanel select { padding-right: var(--chevron-room); }

@@ -1,0 +1,182 @@
+        /* ---------- The two choosers. ONE block each, and nothing else styles them.
+           Tabs move you between sections of a page: ink, and a 2px underline in
+           the mark teal under the live one. A segmented control changes what a
+           card or a list shows: a white pill track with a hairline, the choice
+           in the teal wash with teal ink and a teal ring. Five hand-built
+           families did these two jobs before 2026-10-05 (.ptab, .ftab, .seg,
+           .lbl-seg, and Guide's own): built by tabStrip() and segmented(). */
+        /* A tab is as wide as its label: the first starts on the page's text
+           edge and the underline sits exactly under the word. The space between
+           tabs is the strip's gap, not each tab's own padding. */
+        /* THE TAB STRIP (the mix, spec 5): 44 tall on a full-width hairline, the
+           tabs as wide as their words and 24 apart, the live one in ink with a
+           2px teal-line underline sitting on the rule. It never wraps: on a
+           narrow screen it scrolls sideways, and the underline and the focus
+           ring are drawn inside it, so it never scrolls up and down. */
+        .tabs { display: flex; align-items: stretch; flex-wrap: nowrap; gap: 0 var(--sp-6); max-width: 100%; min-height: var(--row-h);
+            box-shadow: var(--rule-b); overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+            padding-inline: var(--sp-2); margin: 0 calc(-1 * var(--sp-2)) var(--sp-7); }
+        .tabs::-webkit-scrollbar { display: none; }
+        .card > .tabs { margin-bottom: 0; }
+        /* A strip inside a section keeps its rule on the section's text column,
+           from the text edge to the text edge. The box still runs 8 past the
+           text at each end (room for the focus box round a word), so the
+           hairline is drawn between its padding edges rather than along the box. */
+        .card > .tabs { max-width: none; box-shadow: none;
+            background: linear-gradient(var(--border-default), var(--border-default)) center bottom / calc(100% - 2 * var(--sp-2)) var(--bw-hairline) no-repeat; }
+        /* A page's own strip runs edge to edge across the sheet, its first tab on the gutter. */
+        .ov-wrap > .tabs { margin-inline: calc(-1 * var(--wrap-pad)); padding-inline: var(--wrap-pad); max-width: none; }
+        /* On the grey page a tab strip's rule ends on the column, as the panels
+           under it do, and the tabs keep their own 8 of focus room (13 Oct 2026):
+           a standalone strip draws its rule inside that 8, not on its box.
+           After the rules above and the grid's, at the grid's weight, so it wins. */
+        @media screen {
+            :is(.ov-wrap, .ov-wrap.wgrid) > .page-tabs { margin-inline: 0; padding-inline: 0; }
+            :is(.ov-wrap, .ov-wrap.wgrid) > .tabs { margin-inline: calc(-1 * var(--sp-2)); padding-inline: var(--sp-2); box-shadow: none;
+                background: linear-gradient(var(--border-default) 0 0) 50% 100% / calc(100% - 2 * var(--sp-2)) var(--bw-hairline) no-repeat; }
+        }
+        /* On a phone a strip that scrolls runs to the screen's edge, so a tab scrolled out
+           of view is cut there, not 8 into the gutter; its rule stays on the column. */
+        @media screen and (max-width: 640px) {
+            :is(.ov-wrap, .ov-wrap.wgrid) > .tabs { margin-inline: calc(-1 * var(--sp-4)); padding-inline: var(--sp-4);
+                background-size: calc(100% - 2 * var(--sp-4)) var(--bw-hairline); }
+            :is(.ov-wrap, .ov-wrap.wgrid) > .page-tabs > .tabs { margin-inline: calc(-1 * var(--sp-4)); padding-inline: var(--sp-4); }
+        }
+        .tab { position: relative; display: inline-flex; align-items: center; gap: var(--control-gap); flex: none;
+            height: auto; padding: 0; border: 0; background: none;
+            border-radius: 0; font: inherit; font-size: var(--text-body); font-weight: var(--weight-medium);
+            line-height: var(--lh-control); color: var(--text-tertiary); cursor: pointer; white-space: nowrap;
+            transition: color var(--dur) var(--ease); }
+        /* Hover is the ink alone: a grey box behind an underlined tab mixed two
+           kinds of tab in one control. */
+        .tab:active { color: var(--text-primary); }
+        @media (hover: hover) { .tab:hover { color: var(--text-primary); } }
+        .tab:is(.on, [aria-current="page"], [aria-pressed="true"]) { color: var(--text-primary); }
+        .tab:is(.on, [aria-current="page"], [aria-pressed="true"])::after { content: ""; position: absolute; left: 0; right: 0;
+            bottom: 0; height: var(--bw-strong); border-radius: var(--radius-swatch) var(--radius-swatch) 0 0; background: var(--fill-mark); }
+        /* Focus is a rounded box round the word, inside the strip. */
+        .tab:focus-visible { outline: 0; }
+        .tab:focus-visible::before { content: ""; position: absolute; inset: var(--sp-1) calc(-1 * var(--sp-2)); border-radius: var(--radius-control);
+            box-shadow: inset 0 0 0 var(--bw-strong) var(--fill-mark); pointer-events: none; }
+        .tab .beta-tag { margin-left: 0; }
+        /* A count beside its word (a tab, a segment, a section head, a list row,
+           a menu row): caption at 500 in ink-3, tabular, 8 after the word. */
+        .cnt { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary);
+            font-variant-numeric: tabular-nums; }
+        /* QUEUE COUNTERS (the mix, spec 6): the flow's queues as big tiles, the
+           label above a 36 figure, a small chevron between; the chosen one a
+           teal fill with the focal glow and ink words. The other queues are
+           tabs beside them on the chosen recipe: wash, teal ring, ink words. */
+        .queues { display: flex; align-items: stretch; gap: var(--control-gap); }
+        .qc { width: var(--qc-w); padding: var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius-tile); background: var(--surface-tertiary);
+            display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); font: inherit; color: var(--text-primary); text-align: left; cursor: pointer; }
+        .qc-l { font-weight: var(--weight-medium); color: var(--text-secondary); white-space: nowrap; }
+        .qc-n { font-size: var(--fig-l); font-weight: var(--weight-semibold); line-height: var(--lh-none); letter-spacing: var(--tr-fig); font-variant-numeric: tabular-nums; }
+        .qc.on { background: var(--action-primary); box-shadow: var(--shadow-focal); }
+        /* On the grey page the counters are white tiles with a hairline, the chosen one teal (13 Oct 2026). */
+        @media screen { .ov-wrap > .queues .qc:not(.on) { background: var(--surface-primary); box-shadow: inset 0 0 0 var(--bw-hairline) var(--border-default); } }
+        .qc.on .qc-l { color: var(--text-on-action); }
+        @media (hover: hover) { .qc:not(.on):hover { background: var(--surface-sunken); } }
+        .qc:not(.on):active { background: var(--press-fill); }
+        .qsep { align-self: center; color: var(--border-emphasis); display: grid; place-items: center; }
+        .qsep svg { width: var(--icon-sm); height: var(--icon-sm); stroke-width: var(--icon-stroke-s); }
+        .qrest { margin-left: var(--sp-4); align-self: flex-end; display: flex; gap: var(--control-gap); }
+        .qt { height: var(--control-h); padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-control); background: none; display: flex; align-items: center;
+            gap: var(--control-gap); font: inherit; font-weight: var(--weight-medium); color: var(--text-secondary); white-space: nowrap; cursor: pointer; }
+        .qt .ic { color: var(--text-tertiary); }
+        .qt .ic svg { width: var(--icon-md); height: var(--icon-md); }
+        .qt.on { background: var(--action-selected); color: var(--text-primary); box-shadow: var(--ring-chosen); }
+        .qt.on .ic { color: var(--text-brand); }
+        @media (hover: hover) { .qt:not(.on):hover { background: var(--surface-tertiary); } }
+        .qt:not(.on):active { background: var(--press); }
+        @media (max-width: 640px) {
+            .queues { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .queues > .qsep { display: none; }
+            .qc { width: auto; padding: var(--sp-3); }
+            .qc-l { font-size: var(--text-sm); line-height: var(--lh-control); }
+            .qc-n { font-size: var(--fig-m); }
+            .qrest { grid-column: 1 / -1; margin: 0 calc(-1 * var(--sp-2)); align-self: auto; }
+        }
+        /* On a phone the Beta marks go from the tabs: the sidebar still carries them. */
+        @media (max-width: 900px) {
+            .tab .beta-tag { display: none; } }
+        /* align-self: a card is a column flexbox, and stretched across it the
+           track ran from border to border with its choices bunched at one end. */
+        /* The track is a quiet grey well (the fill, which reads on the white sheet
+           and on a white card alike) with no edge of its own, and the chosen
+           choice sits in it on white with ink words and a teal-line ring (below).
+           Its corner is the control's, the choices' that less the 2px inset, so
+           the two curves run parallel. */
+        .segmented { display: inline-flex; flex-wrap: wrap; align-items: stretch; align-self: flex-start; gap: var(--sp-0-5); max-width: 100%;
+            padding: 0 var(--sp-0-5); background: var(--surface-tertiary); border: 0;
+            border-radius: var(--radius-control); }
+        /* A chooser on the grey page (a page's own, or Forecast's in the Finance strip)
+           shares the grey's tone: one shade deeper keeps its track, with the white
+           chosen choice in it (13 Oct 2026). */
+        @media screen { :is(.ov-wrap, .page-tabs-end) > .segmented { background: var(--surface-sunken); } }
+        /* flex: 1 1 auto shares out the spare room of a line, which a track
+           only has once it wraps: a wrapped track fills its lines rather than
+           stranding one choice at the left of the second. On one line the track
+           is as wide as its choices, so nothing grows. */
+        .segmented > button { position: relative; isolation: isolate; flex: 1 1 auto; justify-content: center; display: inline-flex; align-items: center; gap: var(--control-gap); height: var(--control-h);
+            padding: 0 var(--sp-3); border: 0; background: transparent; border-radius: 0;
+            font: inherit; font-size: var(--text-body); font-weight: var(--weight-medium); line-height: var(--lh-control);
+            color: var(--text-tertiary); cursor: pointer; white-space: nowrap;
+            transition: color var(--dur) var(--ease); }
+        /* A segment is the track's full height, so its target is too (40 on a phone); the choice
+           it draws is inset by the track's own 2, on ::before, as in the mockup. */
+        .segmented > button::before { content: ""; position: absolute; inset: var(--sp-0-5) 0; z-index: -1;
+            border-radius: calc(var(--radius-control) - var(--sp-0-5)); transition: background var(--dur) var(--ease); }
+        @media (hover: hover) { .segmented > button:hover { color: var(--text-primary); } }
+        .segmented > button:active::before { background: var(--press); }
+        /* Chosen (the mix, 4.6): white with a teal-line ring and ink words. */
+        .segmented > button:is(.on, [aria-pressed="true"]) { color: var(--text-primary); }
+        .segmented > button:is(.on, [aria-pressed="true"])::before { background: var(--surface-primary); box-shadow: var(--ring-chosen); }
+        .segmented > button svg { width: var(--icon-md); height: var(--icon-md); }
+        .segmented > button:disabled { color: var(--text-disabled); cursor: not-allowed; }
+        .segmented > button:disabled::before { background: transparent; }
+        /* The focus ring follows the drawn choice, inside the track's 2 and the gap between choices. */
+        .segmented > button:focus-visible { outline: 0; }
+        .segmented > button:focus-visible::before { outline: var(--focus-outline); outline-offset: 0; }
+        .segmented > button .cdot { display: inline-grid; place-items: center; vertical-align: middle; color: var(--success); }
+        .segmented > button .cdot svg { width: var(--icon-xs); height: var(--icon-xs); }
+        /* On a phone a track takes a line of its own, fills it, and never wraps:
+           it scrolls sideways like a tab strip, rather than leaving one choice
+           alone on a second line. align-self fills a column parent, the 100%
+           basis a row parent (a toolbar, a section title). */
+        @media (max-width: 640px) {
+            .segmented { display: flex; align-self: stretch; flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+            .segmented::-webkit-scrollbar { display: none; }
+            .segmented > * { flex: 1 0 auto; justify-content: center; }
+            /* Four or more choices may not fit a phone's line, and scrolled they
+               hid the last one (CRM's Done) with nothing to say it was there.
+               They wrap instead, each starting from its own label's width, so
+               short labels (3M 6M 12M 24M) share one line and longer sets wrap
+               only as far as they must (an 84px basis left 24M alone). */
+            .segmented:has(> :nth-child(4)) { flex-wrap: wrap; overflow-x: visible; }
+            .segmented:has(> :nth-child(4)) > * { flex: 1 1 0; min-width: max-content; } }
+        /* In the Xero sync check's column the chooser keeps its own height:
+           flex: 1 1 100% stretched it DOWN the column into a 789px slab. */
+        @media (max-width: 640px) { .cx-res > .segmented { flex: none; } }
+        .kbadge { display: inline-flex; align-items: center; height: var(--tag-h); font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; padding: 0 var(--sp-2); border-radius: var(--radius-tag); margin-left: var(--sp-2); background: var(--warning-bg); color: var(--warning); vertical-align: middle; flex: none; }
+        .kbadge.win { background: var(--success-bg); color: var(--success); }
+        .scan-url { flex: 1 1 18rem; min-width: 0; }
+        /* R13: on a phone Products' Export CSV is its icon, so it shares the line with Filters and Compare periods. */
+        @media (max-width: 640px) { .btn.p-export { width: var(--control-h); padding: 0; justify-content: center; } .p-export > .p-export-txt { display: none; } }
+        /* R13: a CRM contact's tick box sits before its name on a phone, not at the start of the line under it. */
+        @media (max-width: 640px) { .ktable.crm-contact-table > tbody > tr > td.tick { order: -2; } .ktable.crm-contact-table > tbody > tr > td.kt-main { flex: 1 1 calc(100% - var(--sp-8) - var(--sp-3)); } }
+        /* R13: on a phone the field gives way, so Scan stays beside it rather than alone under it. */
+        @media (max-width: 640px) { .scan-card > .act-row { flex-wrap: nowrap; } .scan-card .scan-url { flex-basis: 0; } }
+        .scan-out { display: flex; flex-direction: column; gap: var(--sp-2); }
+        .scan-out:empty { display: none; }
+        /* The findings bleed to the card's edges as rows; the summary and the
+           actions heading keep the gutter, at the card's own body sizes. */
+        .scan-card .card-bleed > .summary, .scan-card .card-bleed .block > .section-title { padding-inline: 0; }
+        .scan-card .card-bleed > .summary { font-size: var(--text-body); }
+        .scan-card .card-bleed .block > .section-title { font-size: var(--text-body); margin: var(--sp-3) 0 var(--sp-2); }
+        .scan-row { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+        .scan-row .psel { flex: 1; min-width: 220px; }
+        .kchips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+        .kchip { background: var(--surface-sunken); border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-control); padding: var(--sp-1) var(--sp-3); font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); }
+        .kchip b { color: var(--text-primary); font-weight: var(--weight-medium); }
+        .kmeta { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); margin: var(--sp-1) 0 var(--sp-0-5); word-break: normal; overflow-wrap: anywhere; } .kmeta b { color: var(--text-primary); }

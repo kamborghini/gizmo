@@ -1,0 +1,29 @@
+        /* ---------- Impact tracking ---------- */
+        .track-btn { border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-tertiary); color: var(--text-secondary); font: inherit; font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-control); display: inline-flex; align-items: center; gap: var(--sp-1); flex: none; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
+        @media (hover: hover) { .track-btn:hover { color: var(--text-primary); border-color: var(--border-emphasis); } }
+        .track-btn:active { background: var(--surface-tertiary); }
+        .track-btn:is(.on, [aria-pressed="true"]) { background: var(--success-bg); color: var(--success); border-color: transparent; cursor: default; }
+        .track-btn > span { display: grid; place-items: center; } .track-btn svg { width: var(--icon-xs); height: var(--icon-xs); display: block; }
+        /* Each tracked change a row of the card, separated by a rule. */
+        /* Tracked changes three across (12 Oct 2026, WS-20), each block its
+           title, when, figures and actions, lined up across the three. */
+        .impact-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-6) var(--sp-8); align-items: start; list-style: none; margin: 0; padding: 0; }
+        @media (max-width: 900px) { .impact-list { grid-template-columns: minmax(0, 1fr); } }
+        .card > .impact-list { padding-inline: 0; }
+        .impact-row { display: flex; flex-direction: column; gap: var(--sp-2); padding: 0; border-top: 0; }
+        .impact-row.done .impact-text { color: var(--text-secondary); }
+        .impact-top { display: flex; align-items: flex-start; gap: var(--sp-3); }
+        .impact-text { flex: 1; font-weight: var(--weight-medium); font-size: var(--text-body); line-height: var(--lh-control); }
+        .impact-acts { display: flex; align-items: center; gap: var(--sp-1); flex: none; }
+        .impact-sub { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); margin: 0; }
+        .impact-deltas { display: grid; grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr)); gap: var(--sp-2) var(--sp-4); }
+        /* Four figures go two by two, never three and one alone (final visual review M6). */
+        .impact-deltas:has(> .idelta:nth-child(4):last-child) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        /* Three across, the changes share their rows, so titles, figures and Conclude line up. */
+        @media (min-width: 901px) { .impact-row { display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: var(--sp-2); align-content: start; } }
+        /* Small figures, no tiles: rises green, falls red. */
+        .impact-deltas .idelta { background: none; padding: 0; min-width: 0; border-radius: 0; }
+        .idelta { display: flex; flex-direction: column; gap: 0; background: var(--surface-tertiary); border: 0; border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-3); min-width: 86px; }
+        .idelta .il { font-size: var(--text-xs); line-height: var(--lh-caption); text-transform: none; letter-spacing: normal; color: var(--text-tertiary); font-weight: var(--weight-medium); }
+        .idelta .iv { font-size: var(--text-body); font-weight: var(--weight-medium); }
+        .idelta.up .iv { color: var(--success); } .idelta.down .iv { color: var(--error); } .idelta.flat .iv { color: var(--text-secondary); }

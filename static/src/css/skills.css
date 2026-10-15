@@ -1,0 +1,163 @@
+        /* How they are used, one band of three (12 Oct 2026, WS-33). */
+        .sk-use-band { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-4) var(--sp-8); }
+        @media (max-width: 900px) { .sk-use-band { grid-template-columns: minmax(0, 1fr); } }
+        .sk-use-k { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary); }
+        .sk-use-v { margin-top: var(--sp-1); font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-primary); }
+        .sk-item:first-child { border-top: 0; padding-top: 0; }
+        .sk-item:last-child { padding-bottom: 0; }
+        .sk-list > .empty { list-style: none; }
+        .sk-editor { display: grid; gap: var(--sp-1); }
+        .sk-editor { max-width: 720px; }
+        .sk-form-title { font-size: var(--text-body); font-weight: var(--weight-medium); margin: 0 0 var(--sp-2); }
+        .sk-field { display: block; margin-bottom: var(--sp-3); }
+        .sk-field > span { display: block; font-size: var(--text-body); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-primary); margin-bottom: var(--sp-1); }
+        /* On the one field recipe (edge, ink, 13, lift and the focus ring come from
+           it): this only sets what a skill or note editor adds, its width and corner. */
+        .sk-input, .sk-textarea { width: 100%; border-radius: var(--radius-field); padding: var(--control-pad-y) var(--sp-3); min-height: var(--control-h); line-height: var(--lh-control); }
+        /* Room to write a playbook: twelve lines to start, growing with it
+           to most of the screen (autoGrow), then scrolling. */
+        .sk-textarea { resize: vertical; min-height: calc(var(--lh-body) * 1em * 12); line-height: var(--lh-control); }
+        .sk-textarea.mem-ta { min-height: calc(var(--lh-body) * 1em * 3); }
+        .sk-form-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+        .sk-count { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .sk-count.over { color: var(--error); }
+        .btn.ghost { background: transparent; border-color: transparent; box-shadow: none; }
+        .btn.ghost .ic { color: var(--text-tertiary); }
+        .sk-head { display: flex; align-items: flex-start; gap: var(--sp-2); }
+        .sk-title { font-size: var(--text-body); font-weight: var(--weight-medium); flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; line-height: var(--lh-control); margin: 0; padding-top: var(--sp-0-5); }
+        .sk-acts { display: flex; align-items: center; gap: var(--sp-1); flex-shrink: 0; }
+        .sk-body { font-size: var(--text-body); line-height: var(--lh-prose); color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; margin-top: var(--sp-2); max-width: var(--measure); }
+        .sk-body.clamped { max-height: calc(var(--lh-prose) * 1em * 5); overflow: hidden; -webkit-mask-image: linear-gradient(180deg, var(--black) 58%, transparent); mask-image: linear-gradient(180deg, var(--black) 58%, transparent); }
+        .sk-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-4); margin-top: var(--sp-2); }
+        .sk-more { background: transparent; border: 0; font: inherit; font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); padding: 0; cursor: pointer; }
+        .sk-meta { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .sk-when { font-size: var(--text-body); color: var(--text-secondary); margin: var(--sp-1-5) 0 0; max-width: var(--measure); line-height: var(--lh-control); }
+        .sk-body.md { white-space: normal; }
+        .sk-foot .sk-read { margin-left: auto; }
+        .sk-when-input { min-height: calc(var(--lh-body) * 1em * 2 + var(--sp-3)); resize: vertical; line-height: var(--lh-control); }
+        /* Files dropped on the card, and the files being checked. */
+        .sk-card.drop-on { box-shadow: var(--ring-action-2); }
+        .sk-upload { display: grid; gap: var(--sp-2); }
+        .sk-upload-note, .sk-upload-cost { font-size: var(--text-body); color: var(--text-secondary); margin: 0; max-width: var(--measure); line-height: var(--lh-control); }
+        .sk-upload-cost { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        /* One column that never grows past the card: a preview's table
+           scrolls inside its wrapper instead of pushing the row off screen. */
+        /* Files being added sit two across, each under a hairline (12 Oct 2026, WS-32). */
+        .sk-up-list { display: grid; gap: var(--sp-3) var(--sp-8); grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        @media (max-width: 900px) { .sk-up-list { grid-template-columns: minmax(0, 1fr); } }
+        .sk-up { border: 0; border-top: var(--bw-hairline) solid var(--border-default); border-radius: 0; padding: var(--sp-3) 0 0; display: grid; gap: var(--sp-1); grid-template-columns: minmax(0, 1fr); }
+        .sk-up-warn { margin: var(--sp-1) 0 0; color: var(--text-primary); }
+        .sk-check { display: flex; align-items: flex-start; gap: var(--sp-2); font-size: var(--text-body); margin: 0 0 var(--sp-3); flex-wrap: wrap; }
+        .sk-check input { margin-top: var(--sp-0-5); }
+        .sk-check-note { color: var(--text-tertiary); font-size: var(--text-xs); line-height: var(--lh-caption); }
+        .sk-check-note.over { color: var(--error); }
+        .sk-head > .sk-always { flex: none; align-self: center; }
+        .sk-up-top { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; margin-bottom: var(--sp-1); }
+        .sk-up-top > .ic svg { width: var(--icon-sm); height: var(--icon-sm); display: block; color: var(--text-tertiary); }
+        .sk-up-name { font-size: var(--text-body); font-weight: var(--weight-medium); overflow-wrap: anywhere; min-width: 0; }
+        .sk-up-size { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); white-space: nowrap; margin-right: auto; }
+        .sk-up .sk-field { margin-bottom: var(--sp-2); }
+        .sk-up-stat { font-size: var(--text-xs); color: var(--text-secondary); line-height: var(--lh-caption); }
+        .sk-up-parts { margin: var(--sp-1) 0 0; padding-left: var(--sp-5); }
+        .sk-preview summary, .sk-reading summary { font-size: var(--text-body); font-weight: var(--weight-medium); cursor: pointer;
+            display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); padding-block: var(--sp-1); list-style: none; }
+        .sk-preview summary::-webkit-details-marker, .sk-reading summary::-webkit-details-marker { display: none; }
+        /* A disclosure shows a caret that turns when it opens. */
+        .sk-preview summary::before, .sk-reading summary::before { content: ""; width: 0; height: 0; border-left: var(--sp-1) solid currentColor;
+            border-top: var(--sp-1) solid transparent; border-bottom: var(--sp-1) solid transparent; transition: transform var(--dur) var(--ease); }
+        .sk-preview[open] summary::before, .sk-reading[open] summary::before { transform: rotate(90deg); }
+        .sk-preview-doc { margin-top: var(--sp-2); padding-top: var(--sp-2); border-top: var(--bw-hairline) solid var(--border-default); }
+        /* How Reactor reads a skill: what it will do, where, and what to check. */
+        /* How Reactor reads it, a line in the right column, no box (12 Oct 2026, WS-31). */
+        .sk-reading { border: 0; border-radius: 0; padding: 0; margin: 0; align-self: stretch; }
+        .sk-reading-body { display: grid; gap: var(--sp-3); padding: var(--sp-2) 0 var(--sp-1); }
+        .sk-rules, .sk-questions { margin: 0; padding-left: var(--sp-5); display: grid; gap: var(--sp-1); }
+        .sk-examples { display: flex; flex-wrap: wrap; gap: var(--sp-1-5); }
+        .sk-examples .chip { text-align: left; }
+        .sk-reading-foot { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: var(--sp-3); }
+        /* Markdown, drawn: a skill, a prose answer, what Reactor learned. */
+        :is(.md, .prose, .know-text) :is(p, ul, ol, pre, blockquote, .prose-table) { margin: 0 0 var(--sp-2); }
+        :is(.md, .prose, .know-text) :is(ul, ol) { padding-left: var(--sp-5); }
+        :is(.md, .prose, .know-text) li { margin: var(--sp-0-5) 0; }
+        :is(.md, .prose, .know-text) li > :is(ul, ol) { margin: var(--sp-0-5) 0 0; }
+        :is(.md, .prose, .know-text) .md-h { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); margin: var(--sp-4) 0 var(--sp-1); }
+        :is(.md, .prose, .know-text) h5.md-h { color: var(--text-secondary); margin-top: var(--sp-3); }
+        :is(.md, .prose, .know-text) > .md-h:first-child { margin-top: 0; }
+        :is(.md, .prose, .know-text) strong { font-weight: var(--weight-medium); color: var(--text-primary); }
+        .md-ic { font-family: var(--font-mono); font-size: var(--text-xs); line-height: var(--lh-caption); background: var(--surface-sunken); border-radius: var(--radius-tag); padding: 0 var(--sp-1); }
+        .md-code { font-family: var(--font-mono); font-size: var(--text-xs); background: var(--surface-sunken); border-radius: var(--radius-inset);
+            padding: var(--sp-2) var(--sp-3); white-space: pre-wrap; overflow-wrap: anywhere; line-height: var(--lh-caption); }
+        .md-quote { border-left: var(--bw-hairline) solid var(--border-emphasis); padding-left: var(--sp-3); color: var(--text-secondary); }
+        .md-hr { border: 0; border-top: var(--bw-hairline) solid var(--border-default); margin: var(--sp-3) 0; }
+        .md-a { overflow-wrap: anywhere; }
+        .md-task { color: var(--text-tertiary); }
+        .md .prose-table { max-width: 100%; }
+        /* How they are used: a term and its facts, in two columns. */
+        .sk-facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-2) var(--sp-4); margin: 0; font-size: var(--text-body); line-height: var(--lh-control); }
+        .sk-facts dt { color: var(--text-tertiary); }
+        .sk-facts dd { margin: 0; color: var(--text-primary); max-width: var(--measure); }
+        @media (max-width: 640px) { .sk-facts { grid-template-columns: 1fr; gap: var(--sp-1); } .sk-facts dd + dt { margin-top: var(--sp-2); } }
+        @media (max-width: 640px) {
+            .sk-form-row .sk-count { flex-basis: 100%; order: -1; }
+        }
+        /* By the card's width: on an iPad the titles were squeezed to 60px
+           beside their buttons while a 640 window gave them a line each. */
+        /* Read and add, the review's main button, stays at the right when the
+           row wraps on a phone, not alone at the left under the others. On a
+           desk it follows Cancel (WS-32). */
+        @media (max-width: 640px) { .sk-upload .sk-form-row .btn-primary { margin-left: auto; } }
+        .sk-card { container: skcard / inline-size; }
+        @container skcard (max-width: 600px) {
+            .sk-head { flex-wrap: wrap; }
+        }
+        @keyframes navspin { to { transform: rotate(360deg); } }
+        /* per-page ask panel. No margin of its own: it is always a direct
+           child of .ov-wrap, whose rhythm zeroes the top and sets the gap. */
+        .pchat { padding: 0; overflow: hidden; }
+        .pchat-thread { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); }
+        .pchat-hint { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .pchat-thread .msg { margin: 0; max-width: 100%; }
+        .pchat-thread .msg.user { align-self: flex-end; max-width: 86%; }
+        .pchat-thread .msg.assistant { align-self: stretch; }
+        .pchat-input { display: flex; gap: var(--sp-2); align-items: flex-end; padding: var(--sp-3) var(--sp-3); border-top: var(--bw-hairline) solid var(--border-default); background: var(--surface-tertiary); }
+        .pchat-ta { flex: 1; resize: none; max-height: 140px; background: var(--surface-secondary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-field); color: var(--text-primary); font: inherit; font-size: var(--text-body); padding: var(--sp-2) var(--sp-3); line-height: var(--lh-control); outline: none; transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+        .pchat-send { flex-shrink: 0; padding: 0; width: var(--control-h); height: var(--control-h); min-height: var(--control-h); display: grid; place-items: center; }
+        .pchat-send svg { width: var(--icon-md); height: var(--icon-md); }
+        /* customer sector selector */
+        .seclink { background: transparent; border: 0; font: inherit; font-weight: var(--weight-medium); cursor: pointer; padding: 0; text-align: left; }
+        .kw-more { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); padding-top: var(--sp-3); }
+        /* Two short tables side by side in one card (Customers' top customers,
+           the trade radar's two lists), one above the other when narrow. */
+        .duo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--gap-cols); row-gap: var(--sp-6); align-items: start; }
+        .card:has(> .card-bleed > .duo), .card:has(> .duo) { container: duo cols / inline-size; }
+        @container duo (max-width: 64rem) { .duo { grid-template-columns: minmax(0, 1fr); } }
+        /* A table in half a row wraps a long head rather than running its last
+           column under the half's edge ("Lifetime revenu" at 1440); heads stand
+           on their foot, so one-line and two-line heads line up. */
+        :is(.wpair, .duo) .ktable > thead th { white-space: normal; vertical-align: bottom; padding-block: var(--sp-1); }
+        /* The overdue accounts have six columns and the untagged three, so they share the row seven to five. */
+        .radar-cols { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); column-gap: var(--gap-cols); row-gap: var(--sp-6); align-items: start; }
+        .card:has(> .radar-cols) { container: radar cols / inline-size; }
+        /* What an account last bought wraps under its name rather than pushing
+           the table past its column. */
+        .radar-cols .ktable td.kw .prod-sub { white-space: normal; }
+        @container radar (max-width: 64rem) { .radar-cols { grid-template-columns: minmax(0, 1fr); } }
+        /* TWO BLOCKS SIDE BY SIDE (12 Oct 2026, R6). A short block beside the
+           block it belongs with (the summary and What changed, the actions and
+           the findings, two short tables), seven twelfths and five, each only
+           as tall as itself; one widget the grid moves as one. Under 64rem of
+           its own width the two stack. */
+        .wpair { container: wpair / inline-size; }
+        .wpair-in { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); column-gap: var(--gap-cols); row-gap: var(--page-rhythm); align-items: start; }
+        /* Panels side by side stand as one row, equal heights and a panel gap apart
+           (Cameron, 13 Oct 2026); stacked, each is its own height, its row's. Screen
+           only: paper has no panels and keeps the 64 above. Forecast's columns too. */
+        @media screen { :is(.wpair-in, .fc-cols) { column-gap: var(--panel-gap); align-items: stretch; } }
+        /* A half's own margin sits outside its box, where the stretch cannot reach: a
+           chart card's 16 left a half 16 short of its neighbour. The grid's gaps space them. */
+        @media screen { :is(.wpair-in, .fc-cols) > .panel { margin-block: 0; } }
+        .wpair.even > .wpair-in { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .wpair.flip > .wpair-in { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
+        /* A table at its natural width, and the other half takes the rest (Xero sync's runs). */
+        .wpair.fit > .wpair-in { grid-template-columns: minmax(0, max-content) minmax(0, 1fr); }
+        .wpair-in > * { min-width: 0; margin: 0; }

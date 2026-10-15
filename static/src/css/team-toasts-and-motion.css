@@ -1,0 +1,203 @@
+        /* A name being renamed stays in its own cell. */
+        .tm-list .files-rename { width: 100%; min-width: 0; }
+        /* Team's cards are spaced like every page's: the Work tab's three sat
+           edge to edge in plain divs. */
+        #team-content .card + .card { margin-top: var(--page-rhythm); }
+        /* Work's pair (12 Oct 2026): its two heads share a line, and the sessions keep the rhythm under it. */
+        #team-content .wpair-in > .card { margin-top: 0; }
+        #team-content .wpair + .card { margin-top: var(--page-rhythm); }
+        /* A 12px time beside a 14px sentence shares its baseline. */
+        #team-content .tm-row:not(:has(> .files-acts)) { align-items: baseline; }
+        /* An activity line wraps rather than ending in '...' with no way to
+           read the rest, and the hours stay on one line in a table that
+           already scrolls. */
+        #team-content .tm-row:not(.tm-day) > .files-name.still { white-space: normal; overflow-wrap: anywhere; font-weight: var(--weight-regular); }
+        #team-content .ktable :is(td:not(:first-child), th) { white-space: nowrap; }
+        /* One set of columns for every person, name | meta | actions, each
+           row a subgrid of it: the master's one-chip rail ended its meta
+           line 300px right of everyone else's. Chosen by the LIST'S width,
+           not the window's: switched at a 641px window, a 768 tablet with the
+           sidebar open gave the list 400px, the button column wanted 580, the
+           name went to 0px and Tabs and Delete account ran off the card. */
+        .card:has(> .tm-list) { container: team / inline-size; }
+        @container team (min-width: 900px) {
+            .tm-list { display: grid; grid-template-columns: minmax(9rem, 1fr) auto fit-content(60%); column-gap: var(--sp-2-5); }
+            .tm-list .files-acts { flex-wrap: wrap; }
+            .tm-list > * { grid-column: 1 / -1; }
+            .tm-list > .tm-row:not(.tm-new) { display: grid; grid-template-columns: subgrid; flex-wrap: nowrap; }
+            .tm-list > .tm-row > .files-meta { justify-self: end; text-align: right; }
+        }
+        /* Narrower, a person's actions take their own line and wrap: in one
+           unbroken row, Tabs and Delete account sat past the card's clipped
+           edge, where no finger could reach them. */
+        @container team (max-width: 899px) {
+            .tm-row .files-meta { margin-left: 0; }
+            .tm-row .files-acts { flex: 1 1 100%; flex-wrap: wrap; }
+            /* A rail that holds only a role tag stays on the name's line when it fits. */
+            .tm-row .files-acts:has(> .tm-role-fixed:only-child) { flex: none; margin-left: auto; }
+        }
+        /* A text field that matches the height of .lbl-size selects, so a row
+           mixing inputs, a select and a button lines up. */
+        .tm-field { flex: 1 1 120px; min-width: 0; background: var(--surface-primary); color: var(--text-primary);
+            font: inherit; font-size: var(--text-body); padding: var(--control-pad-y) var(--sp-2-5); line-height: var(--lh-control); min-height: var(--control-h);
+            border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-field); }
+        .starter-pw { width: 100%; font-family: var(--font-mono); }
+        .tm-date { flex-direction: row; align-items: center; gap: var(--sp-2); }
+        .tm-day { background: none; }
+        .tm-date > span { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-regular); color: var(--text-secondary); }
+        /* Stacked on a phone, the two fields start at one x; side by side each
+           label keeps its own width. */
+        @media (max-width: 640px) { .tm-date > span { min-width: var(--sp-7); } }
+        .tm-panel { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-4) var(--sp-8); align-items: start; padding: var(--sp-4);
+            background: var(--surface-secondary); border-top: var(--bw-hairline) solid var(--border-default); }
+        /* Under its row in the People table (12 Oct 2026): the open row's wash
+           is its ground, and one Save runs under all three groups. */
+        .dtable > .dt-detail > .tm-panel { padding: 0; background: none; border-top: 0; }
+        .tm-panel > .tm-panel-save { grid-column: 1 / -1; }
+        @media (max-width: 900px) { .tm-panel { grid-template-columns: minmax(0, 1fr); } }
+        /* People: the person over their username, then the facts under heads,
+           the spare width shared between the columns. Their floors are fixed:
+           an opened Tabs panel spans every column, and a content floor handed
+           its whole width to the flexible ones. */
+        .dt-people { --dt-cols: minmax(12rem, 2fr) minmax(7.5rem, 1fr) repeat(4, minmax(4.5rem, 1fr)) minmax(7rem, 1fr) max-content; }
+        .dmenu-item.danger, .dmenu-item.danger .ic { color: var(--error); }
+        /* Team, Work (12 Oct 2026): the clock and the hours at their natural
+           widths side by side, the sessions under heads with a day line. */
+        /* Its last column, the button, takes any spare width, so in a panel the table
+           fills it and the button sits at the row's end (13 Oct 2026). */
+        .dt-clock { --dt-cols: repeat(3, max-content) minmax(max-content, 1fr); }
+        .tm-none { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-tertiary); }
+        .tm-export { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-2); }
+        .dt-sessions { --dt-cols: max-content max-content max-content max-content max-content max-content minmax(10rem, 1fr); }
+        .tm-dayscale { display: flex; justify-content: space-between; width: 100%; font-variant-numeric: tabular-nums; }
+        .tm-daytrack { position: relative; display: block; width: 100%; height: var(--sp-2); border-radius: var(--radius-full); background: var(--surface-tertiary); }
+        .tm-daytrack > i { position: absolute; top: 0; bottom: 0; border-radius: var(--radius-full); background: var(--fill-mark); }
+        /* Team, Activity (12 Oct 2026): the feed takes the flexible track and
+           the Who and Area lists sit in a 248px column beside it. */
+        .tm-feedwrap { display: grid; grid-template-columns: minmax(0, 1fr) 15.5rem; gap: var(--sp-8); align-items: start; }
+        @media (max-width: 900px) { .tm-feedwrap { grid-template-columns: minmax(0, 1fr); } .tm-feedwrap > .tm-filters { order: -1; } }
+        .dt-feed { --dt-cols: max-content max-content max-content minmax(0, 1fr); }
+        .tm-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tm-filters { display: flex; flex-direction: column; gap: var(--sp-1); }
+        .tm-filter-sels { display: none; }
+        @media (max-width: 640px) { .tm-feedwrap > .tm-filters { display: none; } .tm-filter-sels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--control-gap); } }
+        .tm-filter-h { margin-top: var(--sp-3); font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary); }
+        .tm-filter-h:first-child { margin-top: 0; }
+        .tm-filter-list { display: flex; flex-direction: column; }
+        .tm-filter { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: var(--control-h); padding: 0 var(--sp-2);
+            border: 0; border-radius: var(--radius-control); background: none; font: inherit; color: var(--text-primary); text-align: left; cursor: pointer; }
+        @media (hover: hover) { .tm-filter:hover { background: var(--surface-tertiary); } }
+        .tm-filter.on { background: var(--action-selected); box-shadow: inset var(--bw-strong) 0 0 var(--border-selected); }
+        .tm-filter.none { color: var(--text-tertiary); }
+        .tm-filter-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tm-filter > .cnt { color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+        .tm-group { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+        .tm-legend { display: flex; align-items: center; gap: var(--sp-3); padding: 0; margin-bottom: var(--sp-2);
+            font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); }
+        .tm-picks { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--sp-1);
+            padding-left: calc(var(--sp-8) * 3 + var(--sp-1)); }
+        /* The group's name hangs in the indent, so ticks that wrap line up
+           under the other ticks rather than under 'Operations'. */
+        .tm-sub { flex: 0 0 calc(var(--sp-8) * 3); font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary);
+            margin-left: calc(-1 * (var(--sp-8) * 3 + var(--sp-1))); margin-right: var(--sp-1); }
+        .tm-note { margin: 0; font-size: var(--text-body); color: var(--text-secondary); }
+        .tm-colour { max-width: calc(var(--sp-8) * 6); }
+        .tm-panel .pfield textarea { width: 100%; max-width: 60ch; }
+        .tm-sign-save { margin-top: var(--sp-2); }
+        @media (max-width: 640px) { .tm-sub { flex-basis: 100%; margin: 0; } .tm-picks { padding-left: 0; } }
+        .tm-tabpick { display: inline-flex; align-items: center; gap: var(--sp-1-5); margin: 0 var(--sp-2-5) var(--sp-2) 0;
+            cursor: pointer; font-size: var(--text-body); color: var(--text-secondary); min-height: var(--control-h); }
+        .tm-tabpick input { width: var(--box-xs); height: var(--box-xs); accent-color: var(--control-accent); cursor: pointer; }
+        /* On a phone the name owns the first line; size and date step down a line
+           rather than crushing the name to a letter. */
+        @media (max-width: 640px) {
+            .files-row { flex-wrap: wrap; }
+            .files-name { flex: 1 1 0; }
+            .files-acts { order: 2; }
+            .files-meta { order: 3; flex: 1 1 100%; margin: 0 0 0 var(--sp-6); }
+            /* Team's Activity rows have no file icon to clear: their time and
+               area stay beside the sentence. */
+            #team-content .tm-row:not(:has(> .files-acts)) > .files-meta { margin-left: 0; flex: none; }
+            .tm-row .files-acts { order: 4; }
+            /* The cells step down a line under the name, packed rather than
+               tracked: fixed columns are for a list wide enough to have them,
+               and the header that names them is dropped with them. */
+            .files-cols { order: 3; flex: 1 1 100%; margin-left: var(--icon-col);
+                grid-template-columns: max-content max-content; gap: var(--sp-3); }
+            .files-cols .size { text-align: left; }
+            .files-head { display: none; }
+            /* The cells have their own line here, so the actions no longer set
+               where a column starts: a folder row can keep the 60px it was
+               reserving for buttons it does not have, and show more name. */
+            #files-content .files-acts { min-width: 0; }
+            /* The row's actions wait behind its ••• (12 Oct 2026, OPS-31). */
+            #files-content .files-acts:has(> .files-more) > :not(.files-more) { display: none; }
+            #files-content .files-acts > .files-more { display: inline-flex; }
+            /* Two text buttons cannot share a phone line with a file name: the
+               trash rows were clipping theirs to four characters. */
+            #files-content .files-acts.wide { order: 4; flex: 1 1 100%;
+                justify-content: flex-start; margin-left: var(--icon-col); }
+        }
+        .toast { display: flex; gap: var(--sp-2); align-items: flex-start; background: var(--surface-primary);
+            border: 0; border-left: var(--bw-marker) solid var(--border-selected); border-radius: var(--radius-pop);
+            padding: var(--pop-pad); box-shadow: var(--shadow-pop); font-size: var(--text-body); color: var(--text-primary);
+            animation: toastin .18s ease-out; }
+        .toast.bad { border-left-color: var(--error); }
+        .toast.good { border-left-color: var(--success); }
+        .toast-msg { flex: 1 1 auto; line-height: var(--lh-control); }
+        .toast-x { background: none; border: 0; color: var(--text-tertiary); cursor: pointer; padding: 0; line-height: var(--lh-none); flex: none; }
+        .toast-x { min-width: var(--control-h-sm); min-height: var(--control-h-sm); display: grid; place-items: center; }
+        .toast-x svg { width: var(--icon-sm); height: var(--icon-sm); }
+        /* Not on the colour token: this fade is paired with the 320ms
+           removal timer in toast(), so the two have to say the same number. */
+        .toast.out { opacity: 0; transition: opacity .32s var(--ease); }
+        @keyframes toastin { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+        /* Says the tab is out of date. Deliberately a bar and not a dialog, and
+           BELOW the modal layer (50) on purpose: a booking window must never be
+           covered by a notice about versions. It never reloads on its own. */
+        .build-bar { position: fixed; z-index: 40; max-width: 460px;
+            left: calc(16px + env(safe-area-inset-left, 0px));
+            bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+            display: flex; gap: var(--sp-2-5); align-items: flex-start; flex-wrap: wrap;
+            background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-left: var(--bw-marker) solid var(--border-selected);
+            border-radius: var(--radius-card); padding: var(--sp-3) var(--sp-4); box-shadow: var(--shadow-lg);
+            font-size: var(--text-body); color: var(--text-primary); line-height: var(--lh-control); }
+        .build-bar span { flex: 1 1 100%; }
+        /* Anchored to the window's corner it lay over the sidebar's account
+           row (the only way to Settings and Log out) and over Chat's composer,
+           the whole of it on a phone, with no margin on the right. */
+        .build-bar { max-width: min(460px, calc(100vw - 32px)); }
+        @media (min-width: 901px) { body:not(.sidebar-collapsed) .build-bar { left: calc(var(--sidebar-w) + 16px); } }
+        body:has(#view-chat.active) .build-bar { bottom: auto; top: calc(var(--topbar-h) + 12px); }
+        @media print { .build-bar { display: none !important; } }
+        /* Nothing pinned to the viewport prints, in either mode. Label mode
+           hides #app, but a fixed element outside it, or one that happens to
+           be open when the print starts (a toast, a menu, the update bar, the
+           sign-in scrim, a modal, a drag bar), is carried onto every page. The
+           list is every position:fixed selector in this stylesheet; the guard
+           keeps them in step. */
+        @media print {
+            .skip-link, .build-bar, #toast-host, .modal-overlay, .auth-overlay, .backdrop,
+            .dmenu, .crm-dropbar, .sidebar { display: none !important; }
+        }
+        .confirm-overlay { z-index: 60; }
+        .confirm-modal { max-width: 460px; width: 92vw; }
+        .confirm-msg { font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-primary); margin: 0; }
+        @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+        /* The blanket rule the two targeted ones above should always have been:
+           reduce means reduce EVERYTHING, including the fadeUps, the loader and
+           the spinning refresh icon, and including inline animation styles
+           (the important wins over those). Durations become a tick rather than
+           zero so animationend still fires for anything listening. */
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: .01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: .01ms !important;
+                scroll-behavior: auto !important;
+            }
+        }
+        .field-label { font-size: var(--text-body); font-weight: var(--weight-medium); display: block; margin-top: var(--sp-2); color: var(--text-primary); }
+        .field-help { font-size: var(--text-xs); color: var(--text-secondary); margin: var(--sp-1) 0 var(--sp-3); line-height: var(--lh-caption); }
+        .pf-input { width: 100%; resize: vertical; border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-field);
+            padding: var(--sp-2) var(--sp-2-5); font: inherit; font-size: var(--text-body); line-height: var(--lh-control); outline: none; color: var(--text-primary); margin: var(--sp-2) 0 var(--sp-3); background: var(--surface-primary); }

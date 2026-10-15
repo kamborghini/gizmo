@@ -1,0 +1,83 @@
+        /* ---- production lifecycle segments + dispatch ---- */
+        /* flex-wrap, not nowrap: at 375px a five-item bar measured 422px wide,
+           so its LAST segment sat past the viewport with nothing scrolling -
+           the CRM's Insights and the Production Manager's Custom Shipments
+           were unreachable on a phone. Wrapping keeps every segment tappable
+           inside the same track. */
+        /* CONCENTRIC CORNERS. A rounded thumb sitting inside a rounded track
+           has to take the track's radius MINUS the gap between them, or the
+           two curves are not parallel and the thumb reads as a slightly wrong
+           shape rattling inside its slot. Picking the inner radius from the
+           token scale by eye is what goes stale: these two tracks used the
+           same 8px thumb with DIFFERENT padding, so one was concentric by luck
+           (10 - 2 = 8) and this one was 2px out (10 - 4 wants 6, it had 8).
+           Deriving it means the thumb follows the track: change either the
+           radius or the padding and the corner stays parallel by itself.
+           SwiftUI has a shape for this, ConcentricRectangle; on the web it is
+           one subtraction, as long as it is written down rather than guessed. */
+        .modal.disp-modal { max-width: 720px; width: 94vw; }
+        /* A window of paragraphs (Forecast's plan and trust) is the house window's width. */
+        .modal.disp-modal.prose { max-width: 520px; }
+        /* Inside a window a group is a tinted well with no edge (the mix, spec 3): the window is boxed as a whole. */
+        .disp-dest { padding: var(--sp-3) var(--sp-3); background: var(--surface-secondary); border: 0;
+            border-radius: var(--radius-inset); margin-bottom: var(--sp-4); }
+        /* One rhythm down the form, and one height for every control in a row. */
+        .disp-modal .field-help { margin: var(--sp-2) 0 0; }
+        .disp-boxedit { display: flex; gap: var(--sp-2); align-items: center; margin-bottom: var(--sp-2); }
+        .disp-boxedit > select, .disp-boxedit > input { height: var(--control-h); box-sizing: border-box; }
+        .disp-boxedit > select.psel { min-width: 168px; }
+        .disp-boxedit .icon-btn { width: var(--control-h); height: var(--control-h); flex: none; }
+        .disp-boxedit > input.disp-boxdef { width: var(--box-xs); height: var(--box-xs); flex: none;
+            accent-color: var(--control-accent); cursor: pointer; margin: 0; }
+        .disp-addbox { margin-top: var(--sp-2); }
+        .disp-insure { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-5) 0 0;
+            font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); cursor: pointer; }
+        .disp-insure input[type=number] { height: var(--control-h); width: 112px; box-sizing: border-box; margin: 0; }
+        .disp-quote { margin-top: var(--sp-4); }
+        .disp-dest-name { font-weight: var(--weight-medium); font-size: var(--text-body); }
+        .disp-boxrow { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+        .disp-boxrow .psel { max-width: 320px; }
+        .disp-dims { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-2); margin-bottom: var(--sp-1); }
+        .disp-origin { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); }
+        .disp-fld { display: flex; flex-direction: column; gap: var(--sp-1); }
+        .disp-fld-lab { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); font-weight: var(--weight-medium); }
+        .disp-num { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-field);
+            color: var(--text-primary); font: inherit; font-size: var(--text-body); padding: var(--control-pad-y) var(--sp-2); line-height: var(--lh-control);
+            min-height: var(--control-h); width: 100%; }
+        .disp-subhead { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); font-weight: var(--weight-medium); margin-bottom: var(--sp-1); }
+        /* Custom address shipment: the paste box and the fields it fills. */
+        .disp-paste { width: 100%; box-sizing: border-box; min-height: 84px; resize: vertical;
+            background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-field);
+            color: var(--text-primary); font: inherit; font-size: var(--text-body); line-height: var(--lh-control); padding: var(--sp-2-5) var(--sp-3); }
+        .disp-addr-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2-5); margin: var(--sp-3) 0 var(--sp-1); }
+        .disp-addr-grid select { max-width: 100%; }
+        .disp-addr-f { display: flex; flex-direction: column; gap: var(--sp-1); }
+        .disp-addr-f > .field-help { margin: 0; }
+        .disp-addr-lab { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); font-weight: var(--weight-medium); }
+        .disp-text { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-field);
+            color: var(--text-primary); font: inherit; font-size: var(--text-body); padding: var(--control-pad-y) var(--sp-2-5); line-height: var(--lh-control);
+            min-height: var(--control-h); width: 100%; box-sizing: border-box; }
+        /* The stage editor's number boxes are number-sized; the stage's name takes the rest. */
+        .crm-focus .disp-boxrow > .disp-num { flex: 0 0 4.5rem; }
+        .crm-focus .disp-boxrow { flex-wrap: wrap; }
+        .crm-focus .disp-boxrow > .disp-text { flex: 1 1 8rem; min-width: 7rem; }
+        @media (max-width: 640px) { .crm-focus .disp-boxrow > .disp-num { flex-basis: 3.5rem; } }
+        .disp-recent { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+            padding: var(--sp-2-5) 0; border-bottom: var(--bw-hairline) solid var(--border-default); }
+        .disp-recent:last-child { border-bottom: 0; }
+        .disp-recent-t { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); }
+        .disp-customs { margin: var(--sp-3) 0; padding: var(--sp-3); border: 0;
+            border-radius: var(--radius-inset); background: var(--surface-secondary); }
+        .disp-customs .disp-boxrow > .disp-text { flex: 1 1 auto; min-width: 120px; }
+        .disp-customs .disp-boxrow > .disp-num { width: 88px; flex: none; }
+        /* Chase desk: the composed chasing email under an expanded account. */
+        /* No box round it (the mix, spec 3): the head, the email field and its
+           buttons sit on the drill-down's own text edge. The field keeps its
+           edge, as every field does. */
+        .lia-chase { margin: 0 0 var(--sp-4); padding: 0; border: 0; border-radius: 0; background: none; display: flex;
+            flex-direction: column; gap: var(--sp-2); }
+        .lia-chase-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+        .lia-chase-head .sub { min-width: 0; overflow-wrap: anywhere; }
+        .lia-chase-body { width: 100%; box-sizing: border-box; resize: vertical;
+            background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-field);
+            color: var(--text-primary); font: inherit; font-size: var(--text-body); line-height: var(--lh-control); padding: var(--sp-2-5) var(--sp-3); }
