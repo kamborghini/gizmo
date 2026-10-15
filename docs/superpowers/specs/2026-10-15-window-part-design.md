@@ -3,8 +3,7 @@
 **Approved 15 Oct 2026** (approach A). Stage 3, piece 1 of the 14 October
 engineering audit; Cameron chose the six-piece split and this piece first.
 
-Nothing on screen changes in this piece but one thing: the starter-password
-window gains the X every other window has. It changes how windows are built, so
+Nothing on screen changes in this piece. It changes how windows are built, so
 that every window behaves the same way because one piece of code builds them
 all, rather than because each was copied carefully.
 
@@ -41,10 +40,12 @@ const w = dialog({
   size: 'disp-modal',           // optional: today's classes on the box (disp-modal, wide, cmodal proof-modal, confirm-modal)
   overlayClass: 'chart-modal',  // optional: today's classes on the overlay (chart-modal, confirm-overlay)
   bodyClass: 'fprev-body',      // optional: an extra class on the body, as some windows have today
+  x: false,                     // optional: a question or notice answered by its own buttons has no X (uiConfirm, the starter password)
+  opener: button,               // optional: what focus goes back to, when it is not the control that has focus
   onEscape: () => answer(false),// optional: the yes/no question only; every other window ignores Escape
   onClose: () => renderCRM(),   // optional: what the window does after it closes
 });
-w.head                          // the header, for a window that adds controls beside its title (the X stays last)
+w.head, w.heading, w.x          // the header, its title and its X, for a window that adds to its header (the X stays last)
 w.body.append(...);             // the content
 w.foot().append(saveButton);    // the footer, made the first time it is asked for
 w.close();                      // closes it: the X calls this too
@@ -56,10 +57,13 @@ must do:
 
 - **Its role and name:** `role="dialog"`, `aria-modal="true"`, named by its
   title (`aria-labelledby`).
-- **The X:** a button named "Close". Besides the window's own answers (Save,
-  Cancel, Done), it is the only way out: a window holding work never closes
-  on Escape or on a click outside it, the app's own rule (the Guide's Design
-  page), so a slip cannot lose what was typed.
+- **The X:** a button named "Close" on every window holding work. Besides the
+  window's own answers (Save, Cancel, Done), it is the only way out: a window
+  holding work never closes on Escape or on a click outside it, the app's own
+  rule (the Guide's Design page), so a slip cannot lose what was typed. A
+  question or notice answered by its own buttons has no X, as today.
+- **One way to close:** every window closes through the part (`w.close()`),
+  so the part always knows which window is on top.
 - **Focus in:** as it opens, focus moves inside it: to the field the builder
   focuses, or to the X when the builder focuses nothing.
 - **Focus back:** as it closes, focus returns to the control that opened it,
@@ -81,8 +85,8 @@ window is open over another, only the topmost hears the keys.
 
 The two enlarged views, the folder picker and the starter password are built
 with `dialog()` like the rest (`overlayClass` carries today's `chart-modal` and
-`confirm-overlay`). The starter-password window, which today closes only by
-its Done button, gains the X. The Settings window is written into the page, so
+`confirm-overlay`); the starter password keeps Done as its one answer and no X.
+The Settings window is written into the page, so
 it gets the same behaviour through `dialogShow(overlay)` / `dialogHide(overlay)`.
 
 ### What is deleted
@@ -101,10 +105,11 @@ things from the part that builds it.
 - **Every window by keyboard.** The keyboard journeys grow from three windows
   to every window the seeded world can open without saving anything: focus
   moves in, Escape leaves it open, Tab stays inside, the X closes it, focus
-  comes back. A yes/no question over a window: Escape answers No and leaves
-  the window under it open.
-- **No window built by hand again.** A page-suite guard fails if anything
-  outside `part-dialog.js` builds a `modal-overlay`.
+  comes back. A yes/no question over a window (run for real in node, beside
+  the existing test of `uiConfirm`): Escape answers No and leaves the window
+  under it open.
+- **No window built or closed by hand again.** A page-suite guard fails if
+  anything outside `part-dialog.js` builds a `modal-overlay` or removes one.
 - **The fixers stay gone.** A page-suite guard fails if `syncDialogs` or the
   window observers come back.
 
@@ -143,5 +148,4 @@ The dated specs stay where they are, as the record of how each rule came to be.
 ## Release note
 
 One line, dated the merge day: every window is now built by one part, so they
-all open, close and hand focus back the same way (and the starter-password
-window has an X like the rest).
+all open, close and hand focus back the same way.
