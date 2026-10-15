@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-19",
+   "title": "Windows that behave alike",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "Every window in the app is now built the same way: each one takes you into it as it opens and puts you back where you were when it closes. Nothing you see changes."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-19",
    "title": "Behind the scenes",
    "items": [
     {
