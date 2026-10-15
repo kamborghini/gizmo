@@ -63,6 +63,15 @@ def fn_src(name):
     return SCRIPT[i:i + len(name) + (min(ends) if ends else len(rest))]
 
 
+DIALOG_START = "/* ---------- the window part ----------"
+DIALOG_END = "/* ---------- the window part end ---------- */"
+
+
+def dialog_part():
+    """The window part's source (static/src/js/part-dialog.js) as the page has it."""
+    return SCRIPT[SCRIPT.index(DIALOG_START):SCRIPT.index(DIALOG_END)]
+
+
 @test
 def t_the_script_parses():
     """A duplicate `const` in a 5,700-line file is invisible until the page dies."""
@@ -8598,6 +8607,94 @@ def _run_node(js):
         return json.loads((r.stdout or "").strip().splitlines()[-1])
     finally:
         os.unlink(path)
+
+
+def dialog_harness():
+    """The window part, runnable after MINIDOM: node has no frames, no icons
+    and no CSS.escape, so plain stand-ins come first."""
+    return ("globalThis.I = globalThis.I || { x: '' };\n"
+            "globalThis.requestAnimationFrame = globalThis.requestAnimationFrame || ((f) => setTimeout(f, 0));\n"
+            "globalThis.CSS = globalThis.CSS || { escape: (s) => String(s) };\n" + dialog_part())
+
+
+@test
+def t_the_window_part_builds_a_named_dialog_with_its_x():
+    """Stage 3, piece 1 (docs/superpowers/specs/2026-10-15-window-part-design.md):
+    every window is built by dialog(), which gives it today's markup and
+    classes, the dialog role named by its own title, an X named Close that
+    closes it, focus inside as it opens, and one footer made when first asked
+    for. What a window does as it closes runs before focus looks for its
+    opener: the CRM board is redrawn before focus finds the deal's new card."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + "\n" + dialog_harness() + r"""
+const order = [];
+const opener = el('button', 'btn'); document.body.append(opener); opener.focus();
+const w = dialog({ title: 'Edit Loan 1', size: 'disp-modal', bodyClass: 'fprev-body', onClose: () => order.push('onClose') });
+const out = {
+  overlay: w.overlay.className, modal: w.modal.className, body: w.body.className,
+  role: w.modal.getAttribute('role'), modalFlag: w.modal.getAttribute('aria-modal'),
+  named: w.modal.getAttribute('aria-labelledby') === w.heading.id && w.heading.textContent === 'Edit Loan 1',
+  xName: w.x.getAttribute('aria-label'), xLast: w.head.children[w.head.children.length - 1] === w.x,
+  focusOnX: document.activeElement === w.x, inPage: w.overlay.parentNode === document.body, top: w.isTop(),
+};
+const f1 = w.foot(), f2 = w.foot();
+out.footOnce = f1 === f2 && f1.className === 'modal-foot' && w.modal.children[2] === f1;
+const q = dialog({ title: 'Sure?', x: false });
+out.noX = q.x === null && q.head.children.length === 1;
+q.close();
+w.x.click();
+out.closed = w.overlay.parentNode === null && order.join() === 'onClose';
+w.close();
+out.once = order.length === 1;
+console.log(JSON.stringify(out));
+"""
+    got = _run_node(js)
+    ok(got["overlay"] == "modal-overlay show" and got["modal"] == "modal disp-modal" and got["body"] == "modal-body fprev-body",
+       "today's classes: %r" % got)
+    ok(got["role"] == "dialog" and got["modalFlag"] == "true" and got["named"], "a modal dialog named by its title")
+    ok(got["xName"] == "Close" and got["xLast"], "an X named Close, last in the header")
+    ok(got["focusOnX"] and got["inPage"] and got["top"], "open, on top, with focus inside")
+    ok(got["footOnce"], "one footer, after the body, made when first asked for")
+    ok(got["noX"], "a question answered by its own buttons has no X")
+    ok(got["closed"] and got["once"], "the X closes it, and closing twice runs its close once")
+    part = dialog_part()
+    ok(part.index("if (opts.onClose) opts.onClose();") < part.index("dialogGiveBack(rec.opener);"),
+       "what the window does as it closes runs before focus looks for its opener")
+
+
+@test
+def t_the_window_part_keeps_one_stack():
+    """One stack of open windows, topmost last. Only the window on top hears
+    Escape, and only a window that asked for it (the yes/no question) answers
+    it; a window closed under another leaves the rest in order; and a window
+    removed some other way is forgotten rather than left to swallow the keys."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + "\n" + dialog_harness() + r"""
+const out = {};
+const a = dialog({ title: 'A' });
+const b = dialog({ title: 'B', x: false, onEscape: () => b.close() });
+pressKey('Escape');
+out.bClosedByEscape = b.overlay.parentNode === null && a.overlay.parentNode === document.body && a.isTop();
+pressKey('Escape');
+out.aIgnoresEscape = a.overlay.parentNode === document.body;
+const c = dialog({ title: 'C' });
+a.close();
+out.closedUnder = c.isTop() && c.overlay.parentNode === document.body;
+const d = dialog({ title: 'D' });
+d.overlay.remove(); d.overlay.isConnected = false;
+out.forgotten = c.isTop();
+c.close();
+console.log(JSON.stringify(out));
+"""
+    got = _run_node(js)
+    ok(got["bClosedByEscape"], "Escape answers the window on top that asked for it: %r" % got)
+    ok(got["aIgnoresEscape"], "and a window holding work ignores it")
+    ok(got["closedUnder"], "closing a window under another keeps the one on top")
+    ok(got["forgotten"], "a window removed some other way is forgotten")
 
 
 @test
