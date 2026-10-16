@@ -8,7 +8,7 @@
 # `make lock`, run `make check`, and check /healthz after the deploy.
 # mcp supports only its newest 1.x and 2.x releases. 2.x renamed FastMCP to
 # MCPServer and moved the transport settings onto the app (server.MCP_HTTP).
-mcp==2.2.0
+mcp==2.3.0
 httpx==0.28.1
 pydantic==2.13.5
 uvicorn==0.54.0
@@ -43,7 +43,7 @@ starlette==1.7.0
 python-multipart==0.0.32
 cryptography==50.0.2
 pyasn1==0.6.4
-boto3==1.43.107
+boto3==1.43.108
 
 # The serial sticker's two codes, generated SERVER-side and placed as data:
 # URIs. The app's own CSP allows no CDN scripts, so a browser QR library was
