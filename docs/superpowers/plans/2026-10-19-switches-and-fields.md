@@ -4,7 +4,7 @@
 
 **Goal:** The Settings switches become real, named switches and the switch fixers go; every captioned field is built by `field()` with the house label; every control on the measured screens and in the journeys' windows has a name, held by a zero-tolerance browser check.
 
-**Architecture:** `setSwitch()` and `field()` join `static/src/js/part-button.js`'s neighbour section `static/src/js/part-field.js` (after `js/part-button.js` in the manifest); the Settings switches change in `static/src/shell.html`; a codemod converts the four caption families; a naming probe in `tests/browser/probes.js` feeds a new zero-tolerance check in `pages.spec.js` and the keyboard journeys.
+**Architecture:** `setSwitch()` and `formField()` live in `static/src/js/part-field.js` (after `js/part-button.js` in the manifest); the Settings switches change in `static/src/shell.html`; a codemod converts the four caption families; a naming probe in `tests/browser/probes.js` feeds a new zero-tolerance check in `pages.spec.js` and the keyboard journeys.
 
 **Tech Stack:** Plain JavaScript in the page's one scope, the page suite with `MINIDOM`, the browser suite, Pillow for the screenshot comparison.
 
