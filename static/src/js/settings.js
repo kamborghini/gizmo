@@ -463,7 +463,7 @@
             $('pf-goals').value = profile.business_goals || '';
             $('pf-strategy').value = profile.strategy || '';
             $('pf-notes').value = profile.notes || '';
-            prefToggles().forEach(t => t.classList.toggle('on', !!profile.prefs[t.dataset.pref]));
+            prefToggles().forEach(t => setSwitch(t, !!profile.prefs[t.dataset.pref]));
             /* Only an admin can change the store profile (the server says so
                on every write): for anyone else the fields and switches are
                shown as they stand, not offered as controls that bounce. */
@@ -628,7 +628,7 @@
         async function savePrefToggle(t) {
             if (t.getAttribute('aria-disabled') === 'true') return;
             const was = t.classList.contains('on');
-            t.classList.toggle('on', !was);
+            setSwitch(t, !was);
             const prefs = {};
             prefToggles().forEach(x => prefs[x.dataset.pref] = x.classList.contains('on'));
             try {
@@ -640,7 +640,7 @@
                 else profile.prefs = prefs;
                 cacheProfile();
             } catch (e) {
-                t.classList.toggle('on', was);
+                setSwitch(t, was);
                 toastError('That setting was not saved. ' + (e.message || ''));
             }
         }
@@ -705,7 +705,7 @@
            would ever say so. The class now follows the WRITE: it moves when
            the server agrees, and moves back when it does not. */
         function paintSchedule(on, hours) {
-            $('sched-toggle').classList.toggle('on', !!on);
+            setSwitch($('sched-toggle'), !!on);
             if (hours) $('sched-freq').value = String(hours);
             $('sched-freq-row').style.display = on ? '' : 'none';
         }

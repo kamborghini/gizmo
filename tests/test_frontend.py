@@ -80,6 +80,15 @@ def button_part():
     return SCRIPT[SCRIPT.index(BUTTON_START):SCRIPT.index(BUTTON_END)]
 
 
+FIELD_START = "/* ---------- the field parts ----------"
+FIELD_END = "/* ---------- the field parts end ---------- */"
+
+
+def field_part():
+    """The switch and field parts' source (static/src/js/part-field.js) as the page has it."""
+    return SCRIPT[SCRIPT.index(FIELD_START):SCRIPT.index(FIELD_END)]
+
+
 @test
 def t_the_script_parses():
     """A duplicate `const` in a 5,700-line file is invisible until the page dies."""
@@ -860,15 +869,13 @@ def t_restore_from_backup_is_treated_as_destructive():
 @test
 def t_a_switch_reports_its_state():
     """Toggles were given role=switch but never aria-checked, so a screen reader
-    announced 'switch' and stopped. They are also built inside modals long after
-    load, so a one-shot pass at startup missed most of them."""
-    ok("function syncToggles" in SCRIPT, "one shared pass sets role, tabindex and state")
-    ok("aria-checked" in SCRIPT, "and it actually reports the state")
-    ok("MutationObserver" in SCRIPT and "syncToggles()" in SCRIPT,
-       "toggles built after load are covered too")
-    ok("requestAnimationFrame" in re.search(
-        r"new MutationObserver\(\(\) => \{.*?\}\)\.observe", SCRIPT, re.S).group(0),
-       "batched, or one tab repaint would run it hundreds of times")
+    announced 'switch' and stopped. Every switch is a real one now: built by
+    switchBtn() or written into the page as a switch, and turned by setSwitch(),
+    which sets its look and its state together."""
+    ok("function setSwitch(" in field_part() and "sw.setAttribute('aria-checked'" in field_part(),
+       "one part turns a switch and says its state")
+    ok("b.setAttribute('role', 'switch'); b.setAttribute('aria-checked'" in SCRIPT, "a switch built in the script is one from the start")
+    ok(not re.search(r'<div class="toggle"', HTML), "and none in the page is a bare box")
 
 
 @test
@@ -2522,7 +2529,7 @@ def t_a_phone_reads_every_table_as_two_line_rows():
     sh = fn_src("function syncTableHeads(") if "function syncTableHeads(" in SCRIPT else ""
     ok("table.ktable > :is(tbody, tfoot) > tr:not([data-kh])" in sh and "td.dataset.h = h" in sh and "td.classList.add('kt-main')" in sh,
        "each body cell carries its column's head, and the head marked kt-main names the cell that leads")
-    ok("syncToggles(); syncTableHeads();" in SCRIPT, "stamped in the one batched pass, wherever a table is built")
+    ok("syncTableHeads(); syncPanels();" in SCRIPT, "stamped in the one batched pass, wherever a table is built")
     ph = CSS.split("/* R13: on a phone a table's rows are two lines")[1].split("\n        }\n")[0] if "/* R13: on a phone a table's rows are two lines" in CSS else ""
     ok(KT + " { display: block; min-width: 0; }" in ph and KT + " > thead { display: none; }" in ph, "no head row and no sideways scroll")
     ok(KT + " > :is(tbody, tfoot) > tr { display: flex; flex-wrap: wrap;" in ph, "a row wraps its cells")
@@ -9030,6 +9037,61 @@ def t_every_ordinary_button_is_built_by_the_part():
 
 
 @test
+def t_settings_switches_are_named_switches():
+    """Stage 3, piece 3: the five Settings switches were bare boxes with no
+    name a screen reader could read, made to work after drawing. They are
+    switches in the markup now, named by the title beside them."""
+    for key in ('data-pref="track_inventory"', 'data-pref="concise"', 'data-pref="proactive"',
+                'data-pref="flag_anomalies"', 'id="sched-toggle"'):
+        m = re.search(r'<button type="button" class="toggle" role="switch" aria-checked="(?:true|false)"[^>]*' + re.escape(key) + r'[^>]*>', HTML) \
+            or re.search(r'<button type="button" class="toggle"[^>]*' + re.escape(key) + r'[^>]*role="switch"[^>]*>', HTML)
+        ok(m, key + " is a switch button")
+        lab = re.search(r'aria-labelledby="([^"]+)"', m.group(0))
+        ok(lab, key + " names itself by its title")
+        t = re.search(r'id="' + re.escape(lab.group(1)) + r'"[^>]*>([^<]+)<', HTML)
+        ok(t and t.group(1).strip(), key + " points at a title that exists")
+
+
+@test
+def t_a_switch_says_its_state_and_a_locked_one_does_not_move():
+    """setSwitch() turns the look and the spoken state together, so a save
+    that fails and flips a switch back says so; a switch someone may not
+    change does not move when pressed."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + field_part() + r"""
+let profile = { prefs: { concise: false } }; const DEFAULT_PREFS = { concise: false };
+const calls = []; async function api(path, body) { calls.push(path); throw new Error('offline'); }
+function cacheProfile() {} function toastError() {}
+const b = el('button', 'toggle'); b.dataset.pref = 'concise';
+const prefToggles = () => [b];
+""" + fn_src("async function savePrefToggle(") + r"""
+(async () => {
+  const out = {};
+  setSwitch(b, true); out.on = [b.classList.contains('on'), b.getAttribute('aria-checked')];
+  setSwitch(b, false); out.off = [b.classList.contains('on'), b.getAttribute('aria-checked')];
+  await savePrefToggle(b); out.failed = [b.classList.contains('on'), b.getAttribute('aria-checked'), calls.length];
+  b.setAttribute('aria-disabled', 'true'); await savePrefToggle(b);
+  out.locked = [b.classList.contains('on'), calls.length];
+  console.log(JSON.stringify(out));
+})();
+"""
+    got = _run_node(js)
+    ok(got["on"] == [True, "true"] and got["off"] == [False, "false"], "the look and the state together: %r" % got)
+    ok(got["failed"] == [False, "false", 1], "a failed save flips both back")
+    ok(got["locked"] == [False, 1], "a locked switch does not move or save")
+
+
+@test
+def t_the_switch_fixers_stay_gone():
+    """syncToggles stamped a role and a state on every .toggle after drawing,
+    and a page-wide key handler pressed them. Every switch is a real one now."""
+    ok("function syncToggles(" not in SCRIPT and "syncToggles()" not in SCRIPT, "no switch stamp")
+    ok("contains('toggle') && (e.key === 'Enter'" not in SCRIPT, "no page-wide switch key handler")
+
+
+@test
 def t_a_print_overtaken_by_a_newer_one_opens_no_dialog():
     """Every print stages its page in one box (#label-print) under one page
     rule, and a newer print takes both over, counted by printSeq. The
@@ -10894,7 +10956,7 @@ def t_settings_saves_one_way():
        "Save profile sits under the four text fields it saves")
     ok("prefToggles().forEach(t => t.onclick = function () { savePrefToggle(this); });" in SCRIPT, "a preference saves when it is changed")
     fn = fn_src("async function savePrefToggle(")
-    ok("t.classList.toggle('on', was);" in fn and "toastError(" in fn, "and a switch the server refused goes back and says so")
+    ok("setSwitch(t, was);" in fn and "toastError(" in fn, "and a switch the server refused goes back and says so")
     ok("api('/api/profile', { prefs: prefs })" in fn and "profile: " not in fn.split("api('/api/profile'")[1][:40],
        "a switch sends the switches alone, never this page's copy of the text (the server merges them)")
     close = fn_src("function closeSettings(")
@@ -12867,7 +12929,7 @@ def t_each_section_of_a_page_is_a_panel():
     panel, a pair's halves and what a plain wrapper holds included; the
     header, tabs, choosers, notices and the Production Manager's counters
     stay on the grey page."""
-    ok("syncToggles(); syncTableHeads(); syncPanels();" in SCRIPT, "stamped in the one batched pass")
+    ok("syncTableHeads(); syncPanels();" in SCRIPT, "stamped in the one batched pass")
     if not _node_ok():
         print("       (node unavailable, skipped)")
         return

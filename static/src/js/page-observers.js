@@ -1,20 +1,12 @@
-        /* A switch that never reports its state is worse than no switch: a screen
-           reader announces "switch" and stops. Most toggles are also built inside
-           modals long after load, so this watches rather than runs once. */
-        function syncToggles() {
-            document.querySelectorAll('.toggle').forEach(t => {
-                t.setAttribute('role', 'switch');
-                if (!t.hasAttribute('tabindex')) t.tabIndex = 0;
-                t.setAttribute('aria-checked', t.classList.contains('on') ? 'true' : 'false');
-            });
-        }
-        syncToggles();
-        let togglePass = 0;
+        /* What the page still stamps after drawing (stage 3 retires these one
+           part at a time): table heads onto their cells, and panels. Every
+           switch says its own state now (setSwitch, js/part-field.js). */
+        let stampPass = 0;
         new MutationObserver(() => {
             // Batched: whole tabs repaint at once, and a sync per mutation would
             // run hundreds of times for one render.
-            if (togglePass) return;
-            togglePass = requestAnimationFrame(() => { togglePass = 0; syncToggles(); syncTableHeads(); syncPanels(); });
+            if (stampPass) return;
+            stampPass = requestAnimationFrame(() => { stampPass = 0; syncTableHeads(); syncPanels(); });
         }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
         /* R13: a table's heads, copied onto its body cells as data-h, so on a
            phone each row reads as two lines with every value named (see
@@ -79,10 +71,6 @@
             if (!auth.contains(document.activeElement)) { e.preventDefault(); first.focus(); return; }
             if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
             else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-        });
-        document.addEventListener('keydown', (e) => {
-            const t = e.target;
-            if (t && t.classList && t.classList.contains('toggle') && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); t.click(); }
         });
         /* The widget grid's own live region, made at boot for the reason the
            toast host's is below, and kept apart from the toasts: a toast on

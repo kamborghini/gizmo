@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-19",
+   "title": "Switches and fields",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "Field captions in the dispatch and CRM forms now match the rest of the app, and every switch, box and tick has a name a screen reader reads out."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-19",
    "title": "Buttons that match",
    "items": [
     {
