@@ -57,18 +57,45 @@ BIG_ORDER = 2000.0
 BIG_ORDERS_NAME = "Big orders counted apart"
 
 
+def big_level(b: pd.Series) -> float:
+    """What big orders are taken to bring in a month: the middle of the last
+    twelve months that had any, scaled by how many of the twelve did. Where
+    every month had big orders, as on the shop this was measured on, that is
+    simply the middle month of the twelve.
+
+    It was their average. A few exceptional months held the average up, and
+    on the months it could not see the average overstated big orders by far
+    more than the middle month did. Of the ways tried (none at all, averages
+    over six months, twelve and all history, a smoothed level, the same month
+    last year), the middle month was closest over the whole history and over
+    2026, and closer than the twelve-month average on every stretch, the
+    earliest included, before the months that prompted the change.
+
+    The scaling is for a shop where big orders skip months: the plain middle
+    month of twelve with seven empty is nothing, and every month, the year and
+    the cash path would be forecast with no big orders at all. `b` must
+    already be cut at the forecast's own last month."""
+    tail = b.astype(float).iloc[-12:].fillna(0.0)
+    had = tail[tail > 0]
+    if not len(had):
+        return 0.0
+    return float(had.median()) * len(had) / len(tail)
+
+
 def big_orders_apart(y: pd.Series, h: int, big: pd.Series) -> Tuple[pd.Series, str]:
-    """Regular orders by last year, adjusted for this year; big orders as their
-    average month over the last year.
+    """Regular orders by last year, adjusted for this year; big orders as a
+    typical month of them over the last year (see big_level).
 
     Measured on Projected Image's own months it could not see (Jan to Sep
     2026), orders of 2,000 or more caused 78% of "last year, adjusted"'s
     squared error: it scales last year's one-off big orders into this year,
     so nine big orders in January 2025 made it forecast January 2026 at
     nearly double, and one 20,040 order in May 2025 added 18,900 to May 2026.
-    Split like this it was 20% out against 31% (17% against 37% on May to
-    September), and it held at thresholds of 3,000 and 5,000. It is a source
-    like the others: it leads only if it keeps scoring best.
+    Split like this, with big orders then taken as their average month, it was
+    20% out against 31% (17% against 37% on May to September), and it held at
+    thresholds of 3,000 and 5,000; the middle month (big_level) came closer
+    again. It is a source like the others: it leads only if it keeps scoring
+    best.
 
     `big` is the monthly total of big orders. Only its months up to the end of
     `y` are read, so a backtest fold cannot see past its own cut-off."""
@@ -76,7 +103,7 @@ def big_orders_apart(y: pd.Series, h: int, big: pd.Series) -> Tuple[pd.Series, s
     base = (y.astype(float) - b).clip(lower=0.0)
     r = _ratio_to_last_year(base)
     idx = _future_index(y, h)
-    level = float(b.iloc[-12:].mean()) if len(b) else 0.0
+    level = big_level(b)
     vals = [base.get(p - 12, np.nan) * r + level for p in idx]
     return pd.Series(vals, index=idx, dtype=float), \
         f"orders under {BIG_ORDER:,.0f}: last year x {r:.2f}; big orders {level:,.0f} a month"
@@ -84,10 +111,11 @@ def big_orders_apart(y: pd.Series, h: int, big: pd.Series) -> Tuple[pd.Series, s
 
 BIG_ORDERS_ABOUT = (
     "It splits each month into orders under \u00a32,000 and big orders. The smaller ones follow "
-    "last year's same month, scaled by how this year is trading; the big ones are taken as "
-    "their average month over the last year, because a big one-off order rarely comes back "
-    "in the same month a year later. It misleads when big orders start arriving much more or "
-    "less often than they did over the last year.")
+    "last year's same month, scaled by how this year is trading. The big ones are taken as a "
+    "typical month of them over the last year, the middle one rather than the average, so one "
+    "exceptional month does not lift every month after it, and not repeated from last year's "
+    "same month, because a big one-off order rarely comes back a year later. It misleads when "
+    "big orders start arriving much more or less often than they did over the last year.")
 BIG_ORDERS_BEST_AT = "Best at: a business where a few big orders make or break a month."
 
 
@@ -277,6 +305,24 @@ def _folds(y: pd.Series, folds: int = 3, h: int = 3) -> List[Tuple[int, int]]:
     return out
 
 
+def _p80(misses) -> float:
+    """The width meant to hold 8 in 10 of the NEXT misses, from n past ones:
+    the ceil(0.8 x (n + 1))-th smallest, the small-sample rank split-conformal
+    prediction uses, not the 80th percentile interpolated between them. With
+    nine misses that is the eighth smallest rather than a point between the
+    seventh and eighth; with eight or fewer it is the largest.
+
+    It is never narrower than the plain percentile, which on the months the
+    sources could not see held only about half of them. It is no guarantee
+    either: the backtest's nine misses come from three overlapping folds, a
+    few distinct months marked one to three months ahead, and the rule's
+    promise needs misses that are alike. It narrows the shortfall; the
+    evaluate command measures what is left of it."""
+    v = np.sort(np.asarray(misses, dtype=float))
+    k = (4 * (len(v) + 1) + 4) // 5 - 1          # ceil(0.8 (n + 1)) - 1, in whole numbers
+    return float(v[min(max(k, 0), len(v) - 1)])
+
+
 def _errors_to_score(errs: List[float], spread: Optional[List[float]] = None) -> Dict[str, Optional[float]]:
     """Typical error, bias and worst, against what came in; and `p80`, the
     width of the likely range.
@@ -286,14 +332,19 @@ def _errors_to_score(errs: List[float], spread: Optional[List[float]] = None) ->
     is the size 8 in 10 of those stayed within, so forecast x (1 +/- p80)
     holds 8 in 10 of the past outcomes. Measured against the actual instead,
     the top of the range sat short exactly when a source forecast too low, as
-    September 2026's did. Plus or minus the AVERAGE miss held about 6 in 10."""
+    September 2026's did. Plus or minus the AVERAGE miss held about 6 in 10.
+
+    The 8 in 10 is read the way a handful of misses needs (see _p80): the
+    range is a claim about the NEXT month, and the plain 80th percentile of
+    nine past misses held far fewer than 8 in 10 of the months that came
+    after."""
     if not errs:
         return {"mape": None, "bias": None, "worst": None, "p80": None, "folds": 0}
     arr = np.array(errs, dtype=float)
     sp = np.array([v for v in (spread or []) if np.isfinite(v)], dtype=float)
     return {"mape": float(np.mean(np.abs(arr))), "bias": float(np.mean(arr)),
             "worst": float(np.max(np.abs(arr))),
-            "p80": float(np.quantile(sp, 0.8)) if len(sp) else None,
+            "p80": _p80(sp) if len(sp) else None,
             "folds": len(errs)}
 
 
@@ -365,10 +416,15 @@ def track_record(results: Optional[List[dict]]) -> Dict[str, Dict[str, float]]:
             e = rec.get("error")
             if not isinstance(e, (int, float)) or not np.isfinite(e):
                 continue
-            d = out.setdefault(name, {"n": 0, "abs": 0.0, "sum": 0.0, "wins": 0})
+            d = out.setdefault(name, {"n": 0, "abs": 0.0, "sum": 0.0, "wins": 0, "spread": []})
             d["n"] += 1
             d["abs"] += abs(float(e))
             d["sum"] += float(e)
+            # `error` is (forecast - actual) / actual; the range is drawn
+            # around the forecast, so its misses are |actual - forecast| /
+            # forecast, which is |error| / (1 + error).
+            if 1.0 + float(e) > 0:
+                d["spread"].append(abs(float(e)) / (1.0 + float(e)))
             if r.get("winner") == name:
                 d["wins"] += 1
     for name, d in out.items():
@@ -376,6 +432,7 @@ def track_record(results: Optional[List[dict]]) -> Dict[str, Dict[str, float]]:
         d["mape"] = d["abs"] / n
         d["bias"] = d["sum"] / n
         d["win_rate"] = d["wins"] / n
+        d["p80"] = _p80(d["spread"]) if d["spread"] else None
     return out
 
 
@@ -396,7 +453,8 @@ def _live_weights(live: Dict[str, Dict[str, float]], names: List[str]) -> Dict[s
 def sanity_forecasts(monthly: pd.Series, horizon: int = DEFAULT_HORIZON,
                      folds: int = 3, fold_h: int = 3,
                      results: Optional[List[dict]] = None,
-                     big: Optional[pd.Series] = None) -> dict:
+                     big: Optional[pd.Series] = None,
+                     daily_small: Optional[pd.Series] = None) -> dict:
     """Every source's next `horizon` months, plus combinations of them, each
     carrying the score it earned on this shop's own months.
 
@@ -406,7 +464,16 @@ def sanity_forecasts(monthly: pd.Series, horizon: int = DEFAULT_HORIZON,
 
     Combinations are rows like any other. They are not assumed to be better -
     an average of forecasts that all lean high leans high - so they are marked
-    against the same folds and ranked with everyone else."""
+    against the same folds and ranked with everyone else.
+
+    `daily_small` is the regular orders (under BIG_ORDER) by day. Given it
+    with `big`, the sources that forecast the regular orders day by day join
+    the panel (see prophet_source); without it, or without the library, the
+    panel is exactly what it was. Their days are cut at each fold's own last
+    month, like `big`.
+
+    `ranking` is every scored row, best first, in the order the page ranks
+    them, and pick_opinions follows it."""
     monthly = monthly.dropna().sort_index()
     if len(monthly) < MIN_MONTHS:
         return {"available": False,
@@ -418,6 +485,9 @@ def sanity_forecasts(monthly: pd.Series, horizon: int = DEFAULT_HORIZON,
     if big is not None and len(big):
         models.append((BIG_ORDERS_NAME, lambda yy, hh: big_orders_apart(yy, hh, big),
                        BIG_ORDERS_ABOUT, BIG_ORDERS_BEST_AT))
+        if daily_small is not None and len(daily_small):
+            from .prophet_source import prophet_models
+            models += prophet_models(big, daily_small)
     models += statsforecast_models()
     mscore, cscore = _backtest_all(monthly, models, folds, fold_h)
 
@@ -475,16 +545,37 @@ def sanity_forecasts(monthly: pd.Series, horizon: int = DEFAULT_HORIZON,
     # Attach the standing record to each source, and rank on it once there is
     # enough of it: a month a source could not see is worth more than a fold
     # it was refitted to.
+    #
+    # "Enough" is every scored method having MIN_LIVE_MONTHS closed months of
+    # its OWN, not the longest record on the board. Counted on the longest, a
+    # method added later competed on one month's error against everyone
+    # else's average over several, and a lucky month put it in charge of the
+    # figures. And the page ranks on the record only between two methods that
+    # both have one, falling back to the backtest otherwise; with every method
+    # on the record or none, its order and this one are the same.
     closed = max((int(d.get("n", 0)) for d in live.values()), default=0)
+
+    def own(name: str) -> int:
+        return int((live.get(name) or {}).get("n", 0))
+    scored_now = [e for e in out if e.get("months") and (e.get("score") or {}).get("mape") is not None]
+    on_record = (closed >= MIN_LIVE_MONTHS and bool(scored_now)
+                 and all(own(e["name"]) >= MIN_LIVE_MONTHS for e in scored_now))
     for entry in out:
         d = live.get(entry["name"])
-        if d:
-            entry["live"] = {"months": int(d["n"]), "mape": round(d["mape"], 4),
-                             "bias": round(d["bias"], 4), "wins": int(d["wins"]),
-                             "win_rate": round(d["win_rate"], 3)}
+        if not d:
+            continue
+        if on_record and d["n"] < MIN_LIVE_MONTHS:
+            # Only a row with no backtest of its own (the track-record
+            # weighting) can be this young here: it shows no record until it
+            # has enough, so it ranks last, on the page as here.
+            continue
+        entry["live"] = {"months": int(d["n"]), "mape": round(d["mape"], 4),
+                         "bias": round(d["bias"], 4), "wins": int(d["wins"]),
+                         "win_rate": round(d["win_rate"], 3),
+                         "p80": None if d.get("p80") is None else round(d["p80"], 4)}
 
     def rank_key(m):
-        if closed >= MIN_LIVE_MONTHS and (m.get("live") or {}).get("mape") is not None:
+        if on_record and (m.get("live") or {}).get("mape") is not None:
             return (0, m["live"]["mape"])
         sc = (m.get("score") or {}).get("mape")
         return (1, sc if sc is not None else 9.9)
@@ -493,10 +584,17 @@ def sanity_forecasts(monthly: pd.Series, horizon: int = DEFAULT_HORIZON,
               and ((m.get("score") or {}).get("mape") is not None or (m.get("live") or {}).get("mape") is not None)]
     ranked.sort(key=rank_key)
     best = ranked[0]["name"] if ranked else None
-    ranked_on = "record" if closed >= MIN_LIVE_MONTHS else "backtest"
+    ranked_on = "record" if on_record else "backtest"
+    # Who the record is waiting on, once months enough have closed: the
+    # methods with fewer than MIN_LIVE_MONTHS of their own, and how many each
+    # has, so the page can say so rather than "three are needed" under a list
+    # of more than three. `closed_months` stays the months that have closed.
+    waiting = ({e["name"]: own(e["name"]) for e in scored_now if own(e["name"]) < MIN_LIVE_MONTHS}
+               if closed >= MIN_LIVE_MONTHS and not on_record else {})
     median = ({k: (None if not np.isfinite(v) else round(float(v), 2))
                for k, v in zip(months, _median(stack))} if stack is not None else {})
     return {"available": True, "months": months, "models": out, "median": median, "best": best,
+            "ranking": [m["name"] for m in ranked], "record_waiting": waiting,
             "ranked_on": ranked_on, "closed_months": closed, "sources": len(live_fc),
             "history": [{"month": str(p), "value": round(float(v), 2)}
                         for p, v in monthly.tail(24).items()]}
@@ -505,20 +603,30 @@ def sanity_forecasts(monthly: pd.Series, horizon: int = DEFAULT_HORIZON,
 def pick_opinions(result: dict, n: int = 3) -> List[dict]:
     """The models worth showing, best on this shop's own history first.
 
-    Ranked by the error each earned in the backtest, not by how sophisticated
-    it is. On Projected Image the order comes out simplest-first, and that is
-    the point: a model is trusted here because it was right, not because of
-    what it is called."""
-    scored = [m for m in (result.get("models") or []) if (m.get("score") or {}).get("mape") is not None]
+    Ranked by the error each earned, not by how sophisticated it is: a model
+    is trusted here because it was right, not because of what it is called.
+    The order is sanity_forecasts' own `ranking`, so the source that drives
+    the numbers is the one the page names as running: on the record once
+    enough months have closed, on the backtest until then. Sorting on the
+    backtest here, as this once did, would have left the numbers on the
+    backtest's leader while the page named the record's."""
+    models = result.get("models") or []
+    order = result.get("ranking")
+    if order is not None:
+        by_name = {m["name"]: m for m in models}
+        return [by_name[k] for k in order if k in by_name][:n]
+    scored = [m for m in models if (m.get("score") or {}).get("mape") is not None]
     return sorted(scored, key=lambda m: m["score"]["mape"])[:n]
 
 
 def band_width(model: dict) -> float:
     """How far either side of a month the likely range reaches, as a share of
     it: the miss 8 in 10 of the source's past ones stayed within, held between
-    10% and 90%."""
+    10% and 90%. A source with no backtest of its own (the one weighted by
+    track record) is drawn at the same width read from its misses on the
+    record."""
     sc = model.get("score") or {}
-    err = float(sc.get("p80") or sc.get("mape") or 0.3)
+    err = float(sc.get("p80") or sc.get("mape") or (model.get("live") or {}).get("p80") or 0.3)
     return min(max(err, 0.10), 0.90)
 
 

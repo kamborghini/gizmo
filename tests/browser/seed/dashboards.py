@@ -898,12 +898,17 @@ def _fc_run(as_of, cf, hook):
     months = monthly_cash(orders, as_of, since)
     big = monthly_cash(orders, as_of, since, min_total=BIG_ORDER)
     actual_daily = daily_cash(orders, as_of)
+    # The regular orders by day are what the Prophet methods read. The image
+    # does not carry Prophet, so neither does this world: handed the days, a
+    # machine that has it installed (make install does) would seed a page
+    # production never shows, and differ from CI's.
+    daily_small = None
     cfg = Config(as_of=as_of, horizon_days=90)
     first = pd.Period(as_of, freq="M")
     last = max((pd.Period(m, freq="M") for m in cf.projection_months()), default=first)
     need = max(1, (last.year - first.year) * 12 + (last.month - first.month) + 1)
     record = _ok(client.get("/hooks/forecast/ledger", headers=hook), "forecast ledger").get("results") or []
-    sanity = sanity_forecasts(months, horizon=min(need, 18), results=record, big=big)
+    sanity = sanity_forecasts(months, horizon=min(need, 18), results=record, big=big, daily_small=daily_small)
     if not sanity.get("available"):
         raise RuntimeError("forecast: " + str(sanity.get("reason")))
     opinions = pick_opinions(sanity)
