@@ -114,3 +114,21 @@ test('a window opened without focus does not hand it back to a field left earlie
   await page.waitForTimeout(300);
   expect(await field.evaluate(e => document.activeElement === e), 'focus stayed away from the old field').toBe(false);
 });
+
+// The queue's rows are not tab stops (19 Oct 2026: they held the order link and
+// the actions); a keyboard opens an order's preview with the row's Preview button.
+test('keyboard: the queue opens an order from its Preview button', async ({ page, context, baseURL }, info) => {
+  test.skip(info.project.name !== 'laptop', 'checked once');
+  await S.prepare(context, baseURL);
+  const w = S.watch(page, baseURL);
+  await S.open(page, w);
+  await SCREENS.find(x => x.id === 'labels').go(page, S.helpers(page, w, info.project.name));
+  const pv = () => page.locator('#labels-content .lbl-qrow').first().locator('button[aria-expanded]').first();
+  expect(await pv().getAttribute('aria-expanded'), 'the preview starts closed').toBe('false');
+  await pv().focus();
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('#labels-content .lbl-preview');
+  expect(await pv().getAttribute('aria-expanded'), 'and opens from the keyboard').toBe('true');
+  expect(w.writes).toEqual([]);
+  expect(w.errors).toEqual([]);
+});

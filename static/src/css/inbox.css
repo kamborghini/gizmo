@@ -132,7 +132,10 @@
             border: 0; box-shadow: var(--rule-b-soft); font-size: var(--text-body); cursor: pointer;
             position: relative; }
         /* The keyboard ring is drawn inside the row, so it is never cut away. */
-        .mrow:focus-visible { outline-offset: -2px; }
+        /* A row is not focusable itself: its opener (rowOpener) is, out of sight,
+           and the row draws the ring it always had while the opener has focus. */
+        .mrow:has(> .row-open:focus-visible) { outline: var(--focus-outline); outline-offset: -2px; }
+        .mail-card:has(> .row-open:focus-visible) { outline: var(--focus-outline); outline-offset: var(--sp-0-5); }
         /* Rows off screen are not laid out or painted until they come near
            (the 2026-10-12 speed audit, P5): a Refresh of 400 rows went from
            157-184 ms of a desktop's main thread to 101-125. Until it is drawn
@@ -485,7 +488,7 @@
            table, so the house ring never appeared on either CRM table and a
            tabbed row was focusable with nothing to show for it. Drawn INSIDE
            the row instead, the way the inbox's keyboard cursor already is. */
-        .crm-list-row:focus-visible { outline: none; box-shadow: var(--ring-action-2); }
+        .crm-list-row:has(.row-open:focus-visible) { outline: none; box-shadow: var(--ring-action-2); }
         /* Rotting is its own signal: a red left edge on the whole card (the rule above), never
            to be confused with an overdue activity's red icon or a red label dot. */
         /* Tinted, not white-on-colour: an amber or grey label must still read. */

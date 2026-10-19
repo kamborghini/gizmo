@@ -843,8 +843,8 @@
                 // In the Complete queue "fulfilled" is the expected state, not staleness.
                 const staleStatus = dispatched && o.status === 'fulfilled' ? '' : o.status;
                 const row = el('div', 'lbl-row lbl-qrow' + (labelSel === o.id ? ' on' : '') + (staleStatus || (st.made_at && !dispatched) ? ' stale' : ''));
-                row.setAttribute('role', 'button'); row.tabIndex = 0;
-                row.addEventListener('keydown', (e) => { if (e.target !== row) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } });
+                /* Not a pretend button (it holds the order link and the actions):
+                   the keyboard opens a row's preview with its Preview button. */
                 row.append(orderA(orderNo(o), o.admin_url, 'lbl-num lbl-num-link'));
                 const who = el('div', 'lbl-who');
                 const nameLine = el('span', 'lbl-nameline');

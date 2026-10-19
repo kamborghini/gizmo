@@ -767,12 +767,11 @@
                 /* The same three lines the contacts row and the board card
                    carry: a row whose only action is a click is mouse-only,
                    and this was the one view where that was still true. */
-                tr.setAttribute('role', 'button'); tr.tabIndex = 0;
-                tr.addEventListener('keydown', (ev) => {
-                    if (ev.target !== tr) return;
-                    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); tr.click(); }
-                });
-                tr.append(el('td', 'kw', x.title));
+                const openDeal = () => crmDealModal(x.id);
+                const dealName = el('td', 'kw', x.title);
+                const dob = rowOpener('Open ' + x.title, openDeal); dob.dataset.focusKey = 'deal-row-' + x.id;
+                dealName.prepend(dob);
+                tr.append(dealName);
                 tr.append(el('td', null, crmWho(x)));
                 tr.append(el('td', 'num', crmMoney(x.value)));
                 tr.append(el('td', null, x.status === 'open' ? (stages[x.stage_id] || '') : ''));
@@ -784,7 +783,7 @@
                 stTd.append(el('span', 'lbl-chip' + (x.status === 'won' ? ' made' : x.status === 'lost' ? ' bad' : ' note'),
                     (x.archived ? 'Archived · ' : '') + cap(x.status)));
                 tr.append(stTd);
-                tr.onclick = () => crmDealModal(x.id);
+                opensOnClick(tr, openDeal);
                 tbody.append(tr);
             });
             tb.append(tbody); wrap.append(tb); host.append(wrap);
@@ -1771,11 +1770,9 @@
                     /* .sel, so the row a tick chose is darker than the row the
                        pointer merely passed over. */
                     const tr = el('tr', 'crm-list-row' + (crmContactSel.has(c.id) ? ' sel' : ''));
-                    tr.setAttribute('role', 'button'); tr.tabIndex = 0;
-                    /* Only when the ROW itself is focused: a bubbled Space from the
-                       selection checkbox inside this row is the checkbox's keypress,
-                       and swallowing it opened the modal instead of ticking the box. */
-                    tr.addEventListener('keydown', (ev) => { if (ev.target !== tr) return; if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); tr.click(); } });
+                    /* Not a pretend button (it holds a tick): the name cell holds the
+                       row's opener, and a click anywhere else on the row opens it. */
+                    const openContact = () => crmContactModal(people ? 'person' : 'org', c.id);
                     if (master) {
                         const cell = el('td', 'tick');
                         const cb = document.createElement('input');
@@ -1784,7 +1781,10 @@
                             cb.checked ? crmContactSel.add(c.id) : crmContactSel.delete(c.id); paint(); };
                         cell.append(cb); tr.append(cell);
                     }
-                    tr.append(el('td', 'kw', c.name));
+                    const nameTd = el('td', 'kw', c.name);
+                    const cob = rowOpener('Open ' + c.name, openContact); cob.dataset.focusKey = 'contact-row-' + c.id;
+                    nameTd.prepend(cob);
+                    tr.append(nameTd);
                     const deals = Object.values(crmCache.deals).filter(x =>
                         (people ? x.person_id : x.org_id) === c.id);
                     const openD = deals.filter(x => x.status === 'open' && !x.archived).length;
@@ -1809,7 +1809,7 @@
                     const lab = el('td', 'crm-label');
                     if (c.label) lab.append(crmChip(c.label));
                     tr.append(lab);
-                    tr.onclick = () => crmContactModal(people ? 'person' : 'org', c.id);
+                    opensOnClick(tr, openContact);
                     tbody.append(tr);
                 });
                 /* The header tick, which was an empty cell: a list this long

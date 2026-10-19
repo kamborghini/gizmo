@@ -1541,20 +1541,15 @@ def t_save_is_pinned_where_every_other_modal_puts_it():
 
 @test
 def t_the_inbox_list_can_be_worked_without_a_mouse():
-    """Every other list row in the app is a real button; the Inbox's rows and
-    cards were click-only divs."""
-    for name in ("row", "card"):
-        ok(name + ".setAttribute('role', 'button'); " + name + ".tabIndex = 0;" in SCRIPT,
-           "the mail %s announces itself and can be tabbed to" % name)
-    # The mail rows pioneered this guard; the audit pass spread it to every
-    # row in the app, so the count is now "at least", not "exactly one".
-    ok(SCRIPT.count("if (e.target !== row) return;") >= 1
-       and SCRIPT.count("if (e.target !== card) return;") >= 1,
-       "the key handler is guarded on target so the row's own checkbox and "
-       "Claim keep their Space and Enter")
-    ok("e.stopPropagation(); row.click();" in SCRIPT,
+    """Every other list row in the app opens from the keyboard; the Inbox's
+    rows and cards were click-only divs. They open from their own button now
+    (rowOpener, stage 3 piece 4), a real one named for the email, whose Enter
+    and Space stop there so the inbox-wide Enter shortcut does not also fire."""
+    mr, card = fn_src("function mailRow("), fn_src("function mailCard(")
+    ok("rowOpener(" in mr and "rowOpener(" in card, "the mail row and card open from a real, named button")
+    ok("if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();" in row_part(),
        "and it stops there, or the inbox-wide Enter shortcut fires too")
-    ok(re.search(r"\.mrow:focus-visible \{[^}]*outline-offset: -2px", HTML),
+    ok(re.search(r"\.mrow:has\(> \.row-open:focus-visible\) \{[^}]*outline-offset: -2px", HTML),
        "the ring is drawn inside the row, which .mlist would otherwise clip")
 
 
@@ -4351,7 +4346,7 @@ def t_everything_that_says_it_is_a_button_works_like_one():
     Every role=button in the file now has a keyboard path."""
     import re as _re2
     sites = [m.start() for m in _re2.finditer(_re2.escape("setAttribute('role', 'button')"), SCRIPT)]
-    ok(len(sites) >= 10, "the role=button sites are all still here (%d)" % len(sites))
+    ok(len(sites) >= 6, "the role=button sites are all still here (%d; rows that held controls open from their own button since 19 Oct 2026)" % len(sites))
     for i, at in enumerate(sites):
         seg = SCRIPT[at:at + 400]
         ok("keydown" in seg, "role=button site %d has a keydown handler beside it" % (i + 1))
@@ -4547,7 +4542,10 @@ def t_a_rows_keydown_never_steals_an_inner_controls_keypress():
     rowish = _re2.findall(r"(row|tr|r|card)\.(?:addEventListener\('keydown'|onkeydown)", SCRIPT)
     # Rows that became tables (12 Oct 2026: Liability, Reconciliation, CRM leads, the filter counters)
     # open from a real button in the row, which needs no keydown of its own, so fewer handlers remain.
-    ok(len(hits) >= 2, "the container handlers carry the target guard (%d)" % len(hits))
+    # Rows that open from their own button (rowOpener, 19 Oct 2026) have no key
+    # handler left to steal with: the button stops its own Enter and Space.
+    for fn in ("function mailRow(", "function mailCard(", "function renderCRMContacts("):
+        ok(not re.search(r"\b(row|tr|card)\.addEventListener\('keydown'", fn_src(fn)), fn + " leaves the keys to its opener")
     ok("if (e.target !== card) return;" in SCRIPT, "the deal card too")
     # The two leaf handlers (the follow-up ticks) have no children to steal from
     # and legitimately omit the guard.
@@ -6954,8 +6952,8 @@ def t_focus_is_declared_once_per_kind():
        "one rule for every field, contenteditable included")
     ok(not re.search(r"\.[\w-]+:focus \{[^}]*(focus-ring|focus-outline)", CSS),
        "no component carries its own copy of either focus look")
-    ok(CSS.count("outline: var(--focus-outline)") == 7,
-       "the outline is read by the control rule and by six deliberate variants (the "
+    ok(CSS.count("outline: var(--focus-outline)") == 9,
+       "the outline is read by the control rule and by eight deliberate variants (an Inbox row and a mail card whose hidden opener has focus, the "
        "custom-drawn checkbox, the menu item which insets it, a widget card just dropped "
        "in Customize mode, which borrows it for --dur-landed, and the info button, which "
        "draws it on its 24 face so a phone's 40 target never shows, a chart's plot, one stop for the arrow keys, "
@@ -9212,6 +9210,26 @@ def t_a_tick_row_is_one_recipe():
     for fam in (".disp-notify", ".disp-insure"):
         r = re.search(re.escape(fam) + r" \{([^}]*)\}", CSS)
         ok(r and "font-size" not in r.group(1) and "color" not in r.group(1), fam + " keeps only its spacing")
+
+
+@test
+def t_no_row_is_a_pretend_button():
+    """A row built as a pretend button held real controls (a tick, Claim, the
+    order link, the queue's actions), which a screen reader cannot present.
+    Rows open from their own real button now, and a click anywhere still
+    opens them; the queue opens from its Preview button, which it always had."""
+    mr, card = fn_src("function mailRow("), fn_src("function mailCard(")
+    for name, src in (("the Inbox row", mr), ("the Inbox card", card)):
+        ok("setAttribute('role', 'button')" not in src, name + " is not a pretend button")
+        ok("rowOpener(" in src and "opensOnClick(" in src, name + " opens from its own button, and from a click anywhere")
+    q = SCRIPT[SCRIPT.index("const row = el('div', 'lbl-row lbl-qrow'"):][:900]
+    ok("row.setAttribute('role', 'button')" not in q and "row.tabIndex = 0" not in q, "the queue row is not a pretend button")
+    deals = SCRIPT[SCRIPT.index("const openDeal = () => crmDealModal(x.id);") - 600:][:2400]
+    for src, name in ((deals, "the deals list"), (fn_src("function renderCRMContacts("), "CRM Contacts")):
+        ok("tr.setAttribute('role', 'button')" not in src, name + " rows are table rows, not pretend buttons")
+        ok("rowOpener(" in src and "opensOnClick(tr" in src, name + " rows open from their own button")
+    for fam in (".mrow", ".mail-card", ".crm-list-row"):
+        ok(re.search(re.escape(fam) + r"[^{]*:has\([^)]*\.row-open:focus-visible\)", CSS), fam + " draws its ring when its opener has focus")
 
 
 @test
