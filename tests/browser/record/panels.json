@@ -9,8 +9,7 @@
     "inset": 1
   },
   "connector@phone": {
-    "inset": 1,
-    "short": 1
+    "inset": 1
   },
   "connector@wide": {
     "inset": 1
@@ -19,16 +18,10 @@
   "crm~activities@phone": {},
   "crm~activities@wide": {},
   "crm~contacts@laptop": {},
-  "crm~contacts@phone": {
-    "inset": 1,
-    "short": 1
-  },
+  "crm~contacts@phone": {},
   "crm~contacts@wide": {},
   "crm~deal@laptop": {},
-  "crm~deal@phone": {
-    "inset": 2,
-    "short": 1
-  },
+  "crm~deal@phone": {},
   "crm~deal@wide": {},
   "crm~insights@laptop": {},
   "crm~insights@phone": {},
@@ -36,26 +29,12 @@
   "crm~leads@laptop": {},
   "crm~leads@phone": {},
   "crm~leads@wide": {},
-  "customers@laptop": {
-    "inset": 1
-  },
-  "customers@phone": {
-    "inset": 1
-  },
-  "customers@wide": {
-    "inset": 1,
-    "short": 1
-  },
-  "customers~customise@laptop": {
-    "inset": 1
-  },
-  "customers~customise@phone": {
-    "inset": 1
-  },
-  "customers~customise@wide": {
-    "inset": 1,
-    "short": 1
-  },
+  "customers@laptop": {},
+  "customers@phone": {},
+  "customers@wide": {},
+  "customers~customise@laptop": {},
+  "customers~customise@phone": {},
+  "customers~customise@wide": {},
   "files@laptop": {},
   "files@phone": {},
   "files@wide": {},
@@ -66,133 +45,65 @@
   "guide@phone": {},
   "guide@wide": {},
   "guide~design@laptop": {},
-  "guide~design@phone": {
-    "inset": 3,
-    "short": 2
-  },
+  "guide~design@phone": {},
   "guide~design@wide": {},
   "guide~new@laptop": {},
   "guide~new@phone": {},
   "guide~new@wide": {},
   "guide~requests@laptop": {},
-  "guide~requests@phone": {
-    "inset": 1
-  },
+  "guide~requests@phone": {},
   "guide~requests@wide": {},
-  "keywords@laptop": {
-    "inset": 1
-  },
-  "keywords@phone": {
-    "inset": 1
-  },
-  "keywords@wide": {
-    "inset": 1,
-    "short": 1
-  },
+  "keywords@laptop": {},
+  "keywords@phone": {},
+  "keywords@wide": {},
   "labels@laptop": {},
-  "labels@phone": {
-    "inset": 3
-  },
+  "labels@phone": {},
   "labels@wide": {},
   "labels~make-open@laptop": {},
-  "labels~make-open@phone": {
-    "inset": 3,
-    "short": 1
-  },
+  "labels~make-open@phone": {},
   "labels~make-open@wide": {},
   "labels~shipments@laptop": {},
-  "labels~shipments@phone": {
-    "inset": 1
-  },
+  "labels~shipments@phone": {},
   "labels~shipments@wide": {},
-  "liability@laptop": {
-    "gaps": 1,
-    "inset": 1
-  },
-  "liability@phone": {
-    "gaps": 1,
-    "inset": 2
-  },
-  "liability@wide": {
-    "gaps": 1,
-    "inset": 1
-  },
+  "liability@laptop": {},
+  "liability@phone": {},
+  "liability@wide": {},
   "loans@laptop": {},
-  "loans@phone": {
-    "short": 1
-  },
+  "loans@phone": {},
   "loans@wide": {},
   "loans~unit@laptop": {},
-  "loans~unit@phone": {
-    "short": 1
-  },
+  "loans~unit@phone": {},
   "loans~unit@wide": {},
   "mail@laptop": {},
-  "mail@phone": {
-    "inset": 1
-  },
+  "mail@phone": {},
   "mail@wide": {},
   "memory@laptop": {},
-  "memory@phone": {
-    "inset": 1,
-    "short": 1
-  },
+  "memory@phone": {},
   "memory@wide": {},
-  "overview@laptop": {
-    "inset": 1
-  },
-  "overview@phone": {
-    "inset": 1
-  },
-  "overview@wide": {
-    "inset": 1,
-    "short": 1
-  },
-  "overview~customise@laptop": {
-    "inset": 1
-  },
-  "overview~customise@phone": {
-    "inset": 1
-  },
-  "overview~customise@wide": {
-    "inset": 1,
-    "short": 1
-  },
+  "overview@laptop": {},
+  "overview@phone": {},
+  "overview@wide": {},
+  "overview~customise@laptop": {},
+  "overview~customise@phone": {},
+  "overview~customise@wide": {},
   "products@laptop": {},
-  "products@phone": {
-    "inset": 2
-  },
+  "products@phone": {},
   "products@wide": {},
   "recon@laptop": {},
-  "recon@phone": {
-    "inset": 1,
-    "short": 1
-  },
+  "recon@phone": {},
   "recon@wide": {},
-  "seo@laptop": {
-    "inset": 1
-  },
-  "seo@phone": {
-    "inset": 1
-  },
-  "seo@wide": {
-    "inset": 1,
-    "short": 1
-  },
+  "seo@laptop": {},
+  "seo@phone": {},
+  "seo@wide": {},
   "sizes@laptop": {},
-  "sizes@phone": {
-    "inset": 2
-  },
+  "sizes@phone": {},
   "sizes@wide": {},
   "sizes~rule@laptop": {},
-  "sizes~rule@phone": {
-    "inset": 3
-  },
+  "sizes~rule@phone": {},
   "sizes~rule@wide": {},
   "skills@laptop": {},
   "skills@phone": {
-    "inset": 2,
-    "short": 1
+    "inset": 1
   },
   "skills@wide": {},
   "team~activity@laptop": {},
@@ -202,8 +113,6 @@
   "team~people@phone": {},
   "team~people@wide": {},
   "team~work@laptop": {},
-  "team~work@phone": {
-    "short": 1
-  },
+  "team~work@phone": {},
   "team~work@wide": {}
 }
