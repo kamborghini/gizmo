@@ -285,14 +285,14 @@
                     + (canEditInstructions() ? '' : ' Only an admin can add, change or delete a skill.') });
             head.append(titleInfo(yt, ytInfo));
             const acts = el('div', 'card-act');
-            const up = textButton(null, { small: true }); up.type = 'button';
+            const up = textButton(null); up.type = 'button';
             up.append(ico(I.upload), document.createTextNode('Upload Markdown'));
             up.title = 'Add skills from .md files, such as a SKILL.md';
             const fi = el('input'); fi.type = 'file'; fi.multiple = true; fi.hidden = true;
             fi.accept = '.md,.markdown,.txt,.text,text/markdown,text/plain';
             fi.onchange = () => { const fs = fi.files; startUpload(fs); fi.value = ''; };
             up.onclick = () => fi.click();
-            const add = textButton(null, { kind: 'primary', small: true }); add.type = 'button';
+            const add = textButton(null, { kind: 'primary' }); add.type = 'button';
             add.append(ico(I.plus), document.createTextNode('New skill'));
             /* Not while the list is unknown: a skill added blind may be one
                that is already there. */
@@ -388,13 +388,13 @@
             items.forEach((u, k) => list.append(uploadRow(u, k, busy)));
             box.append(list);
             const row = el('div', 'sk-form-row');
-            const more = textButton(null, { small: true }); more.type = 'button'; more.append(ico(I.plus), document.createTextNode('More files'));
+            const more = textButton(null); more.type = 'button'; more.append(ico(I.plus), document.createTextNode('More files'));
             const fi = el('input'); fi.type = 'file'; fi.multiple = true; fi.hidden = true; fi.accept = '.md,.markdown,.txt,.text,text/markdown,text/plain';
             fi.onchange = () => { const fs = fi.files; startUpload(fs); fi.value = ''; };
             more.onclick = () => fi.click();
             more.disabled = busy || items.length >= UPLOAD_MAX;
             if (items.length >= UPLOAD_MAX) more.title = 'Up to ' + UPLOAD_MAX + ' files at a time';
-            const cancel = textButton(null, { small: true }); cancel.type = 'button'; cancel.textContent = 'Cancel';
+            const cancel = textButton(null); cancel.type = 'button'; cancel.textContent = 'Cancel';
             cancel.disabled = busy;
             cancel.onclick = async () => {
                 if (skView.busy) return;
@@ -404,8 +404,8 @@
                 skView.uploads = null; paintSkills();
                 const up = skHost.card.querySelector('.card-act .btn'); if (up) up.focus();
             };
-            const plain = textButton(null, { small: true }); plain.type = 'button'; plain.textContent = 'Add without reading';
-            const read = textButton(null, { kind: 'primary', small: true }); read.type = 'button';
+            const plain = textButton(null); plain.type = 'button'; plain.textContent = 'Add without reading';
+            const read = textButton(null, { kind: 'primary' }); read.type = 'button';
             read.append(ico(I.book), document.createTextNode(n === 1 ? 'Read and add' : 'Read and add ' + n + ' skills'));
             read.title = n === 1 ? 'An AI run: Reactor reads the skill and writes down when it applies and what it will do.'
                 : n + ' AI runs, one for each skill: Reactor reads each and writes down when it applies and what it will do.';
@@ -622,7 +622,7 @@
             const foot = el('div', 'sk-reading-foot');
             foot.append(el('span', 'sk-meta', 'Read ' + fmtDate(r.at) + (r.by ? ' for ' + r.by : '')
                 + (r.stale ? '. The skill has changed since, so read it again before relying on this.' : '.')));
-            const again = textButton(null, { small: true }); again.type = 'button';
+            const again = textButton(null); again.type = 'button';
             again.append(ico(I.rotate), document.createTextNode('Read again'));
             again.title = 'An AI run: Reactor reads the skill as it is now.';
             again.onclick = () => readSkill(s.id, again);
@@ -655,7 +655,7 @@
             if (s.always) head.append(el('span', 'lbl-chip note sk-always', 'Every answer'));
             main.append(head);
             const acts = el('div', 'sk-acts');
-            const use = textButton(null, { small: true }); use.type = 'button';
+            const use = textButton(null); use.type = 'button';
             use.append(ico(I.chat), document.createTextNode('Use in chat'));
             use.title = 'Ask a question with this skill applied';
             use.onclick = () => useSkillInChat(s.id);
@@ -727,7 +727,7 @@
             if (s.file) made.push('from ' + s.file);
             if (made.length) side.append(el('span', 'sk-meta', made.join(' \u00b7 ')));
             if (!s.reading && canEditInstructions()) {
-                const rd = textButton(null, { small: true, cls: 'sk-read' }); rd.type = 'button';
+                const rd = textButton(null, { cls: 'sk-read' }); rd.type = 'button';
                 rd.append(ico(I.book), document.createTextNode('Have Reactor read it'));
                 rd.title = 'An AI run: Reactor reads the skill closely and writes down when it applies and what it will do.';
                 if (skView.reading[s.id]) setBusy(rd, true);
@@ -777,12 +777,12 @@
             autoGrow(bo);
             f2.append(bo, bMsg); f.append(f2);
             const row = el('div', 'sk-form-row');
-            const fileBtn = textButton(null, { small: true }); fileBtn.type = 'button';
+            const fileBtn = textButton(null); fileBtn.type = 'button';
             fileBtn.append(ico(I.upload), document.createTextNode('Load from file'));
             const fi = el('input'); fi.type = 'file'; fi.accept = '.md,.markdown,.txt,.text,text/markdown,text/plain'; fi.hidden = true;
             fileBtn.onclick = () => fi.click();
             const count = el('div', 'sk-count'); count.id = 'sk-count-' + (s ? s.id : 'new');
-            const splitBtn = textButton(null, { small: true }); splitBtn.type = 'button'; splitBtn.hidden = true;
+            const splitBtn = textButton(null); splitBtn.type = 'button'; splitBtn.hidden = true;
             const say = (node, field, msg) => { node.hidden = !msg; node.textContent = msg || ''; markInvalid(field, !!msg); };
             /* Anyone may edit a long skill the master saved, but not make it longer. */
             const lim = Math.max(skillCaps.body, s ? String(s.content || '').trim().length : 0);
@@ -825,14 +825,14 @@
                     bo.dispatchEvent(new Event('input'));
                 } catch (e) { toastError('That file could not be read.'); }
             };
-            const cancel = textButton(null, { small: true }); cancel.type = 'button'; cancel.textContent = 'Cancel';
+            const cancel = textButton(null); cancel.type = 'button'; cancel.textContent = 'Cancel';
             cancel.onclick = async () => {
                 const dirty = ti.value !== ti.dataset.initial || bo.value !== bo.dataset.initial || wh.value !== wh.dataset.initial || (cb.checked ? '1' : '') !== cb.dataset.initial;
                 if (dirty && !await uiConfirm('Discard this skill? What you have written is not saved.', { title: 'Discard changes', okText: 'Discard' })) return;
                 ti.dataset.initial = ti.value; bo.dataset.initial = bo.value; wh.dataset.initial = wh.value;
                 skView.editId = null; skView.adding = false; skView.draft = null; paintSkills();
             };
-            const save = textButton(null, { kind: 'primary', small: true }); save.type = 'button'; save.textContent = s ? 'Save changes' : 'Add skill';
+            const save = textButton(null, { kind: 'primary' }); save.type = 'button'; save.textContent = s ? 'Save changes' : 'Add skill';
             const done = (msg) => {
                 const name = ti.value.trim();
                 ti.dataset.initial = ti.value; bo.dataset.initial = bo.value; wh.dataset.initial = wh.value;

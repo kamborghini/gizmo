@@ -1,0 +1,17 @@
+    @layer parts {
+        .icon-btn { border: 0; background: transparent; color: var(--text-tertiary); padding: var(--sp-1); border-radius: var(--radius-control);
+            min-width: var(--control-h); min-height: var(--control-h); display: grid; place-items: center; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+        @media (hover: hover) { .icon-btn:hover { background: var(--surface-tertiary); color: var(--text-primary); } }
+        .icon-btn:active { background: var(--surface-sunken); }
+        .icon-btn[aria-disabled="true"], .icon-btn:disabled { background: transparent; color: var(--text-disabled); cursor: not-allowed; }
+        .icon-btn svg { width: var(--icon-md); height: var(--icon-md); }
+        /* The icon button's three sizes (iconButton(), docs/DESIGN.md): 32 above, 24 for
+           crosses and dense rows, 20 inside a tag. A delete hovers red, a confirm green. */
+        .icon-btn.icon-btn-sm { min-width: var(--control-h-sm); min-height: var(--control-h-sm); padding: 0; }
+        .icon-btn.icon-btn-sm svg { width: var(--icon-sm); height: var(--icon-sm); }
+        .icon-btn.icon-btn-tag { min-width: var(--box-sm); min-height: var(--box-sm); padding: 0; border-radius: var(--radius-tag); }
+        .icon-btn.icon-btn-tag svg { width: var(--icon-xs); height: var(--icon-xs); }
+        @media (hover: hover) { .icon-btn.del:hover { color: var(--error); background: var(--error-bg); } }
+        @media (hover: hover) { .icon-btn.ok:hover { color: var(--success); background: var(--success-bg); } }
+        @media (pointer: coarse) { .icon-btn.icon-btn-sm { min-width: var(--control-h); min-height: var(--control-h); } }
+    }

@@ -1,0 +1,10 @@
+    @layer base {
+        @media screen { b, strong { font-weight: var(--weight-semibold); } }
+        @media screen { :where(svg[stroke-width="2"]) { stroke-width: var(--icon-stroke); } }
+        button { font-family: inherit; cursor: pointer; }
+        ::-webkit-scrollbar { width: 11px; height: 11px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--radius-full); border: var(--bw-marker) solid transparent; background-clip: padding-box; }
+        @media (hover: hover) { ::-webkit-scrollbar-thumb:hover { background: var(--border-emphasis); background-clip: padding-box; } }
+        [aria-busy="true"] { cursor: progress; }
+    }

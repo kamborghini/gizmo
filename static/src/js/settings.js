@@ -240,7 +240,7 @@
                drawn at all for a role that sees neither button. */
             const bkActs = el('div', 'row-acts');
             if (!teamMe || teamMe.role === 'master') bkRow.append(bkActs);
-            const bk = textButton(null, { small: true });
+            const bk = textButton(null);
             bk.style.display = (!teamMe || teamMe.role === 'master') ? '' : 'none';
             bk.append(ico(I.download), document.createTextNode('Download backup'));
             bk.title = 'A zip of everything the app has learned: rulings, aliases, state, usage.';
@@ -264,7 +264,7 @@
             if (!teamMe || teamMe.role === 'master') {   // unknown role: show it; the server enforces master-only
                 const rsInput = document.createElement('input');
                 rsInput.type = 'file'; rsInput.accept = '.zip'; rsInput.style.display = 'none';
-                const rs = textButton(null, { small: true });
+                const rs = textButton(null);
                 rs.append(ico(I.upload), document.createTextNode('Restore'));
                 rs.title = 'Put a downloaded backup zip back: after a lost volume, or a region move.';
                 rsInput.onchange = async () => {
@@ -419,9 +419,7 @@
                 body.append(el('p', 'field-help',
                     'Add this to an authenticator app, then type the six-digit code it '
                     + 'shows to prove it works. It is not on until you do.'));
-                const code = el('div', 'evidence'); code.textContent = st.secret;
-                code.style.cssText = 'font-family:var(--font-mono);padding:var(--sp-2-5) var(--sp-3);'
-                    + 'background:var(--surface-tertiary);border-radius:var(--radius-control);word-break:break-all';
+                const code = el('div', 'evidence mono-box break-all'); code.textContent = st.secret;
                 body.append(code);
                 const f = formField('The code from your app');
                 const inp = el('input', 'psel'); inp.type = 'text'; inp.inputMode = 'numeric';
@@ -440,9 +438,7 @@
                         'Two-step sign-in is on. Keep these recovery codes somewhere safe: '
                         + 'each one gets you in once if you lose your phone, and this is the '
                         + 'only time they are shown.'));
-                    const list = el('div', 'evidence');
-                    list.style.cssText = 'font-family:var(--font-mono);line-height:var(--lh-prose);'
-                        + 'padding:var(--sp-2-5) var(--sp-3);background:var(--surface-tertiary);border-radius:var(--radius-control)';
+                    const list = el('div', 'evidence mono-box prose');
                     (r.recovery || []).forEach(c => list.append(el('div', null, c)));
                     body.append(list);
                     foot.innerHTML = '';
@@ -536,7 +532,7 @@
                 text.append(el('div', 'setting-title', total + ' erasure requests are waiting'),
                     el('div', 'setting-sub', 'More than Shopify sends for one shop. If nobody here erased these customers in Shopify, stop them all: someone holds the app\u2019s secret.'));
                 const acts = el('div', 'row-acts');
-                const all = textButton(null, { small: true }); all.type = 'button'; all.textContent = 'Stop all';
+                const all = textButton(null); all.type = 'button'; all.textContent = 'Stop all';
                 all.onclick = async () => {
                     if (!await uiConfirm('Stop all ' + total + ' waiting erasure requests and keep those customers\u2019 records? Only if nobody here erased them in Shopify.',
                         { title: 'Stop every erasure request', okText: 'Stop them all' })) return;
@@ -555,7 +551,7 @@
                 if (reach) text.append(el('div', 'setting-sub', reach));
                 if (h.stopped_before) text.append(el('div', 'setting-sub', 'The same request was stopped as not asked for on ' + fmtDate(h.stopped_before) + '.'));
                 const acts = el('div', 'row-acts');
-                const er = textButton(null, { small: true }); er.type = 'button'; er.textContent = 'Erase now';
+                const er = textButton(null); er.type = 'button'; er.textContent = 'Erase now';
                 if (h.scope && h.scope.unreadable) er.disabled = true;
                 er.onclick = async () => {
                     if (!await uiConfirm('Erase what Reactor holds about ' + h.email + '? ' + reach
@@ -564,7 +560,7 @@
                     /* The reach shown, checked again by the server at the click. */
                     privacyOp({ op: 'erase', id: h.id, reach: (h.scope && h.scope.key) || '' }, er);
                 };
-                const st = textButton(null, { small: true }); st.type = 'button'; st.textContent = 'Not requested';
+                const st = textButton(null); st.type = 'button'; st.textContent = 'Not requested';
                 st.onclick = async () => {
                     if (!await uiConfirm('Stop this request and keep ' + h.email + '\u2019s records? Only if nobody here erased them in Shopify: '
                         + 'a request Shopify did not send means someone holds the app\u2019s secret.', { title: 'Stop erasure request', okText: 'Stop it' })) return;
@@ -581,7 +577,7 @@
                     el('div', 'setting-sub', 'Asked on ' + fmtDate(a.at) + ' for the data held about them. '
                         + (a.overdue ? 'Overdue: they should have had it by ' + fmtDate(a.due) + '.' : 'Send it to them by ' + fmtDate(a.due) + '.')));
                 const acts = el('div', 'row-acts');
-                const done = textButton(null, { small: true }); done.type = 'button'; done.textContent = 'Mark answered';
+                const done = textButton(null); done.type = 'button'; done.textContent = 'Mark answered';
                 done.onclick = () => privacyOp(a.id ? { op: 'answered', id: a.id, email: a.email } : { op: 'answered', at: a.at, email: a.email }, done);
                 acts.append(done);
                 row.append(text, acts);
@@ -677,7 +673,7 @@
                 top.append(document.createTextNode(' across ' + (u.runs || 0) + ' calls. Same volume on Sonnet ≈ $' + (u.cost_if_sonnet || 0).toFixed(2) + ', on Haiku ≈ $' + (u.cost_if_haiku || 0).toFixed(2) + '.'));
                 box.append(top);
                 if (Array.isArray(u.by_kind) && u.by_kind.length) {
-                    const kt = dataTable(['Type', ['Runs', 'num'], ['Avg cost', 'num'], ['Total', 'num']]); kt.wrap.style.marginTop = 'var(--sp-2-5)';
+                    const kt = dataTable(['Type', ['Runs', 'num'], ['Avg cost', 'num'], ['Total', 'num']]); kt.wrap.classList.add('space-above-2-5');
                     u.by_kind.forEach(k => {
                         const tr = el('tr');
                         tr.append(el('td', 'kw', k.kind));

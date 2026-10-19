@@ -14,6 +14,14 @@
            This block is the only place any of it is defined, and the Guide's
            Design section draws it.
            ------------------------------------------------------------------ */
+        /* THE LAYERS (19 Oct 2026, stage 3 piece 6; docs/DESIGN.md, Layers). Below every
+           other rule, in this order: the element defaults (css/base.css) and the parts' own
+           rules (css/parts/). Every rule not in a layer, the tokens, the screens and the
+           panels, sits above them, so a screen's own rule beats a part's whatever their
+           weights. What paper reads (the tokens, html, body and every element) and print
+           itself are not in a layer. */
+        @layer base, parts;
+
         :root {
             /* ==================================================================
                DESIGN TOKENS. Three tiers in one block. Components read tier 2
@@ -409,11 +417,11 @@
         body > :where(:not([id="label-print"])) { font-size: var(--text-body); line-height: var(--lh-control); }
         /* Bold is 600 on screen, the heaviest weight there is (the mix, 4.2): the browser's own 700 is not on the list.
            Screen only, so the printed sheets keep what they print. */
-        @media screen { b, strong { font-weight: var(--weight-semibold); } }
+        
         /* Every interface icon at 1.75 (the icon table draws them at 2); a 14
            inline glyph sets 2 on its own rule, which outranks this. Screen
            only, so nothing printed changes. */
-        @media screen { :where(svg[stroke-width="2"]) { stroke-width: var(--icon-stroke); } }
+        
         /* Short findings and actions are balanced, so a two-line one does
            not end on 'for ten.' under a full line. */
         .insight .d, .insight .t, .action .text, .summary { text-wrap: balance; }
@@ -431,13 +439,13 @@
         :is(button, select, input, textarea, summary, [role="button"], .toggle,
             [tabindex], .convos):focus-visible {
             outline: var(--focus-outline); outline-offset: var(--sp-0-5); }
-        button { font-family: inherit; cursor: pointer; }
+        
         input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
 
-        ::-webkit-scrollbar { width: 11px; height: 11px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--radius-full); border: var(--bw-marker) solid transparent; background-clip: padding-box; }
-        @media (hover: hover) { ::-webkit-scrollbar-thumb:hover { background: var(--border-emphasis); background-clip: padding-box; } }
+        
+        
+        
+        
 
         #app { position: relative; z-index: 1; display: flex; height: 100%; overflow-x: clip; }
 

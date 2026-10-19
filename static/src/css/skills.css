@@ -21,8 +21,8 @@
         .sk-form-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
         .sk-count { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); white-space: nowrap; font-variant-numeric: tabular-nums; }
         .sk-count.over { color: var(--error); }
-        .btn.ghost { background: transparent; border-color: transparent; box-shadow: none; }
-        .btn.ghost .ic { color: var(--text-tertiary); }
+        
+        
         .sk-head { display: flex; align-items: flex-start; gap: var(--sp-2); }
         .sk-title { font-size: var(--text-body); font-weight: var(--weight-medium); flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; line-height: var(--lh-control); margin: 0; padding-top: var(--sp-0-5); }
         .sk-acts { display: flex; align-items: center; gap: var(--sp-1); flex-shrink: 0; }
@@ -124,7 +124,7 @@
         .pchat-send { flex-shrink: 0; padding: 0; width: var(--control-h); height: var(--control-h); min-height: var(--control-h); display: grid; place-items: center; }
         .pchat-send svg { width: var(--icon-md); height: var(--icon-md); }
         /* customer sector selector */
-        .seclink { background: transparent; border: 0; font: inherit; font-weight: var(--weight-medium); cursor: pointer; padding: 0; text-align: left; }
+        
         .kw-more { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); padding-top: var(--sp-3); }
         /* Two short tables side by side in one card (Customers' top customers,
            the trade radar's two lists), one above the other when narrow. */

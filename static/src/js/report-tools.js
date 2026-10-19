@@ -10,7 +10,7 @@
         function refreshAllBtn() {
             const mine = allowedReports();
             if (mine.length < 2) return null;
-            const b = textButton(null, { small: true, cls: 'refresh-all-btn' }); b.type = 'button';
+            const b = textButton(null, { cls: 'refresh-all-btn' }); b.type = 'button';
             b.append(ico(I.rotate), el('span', 'nr-label', refreshingAll ? refreshAllLabel : 'Refresh all'));
             b.title = 'Run ' + mine.map(r => r[1]).join(', ') + ' again. Uses AI credits.';
             if (refreshingAll) setBusy(b, true);

@@ -216,7 +216,7 @@
                           + 'with the Gmail API enabled in the same Google Cloud project.');
                     if (d.client) {
                         const row = el('div', 'act-row');
-                        const go = textButton(null, { kind: 'primary', small: true });
+                        const go = textButton(null, { kind: 'primary' });
                         go.append(ico(I.mail), document.createTextNode('Connect mailbox'));
                         go.onclick = async () => {
                             /* The tab must be opened INSIDE the click, before any
@@ -264,7 +264,7 @@
                             + 'come back here and press Connect mailbox.');
                         const r2 = el('div', 'act-row');
                         r2.append(el('code', 'setup-code', su.redirect_uri || ''));
-                        const cp = textButton(null, { small: true }); cp.type = 'button';
+                        const cp = textButton(null); cp.type = 'button';
                         cp.append(ico(I.copy), document.createTextNode('Copy'));
                         cp.onclick = async () => {
                             try { await navigator.clipboard.writeText(su.redirect_uri || ''); toastOk('Address copied.'); }
@@ -371,10 +371,10 @@
             mSynced.dataset.mailSynced = '';      // mailPaintSynced moves it on a quiet poll
             mHead.append(mSynced);
             const mAct = el('div', 'card-act');
-            const filt = textButton('Filters' + (d.rules ? ' (' + d.rules + ')' : ''), { small: true });
+            const filt = textButton('Filters' + (d.rules ? ' (' + d.rules + ')' : ''));
             filt.title = 'Rules that sort mail as it arrives';
             filt.onclick = () => openMailRules();
-            const rf = textButton(null, { small: true });
+            const rf = textButton(null);
             rf.append(ico(I.refresh), document.createTextNode('Refresh'));
             rf.onclick = async () => {
                 rf.disabled = true;
@@ -390,7 +390,7 @@
                because the server refuses it anyway and a button that always
                fails is a lie. */
             if (mailCanSend()) {
-                const cmp = textButton('Compose', { kind: 'primary', small: true });
+                const cmp = textButton('Compose', { kind: 'primary' });
                 cmp.title = 'Start a new conversation from the shared mailbox';
                 cmp.onclick = () => openMailCompose();
                 mAct.append(cmp);
@@ -637,7 +637,7 @@
             host.append(list);
             if (rows.length > mailListCap) {
                 const more = textButton();
-                more.style.marginTop = 'var(--sp-2)';
+                more.classList.add('space-above-2');
                 more.textContent = 'Show more (' + (rows.length - mailListCap) + ' older)';
                 more.onclick = () => { mailListCap += 400; renderMail(); };
                 host.append(more);
@@ -889,7 +889,7 @@
         function mailCard(t) {
             const d = mailCache;
             const card = el('div', 'crm-card mail-card');
-            card.style.cursor = 'pointer';
+            card.classList.add('clickable');
             if (t.state === 'unassigned') {
                 const h = mailHours(t.last_at);
                 if (h > 8) card.classList.add('overdue-hard');

@@ -417,7 +417,7 @@
                 const c = el('span', 'fchip', label); const b = el('button'); b.title = 'Remove'; b.innerHTML = I.x;
                 b.onclick = () => { clear(); st.page = 1; renderSizes(); }; c.append(b); wrap.append(c);
             });
-            const all = el('span', 'fchip'); all.style.cursor = 'pointer'; all.textContent = 'Clear all';
+            const all = el('span', 'fchip'); all.classList.add('clickable'); all.textContent = 'Clear all';
             all.onclick = () => { Object.assign(st, { q: '', maker: '', size: '', status: 'all', page: 1 }); renderSizes(); };
             wrap.append(all);
             return wrap;
@@ -480,7 +480,7 @@
             acts.append(el('b', null, r.ruling === 'exclude' ? 'Nothing: it is ruled not a gobo, so its label prints no size and no CHECK.'
                 : v ? v + ' mm' : 'No size yet, so its label says CHECK.'));
             if (canEdit) {
-                const setBtn = textButton('Set size', { small: true }); setBtn.type = 'button';
+                const setBtn = textButton('Set size'); setBtn.type = 'button';
                 setBtn.onclick = () => sizesInlineRule(acts, r, setBtn);
                 acts.append(setBtn);
             }
@@ -508,7 +508,7 @@
         function sizesInlineRule(acts, r, setBtn) {
             const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'sizes-inp field-sm';
             inp.value = sizesEff(r); inp.setAttribute('aria-label', 'Production size in millimetres');
-            const save = textButton('Save', { kind: 'primary', small: true }); const cancel = textButton('Cancel', { small: true });
+            const save = textButton('Save', { kind: 'primary' }); const cancel = textButton('Cancel');
             save.type = cancel.type = 'button';
             /* The size and Set size come back as they were. */
             const before = [...acts.childNodes];
@@ -574,9 +574,9 @@
             const sizeSel = sizesSelect('Produced size', [['', 'All sizes']].concat(sizes.map(s => [s, s + ' mm (' + sizeSet[s] + ')'])), st.size, (v) => { st.size = v; st.page = 1; paintSizesList(); });
             const statusSel = sizesSelect('Status', SIZES_STATUS, st.status, (v) => { st.status = v; st.page = 1; paintSizesList(); });
             const sortSel = sizesSelect('Sort', SIZES_SORTS, st.sort, (v) => { st[st.q.trim() ? 'qsort' : 'sort'] = v; st.page = 1; paintSizesList(); });
-            const gbtn = textButton(null, { small: true }); gbtn.textContent = 'Group by maker';
+            const gbtn = textButton(null); gbtn.textContent = 'Group by maker';
             gbtn.onclick = () => { st.group = !st.group; st.page = 1; paintSizesList(); };
-            const xbtn = textButton(null, { small: true }); xbtn.append(ico(I.download), document.createTextNode('Export CSV'));
+            const xbtn = textButton(null); xbtn.append(ico(I.download), document.createTextNode('Export CSV'));
             xbtn.onclick = () => sizesExport(sizesRows());
             const tools = tableTools([search, makerSel, sizeSel, statusSel], [sortSel, gbtn, xbtn]);
             card.append(tools);

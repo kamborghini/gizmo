@@ -955,3 +955,9 @@
         .proof-frame { display: block; width: 100%; height: min(76vh, 820px); border: 0;
             border-radius: 0 0 var(--radius-card) var(--radius-card); background: var(--surface-primary); }
         .proof-ext { margin-left: auto; margin-right: var(--sp-3); font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); }
+        /* The stock sheet and the margin report (these were inline styles: !important, as they were). */
+        .pm-kept-line { font-weight: var(--weight-semibold) !important; font-size: var(--text-md) !important; margin-top: var(--sp-1-5) !important; }
+        .pm-in { flex: none !important; padding: var(--sp-1) var(--sp-2) !important; }
+        .pm-in-final { width: 76px !important; }
+        .pm-in-size { width: 82px !important; }
+        .pm-in-qty { width: 70px !important; }

@@ -1,0 +1,6 @@
+    @layer parts {
+        /* A row's hidden opener (rowOpener) is taken out of the flow: what holds it
+           places it, or it is laid out against the page and stretches it past a
+           scrolling list. Zero weight, so a cell already sticky keeps that. */
+        :where(:has(> .row-open)) { position: relative; }
+    }

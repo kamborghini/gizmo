@@ -86,7 +86,7 @@
         .coll-row-top { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
         .coll-row-name { font-weight: var(--weight-medium); }
         .coll-row-sub { color: var(--text-tertiary); font-size: var(--text-xs); line-height: var(--lh-caption); }
-        .coll-row .linkish { align-self: flex-start; }
+        .coll-row .link-caption { align-self: flex-start; }
         .coll-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: var(--sp-2) var(--sp-4); margin-top: var(--sp-2); }
         @media (max-width: 900px) { .coll-grid { grid-template-columns: 1fr; } }
@@ -128,22 +128,20 @@
         .nav-item:is(.active, [aria-current="page"]) svg { color: var(--nav-on-icon); }
         .convo-head { display: flex; align-items: center; justify-content: space-between; height: var(--control-h); padding: 0 var(--sp-2); margin: var(--sp-4) var(--sp-3) 0; }
         .convo-head span { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--nav-muted); }
-        .icon-btn { border: 0; background: transparent; color: var(--text-tertiary); padding: var(--sp-1); border-radius: var(--radius-control);
-            min-width: var(--control-h); min-height: var(--control-h); display: grid; place-items: center; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
-        @media (hover: hover) { .icon-btn:hover { background: var(--surface-tertiary); color: var(--text-primary); } }
-        .icon-btn:active { background: var(--surface-sunken); }
+        
+        
+        
         /* Conversations' + on the column the group chevrons and the account dots share. */
         .convo-head .icon-btn { margin-right: calc(-1 * var(--sp-1-5)); }
-        .icon-btn[aria-disabled="true"], .icon-btn:disabled { background: transparent; color: var(--text-disabled); cursor: not-allowed; }
-        .icon-btn svg { width: var(--icon-md); height: var(--icon-md); }
-        /* The icon button's three sizes (iconButton(), docs/DESIGN.md): 32 above, 24 for
-           crosses and dense rows, 20 inside a tag. A delete hovers red, a confirm green. */
-        .icon-btn.icon-btn-sm { min-width: var(--control-h-sm); min-height: var(--control-h-sm); padding: 0; }
-        .icon-btn.icon-btn-sm svg { width: var(--icon-sm); height: var(--icon-sm); }
-        .icon-btn.icon-btn-tag { min-width: var(--box-sm); min-height: var(--box-sm); padding: 0; border-radius: var(--radius-tag); }
-        .icon-btn.icon-btn-tag svg { width: var(--icon-xs); height: var(--icon-xs); }
-        @media (hover: hover) { .icon-btn.del:hover { color: var(--error); background: var(--error-bg); } }
-        @media (hover: hover) { .icon-btn.ok:hover { color: var(--success); background: var(--success-bg); } }
+        
+        
+        
+        
+        
+        
+        
+        
+        
         /* On the ink a sidebar icon button is a 28 ghost square in muted
            white, white under the pointer. */
         .sidebar .icon-btn { min-width: var(--control-h-md); min-height: var(--control-h-md); color: var(--nav-muted); }

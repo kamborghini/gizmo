@@ -45,7 +45,7 @@
             const wrap = kt.wrap;
             if (n > 15) {
                 const more = el('div', 'kw-more');
-                const b = textButton(null, { small: true }); b.type = 'button'; b.setAttribute('aria-expanded', 'false');
+                const b = textButton(null); b.type = 'button'; b.setAttribute('aria-expanded', 'false');
                 b.append(document.createTextNode('Show all ' + n + ' keywords'), ico(I.chevDown));
                 const note = el('span', 'lbl-meta', '15 of ' + n + ' shown, most clicks first');
                 b.onclick = () => {
@@ -175,7 +175,7 @@
                 const nt = el('h3', 'card-title', 'Search data is not connected yet');
                 nh.append(titleInfo(nt, infoButton('The two Google sources', { title: 'Search data', body: [ul] })));
                 const na = el('div', 'card-act');
-                const go = textButton(null, { small: true }); go.append(ico(I.settings), document.createTextNode('Open connections'));
+                const go = textButton(null); go.append(ico(I.settings), document.createTextNode('Open connections'));
                 go.onclick = () => openSettings(); na.append(go); nh.append(na);
                 n.append(nh);
                 box.append(widget(n, 'search-data', 'full', 'Search data'));

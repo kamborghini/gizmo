@@ -102,10 +102,9 @@
            one. Setting the token keeps the corner concentric for free. */
         /* The small button. The reference builds its card actions, its table
            filters and its pager from this one size, which is why they line up. */
-        /* The mix has no 28 text button: btn-sm is the same 32 button, kept as
-           a name so its call sites need no change. */
-        .btn-sm { min-height: var(--control-h); padding: 0 var(--sp-3); font-size: var(--text-body); gap: var(--control-gap); border-radius: var(--radius-control); }
-        .btn-sm svg { width: var(--icon-md); height: var(--icon-md); }
+        
+        
+        
         /* A field that sits beside small buttons takes their height, not the
            32px of a form field: 'Save' at 28 beside an input at 32 was on the
            Loans chasing row, the size editor and the reconciliation reason. */

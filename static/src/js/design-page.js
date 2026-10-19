@@ -41,7 +41,7 @@
         ];
         /* A token as the browser resolves it, as [r, g, b]. */
         function dsColour(token) {
-            const p = el('span'); p.style.color = 'var(' + token + ')';
+            const p = el('span', 'ds-probe'); p.style.setProperty('--swatch', 'var(' + token + ')');
             document.body.append(p);
             const raw = getComputedStyle(p).color;
             let c = (raw.match(/[\d.]+/g) || ['0', '0', '0']).slice(0, 3).map(Number);
@@ -56,9 +56,15 @@
            show, read from the :root rules themselves, so a colour added there
            shows here without anyone remembering to list it. A role names
            another token (or mixes them); a palette entry is a literal. */
+        /* The sheet's :root rules, the tokens layer's included: a layer block
+           holds its own rules (as before, not those in an @media block). */
+        function dsRootRules() {
+            const open = (r) => (typeof CSSLayerBlockRule !== 'undefined' && r instanceof CSSLayerBlockRule) ? [].slice.call(r.cssRules).flatMap(open) : [r];
+            return [].slice.call(document.styleSheets).flatMap(sh => { try { return [].slice.call(sh.cssRules); } catch (e) { return []; } })
+                .flatMap(open).filter(r => r.selectorText === ':root');
+        }
         function dsOtherColours(shown) {
-            const roots = [].slice.call(document.styleSheets).flatMap(sh => { try { return [].slice.call(sh.cssRules); } catch (e) { return []; } })
-                .filter(r => r.selectorText === ':root');
+            const roots = dsRootRules();
             const cs = getComputedStyle(document.documentElement);
             const roles = [], palette = [], seen = new Set(shown);
             roots.forEach(r => {
@@ -106,7 +112,7 @@
                 rows.forEach(([name, token, use, on]) => {
                     const c = dsColour(token);
                     const sw = el('div', 'ds-swatch');
-                    const chip = el('span', 'ds-chip'); chip.style.background = 'var(' + token + ')';
+                    const chip = el('span', 'ds-chip'); chip.style.setProperty('--swatch', 'var(' + token + ')');
                     chip.setAttribute('aria-hidden', 'true');
                     const ratio = on ? dsContrast(c, dsColour(on)) : dsContrast(c, white);
                     const words = on ? (on === '--text-on-action' ? 'ink on it' : on === '--text-brand' ? 'teal words on it' : 'words on it') : 'on a card';
@@ -134,7 +140,7 @@
                     const v = getComputedStyle(document.documentElement).getPropertyValue(t).trim();
                     const sw = el('div', 'ds-swatch');
                     if (v && CSS.supports('color', v)) {
-                        const chip = el('span', 'ds-chip'); chip.style.background = 'var(' + t + ')';
+                        const chip = el('span', 'ds-chip'); chip.style.setProperty('--swatch', 'var(' + t + ')');
                         chip.setAttribute('aria-hidden', 'true'); sw.append(chip);
                     }
                     const facts = el('div', 'ds-facts');
@@ -166,7 +172,7 @@
              ['--radius-inset', 'Inside a card', 'A box within a card'], ['--radius-tag', 'Tag', 'Labels that only display'],
              ['--radius-full', 'Round', 'Only a switch, a bar, a dot']].forEach(([t, name, use]) => {
                 const sw = el('div', 'ds-swatch');
-                const box = el('span', 'ds-shape'); box.style.borderRadius = 'var(' + t + ')'; box.setAttribute('aria-hidden', 'true');
+                const box = el('span', 'ds-shape'); box.style.setProperty('--swatch', 'var(' + t + ')'); box.setAttribute('aria-hidden', 'true');
                 const facts = el('div', 'ds-facts');
                 facts.append(el('div', 'ds-name', name), el('div', 'ds-val', getComputedStyle(document.documentElement).getPropertyValue(t).trim() + ' · ' + t), el('div', 'ds-use', use));
                 sw.append(box, facts); shapes.append(sw);
@@ -185,7 +191,7 @@
             page.append(dsCard('Buttons', 'Every control has the same 6px corner and 14px text. One teal button on a screen, for the thing the screen is for.',
                 dsRow(dsButton('btn btn-primary', 'Save'), dsButton('btn', 'Cancel'), dsButton('btn ghost', 'Quiet'),
                     dsButton('btn btn-danger', 'Delete'), dsButton('btn btn-primary', 'Not yet', true)),
-                dsRow(dsButton('btn btn-sm', 'Small'), dsButton('btn btn-sm btn-primary', 'Small and teal'), refreshBtn(() => {}, 'Refresh'))));
+                dsRow(refreshBtn(() => {}, 'Refresh'))));
             /* Tabs, choices, chips */
             const chips = dsRow(...['Wholesale', 'Retail', 'Trade'].map((t, i) => {
                 const c = dsButton('chip', t); c.setAttribute('aria-pressed', String(i === 0));
@@ -235,8 +241,8 @@
             page.append(dsCard('Messages', null,
                 el('div', 'empty', 'Nothing here yet.'),
                 loadFailure('The report could not be read.', () => toastOk('Nothing to try: this is an example.')),
-                dsRow(Object.assign(dsButton('btn btn-sm', 'Show a done note'), { onclick: () => toastOk('Saved.') }),
-                    Object.assign(dsButton('btn btn-sm', 'Show a problem note'), { onclick: () => toastError('That did not work.') }))));
+                dsRow(Object.assign(dsButton('btn', 'Show a done note'), { onclick: () => toastOk('Saved.') }),
+                    Object.assign(dsButton('btn', 'Show a problem note'), { onclick: () => toastError('That did not work.') }))));
             host.append(page);
         }
         /* Contents to jump to, a search that keeps the rows that match, and
@@ -252,7 +258,7 @@
                 a.onclick = () => { const t = $('g-' + sec.id); if (t) { t.scrollIntoView({ block: 'start' }); const h = t.querySelector('h3'); if (h) { h.tabIndex = -1; h.focus({ preventScroll: true }); } } };
                 toc.append(a);
             });
-            const pr = textButton(null, { small: true }); pr.type = 'button'; pr.append(ico(I.printer), document.createTextNode('Print the guide'));
+            const pr = textButton(null); pr.type = 'button'; pr.append(ico(I.printer), document.createTextNode('Print the guide'));
             pr.onclick = () => printGuide();
             const lead = el('div', 'act-row'); lead.append(search, pr);
             tools.append(lead, toc);
@@ -274,7 +280,7 @@
                     if (String(d).includes('{dav}')) {
                         const [a, b] = String(d).split('{dav}');
                         const code = el('code', 'setup-code', davAddress());
-                        const cp = textButton(null, { small: true, cls: 'guide-copy' }); cp.type = 'button'; cp.append(ico(I.copy), document.createTextNode('Copy'));
+                        const cp = textButton(null, { cls: 'guide-copy' }); cp.type = 'button'; cp.append(ico(I.copy), document.createTextNode('Copy'));
                         cp.onclick = () => copyText(davAddress(), 'Drive address copied.');
                         dd.append(document.createTextNode(a), code, document.createTextNode(' '), cp, document.createTextNode(b));
                     } else dd.textContent = d;
@@ -293,7 +299,7 @@
                 });
                 none.hidden = !!shown;
                 if (!shown) {
-                    const clr = textButton('Clear', { small: true }); clr.type = 'button';
+                    const clr = textButton('Clear'); clr.type = 'button';
                     clr.onclick = () => { guideView.q = ''; search.input.value = ''; filterBook(); search.input.focus(); };
                     none.replaceChildren(emptyState({ icon: I.search, text: 'Nothing in the guide mentions \u201c' + guideView.q + '\u201d.', action: clr }));
                 }
@@ -349,7 +355,7 @@
             rels.slice(0, SHOW).forEach((r, i) => list.append(draw(r, i < unread)));
             card.append(list);
             if (rels.length > SHOW) {
-                const more = textButton(null, { small: true, cls: 'rel-more' }); more.type = 'button';
+                const more = textButton(null, { cls: 'rel-more' }); more.type = 'button';
                 more.textContent = 'Show older releases (' + (rels.length - SHOW) + ')';
                 more.setAttribute('aria-expanded', 'false');
                 more.onclick = () => { rels.slice(SHOW).forEach(r => list.append(draw(r, false))); more.remove(); };
@@ -372,7 +378,7 @@
             if (!u.can_triage) head.append(el('p', 'card-desc', 'Ask for what the app cannot do yet.'));
             const act = el('div', 'card-act');
             /* One teal: while a reply is being written, Save reply is it. */
-            const add = textButton(null, { small: true, kind: reqView.reply ? '' : 'primary' }); add.type = 'button';
+            const add = textButton(null, { kind: reqView.reply ? '' : 'primary' }); add.type = 'button';
             add.append(ico(I.plus), document.createTextNode('Ask for a feature'));
             add.onclick = () => askFeature('guide');
             /* With nothing asked yet the empty line carries it, once (12 Oct 2026, WS-52). */
@@ -459,20 +465,20 @@
                     /* The reply is written in the request's own cell, at its measure. */
                     const ta = el('textarea', 'sk-textarea mem-ta'); ta.rows = 2; ta.maxLength = 400; ta.value = r.note || ''; ta.dataset.initial = ta.value;
                     ta.setAttribute('aria-label', 'Reply to ' + r.title);
-                    const save = textButton('Save reply', { kind: 'primary', small: true }); save.type = 'button';
+                    const save = textButton('Save reply', { kind: 'primary' }); save.type = 'button';
                     save.onclick = () => { ta.dataset.initial = ta.value; reqWrite(r, { op: 'state', id: r.id, state: r.state || 'open', note: ta.value.trim() }, save, 'reply'); };
-                    const cancel = textButton('Cancel', { small: true }); cancel.type = 'button';
+                    const cancel = textButton('Cancel'); cancel.type = 'button';
                     cancel.onclick = () => { ta.dataset.initial = ta.value; reqView.reply = null; repaintRequests(); };
                     const f = el('div', 'req-replyform'); f.append(ta); what.append(f);
                     acts.append(save, cancel);
                     requestAnimationFrame(() => ta.focus());
                 } else {
                     /* Reply and Change reply keep one width, so Remove lines up. */
-                    const rep = textButton(null, { small: true }); rep.type = 'button'; rep.dataset.req = r.id;
+                    const rep = textButton(null); rep.type = 'button'; rep.dataset.req = r.id;
                     const sw = el('span', 'swap'); const w1 = el('span', null, 'Reply'), w2 = el('span', null, 'Change reply');
                     (r.note ? w1 : w2).setAttribute('aria-hidden', 'true'); sw.append(w1, w2); rep.append(sw);
                     rep.onclick = () => { reqView.reply = r.id; repaintRequests(); };
-                    const del = textButton(null, { small: true }); del.type = 'button'; del.append(ico(I.trash), document.createTextNode('Remove'));
+                    const del = textButton(null); del.type = 'button'; del.append(ico(I.trash), document.createTextNode('Remove'));
                     del.onclick = async () => {
                         if (!await uiConfirm('Remove the request "' + r.title + '"? Use this for duplicates; it cannot be brought back.', { title: 'Remove request', okText: 'Remove' })) return;
                         reqWrite(r, { op: 'delete', id: r.id }, del);

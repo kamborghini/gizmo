@@ -17,7 +17,7 @@
         /* The size is what the item is for: the name gives way to it. */
         .dmenu-item > .dsearch-sub { flex: none; margin-left: auto; padding-left: var(--sp-2); color: var(--text-tertiary); }
         /* 12px, the size of the trigger it hangs off. Every menu in the app is
-           opened by a .btn-sm filter chip; at 14 the label grew two steps
+           opened by a filter chip button; at 14 the label grew two steps
            between the button and its own list, so the control changed scale the
            moment it opened. The 28px item height is unaffected - it is set. */
         /* A menu row is a nav row (the mix, spec 6): 32 tall, a 6 corner, a 16
@@ -61,17 +61,14 @@
         .dpanel.ipop { width: var(--pop-w); max-width: calc(100vw - 2 * var(--sp-4)); min-width: 0; padding: var(--pop-pad); gap: var(--sp-2); }
         .ipop h3 { margin: 0; font-size: var(--text-body); line-height: var(--lh-control); font-weight: var(--weight-semibold); color: var(--text-primary); }
         .ipop p { margin: 0; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }
-        .ipop .link { align-self: flex-start; margin-top: var(--sp-1); }
-        /* A standalone link ("Show all", "More in the Guide"): teal words at
-           500 with a 14 arrow 2 after them. Not underlined: it stands alone, so
-           the arrow carries what an underline does in running text. */
-        .link { display: inline-flex; align-items: center; gap: var(--sp-0-5); padding: 0; border: 0; background: none;
-            font: inherit; font-weight: var(--weight-medium); color: var(--text-link); text-decoration: none; cursor: pointer; border-radius: var(--radius-tag); }
-        .link svg { width: var(--icon-sm); height: var(--icon-sm); stroke-width: var(--icon-stroke-s); }
-        .link:active { color: var(--text-link-hover); }
-        @media (hover: hover) { .link:hover { color: var(--text-link-hover); } }
-        /* On a phone a standalone link is a 40 target (a link inside a sentence is not a .link). */
-        @media (max-width: 640px) { .link { min-height: var(--control-h-lg); } }
+        .ipop .link-go { align-self: flex-start; margin-top: var(--sp-1); }
+        
+        
+        
+        
+        
+        /* On a phone a standalone link is a 40 target (a link inside a sentence is not a .link-go). */
+        
         .drive-title { margin: 0; font-size: var(--text-body); font-weight: var(--weight-medium); }
         .drive-p, .drive-note { margin: 0; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }
         .drive-p b { color: var(--text-primary); font-weight: var(--weight-medium); overflow-wrap: anywhere; }

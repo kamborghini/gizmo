@@ -78,3 +78,6 @@
         .lia-chase-body { width: 100%; box-sizing: border-box; resize: vertical;
             background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-field);
             color: var(--text-primary); font: inherit; font-size: var(--text-body); line-height: var(--lh-control); padding: var(--sp-2-5) var(--sp-3); }
+        /* These were inline styles: !important, as they were. */
+        .disp-dims.disp-dims-2 { grid-template-columns: 1fr 1fr !important; }
+        .disp-diag-btn { font-size: var(--text-xs) !important; line-height: var(--lh-caption) !important; }

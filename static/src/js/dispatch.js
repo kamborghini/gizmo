@@ -665,7 +665,7 @@
 
             const quoteBtn = textButton(null, { kind: 'primary', cls: 'disp-quote' });
             quoteBtn.append(ico(I.truck), document.createTextNode('Get courier quotes'));
-            quoteWrap = el('div'); quoteWrap.style.marginTop = 'var(--sp-3)';
+            quoteWrap = el('div'); quoteWrap.classList.add('space-above-3');
             body.append(quoteBtn, quoteWrap);
 
             // If the queue already priced this exact parcel, show it now. The guard
@@ -738,7 +738,7 @@
                 customsLines.length = 0;
                 function addLine(pre) {
                     const rowc = el('div', 'disp-boxedit');
-                    const dIn = document.createElement('input'); dIn.type = 'text'; dIn.className = 'disp-num'; dIn.placeholder = 'Description'; dIn.setAttribute('aria-label', 'Description'); dIn.style.flex = '2 1 auto';
+                    const dIn = document.createElement('input'); dIn.type = 'text'; dIn.className = 'disp-num'; dIn.placeholder = 'Description'; dIn.setAttribute('aria-label', 'Description'); dIn.classList.add('flex-2');
                     const qIn = document.createElement('input'); qIn.type = 'number'; qIn.min = '1'; qIn.step = '1'; qIn.className = 'disp-num disp-boxdim'; qIn.placeholder = 'Qty'; qIn.setAttribute('aria-label', 'Quantity');
                     const pIn = document.createElement('input'); pIn.type = 'number'; pIn.min = '0'; pIn.step = '0.01'; pIn.className = 'disp-num disp-boxdim'; pIn.placeholder = 'Unit £'; pIn.setAttribute('aria-label', 'Unit price in pounds');
                     const hIn = document.createElement('input'); hIn.type = 'text'; hIn.spellcheck = false; hIn.setAttribute('aria-label', 'HS code'); hIn.className = 'disp-num disp-boxdim'; hIn.placeholder = 'HS code'; hIn.style.width = 'var(--field-w-sm)';
@@ -821,7 +821,7 @@
                 };
                 card.addEventListener('input', checkZeros);
                 setTimeout(checkZeros, 0);
-                const rt = formField("Receiver's tax / VAT id (optional, helps clearance)", null, { cls: 'disp-fld' }); rt.style.marginTop = 'var(--sp-2)';
+                const rt = formField("Receiver's tax / VAT id (optional, helps clearance)", null, { cls: 'disp-fld' }); rt.classList.add('space-above-2');
                 recvTaxIn = document.createElement('input'); recvTaxIn.type = 'text'; recvTaxIn.className = 'disp-num';
                 /* What the customer already gave Shopify, so an export does not
                    wait on somebody hunting for it. Anything typed on this card
@@ -989,11 +989,11 @@
                 quoteWrap.append(list);
                 // Expected a service that is not here? Ask World Options the same
                 // question several ways and show what each way returns.
-                const diagRow = el('div'); diagRow.style.marginTop = 'var(--sp-2)';
-                const diagBtn = textButton(); diagBtn.style.fontSize = 'var(--text-xs)';
+                const diagRow = el('div'); diagRow.classList.add('space-above-2');
+                const diagBtn = textButton(null, { cls: 'disp-diag-btn' });
                 diagBtn.textContent = 'Missing a service?';
                 diagBtn.title = 'Re-quote this parcel several ways to see which services each returns. Free, and books nothing.';
-                const diagOut = el('div'); diagOut.style.marginTop = 'var(--sp-2)';
+                const diagOut = el('div'); diagOut.classList.add('space-above-2');
                 diagBtn.onclick = async () => {
                     diagBtn.disabled = true; diagOut.innerHTML = '';
                     const t = el('div', 'thinking'); t.append(loader(), el('span', null, 'Asking World Options several ways…')); diagOut.append(t);
@@ -1059,7 +1059,7 @@
                 const sigVals = chosen.no_signature ? [] : (sigGroups[(chosen.carrier_name || '').toUpperCase()] || []);
                 let sigSel = null;
                 if (sigVals.length) {
-                    const sigF = formField('Delivery signature', null, { cls: 'disp-fld' }); sigF.style.margin = 'var(--sp-1-5) 0';
+                    const sigF = formField('Delivery signature', null, { cls: 'disp-fld' }); sigF.classList.add('space-y-1-5');
                     sigSel = el('select', 'psel');
                     const d0 = el('option', null, 'Courier default'); d0.value = ''; sigSel.append(d0);
                     sigVals.forEach(v => {
@@ -1228,7 +1228,7 @@
                 else if (f.reason && f.reason !== 'not_attempted') out.append(el('div', 'disp-warn', f.detail || 'Shopify fulfilment could not be completed.'));
                 if (res.tag && !res.tag.ok && res.tag.note) out.append(el('div', 'disp-warn', res.tag.note));
                 labelButtons(out, s.labels);
-                const done = textButton(); done.style.marginTop = 'var(--sp-4)'; done.textContent = 'Done'; done.onclick = close;
+                const done = textButton(); done.classList.add('space-above-4'); done.textContent = 'Done'; done.onclick = close;
                 out.append(done);
                 body.innerHTML = '';
                 body.append(out);
@@ -1258,7 +1258,7 @@
                             + String((err && err.message) || err)
                             + '. Write the tracking number down, then close this and press '
                             + 'Dispatch again to see the shipment and print the label.'));
-                        const done = textButton(); done.style.marginTop = 'var(--sp-4)';
+                        const done = textButton(); done.classList.add('space-above-4');
                         done.textContent = 'Done'; done.onclick = close; body.append(done);
                     } catch (e2) {
                         // No helpers left. Plain text still carries the number.
@@ -1623,7 +1623,7 @@
             // ---- quotes ----
             const quoteBtn = textButton(null, { kind: 'primary', cls: 'disp-quote' });
             quoteBtn.append(ico(I.truck), document.createTextNode('Get courier quotes'));
-            const quoteWrap = el('div'); quoteWrap.style.marginTop = 'var(--sp-3)';
+            const quoteWrap = el('div'); quoteWrap.classList.add('space-above-3');
             body.append(quoteBtn, quoteWrap);
 
             function staleQuote() {
@@ -2054,7 +2054,7 @@
                 body.append(el('label', 'field-label', lab), inp);
                 credIn[k] = inp;
             });
-            const pluginRow = formField('Plugin code (leave as Web_Service unless told otherwise)', null, { cls: 'disp-fld' }); pluginRow.style.marginTop = 'var(--sp-2)';
+            const pluginRow = formField('Plugin code (leave as Web_Service unless told otherwise)', null, { cls: 'disp-fld' }); pluginRow.classList.add('space-above-2');
             const pluginIn = el('select', 'psel'); pluginIn.setAttribute('aria-label', 'Plugin code');
             (cfg.plugin_codes || ['Web_Service']).forEach(v => {
                 const op = el('option', null, v); op.value = v;
@@ -2062,8 +2062,8 @@
                 pluginIn.append(op);
             });
             pluginRow.append(pluginIn); body.append(pluginRow);
-            const testBtn = textButton(); testBtn.style.marginTop = 'var(--sp-2-5)'; testBtn.append(ico(I.check), document.createTextNode('Save & test connection'));
-            const testOut = el('span', 'setting-sub'); testOut.style.marginLeft = 'var(--sp-2-5)';
+            const testBtn = textButton(); testBtn.classList.add('space-above-2-5'); testBtn.append(ico(I.check), document.createTextNode('Save & test connection'));
+            const testOut = el('span', 'setting-sub'); testOut.classList.add('space-before-2-5');
             testBtn.onclick = async () => {
                 testBtn.disabled = true; testOut.textContent = 'Testing…';
                 try {
@@ -2103,7 +2103,7 @@
             notifyWrap.append(notifyCb, el('span', null, ' Email the customer tracking when an order is dispatched (default)'));
             body.append(notifyWrap);
             body.append(el('p', 'field-help', 'When the courier can collect. Sent with every booking.'));
-            const timeGrid = el('div', 'disp-dims'); timeGrid.style.gridTemplateColumns = '1fr 1fr';
+            const timeGrid = el('div', 'disp-dims disp-dims-2');
             const readyF = formField('Ready from', null, { cls: 'disp-fld' });
             const readyIn = document.createElement('input'); readyIn.type = 'time'; readyIn.className = 'disp-num';
             readyIn.value = cfg.ready_time || ''; readyF.append(readyIn);
@@ -2112,7 +2112,7 @@
             closeIn.value = cfg.close_time || ''; closeF.append(closeIn);
             timeGrid.append(readyF, closeF);
             body.append(timeGrid);
-            const coF = formField('Collection arrangement', null, { cls: 'disp-fld' }); coF.style.marginTop = 'var(--sp-2)';
+            const coF = formField('Collection arrangement', null, { cls: 'disp-fld' }); coF.classList.add('space-above-2');
             const coSel = el('select', 'psel');
             const CO_LABELS = {
                 'I_Need_To_Book_A_Collection': 'Book a collection for each dispatch',
@@ -2142,7 +2142,7 @@
             const labelWarn = el('div', 'setting-sub');
             [['label_size_production', 'Production label stock', '4x4'],
              ['label_size_shipping', 'Courier label stock', '4x6']].forEach(([k, lab, fallback]) => {
-                const w = formField(lab, null, { cls: 'disp-fld' }); w.style.marginTop = 'var(--sp-1-5)';
+                const w = formField(lab, null, { cls: 'disp-fld' }); w.classList.add('space-above-1-5');
                 const sel = el('select', 'psel'); sel.setAttribute('aria-label', lab);
                 const cur = LABEL_SIZES[cfg[k]] ? cfg[k] : fallback;
                 Object.keys(LABEL_SIZES).forEach(key => {
@@ -2161,7 +2161,7 @@
                     ? 'Courier artwork is 4 x 6. On other stock it is scaled to fit, '
                       + 'and a shrunk barcode may not scan.'
                     : '';
-                labelWarn.style.color = off ? 'var(--warning-text)' : '';
+                labelWarn.classList.toggle('tone-warning', !!off);
             }
             paintLabelWarn();
             body.append(labelWarn);
@@ -2170,15 +2170,15 @@
             const intlIn = {};
             [['eori', 'EORI number (e.g. GB123456789000)'], ['vat_number', 'VAT number (optional)'],
              ['default_hs_code', 'Default HS / commodity code (optional, e.g. 70200080)'], ['trade_term', 'Trade term (optional, e.g. DAP)']].forEach(([k, lab]) => {
-                const w = formField(lab, null, { cls: 'disp-fld' }); w.style.marginTop = 'var(--sp-1-5)';
+                const w = formField(lab, null, { cls: 'disp-fld' }); w.classList.add('space-above-1-5');
                 const inp = document.createElement('input'); inp.type = 'text'; inp.spellcheck = false; inp.className = 'disp-num'; inp.value = cfg[k] || '';
                 w.append(inp); intlIn[k] = inp; body.append(w);
             });
-            const erF = formField('Reason for export', null, { cls: 'disp-fld' }); erF.style.marginTop = 'var(--sp-1-5)';
+            const erF = formField('Reason for export', null, { cls: 'disp-fld' }); erF.classList.add('space-above-1-5');
             const erSel = el('select', 'psel');
             (cfg.export_reasons || ['Sale']).forEach(v => { const op3 = el('option', null, v.replace(/_/g, ' ')); op3.value = v; if (v === (cfg.export_reason || 'Sale')) op3.selected = true; erSel.append(op3); });
             erF.append(erSel); body.append(erF);
-            const dpF = formField('Who pays import duties', null, { cls: 'disp-fld' }); dpF.style.marginTop = 'var(--sp-1-5)';
+            const dpF = formField('Who pays import duties', null, { cls: 'disp-fld' }); dpF.classList.add('space-above-1-5');
             const dpSel = el('select', 'psel');
             const DP_LABELS = { 'Duties_To_Be_Paid_By_Receiver': 'The customer (receiver) pays duties', 'Duties_To_Be_Paid_By_Sender': 'We (the sender) pay duties', 'Duties_To_Be_Paid_By_Third_Party': 'A third party pays duties' };
             (cfg.duties_payors || Object.keys(DP_LABELS)).forEach(v => { const op4 = el('option', null, DP_LABELS[v] || v); op4.value = v; if (v === (cfg.duties_payor || 'Duties_To_Be_Paid_By_Receiver')) op4.selected = true; dpSel.append(op4); });
@@ -2189,7 +2189,7 @@
                ourselves makes the error go away. It also makes us liable for
                the customer's import charges, which is why the answer is no. */
             const dpWarn = el('div', 'mail-viewwarn');
-            dpWarn.style.cssText = 'margin-top:var(--sp-2);margin-bottom:0;display:none';
+            dpWarn.classList.add('space-above-2', 'no-space-below'); dpWarn.style.display = 'none';
             dpWarn.textContent = 'Paying duties on the customer\u2019s behalf makes this business '
                 + 'liable for their import charges. This is deliberately set to the customer, and a '
                 + 'courier refusing a booking is not a reason to change it.';
@@ -2305,7 +2305,7 @@
                     rowb.append(rm);
                     boxHost.append(rowb);
                 });
-                const add = textButton(); add.style.marginTop = 'var(--sp-1-5)'; add.append(ico(I.plus), document.createTextNode('Add box'));
+                const add = textButton(); add.classList.add('space-above-1-5'); add.append(ico(I.plus), document.createTextNode('Add box'));
                 add.onclick = () => { boxes.push({ id: 'box' + (boxes.length + 1) + '_' + Date.now(), name: 'New box', width: 20, length: 15, depth: 10, weight: 0.5 }); renderBoxes(); };
                 boxHost.append(add);
             }
@@ -2371,7 +2371,7 @@
             const box = $('labels-content'); box.innerHTML = '';
             const hero = pageHead({ view: 'labels', title: 'Production Manager', line: 'Preparing the label for this order\u2026' });
             box.append(hero);
-            const t = el('div', 'thinking'); t.style.marginTop = 'var(--sp-2)'; t.append(loader(), el('span', null, 'Fetching the order\u2026')); box.append(t);
+            const t = el('div', 'thinking'); t.classList.add('space-above-2'); t.append(loader(), el('span', null, 'Fetching the order\u2026')); box.append(t);
             labelsLoading = true;
             try {
                 const data = await api('/api/production-labels', { order_id: orderId });
@@ -2390,7 +2390,7 @@
             const box = $('labels-content'); box.innerHTML = '';
             const hero = pageHead({ view: 'labels', title: 'Production Manager', line: 'Opening dispatch for this order\u2026' });
             box.append(hero);
-            const t = el('div', 'thinking'); t.style.marginTop = 'var(--sp-2)'; t.append(loader(), el('span', null, 'Fetching the order\u2026')); box.append(t);
+            const t = el('div', 'thinking'); t.classList.add('space-above-2'); t.append(loader(), el('span', null, 'Fetching the order\u2026')); box.append(t);
             labelsLoading = true;
             try {
                 const data = await api('/api/production-labels', { order_id: orderId });

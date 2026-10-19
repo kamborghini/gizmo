@@ -167,8 +167,8 @@
             .ov-hero-act { max-width: 100%; flex-wrap: wrap; justify-content: flex-end; }
             .ov-hero-act > .ov-updated { white-space: normal; text-align: right; }
         }
-        /* An icon-only small button is one control wide: a square at the control height (32; 40 on touch). */
-        .btn-sm.btn-icon { width: var(--control-h); padding: 0; justify-content: center; }
+        
+        
         /* On a phone the badge, the gaps and this stamp left the heading and
            its sentence 138px of a 300px row - a four-line ribbon. The stamp
            takes its own line instead, and the text gets the width. */
@@ -178,7 +178,7 @@
             .ov-hero { flex-wrap: wrap; gap: var(--sp-4); }
             .ov-hero h2 { font-size: var(--text-2xl); }
             /* The actions take a row of their own under the title, sharing it. */
-            .ov-hero-act > .btn:not(.btn-icon) { flex: 1 1 auto; }
+            .ov-hero-act > .btn:not(.btn-square) { flex: 1 1 auto; }
             .ov-hero > div:not(.badge):not(.ov-hero-act) { flex: 1 1 200px; min-width: 0; }
             .ov-hero > .ov-hero-act { flex: 1 1 100%; }
             /* The stamp takes its own line; the buttons stay together under it. */
@@ -195,7 +195,7 @@
             /* A rail of three words or more wraps rather than running past the gutter, each button at its
                own width. A stamp and a Refresh stay on one line. */
             .ov-hero-act:has(> .btn + .btn + .btn) { flex-wrap: wrap; }
-            .ov-hero-act:has(> .btn + .btn + .btn) > .btn:not(.btn-icon) { flex: none; }
+            .ov-hero-act:has(> .btn + .btn + .btn) > .btn:not(.btn-square) { flex: none; }
             /* With the widget grid's Customize beside Refresh the row is
                fuller than the stamp's full-width basis leaves room for, and the
                icon button was squeezed to 18px wide under its 28px height. On
@@ -209,7 +209,7 @@
                aria-label), as More is on the Production Manager; Forecast's two words are an equal pair (the mockup's .m-acts). */
             .ov-hero:has(> .ov-hero-act > [data-wg-customize]) { position: relative; }
             .ov-hero:has(> .ov-hero-act > [data-wg-customize]) > .ph-text { padding-right: calc(var(--control-h-lg) + var(--sp-2)); }
-            [data-wg-customize] { position: absolute; top: calc((var(--lh-title) - var(--control-h-lg)) / 2); right: 0; margin: 0; padding: 0;
+            [data-wg-customize] { position: absolute; top: calc((var(--lh-title) - var(--control-h-lg)) / 2); right: 0; margin: 0;
                 width: var(--control-h-lg); min-width: var(--control-h-lg); justify-content: center; }
             [data-wg-customize] .wg-txt { display: none; }
             #view-forecast .ov-hero-act > .btn:not([data-wg-customize]) { flex: 1 1 0; min-width: 0; }

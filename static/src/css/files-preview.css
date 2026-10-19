@@ -47,6 +47,8 @@
             padding: var(--sp-2) var(--sp-2-5); border-radius: var(--radius-row); cursor: pointer; }
         /* A folder name with no spaces wraps rather than running past its row. */
         .fpick-row { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+        /* A folder sits in from the left by its depth (--indent, set as the tree is drawn; it was an inline style). */
+        .fpick-row[style*="--indent"] { padding-left: var(--indent) !important; }
         @media (hover: hover) { .fpick-row:hover { background: var(--surface-secondary); } }
         .fpick-row span { display: flex; flex: none; }
         .fpick-row svg { width: var(--icon-md); height: var(--icon-md); color: var(--text-brand); }

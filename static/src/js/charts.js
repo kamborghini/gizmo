@@ -452,7 +452,7 @@
                 const bars = vals.map((v, i) => { const y = Y(v), r = svgEl('rect', { class: 'chart-bar', x: (X(i) - bw / 2).toFixed(1), y: y.toFixed(1), width: bw.toFixed(1), height: Math.max(0, Y(0) - y).toFixed(1), rx: 3, fill: color }); svg.append(r); return r; });
                 /* No average rule on a bar chart either: the reference's bars carry
                    nothing but the bars. */
-                bars.forEach((r, i) => r.addEventListener('mouseenter', () => { bars.forEach(b => b.style.opacity = .38); r.style.opacity = 1; tip.innerHTML = ''; tip.append(el('div', 'tl', labels[i])); const tr = el('div', 'tr'); const sw = el('span', 'sw'); sw.style.background = color; tr.append(sw, el('b', null, fmt(vals[i]))); tip.append(tr); const rect = svg.getBoundingClientRect(); const tw = tip.offsetWidth, th = tip.offsetHeight; tip.style.left = Math.max(tw / 2, Math.min(rect.width - tw / 2, X(i) / W * rect.width)) + 'px'; tip.style.top = Math.max(th + 12, Y(vals[i]) / H * rect.height) + 'px'; tip.style.opacity = 1; }));
+                bars.forEach((r, i) => r.addEventListener('mouseenter', () => { bars.forEach(b => b.style.opacity = .38); r.style.opacity = 1; tip.innerHTML = ''; tip.append(el('div', 'tl', labels[i])); const tr = el('div', 'tr'); const sw = el('span', 'sw'); sw.style.setProperty('--sw', color); tr.append(sw, el('b', null, fmt(vals[i]))); tip.append(tr); const rect = svg.getBoundingClientRect(); const tw = tip.offsetWidth, th = tip.offsetHeight; tip.style.left = Math.max(tw / 2, Math.min(rect.width - tw / 2, X(i) / W * rect.width)) + 'px'; tip.style.top = Math.max(th + 12, Y(vals[i]) / H * rect.height) + 'px'; tip.style.opacity = 1; }));
                 svg.addEventListener('mouseleave', () => { bars.forEach(b => b.style.opacity = 1); tip.style.opacity = 0; });
                 wrap.append(svg);
             };
@@ -469,8 +469,8 @@
             const wrap = el('div', 'chart-wrap'); card.append(wrap);
             if (!items.length) { wrap.append(el('div', 'empty', 'No breakdown available for this range.')); return card; }
             const max = Math.max.apply(null, items.map(d => +d.value || 0).concat([1]));
-            const bl = el('div', 'barlist'); bl.style.marginTop = 'var(--sp-1)';
-            items.forEach(d => { const row = el('div', 'barrow'); row.append(el('div', 'bn', d.label)); const tr = el('div', 'bartrack'); const i = el('i'); i.style.width = Math.max(2, (+d.value || 0) / max * 100) + '%'; i.style.background = color; tr.append(i); row.append(tr, el('div', 'bv', fmt(d.value))); bl.append(row); });
+            const bl = el('div', 'barlist'); bl.classList.add('space-above-1');
+            items.forEach(d => { const row = el('div', 'barrow'); row.append(el('div', 'bn', d.label)); const tr = el('div', 'bartrack'); const i = el('i'); i.style.width = Math.max(2, (+d.value || 0) / max * 100) + '%'; i.style.setProperty('--bar', color); tr.append(i); row.append(tr, el('div', 'bv', fmt(d.value))); bl.append(row); });
             wrap.append(bl);
             if (opts.note) card.append(el('div', 'chart-note', opts.note));
             return card;

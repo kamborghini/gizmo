@@ -80,26 +80,17 @@
             border-radius: 0; padding: var(--sp-1) var(--sp-2); }
         .dpanel-search input:focus { box-shadow: none; border-color: var(--border-default); }
         .dsearch-list { display: flex; flex-direction: column; max-height: 60vh; overflow-y: auto; }
-        /* THE BUTTON (the mix, spec 6): 32 tall, 12 in, a 6 corner, a line-ctl
-           hairline and a 1px lift; 13/20 at 500; a 16 icon in ink-2, 8 from its
-           word. The label is centred in the 32 by the flexbox, so a label that
-           wraps grows the button rather than spilling out of it. */
-        .btn { border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-primary); color: var(--text-primary); border-radius: var(--radius-control);
-            padding: 0 var(--sp-3); font-size: var(--text-body); font-weight: var(--weight-medium); line-height: var(--lh-control); white-space: nowrap;
-            display: inline-flex; align-items: center; justify-content: center; gap: var(--control-gap); box-shadow: var(--shadow-control);
-            transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease); min-height: var(--control-h); }
-        .btn svg { width: var(--icon-md); height: var(--icon-md); }
-        .btn .ic { color: var(--text-secondary); }
-        /* A button that is not ink (disabled, danger) carries its own colour to its icon. */
-        .btn:is([disabled], :disabled, [aria-disabled="true"], .btn-danger, .btn.ghost[disabled], .btn.ghost[aria-disabled="true"]) .ic { color: inherit; }
-        @media (hover: hover) { .btn:hover { background: var(--surface-tertiary); } }
-        .btn:active { background: var(--press); }
-        .btn[aria-expanded="true"] { background: var(--surface-tertiary); }
-        /* ---- Disabled. One recipe for a control (muted fill, disabled ink,
-           not-allowed) and one for a field (muted fill, but the VALUE stays
-           readable, because a locked address is still an address). Nothing
-           fades with opacity any more; three controls used to. ---- */
-        .btn[aria-disabled="true"], .btn[disabled], .btn:disabled { background: var(--surface-tertiary); color: var(--text-disabled); border-color: var(--border-default); cursor: not-allowed; }
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         /* Icon wrapper: the svg becomes a block inside a shrink-wrapped flex
            span, so flex parents centre it truly and inline contexts sit it on
            the text's middle instead of its baseline. */
@@ -112,19 +103,19 @@
         .modal-body, .dmenu, .scroll { overscroll-behavior: contain; }
         .ic { display: inline-flex; align-items: center; vertical-align: middle; }
         .ic svg { display: block; }
-        .btn-primary { background: var(--action-primary); border-color: var(--border-selected); color: var(--text-on-action); }
-        .btn-primary .ic { color: var(--text-on-action); }
-        @media (hover: hover) { .btn-primary:hover { background: var(--action-hover); border-color: var(--action-hover); } }
-        .btn-primary:active { background: var(--action-active); border-color: var(--action-active); }
-        .btn-primary[aria-disabled="true"], .btn-primary[disabled], .btn-primary:disabled { background: var(--surface-tertiary); border-color: var(--border-default); color: var(--text-disabled); }
-        /* The one-way door. Only ever the confirming button of a destructive dialog. */
-        .btn-danger { background: var(--action-danger-soft); border-color: transparent; color: var(--error); }
-        @media (hover: hover) { .btn-danger:hover { background: var(--action-danger-soft-hover); border-color: transparent; color: var(--error); } }
-        .btn-danger:active { background: var(--action-danger-soft-active); border-color: transparent; }
+        
+        
+        
+        
+        
+        
+        
+        
+        
         /* ---- Loading. A control that is working keeps its own colours (it is
            busy, not inactive), cannot be pressed twice, and its icon turns.
            setBusy() in the script sets aria-busy; any control may carry it. ---- */
-        [aria-busy="true"] { cursor: progress; }
+        
         :is(.btn, .icon-btn, .send, .info)[aria-busy="true"] { pointer-events: none; }
         :is(.btn, .icon-btn, .info)[aria-busy="true"] svg { animation: navspin 1s linear infinite; }
         .confirm-danger .confirm-msg { border-left: var(--bw-marker) solid var(--error); padding-left: var(--sp-2-5); }
