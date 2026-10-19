@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-19",
+   "title": "Buttons that match",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "The small buttons that close and act on things, the crosses on messages and chips and the actions in Memory and chat, now look and behave the same everywhere, and every one has a name a screen reader reads out. The sign-in card's links are the house link."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-19",
    "title": "Windows that behave alike",
    "items": [
     {
