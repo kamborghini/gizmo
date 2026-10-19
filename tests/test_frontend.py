@@ -98,6 +98,15 @@ def row_part():
     return SCRIPT[SCRIPT.index(ROW_START):SCRIPT.index(ROW_END)]
 
 
+TABLE_START = "/* ---------- the table parts ----------"
+TABLE_END = "/* ---------- the table parts end ---------- */"
+
+
+def table_part():
+    """The table part's source (static/src/js/part-table.js) as the page has it."""
+    return SCRIPT[SCRIPT.index(TABLE_START):SCRIPT.index(TABLE_END)] if TABLE_START in SCRIPT else ""
+
+
 @test
 def t_the_script_parses():
     """A duplicate `const` in a 5,700-line file is invisible until the page dies."""
@@ -528,8 +537,7 @@ def t_stock_sheet_review_is_editable_and_honest():
     ok("Already sent to the stock sheet" in SCRIPT, "a sent day announces itself")
     ok("replaces the earlier sheet" in SCRIPT, "and a re-send is labelled as a replacement")
     ok("'/api/stock-usage/send'" in SCRIPT, "wired to the send route")
-    ok(re.search(r"<th class=\"num\">Estimated</th><th class=\"num\">Final</th>", SCRIPT),
-       "estimate and final are distinct columns")
+    ok("['Estimated', 'num'], ['Final', 'num']" in SCRIPT, "estimate and final are distinct columns")
     ok("No stock item" in SCRIPT, "a failed line is named, never silent")
     ok("Add something that was used but not in the estimate" in SCRIPT,
        "lines can be added beyond the estimate")
@@ -2530,10 +2538,10 @@ def t_a_phone_reads_every_table_as_two_line_rows():
     comparison, Customer segments, CRM contacts, Hours per person), or squeezed
     an email into a column one word wide. Each row is now two lines: the cell
     that leads it, then the others, each after its column's head."""
-    sh = fn_src("function syncTableHeads(") if "function syncTableHeads(" in SCRIPT else ""
-    ok("table.ktable > :is(tbody, tfoot) > tr:not([data-kh])" in sh and "td.dataset.h = h" in sh and "td.classList.add('kt-main')" in sh,
+    tp = table_part()
+    ok("if (name && td.dataset.h === undefined) td.dataset.h = name;" in tp and "td.classList.add('kt-main')" in tp,
        "each body cell carries its column's head, and the head marked kt-main names the cell that leads")
-    ok("syncTableHeads(); syncPanels();" in SCRIPT, "stamped in the one batched pass, wherever a table is built")
+    ok("syncTableHeads" not in SCRIPT, "named by dataTable() as each row is added, wherever a table is built (stage 3, piece 5)")
     ph = CSS.split("/* R13: on a phone a table's rows are two lines")[1].split("\n        }\n")[0] if "/* R13: on a phone a table's rows are two lines" in CSS else ""
     ok(KT + " { display: block; min-width: 0; }" in ph and KT + " > thead { display: none; }" in ph, "no head row and no sideways scroll")
     ok(KT + " > :is(tbody, tfoot) > tr { display: flex; flex-wrap: wrap;" in ph, "a row wraps its cells")
@@ -2544,9 +2552,9 @@ def t_a_phone_reads_every_table_as_two_line_rows():
     ok(KT + " > :is(tbody, tfoot) > tr[hidden], " + KT + " > :is(tbody, tfoot) > tr > td[hidden] { display: none; }" in ph,
        "a hidden row stays hidden (Keywords' rows past 15 showed on a phone)")
     ok(".kw-more { display: flex; flex-wrap: wrap;" in CSS, "and Keywords' count goes under Show all rather than off the screen")
-    ok("cols.push('<th class=\"kt-main\">Name</th>');" in SCRIPT, "CRM contacts lead with the name, not the tick box")
+    ok("cols.push(['Name', 'kt-main']);" in SCRIPT, "CRM contacts lead with the name, not the tick box")
     ok("['Segment', 'kt-main']" in fn_src("function segTable("), "the segments lead with the segment, not its count")
-    ok("heads.push(th.colSpan > 1 ? null : th)" in fn_src("function syncTableHeads("), "a selection bar across the head names no column")
+    ok("const th = heads[i], span = td.colSpan || 1;" in tp, "a table names from its own column heads, so a selection bar across the head names no column")
 
 
 @test
@@ -2702,8 +2710,8 @@ def t_a_phone_keeps_the_crm_selection_bar():
     head row the rows lost their labels too and the tick box took the name's
     line. The column heads stay as a hidden row after the bar, and a phone
     shows a head that holds the bar."""
-    rc = SCRIPT[SCRIPT.index("const tb = el('table', 'ktable crm-table crm-contact-table');"):][:1500]
-    ok("thead.innerHTML = '<tr class=\"crm-colhead\">' + cols.join('') + '</tr>'; thead.prepend(tr0);" in rc, "the column heads follow the bar, for the labels")
+    rc = SCRIPT[SCRIPT.index("const kt = dataTable(cols, { cls: 'crm-table crm-contact-table' });"):][:1500]
+    ok("kt.heads[0].parentNode.className = 'crm-colhead'; kt.thead.prepend(tr0);" in rc, "the column heads follow the bar, for the labels")
     ok(".ktable.crm-contact-table > thead > tr.crm-selhead ~ tr { display: none; }" in CSS, "and stay hidden while the bar shows")
     ok("@media (max-width: 640px) { .ktable.crm-contact-table > thead:has(> tr.crm-selhead), .ktable.crm-contact-table > thead > tr.crm-selhead, .ktable.crm-contact-table > thead > tr.crm-selhead > th { display: block; } }" in CSS,
        "a phone shows the head that holds Delete and Clear selection")
@@ -3205,7 +3213,7 @@ def t_contacts_is_a_table_not_a_run_together_line():
     # The window is the table block itself - from the table's class to the pager
     # that follows it - rather than a byte count that a comment above the row
     # can push the tick handler out of.
-    fn = SCRIPT.split("crm-contact-table")[1]
+    fn = SCRIPT[SCRIPT.index("const cols = master ? [[null, 'tick']] : [];"):]
     fn = fn[:fn.index("list.append(tablePager({")]
     for col in ("Organisation", "Email", "Phone", "Deals", "Label"):
         ok(col in fn, "there is a " + col + " column")
@@ -3519,7 +3527,7 @@ def t_a_size_list_row_opens_in_place_and_fits_a_phone():
     paint = SCRIPT.split("function paintSizesList()")[1].split("\n        async function showReconView")[0]
     ok("const ob = el('button', 'sizes-open');" in paint and "ob.setAttribute('aria-expanded', open ? 'true' : 'false');" in paint
        and "ob.setAttribute('aria-controls', 'sizes-d-' + r._i);" in paint, "the model is the row's button")
-    ok("if (now) tr.after(sizesDetail(r, cols.length, canEdit));" in paint and "if (open) tb.append(sizesDetail(r, cols.length, canEdit));" in paint,
+    ok("if (now) tr.after(sizesDetail(r, cols.length, canEdit));" in paint and "if (open) kt.add(sizesDetail(r, cols.length, canEdit));" in paint,
        "it opens in place and stays open across a repaint")
     det = SCRIPT.split("function sizesDetail(")[1][:2600]
     for k in ("'Cut at'", "'Ruling'", "'Holder glass'", "'Image'", "'Undercut'", "'Needs review'", "'Notes'", "'Also sold as'", "'One customer'"):
@@ -8851,7 +8859,7 @@ def t_the_window_fixers_stay_gone():
     ok("function dialogOpened(" not in SCRIPT and "const dialogOpeners" not in SCRIPT, "no focus observer")
     ok(SCRIPT.count("let focusOutside") == 1 and "let focusOutside" in dialog_part(), "one record of where focus was, in the part")
     ok(".modal-overlay.show, .auth-overlay" not in SCRIPT, "no window fence outside the part")
-    ok("document.querySelectorAll('.auth-overlay')" in SCRIPT[SCRIPT.index("function syncTableHeads("):], "the sign-in screen's own fence")
+    ok("document.querySelectorAll('.auth-overlay')" in SCRIPT[SCRIPT.index("/* The sign-in screen is not a window and sits over everything"):], "the sign-in screen's own fence")
     ok("dialogShow($('settings-modal'))" in SCRIPT and "dialogHide($('settings-modal'))" in SCRIPT,
        "Settings opens and closes through the part")
     ok('<div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">' in HTML
@@ -9199,6 +9207,55 @@ console.log(JSON.stringify(out));
     ok(got["docKeys"] == 0, "its Enter never reaches a page-wide shortcut")
     ok(got["byTick"] == 1, "a click on the row's own tick does not open it")
     ok(got["byWords"] == 2, "a click anywhere else on the row does")
+
+
+@test
+def t_a_table_names_its_cells_as_rows_are_added():
+    """Stage 3, piece 5: a phone's two-line table rows name every value from its
+    column ("Orders 5"). The names were stamped onto the cells after drawing
+    (syncTableHeads); dataTable() builds the table and names each cell as its
+    row is added: one column under one column, a cell's own name kept, the
+    leading column marked, and rows added again after the body is emptied."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + table_part() + r"""
+const out = {};
+const t = dataTable(['Sector', ['Revenue', 'num'], ['Name', 'kt-main'], null], { cls: 'x', wrap: 'w' });
+out.shell = [t.wrap.className, t.table.className, t.heads.map(h => [h.className, h.textContent])];
+const row = (n, own) => { const tr = el('tr'); for (let k = 0; k < n; k++) tr.append(el('td', null, 'v' + k)); if (own) tr.children[0].dataset.h = own; return tr; };
+const a = row(4); t.add(a);
+out.named = a.children.map(td => [td.dataset.h || null, td.className]);
+const b = el('tr'); const wide = el('td', null, 'all'); wide.colSpan = 2; b.append(wide, el('td', null, 'n'), el('td', null, 'e')); t.add(b);
+out.spanned = b.children.map(td => td.dataset.h || null);
+const c = row(3, 'Own'); t.add(c); out.own = c.children[0].dataset.h;
+t.body.textContent = ''; const d = row(3); t.add(d); out.again = [t.body.children.length, d.children[1].dataset.h];
+const f = dataTable([null, null], { head: false }); const fr = row(2); f.add(fr);
+out.headless = [f.table.children.map(n => n.tagName), fr.children.map(td => td.dataset.h || null)];
+console.log(JSON.stringify(out));
+"""
+    got = _run_node(js)
+    ok(got["shell"] == ["ktable-wrap w", "ktable x", [["", "Sector"], ["num", "Revenue"], ["kt-main", "Name"], ["", ""]]],
+       "the wrapper, the table and its heads: %r" % got.get("shell"))
+    ok(got["named"] == [["Sector", ""], ["Revenue", ""], ["Name", "kt-main"], [None, ""]],
+       "each cell named from its column, the leading one marked, an empty head names nothing: %r" % got.get("named"))
+    ok(got["spanned"] == [None, "Name", None], "a cell across two columns is not named, and the next takes its own column: %r" % got.get("spanned"))
+    ok(got["own"] == "Own", "a cell's own name is kept")
+    ok(got["again"] == [1, "Revenue"], "rows added after the body is emptied are named too: %r" % got.get("again"))
+    ok(got["headless"] == [["TBODY"], [None, None]], "a table built with no head has none, and names nothing: %r" % got.get("headless"))
+
+
+@test
+def t_every_table_is_built_by_the_part():
+    """Real tables were built by hand in 26 places and named by a stamp after
+    drawing. dataTable() builds them all; the stamp is gone."""
+    bad = _built_by_hand(["el('table', 'ktable", "el('thead')"], part="js/part-table.js")
+    ok(not bad, "tables built by hand: %s" % bad)
+    ok("syncTableHeads" not in SCRIPT, "nothing stamps table heads onto cells after drawing")
+    rest = SCRIPT
+    for sig in ("function printDispatchManifest(", "function printStockUsage(", "function printDaySheet(", "function printGuide("):
+        rest = rest.replace(_body_of(sig), "")
+    ok("<thead>" not in rest, "no table head written as markup outside the frozen print sheets")
 
 
 @test
@@ -11429,7 +11486,7 @@ def t_an_answer_in_prose_is_drawn_as_prose():
     if not _node_ok():
         print("       (node unavailable, skipped)")
         return
-    js = (MINIDOM + "document.createDocumentFragment = () => new Node_('#fragment');\n" + md_src()
+    js = (MINIDOM + "document.createDocumentFragment = () => new Node_('#fragment');\n" + md_src() + table_part()
           + r"""
 const f = proseNodes('## Where it came from\n- **Wedding** gobos\n- Steel\n\n| Product | Orders |\n|---|---|\n| Monogram | 9 |\nThat is all.');
 const tags = f.children.map(n => n.tagName);
@@ -11559,7 +11616,7 @@ def t_markdown_is_drawn_as_elements_and_never_as_markup():
     if not _node_ok():
         print("       (node unavailable, skipped)")
         return
-    js = (MINIDOM + "document.createDocumentFragment = () => new Node_('#fragment');\n" + md_src()
+    js = (MINIDOM + "document.createDocumentFragment = () => new Node_('#fragment');\n" + md_src() + table_part()
           + r"""
 const f = mdNodes('---\nname: x\n---\n# Title\n\n1. First\n   - nested **bold**\n2. Second\n\n- [x] done\n- [ ] to do\n\n```\n# not a heading\n<b>raw</b>\n```\n\n> quoted *em*\n\n---\n\n[site](https://projectedimage.co.uk) [bad](javascript:alert(1)) `code` <img src=x onerror=alert(1)>');
 const walk = (n, out) => { out.push(n.tagName + (n.href ? '@' + n.href : '')); n.children.forEach(c => walk(c, out)); return out; };
@@ -11596,7 +11653,7 @@ def t_markdown_the_reviewer_found_drawn_wrongly_is_drawn_right():
     if not _node_ok():
         print("       (node unavailable, skipped)")
         return
-    js = (MINIDOM + "document.createDocumentFragment = () => new Node_('#fragment');\n" + md_src()
+    js = (MINIDOM + "document.createDocumentFragment = () => new Node_('#fragment');\n" + md_src() + table_part()
           + r"""
 const draw = (t) => { const f = mdNodes(t); const walk = (n, o) => { o.push(n.tagName + (n.href ? '@' + n.href : '')); n.children.forEach(c => walk(c, o)); return o; }; return { tags: walk(f, []), text: f.textContent, top: f.children.map(n => n.tagName) }; };
 const out = {
@@ -12113,7 +12170,7 @@ def t_the_design_page_is_the_source_of_truth_made_visible():
     ok("if (guideSeg === 'design') { paintDesign(host); return; }" in seg, "it paints without fetching anything")
     ok("box.querySelectorAll(':scope > .tabs > .tab')" in seg, "and the Guide's own tabs are told apart from the examples")
     fn = SCRIPT.split("function paintDesign(host) {")[1].split("\n        function ")[0]
-    for part in ("tabStrip(", "segmented(", "metricsStrip(", "loadFailure(", "refreshBtn(", "'ktable-wrap'", "'ktable'",
+    for part in ("tabStrip(", "segmented(", "metricsStrip(", "loadFailure(", "refreshBtn(", "dataTable(",
                  "'btn btn-primary'", "'chip'", "'empty'", "formField(", "'field-help'", "'field-msg'",
                  "toastOk(", "toastError("):
         ok(part in fn, "the page draws %s with the real thing" % part)
@@ -13093,7 +13150,7 @@ def t_each_section_of_a_page_is_a_panel():
     panel, a pair's halves and what a plain wrapper holds included; the
     header, tabs, choosers, notices and the Production Manager's counters
     stay on the grey page."""
-    ok("syncTableHeads(); syncPanels();" in SCRIPT, "stamped in the one batched pass")
+    ok("stampPass = 0; syncPanels();" in SCRIPT, "stamped in the one batched pass")
     if not _node_ok():
         print("       (node unavailable, skipped)")
         return
@@ -13858,7 +13915,7 @@ def t_the_numbers_behind_it_are_four_rows_and_a_method_is_a_method():
            % re.findall(r"[^.]*\b[Ss]ources?\b(?!:)[^.]*", words)[:2])
     ok("'Every method'" in SCRIPT and "'Every source'" not in SCRIPT, "the sanity table's chooser says method")
     tb = fn_src("function fcTable(head, rows, right) {")
-    ok("th.classList.add('num')" in tb and "style.textAlign" not in tb, "a number column is the table's own class, not an inline style")
+    ok("right && right[i] ? 'num' : null" in tb and "td.classList.add('num')" in tb and "style.textAlign" not in tb, "a number column is the table's own class, not an inline style")
     setup = fn_src("function forecastSetupCard(c) {")
     ok("'The first run lands after 03:00.'" in setup and "'No cash flow workbook yet. Upload one above.'" in setup,
        "the setup lines are short")

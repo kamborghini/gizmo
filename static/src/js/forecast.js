@@ -26,15 +26,7 @@
                            extrapolated: 'Extrapolated' };
         const fcSentence = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
         function fcTable(head, rows, right) {
-            const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
-            const thead = el('thead'); const hr = el('tr');
-            head.forEach((h, i) => {
-                const th = el('th');
-                if (h instanceof Node) th.append(h); else th.textContent = h == null ? '' : String(h);
-                if (right && right[i]) th.classList.add('num'); hr.append(th);
-            });
-            thead.append(hr); tbl.append(thead);
-            const tb = el('tbody');
+            const kt = dataTable(head.map((h, i) => [h instanceof Node ? h : (h == null ? '' : String(h)), right && right[i] ? 'num' : null]));
             rows.forEach(cells => {
                 const tr = el('tr');
                 cells.forEach((c, i) => {
@@ -43,9 +35,9 @@
                     if (right && right[i]) td.classList.add('num');
                     tr.append(td);
                 });
-                tb.append(tr);
+                kt.add(tr);
             });
-            tbl.append(tb); wrap.append(tbl); return wrap;
+            return kt.wrap;
         }
         function forecastUploadButton() {
             const b = textButton('Upload workbook'); b.prepend(ico(I.upload));

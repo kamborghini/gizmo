@@ -820,27 +820,21 @@
             recs.forEach(r => Object.keys(r).forEach(k => { if (keys.indexOf(k) < 0 && reconValue(k, r[k]) !== '') keys.push(k); }));
             const shared = keys.filter(k => recs.filter(r => reconValue(k, r[k]) !== '').length > 1);
             const first = recs.length > 1 && shared.length ? shared : keys.slice(0, 6);
-            const wrap = el('div', 'ktable-wrap');
-            const tb = el('table', 'ktable rd-ev');
             const evName = (v) => v.eid + ' \u00b7 ' + cap(v.system) + ' ' + v.label;
             /* One record is named in a caption over its fields; two or three
                head a column each. */
-            if (evs.length === 1) wrap.append(el('p', 'rd-evname', evName(evs[0])));
-            else {
-                const thead = el('thead'); const htr = el('tr'); htr.append(el('th'));
-                evs.forEach(v => htr.append(el('th', null, evName(v))));
-                thead.append(htr); tb.append(thead);
-            }
-            const tbody = el('tbody'); tb.append(tbody); wrap.append(tb);
+            const kt = dataTable([null].concat(evs.map(evName)), { cls: 'rd-ev', head: evs.length > 1 });
+            const wrap = kt.wrap;
+            if (evs.length === 1) wrap.prepend(el('p', 'rd-evname', evName(evs[0])));
             const paint = (all) => {
-                tbody.innerHTML = '';
+                kt.body.innerHTML = '';
                 (all ? keys : first).forEach(k => {
                     const vals = recs.map(r => reconValue(k, r[k]));
                     const got = vals.filter(v => v !== '');
                     const differ = got.length > 1 && got.some(v => v !== got[0]);
                     const tr = el('tr'); tr.append(el('td', 'rd-k', reconKey(k)));
                     vals.forEach(v => tr.append(el('td', differ && v !== '' ? 'rd-diff' : null, v)));
-                    tbody.append(tr);
+                    kt.add(tr);
                 });
             };
             paint(false);

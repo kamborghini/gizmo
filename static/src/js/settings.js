@@ -677,19 +677,16 @@
                 top.append(document.createTextNode(' across ' + (u.runs || 0) + ' calls. Same volume on Sonnet ≈ $' + (u.cost_if_sonnet || 0).toFixed(2) + ', on Haiku ≈ $' + (u.cost_if_haiku || 0).toFixed(2) + '.'));
                 box.append(top);
                 if (Array.isArray(u.by_kind) && u.by_kind.length) {
-                    const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = 'var(--sp-2-5)'; const tbl = el('table', 'ktable');
-                    const thead = el('thead'); const htr = el('tr');
-                    ['Type', 'Runs', 'Avg cost', 'Total'].forEach((h, i) => htr.append(el('th', i ? 'num' : null, h)));
-                    thead.append(htr); tbl.append(thead); const tb = el('tbody');
+                    const kt = dataTable(['Type', ['Runs', 'num'], ['Avg cost', 'num'], ['Total', 'num']]); kt.wrap.style.marginTop = 'var(--sp-2-5)';
                     u.by_kind.forEach(k => {
                         const tr = el('tr');
                         tr.append(el('td', 'kw', k.kind));
                         tr.append(el('td', 'num', String(k.runs)));
                         tr.append(el('td', 'num', '$' + (k.avg_cost || 0).toFixed(3)));
                         tr.append(el('td', 'num', '$' + (k.cost || 0).toFixed(2)));
-                        tb.append(tr);
+                        kt.add(tr);
                     });
-                    tbl.append(tb); wrap.append(tbl); box.append(wrap);
+                    box.append(kt.wrap);
                 } else {
                     box.append(el('div', 'setting-sub', 'No AI usage recorded yet. Run an audit or chat, then reopen this.'));
                 }

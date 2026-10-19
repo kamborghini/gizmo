@@ -289,15 +289,13 @@
                 if (!rows.length) return;
                 host.append(el('div', 'disp-subhead', title));
                 /* The house two-column data table, not the file browser's rows. */
-                const wrap = el('div', 'ktable-wrap');
-                const tb = el('table', 'ktable');
-                const tbody = el('tbody');
+                const kt = dataTable([null, null], { head: false });
                 rows.forEach(([a, b]) => {
                     const tr = el('tr');
                     tr.append(el('td', 'kw', a), el('td', null, b));
-                    tbody.append(tr);
+                    kt.add(tr);
                 });
-                tb.append(tbody); wrap.append(tb); host.append(wrap);
+                host.append(kt.wrap);
             };
             section('Pipelines', (r.pipelines || []).map(p =>
                 [p.name, p.deals + ' deals  ·  ' + p.stages + ' stages']));
@@ -754,11 +752,8 @@
         function paintList(host) {
             const deals = crmVisibleDeals().sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
             if (!deals.length) { host.append(el('div', 'empty', 'No deals match.')); return; }
-            const wrap = el('div', 'ktable-wrap'); const tb = el('table', 'ktable crm-table crm-deals-table');
-            tb.innerHTML = '<thead><tr><th>Deal</th><th>Contact</th><th class="num">Value</th>'
-                + '<th>Stage</th><th>Next activity</th><th>Status</th></tr></thead>';
+            const kt = dataTable(['Deal', 'Contact', ['Value', 'num'], 'Stage', 'Next activity', 'Status'], { cls: 'crm-table crm-deals-table' });
             const stages = {}; crmCache.stages.forEach(s => stages[s.id] = s.name);
-            const tbody = el('tbody');
             const pageCount = Math.max(1, Math.ceil(deals.length / crmDealsSize));
             if (crmDealsPage > pageCount) crmDealsPage = pageCount;
             const from = (crmDealsPage - 1) * crmDealsSize;
@@ -784,9 +779,9 @@
                     (x.archived ? 'Archived · ' : '') + cap(x.status)));
                 tr.append(stTd);
                 opensOnClick(tr, openDeal);
-                tbody.append(tr);
+                kt.add(tr);
             });
-            tb.append(tbody); wrap.append(tb); host.append(wrap);
+            host.append(kt.wrap);
             /* The same pager the contacts table carries, counting what the
                filters left rather than what the store holds. */
             host.append(tablePager({
@@ -1749,20 +1744,18 @@
                    into one nowrap line, so a long company name truncated the
                    other three away entirely. Same shape as the deals list, so
                    both read alike and the width goes to real columns. */
-                const wrapT = el('div', 'ktable-wrap');
-                const tb = el('table', 'ktable crm-table crm-contact-table');
-                const cols = master ? ['<th class="tick"></th>'] : [];
-                cols.push('<th class="kt-main">Name</th>');
-                if (people) cols.push('<th>Organisation</th>', '<th>Email</th>', '<th>Phone</th>');
-                else cols.push('<th>Website</th>', '<th>Address</th>');
-                cols.push('<th class="num crm-deals">Deals</th>', '<th class="crm-label">Label</th>');
+                const cols = master ? [[null, 'tick']] : [];
+                cols.push(['Name', 'kt-main']);
+                if (people) cols.push('Organisation', 'Email', 'Phone');
+                else cols.push('Website', 'Address');
+                cols.push(['Deals', 'num crm-deals'], ['Label', 'crm-label']);
+                const kt = dataTable(cols, { cls: 'crm-table crm-contact-table' });
                 if (bar2) {
-                    const thead = el('thead'); const tr0 = el('tr', 'crm-selhead'); const th0 = el('th'); th0.colSpan = cols.length;
+                    const tr0 = el('tr', 'crm-selhead'); const th0 = el('th'); th0.colSpan = cols.length;
                     th0.append(bar2); tr0.append(th0);
                     /* The column heads stay after the bar, hidden, so a phone's two-line rows still name their values. */
-                    thead.innerHTML = '<tr class="crm-colhead">' + cols.join('') + '</tr>'; thead.prepend(tr0); tb.append(thead);
-                } else tb.innerHTML = '<thead><tr>' + cols.join('') + '</tr></thead>';
-                const tbody = el('tbody');
+                    kt.heads[0].parentNode.className = 'crm-colhead'; kt.thead.prepend(tr0);
+                }
                 const pageCount = Math.max(1, Math.ceil(items.length / crmContactsSize));
                 if (crmContactsPage > pageCount) crmContactsPage = pageCount;
                 const from = (crmContactsPage - 1) * crmContactsSize;
@@ -1810,7 +1803,7 @@
                     if (c.label) lab.append(crmChip(c.label));
                     tr.append(lab);
                     opensOnClick(tr, openContact);
-                    tbody.append(tr);
+                    kt.add(tr);
                 });
                 /* The header tick, which was an empty cell: a list this long
                    already offers a bulk delete, and arming it a row at a time
@@ -1818,7 +1811,7 @@
                    and it covers what the SEARCH left, which is the same rule
                    the row ticks are pruned by. */
                 if (master) {
-                    const th = tb.querySelector('thead th.tick');
+                    const th = kt.table.querySelector('thead th.tick');
                     const all = document.createElement('input');
                     all.type = 'checkbox';
                     const lab = 'Select every ' + (people ? 'person' : 'organisation') + ' this search left';
@@ -1832,7 +1825,7 @@
                     };
                     if (th) th.append(all);
                 }
-                tb.append(tbody); wrapT.append(tb); list.append(wrapT);
+                list.append(kt.wrap);
                 /* A pager rather than "show more": at four thousand contacts
                    the old button had to be pressed thirty times, and the count
                    it printed was the only clue how many that would be. */

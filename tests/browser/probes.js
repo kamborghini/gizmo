@@ -127,4 +127,32 @@ async function strayOpeners(page) {
       + (b.offsetParent ? b.offsetParent.tagName.toLowerCase() + (b.offsetParent.id ? '#' + b.offsetParent.id : '') : 'nothing')));
 }
 
-module.exports = { measure, panelCounts, unnamed, strayOpeners, SKIP, HOLD };
+// A real table's body cell its head names that does not carry the name (or,
+// under the leading head, the mark): a phone's two-line row would show the
+// value with no word for what it is. Every table in the page, shown or not.
+async function unnamedCells(page) {
+  return page.evaluate(() => {
+    const out = [];
+    document.querySelectorAll('table.ktable').forEach(t => {
+      const hr = t.tHead && t.tHead.rows[t.tHead.rows.length - 1];
+      if (!hr) return;
+      const heads = [];
+      [...hr.cells].forEach(th => { for (let k = 0; k < (th.colSpan || 1); k++) heads.push(th.colSpan > 1 ? null : th); });
+      [...t.tBodies, ...(t.tFoot ? [t.tFoot] : [])].forEach(b => [...b.rows].forEach(tr => {
+        let i = 0;
+        [...tr.cells].forEach(td => {
+          const th = heads[i];
+          if (th && (td.colSpan || 1) === 1) {
+            const name = th.textContent.replace(/\s+/g, ' ').trim();
+            if (name && !td.hasAttribute('data-h')) out.push(t.className + ': "' + name + '" cell unnamed');
+            if (th.classList.contains('kt-main') && !td.classList.contains('kt-main')) out.push(t.className + ': "' + name + '" cell not marked as leading');
+          }
+          i += td.colSpan || 1;
+        });
+      }));
+    });
+    return [...new Set(out)];
+  });
+}
+
+module.exports = { measure, panelCounts, unnamed, strayOpeners, unnamedCells, SKIP, HOLD };

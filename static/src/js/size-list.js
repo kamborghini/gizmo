@@ -691,12 +691,8 @@
                 card.append(az);
             }
             const canEdit = !!c.can_edit;
-            const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable sizes-table');
-            const thead = el('thead'); const hr = el('tr');
             const cols = (grouped ? [] : [['Maker']]).concat([['Model'], ['Holder glass, mm', 1], ['Image, mm', 1], ['Produced as, mm', 1], ['Status'], ['Undercut, mm', 1], ['Notes']]);
-            cols.forEach(([h, num]) => { const th = el('th', num ? 'num' : null, h); hr.append(th); });
-            thead.append(hr); tbl.append(thead);
-            const tb = el('tbody');
+            const kt = dataTable(cols.map(([h, num]) => [h, num ? 'num' : null]), { cls: 'sizes-table' });
             const continued = grouped && start > 0 && slice.length && !slice[0].head;
             slice.forEach((it, i) => {
                 if (it.head) {
@@ -710,11 +706,11 @@
                     tr.dataset.maker = it.head;
                     tr.onclick = () => { st.folded[it.head] = !folded; st.focus = { maker: it.head }; paintSizesList(); };
                     tr.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); tr.click(); } };
-                    tb.append(tr); return;
+                    kt.add(tr); return;
                 }
                 if (i === 0 && continued) {
                     const tr = el('tr', 'ktable-grp'); const th = el('th'); th.colSpan = cols.length;
-                    th.append(document.createTextNode(it.row.manufacturer), el('span', 'grp-n', 'continued')); tr.append(th); tb.append(tr);
+                    th.append(document.createTextNode(it.row.manufacturer), el('span', 'grp-n', 'continued')); tr.append(th); kt.add(tr);
                 }
                 const r = it.row; const key = sizesKey(r); const open = !!st.open[key];
                 const tr = el('tr', 'sizes-row' + (open ? ' open' : '')); tr.dataset.i = r._i;
@@ -745,10 +741,10 @@
                     if (next && next.classList.contains('sizes-detail')) next.remove();
                     if (now) tr.after(sizesDetail(r, cols.length, canEdit));
                 };
-                tb.append(tr);
-                if (open) tb.append(sizesDetail(r, cols.length, canEdit));
+                kt.add(tr);
+                if (open) kt.add(sizesDetail(r, cols.length, canEdit));
             });
-            tbl.append(tb); wrap.append(tbl); card.append(wrap);
+            card.append(kt.wrap);
             /* The house pager, counting models: it counted 'lines' (maker
                headings included) beside a head that said models, and its own
                select had its caret painted over its words. */

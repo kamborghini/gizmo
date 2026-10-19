@@ -48,10 +48,7 @@
             return emptyState({ icon: I.users, text: RUN_COST, sub: 'Your customers and 12 months of orders.', action: btn, cls: 'run-gate' });
         }
         function sectorComparisonTable(rows, cur) {
-            const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
-            const thead = el('thead'); const htr = el('tr');
-            ['Sector', 'Customers', 'Repeat rate', 'Average lifetime value', 'Lifetime revenue'].forEach((h, i) => htr.append(el('th', i ? 'num' : null, h)));
-            thead.append(htr); tbl.append(thead); const tb = el('tbody');
+            const kt = dataTable(['Sector', ['Customers', 'num'], ['Repeat rate', 'num'], ['Average lifetime value', 'num'], ['Lifetime revenue', 'num']]);
             rows.forEach(r => {
                 const tr = el('tr'); const c0 = el('td', 'kw');
                 const sl = textLink(r.sector || '', { size: 'inline' }); sl.onclick = () => pickSector(r.sector);
@@ -60,9 +57,9 @@
                 tr.append(el('td', 'num', (r.repeat_rate != null ? pct1(r.repeat_rate) : '')));
                 tr.append(el('td', 'num', fmtMoney(r.avg_ltv || 0, cur)));
                 tr.append(el('td', 'num', fmtMoney(r.lifetime_revenue || 0, cur)));
-                tb.append(tr);
+                kt.add(tr);
             });
-            tbl.append(tb); wrap.append(tbl); return wrap;
+            return kt.wrap;
         }
         function showCustomersView() {
             loadCustomerTags();
@@ -105,12 +102,8 @@
             card.append(head);
             const table = (cols, rows) => {
                 const bleed = el('div', 'card-bleed');
-                const wrap = el('div', 'ktable-wrap'); const tb = el('table', 'ktable');
-                const thead = el('thead'); const htr = el('tr');
-                cols.forEach(([h, num]) => htr.append(el('th', num ? 'num' : null, h)));
-                thead.append(htr); tb.append(thead);
-                const tbody = el('tbody'); rows.forEach(tr => tbody.append(tr)); tb.append(tbody);
-                wrap.append(tb); bleed.append(wrap); return bleed;
+                const kt = dataTable(cols.map(([h, num]) => [h, num ? 'num' : null]));
+                kt.add(...rows); bleed.append(kt.wrap); return bleed;
             };
             const days = (n) => n + (n === 1 ? ' day' : ' days');
             const od = d.overdue || [];
@@ -205,10 +198,7 @@
         /* The segments as a table (12 Oct 2026): how many, the segment and what
            it means, and what it is worth, beside the sector comparison. */
         function segTable(segments, cur) {
-            const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
-            const thead = el('thead'); const htr = el('tr');
-            [['Customers', 'num'], ['Segment', 'kt-main'], ['Lifetime revenue', 'num']].forEach(([h, c]) => htr.append(el('th', c, h)));
-            thead.append(htr); tbl.append(thead); const tb = el('tbody');
+            const kt = dataTable([['Customers', 'num'], ['Segment', 'kt-main'], ['Lifetime revenue', 'num']]);
             (segments || []).forEach(s => {
                 const tr = el('tr');
                 tr.append(el('td', 'num', (s.count || 0).toLocaleString()));
@@ -216,9 +206,9 @@
                 if (s.desc) nm.append(el('div', 'prod-sub', s.desc));
                 tr.append(nm);
                 tr.append(el('td', 'num', fmtMoney(s.revenue || 0, cur)));
-                tb.append(tr);
+                kt.add(tr);
             });
-            tbl.append(tb); wrap.append(tbl); return wrap;
+            return kt.wrap;
         }
         /* Top customers as two tables of ten side by side (12 Oct 2026): one
            column of 25 ran the page's length with the row half empty. */
@@ -229,10 +219,7 @@
             return duo;
         }
         function customersHalf(rows, cur) {
-            const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
-            const thead = el('thead'); const htr = el('tr');
-            ['Customer', 'Orders', 'Lifetime spend', 'Last order'].forEach((h, i) => htr.append(el('th', i ? 'num' : null, h)));
-            thead.append(htr); tbl.append(thead); const tb = el('tbody');
+            const kt = dataTable(['Customer', ['Orders', 'num'], ['Lifetime spend', 'num'], ['Last order', 'num']]);
             rows.forEach(r => {
                 const tr = el('tr'); const c0 = el('td', 'kw'); c0.append(document.createTextNode(r.name || 'Customer'));
                 if (r.email) c0.append(el('div', 'prod-sub', r.email));
@@ -240,9 +227,9 @@
                 tr.append(el('td', 'num', (r.orders || 0).toLocaleString()));
                 tr.append(el('td', 'num', fmtMoney(r.spent || 0, cur)));
                 tr.append(el('td', 'num', r.days_since == null ? 'over 1y' : (r.days_since + 'd ago')));
-                tb.append(tr);
+                kt.add(tr);
             });
-            tbl.append(tb); wrap.append(tbl); return wrap;
+            return kt.wrap;
         }
         function renderCustomers(seg) {
             seg = (typeof seg === 'string' && seg) ? seg : (customersSeg || SEG_ALL);

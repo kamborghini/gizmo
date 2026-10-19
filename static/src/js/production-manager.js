@@ -1308,10 +1308,8 @@
             if (!(d.flagged || []).length) {
                 card.append(el('div', 'cov-ok', 'Every gobo item on these orders matches the size list. Nothing to fix.'));
             } else {
-                const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = 'var(--sp-2-5)';
-                const tb = el('table', 'ktable');
-                tb.innerHTML = '<thead><tr><th>Model as written on orders</th><th>Manufacturer</th><th>Why it flags</th><th class="num">Items</th><th>Seen on</th><th></th></tr></thead>';
-                const tbody = el('tbody');
+                const kt = dataTable(['Model as written on orders', 'Manufacturer', 'Why it flags', ['Items', 'num'], 'Seen on', null]);
+                kt.wrap.style.marginTop = 'var(--sp-2-5)';
                 d.flagged.forEach(r => {
                     const tr = el('tr');
                     const c1 = el('td', 'kw', r.model); tr.append(c1);
@@ -1340,9 +1338,9 @@
                         act.append(fix);
                     }
                     tr.append(act);
-                    tbody.append(tr);
+                    kt.add(tr);
                 });
-                tb.append(tbody); wrap.append(tb); card.append(wrap);
+                card.append(kt.wrap);
             }
             if (d.skipped_no_model) {
                 card.append(el('div', 'cov-note', d.skipped_no_model + ' items with no gobo options (accessories and plain products) were not counted.'));
@@ -1440,12 +1438,7 @@
                     m.textContent = 'Kept ' + money(tt.margin) + (tt.margin_pct != null ? '  (' + tt.margin_pct + '%)' : '');
                     head2.append(m);
                     out.append(head2);
-                    const wrap = el('div', 'ktable-wrap');
-                    const tb = el('table', 'ktable');
-                    tb.innerHTML = '<thead><tr><th>Order</th><th>Customer</th><th>Sent</th>'
-                        + '<th class="num">Revenue</th><th class="num">Goods</th><th class="num">Courier</th>'
-                        + '<th class="num">Kept</th><th class="num">%</th></tr></thead>';
-                    const tbody = el('tbody');
+                    const kt = dataTable(['Order', 'Customer', 'Sent', ['Revenue', 'num'], ['Goods', 'num'], ['Courier', 'num'], ['Kept', 'num'], ['%', 'num']]);
                     d.rows.forEach(r => {
                         const tr = el('tr');
                         if (r.incomplete) {
@@ -1466,9 +1459,9 @@
                                 el('td', 'num', money(r.courier_cost, r.currency)), kept,
                                 el('td', 'num', r.margin_pct == null ? '' : r.margin_pct + '%'));
                         }
-                        tbody.append(tr);
+                        kt.add(tr);
                     });
-                    tb.append(tbody); wrap.append(tb); out.append(wrap);
+                    out.append(kt.wrap);
                     if (d.orders_incomplete) out.append(el('div', 'cov-note',
                         d.orders_incomplete + ' order(s) could not be costed and are left out of the totals'
                         + (d.missing_cost && d.missing_cost.length
@@ -1512,11 +1505,7 @@
                     if (rq !== maniReq) return;
                     out.innerHTML = ''; current = d;
                     if (!d.rows.length) { out.append(el('div', 'cov-line', 'Nothing was booked on this day.')); return; }
-                    const wrap = el('div', 'ktable-wrap');
-                    const tb = el('table', 'ktable');
-                    tb.innerHTML = '<thead><tr><th>Time</th><th>Order</th><th>Customer</th><th>Courier</th>'
-                        + '<th>Tracking</th><th class="num">Courier ex VAT</th><th class="num">Customer paid</th></tr></thead>';
-                    const tbody = el('tbody');
+                    const kt = dataTable(['Time', 'Order', 'Customer', 'Courier', 'Tracking', ['Courier ex VAT', 'num'], ['Customer paid', 'num']]);
                     d.rows.forEach(r => {
                         const tr = el('tr');
                         if (r.canceled) tr.style.opacity = '.45';
@@ -1528,9 +1517,9 @@
                             el('td', null, r.tracking),
                             el('td', 'num', money(r.amount_ex_vat, r.currency)),
                             el('td', 'num', money(r.shipping_paid, r.currency)));
-                        tbody.append(tr);
+                        kt.add(tr);
                     });
-                    tb.append(tbody); wrap.append(tb); out.append(wrap);
+                    out.append(kt.wrap);
                     const tt = d.totals || {};
                     const bits = [tt.shipments + (tt.shipments === 1 ? ' shipment' : ' shipments')];
                     if (tt.courier_ex_vat != null) bits.push('couriers ' + money(tt.courier_ex_vat) + ' ex VAT');
@@ -1677,11 +1666,8 @@
                             b.style.color = 'var(--text-brand)';
                             sheetHost.append(b);
                         }
-                        const wrap = el('div', 'ktable-wrap'); wrap.style.marginTop = 'var(--sp-2-5)';
-                        const tb = el('table', 'ktable');
-                        tb.innerHTML = '<thead><tr><th>Size</th><th>Glass</th><th>Unit</th>'
-                            + '<th class="num">Estimated</th><th class="num">Final</th><th></th></tr></thead>';
-                        const tbody = el('tbody');
+                        const kt = dataTable(['Size', 'Glass', 'Unit', ['Estimated', 'num'], ['Final', 'num'], null]);
+                        kt.wrap.style.marginTop = 'var(--sp-2-5)';
                         sheet.forEach((r, i) => {
                             const tr = el('tr');
                             const inp = document.createElement('input');
@@ -1697,7 +1683,7 @@
                             const tdR = el('td'); tdR.append(rm);
                             tr.append(el('td', 'kw', r.size + 'mm'), el('td', null, r.family),
                                 el('td', null, r.family === 'Ring' ? 'rings' : 'blanks'), est, tdF, tdR);
-                            tbody.append(tr);
+                            kt.add(tr);
                         });
                         const addTr = el('tr');
                         const famSel = el('select', 'lbl-size'); famSel.setAttribute('aria-label', 'Glass family');
@@ -1720,8 +1706,8 @@
                         tds[0].append(szIn); tds[1].append(famSel); tds[3].style.color = 'var(--text-tertiary)';
                         tds[4].append(qIn); tds[5].append(addB);
                         tds.forEach(t2 => addTr.append(t2));
-                        tbody.append(addTr);
-                        tb.append(tbody); wrap.append(tb); sheetHost.append(wrap);
+                        kt.add(addTr);
+                        sheetHost.append(kt.wrap);
                         const send = textButton(null, { kind: 'primary' }); send.style.marginTop = 'var(--sp-2-5)';
                         send.append(ico(I.send), document.createTextNode(
                             d.sent ? 'Send again (replaces the earlier sheet)' : 'Send to stock sheet'));

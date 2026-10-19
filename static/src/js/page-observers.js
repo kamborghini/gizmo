@@ -1,38 +1,14 @@
         /* What the page still stamps after drawing (stage 3 retires these one
-           part at a time): table heads onto their cells, and panels. Every
-           switch says its own state now (setSwitch, js/part-field.js). */
+           part at a time): panels. Every switch says its own state now
+           (setSwitch, js/part-field.js), and every table names its own cells
+           (dataTable, js/part-table.js). */
         let stampPass = 0;
         new MutationObserver(() => {
             // Batched: whole tabs repaint at once, and a sync per mutation would
             // run hundreds of times for one render.
             if (stampPass) return;
-            stampPass = requestAnimationFrame(() => { stampPass = 0; syncTableHeads(); syncPanels(); });
+            stampPass = requestAnimationFrame(() => { stampPass = 0; syncPanels(); });
         }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
-        /* R13: a table's heads, copied onto its body cells as data-h, so on a
-           phone each row reads as two lines with every value named (see
-           .ktable's phone rule). Tables are built in twenty places; they are
-           stamped in one, as the switches and dialogs are. A head cell marked
-           kt-main names the cell that leads its row; the first leads otherwise. */
-        function syncTableHeads() {
-            document.querySelectorAll('table.ktable > :is(tbody, tfoot) > tr:not([data-kh])').forEach(tr => {
-                tr.dataset.kh = '';
-                const hd = tr.closest('table').tHead, hr = hd && hd.rows[hd.rows.length - 1];
-                if (!hr) return;
-                const heads = [];
-                /* A cell across several columns (a selection bar in the head) names none of them. */
-                [...hr.cells].forEach(th => { for (let k = 0; k < (th.colSpan || 1); k++) heads.push(th.colSpan > 1 ? null : th); });
-                let i = 0;
-                [...tr.cells].forEach(td => {
-                    const th = heads[i];
-                    if (th && (td.colSpan || 1) === 1) {
-                        const h = th.textContent.replace(/\s+/g, ' ').trim();
-                        if (h && !td.hasAttribute('data-h')) td.dataset.h = h;
-                        if (th.classList.contains('kt-main')) td.classList.add('kt-main');
-                    }
-                    i += td.colSpan || 1;
-                });
-            });
-        }
         /* PANELS (13 Oct 2026, docs/superpowers/specs/2026-10-13-panels-design.md):
            every section of a page sits in a white panel on the grey page. A page's
            content root (.ov-wrap) holds its sections; panelTargets says which of
