@@ -40,7 +40,12 @@ whose selectors name no class and no id: `html`, `body`, `a`, `button`,
 under `static/src/css/parts/`: buttons, icon buttons, links, fields,
 switches, tick rows and row openers. Everything else, screens and panels,
 stays unlayered on top, so a screen's own rule beats a part's whatever their
-weights. Print is untouched: no rule under `@media print`, and none of the
+weights. (As built: the sheet opens with `@layer base, parts;`. The tokens stay above,
+unlayered: custom properties declared first gain nothing from a layer, and the
+print freeze and the token guards read the one top-level `:root`. What paper
+inherits (`html`, `body`, every element), a field's element rules (the proof
+found them meeting the screens' field classes by weight) and `!important` rules
+(a layer reverses them) stay above too.) Print is untouched: no rule under `@media print`, and none of the
 frozen print rules, moves. The flips the move causes are settled one by one so
 that nothing changes; the Design page reads tokens inside layers. Tables,
 rows, windows and panels can move into `parts` the same way later.

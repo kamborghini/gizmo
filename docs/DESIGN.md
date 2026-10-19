@@ -10,7 +10,10 @@ live.
 
 - **One source per decision.** Every value is a token in `:root`. Outside it,
   rules use `var(--...)` only; the exceptions are 0, 1px hairlines and
-  percentages. Markup carries no style attributes.
+  percentages. Markup carries no style attributes, and the script sets no
+  spacing, colour, type, border or background on an element: those are
+  classes in the sheet (it keeps positions, sizes, showing, hiding and fading,
+  and custom properties for values from data). Guard: `t_the_script_sets_no_styling`.
   ([tokens](superpowers/specs/2026-09-07-design-system-tokens-design.md),
   [the mix](superpowers/specs/2026-10-06-reactor-mix-design.md) §3)
 - **Parts own their behaviour.** A window, and from the later pieces of the
@@ -86,6 +89,33 @@ checks every measured state against its own walk, both ways
 ([spec](superpowers/specs/2026-10-19-panels-and-tables-design.md)). Guard:
 `t_the_panel_rule_is_the_stylesheets`.
 
+## Layers
+
+The sheet opens with `@layer base, parts;` (`static/src/css/tokens.css`).
+Below every other rule, in that order, sit the element defaults
+(`static/src/css/base.css`: bold, the icon stroke, a button's font, scroll bars)
+and each built part's own rules, one file per part under
+`static/src/css/parts/` (buttons, icon buttons, links, field captions,
+switches, tick rows, row openers). Everything else, the screens and the panels,
+sits above them, so a screen's own rule beats a part's whatever their weights.
+Some rules stay above on purpose: the tokens (custom properties, declared first,
+which several guards and the Design page read as the one top-level `:root`);
+what paper inherits (`html`, `body`, every element) and print itself; a
+field's element rules, which still meet the screens' field classes by weight
+and move with fields as a part; and any rule with `!important` (a layer
+reverses it). A part moves in by its own rules only (selectors made of its
+classes), proved with the check below
+([spec](superpowers/specs/2026-10-19-stylesheet-layers-design.md)).
+Guard: `t_the_stylesheet_opens_with_its_layers`.
+
+**The proof that a style change changed nothing:** `make css-proof BASE=<ref>`
+shoots the final style of every element on every measured state, at each
+size, with its `::before` and `::after`, and again with hover and keyboard focus
+forced on the controls; the base in a worktree of its own, the branch twice
+(their difference is clocks and times), on ports 8941 and 8942. It fails on any
+difference, naming the state, the element and the property, and ignores only
+what draws nothing on either side. Guard: `t_css_proof_is_wired`.
+
 ## Parts
 
 ### Windows
@@ -114,10 +144,10 @@ browser suite's keyboard journeys (`tests/browser/keyboard.spec.js`).
 ordinary button ([spec](superpowers/specs/2026-10-19-buttons-and-links-design.md)):
 `kind` is `primary` (the one teal per screen), `danger` (a one-way door, the
 confirming button of a destructive question) or `ghost`; `square` is the
-bordered square that holds one icon; `cls` carries a screen's layout hooks.
-`small` builds `btn-sm`, which is the same 32 button: the name is kept until
-the stylesheet is put in layers. A button inside a frozen print function keeps
-its hand-built form. Guard: `t_every_ordinary_button_is_built_by_the_part`.
+bordered square that holds one icon (`btn-square`); `cls` carries a screen's
+layout hooks. There is no smaller text button: every one is 32. A button inside
+a frozen print function keeps its hand-built form. Guards:
+`t_every_ordinary_button_is_built_by_the_part`, `t_the_legacy_names_are_gone`.
 
 ### Icon buttons
 
@@ -142,7 +172,7 @@ small or tag one keeps its size and gets an invisible 40 target. Guards:
 `textLink(text, opts)` builds the one text link (teal, underlined in a quiet
 line that turns teal on hover): `caption` (12, the default), `inline` (the size
 of its sentence) or `go` (standing alone, a chevron after the words, or the
-icon given). It builds the legacy classes `linkish`, `seclink` and `link`. The
+icon given). It builds `link-caption`, `link-inline` and `link-go`. The
 sign-in card's links are caption links. Guards:
 `t_every_text_link_is_built_by_the_part`, `t_the_sign_in_card_uses_the_house_link`.
 
@@ -222,4 +252,6 @@ A part lives in its own section, `static/src/js/part-<name>.js`, listed in
 3. come with a page-suite guard that fails when the thing it builds is built
    by hand anywhere else;
 4. come with a keyboard journey in the browser suite when it can be operated;
-5. get its section under Parts here.
+5. get its section under Parts here;
+6. move its own rules into `static/src/css/parts/<name>.css` in the `parts`
+   layer, with `make css-proof` showing no difference.
