@@ -799,24 +799,13 @@
 
         /* ---------------- modal scaffolding ---------------- */
         function crmModal(title) {
-            const overlay = el('div', 'modal-overlay show');
-            const modal = el('div', 'modal disp-modal');
-            const head = el('div', 'modal-head');
-            head.append(el('h3', null, title));
-            const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Close'; head.append(x);
-            const body = el('div', 'modal-body');
-            modal.append(head, body); overlay.append(modal); document.body.append(overlay);
-            const close = () => { overlay.remove(); if (document.querySelector('#view-crm.active')) renderCRM(); };
-            x.onclick = close;   /* the X is the only way out, as everywhere else */
-            /* The house action bar: right-aligned, outside the scroll, one per
-               modal. Composer bars beside their textareas stay in the body. */
-            let footEl = null;
-            const foot = () => {
-                if (!footEl) { footEl = el('div', 'modal-foot'); modal.append(footEl); }
-                footEl.innerHTML = '';
-                return footEl;
-            };
-            return { body: body, close: close, head: head, foot: foot };
+            /* The X is the house window's (dialog()); closing redraws the board
+               when the CRM is on screen. The action bar starts empty each time
+               it is asked for: a deal repaints its own actions. */
+            const win = dialog({ title: title, size: 'disp-modal',
+                onClose: () => { if (document.querySelector('#view-crm.active')) renderCRM(); } });
+            const foot = () => { const f = win.foot(); f.innerHTML = ''; return f; };
+            return { body: win.body, close: win.close, head: win.head, foot: foot };
         }
         function crmField(host, label, input) {
             const w = el('label', 'disp-addr-f');

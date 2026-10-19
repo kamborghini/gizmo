@@ -45,6 +45,7 @@
   "js/widget-grid.js",
   "js/menu.js",
   "js/choosers.js",
+  "js/part-dialog.js",
   "js/table-card.js",
   "js/markdown.js",
   "js/charts.js",

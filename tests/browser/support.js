@@ -32,6 +32,20 @@ const READS = {
   '/api/production-labels/coverage': [R(null, 'orders')],
   '/api/recon/exceptions': [R(null, 'q', 'severity', 'status')],
   '/api/recon/exception': [R(null, 'id')],
+  // The windows the keyboard journeys open (windows.js), each read checked in copilot.py on 15 Oct 2026.
+  '/api/margin': [R(null, 'days')],
+  '/api/dispatch/manifest': [R(null, 'date')],
+  '/api/stock-usage': [R(null, 'date')],
+  '/api/order/edit': [R('read', 'order_id')],
+  '/api/shipping/config': [R('get')],
+  '/api/mail/addresses': [R()],
+  // What the Settings window reads as it opens.
+  '/api/status': [R()],
+  '/api/schedule': [R()],
+  '/api/usage': [R(null, 'days')],
+  '/api/privacy': [R()],
+  '/api/auth/mfa': [R('status')],
+  '/api/mail/settings': [R('get')],
 };
 
 function isRead(route, b) {
