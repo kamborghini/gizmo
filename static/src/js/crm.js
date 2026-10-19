@@ -764,9 +764,9 @@
             const from = (crmDealsPage - 1) * crmDealsSize;
             deals.slice(from, from + crmDealsSize).forEach(x => {
                 const tr = el('tr', 'crm-list-row');
-                /* The same three lines the contacts row and the board card
-                   carry: a row whose only action is a click is mouse-only,
-                   and this was the one view where that was still true. */
+                /* A row whose only action is a click is mouse-only: the name
+                   cell holds the row's opener, as the contacts rows do, and a
+                   click anywhere else on the row opens it too. */
                 const openDeal = () => crmDealModal(x.id);
                 const dealName = el('td', 'kw', x.title);
                 const dob = rowOpener('Open ' + x.title, openDeal); dob.dataset.focusKey = 'deal-row-' + x.id;

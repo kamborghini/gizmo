@@ -56,7 +56,10 @@ body text, as in the photo.
 
 Memory's "Pages it read" links get a finger-sized line (the target size from
 the tokens); Customise mode marks each block of its grid a list item. **No
-visible change** beyond the links' line height.
+visible change** beyond the links' line height. (Built as a group, not a list:
+the grid also holds the page's header and chooser, and a list may hold only
+list items, so the grid is a group and each block a group named with its place,
+"Top customers, 3 of 7".)
 
 ## Guards
 

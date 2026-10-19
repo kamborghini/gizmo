@@ -116,4 +116,15 @@ async function unnamed(page) {
       + (e.placeholder ? ' "' + e.placeholder + '"' : '')));
 }
 
-module.exports = { measure, panelCounts, unnamed, SKIP, HOLD };
+// A row's hidden opener placed by anything but its own cell or row. It is
+// taken out of the flow, so with no positioned box around it, it is laid out
+// against the page and stretches it past a scrolling list (19 Oct 2026: CRM
+// Contacts on a phone grew 500 of blank page).
+async function strayOpeners(page) {
+  return page.evaluate(() => [...document.querySelectorAll('.row-open')]
+    .filter(b => b.offsetParent !== b.parentElement)
+    .map(b => (b.getAttribute('aria-label') || '') + ' placed by '
+      + (b.offsetParent ? b.offsetParent.tagName.toLowerCase() + (b.offsetParent.id ? '#' + b.offsetParent.id : '') : 'nothing')));
+}
+
+module.exports = { measure, panelCounts, unnamed, strayOpeners, SKIP, HOLD };

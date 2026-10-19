@@ -189,3 +189,7 @@
         /* A tick (or a radio) and its words: one recipe (tickRow(), docs/DESIGN.md).
            The screen's own class sets only its spacing. */
         .tick-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-primary); cursor: pointer; }
+        /* A row's hidden opener (rowOpener) is taken out of the flow: what holds it
+           places it, or it is laid out against the page and stretches it past a
+           scrolling list. Zero weight, so a cell already sticky keeps that. */
+        :where(:has(> .row-open)) { position: relative; }
