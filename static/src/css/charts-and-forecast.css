@@ -178,9 +178,6 @@
         .chart-expand { position: absolute; top: 0; right: 0; z-index: 2; border: 0; background: transparent; color: var(--text-tertiary); width: var(--control-h); height: var(--control-h); border-radius: var(--radius-control); display: grid; place-items: center; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease); }
         @media (hover: hover) { .chart-expand:hover { background: var(--surface-tertiary); color: var(--text-primary); } }
         .chart-expand:active { background: var(--press); }
-        /* A chart that is a panel itself (a pair's half): the button sits on its title row,
-           inside the panel's inset, not in the corner of its padding (13 Oct 2026). */
-        @media screen { .ov-wrap .panel.chart-card .chart-expand { top: var(--panel-pad-y); right: var(--panel-pad-x); } }
         .chart-expand svg { width: var(--icon-md); height: var(--icon-md); display: block; }
         /* .modal's own 520px cap is declared 100 lines further down, so a
            single-class .cmodal lost to it on source order and the expand button

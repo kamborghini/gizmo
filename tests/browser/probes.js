@@ -2,12 +2,25 @@
 // zero on every screen (sideways scroll, content spilling out of its panel);
 // the panel rules are counted per rule and held by the ratchet (record.js).
 const APP = require('./page-source').join();
-const list = name => JSON.parse(new RegExp(`const ${name} = (\\[[^\\]]*\\])`).exec(APP)[1].replace(/'/g, '"'));
-const SKIP = list('PANEL_SKIP');
-const HOLD = list('PANEL_HOLD');
+// The panel rule is the stylesheet's (css/panels.css, "the panel rule"): its
+// selector finds the panels, and its two lists drive this probe's own walk,
+// which has no depth limit, so a block the rule misses, or one it paints that
+// the walk does not expect, is counted.
+const PANEL = /\/\* the panel rule \*\/\s*([^{]+)\{/.exec(APP)[1].replace(/\s+/g, ' ').trim();
+function args(text, at) {          // the text inside the parentheses that open at text[at]
+  let d = 0;
+  for (let i = at; i < text.length; i++) {
+    if (text[i] === '(') d++;
+    else if (text[i] === ')' && --d === 0) return text.slice(at + 1, i);
+  }
+  throw new Error('unbalanced panel rule');
+}
+const classes = list => list.split(',').map(x => x.trim()).filter(x => /^\.[\w-]+$/.test(x)).map(x => x.slice(1));
+const HOLD = classes(args(PANEL, PANEL.indexOf(':is(') + 3));
+const SKIP = classes(args(PANEL, PANEL.lastIndexOf('> :not(') + 6)).filter(c => !HOLD.includes(c));
 
 async function measure(page) {
-  return page.evaluate(([SKIP, HOLD]) => {
+  return page.evaluate(([SKIP, HOLD, PANEL]) => {
     const vis = n => n.getClientRects().length && getComputedStyle(n).display !== 'none' && getComputedStyle(n).visibility !== 'hidden';
     const desc = n => (n.tagName.toLowerCase() + (n.id ? '#' + n.id : '') + ([...n.classList].length ? '.' + [...n.classList].join('.') : '')).slice(0, 80);
     const clips = s => /(auto|scroll|hidden|clip)/.test(s.overflowX);
@@ -28,8 +41,8 @@ async function measure(page) {
       .map(e => desc(e) + ' ' + (e.scrollWidth - e.clientWidth) + 'px');
 
     const roots = [...document.querySelectorAll('.view.active .ov-wrap')];
-    const panels = [...document.querySelectorAll('.view.active .ov-wrap .panel, .view.active .panel')].filter(vis)
-      .filter((n, i, a) => a.indexOf(n) === i && !n.parentElement.closest('.panel'));
+    const panels = [...document.querySelectorAll(PANEL)].filter(n => vis(n) && n.closest('.view.active'))
+      .filter(n => !n.parentElement.closest(PANEL));
     const R = panels.map(n => ({ n, r: n.getBoundingClientRect() }));
 
     // Spill: a visible element wider than its panel, not held by a scroller or a clip.
@@ -48,18 +61,20 @@ async function measure(page) {
     }
 
     // The panel rules (13 Oct).
-    const bad = [];
+    const bad = [], expected = new Set();
     const walk = n => {
-      if (!vis(n) || SKIP.some(c => n.classList.contains(c))) return;
+      if (!vis(n) || n.tagName === 'INPUT' || n.tagName === 'SCRIPT' || SKIP.some(c => n.classList.contains(c))) return;
       if (!n.className || HOLD.some(c => n.classList.contains(c))) { [...n.children].forEach(walk); return; }
+      expected.add(n);
       const cs = getComputedStyle(n);
       const painted = cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && (cs.borderTopWidth !== '0px' || cs.boxShadow !== 'none' || cs.outlineStyle !== 'none');
-      if (!n.classList.contains('panel') || !painted) bad.push(desc(n));
+      if (!n.matches(PANEL) || !painted) bad.push(desc(n));
     };
     roots.forEach(r => [...r.children].forEach(walk));
+    const extra = roots.flatMap(r => [...r.querySelectorAll(PANEL)]).filter(n => vis(n) && !expected.has(n) && !n.parentElement.closest(PANEL)).map(desc);
     const loose = [...document.querySelectorAll('.view.active .ov-wrap :is(.section-title, .card-title, h2, h3)')].filter(vis)
-      .filter(h => !h.closest('.panel') && !h.closest('.ov-hero, .fband, .miss-strip, .modal')).map(desc);
-    const nested = [...document.querySelectorAll('.view.active .panel .panel')].filter(vis).map(desc);
+      .filter(h => !h.closest(PANEL) && !h.closest('.ov-hero, .fband, .miss-strip, .modal')).map(desc);
+    const nested = [...document.querySelectorAll(PANEL)].filter(n => vis(n) && n.closest('.view.active') && n.parentElement.closest(PANEL)).map(desc);
     const gap = innerWidth <= 640 ? 12 : 20;
     const gaps = [], heights = [];
     for (const a of R) {
@@ -71,7 +86,7 @@ async function measure(page) {
     }
     const greyish = c => { const m = c.match(/\d+/g); if (!m || (c.startsWith('rgba') && +m[3] === 0)) return false; const [r, g, b] = m.map(Number); return r >= 236 && r <= 246 && Math.abs(r - g) <= 3 && Math.abs(g - b) <= 3; };
     const vanish = [...document.querySelectorAll('.view.active :is(.segmented, input, select, textarea, .btn, .tabs)')].filter(vis)
-      .filter(n => !n.closest('.panel, .modal, .fband, .miss-strip')).filter(n => greyish(getComputedStyle(n).backgroundColor) && getComputedStyle(n).boxShadow === 'none' && getComputedStyle(n).borderTopWidth === '0px').map(desc);
+      .filter(n => !n.closest(PANEL + ', .modal, .fband, .miss-strip')).filter(n => greyish(getComputedStyle(n).backgroundColor) && getComputedStyle(n).boxShadow === 'none' && getComputedStyle(n).borderTopWidth === '0px').map(desc);
     const lone = panels.filter(n => n.matches('.section-title, .card-title, h2, h3') || ([...n.children].filter(vis).length === 1 && [...n.children].filter(vis)[0].matches('.section-title, .card-title, h2, h3'))).map(desc);
     const inset = [], short = [];
     for (const { n: pn, r: pr } of R) {
@@ -92,8 +107,8 @@ async function measure(page) {
           && ![...c.children].some(s => s !== e && vis(s) && Math.abs(s.getBoundingClientRect().top - r.top) < 3 && s.getBoundingClientRect().left >= r.right - 1)) short.push(desc(e));
       }
     }
-    return { sideways, spill, panels: { bad, loose, nested, gaps, heights, vanish, lone, inset: [...new Set(inset)], short: [...new Set(short)] } };
-  }, [SKIP, HOLD]);
+    return { sideways, spill, panels: { bad, extra, loose, nested, gaps, heights, vanish, lone, inset: [...new Set(inset)], short: [...new Set(short)] } };
+  }, [SKIP, HOLD, PANEL]);
 }
 
 function panelCounts(m) {
@@ -155,4 +170,4 @@ async function unnamedCells(page) {
   });
 }
 
-module.exports = { measure, panelCounts, unnamed, strayOpeners, unnamedCells, SKIP, HOLD };
+module.exports = { measure, panelCounts, unnamed, strayOpeners, unnamedCells, PANEL, SKIP, HOLD };

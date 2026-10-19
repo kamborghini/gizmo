@@ -54,7 +54,7 @@ test.describe('the probes', () => {
   test('a section that is not a panel, a panel in a panel, and unequal neighbours are counted', async ({ page }) => {
     await page.setContent(shell('<section class="loose"><p>floating</p></section>'
       + '<section class="panel"><div class="panel">inner</div></section>'
-      + '<div class="pair-holder" style="display:flex;gap:20px"><section class="panel" style="flex:1;height:100px">a</section><section class="panel" style="flex:1;height:160px">b</section></div>'));
+      + '<div class="wpair-in" style="display:flex;gap:20px"><section class="panel" style="flex:1;height:100px">a</section><section class="panel" style="flex:1;height:160px">b</section></div>'));
     const c = P.panelCounts(await P.measure(page));
     expect(c.bad).toBeGreaterThanOrEqual(1);
     expect(c.nested).toBe(1);

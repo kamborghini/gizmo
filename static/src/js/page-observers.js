@@ -1,37 +1,8 @@
-        /* What the page still stamps after drawing (stage 3 retires these one
-           part at a time): panels. Every switch says its own state now
-           (setSwitch, js/part-field.js), and every table names its own cells
-           (dataTable, js/part-table.js). */
-        let stampPass = 0;
-        new MutationObserver(() => {
-            // Batched: whole tabs repaint at once, and a sync per mutation would
-            // run hundreds of times for one render.
-            if (stampPass) return;
-            stampPass = requestAnimationFrame(() => { stampPass = 0; syncPanels(); });
-        }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
-        /* PANELS (13 Oct 2026, docs/superpowers/specs/2026-10-13-panels-design.md):
-           every section of a page sits in a white panel on the grey page. A page's
-           content root (.ov-wrap) holds its sections; panelTargets says which of
-           its children, or of what they hold, is a panel, and the batched pass
-           stamps .panel on them, so a page added next year is boxed without
-           anyone wiring it. The header, tabs, choosers, notices, the queue's
-           counters, Forecast's own tinted band and every notice (the ONE NOTICE
-           recipe's classes) stay on the page, and Customise's
-           grip and hide button, which a pair carries as children, are never panels. */
-        const PANEL_SKIP = ['ov-hero', 'page-tabs', 'tabs', 'seg-row', 'queues', 'segmented', 'back-btn', 'miss-strip', 'msg',
-            'alerts-banner', 'cx-health', 'mail-viewwarn', 'mail-sendwarn', 'disp-warn', 'disp-await', 'mail-note', 'mail-hidden-note', 'resp-note',
-            'fband', 'sr-only', 'wg-grip', 'wg-hide'];
-        const PANEL_HOLD = ['wpair', 'wpair-in', 'fc-pair', 'fc-cols', 'crm-seg', 'crm-charts', 'guide-host', 'guide-grid', 'ds-page'];
-        function panelTargets(n) {
-            if (!n || !n.classList || n.tagName === 'INPUT' || n.tagName === 'SCRIPT') return [];
-            if (PANEL_SKIP.some(c => n.classList.contains(c))) return [];
-            if (!n.className || PANEL_HOLD.some(c => n.classList.contains(c))) return [...n.children].flatMap(panelTargets);
-            return [n];
-        }
-        function syncPanels() {
-            document.querySelectorAll('.ov-wrap').forEach(root => [...root.children].flatMap(panelTargets)
-                .forEach(t => { if (!t.classList.contains('panel')) t.classList.add('panel'); }));
-        }
+        /* Nothing is stamped onto the page after it is drawn (stage 3 of the
+           14 Oct audit): every switch says its own state (setSwitch,
+           js/part-field.js), every table names its own cells (dataTable,
+           js/part-table.js), and the stylesheet says what is a panel (the panel
+           rule, css/panels.css). */
         /* The sign-in screen is not a window and sits over everything (a
            session expiring with a window open): Tab stays on it. Windows keep
            their own fence (dialog(), js/part-dialog.js). */
