@@ -49,6 +49,7 @@ import httpx
 import jwt
 import eori
 import perf
+import pagesource
 import google_data
 import mailmime
 import google_mail
@@ -221,7 +222,7 @@ _MODEL_PRICE = {
 }
 _CACHE_READ_RATE = {"claude-opus-5-5": 0.05}
 
-_PAGE_PATH = os.path.join(os.path.dirname(__file__), "static", "index.html")
+_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")   # composer.js; the page itself is joined by pagesource.py from static/src
 _page_cache: Optional[str] = None   # the shell: the page with its CSS and JS lifted out
 _page_assets: dict = {}             # "css" / "js" -> (media type, bytes), served at hashed URLs
 _asset_hashes: dict = {}            # "css" / "js" -> the content hash in their URL
@@ -11015,8 +11016,9 @@ def _page_parts() -> tuple:
     opens, cacheable for a year, and a new build simply asks for a new URL."""
     global _page_cache, _page_assets
     if _page_cache is None:
-        with open(_PAGE_PATH, "r", encoding="utf-8") as fh:
-            raw = fh.read()
+        # The page is joined from its sections (static/src), byte for byte the
+        # single file it was: the split below and its hashed URLs are unchanged.
+        raw = pagesource.join()
         shell, css, js = _split_page(raw)
         assets = {}
         if css and js:
@@ -11027,7 +11029,7 @@ def _page_parts() -> tuple:
             # line. Same hash-in-the-URL contract as app.js, loaded after it
             # because the page's mail code calls into it, never the reverse.
             try:
-                with open(os.path.join(os.path.dirname(_PAGE_PATH), "composer.js"), "r",
+                with open(os.path.join(_STATIC_DIR, "composer.js"), "r",
                           encoding="utf-8") as fh:
                     composer = fh.read()
             except OSError:

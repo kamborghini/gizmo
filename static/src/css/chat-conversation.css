@@ -1,0 +1,73 @@
+        /* ---------- Chat, the conversation ---------- */
+        .chat-inner.no-intro > .msg:not(.enter) { animation: none; }
+        .chat-title { display: grid; gap: var(--sp-1); padding-bottom: var(--sp-3); border-bottom: var(--bw-hairline) solid var(--border-default); }
+        .chat-title-row { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; }
+        .chat-h { font-size: var(--text-head); font-weight: var(--weight-medium); margin: 0; letter-spacing: normal; line-height: var(--lh-control);
+            overflow-wrap: anywhere; min-width: 0; }
+        .chat-rename { flex: 1; min-width: 0; }
+        .chat-meta { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .msg-with { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); margin-top: var(--sp-1); text-align: right; }
+        /* Nothing unbroken pushes the chat sideways: an address, a SKU or a
+           handle wraps where it must. */
+        .msg.user .bubble, .summary, .prose, .insight .t, .insight .d, .action .text, details.sect .body, .data-src-pre, .resp-note { overflow-wrap: anywhere; }
+        .resp-head .who { margin: 0; }
+        .resp-head .who:focus { outline: 0; }
+        .resp-at { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .resp-copy { margin-left: auto; }
+        .resp-note { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3);
+            margin-top: var(--sp-3); padding: var(--sp-2) var(--sp-3); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset);
+            font-size: var(--text-body); color: var(--text-secondary); line-height: var(--lh-control); }
+        .resp-note > span { flex: 1 1 24ch; }
+        .resp-again { margin-top: var(--sp-3); }
+        .followed { display: block; font-size: var(--text-xs); color: var(--text-tertiary); margin: var(--sp-3) 0 0; line-height: var(--lh-caption); }
+        .followed > * { vertical-align: middle; }
+        .followed > .ic { display: inline-grid; }
+        .followed > .ic { place-items: center; margin-right: var(--sp-0-5); }
+        .followed > .ic svg { width: var(--icon-xs); height: var(--icon-xs); display: block; }
+        .followed-link { cursor: pointer; }
+        /* The AI summary, a section of its own (the mix, spec 8.3): body copy at
+           the reading measure, the skills it followed 8 under it. */
+        .ai-summary-text { margin: 0; color: var(--text-secondary); max-width: var(--measure); }
+        .ai-summary .followed { margin-top: var(--sp-2); }
+        /* An info button inside a title that is not a flex row sits 8 from its
+           words and centred on the line, as it does in one. */
+        :is(.card-title, .stat .label, .chart-head .ct, .cx-tile-title, .disp-subhead) > .info {
+            vertical-align: middle; margin-left: calc(var(--sp-2) + (var(--icon-md) - var(--control-h-sm)) / 2); }
+        .prose { font-size: var(--text-body); line-height: var(--lh-prose); color: var(--text-secondary); margin: calc(-1 * var(--sp-2)) 0 var(--sp-4); max-width: var(--measure); }
+        .prose p { margin: 0 0 var(--sp-2); } .prose ul, .prose ol { margin: 0 0 var(--sp-2); padding-left: var(--sp-5); } .prose li { margin: var(--sp-1) 0; }
+        .prose .prose-h { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); margin: var(--sp-4) 0 var(--sp-1); }
+        .prose .prose-table { margin: var(--sp-2) 0 var(--sp-3); }
+        /* An answer's figures are sized by the answer, not the screen, and
+           their changes are neutral: the model picks the figures, so a fall
+           in refunds painted red was a judgement nobody made. */
+        .msg.assistant { container-type: inline-size; }
+        .chat-metrics .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 0; gap: var(--sp-3); }
+        .chat-metrics .metrics > .stat::before { left: calc(-0.5 * var(--sp-3)); }
+        @container (min-width: 600px) { .chat-metrics .metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+        .chat-metrics .stat { min-height: 0; padding: 0; }
+        .chat-metrics .stat-ic { display: none; }
+        .chat-metrics .stat .value { font-size: var(--fig-s); }
+        .chat-metrics .stat-row { flex-wrap: wrap; row-gap: var(--sp-1); }
+        /* A chat answer's figures are written by the model, so no chip under it is coloured, whatever its
+           direction: the arrow and the hidden word carry it. */
+        .chat-metrics .delta:is(.good, .bad), .chat-metrics .stat.warn .delta.bad { color: var(--text-tertiary); background: var(--surface-tertiary); }
+        .chat-thinking .thinking { flex-wrap: wrap; }
+        .th-secs { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+        .th-stop { margin-left: auto; }
+        .chat-recent { width: 100%; max-width: 480px; margin: 0 0 var(--sp-5); text-align: left; display: grid; gap: 0;
+            grid-template-columns: minmax(0, 1fr); }
+        .chat-recent-h { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-secondary); padding: 0 var(--sp-2); }
+        .chat-recent-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: var(--row-h); border: 0; background: transparent;
+            border-radius: 0; box-shadow: var(--rule-b-soft); padding: 0 var(--sp-2); font: inherit; font-size: var(--text-body); color: var(--text-primary); text-align: left; cursor: pointer; }
+        @media (hover: hover) { .chat-recent-row:hover { background: var(--surface-secondary); } }
+        .chat-recent-row .ic svg { width: var(--icon-md); height: var(--icon-md); display: block; color: var(--text-tertiary); }
+        .crr-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .crr-at { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); flex: none; }
+        @media (max-width: 900px) {
+            /* The page gutter token, as every other screen and the top bar have it. */
+            .chat-inner { padding-inline: var(--wrap-pad); }
+            .composer-wrap { padding-inline: var(--wrap-pad); }
+        }
+
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+

@@ -1,0 +1,220 @@
+        /* ---------- widget grid ----------
+           A view whose blocks carry data-widget ids becomes one grid, and the
+           layer writes the arrangement as DOM order plus two attributes: the
+           column count on the wrap and each card's placed width. Attributes,
+           never inline styles, so print can override them and no screen writes
+           its own size. The gap is the page rhythm, so the margins the flow
+           layout spaced blocks with are zeroed here. */
+        .ov-wrap.wgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: var(--page-rhythm); align-items: stretch; }
+        .ov-wrap.wgrid[data-cols="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .ov-wrap.wgrid[data-cols="1"] { grid-template-columns: minmax(0, 1fr); }
+        .ov-wrap.wgrid > * { margin: 0; }
+        /* A fixed block (the header, a banner, the page chat) takes the whole
+           row, and so does a card as wide as the grid. No span of three: sizes
+           are one, two or every column, and the layout never widens a card. */
+        .ov-wrap.wgrid > :not([data-widget]), .ov-wrap.wgrid > [data-span="full"] { grid-column: 1 / -1; }
+        .ov-wrap.wgrid > [data-span="2"] { grid-column: span 2; }
+        /* The hidden attribute alone loses to a card's own display: flex. */
+        .ov-wrap.wgrid > [data-widget][hidden] { display: none; }
+        /* A holder its renderer has not filled yet (the trade radar before
+           its answer) takes no row: in the flow its margins collapsed through
+           it, but an empty grid item still costs a row and a gap. */
+        .ov-wrap.wgrid > [data-widget]:empty { display: none; }
+        /* On a phone the grid is two columns and a trend figure (a tile with a
+           sparkline) is one of them, so Overview's eight pair up as the mockup
+           draws (R13, 12 Oct 2026). They each took the row: 1,300px of figures. */
+        /* A tab strip belongs to the header above it, so it keeps the 20 under it
+           there rather than the gap between two blocks, as
+           .ov-hero:has(+ .page-tabs) gives it in the flow. */
+        .ov-wrap.wgrid > .ov-hero + .page-tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm)); }
+        .ov-wrap.wgrid > .ov-hero + .tabs { margin-top: calc(var(--sp-5) - var(--page-rhythm)); }
+        /* The header sits 32 above what follows it, as on a plain page: the grid
+           zeroes every child's margin and spaces them by one gap, which is less.
+           The offset is on the header, which is alone in its full-width row; on
+           whatever follows it would move one tile, since a KPI tile can be the
+           first thing after it, and a hidden block would take the margin with
+           it. A tab strip has its own 20 (above), and the queue counters
+           (.queues) get their own offset, so neither is given this one too. */
+        .ov-wrap.wgrid > .ov-hero:not(:has(+ :is(.tabs, .page-tabs, .queues))) { margin-bottom: calc(var(--sp-7) - var(--page-rhythm)); }
+        /* A segment bar is as wide as its buttons in the flow; a grid item
+           would stretch its track across the whole row. */
+        .ov-wrap.wgrid > .segmented { justify-self: start; }
+        /* In the grid a tab row still runs edge to edge, and its 32 to the body
+           is taken out of the grid's gap. */
+        .ov-wrap.wgrid > :is(.tabs, .page-tabs) { margin-inline: calc(-1 * var(--wrap-pad)); margin-bottom: calc(var(--sp-7) - var(--page-rhythm)); }
+        .ov-wrap.wgrid > .ov-hero + .queues { margin-top: calc(var(--sp-5) - var(--page-rhythm)); }
+        .ov-wrap.wgrid > .queues { margin-bottom: calc(var(--sp-5) - var(--page-rhythm)); }
+        /* A block with no box of its own (the page chat, a structured block,
+           a plain wrapper marked widget-bare) let its first child's top margin
+           and its last child's bottom margin fall into the page rhythm in the
+           flow. A grid item, and a block in a group's column, keeps them inside
+           itself, which put a heading 24 further down than it was, so they go. */
+        .ov-wrap.wgrid > :is(.page-chat, .block, .widget-bare) > :first-child,
+        .ov-wrap .widget-group > .widget-bare > :first-child { margin-top: 0; }
+        .ov-wrap.wgrid > :is(.page-chat, .block, .widget-bare) > :last-child,
+        .ov-wrap .widget-group > .widget-bare > :last-child { margin-bottom: 0; }
+        /* One card made of a heading and the blocks under it, built by the
+           renderer that owns them, because trendsSection repaints by swapping
+           its own nodes and a wrapper added from outside would break that. The
+           page rhythm holds inside: 12 under the heading, the grid gap between
+           blocks. */
+        .widget-group { display: flex; flex-direction: column; min-width: 0; }
+        .ov-wrap .widget-group > * { margin: 0; }
+        .ov-wrap .widget-group > * + * { margin-top: var(--page-rhythm); }
+        .ov-wrap .widget-group > .section-title + * { margin-top: var(--sp-3); }
+        /* One visually hidden text technique for the whole page, the one
+           .disp-opt-sr already uses: read by a screen reader, drawn nowhere. */
+        .sr-only { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+        /* Customize mode. Every card shows a dashed edge just outside its own
+           border, which is the convention for something you can pick up, and
+           a grab cursor. The wrap is positioned so a card's offsetLeft and
+           offsetTop measure its slot in the grid with no transform in them. A
+           focused card drops the dashed edge for the focus outline every
+           other control draws. */
+        /* Scroll anchoring is off while cards are being moved: a card lifted
+           out of a row above the fold made the browser shift the page to keep
+           what was on screen still, so the slots moved under a still pointer
+           and the next step carried the card a place further than it was
+           aimed (measured on SEO: a two place move became one). */
+        .ov-wrap.wg-editing { position: relative; overflow-anchor: none; }
+        .ov-wrap.wg-editing > [data-widget] { position: relative; cursor: grab; user-select: none;
+            -webkit-user-select: none; -webkit-touch-callout: none;
+            transition: outline-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease), scale var(--dur) var(--ease); }
+        /* A section has no box at rest (the mix), so its dashed edge in
+           Customize mode stands 8 clear of its content. */
+        .ov-wrap.wg-editing > [data-widget]:not(:focus-visible) {
+            outline: var(--bw-hairline) dashed var(--border-emphasis); outline-offset: var(--sp-2); }
+        /* A panel has an edge of its own, so its dashed edge in Customise is that edge. */
+        .ov-wrap.wg-editing > [data-widget].panel:not(:focus-visible) { outline-offset: calc(-1 * var(--bw-hairline)); }
+        /* The held card follows the pointer by an inline translate the script
+           writes, and floats: the large shadow, above its neighbours, and a
+           step bigger unless motion is reduced (the script adds wg-lifted only
+           then). */
+        .ov-wrap.wg-editing > [data-widget].wg-held { cursor: grabbing; z-index: 2; box-shadow: var(--shadow-lg); }
+        .ov-wrap.wg-editing > [data-widget].wg-held.wg-lifted { scale: var(--lift-scale); }
+        .ov-wrap.wg-editing > [data-widget].wg-landed { outline: var(--focus-outline); outline-offset: var(--sp-0-5); }
+        /* The hide button sits on the card's top right corner, a control with
+           the control's corner, and carries its own ground because it sits over
+           whatever the card draws there. */
+        .ov-wrap.wg-editing > [data-widget] > .wg-hide { position: absolute; top: 0; right: 0; z-index: 1;
+            margin: 0; padding: 0; width: var(--control-h-sm); height: var(--control-h-sm); min-width: 0; min-height: 0;
+            background: var(--surface-primary); box-shadow: var(--shadow-pop);
+            border-radius: var(--radius-control); cursor: pointer; }
+        /* The grip, in the gutter left of the block's first line. */
+        .ov-wrap.wg-editing > [data-widget] > .wg-grip { position: absolute; top: 0; left: calc(-1 * var(--sp-6)); display: grid; place-items: center;
+            height: var(--control-h-sm); color: var(--text-tertiary); pointer-events: none; }
+        .ov-wrap.wg-editing > [data-widget] > .wg-grip svg { width: var(--icon-md); height: var(--icon-md); }
+        @media (max-width: 640px) { .ov-wrap.wg-editing > [data-widget] > .wg-grip { display: none; } }
+        @media (hover: hover) { .ov-wrap.wg-editing > [data-widget] > .wg-hide:hover { background: var(--surface-tertiary); } }
+        .ov-wrap.wg-editing > [data-widget] > .wg-hide:active { background: var(--surface-sunken); }
+        .ov-wrap.wg-editing > [data-widget] > .wg-hide:disabled { background: var(--surface-primary); cursor: not-allowed; }
+        /* A card head's own buttons move clear of the hide button, which sat
+           over Store knowledge's Delete. */
+        .ov-wrap.wg-editing > [data-widget] .card-head { padding-right: calc(var(--sp-4) + var(--sp-8)); }
+        /* chat drill-down: show the data behind this. A hairline row on the
+           text edge, not a box (the mix, spec 3): the row is a 32 control (40 on
+           a phone, where --control-h is 40), and what it opens sits under it. */
+        .data-drill { margin-top: var(--sp-3); border: 0; border-top: var(--bw-hairline) solid var(--border-default); border-radius: 0; background: none; overflow: visible; }
+        .data-drill summary { padding: 0; min-height: var(--control-h); cursor: pointer; list-style: none; display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); font-weight: var(--weight-medium); }
+        .data-drill summary::-webkit-details-marker { display: none; }
+        .data-drill summary > span { display: grid; place-items: center; } .data-drill summary svg { width: var(--icon-sm); height: var(--icon-sm); color: var(--text-tertiary); }
+        .data-drill-body { padding: 0 0 var(--sp-3); max-height: 320px; overflow: auto; }
+        .data-src { margin-top: var(--sp-3); }
+        .data-src-label { font-size: var(--text-xs); line-height: var(--lh-caption); text-transform: none; letter-spacing: normal; color: var(--text-tertiary); font-weight: var(--weight-medium); margin-bottom: var(--sp-1); }
+        .data-src-pre { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; background: var(--surface-sunken); border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-2); line-height: var(--lh-caption); }
+
+        /* THE SECTION HEAD (the mix, spec 6): 15/20 at 600 in Inter, a count and
+           an info button after it, tools at the right; 12 above its content and
+           a section's own space above it. */
+        .section-title { font-size: var(--text-head); font-weight: var(--weight-semibold); text-transform: none; letter-spacing: normal; color: var(--text-primary);
+            line-height: var(--lh-control); min-height: var(--control-h); margin: var(--page-rhythm, var(--sp-9)) 0 var(--sp-3);
+            display: flex; align-items: center; gap: var(--sp-2); }
+        /* No rule across the page. The reference separates sections with the
+           gap between cards and nothing else. */
+        .section-title::after { content: ""; flex: 1; }
+        /* A heading that stays on the page is a section head: the head step, 15/20
+           at 600, the same as a card's title (the mix, spec 6), everywhere, not only
+           where a renderer remembered to mark the group. A heading folded into
+           a card becomes that card's title instead. Ranks: page 26 (Bricolage),
+           section and card 15, label 13. */
+        /* ::after is always the last flex item, so a control inside the heading has
+           to be ordered past it to leave the hairline in between. The heading
+           tracking would otherwise inherit and stretch the button labels. */
+        .section-title > .segmented { order: 1; letter-spacing: normal; }
+        .section-title > .choice-select { order: 1; letter-spacing: normal; font-weight: var(--weight-regular); }
+        /* A section's tools (the mix, spec 6): one group at the head's right,
+           past the spacer, wrapping as a group. On a phone the spacer goes and
+           the margin keeps them right. */
+        .section-title > .sec-tools { order: 1; margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end;
+            gap: var(--gap-cluster); font-size: var(--text-body); font-weight: var(--weight-regular); letter-spacing: normal; }
+        /* On a phone the row cannot hold both. Unwrapped, "Search performance
+           over time" took 129 of 332px and broke over three lines while the
+           186px range control sat beside it; the heading block was 84px tall
+           where the same heading is 28px on a desktop. Below 640 the title
+           takes the row on its own and the control drops under it, left
+           aligned like every other toolbar - which is also how the reference
+           stacks a header block above its own tab strip and range select. The
+           hairline spacer has to go with it, or its flex-grow would push the
+           control to the right edge of the second line. */
+        @media (max-width: 640px) {
+            .section-title { flex-wrap: wrap; }
+            .section-title > span:not(.cnt) { flex: 1 1 100%; }
+            .section-title::after { content: none; }
+        }
+        /* Up to 1100 a heading's controls may wrap under it: 'Cash in' broke
+           into two lines beside its range tabs, and 'Algorithm 1' inside its
+           own button. */
+        @media (max-width: 1100px) { .section-title { flex-wrap: wrap; row-gap: var(--sp-2); } }
+        /* 16px, the inset every other card on the page uses, because this is
+           the topmost card and an 8px step at the top of a column is the first
+           thing the eye tracks down. The bottom margin is gone as well: the
+           page rhythm rule already spaces this block, so the component's own
+           20px was a second value doing that job. */
+        /* The score is a figure with its meter, on the figure recipe (the mix, spec 3 and 8.3):
+           no box, so it sits on the text edge like the figure row beside it. */
+        .seo-score { display: flex; align-items: center; gap: var(--sp-4); background: none; border: 0;
+            border-radius: 0; padding: 0; box-shadow: none; position: relative; overflow: visible; }
+        .seo-score .num { font-size: var(--fig-m); font-weight: var(--weight-semibold); letter-spacing: var(--tr-fig); line-height: var(--lh-none); }
+        .seo-score .out { color: var(--text-secondary); font-size: var(--text-body); margin-top: 0; }
+        .seo-score .bar { flex: 1; height: var(--sp-1); border-radius: var(--radius-full); background: var(--surface-tertiary); overflow: hidden; min-width: 90px; }
+        /* The fill is neutral and the tier colour lives on the number alone.
+           Painted in its tier hue, this bar was the only opaque saturated block
+           anywhere in the app: 709x8 of #b45309 at 1600, about 116 times the
+           area of the largest coloured thing the reference paints (a KPI delta
+           on a 10% tint), and on a page whose charts are deliberately
+           monochrome the eye reached it before the score itself. --action-primary is
+           CH[0], the ink those charts and .files-meter already draw with, so
+           the bar reads as a measure and the colour stays what it is
+           everywhere else here: a judgement about a number. */
+        .seo-score .bar > i { display: block; height: 100%; border-radius: var(--radius-full); background: var(--fill-mark); }
+        /* As the first figure of the checks group (12 Oct 2026): label, figure,
+           out of 100, and the meter under them at the figure's width. */
+        .metrics-strip > .seo-score .bar { flex: none; width: 100%; min-width: var(--fig-min); margin-top: var(--sp-1); }
+        .seo-foot { display: grid; row-gap: var(--sp-1); }
+        .seo-score.good .value { color: var(--success); }
+        .seo-score.mid .value { color: var(--warning); }
+        .seo-score.low .value { color: var(--error); }
+        .seo-score.good .num { color: var(--success); }
+        .seo-score.mid .num { color: var(--warning); }
+        .seo-score.low .num { color: var(--error); }
+        /* The bar is the number drawn, so it takes the number's colour: a red
+           47 sat over a black bar. */
+        .seo-score.stat-open { cursor: pointer; position: relative; padding-right: var(--sp-8); }
+        /* Its hover fill bleeds 8 past the column, as every row's does. */
+        @media (hover: hover) { .seo-score.stat-open:hover { background: var(--surface-secondary);
+            box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); } }
+        .seo-score.good .bar > i { background: var(--success); }
+        .seo-score.mid .bar > i { background: var(--warning); }
+        .seo-score.low .bar > i { background: var(--error); }
+        @media (max-width: 640px) {
+            /* Side by side, the caption wrapped to two lines and the bar hit
+               its 90px floor, so the score's own measure became a stub level
+               with the second line of its label. Stacked, the bar is the width
+               of the card and reads as the number's gauge again. */
+            .seo-score { flex-direction: column; align-items: stretch; gap: var(--sp-3); }
+            /* flex: 1 grows the MAIN axis, which stacking has turned into the
+               height, so the bar has to be let go of it or it swells into a
+               block instead of staying an 8px rule. */
+            .seo-score .bar { flex: none; min-width: 0; }
+        }

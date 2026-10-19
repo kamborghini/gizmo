@@ -128,6 +128,7 @@ _socket.socket.connect, _socket.socket.connect_ex = _no_connect, _no_connect_ex
 
 import jwt
 import server, copilot, worldoptions, pipedrive
+import pagesource
 import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
@@ -2114,8 +2115,7 @@ def t_quote_names_the_carrier_for_every_live_option():
 def t_the_page_can_name_every_carrier_the_server_can_resolve():
     # The page keeps its own map for booked orders. A carrier the server resolves
     # but the page cannot name would show the merchant a raw enum like EVRICORPORATE.
-    html = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                             "static", "index.html"), encoding="utf-8").read()
+    html = pagesource.join(HERE)
     block = re.search(r"const CARRIER_LABELS = \{(.*?)\};", html, re.S)
     ok(block, "found CARRIER_LABELS on the page")
     page = dict(re.findall(r"(\w+): '([^']+)'", block.group(1)))
@@ -4524,7 +4524,7 @@ def t_settings_names_the_version_shopify_sends_order_events_in():
     h = dict(wh_headers(raw, delivery="ev-version"), **{"X-Shopify-API-Version": "2026-10"})
     eq(client.post("/webhooks/orders", content=raw, headers=h).status_code, 200)
     eq(post("/api/status", {}).json()["webhooks"]["version"], "2026-10")
-    page = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+    page = pagesource.join(HERE)
     ok("', Shopify version ' + wh.version" in page, "and the Live updates row says it")
 
 @test
@@ -6949,8 +6949,7 @@ def t_the_page_is_a_small_shell_and_the_bulk_is_cacheable():
         ok("immutable" in res.headers.get("cache-control", ""),
            "hashed assets cache for a year: " + res.headers.get("cache-control", ""))
     # The split must lose nothing: shell + css + js is the whole page again.
-    whole = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                              "static", "index.html"), encoding="utf-8").read()
+    whole = pagesource.join(HERE)
     eq(len(body) + len(css.text) + len(js.text) > len(whole) - 200, True,
        "the page was split, not truncated")
 
@@ -12493,7 +12492,7 @@ def t_memory_write_path_honours_provenance():
 def t_a_carriage_return_cannot_smuggle_a_formula_into_a_csv():
     """Rows are joined with CRLF, so a bare CR inside an unquoted field starts
     a new record in Excel - past the leading-character armour."""
-    js = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+    js = pagesource.join(HERE)
     quoting = [l for l in js.splitlines() if 'replace(/"/g,' in l and "test(v)" in l]
     ok(quoting, "found the CSV escapers")
     for line in quoting:
@@ -12503,7 +12502,7 @@ def t_a_carriage_return_cannot_smuggle_a_formula_into_a_csv():
 
 @test
 def t_a_label_colour_from_pipedrive_cannot_become_a_css_url():
-    js = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+    js = pagesource.join(HERE)
     fn = js.split("function crmLabelColor(")[1].split("function ")[0]
     ok("CRM_COLOR_CSS[c] || c" not in fn,
        "the raw Pipedrive string no longer falls through into style.background")
@@ -14587,7 +14586,7 @@ def t_only_admins_write_the_instructions_everyone_reads():
             eq(post_s(mem, "/api/learn", body).status_code, 403, "member " + body["op"] + " knowledge")
         eq(post_s(mem, "/api/learn", {}).status_code, 200, "a member still reads it")
         eq(post_s(mem, "/api/learn/run", {}).status_code, 403, "and cannot re-learn it")
-        page = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+        page = pagesource.join(HERE)
         ok("function canEditInstructions()" in page and page.count("canEditInstructions()") >= 8,
            "the page offers the editing controls to admins only")
     saved = (copilot.SKILLS_PATH, copilot.MEMORY_PATH)
@@ -14731,7 +14730,7 @@ def t_first_run_setup_needs_the_servers_setup_code():
             copilot.SETUP_CODE = saved
         ok(bare("/api/auth/state", {}).json()["setup"], "and nobody became master")
     with_accounts(go)
-    page = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+    page = pagesource.join(HERE)
     ok("setup_code: inCode.value" in page, "the setup screen asks for the code")
     saved_env = {k: os.environ.pop(k, None) for k in ("RAILWAY_ENVIRONMENT", "RAILWAY_PROJECT_ID")}
     try:
@@ -17449,7 +17448,7 @@ def t_a_google_connection_says_which_permission_was_left_unticked():
            "Google isn't connected yet. Connect it in Settings.", "with no connection, it says so")
     finally:
         gd.OAUTH_TOKEN_PATH, gd.httpx, gd.GSC_SITE_URL, gd.GA4_PROPERTY_ID = real
-    page = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+    page = pagesource.join(HERE)
     ok("g.granted.ga4 === false" in page and "g.granted.gsc === false" in page,
        "Settings' Google rows say which permission is missing")
 
@@ -17596,25 +17595,19 @@ def t_every_reply_says_which_build_answered_it():
         copilot._page_cache = None
         copilot._page_assets = None
         copilot._asset_hashes.clear()
-        real = copilot._PAGE_PATH
-        with open(real, encoding="utf-8") as fh:
-            page = fh.read()
-        import tempfile as _tf
-        with _tf.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf-8") as fh:
-            fh.write(page.replace("<script>\n    (function ()",
-                                  "<script>\n    (function () /*moved*/", 1))
-            tmp = fh.name
-        copilot._PAGE_PATH = tmp
+        # The page is joined by pagesource.join, which copilot looks up as it
+        # calls it: standing in for it here changes the page the server reads.
+        real = pagesource.join
+        page = real(HERE)
+        moved_page = page.replace("<script>\n    (function ()", "<script>\n    (function () /*moved*/", 1)
+        ok(moved_page != page, "the stand-in page really differs")
+        pagesource.join = lambda root=None: moved_page
         moved = copilot._build_id()
         ok(moved and moved != build, "a changed page is a changed build id")
     finally:
-        copilot._PAGE_PATH = real
+        pagesource.join = real
         copilot._page_cache, copilot._page_assets = saved[0], saved[1]
         copilot._asset_hashes.clear(); copilot._asset_hashes.update(saved[2])
-        try:
-            os.unlink(tmp)
-        except Exception:
-            pass
     eq(copilot._build_id(), build, "and the real one is unchanged afterwards")
 
 
@@ -17753,7 +17746,7 @@ def t_the_courier_reference_is_never_printed_as_markup():
     src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
     eq(src.count("parse_collection("), 2,
        "both the collections view and the manifest column parse it")
-    html = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+    html = pagesource.join(HERE)
     ok("collRefText(s.collection_date)" in html,
        "and the booking result does too, for records stored before this")
 
@@ -17938,7 +17931,7 @@ def t_each_courier_carries_its_own_collection_arrangement():
     seg = src[src.index("def _collection_plans("):][:1600]
     ok('o["collection_message"]' in seg and 'o["collection_already"]' in seg,
        "each option says how its courier collects, and whether one is already coming")
-    html = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+    html = pagesource.join(HERE)
     ok(html.count("if (op.collection_message)") == 2,
        "and BOTH option lists show it - the order panel and the pasted address one")
 
@@ -17947,7 +17940,7 @@ def t_each_courier_carries_its_own_collection_arrangement():
 def t_asking_for_a_collection_is_spent_once_it_is_used():
     """The mistake that costs money here is asking five times in a morning and
     being charged for five pickups."""
-    html = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+    html = pagesource.join(HERE)
     i = html.index("function renderResult(res)")
     seg = html[i:html.index("function renderResultSafe(", i)]
     ok("collectionForRun === askedCollection" in seg,
@@ -21510,7 +21503,7 @@ def t_the_streaming_chat_route_checks_the_session_before_it_spends_an_ai_slot():
     r = bare("/api/chat/stream", {"message": "hello"})
     eq(r.status_code, 401, "no app session, no answer")
     eq(len(copilot._rl_global), 0, "and no slot was spent getting there")
-    src = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+    src = pagesource.join(HERE)
     seg = src.split("async function streamChat(")[1][:1200]
     ok("X-App-Session" in seg, "and the page now sends the session on the streaming call")
 
@@ -24590,7 +24583,7 @@ def t_a_gateway_error_on_a_booking_says_it_may_have_been_booked():
         err = r.json().get("error", "")
         ok("MAY still have been booked" in err, "the booking may exist, and the page is told so: " + err)
         eq(len(posts), 1, "and it is never sent a second time by itself")
-        page = open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read()
+        page = pagesource.join(HERE)
         rx = re.search(r"const BOOKING_UNKNOWN = /(.*?)/i;", page).group(1)
         ok(re.search(rx, err, re.I), "which is what holds the Book button on the page")
         ok(page.count("BOOKING_UNKNOWN.test(msg)") == 2,
@@ -25921,8 +25914,7 @@ def t_a_relayed_gateway_timeout_is_never_booked_twice_by_itself():
         # guard was cleared, the page's unknown-outcome rule did not match, Book
         # re-armed, and the next press booked and charged a second time.
         ok("MAY still have been booked" in r1.get("error", ""), r1)
-        rx = re.search(r"const BOOKING_UNKNOWN = /(.*?)/i;", open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                       "..", "static", "index.html"), encoding="utf-8").read()).group(1)
+        rx = re.search(r"const BOOKING_UNKNOWN = /(.*?)/i;", pagesource.join(HERE)).group(1)
         ok(re.search(rx, r1["error"], re.I), "the page holds Book on it")
         ok(copilot._intent_open(12345), "the guard keeps its record")
         r2 = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX}).json()

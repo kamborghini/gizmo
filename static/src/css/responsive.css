@@ -1,0 +1,34 @@
+        /* ---------- Responsive ---------- */
+        /* The sidebar is a drawer up to 900px, the tablet stop. It docked from
+           761, so an iPad held upright (768 to 834) kept 272px of sidebar and
+           gave every page 496 to 562px, less than a 640px window gets, and
+           showed the worst of every squeeze in the app. */
+        .backdrop { display: none; }
+        @media (max-width: 900px) {
+            .sidebar { position: fixed; z-index: 30; height: 100%; margin-left: calc(-1 * var(--sidebar-w));
+                padding-top: env(safe-area-inset-top, 0px);
+                padding-bottom: env(safe-area-inset-bottom, 0px); }
+            /* The lift only while open: parked off-screen it still painted its
+               blur over the left edge of every page and the top bar. */
+            .sidebar.open { margin-left: 0; box-shadow: var(--shadow-lg); }
+            .backdrop.show { display: block; position: fixed; inset: 0; background: var(--overlay-scrim); z-index: 20; }
+        }
+        /* With the sidebar a drawer (900 and under) the frame is the ink top
+           bar: the menu, the section, search. The sheet rises under it with its
+           12 corners, edge to edge. Chat has no page header, so its bar keeps
+           the page's own name. */
+        @media screen and (max-width: 900px) {
+            .main { margin: 0; border-radius: 0; background: transparent; overflow: visible; }
+            .view.active { background: var(--surface-canvas); border-radius: var(--radius-sheet) var(--radius-sheet) 0 0; overflow: hidden; }
+            .topbar { background: transparent; padding: 0 var(--sp-1); }
+            .crumbs { color: var(--nav-text); font-size: var(--text-body); }
+            .topbar h1 { color: var(--nav-text); font-size: var(--text-body); }
+            body:not([data-view="chat"]) :is(#crumb-chev, #view-title) { display: none; }
+            body[data-view="chat"] :is(#view-crumb, #crumb-chev) { display: none; }
+            .topbar :is(.icon-btn, .topbar-search) { color: var(--nav-text); background: transparent; }
+            .topbar-search { width: var(--control-h); padding: 0; justify-content: center; }
+            .topbar-search :is(.ts-label, kbd) { display: none; }
+            @media (hover: hover) { .topbar :is(.icon-btn, .topbar-search):hover { background: var(--chrome-fill); color: var(--text-on-chrome); } }
+            .topbar :is(.icon-btn, .topbar-search):active { background: var(--chrome-press); }
+        }
+

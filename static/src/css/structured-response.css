@@ -1,0 +1,238 @@
+        /* ---------- Structured response components ---------- */
+        .insights { display: flex; flex-direction: column; gap: 0; }
+        /* An insight is a row of a list, in a card or not (the mix, spec 3):
+           no box of its own, a hairline between neighbours, words on the text edge. */
+        .insight { display: flex; gap: var(--sp-3); padding: var(--sp-3) 0; border: 0; border-radius: 0;
+            background: none; box-shadow: none; animation: fadeUp .4s ease backwards; }
+        .insights > .insight + .insight { border-top: var(--bw-hairline) solid var(--border-default); }
+        .insight .ico { width: var(--box-lg); height: var(--box-lg); border-radius: var(--radius-inset); display: grid; place-items: center; flex-shrink: 0; margin-top: 0; }
+        .insight .ico svg { width: var(--icon-sm); height: var(--icon-sm); }
+        .insight .t { font-weight: var(--weight-medium); font-size: var(--text-body); margin: var(--sp-px) 0 var(--sp-1); }
+        .insight .d { color: var(--text-secondary); font-size: var(--text-body); line-height: var(--lh-control); }
+        .insight .ico { background: var(--info-bg); color: var(--info); }  /* generic first: .insight.insight would match EVERY card and clobber the typed colors below */
+        .insight.win .ico { background: var(--success-bg); color: var(--success); }
+        .insight.warning .ico { background: var(--warning-bg); color: var(--warning); }
+        .insight.opportunity .ico { background: var(--opportunity-bg); color: var(--opportunity); }
+
+        /* A SECTION, NOT A CARD (the mix, spec 3): one sheet, few boxes. What
+           was a card is a head and its content on the sheet: no edge, no fill,
+           no padding of its own, its content 12 under its head and on the
+           page's text edge, the page rhythm (48) to the next. The class stays,
+           so every screen's sections changed at once. */
+        .card { background: none; border: 0; border-radius: 0; box-shadow: none;
+            padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+        /* .card's display beat the browser's [hidden]: an empty Skills page
+           drew the hidden 'How they are used' card as a bare 34px box. */
+        .card[hidden] { display: none; }
+        /* A holder that is empty for now (a filters panel not yet opened, a
+           chip row with nothing in it) still costs the card's 16px gap on
+           each side. It takes no room until it holds something. */
+        .card > div:empty { display: none; }
+        /* The product filter holder carries the hidden panel, so it is never
+           :empty, and it opened a second 16px gap under the toolbar. */
+        .card > .ptools:not(:has(> .show, > .row1)) { display: none; }
+        /* The card's own 16px gap is the rhythm between its children, so a
+           toolbar that carries a standalone bottom margin must not add an
+           extra 8px to it, and must not leave that 8px under the last row. */
+        .card > .lbl-toolbar { margin-bottom: 0; }
+        /* Opt out, for the things that should touch the card edge. */
+        .card > .card-bleed { padding-left: 0; padding-right: 0; }
+        /* A label for one of several lists inside a card: under the card's own
+           title in size, above its body copy in weight. */
+        .radar-h { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); margin-top: var(--sp-2); }
+        /* A row of controls inside a card body: a field and its button, or a
+           value and its copy button. It wraps rather than overflows. */
+        .act-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+        /* Save and Cancel side by side in the Size list's narrow action
+           cell; wrapped, they stacked and doubled the row. */
+        .act-row.sizes-edit-acts { flex-wrap: nowrap; }
+        /* The forecast month table: a month and its basis on one line each. */
+        .fc-months th, .fc-months td:nth-child(-n+2) { white-space: nowrap; }
+        /* A drawer's text may break anywhere, but a figure may not: '£293,02'
+           over '8' and '+4.0' over '%' read as other numbers. The table
+           already scrolls, so a whole figure only makes it wider. */
+        details.sect .body .ktable :is(th, td) { overflow-wrap: normal; }
+        details.sect .body .ktable td:not(:first-child) { white-space: nowrap; }
+        .act-row[hidden] { display: none; }
+        /* Setup instructions: numbered steps at the body size, each carrying
+           its own controls, rather than 12px form-help lines. */
+        .setup-steps { margin: 0; padding-left: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-3);
+            font-size: var(--text-body); color: var(--text-secondary); line-height: var(--lh-control); }
+        .setup-steps > li { max-width: var(--measure); }
+        .setup-steps .act-row { margin-top: var(--sp-2); }
+        .setup-code { font-family: var(--font-mono); font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-primary);
+            background: var(--surface-sunken); border-radius: var(--radius-tag); padding: var(--sp-0-5) var(--sp-1-5);
+            word-break: break-all; user-select: all; }
+        .setup-field { flex: 1 1 14rem; max-width: var(--field-w-xl); }
+        .setup-scopes { margin: var(--sp-2) 0; padding-left: var(--sp-5); }
+        .recon-priv { display: flex; flex-direction: column; gap: var(--sp-2); }
+        /* Its own padding-inline: 0 is declared above the card rule and lost
+           to it, so it took the gutter twice: margin and padding, 32px in. */
+        .card > .know-body { padding-inline: 0; }
+        /* A setting's name or an address inside a step's sentence stays whole:
+           .setup-code breaks anywhere, which is right for a long URL on its
+           own line and wrong for '.railway.internal' mid-sentence. It moves to
+           the next line whole, and only an address longer than the line breaks:
+           kept on one line regardless, the callback address ran off a phone. */
+        .setup-steps li > .setup-code { word-break: normal; overflow-wrap: anywhere; }
+        /* A value standing in a row with its Copy button is as tall as the
+           button; a value inside a sentence stays inline text. */
+        .act-row > .setup-code { display: inline-flex; align-items: center; min-height: var(--control-h); padding-inline: var(--sp-3); }
+        /* One algorithm explained: a name, what it does, what it suits and how
+           right it has been. A list of these is reference material, so it is
+           quiet - separated by a hairline rather than boxed, because a stack of
+           boxes inside a box is the thing the card rules exist to prevent. */
+        /* Rows separated by a rule. The rule is an edge of their own, so the
+           inset is a MARGIN (the list above) and the horizontal padding is
+           deliberately 0 - taking BOTH would put the names 32px in against a
+           card-sub at 16px. Written on its axes rather than as a shorthand,
+           because the shorthand reads like an accident: it was missing from
+           the margin list and its 0 silently overrode the card's gutter, so
+           every name, every line of prose and both ends of every rule sat 1px
+           from the card's border. */
+        .fc-algo { padding-block: var(--sp-3); padding-inline: 0;
+            border-top: var(--bw-hairline) solid var(--border-default); }
+        .fc-algo:first-of-type { border-top: 0; padding-block-start: 0; }
+        /* The head is a row: what it is, then what it has been worth. The
+           figures are NOT pushed to the far edge - space-between across a
+           1269px card left a 573px hole between a name and the numbers that
+           describe it, so on a wide screen they read as two unrelated columns
+           and the second one falls off the side of a screenshot. The name
+           takes a fixed column instead, so the figures start at the same place
+           on every row, close enough to belong to the name beside them. */
+        .fc-algo-head { display: flex; align-items: baseline; gap: var(--sp-4); flex-wrap: wrap; }
+        .fc-algo-name { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary);
+            display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+            flex: 0 0 auto; min-width: calc(var(--sp-8) * 9); }
+        .fc-algo-nums { display: flex; align-items: baseline; gap: var(--sp-3); flex-wrap: wrap;
+            font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+        .fc-algo-num { white-space: nowrap; }
+        .fc-algo-text { margin: var(--sp-1-5) 0 0; font-size: var(--text-body); color: var(--text-secondary);
+            line-height: var(--lh-prose); max-width: var(--measure); }
+        /* What the source suits, on its own line under the prose, so it can be
+           found by scanning the left edge instead of read for. The label is
+           the quiet part; the shape of month it fits is the part being
+           compared, so that carries the weight. */
+        .fc-algo-fit { margin-top: var(--sp-1-5); display: flex; align-items: baseline;
+            gap: var(--sp-2); flex-wrap: wrap; max-width: var(--measure); }
+        .fc-algo-fit-lbl { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary);
+            flex: 0 0 auto; min-width: calc(var(--sp-8) * 1.75); }
+        .fc-algo-fit-txt { font-size: var(--text-body); color: var(--text-primary); }
+        /* The comparison row on the chart: a chip per source, obvious rather
+           than buried, wrapping onto as many lines as it needs. */
+        .fc-dates { margin-bottom: var(--sp-3); }
+        .fc-err { display: block; white-space: pre-wrap; margin-top: var(--sp-2); }
+        .fc-drawer-body { display: flex; flex-direction: column; gap: var(--sp-3); }
+        .ktable th .fc-th-wrap { display: inline-block; white-space: normal; min-width: calc(var(--sp-8) * 3); max-width: calc(var(--sp-8) * 4); }
+        /* A column head with its info button beside it. */
+        .fc-th { display: inline-flex; align-items: center; gap: var(--sp-1); }
+        .fc-date { width: calc(var(--sp-8) * 5); }
+        .fc-cmp { display: flex; flex-wrap: wrap; gap: var(--sp-2); flex: 1 1 100%; }
+        /* Cash in: the methods to compare sit 16 under the chart; on a phone
+           the range is one list and the switch moves under the chart. */
+        .fc-cmp-box { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); }
+        .fc-cmp-note { margin: 0; flex: 1 1 100%; color: var(--text-tertiary); max-width: var(--measure); }
+        /* Clear's words start on the text edge, not 12 in. */
+        .fc-cmp-box > .btn.ghost { margin-left: calc(-1 * (var(--sp-3) + var(--bw-hairline))); }
+        .fc-range-pick { display: none; }
+        .fc-cash > .fc-cmp-phone { display: none; }
+        /* The switch is for a screen (it changes a chart, and a printed one cannot be changed). */
+        .fc-cash .sec-tools > .toggle { display: none; }
+        @media screen { .fc-cash .sec-tools > .toggle { display: inline-flex; } }
+        /* The phone's range: the mockup's button (a calendar, the range, a chevron, 40 tall)
+           drawn on the real select, so it keeps the keyboard and the screen reader. */
+        .fc-range-pick > .ic { position: absolute; left: var(--sp-3); top: 50%; margin-top: calc(var(--icon-md) / -2);
+            color: var(--text-secondary); pointer-events: none; }
+        .fc-range-pick > .ic svg { width: var(--icon-md); height: var(--icon-md); }
+        .fc-range-pick > select { padding-left: calc(var(--sp-3) + var(--icon-md) + var(--sp-2)); font-weight: var(--weight-medium);
+            color: var(--text-primary); border-color: var(--border-strong); box-shadow: var(--shadow-control); }
+        .ov-wrap .fc-cash.widget-bare > .chart-card:not(:last-child) { margin-bottom: 0; }
+        @media (max-width: 640px) {
+            .fc-cash .sec-tools > :is(.toggle, .segmented) { display: none; }
+            .fc-range-pick { display: inline-block; position: relative; }
+            .fc-cash > .fc-cmp-phone { display: inline-flex; margin-top: var(--sp-3); }
+        }
+        /* A notice spans its card, so it ends on the card's gutter like everything
+           else in it; its words keep the reading measure. Capped at 56rem, the
+           box stopped short of the card and looked unfinished. */
+        .load-failed > div:first-child { max-width: var(--measure); }
+        /* A LIST THAT IS ALREADY IN A CARD IS A LIST OF ROWS, NOT A STACK OF
+           CARDS. Insight cards, Details disclosures and the opportunity list
+           each drew their own 1px hairline in the same grey, on the same white,
+           17px inside the wrapping card's identical hairline: two concentric
+           frames saying one thing. Measuring the reference: apart from its four
+           top-level cards the only borders on the page are row rules, and every
+           list it draws inside a card is separated by a bottom hairline alone.
+           So these three shed their frame and become rows on the card, taking
+           the 16px gutter from their OWN padding the way .action rows already
+           do - which is also why .insights loses the padding it used to hand
+           out: the rule between two rows has to reach the card's edge. */
+        .card-bleed > .insights { gap: 0; }
+        .card-bleed .block { margin-bottom: 0; }
+        .card-bleed > .insights > .insight, .card-bleed .block > .insights > .insight,
+        .card-bleed > details.sect, .card-bleed .block > details.sect,
+        .card-bleed > .actions, .card-bleed .block > .actions {
+            border: 0; border-radius: 0; box-shadow: none;
+            margin-left: 0; margin-right: 0; margin-bottom: 0; }
+        .card-bleed > .insights > .insight + .insight, .card-bleed .block > .insights > .insight + .insight,
+        .card-bleed > details.sect + details.sect, .card-bleed .block > details.sect + details.sect {
+            border-top: var(--bw-hairline) solid var(--border-default); }
+        /* ...and on the section's text edge: no side padding of their own. */
+        .card-bleed > .insights > .insight, .card-bleed .block > .insights > .insight { padding-inline: 0; }
+        /* ...and 16 UNDER it, not the standalone 8 it carries elsewhere: inside
+           a card the gap between a toolbar and the table below it is the card's
+           own 16, and 8 was the last of three different gaps in one card. */
+        .card-bleed > .lbl-toolbar { margin-bottom: var(--sp-4); }
+        /* Header: title, one line of muted description, and an action rail on
+           the right that drops under on a narrow card. */
+        /* A section's head row: the title (with its count and info button) on
+           the left and its tools on the right, 32 tall so a button beside it
+           sits on the title's line. */
+        .card-head { display: grid; grid-template-columns: 1fr auto; align-items: center;
+            gap: var(--sp-1) var(--sp-4); min-height: var(--control-h); }
+        .card-title { font-size: var(--text-head); font-weight: var(--weight-semibold);
+            line-height: var(--lh-control); margin: 0; display: flex; align-items: center; gap: var(--sp-2); }
+        /* A title with its info button (titleInfo): the heading and the button side by side in a
+           row, the heading's name staying its words. */
+        .title-row { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+        .card-desc { grid-column: 1; font-size: var(--text-body); color: var(--text-tertiary);
+            line-height: var(--lh-control); margin: 0; max-width: var(--measure); }
+        /* The reference's orders card head: a quiet title, a big counted line,
+           and a muted line under it. */
+        .card-head-stat .card-title { font-size: var(--text-body); font-weight: var(--weight-regular); color: var(--text-tertiary); }
+        .card-head-stat .card-desc { font-size: var(--fig-s); font-weight: var(--weight-semibold); color: var(--text-primary); line-height: var(--lh-none); letter-spacing: var(--tr-fig); }
+        .card-sub { grid-column: 1; margin: 0; font-size: var(--text-body); color: var(--text-tertiary); line-height: var(--lh-control); max-width: var(--measure); }
+        .card-sub b { color: var(--text-primary); font-weight: var(--weight-medium); }
+        .card-act { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center;
+            gap: var(--sp-2); flex-wrap: wrap; justify-content: flex-end; }
+        /* A header's button rail has at most half the head, and its buttons
+           wrap inside it. As an auto column it took all it asked for: the
+           Production Manager's four buttons left the title and description a
+           column 80px wide, CRM's Contacts 82px, Deals 116px, and Skills,
+           Inbox and Xero sync 146 to 165px at 768. A rail that cannot wrap
+           still gets its narrowest width, so it never lies over the title.
+           On a wide header the title keeps 18rem and the rail may have the
+           rest: at a flat half, two 14px buttons wrapped onto a second line
+           at 1024 and 768 beside a title that needed a third of the room. */
+        @media (min-width: 641px) { .card-head { grid-template-columns: 1fr fit-content(max(50%, 100% - 18rem - var(--sp-4))); } }
+        /* A stat head's text is a count and one short line, so it keeps
+           12.5rem and its rail has the rest. At half, Products' three buttons
+           wrapped at 700 and at 821 to 900 with the count already on one
+           line. Its rail spans the summary row as well, so buttons that do
+           wrap sit beside all three lines rather than pushing the count away
+           from its title. Held to the title's row instead, a rail one button
+           tall pushed every stat head's count down 14px, Connection's on Xero
+           sync included, and on a phone it put the buttons above the title. */
+        @media (min-width: 641px) {
+            .card-head-stat { grid-template-columns: 1fr fit-content(max(50%, 100% - 12.5rem - var(--sp-4))); }
+            .card-head-stat:has(> .card-sub) > .card-act { grid-row: 1 / span 3; }
+        }
+        @media (max-width: 640px) {
+            .card-head { grid-template-columns: 1fr; }
+            .card-act { grid-column: 1; grid-row: auto; justify-content: flex-start; margin-top: var(--sp-2); }
+            /* A single button (the Guide's print, + Lead, Add a unit, Retry failed) stays
+               beside its title, as on a desktop, rather than taking a line of its own (R13). */
+            .card-head:has(> .card-act > :only-child:is(button, .btn)) { grid-template-columns: 1fr auto; }
+            .card-head > .card-act:has(> :only-child:is(button, .btn)) { grid-column: 2; grid-row: 1 / span 2; margin-top: 0; }
+        }
+

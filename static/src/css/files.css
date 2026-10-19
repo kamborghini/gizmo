@@ -1,0 +1,151 @@
+        /* Files */
+        /* Page-level metadata, set at the size the rest of the page's metadata
+           is. The bar is the part that gives up width on a phone: it kept 210
+           of the 332 available and broke the label's last word onto its own
+           line, which doubled the meter's height. */
+        .files-meter { display: flex; align-items: center; gap: var(--sp-2-5); font-size: var(--text-body); color: var(--text-secondary); margin: var(--sp-1) 0 var(--sp-4); }
+        .files-meter span { white-space: nowrap; }
+        .files-meter .bar { flex: 1 1 120px; min-width: 80px; max-width: 220px; height: var(--sp-1); border-radius: var(--radius-full); background: var(--surface-tertiary); overflow: hidden; }
+        .files-meter .bar i { display: block; height: 100%; background: var(--fill-mark); border-radius: var(--radius-full); }
+        .files-meter.warn .bar i { background: var(--error); }
+        /* No margin of its own: the card's 16px gap is the rhythm here, and a
+           12/8 margin on top of it made the trail's two sides differ. */
+        .files-crumbs { display: flex; align-items: center; gap: var(--sp-0-5); margin: 0; font-size: var(--text-body); flex-wrap: wrap; color: var(--text-tertiary); }
+        .files-crumb { border: 0; background: transparent; font: inherit; font-size: var(--text-body); color: var(--text-secondary); padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-control); cursor: pointer; }
+        @media (hover: hover) { .files-crumb:hover { background: var(--surface-tertiary); color: var(--text-primary); } }
+        .files-crumb.here { color: var(--text-primary); font-weight: var(--weight-medium); cursor: default; background: transparent; }
+        .files-crumb.dropok { background: var(--action-soft); color: var(--text-brand); }
+        .files-crumbs svg { width: var(--icon-sm); height: var(--icon-sm); }
+        /* The crumbs and the upload queue are always-present hosts, and an
+           empty one still took a 16px gap from the card either side of it. */
+        .files-slot:empty { display: none; }
+        /* A list of files (and a team's people and activity) is rows on the
+           section's text edge, no box: a row's words start where the section
+           title's do, and its hairline runs the text column. The hover fill is
+           drawn 8 past the column each side, so the words never touch it. */
+        .files-list { border: 0; border-radius: 0; background: none; overflow: visible; }
+        .files-list.drag { outline: 2px dashed var(--border-selected); outline-offset: -2px; background: var(--action-soft); }
+        /* 12px on every side and a full hairline, like every other list in the
+           app now. The 0.5px rule lands on a device pixel on some screens and
+           disappears on others. */
+        .files-row { display: flex; align-items: center; gap: var(--sp-2-5); padding: var(--sp-3) 0;
+            border-top: var(--bw-hairline) solid var(--border-default); font-size: var(--text-body); }
+        .files-row:first-child { border-top: 0; }
+        @media (hover: hover) { .files-row:hover { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); } }
+        .files-row.dropok { background: var(--action-soft); }
+        .files-row > svg, .files-row > span:first-child svg { width: var(--icon-md); height: var(--icon-md); color: var(--text-tertiary); flex: none; display: block; }
+        .files-row.is-folder > span:first-child svg { color: var(--text-brand); }
+        .files-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            border: 0; background: transparent; font: inherit; font-size: var(--text-body); font-weight: var(--weight-medium);
+            color: var(--text-primary); text-align: left; cursor: pointer;
+            /* The only way into a folder was the 20px line box of its name.
+               The padding is the touch target; the negative margin cancels
+               its effect on the row, which keeps its old height. */
+            padding: var(--control-pad-y) 0; margin: calc(-1 * var(--control-pad-y)) 0; text-decoration: none; text-underline-offset: var(--sp-1); }
+        /* The underline is the hover, not the resting state: drawn at rest it
+           striped every name in the list and told the reader nothing. */
+        @media (hover: hover) { .files-name:hover { color: var(--text-brand); text-decoration: underline; } }
+        .files-name:focus-visible { text-decoration: underline; }
+        .files-name.still { cursor: default; }
+        @media (hover: hover) { .files-name.still:hover { color: var(--text-primary); text-decoration: none; } }
+        .files-name .fpath { color: var(--text-tertiary); font-weight: var(--weight-regular); }
+        .files-meta { color: var(--text-tertiary); font-size: var(--text-xs); line-height: var(--lh-caption); white-space: nowrap; flex: none; }
+        /* Drawn at rest, the way the reference fills its right gutter: at
+           opacity 0 the row ended in 128px of blank white and every action in
+           the tab had to be discovered by hovering. .75 is as quiet as the
+           glyphs can go and still clear 3:1 against the surface (--text-tertiary at
+           .75 is #8e8e8e, 3.25:1); the hover takes them to full ink. */
+        .files-acts { display: flex; gap: var(--sp-0-5); flex: none; opacity: .75; transition: opacity var(--dur) var(--ease); }
+        .files-row:focus-within .files-acts { opacity: 1; }
+        @media (hover: hover) { .files-row:hover .files-acts { opacity: 1; } }
+        /* The trash's two text buttons are the only controls in that segment. */
+        .files-acts.wide { opacity: 1; }
+        @media (hover: none) { .files-acts { opacity: 1; } }
+        /* Size, date and uploader were one right-aligned string, so the size
+           began at a different x on almost every row and the other two facts
+           never lined up at all. Three cells, the way the reference tables
+           them, and a column can be read down. Capped rather than fixed: the
+           tracks resolve to 140/96/88 whenever the row can afford them, and
+           when it cannot the grid yields its slack, widest cap first, rather
+           than the name being the only thing left to take it from. */
+        .files-cols { display: grid; grid-template-columns: minmax(0, 140px) minmax(0, 96px) minmax(0, 88px);
+            gap: var(--sp-4); flex: 0 1 auto; min-width: 0;
+            align-items: center; font-size: var(--text-body); color: var(--text-tertiary); }
+        .files-cols span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .files-cols .size { text-align: right; }
+        @media (hover: hover) { .files-head:hover { background: transparent; box-shadow: none; } }
+        .files-head .files-cols { color: var(--text-primary); font-weight: var(--weight-medium); }
+        /* The Files list only: the same .files-row shell carries the Team and
+           Work rows, which hold wrapping sentences rather than table cells. */
+        #files-content .files-row { padding: var(--sp-2) 0; }
+        /* A file row offers four buttons and a folder row two. Reserving the
+           four on both is what stops the folders' figures sitting 60px right
+           of every file's. The trash answers with two text buttons instead,
+           which no 118px column holds: 'Put back' and 'Delete now' measure
+           159.5px together at the small scale, so that list reserves its own
+           width and its header cell is built to match. */
+        #files-content .files-acts { min-width: 118px; justify-content: flex-end; }
+        /* ONE TABLE BY ITS COLUMNS (12 Oct 2026, OPS-28, OPS-30): the list is
+           one grid and every row takes its tracks, the icon, Name 2, Owner 1,
+           Modified 1 and Size 0.6 sharing the spare width, then the actions in
+           one column, a folder's two in the files' last two slots. The facts sat
+           in fixed cells pushed right by a stretching name. Not on a phone,
+           where a row is two lines. */
+        @media (min-width: 641px) {
+            #files-content .files-list:has(> .files-row) { display: grid; grid-template-columns: max-content minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, .6fr) max-content; column-gap: var(--sp-4); }
+            #files-content .files-list:has(> .files-row) > * { grid-column: 1 / -1; }
+            #files-content .files-list > .files-row { display: grid; grid-template-columns: subgrid; column-gap: var(--sp-4); }
+            #files-content .files-list > .files-row > .files-cols { display: contents; }
+            #files-content .files-list > .files-row > .files-cols > .who { display: block; }
+        }
+        .files-more { display: none; }
+        .page-tabs-end > .files-meter { margin: 0; }
+        #files-content .files-acts.wide { min-width: 160px; }
+        /* The name is the flexible cell and it starts from a floor rather than
+           from its own text: with a content basis, a long name and a short one
+           shrank by different amounts and the columns stopped lining up. */
+        @media (min-width: 641px) { #files-content .files-name { flex: 1 1 140px; } }
+        /* The uploader is the first fact to go when the card gets narrow: the
+           date and the size are the two a file is looked up by. It goes at
+           1100 rather than 900, which is the width where its 156px is what
+           the name would otherwise have had to give up. */
+        @media (max-width: 1100px) {
+            .files-cols { grid-template-columns: minmax(0, 96px) minmax(0, 88px); }
+            .files-cols .who { display: none; }
+        }
+        .files-empty { padding: var(--sp-3) 0; text-align: left; color: var(--text-tertiary); font-size: var(--text-body); }
+        .card > .card-bleed.files-list > .files-empty:only-child { padding-block: 0; }
+        .files-hint { margin-top: var(--sp-2); font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        /* In the Files card the hint is a block of the card like the list and
+           the toolbar are, and the card's 16px gap is the rhythm: its own 8px
+           on top of that made the one gap in the card that was 24. */
+        #files-content .files-hint { margin-top: 0; }
+        /* An upload in progress is a hairline row on the text edge, no box (the mix, spec 3). */
+        .files-up { display: flex; align-items: center; gap: var(--sp-2-5); padding: var(--sp-2) 0; border: 0; border-radius: 0; background: none;
+            box-shadow: var(--rule-b-soft); margin-bottom: 0; font-size: var(--text-body); }
+        .files-up .upname { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .files-up .bar { flex: 1 1 60px; height: 5px; border-radius: var(--radius-full); background: var(--surface-sunken); overflow: hidden; }
+        .files-up .bar i { display: block; height: 100%; background: var(--fill-mark); border-radius: var(--radius-full); }
+        .files-up.failed { box-shadow: inset 0 calc(-1 * var(--bw-hairline)) 0 var(--error); }
+        /* A failed upload has no progress to show: its empty track only squeezed the name and the reason beside it. */
+        .files-up.failed .bar { display: none; }
+        .files-up .upstate { color: var(--text-tertiary); font-size: var(--text-xs); line-height: var(--lh-caption); white-space: nowrap; }
+        .files-up.failed .upstate { color: var(--error); white-space: normal; }
+        /* A name field is a field, not a row: at flex: 1 1 auto it ran from the
+           name column straight through Owner, Modified and Size to the row's
+           right edge. Capped at 320 with the leftover taken by the auto margin,
+           so the columns beside it do not move while a name is being typed.
+           20px of line box, like every other control, keeps the row at 45. */
+        .files-rename { flex: 0 1 320px; min-width: 0; margin-right: auto; font: inherit;
+            font-size: var(--text-body); line-height: var(--lh-control); padding: var(--sp-1) var(--sp-2); border: var(--bw-hairline) solid var(--border-selected);
+            border-radius: var(--radius-field); background: var(--surface-primary); color: var(--text-primary); }
+        /* Team + Work rows reuse the files-row shell but carry long data
+           strings and no leading icon: let their meta wrap instead of clip,
+           and drop the file-icon indent on phones. */
+        .tm-row { flex-wrap: wrap; }
+        /* A role that cannot be changed is a label, so it is a tag, not a box
+           that looks like a disabled field. */
+        .tm-role-fixed { display: inline-flex; align-items: center; height: var(--tag-h); padding: 0 var(--sp-1-5);
+            font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-secondary); border: 0;
+            border-radius: var(--radius-tag); background: var(--surface-sunken); }
+        .tm-row .files-meta { white-space: normal; }

@@ -27,6 +27,17 @@
    ]
   },
   {
+   "date": "2026-10-19",
+   "title": "Behind the scenes",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "The app's page is now kept in sections, so a change to one screen is quicker and safer to make. Nothing you see changes."
+    }
+   ]
+  },
+  {
    "date": "2026-10-14",
    "title": "Windows and the keyboard",
    "items": [

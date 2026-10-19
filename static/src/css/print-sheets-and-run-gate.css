@@ -1,0 +1,94 @@
+        /* Day sheet: one A4 cut list for the bench. */
+        .day-sheet { background: var(--paper); color: var(--paper-ink); width: 100%; max-width: 186mm; padding: 2mm;
+            font-family: var(--font-print); }
+        .day-sheet.wide { max-width: none; }
+        /* The guide's section headings had no rule, so they fell back to the UA's
+           1.5em bold and outsized the document title. */
+        .day-sheet h2 { font-size: 15px; font-weight: var(--weight-semibold); letter-spacing: -.01em;
+            margin: 18px 0 6px; padding-bottom: 3px; border-bottom: var(--bw-hairline) solid var(--paper-rule-2);
+            break-after: avoid; page-break-after: avoid; }
+        .day-sheet h1 { font-size: 22px; font-weight: var(--weight-semibold); letter-spacing: -.02em; margin: 0; }
+        .day-sheet .ds-meta { font-size: var(--text-sm); color: var(--paper-ink-4); margin: 4px 0 14px; }
+        .day-sheet .ds-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+        .day-sheet .ds-table th { text-align: left; border-bottom: var(--bw-strong) solid var(--paper-rule-strong); padding: 6px 8px;
+            font-size: var(--text-xs); text-transform: none; letter-spacing: normal; }
+        .day-sheet .ds-table td { border-bottom: var(--bw-hairline) solid var(--paper-rule); padding: 8px; }
+        .day-sheet .ds-size { font-weight: var(--weight-semibold); font-size: var(--text-md); }
+        .day-sheet .ds-qty { font-weight: var(--weight-semibold); }
+        .day-sheet .ds-tick { width: 60px; }
+        .day-sheet td.ds-tick::after { content: ''; display: inline-block; width: 16px; height: 16px;
+            border: var(--bw-strong) solid var(--paper-rule-strong); border-radius: 3px; }
+        .day-sheet .ds-flag { margin-top: 12px; border: var(--bw-strong) solid var(--paper-ink); padding: 8px 10px;
+            font-weight: var(--weight-semibold); font-size: var(--text-sm); }
+        .day-sheet .ds-orders { margin-top: 14px; font-size: var(--text-xs); color: var(--paper-ink-4); }
+        @media print {
+            /* Label mode prints ONLY the label sheets, one per physical label.
+               Everything else at body level goes, whatever it is. Naming them
+               one at a time is how three things in a row reached the printer:
+               #toast-host, then the skip link, then the widget grid's live
+               region, which is one absolute pixel that sat exactly at the foot
+               of the sheet and printed a second, blank label every time. */
+            body.printing-label > :not(#label-print) { display: none !important; }
+            body.printing-label #label-print { position: static !important; left: auto !important; }
+            body.printing-label .label-sheet { border: 0 !important; border-radius: 0 !important;
+                break-after: page; page-break-after: always; }
+            body.printing-label .label-sheet:last-child { break-after: auto; page-break-after: auto; }
+        }
+        /* PDF export (print) */
+        .print-head { font-size: var(--text-sm); line-height: var(--lh-body); display: none; align-items: center; justify-content: space-between; padding: 0 0 var(--sp-4); margin-bottom: var(--sp-3); border-bottom: var(--bw-hairline) solid var(--border-strong); }
+        .print-head .ph-brand { font-weight: var(--weight-semibold); font-size: var(--text-md); letter-spacing: -.02em; }
+        .print-head .ph-meta { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); }
+        @media print {
+            @page { margin: 14mm; }
+            /* Paper has no tinted grounds to sit on, so surfaces go flat white.
+               Everything else keeps the app's own light palette. */
+            :root { --surface-primary: var(--white); --surface-secondary: var(--white); --surface-tertiary: var(--white); }
+            html, body, #app { height: auto !important; display: block !important; background: var(--white) !important; }
+            body::before { display: none !important; }
+            body, body * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            .card, .chart-card, .stat, .seg-card, .insight, .ktable-wrap, .run-gate { box-shadow: none !important; }
+            .sidebar, .backdrop, .topbar, #print-btn, .modal-overlay, #toast-host { display: none !important; }
+            .main { display: block !important; height: auto !important; }
+            .view { display: none !important; }
+            .view.active { display: block !important; position: static !important; }
+            .view.active .scroll { height: auto !important; max-height: none !important; overflow: visible !important; }
+            /* drop interactive bits from a static report */
+            .sr-only, .page-chat, .composer-wrap, .run-gate, .chart-expand, .stat-act, .wg-hide, [data-wg-control], .data-drill,
+            .ptools, .pfilters, .fchips, .scan-card, .segmented, .tabs, .alerts-banner, .back-btn,
+            .track-btn, .mem-acts, .sk-acts, .sk-editor, .mem-add, .impact-acts, .know .card-act, .chart-tip, .sk-more, .ov-updated, .ov-hero-act { display: none !important; }
+            .print-head { display: flex !important; }
+            /* The arrangement on screen, hidden cards left out, in one column:
+               four columns on an A4 page would squeeze every card. The
+               attributes the layer wrote are overruled rather than removed. */
+            .ov-wrap.wgrid { grid-template-columns: minmax(0, 1fr) !important; }
+            .ov-wrap.wgrid > * { grid-column: 1 / -1 !important; }
+            .ov-wrap.wgrid > [data-widget][hidden] { display: none !important; }
+            .ov-wrap.wg-editing > [data-widget] { outline: none !important; box-shadow: none !important; translate: none !important; scale: none !important; }
+            /* keep blocks whole across page breaks */
+            .card, .chart-card, .stat, .seg-card, .insight, .ktable-wrap, .action, .changes-strip,
+            .ov-hero, .seo-score, .section-title, .prod-row, .files-row, .lia-row
+                { break-inside: avoid; page-break-inside: avoid; }
+            /* Affordances that only mean something under a finger. */
+            .prod-go, .files-go, .crm-go { display: none !important; }
+            /* A printed queue is one column, never a queue beside a pane. */
+            .lbl-split { display: block !important; }
+            .lbl-pane { position: static !important; }
+        }
+        /* run-task gate (tabs stay idle until the user starts the task) */
+        /* A run gate is an empty state under its page's header (renderRunGate).
+           Customers builds its own until Task 36 moves it onto the same builder. */
+        /* One line under the header, as every empty state is (12 Oct 2026): the
+           tile, what a run costs and what it reads, then Run. */
+        .run-gate { text-align: left; display: flex; flex-direction: row; align-items: center; gap: var(--sp-4); padding: var(--sp-4) 0; }
+        /* 7vh is for a page that is only the gate. Under a card it is stacked
+           on the card's own margin, which measured 65 to 71px of nothing. */
+        .ov-wrap > * + .run-gate { margin-top: 0; }
+        /* Wider, not taller. This overrode the vertical padding to 12px and
+           came out 46px against a control system that is 32 everywhere and a
+           reference whose largest button is also 32. The reference makes a
+           primary action loud by filling it, never by growing it. */
+        /* The reference's lg button keeps the 10px inset of every other size. */
+        .run-gate .rg-btn { font-size: var(--text-body); padding: var(--control-pad-y) var(--sp-3); }
+        /* The gate's one line is the empty state's, not the old paragraph's (Customers' own gate keeps those). */
+        .run-gate .empty-line { color: var(--text-primary); font-size: var(--text-head); line-height: var(--lh-control); margin: 0; max-width: var(--measure); }
+        .run-gate .rg-btn svg { width: var(--icon-md); height: var(--icon-md); }
