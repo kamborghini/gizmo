@@ -62,16 +62,13 @@
         .ipop h3 { margin: 0; font-size: var(--text-body); line-height: var(--lh-control); font-weight: var(--weight-semibold); color: var(--text-primary); }
         .ipop p { margin: 0; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }
         .ipop .link { align-self: flex-start; margin-top: var(--sp-1); }
-        /* A standalone link ("Show all", "More in the Guide"): teal words at
-           500 with a 14 arrow 2 after them. Not underlined: it stands alone, so
-           the arrow carries what an underline does in running text. */
-        .link { display: inline-flex; align-items: center; gap: var(--sp-0-5); padding: 0; border: 0; background: none;
-            font: inherit; font-weight: var(--weight-medium); color: var(--text-link); text-decoration: none; cursor: pointer; border-radius: var(--radius-tag); }
-        .link svg { width: var(--icon-sm); height: var(--icon-sm); stroke-width: var(--icon-stroke-s); }
-        .link:active { color: var(--text-link-hover); }
-        @media (hover: hover) { .link:hover { color: var(--text-link-hover); } }
+        
+        
+        
+        
+        
         /* On a phone a standalone link is a 40 target (a link inside a sentence is not a .link). */
-        @media (max-width: 640px) { .link { min-height: var(--control-h-lg); } }
+        
         .drive-title { margin: 0; font-size: var(--text-body); font-weight: var(--weight-medium); }
         .drive-p, .drive-note { margin: 0; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }
         .drive-p b { color: var(--text-primary); font-weight: var(--weight-medium); overflow-wrap: anywhere; }

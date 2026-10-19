@@ -75,7 +75,7 @@
         .req-acts { margin-top: var(--sp-2); }
         .tab-dot { display: inline-block; width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); background: var(--fill-mark); margin-left: var(--sp-1-5); vertical-align: middle; }
         .stack-form { display: flex; flex-direction: column; gap: var(--sp-4); }
-        .pfield > .field-help { margin: 0; font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-regular); color: var(--text-secondary); }
+        
         .stack-form > .linkish { align-self: flex-start; }
         .stack-form .pf-input { margin: 0; }
         .stack-form .pfield > :is(input, textarea) { width: 100%; }

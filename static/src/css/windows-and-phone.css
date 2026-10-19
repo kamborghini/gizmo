@@ -13,9 +13,9 @@
         .coll-host > .section-title:first-child { margin-top: var(--sp-4); }
         .modal-body .section-title + .setting-row,
         .modal-body .section-title + * > .setting-row:first-child { border-top: 0; }
-        .toggle[aria-disabled="true"] { cursor: default; }
-        .toggle[aria-disabled="true"] .sw { background: var(--surface-tertiary); }
-        .toggle[aria-disabled="true"]:is(.on, [aria-checked="true"]) .sw { background: var(--border-strong); }
+        
+        
+        
         .settings-toggles { margin-top: var(--sp-1); }
         .setting-row { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-3) 0; border-top: var(--bw-hairline) solid var(--border-default); }
         .setting-row:has(> .row-acts) { flex-wrap: wrap; row-gap: var(--sp-3); }
@@ -57,12 +57,12 @@
             :is(.btn, .btn-sm, .segmented > button, .tab, .chip, .toggle, .qt, .dmenu-item, .nav-item, .convo, .rlist-row, details.sect summary) { font-size: var(--text-sm); }
             :is(.icon-btn:not(.icon-btn-sm, .icon-btn-tag), .btn-sm.btn-icon, .topbar .icon-btn, .topbar-search) { min-width: var(--control-h-lg); }
             :is(.tab, .tbl-step, .guide-toc-link, .toggle) { min-width: var(--control-h-lg); }
-            .toggle:has(> .sw:only-child) { justify-content: flex-end; }
+            
             .tbl-step { width: var(--control-h-lg); }
             .tab { justify-content: center; }
             .mail-bulkbar .btn { min-height: var(--control-h-lg); }
             .mail-bulkbar { min-height: calc(var(--control-h-lg) + 2 * var(--sp-1)); }
-            .btn-sm.btn-icon { width: var(--control-h-lg); }
+            
             .section-title, .card-head { min-height: var(--control-h-lg); }
             /* An info button keeps its 24 look; its 40 target grows up, down
                and away from its words, so it never covers them. */

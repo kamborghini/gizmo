@@ -29,3 +29,11 @@ test('an element on one side only is named, unless the head runs disagree on it'
 test('pseudo-elements are their own properties', () => {
   assert.deepStrictEqual(properties('color:red|::beforecontent:"x";color:blue'), { 'el color': 'red', '::before content': '"x"', '::before color': 'blue' });
 });
+
+test('a colour that draws nothing is not a change: a border with no width, an outline with no style', () => {
+  const base = shot({ a: 'border-top-color:red;border-top-style:none;border-top-width:0px;outline-color:red;outline-style:none' });
+  const head = shot({ a: 'border-top-color:blue;border-top-style:none;border-top-width:0px;outline-color:blue;outline-style:none' });
+  assert.deepStrictEqual(compare(base, head, head), []);
+  const seen = shot({ a: 'border-top-color:blue;border-top-style:solid;border-top-width:1px' });
+  assert.strictEqual(compare(shot({ a: 'border-top-color:red;border-top-style:solid;border-top-width:1px' }), seen, seen).length, 1);
+});

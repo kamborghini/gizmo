@@ -14,7 +14,7 @@
         /* A finger-sized target on a touch screen, with room between: a small icon
            button (a dense row's actions, a cross) is the control's 32 under a finger. */
         @media (pointer: coarse) {
-            .icon-btn.icon-btn-sm { min-width: var(--control-h); min-height: var(--control-h); }
+            
             .mem-acts, .sk-acts { gap: var(--sp-2); }
         }
         .mem-edit, .mem-add { display: grid; gap: var(--sp-2); }
@@ -139,7 +139,7 @@
         /* A button that is on (a filter that is set) wears the chosen recipe:
            the teal wash and edge, with ink words. */
         .btn:is(.on, [aria-pressed="true"]) { background: var(--action-selected); border-color: var(--border-selected); color: var(--text-primary); font-weight: var(--weight-medium); }
-        @media (hover: hover) { .btn.ghost:hover { background: var(--surface-tertiary); } }
+        
         /* The filter fields are a row of controls on the section, not a panel
            round them (the mix, spec 3): no box, and on the text edge. */
         .pfilters { display: none; flex-wrap: wrap; gap: var(--sp-3) var(--sp-3); padding: 0; border: 0; border-radius: 0; background: none; }
@@ -147,9 +147,9 @@
         .pfilters.show { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
         @media (max-width: 1100px) { .pfilters.show { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
         @media (max-width: 640px) { .pfilters.show { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-        .pfield { display: flex; flex-direction: column; gap: var(--sp-1); }
+        
         /* The wrapper IS the label now (implicit association); caption is a span. */
-        .pfield label, .pfield > span { font-size: var(--text-body); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-primary); }
+        
         .fchips { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
         .fchip { display: inline-flex; align-items: center; gap: var(--sp-1); background: var(--action-soft); border: var(--bw-hairline) solid var(--action-line); color: var(--text-brand); border-radius: var(--radius-control); padding: var(--sp-1) var(--sp-2) var(--sp-1) var(--sp-3); font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); }
         /* The 12px glyph was the whole target; the box grows around it and the

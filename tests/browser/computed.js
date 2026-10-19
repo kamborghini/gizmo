@@ -107,14 +107,26 @@ function compare(base, head1, head2) {
     if (b === h || h !== h2) continue;
     if (b === undefined || h === undefined) { out.push({ key: k, only: b === undefined ? 'head' : 'base' }); continue; }
     const pb = properties(b), ph = properties(h);
-    const props = [...new Set([...Object.keys(pb), ...Object.keys(ph)])].filter(p => pb[p] !== ph[p]).sort()
+    const props = [...new Set([...Object.keys(pb), ...Object.keys(ph)])].filter(p => pb[p] !== ph[p] && !unseen(p, pb, ph)).sort()
       .map(p => ({ prop: p, base: pb[p], head: ph[p] }));
-    out.push({ key: k, props });
+    if (props.length) out.push({ key: k, props });
   }
   return out;
 }
 
-module.exports = { fingerprint, compare, properties, CONTROLS };
+// A value that draws nothing on either side: a border's colour where that
+// border has no width or no style, an outline's colour, width or offset where
+// there is no outline.
+function unseen(p, a, b) {
+  const [tag, prop] = p.split(' ');
+  const none = (side, f) => [a, b].every(x => x[tag + ' ' + f(side + '-style')] === 'none' || x[tag + ' ' + f(side + '-width')] === '0px');
+  const m = /^border-(top|right|bottom|left)-color$/.exec(prop);
+  if (m) return none('border-' + m[1], x => x);
+  if (/^outline-(color|width|offset)$/.test(prop)) return [a, b].every(x => x[tag + ' outline-style'] === 'none');
+  return false;
+}
+
+module.exports = { fingerprint, compare, properties, unseen, CONTROLS };
 
 // node tests/browser/computed.js <base dir> <head1 dir> <head2 dir>: the report,
 // exit 1 when any state changed.

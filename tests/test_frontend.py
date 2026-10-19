@@ -1851,7 +1851,8 @@ def t_a_link_is_still_identifiable_without_colour():
     style = HTML[HTML.index("<style>"):HTML.index("</style>")]
     for sel in [".lbl-num-link, .modal-order-link, .action-link", ".mail-order-name", ".miss-open",
                 ".seclink", ".sk-more", ".linkish"]:
-        i = style.find("\n        " + sel + " {")
+        m = re.search(r"\n\s+" + re.escape(sel) + r" \{", style)
+        i = m.start() if m else -1
         ok(i >= 0, "the %s rule is still there" % sel)
         body = style[i:style.index("}", i)]
         # underlined by its own rule or as a member of the ONE LINK recipe (its :is() list carries the underline for them all)
@@ -9322,6 +9323,91 @@ def t_css_proof_is_wired():
        "hover and keyboard focus forced, pseudo-elements included")
 
 
+LAYER_PARTS = {   # a part's file: (the classes it owns, one of which a selector must name)
+    "button": ({"btn", "btn-primary", "btn-danger", "btn-ghost", "btn-sm", "btn-icon", "ghost", "ic"}, {"btn", "btn-primary", "btn-danger", "btn-sm", "btn-icon"}),
+    "icon-button": ({"icon-btn", "icon-btn-sm", "icon-btn-tag", "del", "ok"}, {"icon-btn"}),
+    "link": ({"linkish", "seclink", "link"}, {"linkish", "seclink", "link"}),
+    "field": ({"pfield", "field-help"}, {"pfield", "field-help"}),
+    "switch": ({"toggle", "sw", "on"}, {"toggle"}),
+    "tick-row": ({"tick-row"}, {"tick-row"}),
+    "row": ({"row-open"}, {"row-open"}),
+}
+
+
+def _layer_kind(sel):
+    """Which layer a selector belongs in: 'base', a part's name, or None (it stays above): the
+    tokens, and what paper reads (html, body, every element), are not layered."""
+    kinds = set()
+    for one in re.split(r",(?![^()]*\))", sel):
+        one = one.strip()
+        if "#" in one or "&" in one:
+            return None
+        cls = set(re.findall(r"\.([\w-]+)", one))
+        if not cls:
+            if one.startswith("[data-") or one == ":root" or re.search(r"(^|[\s>+~(,])(html|body|\*)(?![\w-])", one):
+                return None
+            if re.search(r"(?<![\w-])(input|textarea|select)(?![\w-])|contenteditable", one):
+                return None    # a field's element rules stay with the screens until fields move as a part
+            kinds.add("base")
+            continue
+        hit = [p for p, (own, anchor) in LAYER_PARTS.items() if cls <= own and cls & anchor]
+        if len(hit) != 1:
+            return None
+        kinds.add(hit[0])
+    return kinds.pop() if len(kinds) == 1 else None
+
+
+@test
+def t_the_stylesheet_opens_with_its_layers():
+    """Stage 3, piece 6: the element defaults and the built parts' own rules
+    sit in cascade layers below everything else, so a screen's own rule beats
+    a part's whatever their weights. The tokens, what paper reads (html, body,
+    every element) and print are not in a layer."""
+    body = re.sub(r"/\*.*?\*/", "", CSS, flags=re.S).strip()
+    ok(body.startswith("@layer base, parts;"), "the sheet opens with the layer order")
+    src = lambda rel: open(os.path.join(ROOT, "static", "src", rel), encoding="utf-8").read()
+    files = {"css/base.css": ("base", "base")}
+    files.update({"css/parts/%s.css" % p: ("parts", p) for p in LAYER_PARTS})
+    for rel, (layer, kind) in files.items():
+        text = src(rel) if os.path.exists(os.path.join(ROOT, "static", "src", rel)) else ""
+        bare = re.sub(r"/\*.*?\*/", "", text, flags=re.S).strip()
+        ok(bare.startswith("@layer %s {" % layer) and bare.endswith("}") and bare.count("@layer") == 1, rel + " is one " + layer + " layer")
+        ok(not re.search(r"label-sheet|day-sheet|loan-sticker|guide-print-row|#label-print|printing-label|@media print|@page", bare),
+           rel + " holds nothing for paper (the print freeze's own pattern)")
+        for sel, _ in _rules(bare):
+            inner = sel.rsplit("{", 1)[-1].strip() if "{" in sel else re.sub(r"^(@\S+ \([^)]*\)( and \([^)]*\))* )+", "", sel.split("@layer %s " % layer, 1)[-1])
+            ok(_layer_kind(inner) == kind, "%s holds only its own rules: %r" % (rel, inner))
+    left = []
+    for sel, b in _rules(CSS):
+        if "@layer" in sel or "print" in sel or "!important" in b:
+            continue
+        inner = sel.rsplit("{", 1)[-1].strip() if "{" in sel else re.sub(r"^(@\S+ \([^)]*\)( and \([^)]*\))* )+", "", sel)
+        if inner.startswith("@") or any(at in sel for at in ("@keyframes", "@font-face", "@property", "@page")):
+            continue
+        if _layer_kind(inner):
+            left.append(sel[:80])
+    ok(not left, "no element default or part's own rule left outside its layer: %s" % left[:6])
+    ok("@layer" not in src("css/tokens.css").replace("@layer base, parts;", ""), "the tokens are not in a layer")
+
+
+@test
+def t_the_design_page_reads_tokens_inside_layers():
+    """The Design page lists the colour tokens by reading the :root rules from
+    the sheet; once they sit in the tokens layer they are inside a layer
+    block, which the reader opens (and, as before, no @media block)."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    fn = fn_src("function dsRootRules(") if "function dsRootRules(" in SCRIPT else "function dsRootRules() { return []; }"
+    got = _run_node(r"""
+class CSSLayerBlockRule { constructor(rules) { this.cssRules = rules; } }
+const document = { styleSheets: [{ cssRules: [{ selectorText: '.x', n: 0 }, new CSSLayerBlockRule([{ selectorText: ':root', n: 1 }]),
+  { selectorText: ':root', n: 2 }, { media: 'x', cssRules: [{ selectorText: ':root', n: 3 }] }] }] };
+""" + fn + "\nconsole.log(JSON.stringify(dsRootRules().map(r => r.n)));")
+    ok(got == [1, 2], "the layer's :root and the sheet's own, not one in @media: %r" % got)
+    ok("dsRootRules()" in fn_src("function dsOtherColours("), "the colours are read through it")
+
+
 @test
 def t_a_tick_row_is_one_recipe():
     """Tick-and-words rows had two text looks (dispatch's notify and insurance
@@ -12303,7 +12389,8 @@ def t_the_brand_pilot_review_findings_stay_fixed():
        "Beta or a control beside a page title is not set in the title face")
     # Design shows every colour token, read from the stylesheet.
     fn = fn_src("function dsOtherColours(")
-    ok("document.styleSheets" in fn and "selectorText === ':root'" in fn and "CSS.supports('color'" in fn,
+    rr = fn_src("function dsRootRules(")
+    ok("document.styleSheets" in rr and "selectorText === ':root'" in rr and "dsRootRules()" in fn and "CSS.supports('color'" in fn,
        "the colours a section does not name are read from the :root list itself")
     ok("Every other role a screen can ask for" in SCRIPT and "The palette the roles are drawn from" in SCRIPT,
        "and shown, roles and palette apart")
@@ -12762,12 +12849,12 @@ def t_a_button_is_the_mix_button():
     with ink words. There is no 28 text button any more: btn-sm is the same 32,
     so every control in a row lines up. Pressed is one step darker than hover
     and nothing jumps; an open menu's button keeps the fill."""
-    b = CSS.split("\n        .btn {")[1].split("}")[0]
+    b = re.split(r"\n\s+\.btn \{", CSS)[1].split("}")[0]
     for prop in ("min-height: var(--control-h)", "padding: 0 var(--sp-3)", "border-radius: var(--radius-control)",
                  "font-size: var(--text-body)", "font-weight: var(--weight-medium)", "gap: var(--control-gap)",
                  "box-shadow: var(--shadow-control)", "solid var(--border-strong)"):
         ok(prop in b, ".btn: " + prop)
-    act = CSS.split("\n        .btn:active {")[1].split("}")[0]
+    act = re.split(r"\n\s+\.btn:active \{", CSS)[1].split("}")[0]
     ok("background: var(--press)" in act and "translateY" not in act, "pressed is one step darker and does not move")
     sm = CSS.split(".btn-sm {")[1].split("}")[0]
     ok("min-height: var(--control-h)" in sm and "padding: 0 var(--sp-3)" in sm and "font-size: var(--text-body)" in sm,
@@ -12779,7 +12866,7 @@ def t_a_button_is_the_mix_button():
     ok("background: var(--action-primary)" in p and "color: var(--text-on-action)" in p, "primary is teal with ink words")
     ok('.btn[aria-expanded="true"] { background: var(--surface-tertiary); }' in CSS, "an open menu's button keeps the fill")
     ok(".btn:not(.btn-sm):has(> .ic:first-child)" not in CSS, "an icon does not pull a button's edge in")
-    ghost = CSS.split("\n        .btn.ghost {")[1].split("}")[0]
+    ghost = re.split(r"\n\s+\.btn\.ghost \{", CSS)[1].split("}")[0]
     ok("border-color: transparent" in ghost and "box-shadow: none" in ghost, "a ghost button has no edge and no lift")
 
 
@@ -13250,7 +13337,7 @@ def t_an_explanation_waits_behind_an_info_button():
     for fname in ("function dropMenu(", "function dropPanel("):
         f = fn_src(fname)
         ok("tokenNum('--pop-offset')" in f and "r.bottom + 4" not in f, fname + " opens 8 from its trigger")
-    link = CSS.split("\n        .link {")[1].split("}")[0]
+    link = re.split(r"\n\s+\.link \{", CSS)[1].split("}")[0]
     ok("color: var(--text-link)" in link and "font-weight: var(--weight-medium)" in link and "text-decoration: none" in link,
        "a standalone link is teal words at 500 with an arrow, not underlined")
     base = CSS.split("\n        .info {")[1].split("}")[0]
@@ -13659,12 +13746,12 @@ def t_a_switch_is_a_track_and_its_word():
     """Spec 6 Switch: a 28 by 16 track, ink-4 when off and teal when on, a 12
     knob, its word beside it; the control 32 tall. Forecast's Compare methods
     is one, built in the script."""
-    t = CSS.split("\n        .toggle {")[1].split("}")[0]
+    t = re.split(r"\n\s+\.toggle \{", CSS)[1].split("}")[0]
     ok("min-height: var(--control-h)" in t and "font-size: var(--text-body)" in t and "font-weight: var(--weight-medium)" in t,
        "the control is 32 and its word 13 at 500")
-    sw = CSS.split("\n        .toggle .sw {")[1].split("}")[0]
+    sw = re.split(r"\n\s+\.toggle \.sw \{", CSS)[1].split("}")[0]
     ok("background: var(--border-emphasis)" in sw, "off is ink-4")
-    knob = CSS.split("\n        .toggle .sw::after {")[1].split("}")[0]
+    knob = re.split(r"\n\s+\.toggle \.sw::after \{", CSS)[1].split("}")[0]
     ok("box-shadow: var(--shadow-raise)" in knob, "the knob is raised")
     ok('.toggle:is(.on, [aria-checked="true"]) .sw { background: var(--fill-mark); }' in CSS, "on is the teal mark")
     ok("function switchBtn(label, on, onToggle) {" in SCRIPT, "a switch can be built in the script")
@@ -13721,7 +13808,7 @@ def t_every_target_on_a_phone_fits_a_finger():
        and '.segmented > button:is(.on, [aria-pressed="true"])::before { background: var(--surface-primary); box-shadow: var(--ring-chosen); }' in CSS,
        "the chosen segment is drawn inset by the track's 2 on ::before, which is what keeps the target 40 and the look 36")
     ok(":is(.tab, .tbl-step, .guide-toc-link, .toggle) { min-width: var(--control-h-lg); }" in b and ".tbl-step { width: var(--control-h-lg); }" in b
-       and ".toggle:has(> .sw:only-child) { justify-content: flex-end; }" in b,
+       and "@media (max-width: 640px) { .toggle:has(> .sw:only-child) { justify-content: flex-end; } }" in CSS,
        "a short tab, a pager step, a contents link and a switch with no word are 40 wide too, the switch's track staying at the end (Task 45: found by the app measure)")
     ok("padding-right: calc(var(--control-h-lg) - var(--control-h-sm))" in b, "an info button's target grows away from its words")
     for sel in (".sidebar .icon-btn", ".brand", ".crm-ticon", ".crm-col-add", ".sizes-open", ".files-name", ".guide-toc-link", ".miss-open", ".action-link", "details summary"):
@@ -15901,7 +15988,7 @@ def t_the_manifest_and_the_sections_agree():
     m = pagesource.manifest(ROOT)
     src = os.path.join(ROOT, pagesource.SRC)
     for kind, ext in (("css", ".css"), ("js", ".js")):
-        on_disk = sorted(kind + "/" + f for f in os.listdir(os.path.join(src, kind)) if f.endswith(ext))
+        on_disk = sorted(os.path.relpath(os.path.join(d, f), src) for d, _, fs in os.walk(os.path.join(src, kind)) for f in fs if f.endswith(ext))
         ok(sorted(m[kind]) == on_disk, "%s: in the folder, not the manifest: %s; in the manifest, not the folder: %s"
            % (kind, sorted(set(on_disk) - set(m[kind])), sorted(set(m[kind]) - set(on_disk))))
         ok(len(set(m[kind])) == len(m[kind]), "%s: a section listed twice" % kind)

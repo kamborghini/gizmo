@@ -115,12 +115,7 @@
             .action .text + :is(.pill, .track-btn), .action .text + .pill-none + .track-btn { margin-left: calc(var(--box-xs) + var(--sp-3)); }
             .action .track-btn { margin-top: 0; }
         }
-        @media (max-width: 640px) {
-            /* On a phone the row has no free space to strand anything in: the
-               text shrinks until the rail is already hard right and the buttons
-               already line up, so the padded pill only costs the text 24px and
-               a fourth wrapped line. It goes back to its label width. */
-        }
+        
 
         .followups { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
         .chip { border: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary); border-radius: var(--radius-control); padding: 0 var(--sp-3); font-size: var(--text-body); line-height: var(--lh-control);
@@ -186,10 +181,7 @@
         @media (max-width: 900px) { .sk-item { grid-template-columns: minmax(0, 1fr); } }
         .sk-main { min-width: 0; }
         .sk-side { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); }
-        /* A tick (or a radio) and its words: one recipe (tickRow(), docs/DESIGN.md).
-           The screen's own class sets only its spacing. */
-        .tick-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-primary); cursor: pointer; }
-        /* A row's hidden opener (rowOpener) is taken out of the flow: what holds it
-           places it, or it is laid out against the page and stretches it past a
-           scrolling list. Zero weight, so a cell already sticky keeps that. */
-        :where(:has(> .row-open)) { position: relative; }
+        
+        
+        
+        

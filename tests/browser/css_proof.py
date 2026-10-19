@@ -47,6 +47,15 @@ def main():
             os.symlink(os.path.join(ROOT, link), os.path.join(tree, link))
         for rel in TOOL:
             shutil.copy(os.path.join(ROOT, rel), os.path.join(tree, rel))
+        # A fresh checkout dates every file now; the app shows some files' dates
+        # (the Size list's "Sheet updated"). The base takes the working tree's.
+        for d, _, fs in os.walk(os.path.join(ROOT, "data")):
+            for f in fs:
+                src = os.path.join(d, f)
+                dst = os.path.join(tree, os.path.relpath(src, ROOT))
+                if os.path.isfile(dst):
+                    st = os.stat(src)
+                    os.utime(dst, ns=(st.st_atime_ns, st.st_mtime_ns))
         print("shooting %s and the working tree in %s" % (a.base, work))
         shoot(tree, os.path.join(work, "base-out"), BASE_PORT, a.only)
         shoot(ROOT, os.path.join(work, "head1"), HEAD_PORT, a.only)

@@ -1,0 +1,6 @@
+    @layer parts {
+        .pfield { display: flex; flex-direction: column; gap: var(--sp-1); }
+        .pfield label, .pfield > span { font-size: var(--text-body); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; color: var(--text-primary); }
+        .pfield > .field-help { margin: 0; font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-regular); color: var(--text-secondary); }
+        .field-help { font-size: var(--text-xs); color: var(--text-secondary); margin: var(--sp-1) 0 var(--sp-3); line-height: var(--lh-caption); }
+    }

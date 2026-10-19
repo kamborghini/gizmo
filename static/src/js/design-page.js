@@ -56,9 +56,15 @@
            show, read from the :root rules themselves, so a colour added there
            shows here without anyone remembering to list it. A role names
            another token (or mixes them); a palette entry is a literal. */
+        /* The sheet's :root rules, the tokens layer's included: a layer block
+           holds its own rules (as before, not those in an @media block). */
+        function dsRootRules() {
+            const open = (r) => (typeof CSSLayerBlockRule !== 'undefined' && r instanceof CSSLayerBlockRule) ? [].slice.call(r.cssRules).flatMap(open) : [r];
+            return [].slice.call(document.styleSheets).flatMap(sh => { try { return [].slice.call(sh.cssRules); } catch (e) { return []; } })
+                .flatMap(open).filter(r => r.selectorText === ':root');
+        }
         function dsOtherColours(shown) {
-            const roots = [].slice.call(document.styleSheets).flatMap(sh => { try { return [].slice.call(sh.cssRules); } catch (e) { return []; } })
-                .filter(r => r.selectorText === ':root');
+            const roots = dsRootRules();
             const cs = getComputedStyle(document.documentElement);
             const roles = [], palette = [], seen = new Set(shown);
             roots.forEach(r => {

@@ -303,8 +303,7 @@
             font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-brand); background: var(--action-soft);
             border: var(--bw-hairline) solid var(--action-line); border-radius: var(--radius-inset);
             padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-2); }
-        .linkish { border: 0; background: none; padding: 0; font: inherit; font-size: var(--text-xs); line-height: var(--lh-caption);
-            font-weight: var(--weight-medium); cursor: pointer; }
+        
         .mrule { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-2); }
         .mrule-head { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
         .mrule-name { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); }

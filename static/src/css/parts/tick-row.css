@@ -1,0 +1,5 @@
+    @layer parts {
+        /* A tick (or a radio) and its words: one recipe (tickRow(), docs/DESIGN.md).
+           The screen's own class sets only its spacing. */
+        .tick-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-primary); cursor: pointer; }
+    }
