@@ -527,7 +527,8 @@ def t_every_source_blurb_stands_as_its_own_sentence():
     there."""
     import inspect
     import forecast.simple as fs
-    blurbs = [m[2] for m in fs.MODELS] + [c[3] for c in fs.COMBINERS]
+    import forecast.prophet_source as fp
+    blurbs = [m[2] for m in fs.MODELS] + [c[3] for c in fs.COMBINERS] + [fp.PROPHET_ABOUT, fp.HYBRID_ABOUT]
     try:
         blurbs += [m[2] for m in fs.statsforecast_models()]
     except Exception:
@@ -575,7 +576,9 @@ def t_big_orders_are_counted_apart():
     included. Orders of 2,000 or more caused 78% of its error on the months it
     could not see in 2026: nine big orders in January 2025 made it forecast
     January 2026 at nearly double. Counted apart, the regular orders follow
-    last year and the big ones are their average month over the last year."""
+    last year and the big ones are the middle of their last twelve months:
+    the average let a few exceptional months lift every month after them,
+    and put big orders about half as high again as they came in."""
     from forecast.simple import (BIG_ORDERS_ABOUT, BIG_ORDERS_NAME, big_orders_apart,
                                  last_year_times_run_rate, sanity_forecasts)
     idx = pd.period_range("2023-10", "2026-08", freq="M")
@@ -588,8 +591,31 @@ def t_big_orders_are_counted_apart():
     sep = pd.Period("2026-09", freq="M")
     ok(plain[sep] > 40000, "scaling last year's whole month repeats the one-off: %.0f" % plain[sep])
     ok(abs(split[sep] - (20000.0 + 30000.0 / 12)) < 1.0,
-       "counted apart: last year's regular month plus big orders' average month: %.0f" % split[sep])
+       "counted apart: last year's regular month plus, with big orders this rare, their average month: %.0f"
+       % split[sep])
     ok("big orders" in note, note)
+    # Big orders most months, and one exceptional one: the middle month is
+    # the usual one, where the average would carry the exception into every
+    # month after it.
+    steady = pd.Series(9000.0, index=idx)
+    steady[pd.Period("2026-03", freq="M")] = 40000.0
+    f, note = big_orders_apart(pd.Series(20000.0, index=idx) + steady, 2, steady)
+    ok(all(abs(v - 29000.0) < 1.0 for v in f.values), "the usual big month, not the exception's average: %s" % list(f.values))
+    ok("9,000 a month" in note, note)
+    from forecast.simple import big_level
+    ok(big_level(steady) == 9000.0 and abs(float(steady.iloc[-12:].mean()) - 11583.33) < 0.01,
+       "the median where the mean would have been 11,583")
+    ok(big_level(pd.Series(dtype=float)) == 0.0, "no big orders on record, none forecast")
+    # Big orders in only five months of twelve: the plain middle month is
+    # nothing, so it would forecast none at all, every month. The middle of
+    # the months that had any, scaled by how many did, is not.
+    sparse = pd.Series([10000.0, 0, 0, 10000.0, 0, 0, 10000.0, 0, 10000.0, 0, 0, 10000.0],
+                       index=pd.period_range("2025-09", periods=12, freq="M"))
+    ok(float(sparse.median()) == 0.0 and abs(big_level(sparse) - 10000.0 * 5 / 12) < 0.01,
+       "five months of twelve: 5/12 of a typical big month, %.0f" % big_level(sparse))
+    half = sparse.copy(); half.iloc[1] = 4000.0
+    ok(abs(big_level(half) - 5000.0) < 0.01 and big_level(half) > big_level(sparse),
+       "another month with a big order never lowers it: %.0f" % big_level(half))
     # A backtest fold cut before the big order cannot see it.
     early = y[y.index <= pd.Period("2025-06", freq="M")]
     f, _ = big_orders_apart(early, 3, big)
@@ -611,8 +637,11 @@ def t_the_range_is_the_miss_8_in_10_stayed_within():
     errs = list((pred - act) / act)
     spread = list(np.abs(act - pred) / pred)
     sc = _errors_to_score(errs, spread)
-    ok(abs(sc["p80"] - float(np.quantile(spread, 0.8))) < 1e-9,
+    # With ten misses, the ceil(0.8 x 11) = 9th smallest: the split-conformal
+    # rule, which never sits inside the plain 80th percentile.
+    ok(abs(sc["p80"] - sorted(spread)[8]) < 1e-9,
        "p80 is measured against the forecast the range is drawn around: %s" % sc["p80"])
+    ok(sc["p80"] >= float(np.quantile(spread, 0.8)), "and never narrower than the plain percentile")
     inside = np.abs(act - pred) <= sc["p80"] * pred
     ok(inside.sum() >= 8, "so forecast x (1 +/- p80) holds 8 in 10 of what came in: %d" % inside.sum())
     # Measured against the actual instead, the same rule held fewer, and missed
@@ -624,6 +653,20 @@ def t_the_range_is_the_miss_8_in_10_stayed_within():
     ok(band_width({"score": {"mape": 0.287}}) == 0.287, "a run without it falls back to the typical error")
     ok(band_width({"score": {"p80": 2.0}}) == 0.90 and band_width({"score": {"p80": 0.01}}) == 0.10, "held between 10% and 90%")
     ok(_errors_to_score([])["p80"] is None, "no errors, no width")
+    from forecast.simple import _p80
+    ok(_p80([0.1, 0.3, 0.2]) == 0.3 and _p80([0.4]) == 0.4, "a handful of misses: the largest")
+    ok(_p80(np.arange(1, 10) / 10) == 0.8, "nine misses: the eighth smallest")
+    # A source with no backtest of its own (the track-record weighting) is
+    # drawn at the same width, read from its misses on the record and
+    # measured against its forecast, not at its typical miss.
+    from forecast.simple import track_record
+    rec = track_record([{"month": m, "by_source": {"w": {"error": e}}}
+                        for m, e in (("2026-01", 0.10), ("2026-02", -0.20), ("2026-03", 0.05), ("2026-04", -0.02))])
+    want = max(0.10 / 1.10, 0.20 / 0.80, 0.05 / 1.05, 0.02 / 0.98)
+    ok(abs(rec["w"]["p80"] - want) < 1e-9, "four misses: the largest, against the forecast: %s" % rec["w"]["p80"])
+    ok(band_width({"score": {"mape": None, "p80": None}, "live": {"mape": 0.0925, "p80": rec["w"]["p80"]}}) == rec["w"]["p80"],
+       "the weighting's range comes from its record")
+    ok(band_width({"score": {"mape": None}, "live": {"mape": 0.05}}) == 0.30, "and a typical miss alone is not a range")
 
 
 @test
@@ -657,7 +700,9 @@ def t_the_words_a_model_shows_on_the_page_say_method_not_source():
     import inspect
     import forecast.simple as fs
     word = re.compile(r"\b[Ss]ources?\b")
-    shown = [fs.BIG_ORDERS_ABOUT, fs.BIG_ORDERS_BEST_AT]
+    import forecast.prophet_source as fp
+    shown = [fs.BIG_ORDERS_ABOUT, fs.BIG_ORDERS_BEST_AT, fp.PROPHET_ABOUT, fp.PROPHET_BEST_AT,
+             fp.HYBRID_ABOUT, fp.HYBRID_BEST_AT]
     for m in fs.MODELS:
         shown += [m[2]]
     for c in fs.COMBINERS:
@@ -668,6 +713,423 @@ def t_the_words_a_model_shows_on_the_page_say_method_not_source():
     ok('"note": "each method weighted' in src and '"about": "It weights every method' in src, "the track-record model too")
     ok(tuple(c[0] for c in fs.COMBINERS) == ("Average of every source", "Middle of every source", "Average, extremes removed"),
        "and the model names are as they were")
+
+
+def _invented_shop(months=31, seed=7):
+    """Orders for an invented shop: regular orders every day with a weekly
+    rhythm and a yearly season, and big quoted orders most months. Its first
+    month is its opening month, which the panel never sees."""
+    rng = np.random.default_rng(seed)
+    start = pd.Timestamp("2023-06-01")
+    end = start + pd.offsets.MonthBegin(months) - pd.Timedelta(days=1)
+    orders = []
+    for d in pd.date_range(start, end, freq="D"):
+        reg = 600 + 250 * np.sin(2 * np.pi * d.dayofyear / 365.25) - (250 if d.weekday() >= 5 else 0) + rng.normal(0, 60)
+        orders.append({"created_at": f"{d.date()}T11:00:00Z", "order_total": round(max(reg, 20.0), 2)})
+        if d.day in (9, 21) and rng.random() < 0.6:
+            orders.append({"created_at": f"{d.date()}T15:00:00Z", "order_total": round(float(rng.uniform(2500, 9000)), 2)})
+    return orders, (end + pd.Timedelta(days=5)).date()
+
+
+def _have_prophet():
+    from forecast.prophet_source import available
+    if available():
+        return True
+    print("        (Prophet is not installed here: its checks are skipped; CI installs it)")
+    return False
+
+
+@test
+def t_regular_orders_by_day_and_big_orders_add_up_to_the_month():
+    """The sources that forecast the regular orders by day must be handed
+    exactly the money the big orders are not, or the month they add back up
+    to is not the month the panel is marked on."""
+    from forecast.ingest import daily_cash, monthly_cash
+    from forecast.simple import BIG_ORDER
+    orders, as_of = _invented_shop(14)
+    orders.append({"created_at": "2023-09-14T10:00:00Z", "order_total": "2000"})        # exactly the line: big
+    orders.append({"created_at": "2023-09-14T12:00:00Z", "order_total": "1999.99"})     # a penny under: regular
+    orders.append({"created_at": "2023-09-15T12:00:00Z", "order_total": "50", "test": True})
+    total = monthly_cash(orders, as_of)
+    big = monthly_cash(orders, as_of, min_total=BIG_ORDER)
+    small = daily_cash(orders, as_of, max_total=BIG_ORDER)
+    whole = daily_cash(orders, as_of)
+    ok(list(small.index) == list(whole.index), "the same days as the whole series")
+    by_month = small.groupby(small.index.to_period("M")).sum()
+    for p in total.index:
+        ok(abs(by_month[p] + big[p] - total[p]) < 0.005, "%s: regular %.2f + big %.2f = %.2f" % (p, by_month[p], big[p], total[p]))
+    ok(abs(small[pd.Timestamp("2023-09-14")] - (whole[pd.Timestamp("2023-09-14")] - 2000.0)) < 0.005,
+       "an order of exactly 2,000 is a big one, a penny under is regular")
+    ok(daily_cash([{"created_at": "2026-01-05T10:00:00Z", "order_total": "5000"}], date(2026, 1, 7),
+                  max_total=BIG_ORDER).tolist() == [0.0, 0.0, 0.0], "days with only big orders are zeros, not gaps")
+
+
+@test
+def t_prophet_reads_no_day_after_its_cut_off():
+    """A backtest fold that can see past its cut-off scores itself on months
+    it has already been shown. Prophet is handed days, not months, so the
+    cut is its own: everything after the last day of the fold's last month,
+    including the month in progress, is never read."""
+    if not _have_prophet():
+        return
+    from forecast.prophet_source import regular_months
+    days = pd.date_range("2023-01-01", "2025-02-14", freq="D")
+    rng = np.random.default_rng(1)
+    y = pd.Series(700 + 200 * np.sin(2 * np.pi * days.dayofyear / 365.25) + rng.normal(0, 40, len(days)), index=days)
+    first, through = pd.Period("2023-01", "M"), pd.Period("2024-12", "M")
+    seen = regular_months(y, first, through, 2)
+    later = y.copy()
+    later[later.index > pd.Timestamp("2024-12-31")] *= 50          # a boom it must not know about
+    ok(np.allclose(regular_months(later, first, through, 2).values, seen.values, rtol=0, atol=1e-6),
+       "what comes after the cut-off changes nothing")
+    ok([str(p) for p in seen.index] == ["2025-01", "2025-02"] and (seen > 0).all(), seen.to_dict())
+    try:
+        regular_months(y[y.index <= pd.Timestamp("2024-12-20")], first, through, 1)
+    except ValueError as e:
+        ok("stop" in str(e), str(e))
+    else:
+        raise AssertionError("days that stop short of the cut-off are refused, not read as a quiet end of month")
+
+
+@test
+def t_a_prophet_fold_sees_nothing_after_its_own_cut_off():
+    """The backtest refits each Prophet method at three earlier cut-offs and
+    scores it there. Changing every day and every big order after the
+    history's own last month (the month in progress) must move nothing it
+    says or scores; changing them after one fold's cut-off must move nothing
+    that fold scored on, so the score of the earliest fold's months is fixed."""
+    if not _have_prophet():
+        return
+    from forecast.evaluate import series_from_orders
+    from forecast.prophet_source import HYBRID_NAME, PROPHET_NAME
+    from forecast.simple import sanity_forecasts
+    orders, as_of = _invented_shop()
+    monthly, big, small = series_from_orders(orders, as_of)
+    first = sanity_forecasts(monthly, horizon=2, big=big, daily_small=small)
+    after = small.copy()
+    after[after.index > monthly.index[-1].to_timestamp(how="end")] *= 9      # the month in progress
+    big9 = big.copy(); big9[pd.Period("2026-01", "M")] = 1e6                  # a month not yet complete
+    again = sanity_forecasts(monthly, horizon=2, big=big9, daily_small=after)
+    by1 = {m["name"]: m for m in first["models"]}
+    by2 = {m["name"]: m for m in again["models"]}
+    for name in (PROPHET_NAME, HYBRID_NAME):
+        ok(by1[name]["months"] == by2[name]["months"] and by1[name]["score"] == by2[name]["score"],
+           "%s: the month in progress reaches neither its forecast nor its backtest" % name)
+    # A fold cut at month k-3 is scored on months k-3..k-1; Prophet's fit for
+    # that fold must not move when the days of month k-1 change.
+    cut_end = monthly.index[-4].to_timestamp(how="end")
+    late = small.copy()
+    late[late.index > cut_end] *= 3
+    import forecast.prophet_source as fp
+    fits = []
+    saved = fp.regular_months
+
+    def spy(d, first_, through, h):
+        out = saved(d, first_, through, h)
+        fits.append((str(through), h, tuple(round(v, 6) for v in out.values)))
+        return out
+    try:
+        fp.regular_months = spy
+        sanity_forecasts(monthly, horizon=2, big=big, daily_small=small)
+        base_fits = dict(((t, h), v) for t, h, v in fits)
+        fits.clear()
+        sanity_forecasts(monthly, horizon=2, big=big, daily_small=late)
+        late_fits = dict(((t, h), v) for t, h, v in fits)
+    finally:
+        fp.regular_months = saved
+    earliest = str(monthly.index[-4])
+    ok((earliest, 3) in base_fits and base_fits[(earliest, 3)] == late_fits[(earliest, 3)],
+       "the fold cut at %s fits the same, whatever came after it" % earliest)
+    ok(base_fits[(str(monthly.index[-1]), 2)] != late_fits[(str(monthly.index[-1]), 2)],
+       "while the fit that is allowed to see those days does move (the check can fail)")
+
+
+@test
+def t_prophet_joins_the_panel_as_two_scored_sources():
+    """Handed the regular orders by day, the panel gains Prophet's forecast of
+    them (with big orders as the middle of their last twelve months) and the
+    average of that with "Big orders counted apart". They are rows like any
+    other: backtested on the same folds, ranked, never wired in."""
+    from forecast.evaluate import series_from_orders
+    from forecast.prophet_source import HYBRID_NAME, PROPHET_NAME
+    from forecast.simple import BIG_ORDERS_NAME, sanity_forecasts
+    orders, as_of = _invented_shop()
+    monthly, big, small = series_from_orders(orders, as_of)
+    ok(len(monthly) == 30 and str(monthly.index[0]) == "2023-07", "the opening month is not fed: %s" % monthly.index[0])
+    without = sanity_forecasts(monthly, horizon=3, big=big)
+    ok(not {PROPHET_NAME, HYBRID_NAME} & {m["name"] for m in without["models"]}, "absent without the days")
+    if not _have_prophet():
+        return
+    r = sanity_forecasts(monthly, horizon=3, big=big, daily_small=small)
+    by = {m["name"]: m for m in r["models"]}
+    for name in (PROPHET_NAME, HYBRID_NAME):
+        m = by.get(name) or {}
+        ok(m.get("months") and len(m["months"]) == 3, "%s forecasts: %s" % (name, m.get("error")))
+        ok((m.get("score") or {}).get("folds") == 9 and m["score"]["mape"] is not None,
+           "%s is scored on the same folds: %s" % (name, m.get("score")))
+        ok(name in r["ranking"], "and ranked")
+    for k in r["months"]:
+        avg = (by[BIG_ORDERS_NAME]["months"][k] + by[PROPHET_NAME]["months"][k]) / 2
+        ok(abs(by[HYBRID_NAME]["months"][k] - avg) < 0.02, "the average is the average: %s" % k)
+    # An invented shop with a clean season: Prophet should be in the right place.
+    for k, v in by[PROPHET_NAME]["months"].items():
+        ok(abs(v - float(monthly[pd.Period(k, "M") - 12])) / v < 0.5, "%s is within reach of a year ago: %.0f" % (k, v))
+
+
+@test
+def t_a_prophet_that_fails_leaves_the_rest_of_the_panel_standing():
+    """It is an optional library with a compiled model behind it. Missing, it
+    leaves the panel exactly as it was; failing, its two rows say so and the
+    rest of the run carries on."""
+    import forecast.prophet_source as fp
+    from forecast.evaluate import series_from_orders
+    from forecast.simple import sanity_forecasts
+    orders, as_of = _invented_shop()
+    monthly, big, small = series_from_orders(orders, as_of)
+    base = sanity_forecasts(monthly, horizon=2, big=big)
+    saved_av, saved_fit = fp.available, fp.regular_months
+    try:
+        fp.available = lambda: False
+        gone = sanity_forecasts(monthly, horizon=2, big=big, daily_small=small)
+        ok([m["name"] for m in gone["models"]] == [m["name"] for m in base["models"]], "absent, the panel is as it was")
+        ok(gone["best"] == base["best"] and gone["ranking"] == base["ranking"], "and ranks the same")
+        fp.available = lambda: True
+
+        def broken(*a, **k):
+            raise RuntimeError("the compiled model would not start")
+        fp.regular_months = broken
+        failed = sanity_forecasts(monthly, horizon=2, big=big, daily_small=small)
+    finally:
+        fp.available, fp.regular_months = saved_av, saved_fit
+    by = {m["name"]: m for m in failed["models"]}
+    for name in (fp.PROPHET_NAME, fp.HYBRID_NAME):
+        ok("would not start" in (by[name].get("error") or ""), "the row says why: %s" % by[name])
+        ok(name not in failed["ranking"], "and it is not ranked")
+    ok(failed["available"] and failed["best"] == base["best"], "the run carries on with everything else")
+
+
+def _page_source():
+    """The page's script: static/index.html, or the sections it is built from."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    parts = []
+    for base, _dirs, files in os.walk(os.path.join(root, "static")):
+        for f in sorted(files):
+            if f.endswith((".html", ".js")):
+                parts.append(open(os.path.join(base, f), encoding="utf-8").read())
+    return "\n".join(parts)
+
+
+def _page_lead(sn):
+    """The page's 'Running now' choice, as fcOptimisedCard makes it (the lines
+    are checked against the page itself below)."""
+    from functools import cmp_to_key
+    rows = [{"m": m, "live": (m.get("live") or {}).get("mape"), "back": (m.get("score") or {}).get("mape")}
+            for m in sn["models"] if m.get("months")]
+    rows = [x for x in rows if x["live"] is not None or x["back"] is not None]
+    on = sn["ranked_on"] == "record"
+
+    def cmp(a, b):
+        if on and a["live"] is not None and b["live"] is not None:
+            d = a["live"] - b["live"]
+        else:
+            d = (9 if a["back"] is None else a["back"]) - (9 if b["back"] is None else b["back"])
+        return (d > 0) - (d < 0)
+    rows = sorted(rows, key=cmp_to_key(cmp))
+    if isinstance(sn.get("ranking"), list):              # fcRankFirst: the run's order first, stable
+        rows = sorted(rows, key=lambda x: sn["ranking"].index(x["m"]["name"])
+                      if x["m"]["name"] in sn["ranking"] else 1e9)
+    return rows[0]["m"]["name"] if rows else None
+
+
+@test
+def t_the_numbers_come_from_the_source_the_page_names():
+    """Once months have closed, the page ranks on the record and names its
+    leader as running. pick_opinions sorted on the backtest regardless, so the
+    month table, the cash path and the alerts followed the backtest's leader
+    under another method's name. The headline is now the first of the panel's
+    own ranking, and that ranking is the page's.
+
+    The record is ranked on only once EVERY scored method has three closed
+    months of its own. Counted on the longest record instead, a method added
+    later raced on one month against the others' averages, and a lucky month
+    put it in charge; and the page, which compares two methods on the record
+    only when both have one, named a different method from the one in use."""
+    from forecast.evaluate import series_from_orders
+    from forecast.simple import pick_opinions, sanity_forecasts
+    src = _page_source()
+    ok("ranked.sort((a, b) => (onRecord && a.live != null && b.live != null)" in src
+       and "? a.live - b.live : ((a.back == null ? 9 : a.back) - (b.back == null ? 9 : b.back)));" in src
+       and "const onRecord = sn.ranked_on === 'record';" in src
+       and "const order = fcRankFirst(sn, ranked, x => x.m.name);" in src,
+       "the page still ranks the way _page_lead copies; if it changed, check the two still agree")
+    orders, as_of = _invented_shop()
+    monthly, big, _ = series_from_orders(orders, as_of)
+    backtest = sanity_forecasts(monthly, horizon=2, big=big)
+    scored = [m for m in backtest["models"] if m.get("months") and m["score"]["mape"] is not None]
+    worst = max(scored, key=lambda m: m["score"]["mape"])["name"]
+    leader = pick_opinions(backtest)[0]["name"]
+    ok(worst != leader and leader == backtest["best"] == _page_lead(backtest), "on the backtest: its best, on both")
+
+    def record(months, errors):
+        return [{"month": m, "winner": min(errors, key=lambda k: abs(errors[k])),
+                 "by_source": {k: {"error": e} for k, e in errors.items()}} for m in months]
+    everyone = {m["name"]: 0.30 for m in scored}
+    everyone[worst] = 0.02
+    three = ("2025-10", "2025-11", "2025-12")
+    r = sanity_forecasts(monthly, horizon=2, big=big, results=record(three, everyone))
+    ok(r["ranked_on"] == "record" and r["best"] == worst and r["ranking"][0] == worst, r.get("ranking", [])[:3])
+    ok(pick_opinions(r)[0]["name"] == worst == _page_lead(r), "the numbers and the page follow the record's leader")
+    ok([m["name"] for m in pick_opinions(r, 5)] == r["ranking"][:5], "in the panel's own order")
+    old = {k: v for k, v in r.items() if k != "ranking"}
+    ok(pick_opinions(old)[0]["name"] == leader, "a run kept from before the ranking still reads")
+    # A method one month into its record, however good that month: the record
+    # waits for it, on both sides, and the page says how many every method has.
+    newcomer = max(scored, key=lambda m: m["score"]["mape"] if m["name"] != worst else -1)["name"]
+    lucky = record(three[:2], {k: v for k, v in everyone.items() if k != newcomer}) + \
+        record(three[2:], dict(everyone, **{newcomer: 0.001}))
+    y = sanity_forecasts(monthly, horizon=2, big=big, results=lucky)
+    ok(y["ranked_on"] == "backtest" and y["closed_months"] == 3 and y["record_waiting"] == {newcomer: 1},
+       "the months that have closed, and who the record is waiting on: %s %s" % (y["closed_months"], y["record_waiting"]))
+    ok(r["record_waiting"] == {} and backtest["record_waiting"] == {}, "and nobody, once it is on the record or before")
+    ok(pick_opinions(y)[0]["name"] == y["best"] == leader == _page_lead(y), "one lucky month leads nothing")
+    # And the same without the run's order, as an older run reads: the
+    # page's own comparison still agrees, because every method is on the
+    # record or none is.
+    for res in (r, y, backtest):
+        bare = {k: v for k, v in res.items() if k != "ranking"}
+        ok(_page_lead(bare) == res["ranking"][0], "the page's own sort agrees: %s" % _page_lead(bare))
+    # The track-record weighting is built from the sources with a record; with
+    # every method on the record it is a row like the rest, young or not, and
+    # the page and the panel still agree on who leads.
+    weighted = [m for m in r["models"] if m["name"] == "Weighted by track record"]
+    ok(weighted and "live" not in weighted[0], "a weighting with no record of its own shows none yet")
+    more = record(three + ("2026-01",), dict(everyone, **{"Weighted by track record": 0.0001}))
+    w = sanity_forecasts(monthly, horizon=2, big=big, results=more)
+    ok(w["ranked_on"] == "record" and pick_opinions(w)[0]["name"] == _page_lead(w), (w["best"], _page_lead(w)))
+
+
+@test
+def t_the_evaluation_marks_each_cut_off_only_on_months_after_it():
+    """`python -m forecast evaluate` replays the panel at every cut-off. A
+    replay that could see ahead would flatter every source, so each cut-off's
+    forecasts must not move when the months after it do."""
+    import forecast.simple as fs
+    from forecast.evaluate import PANEL, evaluate, history_floor, metrics, report, series_from_orders
+    orders, as_of = _invented_shop()
+    monthly, big, _ = series_from_orders(orders, as_of)
+    rows = evaluate(monthly, big, None, first_cut=24, h=3)
+    ok(fs.MIN_MONTHS == 24, "the panel's own floor is put back")
+    ok(sorted(rows["cut"].unique()) == list(range(24, 30)), sorted(rows["cut"].unique()))
+    ok((rows["month"] > rows["origin"]).all(), "every month marked comes after its cut-off")
+    ok(rows.groupby(["source", "cut"])["h"].max().max() == 3 and
+       (rows[rows["cut"] == 29]["h"] == 1).all(), "up to three months ahead, fewer at the end")
+    picks = rows[rows["source"] == PANEL]
+    ok(sorted(picks["cut"].unique()) == [27, 28, 29] and picks["lo"].notna().all(),
+       "the panel picks once it has a fold to rank on, with its range")
+    ok(set(picks["pick"]) <= set(rows["source"]), "and the pick is one of the rows")
+    later = monthly.copy()
+    later.iloc[27:] *= 3                     # the last three months, very different
+    moved = evaluate(later, big, None, first_cut=24, h=3)
+    key = ["source", "cut", "h"]
+    a = rows[rows["cut"] <= 27].set_index(key)["forecast"].sort_index()
+    b = moved[moved["cut"] <= 27].set_index(key)["forecast"].sort_index()
+    ok(a.index.equals(b.index) and np.allclose(a.values, b.values), "no cut-off's forecast saw the months after it")
+    # The same with the big orders after a cut-off changed too, from a floor
+    # low enough that the compared cut-offs have folds and picks: nothing any
+    # of them said moves, the pick and its range included.
+    a = evaluate(monthly, big, None, first_cut=22, h=3)
+    big2 = big.copy()
+    big2.iloc[27:] *= 5
+    b = evaluate(later, big2, None, first_cut=22, h=3)
+    ka = a[a["cut"] <= 27].set_index(key)[["forecast", "lo", "hi"]].sort_index()
+    kb = b[b["cut"] <= 27].set_index(key)[["forecast", "lo", "hi"]].sort_index()
+    ok(ka.index.equals(kb.index) and np.allclose(ka.fillna(-1).values, kb.fillna(-1).values),
+       "nor did the big orders after it, for any source, the pick or a range")
+    ok({25, 26, 27} <= set(a[a["source"] == PANEL]["cut"]), "and the compared cut-offs include picks")
+    ok("ranked_on" in a.columns and (a[a["source"] == PANEL]["ranked_on"] > 0).all(), "each pick says what it ranked on")
+    # The panel as it was, on the same history: put back afterwards.
+    from forecast.evaluate import as_before
+    level, p80 = fs.big_level, fs._p80
+    with as_before():
+        old = evaluate(monthly, big, None, first_cut=24, h=3)
+    ok(fs.big_level is level and fs._p80 is p80, "the panel's own scoring is put back")
+    oa = old[old["source"] == "Big orders counted apart"].set_index(key)["forecast"]
+    na = rows[rows["source"] == "Big orders counted apart"].set_index(key)["forecast"]
+    ok(not np.allclose(oa.sort_index().values, na.sort_index().values), "and as it was, big orders were their average")
+    perfect = rows.assign(forecast=rows["actual"], lo=rows["actual"], hi=rows["actual"])
+    m = metrics(perfect)
+    ok(m["WAPE"] == 0 and m["bias"] == 0 and m["MASE"] == 0 and m["in range"] == 1.0, m)
+    text = report(rows)
+    for part in ("Every source on the same forecasts (", "WAPE (and bias) by months ahead",
+                 "WAPE (and bias) by the half-year marked", "The panel's pick at each cut-off",
+                 "The panel's pick against every source on the forecasts it made (6 forecasts of 3 months",
+                 "WAPE (and bias) by month marked, the pick and the three closest",
+                 "The pick's five largest misses", "Baseline: same month last year"):
+        ok(part in text, part)
+    try:
+        with history_floor(5):
+            raise KeyError("x")
+    except KeyError:
+        pass
+    ok(fs.MIN_MONTHS == 24, "put back even when the replay fails")
+
+
+@test
+def t_the_evaluate_command_runs_on_an_orders_file():
+    import contextlib, io, json as _json, tempfile
+    from forecast.pipeline import main
+    orders, as_of = _invented_shop()
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "orders.json")
+        with open(path, "w") as fh:
+            _json.dump({"orders": orders}, fh)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = main(["evaluate", "--orders", path, "--as-of", as_of.isoformat(), "--first-cut", "26",
+                       "--no-prophet", "--csv", os.path.join(tmp, "rows.csv")])
+        rows = pd.read_csv(os.path.join(tmp, "rows.csv"))
+    text = out.getvalue()
+    ok(rc == 0 and text.startswith("30 complete months, 2023-07 to 2025-12."), text[:200])
+    with tempfile.TemporaryDirectory() as tmp:
+        empty = os.path.join(tmp, "empty.json")
+        with open(empty, "w") as fh:
+            _json.dump([], fh)
+        out2 = io.StringIO()
+        with contextlib.redirect_stdout(out2):
+            rc2 = main(["evaluate", "--orders", empty, "--as-of", as_of.isoformat()])
+    ok(rc2 == 1 and "nothing to evaluate" in out2.getvalue(), "an empty file says so: %r" % out2.getvalue())
+    if _have_prophet():
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "orders.json")
+            with open(path, "w") as fh:
+                _json.dump(orders, fh)
+            out3 = io.StringIO()
+            with contextlib.redirect_stdout(out3):
+                main(["evaluate", "--orders", path, "--as-of", as_of.isoformat(), "--first-cut", "28", "--as-before"])
+        ok("Daily trend" not in out3.getvalue() and "Last year and daily trend" not in out3.getvalue(),
+           "as it was is without Prophet, even where Prophet is installed")
+    ok("Cut-offs 2025-08 to 2025-11 (4)" in text and "The panel's pick" in text, text[:400])
+    ok(set(rows["cut"]) == {26, 27, 28, 29}, "every marked month is in the file")
+
+
+@test
+def t_the_nightly_job_and_the_seeded_world_hand_the_panel_the_regular_days():
+    """Prophet's sources only exist when the panel is given the regular orders
+    by day. The job builds them from the same orders as the months, and the
+    browser suite's seeded world runs the same maths."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for rel in ("forecast/nightly.py", "tests/browser/seed/dashboards.py"):
+        src = open(os.path.join(root, rel), encoding="utf-8").read()
+        call = src.split("sanity = sanity_forecasts(", 1)[1][:160]
+        ok("big=big" in call and "daily_small=daily_small" in call, "%s: %s" % (rel, call))
+    nightly = open(os.path.join(root, "forecast/nightly.py"), encoding="utf-8").read()
+    ok("daily_small = daily_cash(orders, as_of, max_total=BIG_ORDER)" in nightly,
+       "the job hands the days over, so switching Prophet on needs only its lock")
+    seed = open(os.path.join(root, "tests/browser/seed/dashboards.py"), encoding="utf-8").read()
+    ok("daily_small = None" in seed and "max_total=BIG_ORDER" not in seed,
+       "and the seeded world, like the image, has no Prophet, on any machine")
+    ok("No method could be scored yet" in nightly and "no source could" not in nightly,
+       "a run too young to rank says method, and why")
 
 
 if __name__ == "__main__":

@@ -8774,6 +8774,43 @@ def t_every_window_is_built_and_closed_by_the_part():
 
 
 @test
+def t_every_forecast_card_names_the_method_the_figures_come_from():
+    """The nightly run carries its own order (`ranking`), the one its figures
+    follow. Running now, How each one works and Every method, side by side
+    each sorted for themselves, and once the forecast ranked on its record
+    they could name three different leaders. Each puts the run's order first;
+    a row the run did not rank (its forecast failed tonight) is never marked
+    as leading; and an older run without an order reads as before. Run for
+    real, in node."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = fn_src("function fcRankFirst(") + r"""
+const rows = [{name: 'A'}, {name: 'B'}, {name: 'C'}, {name: 'D'}];
+console.log(JSON.stringify({
+  ranked: fcRankFirst({ranking: ['C', 'A']}, rows, r => r.name).map(r => r.name),
+  none: fcRankFirst({}, rows, r => r.name).map(r => r.name),
+  untouched: rows.map(r => r.name),
+}));
+"""
+    got = _run_node(js)
+    ok(got["ranked"] == ["C", "A", "B", "D"], "the run's order first, the rest in the card's own: %s" % got["ranked"])
+    ok(got["none"] == ["A", "B", "C", "D"] and got["untouched"] == ["A", "B", "C", "D"],
+       "an older run reads as before, and nothing is sorted in place")
+    opt, alg, san = fn_src("function fcOptimisedCard("), fn_src("function fcAlgorithmsCard("), fn_src("function fcSanityCard(")
+    ok("const order = fcRankFirst(sn, ranked, x => x.m.name);" in opt and "const lead = order[0], next = order[1];" in opt,
+       "Running now leads with the run's first")
+    ok("fcRankFirst(sn, list.slice().sort(" in alg, "How each one works lists in the same order")
+    ok("fcRankFirst(sn, (sn.models || []).slice().sort(" in san and "RANK[i] && quoted(m)" in san,
+       "and the side by side table marks only rows the run ranked as quoted")
+    rec = fn_src("function fcRecordCard(")
+    ok("sn.record_waiting" in rec and "Every method needs three closed months of its own" in rec,
+       "the record card says who the ranking is waiting on, not 'three are needed' under a longer list")
+    ok("not every method has three closed months on its record yet" in opt
+       and "Once every method has three closed months on its record" in opt, "and Running now says the same")
+
+
+@test
 def t_a_confirm_dialog_answers_for_the_focused_button():
     """A12 in the 2026-09-22 bug audit. Enter was bound on the document and
     answered yes wherever focus was: Tab to Cancel, Enter, and Book & dispatch
@@ -9070,6 +9107,13 @@ def t_settings_switches_are_named_switches():
         ok(lab, key + " names itself by its title")
         t = re.search(r'id="' + re.escape(lab.group(1)) + r'"[^>]*>([^<]+)<', HTML)
         ok(t and t.group(1).strip(), key + " points at a title that exists")
+    # The schedule's frequency list beside them. Its row is shown until
+    # Settings has read the schedule and hidden only if auto-refresh is off,
+    # so the browser suite's no-unnamed-control check saw it or not by
+    # timing, and with auto-refresh on a screen reader heard an unnamed list.
+    sel = re.search(r'<select id="sched-freq"[^>]*>', HTML)
+    ok(sel and 'aria-labelledby="sched-freq-title"' in sel.group(0), "the frequency list is named by its title")
+    ok(re.search(r'id="sched-freq-title"[^>]*>Frequency<', HTML), "and that title exists")
 
 
 @test
