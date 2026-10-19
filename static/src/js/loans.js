@@ -854,19 +854,15 @@
                 const rowsR = [['Invoices', 'invoices'], ['Credit notes', 'creditNotes'], ['Contacts', 'contacts']]
                     .map(([lab2, k]) => [lab2, cxReviewCounts(r, k)]);
                 const shown = cols.filter(([k]) => k === 'create' || rowsR.some(([, c]) => c[k]));
-                const wrapT = el('div', 'ktable-wrap cx-mx');
-                const tb = el('table', 'ktable');
-                const thr = el('tr'); thr.append(el('th', null, 'Send will'));
-                shown.forEach(([, h, long]) => { const th = el('th', 'num', h); if (long) th.title = long; thr.append(th); });
-                const thead = el('thead'); thead.append(thr); tb.append(thead);
-                const tbody = el('tbody');
+                const kt = dataTable(['Send will'].concat(shown.map(([, h]) => [h, 'num'])), { wrap: 'cx-mx' });
+                shown.forEach(([, , long], i) => { if (long) kt.heads[i + 1].title = long; });
                 rowsR.forEach(([lab2, c]) => {
                     const tr = el('tr');
                     tr.append(el('td', 'kw', lab2));
                     shown.forEach(([k]) => tr.append(el('td', 'num' + (c[k] === 0 ? ' zero' : ''), c[k] == null ? '' : String(c[k]))));
-                    tbody.append(tr);
+                    kt.add(tr);
                 });
-                tb.append(tbody); wrapT.append(tb); rv.append(wrapT);
+                rv.append(kt.wrap);
             }
             if (attn.length) {
                 const att = el('div', 'cx-att');
@@ -1252,12 +1248,7 @@
                 const pages = Math.max(1, Math.ceil(order.length / connPayView.size));
                 if (connPayView.page > pages) connPayView.page = pages;
                 const from = (connPayView.page - 1) * connPayView.size;
-                const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable cx-docs cx-pay');
-                const hr = el('tr');
-                [['Order'], ['Payout']].concat(withState ? [['Outcome']] : []).concat([['Note for the invoice']])
-                    .forEach(([h]) => hr.append(el('th', null, h)));
-                const thead = el('thead'); thead.append(hr); tbl.append(thead);
-                const tb = el('tbody');
+                const kt = dataTable(['Order', 'Payout'].concat(withState ? ['Outcome'] : []).concat(['Note for the invoice']), { cls: 'cx-docs cx-pay' });
                 order.slice(from, from + connPayView.size).forEach(n2 => {
                     const tr = el('tr');
                     tr.append(el('td', 'cx-ord', n2.order || ''), el('td', 'cx-payout', n2.payout || ''));
@@ -1269,9 +1260,9 @@
                         tr.append(st2);
                     }
                     tr.append(el('td', 'cx-note', n2.note || ''));
-                    tb.append(tr);
+                    kt.add(tr);
                 });
-                tbl.append(tb); wrap.append(tbl); sec.append(wrap);
+                sec.append(kt.wrap);
                 if (order.length > 20) sec.append(tablePager({ total: order.length, page: connPayView.page, pageSize: connPayView.size,
                     sizes: [20, 50, 100], noun: 'notes',
                     onPage: (p2) => { connPayView.page = p2; connFocus = { sec: 'pay', on: 'head' }; renderConnector(); },

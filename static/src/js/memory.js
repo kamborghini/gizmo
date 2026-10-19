@@ -491,16 +491,10 @@
             const pages = Math.max(1, Math.ceil(rows.length / memView.size));
             if (memView.page > pages) memView.page = pages;
             const from = (memView.page - 1) * memView.size;
-            const wrap = el('div', 'ktable-wrap');
-            const tbl = el('table', 'ktable mem-table');
-            const hr = el('tr');
-            [['Kind'], ['Note'], ['From'], ['Added'], ['Actions', 'sr']].forEach(([h, c]) => {
-                const th = el('th'); if (c) th.append(el('span', 'sr-only', h)); else th.textContent = h; hr.append(th);
-            });
-            const thead = el('thead'); thead.append(hr); tbl.append(thead);
-            const tb = el('tbody');
-            rows.slice(from, from + memView.size).forEach(m => tb.append(memView.editId === m.id ? memEditRow(m) : memRow(m, sent)));
-            tbl.append(tb); wrap.append(tbl); box.append(wrap);
+            /* The actions column has a name for a screen reader and none on screen. */
+            const kt = dataTable(['Kind', 'Note', 'From', 'Added', el('span', 'sr-only', 'Actions')], { cls: 'mem-table' });
+            rows.slice(from, from + memView.size).forEach(m => kt.add(memView.editId === m.id ? memEditRow(m) : memRow(m, sent)));
+            box.append(kt.wrap);
             if (rows.length > 25) box.append(tablePager({ total: rows.length, page: memView.page, pageSize: memView.size, sizes: [25, 50, 100],
                 noun: 'notes', onPage: (k) => { memView.page = k; paintNotesList(); },
                 onSize: (k) => { memView.size = k; memView.page = 1; paintNotesList(); } }));

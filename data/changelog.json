@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-19",
+   "title": "Panels and tables",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "The Ask panel on every report sits in its panel like the rest, and its prompt fits a phone."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-19",
    "title": "Rows and ticks",
    "items": [
     {

@@ -45,7 +45,7 @@
         /* R13: on a phone a table's rows are two lines, never a sideways scroll:
            the cell that leads it (the first, or the one its head marks kt-main)
            on the first line, then the others, each after its column's head
-           (stamped as data-h by syncTableHeads). The size list, Memory's notes
+           (named as data-h by dataTable() as each row is added). The size list, Memory's notes
            and Xero sync's documents keep phone layouts of their own. */
         @media (max-width: 640px) {
             .ktable:not(.sizes-table, .mem-table, .cx-docs) { display: block; min-width: 0; }

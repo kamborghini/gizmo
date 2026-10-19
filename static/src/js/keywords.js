@@ -25,11 +25,7 @@
             }
         }
         function keywordTable(rows) {
-            const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
-            const thead = el('thead'); const htr = el('tr');
-            ['Keyword', 'Clicks', 'Impressions', 'CTR', 'Position'].forEach((h, i) => htr.append(el('th', i ? 'num' : null, h)));
-            thead.append(htr); tbl.append(thead);
-            const tb = el('tbody');
+            const kt = dataTable(['Keyword', ['Clicks', 'num'], ['Impressions', 'num'], ['CTR', 'num'], ['Position', 'num']]);
             /* Fifteen, most clicks first, then Show all (12 Oct 2026): fifty rows
                ran 1,400px past the paid search beside it. */
             const n = Math.min(rows.length, 50);
@@ -44,9 +40,9 @@
                 tr.append(el('td', 'num', (q.impressions || 0).toLocaleString()));
                 tr.append(el('td', 'num', (q.ctr != null ? pct1(q.ctr) : '')));
                 tr.append(el('td', 'num', pos ? pos.toFixed(1) : ''));
-                tb.append(tr);
+                kt.add(tr);
             });
-            tbl.append(tb); wrap.append(tbl);
+            const wrap = kt.wrap;
             if (n > 15) {
                 const more = el('div', 'kw-more');
                 const b = textButton(null, { small: true }); b.type = 'button'; b.setAttribute('aria-expanded', 'false');
@@ -54,7 +50,7 @@
                 const note = el('span', 'lbl-meta', '15 of ' + n + ' shown, most clicks first');
                 b.onclick = () => {
                     const open = b.getAttribute('aria-expanded') !== 'true';
-                    tb.querySelectorAll('tr').forEach((tr, i) => { if (i >= 15) tr.hidden = !open; });
+                    kt.body.querySelectorAll('tr').forEach((tr, i) => { if (i >= 15) tr.hidden = !open; });
                     b.setAttribute('aria-expanded', String(open));
                     b.firstChild.textContent = open ? 'Show fewer' : 'Show all ' + n + ' keywords';
                     note.textContent = open ? 'All ' + n + ' shown, most clicks first' : '15 of ' + n + ' shown, most clicks first';
@@ -83,10 +79,7 @@
                 /* No margin of its own: it sits in the paid search group, whose
                    gap spaces it from the figures, as the figures' own bottom
                    margin did in the flow. */
-                const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
-                const thead = el('thead'); const htr = el('tr');
-                ['Campaign', 'Cost', 'CPC', 'Conv.', 'ROAS'].forEach((h, i) => htr.append(el('th', i ? 'num' : null, h)));
-                thead.append(htr); tbl.append(thead); const tb = el('tbody');
+                const kt = dataTable(['Campaign', ['Cost', 'num'], ['CPC', 'num'], ['Conv.', 'num'], ['ROAS', 'num']]);
                 ads.campaigns.forEach(c => {
                     const tr = el('tr'); tr.append(el('td', 'kw', c.campaign || '(not set)'));
                     tr.append(el('td', 'num', fmtMoney(c.cost, cur)), el('td', 'num', cpcFmt(c.cpc)), el('td', 'num', (c.conversions || 0).toLocaleString()));
@@ -97,9 +90,9 @@
                         roas.classList.add('roas-under');
                         roas.append(el('span', 'roas-flag', 'below cost'));
                     }
-                    tr.append(roas); tb.append(tr);
+                    tr.append(roas); kt.add(tr);
                 });
-                tbl.append(tb); wrap.append(tbl); frag.append(wrap);
+                frag.append(kt.wrap);
             }
             return frag;
         }

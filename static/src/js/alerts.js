@@ -71,10 +71,7 @@
         }
         function sectorSalesTable(rows, cur) {
             const days = (rows[0] && rows[0].days) ? rows[0].days : 28;
-            const wrap = el('div', 'ktable-wrap'); const tbl = el('table', 'ktable');
-            const thead = el('thead'); const htr = el('tr');
-            ['Sector', 'Revenue (' + days + 'd)', 'Orders', 'Average order value'].forEach((h, i) => htr.append(el('th', i ? 'num' : null, h)));
-            thead.append(htr); tbl.append(thead); const tb = el('tbody');
+            const kt = dataTable(['Sector', ['Revenue (' + days + 'd)', 'num'], ['Orders', 'num'], ['Average order value', 'num']]);
             rows.forEach(r => {
                 const tr = el('tr'); const c0 = el('td', 'kw');
                 const sl = textLink(r.sector || '', { size: 'inline' });
@@ -83,9 +80,9 @@
                 tr.append(el('td', 'num', fmtMoney(r.revenue || 0, cur)));
                 tr.append(el('td', 'num', (r.orders || 0).toLocaleString()));
                 tr.append(el('td', 'num', fmtMoney(r.aov || 0, cur)));
-                tb.append(tr);
+                kt.add(tr);
             });
-            tbl.append(tb); wrap.append(tbl); return wrap;
+            return kt.wrap;
         }
         function changesStrip(changes, since) {
             if (!Array.isArray(changes) || !changes.length) return null;

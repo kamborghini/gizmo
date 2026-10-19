@@ -204,17 +204,13 @@
                     { label: 'Orders', value: '214', delta: '3.1%', trend: 'down' },
                     { label: 'Average order', value: money(58.32, 'GBP', 2) }])));
             /* Table */
-            const wrap = el('div', 'ktable-wrap'), t = el('table', 'ktable');
-            const head = el('tr');
-            [['Order', ''], ['Customer', ''], ['Placed', ''], ['Total', 'num']].forEach(([h, c]) => head.append(el('th', c || null, h)));
-            const tb = el('tbody');
+            const kt = dataTable(['Order', 'Customer', 'Placed', ['Total', 'num']]);
             [['#1041', 'Example Events Ltd', '2 Oct', 1840], ['#1042', 'A. Customer', '3 Oct', 64.5], ['#1043', 'Studio North', '4 Oct', 312]].forEach(([o, c, d, v]) => {
                 const tr = el('tr');
                 tr.append(el('td', null, o), el('td', null, c), el('td', null, d), el('td', 'num', money(v, 'GBP', 2)));
-                tb.append(tr);
+                kt.add(tr);
             });
-            const th = el('thead'); th.append(head); t.append(th, tb); wrap.append(t);
-            page.append(dsCard('Tables', 'Every list of rows: the card is its frame, rows divided by hairlines, figures to the right.', wrap));
+            page.append(dsCard('Tables', 'Every list of rows: the card is its frame, rows divided by hairlines, figures to the right.', kt.wrap));
             /* Fields: the app's own pattern, the label wrapping its caption
                and control, help or what is wrong said underneath. */
             const fields = el('div', 'ds-fields');

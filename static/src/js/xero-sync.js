@@ -695,24 +695,15 @@
            card, which is how a tag of 62 orders became a column 10,000px
            tall inside a 444px tile. */
         function connDocTable(entries, dry, withOrder) {
-            const wrap = el('div', 'ktable-wrap');
-            const tbl = el('table', 'ktable cx-docs' + (withOrder ? '' : ' cx-one'));
             /* After a send there is no document to open and no amount: the
                connector attaches the document on a check only. Two empty
-               columns down every row said nothing. */
+               columns down every row said nothing. The Open column has a name
+               for a screen reader and none on screen, where its buttons say
+               what they are. */
             const withDoc = entries.some(e => e.d && e.d.preview);
-            const hr = el('tr');
-            const heads = (withOrder ? [['Order', '']] : []).concat([['Document', ''], ['Outcome', '']])
-                .concat(withDoc ? [['Lines total', 'num'], ['Document window', 'sr']] : []);
-            heads.forEach(([h, c]) => {
-                const th = el('th', c === 'num' ? 'num' : null);
-                /* The Open column has a name for a screen reader and none on
-                   screen, where its buttons say what they are. */
-                if (c === 'sr') th.append(el('span', 'sr-only', h)); else th.textContent = h;
-                hr.append(th);
-            });
-            const thead = el('thead'); thead.append(hr); tbl.append(thead);
-            const tb = el('tbody');
+            const kt = dataTable((withOrder ? ['Order'] : []).concat(['Document', 'Outcome'])
+                .concat(withDoc ? [['Lines total', 'num'], el('span', 'sr-only', 'Document window')] : []),
+                { cls: 'cx-docs' + (withOrder ? '' : ' cx-one') });
             /* An order with a document out against Shopify goes first, its
                documents kept together, and within an order (one order's check
                included) that document leads. */
@@ -774,10 +765,9 @@
                     }
                     tr.append(act);
                 }
-                tb.append(tr);
+                kt.add(tr);
             });
-            tbl.append(tb); wrap.append(tbl);
-            return wrap;
+            return kt.wrap;
         }
         /* A tag's check arms exactly that tag, and a send spends it: the
            results stay on screen to be read, but sending them again needs a

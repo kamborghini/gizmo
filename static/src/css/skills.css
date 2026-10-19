@@ -153,9 +153,6 @@
            (Cameron, 13 Oct 2026); stacked, each is its own height, its row's. Screen
            only: paper has no panels and keeps the 64 above. Forecast's columns too. */
         @media screen { :is(.wpair-in, .fc-cols) { column-gap: var(--panel-gap); align-items: stretch; } }
-        /* A half's own margin sits outside its box, where the stretch cannot reach: a
-           chart card's 16 left a half 16 short of its neighbour. The grid's gaps space them. */
-        @media screen { :is(.wpair-in, .fc-cols) > .panel { margin-block: 0; } }
         .wpair.even > .wpair-in { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .wpair.flip > .wpair-in { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
         /* A table at its natural width, and the other half takes the rest (Xero sync's runs). */

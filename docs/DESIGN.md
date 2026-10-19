@@ -72,6 +72,20 @@ width on the scale, the script painting from tokens only
   rules.
 ([panels](superpowers/specs/2026-10-13-panels-design.md))
 
+**What is a panel is the stylesheet's rule,** not something the page stamps on:
+one selector at the top of `static/src/css/panels.css` ("the panel rule"). A
+page root's children are panels, except the page's own furniture (its header,
+tabs and choosers, its notices, the queue's counters, Forecast's band,
+Customise's grip and hide button); a holder (a pair and its inside, Forecast's
+pair and columns, CRM's segment and charts, the Guide's host and grid, the
+Design page, an element with no class) passes the rule on to what it holds, to
+four holders deep. Every rule about panels nests under it (`&` is a panel). A
+new kind of notice joins the furniture list there; a new wrapper that only
+lays panels out joins the holders. The browser suite reads the selector and
+checks every measured state against its own walk, both ways
+([spec](superpowers/specs/2026-10-19-panels-and-tables-design.md)). Guard:
+`t_the_panel_rule_is_the_stylesheets`.
+
 ## Parts
 
 ### Windows
@@ -182,6 +196,20 @@ Guard: `t_no_row_is_a_pretend_button`, and the keyboard journeys.
 A tick (or a radio) and its words are one `<label>`: `tickRow(cls)` builds it,
 with the body text in primary ink, and `cls` a screen's spacing hook.
 Guard: `t_every_tick_row_is_built_by_the_part`.
+
+### Tables
+
+A real table (`.ktable`) is built by `dataTable(cols, opts)` in
+`static/src/js/part-table.js`: the wrapper, the table, its head and its body.
+Each column is its head (words, a Node, or nothing) or `[head, cls]` (`num`
+for figures, `kt-main` for the cell that leads a phone's row). Rows go in
+through `add(...)`, which names every cell from its column as it goes, the
+words a phone's two-line rows show ("Orders 5"); add a row once its cells are
+in. `head: false` leaves the head out. A list of rows with their own grid
+(open rows, a detail under a row) is the div table, `dtable()`, which names its
+cells the same way. The browser suite checks every table on every measured
+state, with zero tolerance. Guards: `t_every_table_is_built_by_the_part`, the
+browser suite's "table cells a phone row would show unnamed".
 
 ## Adding a part
 

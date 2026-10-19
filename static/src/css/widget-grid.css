@@ -85,8 +85,6 @@
            Customize mode stands 8 clear of its content. */
         .ov-wrap.wg-editing > [data-widget]:not(:focus-visible) {
             outline: var(--bw-hairline) dashed var(--border-emphasis); outline-offset: var(--sp-2); }
-        /* A panel has an edge of its own, so its dashed edge in Customise is that edge. */
-        .ov-wrap.wg-editing > [data-widget].panel:not(:focus-visible) { outline-offset: calc(-1 * var(--bw-hairline)); }
         /* The held card follows the pointer by an inline translate the script
            writes, and floats: the large shadow, above its neighbours, and a
            step bigger unless motion is reduced (the script adds wg-lifted only

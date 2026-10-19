@@ -160,11 +160,9 @@
             /* Cells split on unescaped pipes: 'a\|b' is one cell. */
             const cells = (r) => r.trim().replace(/\\\|/g, '').replace(/^\||\|$/g, '').split('|').map(x => x.trim().replace(//g, '|'));
             const body = rows.filter(r => !mdTableRule(r));
-            const wrap = el('div', 'ktable-wrap prose-table'); const tbl = el('table', 'ktable');
-            const thead = el('thead'), tbody = el('tbody');
-            body.forEach((r, k) => { const tr = el('tr'); cells(r).forEach(x => tr.append(mdInline(el(k === 0 ? 'th' : 'td'), x))); (k === 0 ? thead : tbody).append(tr); });
-            tbl.append(thead, tbody); wrap.append(tbl);
-            return wrap;
+            const kt = dataTable((body.length ? cells(body[0]) : []).map(x => mdInline(document.createDocumentFragment(), x)), { wrap: 'prose-table' });
+            body.slice(1).forEach(r => { const tr = el('tr'); cells(r).forEach(x => tr.append(mdInline(el('td'), x))); kt.add(tr); });
+            return kt.wrap;
         }
         function followupChips(list, onPick) {
             const wrap = el('div', 'followups');

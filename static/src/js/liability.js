@@ -449,11 +449,7 @@
                 x.onclick = (e) => { e.stopPropagation(); liaOpen = null; renderLiability(); };
                 h.append(x); det.append(h);
                 const duo = el('div', 'duo');
-                const wrap = el('div', 'ktable-wrap'); const tb = el('table', 'ktable');
-                const thead = el('thead'); const htr = el('tr');
-                [['Order'], ['Due'], ['Value and paid', 1], ['Outstanding', 1], ['Terms and channel'], ['Status']].forEach(([hd, num]) => htr.append(el('th', num ? 'num' : null, hd)));
-                thead.append(htr); tb.append(thead);
-                const tbody = el('tbody');
+                const kt = dataTable(['Order', 'Due', ['Value and paid', 'num'], ['Outstanding', 'num'], 'Terms and channel', 'Status']);
                 rows.forEach(r => {
                     const tr = el('tr');
                     const onc = el('td', 'kw'); onc.append(orderA(r.name, r.admin_url), el('div', 'prod-sub', 'ordered ' + fmtDate(r.created_at)));
@@ -466,10 +462,9 @@
                     tc.append(el('div', 'prod-sub', (r.channels || [r.channel]).join(', ')));
                     tr.append(tc);
                     const tds = el('td'); tds.append(liaChip(r)); tr.append(tds);
-                    tbody.append(tr);
+                    kt.add(tr);
                 });
-                tb.append(tbody); wrap.append(tb);
-                duo.append(wrap, chasePanel(c, cur));
+                duo.append(kt.wrap, chasePanel(c, cur));
                 det.append(duo);
                 return det;
             }
