@@ -36,6 +36,8 @@ lock:
 	  --custom-compile-command "pip-compile --generate-hashes --output-file=requirements-service.txt requirements-service.in"
 	cd forecast && $(LOCK) requirements-m5.in -o requirements-m5.txt \
 	  --custom-compile-command "pip-compile --generate-hashes --output-file=requirements-m5.txt requirements-m5.in"
+	cd forecast && $(LOCK) requirements-prophet.in -o requirements-prophet.txt \
+	  --custom-compile-command "pip-compile --generate-hashes --output-file=requirements-prophet.txt requirements-prophet.in"
 
 # The same Python as the images and CI, from the same hashed lock. The forecast
 # lock and the scanners make check uses come too, so `make check` runs here
@@ -43,7 +45,9 @@ lock:
 install:
 	uv venv --clear --python 3.14 .venv
 	uv pip install --python $(PY) --quiet --require-hashes -r requirements.txt
-	uv pip install --python $(PY) --quiet --require-hashes -r forecast/requirements-service.txt
+	# The service's lock plus Prophet, as CI's forecast job installs it, so the
+	# Prophet checks in tests/test_forecast.py run here rather than skip.
+	uv pip install --python $(PY) --quiet --require-hashes -r forecast/requirements-prophet.txt
 	uv pip install --python $(PY) --quiet bandit==1.9.4 pip-audit==2.10.1
 
 # `.env` is read here, by the shell, and nowhere in the code: production has

@@ -17890,6 +17890,17 @@ Projected Image UK"></textarea>
             }
             return card;
         }
+        /* The run's own order, the one its figures come from, when it carries
+           one (every run from 19 October 2026). Each card kept a sort of its
+           own, and once the forecast ranked on its record they named different
+           methods from the one the figures followed. The sort is stable, so a
+           card's own order still decides among rows the run did not rank, and
+           for an older run that carries no order. */
+        function fcRankFirst(sn, rows, nameOf) {
+            if (!Array.isArray(sn.ranking)) return rows;
+            const at = r => { const i = sn.ranking.indexOf(nameOf(r)); return i < 0 ? 1e9 : i; };
+            return rows.slice().sort((a, b) => at(a) - at(b));
+        }
         /* ---------- which one is in use, and why ----------
            Nobody picks the algorithm here, so the page owes the reader a
            straight answer to the question they would otherwise ask: which one
@@ -17907,7 +17918,8 @@ Projected Image UK"></textarea>
             const onRecord = sn.ranked_on === 'record';
             ranked.sort((a, b) => (onRecord && a.live != null && b.live != null)
                 ? a.live - b.live : ((a.back == null ? 9 : a.back) - (b.back == null ? 9 : b.back)));
-            const lead = ranked[0], next = ranked[1];
+            const order = fcRankFirst(sn, ranked, x => x.m.name);
+            const lead = order[0], next = order[1];
             if (!lead) {
                 card.append(el('p', 'card-sub', 'No method has been scored yet.'));
                 box.append(card); return box;
@@ -17921,7 +17933,7 @@ Projected Image UK"></textarea>
                 ? 'Chosen on its record: closest on ' + ((lead.m.live || {}).wins || 0) + ' of '
                   + ((lead.m.live || {}).months || 0) + ' months that have closed since this started running'
                 : 'Chosen on the backtest: fitted to earlier months and marked against what happened, '
-                  + 'because not enough months have closed yet to judge it live');
+                  + 'because not every method has three closed months on its record yet');
             if (err != null) bits.push('typically out by ' + (err * 100).toFixed(0) + '%');
             if (next) {
                 const ne = onRecord ? next.live : next.back;
@@ -17936,8 +17948,9 @@ Projected Image UK"></textarea>
                 ? 'It is judged on months it could not see: the first figure it gave for each month, against '
                   + 'what came in. At the end of every month every method is marked again, and if another '
                   + 'starts coming closer, it takes over without anyone changing a setting.'
-                : 'Once three months have closed, the choice moves onto that record instead, which is the '
-                  + 'harder test: a backtest refits a model to a period the code already knows the shape of.'));
+                : 'Once every method has three closed months on its record, the choice moves onto that record '
+                  + 'instead, which is the harder test: a backtest refits a model to a period the code already '
+                  + 'knows the shape of.'));
             box.append(card);
             return box;
         }
@@ -17986,11 +17999,11 @@ Projected Image UK"></textarea>
                 'Every method the system runs each night. It tries all of them, marks all of them, '
                 + 'and uses whichever has been closest. Nothing here needs choosing.'));
             const onRecord = sn.ranked_on === 'record';
-            const rows = list.slice().sort((a, b) => {
+            const rows = fcRankFirst(sn, list.slice().sort((a, b) => {
                 const ax = onRecord && (a.live || {}).mape != null ? a.live.mape : ((a.score || {}).mape ?? 9);
                 const bx = onRecord && (b.live || {}).mape != null ? b.live.mape : ((b.score || {}).mape ?? 9);
                 return ax - bx;
-            });
+            }), m => m.name);
             rows.forEach(m => {
                 /* Name and the numbers on ONE line, so the column of figures
                    reads down the page and the sources can be compared at a
@@ -18170,8 +18183,12 @@ Projected Image UK"></textarea>
                 + (sn.ranked_on === 'record'
                     ? 'With ' + (sn.closed_months || res.length) + ' closed months on record, this is what the '
                       + 'forecast is now ranked on rather than the backtest.'
-                    : 'Three closed months are needed before this outranks the backtest; there are '
-                      + (sn.closed_months || 0) + ' so far.')));
+                    : Object.keys(sn.record_waiting || {}).length
+                        ? 'Every method needs three closed months of its own before this outranks the backtest. '
+                          + (sn.closed_months || 0) + ' have closed; the newest method has '
+                          + Math.min.apply(null, Object.values(sn.record_waiting)) + '.'
+                        : 'Three closed months are needed before this outranks the backtest; there are '
+                          + (sn.closed_months || 0) + ' so far.')));
             /* The source names in full, wrapping onto two lines: cut at 22
                characters they read 'Smoothed level, seaso...' with no way to
                see the rest. */
@@ -18225,16 +18242,20 @@ Projected Image UK"></textarea>
                 + 'They are scored on this shop\u2019s own history: fitted to earlier months, '
                 + 'then marked against what actually happened. Lower error is better, and a '
                 + 'bias that leans one way every month matters more than the size of it.'));
-            const ranked = (sn.models || []).slice().sort((a, b) => {
+            const ranked = fcRankFirst(sn, (sn.models || []).slice().sort((a, b) => {
                 const x = (a.score || {}).mape, y = (b.score || {}).mape;
                 if (x == null) return 1; if (y == null) return -1; return x - y;
-            });
+            }), m => m.name);
+            /* Only a row the run ranked can lead or be quoted: one whose
+               forecast failed tonight keeps its backtest score, and sorted on
+               that alone it was marked as leading with no figures. */
+            const quoted = m => !Array.isArray(sn.ranking) || sn.ranking.indexOf(m.name) >= 0;
             const RANK = ['leads the forecast', 'second opinion', 'third opinion'];
             const shown = mode === 'one' ? ranked.slice(0, 1)
                 : mode === 'three' ? ranked.slice(0, 3) : ranked;
             const rows = shown.map((m, i) => {
                 const name = el('span', null, m.name);
-                if (RANK[i]) name.append(document.createTextNode(' '), fcChip(i ? 'note' : 'made', RANK[i]));
+                if (RANK[i] && quoted(m)) name.append(document.createTextNode(' '), fcChip(i ? 'note' : 'made', RANK[i]));
                 /* An average of the others is a row like any other and is
                    ranked like one, but it is worth being able to see at a
                    glance which rows are combinations rather than sources. */

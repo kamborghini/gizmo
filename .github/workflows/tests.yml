@@ -129,11 +129,13 @@ jobs:
         with:
           python-version: '3.14'
           cache: pip
-          cache-dependency-path: forecast/requirements-service.txt
-      - run: pip install --require-hashes -r forecast/requirements-service.txt
+          cache-dependency-path: forecast/requirements-prophet.txt
+      # The service's lock plus Prophet, which the image does not carry, so
+      # its two methods are tested here before anyone switches them on.
+      - run: pip install --require-hashes -r forecast/requirements-prophet.txt
       - name: Forecast suite
         run: |
-          python -c "import pandas"   # fail loudly rather than let the suite skip itself
+          python -c "import pandas, prophet"   # fail loudly rather than let the suite (or its Prophet checks) skip
           python tests/test_forecast.py
       - name: Forecast dependency audit (blocking)
         run: |

@@ -1,0 +1,17 @@
+# Prophet (forecast/prophet_source.py), the two methods that forecast the
+# regular orders day by day, on top of the whole service. `make lock`
+# compiles this, with the service's own pins, into requirements-prophet.txt:
+# one hashed lock installed IN PLACE of requirements-service.txt.
+#
+# It is NOT in the nightly image. Measured on the shop's own months (October
+# 2026) it was a little closer than the methods already there, by less than
+# the noise, and the range drawn around it held fewer of the months that came
+# in; it is about 115 MB and eleven packages, matplotlib among them, which it
+# requires and never uses here. CI installs this lock to test it, and
+# `python -m forecast evaluate` measures it again whenever asked. To switch it
+# on: install this file in place of requirements-service.txt in
+# forecast/Dockerfile, and add `python -m forecast.prophet_source` to the
+# image check in .github/workflows/tests.yml, which fits it once inside the
+# built image.
+-r requirements-service.in
+prophet==1.5.0
