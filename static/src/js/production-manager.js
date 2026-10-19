@@ -1493,7 +1493,7 @@
             const { overlay, modal, head, x, body } = win;
             const bar = el('div', 'lbl-toolbar');
             const dt = document.createElement('input');
-            dt.type = 'date'; dt.className = 'lbl-size';
+            dt.type = 'date'; dt.className = 'lbl-size'; dt.setAttribute('aria-label', 'Date');
             dt.value = new Date().toLocaleDateString('en-CA');
             bar.append(el('span', 'cov-line', 'Everything booked on'), dt);
             const pr = textButton(); pr.append(ico(I.printer), document.createTextNode('Print'));
@@ -1611,7 +1611,7 @@
             const { overlay, modal, head, x, body } = win;
             const bar = el('div', 'lbl-toolbar');
             const dt = document.createElement('input');
-            dt.type = 'date'; dt.className = 'lbl-size';
+            dt.type = 'date'; dt.className = 'lbl-size'; dt.setAttribute('aria-label', 'Date');
             dt.value = new Date().toLocaleDateString('en-CA');
             bar.append(el('span', 'cov-line', 'Everything marked made on'), dt);
             const pr = textButton(); pr.append(ico(I.printer), document.createTextNode('Print'));
@@ -1706,7 +1706,7 @@
                         szIn.className = 'tm-field'; szIn.placeholder = 'Size mm'; szIn.setAttribute('aria-label', 'Size in millimetres');
                         szIn.style.cssText = 'width:82px;flex:none;padding:var(--sp-1) var(--sp-2)';
                         const qIn = document.createElement('input');
-                        qIn.type = 'number'; qIn.min = '1'; qIn.max = '10000'; qIn.placeholder = 'Qty';
+                        qIn.type = 'number'; qIn.min = '1'; qIn.max = '10000'; qIn.placeholder = 'Qty'; qIn.setAttribute('aria-label', 'Quantity');
                         qIn.className = 'tm-field'; qIn.style.cssText = 'width:70px;flex:none;padding:var(--sp-1) var(--sp-2)';
                         const addB = textButton(); addB.append(ico(I.plus), document.createTextNode('Add'));
                         addB.title = 'Add something that was used but not in the estimate';

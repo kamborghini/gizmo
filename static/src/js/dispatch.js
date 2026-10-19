@@ -464,7 +464,7 @@
             const onT = el('div', 'section-title', 'Order note');
             body.append(onT);
             const note = document.createElement('textarea');
-            note.className = 'disp-paste'; note.rows = 4;
+            note.className = 'disp-paste'; note.rows = 4; note.setAttribute('aria-label', 'Paste an address');
             /* Prefilled from the LIVE note, not the queue's copy: that one has the
                proposal link stripped out and is cut to 500 characters, so saving
                it back would delete the proof link. Left untouched, this
@@ -738,9 +738,9 @@
                 customsLines.length = 0;
                 function addLine(pre) {
                     const rowc = el('div', 'disp-boxedit');
-                    const dIn = document.createElement('input'); dIn.type = 'text'; dIn.className = 'disp-num'; dIn.placeholder = 'Description'; dIn.style.flex = '2 1 auto';
-                    const qIn = document.createElement('input'); qIn.type = 'number'; qIn.min = '1'; qIn.step = '1'; qIn.className = 'disp-num disp-boxdim'; qIn.placeholder = 'Qty';
-                    const pIn = document.createElement('input'); pIn.type = 'number'; pIn.min = '0'; pIn.step = '0.01'; pIn.className = 'disp-num disp-boxdim'; pIn.placeholder = 'Unit £';
+                    const dIn = document.createElement('input'); dIn.type = 'text'; dIn.className = 'disp-num'; dIn.placeholder = 'Description'; dIn.setAttribute('aria-label', 'Description'); dIn.style.flex = '2 1 auto';
+                    const qIn = document.createElement('input'); qIn.type = 'number'; qIn.min = '1'; qIn.step = '1'; qIn.className = 'disp-num disp-boxdim'; qIn.placeholder = 'Qty'; qIn.setAttribute('aria-label', 'Quantity');
+                    const pIn = document.createElement('input'); pIn.type = 'number'; pIn.min = '0'; pIn.step = '0.01'; pIn.className = 'disp-num disp-boxdim'; pIn.placeholder = 'Unit £'; pIn.setAttribute('aria-label', 'Unit price in pounds');
                     const hIn = document.createElement('input'); hIn.type = 'text'; hIn.spellcheck = false; hIn.setAttribute('aria-label', 'HS code'); hIn.className = 'disp-num disp-boxdim'; hIn.placeholder = 'HS code'; hIn.style.width = 'var(--field-w-sm)';
                     // Origin is ON the card: the commercial invoice needs it, and an
                     // invisible wrong value is worse than a visible editable one.
@@ -1496,7 +1496,7 @@
             // ---- paste ----
             body.append(el('div', 'disp-subhead', 'Paste the address'));
             const paste = document.createElement('textarea');
-            paste.className = 'disp-paste'; paste.rows = 4;
+            paste.className = 'disp-paste'; paste.rows = 4; paste.setAttribute('aria-label', 'Paste an address');
             paste.placeholder = 'Paste the address from an email. It will be split into the fields below.';
             body.append(paste);
             const pasteNote = el('div', 'sub'); body.append(pasteNote);
@@ -1576,6 +1576,7 @@
                     const i = document.createElement('input');
                     i.type = 'number'; i.min = '0'; i.step = '0.1'; i.className = 'disp-num';
                     i.placeholder = k === 'weight' ? 'kg' : k.slice(0, 1).toUpperCase() + k.slice(1) + ' cm';
+                    i.setAttribute('aria-label', k === 'weight' ? 'Weight in kg' : k.slice(0, 1).toUpperCase() + k.slice(1) + ' in cm');
                     i.oninput = staleQuote; ins[k] = i;
                 });
                 const rm = iconButton(I.x, 'Remove this parcel');
@@ -1601,7 +1602,7 @@
             const insWrap = el('label', 'disp-insure');
             const insCb = document.createElement('input'); insCb.type = 'checkbox';
             const insAmt = document.createElement('input');
-            insAmt.type = 'number'; insAmt.min = '0'; insAmt.step = '1'; insAmt.className = 'disp-num';
+            insAmt.type = 'number'; insAmt.min = '0'; insAmt.step = '1'; insAmt.className = 'disp-num'; insAmt.setAttribute('aria-label', 'Insured value');
             insAmt.disabled = true;
             insCb.onchange = () => { insAmt.disabled = !insCb.checked; if (insCb.checked && !insAmt.value) insAmt.value = valueIn.value; staleQuote(); };
             insAmt.oninput = staleQuote;
@@ -2048,7 +2049,7 @@
              ['password', 'Password', 'password', cfg.has_password ? 'Saved (enter to replace)' : 'Web service password']
             ].forEach(([k, lab, type, ph]) => {
                 const inp = document.createElement('input');
-                inp.type = type; inp.className = 'pf-input'; inp.autocomplete = 'off'; inp.placeholder = fromEnv ? 'Set on the server' : ph;
+                inp.type = type; inp.className = 'pf-input'; inp.autocomplete = 'off'; inp.placeholder = fromEnv ? 'Set on the server' : ph; inp.setAttribute('aria-label', lab);
                 if (fromEnv) inp.disabled = true;
                 body.append(el('label', 'field-label', lab), inp);
                 credIn[k] = inp;
@@ -2288,11 +2289,11 @@
                     def.setAttribute('aria-label', 'Use ' + (b.name || 'this box') + ' by default');
                     def.onchange = () => { if (def.checked) defaultBoxId = b.id; };
                     rowb.append(def);
-                    const nm = document.createElement('input'); nm.type = 'text'; nm.className = 'disp-num disp-boxname'; nm.value = b.name || ''; nm.placeholder = 'Name';
+                    const nm = document.createElement('input'); nm.type = 'text'; nm.className = 'disp-num disp-boxname'; nm.value = b.name || ''; nm.placeholder = 'Name'; nm.setAttribute('aria-label', 'Box name');
                     nm.oninput = () => b.name = nm.value;
                     rowb.append(nm);
                     [['width', 'W'], ['length', 'L'], ['depth', 'D'], ['weight', 'kg']].forEach(([k, ph]) => {
-                        const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.step = '0.1'; inp.className = 'disp-num disp-boxdim'; inp.value = b[k]; inp.placeholder = ph === 'kg' ? ph : ph + ' cm';
+                        const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.step = '0.1'; inp.className = 'disp-num disp-boxdim'; inp.value = b[k]; inp.setAttribute('aria-label', ph === 'kg' ? 'Weight in kg' : { W: 'Width', L: 'Length', D: 'Depth' }[ph] + ' in cm'); inp.placeholder = ph === 'kg' ? ph : ph + ' cm';
                         inp.oninput = () => b[k] = parseFloat(inp.value) || 0;
                         rowb.append(inp);
                     });

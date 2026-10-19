@@ -1280,7 +1280,7 @@
                 });
                 const note = document.createElement('input');
                 note.type = 'text'; note.className = 'disp-text';
-                note.placeholder = 'Handover note (optional)'; note.style.flex = '1';
+                note.placeholder = 'Handover note (optional)'; note.setAttribute('aria-label', 'Handover note'); note.style.flex = '1';
                 const go = textButton('Assign');
                 go.onclick = async () => {
                     go.disabled = true;
@@ -1349,7 +1349,7 @@
             const nrow = el('div', 'mail-statebar');
             const ninput = document.createElement('input');
             ninput.type = 'text'; ninput.className = 'disp-text';
-            ninput.placeholder = 'Add a note for the team (the customer never sees these)';
+            ninput.placeholder = 'Add a note for the team (the customer never sees these)'; ninput.setAttribute('aria-label', 'A note for the team');
             ninput.style.flex = '1';
             const nbtn = textButton('Add note');
             nbtn.onclick = async () => {

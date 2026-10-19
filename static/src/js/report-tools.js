@@ -120,7 +120,7 @@
             const thread = el('div', 'pchat-thread'); thread.id = 'pchat-thread-' + threadKey(page);
             renderPageThread(page, thread, data); card.append(thread);
             const row = el('div', 'pchat-input');
-            const ta = el('textarea', 'pchat-ta'); ta.rows = 1; ta.placeholder = 'Ask a question about this report…';
+            const ta = el('textarea', 'pchat-ta'); ta.rows = 1; ta.placeholder = 'Ask a question about this report…'; ta.setAttribute('aria-label', 'Ask a question about this report');
             ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 140) + 'px'; });
             /* While an answer is still coming, the question stays in the box:
                it was cleared first and then refused, gone without a word. */

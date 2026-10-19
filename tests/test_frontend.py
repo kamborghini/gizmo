@@ -9128,6 +9128,34 @@ def t_every_captioned_field_is_built_by_the_part():
 
 
 @test
+def t_no_field_is_named_only_by_its_placeholder():
+    """A placeholder is a name only until someone types. Every input or text
+    box the script makes and gives a placeholder is also named: by its own
+    aria-label, aria-labelledby or title, by a caption built round it
+    (formField, crmField, the Design page's sample field, a label linked by
+    its id), or by whoever it is handed back to (a factory such as crmText)."""
+    def enclosing(pos):
+        a = max(SCRIPT.rfind("\n        function ", 0, pos), SCRIPT.rfind("\n        async function ", 0, pos))
+        b = [j for j in (SCRIPT.find("\n        function ", pos), SCRIPT.find("\n        async function ", pos)) if j >= 0]
+        return SCRIPT[a:min(b) if b else len(SCRIPT)]
+    bad = []
+    for m in re.finditer(r"(\w+)\.placeholder\s*=", SCRIPT):
+        x, body = m.group(1), enclosing(m.start())
+        if not re.search(r"\b" + re.escape(x) + r"\s*=\s*(?:el\('(?:input|textarea)'|document\.createElement\('(?:input|textarea)'\)|crmText\()", body):
+            continue
+        X = re.escape(x)
+        named = (re.search(X + r"\.setAttribute\('aria-label(?:ledby)?'", body) or re.search(X + r"\.title\s*=", body)
+                 or re.search(r"\b(?:formField|crmField|field)\([^;]*\b" + X + r"\b", body)
+                 or re.search(r"return " + X + r"\b", body)
+                 or (re.search(X + r"\.id\s*=", body) and ".htmlFor = " in body)
+                 or any(re.search(re.escape(w) + r"\.append\([^;]*\b" + X + r"\b", body)
+                        for w in re.findall(r"(\w+)\s*=\s*formField\(", body)))
+        if not named:
+            bad.append(SCRIPT[m.start():m.start() + 60].split("\n")[0])
+    ok(not bad, "named only by a placeholder: %s" % bad)
+
+
+@test
 def t_a_print_overtaken_by_a_newer_one_opens_no_dialog():
     """Every print stages its page in one box (#label-print) under one page
     rule, and a newer print takes both over, counted by printSeq. The

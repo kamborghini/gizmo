@@ -8,6 +8,7 @@
 // world can open (windows.js).
 const { test, expect } = require('@playwright/test');
 const S = require('./support');
+const P = require('./probes');
 const SCREENS = require('./screens');
 const WINDOWS = require('./windows');
 
@@ -47,6 +48,7 @@ async function openByKeyboard(page, j) {
 async function journey(page, w) {
   await page.waitForSelector('.modal-overlay.show .modal');
   await expect.poll(() => page.evaluate(inside), { message: 'focus moved into the window' }).toBe(true);
+  expect(await P.unnamed(page), 'controls with no name').toEqual([]);
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
   await expect(page.locator('.modal-overlay.show'), 'Escape leaves a window open: X only').toHaveCount(1);

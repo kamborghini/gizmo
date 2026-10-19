@@ -102,4 +102,18 @@ function panelCounts(m) {
   return out;
 }
 
-module.exports = { measure, panelCounts, SKIP, HOLD };
+// Every visible control with no name a screen reader can read: no label, no
+// aria-label, no aria-labelledby, no title, and for a button no words either.
+// A placeholder is not a name: it goes as soon as someone types.
+async function unnamed(page) {
+  return page.evaluate(() => [...document.querySelectorAll('input, select, textarea, [role="switch"]')]
+    .filter(e => e.getClientRects().length && e.type !== 'hidden' && e.type !== 'file')
+    .filter(e => !(e.labels && e.labels.length) && !(e.getAttribute('aria-label') || '').trim()
+      && !e.getAttribute('aria-labelledby') && !(e.title || '').trim()
+      && !(e.tagName === 'BUTTON' && (e.innerText || '').trim()))
+    .map(e => e.tagName.toLowerCase() + (e.type ? '[' + e.type + ']' : '')
+      + (e.className ? '.' + String(e.className).trim().split(/\s+/).join('.') : '')
+      + (e.placeholder ? ' "' + e.placeholder + '"' : '')));
+}
+
+module.exports = { measure, panelCounts, unnamed, SKIP, HOLD };

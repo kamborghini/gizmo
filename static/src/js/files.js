@@ -826,7 +826,7 @@
                     const chip = el('span', 'files-chip'); chip.innerHTML = I.folder;
                     row.append(chip);
                     const inp = document.createElement('input');
-                    inp.className = 'files-rename'; inp.placeholder = 'Folder name';
+                    inp.className = 'files-rename'; inp.placeholder = 'Folder name'; inp.setAttribute('aria-label', 'Folder name');
                     let done = false;
                     const finish = async (commit) => {
                         if (done) return; done = true; filesNewFolder = false;
