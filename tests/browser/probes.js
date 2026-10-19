@@ -61,9 +61,10 @@ async function measure(page) {
     }
 
     // The panel rules (13 Oct).
-    const bad = [], expected = new Set();
+    const bad = [], expected = new Set(), furniture = [];
     const walk = n => {
-      if (!vis(n) || n.tagName === 'INPUT' || n.tagName === 'SCRIPT' || SKIP.some(c => n.classList.contains(c))) return;
+      if (!vis(n) || n.tagName === 'INPUT' || n.tagName === 'SCRIPT') return;
+      if (SKIP.some(c => n.classList.contains(c))) { furniture.push(n.getBoundingClientRect()); return; }
       if (!n.className || HOLD.some(c => n.classList.contains(c))) { [...n.children].forEach(walk); return; }
       expected.add(n);
       const cs = getComputedStyle(n);
@@ -79,7 +80,9 @@ async function measure(page) {
     const gaps = [], heights = [];
     for (const a of R) {
       const below = R.filter(b => b !== a && b.r.top >= a.r.bottom - 1 && Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left) > 8).sort((x, y) => x.r.top - y.r.top)[0];
-      if (below && Math.abs(below.r.top - a.r.bottom - gap) > 1) gaps.push('v ' + Math.round(below.r.top - a.r.bottom) + ': ' + desc(a.n));
+      // A notice (or other page furniture) between two panels spaces them itself.
+      const between = below && furniture.some(f => f.top >= a.r.bottom - 1 && f.bottom <= below.r.top + 1 && Math.min(f.right, a.r.right) - Math.max(f.left, a.r.left) > 8);
+      if (below && !between && Math.abs(below.r.top - a.r.bottom - gap) > 1) gaps.push('v ' + Math.round(below.r.top - a.r.bottom) + ': ' + desc(a.n));
       const right = R.filter(b => b !== a && b.r.left >= a.r.right - 1 && Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top) > 8).sort((x, y) => x.r.left - y.r.left)[0];
       if (right && Math.abs(right.r.left - a.r.right - gap) > 1) gaps.push('h ' + Math.round(right.r.left - a.r.right) + ': ' + desc(a.n));
       if (right && Math.abs(right.r.top - a.r.top) <= 1 && Math.abs(right.r.bottom - a.r.bottom) > 1 && getComputedStyle(a.n.parentElement).columnCount === 'auto') heights.push(desc(a.n) + ' | ' + desc(right.n));
@@ -97,8 +100,9 @@ async function measure(page) {
       for (const e of pn.querySelectorAll('*')) {
         if (!vis(e)) continue;
         const es = getComputedStyle(e);
-        const ruled = (parseFloat(es.borderBottomWidth) >= 1 && es.borderBottomStyle !== 'none' && !es.borderBottomColor.endsWith(', 0)'))
-          || (parseFloat(es.borderTopWidth) >= 1 && es.borderTopStyle !== 'none' && !es.borderTopColor.endsWith(', 0)'));
+        const edge = side => parseFloat(es['border' + side + 'Width']) >= 1 && es['border' + side + 'Style'] !== 'none' && !es['border' + side + 'Color'].endsWith(', 0)');
+        // A ruled line is a hairline above or below: a box (a field, a menu, a button, a chip, a bar) has sides too, and is not one.
+        const ruled = (edge('Bottom') || edge('Top')) && !edge('Left') && !edge('Right');
         if (!ruled) continue;
         const r = e.getBoundingClientRect();
         if (r.width >= cw * 0.9 && Math.abs(r.left - (pr.left + padL)) <= 2 && Math.abs(r.right - (pr.right - padR)) <= 2) inset.push(desc(e));

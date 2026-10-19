@@ -149,8 +149,12 @@
                     & .mlist > .mrow > .mown-slot { min-width: 0; }
                     & .mlist > .mrow > .mage { flex: 0 0 auto; }
                 }
-                /* The Ask box's grey well was a box inside the panel: the field sits in the panel itself. */
-                &.pchat > .pchat-input { padding: 0; background: none; border-top: 0; }
+                /* The Ask box's grey well was a box inside the panel: the field sits in the panel itself,
+                   and the suggestions and answers on its inset, under its title. The panel is .page-chat;
+                   the .pchat card is inside it (the 13 Oct rule aimed at the card as the panel, and never
+                   matched: 19 Oct 2026). */
+                .ov-wrap & > .pchat > .pchat-thread { padding: var(--sp-3) 0 0; }
+                .ov-wrap & > .pchat > .pchat-input { padding: var(--sp-4) 0 0; background: none; border-top: 0; }
                 /* The queue's bands end at its panel's edges; the panel's own top and bottom close the queue. */
                 &.q-card::before { content: none; }
                 &.q-card .lbl-list > .lbl-grid::before { inset-inline: calc(-1 * var(--panel-pad-x)); }

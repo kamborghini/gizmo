@@ -9287,6 +9287,24 @@ def t_the_panel_rule_is_the_stylesheets():
 
 
 @test
+def t_the_ask_panel_sits_in_its_panel():
+    """Stage 3, piece 5: on every report page the "Ask about this ..." panel
+    showed its grey ask well as a box inside the panel, and its suggestions
+    started 16 further in than its title. The 13 Oct rule meant to put the
+    field in the panel itself aimed at the panel being the .pchat card, but
+    the panel is .page-chat and the card is inside it, so it never matched.
+    On a phone the prompt was cut mid-line."""
+    ok(".ov-wrap & > .pchat > .pchat-thread { padding: var(--sp-3) 0 0; }" in CSS,
+       "the suggestions and answers sit on the panel's own inset, under the title")
+    ok(".ov-wrap & > .pchat > .pchat-input { padding: var(--sp-4) 0 0; background: none; border-top: 0; }" in CSS,
+       "the field sits in the panel itself: no grey well, no rule above it")
+    ok("&.pchat > .pchat-input" not in CSS, "the rule that never matched is gone")
+    pc = fn_src("function pageChatPanel(")
+    ok("ta.placeholder = 'Ask a question\u2026';" in pc, "a prompt that fits a phone")
+    ok("ta.setAttribute('aria-label', 'Ask a question about this report');" in pc, "its name for a screen reader is unchanged")
+
+
+@test
 def t_a_tick_row_is_one_recipe():
     """Tick-and-words rows had two text looks (dispatch's notify and insurance
     ticks were 12 grey). tickRow() builds them all; one rule gives the words."""
@@ -13016,7 +13034,8 @@ def t_rows_keep_the_inset_wherever_they_sit():
        "Keywords' Show all takes the inset back")
     ok("@container mlist (max-width: 560px) {" in fx and "& .mlist > .mrow > .mown-slot { min-width: 0; }" in fx
        and "& .mlist > .mrow > .mage { flex: 0 0 auto; }" in fx, "an Inbox row on a phone keeps the sender's name")
-    ok("&.pchat > .pchat-input { padding: 0; background: none; border-top: 0; }" in fx, "the Ask box is a field in its panel, not a well in a box")
+    ok(".ov-wrap & > .pchat > .pchat-input { padding: var(--sp-4) 0 0; background: none; border-top: 0; }" in fx,
+       "the Ask box is a field in its panel, not a well in a box (the rule that does it since 19 Oct: t_the_ask_panel_sits_in_its_panel)")
     for stop, rem in (("xs", "24"), ("s", "40"), ("m", "56"), ("l", "72")):
         ok("@container dt (max-width: %srem) { .dt-%s > .dtable > .dt-row > .dt-c.act { justify-content: flex-start; } }" % (rem, stop) in CSS,
            "a two-line row's actions start on the inset (%s)" % stop)
