@@ -10,7 +10,9 @@ WORKDIR /app
 # installed: they were two thirds of this image and serve a model that is off
 # by default. To turn it back on, copy requirements-m5.txt (the whole service
 # plus the boosters, one hashed lock) and install it in place of
-# requirements-service.txt below.
+# requirements-service.txt below. Prophet's two methods are off the same way:
+# requirements-prophet.txt is the whole service plus Prophet (see the note at
+# the top of requirements-prophet.in for when, and what else to change).
 COPY forecast/requirements-service.txt /app/forecast/requirements-service.txt
 RUN pip install --no-cache-dir --require-hashes -r /app/forecast/requirements-service.txt
 COPY forecast /app/forecast

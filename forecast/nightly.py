@@ -295,6 +295,10 @@ def main() -> int:
             # forecasts them apart from the rest.
             big = monthly_cash(orders, as_of, since, min_total=BIG_ORDER)
             actual_daily = daily_cash(orders, as_of)
+            # The orders under BIG_ORDER by day, for the sources that forecast
+            # them day by day (Prophet, when the image carries it). Each cuts
+            # them at its own last complete month.
+            daily_small = daily_cash(orders, as_of, max_total=BIG_ORDER)
             if months.empty:
                 raise RuntimeError("no orders came back from Shopify")
             # Reach the end of the plan, so every source can be asked what it
@@ -308,15 +312,22 @@ def main() -> int:
             horizon_months = int(env.get("FORECAST_MONTHS", "0")) or min(_need, 18)
             log.info("forecasting %d month(s), to %s", horizon_months, _last)
             record = _fetch_ledger(base + "/hooks/forecast/ledger", token)
-            sanity = sanity_forecasts(months, horizon=horizon_months, results=record, big=big)
+            sanity = sanity_forecasts(months, horizon=horizon_months, results=record, big=big,
+                                      daily_small=daily_small)
             log.info("ranked on the %s (%d closed month(s) on record)",
                      sanity.get("ranked_on"), sanity.get("closed_months") or 0)
             if not sanity.get("available"):
                 raise RuntimeError(sanity.get("reason") or "not enough history to forecast")
             opinions = pick_opinions(sanity)
+            if not opinions:
+                from .simple import MIN_MONTHS
+                raise RuntimeError("No method could be scored yet: the backtest needs %d complete months."
+                                   % (MIN_MONTHS + 3))
             primary = opinions[0]
-            log.info("forecast: %s (typical error %.0f%%, bias %+.0f%%); second %s, third %s",
-                     primary["name"], primary["score"]["mape"] * 100, primary["score"]["bias"] * 100,
+            _sc = primary.get("score") or {}
+            log.info("forecast: %s (typical error %s, bias %s); second %s, third %s", primary["name"],
+                     "-" if _sc.get("mape") is None else "%.0f%%" % (_sc["mape"] * 100),
+                     "-" if _sc.get("bias") is None else "%+.0f%%" % (_sc["bias"] * 100),
                      opinions[1]["name"] if len(opinions) > 1 else "-",
                      opinions[2]["name"] if len(opinions) > 2 else "-")
 

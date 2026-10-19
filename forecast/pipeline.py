@@ -432,10 +432,18 @@ def main(argv=None) -> int:
     run.add_argument("--no-lightgbm", action="store_true"); run.add_argument("--no-catboost", action="store_true")
     run.add_argument("--no-nbeats", action="store_true")
     sub.add_parser("nightly", help="the Railway cron entry: pull, run, post to Reactor (see nightly.py)")
+    sub.add_parser("evaluate", add_help=False,
+                   help="rolling-origin evaluation of the monthly panel on an orders file (see evaluate.py)")
     syn = sub.add_parser("synth", help="write a synthetic store shaped by the workbook")
     syn.add_argument("--cashflow"); syn.add_argument("--as-of", required=True); syn.add_argument("--out", default="synthetic")
     syn.add_argument("--days", type=int, default=830); syn.add_argument("--scenario", default="Algorithm 3")
     syn.add_argument("--scale", type=float, default=0.93)
+    import sys
+    rest = list(sys.argv[1:] if argv is None else argv)
+    if rest[:1] == ["evaluate"]:
+        # Its own flags, parsed by its own parser, so `evaluate --help` lists them.
+        from .evaluate import main as evaluate_main
+        return evaluate_main(rest[1:])
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
     if args.cmd == "nightly":
