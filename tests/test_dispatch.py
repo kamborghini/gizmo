@@ -3207,7 +3207,8 @@ def t_the_locks_match_their_pins_and_carry_hashes():
     package in the lock without a hash, fails here rather than in a build."""
     for pins_path, lock_path in (("requirements.in", "requirements.txt"),
                                  ("forecast/requirements-service.in", "forecast/requirements-service.txt"),
-                                 ("forecast/requirements-m5.in", "forecast/requirements-m5.txt")):
+                                 ("forecast/requirements-m5.in", "forecast/requirements-m5.txt"),
+                                 ("forecast/requirements-prophet.in", "forecast/requirements-prophet.txt")):
         pins = open(os.path.join(HERE, pins_path), encoding="utf-8").read()
         lock_text = open(os.path.join(HERE, lock_path), encoding="utf-8").read()
         ok("pip-compile --generate-hashes" in lock_text.split("\n", 3)[1], lock_path + " says how it is rebuilt")
@@ -3224,8 +3225,12 @@ def t_the_locks_match_their_pins_and_carry_hashes():
             eq(lock[name][0], m.group(2), lock_path + ": " + name + " is the version " + pins_path + " pins")
     m5 = _lock_packages(open(os.path.join(HERE, "forecast", "requirements-m5.txt"), encoding="utf-8").read())
     service = _lock_packages(open(os.path.join(HERE, "forecast", "requirements-service.txt"), encoding="utf-8").read())
+    prophet = _lock_packages(open(os.path.join(HERE, "forecast", "requirements-prophet.txt"), encoding="utf-8").read())
     for name, (ver, _h) in service.items():
         eq(m5.get(name, [None])[0], ver, "the M5 lock carries the whole service at its versions: " + name)
+        eq(prophet.get(name, [None])[0], ver, "the Prophet lock carries the whole service at its versions: " + name)
+    for name in set(m5) & set(prophet):
+        eq(prophet[name][0], m5[name][0], "the two optional locks agree where they overlap: " + name)
     for extra in ("forecast/requirements.txt",):
         for line in open(os.path.join(HERE, extra), encoding="utf-8").read().splitlines():
             line = line.split("#")[0].strip()
@@ -13602,8 +13607,10 @@ def t_the_system_learns_which_source_is_right_from_closed_months():
     """Nobody picks the algorithm. Every run writes down what each source says
     about the months ahead; when a month closes, each of those predictions is
     marked against what actually came in, the closest is recorded, and once
-    three months have closed the forecast is ranked on that record rather than
-    on a backtest.
+    every method has three closed months of its own the forecast is ranked on
+    that record rather than on a backtest. (Counted on the longest record
+    alone, a method added later raced on one month against everyone else's
+    average, and a lucky month put it in charge of the figures.)
 
     The distinction matters. A backtest refits a model to a period the code
     already knows the shape of and forgives it accordingly. The record is what
@@ -13628,8 +13635,10 @@ def t_the_system_learns_which_source_is_right_from_closed_months():
 
     ok("def track_record(" in simple and "MIN_LIVE_MONTHS = 3" in simple,
        "the record becomes a score per source, after three closed months")
-    ok('ranked_on = "record" if closed >= MIN_LIVE_MONTHS else "backtest"' in simple,
-       "and outranks the backtest at that point")
+    ok('ranked_on = "record" if on_record else "backtest"' in simple
+       and 'all(own(e["name"]) >= MIN_LIVE_MONTHS for e in scored_now)' in simple
+       and "closed >= MIN_LIVE_MONTHS and bool(scored_now)" in simple,
+       "and outranks the backtest once every scored method has three closed months of its own")
     ok('return (0, m["live"]["mape"])' in simple,
        "ranking prefers what a source did on months it could not see")
     ok('"Weighted by track record"' in simple and "_live_weights(" in simple,

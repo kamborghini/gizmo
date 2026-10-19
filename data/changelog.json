@@ -2,6 +2,32 @@
  "releases": [
   {
    "date": "2026-10-19",
+   "title": "A closer forecast",
+   "items": [
+    {
+     "kind": "improved",
+     "tab": "forecast",
+     "text": "Big orders counted apart now takes big orders as their typical month, the middle one of the last twelve rather than the average, so one exceptional month no longer lifts every month after it. On this year's months it came about 15% out instead of 20%."
+    },
+    {
+     "kind": "fixed",
+     "tab": "forecast",
+     "text": "The forecast is ranked on its record once every method has three closed months of its own, and from then the month table, the cash path and the alerts come from the method named as running, everywhere on the page. Before, they kept following the method that did best in the backtest."
+    },
+    {
+     "kind": "fixed",
+     "tab": "forecast",
+     "text": "Every method, side by side no longer marks a method as leading on a night its forecast failed."
+    },
+    {
+     "kind": "improved",
+     "tab": "forecast",
+     "text": "The likely range is read from the same past misses in a way that suits a handful of them. It is a little wider and holds more of the months it claims to, though still fewer than 8 in 10."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-19",
    "title": "Behind the scenes",
    "items": [
     {

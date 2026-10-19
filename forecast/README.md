@@ -153,6 +153,44 @@ python -m forecast run --orders synthetic/orders.json --products synthetic/produ
 Tests: `python tests/test_forecast.py` in the forecasting environment (it
 skips itself where pandas is absent, so the app's CI does not run it).
 
+### Measuring the monthly forecast
+
+The nightly job forecasts with a panel of plain monthly methods
+(`simple.py`), each scored on the shop's own history, and uses whichever
+scores best. To see how good that really is, replay it:
+
+```bash
+python -m forecast evaluate --orders orders.json --as-of 2026-10-18 --csv rows.csv
+```
+
+At every cut-off from 20 complete months on (`--first-cut`), the nightly
+job's own code is run on only what existed then (with the differences
+listed at the top of `evaluate.py`), and every method, every combination,
+the panel's own pick with the range it would have drawn, and three
+baselines are marked on the next three months (`--horizon`). The report
+gives WAPE (the headline: total miss over total money), MAE, RMSE, bias,
+MASE, MAPE, how often the outcome fell inside the range and how wide it was,
+compared only on the forecasts every method made; then WAPE and bias by
+months ahead and by half-year; the pick against everything on the forecasts
+it made, by months ahead and by month; and the pick's largest misses. A
+month is forecast from up to three cut-offs, so the forecasts overlap and
+the report says how many distinct months they cover. `--as-before` scores
+the panel as it was before 19 October 2026 (no Prophet), to measure a change
+on the same history, against a run with `--no-prophet`, which leaves out the
+two methods that read the regular orders by day as the nightly image does. `orders.json` is the shape the nightly job pulls
+(`run_bulk_orders`, above, dumped with `json.dump`).
+
+Prophet (`prophet_source.py`) gives the panel two methods that forecast the
+orders under 2,000 day by day. It is NOT in the nightly image: measured on
+the shop's own months it was a little closer than the methods already there,
+by less than the noise, and the range drawn around it held fewer of the
+months that came in. `requirements-prophet.txt` is the service's lock plus
+Prophet; CI's forecast job installs it to test them, and `make install`
+installs it here, so `evaluate` can measure them again as months close. To
+switch them on, follow the note in `requirements-prophet.in`. Where it is
+installed and fails, its two rows say why and are not ranked; where it is
+absent, the panel is exactly what it was.
+
 ## The Forecast tab in Reactor
 
 The app has a Forecast tab under Finance. It runs no model: a second
@@ -292,6 +330,9 @@ forecast/
   backtest.py    expanding folds, WRMSSE / MAE / bias, interval bands
   reconcile.py   the grouped hierarchy, bottom-up, MinT-shrink
   variance.py    the month-by-month comparison, cash path, alerts, summary
+  simple.py      the monthly panel the nightly job forecasts with, and its scoring
+  prophet_source.py  Prophet on the regular orders by day, two of the panel's methods
+  evaluate.py    the rolling-origin replay of the panel (python -m forecast evaluate)
   pipeline.py    the runner and the CLI
   synth.py       a synthetic store shaped by the workbook
 tests/test_forecast.py
