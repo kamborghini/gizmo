@@ -24,13 +24,13 @@ small controls around them:
 
 ## What changes
 
-One new section, `static/src/js/part-button.js`, holds three parts. Each
+One new section, `static/src/js/part-button.js`, holds three parts. (Built as `textButton()` and `textLink()`: plain `button` and `link` were already local names in several functions, where a part of that name would be shadowed.) Each
 builds markup the stylesheet already styles, so only the changes approved
 below are visible.
 
-### `button(text, opts)`, the ordinary button
+### `textButton(text, opts)`, the ordinary button
 
-`button('Save', { kind: 'primary' })` builds `<button class="btn btn-primary">Save</button>`.
+`textButton('Save', { kind: 'primary' })` builds `<button class="btn btn-primary">Save</button>`.
 Options: `kind` (`primary`, `danger`, `ghost`), `small` (today's `btn-sm`,
 kept until the stylesheet is put in layers in piece 6, since it is the same
 button), `square` (today's `btn-icon`, a bordered square holding one icon),
@@ -70,7 +70,7 @@ Not in this piece: the sidebar's conversation delete (`.convo .del`, a sidebar
 part with its own muted ink), a chart's expand button, a figure's open button
 and the chat send button, each part of a component with its own look.
 
-### `link(text, opts)`, the text link
+### `textLink(text, opts)`, the text link
 
 One link: teal, underlined in a quiet line that turns teal on hover. Sizes:
 `caption` (12, today's `linkish`), `inline` (the size of its sentence, today's

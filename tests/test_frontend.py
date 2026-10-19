@@ -8853,13 +8853,17 @@ def t_the_design_rules_live_in_one_document():
     path = os.path.join(ROOT, "docs", "DESIGN.md")
     ok(os.path.exists(path), "docs/DESIGN.md exists")
     doc = open(path, encoding="utf-8").read()
-    for heading in ("## Principles", "## Tokens", "## Recipes", "## Layout", "## Parts", "### Windows", "## Adding a part"):
+    for heading in ("## Principles", "## Tokens", "## Recipes", "## Layout", "## Parts", "### Windows", "### Buttons",
+                    "### Icon buttons", "### Links", "## Adding a part"):
         ok(heading in doc, "it has " + heading)
     ok("static/src/css/tokens.css" in doc and "static/src/js/part-dialog.js" in doc, "it names where values and parts live")
     for spec in ("2026-09-07-design-system-tokens-design.md", "2026-10-05-brand-design-system-design.md",
-                 "2026-10-06-reactor-mix-design.md", "2026-10-13-panels-design.md", "2026-10-15-window-part-design.md"):
+                 "2026-10-06-reactor-mix-design.md", "2026-10-13-panels-design.md", "2026-10-15-window-part-design.md",
+                 "2026-10-19-buttons-and-links-design.md"):
         ok(spec in doc, "it links " + spec)
-    for guard in ("t_every_corner_is_a_role", "t_every_defined_token_is_read", "t_every_window_is_built_and_closed_by_the_part"):
+    for guard in ("t_every_corner_is_a_role", "t_every_defined_token_is_read", "t_every_window_is_built_and_closed_by_the_part",
+                  "t_every_icon_button_is_built_by_the_part", "t_every_text_link_is_built_by_the_part",
+                  "t_every_ordinary_button_is_built_by_the_part"):
         ok(guard in doc and ("def " + guard + "(") in open(__file__, encoding="utf-8").read(), "it names the guard " + guard)
 
 @test
