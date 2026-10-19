@@ -101,7 +101,7 @@
              [I.chevLeft, 'Previous page', page - 1, page <= 1],
              [I.chev, 'Next page', page + 1, page >= pages],
              [I.chevLast, 'Last page', pages, page >= pages]].forEach(([icon, title, to, off]) => {
-                const b = el('button', 'btn tbl-step');
+                const b = textButton(null, { cls: 'tbl-step' });
                 b.append(ico(icon)); b.title = title; b.setAttribute('aria-label', title);
                 if (off) b.disabled = true; else b.onclick = () => o.onPage(to);
                 steps.append(b);

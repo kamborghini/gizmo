@@ -116,7 +116,7 @@
             }
             const t = el('div', 'toast');
             t.append(el('div', 'toast-msg', 'Marked ' + ids.length + (ids.length === 1 ? ' order' : ' orders') + ' as printed.'));
-            const u = el('button', 'btn'); u.textContent = 'Undo';
+            const u = textButton(); u.textContent = 'Undo';
             u.onclick = async () => {
                 u.disabled = true;
                 try {
@@ -269,7 +269,7 @@
                     pf.onclick = (e) => { e.preventDefault(); openProposal({ name: m.name, proposal_url: m.proposal_url }); };
                     row.append(pf);
                 }
-                const q = el('button', 'btn miss-queue');
+                const q = textButton(null, { cls: 'miss-queue' });
                 q.append(ico(I.plus), document.createTextNode('Add to queue'));
                 q.title = 'Tag this order "' + (d.tag || LABEL_TAG) + '" so it joins the production list';
                 q.onclick = async () => {
@@ -457,7 +457,7 @@
             /* The same page as the other queues (the mix): the same header with
                its live line and Refresh, the same counters and tabs, then the
                house search and the list. */
-            const newShip = el('button', 'btn btn-sm');
+            const newShip = textButton(null, { small: true });
             newShip.append(ico(I.plus), document.createTextNode('New shipment'));
             newShip.onclick = openCustomShip;
             const head = pageHead({ view: 'labels', title: 'Production Manager', live: Date.now(),
@@ -483,7 +483,7 @@
                      + (sh.tracking || '') + ' ' + (sh.carrier || '')).toLowerCase().indexOf(q) >= 0);
                 if (!shown.length) {
                     if (rows.length) { host.append(el('div', 'empty', 'Nothing matches that.')); return; }
-                    const again = el('button', 'btn'); again.type = 'button';
+                    const again = textButton(); again.type = 'button';
                     again.append(ico(I.plus), document.createTextNode('New shipment'));
                     again.onclick = openCustomShip;
                     host.append(emptyState({ icon: I.box, text: 'No custom shipments yet.', action: again }));
@@ -515,7 +515,7 @@
                         .filter(Boolean).join('  ·  ')));
                     const acts = el('div', 'lbl-actions');
                     if (!sh.canceled && sh.tracking) {
-                        const cp = el('button', 'btn btn-sm');
+                        const cp = textButton(null, { small: true });
                         cp.title = 'Copy tracking'; cp.append(ico(I.copy), el('span', 'lbl-btn-txt', 'Copy tracking'));
                         cp.onclick = async () => {
                             try { await navigator.clipboard.writeText(sh.tracking); toastOk('Tracking copied'); }
@@ -525,12 +525,12 @@
                     } else {
                         /* An empty slot as wide as Copy tracking, so Reprint label
                            lines up down the list (OPS-11). */
-                        const slot = el('button', 'btn btn-sm lbl-slot'); slot.type = 'button'; slot.tabIndex = -1; slot.setAttribute('aria-hidden', 'true');
+                        const slot = textButton(null, { small: true, cls: 'lbl-slot' }); slot.type = 'button'; slot.tabIndex = -1; slot.setAttribute('aria-hidden', 'true');
                         slot.append(ico(I.copy), el('span', 'lbl-btn-txt', 'Copy tracking'));
                         acts.append(slot);
                     }
                     /* Plain: nine teal Reprint labels down a list were nine primaries. */
-                    const rp = el('button', 'btn btn-sm');
+                    const rp = textButton(null, { small: true });
                     rp.append(ico(I.printer), el('span', 'lbl-btn-txt', 'Reprint label'));
                     rp.title = 'Reprint label';
                     if (sh.has_label === false) {
@@ -631,7 +631,7 @@
             const tools = el('div');
             let pnBtn = null, allBtn = null, slBtn = null, filtTabs = null;
             // A parcel that is not an order: paste an address and book it.
-            const newShip = el('button', 'btn btn-sm');
+            const newShip = textButton(null, { small: true });
             newShip.append(ico(I.plus), document.createTextNode('New shipment'));
             newShip.title = 'Book a courier to an address you paste in, with no Shopify order behind it';
             newShip.onclick = openCustomShip;
@@ -639,7 +639,7 @@
             /* Says what it will do rather than only what it is: once an
                arrangement is chosen the button carries it, so nobody has to
                remember what the next booking is going to ask for. */
-            const coll = el('button', 'btn btn-sm' + (collectionForRun ? ' on' : ''));
+            const coll = textButton(null, { small: true, cls: collectionForRun ? 'on' : '' });
             coll.append(ico(I.cal), document.createTextNode(
                 collectionForRun ? ('Collection: ' + collectionSummary()) : 'Collections'));
             coll.title = 'How each courier collects, and a one-off change for the next booking';
@@ -647,13 +647,13 @@
             bar.append(coll);
             if (unprinted.length && unprinted.length < printable.length) {
                 /* One teal: while an order is open its Print is the one. */
-                pnBtn = el('button', 'btn btn-sm' + (labelSel ? '' : ' btn-primary'));
+                pnBtn = textButton(null, { small: true, kind: labelSel ? '' : 'primary' });
                 pnBtn.append(ico(I.printer), document.createTextNode('Print new (' + unprinted.length + ')'));
                 pnBtn.onclick = () => printLabels(unprinted);
             }
             if (printable.length) {
                 // Cancelled, refunded and already-fulfilled orders never join a bulk print.
-                allBtn = el('button', 'btn btn-sm');
+                allBtn = textButton(null, { small: true });
                 allBtn.append(ico(I.printer), document.createTextNode('Print all (' + printable.length + ')'));
                 allBtn.onclick = () => printLabels(printable);
             }
@@ -663,7 +663,7 @@
                4x6 sheet, and they are never the same run. */
             const shipLabels = shown.filter(shipLabelEligible);
             if (shipLabels.length) {
-                slBtn = el('button', 'btn btn-sm ship-btn');
+                slBtn = textButton(null, { small: true, cls: 'ship-btn' });
                 slBtn.append(ico(I.printer), document.createTextNode(
                     'Print shipping labels (' + shipLabels.length + ')'));
                 slBtn.title = 'Reprint the courier labels for dispatched orders in this list';
@@ -697,7 +697,7 @@
                     if (again) { again.value = typed; again.focus(); try { again.setSelectionRange(at, at); } catch (e) {} }
                 }, 180);
             };
-            const oldf = el('button', 'btn btn-sm' + (labelsOldest ? ' on' : ''));
+            const oldf = textButton(null, { small: true, cls: labelsOldest ? 'on' : '' });
             oldf.append(ico(I.sort), document.createTextNode(labelsOldest ? 'Oldest first' : 'Newest first'));
             oldf.title = 'Flip the queue order';
             oldf.onclick = () => { labelsOldest = !labelsOldest; renderLabels(); };
@@ -716,25 +716,25 @@
                 renderLabels();
             };
             bar.append(sizeSel);
-            const cov = el('button', 'btn'); cov.append(ico(I.check), document.createTextNode('Size check'));
+            const cov = textButton(); cov.append(ico(I.check), document.createTextNode('Size check'));
             cov.title = 'Run the last 200 orders through the size list and report any model that fails to match';
             cov.onclick = runCoverage;
             tools.append(cov);
-            const day = el('button', 'btn'); day.append(ico(I.grid), document.createTextNode('Day sheet'));
+            const day = textButton(); day.append(ico(I.grid), document.createTextNode('Day sheet'));
             day.title = 'Print one A4 cut list of everything not yet made';
             day.onclick = printDaySheet;
             tools.append(day);
-            const dm = el('button', 'btn'); dm.append(ico(I.truck || I.box), document.createTextNode('Dispatch manifest'));
+            const dm = textButton(); dm.append(ico(I.truck || I.box), document.createTextNode('Dispatch manifest'));
             dm.title = 'Everything booked on a day: driver handover and invoice check';
             dm.onclick = openDispatchManifest;
-            const su = el('button', 'btn'); su.append(ico(I.box), document.createTextNode('Stock usage'));
+            const su = textButton(); su.append(ico(I.box), document.createTextNode('Stock usage'));
             su.title = 'Glass used by everything marked made on a chosen day';
             su.onclick = openStockUsage;
-            const mg = el('button', 'btn'); mg.append(ico(I.spark || I.box), document.createTextNode('Margins'));
+            const mg = textButton(); mg.append(ico(I.spark || I.box), document.createTextNode('Margins'));
             mg.title = 'What each dispatched order actually made after goods and carriage';
             mg.onclick = openMargins;
             tools.append(dm, su, mg);
-            const upBtn = el('button', 'btn'); upBtn.append(ico(I.plus), document.createTextNode('Update size list'));
+            const upBtn = textButton(); upBtn.append(ico(I.plus), document.createTextNode('Update size list'));
             upBtn.title = 'Replace the gobo size sheet with a new CSV export. The current one is kept as a backup.';
             const fileIn = document.createElement('input');
             fileIn.type = 'file'; fileIn.accept = '.csv,text/csv'; fileIn.style.display = 'none';
@@ -758,7 +758,7 @@
                 upBtn.disabled = false;
             };
             tools.append(upBtn, fileIn);
-            const shipBtn = el('button', 'btn'); shipBtn.append(ico(I.truck || I.box), document.createTextNode('Shipping settings'));
+            const shipBtn = textButton(); shipBtn.append(ico(I.truck || I.box), document.createTextNode('Shipping settings'));
             shipBtn.title = 'Connect World Options and set your dispatch address, boxes and options';
             shipBtn.onclick = openShippingSettings;
             tools.append(shipBtn);
@@ -786,7 +786,7 @@
             /* No title: the counters carry the count it gave. One order opened
                from Shopify says so. */
             if (data.single) qCard.append(el('p', 'q-note', 'One order, opened from Shopify. Refresh for all.'));
-            const more = el('button', 'btn btn-sm');
+            const more = textButton(null, { small: true });
             /* The house menu trigger: its name, then the caret, like Manage and
                the filters. A grid icon read as a view switch. */
             more.classList.add('more-btn'); more.setAttribute('aria-label', 'More');
@@ -815,7 +815,7 @@
 
             if (!orders.length) {
                 /* One line and the way on (the mix, spec 6 and 7). */
-                const goUnproc = el('button', 'btn'); goUnproc.type = 'button';
+                const goUnproc = textButton(); goUnproc.type = 'button';
                 goUnproc.append(ico(I.clock), document.createTextNode('Go to Unprocessed'));
                 goUnproc.onclick = () => { queueMode = 'unprocessed'; labelsCache = null; labelSel = null; labelsFilter = 'all'; loadLabels(true); };
                 qCard.append(emptyState(dispatched ? { icon: I.check, text: 'Nothing dispatched yet.' }
@@ -894,7 +894,7 @@
                 row.append(who);
                 row.append(el('div', 'lbl-meta', fmtDate(o.created_at)));
                 const acts = el('div', 'lbl-actions');
-                const pv = el('button', 'btn btn-sm'); pv.title = labelSel === o.id ? 'Hide label preview' : 'Preview label';
+                const pv = textButton(null, { small: true }); pv.title = labelSel === o.id ? 'Hide label preview' : 'Preview label';
                 /* Preview and Hide hold one width (the mix, spec 6), so no column
                    moves when a row opens: both words lie in one cell and the one
                    not in use is hidden. */
@@ -906,18 +906,18 @@
                 pv.onclick = (e) => { e.stopPropagation(); labelSel = (labelSel === o.id ? null : o.id); renderLabels(); };
                 acts.append(pv);
                 if (canEditOrders() && o.status !== 'cancelled') {
-                    const ed = el('button', 'btn btn-sm'); ed.title = 'Change the delivery address or contact details';
+                    const ed = textButton(null, { small: true }); ed.title = 'Change the delivery address or contact details';
                     ed.append(ico(I.edit), el('span', 'lbl-btn-txt', 'Edit'));
                     ed.onclick = (e) => { e.stopPropagation(); openOrderEdit(o); };
                     acts.append(ed);
                 }
                 if (o.proposal_url) {
-                    const pf = el('button', 'btn btn-sm'); pf.title = 'Preview the proposal proof';
+                    const pf = textButton(null, { small: true }); pf.title = 'Preview the proposal proof';
                     pf.append(ico(I.globe), el('span', 'lbl-btn-txt', 'Proof'));
                     pf.onclick = (e) => { e.stopPropagation(); openProposal(o); };
                     acts.append(pf);
                 }
-                const pr = el('button', 'btn btn-sm'); pr.title = 'Print label'; pr.append(ico(I.printer), el('span', 'lbl-btn-txt', 'Print'));
+                const pr = textButton(null, { small: true }); pr.title = 'Print label'; pr.append(ico(I.printer), el('span', 'lbl-btn-txt', 'Print'));
                 /* The open order's Print is the screen's one primary action (the
                    mix, spec 8.2), unless its row has its own: To ship's Dispatch,
                    Unprocessed's Ready to make. */
@@ -928,7 +928,7 @@
                     // The release gate: out of Unprocessed, into To make. Same
                     // tag move the amber strip's Add to queue performs.
                     if (!o.status) {
-                        const rd = el('button', 'btn btn-sm btn-primary');
+                        const rd = textButton(null, { kind: 'primary', small: true });
                         rd.title = 'Remove the Unprocessed tag and add IP, so this order joins To make';
                         rd.append(ico(I.check), el('span', 'lbl-btn-txt', 'Ready to make'));
                         rd.onclick = (e) => { e.stopPropagation(); readyToMake(o, rd); };
@@ -938,7 +938,7 @@
                 } else {
                 if (o.status !== 'cancelled') {
                     const dispatched = !!dsp.tracking_number && !dsp.canceled;
-                    const db = el('button', 'btn btn-sm' + (dispatched ? ' on' : (queueMode === 'ship' ? ' btn-primary' : '')));
+                    const db = textButton(null, { small: true, kind: !dispatched && queueMode === 'ship' ? 'primary' : '', cls: dispatched ? 'on' : '' });
                     db.title = dispatched ? 'View shipment / reprint label' : 'Dispatch a courier for this order';
                     db.append(ico(I.truck), el('span', 'lbl-btn-txt', dispatched ? 'Shipment' : 'Dispatch'));
                     db.onclick = (e) => { e.stopPropagation(); openDispatch(o); };
@@ -946,7 +946,7 @@
                     acts.append(db);
                 }
                 if (!o.status) {
-                    const mk = el('button', 'btn btn-sm' + (st.made_at ? ' on' : ''));
+                    const mk = textButton(null, { small: true, cls: st.made_at ? 'on' : '' });
                     mk.title = st.made_at ? 'Made ' + fmtDate(st.made_at) + '. Click to unmark.' : 'Mark this order as made';
                     mk.append(ico(I.check), el('span', 'lbl-btn-txt', st.made_at ? 'Made' : 'Mark made'));
                     mk.onclick = (e) => { e.stopPropagation(); toggleMade(o); };
@@ -969,7 +969,7 @@
                     const note = el('div', 'lbl-preview-note'); wrap.append(note);
                     const act = el('div', 'lbl-toolbar');
                     /* Not a second primary: the open row's Print is the one. */
-                    const p2 = el('button', 'btn'); p2.append(ico(I.printer), document.createTextNode('Print this label'));
+                    const p2 = textButton(); p2.append(ico(I.printer), document.createTextNode('Print this label'));
                     p2.onclick = () => printLabels([o]);
                     act.append(p2); wrap.append(act);
                     /* Under its own row, where it is seen, not after the whole queue card. */
@@ -1121,7 +1121,7 @@
                         left.append(el('div', 'field-help', rhs));
                         line.append(left);
                         if (canEdit) {
-                            const del = el('button', 'btn btn-sm', 'Remove');
+                            const del = textButton('Remove', { small: true });
                             del.onclick = async () => {
                                 if (!await uiConfirm('Remove the rule for "' + model + '"? It goes back to '
                                     + 'whatever the size list says, which may be nothing.',
@@ -1216,7 +1216,7 @@
                     if (mine !== seq) return;   // a slower earlier search must not win
                     hits.innerHTML = '';
                     (res.models || []).forEach(m => {
-                        const b = el('button', 'btn sr-hit');
+                        const b = textButton(null, { cls: 'sr-hit' });
                         b.textContent = (m.manufacturer ? m.manufacturer + ' · ' : '') + m.model
                             + (m.size ? '  (' + m.size + ' mm)' : '');
                         b.onclick = () => {
@@ -1246,8 +1246,8 @@
             choose('set');
 
             const foot = el('div', 'modal-foot');
-            const save = el('button', 'btn btn-primary', 'Save rule');
-            const cancel = el('button', 'btn', 'Cancel'); cancel.onclick = close;
+            const save = textButton('Save rule', { kind: 'primary' });
+            const cancel = textButton('Cancel'); cancel.onclick = close;
             save.onclick = async () => {
                 const req = { manufacturer: row.manufacturer || '', model: row.model || '' };
                 if (pick === 'set') {
@@ -1338,7 +1338,7 @@
                        (no projector on it, or two sizes) is not a gap in the
                        size list: a size rule would not settle it. */
                     if (sizeRulesCanEdit && !r.order_problem) {
-                        const fix = el('button', 'btn btn-sm', 'Resolve');
+                        const fix = textButton('Resolve', { small: true });
                         fix.onclick = () => openSizeRuleModal(r, () => runCoverage());
                         act.append(fix);
                     }
@@ -1499,7 +1499,7 @@
             dt.type = 'date'; dt.className = 'lbl-size';
             dt.value = new Date().toLocaleDateString('en-CA');
             bar.append(el('span', 'cov-line', 'Everything booked on'), dt);
-            const pr = el('button', 'btn'); pr.append(ico(I.printer), document.createTextNode('Print'));
+            const pr = textButton(); pr.append(ico(I.printer), document.createTextNode('Print'));
             pr.disabled = true;
             bar.append(pr);
             body.append(bar);
@@ -1617,7 +1617,7 @@
             dt.type = 'date'; dt.className = 'lbl-size';
             dt.value = new Date().toLocaleDateString('en-CA');
             bar.append(el('span', 'cov-line', 'Everything marked made on'), dt);
-            const pr = el('button', 'btn'); pr.append(ico(I.printer), document.createTextNode('Print'));
+            const pr = textButton(); pr.append(ico(I.printer), document.createTextNode('Print'));
             pr.disabled = true;
             bar.append(pr);
             body.append(bar);
@@ -1711,7 +1711,7 @@
                         const qIn = document.createElement('input');
                         qIn.type = 'number'; qIn.min = '1'; qIn.max = '10000'; qIn.placeholder = 'Qty';
                         qIn.className = 'tm-field'; qIn.style.cssText = 'width:70px;flex:none;padding:var(--sp-1) var(--sp-2)';
-                        const addB = el('button', 'btn'); addB.append(ico(I.plus), document.createTextNode('Add'));
+                        const addB = textButton(); addB.append(ico(I.plus), document.createTextNode('Add'));
                         addB.title = 'Add something that was used but not in the estimate';
                         addB.onclick = () => {
                             const s = szIn.value.trim(); const q = parseInt(qIn.value, 10);
@@ -1725,7 +1725,7 @@
                         tds.forEach(t2 => addTr.append(t2));
                         tbody.append(addTr);
                         tb.append(tbody); wrap.append(tb); sheetHost.append(wrap);
-                        const send = el('button', 'btn btn-primary'); send.style.marginTop = 'var(--sp-2-5)';
+                        const send = textButton(null, { kind: 'primary' }); send.style.marginTop = 'var(--sp-2-5)';
                         send.append(ico(I.send), document.createTextNode(
                             d.sent ? 'Send again (replaces the earlier sheet)' : 'Send to stock sheet'));
                         send.onclick = async () => {

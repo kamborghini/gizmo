@@ -81,7 +81,7 @@
             m.append(el('div', null, t.stopped ? 'Stopped before an answer came back.' : 'That question was not answered. ' + (t.text || '')));
             const q = c.turns[i - 1];
             if (q && q.role === 'user' && i === c.turns.length - 1) {
-                const again = el('button', 'btn btn-sm'); again.type = 'button'; again.textContent = 'Ask again';
+                const again = textButton(null, { small: true }); again.type = 'button'; again.textContent = 'Ask again';
                 again.onclick = () => askAgain(c, i);
                 m.append(again);
             }
@@ -126,7 +126,7 @@
                 const n = el('div', 'resp-note');
                 n.append(el('span', null, 'Not kept as a note, because it reads as an instruction: "' + t.not_kept[0] + '"'
                     + (t.not_kept.length > 1 ? ' and ' + (t.not_kept.length - 1) + ' more' : '') + '. Instructions belong in Skills, where Reactor follows them.'));
-                const b = el('button', 'btn btn-sm'); b.type = 'button'; b.textContent = 'Save as a skill';
+                const b = textButton(null, { small: true }); b.type = 'button'; b.textContent = 'Save as a skill';
                 b.onclick = () => openSkillDraft(t.not_kept.join('\n\n'));
                 if (canEditInstructions()) n.append(b);
                 m.append(n);
@@ -143,7 +143,7 @@
             if (Array.isArray(t.followups_closed) && t.followups_closed.length) {
                 const n = el('div', 'resp-note');
                 n.append(el('span', null, 'Marked done in Memory: ' + t.followups_closed.map(f => f.text).join('; ') + '.'));
-                const b = el('button', 'btn btn-sm'); b.type = 'button'; b.textContent = 'Undo';
+                const b = textButton(null, { small: true }); b.type = 'button'; b.textContent = 'Undo';
                 b.onclick = async () => {
                     setBusy(b, true);
                     try {
@@ -158,7 +158,7 @@
             if (Array.isArray(t.followups_maybe) && t.followups_maybe.length) {
                 const n = el('div', 'resp-note');
                 n.append(el('span', null, 'These may be done: ' + t.followups_maybe.map(f => f.text).join('; ') + '.'));
-                const b = el('button', 'btn btn-sm'); b.type = 'button'; b.textContent = 'Mark done';
+                const b = textButton(null, { small: true }); b.type = 'button'; b.textContent = 'Mark done';
                 b.onclick = async () => {
                     setBusy(b, true);
                     try {
@@ -175,13 +175,13 @@
             const q = c.turns[i - 1];
             const empty = !t.structured || /^Reactor did not send an answer/.test(String(t.structured.summary || '')) && !(t.structured.insights || t.structured.sections || t.structured.actions || t.structured.metrics);
             if (empty && i === c.turns.length - 1 && q && q.role === 'user') {
-                const again = el('button', 'btn btn-sm resp-again'); again.type = 'button'; again.textContent = 'Ask again';
+                const again = textButton(null, { small: true, cls: 'resp-again' }); again.type = 'button'; again.textContent = 'Ask again';
                 again.onclick = () => { if (pending[c.id]) { busyNote(); return; } c.turns.splice(i - 1, 2); save(); send(q.text, { convo: c, skills: q.skills }); };
                 m.append(again);
                 return m;
             }
             if (t.at && Date.now() - Date.parse(t.at) > 86400000 && i === c.turns.length - 1 && q && q.role === 'user') {
-                const again = el('button', 'btn btn-sm resp-again'); again.type = 'button';
+                const again = textButton(null, { small: true, cls: 'resp-again' }); again.type = 'button';
                 again.append(ico(I.rotate), document.createTextNode('Ask again with today’s figures'));
                 again.onclick = () => send(q.text, { convo: c, skills: q.skills });
                 m.append(again);
@@ -242,7 +242,7 @@
             const t = el('div', 'thinking');
             const label = el('span', 'th-label', p.label);
             const secs = el('span', 'th-secs', elapsed(p.started));
-            const stop = el('button', 'btn btn-sm th-stop'); stop.type = 'button'; stop.textContent = 'Stop';
+            const stop = textButton(null, { small: true, cls: 'th-stop' }); stop.type = 'button'; stop.textContent = 'Stop';
             stop.onclick = () => stopAnswer(c.id);
             t.append(loader(), label, secs, stop); m.append(t);
             return m;

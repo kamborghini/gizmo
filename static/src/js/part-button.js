@@ -3,14 +3,14 @@
            (docs/DESIGN.md, Buttons, Icon buttons and Links), so a button looks
            and behaves like the others of its kind because one piece of code
            makes it:
-           - button(): the ordinary button. It builds the classes the
+           - textButton(): the ordinary button. It builds the classes the
              stylesheet already styles (btn, and btn-sm, kept as a name until
              the stylesheet is put in layers: it is the same 32 button);
            - iconButton(): one icon-only recipe in three sizes from the tokens
              (32, 24, 20), the grey icon with one hover, and a name always;
            - textLink(): one text link, teal and underlined, at caption size, at
              the size of its sentence, or standing alone with a chevron. */
-        function button(text, opts) {
+        function textButton(text, opts) {
             const o = opts || {};
             const kind = o.kind === 'primary' ? ' btn-primary' : o.kind === 'danger' ? ' btn-danger' : o.kind === 'ghost' ? ' ghost' : '';
             const b = el('button', 'btn' + (o.small ? ' btn-sm' : '') + kind + (o.square ? ' btn-icon' : '') + (o.cls ? ' ' + o.cls : ''));

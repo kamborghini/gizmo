@@ -198,7 +198,7 @@
                row, and opened as a card on all five tabs. */
             const heads = [];
             if (!teamMe || teamMe.role === 'master') {
-                const more = el('button', 'btn btn-sm'); more.type = 'button';
+                const more = textButton(null, { small: true }); more.type = 'button';
                 more.append(document.createTextNode('More'), ico(I.chevDown));
                 more.onclick = () => dropMenu(more, [{ label: 'Pipedrive import', icon: I.download, onClick: openPipedriveImport }]);
                 heads.push(more);
@@ -237,7 +237,7 @@
             const m = sheetModal('Pipedrive import');
             m.body.append(el('p', 'card-sub', 'Reads your Pipedrive account and writes nothing, to either system.'));
             const row = el('div', 'lbl-toolbar');
-            const go = el('button', 'btn btn-sm', 'Look at my Pipedrive'); go.type = 'button';
+            const go = textButton('Look at my Pipedrive', { small: true }); go.type = 'button';
             const out = el('div', 'pd-out');
             go.onclick = () => runPipedriveSurvey(out, go);
             row.append(go);
@@ -320,7 +320,7 @@
                copies the SHAPE of the account, never its contents: counts,
                field names, pipeline names and who owns how much. No deal
                titles, no customer names, no email addresses. */
-            const copy = el('button', 'btn');
+            const copy = textButton();
             copy.style.marginTop = 'var(--sp-2-5)';
             copy.append(ico(I.copy), document.createTextNode('Copy summary'));
             copy.onclick = async () => {
@@ -363,7 +363,7 @@
             host.append(copy);
             /* The import lives behind the survey deliberately: nobody should
                reach it without first seeing what is in the account. */
-            const imp = el('button', 'btn');
+            const imp = textButton();
             imp.style.cssText = 'margin-top:var(--sp-2-5);margin-left:var(--sp-2)';
             imp.textContent = 'Preview the import';
             imp.onclick = () => runPipedriveImport(host, imp, false);
@@ -448,7 +448,7 @@
                 return;
             }
             btn.textContent = 'Preview again';
-            const doIt = el('button', 'btn btn-primary', 'Import it for real');
+            const doIt = textButton('Import it for real', { kind: 'primary' });
             doIt.style.marginTop = 'var(--sp-2-5)';
             doIt.onclick = async () => {
                 if (!(await uiConfirm('Copy ' + ((rep.deals || {}).new || 0) + ' deals, '
@@ -506,9 +506,9 @@
             };
             head.append(dealsTitle);
             const act = el('div', 'card-act');
-            const add = el('button', 'btn btn-sm btn-primary'); add.append(ico(I.plus), document.createTextNode('Deal'));
+            const add = textButton(null, { kind: 'primary', small: true }); add.append(ico(I.plus), document.createTextNode('Deal'));
             add.onclick = () => crmDealForm();
-            const stagesBtn = el('button', 'btn btn-sm'); stagesBtn.append(ico(I.settings), document.createTextNode('Pipeline'));
+            const stagesBtn = textButton(null, { small: true }); stagesBtn.append(ico(I.settings), document.createTextNode('Pipeline'));
             stagesBtn.onclick = crmStageEditor;
             /* The way OUT matters when the way in was a migration: the data is
                the user's, and a spreadsheet is the lingua franca. It sits on
@@ -516,7 +516,7 @@
                keeps the identical button - it used to be a 32px, 14px button
                alone at the bottom-left of the list, which made one action wear
                two homes and two scales across two tabs of one view. */
-            const exp = el('button', 'btn btn-sm');
+            const exp = textButton(null, { small: true });
             exp.append(ico(I.download), document.createTextNode('Export CSV'));
             exp.onclick = () => crmDealsCSV(crmVisibleDeals());
             act.append(exp, stagesBtn, add);
@@ -602,7 +602,7 @@
                 const mid = el('div', 'lbl-who');
                 mid.append(el('span', 'sub', crmMoney(t.value) + ' · deleted ' + fmtDate(t.deleted_at)));
                 row.append(mid);
-                const back = el('button', 'btn', 'Restore');
+                const back = textButton('Restore');
                 back.onclick = async () => {
                     try { await crmOp('/api/crm/deal', { op: 'restore', id: t.id }); renderCRM(); }
                     catch (e) { toastError(e.message); }
@@ -651,9 +651,9 @@
                 /* One line and the two ways on (copy plan, CRM #5). Neither is a
                    second primary: the card head's '+ Deal' is the one. */
                 const acts = el('div', 'act-row');
-                const nd = el('button', 'btn'); nd.type = 'button'; nd.append(ico(I.plus), document.createTextNode('Deal'));
+                const nd = textButton(); nd.type = 'button'; nd.append(ico(I.plus), document.createTextNode('Deal'));
                 nd.onclick = () => crmDealForm();
-                const pl = el('button', 'btn'); pl.type = 'button'; pl.append(ico(I.settings), document.createTextNode('Pipeline'));
+                const pl = textButton(); pl.type = 'button'; pl.append(ico(I.settings), document.createTextNode('Pipeline'));
                 pl.onclick = crmStageEditor;
                 acts.append(nd, pl);
                 host.append(emptyState({ icon: I.briefcase, text: 'No deals yet.', action: acts }));
@@ -1000,7 +1000,7 @@
             paintChev();
             m.body.append(chev);
             const bar = m.foot();
-            const save = el('button', 'btn btn-primary', dealId ? 'Save' : 'Add deal');
+            const save = textButton(dealId ? 'Save' : 'Add deal', { kind: 'primary' });
             save.onclick = async () => {
                 save.disabled = true;
                 try {
@@ -1061,7 +1061,7 @@
             const com = crmText('', 'Optional comment');
             crmField(grid, 'Comment', com);
             const bar = m.foot();
-            const go = el('button', 'btn btn-primary', 'Mark as lost');
+            const go = textButton('Mark as lost', { kind: 'primary' });
             go.onclick = async () => {
                 go.disabled = true;
                 try { await crmOp('/api/crm/deal', { op: 'lost', id: dealId, reason: sel.value, comment: com.value.trim() }); m.close(); }
@@ -1101,7 +1101,7 @@
             if (x.rotten) top.append(el('span', 'lbl-chip bad', 'Rotting'));
             if (x.archived) top.append(el('span', 'lbl-chip note', 'Archived'));
             if (x.status === 'open') {
-                const won = el('button', 'btn btn-primary', 'Won');
+                const won = textButton('Won', { kind: 'primary' });
                 won.onclick = async () => {
                     try {
                         await crmOp('/api/crm/deal', { op: 'won', id: dealId });
@@ -1109,9 +1109,9 @@
                         paintDealFresh(m, dealId);
                     } catch (e) { toastError(e.message); }
                 };
-                const lost = el('button', 'btn', 'Lost');
+                const lost = textButton('Lost');
                 lost.onclick = () => { m.close(); crmLostPrompt(dealId); };
-                const edit = el('button', 'btn'); edit.append(ico(I.edit), document.createTextNode('Edit'));
+                const edit = textButton(); edit.append(ico(I.edit), document.createTextNode('Edit'));
                 edit.onclick = () => { m.close(); crmDealForm(dealId); };
                 top.append(won, lost, edit);
             } else {
@@ -1120,13 +1120,13 @@
                 chip.title = (x.status === 'won' && x.won_at ? 'Won ' + fmtDate(x.won_at) : '')
                     + (x.status === 'lost' && x.lost_at ? 'Lost ' + fmtDate(x.lost_at) : '');
                 top.append(chip);
-                const re = el('button', 'btn', 'Reopen');
+                const re = textButton('Reopen');
                 re.onclick = async () => { try { await crmOp('/api/crm/deal', { op: 'reopen', id: dealId }); paintDealFresh(m, dealId); } catch (e) { toastError(e.message); } };
                 top.append(re);
             }
             /* The quiet doors: archive (Pipedrive's third outcome) and the
                30-day bin, both reachable by TAP - drag is a desktop luxury. */
-            const arch = el('button', 'btn', x.archived ? 'Unarchive' : 'Archive');
+            const arch = textButton(x.archived ? 'Unarchive' : 'Archive');
             arch.onclick = async () => {
                 try {
                     await crmOp('/api/crm/deal', { op: x.archived ? 'unarchive' : 'archive', id: dealId });
@@ -1279,7 +1279,7 @@
             ta.value = draft;
             comp.append(ta);
             const cbar = el('div', 'disp-actions');
-            const noteBtn = el('button', 'btn', 'Save note');
+            const noteBtn = textButton('Save note');
             noteBtn.onclick = async () => {
                 if (!ta.value.trim()) return;
                 try {
@@ -1289,7 +1289,7 @@
                     paintDealFresh(m, dealId);
                 } catch (e) { toastError(e.message); }
             };
-            const actBtn = el('button', 'btn btn-primary'); actBtn.append(ico(I.cal), document.createTextNode('Schedule activity'));
+            const actBtn = textButton(null, { kind: 'primary' }); actBtn.append(ico(I.cal), document.createTextNode('Schedule activity'));
             actBtn.onclick = () => crmActivityForm({ deal_id: dealId }, () => paintDealFresh(m, dealId));
             cbar.append(actBtn, noteBtn); comp.append(cbar); m.body.append(comp);
             /* Focus: what still needs doing. History below: what happened. */
@@ -1467,7 +1467,7 @@
                 m.body.append(lw);
             }
             const bar = m.foot();
-            const save = el('button', 'btn btn-primary', 'Save');
+            const save = textButton('Save', { kind: 'primary' });
             save.onclick = async () => {
                 save.disabled = true;
                 try {
@@ -1488,7 +1488,7 @@
             };
             bar.append(save);
             if (editing) {
-                const del = el('button', 'btn', 'Delete');
+                const del = textButton('Delete');
                 del.onclick = async () => {
                     if (!await uiConfirm('Delete this activity? Done is usually righter: '
                         + 'deleting removes it from the history too.', { title: 'Delete activity', okText: 'Delete' })) return;
@@ -1513,7 +1513,7 @@
             head.append(el('h3', 'card-title',
                 total.toLocaleString() + (total === 1 ? ' activity' : ' activities')));
             const cAct = el('div', 'card-act');
-            const add = el('button', 'btn btn-sm btn-primary'); add.append(ico(I.plus), document.createTextNode('Activity'));
+            const add = textButton(null, { kind: 'primary', small: true }); add.append(ico(I.plus), document.createTextNode('Activity'));
             add.onclick = () => crmActivityForm({}, renderCRM);
             cAct.append(add); head.append(cAct); card.append(head);
             const seg = segmented([['upcoming', 'To do'], ['overdue', 'Overdue'], ['today', 'Today'],
@@ -1524,7 +1524,7 @@
                the one that was chosen. */
             let mine = null;
             if (crmMulti()) {
-                mine = el('button', 'btn btn-sm' + (crmActMine ? ' on' : ''), 'Mine');
+                mine = textButton('Mine', { small: true, cls: crmActMine ? 'on' : '' });
                 mine.type = 'button';
                 mine.title = 'Only activities assigned to me';
                 mine.setAttribute('aria-pressed', crmActMine ? 'true' : 'false');
@@ -1625,18 +1625,18 @@
             /* A holding rail, not a bar: its children are moved into the
                toolbar's right side once the search and filter are built. */
             const bar = el('div');
-            const add = el('button', 'btn btn-sm btn-primary');
+            const add = textButton(null, { kind: 'primary', small: true });
             add.append(ico(I.plus), document.createTextNode(crmContactsMode === 'people' ? 'Person' : 'Organisation'));
             add.onclick = () => crmContactForm(crmContactsMode === 'people' ? 'person' : 'org');
             /* Exports what the search left, not the whole store: the handler is
                attached inside paint, where the filtered list actually exists. */
-            const expBtn = el('button', 'btn btn-sm');
+            const expBtn = textButton(null, { small: true });
             expBtn.append(ico(I.download), document.createTextNode('Export CSV'));
             bar.append(expBtn);
             if ((!teamMe || teamMe.role === 'master') && crmContactsMode === 'people') {
                 /* Bulk email-matching of contacts to Shopify customers. Runs
                    nightly by itself; the button is for not waiting overnight. */
-                const link = el('button', 'btn btn-sm');
+                const link = textButton(null, { small: true });
                 link.append(ico(I.refresh), document.createTextNode('Link Shopify'));
                 link.title = 'Match every unlinked contact to a Shopify customer by email';
                 link.onclick = async () => {
@@ -1720,7 +1720,7 @@
                    stand empty above the table, a 48px band, until a tick. */
                 const bar2 = master && crmContactSel.size ? el('div', 'crm-selbar') : null;
                 if (bar2) {
-                    const del = el('button', 'btn btn-sm');
+                    const del = textButton(null, { small: true });
                     del.append(ico(I.trash), document.createTextNode(
                         'Delete ' + crmContactSel.size + ' selected'));
                     del.onclick = async () => {
@@ -1741,7 +1741,7 @@
                             renderCRM();
                         } catch (e) { del.disabled = false; toastError(e.message); }
                     };
-                    const clr = el('button', 'btn btn-sm', 'Clear selection');
+                    const clr = textButton('Clear selection', { small: true });
                     clr.onclick = () => { crmContactSel.clear(); paint(); };
                     bar2.append(del, clr);
                 }
@@ -1873,10 +1873,10 @@
                 if (people && cc.org_id && crmOrg(cc.org_id)) sub.push(crmOrg(cc.org_id).name);
                 if (sub.length) top.append(el('span', 'crm-sub', sub.join(' · ')));
                 if (cc.label) top.append(crmChip(cc.label));
-                const edit = el('button', 'btn'); edit.append(ico(I.edit), document.createTextNode('Edit'));
+                const edit = textButton(); edit.append(ico(I.edit), document.createTextNode('Edit'));
                 edit.onclick = () => { m.close(); crmContactForm(kind, id); };
                 top.append(edit);
-                const merge = el('button', 'btn', 'Merge');
+                const merge = textButton('Merge');
                 merge.title = 'Fold a duplicate of this contact into this one';
                 merge.onclick = () => crmMergePrompt(kind, id, () => {
                     notes = null; paint(); loadNotes();   /* the loser's notes just arrived */
@@ -1965,7 +1965,7 @@
                 ta.placeholder = 'A note about ' + cc.name + '…';
                 nn.append(ta);
                 const nbar = el('div', 'disp-actions');
-                const nbtn = el('button', 'btn', 'Save note');
+                const nbtn = textButton('Save note');
                 nbtn.onclick = async () => {
                     if (!ta.value.trim()) return;
                     try {
@@ -2022,7 +2022,7 @@
             const grid = el('div', 'disp-addr-grid'); m.body.append(grid);
             crmField(grid, 'Duplicate', crmTypeahead(dupIn, people ? crmPersonRows : crmOrgRows));
             const bar = m.foot();
-            const go = el('button', 'btn btn-primary', 'Merge');
+            const go = textButton('Merge', { kind: 'primary' });
             go.onclick = async () => {
                 /* The picked ID wins over the typed name: with two "Priya
                    Khan"s a name lookup merges whichever namesake it finds. */
@@ -2103,7 +2103,7 @@
                         try {
                             const r = await api('/api/crm/contact', { op: 'shopify_search', q: sIn.value.trim() });
                             (r.matches || []).forEach(c2 => {
-                                const b = el('button', 'btn');
+                                const b = textButton();
                                 b.style.margin = 'var(--sp-1) var(--sp-1) 0 0';
                                 b.textContent = c2.name + (c2.company ? ' · ' + c2.company : '') + ' (' + (c2.orders || 0) + ' orders)';
                                 b.onclick = () => { shopifyId = c2.id; status.textContent = 'Will link to ' + c2.name; };
@@ -2116,7 +2116,7 @@
                 sWrap.append(status, sIn, results); m.body.append(sWrap);
             }
             const bar = m.foot();
-            const save = el('button', 'btn btn-primary', existing ? 'Save' : 'Add');
+            const save = textButton(existing ? 'Save' : 'Add', { kind: 'primary' });
             save.onclick = async () => {
                 save.disabled = true;
                 try {
@@ -2162,7 +2162,7 @@
             };
             bar.append(save);
             if (existing) {
-                const del = el('button', 'btn', 'Delete');
+                const del = textButton('Delete');
                 del.onclick = async () => {
                     if (!await uiConfirm('Delete ' + existing.name + '?', { title: 'Delete', okText: 'Delete' })) return;
                     try { await crmOp('/api/crm/contact', { op: kind === 'person' ? 'person_delete' : 'org_delete', id: id }); m.close(); }
@@ -2189,7 +2189,7 @@
                 + 'here so the pipeline holds only real, qualified work. Convert it when it firms up.' });
             head.append(titleInfo(lt, ltInfo));
             const act = el('div', 'card-act');
-            const add = el('button', 'btn btn-sm btn-primary'); add.append(ico(I.plus), document.createTextNode('Lead'));
+            const add = textButton(null, { kind: 'primary', small: true }); add.append(ico(I.plus), document.createTextNode('Lead'));
             add.onclick = () => crmLeadForm();
             act.append(add); head.append(act); card.append(head);
             const seg = segmented([['active', 'Inbox'], ['archived', 'Archive']], crmLeadsMode,
@@ -2242,7 +2242,7 @@
             crmCache.labels.forEach(l => labSel.append(new Option(l, l)));
             crmField(grid, 'Label', labSel);
             const bar = m.foot();
-            const save = el('button', 'btn btn-primary', 'Add lead');
+            const save = textButton('Add lead', { kind: 'primary' });
             save.onclick = async () => {
                 save.disabled = true;
                 try {
@@ -2288,7 +2288,7 @@
             ta.className = 'lia-chase-body'; ta.rows = 2; ta.placeholder = 'A note about this lead…';
             nn.append(ta);
             const nbar = el('div', 'disp-actions');
-            const noteBtn = el('button', 'btn', 'Save note');
+            const noteBtn = textButton('Save note');
             noteBtn.onclick = async () => {
                 if (!ta.value.trim()) return;
                 try { await crmOp('/api/crm/lead', { op: 'note_add', id: leadId, text: ta.value.trim() }); m.close(); crmLeadModal(leadId); }
@@ -2298,13 +2298,13 @@
             m.body.append(nn);
             const bar = m.foot();
             if (!l.archived) {
-                const conv = el('button', 'btn btn-primary', 'Convert to deal');
+                const conv = textButton('Convert to deal', { kind: 'primary' });
                 conv.onclick = async () => {
                     try { const r = await crmOp('/api/crm/lead', { op: 'convert', id: leadId }); m.close(); crmSeg = 'deals'; renderCRM(); crmDealModal(r.id); }
                     catch (e) { toastError(e.message); }
                 };
                 bar.append(conv);
-                const edit = el('button', 'btn'); edit.append(ico(I.edit), document.createTextNode('Edit'));
+                const edit = textButton(); edit.append(ico(I.edit), document.createTextNode('Edit'));
                 edit.onclick = () => {
                     m.body.innerHTML = '';
                     const grid = el('div', 'disp-addr-grid'); m.body.append(grid);
@@ -2317,7 +2317,7 @@
                     lSel.value = l.label || '';
                     crmField(grid, 'Label', lSel);
                     const b2 = el('div', 'disp-actions');
-                    const sv = el('button', 'btn btn-primary', 'Save');
+                    const sv = textButton('Save', { kind: 'primary' });
                     sv.onclick = async () => {
                         try {
                             await crmOp('/api/crm/lead', { op: 'update', id: leadId,
@@ -2328,11 +2328,11 @@
                     b2.append(sv); m.body.append(b2);
                 };
                 bar.append(edit);
-                const arch = el('button', 'btn', 'Archive');
+                const arch = textButton('Archive');
                 arch.onclick = async () => { try { await crmOp('/api/crm/lead', { op: 'archive', id: leadId }); m.close(); } catch (e) { toastError(e.message); } };
                 bar.append(arch);
             } else {
-                const un = el('button', 'btn', 'Unarchive');
+                const un = textButton('Unarchive');
                 un.onclick = async () => { try { await crmOp('/api/crm/lead', { op: 'unarchive', id: leadId }); m.close(); } catch (e) { toastError(e.message); } };
                 bar.append(un);
                 const del = iconButton(I.trash, 'Delete this lead for good');
@@ -2375,11 +2375,11 @@
                 });
             }
             paint();
-            const addBtn = el('button', 'btn disp-addbox'); addBtn.append(ico(I.plus), document.createTextNode('Add a stage'));
+            const addBtn = textButton(null, { cls: 'disp-addbox' }); addBtn.append(ico(I.plus), document.createTextNode('Add a stage'));
             addBtn.onclick = () => { working.push({ name: '', probability: 100, rot_days: 0 }); paint(); };
             sb.append(addBtn);
             const bar = el('div', 'disp-actions');
-            const save = el('button', 'btn btn-primary', 'Save stages');
+            const save = textButton('Save stages', { kind: 'primary' });
             save.onclick = async () => {
                 save.disabled = true;
                 try { await crmOp('/api/crm/stages', { stages: working }); m.close(); }
@@ -2416,11 +2416,11 @@
                 });
             }
             paintLabs();
-            const addLab = el('button', 'btn disp-addbox'); addLab.append(ico(I.plus), document.createTextNode('Add a label'));
+            const addLab = textButton(null, { cls: 'disp-addbox' }); addLab.append(ico(I.plus), document.createTextNode('Add a label'));
             addLab.onclick = () => { labs.push({ name: '', color: 'gray' }); paintLabs(); };
             lb.append(addLab);
             const lbar = el('div', 'disp-actions');
-            const lsave = el('button', 'btn btn-primary', 'Save labels');
+            const lsave = textButton('Save labels', { kind: 'primary' });
             lsave.onclick = async () => {
                 lsave.disabled = true;
                 try { await crmOp('/api/crm/stages', { labels: labs.filter(l => l.name.trim()) }); m.close(); }
@@ -2438,7 +2438,7 @@
             lrTa.value = (crmCache.lost_reasons || []).join('\n');
             lr.append(lrTa);
             const rbar = el('div', 'disp-actions');
-            const rsave = el('button', 'btn btn-primary', 'Save reasons');
+            const rsave = textButton('Save reasons', { kind: 'primary' });
             rsave.onclick = async () => {
                 rsave.disabled = true;
                 try {

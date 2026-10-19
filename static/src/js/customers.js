@@ -43,7 +43,7 @@
         }
         function customerGate(seg) {
             const comp = seg === SEG_ALL;
-            const btn = el('button', 'btn btn-primary'); btn.type = 'button';
+            const btn = textButton(null, { kind: 'primary' }); btn.type = 'button';
             btn.textContent = comp ? 'Run comprehensive audit' : ('Run ' + seg + ' audit'); btn.onclick = () => loadCustomers(true, seg);
             return emptyState({ icon: I.users, text: RUN_COST, sub: 'Your customers and 12 months of orders.', action: btn, cls: 'run-gate' });
         }

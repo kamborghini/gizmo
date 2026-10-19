@@ -64,7 +64,7 @@
             const noteIn = crmText('', 'What went with it, condition, anything to remember');
             crmField(grid, 'Note', noteIn);
             m.body.append(el('p', 'field-help', 'Optional. Without one, it turns amber at the chase limit.'));
-            const go = el('button', 'btn btn-primary', 'Loan it out');
+            const go = textButton('Loan it out', { kind: 'primary' });
             go.onclick = async () => {
                 if (!whoIn.value.trim()) { toastError('Say who it is going to.'); return; }
                 const chosen = unit || (choices || []).find(u => String(u.id) === unitSel.value);
@@ -145,7 +145,7 @@
             crmField(grid, 'Serial', serialIn);
             crmField(grid, 'Notes', notesIn);
             m.body.append(foundNote);
-            const save = el('button', 'btn btn-primary', 'Save unit');
+            const save = textButton('Save unit', { kind: 'primary' });
             save.onclick = async () => {
                 if (!nameIn.value.trim()) { toastError('Give the unit a name, for example Loan 3.'); return; }
                 save.disabled = true;
@@ -167,7 +167,7 @@
                carries six controls, and because deleting should cost the
                extra click of opening the record first. */
             if (u.id) {
-                const del = el('button', 'btn btn-danger', 'Delete permanently');
+                const del = textButton('Delete permanently', { kind: 'danger' });
                 del.style.marginLeft = 'auto';
                 del.onclick = async () => {
                     const outNow = ((loansCache || {}).out || [])
@@ -294,7 +294,7 @@
                is going, from those on the shelf. Each shelf row keeps its own,
                secondary. */
             const shelf = units.filter(u => u.status === 'in');
-            const lend = shelf.length ? el('button', 'btn btn-sm btn-primary') : null;
+            const lend = shelf.length ? textButton(null, { kind: 'primary', small: true }) : null;
             if (lend) {
                 lend.type = 'button';
                 lend.append(ico(I.logOut), document.createTextNode('Loan out'));
@@ -323,7 +323,7 @@
                 days.type = 'number'; days.min = '1'; days.max = '365'; days.className = 'field-sm loan-chase-days';
                 days.value = String((d.settings || {}).chase_days || 28);
                 days.setAttribute('aria-label', 'Amber after this many days without a due date');
-                const save = el('button', 'btn btn-sm', 'Save'); save.type = 'button';
+                const save = textButton('Save', { small: true }); save.type = 'button';
                 save.onclick = async () => {
                     save.disabled = true;
                     try { await api('/api/loans', { op: 'settings', chase_days: Number(days.value) });
@@ -347,7 +347,7 @@
                     const who = document.createDocumentFragment();
                     who.append(el('span', 'dt-name', r.who_name || 'Someone'));
                     if (r.phone) who.append(el('span', 'dt-sub', r.phone));
-                    const back = el('button', 'btn btn-sm');
+                    const back = textButton(null, { small: true });
                     back.append(ico(I.logIn), document.createTextNode('Book back in'));
                     back.onclick = async () => {
                         if (!await uiConfirm((r.unit.name || 'This unit') + ' is back from '
@@ -373,7 +373,7 @@
             const rHead = el('div', 'card-head');
             rHead.append(el('h3', 'card-title', 'The register'));
             if (d.can_manage) {
-                const add = el('button', 'btn btn-sm');
+                const add = textButton(null, { small: true });
                 add.append(ico(I.plus), document.createTextNode('Add a unit'));
                 add.onclick = () => loanUnitModal(null);
                 const act = el('div', 'card-act'); act.append(add); rHead.append(act);
@@ -383,7 +383,7 @@
             out.forEach(r => { if (r.unit && r.unit.id) withWhom[r.unit.id] = r.who_name || ''; });
             let emptyReg;
             if (d.can_manage) {
-                const first = el('button', 'btn'); first.type = 'button';
+                const first = textButton(); first.type = 'button';
                 first.append(ico(I.plus), document.createTextNode('Add a unit'));
                 first.onclick = () => loanUnitModal(null);
                 emptyReg = emptyState({ icon: I.box, text: 'No loan units yet.', action: first });
@@ -402,12 +402,12 @@
                     let outB = '';
                     if (u.status === 'in') {
                         /* Secondary: the page's one teal is the header's Loan out. */
-                        outB = el('button', 'btn btn-sm');
+                        outB = textButton(null, { small: true });
                         outB.append(ico(I.logOut), document.createTextNode('Loan out'));
                         outB.onclick = () => loanOutModal(u);
                     }
                     const acts = document.createDocumentFragment();
-                    const hist = el('button', 'btn btn-sm');
+                    const hist = textButton(null, { small: true });
                     hist.append(ico(I.history), document.createTextNode('History'));
                     hist.onclick = () => loanHistoryModal(u);
                     acts.append(hist);
@@ -418,7 +418,7 @@
                            is an admin's; REPRINTING a tag that already exists is
                            anyone's, because a peeled label is found by whoever
                            is holding the projector. The tag is its own column. */
-                        const sk = el('button', 'btn btn-sm');
+                        const sk = textButton(null, { small: true });
                         const sw = el('span', 'swap');
                         const w1 = el('span'); w1.append(ico(I.printer), document.createTextNode('Reprint'));
                         const w2 = el('span'); w2.append(ico(I.printer), document.createTextNode('Serial sticker'));
@@ -526,7 +526,7 @@
                Connection card's tag, and with it on that tag says so. */
             /* Refresh reloads the page's data, so it is the header's, worded
                (12 Oct 2026); it sat in the Connection card's head. */
-            const rf = el('button', 'btn btn-sm'); rf.type = 'button';
+            const rf = textButton(null, { small: true }); rf.type = 'button';
             rf.append(ico(I.refresh), document.createTextNode('Refresh'));
             rf.onclick = () => { rf.disabled = true; refreshConnector().finally(() => { rf.disabled = false; }); };
             box.append(pageHead({ view: 'connector', title: 'Xero sync', line: 'Shopify orders, refunds and customers, sent into Xero.', actions: [rf] }));
@@ -670,7 +670,7 @@
                 if (more.length) end.push(infoButton('About Auto Run', { title: on ? 'Auto Run on' : 'Auto Run off', body: more }));
                 /* The switch sits on the line it switches. */
                 if (connIsAdmin()) {
-                    const t = el('button', 'btn btn-sm', on ? 'Turn Auto Run off' : 'Turn Auto Run on');
+                    const t = textButton(on ? 'Turn Auto Run off' : 'Turn Auto Run on', { small: true });
                     t.onclick = async () => {
                         if (!on && !await uiConfirm(
                             'Turn Auto Run on? Every 10 minutes the connector will check for new '
@@ -710,7 +710,7 @@
                 + 'nothing. ' + (connIsAdmin() ? 'Send does exactly what the review showed.' : 'An admin sends exactly what it showed.') });
             rHead.append(titleInfo(rTitle, rTitleInfo));
             const rAct = el('div', 'card-act');
-            const rev = el('button', 'btn btn-sm');
+            const rev = textButton(null, { small: true });
             rev.append(ico(I.eye), document.createTextNode('Run review'));
             rev.disabled = running;
             rev.onclick = async () => {
@@ -723,7 +723,7 @@
                does not arm Send: the button and the card under it agree. */
             const revAborted = !!(connReview && connReview.result && connReview.result.aborted);
             if (admin) {
-                const send = el('button', 'btn btn-sm btn-primary');
+                const send = textButton(null, { kind: 'primary', small: true });
                 send.append(ico(I.send), document.createTextNode('Send to Xero'));
                 /* Review-before-send, enforced: the button only arms once a
                    completed review is on screen, and a Send spends it. */
@@ -1297,8 +1297,7 @@
                     'How it behaves. Credentials are not on this form: they stay on the '
                     + 'service, and the server will not accept them from here.' });
                 xHead.append(titleInfo(xt, xtInfo));
-                const toggle = el('button', 'btn btn-sm',
-                                  connSettingsOpen ? 'Hide settings' : 'Change settings');
+                const toggle = textButton(connSettingsOpen ? 'Hide settings' : 'Change settings', { small: true });
                 toggle.onclick = async () => {
                     if (connSettingsOpen) { connSettingsOpen = false; connSettingsEdits = {}; renderConnector(); return; }
                     toggle.disabled = true;
@@ -1406,7 +1405,7 @@
                         'Where the reference on the document view is read from.');
                     xCard.append(grid);
                     /* Plain: Send to Xero is the page's one teal action. */
-                    const save = el('button', 'btn', 'Save settings');
+                    const save = textButton('Save settings');
                     save.onclick = async () => {
                         const now = {};
                         Object.keys(fields).forEach(k => { now[k] = fields[k].value; });
@@ -1457,7 +1456,7 @@
                 qHead.append(titleInfo(qt, infoButton('About quarantine', { title: 'Quarantine log', body: 'Held back for bad data. Fix the cause, then retry.' })));
                 if (connIsAdmin()) {
                     const qAct = el('div', 'card-act');
-                    const rt = el('button', 'btn btn-sm');
+                    const rt = textButton(null, { small: true });
                     rt.append(ico(I.refresh), document.createTextNode('Retry failed'));
                     rt.disabled = running;
                     rt.onclick = async () => {

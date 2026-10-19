@@ -130,7 +130,7 @@
                    in body ink with no room reserved for it. */
                 const err2 = el('div', 'auth-error');
                 err2.setAttribute('role', 'alert');
-                const go = el('button', 'btn btn-primary auth-go', 'Sign in');
+                const go = textButton('Sign in', { kind: 'primary', cls: 'auth-go' });
                 const submit = async () => {
                     /* A held Enter repeats keydown every few milliseconds, and
                        each one posted the same ticket while the first was still
@@ -181,7 +181,7 @@
                 const [fp, inPw] = authField('Password (8 characters or more)', 'password', 'au-pw');
                 inPw.autocomplete = 'new-password'; inPw.name = 'new-password';
                 inPw.placeholder = 'Password (8+ characters)';   // the full wording fits a phone only as the label
-                const go = el('button', 'btn btn-primary auth-go', 'Create the master account');
+                const go = textButton('Create the master account', { kind: 'primary', cls: 'auth-go' });
                 [inCode, inName, inUser, inPw].forEach(i => i.onkeydown = e => { if (e.key === 'Enter' && !e.repeat) go.click(); });
                 go.onclick = async () => {
                     go.disabled = true; err.textContent = '';
@@ -198,7 +198,7 @@
                 const [fp, inNew] = authField('New password (8 characters or more)', 'password', 'au-new');
                 inNew.autocomplete = 'new-password'; inNew.name = 'new-password';
                 inNew.placeholder = 'New password (8+ characters)';   // cut off at phone width in full
-                const go = el('button', 'btn btn-primary auth-go', 'Save my password');
+                const go = textButton('Save my password', { kind: 'primary', cls: 'auth-go' });
                 [inCur, inNew].forEach(i => i.onkeydown = e => { if (e.key === 'Enter' && !e.repeat) go.click(); });
                 go.onclick = async () => {
                     go.disabled = true; err.textContent = '';
@@ -225,7 +225,7 @@
                     el('p', 'auth-sub', 'Your own account, not Shopify’s. No account? Ask an admin.'));
                 const [fu, inUser] = authField('Username', 'text', 'au-user');
                 const [fp, inPw] = authField('Password', 'password', 'au-pw');
-                const go = el('button', 'btn btn-primary auth-go', 'Sign in');
+                const go = textButton('Sign in', { kind: 'primary', cls: 'auth-go' });
                 const submit = async () => {
                     if (go.disabled) return;   // in flight: a held Enter must not sign in twice
                     go.disabled = true; err.textContent = '';
@@ -346,12 +346,12 @@
             inp.setAttribute('aria-label', 'Starter password');
             body.append(inp);
             const foot = win.foot();
-            const copy = el('button', 'btn'); copy.append(ico(I.copy), document.createTextNode('Copy'));
+            const copy = textButton(); copy.append(ico(I.copy), document.createTextNode('Copy'));
             copy.onclick = async () => {
                 try { await navigator.clipboard.writeText(pw); copy.textContent = 'Copied'; }
                 catch (e) { inp.select(); document.execCommand('copy'); copy.textContent = 'Copied'; }
             };
-            const done = el('button', 'btn btn-primary', 'Done');
+            const done = textButton('Done', { kind: 'primary' });
             done.onclick = win.close;
             foot.append(copy, done);
             inp.onclick = () => inp.select();
@@ -377,7 +377,7 @@
         const open = el('fieldset', 'tm-group');
         const lg = el('legend', 'tm-legend');
         lg.append(document.createTextNode('Can open'));
-        const all = el('button', 'btn btn-sm', 'Tick all');
+        const all = textButton('Tick all', { small: true });
         all.type = 'button';
         all.onclick = () => boxes.forEach(b => { b.checked = true; });
         lg.append(all);
@@ -485,7 +485,7 @@
         /* One Save under all three (12 Oct 2026, WS-15): the tabs, the two
            permissions and the sign-off together. There were two Saves, one
            between the groups. */
-        const save = el('button', 'btn btn-primary btn-sm', 'Save'); save.type = 'button';
+        const save = textButton('Save', { kind: 'primary', small: true }); save.type = 'button';
         save.onclick = async () => {
             save.disabled = true;
             const picked = boxes.filter(b => b.checked).map(b => b.dataset.k);
@@ -538,7 +538,7 @@
             const act = el('div', 'card-act');
             /* One teal: while the new account's Create or a Tabs panel's Save is open, they have it. */
             const busy = teamNewOpen || d.users.some(u => u.id === teamTabsOpen && u.role !== 'master');
-            const add = el('button', 'btn btn-sm' + (busy ? '' : ' btn-primary')); add.append(ico(I.plus), document.createTextNode('New account'));
+            const add = textButton(null, { small: true, kind: busy ? '' : 'primary' }); add.append(ico(I.plus), document.createTextNode('New account'));
             add.onclick = () => { teamNewOpen = !teamNewOpen; renderTeam(); };
             head.append(el('p', 'card-desc', 'Made, dispatched, files and sales are the last 30 days.'));
             act.append(add); head.append(act); card.append(head);
@@ -553,7 +553,7 @@
                 const roleSel = el('select', 'lbl-size'); roleSel.setAttribute('aria-label', 'Role for the new account');
                 [['member', 'Member'], ['parttime', 'Part-time']].concat(myLevel >= 3 ? [['admin', 'Admin']] : [])
                     .forEach(([v, lab]) => { const o = el('option', null, lab); o.value = v; roleSel.append(o); });
-                const go = el('button', 'btn btn-primary', 'Create');
+                const go = textButton('Create', { kind: 'primary' });
                 go.onclick = async () => {
                     go.disabled = true;
                     try {
@@ -628,7 +628,7 @@
                     const c = (d.counts || {})[u.id] || {};
                     const acts = document.createDocumentFragment();
                     if (manageable) {
-                        const tb = el('button', 'btn btn-sm' + (teamTabsOpen === u.id ? ' on' : ''), 'Tabs'); tb.type = 'button';
+                        const tb = textButton('Tabs', { small: true, cls: teamTabsOpen === u.id ? 'on' : '' }); tb.type = 'button';
                         tb.setAttribute('aria-pressed', String(teamTabsOpen === u.id));
                         tb.onclick = () => { teamTabsOpen = teamTabsOpen === u.id ? '' : u.id; renderTeam(); };
                         acts.append(tb);
@@ -708,7 +708,7 @@
                    to make one (12 Oct 2026, WS-16). It was three cards, two of
                    them empty, and an export of nothing. */
                 if (!uids.length && !d.open.length && !d.sessions.length) {
-                    const goPeople = el('button', 'btn', 'Open People'); goPeople.type = 'button';
+                    const goPeople = textButton('Open People'); goPeople.type = 'button';
                     goPeople.onclick = () => { teamSeg = 'people'; renderTeam(); };
                     wrap.append(emptyState({ icon: I.clock, text: 'No part-time accounts yet.',
                         sub: 'Set someone\'s role to Part-time and the clock appears for them the next time they open the app.', action: goPeople }));
@@ -724,7 +724,7 @@
                     c1.append(none);
                 } else c1.append(dtable([{ head: 'Person' }, { head: 'Since', cap: true }, { head: 'So far', cap: true }, { head: '', cls: 'act' }],
                     d.open.map(ws => {
-                        const res = el('button', 'btn btn-sm', 'Close this session'); res.type = 'button';
+                        const res = textButton('Close this session', { small: true }); res.type = 'button';
                         res.onclick = async () => {
                             if (!(await uiConfirm('Close ' + nm(ws.uid) + '\'s open session now? Use this '
                                 + 'when someone forgot to clock out. The closure is recorded as a '
@@ -753,7 +753,7 @@
                 const dateF = (label) => { const w = el('label', 'pfield tm-date'); w.append(el('span', null, label));
                     const i2 = document.createElement('input'); i2.type = 'date'; i2.className = 'field-sm'; w.append(i2); return [w, i2]; };
                 const [frmL, frm] = dateF('From'), [toL, to] = dateF('To');
-                const exp = el('button', 'btn btn-sm'); exp.append(ico(I.download), document.createTextNode('Export for payroll'));
+                const exp = textButton(null, { small: true }); exp.append(ico(I.download), document.createTextNode('Export for payroll'));
                 exp.onclick = async () => {
                     exp.disabled = true;
                     try {
@@ -818,7 +818,7 @@
             const clearAll = () => { teamFilterWho = ''; teamFilterArea = ''; renderTeam(); };
             /* A filter that is on shows over the feed as a tag you can clear. */
             const tags = [];
-            const tag = (words, clear) => { const b = el('button', 'btn btn-sm'); b.type = 'button'; b.append(document.createTextNode(words), ico(I.x));
+            const tag = (words, clear) => { const b = textButton(null, { small: true }); b.type = 'button'; b.append(document.createTextNode(words), ico(I.x));
                 b.setAttribute('aria-label', 'Clear the filter ' + words); b.onclick = clear; tags.push(b); };
             if (teamFilterWho) tag(personName(teamFilterWho), () => { teamFilterWho = ''; renderTeam(); });
             if (teamFilterArea) tag(areaName(teamFilterArea), () => { teamFilterArea = ''; renderTeam(); });
@@ -838,7 +838,7 @@
                 tableRows.push({ cells: [isNaN(new Date(e.t)) ? '' : londonHM(e.t), areaName(e.area),
                                          e.src === 'system' ? 'System' : personName(e.sub), whatCell] });
             });
-            const clr = el('button', 'btn btn-sm', 'Clear filters'); clr.type = 'button'; clr.onclick = clearAll;
+            const clr = textButton('Clear filters', { small: true }); clr.type = 'button'; clr.onclick = clearAll;
             const feed = el('div', 'tm-feed');
             if (tags.length) feed.append(tableTools(tags, []));
             feed.append(dtable([{ head: 'Time' }, { head: 'Area' }, { head: 'Who' }, { head: 'What' }], tableRows,

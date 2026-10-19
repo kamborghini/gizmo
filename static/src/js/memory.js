@@ -15,7 +15,7 @@
             const box = el('div', 'msg error load-failed');
             box.append(el('div', null, msg));
             /* The small button, as every Try again and header action is. */
-            const b = el('button', 'btn btn-sm'); b.textContent = 'Try again';
+            const b = textButton(null, { small: true }); b.textContent = 'Try again';
             b.onclick = retry; box.append(b);
             return box;
         }
@@ -47,7 +47,7 @@
             const t = el('div', 'toast' + (kind ? ' ' + kind : ''));
             t.append(el('div', 'toast-msg', text));
             if (opts.action) {
-                const b = el('button', 'btn btn-sm'); b.type = 'button'; b.textContent = opts.action.label;
+                const b = textButton(null, { small: true }); b.type = 'button'; b.textContent = opts.action.label;
                 b.onclick = () => { t.remove(); opts.action.fn(); };
                 t.append(b);
             }
@@ -88,8 +88,8 @@
                 if (message instanceof Node) body.append(message);
                 else body.append(el('p', 'confirm-msg', message));
                 const foot = win.foot();
-                const no = el('button', 'btn'); no.textContent = opts.cancelText || 'Cancel';
-                const yes = el('button', 'btn ' + (danger ? 'btn-danger' : 'btn-primary'));
+                const no = textButton(); no.textContent = opts.cancelText || 'Cancel';
+                const yes = textButton(null, { kind: danger ? 'danger' : 'primary' });
                 yes.textContent = opts.okText || 'Confirm';
                 /* A panel that only tells you something has one way out, not a
                    choice between two buttons that do the same thing. */
@@ -125,7 +125,7 @@
             addToast(msg);
             const host = document.getElementById('toast-host');
             const t = host && host.lastElementChild; if (!t) return;
-            const b = el('button', 'btn btn-sm'); b.type = 'button'; b.textContent = label;
+            const b = textButton(null, { small: true }); b.type = 'button'; b.textContent = label;
             b.onclick = () => { t.remove(); fn(); };
             t.insertBefore(b, t.querySelector('.icon-btn'));
         }
@@ -226,7 +226,7 @@
             const mayAct = canEditInstructions() || (!!it.by_uid && !!teamMe && it.by_uid === String(teamMe.id || ''));
             if (it.status === 'concluded') acts.append(el('span', 'lbl-chip note', 'Concluded'));
             else if (mayAct) {
-                const cc = el('button', 'btn btn-sm'); cc.append(ico(I.check), document.createTextNode('Conclude'));
+                const cc = textButton(null, { small: true }); cc.append(ico(I.check), document.createTextNode('Conclude'));
                 cc.title = 'Stop measuring and keep what it came to as a learning';
                 cc.onclick = () => impactOp({ op: 'conclude', id: it.id }, cc);
                 acts.append(cc);
@@ -308,19 +308,19 @@
             if (desc) head.append(el('p', 'card-desc', desc));
             const acts = el('div', 'card-act');
             if (learning) {
-                const b = el('button', 'btn btn-sm'); b.textContent = 'Learning'; setBusy(b, true); acts.append(b);
+                const b = textButton(null, { small: true }); b.textContent = 'Learning'; setBusy(b, true); acts.append(b);
             } else if (knowledgeErr) {
-                const b = el('button', 'btn btn-sm'); b.append(ico(I.rotate), document.createTextNode('Try again')); b.onclick = () => loadMemory(); acts.append(b);
+                const b = textButton(null, { small: true }); b.append(ico(I.rotate), document.createTextNode('Try again')); b.onclick = () => loadMemory(); acts.append(b);
             } else if (learned && !knowEditing && canEditInstructions()) {
-                const ed = el('button', 'btn btn-sm'); ed.append(ico(I.edit), document.createTextNode('Correct'));
+                const ed = textButton(null, { small: true }); ed.append(ico(I.edit), document.createTextNode('Correct'));
                 ed.title = 'Fix a detail it got wrong'; ed.onclick = () => { knowEditing = true; paintMem('knowledge'); };
-                const re = el('button', 'btn btn-sm'); re.append(ico(I.rotate), document.createTextNode('Learn again'));
+                const re = textButton(null, { small: true }); re.append(ico(I.rotate), document.createTextNode('Learn again'));
                 re.title = 'Read the website again. An AI run.';
                 re.onclick = async () => {
                     if (!await uiConfirm('Read your website again? This is an AI run, and what it learns replaces what is here, including any corrections.', { title: 'Learn the store again', okText: 'Learn again' })) return;
                     learnStore();
                 };
-                const del = el('button', 'btn btn-sm'); del.append(ico(I.trash), document.createTextNode('Delete')); del.onclick = deleteKnowledge;
+                const del = textButton(null, { small: true }); del.append(ico(I.trash), document.createTextNode('Delete')); del.onclick = deleteKnowledge;
                 acts.append(ed, re, del);
             }
             head.append(acts); out.push(head);
@@ -330,7 +330,7 @@
                 const fresh = el('div', 'act-row know-fresh');
                 let learnBtn = null;
                 if (canEditInstructions()) {
-                    learnBtn = el('button', 'btn btn-sm'); learnBtn.append(ico(I.book), document.createTextNode('Learn my store'));
+                    learnBtn = textButton(null, { small: true }); learnBtn.append(ico(I.book), document.createTextNode('Learn my store'));
                     learnBtn.title = 'Reads up to 12 pages of your website. An AI run.'; learnBtn.onclick = () => learnStore(learnBtn);
                 }
                 fresh.append(el('p', 'card-sub', 'Uses AI credits. Reads up to 12 pages, once.'), learnBtn || '');
@@ -355,12 +355,12 @@
                 };
                 ta.addEventListener('input', kCheck); kCheck();
                 const row = el('div', 'act-row');
-                const cancel = el('button', 'btn btn-sm', 'Cancel');
+                const cancel = textButton('Cancel', { small: true });
                 cancel.onclick = async () => {
                     if (ta.value !== ta.dataset.initial && !await uiConfirm('Discard your corrections to the store knowledge?', { title: 'Discard changes', okText: 'Discard' })) return;
                     knowEditing = false; paintMem('knowledge');
                 };
-                const save = el('button', 'btn btn-sm btn-primary', 'Save');
+                const save = textButton('Save', { kind: 'primary', small: true });
                 save.onclick = async () => {
                     if (!kCheck()) { ta.focus(); return; }
                     setBusy(save, true);
@@ -442,7 +442,7 @@
             const acts = el('div', 'card-act');
             /* With no notes the empty line carries Add a note, once (WS-23). */
             if (!memoryLoadErr && canEditInstructions() && memories.length) {
-                const add = el('button', 'btn btn-sm btn-primary'); add.append(ico(I.plus), document.createTextNode('Add a note'));
+                const add = textButton(null, { kind: 'primary', small: true }); add.append(ico(I.plus), document.createTextNode('Add a note'));
                 add.onclick = () => { memView.adding = true; memView.editId = null; paintNotes(); };
                 acts.append(add);
             }
@@ -453,7 +453,7 @@
                 if (!memView.adding) {
                     let first = null;
                     if (canEditInstructions()) {
-                        first = el('button', 'btn'); first.type = 'button'; first.append(ico(I.plus), document.createTextNode('Add a note'));
+                        first = textButton(); first.type = 'button'; first.append(ico(I.plus), document.createTextNode('Add a note'));
                         first.onclick = () => { memView.adding = true; memView.editId = null; paintNotes(); };
                     }
                     host.append(emptyState({ icon: I.bookmark, text: 'No notes yet.', action: first }));
@@ -594,10 +594,10 @@
             autoGrow(ta);
             const msg = el('div', 'field-msg'); msg.hidden = true; msg.setAttribute('role', 'alert');
             const acts = el('div', 'act-row');
-            const save = el('button', 'btn btn-sm btn-primary', m ? 'Save' : 'Add note');
-            const cancel = el('button', 'btn btn-sm', 'Cancel');
+            const save = textButton(m ? 'Save' : 'Add note', { kind: 'primary', small: true });
+            const cancel = textButton('Cancel', { small: true });
             cancel.onclick = () => { memView.editId = null; memView.adding = false; ta.dataset.initial = ta.value; paintNotes(); };
-            const asSkill = el('button', 'btn btn-sm', 'Save as a skill instead'); asSkill.hidden = true;
+            const asSkill = textButton('Save as a skill instead', { small: true }); asSkill.hidden = true;
             asSkill.onclick = () => { ta.dataset.initial = ta.value; memView.editId = null; memView.adding = false; openSkillDraft(ta.value); };
             save.onclick = async () => {
                 const text = ta.value.trim();

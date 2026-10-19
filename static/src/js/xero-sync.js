@@ -766,7 +766,7 @@
                        window. */
                     if (p) {
                         const d = e.d;
-                        const open = el('button', 'btn btn-sm', 'Open');
+                        const open = textButton('Open', { small: true });
                         open.title = 'See the ' + (d.kind === 'creditnote' ? 'credit note' : 'invoice');
                         open.setAttribute('aria-label', open.title + (r.order ? ' for ' + r.order : ''));
                         open.onclick = () => connDocModal(d);

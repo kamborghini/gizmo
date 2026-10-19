@@ -49,7 +49,7 @@
             tbl.append(tb); wrap.append(tbl);
             if (n > 15) {
                 const more = el('div', 'kw-more');
-                const b = el('button', 'btn btn-sm'); b.type = 'button'; b.setAttribute('aria-expanded', 'false');
+                const b = textButton(null, { small: true }); b.type = 'button'; b.setAttribute('aria-expanded', 'false');
                 b.append(document.createTextNode('Show all ' + n + ' keywords'), ico(I.chevDown));
                 const note = el('span', 'lbl-meta', '15 of ' + n + ' shown, most clicks first');
                 b.onclick = () => {
@@ -133,7 +133,7 @@
             /* What to paste is the field's own hint (copy plan, Keywords #4). */
             const inp = el('input', 'scan-url'); inp.placeholder = 'A competitor or blog post address'; inp.type = 'url';
             inp.setAttribute('aria-label', 'Page to scan');
-            const btn = el('button', 'btn btn-primary'); btn.append(ico(I.search), document.createTextNode('Scan'));
+            const btn = textButton(null, { kind: 'primary' }); btn.append(ico(I.search), document.createTextNode('Scan'));
             row.append(inp, btn); card.append(row);
             const out = el('div', 'scan-out'); card.append(out);
             const bleed = el('div', 'card-bleed'); card.append(bleed);
@@ -182,7 +182,7 @@
                 const nt = el('h3', 'card-title', 'Search data is not connected yet');
                 nh.append(titleInfo(nt, infoButton('The two Google sources', { title: 'Search data', body: [ul] })));
                 const na = el('div', 'card-act');
-                const go = el('button', 'btn btn-sm'); go.append(ico(I.settings), document.createTextNode('Open connections'));
+                const go = textButton(null, { small: true }); go.append(ico(I.settings), document.createTextNode('Open connections'));
                 go.onclick = () => openSettings(); na.append(go); nh.append(na);
                 n.append(nh);
                 box.append(widget(n, 'search-data', 'full', 'Search data'));

@@ -48,7 +48,7 @@
             tbl.append(tb); wrap.append(tbl); return wrap;
         }
         function forecastUploadButton() {
-            const b = el('button', 'btn', 'Upload workbook'); b.prepend(ico(I.upload));
+            const b = textButton('Upload workbook'); b.prepend(ico(I.upload));
             const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.xlsx'; inp.style.display = 'none';
             inp.onchange = async () => {
                 const f = inp.files && inp.files[0]; if (!f) return;
@@ -634,7 +634,7 @@
                        it works, not the whole set disabled. */
                     box.append(el('p', 'fc-cmp-note', 'Each method forecasts a month, so they can be compared on a '
                         + 'monthly range rather than day by day.'));
-                    const go = el('button', 'btn', 'Show the last twelve months');
+                    const go = textButton('Show the last twelve months');
                     go.type = 'button'; go.onclick = () => setFcRange('year');
                     box.append(go);
                 } else {
@@ -653,7 +653,7 @@
                     });
                     box.append(chips);
                     if (cmp.length) {
-                        const clr = el('button', 'btn ghost', 'Clear');
+                        const clr = textButton('Clear', { kind: 'ghost' });
                         clr.type = 'button'; clr.onclick = clearFcCompare;
                         box.append(clr);
                     }

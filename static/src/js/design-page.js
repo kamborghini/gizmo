@@ -256,7 +256,7 @@
                 a.onclick = () => { const t = $('g-' + sec.id); if (t) { t.scrollIntoView({ block: 'start' }); const h = t.querySelector('h3'); if (h) { h.tabIndex = -1; h.focus({ preventScroll: true }); } } };
                 toc.append(a);
             });
-            const pr = el('button', 'btn btn-sm'); pr.type = 'button'; pr.append(ico(I.printer), document.createTextNode('Print the guide'));
+            const pr = textButton(null, { small: true }); pr.type = 'button'; pr.append(ico(I.printer), document.createTextNode('Print the guide'));
             pr.onclick = () => printGuide();
             const lead = el('div', 'act-row'); lead.append(search, pr);
             tools.append(lead, toc);
@@ -278,7 +278,7 @@
                     if (String(d).includes('{dav}')) {
                         const [a, b] = String(d).split('{dav}');
                         const code = el('code', 'setup-code', davAddress());
-                        const cp = el('button', 'btn btn-sm guide-copy'); cp.type = 'button'; cp.append(ico(I.copy), document.createTextNode('Copy'));
+                        const cp = textButton(null, { small: true, cls: 'guide-copy' }); cp.type = 'button'; cp.append(ico(I.copy), document.createTextNode('Copy'));
                         cp.onclick = () => copyText(davAddress(), 'Drive address copied.');
                         dd.append(document.createTextNode(a), code, document.createTextNode(' '), cp, document.createTextNode(b));
                     } else dd.textContent = d;
@@ -297,7 +297,7 @@
                 });
                 none.hidden = !!shown;
                 if (!shown) {
-                    const clr = el('button', 'btn btn-sm', 'Clear'); clr.type = 'button';
+                    const clr = textButton('Clear', { small: true }); clr.type = 'button';
                     clr.onclick = () => { guideView.q = ''; search.input.value = ''; filterBook(); search.input.focus(); };
                     none.replaceChildren(emptyState({ icon: I.search, text: 'Nothing in the guide mentions \u201c' + guideView.q + '\u201d.', action: clr }));
                 }
@@ -353,7 +353,7 @@
             rels.slice(0, SHOW).forEach((r, i) => list.append(draw(r, i < unread)));
             card.append(list);
             if (rels.length > SHOW) {
-                const more = el('button', 'btn btn-sm rel-more'); more.type = 'button';
+                const more = textButton(null, { small: true, cls: 'rel-more' }); more.type = 'button';
                 more.textContent = 'Show older releases (' + (rels.length - SHOW) + ')';
                 more.setAttribute('aria-expanded', 'false');
                 more.onclick = () => { rels.slice(SHOW).forEach(r => list.append(draw(r, false))); more.remove(); };
@@ -376,7 +376,7 @@
             if (!u.can_triage) head.append(el('p', 'card-desc', 'Ask for what the app cannot do yet.'));
             const act = el('div', 'card-act');
             /* One teal: while a reply is being written, Save reply is it. */
-            const add = el('button', 'btn btn-sm' + (reqView.reply ? '' : ' btn-primary')); add.type = 'button';
+            const add = textButton(null, { small: true, kind: reqView.reply ? '' : 'primary' }); add.type = 'button';
             add.append(ico(I.plus), document.createTextNode('Ask for a feature'));
             add.onclick = () => askFeature('guide');
             /* With nothing asked yet the empty line carries it, once (12 Oct 2026, WS-52). */
@@ -384,7 +384,7 @@
             head.append(act);
             card.append(head);
             if (!all.length) {
-                const first = el('button', 'btn'); first.type = 'button';
+                const first = textButton(); first.type = 'button';
                 first.append(ico(I.plus), document.createTextNode('Ask for a feature'));
                 first.onclick = () => askFeature('guide');
                 card.append(emptyState({ icon: I.spark, text: 'Nothing asked for yet.', action: first }));
@@ -463,20 +463,20 @@
                     /* The reply is written in the request's own cell, at its measure. */
                     const ta = el('textarea', 'sk-textarea mem-ta'); ta.rows = 2; ta.maxLength = 400; ta.value = r.note || ''; ta.dataset.initial = ta.value;
                     ta.setAttribute('aria-label', 'Reply to ' + r.title);
-                    const save = el('button', 'btn btn-sm btn-primary', 'Save reply'); save.type = 'button';
+                    const save = textButton('Save reply', { kind: 'primary', small: true }); save.type = 'button';
                     save.onclick = () => { ta.dataset.initial = ta.value; reqWrite(r, { op: 'state', id: r.id, state: r.state || 'open', note: ta.value.trim() }, save, 'reply'); };
-                    const cancel = el('button', 'btn btn-sm', 'Cancel'); cancel.type = 'button';
+                    const cancel = textButton('Cancel', { small: true }); cancel.type = 'button';
                     cancel.onclick = () => { ta.dataset.initial = ta.value; reqView.reply = null; repaintRequests(); };
                     const f = el('div', 'req-replyform'); f.append(ta); what.append(f);
                     acts.append(save, cancel);
                     requestAnimationFrame(() => ta.focus());
                 } else {
                     /* Reply and Change reply keep one width, so Remove lines up. */
-                    const rep = el('button', 'btn btn-sm'); rep.type = 'button'; rep.dataset.req = r.id;
+                    const rep = textButton(null, { small: true }); rep.type = 'button'; rep.dataset.req = r.id;
                     const sw = el('span', 'swap'); const w1 = el('span', null, 'Reply'), w2 = el('span', null, 'Change reply');
                     (r.note ? w1 : w2).setAttribute('aria-hidden', 'true'); sw.append(w1, w2); rep.append(sw);
                     rep.onclick = () => { reqView.reply = r.id; repaintRequests(); };
-                    const del = el('button', 'btn btn-sm'); del.type = 'button'; del.append(ico(I.trash), document.createTextNode('Remove'));
+                    const del = textButton(null, { small: true }); del.type = 'button'; del.append(ico(I.trash), document.createTextNode('Remove'));
                     del.onclick = async () => {
                         if (!await uiConfirm('Remove the request "' + r.title + '"? Use this for duplicates; it cannot be brought back.', { title: 'Remove request', okText: 'Remove' })) return;
                         reqWrite(r, { op: 'delete', id: r.id }, del);
@@ -528,7 +528,7 @@
             const f2 = el('label', 'pfield'); f2.append(el('span', null, 'Details (optional)'), d); form.append(f2);
             m.body.append(form);
             const bar = m.foot();
-            const go = el('button', 'btn btn-primary', 'Send it');
+            const go = textButton('Send it', { kind: 'primary' });
             go.onclick = async () => {
                 if (!t.value.trim()) { tMsg.hidden = false; tMsg.textContent = 'Say in one line what you want.'; markInvalid(t, true); t.focus(); return; }
                 setBusy(go, true);

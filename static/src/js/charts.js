@@ -617,7 +617,7 @@
                 if (bare) {
                     /* One line and the way on (copy plan, Overview #6). */
                     let go = null;
-                    if (guideAdmin()) { go = el('button', 'btn'); go.type = 'button'; go.append(ico(I.settings), document.createTextNode('Connect Google')); go.onclick = openSettings; }
+                    if (guideAdmin()) { go = textButton(); go.type = 'button'; go.append(ico(I.settings), document.createTextNode('Connect Google')); go.onclick = openSettings; }
                     host.append(emptyState({ icon: I.trendUp, text: 'No trends yet. Connect Google to add traffic.', action: go }));
                     return;
                 }

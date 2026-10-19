@@ -182,7 +182,7 @@
             return act;
         }
         function refreshBtn(onClick, label) {
-            const b = el('button', 'btn btn-sm btn-icon');
+            const b = textButton(null, { small: true, square: true });
             b.type = 'button'; b.append(ico(I.refresh));
             b.title = label || 'Refresh'; b.setAttribute('aria-label', label || 'Refresh');
             b.onclick = () => { setBusy(b, true); Promise.resolve().then(onClick).finally(() => setBusy(b, false)); };
@@ -262,7 +262,7 @@
            method pages as a menu, the Guide's link last after a rule. items:
            [{ icon, label, n, onClick }]; guide: { label, at: [section id, search] }. */
         function howItWorks(items, guide) {
-            const b = el('button', 'btn');
+            const b = textButton();
             b.type = 'button';
             b.append(ico(I.helpCircle), document.createTextNode('How it works'));
             b.setAttribute('aria-haspopup', 'menu'); b.setAttribute('aria-expanded', 'false');

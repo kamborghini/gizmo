@@ -26,9 +26,9 @@
             buildBar.append(el('span', null,
                 'Reactor has been updated since this tab was opened, so it is still running the '
                 + 'old version. Reload when you are between jobs.'));
-            const go = el('button', 'btn btn-primary', 'Reload');
+            const go = textButton('Reload', { kind: 'primary' });
             go.onclick = () => location.reload();
-            const later = el('button', 'btn', 'Not now');
+            const later = textButton('Not now');
             /* Dismissed for this tab only, and it comes back on the next open:
                nagging is worse than useless, but so is letting it be forgotten. */
             later.onclick = () => { buildBar.remove(); };

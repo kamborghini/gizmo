@@ -60,7 +60,7 @@
                 }
                 if (lead) {
                     const bar = el('div', 'mrule-bar');
-                    const mk = (label, fn) => { const b = el('button', 'btn', label); b.onclick = fn; bar.append(b); };
+                    const mk = (label, fn) => { const b = textButton(label); b.onclick = fn; bar.append(b); };
                     mk('Edit', () => mailRuleForm(m, data, r));
                     mk(r.enabled === false ? 'Switch on' : 'Switch off',
                         async () => reload(await call({ op: 'toggle', id: r.id })));
@@ -87,10 +87,10 @@
                 m.body.append(el('div', 'setting-sub', 'Only a lead can change these.'));
             } else {
                 const bar = el('div', 'mail-statebar');
-                const add = el('button', 'btn btn-primary', 'New filter');
+                const add = textButton('New filter', { kind: 'primary' });
                 add.onclick = () => mailRuleForm(m, data, null);
                 bar.append(add);
-                const run = el('button', 'btn', 'Apply to existing mail');
+                const run = textButton('Apply to existing mail');
                 run.onclick = async () => {
                     if (!(await uiConfirm('Run every filter over the email already here? '
                         + 'Only unclaimed, unassigned email is touched, so nothing is taken '
@@ -160,7 +160,7 @@
                 file.accept = 'image/png,image/jpeg,image/gif,image/webp';
                 file.style.display = 'none';
                 file.setAttribute('aria-label', 'Shop logo image');
-                const logo = el('button', 'btn', slots.logo_key ? 'Replace the logo' : 'Add a logo');
+                const logo = textButton(slots.logo_key ? 'Replace the logo' : 'Add a logo');
                 logo.onclick = () => file.click();
                 file.onchange = async () => {
                     const f = (file.files || [])[0];
@@ -190,7 +190,7 @@
             host.append(logoRow);
             if (lead) {
                 const bar = el('div', 'mail-statebar');
-                const save = el('button', 'btn', 'Save footer');
+                const save = textButton('Save footer');
                 save.onclick = async () => {
                     save.disabled = true;
                     const out = {};
@@ -230,9 +230,9 @@
                     row.append(el('div', 'mrule-do', r.text));
                     if (!lead) { list.append(row); return; }
                     const bar = el('div', 'mrule-bar');
-                    const ed = el('button', 'btn', 'Edit');
+                    const ed = textButton('Edit');
                     ed.onclick = () => replyForm(row, r);
-                    const del = el('button', 'btn', 'Delete');
+                    const del = textButton('Delete');
                     del.onclick = async () => {
                         if (!(await uiConfirm('Delete the saved reply "' + r.title + '"? '
                             + 'Email it was already used in is not touched.', { title: 'Delete this saved reply', okText: 'Delete reply' }))) return;
@@ -245,7 +245,7 @@
                     list.append(row);
                 });
                 if (!lead) return;
-                const add = el('button', 'btn btn-primary', 'Add a saved reply');
+                const add = textButton('Add a saved reply', { kind: 'primary' });
                 add.onclick = () => replyForm(add, null);
                 list.append(add);
             };
@@ -260,7 +260,7 @@
                 text.setAttribute('aria-label', 'Saved reply text');
                 box.append(text);
                 const bar = el('div', 'mrule-bar');
-                const save = el('button', 'btn btn-primary', 'Save');
+                const save = textButton('Save', { kind: 'primary' });
                 save.onclick = async () => {
                     save.disabled = true;
                     const payload = { op: 'reply_save', title: title.value.trim(), text: text.value };
@@ -269,7 +269,7 @@
                     catch (e) { toastError(e.message); save.disabled = false; return; }
                     reload();
                 };
-                const cancel = el('button', 'btn', 'Cancel');
+                const cancel = textButton('Cancel');
                 cancel.onclick = () => { box.remove(); anchor.style.display = ''; };
                 bar.append(save, cancel);
                 box.append(bar);
@@ -330,7 +330,7 @@
                     }
                     conds.append(row);
                 });
-                const more = el('button', 'btn', 'Add another condition');
+                const more = textButton('Add another condition');
                 more.onclick = () => {
                     if (r.conditions.length >= 8) return;
                     r.conditions.push({ field: 'subject', op: 'contains', value: '' });
@@ -394,7 +394,7 @@
             doneL.append(doneCb, document.createTextNode('Close it on arrival (for mail nobody needs to answer)'));
             m.body.append(doneL);
             const bar = el('div', 'mail-statebar');
-            const save = el('button', 'btn btn-primary', 'Save filter');
+            const save = textButton('Save filter', { kind: 'primary' });
             save.onclick = async () => {
                 r.name = name.value; r.mode = mode.value; r.assign = who.value;
                 r.folder = folder.value.trim();
@@ -405,7 +405,7 @@
                     refreshMailQuiet();
                 } catch (e) { toastError(e.message); save.disabled = false; }
             };
-            const back = el('button', 'btn', 'Back');
+            const back = textButton('Back');
             back.onclick = () => paintMailRules(m, data);
             bar.append(save, back);
             m.body.append(bar);
@@ -459,8 +459,8 @@
                 + '?';
             const row = el('div', 'mail-statebar');
             row.append(el('div', 'setting-sub', line));
-            const go = el('button', 'btn btn-primary', 'Send now');
-            const back = el('button', 'btn', 'Back');
+            const go = textButton('Send now', { kind: 'primary' });
+            const back = textButton('Back');
             go.onclick = async () => {
                 go.disabled = true; back.disabled = true;
                 let r;
@@ -750,7 +750,7 @@
             mailReplyPicker(cmp, body);
             mailAddedWhenSent(body);
             const bar = el('div', 'mail-statebar');
-            const send = el('button', 'btn btn-primary', 'Send');
+            const send = textButton('Send', { kind: 'primary' });
             send.onclick = () => mailSendFlow(bar,
                 Object.assign({ to: to.value.trim(), cc: folds.cc.value.trim(),
                                 bcc: folds.bcc.value.trim(), subject: subject.value.trim() },
@@ -868,7 +868,7 @@
                 host.remove();
                 refreshMailQuiet();
             };
-            const copy = el('button', 'btn', 'Copy');
+            const copy = textButton('Copy');
             copy.onclick = async () => {
                 try { await navigator.clipboard.writeText(cmp.getText()); toastOk('Copied'); }
                 catch (e) {
@@ -876,10 +876,10 @@
                     toastError('Select all and copy with the keyboard.');
                 }
             };
-            const drop = el('button', 'btn', 'Discard');
+            const drop = textButton('Discard');
             drop.onclick = () => host.remove();
             if (canSend) {
-                const send = el('button', 'btn btn-primary', 'Send');
+                const send = textButton('Send', { kind: 'primary' });
                 /* The text is read off the textarea HERE, once, so the confirm
                    step names the address for the words that were actually on
                    screen when it was pressed. */
@@ -896,7 +896,7 @@
             steer.style.marginTop = 'var(--sp-2)';
             const note = crmText('', 'Not right? Say what to change, then Try again');
             note.style.flex = '1';
-            const again = el('button', 'btn', 'Try again');
+            const again = textButton('Try again');
             again.onclick = () => mailComposeDraft(m, t, btn, note.value.trim(), cmp.getText());
             steer.append(note, again);
             host.append(steer);
@@ -1136,13 +1136,13 @@
             }
             /* ---- draft a reply with Claude, or write one ---- */
             const draftBar = el('div', 'mail-statebar');
-            const compose = el('button', 'btn', 'Compose reply with Claude');
+            const compose = textButton('Compose reply with Claude');
             compose.onclick = () => mailComposeDraft(m, t, compose);
             draftBar.append(compose);
             /* The same panel, opened empty. Most replies on this inbox are two
                lines that nobody needs a model to write, and spending a credit
                to delete a paragraph first is a poor trade. */
-            const blank = el('button', 'btn', 'Write a reply');
+            const blank = textButton('Write a reply');
             blank.title = 'Type it yourself, with no AI credits spent';
             blank.onclick = () => mailDraftPanel(m, t, compose, { draft: '' });
             draftBar.append(blank);
@@ -1157,7 +1157,7 @@
                     'a draft was saved into Gmail ' + mailAgoLong(t.draft_at)));
             }
             m.body.append(draftBar);
-            const unreadBtn = el('button', 'btn', 'Mark unread');
+            const unreadBtn = textButton('Mark unread');
             unreadBtn.title = 'Puts it back to unread in Gmail too';
             unreadBtn.onclick = async () => {
                 unreadBtn.disabled = true;
@@ -1239,29 +1239,29 @@
                 reload();
             };
             if (!t.owner && t.state !== 'done') {
-                const b = el('button', 'btn btn-primary', 'Claim this email');
+                const b = textButton('Claim this email', { kind: 'primary' });
                 b.onclick = act('/api/mail/claim', { id: t.id });
                 bar.append(b);
             }
             if (t.owner === r.me) {
                 if (t.state !== 'progress') {
-                    const b = el('button', 'btn', t.state === 'done' ? 'Reopen' : 'Start work');
+                    const b = textButton(t.state === 'done' ? 'Reopen' : 'Start work');
                     b.onclick = act('/api/mail/state', { id: t.id, state: 'progress' });
                     bar.append(b);
                 }
                 if (t.state !== 'waiting' && t.state !== 'done') {
-                    const b = el('button', 'btn', 'Waiting on customer');
+                    const b = textButton('Waiting on customer');
                     b.onclick = act('/api/mail/state', { id: t.id, state: 'waiting' });
                     bar.append(b);
                 }
             }
             if (t.owner && (t.owner === r.me || r.lead) && t.state !== 'done') {
-                const b = el('button', 'btn', 'Mark done');
+                const b = textButton('Mark done');
                 b.onclick = act('/api/mail/state', { id: t.id, state: 'done' });
                 bar.append(b);
             }
             if (t.owner === r.me && !r.lead) {
-                const b = el('button', 'btn', 'Release');
+                const b = textButton('Release');
                 b.title = 'Hand this back to the room';
                 b.onclick = act('/api/mail/assign', { id: t.id, uid: '' });
                 bar.append(b);
@@ -1285,7 +1285,7 @@
                 const note = document.createElement('input');
                 note.type = 'text'; note.className = 'disp-text';
                 note.placeholder = 'Handover note (optional)'; note.style.flex = '1';
-                const go = el('button', 'btn', 'Assign');
+                const go = textButton('Assign');
                 go.onclick = async () => {
                     go.disabled = true;
                     /* Only a SUCCESS repaints: a failed submit must hand back
@@ -1355,7 +1355,7 @@
             ninput.type = 'text'; ninput.className = 'disp-text';
             ninput.placeholder = 'Add a note for the team (the customer never sees these)';
             ninput.style.flex = '1';
-            const nbtn = el('button', 'btn', 'Add note');
+            const nbtn = textButton('Add note');
             nbtn.onclick = async () => {
                 const text = ninput.value.trim();
                 if (!text) return;
