@@ -161,6 +161,28 @@ measured screen and in every window the keyboard journeys open, with zero
 tolerance. Guards: `t_no_field_is_named_only_by_its_placeholder` and the
 browser suite's "controls with no name".
 
+### Rows
+
+A row that opens something is not a button: a screen reader cannot present a
+button inside a button, and a row's own tick, link or Claim would be one.
+`rowOpener(label, onOpen)` in `static/src/js/part-row.js` builds a real button,
+visually hidden, named for the row ("Open: Invoice copy please, from Accounts
+Team"); its Enter and Space stop at it, so a page-wide shortcut never acts on
+them too. The row draws its focus ring while that button has focus
+(`:has(.row-open:focus-visible)`). `opensOnClick(row, onOpen)` keeps a click
+anywhere on the row opening it, except on a control of its own. The Inbox, CRM
+Contacts and the deals list use both. A row that already holds a button doing
+the same thing needs no opener: the Production Manager queue opens an order
+from its Preview button
+([spec](superpowers/specs/2026-10-19-rows-design.md)).
+Guard: `t_no_row_is_a_pretend_button`, and the keyboard journeys.
+
+### Tick rows
+
+A tick (or a radio) and its words are one `<label>`: `tickRow(cls)` builds it,
+with the body text in primary ink, and `cls` a screen's spacing hook.
+Guard: `t_every_tick_row_is_built_by_the_part`.
+
 ## Adding a part
 
 A part lives in its own section, `static/src/js/part-<name>.js`, listed in

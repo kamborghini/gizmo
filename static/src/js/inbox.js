@@ -815,17 +815,15 @@
             const age = el('span', 'mage' + (unclaimed && hrs > 8 ? ' hot' : unclaimed && hrs > 4 ? ' warm' : ''), mailAgo(t.last_at));
             age.title = mailAgoLong(t.last_at);
             row.append(age);
-            row.setAttribute('role', 'button'); row.tabIndex = 0;
-            /* Guarded on target, and the event stops here: the row's own
-               checkbox and Claim button have to keep their Space and Enter,
-               and the inbox-wide Enter shortcut would otherwise also open
-               whatever row the j/k cursor last sat on. */
-            row.addEventListener('keydown', (e) => {
-                if (e.target !== row) return;
-                if (e.key !== 'Enter' && e.key !== ' ') return;
-                e.preventDefault(); e.stopPropagation(); row.click();
-            });
-            row.onclick = () => t.archive ? openMailArchive(t) : openMailThread(t.id);
+            /* Not a pretend button: the row holds a tick and Claim. Its opener
+               is a real button named for the email (rowOpener: its Enter stops
+               there, so the inbox-wide Enter does not also open the j/k row),
+               and a click anywhere else on the row opens it too. */
+            const open = () => t.archive ? openMailArchive(t) : openMailThread(t.id);
+            const ob = rowOpener('Open: ' + (t.subject || '(no subject)') + ', from ' + (t.from_name || t.from_email || 'unknown'), open);
+            ob.dataset.focusKey = 'mail-' + t.id;
+            row.prepend(ob);
+            opensOnClick(row, open);
             return row;
         }
         function mailTextMatches(t) {
@@ -922,13 +920,11 @@
             if (stale) age.title = 'Quiet for over a day';
             bot.append(age);
             card.append(bot);
-            card.setAttribute('role', 'button'); card.tabIndex = 0;
-            /* Guarded on target so the Claim button keeps its own Space and Enter. */
-            card.addEventListener('keydown', (e) => {
-                if (e.target !== card) return;
-                if (e.key !== 'Enter' && e.key !== ' ') return;
-                e.preventDefault(); e.stopPropagation(); card.click();
-            });
-            card.onclick = () => openMailThread(t.id);
+            /* Not a pretend button: the card holds Claim (rowOpener, as the list's rows). */
+            const open = () => openMailThread(t.id);
+            const ob = rowOpener('Open: ' + (t.subject || '(no subject)') + ', from ' + (t.from_name || t.from_email || 'unknown'), open);
+            ob.dataset.focusKey = 'mail-card-' + t.id;
+            card.prepend(ob);
+            opensOnClick(card, open);
             return card;
         }

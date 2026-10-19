@@ -390,7 +390,7 @@
             row.append(el('span', 'tm-sub', gname));
             ks.forEach(k => {
                 listed.add(k);
-                const lab = el('label', 'tm-tabpick');
+                const lab = tickRow('tm-tabpick');
                 const cb = document.createElement('input');
                 cb.type = 'checkbox'; cb.checked = chosen.has(k); cb.dataset.k = k;
                 boxes.push(cb);
@@ -405,7 +405,7 @@
             const row = el('div', 'tm-picks');
             row.append(el('span', 'tm-sub', 'Other'));
             rest.forEach(k => {
-                const lab = el('label', 'tm-tabpick');
+                const lab = tickRow('tm-tabpick');
                 const cb = document.createElement('input');
                 cb.type = 'checkbox'; cb.checked = chosen.has(k); cb.dataset.k = k;
                 boxes.push(cb);
@@ -426,7 +426,7 @@
         if (u.sizes_by_rank) {
             perm.append(el('p', 'tm-note', 'Can edit the size list (every admin can).'));
         } else {
-            const sl = el('label', 'tm-tabpick');
+            const sl = tickRow('tm-tabpick');
             sizeBox = document.createElement('input');
             sizeBox.type = 'checkbox'; sizeBox.checked = !!u.can_sizes;
             sl.append(sizeBox, document.createTextNode('Can edit the size list'));
@@ -439,7 +439,7 @@
         if (u.send_by_rank) {
             perm.append(el('p', 'tm-note', 'Can send email from the Inbox (every admin can).'));
         } else {
-            const el2 = el('label', 'tm-tabpick');
+            const el2 = tickRow('tm-tabpick');
             sendBox = document.createElement('input');
             sendBox.type = 'checkbox'; sendBox.checked = !!u.can_send;
             el2.append(sendBox, document.createTextNode('Can send email from the Inbox'));

@@ -359,7 +359,7 @@
                 if (who.value !== '_round') return;
                 poolBox.append(el('div', 'setting-sub', 'Share between:'));
                 (mailCache.team || []).filter(u => u.can_own !== false).forEach(u => {
-                    const l = el('label', 'tm-tabpick');
+                    const l = tickRow('tm-tabpick');
                     const cb = document.createElement('input');
                     cb.type = 'checkbox'; cb.checked = (r.pool || []).indexOf(u.uid) >= 0;
                     cb.onchange = () => {
@@ -377,7 +377,7 @@
             const folder = crmText(r.folder || '', 'e.g. Newsletters, or Suppliers/Glass');
             folder.oninput = () => { r.folder = folder.value; paintArch(); };
             crmField(m.body, 'File it in a Gmail folder (optional)', folder);
-            const archL = el('label', 'tm-tabpick');
+            const archL = tickRow('tm-tabpick');
             const archCb = document.createElement('input');
             archCb.type = 'checkbox'; archCb.checked = !!r.archive;
             archCb.onchange = () => { r.archive = archCb.checked; };
@@ -386,7 +386,7 @@
             paintArch();
             m.body.append(archL);
             m.body.append(el('div', 'setting-sub', 'A folder is a Gmail label. Use / to nest.'));
-            const doneL = el('label', 'tm-tabpick');
+            const doneL = tickRow('tm-tabpick');
             const doneCb = document.createElement('input');
             doneCb.type = 'checkbox'; doneCb.checked = !!r.done;
             doneCb.onchange = () => { r.done = doneCb.checked; };
@@ -815,7 +815,7 @@
                and the person being answered taken out of it. */
             const rall = String(t.reply_all_cc || '');
             if (rall) {
-                const rrow = el('label', 'tm-tabpick');
+                const rrow = tickRow('tm-tabpick');
                 const ra = document.createElement('input');
                 ra.type = 'checkbox';
                 ra.onchange = () => {
@@ -829,7 +829,7 @@
                shape every mail client draws. Nothing a customer sent is ever
                rendered as html in this page, so this is a promise about the
                message rather than a preview of it. */
-            const qrow = el('label', 'tm-tabpick');
+            const qrow = tickRow('tm-tabpick');
             const quote = document.createElement('input');
             quote.type = 'checkbox'; quote.checked = true;
             qrow.append(quote, el('span', null,

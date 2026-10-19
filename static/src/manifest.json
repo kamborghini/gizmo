@@ -48,6 +48,7 @@
   "js/part-dialog.js",
   "js/part-button.js",
   "js/part-field.js",
+  "js/part-row.js",
   "js/table-card.js",
   "js/markdown.js",
   "js/charts.js",

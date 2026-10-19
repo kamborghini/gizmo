@@ -638,7 +638,7 @@
             body.append(addBoxBtn, sizeHelp);
 
             // ---- insurance ----
-            const insWrap = el('label', 'disp-insure');
+            const insWrap = tickRow('disp-insure');
             const insCb = document.createElement('input'); insCb.type = 'checkbox';
             const insAmt = document.createElement('input'); insAmt.type = 'number'; insAmt.min = '0'; insAmt.step = '1';
             insAmt.className = 'disp-num';
@@ -1037,7 +1037,7 @@
                 const whenBits = [chosen.delivery_date, chosen.delivery_time].filter(Boolean).join(' ');
                 if (whenBits) pick.append(el('span', 'disp-pick-when', 'arrives ' + whenBits));
                 conf.append(pick);
-                const notifyWrap = el('label', 'disp-notify');
+                const notifyWrap = tickRow('disp-notify');
                 const nb = document.createElement('input'); nb.type = 'checkbox'; nb.checked = cfg.notify_customer !== false;
                 notifyWrap.append(nb, el('span', null, ' Email the customer their tracking when this order is marked made'));
                 conf.append(notifyWrap);
@@ -1599,7 +1599,7 @@
             body.append(el('p', 'field-help', 'Weigh the packed box: couriers re-weigh and bill it.'));
 
             // ---- insurance ----
-            const insWrap = el('label', 'disp-insure');
+            const insWrap = tickRow('disp-insure');
             const insCb = document.createElement('input'); insCb.type = 'checkbox';
             const insAmt = document.createElement('input');
             insAmt.type = 'number'; insAmt.min = '0'; insAmt.step = '1'; insAmt.className = 'disp-num'; insAmt.setAttribute('aria-label', 'Insured value');
@@ -2098,7 +2098,7 @@
 
             // Notify toggle + collection window
             body.append(el('div', 'section-title', 'Options'));
-            const notifyWrap = el('label', 'disp-notify');
+            const notifyWrap = tickRow('disp-notify');
             const notifyCb = document.createElement('input'); notifyCb.type = 'checkbox'; notifyCb.checked = cfg.notify_customer !== false;
             notifyWrap.append(notifyCb, el('span', null, ' Email the customer tracking when an order is dispatched (default)'));
             body.append(notifyWrap);

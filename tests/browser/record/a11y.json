@@ -11,18 +11,9 @@
   "crm~activities@laptop": {},
   "crm~activities@phone": {},
   "crm~activities@wide": {},
-  "crm~contacts@laptop": {
-    "nested-interactive": 10,
-    "target-size": 10
-  },
-  "crm~contacts@phone": {
-    "nested-interactive": 10,
-    "target-size": 4
-  },
-  "crm~contacts@wide": {
-    "nested-interactive": 10,
-    "target-size": 10
-  },
+  "crm~contacts@laptop": {},
+  "crm~contacts@phone": {},
+  "crm~contacts@wide": {},
   "crm~deal@laptop": {},
   "crm~deal@phone": {},
   "crm~deal@wide": {},
@@ -35,15 +26,9 @@
   "customers@laptop": {},
   "customers@phone": {},
   "customers@wide": {},
-  "customers~customise@laptop": {
-    "aria-required-children": 1
-  },
-  "customers~customise@phone": {
-    "aria-required-children": 1
-  },
-  "customers~customise@wide": {
-    "aria-required-children": 1
-  },
+  "customers~customise@laptop": {},
+  "customers~customise@phone": {},
+  "customers~customise@wide": {},
   "files@laptop": {},
   "files@phone": {},
   "files@wide": {},
@@ -65,28 +50,12 @@
   "keywords@laptop": {},
   "keywords@phone": {},
   "keywords@wide": {},
-  "labels@laptop": {
-    "nested-interactive": 5,
-    "target-size": 4
-  },
-  "labels@phone": {
-    "nested-interactive": 5
-  },
-  "labels@wide": {
-    "nested-interactive": 5,
-    "target-size": 5
-  },
-  "labels~make-open@laptop": {
-    "nested-interactive": 5,
-    "target-size": 1
-  },
-  "labels~make-open@phone": {
-    "nested-interactive": 5
-  },
-  "labels~make-open@wide": {
-    "nested-interactive": 5,
-    "target-size": 3
-  },
+  "labels@laptop": {},
+  "labels@phone": {},
+  "labels@wide": {},
+  "labels~make-open@laptop": {},
+  "labels~make-open@phone": {},
+  "labels~make-open@wide": {},
   "labels~shipments@laptop": {},
   "labels~shipments@phone": {},
   "labels~shipments@wide": {},
@@ -99,36 +68,18 @@
   "loans~unit@laptop": {},
   "loans~unit@phone": {},
   "loans~unit@wide": {},
-  "mail@laptop": {
-    "nested-interactive": 9,
-    "target-size": 5
-  },
-  "mail@phone": {
-    "nested-interactive": 9
-  },
-  "mail@wide": {
-    "nested-interactive": 9,
-    "target-size": 9
-  },
-  "memory@laptop": {
-    "target-size": 2
-  },
+  "mail@laptop": {},
+  "mail@phone": {},
+  "mail@wide": {},
+  "memory@laptop": {},
   "memory@phone": {},
-  "memory@wide": {
-    "target-size": 4
-  },
+  "memory@wide": {},
   "overview@laptop": {},
   "overview@phone": {},
   "overview@wide": {},
-  "overview~customise@laptop": {
-    "aria-required-children": 1
-  },
-  "overview~customise@phone": {
-    "aria-required-children": 1
-  },
-  "overview~customise@wide": {
-    "aria-required-children": 1
-  },
+  "overview~customise@laptop": {},
+  "overview~customise@phone": {},
+  "overview~customise@wide": {},
   "products@laptop": {},
   "products@phone": {},
   "products@wide": {},
@@ -141,16 +92,9 @@
   "sizes@laptop": {},
   "sizes@phone": {},
   "sizes@wide": {},
-  "sizes~rule@laptop": {
-    "nested-interactive": 5
-  },
-  "sizes~rule@phone": {
-    "nested-interactive": 5
-  },
-  "sizes~rule@wide": {
-    "nested-interactive": 5,
-    "target-size": 5
-  },
+  "sizes~rule@laptop": {},
+  "sizes~rule@phone": {},
+  "sizes~rule@wide": {},
   "skills@laptop": {},
   "skills@phone": {},
   "skills@wide": {},

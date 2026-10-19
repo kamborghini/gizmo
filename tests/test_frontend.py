@@ -89,6 +89,15 @@ def field_part():
     return SCRIPT[SCRIPT.index(FIELD_START):SCRIPT.index(FIELD_END)]
 
 
+ROW_START = "/* ---------- the row parts ----------"
+ROW_END = "/* ---------- the row parts end ---------- */"
+
+
+def row_part():
+    """The row parts' source (static/src/js/part-row.js) as the page has it."""
+    return SCRIPT[SCRIPT.index(ROW_START):SCRIPT.index(ROW_END)]
+
+
 @test
 def t_the_script_parses():
     """A duplicate `const` in a 5,700-line file is invisible until the page dies."""
@@ -1532,20 +1541,15 @@ def t_save_is_pinned_where_every_other_modal_puts_it():
 
 @test
 def t_the_inbox_list_can_be_worked_without_a_mouse():
-    """Every other list row in the app is a real button; the Inbox's rows and
-    cards were click-only divs."""
-    for name in ("row", "card"):
-        ok(name + ".setAttribute('role', 'button'); " + name + ".tabIndex = 0;" in SCRIPT,
-           "the mail %s announces itself and can be tabbed to" % name)
-    # The mail rows pioneered this guard; the audit pass spread it to every
-    # row in the app, so the count is now "at least", not "exactly one".
-    ok(SCRIPT.count("if (e.target !== row) return;") >= 1
-       and SCRIPT.count("if (e.target !== card) return;") >= 1,
-       "the key handler is guarded on target so the row's own checkbox and "
-       "Claim keep their Space and Enter")
-    ok("e.stopPropagation(); row.click();" in SCRIPT,
+    """Every other list row in the app opens from the keyboard; the Inbox's
+    rows and cards were click-only divs. They open from their own button now
+    (rowOpener, stage 3 piece 4), a real one named for the email, whose Enter
+    and Space stop there so the inbox-wide Enter shortcut does not also fire."""
+    mr, card = fn_src("function mailRow("), fn_src("function mailCard(")
+    ok("rowOpener(" in mr and "rowOpener(" in card, "the mail row and card open from a real, named button")
+    ok("if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();" in row_part(),
        "and it stops there, or the inbox-wide Enter shortcut fires too")
-    ok(re.search(r"\.mrow:focus-visible \{[^}]*outline-offset: -2px", HTML),
+    ok(re.search(r"\.mrow:has\(> \.row-open:focus-visible\) \{[^}]*outline-offset: -2px", HTML),
        "the ring is drawn inside the row, which .mlist would otherwise clip")
 
 
@@ -4342,7 +4346,7 @@ def t_everything_that_says_it_is_a_button_works_like_one():
     Every role=button in the file now has a keyboard path."""
     import re as _re2
     sites = [m.start() for m in _re2.finditer(_re2.escape("setAttribute('role', 'button')"), SCRIPT)]
-    ok(len(sites) >= 10, "the role=button sites are all still here (%d)" % len(sites))
+    ok(len(sites) >= 6, "the role=button sites are all still here (%d; rows that held controls open from their own button since 19 Oct 2026)" % len(sites))
     for i, at in enumerate(sites):
         seg = SCRIPT[at:at + 400]
         ok("keydown" in seg, "role=button site %d has a keydown handler beside it" % (i + 1))
@@ -4538,7 +4542,10 @@ def t_a_rows_keydown_never_steals_an_inner_controls_keypress():
     rowish = _re2.findall(r"(row|tr|r|card)\.(?:addEventListener\('keydown'|onkeydown)", SCRIPT)
     # Rows that became tables (12 Oct 2026: Liability, Reconciliation, CRM leads, the filter counters)
     # open from a real button in the row, which needs no keydown of its own, so fewer handlers remain.
-    ok(len(hits) >= 2, "the container handlers carry the target guard (%d)" % len(hits))
+    # Rows that open from their own button (rowOpener, 19 Oct 2026) have no key
+    # handler left to steal with: the button stops its own Enter and Space.
+    for fn in ("function mailRow(", "function mailCard(", "function renderCRMContacts("):
+        ok(not re.search(r"\b(row|tr|card)\.addEventListener\('keydown'", fn_src(fn)), fn + " leaves the keys to its opener")
     ok("if (e.target !== card) return;" in SCRIPT, "the deal card too")
     # The two leaf handlers (the follow-up ticks) have no children to steal from
     # and legitimately omit the guard.
@@ -6945,8 +6952,8 @@ def t_focus_is_declared_once_per_kind():
        "one rule for every field, contenteditable included")
     ok(not re.search(r"\.[\w-]+:focus \{[^}]*(focus-ring|focus-outline)", CSS),
        "no component carries its own copy of either focus look")
-    ok(CSS.count("outline: var(--focus-outline)") == 7,
-       "the outline is read by the control rule and by six deliberate variants (the "
+    ok(CSS.count("outline: var(--focus-outline)") == 9,
+       "the outline is read by the control rule and by eight deliberate variants (an Inbox row and a mail card whose hidden opener has focus, the "
        "custom-drawn checkbox, the menu item which insets it, a widget card just dropped "
        "in Customize mode, which borrows it for --dur-landed, and the info button, which "
        "draws it on its 24 face so a phone's 40 target never shows, a chart's plot, one stop for the arrow keys, "
@@ -7877,21 +7884,21 @@ def t_the_widget_grid_watches_every_view_setview_shows():
 
 @test
 def t_a_report_page_is_a_list_only_while_it_is_being_customized():
-    """Outside Customize mode a report page is a document with headings, not a
-    list, so the list roles are set by the mode's decoration and nowhere else,
-    and taken off again when it ends."""
-    for role in ("'list'", "'listitem'"):
-        sites = [m.start() for m in re.finditer(r"'role', " + role, SCRIPT)]
-        ok(len(sites) == 1, "one place sets role %s, found %d" % (role, len(sites)))
-        ok(sites[0] > SCRIPT.index("function wgDecorate(") and sites[0] < SCRIPT.index("function wgUndecorate("),
-           "and it is Customize mode's decoration")
-    ok('role="list"' not in HTML and "role = 'list'" not in SCRIPT, "no markup or property sets it either")
-    undo = _wg_fn("function wgUndecorate(")
-    for need in ("if (root.getAttribute('role') === 'list') root.removeAttribute('role');",
+    """Outside Customize mode a report page is a document with headings. In the
+    mode its blocks are announced with their place. It was a list, but the
+    page's header and chooser sit inside the grid and a list may hold only list
+    items (19 Oct 2026): the grid is a group, each block a group named with its
+    place ("Top customers, 3 of 7"), set by the mode's decoration and nowhere
+    else, and taken off again when it ends."""
+    deco, undo = _wg_fn("function wgDecorate("), _wg_fn("function wgUndecorate(")
+    ok("wgAttr(root, 'role', 'group');" in deco and "wgAttr(n, 'role', 'group');" in deco, "the mode makes the grid and each block a group")
+    ok("name + ', ' + (at + 1) + ' of ' + shown.length" in deco, "and names each block with its place")
+    ok("'listitem'" not in SCRIPT and "wgAttr(root, 'role', 'list')" not in SCRIPT, "no list roles any more")
+    ok('role="list"' not in HTML and "role = 'list'" not in SCRIPT, "no markup or property sets one either")
+    for need in ("if (root.getAttribute('role') === 'group') root.removeAttribute('role');",
                  "orig.forEach(([a, v]) => wgAttr(n, a, v))", ".wg-hide').forEach(b => b.remove())",
                  "c.inert = false"):
         ok(need in undo, "leaving the mode undoes: " + need)
-    deco = _wg_fn("function wgDecorate(")
     ok("c.inert = true;" in deco and "wgInert.add(c);" in deco,
        "everything inside a card is inert in the mode, and only what the mode made inert is released")
 
@@ -8897,17 +8904,20 @@ def t_the_design_rules_live_in_one_document():
     ok(os.path.exists(path), "docs/DESIGN.md exists")
     doc = open(path, encoding="utf-8").read()
     for heading in ("## Principles", "## Tokens", "## Recipes", "## Layout", "## Parts", "### Windows", "### Buttons",
-                    "### Icon buttons", "### Links", "### Switches", "### Fields", "### Names", "## Adding a part"):
+                    "### Icon buttons", "### Links", "### Switches", "### Fields", "### Names", "### Rows", "### Tick rows",
+                    "## Adding a part"):
         ok(heading in doc, "it has " + heading)
     ok("static/src/css/tokens.css" in doc and "static/src/js/part-dialog.js" in doc, "it names where values and parts live")
     for spec in ("2026-09-07-design-system-tokens-design.md", "2026-10-05-brand-design-system-design.md",
                  "2026-10-06-reactor-mix-design.md", "2026-10-13-panels-design.md", "2026-10-15-window-part-design.md",
-                 "2026-10-19-buttons-and-links-design.md", "2026-10-19-switches-and-fields-design.md"):
+                 "2026-10-19-buttons-and-links-design.md", "2026-10-19-switches-and-fields-design.md",
+                 "2026-10-19-rows-design.md"):
         ok(spec in doc, "it links " + spec)
     for guard in ("t_every_corner_is_a_role", "t_every_defined_token_is_read", "t_every_window_is_built_and_closed_by_the_part",
                   "t_every_icon_button_is_built_by_the_part", "t_every_text_link_is_built_by_the_part",
                   "t_every_ordinary_button_is_built_by_the_part", "t_every_captioned_field_is_built_by_the_part",
-                  "t_the_switch_fixers_stay_gone", "t_no_field_is_named_only_by_its_placeholder"):
+                  "t_the_switch_fixers_stay_gone", "t_no_field_is_named_only_by_its_placeholder",
+                  "t_no_row_is_a_pretend_button", "t_every_tick_row_is_built_by_the_part"):
         ok(guard in doc and ("def " + guard + "(") in open(__file__, encoding="utf-8").read(), "it names the guard " + guard)
 
 @test
@@ -9198,6 +9208,95 @@ def t_no_field_is_named_only_by_its_placeholder():
         if not named:
             bad.append(SCRIPT[m.start():m.start() + 60].split("\n")[0])
     ok(not bad, "named only by a placeholder: %s" % bad)
+
+
+@test
+def t_a_row_opens_from_its_own_button_and_its_controls_keep_theirs():
+    """Stage 3, piece 4: a row that opens something is no longer a pretend
+    button holding other controls. A real button, named for the row, opens
+    it, and its Enter stops there; a click anywhere on the row still opens it,
+    except on a control of its own."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + row_part() + r"""
+const out = {}; let opened = 0, docKeys = 0, rowClicks = 0;
+document.addEventListener('keydown', () => { docKeys++; });
+const row = el('div', 'mrow');
+const open = () => { opened++; };
+const b = rowOpener('Open: Invoice copy please, from Accounts Team', open);
+const tick = document.createElement('input'); tick.type = 'checkbox';
+const words = el('span', 'msubj', 'Invoice copy please');
+row.append(b, tick, words); document.body.append(row);
+opensOnClick(row, open);
+row.addEventListener('click', () => { rowClicks++; });
+out.button = [b.className, b.getAttribute('aria-label'), b.tagName];
+b.click(); out.byButton = [opened, rowClicks];
+dispatch(b, new Ev('keydown', { key: 'Enter', bubbles: true })); out.docKeys = docKeys;
+tick.click(); out.byTick = opened;
+words.click(); out.byWords = opened;
+console.log(JSON.stringify(out));
+"""
+    got = _run_node(js)
+    ok(got["button"] == ["row-open sr-only", "Open: Invoice copy please, from Accounts Team", "BUTTON"], "a real, named button: %r" % got)
+    ok(got["byButton"] == [1, 0], "it opens the row once, and the click stops at it")
+    ok(got["docKeys"] == 0, "its Enter never reaches a page-wide shortcut")
+    ok(got["byTick"] == 1, "a click on the row's own tick does not open it")
+    ok(got["byWords"] == 2, "a click anywhere else on the row does")
+
+
+@test
+def t_a_tick_row_is_one_recipe():
+    """Tick-and-words rows had two text looks (dispatch's notify and insurance
+    ticks were 12 grey). tickRow() builds them all; one rule gives the words."""
+    if _node_ok():
+        got = _run_node(MINIDOM + row_part() + "console.log(JSON.stringify([tickRow('tm-tabpick').className, tickRow().className]));")
+        ok(got == ["tick-row tm-tabpick", "tick-row"], "the shared class and the screen's own: %r" % got)
+    rule = re.search(r"\.tick-row \{([^}]*)\}", CSS)
+    ok(rule and "font-size: var(--text-body)" in rule.group(1) and "color: var(--text-primary)" in rule.group(1), "the body text in primary ink")
+    for fam in (".disp-notify", ".disp-insure"):
+        r = re.search(re.escape(fam) + r" \{([^}]*)\}", CSS)
+        ok(r and "font-size" not in r.group(1) and "color" not in r.group(1), fam + " keeps only its spacing")
+
+
+@test
+def t_every_tick_row_is_built_by_the_part():
+    """Tick-and-words rows came in five families with two text looks; tickRow()
+    builds them all with the one recipe."""
+    bad = _built_by_hand(["el('label', 'tm-tabpick'", "el('label', 'disp-notify'", "el('label', 'disp-insure'",
+                          "el('label', 'crm-cline'", "el('label', 'sr-opt'"], part="js/part-row.js")
+    ok(not bad, "tick rows built by hand: %s" % bad)
+
+
+@test
+def t_memory_read_pages_are_finger_sized():
+    """Memory's "Pages it read" links were 16 tall, too small to tap (WCAG 2.2
+    target size). Each sits on a line at least the small control's height."""
+    r = re.search(r"\.know-src a \{([^}]*)\}", CSS)
+    ok(r and "min-height: var(--control-h-sm)" in r.group(1) and "display: inline-flex" in r.group(1),
+       "each link is at least 24 tall: %r" % (r.group(1) if r else None))
+
+
+@test
+def t_no_row_is_a_pretend_button():
+    """A row built as a pretend button held real controls (a tick, Claim, the
+    order link, the queue's actions), which a screen reader cannot present.
+    Rows open from their own real button now, and a click anywhere still
+    opens them; the queue opens from its Preview button, which it always had."""
+    mr, card = fn_src("function mailRow("), fn_src("function mailCard(")
+    for name, src in (("the Inbox row", mr), ("the Inbox card", card)):
+        ok("setAttribute('role', 'button')" not in src, name + " is not a pretend button")
+        ok("rowOpener(" in src and "opensOnClick(" in src, name + " opens from its own button, and from a click anywhere")
+    q = SCRIPT[SCRIPT.index("const row = el('div', 'lbl-row lbl-qrow'"):][:900]
+    ok("row.setAttribute('role', 'button')" not in q and "row.tabIndex = 0" not in q, "the queue row is not a pretend button")
+    deals = SCRIPT[SCRIPT.index("const openDeal = () => crmDealModal(x.id);") - 600:][:2400]
+    for src, name in ((deals, "the deals list"), (fn_src("function renderCRMContacts("), "CRM Contacts")):
+        ok("tr.setAttribute('role', 'button')" not in src, name + " rows are table rows, not pretend buttons")
+        ok("rowOpener(" in src and "opensOnClick(tr" in src, name + " rows open from their own button")
+    for fam in (".mrow", ".mail-card", ".crm-list-row"):
+        ok(re.search(re.escape(fam) + r"[^{]*:has\([^)]*\.row-open:focus-visible\)", CSS), fam + " draws its ring when its opener has focus")
+    ok(":where(:has(> .row-open)) { position: relative; }" in CSS,
+       "what holds an opener places it, so it never stretches the page (the browser suite's stray-opener check)")
 
 
 @test

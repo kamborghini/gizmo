@@ -83,7 +83,7 @@
         .know-text .know-h:first-child { margin-top: 0; }
         .know-src-h { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-secondary); margin-top: var(--sp-4); }
         .know-src { margin: var(--sp-1) 0 0; padding-left: var(--sp-5); font-size: var(--text-xs); line-height: var(--lh-caption); }
-        .know-src a { color: var(--text-secondary); overflow-wrap: anywhere; }
+        .know-src a { display: inline-flex; align-items: center; min-height: var(--control-h-sm); color: var(--text-secondary); overflow-wrap: anywhere; }
         .know-text p { margin: 0 0 var(--sp-2); } .know-text ul { margin: 0 0 var(--sp-2); padding-left: var(--sp-5); } .know-text li { margin: var(--sp-1) 0; }
         /* Products list */
         .roas-under { color: var(--error); font-weight: var(--weight-medium); }
