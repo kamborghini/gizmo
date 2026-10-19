@@ -530,17 +530,26 @@ def monthly_cash(orders: List[dict], as_of: date, since: Optional[date] = None,
 
 
 
-def daily_cash(orders: List[dict], as_of: date) -> "pd.Series":
+def daily_cash(orders: List[dict], as_of: date, max_total: Optional[float] = None) -> "pd.Series":
     """Cash in by day, up to and including as_of.
 
     The month-to-date figure the variance table shows comes from here, so it
     has to be the same money as the forecast it is compared with: the order
-    total, not the panel's line-item net."""
-    rows = [(pd.Timestamp(d), t) for d, t in _cash_rows(orders) if d <= as_of]
-    if not rows:
+    total, not the panel's line-item net.
+
+    `max_total` keeps only orders BELOW that much: the regular orders, for the
+    sources that forecast them by day apart from the big ones. It is the exact
+    complement of monthly_cash's `min_total`, so a month of these plus the
+    same month of big orders is the month's total. Its days run over the same
+    span as the whole series, a day with no regular order being a zero."""
+    every = [(pd.Timestamp(d), t) for d, t in _cash_rows(orders) if d <= as_of]
+    if not every:
         return pd.Series(dtype=float)
+    full = pd.date_range(min(d for d, _ in every), pd.Timestamp(as_of), freq="D")
+    rows = every if max_total is None else [(d, t) for d, t in every if t < max_total]
+    if not rows:
+        return pd.Series(0.0, index=full)
     ser = pd.DataFrame(rows, columns=["date", "total"]).groupby("date")["total"].sum().sort_index()
-    full = pd.date_range(ser.index.min(), pd.Timestamp(as_of), freq="D")
     return ser.reindex(full, fill_value=0.0)
 
 
