@@ -7884,21 +7884,21 @@ def t_the_widget_grid_watches_every_view_setview_shows():
 
 @test
 def t_a_report_page_is_a_list_only_while_it_is_being_customized():
-    """Outside Customize mode a report page is a document with headings, not a
-    list, so the list roles are set by the mode's decoration and nowhere else,
-    and taken off again when it ends."""
-    for role in ("'list'", "'listitem'"):
-        sites = [m.start() for m in re.finditer(r"'role', " + role, SCRIPT)]
-        ok(len(sites) == 1, "one place sets role %s, found %d" % (role, len(sites)))
-        ok(sites[0] > SCRIPT.index("function wgDecorate(") and sites[0] < SCRIPT.index("function wgUndecorate("),
-           "and it is Customize mode's decoration")
-    ok('role="list"' not in HTML and "role = 'list'" not in SCRIPT, "no markup or property sets it either")
-    undo = _wg_fn("function wgUndecorate(")
-    for need in ("if (root.getAttribute('role') === 'list') root.removeAttribute('role');",
+    """Outside Customize mode a report page is a document with headings. In the
+    mode its blocks are announced with their place. It was a list, but the
+    page's header and chooser sit inside the grid and a list may hold only list
+    items (19 Oct 2026): the grid is a group, each block a group named with its
+    place ("Top customers, 3 of 7"), set by the mode's decoration and nowhere
+    else, and taken off again when it ends."""
+    deco, undo = _wg_fn("function wgDecorate("), _wg_fn("function wgUndecorate(")
+    ok("wgAttr(root, 'role', 'group');" in deco and "wgAttr(n, 'role', 'group');" in deco, "the mode makes the grid and each block a group")
+    ok("name + ', ' + (at + 1) + ' of ' + shown.length" in deco, "and names each block with its place")
+    ok("'listitem'" not in SCRIPT and "wgAttr(root, 'role', 'list')" not in SCRIPT, "no list roles any more")
+    ok('role="list"' not in HTML and "role = 'list'" not in SCRIPT, "no markup or property sets one either")
+    for need in ("if (root.getAttribute('role') === 'group') root.removeAttribute('role');",
                  "orig.forEach(([a, v]) => wgAttr(n, a, v))", ".wg-hide').forEach(b => b.remove())",
                  "c.inert = false"):
         ok(need in undo, "leaving the mode undoes: " + need)
-    deco = _wg_fn("function wgDecorate(")
     ok("c.inert = true;" in deco and "wgInert.add(c);" in deco,
        "everything inside a card is inert in the mode, and only what the mode made inert is released")
 
@@ -9210,6 +9210,24 @@ def t_a_tick_row_is_one_recipe():
     for fam in (".disp-notify", ".disp-insure"):
         r = re.search(re.escape(fam) + r" \{([^}]*)\}", CSS)
         ok(r and "font-size" not in r.group(1) and "color" not in r.group(1), fam + " keeps only its spacing")
+
+
+@test
+def t_every_tick_row_is_built_by_the_part():
+    """Tick-and-words rows came in five families with two text looks; tickRow()
+    builds them all with the one recipe."""
+    bad = _built_by_hand(["el('label', 'tm-tabpick'", "el('label', 'disp-notify'", "el('label', 'disp-insure'",
+                          "el('label', 'crm-cline'", "el('label', 'sr-opt'"], part="js/part-row.js")
+    ok(not bad, "tick rows built by hand: %s" % bad)
+
+
+@test
+def t_memory_read_pages_are_finger_sized():
+    """Memory's "Pages it read" links were 16 tall, too small to tap (WCAG 2.2
+    target size). Each sits on a line at least the small control's height."""
+    r = re.search(r"\.know-src a \{([^}]*)\}", CSS)
+    ok(r and "min-height: var(--control-h-sm)" in r.group(1) and "display: inline-flex" in r.group(1),
+       "each link is at least 24 tall: %r" % (r.group(1) if r else None))
 
 
 @test

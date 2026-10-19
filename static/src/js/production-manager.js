@@ -1166,7 +1166,7 @@
                 radios.forEach(r => { r.checked = (r.value === k); });
             };
             const opt = (k, label, build) => {
-                const wrapL = el('label', 'sr-opt');
+                const wrapL = tickRow('sr-opt');
                 const r = document.createElement('input');
                 r.type = 'radio'; r.name = 'sizerule'; r.value = k; r.checked = (k === 'set');
                 r.onchange = () => choose(k);

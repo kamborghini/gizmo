@@ -1460,7 +1460,7 @@
             if (!editing) {
                 /* Logging a call that already happened is one tick, not
                    add-then-hunt-it-down-and-tick-it. */
-                const lw = el('label', 'crm-cline');
+                const lw = tickRow('crm-cline');
                 doneNow = document.createElement('input'); doneNow.type = 'checkbox';
                 lw.append(doneNow, document.createTextNode(' Already done, just logging it'));
                 m.body.append(lw);
@@ -2453,7 +2453,7 @@
             /* ---- the follow-up nag ---- */
             const fp = el('div', 'crm-focus');
             fp.append(el('div', 'disp-subhead', 'Follow-ups'));
-            const fu = el('label', 'crm-cline');
+            const fu = tickRow('crm-cline');
             const fcb = document.createElement('input'); fcb.type = 'checkbox';
             fcb.checked = crmCache.settings.followup_popup !== false;
             fcb.onchange = async () => {

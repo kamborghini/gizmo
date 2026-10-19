@@ -265,7 +265,7 @@
         const wgInert = new WeakSet();  // children Customize mode made inert, and only those
         const wgMotion = new WeakMap(); // card -> its running slide, cancelled by the next one
         let wgEatClicksUntil = 0;
-        const WG_ARIA = ['role', 'tabindex', 'aria-label', 'aria-posinset', 'aria-setsize', 'aria-haspopup'];
+        const WG_ARIA = ['role', 'tabindex', 'aria-label', 'aria-haspopup'];
         /* The gesture's own thresholds rather than design tokens, since nothing
            is drawn at these sizes: how far a mouse travels before a press is a
            drag (so a plain click never flashes a lift), how long a finger holds
@@ -509,26 +509,26 @@
                 if (want[i].nextElementSibling !== want[i + 1]) act.insertBefore(want[i], want[i + 1]);
             }
         }
-        /* The mode's marks on a view that is arranged: a list of cards, each
-           focusable, named and hideable, with everything inside it inert so no
+        /* The mode's marks on a view that is arranged: a group of cards, each
+           focusable, named with its place and hideable (a group, not a list:
+           the page's header and chooser sit in the grid too, and a list may
+           hold only list items), with everything inside it inert so no
            link, button, chart hover or inner drag answers while cards are being
            moved. Re-applied after a render, because a render brings new nodes. */
         function wgDecorate(view, root, shown, widgets) {
             const hint = $('wg-hint');
             if (hint && hint.hidden) hint.hidden = false;
             if (!root.classList.contains('wg-editing')) root.classList.add('wg-editing');
-            wgAttr(root, 'role', 'list');
+            wgAttr(root, 'role', 'group');
             wgAttr(root, 'aria-describedby', 'wg-hint');
             widgets.forEach(n => {
                 if (!wgOrig.has(n)) wgOrig.set(n, WG_ARIA.map(a => [a, n.getAttribute(a)]));
                 const at = shown.indexOf(n);
                 if (at < 0) { wgOrig.get(n).forEach(([a, v]) => wgAttr(n, a, v)); return; }
                 const name = wgName(n);
-                wgAttr(n, 'role', 'listitem');
+                wgAttr(n, 'role', 'group');
                 wgAttr(n, 'tabindex', '0');
-                wgAttr(n, 'aria-label', name);
-                wgAttr(n, 'aria-posinset', String(at + 1));
-                wgAttr(n, 'aria-setsize', String(shown.length));
+                wgAttr(n, 'aria-label', name + ', ' + (at + 1) + ' of ' + shown.length);
                 wgAttr(n, 'aria-haspopup', null);
                 [...n.children].forEach(c => {
                     if (c.classList.contains('wg-hide') || c.classList.contains('wg-grip') || c.inert) return;
@@ -555,7 +555,7 @@
         function wgUndecorate(root) {
             if (!root.classList.contains('wg-editing')) return;
             root.classList.remove('wg-editing');
-            if (root.getAttribute('role') === 'list') root.removeAttribute('role');
+            if (root.getAttribute('role') === 'group') root.removeAttribute('role');
             if (root.getAttribute('aria-describedby') === 'wg-hint') root.removeAttribute('aria-describedby');
             [...root.children].forEach(n => {
                 const orig = wgOrig.get(n);
