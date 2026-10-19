@@ -55,7 +55,7 @@
             .tbl-search { height: var(--control-h-lg); }
             .segmented > button { height: var(--control-h-lg); }
             :is(.btn, .btn-sm, .segmented > button, .tab, .chip, .toggle, .qt, .dmenu-item, .nav-item, .convo, .rlist-row, details.sect summary) { font-size: var(--text-sm); }
-            :is(.icon-btn, .btn-sm.btn-icon, .topbar .icon-btn, .topbar-search) { min-width: var(--control-h-lg); }
+            :is(.icon-btn:not(.icon-btn-sm, .icon-btn-tag), .btn-sm.btn-icon, .topbar .icon-btn, .topbar-search) { min-width: var(--control-h-lg); }
             :is(.tab, .tbl-step, .guide-toc-link, .toggle) { min-width: var(--control-h-lg); }
             .toggle:has(> .sw:only-child) { justify-content: flex-end; }
             .tbl-step { width: var(--control-h-lg); }
@@ -80,9 +80,9 @@
             .ph-sub > .info::before { top: calc(var(--sp-1) + var(--lh-control) / 2); }
             /* The rest of what a finger meets: the drawer's own icon buttons and brand row, an icon button in a row, a row's
                name button, a standalone link, a summary, a maker's band and the chart's expand square. */
-            :is(.sidebar .icon-btn, .brand, .mem-btn, .crm-ticon, .crm-col-add, .sizes-open, .files-name, .guide-toc-link, .miss-open, .action-link, details summary) { min-height: var(--control-h-lg); }
+            :is(.sidebar .icon-btn, .brand, .crm-ticon, .crm-col-add, .sizes-open, .files-name, .guide-toc-link, .miss-open, .action-link, details summary) { min-height: var(--control-h-lg); }
             .ktable tr.ktable-grp th { height: var(--control-h-lg); }
-            :is(.sidebar .icon-btn, .mem-btn, .crm-ticon) { min-width: var(--control-h-lg); }
+            :is(.sidebar .icon-btn, .crm-ticon) { min-width: var(--control-h-lg); }
             /* Hide sidebar's 40 target leaves its glyph room enough, so 4 to it
                keeps the brand row's logo, hairline and name whole. */
             .side-head { gap: var(--sp-1); }
@@ -97,11 +97,11 @@
             /* A small close or clear glyph keeps its look, and its target grows to a 40 square centred on it (an invisible
                hit area: no visible change, nothing moved). Reaching them on a touch screen is what a 390 scan without touch
                emulation cannot show. */
-            :is(.convo .del, .toast-x, .tbl-search .tbl-clear, .alert-x, .sk-chip-x, .fchip button) { position: relative; }
-            :is(.toast-x, .alert-x, .sk-chip-x, .fchip button)::after,
+            :is(.convo .del, .tbl-search .tbl-clear, .fchip button, .icon-btn-sm, .icon-btn-tag) { position: relative; }
+            :is(.fchip button, .icon-btn-sm, .icon-btn-tag)::after,
             :is(.convo .del, .tbl-search .tbl-clear, .ov-wrap.wg-editing > [data-widget] > .wg-hide)::after {
                 content: ""; position: absolute; height: var(--control-h-lg); }
-            :is(.toast-x, .alert-x, .sk-chip-x, .fchip button)::after {
+            :is(.fchip button, .icon-btn-sm, .icon-btn-tag)::after {
                 left: 50%; top: 50%; width: var(--control-h-lg); margin: calc(var(--control-h-lg) / -2) 0 0 calc(var(--control-h-lg) / -2); }
             /* A button with a neighbour on one side leans its square away from it: it never covers the search's input, the
                conversation's title or a chart's expand square. The clear button's square starts at the button's left edge

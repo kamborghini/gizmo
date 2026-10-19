@@ -54,7 +54,7 @@
             sum.textContent = 'Technical details (send these to your developer)';
             det.append(sum);
             const bar = el('div', 'disp-tech-bar');
-            const copy = el('button', 'btn', 'Copy');
+            const copy = textButton('Copy');
             const text = () => [
                 'Order: ' + (tech.order || ''),
                 'When: ' + (tech.when || ''),
@@ -344,7 +344,7 @@
             const row = el('div', 'disp-actions');
             const printable = labels.filter(l => l && l.print_images && l.print_images.length);
             if (printable.length) {
-                const b = el('button', 'btn btn-primary');
+                const b = textButton(null, { kind: 'primary' });
                 b.append(ico(I.printer), document.createTextNode(
                     (verb || 'Print label') + (printable.length > 1 ? 's' : '')));
                 b.onclick = () => printLabelImages(printable);
@@ -355,7 +355,7 @@
             // label is never stranded while the normal row stays one button.
             labels.forEach((l, i) => {
                 if (l && l.print_images && l.print_images.length) return;
-                const d = el('button', 'btn');
+                const d = textButton();
                 d.append(ico(I.download), document.createTextNode(
                     labels.length > 1 ? ('Download label ' + (i + 1)) : 'Download label'));
                 d.title = 'This label cannot be printed in place; save the file and print it';
@@ -481,8 +481,8 @@
 
             const err = el('div'); body.append(err);
             const foot = el('div', 'modal-foot');
-            const cancel = el('button', 'btn', 'Cancel'); cancel.onclick = close;
-            const save = el('button', 'btn btn-primary', 'Save changes');
+            const cancel = textButton('Cancel'); cancel.onclick = close;
+            const save = textButton('Save changes', { kind: 'primary' });
             foot.append(cancel, save); modal.append(foot);
 
             save.onclick = async () => {
@@ -558,7 +558,7 @@
             if (!cfg.connected) {
                 const m = el('div', 'disp-notice');
                 m.append(el('p', null, 'World Options is not connected yet.'));
-                const b = el('button', 'btn btn-primary'); b.append(ico(I.truck), document.createTextNode('Open shipping settings'));
+                const b = textButton(null, { kind: 'primary' }); b.append(ico(I.truck), document.createTextNode('Open shipping settings'));
                 b.onclick = () => { close(); openShippingSettings(); };
                 m.append(b); body.append(m); return;
             }
@@ -612,7 +612,7 @@
                     ins[k] = inp;
                 });
                 ins.weight.addEventListener('input', () => { weightTouched = true; });
-                const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove this parcel';
+                const rm = iconButton(I.x, 'Remove this parcel');
                 rm.onclick = () => { const i = boxRows.indexOf(row); if (i >= 0) boxRows.splice(i, 1); rowb.remove(); staleQuote(); };
                 const row = { el: rowb, sel, ins };
                 function applyPreset(id) {
@@ -635,7 +635,7 @@
             }
             addBoxRow(defaultPreset);
             const sizeHelp = el('p', 'field-help', 'Weigh the packed box: couriers re-weigh and bill it.');
-            const addBoxBtn = el('button', 'btn disp-addbox'); addBoxBtn.append(ico(I.plus), document.createTextNode('Add a box'));
+            const addBoxBtn = textButton(null, { cls: 'disp-addbox' }); addBoxBtn.append(ico(I.plus), document.createTextNode('Add a box'));
             addBoxBtn.title = 'Multi-parcel shipment: every box travels on the same booking';
             addBoxBtn.onclick = () => { addBoxRow(defaultPreset); staleQuote(); };
             body.append(addBoxBtn, sizeHelp);
@@ -666,7 +666,7 @@
                 return insCb.checked && parseFloat(insAmt.value) > 0 ? parseFloat(insAmt.value) : 0;
             }
 
-            const quoteBtn = el('button', 'btn btn-primary disp-quote');
+            const quoteBtn = textButton(null, { kind: 'primary', cls: 'disp-quote' });
             quoteBtn.append(ico(I.truck), document.createTextNode('Get courier quotes'));
             quoteWrap = el('div'); quoteWrap.style.marginTop = 'var(--sp-3)';
             body.append(quoteBtn, quoteWrap);
@@ -756,7 +756,7 @@
                         hIn.value = pre.hs || ''; oIn.value = pre.origin || 'GB';
                     }
                     else { oIn.value = 'GB'; }
-                    const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove line';
+                    const rm = iconButton(I.x, 'Remove line');
                     const line = { dIn, qIn, pIn, hIn, oIn, key: (pre && pre.key) || '' };
                     rm.onclick = () => { const i = customsLines.indexOf(line); if (i >= 0) customsLines.splice(i, 1); rowc.remove(); };
                     rowc.append(dIn, qIn, pIn, hIn, oIn, rm);
@@ -811,7 +811,7 @@
                 }
                 if (!customsLines.length) addLine({ description: 'Custom glass gobo', quantity: 1, hs: quote.default_hs_code || '' });
                 card.append(linesHost);
-                const addL = el('button', 'btn'); addL.append(ico(I.plus), document.createTextNode('Add line'));
+                const addL = textButton(); addL.append(ico(I.plus), document.createTextNode('Add line'));
                 addL.onclick = () => addLine(null);
                 card.append(addL);
                 const zeroWarn = el('div', 'disp-warn'); zeroWarn.style.display = 'none';
@@ -994,7 +994,7 @@
                 // Expected a service that is not here? Ask World Options the same
                 // question several ways and show what each way returns.
                 const diagRow = el('div'); diagRow.style.marginTop = 'var(--sp-2)';
-                const diagBtn = el('button', 'btn'); diagBtn.style.fontSize = 'var(--text-xs)';
+                const diagBtn = textButton(); diagBtn.style.fontSize = 'var(--text-xs)';
                 diagBtn.textContent = 'Missing a service?';
                 diagBtn.title = 'Re-quote this parcel several ways to see which services each returns. Free, and books nothing.';
                 const diagOut = el('div'); diagOut.style.marginTop = 'var(--sp-2)';
@@ -1093,7 +1093,7 @@
                         + ' and the customer collects it. Only pick this if that is acceptable for this order.'));
                 }
                 conf.append(el('div', 'disp-charge', 'Booking charges your World Options account.'));
-                const book = el('button', 'btn btn-primary disp-book');
+                const book = textButton(null, { kind: 'primary', cls: 'disp-book' });
                 if (chosen.amount_ex_vat != null && chosen.vat) {
                     conf.append(el('div', 'disp-vat', fmtPrice(chosen.amount_ex_vat, chosen.currency) + ' ex VAT'
                         + '   +   ' + fmtPrice(chosen.vat, chosen.currency) + ' VAT'
@@ -1233,7 +1233,7 @@
                 else if (f.reason && f.reason !== 'not_attempted') out.append(el('div', 'disp-warn', f.detail || 'Shopify fulfilment could not be completed.'));
                 if (res.tag && !res.tag.ok && res.tag.note) out.append(el('div', 'disp-warn', res.tag.note));
                 labelButtons(out, s.labels);
-                const done = el('button', 'btn'); done.style.marginTop = 'var(--sp-4)'; done.textContent = 'Done'; done.onclick = close;
+                const done = textButton(); done.style.marginTop = 'var(--sp-4)'; done.textContent = 'Done'; done.onclick = close;
                 out.append(done);
                 body.innerHTML = '';
                 body.append(out);
@@ -1263,7 +1263,7 @@
                             + String((err && err.message) || err)
                             + '. Write the tracking number down, then close this and press '
                             + 'Dispatch again to see the shipment and print the label.'));
-                        const done = el('button', 'btn'); done.style.marginTop = 'var(--sp-4)';
+                        const done = textButton(); done.style.marginTop = 'var(--sp-4)';
                         done.textContent = 'Done'; done.onclick = close; body.append(done);
                     } catch (e2) {
                         // No helpers left. Plain text still carries the number.
@@ -1292,7 +1292,7 @@
                 }
                 if (d.dispatched_at) body.append(el('div', 'sub', 'Dispatched ' + fmtDate(d.dispatched_at)));
                 const bar = el('div', 'disp-actions');
-                const rp = el('button', 'btn btn-primary'); rp.append(ico(I.printer), document.createTextNode('Reprint label'));
+                const rp = textButton(null, { kind: 'primary' }); rp.append(ico(I.printer), document.createTextNode('Reprint label'));
                 rp.onclick = async () => {
                     rp.disabled = true;
                     try {
@@ -1310,7 +1310,7 @@
                     rp.disabled = false;
                 };
                 bar.append(rp);
-                const cancel = el('button', 'btn'); cancel.append(ico(I.x), document.createTextNode('Cancel shipment'));
+                const cancel = textButton(); cancel.append(ico(I.x), document.createTextNode('Cancel shipment'));
                 cancel.onclick = async () => {
                     if (!await uiConfirm('Cancel this shipment at World Options? Depending on the courier you may still be charged.', { title: 'Cancel shipment', okText: 'Cancel shipment', cancelText: 'Keep it' })) return;
                     cancel.disabled = true;
@@ -1441,7 +1441,7 @@
                     if (sub.length) row.append(el('div', 'coll-row-sub', sub.join(' \u00b7 ')));
                     /* The van has been and gone and another parcel needs one:
                        clearing lets the next booking ask again. */
-                    const clr = el('button', 'linkish', 'The van has been, book another');
+                    const clr = textLink('The van has been, book another');
                     clr.onclick = async () => {
                         if (!await uiConfirm('Clear the record of ' + r.label + '\u2019s collection today? '
                             + 'The next parcel booked with them will ask for a new one, which is a '
@@ -1585,7 +1585,7 @@
                     i.placeholder = k === 'weight' ? 'kg' : k.slice(0, 1).toUpperCase() + k.slice(1) + ' cm';
                     i.oninput = staleQuote; ins[k] = i;
                 });
-                const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove this parcel';
+                const rm = iconButton(I.x, 'Remove this parcel');
                 const row = { el: rowb, ins };
                 rm.onclick = () => { const i = boxRows.indexOf(row); if (i >= 0) boxRows.splice(i, 1); rowb.remove(); staleQuote(); };
                 sel.onchange = () => {
@@ -1598,7 +1598,7 @@
                 if (presets.length) { sel.value = presets[0].id; sel.onchange(); }
             }
             addBoxRow();
-            const addBoxBtn = el('button', 'btn disp-addbox');
+            const addBoxBtn = textButton(null, { cls: 'disp-addbox' });
             addBoxBtn.append(ico(I.plus), document.createTextNode('Add a box'));
             addBoxBtn.onclick = () => { addBoxRow(); staleQuote(); };
             body.append(addBoxBtn);
@@ -1627,7 +1627,7 @@
             }
 
             // ---- quotes ----
-            const quoteBtn = el('button', 'btn btn-primary disp-quote');
+            const quoteBtn = textButton(null, { kind: 'primary', cls: 'disp-quote' });
             quoteBtn.append(ico(I.truck), document.createTextNode('Get courier quotes'));
             const quoteWrap = el('div'); quoteWrap.style.marginTop = 'var(--sp-3)';
             body.append(quoteBtn, quoteWrap);
@@ -1761,7 +1761,7 @@
                     const price = mk('Unit £', 'disp-num'); price.type = 'number'; price.min = '0'; price.step = '0.01';
                     const hs = mk('HS code', 'disp-num', quote.default_hs_code || '');
                     const orig = mk('Origin', 'disp-num', 'GB');
-                    const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove this line';
+                    const rm = iconButton(I.x, 'Remove this line');
                     const entry = { desc: desc, qty: qty, price: price, hs: hs, orig: orig };
                     rm.onclick = () => {
                         const i = customsRows.indexOf(entry);
@@ -1776,7 +1776,7 @@
                 // Seed the first line from what they already typed: for a one-item
                 // parcel that is the whole declaration.
                 addLine({ desc: contentsIn.value.trim(), price: valueIn.value });
-                const addBtn = el('button', 'btn disp-addbox');
+                const addBtn = textButton(null, { cls: 'disp-addbox' });
                 addBtn.append(ico(I.plus), document.createTextNode('Add a line'));
                 addBtn.onclick = () => addLine();
                 card.append(addBtn);
@@ -1827,7 +1827,7 @@
                 confirmWrap.innerHTML = '';
                 if (!chosen) return;
                 const bar = el('div', 'disp-actions');
-                const bk = el('button', 'btn btn-primary');
+                const bk = textButton(null, { kind: 'primary' });
                 bk.append(ico(I.truck), document.createTextNode('Book ' + fmtPrice(chosen.amount, chosen.currency)));
                 bk.onclick = async () => {
                     const boxes = collectBoxes();
@@ -1899,11 +1899,11 @@
                 const printed = printLabelImages((r.shipment && r.shipment.labels) || []);
                 if (!printed) labelButtons(out, (r.shipment || {}).labels, 'Print label');
                 const bar = el('div', 'disp-actions');
-                const rp = el('button', 'btn btn-primary');
+                const rp = textButton(null, { kind: 'primary' });
                 rp.append(ico(I.printer), document.createTextNode('Reprint label'));
                 rp.onclick = () => reprintCustom(r.id || shipId, body, rp);
                 bar.append(rp);
-                const done = el('button', 'btn', 'Done'); done.onclick = close;
+                const done = textButton('Done'); done.onclick = close;
                 bar.append(done); out.append(bar);
                 body.innerHTML = '';
                 body.append(out);
@@ -1926,7 +1926,7 @@
                             + String((err && err.message) || err)
                             + '. Write the tracking number down, then close this and press '
                             + 'New shipment again: it is listed under Already booked, with Reprint.'));
-                        const done = el('button', 'btn', 'Done'); done.onclick = close; body.append(done);
+                        const done = textButton('Done'); done.onclick = close; body.append(done);
                     } catch (e2) {
                         body.textContent = 'Booked and charged. Tracking: ' + (tn || 'unknown')
                             + '. Close this and press New shipment again to reprint.';
@@ -1949,7 +1949,7 @@
                         left.append(el('div', 'sub', (s.carrier || '') + ' ' + (s.tracking || '')
                             + (s.at ? ' · ' + fmtDate(s.at) : '')));
                         row.append(left);
-                        const rp = el('button', 'btn');
+                        const rp = textButton();
                         rp.append(ico(I.printer), document.createTextNode('Reprint'));
                         rp.onclick = () => reprintCustom(s.id, body, rp);
                         row.append(rp);
@@ -2070,7 +2070,7 @@
                 pluginIn.append(op);
             });
             pluginRow.append(pluginIn); body.append(pluginRow);
-            const testBtn = el('button', 'btn'); testBtn.style.marginTop = 'var(--sp-2-5)'; testBtn.append(ico(I.check), document.createTextNode('Save & test connection'));
+            const testBtn = textButton(); testBtn.style.marginTop = 'var(--sp-2-5)'; testBtn.append(ico(I.check), document.createTextNode('Save & test connection'));
             const testOut = el('span', 'setting-sub'); testOut.style.marginLeft = 'var(--sp-2-5)';
             testBtn.onclick = async () => {
                 testBtn.disabled = true; testOut.textContent = 'Testing…';
@@ -2224,7 +2224,7 @@
             eoriIn.type = 'text'; eoriIn.spellcheck = false; eoriIn.className = 'disp-num';
             eoriIn.placeholder = 'e.g. DE123456789';
             eoriIn.setAttribute('aria-label', 'EORI number to check');
-            const eoriBtn = el('button', 'btn', 'Check');
+            const eoriBtn = textButton('Check');
             const eoriOut = el('div', 'eori-line muted');
             eoriBtn.onclick = () => eoriRun(eoriIn, eoriBtn, eoriOut);
             /* Typed and confirmed without reaching for the mouse: this is a
@@ -2314,7 +2314,7 @@
                         inp.oninput = () => b[k] = parseFloat(inp.value) || 0;
                         rowb.append(inp);
                     });
-                    const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove';
+                    const rm = iconButton(I.x, 'Remove');
                     rm.onclick = () => {
                         if (boxes[i].id === defaultBoxId) defaultBoxId = '';
                         boxes.splice(i, 1); renderBoxes();
@@ -2322,14 +2322,14 @@
                     rowb.append(rm);
                     boxHost.append(rowb);
                 });
-                const add = el('button', 'btn'); add.style.marginTop = 'var(--sp-1-5)'; add.append(ico(I.plus), document.createTextNode('Add box'));
+                const add = textButton(); add.style.marginTop = 'var(--sp-1-5)'; add.append(ico(I.plus), document.createTextNode('Add box'));
                 add.onclick = () => { boxes.push({ id: 'box' + (boxes.length + 1) + '_' + Date.now(), name: 'New box', width: 20, length: 15, depth: 10, weight: 0.5 }); renderBoxes(); };
                 boxHost.append(add);
             }
             renderBoxes();
 
             const foot = el('div', 'modal-foot');
-            const saveB = el('button', 'btn btn-primary'); saveB.textContent = 'Save shipping settings';
+            const saveB = textButton(null, { kind: 'primary' }); saveB.textContent = 'Save shipping settings';
             saveB.onclick = async () => {
                 const origin = {}; Object.keys(of).forEach(k => origin[k] = of[k].value.trim());
                 /* Every preset is saved or none is. Half-filled rows used to be

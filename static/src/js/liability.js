@@ -156,7 +156,7 @@
                (copy plan, Liability #1). The stamp and Refresh live on the tabs. */
             /* Refresh is worded in the header, as on Xero sync; the stamp stays on
                the tab row (12 Oct 2026). */
-            const liaRefresh = el('button', 'btn btn-sm'); liaRefresh.type = 'button';
+            const liaRefresh = textButton(null, { small: true }); liaRefresh.type = 'button';
             liaRefresh.append(ico(I.refresh), document.createTextNode('Refresh'));
             liaRefresh.onclick = () => loadLiability(true, true);
             box.append(pageHead({ view: 'liability', title: 'Liability', line: 'What customers owe on unpaid orders.', actions: [liaRefresh],
@@ -307,7 +307,7 @@
                 (v) => { liaF.channel = v; renderLiability(); }));
 
             const rangeSet = !!(liaF.from || liaF.to || liaF.min);
-            const rangeBtn = el('button', 'btn btn-sm' + (rangeSet ? ' on' : ''));
+            const rangeBtn = textButton(null, { small: true, cls: rangeSet ? 'on' : '' });
             rangeBtn.append(ico(I.cal), document.createTextNode(rangeSet ? 'Dates and amount: set' : 'Dates and amount'));
             rangeBtn.onclick = () => dropPanel(rangeBtn, (body, close) => {
                 const fieldRow = el('label', 'dpanel-row');
@@ -336,7 +336,7 @@
                 minIn.value = liaF.min;
                 minIn.oninput = () => { liaF.min = minIn.value; paint(); };
                 minRow.append(minIn);
-                const done = el('button', 'btn btn-sm', 'Done');
+                const done = textButton('Done', { small: true });
                 done.onclick = () => { close(); renderLiability(); };
                 body.append(fieldRow, fromRow, toRow, minRow, done);
             });
@@ -345,7 +345,7 @@
                way to clear it on the bar at all. paint() shows it from the same
                expression the coverage line is written from, so the chip and the
                line can never disagree. */
-            const clr = el('button', 'btn btn-sm');
+            const clr = textButton(null, { small: true });
             clr.append(ico(I.x), document.createTextNode('Clear'));
             clr.title = 'Reset every filter';
             clr.onclick = () => {
@@ -402,7 +402,7 @@
                 /* Every customer owing in one table (12 Oct 2026, DF-18): Owed
                    straight after the name, every fact under its own head, and
                    an opened account under its own row. */
-                const clearAll = el('button', 'btn btn-sm'); clearAll.type = 'button'; clearAll.textContent = 'Clear filters';
+                const clearAll = textButton(null, { small: true }); clearAll.type = 'button'; clearAll.textContent = 'Clear filters';
                 clearAll.onclick = () => clr.click();
                 const none = d.total > 0 ? emptyState({ icon: I.search, text: 'Nothing matches these filters.', action: clearAll })
                     : el('div', 'empty', 'Nothing is owed.');
@@ -445,8 +445,7 @@
                 const tot = rows.reduce((a, r) => a + (r.outstanding || 0), 0);
                 h.append(el('b', null, c.name), el('span', 'lbl-meta', rows.length + (rows.length === 1 ? ' order' : ' orders')
                     + ' \u00b7 ' + liaMoney(tot, cur) + ' outstanding'));
-                const x = el('button', 'icon-btn'); x.type = 'button'; x.innerHTML = I.x;
-                x.setAttribute('aria-label', 'Close ' + c.name);
+                const x = iconButton(I.x, 'Close ' + c.name);
                 x.onclick = (e) => { e.stopPropagation(); liaOpen = null; renderLiability(); };
                 h.append(x); det.append(h);
                 const duo = el('div', 'duo');
@@ -502,7 +501,7 @@
                 panel.append(ta);
                 const bar = el('div', 'disp-actions');
                 function copyBtn(label, field) {
-                    const b = el('button', 'btn');
+                    const b = textButton();
                     b.append(ico(I.copy), document.createTextNode(label));
                     b.onclick = async () => {
                         try {
@@ -519,7 +518,7 @@
                 }
                 bar.append(copyBtn('Copy body', ta));
                 bar.append(copyBtn('Copy subject', subj));
-                const mark = el('button', 'btn btn-primary');
+                const mark = textButton(null, { kind: 'primary' });
                 mark.append(ico(I.check), document.createTextNode('Mark as chased'));
                 mark.onclick = async () => {
                     mark.disabled = true;

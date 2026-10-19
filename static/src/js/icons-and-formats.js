@@ -182,7 +182,7 @@
             return act;
         }
         function refreshBtn(onClick, label) {
-            const b = el('button', 'btn btn-sm btn-icon');
+            const b = textButton(null, { small: true, square: true });
             b.type = 'button'; b.append(ico(I.refresh));
             b.title = label || 'Refresh'; b.setAttribute('aria-label', label || 'Refresh');
             b.onclick = () => { setBusy(b, true); Promise.resolve().then(onClick).finally(() => setBusy(b, false)); };
@@ -239,8 +239,8 @@
                     if (o.title) box.append(el('h3', null, o.title));
                     [].concat(o.body || []).filter(Boolean).forEach(t => box.append(typeof t === 'string' ? el('p', null, t) : t));
                     if (o.guide) {
-                        const a = el('button', 'link', 'More in the Guide');
-                        a.type = 'button'; a.append(ico(I.arrowRight));
+                        const a = textLink('More in the Guide', { size: 'go', icon: I.arrowRight });
+                        a.type = 'button';
                         a.onclick = () => { closeDMenu(); openGuideAt(o.guide[0], o.guide[1] || ''); };
                         box.append(a);
                     }
@@ -262,7 +262,7 @@
            method pages as a menu, the Guide's link last after a rule. items:
            [{ icon, label, n, onClick }]; guide: { label, at: [section id, search] }. */
         function howItWorks(items, guide) {
-            const b = el('button', 'btn');
+            const b = textButton();
             b.type = 'button';
             b.append(ico(I.helpCircle), document.createTextNode('How it works'));
             b.setAttribute('aria-haspopup', 'menu'); b.setAttribute('aria-expanded', 'false');

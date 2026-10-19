@@ -358,7 +358,7 @@
                 const label = res.match.manufacturer + ' ' + res.match.model;
                 const shown = ((sizesPane && sizesPane.rows) || []).some(r => r.manufacturer === res.match.manufacturer && r.model === res.match.model);
                 if (!shown) return el('b', null, label);
-                const b = el('button', 'seclink', label); b.type = 'button';
+                const b = textLink(label, { size: 'inline' }); b.type = 'button';
                 b.title = 'Show it in the list'; b.onclick = () => sizesReveal(res.match); return b;
             };
             if (res.excluded) txt.append('The label prints no size and no CHECK: the name is ruled not a gobo.');
@@ -480,7 +480,7 @@
             acts.append(el('b', null, r.ruling === 'exclude' ? 'Nothing: it is ruled not a gobo, so its label prints no size and no CHECK.'
                 : v ? v + ' mm' : 'No size yet, so its label says CHECK.'));
             if (canEdit) {
-                const setBtn = el('button', 'btn btn-sm', 'Set size'); setBtn.type = 'button';
+                const setBtn = textButton('Set size', { small: true }); setBtn.type = 'button';
                 setBtn.onclick = () => sizesInlineRule(acts, r, setBtn);
                 acts.append(setBtn);
             }
@@ -508,7 +508,7 @@
         function sizesInlineRule(acts, r, setBtn) {
             const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'sizes-inp field-sm';
             inp.value = sizesEff(r); inp.setAttribute('aria-label', 'Production size in millimetres');
-            const save = el('button', 'btn btn-sm btn-primary', 'Save'); const cancel = el('button', 'btn btn-sm', 'Cancel');
+            const save = textButton('Save', { kind: 'primary', small: true }); const cancel = textButton('Cancel', { small: true });
             save.type = cancel.type = 'button';
             /* The size and Set size come back as they were. */
             const before = [...acts.childNodes];
@@ -574,9 +574,9 @@
             const sizeSel = sizesSelect('Produced size', [['', 'All sizes']].concat(sizes.map(s => [s, s + ' mm (' + sizeSet[s] + ')'])), st.size, (v) => { st.size = v; st.page = 1; paintSizesList(); });
             const statusSel = sizesSelect('Status', SIZES_STATUS, st.status, (v) => { st.status = v; st.page = 1; paintSizesList(); });
             const sortSel = sizesSelect('Sort', SIZES_SORTS, st.sort, (v) => { st[st.q.trim() ? 'qsort' : 'sort'] = v; st.page = 1; paintSizesList(); });
-            const gbtn = el('button', 'btn btn-sm'); gbtn.textContent = 'Group by maker';
+            const gbtn = textButton(null, { small: true }); gbtn.textContent = 'Group by maker';
             gbtn.onclick = () => { st.group = !st.group; st.page = 1; paintSizesList(); };
-            const xbtn = el('button', 'btn btn-sm'); xbtn.append(ico(I.download), document.createTextNode('Export CSV'));
+            const xbtn = textButton(null, { small: true }); xbtn.append(ico(I.download), document.createTextNode('Export CSV'));
             xbtn.onclick = () => sizesExport(sizesRows());
             const tools = tableTools([search, makerSel, sizeSel, statusSel], [sortSel, gbtn, xbtn]);
             card.append(tools);
@@ -611,7 +611,7 @@
             if (near.length) {
                 box.append(' The nearest ' + (near.length > 1 ? 'sizes' : 'size') + ' the bench cuts: ');
                 near.forEach((v, k) => {
-                    const b = el('button', 'seclink', v + ' mm'); b.type = 'button';
+                    const b = textLink(v + ' mm', { size: 'inline' }); b.type = 'button';
                     b.onclick = () => { st.q = v + 'mm'; st.page = 1; renderSizes(); };
                     if (k) box.append(' and ');
                     box.append(b);

@@ -43,7 +43,7 @@
         }
         function customerGate(seg) {
             const comp = seg === SEG_ALL;
-            const btn = el('button', 'btn btn-primary'); btn.type = 'button';
+            const btn = textButton(null, { kind: 'primary' }); btn.type = 'button';
             btn.textContent = comp ? 'Run comprehensive audit' : ('Run ' + seg + ' audit'); btn.onclick = () => loadCustomers(true, seg);
             return emptyState({ icon: I.users, text: RUN_COST, sub: 'Your customers and 12 months of orders.', action: btn, cls: 'run-gate' });
         }
@@ -54,8 +54,8 @@
             thead.append(htr); tbl.append(thead); const tb = el('tbody');
             rows.forEach(r => {
                 const tr = el('tr'); const c0 = el('td', 'kw');
-                const link = el('button', 'seclink'); link.textContent = r.sector || ''; link.onclick = () => pickSector(r.sector);
-                c0.append(link); tr.append(c0);
+                const sl = textLink(r.sector || '', { size: 'inline' }); sl.onclick = () => pickSector(r.sector);
+                c0.append(sl); tr.append(c0);
                 tr.append(el('td', 'num', (r.customers || 0).toLocaleString()));
                 tr.append(el('td', 'num', (r.repeat_rate != null ? pct1(r.repeat_rate) : '')));
                 tr.append(el('td', 'num', fmtMoney(r.avg_ltv || 0, cur)));

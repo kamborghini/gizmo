@@ -49,13 +49,13 @@
                    check that can settle it. */
                 let metric;
                 if (/size list/i.test(label)) {
-                    metric = el('button', 'a-metric seclink');
+                    metric = textLink(null, { size: 'inline', cls: 'a-metric' });
                     metric.textContent = label;
                     metric.title = 'Open the size check and resolve this';
                     metric.onclick = () => { setView('labels'); runCoverage(); };
                 } else if (a.tab === 'settings' && /privacy requests/i.test(label)) {
                     /* Where the request is dealt with, not just a notice of it. */
-                    metric = el('button', 'a-metric seclink');
+                    metric = textLink(null, { size: 'inline', cls: 'a-metric' });
                     metric.textContent = label;
                     metric.title = 'Open Settings, Privacy requests';
                     metric.onclick = openPrivacyRequests;
@@ -64,7 +64,7 @@
                 }
                 row.append(el('span', 'adot ' + dir), el('span', 'a-tab', a.tab_label || a.kind || ''), metric,
                     el('span', 'a-pct ' + dir, a.pct == null ? '~' : ((a.pct > 0 ? '+' : '') + a.pct + '%')));
-                const x = el('button', 'alert-x'); x.innerHTML = I.x; x.title = 'Dismiss'; x.onclick = () => alertOp({ op: 'dismiss', id: a.id });
+                const x = iconButton(I.x, 'Dismiss', { size: 'small' }); x.onclick = () => alertOp({ op: 'dismiss', id: a.id });
                 row.append(x); wrap.append(row);
             });
             return wrap;
@@ -77,9 +77,9 @@
             thead.append(htr); tbl.append(thead); const tb = el('tbody');
             rows.forEach(r => {
                 const tr = el('tr'); const c0 = el('td', 'kw');
-                const link = el('button', 'seclink'); link.textContent = r.sector || '';
-                link.title = 'Open this sector in Customers'; link.onclick = () => { customersSeg = r.sector; setView('customers'); };
-                c0.append(link); tr.append(c0);
+                const sl = textLink(r.sector || '', { size: 'inline' });
+                sl.title = 'Open this sector in Customers'; sl.onclick = () => { customersSeg = r.sector; setView('customers'); };
+                c0.append(sl); tr.append(c0);
                 tr.append(el('td', 'num', fmtMoney(r.revenue || 0, cur)));
                 tr.append(el('td', 'num', (r.orders || 0).toLocaleString()));
                 tr.append(el('td', 'num', fmtMoney(r.aov || 0, cur)));

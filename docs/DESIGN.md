@@ -94,6 +94,44 @@ The Settings window, written into the page, opens and closes with
 `t_the_window_part_keeps_one_stack`, `t_the_window_fixers_stay_gone`, and the
 browser suite's keyboard journeys (`tests/browser/keyboard.spec.js`).
 
+### Buttons
+
+`textButton(text, opts)` in `static/src/js/part-button.js` builds every
+ordinary button ([spec](superpowers/specs/2026-10-19-buttons-and-links-design.md)):
+`kind` is `primary` (the one teal per screen), `danger` (a one-way door, the
+confirming button of a destructive question) or `ghost`; `square` is the
+bordered square that holds one icon; `cls` carries a screen's layout hooks.
+`small` builds `btn-sm`, which is the same 32 button: the name is kept until
+the stylesheet is put in layers. A button inside a frozen print function keeps
+its hand-built form. Guard: `t_every_ordinary_button_is_built_by_the_part`.
+
+### Icon buttons
+
+`iconButton(icon, label, opts)` builds every icon-only button: the grey icon,
+one hover (the tertiary surface and primary ink), the control corner, and a
+name always (`aria-label`; `title` is the same, or a short form given as
+`opts.title`). Three sizes:
+
+| Size | Box | Icon | For |
+|---|---|---|---|
+| `regular` | 32 | 16 | toolbars, headers, a window's X, rows of 32 controls |
+| `small` | 24 (32 under a finger) | 14 | crosses on toasts and alerts, dense rows (Memory, chat) |
+| `tag` | 20, tag corner | 12 | the cross inside a chip |
+
+Tones: `danger` hovers red, `ok` green. On a phone a regular one is 40 wide; a
+small or tag one keeps its size and gets an invisible 40 target. Guards:
+`t_every_icon_button_is_built_by_the_part`, `t_the_retired_button_recipes_are_gone`,
+`t_small_icon_buttons_keep_their_size_on_a_phone`.
+
+### Links
+
+`textLink(text, opts)` builds the one text link (teal, underlined in a quiet
+line that turns teal on hover): `caption` (12, the default), `inline` (the size
+of its sentence) or `go` (standing alone, a chevron after the words, or the
+icon given). It builds the legacy classes `linkish`, `seclink` and `link`. The
+sign-in card's links are caption links. Guards:
+`t_every_text_link_is_built_by_the_part`, `t_the_sign_in_card_uses_the_house_link`.
+
 ## Adding a part
 
 A part lives in its own section, `static/src/js/part-<name>.js`, listed in

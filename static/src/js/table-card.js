@@ -101,7 +101,7 @@
              [I.chevLeft, 'Previous page', page - 1, page <= 1],
              [I.chev, 'Next page', page + 1, page >= pages],
              [I.chevLast, 'Last page', pages, page >= pages]].forEach(([icon, title, to, off]) => {
-                const b = el('button', 'btn tbl-step');
+                const b = textButton(null, { cls: 'tbl-step' });
                 b.append(ico(icon)); b.title = title; b.setAttribute('aria-label', title);
                 if (off) b.disabled = true; else b.onclick = () => o.onPage(to);
                 steps.append(b);
@@ -266,8 +266,7 @@
                 /* In an answer, one action can be copied on its own, for an
                    email or a task. */
                 if (state) {
-                    const cp = el('button', 'mem-btn act-copy'); cp.type = 'button'; cp.append(ico(I.copy));
-                    cp.title = 'Copy this action'; cp.setAttribute('aria-label', 'Copy: ' + String(a.text || '').slice(0, 60));
+                    const cp = iconButton(I.copy, 'Copy: ' + String(a.text || '').slice(0, 60), { size: 'small', cls: 'act-copy', title: 'Copy this action' });
                     cp.onclick = (e) => { e.stopPropagation(); copyText(a.text || '', 'Action copied.'); };
                     row.append(cp);
                 }

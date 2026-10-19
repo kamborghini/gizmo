@@ -10,7 +10,7 @@
         function refreshAllBtn() {
             const mine = allowedReports();
             if (mine.length < 2) return null;
-            const b = el('button', 'btn btn-sm refresh-all-btn'); b.type = 'button';
+            const b = textButton(null, { small: true, cls: 'refresh-all-btn' }); b.type = 'button';
             b.append(ico(I.rotate), el('span', 'nr-label', refreshingAll ? refreshAllLabel : 'Refresh all'));
             b.title = 'Run ' + mine.map(r => r[1]).join(', ') + ' again. Uses AI credits.';
             if (refreshingAll) setBusy(b, true);
@@ -97,7 +97,7 @@
                 else if (t.role === 'error') {
                     const m = el('div', 'msg error pchat-err');
                     m.append(el('div', null, 'That question did not reach Reactor. ' + t.text));
-                    const again = el('button', 'btn'); again.textContent = 'Ask again';
+                    const again = textButton(); again.textContent = 'Ask again';
                     const q = (items[i - 1] || {}).text || '';
                     again.onclick = () => { pageThreads[threadKey(page)].splice(i - 1, 2); pageAsk(page, q, data); };
                     if (q) m.append(again);
@@ -130,7 +130,7 @@
             };
             ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!e.repeat) sendIt(); } });
             /* Plain, not teal (12 Oct 2026): a report's one teal is its own action, and Ask is a side door. */
-            const btn = el('button', 'btn pchat-send'); btn.innerHTML = I.send; btn.title = 'Ask';
+            const btn = textButton(null, { cls: 'pchat-send' }); btn.innerHTML = I.send; btn.title = 'Ask';
             btn.onclick = sendIt;
             row.append(ta, btn); card.append(row); wrap.append(card);
             return wrap;

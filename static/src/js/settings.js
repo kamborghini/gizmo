@@ -214,7 +214,7 @@
             if (sh.available) {
                 // A real button appended beside the badge, not instead of it:
                 // replacing it took away the row's only state readout.
-                const mng = el('button', 'btn', sh.ok ? 'Manage' : 'Set up');
+                const mng = textButton(sh.ok ? 'Manage' : 'Set up');
                 mng.onclick = () => { closeSettings(); openShippingSettings(); };
                 shRow.append(mng);
             }
@@ -240,7 +240,7 @@
                drawn at all for a role that sees neither button. */
             const bkActs = el('div', 'row-acts');
             if (!teamMe || teamMe.role === 'master') bkRow.append(bkActs);
-            const bk = el('button', 'btn btn-sm');
+            const bk = textButton(null, { small: true });
             bk.style.display = (!teamMe || teamMe.role === 'master') ? '' : 'none';
             bk.append(ico(I.download), document.createTextNode('Download backup'));
             bk.title = 'A zip of everything the app has learned: rulings, aliases, state, usage.';
@@ -264,7 +264,7 @@
             if (!teamMe || teamMe.role === 'master') {   // unknown role: show it; the server enforces master-only
                 const rsInput = document.createElement('input');
                 rsInput.type = 'file'; rsInput.accept = '.zip'; rsInput.style.display = 'none';
-                const rs = el('button', 'btn btn-sm');
+                const rs = textButton(null, { small: true });
                 rs.append(ico(I.upload), document.createTextNode('Restore'));
                 rs.title = 'Put a downloaded backup zip back: after a lost volume, or a region move.';
                 rsInput.onchange = async () => {
@@ -322,8 +322,8 @@
                 const inp = el('input', 'psel'); inp.type = 'text'; inp.value = initial || '';
                 f.append(inp); body.append(f);
                 const foot = win.foot();
-                const cancel = el('button', 'btn', 'Cancel'); cancel.onclick = () => finish(null);
-                const go = el('button', 'btn btn-primary', okText || 'Continue');
+                const cancel = textButton('Cancel'); cancel.onclick = () => finish(null);
+                const go = textButton(okText || 'Continue', { kind: 'primary' });
                 go.onclick = () => finish(inp.value);
                 inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); go.click(); } };
                 foot.append(cancel, go);
@@ -344,8 +344,8 @@
                 const inp = el('input', 'psel'); inp.type = 'password'; inp.autocomplete = 'current-password';
                 f.append(inp); body.append(f);
                 const foot = win.foot();
-                const cancel = el('button', 'btn', 'Cancel'); cancel.onclick = () => finish(null);
-                const go = el('button', 'btn btn-primary', okText || 'Continue');
+                const cancel = textButton('Cancel'); cancel.onclick = () => finish(null);
+                const go = textButton(okText || 'Continue', { kind: 'primary' });
                 go.onclick = () => finish(inp.value);
                 inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); go.click(); } };
                 foot.append(cancel, go);
@@ -431,8 +431,8 @@
                 inp.maxLength = 6; inp.placeholder = '000000';
                 f.append(inp); body.append(f);
                 const foot = el('div', 'modal-foot');
-                const cancel = el('button', 'btn', 'Cancel'); cancel.onclick = win.close;
-                const go = el('button', 'btn btn-primary', 'Turn it on');
+                const cancel = textButton('Cancel'); cancel.onclick = win.close;
+                const go = textButton('Turn it on', { kind: 'primary' });
                 go.onclick = async () => {
                     go.disabled = true;
                     let r;
@@ -449,7 +449,7 @@
                     (r.recovery || []).forEach(c => list.append(el('div', null, c)));
                     body.append(list);
                     foot.innerHTML = '';
-                    const done = el('button', 'btn btn-primary', 'I have saved them');
+                    const done = textButton('I have saved them', { kind: 'primary' });
                     done.onclick = () => { win.close(); refreshMfaRow(); };
                     foot.append(done);
                 };
@@ -539,7 +539,7 @@
                 text.append(el('div', 'setting-title', total + ' erasure requests are waiting'),
                     el('div', 'setting-sub', 'More than Shopify sends for one shop. If nobody here erased these customers in Shopify, stop them all: someone holds the app\u2019s secret.'));
                 const acts = el('div', 'row-acts');
-                const all = el('button', 'btn btn-sm'); all.type = 'button'; all.textContent = 'Stop all';
+                const all = textButton(null, { small: true }); all.type = 'button'; all.textContent = 'Stop all';
                 all.onclick = async () => {
                     if (!await uiConfirm('Stop all ' + total + ' waiting erasure requests and keep those customers\u2019 records? Only if nobody here erased them in Shopify.',
                         { title: 'Stop every erasure request', okText: 'Stop them all' })) return;
@@ -558,7 +558,7 @@
                 if (reach) text.append(el('div', 'setting-sub', reach));
                 if (h.stopped_before) text.append(el('div', 'setting-sub', 'The same request was stopped as not asked for on ' + fmtDate(h.stopped_before) + '.'));
                 const acts = el('div', 'row-acts');
-                const er = el('button', 'btn btn-sm'); er.type = 'button'; er.textContent = 'Erase now';
+                const er = textButton(null, { small: true }); er.type = 'button'; er.textContent = 'Erase now';
                 if (h.scope && h.scope.unreadable) er.disabled = true;
                 er.onclick = async () => {
                     if (!await uiConfirm('Erase what Reactor holds about ' + h.email + '? ' + reach
@@ -567,7 +567,7 @@
                     /* The reach shown, checked again by the server at the click. */
                     privacyOp({ op: 'erase', id: h.id, reach: (h.scope && h.scope.key) || '' }, er);
                 };
-                const st = el('button', 'btn btn-sm'); st.type = 'button'; st.textContent = 'Not requested';
+                const st = textButton(null, { small: true }); st.type = 'button'; st.textContent = 'Not requested';
                 st.onclick = async () => {
                     if (!await uiConfirm('Stop this request and keep ' + h.email + '\u2019s records? Only if nobody here erased them in Shopify: '
                         + 'a request Shopify did not send means someone holds the app\u2019s secret.', { title: 'Stop erasure request', okText: 'Stop it' })) return;
@@ -584,7 +584,7 @@
                     el('div', 'setting-sub', 'Asked on ' + fmtDate(a.at) + ' for the data held about them. '
                         + (a.overdue ? 'Overdue: they should have had it by ' + fmtDate(a.due) + '.' : 'Send it to them by ' + fmtDate(a.due) + '.')));
                 const acts = el('div', 'row-acts');
-                const done = el('button', 'btn btn-sm'); done.type = 'button'; done.textContent = 'Mark answered';
+                const done = textButton(null, { small: true }); done.type = 'button'; done.textContent = 'Mark answered';
                 done.onclick = () => privacyOp(a.id ? { op: 'answered', id: a.id, email: a.email } : { op: 'answered', at: a.at, email: a.email }, done);
                 acts.append(done);
                 row.append(text, acts);

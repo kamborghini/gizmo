@@ -54,8 +54,4 @@
             color: var(--text-primary); background: var(--surface-sunken); border-radius: var(--radius-tag); padding: var(--sp-0-5) var(--sp-0-5) var(--sp-0-5) var(--sp-2); }
         .sk-chip > span:not(.ic) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .sk-chip .ic svg { width: var(--icon-xs); height: var(--icon-xs); display: block; }
-        .sk-chip-x { border: 0; background: transparent; color: var(--text-tertiary); border-radius: var(--radius-tag); display: grid; place-items: center;
-            width: var(--box-sm); height: var(--box-sm); padding: 0; }
-        @media (hover: hover) { .sk-chip-x:hover { background: var(--surface-tertiary); color: var(--text-primary); } }
-        .sk-chip-x svg { width: var(--icon-xs); height: var(--icon-xs); }
 

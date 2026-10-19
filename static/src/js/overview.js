@@ -9,7 +9,7 @@
         const RUN_COST = 'Uses AI credits only when you run it.';
         function renderRunGate(boxId, o) {
             const box = $(boxId); box.innerHTML = '';
-            const btn = el('button', 'btn btn-primary rg-btn'); btn.textContent = o.cta; btn.onclick = o.onRun;
+            const btn = textButton(null, { kind: 'primary', cls: 'rg-btn' }); btn.textContent = o.cta; btn.onclick = o.onRun;
             box.append(pageHead({ view: o.view, title: o.title, line: o.desc,
                 info: o.more ? infoButton('About this run', { title: o.title, body: o.more }) : null }),
                 emptyState({ icon: o.icon, text: o.note, sub: o.covers, action: btn, cls: 'run-gate' }));

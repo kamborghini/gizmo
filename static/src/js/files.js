@@ -31,7 +31,7 @@
                     if (fresh) {
                         const box = el('div', 'drive-pw');
                         const code = el('code', null, fresh);
-                        const cp = el('button', 'btn btn-sm'); cp.type = 'button'; cp.append(ico(I.copy), document.createTextNode('Copy'));
+                        const cp = textButton(null, { small: true }); cp.type = 'button'; cp.append(ico(I.copy), document.createTextNode('Copy'));
                         cp.onclick = () => copyText(fresh, 'Drive password copied.');
                         box.append(code, cp);
                         body.append(box, el('p', 'drive-note', 'Shown once. Let Finder keep it in your keychain; if it is lost, make a new one.'));
@@ -40,7 +40,7 @@
                                                                   : 'You have no drive password yet.'));
                     }
                     const acts = el('div', 'dpanel-row');
-                    const make = el('button', 'btn btn-sm btn-primary', st.has ? 'Make a new one' : 'Make a drive password');
+                    const make = textButton(st.has ? 'Make a new one' : 'Make a drive password', { kind: 'primary', small: true });
                     make.type = 'button';
                     make.onclick = async () => {
                         if (st.has && !await uiConfirm('Make a new drive password? The old one stops working, so Finder will ask for the new one.',
@@ -51,7 +51,7 @@
                     };
                     acts.append(make);
                     if (st.has) {
-                        const rm = el('button', 'btn btn-sm', 'Remove'); rm.type = 'button';
+                        const rm = textButton('Remove', { small: true }); rm.type = 'button';
                         rm.onclick = async () => {
                             setBusy(rm, true);
                             try { paint(await api('/api/files/drive', { op: 'remove' })); toastOk('Drive password removed. Finder can no longer open the drive as you.'); }
@@ -90,7 +90,7 @@
             });
             filesPagedFocus = -1;
             if (rows.length > cap) {
-                const b = el('button', 'btn', 'Show more (' + (rows.length - cap) + ' remaining)');
+                const b = textButton('Show more (' + (rows.length - cap) + ' remaining)');
                 b.style.cssText = 'margin:var(--sp-2) auto;display:block';
                 b.onclick = () => { filesPagedFocus = cap; more(); };
                 list.append(b);
@@ -233,8 +233,8 @@
            four 40 targets do not fit beside a file's name. The button lives in
            the actions cell, so the row keeps the list's columns. */
         function filesMore(acts, items, name) {
-            const b = el('button', 'icon-btn files-more'); b.type = 'button'; b.innerHTML = I.moreH;
-            b.setAttribute('aria-label', 'Actions for ' + name); b.setAttribute('aria-haspopup', 'menu');
+            const b = iconButton(I.moreH, 'Actions for ' + name, { cls: 'files-more' });
+            b.setAttribute('aria-haspopup', 'menu');
             b.onclick = (e) => { e.stopPropagation(); dropMenu(b, items); };
             acts.append(b);
         }
@@ -324,7 +324,7 @@
             if (rows.length) tHead.append(el('p', 'card-desc', 'Deleted for good after 30 days.'));
             if (rows.length) {
                 const tAct = el('div', 'card-act');
-                const emp = el('button', 'btn btn-sm'); emp.append(ico(I.trash), document.createTextNode('Empty the trash'));
+                const emp = textButton(null, { small: true }); emp.append(ico(I.trash), document.createTextNode('Empty the trash'));
                 emp.onclick = async () => {
                     if (!(await uiConfirm('Delete everything in the trash for good? '
                         + (rows.length === 1 ? '1 file' : rows.length + ' files') + ' ('
@@ -360,13 +360,13 @@
                 const acts = el('div', 'files-acts wide');
                 // The small scale, like every other control in this card: at
                 // the 32px one these rows stood 4px taller than the browser's.
-                const back = el('button', 'btn btn-sm'); back.textContent = 'Put back';
+                const back = textButton(null, { small: true }); back.textContent = 'Put back';
                 back.onclick = async () => {
                     back.disabled = true;
                     try { await filesOp('/api/files/file', { op: 'restore', id: f.id }); renderFiles(); }
                     catch (e) { back.disabled = false; toastError(e.message || 'Could not restore the file.'); }
                 };
-                const gone = el('button', 'btn btn-sm'); gone.textContent = 'Delete now';
+                const gone = textButton(null, { small: true }); gone.textContent = 'Delete now';
                 gone.onclick = async () => {
                     if (!(await uiConfirm('Delete "' + f.name + '" for good? It cannot be put back after this.',
                                           { title: 'Delete for good', okText: 'Delete for good' }))) return;
@@ -407,7 +407,7 @@
             foot.append(el('span', 'fprev-meta',
                 fmtBytes(f.size) + ' · ' + fmtDate(f.uploaded_at || f.created_at)
                 + (byName(f.by) ? ' · ' + byName(f.by) : '')));
-            const dl = el('button', 'btn'); dl.append(ico(I.download), document.createTextNode('Download'));
+            const dl = textButton(); dl.append(ico(I.download), document.createTextNode('Download'));
             dl.onclick = () => download(fid);
             foot.append(dl);
             modal.append(foot);
@@ -486,7 +486,7 @@
                     + 'Drag a file onto a folder, or onto a step of the path above, to move it.' });
             const fDescEl = el('p', 'card-desc', '');
             fHead.append(titleInfo(fTitleEl, fInfo), fDescEl);
-            const up = el('button', 'btn btn-primary'); up.append(ico(I.upload), document.createTextNode('Upload'));
+            const up = textButton(null, { kind: 'primary' }); up.append(ico(I.upload), document.createTextNode('Upload'));
             const fi = document.createElement('input');
             fi.type = 'file'; fi.multiple = true; fi.style.display = 'none';
             fi.onchange = () => { filesEnqueue(fi.files); fi.value = ''; };
@@ -494,9 +494,9 @@
                 if (filesQ) { toastError('Clear the search first, so the upload has a folder to land in.'); return; }
                 fi.click();
             };
-            const nf = el('button', 'btn'); nf.append(ico(I.folderPlus), document.createTextNode('New folder'));
+            const nf = textButton(); nf.append(ico(I.folderPlus), document.createTextNode('New folder'));
             nf.onclick = () => { filesNewFolder = true; paintList(); };
-            const drv = el('button', 'btn files-drv'); drv.append(ico(I.hardDrive), el('span', 'drv-txt', 'Finder drive'));
+            const drv = textButton(null, { cls: 'files-drv' }); drv.append(ico(I.hardDrive), el('span', 'drv-txt', 'Finder drive'));
             drv.title = 'Open these files as a drive on a Mac'; drv.setAttribute('aria-label', 'Finder drive');
             drv.onclick = () => openDrivePanel(drv);
             if (filesHeroAct) { filesHeroAct.innerHTML = ''; filesHeroAct.append(drv, nf, up, fi); }
@@ -628,12 +628,12 @@
                 /* Owner is who made the folder (12 Oct 2026): it was blank. */
                 row.append(filesCols(byName(f.by), tot.at ? fmtDate(tot.at) : '', tot.size ? fmtBytes(tot.size) : ''));
                 const acts = el('div', 'files-acts');
-                const rn = el('button', 'icon-btn'); rn.innerHTML = I.edit; rn.title = 'Rename folder';
+                const rn = iconButton(I.edit, 'Rename folder');
                 rn.onclick = () => inlineRename(row, name, f.name, async (v) => {
                     try { await filesOp('/api/files/folder', { op: 'rename', id: fid, name: v }); filesReveal.add(fid); } catch (e) { toastError(e.message); }
                     paintList();
                 });
-                const del = el('button', 'icon-btn'); del.innerHTML = I.trash; del.title = 'Delete folder (must be empty)';
+                const del = iconButton(I.trash, 'Delete folder (must be empty)');
                 del.onclick = async () => {
                     try { await filesOp('/api/files/folder', { op: 'delete', id: fid }); paintCrumbs(); paintList(); }
                     catch (e) { toastError(e.message || 'Could not delete the folder.'); }
@@ -684,11 +684,11 @@
                 row.append(name);
                 row.append(filesCols(byName(f.by), fmtDate(f.uploaded_at || f.created_at), fmtBytes(f.size)));
                 const acts = el('div', 'files-acts');
-                const dl = el('button', 'icon-btn'); dl.innerHTML = I.download; dl.title = 'Download';
+                const dl = iconButton(I.download, 'Download');
                 dl.onclick = () => download(fid);
-                const mv = el('button', 'icon-btn'); mv.innerHTML = I.moveTo; mv.title = 'Move to folder';
+                const mv = iconButton(I.moveTo, 'Move to folder');
                 mv.onclick = () => openMovePicker([fid], () => { paintCrumbs(); paintList(); });
-                const rn = el('button', 'icon-btn'); rn.innerHTML = I.edit; rn.title = 'Rename';
+                const rn = iconButton(I.edit, 'Rename');
                 rn.onclick = () => inlineRename(row, name, f.name, async (v) => {
                     // A rename must not quietly cost the file its type.
                     const oldExt = f.name.includes('.') ? f.name.split('.').pop() : '';
@@ -696,7 +696,7 @@
                     try { await filesOp('/api/files/file', { op: 'rename', id: fid, name: v }); filesReveal.add(fid); } catch (e) { toastError(e.message); }
                     paintList();
                 });
-                const del = el('button', 'icon-btn'); del.innerHTML = I.trash; del.title = 'Move to trash';
+                const del = iconButton(I.trash, 'Move to trash');
                 del.onclick = async () => {
                     try { await filesOp('/api/files/file', { op: 'trash', id: fid }); renderFiles(); }
                     catch (e) { toastError(e.message || 'Could not delete the file.'); }
@@ -733,16 +733,16 @@
                 bar.append(el('span', null, filesSel.size === 1 ? '1 file selected'
                     : filesSel.size + ' files selected'));
                 // The toolbar above this bar is at the small scale; so is it.
-                const mv = el('button', 'btn btn-sm', 'Move');
+                const mv = textButton('Move', { small: true });
                 mv.onclick = () => openMovePicker([...filesSel], () => { paintCrumbs(); paintList(); });
-                const tr = el('button', 'btn btn-sm', 'Trash');
+                const tr = textButton('Trash', { small: true });
                 tr.onclick = async () => {
                     try { await filesOp('/api/files/file', { op: 'trash', ids: [...filesSel] }); }
                     catch (e) { toastError(e.message); }
                     filesSel.clear();
                     renderFiles();
                 };
-                const clear = el('button', 'btn btn-sm', 'Clear');
+                const clear = textButton('Clear', { small: true });
                 clear.onclick = () => {
                     filesSel.clear();
                     listHost.querySelectorAll('.files-row.selected').forEach(r => {
@@ -857,7 +857,7 @@
                     () => { filesRowCap += FILES_HIT_STEP; paintList(); });
                 if (!folders.length && !files.length && !filesNewFolder)
                     list.append(emptyState({ icon: I.folder, text: 'No files here yet.', action: (() => {
-                        const u = el('button', 'btn'); u.type = 'button'; u.append(ico(I.upload), document.createTextNode('Upload'));
+                        const u = textButton(); u.type = 'button'; u.append(ico(I.upload), document.createTextNode('Upload'));
                         u.onclick = () => fi.click(); return u; })() }));
                 listHost.append(list);
             }
@@ -880,7 +880,7 @@
                     // Only a sending row's bar and number move between states.
                     if (u.state === 'sending') { u._fill = fill; u._label = labelEl; } else { u._fill = u._label = null; }
                     if (u.state === 'failed') {
-                        const rt = el('button', 'btn', 'Try again');
+                        const rt = textButton('Try again');
                         rt.onclick = () => { u.state = 'waiting'; u.pct = 0; u.err = ''; filesQueue.push(u.job); paintUploads(); filesPump(); };
                         row.append(rt);
                     }

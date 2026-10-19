@@ -89,8 +89,7 @@
             head.append(heading);
             let x = null;
             if (opts.x !== false) {
-                x = el('button', 'icon-btn'); x.innerHTML = I.x;
-                x.title = 'Close'; x.setAttribute('aria-label', 'Close');
+                x = iconButton(I.x, 'Close');
                 head.append(x);
             }
             const body = el('div', 'modal-body' + (opts.bodyClass ? ' ' + opts.bodyClass : ''));
