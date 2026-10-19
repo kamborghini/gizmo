@@ -808,8 +808,8 @@
             return { body: win.body, close: win.close, head: win.head, foot: foot };
         }
         function crmField(host, label, input) {
-            const w = el('label', 'disp-addr-f');
-            w.append(el('span', 'disp-addr-lab', label), input);
+            const w = formField(label, null, { cls: 'disp-addr-f' });
+            w.append(input);
             host.append(w); return input;
         }
         function crmText(val, ph) {

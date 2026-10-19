@@ -101,8 +101,7 @@
         }
         // A labelled numeric field for the box editor.
         function numField(lab, val) {
-            const wrap = el('label', 'disp-fld');
-            wrap.append(el('span', 'disp-fld-lab', lab));
+            const wrap = formField(lab, null, { cls: 'disp-fld' });
             const inp = document.createElement('input');
             inp.type = 'number'; inp.min = '0'; inp.step = '0.1'; inp.className = 'disp-num';
             if (val != null) inp.value = val;
@@ -432,8 +431,7 @@
             const f = {};
             const grid = el('div', 'disp-origin');
             ORDER_EDIT_FIELDS.forEach(([k, lab]) => {
-                const w = el('label', 'disp-fld');
-                w.append(el('span', 'disp-fld-lab', lab));
+                const w = formField(lab, null, { cls: 'disp-fld' });
                 const inp = document.createElement('input');
                 inp.type = 'text'; inp.className = 'disp-num'; inp.value = cur[k] || '';
                 w.append(inp); f[k] = inp; grid.append(w);
@@ -458,8 +456,7 @@
                printed on the label. */
             body.append(el('div', 'section-title', 'Contact'));
             const cgrid = el('div', 'disp-origin');
-            const ew = el('label', 'disp-fld');
-            ew.append(el('span', 'disp-fld-lab', 'Email'));
+            const ew = formField('Email', null, { cls: 'disp-fld' });
             const einp = document.createElement('input');
             einp.type = 'email'; einp.className = 'disp-num'; einp.value = cur.email || '';
             ew.append(einp); f.email = einp; cgrid.append(ew);
@@ -824,8 +821,7 @@
                 };
                 card.addEventListener('input', checkZeros);
                 setTimeout(checkZeros, 0);
-                const rt = el('label', 'disp-fld'); rt.style.marginTop = 'var(--sp-2)';
-                rt.append(el('span', 'disp-fld-lab', "Receiver's tax / VAT id (optional, helps clearance)"));
+                const rt = formField("Receiver's tax / VAT id (optional, helps clearance)", null, { cls: 'disp-fld' }); rt.style.marginTop = 'var(--sp-2)';
                 recvTaxIn = document.createElement('input'); recvTaxIn.type = 'text'; recvTaxIn.className = 'disp-num';
                 /* What the customer already gave Shopify, so an export does not
                    wait on somebody hunting for it. Anything typed on this card
@@ -1063,8 +1059,7 @@
                 const sigVals = chosen.no_signature ? [] : (sigGroups[(chosen.carrier_name || '').toUpperCase()] || []);
                 let sigSel = null;
                 if (sigVals.length) {
-                    const sigF = el('label', 'disp-fld'); sigF.style.margin = 'var(--sp-1-5) 0';
-                    sigF.append(el('span', 'disp-fld-lab', 'Delivery signature'));
+                    const sigF = formField('Delivery signature', null, { cls: 'disp-fld' }); sigF.style.margin = 'var(--sp-1-5) 0';
                     sigSel = el('select', 'psel');
                     const d0 = el('option', null, 'Courier default'); d0.value = ''; sigSel.append(d0);
                     sigVals.forEach(v => {
@@ -1510,8 +1505,7 @@
             const addrGrid = el('div', 'disp-addr-grid');
             const addr = {};
             ADDR_FIELDS.forEach(([key, label, help]) => {
-                const wrap = el('label', 'disp-addr-f');
-                wrap.append(el('span', 'disp-addr-lab', label));
+                const wrap = formField(label, null, { cls: 'disp-addr-f' });
                 const inp = document.createElement('input');
                 /* The right keyboard on touch and the right autofill: email and
                    phone are not plain text, and postcodes are not words. */
@@ -1554,8 +1548,7 @@
             body.append(el('div', 'disp-subhead', 'What is in it'));
             const meta = el('div', 'disp-addr-grid');
             function metaField(label, help, type) {
-                const wrap = el('label', 'disp-addr-f');
-                wrap.append(el('span', 'disp-addr-lab', label));
+                const wrap = formField(label, null, { cls: 'disp-addr-f' });
                 const inp = document.createElement('input');
                 inp.type = type || 'text'; inp.className = 'disp-text'; inp.placeholder = help || '';
                 if (type === 'number') { inp.min = '0'; inp.step = '1'; }
@@ -1782,8 +1775,7 @@
                 card.append(addBtn);
                 const ids = el('div', 'disp-addr-grid');
                 function idField(label, help) {
-                    const w = el('label', 'disp-addr-f');
-                    w.append(el('span', 'disp-addr-lab', label));
+                    const w = formField(label, null, { cls: 'disp-addr-f' });
                     const i = document.createElement('input');
                     i.type = 'text'; i.className = 'disp-text'; i.placeholder = help || '';
                     w.append(i); ids.append(w); return i;
@@ -2061,8 +2053,7 @@
                 body.append(el('label', 'field-label', lab), inp);
                 credIn[k] = inp;
             });
-            const pluginRow = el('label', 'disp-fld'); pluginRow.style.marginTop = 'var(--sp-2)';
-            pluginRow.append(el('span', 'disp-fld-lab', 'Plugin code (leave as Web_Service unless told otherwise)'));
+            const pluginRow = formField('Plugin code (leave as Web_Service unless told otherwise)', null, { cls: 'disp-fld' }); pluginRow.style.marginTop = 'var(--sp-2)';
             const pluginIn = el('select', 'psel'); pluginIn.setAttribute('aria-label', 'Plugin code');
             (cfg.plugin_codes || ['Web_Service']).forEach(v => {
                 const op = el('option', null, v); op.value = v;
@@ -2098,8 +2089,7 @@
             const of = {};
             const originGrid = el('div', 'disp-origin');
             [['company', 'Company'], ['name', 'Contact name'], ['street', 'Street'], ['city', 'City'], ['state', 'County / state'], ['postcode', 'Postcode'], ['country', 'Country (2-letter, e.g. GB)'], ['phone', 'Phone'], ['email', 'Email']].forEach(([k, lab]) => {
-                const w = el('label', 'disp-fld');
-                w.append(el('span', 'disp-fld-lab', lab));
+                const w = formField(lab, null, { cls: 'disp-fld' });
                 const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'disp-num'; inp.value = o[k] || '';
                 w.append(inp); of[k] = inp; originGrid.append(w);
             });
@@ -2113,18 +2103,15 @@
             body.append(notifyWrap);
             body.append(el('p', 'field-help', 'When the courier can collect. Sent with every booking.'));
             const timeGrid = el('div', 'disp-dims'); timeGrid.style.gridTemplateColumns = '1fr 1fr';
-            const readyF = el('label', 'disp-fld');
-            readyF.append(el('span', 'disp-fld-lab', 'Ready from'));
+            const readyF = formField('Ready from', null, { cls: 'disp-fld' });
             const readyIn = document.createElement('input'); readyIn.type = 'time'; readyIn.className = 'disp-num';
             readyIn.value = cfg.ready_time || ''; readyF.append(readyIn);
-            const closeF = el('label', 'disp-fld');
-            closeF.append(el('span', 'disp-fld-lab', 'Closes at'));
+            const closeF = formField('Closes at', null, { cls: 'disp-fld' });
             const closeIn = document.createElement('input'); closeIn.type = 'time'; closeIn.className = 'disp-num';
             closeIn.value = cfg.close_time || ''; closeF.append(closeIn);
             timeGrid.append(readyF, closeF);
             body.append(timeGrid);
-            const coF = el('label', 'disp-fld'); coF.style.marginTop = 'var(--sp-2)';
-            coF.append(el('span', 'disp-fld-lab', 'Collection arrangement'));
+            const coF = formField('Collection arrangement', null, { cls: 'disp-fld' }); coF.style.marginTop = 'var(--sp-2)';
             const coSel = el('select', 'psel');
             const CO_LABELS = {
                 'I_Need_To_Book_A_Collection': 'Book a collection for each dispatch',
@@ -2154,8 +2141,7 @@
             const labelWarn = el('div', 'setting-sub');
             [['label_size_production', 'Production label stock', '4x4'],
              ['label_size_shipping', 'Courier label stock', '4x6']].forEach(([k, lab, fallback]) => {
-                const w = el('label', 'disp-fld'); w.style.marginTop = 'var(--sp-1-5)';
-                w.append(el('span', 'disp-fld-lab', lab));
+                const w = formField(lab, null, { cls: 'disp-fld' }); w.style.marginTop = 'var(--sp-1-5)';
                 const sel = el('select', 'psel'); sel.setAttribute('aria-label', lab);
                 const cur = LABEL_SIZES[cfg[k]] ? cfg[k] : fallback;
                 Object.keys(LABEL_SIZES).forEach(key => {
@@ -2183,18 +2169,15 @@
             const intlIn = {};
             [['eori', 'EORI number (e.g. GB123456789000)'], ['vat_number', 'VAT number (optional)'],
              ['default_hs_code', 'Default HS / commodity code (optional, e.g. 70200080)'], ['trade_term', 'Trade term (optional, e.g. DAP)']].forEach(([k, lab]) => {
-                const w = el('label', 'disp-fld'); w.style.marginTop = 'var(--sp-1-5)';
-                w.append(el('span', 'disp-fld-lab', lab));
+                const w = formField(lab, null, { cls: 'disp-fld' }); w.style.marginTop = 'var(--sp-1-5)';
                 const inp = document.createElement('input'); inp.type = 'text'; inp.spellcheck = false; inp.className = 'disp-num'; inp.value = cfg[k] || '';
                 w.append(inp); intlIn[k] = inp; body.append(w);
             });
-            const erF = el('label', 'disp-fld'); erF.style.marginTop = 'var(--sp-1-5)';
-            erF.append(el('span', 'disp-fld-lab', 'Reason for export'));
+            const erF = formField('Reason for export', null, { cls: 'disp-fld' }); erF.style.marginTop = 'var(--sp-1-5)';
             const erSel = el('select', 'psel');
             (cfg.export_reasons || ['Sale']).forEach(v => { const op3 = el('option', null, v.replace(/_/g, ' ')); op3.value = v; if (v === (cfg.export_reason || 'Sale')) op3.selected = true; erSel.append(op3); });
             erF.append(erSel); body.append(erF);
-            const dpF = el('label', 'disp-fld'); dpF.style.marginTop = 'var(--sp-1-5)';
-            dpF.append(el('span', 'disp-fld-lab', 'Who pays import duties'));
+            const dpF = formField('Who pays import duties', null, { cls: 'disp-fld' }); dpF.style.marginTop = 'var(--sp-1-5)';
             const dpSel = el('select', 'psel');
             const DP_LABELS = { 'Duties_To_Be_Paid_By_Receiver': 'The customer (receiver) pays duties', 'Duties_To_Be_Paid_By_Sender': 'We (the sender) pay duties', 'Duties_To_Be_Paid_By_Third_Party': 'A third party pays duties' };
             (cfg.duties_payors || Object.keys(DP_LABELS)).forEach(v => { const op4 = el('option', null, DP_LABELS[v] || v); op4.value = v; if (v === (cfg.duties_payor || 'Duties_To_Be_Paid_By_Receiver')) op4.selected = true; dpSel.append(op4); });
@@ -2253,8 +2236,7 @@
                    { code: 'FEDEX', label: 'FedEx' }, { code: 'DPD', label: 'DPD' }];
             const collGrid = el('div', 'coll-grid');
             carriers.forEach(c => {
-                const row = el('label', 'disp-fld');
-                row.append(el('span', 'disp-fld-lab', c.label));
+                const row = formField(c.label, null, { cls: 'disp-fld' });
                 const sc = el('select', 'psel');
                 const none = el('option', null, 'Use the setting above'); none.value = '';
                 if (!collByCarrier[c.code]) none.selected = true;

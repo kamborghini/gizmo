@@ -39,7 +39,7 @@ Settings code flips them with `setSwitch`. `syncToggles`, its share of the
 batched observer and the page-wide Enter/Space handler are deleted. **No
 visible change.**
 
-### `field(caption, control, opts)`
+### `formField(caption, control, opts)`
 
 Builds `<label class="pfield[ cls]"><span>caption</span>control</label>`, with
 `opts.help` as a line under the control (`field-help`) and `opts.cls` for a

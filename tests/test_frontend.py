@@ -4406,8 +4406,7 @@ def t_every_control_has_a_name_that_survives_typing():
        "tableSearch names its input from its placeholder")
     for factory in ("mkSel", "selField", "numField", "dateField"):
         seg = SCRIPT.split("const " + factory + " = ")[1][:220]
-        ok("el('label', 'pfield')" in seg, factory + " wraps in a real label")
-        ok("el('span', null, label)" in seg, "with the caption as a span, not a nested label")
+        ok("formField(label)" in seg, factory + " wraps in a real label (formField(), its caption a span, not a nested label)")
     # The sweep: every select creation must be followed by a name source.
     nameless = []
     for m in _re2.finditer(r"(?:el\('select'|document\.createElement\('select'\))", SCRIPT):
@@ -4419,7 +4418,7 @@ def t_every_control_has_a_name_that_survives_typing():
         before = SCRIPT[max(0, m.start() - 300):m.start()]
         named = ("aria-label" in ctx or ".title = " in ctx
                  or "crmField(" in ctx or "authField" in before
-                 or "el('label'" in before[-200:] or "dpanel-row" in before[-200:])
+                 or "el('label'" in before[-200:] or "formField(" in before[-200:] or "dpanel-row" in before[-200:])
         if not named:
             nameless.append(SCRIPT[:m.start()].count("\n") + 1)
     ok(not nameless, "selects with no accessible name near script lines: " + str(nameless))
@@ -5357,7 +5356,7 @@ def t_the_skills_captions_are_real_labels():
     """They were sibling <label>s with no `for`: visible text that named nothing,
     so both fields announced as bare inputs."""
     ed, up = fn_src("function skillEditor("), fn_src("function uploadRow(")
-    ok(ed.count("el('label', 'sk-field')") == 3 and up.count("el('label', 'sk-field')") == 2,
+    ok(ed.count("{ cls: 'sk-field' })") == 3 and up.count("{ cls: 'sk-field' })") == 2,
        "the one skills editor wraps each of its three fields in its label, and so does a file being added")
     ok("el('div', 'sk-field')" not in SCRIPT, "and no orphan caption is left")
 
@@ -9092,6 +9091,43 @@ def t_the_switch_fixers_stay_gone():
 
 
 @test
+def t_a_field_is_its_caption_and_its_control():
+    """formField() builds every captioned field: the house label above its
+    control, the control added now or afterwards, a help line under it."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + field_part() + r"""
+const out = {};
+const inp = el('input');
+const a = formField('Postcode', inp);
+out.a = [a.tagName, a.className, a.children[0].tagName, a.children[0].textContent, a.children[1] === inp];
+const b = formField('Town', null, { cls: 'disp-fld' });
+out.b = [b.className, b.children.length];
+const later = el('input'); b.append(later); out.later = b.children[1] === later;
+const c = formField('Code', el('input'), { help: 'Six digits' });
+const last = c.children[c.children.length - 1];
+out.c = [last.tagName, last.className, last.textContent];
+console.log(JSON.stringify(out));
+"""
+    got = _run_node(js)
+    ok(got["a"] == ["LABEL", "pfield", "SPAN", "Postcode", True], "a label holding its caption, then its control: %r" % got)
+    ok(got["b"] == ["pfield disp-fld", 1] and got["later"], "a layout hook rides along, and a control can come afterwards")
+    ok(got["c"] == ["P", "field-help", "Six digits"], "a help line under the control")
+
+
+@test
+def t_every_captioned_field_is_built_by_the_part():
+    """Four wrappers (pfield, disp-fld, disp-addr-f, sk-field) with two caption
+    looks. formField() builds them all with the house label."""
+    bad = _built_by_hand(["el('label', 'pfield'", "el('label', 'disp-fld'", "el('label', 'disp-addr-f'", "el('label', 'sk-field'"],
+                         part="js/part-field.js")
+    ok(not bad, "captioned fields built by hand: %s" % bad)
+    for name in ("disp-fld-lab", "disp-addr-lab"):
+        ok(name not in SCRIPT and name not in CSS, name + " is retired")
+
+
+@test
 def t_a_print_overtaken_by_a_newer_one_opens_no_dialog():
     """Every print stages its page in one box (#label-print) under one page
     rule, and a newer print takes both over, counted by printSeq. The
@@ -11950,7 +11986,7 @@ def t_the_design_page_is_the_source_of_truth_made_visible():
     ok("box.querySelectorAll(':scope > .tabs > .tab')" in seg, "and the Guide's own tabs are told apart from the examples")
     fn = SCRIPT.split("function paintDesign(host) {")[1].split("\n        function ")[0]
     for part in ("tabStrip(", "segmented(", "metricsStrip(", "loadFailure(", "refreshBtn(", "'ktable-wrap'", "'ktable'",
-                 "'btn btn-primary'", "'chip'", "'empty'", "el('label', 'pfield')", "'field-help'", "'field-msg'",
+                 "'btn btn-primary'", "'chip'", "'empty'", "formField(", "'field-help'", "'field-msg'",
                  "toastOk(", "toastError("):
         ok(part in fn, "the page draws %s with the real thing" % part)
     block = SCRIPT.split("const DS_COLOURS = [")[1].split("function paintDesign(host) {")[0]

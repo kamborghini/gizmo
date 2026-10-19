@@ -1182,13 +1182,11 @@
             // 1. A size of its own.
             let sizeIn, domIn;
             opt('set', 'Give it a production size', (pane) => {
-                const f = el('label', 'pfield');
-                f.append(el('span', null, 'Production size (mm)'));
+                const f = formField('Production size (mm)');
                 sizeIn = el('input', 'psel'); sizeIn.type = 'text';
                 sizeIn.placeholder = 'e.g. 37.5'; sizeIn.inputMode = 'decimal';
                 f.append(sizeIn); pane.append(f);
-                const f2 = el('label', 'pfield');
-                f2.append(el('span', null, 'Only for one customer (optional)'));
+                const f2 = formField('Only for one customer (optional)');
                 domIn = el('input', 'psel'); domIn.type = 'text';
                 domIn.placeholder = 'their email domain, e.g. acme.co.uk';
                 f2.append(domIn); pane.append(f2);
@@ -1198,8 +1196,7 @@
             // 2. Another name for something already on the sheet.
             let target = null, targetLine;
             opt('alias', 'It is another name for a model already on the list', (pane) => {
-                const f = el('label', 'pfield');
-                f.append(el('span', null, 'Search the size list'));
+                const f = formField('Search the size list');
                 const q = el('input', 'psel'); q.type = 'text';
                 q.placeholder = 'Start typing a model on the list…';
                 f.append(q); pane.append(f);

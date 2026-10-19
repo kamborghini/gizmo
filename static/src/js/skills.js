@@ -448,11 +448,11 @@
             };
             top.append(rm); r.append(top);
             if (u.err) { const m = el('div', 'field-msg'); m.textContent = u.err; r.append(m); return r; }
-            const f1 = el('label', 'sk-field'); f1.append(el('span', null, 'Title'));
+            const f1 = formField('Title', null, { cls: 'sk-field' });
             const ti = el('input', 'sk-input'); ti.maxLength = skillCaps.title; ti.value = u.title; ti.dataset.initial = ''; ti.readOnly = busy;
             const tMsg = el('div', 'field-msg'); tMsg.hidden = true; tMsg.id = 'sk-up-t-' + k; ti.setAttribute('aria-describedby', tMsg.id);
             f1.append(ti, tMsg);
-            const f2 = el('label', 'sk-field'); f2.append(el('span', null, 'When it applies'));
+            const f2 = formField('When it applies', null, { cls: 'sk-field' });
             const wh = el('textarea', 'sk-input sk-when-input'); wh.rows = 3; wh.maxLength = skillCaps.when; wh.value = u.when; wh.dataset.initial = ''; wh.readOnly = busy;
             wh.placeholder = 'e.g. Replying to a trade customer about prices or lead times. Reactor can write this when it reads the skill.';
             f2.append(wh);
@@ -746,14 +746,14 @@
         function skillEditor(s) {
             const f = el('div', 'sk-editor');
             f.append(el('h4', 'sk-form-title', s ? 'Edit skill' : 'New skill'));
-            const f1 = el('label', 'sk-field'); f1.append(el('span', null, 'Title'));
+            const f1 = formField('Title', null, { cls: 'sk-field' });
             const ti = el('input', 'sk-input'); ti.maxLength = skillCaps.title;
             ti.placeholder = 'e.g. Trade enquiry replies';
             ti.value = s ? (s.title || '') : ''; ti.dataset.initial = ti.value;
             const tMsg = el('div', 'field-msg'); tMsg.id = 'sk-tmsg-' + (s ? s.id : 'new'); tMsg.hidden = true;
             ti.setAttribute('aria-describedby', tMsg.id);
             f1.append(ti, tMsg); f.append(f1);
-            const fw = el('label', 'sk-field'); fw.append(el('span', null, 'When it applies (optional)'));
+            const fw = formField('When it applies (optional)', null, { cls: 'sk-field' });
             const wh = el('textarea', 'sk-input sk-when-input'); wh.rows = 2; wh.maxLength = skillCaps.when;
             wh.placeholder = 'e.g. Replying to a trade customer about prices or lead times. It helps Reactor pick the skill for the right question.';
             wh.value = s ? (s.when || '') : ((skView.draft && skView.draft.when) || ''); wh.dataset.initial = s ? wh.value : '';
@@ -767,7 +767,7 @@
             const alwNote = el('span', 'sk-check-note');
             alw.append(cb, el('span', null, 'Apply to every answer and email draft'), alwNote);
             f.append(alw);
-            const f2 = el('label', 'sk-field'); f2.append(el('span', null, 'What Reactor should do'));
+            const f2 = formField('What Reactor should do', null, { cls: 'sk-field' });
             const bo = el('textarea', 'sk-textarea');
             bo.placeholder = 'The instructions, rules or reference text to follow. Markdown works: # headings, - lists, **bold**, tables.';
             bo.value = s ? (s.content || '') : ((skView.draft && skView.draft.content) || ''); bo.dataset.initial = s ? bo.value : '';

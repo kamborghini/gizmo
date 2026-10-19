@@ -452,8 +452,7 @@
            everyone else. */
         const inbox = el('fieldset', 'tm-group');
         inbox.append(el('legend', 'tm-legend', 'Inbox'));
-        const cl = el('label', 'pfield');
-        cl.append(el('span', null, 'Colour'));
+        const cl = formField('Colour');
         const csel = el('select', 'psel tm-colour');
         TEAM_TINTS.forEach(t => {
             const o = el('option', null, t.charAt(0).toUpperCase() + t.slice(1));
@@ -471,8 +470,7 @@
         let sta = null;
         if (manageable) {
             const sw = el('div');
-            const sl2 = el('label', 'pfield');
-            sl2.append(el('span', null, 'Sign-off on their email'));
+            const sl2 = formField('Sign-off on their email');
             sta = document.createElement('textarea');
             sta.className = 'mail-draft-text'; sta.rows = 3;
             sta.value = u.sign_off || '';

@@ -219,7 +219,7 @@
                and control, help or what is wrong said underneath. */
             const fields = el('div', 'ds-fields');
             const field = (lab, ctl, help, bad) => {
-                const f = el('label', 'pfield'); f.append(el('span', null, lab), ctl);
+                const f = formField(lab); f.append(ctl);
                 if (bad) {
                     const m = el('div', 'field-msg', bad); m.id = 'ds-' + lab.toLowerCase() + '-msg';
                     ctl.setAttribute('aria-invalid', 'true'); ctl.setAttribute('aria-describedby', m.id); f.append(m);
@@ -229,7 +229,7 @@
             const txt = el('input', 'psel'); txt.type = 'text'; txt.placeholder = 'Type here';
             const area = el('textarea', 'psel'); area.rows = 2; area.placeholder = 'A longer note';
             const wrong = el('input', 'psel'); wrong.type = 'text'; wrong.value = 'not an email';
-            const dl = el('label', 'pfield'); dl.append(el('span', null, 'Delivery'));
+            const dl = formField('Delivery');
             const sel = el('select', 'psel'); ['Next day', 'Two days', 'Collection'].forEach(o => sel.append(el('option', null, o)));
             dl.append(sel, el('div', 'field-help', 'Picked from a list.'));
             fields.append(field('Name', txt, 'What the team will see.'), dl,
@@ -521,11 +521,11 @@
             const t = crmText('', 'One line');
             t.maxLength = 140; t.id = 'af-title';
             const tMsg = el('div', 'field-msg'); tMsg.hidden = true; tMsg.id = 'af-title-msg'; t.setAttribute('aria-describedby', tMsg.id);
-            const f1 = el('label', 'pfield'); f1.append(el('span', null, 'What you want'), t); form.append(f1, tMsg);
+            const f1 = formField('What you want'); f1.append(t); form.append(f1, tMsg);
             const d = document.createElement('textarea');
             d.className = 'pf-input'; d.rows = 4; d.maxLength = 4000;
             d.placeholder = 'When it would help, and what you do instead today';
-            const f2 = el('label', 'pfield'); f2.append(el('span', null, 'Details (optional)'), d); form.append(f2);
+            const f2 = formField('Details (optional)'); f2.append(d); form.append(f2);
             m.body.append(form);
             const bar = m.foot();
             const go = textButton('Send it', { kind: 'primary' });

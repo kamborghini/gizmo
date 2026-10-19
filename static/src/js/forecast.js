@@ -534,7 +534,7 @@
             if (range === 'custom') {
                 const row = el('div', 'act-row fc-dates');
                 const mk = (val, label, on) => {
-                    const w = el('label', 'pfield'); w.append(el('span', null, label));
+                    const w = formField(label);
                     const i = document.createElement('input'); i.type = 'date'; i.className = 'field-sm fc-date'; i.value = val;
                     i.onchange = on; w.append(i); return w;
                 };

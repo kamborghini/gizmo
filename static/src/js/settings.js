@@ -317,8 +317,7 @@
                 const body = win.body;
                 const finish = (v) => { answer = v; win.close(); };
                 if (message) body.append(el('p', 'field-help', message));
-                const f = el('label', 'pfield');
-                f.append(el('span', null, label || 'Value'));
+                const f = formField(label || 'Value');
                 const inp = el('input', 'psel'); inp.type = 'text'; inp.value = initial || '';
                 f.append(inp); body.append(f);
                 const foot = win.foot();
@@ -339,8 +338,7 @@
                 const body = win.body;
                 const finish = (v) => { answer = v; win.close(); };
                 if (message) body.append(el('p', 'field-help', message));
-                const f = el('label', 'pfield');
-                f.append(el('span', null, 'Your password'));
+                const f = formField('Your password');
                 const inp = el('input', 'psel'); inp.type = 'password'; inp.autocomplete = 'current-password';
                 f.append(inp); body.append(f);
                 const foot = win.foot();
@@ -425,8 +423,7 @@
                 code.style.cssText = 'font-family:var(--font-mono);padding:var(--sp-2-5) var(--sp-3);'
                     + 'background:var(--surface-tertiary);border-radius:var(--radius-control);word-break:break-all';
                 body.append(code);
-                const f = el('label', 'pfield');
-                f.append(el('span', null, 'The code from your app'));
+                const f = formField('The code from your app');
                 const inp = el('input', 'psel'); inp.type = 'text'; inp.inputMode = 'numeric';
                 inp.maxLength = 6; inp.placeholder = '000000';
                 f.append(inp); body.append(f);
