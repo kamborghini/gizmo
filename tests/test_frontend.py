@@ -71,6 +71,14 @@ def dialog_part():
     """The window part's source (static/src/js/part-dialog.js) as the page has it."""
     return SCRIPT[SCRIPT.index(DIALOG_START):SCRIPT.index(DIALOG_END)]
 
+BUTTON_START = "/* ---------- the button parts ----------"
+BUTTON_END = "/* ---------- the button parts end ---------- */"
+
+
+def button_part():
+    """The button parts' source (static/src/js/part-button.js) as the page has it."""
+    return SCRIPT[SCRIPT.index(BUTTON_START):SCRIPT.index(BUTTON_END)]
+
 
 @test
 def t_the_script_parses():
@@ -146,7 +154,12 @@ def t_untrusted_text_never_reaches_innerHTML():
     server string into the DOM as markup, which is the sink the whole CSP is
     there to make survivable.
     """
-    STATIC = ("svg", "LABEL_LOGO", "o.icon")
+    STATIC = ("svg", "LABEL_LOGO", "o.icon", "icon")
+    # iconButton() puts its icon in with innerHTML: every call must hand it one
+    # of the page's own icon constants, never text from anywhere else.
+    for m in re.finditer(r"\biconButton\(\s*([^,)]+)", SCRIPT):
+        ok(m.group(1).strip().startswith("I.") or m.group(1).strip() == "icon",
+           "iconButton is handed an icon constant, not " + m.group(1)[:40])
 
     def static_markup(expr: str) -> bool:
         e = expr.strip()
@@ -8848,6 +8861,81 @@ def t_the_design_rules_live_in_one_document():
     for guard in ("t_every_corner_is_a_role", "t_every_defined_token_is_read", "t_every_window_is_built_and_closed_by_the_part"):
         ok(guard in doc and ("def " + guard + "(") in open(__file__, encoding="utf-8").read(), "it names the guard " + guard)
 
+@test
+def t_the_button_parts_build_todays_classes():
+    """Stage 3, piece 2 (docs/superpowers/specs/2026-10-19-buttons-and-links-design.md):
+    three parts build every button. button() and link() build the classes the
+    stylesheet already styles; iconButton() builds the one icon-button recipe
+    in three sizes, and always gives it a name."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+globalThis.I = { chev: '<svg/>', x: '<svg/>', trash: '<svg/>' };
+globalThis.ico = (s) => { const n = el('span', 'ic'); n.innerHTML = s; return n; };
+""" + button_part() + r"""
+const out = {};
+const b = button('Save'); out.plain = [b.className, b.textContent];
+out.primarySmall = button('Save', { kind: 'primary', small: true }).className;
+const d = button(null, { kind: 'danger', cls: 'disp-book' }); out.danger = [d.className, d.textContent];
+out.square = button(null, { small: true, square: true }).className;
+const c = button('Copy', { icon: I.x }); out.icon = [c.children[0].className, c.textContent];
+const x = iconButton(I.x, 'Close'); out.x = [x.className, x.getAttribute('aria-label'), x.title];
+out.small = iconButton(I.trash, 'Delete note', { size: 'small', tone: 'danger' }).className;
+out.tag = iconButton(I.x, 'Remove', { size: 'tag' }).className;
+try { iconButton(I.x, ''); out.unnamed = 'built'; } catch (e) { out.unnamed = e.message; }
+out.caption = link('Undo').className;
+out.inline = link('Education', { size: 'inline' }).className;
+const g = link('Show all', { size: 'go' }); out.go = [g.className, g.children[g.children.length - 1].className];
+out.cls = link('Back', { cls: 'auth-back' }).className;
+console.log(JSON.stringify(out));
+"""
+    got = _run_node(js)
+    ok(got["plain"] == ["btn", "Save"], "a plain button: %r" % got)
+    ok(got["primarySmall"] == "btn btn-sm btn-primary", "kind and size, in the stylesheet's order")
+    ok(got["danger"] == ["btn btn-danger disp-book", ""], "a layout hook rides along; no text, an empty button")
+    ok(got["square"] == "btn btn-sm btn-icon", "the bordered square")
+    ok(got["icon"] == ["ic", "Copy"], "an icon before the words")
+    ok(got["x"] == ["icon-btn", "Close", "Close"], "an icon button, named")
+    ok(got["small"] == "icon-btn icon-btn-sm del", "small, with the danger tone")
+    ok(got["tag"] == "icon-btn icon-btn-tag", "the size inside a tag")
+    ok("needs a label" in got["unnamed"], "an icon button without a name is refused")
+    ok(got["caption"] == "linkish" and got["inline"] == "seclink", "one link: caption and inline")
+    ok(got["go"] == ["link", "ic"], "the stand-alone link carries its chevron")
+    ok(got["cls"] == "linkish auth-back", "and a layout hook")
+
+
+@test
+def t_icon_buttons_have_three_sizes_from_the_tokens():
+    """One icon-button recipe, three sizes from the tokens: 32 (the control),
+    24 and 20, each with its icon; a delete hovers red, a confirm green."""
+    def rule(sel):
+        m = re.search(re.escape(sel) + r" \{([^}]*)\}", CSS)
+        return m.group(1) if m else ""
+    sm, smv = rule(".icon-btn.icon-btn-sm"), rule(".icon-btn.icon-btn-sm svg")
+    ok("min-width: var(--control-h-sm)" in sm and "min-height: var(--control-h-sm)" in sm and "padding: 0" in sm, "small is 24")
+    ok("width: var(--icon-sm)" in smv and "height: var(--icon-sm)" in smv, "with a 14 icon")
+    tg, tgv = rule(".icon-btn.icon-btn-tag"), rule(".icon-btn.icon-btn-tag svg")
+    ok("min-width: var(--box-sm)" in tg and "min-height: var(--box-sm)" in tg and "padding: 0" in tg
+       and "border-radius: var(--radius-tag)" in tg, "tag is 20, with the tag corner")
+    ok("width: var(--icon-xs)" in tgv and "height: var(--icon-xs)" in tgv, "with a 12 icon")
+    ok(re.search(r"@media \(hover: hover\) \{ \.icon-btn\.del:hover \{ color: var\(--error\); background: var\(--error-bg\); \} \}", CSS),
+       "a delete hovers red")
+    ok(re.search(r"@media \(hover: hover\) \{ \.icon-btn\.ok:hover \{ color: var\(--success\); background: var\(--success-bg\); \} \}", CSS),
+       "a confirm hovers green")
+
+
+@test
+def t_small_icon_buttons_keep_their_size_on_a_phone():
+    """On a phone a regular icon button is 40 wide; a small or tag one keeps
+    its size and gets an invisible 40 target, so a toast's cross or a chip's
+    cross does not balloon."""
+    phone = "\n".join(re.findall(r"@media \(max-width: 640px\) \{(.*?)\n        \}", CSS, re.S))
+    ok(":is(.icon-btn:not(.icon-btn-sm, .icon-btn-tag), .btn-sm.btn-icon, .topbar .icon-btn, .topbar-search) { min-width: var(--control-h-lg); }" in phone,
+       "the 40-wide rule leaves small and tag alone")
+    ok(re.search(r":is\([^)]*\.icon-btn-sm, \.icon-btn-tag[^)]*\)::after \{\s*left: 50%", phone), "they get the centred 40 target")
+    ok(re.search(r":is\([^)]*\.icon-btn-sm, \.icon-btn-tag[^)]*\) \{ position: relative; \}", phone), "anchored to themselves")
+
 
 @test
 def t_a_print_overtaken_by_a_newer_one_opens_no_dialog():
@@ -13283,14 +13371,14 @@ def t_the_phone_and_chart_review_fixes_hold():
     b = blocks[0] if blocks else ""
     ok(".send { width: var(--control-h-lg); height: var(--control-h-lg); }" in b, "Send is 40 by 40 on a phone")
     ok("#input { min-height: var(--control-h-lg); }" in b, "and the input is at least 40 tall (its auto-grow sets only a taller height)")
-    ok(":is(.convo .del, .toast-x, .tbl-search .tbl-clear, .alert-x, .sk-chip-x, .fchip button) { position: relative; }" in b,
+    ok(":is(.convo .del, .toast-x, .tbl-search .tbl-clear, .alert-x, .sk-chip-x, .fchip button, .icon-btn-sm, .icon-btn-tag) { position: relative; }" in b,
        "the small glyph buttons are the containing block for their hit area")
     shared = ".ov-wrap.wg-editing > [data-widget] > .wg-hide)::after {"
     ok(shared in b, "the hit-area rule is there")
     sbody = b.split(shared)[1].split("}")[0] if shared in b else ""
     ok('content: ""; position: absolute; height: var(--control-h-lg);' in sbody and "width" not in sbody and "left" not in sbody,
        "the rule shared by the squares sets only their height (a shared width or left would out-rank each one's own, since its list carries the hide button's long selector)")
-    ok(":is(.toast-x, .alert-x, .sk-chip-x, .fchip button)::after {\n                left: 50%; top: 50%; width: var(--control-h-lg);" in b,
+    ok(":is(.toast-x, .alert-x, .sk-chip-x, .fchip button, .icon-btn-sm, .icon-btn-tag)::after {\n                left: 50%; top: 50%; width: var(--control-h-lg);" in b,
        "a button with no neighbour on a side has a 40 square centred on it")
     ok(".tbl-search .tbl-clear::after { left: 0; top: 50%; margin: calc(var(--control-h-lg) / -2) 0 0; width: min(var(--control-h-lg), calc(100% + var(--sp-2) + var(--bw-hairline))); }" in b,
        "the clear button's square starts at its left edge, never over the input, and runs right to the field's own edge")
