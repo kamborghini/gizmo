@@ -2,7 +2,7 @@
  "releases": [
   {
    "date": "2026-10-19",
-   "title": "Behind the scenes",
+   "title": "A tidier stylesheet",
    "items": [
     {
      "kind": "changed",
