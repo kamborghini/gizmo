@@ -9087,6 +9087,13 @@ def t_settings_switches_are_named_switches():
         ok(lab, key + " names itself by its title")
         t = re.search(r'id="' + re.escape(lab.group(1)) + r'"[^>]*>([^<]+)<', HTML)
         ok(t and t.group(1).strip(), key + " points at a title that exists")
+    # The schedule's frequency list beside them. Its row is shown until
+    # Settings has read the schedule and hidden only if auto-refresh is off,
+    # so the browser suite's no-unnamed-control check saw it or not by
+    # timing, and with auto-refresh on a screen reader heard an unnamed list.
+    sel = re.search(r'<select id="sched-freq"[^>]*>', HTML)
+    ok(sel and 'aria-labelledby="sched-freq-title"' in sel.group(0), "the frequency list is named by its title")
+    ok(re.search(r'id="sched-freq-title"[^>]*>Frequency<', HTML), "and that title exists")
 
 
 @test
