@@ -29,7 +29,7 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Icon library source — icons are inlined into static/index.html, no need to ship these
+# Icon library source — icons are inlined into the page (static/src), no need to ship these
 feather/
 
 # Shopify CLI local state

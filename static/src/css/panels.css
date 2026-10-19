@@ -1,0 +1,167 @@
+        /* PANELS (13 Oct 2026): on screen, every section of a page is a white panel
+           on the grey page, its edge a hairline, its corner the card's, a very soft
+           shadow, 20 by 24 inside (16 on a phone). Paper keeps its plain page. A
+           figure group clips the hairline before its first figure at its own edge
+           (overflow: clip), so its inset is a transparent border, not padding, and
+           its edge an outline on the border box's own line. Two classes of weight and the end
+           of the sheet, so no block's own flat rule (.chart-card, .band and the
+           rest, one or two classes each) can take a panel's paint away. */
+        @media screen {
+            .ov-wrap .panel, .chat-recent.panel { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-card);
+                box-shadow: var(--shadow-panel); padding: var(--panel-pad-y) var(--panel-pad-x); }
+            .ov-wrap .panel.metrics { padding: 0; border-style: solid; border-color: transparent; border-width: var(--panel-pad-y) var(--panel-pad-x);
+                box-shadow: var(--shadow-panel); outline: var(--bw-hairline) solid var(--border-default); outline-offset: calc(-1 * var(--bw-hairline)); width: auto; }
+        }
+        /* TABLES AND LISTS IN PANELS (13 Oct 2026): a table, and any list ruled
+           between its rows, runs to its panel's left and right edges, so its rows
+           are the panel's list (as a card's dividers run in Shopify's own admin);
+           its words keep the panel's inset, so they line up with the heading. A
+           dtable row is a subgrid of its table, so the same padding on every row
+           widens the outer columns alike. A ktable's first and last cells take
+           the inset, except on a phone, where its two-line rows are flex rows of
+           unpadded cells and the row takes it. The panel's edge closes a table,
+           so its last row has no rule (a ktable's last row already has none).
+           The Production Manager's lists keep their own look. */
+        @media screen {
+            .panel .dtable > :last-child { border-bottom-color: transparent; }
+            :is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > .ktable-wrap, :is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > .dt > .dtable { margin-inline: calc(-1 * var(--panel-pad-x)); }
+            :is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > .ktable-wrap > .ktable :is(th, td):first-child { padding-left: var(--panel-pad-x); }
+            :is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > .ktable-wrap > .ktable :is(th, td):last-child { padding-right: var(--panel-pad-x); }
+            :is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > .dt > .dtable > :is(.dt-head, .dt-row, .dt-detail) { padding-inline: var(--panel-pad-x); }
+            :is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > .dt > .dtable > :is(.dt-row.open, .dt-detail)::before { left: 0; }
+            .panel :is(.files-list, .mlist, .sk-list, .fc-wl, .fc-drive, .rel-list, .guide-rows, .insights):not(.pchat *), .panel > #mail-bulk-host { margin-inline: calc(-1 * var(--panel-pad-x)); }
+            .ov-wrap .panel :is(.files-list > .files-row, .mlist > .mrow, .sk-list > .sk-item, .fc-wl > [role="row"], .fc-drive > .fc-drive-row, .rel-list > .rel, .guide-rows > .guide-row, .insights > .insight):not(.pchat *) { padding-inline: var(--panel-pad-x); }
+            .ov-wrap :is(.panel.actions, .panel .actions) > :is(.action-head, .action), .ov-wrap .panel > .card-bleed > details.sect { margin-inline: calc(-1 * var(--panel-pad-x)); padding-inline: var(--panel-pad-x); }
+            .ov-wrap .panel > #mail-bulk-host > .mail-bulkbar { padding-inline: calc(var(--panel-pad-x) + var(--dot-md) + var(--sp-2-5)) var(--panel-pad-x); }
+        }
+        @media screen and (max-width: 640px) {
+            :is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > .ktable-wrap > .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr { padding-inline: var(--panel-pad-x); }
+            :is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > .ktable-wrap > .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr > td { padding-inline: 0; }
+        }
+        /* A ktable draws a rule above and below itself; in a panel that was a frame inside
+           the panel, its lower line 20 above the panel's own edge. The panel's edge closes
+           the table, as it closes a dtable, and the head row keeps its own rule. */
+        @media screen { .panel .ktable-wrap:not(.prose-table, .pchat *) { box-shadow: none; } }
+        /* SIDEWAYS SCROLLERS IN PANELS (13 Oct 2026): a board that scrolls sideways runs
+           to its panel's edges like a table, its first lane on the inset, so a lane cut
+           by the scroll is cut at the panel's edge, not short of it with white after it.
+           The Size list's A to Z swipes on a phone the same way. */
+        @media screen { .panel .crm-board { margin-inline: calc(-1 * var(--panel-pad-x)); padding-inline: var(--panel-pad-x); scroll-padding-inline: var(--panel-pad-x); } }
+        @media screen and (max-width: 640px) { .panel .az { margin-inline: calc(-1 * var(--panel-pad-x)); padding-inline: var(--panel-pad-x); } }
+        /* NARROW LISTS IN PANELS (13 Oct 2026): a list that is a column on a wide
+           screen and the panel's width on a narrow one takes the edges only when it
+           spans the panel. Team's Activity feed is a column beside its filters over
+           900; Forecast's numbers are two columns over 1000 of their own width; What
+           changed lays out columns of 12rem, so it is one column under 25.5rem, set
+           outright there so its rows never meet the edges as two columns. */
+        @media screen and (max-width: 900px) {
+            .panel .tm-feedwrap > .tm-feed > .dt > .dtable { margin-inline: calc(-1 * var(--panel-pad-x)); }
+            .panel .tm-feedwrap > .tm-feed > .dt > .dtable > :is(.dt-head, .dt-row, .dt-detail) { padding-inline: var(--panel-pad-x); }
+            .panel .tm-feedwrap > .tm-feed > .dt > .dtable > :is(.dt-row.open, .dt-detail)::before { left: 0; }
+        }
+        @media screen {
+            @container fcnumbers (max-width: 1000px) {
+                .panel .rlist.cols-2 { margin-inline: calc(-1 * var(--panel-pad-x)); }
+                .panel .rlist.cols-2 > .rlist-row { padding-inline: var(--panel-pad-x); }
+            }
+            .wpair .changes-strip { container: changes / inline-size; }
+            @container changes (width < 25.5rem) {
+                .wpair .changes-strip .impact-deltas { grid-template-columns: minmax(0, 1fr); }
+                :is(.changes-strip.panel, .panel .changes-strip) .impact-deltas { margin-inline: calc(-1 * var(--panel-pad-x)); }
+                :is(.changes-strip.panel, .panel .changes-strip) .impact-deltas > .idelta { padding-inline: var(--panel-pad-x); }
+            }
+            /* A two-column card (.duo, the trade radar's columns) stacks at 64rem of its own
+               width; its tables then span the panel. Both cards are also a 'cols' container. */
+            @container cols (max-width: 64rem) {
+                :is(.panel .duo, .panel .duo > .card-bleed, .panel .radar-col > .card-bleed) > .ktable-wrap, :is(.panel .duo, .panel .duo > .card-bleed, .panel .radar-col > .card-bleed) > .dt > .dtable { margin-inline: calc(-1 * var(--panel-pad-x)); }
+                :is(.panel .duo, .panel .duo > .card-bleed, .panel .radar-col > .card-bleed) > .ktable-wrap > .ktable :is(th, td):first-child { padding-left: var(--panel-pad-x); }
+                :is(.panel .duo, .panel .duo > .card-bleed, .panel .radar-col > .card-bleed) > .ktable-wrap > .ktable :is(th, td):last-child { padding-right: var(--panel-pad-x); }
+                :is(.panel .duo, .panel .duo > .card-bleed, .panel .radar-col > .card-bleed) > .dt > .dtable > :is(.dt-head, .dt-row, .dt-detail) { padding-inline: var(--panel-pad-x); }
+                :is(.panel .duo, .panel .duo > .card-bleed, .panel .radar-col > .card-bleed) > .dt > .dtable > :is(.dt-row.open, .dt-detail)::before { left: 0; }
+                @media (max-width: 640px) {
+                    :is(.panel .duo, .panel .duo > .card-bleed, .panel .radar-col > .card-bleed) > .ktable-wrap > .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr { padding-inline: var(--panel-pad-x); }
+                    :is(.panel .duo, .panel .duo > .card-bleed, .panel .radar-col > .card-bleed) > .ktable-wrap > .ktable:not(.sizes-table, .mem-table, .cx-docs) > :is(tbody, tfoot) > tr > td { padding-inline: 0; }
+                }
+            }
+        }
+
+        /* FROM THE FINAL REVIEWS (13 Oct 2026): where a row's own rule outweighed the
+           panel's inset, a control's hover was the grey's own tone, the queue still drew
+           to the old page gutter, a list ruled the line above the panel's edge, and
+           Customise placed its controls outside the panels. */
+        @media screen {
+            /* Memory's notes and the Size list stack their rows in a narrow panel: the row takes the inset, its cells none. */
+            @container memcard (max-width: 700px) {
+                .panel .mem-list > .ktable-wrap > .ktable.mem-table tr { padding-inline: var(--panel-pad-x); }
+                .panel .mem-list > .ktable-wrap > .ktable.mem-table td:nth-child(n) { padding-inline: 0; }
+            }
+            @container sizes (max-width: 520px) {
+                .panel > .ktable-wrap > .ktable.sizes-table tr.sizes-row { padding-inline: var(--panel-pad-x); }
+                .panel > .ktable-wrap > .ktable.sizes-table tr.sizes-row > td:nth-child(n) { padding-inline: 0; }
+                .panel > .ktable-wrap > .ktable.sizes-table tr.sizes-detail > td:nth-child(n) { padding-inline: var(--panel-pad-x); }
+                .panel > .ktable-wrap > .ktable.sizes-table tr.sizes-row.open { box-shadow: none; }
+                @media (hover: hover) { .panel > .ktable-wrap > .ktable.sizes-table tr.sizes-row:hover { box-shadow: none; } }
+            }
+            /* A table's bands and open rows reached 8 past a cell, to the old page edge; in a panel they stop at its edge. */
+            .panel .ktable tr.ktable-grp th { box-shadow: var(--rule-b); }
+            @media (hover: hover) { .panel .ktable tr.ktable-grp:hover th { box-shadow: var(--rule-b); } }
+            .panel .ktable tr.sizes-row.open > td:is(:first-child, :last-child), .panel .ktable tr.sizes-detail > td { box-shadow: none; }
+            /* Keywords' Show all sits in the bled table's box: it takes the inset back. */
+            :is(.panel, .panel > .card-bleed, .panel > div:not([class]), .panel .mem-list, .panel .req-list) > .ktable-wrap > .kw-more { padding-inline: var(--panel-pad-x); }
+            /* On a phone an Inbox row's Claim and age take the width of their words, so the sender keeps its name. */
+            @container mlist (max-width: 560px) {
+                .panel .mlist > .mrow > .mown-slot { min-width: 0; }
+                .panel .mlist > .mrow > .mage { flex: 0 0 auto; }
+            }
+            /* The Ask box's grey well was a box inside the panel: the field sits in the panel itself. */
+            .panel.pchat > .pchat-input { padding: 0; background: none; border-top: 0; }
+            /* Controls on the grey show their hover and press (their own hover is the grey's tone). */
+            @media (hover: hover) {
+                .ov-wrap > .queues :is(.qc:not(.on), .qt:not(.on)):hover { background: var(--surface-sunken); }
+                .ov-wrap > :is(.ov-hero, .page-tabs) .icon-btn:hover { background: var(--surface-sunken); }
+                .ov-wrap > :is(.ov-hero, .page-tabs) .info:hover::before { background: var(--surface-sunken); }
+            }
+            .ov-wrap > .queues .qc:not(.on):active { background: var(--press-fill); }
+            /* The queue's bands end at its panel's edges; the panel's own top and bottom close the queue. */
+            .q-card.panel::before { content: none; }
+            .q-card.panel .lbl-list > .lbl-grid::before { inset-inline: calc(-1 * var(--panel-pad-x)); }
+            .q-card.panel .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::before { inset: 0 calc(-1 * var(--panel-pad-x)); }
+            .q-card.panel .lbl-list > .lbl-grid > :is(.lbl-qrow, .lbl-preview)::after { inset-inline: calc(-1 * var(--panel-pad-x)); }
+            .q-card.panel .lbl-list > .lbl-grid > :last-child::after { content: none; }
+            /* The panel's edge closes a list: no rule above it under the last row. */
+            :is(.changes-strip.panel, .panel .changes-strip) .impact-deltas { clip-path: inset(0 0 var(--bw-hairline) 0); }
+            .fc-numbers.panel > .rlist { box-shadow: none; }
+            .chat-recent.panel > .chat-recent-h { padding-inline: 0; }
+            .chat-recent.panel > .chat-recent-row { width: auto; margin-inline: calc(-1 * var(--panel-pad-x)); padding-inline: var(--panel-pad-x); }
+            .chat-recent.panel > .chat-recent-row:last-child { box-shadow: none; }
+            /* A panel's last block keeps no margin of its own: the panel's inset is the space under it. */
+            .ov-wrap .panel > :last-child { margin-bottom: 0; }
+            /* Customise on panels (spec 7): the dashed edge on the panel's own edge, a group's on its
+               panels' outer edges; the grip and the hide button inside the panel, on its first line. A figure group's
+               inset is a border its clip cuts, so while arranging it shows its grip and drops the hairlines
+               between its figures. */
+            .ov-wrap.wg-editing > [data-widget]:not(.panel):not(:focus-visible) { outline-offset: calc(-1 * var(--bw-hairline)); }
+            .ov-wrap.wg-editing > [data-widget] > .wg-grip { top: calc(var(--panel-pad-y) - var(--sp-1)); left: calc((var(--panel-pad-x) - var(--icon-md)) / 2); }
+            .ov-wrap.wg-editing > [data-widget] > .wg-hide { top: calc(var(--panel-pad-y) - var(--sp-1)); right: calc(var(--panel-pad-x) - var(--sp-1)); }
+            .ov-wrap.wg-editing > .panel.metrics { overflow: visible; }
+            .ov-wrap.wg-editing > .panel.metrics > .stat::before { content: none; }
+            .ov-wrap.wg-editing > .panel.metrics > .wg-grip { top: calc(-1 * var(--sp-1)); left: calc((var(--panel-pad-x) - var(--icon-md)) / 2 - var(--panel-pad-x)); }
+            .ov-wrap.wg-editing > .panel.metrics > .wg-hide { top: calc(-1 * var(--sp-1)); right: calc(-1 * var(--sp-1)); }
+        }
+        @media screen and (min-width: 901px) { @media (hover: hover) { .topbar .icon-btn:hover { background: var(--surface-sunken); } } }
+        /* Files' rows keep the page's own zero sides; in their panel the inset outweighs it. */
+        @media screen { #files-content .panel .files-list > .files-row { padding-inline: var(--panel-pad-x); } }
+        /* In a two-line row a row's actions start on the inset, under its words; on a phone each is the width of its own words. */
+        @media screen {
+            @container dt (max-width: 24rem) { .dt-xs > .dtable > .dt-row > .dt-c.act { justify-content: flex-start; } }
+            @container dt (max-width: 40rem) { .dt-s > .dtable > .dt-row > .dt-c.act { justify-content: flex-start; } }
+            @container dt (max-width: 56rem) { .dt-m > .dtable > .dt-row > .dt-c.act { justify-content: flex-start; } }
+            @container dt (max-width: 72rem) { .dt-l > .dtable > .dt-row > .dt-c.act { justify-content: flex-start; } }
+        }
+        @media screen and (max-width: 640px) { .dt-c.act .swap > [aria-hidden="true"] { display: none; } }
+
+        /* A field under a finger is 16, or iOS zooms into the page when it takes focus. This is the LAST word on a field's
+           size and the only place the stylesheet's 16 for a field is written: it comes after every field rule, and the
+           :is() list takes the specificity of its strongest member (the chat box's id), so a field carrying .psel,
+           .lbl-size or any other field class does not beat it. */
+        @media (pointer: coarse) { :is(input:not([type=checkbox]):not([type=radio]), textarea, select, #input, [contenteditable="true"]) { font-size: var(--text-md); } }

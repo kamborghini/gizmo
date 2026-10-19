@@ -1,0 +1,810 @@
+        /* ------------------------------------------------------------------
+           Inbox: the shared-mailbox ownership board. Columns and cards wear
+           the CRM board's clothes; only the ownership chrome is its own.
+           ------------------------------------------------------------------ */
+        .mail-sync { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .mail-sync.err { color: var(--error); }
+        /* Inside .tbl-search it takes that field's shape; on its own (the
+           reconciliation exception search used to use this class) it still
+           needs a width of its own. The ceiling is the wrapper rather than
+           `none`, or the one field in the app that opts out is also the one
+           that cannot shrink out of the card on a phone. */
+        .mail-search { flex: 1 1 160px; max-width: 260px; }
+        .tbl-search .mail-search { flex: 1 1 auto; min-width: 0; max-width: none; }
+        /* A search whose hint is a sentence has a sentence's width (Inbox, CRM contacts: final visual review M9). */
+        .tbl-search.search-long { width: var(--field-w-xl); max-width: 100%; }
+        /* Wraps rather than scrolls. As a full-bleed strip it ran to the
+           card's own border, so the person who did not fit was SLICED by
+           that line - a bordered card cut in half at the card edge, with a
+           scrollbar under it. A team is a handful of cards; wrapping shows
+           all of them and nothing meets an edge it should not. */
+        /* Who is on today: each person is a plain group, no capsule (the mix, spec 3): the colour dot, where they
+           are working, their name, your own presence choice and their load, people 32 apart. On a phone each is a
+           hairline row (below). */
+        .mail-who { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-8); }
+        .mail-who-card { flex: 0 0 auto; display: flex; align-items: center; gap: var(--sp-2); min-height: var(--control-h);
+            background: none; border: 0; border-radius: 0;
+            padding: 0; font-size: var(--text-xs); line-height: var(--lh-caption); }
+        .mail-who-card { max-width: 100%; min-width: 0; }
+        .mail-who-card .mail-who-name, .mail-who-card .mail-who-load { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .mail-who-name { font-weight: var(--weight-medium); color: var(--text-primary); }
+        /* A person is two lines (12 Oct 2026): the name over where they are and what they hold. */
+        .mail-who-txt { display: flex; flex-direction: column; min-width: 0; }
+        .mail-who-load { color: var(--text-tertiary); }
+        /* Hollow, because the card already carries a solid one. Two 8px discs
+           sat 18px apart saying unrelated things - the colour that keys the
+           row tints, and where the person is working today - and for a green
+           team member in the office they were the same #15803d twice over
+           (orange against amber was the same near-miss). One solid dot per
+           card is the colour key; presence is the ring beside it, so the pair
+           reads as two facts rather than one repeated. */
+        .mail-presence { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); flex: none;
+            background: transparent; box-shadow: inset 0 0 0 var(--bw-strong) var(--border-emphasis); }
+        .mail-presence.office { box-shadow: inset 0 0 0 var(--bw-strong) var(--success); }
+        .mail-presence.home { box-shadow: inset 0 0 0 var(--bw-strong) var(--warning); }
+        .mail-presence.out { box-shadow: inset 0 0 0 var(--bw-strong) var(--text-tertiary); }
+        .mail-presence-pick { border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-field); background: var(--surface-primary);
+            color: var(--text-primary); font: inherit; font-size: var(--text-xs); line-height: var(--lh-caption); padding: var(--sp-0-5) var(--sp-1-5); height: 28px; }
+        /* Inside a chip it is chip-sized. The house control height is 32 and
+           this class keeps it everywhere else it is used, but one 32px select
+           set the height of all three chips in the strip and left the two
+           without one carrying 14px of air around an 18px line. 24 is the row
+           scale the chip is already built from: .mail-claim and .mail-owner. */
+        .mail-who-card .mail-presence-pick { height: var(--control-h-md); min-height: var(--control-h-md); box-sizing: border-box; }
+        .mail-card-sub { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); margin-top: var(--sp-px);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .mail-card.overdue-soft { background: var(--warning-bg); border-color: var(--border-default); }
+        .mail-card.overdue-hard { background: var(--error-bg); border-color: var(--border-default); }
+        /* This chip and the Claim button below it are both 24 because whichever
+           one ends a row SETS that row's height, and a row carries one or the
+           other: at 22 against 24 the list alternated a 47px and a 49px pitch
+           depending on whether the email had been claimed. 24 is the chip
+           scale .mail-presence-pick above is already held to.
+           The dot is the owner's own colour, at the strength the key above the
+           list uses. Without it the chip was the third grey capsule in the
+           row, the same object as the message count and the folder tag, and
+           the one thing this board exists to show read as a tag nobody looks
+           at. gap 3 not 5, because .who-dot brings 2px of its own margin. */
+        /* The hairline is what keeps the capsule a capsule. Its #ebebeb ground
+           against the eight owner tints computes 1.00 to 1.04:1 - on the red
+           row the chip disappeared outright - and a darker ground cannot fix
+           it: the first grey that separates from the tints takes --text-tertiary on
+           the chip under 4:1. So the EDGE carries the shape, the same
+           1px --border-strong the Claim button beside it already reads on every
+           tint with. Padding drops 1px to hold the measured width. */
+        /* The owner is a TAG (the mix, spec 6): 20 tall, the tag corner, no border, tinted by the owner's
+           team colour (the same tint the row used to be washed in) with the colour's dot beside the name. */
+        .mail-owner { display: inline-flex; align-items: center; height: var(--tag-h); max-width: 100%;
+            gap: var(--sp-1); font-size: var(--text-xs); line-height: var(--lh-caption); border: 0;
+            background: var(--surface-sunken); border-radius: var(--radius-tag); padding: 0 var(--sp-2); color: var(--text-secondary); }
+        .mail-owner.own-red    { background: var(--owner-red-bg); }
+        .mail-owner.own-orange { background: var(--owner-orange-bg); }
+        .mail-owner.own-yellow { background: var(--owner-yellow-bg); }
+        .mail-owner.own-green  { background: var(--owner-green-bg); }
+        .mail-owner.own-blue   { background: var(--owner-blue-bg); }
+        .mail-owner.own-purple { background: var(--owner-purple-bg); }
+        .mail-owner.own-pink   { background: var(--owner-pink-bg); }
+        .mail-owner.own-brown  { background: var(--owner-brown-bg); }
+        .mail-owner-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .mail-claim { display: inline-flex; align-items: center; justify-content: center; height: var(--control-h-sm);
+            border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-primary); color: var(--text-brand);
+            font: inherit; font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); border-radius: var(--radius-control); padding: var(--sp-0-5) var(--sp-2-5); cursor: pointer; }
+        @media (hover: hover) { .mail-claim:hover { border-color: var(--border-selected); } }
+        .mail-claim:active { background: var(--surface-tertiary); }
+        .mail-claim:disabled { background: var(--surface-tertiary); color: var(--text-disabled); border-color: var(--border-default); cursor: not-allowed; }
+        .mail-age { margin-left: auto; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .mail-age.hot { color: var(--error); font-weight: var(--weight-medium); }
+        .mail-viewwarn { background: var(--warning-bg); border: var(--bw-hairline) solid var(--border-default); color: var(--warning);
+            border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-3); font-size: var(--text-xs); line-height: var(--lh-caption); margin-bottom: var(--sp-3); }
+        /* The same warning, under a class of its own. The viewing heartbeat
+           finds .mail-viewwarn BY CLASS and removes it the moment nobody else
+           is looking at the thread, which would have swept an unconfirmed send
+           off the screen ten seconds after it appeared. */
+        .mail-sendwarn { background: var(--warning-bg); border: var(--bw-hairline) solid var(--border-default); color: var(--warning);
+            border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-3); font-size: var(--text-xs); line-height: var(--lh-caption); margin-bottom: var(--sp-3); }
+        .mail-msg { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-2-5); margin-bottom: var(--sp-2); }
+        .mail-msg.ours { background: var(--surface-tertiary); }
+        .mail-msg-head { display: flex; gap: var(--sp-2); font-size: var(--text-xs); line-height: var(--lh-caption); margin-bottom: var(--sp-1); }
+        .mail-msg-from { font-weight: var(--weight-medium); color: var(--text-primary); }
+        .mail-msg-at { margin-left: auto; color: var(--text-tertiary); }
+        .mail-msg-snip { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); overflow-wrap: anywhere; }
+        .mail-msg-full { font-size: var(--text-xs); color: var(--text-secondary); line-height: var(--lh-caption);
+            white-space: pre-wrap; word-break: break-word; }
+        .mail-msg-full { overflow-wrap: anywhere; }
+        .mail-note { background: var(--warning-bg); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset);
+            padding: var(--sp-2) var(--sp-2-5); font-size: var(--text-xs); line-height: var(--lh-caption); margin-bottom: var(--sp-1-5); }
+        .mail-note-meta { color: var(--text-tertiary); font-size: var(--text-xs); line-height: var(--lh-caption); margin-bottom: var(--sp-0-5); }
+        .mail-act { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); padding: var(--sp-0-5) 0; }
+        .mail-crmchip { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--text-xs); line-height: var(--lh-caption);
+            background: var(--action-soft); border: var(--bw-hairline) solid var(--action-line); color: var(--text-brand);
+            border-radius: var(--radius-tag); padding: var(--sp-0-5) var(--sp-2); }
+        .mail-statebar { display: flex; gap: var(--sp-1-5); flex-wrap: wrap; margin: var(--sp-2-5) 0; align-items: center; }
+        .mail-labelerr { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--warning); }
+        /* ---- the list: an inbox reads as rows, not columns ---- */
+        /* The list is hairline rows on the section's text edge, no box (the mix, spec 3 and 8.3). It
+           clips nothing: a hover or selected fill bleeds 8 past the column as a shadow. */
+        .mlist { border: 0; border-radius: 0; background: none; overflow: visible;
+            container: mlist / inline-size; }
+        /* A row is the spec's 44 with a full hairline under it (a box-shadow, not a half-pixel
+           border, which lands on a device pixel on some screens and vanishes on others), its words
+           on the text edge, and its own text at 14px. */
+        .mrow { display: flex; align-items: center; gap: var(--sp-2-5); padding: var(--sp-2) 0; min-height: var(--row-h);
+            border: 0; box-shadow: var(--rule-b-soft); font-size: var(--text-body); cursor: pointer;
+            position: relative; }
+        /* The keyboard ring is drawn inside the row, so it is never cut away. */
+        .mrow:focus-visible { outline-offset: -2px; }
+        /* Rows off screen are not laid out or painted until they come near
+           (the 2026-10-12 speed audit, P5): a Refresh of 400 rows went from
+           157-184 ms of a desktop's main thread to 101-125. Until it is drawn
+           a row stands at its real content height, so the reader's place
+           holds across a redraw: the row less its padding, its 32 px controls
+           on a touch screen (rows are 48 px there), or its own line where the
+           browser zooms text alone. Only where every row is one line: a list
+           560 px or narrower, or a window 640 px or narrower, wraps them to
+           two. Only on screen. The line is in a second rule of its own: a
+           browser without the lh unit keeps the first, where a value it
+           could not read would leave no size at all. */
+        @media screen and (min-width: 641px) {
+            @container mlist not (max-width: 560px) {
+                .mrow { content-visibility: auto;
+                    contain-intrinsic-size: auto max(calc(var(--row-h) - 2 * var(--sp-2)), var(--control-h-sm)); }
+                @supports (height: 1lh) {
+                    .mrow { contain-intrinsic-size: auto max(calc(var(--row-h) - 2 * var(--sp-2)), var(--control-h-sm), 1lh); }
+                }
+            }
+        }
+        /* 16, the size every other tick in the app is drawn at (.fslot input,
+           .tm-tabpick input, .sr-opt input). Two areas were a pixel either
+           side of it for the same gesture. */
+        .mail-check { width: var(--box-xs); height: var(--box-xs); flex: none; margin: 0; accent-color: var(--control-accent); cursor: pointer; }
+        /* A 15px tick is a miss under a finger, and this one selects the email
+           a bulk action is about to run on. */
+        @media (hover: none) { .mail-check { width: var(--box-md); height: var(--box-md); } }
+        /* The tick's label: its own size, and the anchor of the phone's 40 square (below). */
+        .mail-tick { position: relative; display: inline-flex; flex: none; }
+        .mdot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); flex: none; background: var(--border-emphasis); }
+        .mdot.unassigned { background: var(--warning); }
+        .mdot.assigned { background: var(--fill-mark); }
+        .mdot.progress { background: var(--success); }
+        .mdot.waiting { background: var(--text-tertiary); }
+        .mdot.done { background: transparent; box-shadow: var(--ring-emphasis); }
+        .mfrom { flex: 0 0 148px; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap; color: var(--text-secondary); }
+        .msubj { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap; color: var(--text-tertiary); }
+        /* Who and what were the same 14px, the same weight and the same ink on
+           every row, read or unread, so the only thing separating the sender
+           from the subject was the gap between the columns. The value step
+           the reference draws between them (near-black sender, muted subject)
+           costs nothing here: the sender stays the darkest thing in the row
+           and the subject sits one token behind it, in both states. */
+        .msubj b { font-weight: var(--weight-regular); color: var(--text-tertiary); }
+        /* Unread has to be obvious at a glance, not a 100-weight difference
+           nobody can see. Read rows sit back (400, muted); unread comes
+           forward: full-strength ink, 600, its own tint and a blue edge. */
+        /* 2px, as the reference draws its marker bar. At 3px it read as a
+           border the row had grown rather than a mark against it. */
+        /* WHOSE the email is, at a glance down a long list. Each tint is the
+           team colour at 10% over white, precomputed rather than color-mix()
+           so the contrast guard can read the actual value: 12% was the first
+           strength that failed, on pink and red against the muted ink.
+           Class per name, never a value from data - the CRM learned that when
+           a Pipedrive label coloured url(//evil.co/a) beaconed every render. */
+        /* The dot is the key to the code, so it takes the SOLID colour: a 10%
+           wash is invisible at 8px. Same names, different strength. */
+        .who-dot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); flex: none;
+            display: inline-block; margin-right: var(--sp-0-5); background: var(--text-tertiary); }
+        .who-dot.own-red    { background: var(--owner-red); }
+        .who-dot.own-orange { background: var(--owner-orange); }
+        .who-dot.own-yellow { background: var(--owner-yellow); }
+        .who-dot.own-green  { background: var(--owner-green); }
+        .who-dot.own-blue   { background: var(--owner-blue); }
+        .who-dot.own-purple { background: var(--owner-purple); }
+        .who-dot.own-pink   { background: var(--owner-pink); }
+        .who-dot.own-brown  { background: var(--owner-brown); }
+        /* Whose an email is, is the owner TAG at the row's end (.mail-owner, tinted by the same eight
+           team colours); the row itself is never tinted. Hover and selected are fills that bleed 8
+           past the column with box-shadow, as the order rows' do, and the selected one is the teal
+           wash with its 2px teal-line edge on the outer edge of the bleed, like the open order. */
+        @media (hover: hover) { .mrow:hover { background: var(--surface-secondary);
+            box-shadow: var(--rule-b-soft), calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); } }
+        .mrow:is(.selected, [aria-selected="true"]) { background: var(--action-selected);
+            box-shadow: var(--rule-b-soft), calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected), calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected); }
+        @media (hover: hover) { .mrow:is(.selected, [aria-selected="true"]):hover { background: var(--action-selected);
+            box-shadow: var(--rule-b-soft), calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected), calc(-1 * (var(--sp-2) + var(--bw-strong))) 0 0 var(--border-selected); } }
+        /* The keyboard cursor (j and k) is a ring inside the row, and it wins over the rest. */
+        .mrow.cursor, .mrow.unread.cursor { box-shadow: var(--ring-action-2); }
+        @media (hover: hover) { .mrow.cursor:hover { box-shadow: var(--ring-action-2); } }
+        /* Unread: the sender at 600 and an 8 teal dot at the row's start (the .munread mark), the age
+           accented. The bold sender is what Gmail leans on anyway. */
+        .mrow.unread .mfrom { color: var(--text-primary); font-weight: var(--weight-semibold); }
+        .mrow.unread .msubj { color: var(--text-secondary); }
+        .mrow.unread .msubj b { font-weight: var(--weight-medium); color: var(--text-secondary); }
+        .mrow.unread .mage { color: var(--text-brand); font-weight: var(--weight-medium); }
+        /* Stale outranks unread on the age. Unclaimed mail is nearly always
+           unread, so without this the red the hero paragraph promises, and
+           that the Board already paints, could never actually appear here. */
+        .mrow.unread .mage.hot { color: var(--error); }
+        /* The unread mark is an 8 teal dot (--fill-mark, the semantic mark teal: 3.85:1 on white) at the row's start, ahead of the tick (the mix, spec 8.3).
+           Its word stays in the page for a screen reader (the .sr-only span inside) and is not drawn. */
+        .munread { order: -1; position: relative; flex: none; width: var(--dot-md); height: var(--dot-md); }
+        .munread::before { content: ''; position: absolute; inset: 0; border-radius: var(--radius-circle); background: var(--fill-mark); }
+        /* The badge is on every row and only blanked when the mail has been
+           read: a slot that exists on some rows and not others pushed the
+           sender and the subject of every unread row 36px right of every read
+           one. Hidden, not removed, so the word stays out of the screen
+           reader and the column stays where it is. */
+        .munread.seen { visibility: hidden; }
+        .mcount { flex: none; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); background: var(--surface-sunken);
+            border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-tag); padding: 0 var(--sp-1); }
+        .mnote { flex: none; display: inline-flex; color: var(--text-tertiary); }
+        .mnote svg { width: var(--icon-sm); height: var(--icon-sm); }
+        /* The owner column, pinned the way .mage below it already is. The chip
+           and the Claim button are different widths and a row carries one or
+           neither, so the last thing before the age wandered down the list and
+           dragged the subject's truncation edge 16px with it. */
+        .mown-slot { flex: 0 0 auto; min-width: 88px; max-width: 150px; min-height: var(--control-h-sm); display: flex; align-items: center; }
+        .mage { flex: 0 0 46px; text-align: right; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .mage.hot { color: var(--error); font-weight: var(--weight-medium); }
+        .mage.warm { color: var(--warning); font-weight: var(--weight-medium); }
+        .mail-meta { font-size: var(--text-xs); color: var(--text-secondary); line-height: var(--lh-caption); }
+        .mail-gmail { display: inline-block; margin: var(--sp-1) 0; font-size: var(--text-body); }
+        /* The list's first line when it has nothing: inset like a row, no box. */
+        .mail-empty { border: 0; background: transparent; padding: var(--sp-3) var(--sp-4); text-align: left;
+            font-size: var(--text-body); color: var(--text-tertiary); }
+        /* Idle and armed have to measure the same, or ticking one row drops the
+           whole list and the row you just ticked slides out from under the
+           pointer. 44 (a row) is the armed height: a 32 button and 4 of padding
+           each side, with room to spare. The bar has no edge, only its tint. */
+        /* The list's own head row (12 Oct 2026, OPS-27): a hairline under it
+           and no fill; a tick arms it in place. It was a grey box over the list. */
+        .mail-bulkbar { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+            min-height: var(--row-h);
+            padding: var(--sp-1) 0 var(--sp-1) calc(var(--dot-md) + var(--sp-2-5)); margin-bottom: 0; border: 0; border-bottom: var(--bw-hairline) solid var(--border-default);
+            border-radius: 0; background: none; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .mail-bulkbar .btn { min-height: var(--control-h); padding: 0 var(--sp-3); font-size: var(--text-body); }
+        /* The head row sits straight on its rows: the card's gap is taken back. */
+        .card > #mail-bulk-host:has(> .mail-bulkbar) { margin-bottom: calc(-1 * var(--sp-3)); }
+        /* The 44 above only holds if everything in the bar is one height: the
+           Assign select (only a lead sees it) is the 32 of the buttons beside
+           it, with their weight. */
+        .mail-bulkbar .mail-presence-pick { height: var(--control-h); min-height: var(--control-h); box-sizing: border-box;
+            border-radius: var(--radius-field); border-color: var(--border-default); font-weight: var(--weight-medium); }
+        .mail-bulkbar.armed { background: var(--action-soft);
+            color: var(--text-brand); }
+        .mail-bulk-hint { color: inherit; flex: 1 1 0; min-width: 7rem; }
+        .mail-files { border: 0; border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-3);
+            margin: var(--sp-3) 0; background: var(--surface-tertiary); }
+        .mail-file { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-xs); line-height: var(--lh-caption);
+            border-top: var(--bw-hairline) solid var(--border-default); padding: var(--sp-1-5) 0 var(--sp-1); }
+        .mail-file > :not(.mail-file-name) { flex: none; white-space: nowrap; }
+        .mail-file:first-of-type { border-top: 0; padding-top: 0; }
+        .mail-file-name { flex: 1 1 auto; min-width: 0; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font-weight: var(--weight-medium); }
+        .mail-orders { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-3);
+            margin: var(--sp-3) 0; background: var(--surface-tertiary); }
+        .mail-orders-head { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-secondary); margin-bottom: var(--sp-1-5); }
+        .mail-order { border-top: var(--bw-hairline) solid var(--border-default); padding: var(--sp-2) 0 var(--sp-1); }
+        .mail-order:first-of-type { border-top: 0; padding-top: 0; }
+        .mail-order-top { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
+        .mail-order-name { font-size: var(--text-body); font-weight: var(--weight-medium); }
+        .mail-order-stage { display: inline-flex; align-items: center; font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); border-radius: var(--radius-tag); padding: 0 var(--sp-2); }
+        .mail-order-stage.shipped { background: var(--success-bg); color: var(--success); }
+        .mail-order-stage.made { background: var(--action-soft); color: var(--text-brand); }
+        .mail-order-stage.in-production { background: var(--warning-bg); color: var(--warning); }
+        .mail-order-stage.not-started { background: var(--surface-sunken); color: var(--text-tertiary); }
+        .mail-order-meta { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .mail-order-track { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-xs); line-height: var(--lh-caption);
+            color: var(--text-secondary); margin-top: var(--sp-1); font-family: var(--font-mono); }
+        .mail-hidden-note { display: flex; align-items: center; gap: var(--sp-1-5); flex-wrap: wrap;
+            font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-brand); background: var(--action-soft);
+            border: var(--bw-hairline) solid var(--action-line); border-radius: var(--radius-inset);
+            padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-2); }
+        .linkish { border: 0; background: none; padding: 0; font: inherit; font-size: var(--text-xs); line-height: var(--lh-caption);
+            font-weight: var(--weight-medium); cursor: pointer; }
+        .mrule { border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-2); }
+        .mrule-head { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
+        .mrule-name { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); }
+        .mrule-name.off { color: var(--text-tertiary); text-decoration: line-through; }
+        .mrule-when { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); }
+        .mrule-do { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); margin-top: var(--sp-1); }
+        .mrule-bar { display: flex; gap: var(--sp-1-5); flex-wrap: wrap; margin-top: var(--sp-2); }
+        .mrule-bar .btn { font-size: var(--text-xs); line-height: var(--lh-caption); padding: var(--sp-1) var(--sp-2); }
+        .mrule-cond { display: flex; align-items: center; gap: var(--sp-1-5); margin-bottom: var(--sp-1-5); flex-wrap: wrap; }
+        .mrule-pool { margin: var(--sp-1-5) 0; }
+        .mrule-broken { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--warning); margin-top: var(--sp-1); }
+        /* A Gmail folder can be called anything, so the tag ellipsises rather
+           than taking the subject's last pixels wherever it is allowed to
+           shrink (see the narrow-row block). */
+        .mrule-tag { flex: none; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); background: var(--surface-sunken);
+            border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-tag); padding: 0 var(--sp-1); font-weight: var(--weight-medium); height: 20px; display: inline-flex; align-items: center; }
+        /* A loan's status chip never shrinks: the Inbox's rules for this chip cut it to 'On the'. */
+        .loan-row .mrule-tag { flex: none; }
+        .mail-draft { border: var(--bw-hairline) solid var(--action-line); background: var(--action-soft);
+            border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-3); margin: var(--sp-3) 0; }
+        .mail-draft-text { width: 100%; box-sizing: border-box; font: inherit; font-size: var(--text-body);
+            line-height: var(--lh-control); padding: var(--sp-2) var(--sp-3); margin-top: var(--sp-2); border-radius: var(--radius-field);
+            border: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary); color: var(--text-primary);
+            resize: vertical; }
+        /* What the server appends on send. Muted and unfocusable on purpose:
+           it is a readout of what is coming, not another box to type in. */
+        .mail-sig { margin-top: var(--sp-2); padding-left: var(--sp-2-5); border-left: var(--bw-strong) solid var(--border-strong);
+            font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); }
+        .mail-sig-lab { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium);
+            color: var(--text-tertiary); margin-bottom: var(--sp-1); }
+        .mail-sig-text { white-space: pre-wrap; line-height: var(--lh-control); margin-bottom: var(--sp-1); }
+        .mail-sig-text:last-child { margin-bottom: 0; }
+        /* The shop logo, previewed at the width the footer renders it at. */
+        .mail-sig-logo { display: block; max-width: 160px; height: auto; margin-bottom: var(--sp-1); }
+        .mail-insert { margin-top: var(--sp-2); max-width: 260px; }
+        /* The subject is the only item in the row that can give way: every
+           other span is flex: none and the sender is a hard 148. So under
+           pressure it went to 0 - and the row still did not fit, which pushed
+           the age past the right edge where .mlist's overflow clips it, a row
+           with neither a subject nor a date. Below 1100 the sender and the
+           folder tag yield first, both ellipsised, and the subject keeps what
+           is left. 76px is a first name and the start of a surname; 40 keeps
+           the tag a capsule, and the whole folder name is on its title. */
+        @media (max-width: 1100px) {
+            .mfrom { flex: 0 1 148px; min-width: 76px; }
+            .mrule-tag { flex: 0 1 auto; min-width: 40px; }
+        }
+        /* Two lines by the list's own width: from 821 to 900 with the sidebar
+           docked the row stayed on one line and the subject, the thing a row
+           is for, was a word or two. */
+        @container mlist (max-width: 560px) {
+            .mrow { flex-wrap: wrap; }
+            .msubj { flex: 1 1 55%; order: 5; }
+            .mrow .mrule-tag, .mrow .mnote, .mrow .mail-labelerr { order: 6; }
+            .mrow .mrule-tag { max-width: 60px; }
+            .mfrom { min-width: 0; flex: 1 1 56px; }
+        }
+        /* Narrow rows have to give something up, and it was the owner, which
+           left the 10% tint as the only thing saying whose the email is. The
+           key to that tint is the strip at the top of the card, off screen by
+           the time the list is being read, so the row said nothing. The count
+           goes instead: it repeats a number the thread itself shows.
+           The same row on a WIDER screen is no better off. The sidebar is
+           off canvas up to 900 now; when it docked from 761 a 761px window
+           gave the row 394 - narrower than
+           any phone reaches, and every subject in the list went to zero. The
+           row stays narrow up to the 900 tablet stop, so one query covers
+           both. */
+        @media (max-width: 900px) {
+            .mfrom { flex-basis: 96px; }
+            .mcount { display: none; }
+            /* The row wraps at this width, so a fixed column buys nothing and
+               costs the sender the space it needs. */
+            .mown-slot { flex: 0 0 auto; }
+            /* In a row, the chip collapses to its dot: that is the whole cue,
+               it is the same key the strip at the top of the card draws, and
+               it costs 22px where the name costs 83. The name is still read
+               out, by the technique .disp-opt-sr uses. The board's cards have
+               the room, so they keep theirs. */
+            .mrow .mail-owner { padding: 0 var(--sp-1-5); }
+            .mrow .mail-owner-name { position: absolute; width: 1px; height: 1px;
+                overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+        }
+        .crm-ai.future { color: var(--text-tertiary); }
+        /* Anything pinned to a viewport edge clears the notch and the home
+           indicator. env() is 0 on hardware that has neither, so this costs
+           nothing on a desktop. */
+        /* The drop targets belong to the board, so the bar spans the main column,
+           not the sidebar too. */
+        .crm-dropbar { position: fixed; left: 0; right: 0; bottom: 0; display: none; gap: var(--sp-2);
+            padding: var(--sp-3) var(--sp-4);
+            padding-bottom: calc(var(--sp-3) + env(safe-area-inset-bottom, 0px));
+            background: var(--surface-primary); border-top: var(--bw-hairline) solid var(--border-default);
+            box-shadow: var(--shadow-lg); z-index: 60; }
+        @media (min-width: 901px) { body:not(.sidebar-collapsed) .crm-dropbar { left: var(--sidebar-w); } }
+        .crm-dropbar.show { display: flex; }
+        .crm-zone { flex: 1; text-align: center; padding: var(--sp-4) 0; border-radius: var(--radius-inset);
+            border: var(--bw-strong) dashed var(--border-emphasis); font-weight: var(--weight-medium); font-size: var(--text-body); color: var(--text-secondary); }
+        .crm-zone.won { border-color: var(--success); color: var(--success); }
+        .crm-zone.lost { border-color: var(--error); color: var(--error); }
+        .crm-zone.dragover { background: var(--surface-sunken); }
+        .crm-badge { background: var(--error); color: var(--text-on-status); border-radius: var(--radius-tag); font-size: var(--text-xs); line-height: var(--lh-caption);
+            font-weight: var(--weight-medium); padding: 0 var(--sp-1-5); margin-left: var(--sp-1-5); }
+        .crm-new-dot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-circle); background: var(--fill-mark); flex: none; }
+        .crm-chev { display: flex; gap: var(--sp-0-5); margin: var(--sp-2) 0 var(--sp-1); }
+        .crm-chev-s { flex: 1; padding: var(--sp-2) var(--sp-0-5); background: var(--surface-sunken); cursor: pointer;
+            font-size: var(--text-xs); line-height: var(--lh-caption); text-align: center; color: var(--text-secondary); white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis;
+            clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 50%, calc(100% - 7px) 100%, 0 100%, 7px 50%); }
+        .crm-chev-s:first-child { clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 50%, calc(100% - 7px) 100%, 0 100%); }
+        .crm-chev-s.done { background: var(--action-soft); color: var(--text-brand); }
+        .crm-chev-s.on { background: var(--action-selected); color: var(--text-brand); box-shadow: var(--ring-action); font-weight: var(--weight-medium); }
+        .crm-chev-s.frozen { cursor: default; }
+        .crm-sub { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        /* Activities live in a card like every other list in the app; naked
+           hairline rows on the page background read as a draft. */
+        .crm-act-list { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default);
+            border-radius: var(--radius-card); padding: 0 var(--sp-3); }
+        /* ...and inside the activities card it sheds that frame: a bordered box
+           17px inside the card's identical border is one frame drawn twice. The
+           rows sit on the section's text edge (no side padding of their own), so
+           the rule between two of them runs the text column the way a table's does. */
+        .card-bleed.crm-act-list { border: 0; border-radius: 0; padding: 0; background: transparent; }
+        .card-bleed.crm-act-list > .crm-act-row,
+        .card-bleed.crm-act-list > .crm-group,
+        .card-bleed.crm-act-list > .crm-sub {
+            padding-left: 0; padding-right: 0; }
+        .crm-act-list .crm-group { margin: var(--sp-3) 0 0; }
+        /* The same swap for the leads list: rows on a card, not a stack of
+           bordered boxes inside a bordered box. */
+        .crm-lead-list .lbl-who .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .card-bleed.crm-lead-list > .lbl-row { border: 0; border-radius: 0; margin-bottom: 0; padding-inline: 0;
+            border-bottom: var(--bw-hairline) solid var(--border-default); }
+        .card-bleed.crm-lead-list > .lbl-row:last-child { border-bottom: 0; }
+        /* One hover shade across the whole tab: the tables under it use --surface-secondary,
+           and --surface-tertiary now means SELECTED on the contacts table. */
+        @media (hover: hover) { .card-bleed.crm-lead-list > .lbl-row:hover { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); } }
+        .crm-act-row { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) 0;
+            border-bottom: var(--bw-hairline) solid var(--border-default); font-size: var(--text-body); }
+        .crm-act-row:last-child { border-bottom: 0; }
+        .crm-act-sub { font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--text-primary); }
+        .crm-act-row.done .crm-act-sub { text-decoration: line-through; color: var(--text-tertiary); font-weight: var(--weight-regular); }
+        .crm-act-due { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); white-space: nowrap; }
+        .crm-act-due.overdue { color: var(--error); font-weight: var(--weight-medium); }
+        .crm-act-due.today { color: var(--success); font-weight: var(--weight-medium); }
+        /* Six toggles, one group, on the left of the activities toolbar. The
+           32px box is re-cut to the toolbar's own 28px row here for the same
+           reason the selects and the segmented track are: one control carrying
+           its own height sets the height of the whole row. */
+        .crm-types { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }
+        .tbl-tools .crm-ticon { width: var(--box-lg); height: var(--box-lg); }
+        .crm-ticon { width: var(--control-h); height: var(--control-h); border-radius: var(--radius-control); border: var(--bw-hairline) solid var(--border-strong);
+            background: var(--surface-primary); cursor: pointer; display: inline-flex; align-items: center;
+            justify-content: center; color: var(--text-tertiary); }
+        .crm-ticon svg { width: var(--icon-md); height: var(--icon-md); }
+        .crm-ticon:is(.on, [aria-pressed="true"]) { color: var(--text-brand); border-color: var(--border-selected); background: var(--action-selected); }
+        /* One chip geometry for the whole tab: the lbl-chip recipe, height set
+           rather than inherited from a line box. Left to inherit, the same
+           label measured 24px in a table cell and 22px in a modal. */
+        .crm-prio { display: inline-flex; align-items: center; height: var(--tag-h); font-size: var(--text-xs); line-height: var(--lh-caption);
+            font-weight: var(--weight-medium); border-radius: var(--radius-tag); padding: 0 var(--sp-2);
+            letter-spacing: normal; flex: none; }
+        .crm-prio.high { background: var(--error-bg); color: var(--error); }
+        .crm-prio.medium { background: var(--warning-bg); color: var(--warning); }
+        .crm-prio.low { background: var(--surface-sunken); color: var(--text-tertiary); }
+        .crm-bar-row { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-1) 0; font-size: var(--text-xs); line-height: var(--lh-caption); }
+        .crm-bar-lab { width: 150px; flex: none; color: var(--text-secondary); white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis; text-align: right; }
+        .crm-bar-track { flex: 1; background: var(--surface-sunken); border-radius: var(--radius-full); height: 16px; }
+        .crm-bar-fill { height: 100%; border-radius: var(--radius-full); background: var(--fill-mark); min-width: 2px; }
+        .crm-bar-val { width: 90px; flex: none; font-weight: var(--weight-medium); }
+        /* A group inside a CRM window has no box of its own (the mix, spec 3): a window is boxed as a whole. */
+        .crm-focus { border: 0; border-radius: 0; padding: 0; margin: var(--sp-3) 0; }
+        .crm-hist-row { padding: var(--sp-2) 0; border-bottom: var(--bw-hairline) solid var(--border-default); font-size: var(--text-body); overflow-wrap: anywhere; }
+        .crm-hist-row:last-child { border-bottom: 0; }
+        .crm-hist-row.pinned { background: var(--surface-tertiary); border-radius: var(--radius-inset); padding: var(--sp-2); }
+        .crm-hist-when { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .crm-list-row { cursor: pointer; }
+        /* Chromium does not paint an outline on a row of a border-collapse
+           table, so the house ring never appeared on either CRM table and a
+           tabbed row was focusable with nothing to show for it. Drawn INSIDE
+           the row instead, the way the inbox's keyboard cursor already is. */
+        .crm-list-row:focus-visible { outline: none; box-shadow: var(--ring-action-2); }
+        /* Rotting is its own signal: a red left edge on the whole card (the rule above), never
+           to be confused with an overdue activity's red icon or a red label dot. */
+        /* Tinted, not white-on-colour: an amber or grey label must still read. */
+        .crm-chip { display: inline-flex; align-items: center; height: var(--tag-h); font-size: var(--text-xs); line-height: var(--lh-caption);
+            font-weight: var(--weight-medium); border-radius: var(--radius-tag); padding: 0 var(--sp-2);
+            letter-spacing: normal; flex: none; }
+        .crm-group { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary);
+            text-transform: none; letter-spacing: normal; margin: var(--sp-4) 0 var(--sp-0-5); }
+        .crm-act-note { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); margin-top: var(--sp-0-5); white-space: pre-wrap;
+            font-weight: var(--weight-regular); }
+        .crm-ta { position: relative; }
+        .crm-ta-drop { position: absolute; z-index: 60; left: 0; right: 0; top: 100%;
+            background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-card);
+            box-shadow: var(--shadow-lg); max-height: 220px; overflow-y: auto; }
+        .crm-ta-drop button { display: block; width: 100%; text-align: left; padding: var(--sp-2) var(--sp-2-5);
+            background: none; border: 0; border-bottom: var(--bw-hairline) solid var(--border-default); cursor: pointer;
+            font-size: var(--text-body); color: var(--text-primary); }
+        .crm-ta-drop button:last-child { border-bottom: 0; }
+        /* .on is the keyboard's highlight and shares the mouse's exactly: two
+           shades would read as two different states. */
+        .crm-ta-drop button.hot, .crm-ta-drop button.on { background: var(--surface-tertiary); }
+        @media (hover: hover) { .crm-ta-drop button:hover { background: var(--surface-tertiary); } }
+        .crm-ta-sub { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .crm-cline { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1-5) 0; font-size: var(--text-body); }
+        .crm-cline svg { width: var(--icon-md); height: var(--icon-md); color: var(--text-tertiary); flex: none; }
+        .crm-cline a { color: var(--text-brand); text-decoration: underline; word-break: normal; overflow-wrap: anywhere; text-underline-offset: var(--sp-1); text-decoration-color: var(--link-underline); }
+        @media (hover: hover) { .crm-cline a:hover { text-decoration-color: currentColor; } }
+        .crm-cf { display: grid; grid-template-columns: minmax(90px, 150px) 1fr; gap: var(--sp-1) var(--sp-2-5);
+            font-size: var(--text-body); }
+        .crm-cf-k { color: var(--text-tertiary); font-size: var(--text-xs); line-height: var(--lh-caption); padding-top: var(--sp-0-5); }
+        /* --radius-inset, not --radius-card: this box sits inside the deals card, in the same 1px
+           grey, and repeating the parent's corner reads as one frame drawn
+           twice. */
+        /* The empty pipeline's welcome is words on the card, not a box inside it:
+           the in-card label over a line of prose, then the board. */
+        /* Idle and armed measure the same, so ticking a row never moves the
+           table under the pointer: 28px is the armed height, the small button
+           the card header and the toolbar above it are both built from. */
+        .crm-selbar { display: flex; align-items: center; gap: var(--control-gap); }
+        .ktable tr.crm-selhead > th { padding: 0; }
+        .ktable.crm-contact-table > thead > tr.crm-selhead ~ tr { display: none; }
+        /* A phone hides every table's head, but not the one holding Delete and Clear selection (final review I-2). */
+        @media (max-width: 640px) { .ktable.crm-contact-table > thead:has(> tr.crm-selhead), .ktable.crm-contact-table > thead > tr.crm-selhead, .ktable.crm-contact-table > thead > tr.crm-selhead > th { display: block; } }
+        .crm-act-row .crm-mid { flex: 1; min-width: 0; cursor: pointer; }
+        /* The contacts table's tick is the same gesture as the activity row's,
+           so it is drawn here rather than hand-sized at the call site. Both are
+           the house 16, and both are DRAWN: left native the box carried the
+           UA's own 3px/4px margin, so it sat 4px off the cell's 12px padding,
+           and it answered none of the 1px hairline and 4px corner the
+           reference's selection control is built from. 4px, not --radius-xs: on a
+           16px box a 6px corner is 37% of the side and the checked state read
+           as a black disc with a tick in it - the pick-ONE control. */
+        .crm-act-row input[type=checkbox], .crm-contact-table .tick input[type=checkbox] {
+            appearance: none; -webkit-appearance: none; display: block;
+            width: var(--box-xs); height: var(--box-xs); margin: 0; flex: none; cursor: pointer;
+            background: var(--surface-primary);
+            border: var(--bw-hairline) solid var(--border-emphasis); border-radius: var(--radius-tag);
+            transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+        @media (hover: hover) { .crm-act-row input[type=checkbox]:hover, .crm-contact-table .tick input[type=checkbox]:hover {
+            border-color: var(--text-secondary); } }
+        .crm-act-row input[type=checkbox]:checked, .crm-contact-table .tick input[type=checkbox]:checked,
+        .crm-contact-table .tick input[type=checkbox]:indeterminate {
+            background: var(--fill-mark) no-repeat center/11px;
+            border-color: var(--border-selected); }
+        .crm-act-row input[type=checkbox]:checked, .crm-contact-table .tick input[type=checkbox]:checked {
+            background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E"); }
+        /* Some but not all: the header tick says so rather than lying either way. */
+        .crm-contact-table .tick input[type=checkbox]:indeterminate {
+            background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3.4' stroke-linecap='round'%3E%3Cline x1='6' y1='12' x2='18' y2='12'/%3E%3C/svg%3E"); }
+        .crm-act-row input[type=checkbox]:focus-visible, .crm-contact-table .tick input[type=checkbox]:focus-visible {
+            outline: var(--focus-outline); outline-offset: 1px; }
+        .crm-board { scroll-snap-type: x proximity; }
+        .crm-col { scroll-snap-align: start; }
+        @media (max-width: 640px) {
+            .crm-col { min-width: 240px; flex-basis: 240px; min-height: 200px; }
+            .crm-chev { flex-wrap: wrap; }
+            .crm-chev-s { flex: 1 1 30%; clip-path: none !important; border-radius: var(--radius-control); }
+            .crm-bar-lab { width: calc(var(--sp-8) * 3); font-size: var(--text-xs); line-height: var(--lh-caption); }
+            .crm-bar-val { width: var(--field-w-xs); font-size: var(--text-xs); line-height: var(--lh-caption); }
+            /* Order and email rows are built from hard min-widths plus a row
+               of buttons whose min-content exceeds a 390px phone, so they
+               spilled past the card and pushed the page sideways. On a phone
+               they wrap onto a second line instead, and the floors relax. */
+            .lbl-row { flex-wrap: wrap; padding: var(--sp-3); }
+            .lbl-qrow { padding-inline: 0; }   /* the queue's rows keep their words on the text edge */
+            .lbl-num { min-width: 0; }
+            .lbl-who { min-width: 0; flex: 1 1 100%; }
+            .lbl-actions { flex: 1 1 100%; justify-content: flex-start; }
+            .mrow { flex-wrap: wrap; }
+            /* Line one is the sender and the age, line two is the subject and
+               the badges that qualify it. Ordering only the subject left the
+               badges on line one, where a folder name plus a clip plus a
+               warning pushed the age off the end: it wrapped to the FAR LEFT
+               of line two on the rows that had them, and those rows grew a
+               third line (108 and 111px against 80). The badges follow the
+               subject now, and the basis is under 100% so they share its line
+               rather than starting another one. */
+            .msubj { flex: 1 1 55%; order: 5; }
+            .mrow .mrule-tag, .mrow .mnote, .mrow .mail-labelerr { order: 6; }
+            .mrow .mrule-tag { max-width: 60px; }
+            /* A basis, not auto: with auto the sender's own length decides
+               where the row wraps, so a long name cost that row a whole third
+               line and the list came out 80px, 80px, 108px. min-width stays 0,
+               so it can still shrink out of the way under real pressure. */
+            .mfrom { min-width: 0; flex: 1 1 56px; }
+            /* The presence chip is built round a select and will not shrink, so on
+               a phone each person takes the full width as a 44 hairline row.
+               Full width puts each row on its own flex LINE, which is where the
+               strip kept one height: stretch only equalises cards sharing a line.
+               The two strings ellipsise rather than wrap, so every row measures
+               the same, and the select is a 40 target. */
+            .mail-who { gap: 0; }
+            .mail-who-card { flex: 1 1 100%; min-width: 0; min-height: var(--row-h); padding: 0; box-shadow: var(--rule-b-soft); }
+            .mail-who-card .mail-presence-pick { height: var(--control-h-lg); min-height: var(--control-h-lg); }
+            .mail-who-card .mail-who-name, .mail-who-card .mail-who-load {
+                min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        }
+        @media (max-width: 640px) { .disp-addr-grid { grid-template-columns: 1fr; } }
+        /* The parcel and customs rows are built from unshrinkable fixed widths
+           (~466px) inside a ~310px modal on a phone, so the weight field and the
+           remove button sat outside the modal entirely. Let them wrap. */
+        @media (max-width: 640px) {
+            .disp-boxedit { flex-wrap: wrap; }
+            .disp-boxedit > select.psel { min-width: 0; flex: 1 1 100%; }
+            .disp-boxedit > input[type=text] { flex: 1 1 100%; }
+            .disp-boxdim { width: 58px; }
+            /* The custom shipment's parcel row: the four measures were 26 wide, slivers with no word in them. The preset
+               takes three of four columns with the remove square in the fourth; the measures are the next line, equal. */
+            .disp-boxrow:has(> .disp-sel) { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+            .disp-boxrow > .disp-sel { grid-column: 1 / 4; min-width: 0; }
+            .disp-boxrow:has(> .disp-sel) > .icon-btn { grid-column: 4; grid-row: 1; justify-self: end; }
+            .disp-boxrow:has(> .disp-sel) > .disp-num { min-width: 0; }
+            /* An actual-size label preview is 102mm (384px) or A4 (794px) wide:
+               it juts past the card and drags the whole tab sideways. Scroll it
+               inside its own box, and scale it down to fit the phone - the mm
+               geometry the printer uses is untouched. zoom, not a transform, so
+               the box shrinks with the label and no blank is left under it
+               (Cameron, 13 Oct 2026). */
+            .lbl-preview { overflow-x: auto; }
+            .lbl-preview .label-sheet { zoom: .78; }
+        }
+        .disp-pick { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2);
+            margin: 0 0 var(--sp-2-5); padding-bottom: var(--sp-2-5); border-bottom: var(--bw-hairline) solid var(--border-default); }
+        .disp-pick-name { font-weight: var(--weight-medium); color: var(--text-primary); }
+        .disp-tech { margin-top: var(--sp-3); border: 0; border-radius: var(--radius-inset);
+            padding: var(--sp-2) var(--sp-3); background: var(--surface-tertiary); }
+        .disp-tech > summary { cursor: pointer; font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-secondary); }
+        .disp-tech-bar { display: flex; gap: var(--sp-2); margin: var(--sp-2) 0 0; }
+        .disp-tech-h { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary);
+            text-transform: none; letter-spacing: normal; margin: var(--sp-3) 0 var(--sp-1); }
+        .disp-tech-pre { margin: 0; padding: var(--sp-2) var(--sp-2); border-radius: var(--radius-inset); background: var(--surface-primary);
+            border: 0; font-size: var(--text-xs); line-height: var(--lh-caption);
+            white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto;
+            font-family: var(--font-mono); color: var(--text-secondary); }
+        .disp-pick-when { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        /* Courier quote card: two hard rails - the carrier's name on the left and a
+           right-aligned price - so 8+ options can be raked, not read. Detail
+           (drop-off address, price breakdown) is revealed only on selection. */
+        .disp-opts { display: flex; flex-direction: column; gap: var(--sp-1); }
+        .disp-opt { position: relative; display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            column-gap: var(--sp-3); row-gap: 0; align-items: center;
+            padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-3); cursor: pointer; overflow: hidden;
+            background: var(--surface-secondary); border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-inset);
+            transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+        /* Selection spine: still legible when the card scrolls under the header. */
+        .disp-opt::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+            background: var(--fill-mark); transform: scaleX(0); transform-origin: left; transition: transform .14s; }
+        @media (hover: hover) { .disp-opt:hover { background: var(--surface-primary); border-color: var(--border-emphasis); } }
+        /* The chosen courier is a chosen control: the wash and the selected edge,
+           with no second ring or spine on top. */
+        .disp-opt:is(.on, :has(> input[type=radio]:checked)) { background: var(--action-selected); border-color: var(--border-selected); box-shadow: none; }
+        .disp-opt:focus-within { border-color: var(--border-selected); box-shadow: var(--focus-ring); }
+        .disp-opt > input[type=radio] { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
+        .disp-opt-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+        .disp-opt-top { grid-column: 1; grid-row: 1; display: flex; align-items: baseline; gap: var(--sp-1); min-width: 0;
+            flex-wrap: wrap; row-gap: var(--sp-1); }
+        .disp-opt-top > .lbl-chip { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        /* The courier's own name leads: a product code told the operator nothing. */
+        .disp-opt-prov { font-weight: var(--weight-medium); color: var(--text-primary); flex: none; }
+        .disp-opt-prov.disp-opt-unknown { color: var(--warning); font-weight: var(--weight-medium); }
+        /* Same rule as .lbl-nameline: the name gives way, chips are never cut in half. */
+        .disp-opt-carrier { font-weight: var(--weight-medium); font-size: var(--text-body); color: var(--text-primary);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+        .disp-opt-price { grid-column: 2; grid-row: 1; justify-self: end;
+            font-weight: var(--weight-medium); font-size: var(--text-body); letter-spacing: normal; white-space: nowrap; color: var(--text-primary); }
+        .disp-opt-when { grid-column: 1; grid-row: 2; font-size: var(--text-xs); line-height: var(--lh-caption); min-width: 0;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .disp-opt-when .d { color: var(--text-primary); font-weight: var(--weight-medium); }
+        .disp-opt-when .t { color: var(--text-secondary); }
+        .disp-opt-when .p { color: var(--text-tertiary); }
+        .disp-opt-price { display: flex; flex-direction: column; align-items: flex-end; line-height: var(--lh-control); }
+        .disp-opt-price .p-inc { font-weight: var(--weight-medium); font-size: var(--text-body); letter-spacing: normal; }
+        .disp-opt-price .p-ex { font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary); letter-spacing: 0; }
+        .disp-vat { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); margin: var(--sp-0-5) 0 var(--sp-2); font-variant-numeric: tabular-nums; }
+        .disp-opt-more { grid-column: 1 / -1; grid-row: 3; display: none;
+            margin-top: var(--sp-2); padding-top: var(--sp-2); border-top: var(--bw-hairline) solid var(--border-default); }
+        .disp-opt:is(.on, :has(> input[type=radio]:checked)) .disp-opt-more { display: block; }
+        .disp-opt-shop { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); }
+        .disp-opt-shop b { color: var(--text-primary); font-weight: var(--weight-medium); }
+        @media (prefers-reduced-motion: reduce) { .disp-opt, .disp-opt::before { transition: none; } }
+        .disp-confirm { margin-top: var(--sp-3); }
+        .disp-notify { display: flex; align-items: flex-start; gap: var(--sp-2); font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary);
+            padding: var(--sp-2) 0; cursor: pointer; }
+        .disp-book.needs-requote { background: var(--warning); border-color: var(--warning); }
+        .disp-charge { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--warning); margin: var(--sp-1) 0 var(--sp-2-5); }
+        .disp-book { width: 100%; justify-content: center; }
+        .disp-result-head { display: flex; align-items: center; gap: var(--sp-2); font-weight: var(--weight-medium); font-size: var(--text-body); margin-bottom: var(--sp-2); }
+        .disp-result-head svg { width: var(--icon-lg); height: var(--icon-lg); color: var(--success); flex: none; }
+        .disp-track { font-size: var(--text-body); margin-bottom: var(--sp-1); }
+        .disp-track b { font-family: var(--font-mono); }
+        .disp-warn { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--warning); background: var(--warning-bg);
+            border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset); padding: var(--sp-2) var(--sp-2); margin: var(--sp-2) 0; }
+        .disp-ok-line { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--success); margin: var(--sp-2) 0; }
+        /* One line, three tones. The tone is the answer: green only for a
+           number the EU database confirmed, and muted (never red) for one it
+           failed to answer about. */
+        .eori-row { display: flex; gap: var(--sp-2); align-items: center; margin-top: var(--sp-1-5); }
+        .eori-row .disp-num { flex: 1 1 auto; min-width: 0; }
+        .eori-line { font-size: var(--text-xs); margin: var(--sp-2) 0 0; line-height: var(--lh-caption); }
+        .eori-line.ok { color: var(--success); }
+        .eori-line.bad { color: var(--error); }
+        .eori-line.muted { color: var(--text-secondary); }
+        .eori-line a { color: inherit; text-decoration: underline; }
+        .disp-await { color: var(--text-secondary); background: var(--surface-secondary); margin: var(--sp-2) 0; }
+        .disp-notice { text-align: center; padding: var(--sp-4) 0; }
+        .disp-notice p { color: var(--text-secondary); margin-bottom: var(--sp-3); }
+        .disp-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-top: var(--sp-3); }
+        .disp-boxname { flex: 1 1 auto; }
+        .disp-boxdim { width: 62px; flex: none; }
+        .disp-breakdown { font-size: var(--text-xs); line-height: var(--lh-caption); margin-top: var(--sp-1); }
+        .disp-breakdown summary { cursor: pointer; color: var(--text-tertiary); font-weight: var(--weight-medium); }
+        .disp-breakdown[open] summary { color: var(--text-secondary); }
+        @media (max-width: 640px) { .disp-dims { grid-template-columns: repeat(2, 1fr); } .disp-origin { grid-template-columns: 1fr; } }
+        .miss-strip { background: var(--warning-bg); margin-bottom: var(--sp-3); }
+        .miss-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--text-body); }
+        .miss-head svg { width: var(--icon-md); height: var(--icon-md); color: var(--warning); flex: none; }
+        .miss-sub { color: var(--text-secondary); font-size: var(--text-xs); line-height: var(--lh-caption); }
+        .miss-row { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary);
+            padding: var(--sp-1-5) 0 0 var(--sp-6); }
+        .miss-row b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+        .miss-co { color: var(--text-primary); font-weight: var(--weight-medium); }
+        .miss-queue { margin-left: auto; padding: var(--sp-1) var(--sp-2); font-size: var(--text-xs); line-height: var(--lh-caption); }
+        .miss-open { font-weight: var(--weight-medium); cursor: pointer; }
+        @media (hover: hover) { .miss-open:hover { text-decoration: underline; } }
+        /* An order number that is a door still has to sit in the same column as
+           one that is not, so the link takes only the colour: .lbl-num keeps the
+           14px tabular geometry and the 92px column. */
+        .lbl-num-link, .modal-order-link, .action-link { color: var(--text-brand); text-decoration: underline; text-underline-offset: var(--sp-1); text-decoration-color: var(--link-underline); }
+        @media (hover: hover) { .lbl-num-link:hover, .modal-order-link:hover { text-decoration: underline; } }
+        .label-sheet .ls-dead { border: var(--bw-marker) solid var(--paper-ink); font-size: 1.68em; font-weight: var(--weight-semibold); letter-spacing: .04em;
+            text-align: center; padding: .35em .4em; margin-bottom: .7em; }
+        .label-sheet .ls-due { font-size: .85em; font-weight: var(--weight-semibold); color: var(--paper-ink-4); margin-left: .7em; }
+        .label-sheet .ls-due.soon { color: var(--paper-ink); font-weight: var(--weight-semibold); border: var(--bw-strong) solid var(--paper-ink);
+            padding: .08em .55em; border-radius: 2px; }
+        .label-sheet .ls-onote { font-size: .9em; font-weight: var(--weight-medium); color: var(--paper-ink-2); margin-top: .55em; overflow-wrap: break-word; }
+        .label-sheet .ls-onote b { font-weight: var(--weight-semibold); }
+        /* liability / accounts receivable */
+        /* auto-FIT stretches its tracks to fill, so six summary tiles became six
+           very wide ones on a big screen. A ceiling stops them and the row
+           stays left-aligned instead. */
+        .lia-grid { display: grid; gap: var(--sp-3); margin-bottom: var(--sp-3);
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+        @media (min-width: 1500px) {
+            .lia-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 280px));
+                justify-content: start; }
+        }
+        .lia-card { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-card);
+            padding: var(--sp-5) var(--sp-6); box-shadow: var(--shadow-sm); }
+        .lia-k { font-size: var(--text-body); font-weight: var(--weight-regular); text-transform: none; letter-spacing: normal; color: var(--text-tertiary); }
+        .lia-v { font-size: var(--text-head); font-weight: var(--weight-semibold); letter-spacing: var(--tr-fig); margin-top: var(--sp-1); font-variant-numeric: tabular-nums; }
+        .lia-card.ok .lia-v { color: var(--success); }
+        .lia-card.warn .lia-v { color: var(--warning); }
+        .lia-card.bad .lia-v { color: var(--error); }
+        .lia-bar { display: flex; height: 14px; border-radius: var(--radius-full); overflow: hidden; background: var(--surface-tertiary);
+            border: var(--bw-hairline) solid var(--border-strong); margin-bottom: var(--sp-2); }
+        /* The FOREGROUND tokens, for the same reason the legend dots below were
+           moved off the tints: #f0fdf4 and #fffbeb are 1.05:1 and 1.04:1
+           against the card, so the first third of the bar read as unfilled
+           track and the key claimed a colour the bar was not painting. */
+        .lia-seg.within { background: var(--success); }
+        .lia-seg.soon { background: var(--warning); }
+        /* The four overdue buckets were the SAME pink, so the aged-debt bar -
+           whose entire job is showing how deep the debt is aged - read as one
+           undifferentiated block. A ramp from the danger tint to full danger. */
+        .lia-seg.o1, .lia-dot.o1 { background: var(--ageing-1); }
+        .lia-seg.o2, .lia-dot.o2 { background: var(--ageing-2); }
+        .lia-seg.o3, .lia-dot.o3 { background: var(--ageing-3); }
+        .lia-seg.o4, .lia-dot.o4 { background: var(--ageing-4); }
+        /* An edge round every band and every swatch, which is also the edge
+           between two bands: six adjacent fills, four of them steps on one ramp
+           and two of them the same lightness in different hues, are only
+           counted as six if each one's boundary is drawn. It is a hairline in
+           45% ink, 3.35:1 on the card, because the palest step rgb(252,165,165)
+           is 1.91:1 there - under the 3:1 a meaningful graphic needs, and worst
+           on the 9px legend dot that stands alone on white. The ramp cannot be
+           darkened to fix that without collapsing o1 into o2, so the boundary
+           carries the contrast instead of the fill. */
+        .lia-seg, .lia-dot { box-shadow: var(--ring-edge); }
+        .lia-legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: var(--sp-1) var(--sp-4); font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); }
+        .lia-leg-item { display: inline-flex; align-items: center; gap: var(--sp-1); }
+        .lia-dot { width: var(--dot-md); height: var(--dot-md); border-radius: var(--radius-swatch); display: inline-block; }
+        /* Legend swatches use the FOREGROUND tokens: the -bg tints were almost
+           the page colour, so the key read as blank space. */
+        .lia-dot.within { background: var(--success); }
+        .lia-dot.soon { background: var(--warning); }
+        /* A fixed track, not a floor. min-width let the column GROW instead of
+           ellipsing, so one long account name pushed its row's second column
+           256px right of every other row's and the declared ellipsis never
+           fired. Every row's name now starts and ends at the same x. */
+        .lia-name { font-size: var(--text-body); font-weight: var(--weight-medium); flex: 0 0 clamp(150px, 30%, 320px); width: clamp(150px, 30%, 320px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .lbl-chip.deep { background: var(--error-bg); color: var(--error); border-color: var(--error); }
+        .cov-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+        .cov-head h3 { font-size: var(--text-body); font-weight: var(--weight-medium); }
+        .cov-line { font-size: var(--text-body); color: var(--text-secondary); margin-top: var(--sp-1); }
+        .cov-ok { font-size: var(--text-body); color: var(--success); margin-top: var(--sp-2); font-weight: var(--weight-medium); }
+        .cov-note { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); margin-top: var(--sp-2); }
+        .lbl-preview-note { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); margin: var(--sp-2) 0 0; }
+        .lbl-preview-note.bad { color: var(--error); font-weight: var(--weight-medium); }
+        /* Off-screen staging area: it must have real layout (not display:none) so the
+           shrink-to-fit measurement is accurate before printing. */
+        #label-print { position: absolute; left: -10000px; top: 0; }

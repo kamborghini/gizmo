@@ -1,0 +1,138 @@
+        /* ---------- Main ---------- */
+        .main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+        /* THE INK FRAME (the mix, spec 5). The chrome is ink; the page is one
+           sheet 8 inside it with a 12 corner, no edge and no shadow. Since 13 Oct
+           2026 the sheet is a light grey page for white panels (PANELS, below).
+           Screen only: a report printed to PDF keeps its plain white page. */
+        @media screen {
+            #app { background: var(--surface-chrome); }
+            .main { margin: var(--frame-inset) var(--frame-inset) var(--frame-inset) 0; border-radius: var(--radius-sheet);
+                background: var(--surface-canvas); overflow: hidden; }
+            /* Chat is a reading column, not sections: it keeps the white sheet (13 Oct 2026). */
+        }
+        @media screen { #view-chat { background: var(--surface-primary); } }
+        /* With the sidebar folded away the frame closes round the sheet's left edge too. */
+        @media screen and (min-width: 901px) { body.sidebar-collapsed .main { margin-left: var(--frame-inset); } }
+        /* The bar's row sits on the page column, so the breadcrumb starts on the
+           title's edge and Search ends on the page's right edge at every width.
+           On a wide monitor the bar ran the sheet's width while the page was a
+           centred column, and the margins read as a mistake (12 Oct 2026). */
+        .topbar { height: var(--topbar-h); flex-shrink: 0; background: var(--surface-primary);
+            display: flex; align-items: center; gap: var(--control-gap); position: relative; z-index: 5;
+            padding-inline: max(var(--wrap-pad), calc((100% - var(--wrap)) / 2 + var(--wrap-pad))); }
+        /* On the grey page the bar is the page's own ground, not a white strip of
+           its own (13 Oct 2026); Chat's bar stays on Chat's white sheet. Under 900
+           the bar is the ink frame (below). */
+        @media screen { .topbar { background: transparent; } }
+        @media screen and (min-width: 901px) { body:has(#view-chat.active) .topbar { background: var(--surface-primary); } }
+        /* Where you are: the section in ink-3, a 14 chevron, the page in ink. */
+        .crumbs { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-1); color: var(--text-tertiary);
+            font-size: var(--text-body); line-height: var(--lh-control); }
+        .crumb-chev { display: grid; place-items: center; flex: none; }
+        .crumb-chev svg { width: var(--icon-sm); height: var(--icon-sm); stroke-width: var(--icon-stroke-s); }
+        /* One line, always. A conversation title is user-written and can run to
+           sixty characters; at 375px that wrapped to three lines inside a
+           48px bar and spilled over its border. min-width:0 lets the flex item
+           shrink past its text; the full title rides in the tooltip. */
+        .topbar h1 { font-size: var(--text-body); line-height: var(--lh-control); font-weight: var(--weight-medium); color: var(--text-primary); margin: 0; letter-spacing: normal;
+            min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .menu-btn { display: inline-grid; }
+        /* On a desk the sidebar's own Hide sidebar is in view, so the top bar's
+           trigger steps aside until the sidebar is folded away. On a phone it
+           is the drawer's only door. */
+        @media (min-width: 901px) { body:not(.sidebar-collapsed) .menu-btn { display: none; } }
+        /* Its glyph, not its box, sits on the page's text edge, as the
+           Conversations + does on the sidebar's icon column. */
+        .topbar .menu-btn { margin-left: calc(-1 * var(--sp-1)); }
+        .mb-menu { display: none; }
+        @media (max-width: 900px) { .mb-panel { display: none; } .mb-menu { display: block; } }
+        /* Search: a 32 well 232 wide, the glyph 8 from its word, the shortcut
+           in a key cap. It opens a list of every page you can go to. */
+        .topbar-search { display: inline-flex; align-items: center; gap: var(--control-gap); height: var(--control-h); width: var(--find-w); flex: none;
+            padding: 0 var(--sp-2) 0 var(--sp-3); border: 0; border-radius: var(--radius-control); background: var(--surface-tertiary);
+            color: var(--text-tertiary); font: inherit; font-size: var(--text-body); line-height: var(--lh-control); text-align: start;
+            cursor: pointer; transition: color var(--dur) var(--ease), background var(--dur) var(--ease); }
+        /* Its fill is the grey page's own tone, so on the page it is a white field with a hairline (13 Oct 2026);
+           under 900 the bar is the ink frame, where it keeps its own look. */
+        @media screen and (min-width: 901px) { .topbar-search { background: var(--surface-primary); box-shadow: inset 0 0 0 var(--bw-hairline) var(--border-default); } }
+        @media (hover: hover) { .topbar-search:hover { background: var(--surface-sunken); } }
+        .topbar-search:active { background: var(--press-fill); }
+        .topbar-search svg { width: var(--icon-md); height: var(--icon-md); }
+        .topbar-search .ts-label { flex: 1; }
+        .topbar-search kbd { display: inline-grid; place-items: center; height: var(--tag-h); min-width: var(--tag-h); padding: 0 var(--sp-1);
+            border: 0; border-radius: var(--radius-tag); background: var(--surface-primary); box-shadow: var(--ring-default);
+            font-family: inherit; font-size: var(--text-micro); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary); }
+        @media (max-width: 640px) { .topbar-search .ts-label, .topbar-search kbd { display: none; }
+            /* The page's gutter steps down on a phone, and the top bar, which
+               takes the same token, steps with it, so its controls line up
+               with the page under them. */
+            :root { --wrap-pad: var(--sp-4); } }
+        /* The page list behind the search: an input on top, the pages under it
+           grouped as the sidebar groups them. */
+        .dpanel-search { padding: var(--sp-1); gap: var(--sp-1); min-width: 320px; }
+        /* One width, set before it opens and kept while typing: .dpanel's
+           min-width beat the 320 above, the palette opened 248px wide and was
+           clamped for that, then grew to 302 as results painted, 30px past
+           the window's right edge on every page. */
+        .dpanel.dpanel-search { min-width: 0; width: min(340px, calc(100vw - 16px)); }
+        .dsearch-list .dmenu-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+        .dpanel-search input { width: 100%; height: var(--control-h); border: 0; border-bottom: var(--bw-hairline) solid var(--border-default);
+            border-radius: 0; padding: var(--sp-1) var(--sp-2); }
+        .dpanel-search input:focus { box-shadow: none; border-color: var(--border-default); }
+        .dsearch-list { display: flex; flex-direction: column; max-height: 60vh; overflow-y: auto; }
+        /* THE BUTTON (the mix, spec 6): 32 tall, 12 in, a 6 corner, a line-ctl
+           hairline and a 1px lift; 13/20 at 500; a 16 icon in ink-2, 8 from its
+           word. The label is centred in the 32 by the flexbox, so a label that
+           wraps grows the button rather than spilling out of it. */
+        .btn { border: var(--bw-hairline) solid var(--border-strong); background: var(--surface-primary); color: var(--text-primary); border-radius: var(--radius-control);
+            padding: 0 var(--sp-3); font-size: var(--text-body); font-weight: var(--weight-medium); line-height: var(--lh-control); white-space: nowrap;
+            display: inline-flex; align-items: center; justify-content: center; gap: var(--control-gap); box-shadow: var(--shadow-control);
+            transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease); min-height: var(--control-h); }
+        .btn svg { width: var(--icon-md); height: var(--icon-md); }
+        .btn .ic { color: var(--text-secondary); }
+        /* A button that is not ink (disabled, danger) carries its own colour to its icon. */
+        .btn:is([disabled], :disabled, [aria-disabled="true"], .btn-danger, .btn.ghost[disabled], .btn.ghost[aria-disabled="true"]) .ic { color: inherit; }
+        @media (hover: hover) { .btn:hover { background: var(--surface-tertiary); } }
+        .btn:active { background: var(--press); }
+        .btn[aria-expanded="true"] { background: var(--surface-tertiary); }
+        /* ---- Disabled. One recipe for a control (muted fill, disabled ink,
+           not-allowed) and one for a field (muted fill, but the VALUE stays
+           readable, because a locked address is still an address). Nothing
+           fades with opacity any more; three controls used to. ---- */
+        .btn[aria-disabled="true"], .btn[disabled], .btn:disabled { background: var(--surface-tertiary); color: var(--text-disabled); border-color: var(--border-default); cursor: not-allowed; }
+        /* Icon wrapper: the svg becomes a block inside a shrink-wrapped flex
+           span, so flex parents centre it truly and inline contexts sit it on
+           the text's middle instead of its baseline. */
+        /* No double-tap zoom delay on things you press, and no grey tap flash:
+           every control here paints its own pressed state. */
+        button, [role="button"], select, input, .toggle, .lbl-row, .mrow, .files-row {
+            touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+        /* A modal or menu that bottoms out must not hand the scroll to the
+           page behind it. */
+        .modal-body, .dmenu, .scroll { overscroll-behavior: contain; }
+        .ic { display: inline-flex; align-items: center; vertical-align: middle; }
+        .ic svg { display: block; }
+        .btn-primary { background: var(--action-primary); border-color: var(--border-selected); color: var(--text-on-action); }
+        .btn-primary .ic { color: var(--text-on-action); }
+        @media (hover: hover) { .btn-primary:hover { background: var(--action-hover); border-color: var(--action-hover); } }
+        .btn-primary:active { background: var(--action-active); border-color: var(--action-active); }
+        .btn-primary[aria-disabled="true"], .btn-primary[disabled], .btn-primary:disabled { background: var(--surface-tertiary); border-color: var(--border-default); color: var(--text-disabled); }
+        /* The one-way door. Only ever the confirming button of a destructive dialog. */
+        .btn-danger { background: var(--action-danger-soft); border-color: transparent; color: var(--error); }
+        @media (hover: hover) { .btn-danger:hover { background: var(--action-danger-soft-hover); border-color: transparent; color: var(--error); } }
+        .btn-danger:active { background: var(--action-danger-soft-active); border-color: transparent; }
+        /* ---- Loading. A control that is working keeps its own colours (it is
+           busy, not inactive), cannot be pressed twice, and its icon turns.
+           setBusy() in the script sets aria-busy; any control may carry it. ---- */
+        [aria-busy="true"] { cursor: progress; }
+        :is(.btn, .icon-btn, .send, .info)[aria-busy="true"] { pointer-events: none; }
+        :is(.btn, .icon-btn, .info)[aria-busy="true"] svg { animation: navspin 1s linear infinite; }
+        .confirm-danger .confirm-msg { border-left: var(--bw-marker) solid var(--error); padding-left: var(--sp-2-5); }
+
+        .view { flex: 1; min-height: 0; display: none; flex-direction: column; }
+        .view.active { display: flex; }
+        /* scrollbar-gutter: a tab whose content scrolls used to be ~11px
+           narrower than one that does not, so the whole page jumped sideways
+           as you moved between them. The gutter is always reserved. */
+        .scroll { flex: 1; overflow-y: auto; scrollbar-gutter: stable; }
+

@@ -1,0 +1,188 @@
+        /* ---------- Form controls: one recipe, applied by element ---------- */
+        /* url, tel and a bare <input> are fields too: the keyword scan's URL
+           box and the Products tag filter wore the browser's bevelled 2px
+           border beside every styled field on the page. */
+        input[type=text], input[type=number], input[type=date], input[type=search],
+        input[type=email], input[type=password], input[type=url], input[type=tel], input:not([type]), textarea, select {
+            background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-strong); border-radius: var(--radius-field);
+            color: var(--text-primary); font: inherit; font-size: var(--text-body); line-height: var(--lh-control); padding: var(--control-pad-y) var(--sp-3);
+            /* 32px like every other control (the mix, spec 6), with a control's 1px lift. */
+            min-height: var(--control-h); box-shadow: var(--shadow-control);
+            transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+        @media (hover: hover) { input:hover:not(:disabled), textarea:hover:not(:disabled), select:hover:not(:disabled) {
+            border-color: var(--border-emphasis); } }
+        /* ---- Focus. Two looks, declared ONCE each: controls draw the outline
+           (the :focus-visible rule above), fields draw the ring. A field's rule
+           used to be copied nine times, once per component, with one copy
+           drawing the outline instead. ---- */
+        :is(input, textarea, select, [contenteditable="true"]):focus { outline: none; box-shadow: var(--focus-ring); }
+        input:disabled, textarea:disabled, select:disabled { background: var(--surface-tertiary); color: var(--text-tertiary); cursor: not-allowed; }
+        /* ---- Invalid. A field the app has rejected says so on its own edge, and
+           its focus ring takes the error tint so the two cannot be confused.
+           markInvalid() in the script sets aria-invalid. ---- */
+        :is(input, textarea, select, [contenteditable="true"])[aria-invalid="true"] { border-color: var(--error); }
+        :is(input, textarea, select, [contenteditable="true"])[aria-invalid="true"]:focus { border-color: var(--error);
+            box-shadow: 0 0 0 var(--bw-strong) var(--white), 0 0 0 calc(2 * var(--bw-strong)) var(--error); }
+        /* A native date/time control carries its own intrinsic content height,
+           so it ignores the shared line box and lands 2px proud of every other
+           field in the same row. Pinned. */
+        input[type=date], input[type=time] { height: var(--control-h); }
+        select { appearance: none; -webkit-appearance: none; padding-right: var(--chevron-room);
+            background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235F6368' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: right var(--sp-3) center; }
+        /* A drawer is a row (the mix): a 44 summary over a soft hairline, its
+           body opening under it. */
+        details.sect { border: 0; border-radius: 0; background: none; margin-bottom: 0; overflow: visible; box-shadow: var(--rule-b-soft); }
+        details.sect summary { min-height: var(--row-h); padding: 0; font-weight: var(--weight-medium); font-size: var(--text-body); line-height: var(--lh-control); cursor: pointer; list-style: none;
+            display: flex; align-items: center; gap: var(--gap-row-icon); }
+        details.sect summary::-webkit-details-marker { display: none; }
+        /* SV() emits its icons with no width or height attribute, so every
+           icon site in the file has to size its own svg. This one never did:
+           the chevron measured 0x0 and an expandable row's only cue was the
+           pointer cursor. 16px, like the caret on a select. */
+        /* The marker leads the row's words, so no row ends in a stranded chevron (R7). */
+        details.sect summary .chev { order: -1; transition: transform var(--dur) var(--ease); color: var(--text-tertiary); display: grid; }
+        details.sect summary .chev svg { width: var(--icon-md); height: var(--icon-md); display: block; }
+        details.sect[open] summary .chev { transform: rotate(90deg); }
+        details.sect .body { padding: 0 0 var(--sp-4); color: var(--text-secondary); font-size: var(--text-body); line-height: var(--lh-control); }
+        details.sect .body p { margin: 0 0 var(--sp-2); }
+        details.sect .body ul { margin: 0; padding-left: var(--sp-5); } details.sect .body li { margin: var(--sp-1) 0; }
+
+        /* A list card, built the way the reference builds a table card: the
+           rows run the card's full inner width and take their 16px inset from
+           their own padding, so the divider and the hover fill reach the
+           border instead of floating 4px inside it. The card clips to its own
+           radius because the first and last rows now paint into its corners,
+           and the 16px flex gap goes with the 4px: a row hover that stopped
+           short of the row above left a stripe of card between two highlights,
+           where the reference's rows share one edge. */
+        .actions { padding: 0; gap: 0; overflow: visible; }
+        /* RECOMMENDED ACTIONS ARE A TABLE (12 Oct 2026, R3): the tick, the
+           action (the flexible track, where its sentence wraps), its priority
+           and Track, every row on the same columns under Action and Priority.
+           It was a short sentence at the left with its tag and button 900px
+           away at the far edge (DF-02). An answer in chat adds a copy column. */
+        .card.actions { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content max-content; column-gap: var(--sp-3); }
+        .card.actions:has(.act-copy) { grid-template-columns: max-content minmax(0, 1fr) max-content max-content max-content; }
+        .card.actions > :is(.action, .action-head) { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start; }
+        /* The action's sentence fills its column: balanced, a two-line action
+           broke in its middle and left half the column empty before Priority. */
+        .card.actions .action .text { max-width: none; text-wrap: pretty; }
+        .action-head { padding-bottom: var(--sp-2); border-bottom: var(--bw-hairline) solid var(--border-default);
+            font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary); }
+        .action { display: flex; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-3) 0; }
+        .action + .action { border-top: var(--bw-hairline) solid var(--border-default); }
+        @media (hover: hover) { .action:hover { background: var(--surface-secondary); box-shadow: calc(-1 * var(--sp-2)) 0 0 var(--surface-secondary), var(--sp-2) 0 0 var(--surface-secondary); } }
+        /* 16px on a 4px corner, the one checkbox this app draws: the CRM ticks
+           and the inbox's are already 16, and this was the odd 20 - on the page
+           the merchant is actually meant to work through. 4px rather than the
+           --radius-xs 6, because at 16 a 6px corner is 37% of the box and reads as a
+           radio button; the radius ladder simply bottoms out above what a small
+           square control needs. The 2px top margin keeps it optically centred
+           on the 21px first line of .action .text. */
+        .action .check { width: var(--box-xs); height: var(--box-xs); border-radius: var(--radius-tag); border: var(--bw-hairline) solid var(--border-emphasis); flex-shrink: 0; margin-top: var(--sp-0-5);
+            display: grid; place-items: center; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
+        .action .check svg { width: var(--icon-xs); height: var(--icon-xs); opacity: 0; color: var(--text-on-status); }
+        .action.done .check { background: var(--success); border-color: var(--success); }
+        .action.done .check svg { opacity: 1; }
+        .action.done .text { color: var(--text-tertiary); text-decoration: line-through; }
+        .action .text { flex: 1; font-size: var(--text-body); line-height: var(--lh-control); }
+        .pill { display: inline-flex; align-items: center; height: var(--tag-h); font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); text-transform: none; letter-spacing: normal; padding: 0 var(--sp-2); border-radius: var(--radius-tag); flex-shrink: 0; }
+        .pill.high { background: var(--error-bg); color: var(--error); } .pill.medium { background: var(--warning-bg); color: var(--warning); }
+        .pill.low { background: var(--surface-sunken); color: var(--text-secondary); }
+        /* THE TRAILING RAIL IS A COLUMN, as the reference's last table cell is.
+           .action .text carries the 52ch measure cap, so its flex-grow stops at
+           482px and the free space on a wide card was left at the END of the
+           row: the pill and the button sat mid-row with 591px of nothing to
+           their right. The auto margin goes on whichever child FOLLOWS the
+           text, because an Overview follow-up row has no pill. */
+        /* And one width for the three priorities that ship, or the buttons rag
+           by 25px behind pills of 36, 40 and 61px. 64 is the widest of them
+           (medium, 60.83) taken up to the 4px grid the rest of the page is on. */
+        .action .pill { min-width: 64px; justify-content: center; }
+        /* Centred on the first line of text, as the 20px pill beside it is:
+           the 28px button hung 4px below the tick, the text and the pill. */
+        .action .track-btn { margin-top: calc(-1 * var(--sp-1)); }
+        /* On a phone the text takes the row and the pill and Track drop
+           under it, lined up with it: squeezed beside them it ran to three
+           lines of three words with an orphan. */
+        @media (max-width: 640px) {
+            .card.actions { display: block; }
+            .card.actions > .action-head, .action > .pill-none { display: none; }
+            .card.actions > .action { display: flex; }
+            .action { flex-wrap: wrap; row-gap: var(--sp-2); }
+            .action .text { flex: 1 1 calc(100% - var(--box-xs) - var(--sp-3)); }
+            .action .text + :is(.pill, .track-btn), .action .text + .pill-none + .track-btn { margin-left: calc(var(--box-xs) + var(--sp-3)); }
+            .action .track-btn { margin-top: 0; }
+        }
+        @media (max-width: 640px) {
+            /* On a phone the row has no free space to strand anything in: the
+               text shrinks until the rail is already hard right and the buttons
+               already line up, so the padded pill only costs the text 24px and
+               a fourth wrapped line. It goes back to its label width. */
+        }
+
+        .followups { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
+        .chip { border: var(--bw-hairline) solid var(--border-default); background: var(--surface-primary); border-radius: var(--radius-control); padding: 0 var(--sp-3); font-size: var(--text-body); line-height: var(--lh-control);
+            font-weight: var(--weight-medium); color: var(--text-primary); display: inline-flex; align-items: center; gap: var(--control-gap); transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); cursor: pointer;
+            /* A floor, not a height: on a phone a suggestion wraps to two lines,
+               and a fixed 28px pill spilled them over its own border. */
+            min-height: var(--control-h); padding-block: var(--sp-1); text-align: start; }
+        @media (hover: hover) { .chip:hover { background: var(--surface-tertiary); border-color: var(--border-default); color: var(--text-primary); } }
+        .chip:active { background: var(--surface-sunken); }
+        /* A chip that is a toggle (the Forecast's compare set) shows it is on the
+           way a chosen segment does: the teal wash, teal ink, a teal hairline. */
+        .chip:is(.on, [aria-pressed="true"]) { background: var(--action-selected); color: var(--text-brand); border-color: var(--border-selected); }
+        .chip > span { display: grid; place-items: center; flex: none; }
+        .chip svg { width: var(--icon-sm); height: var(--icon-sm); color: var(--text-tertiary); display: block; }
+        /* Solid, on the card edge. A dashed rule is the convention for a
+           DROP TARGET - somewhere to put something - and the reference uses
+           none anywhere. These panels are just saying there is nothing here
+           yet, which is an ordinary panel, not an invitation to drag. */
+        /* An empty state is the list's stand-in, so the BOX takes the list's
+           width the way every other boxed block does - it used to sit in the
+           52ch prose group and hang 483px wide on the left of a 1,235px card,
+           with three quarters of the card blank beside it. The measure moves
+           off the box and onto the line's own width: a max-width with auto
+           margins centres it, so a long sentence still breaks near 52ch, the
+           padding stays the 16 gutter, and nothing is a fraction of a pixel. */
+        /* A list that matched nothing (a search, a filter): one quiet line,
+           centred where its rows would be. A space with nothing in it at all is
+           the empty state below. */
+        /* 12 Oct 2026 (R8): on the left, where the rows would start, not centred
+           in a band across the row. */
+        .empty { background: transparent; border: 0; border-radius: 0; width: 100%; max-width: none; margin: 0;
+            padding: var(--sp-4) 0;
+            color: var(--text-tertiary); font-size: var(--text-body); line-height: var(--lh-control); text-align: left; }
+        /* THE EMPTY STATE (12 Oct 2026, R8): one line under its heading, not a
+           tall centred box across the row (the mix had it centred in its space:
+           at 2,200 that was an icon and a line in the middle of a 248px band).
+           The 40 tile with the screen's own icon, the line in the head step and
+           a grey line under it when there is more to say, then the action
+           straight after the words. No illustration and no box. */
+        .empty-state { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: var(--sp-4);
+            text-align: left; padding: var(--sp-4) 0; }
+        .empty-txt { display: flex; flex-direction: column; gap: var(--sp-0-5); min-width: 0; }
+        .empty-sub { margin: 0; color: var(--text-tertiary); font-size: var(--text-body); line-height: var(--lh-control); max-width: var(--measure); }
+        .empty-state > :not(.empty-ic, .empty-txt) { margin-left: var(--sp-4); flex: none; }
+        @media (max-width: 640px) {
+            .empty-state { flex-wrap: wrap; }
+            .empty-state > :not(.empty-ic, .empty-txt) { margin-left: calc(var(--box-2xl) + var(--sp-4)); }
+        }
+        .empty-ic { width: var(--box-2xl); height: var(--box-2xl); border-radius: var(--radius-control); background: var(--surface-tertiary);
+            color: var(--text-tertiary); display: grid; place-items: center; flex: none; }
+        .empty-ic svg { width: var(--icon-md); height: var(--icon-md); }
+        .empty-line { margin: 0; font-size: var(--text-head); line-height: var(--lh-control); font-weight: var(--weight-semibold);
+            color: var(--text-primary); max-width: var(--measure); }
+        /* skills
+           One card, the skills a list inside it, each separated by a rule;
+           the editor opens in place of the one being changed, or at the top
+           for a new one, and grows with what is typed. */
+        .sk-list { list-style: none; margin: 0; padding: 0; }
+        .card > .sk-list { padding-inline: 0; }
+        .sk-item { display: grid; grid-template-columns: minmax(0, 35rem) minmax(0, 1fr); column-gap: calc(var(--sp-8) * 2); row-gap: var(--sp-3); align-items: start;
+            padding: var(--sp-4) 0; border-top: var(--bw-hairline) solid var(--border-default); }
+        .sk-item:has(> .sk-editor) { display: block; }
+        @media (max-width: 900px) { .sk-item { grid-template-columns: minmax(0, 1fr); } }
+        .sk-main { min-width: 0; }
+        .sk-side { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); }

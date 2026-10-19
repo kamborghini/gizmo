@@ -1,10 +1,7 @@
 // What is measured in the page after a screen settles. Two checks must be
 // zero on every screen (sideways scroll, content spilling out of its panel);
 // the panel rules are counted per rule and held by the ratchet (record.js).
-const fs = require('fs');
-const path = require('path');
-
-const APP = fs.readFileSync(path.join(__dirname, '..', '..', 'static', 'index.html'), 'utf8');
+const APP = require('./page-source').join();
 const list = name => JSON.parse(new RegExp(`const ${name} = (\\[[^\\]]*\\])`).exec(APP)[1].replace(/'/g, '"'));
 const SKIP = list('PANEL_SKIP');
 const HOLD = list('PANEL_HOLD');
