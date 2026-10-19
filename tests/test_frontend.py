@@ -7046,7 +7046,7 @@ def t_screen_css_carries_no_arbitrary_lengths():
             if re.search(r"\d(px|em|rem)", strip(m.group(2))):
                 bad.append(sel[:50] + " { " + m.group(0).strip() + " }")
         for m in re.finditer(r"line-height:\s*([^;}]+)", body):
-            if not re.fullmatch(r"var\(--lh-[\w-]+\)|inherit|normal|initial", m.group(1).strip()):
+            if not re.fullmatch(r"(var\(--lh-[\w-]+\)|inherit|normal|initial)(\s*!important)?", m.group(1).strip()):
                 bad.append(sel[:50] + " { " + m.group(0).strip() + " }")
     ok(not bad, "%d arbitrary lengths in screen CSS, e.g. %s" % (len(bad), bad[:6]))
 
@@ -9450,6 +9450,43 @@ const document = { styleSheets: [{ cssRules: [{ selectorText: '.x', n: 0 }, new 
 """ + fn + "\nconsole.log(JSON.stringify(dsRootRules().map(r => r.n)));")
     ok(got == [1, 2], "the layer's :root and the sheet's own, not one in @media: %r" % got)
     ok("dsRootRules()" in fn_src("function dsOtherColours("), "the colours are read through it")
+
+
+STYLING_FROM_THE_SCRIPT = re.compile(r"^(margin|padding|gap|rowGap|columnGap|color|background|font|lineHeight|letterSpacing|textTransform|"
+                                     r"textAlign|textDecoration|border|outline|boxShadow|cursor|flex|gridTemplate|cssText)")
+
+
+def _script_styling():
+    """Every place the script sets spacing, colour, type, a border, a background
+    or other styling directly, outside the frozen print functions."""
+    rest = SCRIPT
+    for sig in ("function printDispatchManifest(", "function printStockUsage(", "function printDaySheet(", "function printGuide(",
+                "function labelSheet(", "function loanStickerSheet(", "async function loanPrintSticker(", "function printShippingLabelsFor(",
+                "function printLabelImages(", "function printLabels(", "function labelPrintCss(", "function fitLabel(", "function prodSize(",
+                "function carrierDims(", "function stickerDims(", "function labelDims(", "function labelFontReady("):
+        if sig in rest:
+            rest = rest.replace(_body_of(sig), "")
+    bad = []
+    for m in re.finditer(r"\.style\.(\w+)\s*=(?!=)|\.style\.setProperty\(\s*'([^']+)'", rest):
+        prop = m.group(1) or m.group(2)
+        if prop.startswith("--"):
+            continue
+        if STYLING_FROM_THE_SCRIPT.match(prop) or (m.group(2) and not prop.startswith("--")):
+            line = rest[:m.start()].count("\n")
+            bad.append(prop + ": " + rest.split("\n")[line].strip()[:70])
+    return bad
+
+
+@test
+def t_the_script_sets_no_styling():
+    """Stage 3, piece 6: the script set 89 spacing, colour, type and other
+    styles on elements directly (30 top margins, 13 blocks of cssText), out
+    of the tokens' guards. They are classes in the sheet now, from the same
+    tokens; the script keeps only what it works out as it runs (positions and
+    sizes, showing, hiding and fading, a chart's drawn length) and custom
+    properties for values from data."""
+    bad = _script_styling()
+    ok(not bad, "%d styles set by the script: %s" % (len(bad), bad[:8]))
 
 
 @test
@@ -12371,7 +12408,7 @@ def t_the_design_page_is_the_source_of_truth_made_visible():
     block = SCRIPT.split("const DS_COLOURS = [")[1].split("function paintDesign(host) {")[0]
     ok(not re.search(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b", block + fn), "no colour is written into the page, only token names")
     ok("getComputedStyle(p).color" in block, "each is read as the browser resolves it")
-    for name in re.findall(r"'(--[a-z0-9-]*[a-z0-9])'", block):
+    for name in re.findall(r"(?<!setProperty\()'(--[a-z0-9-]*[a-z0-9])'", block):   # not one the page sets on a swatch
         ok(re.search(re.escape(name) + r":", CSS), "%s is a token the app defines" % name)
     ok("'--chart-' + n" in block, "and the chart ramp is shown whole")
     ds = "\n".join(l for l in CSS.split("\n") if l.strip().startswith(".ds-"))
@@ -13883,16 +13920,18 @@ def t_text_comes_in_the_five_steps():
         if pr.search(sel) or sel.strip() == "body":
             continue
         for m in re.finditer(r"(?<![\w-])font-size\s*:\s*([^;}]+)", body):
-            if m.group(1).strip() not in sizes: bad.append(sel[:50] + " size " + m.group(1).strip())
+            if re.sub(r"\s*!important$", "", m.group(1).strip()) not in sizes: bad.append(sel[:50] + " size " + m.group(1).strip())
         for m in re.finditer(r"(?<![\w-])line-height\s*:\s*([^;}]+)", body):
-            if m.group(1).strip() not in lhs: bad.append(sel[:50] + " line " + m.group(1).strip())
+            if re.sub(r"\s*!important$", "", m.group(1).strip()) not in lhs: bad.append(sel[:50] + " line " + m.group(1).strip())
     ok(not bad, "%d off the five steps: %s" % (len(bad), bad[:6]))
     track = [sel[:50] + " " + m.group(1).strip() for sel, body in _rules(CSS) if not pr.search(sel)
              for m in re.finditer(r"(?<![\w-])letter-spacing\s*:\s*([^;}]+)", body)
              if m.group(1).strip() not in ("normal", "0", "var(--tr-title)", "var(--tr-fig)")]
     ok(not track, "tracking only on titles and figures, from the token block: %s" % track[:6])
     md = [s for s, b in _rules(CSS) if not pr.search(s) and "font-size: var(--text-md)" in b]
-    ok(all(".brand-name" in s or "pointer: coarse" in s for s in md), "16 is the wordmark's, and a phone field's: %s" % md)
+    # .pm-kept-line: the margin report's "Kept" line, set at 16 by the script until 19 Oct 2026 (out of
+    # this guard's sight); moved into the sheet as it was, a known exception for the type scale to settle.
+    ok(all(".brand-name" in s or "pointer: coarse" in s or ".pm-kept-line" in s for s in md), "16 is the wordmark's, and a phone field's: %s" % md)
     for gone in ("--text-lg", "--text-xl", "--text-3xl", "--lh-tight", "--lh-snug"):
         ok(gone + ":" not in CSS, gone + " has left the token block")
     ok('body > :where(:not([id="label-print"])) { font-size: var(--text-body); line-height: var(--lh-control); }' in CSS,
@@ -15233,7 +15272,7 @@ def t_what_the_app_measure_found_stays_fixed():
     sk = SCRIPT[SCRIPT.index("'sk-acts'"):SCRIPT.index("'sk-acts'") + 2500]
     ok("iconButton(" in sk and not re.search(r"iconButton\([^;]*size:", sk),
        "a skill's icon actions are the 32 of the Use in chat button beside them, not a 24 beside a 32")
-    ok("s.style.color = 'color-mix(in srgb, ' + c + ' 80%, var(--ink))'" in fn_src("function crmChip(name) {"),
+    ok("s.style.setProperty('--chip-fg', 'color-mix(in srgb, ' + c + ' 80%, var(--ink))')" in fn_src("function crmChip(name) {"),
        "a label chip's words are its colour darkened toward ink, so amber, orange and green clear 4.5 on their tint")
     ok(".mail-bulkbar .btn { min-height: var(--control-h-lg); }" in CSS.split("THE PHONE")[1] and "min-height: calc(var(--control-h-lg) + 2 * var(--sp-1))" in CSS.split("THE PHONE")[1],
        "the Inbox's bulk-bar buttons are 40 on a phone, the bar the 48 that holds them")

@@ -91,7 +91,7 @@
             filesPagedFocus = -1;
             if (rows.length > cap) {
                 const b = textButton('Show more (' + (rows.length - cap) + ' remaining)');
-                b.style.cssText = 'margin:var(--sp-2) auto;display:block';
+                b.classList.add('centre-block');
                 b.onclick = () => { filesPagedFocus = cap; more(); };
                 list.append(b);
             }
@@ -457,7 +457,7 @@
                     .sort((a, b) => a[1].name.localeCompare(b[1].name))
                     .forEach(([fid2, fo]) => {
                         const b = el('button', 'fpick-row');
-                        b.style.paddingLeft = (10 + depth * 18) + 'px';
+                        b.style.setProperty('--indent', (10 + depth * 18) + 'px');
                         b.append(ico(I.folder), document.createTextNode(' ' + fo.name));
                         b.onclick = () => pick(fid2);
                         body.append(b);

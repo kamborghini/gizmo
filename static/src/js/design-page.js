@@ -41,7 +41,7 @@
         ];
         /* A token as the browser resolves it, as [r, g, b]. */
         function dsColour(token) {
-            const p = el('span'); p.style.color = 'var(' + token + ')';
+            const p = el('span', 'ds-probe'); p.style.setProperty('--swatch', 'var(' + token + ')');
             document.body.append(p);
             const raw = getComputedStyle(p).color;
             let c = (raw.match(/[\d.]+/g) || ['0', '0', '0']).slice(0, 3).map(Number);
@@ -112,7 +112,7 @@
                 rows.forEach(([name, token, use, on]) => {
                     const c = dsColour(token);
                     const sw = el('div', 'ds-swatch');
-                    const chip = el('span', 'ds-chip'); chip.style.background = 'var(' + token + ')';
+                    const chip = el('span', 'ds-chip'); chip.style.setProperty('--swatch', 'var(' + token + ')');
                     chip.setAttribute('aria-hidden', 'true');
                     const ratio = on ? dsContrast(c, dsColour(on)) : dsContrast(c, white);
                     const words = on ? (on === '--text-on-action' ? 'ink on it' : on === '--text-brand' ? 'teal words on it' : 'words on it') : 'on a card';
@@ -140,7 +140,7 @@
                     const v = getComputedStyle(document.documentElement).getPropertyValue(t).trim();
                     const sw = el('div', 'ds-swatch');
                     if (v && CSS.supports('color', v)) {
-                        const chip = el('span', 'ds-chip'); chip.style.background = 'var(' + t + ')';
+                        const chip = el('span', 'ds-chip'); chip.style.setProperty('--swatch', 'var(' + t + ')');
                         chip.setAttribute('aria-hidden', 'true'); sw.append(chip);
                     }
                     const facts = el('div', 'ds-facts');
@@ -172,7 +172,7 @@
              ['--radius-inset', 'Inside a card', 'A box within a card'], ['--radius-tag', 'Tag', 'Labels that only display'],
              ['--radius-full', 'Round', 'Only a switch, a bar, a dot']].forEach(([t, name, use]) => {
                 const sw = el('div', 'ds-swatch');
-                const box = el('span', 'ds-shape'); box.style.borderRadius = 'var(' + t + ')'; box.setAttribute('aria-hidden', 'true');
+                const box = el('span', 'ds-shape'); box.style.setProperty('--swatch', 'var(' + t + ')'); box.setAttribute('aria-hidden', 'true');
                 const facts = el('div', 'ds-facts');
                 facts.append(el('div', 'ds-name', name), el('div', 'ds-val', getComputedStyle(document.documentElement).getPropertyValue(t).trim() + ' · ' + t), el('div', 'ds-use', use));
                 sw.append(box, facts); shapes.append(sw);

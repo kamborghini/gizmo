@@ -417,7 +417,7 @@
                 const c = el('span', 'fchip', label); const b = el('button'); b.title = 'Remove'; b.innerHTML = I.x;
                 b.onclick = () => { clear(); st.page = 1; renderSizes(); }; c.append(b); wrap.append(c);
             });
-            const all = el('span', 'fchip'); all.style.cursor = 'pointer'; all.textContent = 'Clear all';
+            const all = el('span', 'fchip'); all.classList.add('clickable'); all.textContent = 'Clear all';
             all.onclick = () => { Object.assign(st, { q: '', maker: '', size: '', status: 'all', page: 1 }); renderSizes(); };
             wrap.append(all);
             return wrap;

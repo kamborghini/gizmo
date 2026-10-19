@@ -60,8 +60,8 @@
             /* A Pipedrive label is typed by a person: render it as they typed it. */
             const s = el('span', 'crm-chip', String(name || ''));
             const c = crmLabelColor(name);
-            if (/^#/.test(c)) { s.style.background = c + '22'; s.style.color = 'color-mix(in srgb, ' + c + ' 80%, var(--ink))'; }
-            else { s.style.background = 'var(--surface-sunken)'; s.style.color = 'var(--text-secondary)'; }
+            /* A label's own colour, tinted, as custom properties the chip reads (the plain fill otherwise). */
+            if (/^#/.test(c)) { s.style.setProperty('--chip-bg', c + '22'); s.style.setProperty('--chip-fg', 'color-mix(in srgb, ' + c + ' 80%, var(--ink))'); }
             return s;
         }
         function crmUname(uid) {
@@ -319,7 +319,7 @@
                field names, pipeline names and who owns how much. No deal
                titles, no customer names, no email addresses. */
             const copy = textButton();
-            copy.style.marginTop = 'var(--sp-2-5)';
+            copy.classList.add('space-above-2-5');
             copy.append(ico(I.copy), document.createTextNode('Copy summary'));
             copy.onclick = async () => {
                 const L = [];
@@ -362,7 +362,7 @@
             /* The import lives behind the survey deliberately: nobody should
                reach it without first seeing what is in the account. */
             const imp = textButton();
-            imp.style.cssText = 'margin-top:var(--sp-2-5);margin-left:var(--sp-2)';
+            imp.classList.add('space-above-2-5', 'space-before-2');
             imp.textContent = 'Preview the import';
             imp.onclick = () => runPipedriveImport(host, imp, false);
             host.append(imp);
@@ -372,7 +372,7 @@
             btn.disabled = true;
             btn.textContent = go ? 'Importing\u2026' : 'Reading Pipedrive\u2026';
             const out = el('div', 'crm-focus');
-            out.style.marginTop = 'var(--sp-2-5)';
+            out.classList.add('space-above-2-5');
             out.append((() => { const t = el('div', 'thinking');
                 t.append(loader(), el('span', null, go
                     ? 'Copying it in. Do not close this tab.'
@@ -447,7 +447,7 @@
             }
             btn.textContent = 'Preview again';
             const doIt = textButton('Import it for real', { kind: 'primary' });
-            doIt.style.marginTop = 'var(--sp-2-5)';
+            doIt.classList.add('space-above-2-5');
             doIt.onclick = async () => {
                 if (!(await uiConfirm('Copy ' + ((rep.deals || {}).new || 0) + ' deals, '
                     + ((rep.persons || {}).new || 0) + ' people and '
@@ -1234,7 +1234,7 @@
                     crmDealX.threads.forEach(t => {
                         const r = el('div', 'crm-hist-row');
                         const a = actionLink('miss-open', t.subject);
-                        if (t.unread) a.style.fontWeight = 'var(--weight-semibold)';
+                        if (t.unread) a.classList.add('weight-strong');
                         a.onclick = () => { m.close(); setView('mail'); openMailThread(t.id); };
                         r.append(a);
                         const bits = [t.msg_count + (t.msg_count === 1 ? ' message' : ' messages'),
@@ -2097,7 +2097,7 @@
                             const r = await api('/api/crm/contact', { op: 'shopify_search', q: sIn.value.trim() });
                             (r.matches || []).forEach(c2 => {
                                 const b = textButton();
-                                b.style.margin = 'var(--sp-1) var(--sp-1) 0 0';
+                                b.classList.add('crm-match-pick');
                                 b.textContent = c2.name + (c2.company ? ' · ' + c2.company : '') + ' (' + (c2.orders || 0) + ' orders)';
                                 b.onclick = () => { shopifyId = c2.id; status.textContent = 'Will link to ' + c2.name; };
                                 results.append(b);
@@ -2394,7 +2394,7 @@
                 labs.forEach((l, i) => {
                     const r = el('div', 'disp-boxrow');
                     const dot = el('span', 'crm-dot');
-                    dot.style.cssText = 'align-self:center;background:' + (CRM_COLOR_CSS[l.color] || 'var(--text-tertiary)');
+                    dot.classList.add('in-row'); dot.style.setProperty('--dot', CRM_COLOR_CSS[l.color] || 'var(--text-tertiary)');
                     const name = crmText(l.name, 'Label'); name.oninput = () => { l.name = name.value; };
                     const col = el('select', 'disp-text');
                     col.setAttribute('aria-label', 'Label colour');

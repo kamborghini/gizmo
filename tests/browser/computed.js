@@ -114,11 +114,13 @@ function compare(base, head1, head2) {
   return out;
 }
 
-// A value that draws nothing on either side: a border's colour where that
+// A value that draws nothing on either side: a custom property; a border's colour where that
 // border has no width or no style, an outline's colour, width or offset where
 // there is no outline.
 function unseen(p, a, b) {
   const [tag, prop] = p.split(' ');
+  // A custom property draws nothing itself: what it feeds is compared as the property it feeds.
+  if (prop.startsWith('--')) return true;
   const none = (side, f) => [a, b].every(x => x[tag + ' ' + f(side + '-style')] === 'none' || x[tag + ' ' + f(side + '-width')] === '0px');
   const m = /^border-(top|right|bottom|left)-color$/.exec(prop);
   if (m) return none('border-' + m[1], x => x);

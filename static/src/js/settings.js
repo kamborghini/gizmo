@@ -419,9 +419,7 @@
                 body.append(el('p', 'field-help',
                     'Add this to an authenticator app, then type the six-digit code it '
                     + 'shows to prove it works. It is not on until you do.'));
-                const code = el('div', 'evidence'); code.textContent = st.secret;
-                code.style.cssText = 'font-family:var(--font-mono);padding:var(--sp-2-5) var(--sp-3);'
-                    + 'background:var(--surface-tertiary);border-radius:var(--radius-control);word-break:break-all';
+                const code = el('div', 'evidence mono-box break-all'); code.textContent = st.secret;
                 body.append(code);
                 const f = formField('The code from your app');
                 const inp = el('input', 'psel'); inp.type = 'text'; inp.inputMode = 'numeric';
@@ -440,9 +438,7 @@
                         'Two-step sign-in is on. Keep these recovery codes somewhere safe: '
                         + 'each one gets you in once if you lose your phone, and this is the '
                         + 'only time they are shown.'));
-                    const list = el('div', 'evidence');
-                    list.style.cssText = 'font-family:var(--font-mono);line-height:var(--lh-prose);'
-                        + 'padding:var(--sp-2-5) var(--sp-3);background:var(--surface-tertiary);border-radius:var(--radius-control)';
+                    const list = el('div', 'evidence mono-box prose');
                     (r.recovery || []).forEach(c => list.append(el('div', null, c)));
                     body.append(list);
                     foot.innerHTML = '';
@@ -677,7 +673,7 @@
                 top.append(document.createTextNode(' across ' + (u.runs || 0) + ' calls. Same volume on Sonnet ≈ $' + (u.cost_if_sonnet || 0).toFixed(2) + ', on Haiku ≈ $' + (u.cost_if_haiku || 0).toFixed(2) + '.'));
                 box.append(top);
                 if (Array.isArray(u.by_kind) && u.by_kind.length) {
-                    const kt = dataTable(['Type', ['Runs', 'num'], ['Avg cost', 'num'], ['Total', 'num']]); kt.wrap.style.marginTop = 'var(--sp-2-5)';
+                    const kt = dataTable(['Type', ['Runs', 'num'], ['Avg cost', 'num'], ['Total', 'num']]); kt.wrap.classList.add('space-above-2-5');
                     u.by_kind.forEach(k => {
                         const tr = el('tr');
                         tr.append(el('td', 'kw', k.kind));

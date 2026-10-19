@@ -37,3 +37,9 @@ test('a colour that draws nothing is not a change: a border with no width, an ou
   const seen = shot({ a: 'border-top-color:blue;border-top-style:solid;border-top-width:1px' });
   assert.strictEqual(compare(shot({ a: 'border-top-color:red;border-top-style:solid;border-top-width:1px' }), seen, seen).length, 1);
 });
+
+test('a custom property is not a change by itself: what it feeds is', () => {
+  const base = shot({ a: 'background-color:red' });
+  assert.deepStrictEqual(compare(base, shot({ a: '--chip:red;background-color:red' }), shot({ a: '--chip:red;background-color:red' })), []);
+  assert.strictEqual(compare(base, shot({ a: '--chip:blue;background-color:blue' }), shot({ a: '--chip:blue;background-color:blue' })).length, 1);
+});

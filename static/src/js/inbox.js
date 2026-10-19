@@ -637,7 +637,7 @@
             host.append(list);
             if (rows.length > mailListCap) {
                 const more = textButton();
-                more.style.marginTop = 'var(--sp-2)';
+                more.classList.add('space-above-2');
                 more.textContent = 'Show more (' + (rows.length - mailListCap) + ' older)';
                 more.onclick = () => { mailListCap += 400; renderMail(); };
                 host.append(more);
@@ -889,7 +889,7 @@
         function mailCard(t) {
             const d = mailCache;
             const card = el('div', 'crm-card mail-card');
-            card.style.cursor = 'pointer';
+            card.classList.add('clickable');
             if (t.state === 'unassigned') {
                 const h = mailHours(t.last_at);
                 if (h > 8) card.classList.add('overdue-hard');

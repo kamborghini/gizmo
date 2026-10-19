@@ -19,7 +19,7 @@
             box.innerHTML = '';
             const hero = pageHead({ view: 'labels', title: 'Production Manager', line: 'Finding orders tagged "' + queueTag() + '"…' });
             box.append(hero);
-            const t = el('div', 'thinking'); t.style.marginTop = 'var(--sp-2)'; t.append(loader(), el('span', null, 'Reading your Shopify orders…')); box.append(t);
+            const t = el('div', 'thinking'); t.classList.add('space-above-2'); t.append(loader(), el('span', null, 'Reading your Shopify orders…')); box.append(t);
             labelsLoading = true;
             const rq = ++labelsReq;   // only the newest fetch may commit its result
             try {
@@ -1116,7 +1116,7 @@
                                 : (r['Production Size (mm)'] || '') + ' mm'
                                   + (r['Customer Email Domain'] ? ' for @' + r['Customer Email Domain'] : ''));
                         const line = el('div', 'files-row');
-                        const left = el('div'); left.style.cssText = 'flex:1;min-width:0';
+                        const left = el('div', 'flex-1-fit');
                         left.append(el('div', 'files-name', (mfr ? mfr + ' · ' : '') + model));
                         left.append(el('div', 'field-help', rhs));
                         line.append(left);
@@ -1309,7 +1309,7 @@
                 card.append(el('div', 'cov-ok', 'Every gobo item on these orders matches the size list. Nothing to fix.'));
             } else {
                 const kt = dataTable(['Model as written on orders', 'Manufacturer', 'Why it flags', ['Items', 'num'], 'Seen on', null]);
-                kt.wrap.style.marginTop = 'var(--sp-2-5)';
+                kt.wrap.classList.add('space-above-2-5');
                 d.flagged.forEach(r => {
                     const tr = el('tr');
                     const c1 = el('td', 'kw', r.model); tr.append(c1);
@@ -1434,7 +1434,7 @@
                     head2.append(el('div', null, tt.counted + ' of ' + tt.orders + ' dispatched orders costed'));
                     head2.append(el('div', 'sub', 'Revenue ' + money(tt.revenue) + ' \u00b7 goods ' + money(tt.goods_cost)
                         + ' \u00b7 couriers ' + money(tt.courier_cost)));
-                    const m = el('div'); m.style.cssText = 'font-weight:var(--weight-semibold);font-size:var(--text-md);margin-top:var(--sp-1-5)';
+                    const m = el('div', 'pm-kept-line');
                     m.textContent = 'Kept ' + money(tt.margin) + (tt.margin_pct != null ? '  (' + tt.margin_pct + '%)' : '');
                     head2.append(m);
                     out.append(head2);
@@ -1450,7 +1450,7 @@
                             tr.append(note);
                         } else {
                             const kept = el('td', 'num', money(r.margin, r.currency));
-                            if (r.margin < 0) kept.style.color = 'var(--error)';
+                            if (r.margin < 0) kept.classList.add('tone-error');
                             const oc1 = el('td', 'kw'); oc1.append(orderA(r.order_name, r.admin_url));
                             tr.append(oc1, el('td', null, r.customer || ''),
                                 el('td', null, r.dispatched || ''),
@@ -1663,22 +1663,22 @@
                             const b = el('div', 'cov-note',
                                 'Already sent to the stock sheet at ' + londonHM(d.sent.sent_at)
                                 + (nm ? ' by ' + nm : '') + '. Sending again replaces that sheet.');
-                            b.style.color = 'var(--text-brand)';
+                            b.classList.add('tone-brand');
                             sheetHost.append(b);
                         }
                         const kt = dataTable(['Size', 'Glass', 'Unit', ['Estimated', 'num'], ['Final', 'num'], null]);
-                        kt.wrap.style.marginTop = 'var(--sp-2-5)';
+                        kt.wrap.classList.add('space-above-2-5');
                         sheet.forEach((r, i) => {
                             const tr = el('tr');
                             const inp = document.createElement('input');
                             inp.type = 'number'; inp.min = '0'; inp.max = '10000'; inp.value = r.final;
-                            inp.className = 'tm-field'; inp.style.cssText = 'width:76px;flex:none;padding:var(--sp-1) var(--sp-2)';
+                            inp.className = 'tm-field pm-in pm-in-final';
                             inp.setAttribute('aria-label', 'Final quantity for ' + r.family + ' ' + r.size);
                             inp.oninput = () => { r.final = inp.value; };
                             const rm = iconButton(I.x, 'Remove this line (not actually used)');
                             rm.onclick = () => { sheet.splice(i, 1); paintSheet(); };
                             const est = el('td', 'num', String(r.estimated));
-                            est.style.color = 'var(--text-tertiary)';
+                            est.classList.add('tone-muted');
                             const tdF = el('td', 'num'); tdF.append(inp);
                             const tdR = el('td'); tdR.append(rm);
                             tr.append(el('td', 'kw', r.size + 'mm'), el('td', null, r.family),
@@ -1690,10 +1690,10 @@
                         ['Mono', 'HM', 'Colour', 'Ring'].forEach(f => { const o = el('option', null, f); o.value = f; famSel.append(o); });
                         const szIn = document.createElement('input');
                         szIn.className = 'tm-field'; szIn.placeholder = 'Size mm'; szIn.setAttribute('aria-label', 'Size in millimetres');
-                        szIn.style.cssText = 'width:82px;flex:none;padding:var(--sp-1) var(--sp-2)';
+                        szIn.classList.add('pm-in', 'pm-in-size');
                         const qIn = document.createElement('input');
                         qIn.type = 'number'; qIn.min = '1'; qIn.max = '10000'; qIn.placeholder = 'Qty'; qIn.setAttribute('aria-label', 'Quantity');
-                        qIn.className = 'tm-field'; qIn.style.cssText = 'width:70px;flex:none;padding:var(--sp-1) var(--sp-2)';
+                        qIn.className = 'tm-field pm-in pm-in-qty';
                         const addB = textButton(); addB.append(ico(I.plus), document.createTextNode('Add'));
                         addB.title = 'Add something that was used but not in the estimate';
                         addB.onclick = () => {
@@ -1703,12 +1703,12 @@
                             paintSheet();
                         };
                         const tds = [el('td'), el('td'), el('td', null, ''), el('td', 'num', '0'), el('td', 'num'), el('td')];
-                        tds[0].append(szIn); tds[1].append(famSel); tds[3].style.color = 'var(--text-tertiary)';
+                        tds[0].append(szIn); tds[1].append(famSel); tds[3].classList.add('tone-muted');
                         tds[4].append(qIn); tds[5].append(addB);
                         tds.forEach(t2 => addTr.append(t2));
                         kt.add(addTr);
                         sheetHost.append(kt.wrap);
-                        const send = textButton(null, { kind: 'primary' }); send.style.marginTop = 'var(--sp-2-5)';
+                        const send = textButton(null, { kind: 'primary' }); send.classList.add('space-above-2-5');
                         send.append(ico(I.send), document.createTextNode(
                             d.sent ? 'Send again (replaces the earlier sheet)' : 'Send to stock sheet'));
                         send.onclick = async () => {
@@ -1733,7 +1733,7 @@
                         };
                         sheetHost.append(send);
                         if (lastResult && lastResult.results) {
-                            const box = el('div'); box.style.marginTop = 'var(--sp-2-5)';
+                            const box = el('div'); box.classList.add('space-above-2-5');
                             lastResult.results.forEach(rr => {
                                 let txt = rr.family + ' ' + rr.size + 'mm: ';
                                 if (rr.status === 'adjusted') {
@@ -1748,7 +1748,7 @@
                                     txt += 'the quantity was not readable';
                                 }
                                 const line = el('div', 'cov-note', txt);
-                                if (rr.status === 'no_item') line.style.color = 'var(--error)';
+                                if (rr.status === 'no_item') line.classList.add('tone-error');
                                 box.append(line);
                             });
                             sheetHost.append(box);

@@ -265,3 +265,10 @@
         .crm-ai.overdue { color: var(--error); }
         .crm-ai.today { color: var(--success); }
         .crm-ai.none { color: var(--warning); }
+        /* A token's swatch, shape and colour probe on the Design page, from the token named in --swatch
+           (it was an inline style: !important, as it was). */
+        .ds-chip { background: var(--swatch) !important; }
+        .ds-shape { border-radius: var(--swatch) !important; }
+        .ds-probe { color: var(--swatch) !important; }
+        /* A label's dot in the label editor's row, in the label's colour. */
+        .crm-dot.in-row { align-self: center !important; background: var(--dot) !important; }

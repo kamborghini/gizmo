@@ -164,6 +164,8 @@
         .barrow .bn { color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .bartrack { height: 8px; background: var(--surface-sunken); border-radius: var(--radius-full); overflow: hidden; box-shadow: var(--ring-default); }
         .bartrack > i { display: block; height: 100%; background: var(--action-active); border-radius: var(--radius-full); }
+        /* A bar's own colour, when its chart gives one (it was an inline style: !important, as it was). */
+        .bartrack > i[style*="--bar"] { background: var(--bar) !important; }
         .barrow .bv { text-align: right; font-weight: var(--weight-medium); }
         @media (max-width: 640px) { .barrow { grid-template-columns: 1fr 80px; } .barrow .bn { grid-column: 1 / -1; } }
 

@@ -34,7 +34,7 @@
                 catch (e) { toastError(e.message); return null; }
             };
             const list = el('div');
-            list.style.margin = 'var(--sp-3) 0';
+            list.classList.add('space-y-3');
             (data.rules || []).forEach((r, i) => {
                 const row = el('div', 'mrule');
                 const head = el('div', 'mrule-head');
@@ -287,7 +287,7 @@
             const name = crmText(r.name, 'What is this filter for?');
             crmField(m.body, 'Name', name);
             const modeRow = el('div', 'setting-sub');
-            modeRow.style.margin = 'var(--sp-2-5) 0 var(--sp-1)';
+            modeRow.classList.add('mrule-mode');
             modeRow.append(document.createTextNode('Match '));
             const mode = document.createElement('select');
             mode.className = 'mail-presence-pick';
@@ -319,7 +319,7 @@
                     });
                     o2.onchange = () => { c.op = o2.value; };
                     const val = crmText(c.value, 'what to look for');
-                    val.style.flex = '1';
+                    val.classList.add('flex-1');
                     val.oninput = () => { c.value = val.value; };
                     row.append(f, o2, val);
                     if (r.conditions.length > 1) {
@@ -889,9 +889,9 @@
             /* Steering: say what to change and it drafts again, rather than
                making the person rewrite a paragraph they did not want. */
             const steer = el('div', 'mrule-cond');
-            steer.style.marginTop = 'var(--sp-2)';
+            steer.classList.add('space-above-2');
             const note = crmText('', 'Not right? Say what to change, then Try again');
-            note.style.flex = '1';
+            note.classList.add('flex-1');
             const again = textButton('Try again');
             again.onclick = () => mailComposeDraft(m, t, btn, note.value.trim(), cmp.getText());
             steer.append(note, again);
@@ -985,7 +985,7 @@
             gm.classList.add('action-link', 'mail-gmail');
             m.body.append(gm);
             const msgs = el('div');
-            msgs.style.cssText = 'max-height:360px;overflow-y:auto;margin:var(--sp-2-5) 0';
+            msgs.classList.add('scroll-list', 'scroll-list-tall');
             m.body.append(msgs);
             let r;
             try { r = await api('/api/mail/body', { id: t.id, archive: true }); }
@@ -1280,7 +1280,7 @@
                 });
                 const note = document.createElement('input');
                 note.type = 'text'; note.className = 'disp-text';
-                note.placeholder = 'Handover note (optional)'; note.setAttribute('aria-label', 'Handover note'); note.style.flex = '1';
+                note.placeholder = 'Handover note (optional)'; note.setAttribute('aria-label', 'Handover note'); note.classList.add('flex-1');
                 const go = textButton('Assign');
                 go.onclick = async () => {
                     go.disabled = true;
@@ -1294,7 +1294,7 @@
                 m.body.append(row);
             }
             /* ---- the conversation ---- */
-            const msgs = el('div'); msgs.style.cssText = 'max-height:260px;overflow-y:auto;margin:var(--sp-2-5) 0';
+            const msgs = el('div', 'scroll-list scroll-list-short');
             const ourAddr = (mailCache && mailCache.address || '').toLowerCase();
             (t.messages || []).forEach(msg => {
                 const box = el('div', 'mail-msg' + (ourAddr && msg.from_email === ourAddr ? ' ours' : ''));
@@ -1350,7 +1350,7 @@
             const ninput = document.createElement('input');
             ninput.type = 'text'; ninput.className = 'disp-text';
             ninput.placeholder = 'Add a note for the team (the customer never sees these)'; ninput.setAttribute('aria-label', 'A note for the team');
-            ninput.style.flex = '1';
+            ninput.classList.add('flex-1');
             const nbtn = textButton('Add note');
             nbtn.onclick = async () => {
                 const text = ninput.value.trim();
@@ -1364,7 +1364,7 @@
             m.body.append(nrow);
             /* ---- activity ---- */
             const actHead = el('div', 'setting-title', 'Activity');
-            actHead.style.marginTop = 'var(--sp-2-5)';
+            actHead.classList.add('space-above-2-5');
             m.body.append(actHead);
             (t.activity || []).slice().reverse().slice(0, 20).forEach(a => {
                 m.body.append(el('div', 'mail-act',

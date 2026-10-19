@@ -153,7 +153,7 @@
             if (!defs.length) return null;
             const wrap = el('div', 'fchips');
             defs.forEach(([label, clear]) => { const c = el('span', 'fchip', label); const b = el('button'); b.title = 'Remove'; b.innerHTML = I.x; b.onclick = () => { clear(); rerender(); }; c.append(b); wrap.append(c); });
-            const all = el('span', 'fchip'); all.style.cursor = 'pointer'; all.textContent = 'Clear all';
+            const all = el('span', 'fchip'); all.classList.add('clickable'); all.textContent = 'Clear all';
             all.onclick = () => { Object.assign(F, { status: '', stock: '', vendor: '', type: '', tag: '', priceMin: null, priceMax: null, minRev: null, minUnits: null, createdAfter: '', createdBefore: '' }); rerender(); };
             wrap.append(all);
             return wrap;

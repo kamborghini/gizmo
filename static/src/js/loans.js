@@ -168,7 +168,7 @@
                extra click of opening the record first. */
             if (u.id) {
                 const del = textButton('Delete permanently', { kind: 'danger' });
-                del.style.marginLeft = 'auto';
+                del.classList.add('push-end');
                 del.onclick = async () => {
                     const outNow = ((loansCache || {}).out || [])
                         .find(r => r.unit && r.unit.id === u.id);

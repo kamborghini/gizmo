@@ -50,4 +50,38 @@
         .guide-toc-link { font-size: var(--text-body); line-height: var(--lh-control); font-weight: var(--weight-regular); text-decoration-color: transparent; }
         .guide-toc-link:focus-visible { text-decoration-color: currentColor; }
         @media (hover: hover) { .guide-toc-link:hover { text-decoration-color: currentColor; } }
-
+        /* FROM THE SCRIPT (19 Oct 2026, stage 3 piece 6): styles the script used to set on an element
+           directly, now classes from the same tokens. Each stands where an inline style stood, which beat
+           every rule, so each says !important: nothing that lost to the inline style wins now, in a window
+           the proof cannot open as much as in one it can. The script keeps only what it works out as it
+           runs (positions, sizes, showing, hiding and fading) and custom properties for values from data. */
+        .space-above-1 { margin-top: var(--sp-1) !important; }
+        .space-above-1-5 { margin-top: var(--sp-1-5) !important; }
+        .space-above-2 { margin-top: var(--sp-2) !important; }
+        .space-above-2-5 { margin-top: var(--sp-2-5) !important; }
+        .space-above-3 { margin-top: var(--sp-3) !important; }
+        .space-above-4 { margin-top: var(--sp-4) !important; }
+        .no-space-below { margin-bottom: 0 !important; }
+        .space-before-2 { margin-left: var(--sp-2) !important; }
+        .space-before-2-5 { margin-left: var(--sp-2-5) !important; }
+        .space-y-1-5 { margin: var(--sp-1-5) 0 !important; }
+        .space-y-3 { margin: var(--sp-3) 0 !important; }
+        .push-end { margin-left: auto !important; }
+        .flex-1 { flex: 1 !important; }
+        .flex-1-fit { flex: 1 !important; min-width: 0 !important; }
+        .flex-2 { flex: 2 1 auto !important; }
+        .clickable { cursor: pointer !important; }
+        .centre-block { display: block !important; margin: var(--sp-2) auto !important; }
+        .scroll-list { overflow-y: auto !important; margin: var(--sp-2-5) 0 !important; }
+        .scroll-list-tall { max-height: 360px !important; }
+        .scroll-list-short { max-height: 260px !important; }
+        .weight-strong { font-weight: var(--weight-semibold) !important; }
+        .tone-error { color: var(--error) !important; }
+        .tone-brand { color: var(--text-brand) !important; }
+        .tone-muted { color: var(--text-tertiary) !important; }
+        .tone-warning { color: var(--warning-text) !important; }
+        /* A secret or a list of codes to copy: the type a machine reads, on the tertiary fill. */
+        .mono-box { font-family: var(--font-mono) !important; padding: var(--sp-2-5) var(--sp-3) !important;
+            background: var(--surface-tertiary) !important; border-radius: var(--radius-control) !important; }
+        .mono-box.break-all { word-break: break-all !important; }
+        .mono-box.prose { line-height: var(--lh-prose) !important; }
