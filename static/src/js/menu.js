@@ -113,7 +113,7 @@
         function filterChip(label, options, current, onPick) {
             const chosen = options.find(o => o[0] === current);
             const isAll = !chosen || current === options[0][0];
-            const b = textButton(null, { small: true, cls: isAll ? '' : 'on' });
+            const b = textButton(null, { cls: isAll ? '' : 'on' });
             /* Label first, caret last: a menu trigger reads as its own name
                plus the direction its menu opens, not as a step forward. */
             b.append(document.createTextNode(

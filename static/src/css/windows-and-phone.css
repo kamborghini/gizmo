@@ -49,13 +49,13 @@
            sections are set where those live. A real field under a finger keeps
            16 (the pointer: coarse rule), or iOS zooms into it. */
         @media (max-width: 640px) {
-            :is(.btn, .btn-sm, .icon-btn, .chip, .toggle, .qt, .dmenu-item, .rlist-row, .nav-item, .nav-group, .convo, .tbl-search, .topbar-search,
+            :is(.btn, .icon-btn, .chip, .toggle, .qt, .dmenu-item, .rlist-row, .nav-item, .nav-group, .convo, .tbl-search, .topbar-search,
                 input[type=text], input[type=number], input[type=date], input[type=search], input[type=email], input[type=password],
                 input[type=url], input[type=tel], input:not([type]), select, details.sect summary) { min-height: var(--control-h-lg); }
             .tbl-search { height: var(--control-h-lg); }
             .segmented > button { height: var(--control-h-lg); }
-            :is(.btn, .btn-sm, .segmented > button, .tab, .chip, .toggle, .qt, .dmenu-item, .nav-item, .convo, .rlist-row, details.sect summary) { font-size: var(--text-sm); }
-            :is(.icon-btn:not(.icon-btn-sm, .icon-btn-tag), .btn-sm.btn-icon, .topbar .icon-btn, .topbar-search) { min-width: var(--control-h-lg); }
+            :is(.btn, .segmented > button, .tab, .chip, .toggle, .qt, .dmenu-item, .nav-item, .convo, .rlist-row, details.sect summary) { font-size: var(--text-sm); }
+            :is(.icon-btn:not(.icon-btn-sm, .icon-btn-tag), .btn.btn-square, .topbar .icon-btn, .topbar-search) { min-width: var(--control-h-lg); }
             :is(.tab, .tbl-step, .guide-toc-link, .toggle) { min-width: var(--control-h-lg); }
             
             .tbl-step { width: var(--control-h-lg); }
@@ -123,8 +123,8 @@
             .mail-claim::after { left: 0; right: 0; top: 50%; margin-top: calc(var(--control-h-lg) / -2); }
             /* Track, a sector's name, a skill's Show all and What's new's Open keep their look and get the same invisible
                40 high target across their own width (R13: they were 15 to 32 tall). */
-            :is(.track-btn, .seclink, .sk-more, .rel-open) { position: relative; }
-            :is(.track-btn, .seclink, .sk-more, .rel-open)::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: var(--control-h-lg); margin-top: calc(var(--control-h-lg) / -2); }
+            :is(.track-btn, .link-inline, .sk-more, .rel-open) { position: relative; }
+            :is(.track-btn, .link-inline, .sk-more, .rel-open)::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: var(--control-h-lg); margin-top: calc(var(--control-h-lg) / -2); }
             /* The Size list's A to Z is one swipeable line of 40 squares rather than four rows of them. */
             .az { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; margin-inline: calc(-1 * var(--sp-1)); padding-inline: var(--sp-1); }
             .az::-webkit-scrollbar { display: none; }

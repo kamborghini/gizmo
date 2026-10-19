@@ -377,7 +377,7 @@
         const open = el('fieldset', 'tm-group');
         const lg = el('legend', 'tm-legend');
         lg.append(document.createTextNode('Can open'));
-        const all = textButton('Tick all', { small: true });
+        const all = textButton('Tick all');
         all.type = 'button';
         all.onclick = () => boxes.forEach(b => { b.checked = true; });
         lg.append(all);
@@ -483,7 +483,7 @@
         /* One Save under all three (12 Oct 2026, WS-15): the tabs, the two
            permissions and the sign-off together. There were two Saves, one
            between the groups. */
-        const save = textButton('Save', { kind: 'primary', small: true }); save.type = 'button';
+        const save = textButton('Save', { kind: 'primary' }); save.type = 'button';
         save.onclick = async () => {
             save.disabled = true;
             const picked = boxes.filter(b => b.checked).map(b => b.dataset.k);
@@ -536,7 +536,7 @@
             const act = el('div', 'card-act');
             /* One teal: while the new account's Create or a Tabs panel's Save is open, they have it. */
             const busy = teamNewOpen || d.users.some(u => u.id === teamTabsOpen && u.role !== 'master');
-            const add = textButton(null, { small: true, kind: busy ? '' : 'primary' }); add.append(ico(I.plus), document.createTextNode('New account'));
+            const add = textButton(null, { kind: busy ? '' : 'primary' }); add.append(ico(I.plus), document.createTextNode('New account'));
             add.onclick = () => { teamNewOpen = !teamNewOpen; renderTeam(); };
             head.append(el('p', 'card-desc', 'Made, dispatched, files and sales are the last 30 days.'));
             act.append(add); head.append(act); card.append(head);
@@ -626,7 +626,7 @@
                     const c = (d.counts || {})[u.id] || {};
                     const acts = document.createDocumentFragment();
                     if (manageable) {
-                        const tb = textButton('Tabs', { small: true, cls: teamTabsOpen === u.id ? 'on' : '' }); tb.type = 'button';
+                        const tb = textButton('Tabs', { cls: teamTabsOpen === u.id ? 'on' : '' }); tb.type = 'button';
                         tb.setAttribute('aria-pressed', String(teamTabsOpen === u.id));
                         tb.onclick = () => { teamTabsOpen = teamTabsOpen === u.id ? '' : u.id; renderTeam(); };
                         acts.append(tb);
@@ -722,7 +722,7 @@
                     c1.append(none);
                 } else c1.append(dtable([{ head: 'Person' }, { head: 'Since', cap: true }, { head: 'So far', cap: true }, { head: '', cls: 'act' }],
                     d.open.map(ws => {
-                        const res = textButton('Close this session', { small: true }); res.type = 'button';
+                        const res = textButton('Close this session'); res.type = 'button';
                         res.onclick = async () => {
                             if (!(await uiConfirm('Close ' + nm(ws.uid) + '\'s open session now? Use this '
                                 + 'when someone forgot to clock out. The closure is recorded as a '
@@ -751,7 +751,7 @@
                 const dateF = (label) => { const w = el('label', 'pfield tm-date'); w.append(el('span', null, label));
                     const i2 = document.createElement('input'); i2.type = 'date'; i2.className = 'field-sm'; w.append(i2); return [w, i2]; };
                 const [frmL, frm] = dateF('From'), [toL, to] = dateF('To');
-                const exp = textButton(null, { small: true }); exp.append(ico(I.download), document.createTextNode('Export for payroll'));
+                const exp = textButton(null); exp.append(ico(I.download), document.createTextNode('Export for payroll'));
                 exp.onclick = async () => {
                     exp.disabled = true;
                     try {
@@ -816,7 +816,7 @@
             const clearAll = () => { teamFilterWho = ''; teamFilterArea = ''; renderTeam(); };
             /* A filter that is on shows over the feed as a tag you can clear. */
             const tags = [];
-            const tag = (words, clear) => { const b = textButton(null, { small: true }); b.type = 'button'; b.append(document.createTextNode(words), ico(I.x));
+            const tag = (words, clear) => { const b = textButton(null); b.type = 'button'; b.append(document.createTextNode(words), ico(I.x));
                 b.setAttribute('aria-label', 'Clear the filter ' + words); b.onclick = clear; tags.push(b); };
             if (teamFilterWho) tag(personName(teamFilterWho), () => { teamFilterWho = ''; renderTeam(); });
             if (teamFilterArea) tag(areaName(teamFilterArea), () => { teamFilterArea = ''; renderTeam(); });
@@ -836,7 +836,7 @@
                 tableRows.push({ cells: [isNaN(new Date(e.t)) ? '' : londonHM(e.t), areaName(e.area),
                                          e.src === 'system' ? 'System' : personName(e.sub), whatCell] });
             });
-            const clr = textButton('Clear filters', { small: true }); clr.type = 'button'; clr.onclick = clearAll;
+            const clr = textButton('Clear filters'); clr.type = 'button'; clr.onclick = clearAll;
             const feed = el('div', 'tm-feed');
             if (tags.length) feed.append(tableTools(tags, []));
             feed.append(dtable([{ head: 'Time' }, { head: 'Area' }, { head: 'Who' }, { head: 'What' }], tableRows,

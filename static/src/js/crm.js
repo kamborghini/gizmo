@@ -198,7 +198,7 @@
                row, and opened as a card on all five tabs. */
             const heads = [];
             if (!teamMe || teamMe.role === 'master') {
-                const more = textButton(null, { small: true }); more.type = 'button';
+                const more = textButton(null); more.type = 'button';
                 more.append(document.createTextNode('More'), ico(I.chevDown));
                 more.onclick = () => dropMenu(more, [{ label: 'Pipedrive import', icon: I.download, onClick: openPipedriveImport }]);
                 heads.push(more);
@@ -237,7 +237,7 @@
             const m = sheetModal('Pipedrive import');
             m.body.append(el('p', 'card-sub', 'Reads your Pipedrive account and writes nothing, to either system.'));
             const row = el('div', 'lbl-toolbar');
-            const go = textButton('Look at my Pipedrive', { small: true }); go.type = 'button';
+            const go = textButton('Look at my Pipedrive'); go.type = 'button';
             const out = el('div', 'pd-out');
             go.onclick = () => runPipedriveSurvey(out, go);
             row.append(go);
@@ -504,9 +504,9 @@
             };
             head.append(dealsTitle);
             const act = el('div', 'card-act');
-            const add = textButton(null, { kind: 'primary', small: true }); add.append(ico(I.plus), document.createTextNode('Deal'));
+            const add = textButton(null, { kind: 'primary' }); add.append(ico(I.plus), document.createTextNode('Deal'));
             add.onclick = () => crmDealForm();
-            const stagesBtn = textButton(null, { small: true }); stagesBtn.append(ico(I.settings), document.createTextNode('Pipeline'));
+            const stagesBtn = textButton(null); stagesBtn.append(ico(I.settings), document.createTextNode('Pipeline'));
             stagesBtn.onclick = crmStageEditor;
             /* The way OUT matters when the way in was a migration: the data is
                the user's, and a spreadsheet is the lingua franca. It sits on
@@ -514,7 +514,7 @@
                keeps the identical button - it used to be a 32px, 14px button
                alone at the bottom-left of the list, which made one action wear
                two homes and two scales across two tabs of one view. */
-            const exp = textButton(null, { small: true });
+            const exp = textButton(null);
             exp.append(ico(I.download), document.createTextNode('Export CSV'));
             exp.onclick = () => crmDealsCSV(crmVisibleDeals());
             act.append(exp, stagesBtn, add);
@@ -1507,7 +1507,7 @@
             head.append(el('h3', 'card-title',
                 total.toLocaleString() + (total === 1 ? ' activity' : ' activities')));
             const cAct = el('div', 'card-act');
-            const add = textButton(null, { kind: 'primary', small: true }); add.append(ico(I.plus), document.createTextNode('Activity'));
+            const add = textButton(null, { kind: 'primary' }); add.append(ico(I.plus), document.createTextNode('Activity'));
             add.onclick = () => crmActivityForm({}, renderCRM);
             cAct.append(add); head.append(cAct); card.append(head);
             const seg = segmented([['upcoming', 'To do'], ['overdue', 'Overdue'], ['today', 'Today'],
@@ -1518,7 +1518,7 @@
                the one that was chosen. */
             let mine = null;
             if (crmMulti()) {
-                mine = textButton('Mine', { small: true, cls: crmActMine ? 'on' : '' });
+                mine = textButton('Mine', { cls: crmActMine ? 'on' : '' });
                 mine.type = 'button';
                 mine.title = 'Only activities assigned to me';
                 mine.setAttribute('aria-pressed', crmActMine ? 'true' : 'false');
@@ -1619,18 +1619,18 @@
             /* A holding rail, not a bar: its children are moved into the
                toolbar's right side once the search and filter are built. */
             const bar = el('div');
-            const add = textButton(null, { kind: 'primary', small: true });
+            const add = textButton(null, { kind: 'primary' });
             add.append(ico(I.plus), document.createTextNode(crmContactsMode === 'people' ? 'Person' : 'Organisation'));
             add.onclick = () => crmContactForm(crmContactsMode === 'people' ? 'person' : 'org');
             /* Exports what the search left, not the whole store: the handler is
                attached inside paint, where the filtered list actually exists. */
-            const expBtn = textButton(null, { small: true });
+            const expBtn = textButton(null);
             expBtn.append(ico(I.download), document.createTextNode('Export CSV'));
             bar.append(expBtn);
             if ((!teamMe || teamMe.role === 'master') && crmContactsMode === 'people') {
                 /* Bulk email-matching of contacts to Shopify customers. Runs
                    nightly by itself; the button is for not waiting overnight. */
-                const link = textButton(null, { small: true });
+                const link = textButton(null);
                 link.append(ico(I.refresh), document.createTextNode('Link Shopify'));
                 link.title = 'Match every unlinked contact to a Shopify customer by email';
                 link.onclick = async () => {
@@ -1714,7 +1714,7 @@
                    stand empty above the table, a 48px band, until a tick. */
                 const bar2 = master && crmContactSel.size ? el('div', 'crm-selbar') : null;
                 if (bar2) {
-                    const del = textButton(null, { small: true });
+                    const del = textButton(null);
                     del.append(ico(I.trash), document.createTextNode(
                         'Delete ' + crmContactSel.size + ' selected'));
                     del.onclick = async () => {
@@ -1735,7 +1735,7 @@
                             renderCRM();
                         } catch (e) { del.disabled = false; toastError(e.message); }
                     };
-                    const clr = textButton('Clear selection', { small: true });
+                    const clr = textButton('Clear selection');
                     clr.onclick = () => { crmContactSel.clear(); paint(); };
                     bar2.append(del, clr);
                 }
@@ -2182,7 +2182,7 @@
                 + 'here so the pipeline holds only real, qualified work. Convert it when it firms up.' });
             head.append(titleInfo(lt, ltInfo));
             const act = el('div', 'card-act');
-            const add = textButton(null, { kind: 'primary', small: true }); add.append(ico(I.plus), document.createTextNode('Lead'));
+            const add = textButton(null, { kind: 'primary' }); add.append(ico(I.plus), document.createTextNode('Lead'));
             add.onclick = () => crmLeadForm();
             act.append(add); head.append(act); card.append(head);
             const seg = segmented([['active', 'Inbox'], ['archived', 'Archive']], crmLeadsMode,

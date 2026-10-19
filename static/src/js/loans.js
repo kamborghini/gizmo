@@ -294,7 +294,7 @@
                is going, from those on the shelf. Each shelf row keeps its own,
                secondary. */
             const shelf = units.filter(u => u.status === 'in');
-            const lend = shelf.length ? textButton(null, { kind: 'primary', small: true }) : null;
+            const lend = shelf.length ? textButton(null, { kind: 'primary' }) : null;
             if (lend) {
                 lend.type = 'button';
                 lend.append(ico(I.logOut), document.createTextNode('Loan out'));
@@ -323,7 +323,7 @@
                 days.type = 'number'; days.min = '1'; days.max = '365'; days.className = 'field-sm loan-chase-days';
                 days.value = String((d.settings || {}).chase_days || 28);
                 days.setAttribute('aria-label', 'Amber after this many days without a due date');
-                const save = textButton('Save', { small: true }); save.type = 'button';
+                const save = textButton('Save'); save.type = 'button';
                 save.onclick = async () => {
                     save.disabled = true;
                     try { await api('/api/loans', { op: 'settings', chase_days: Number(days.value) });
@@ -347,7 +347,7 @@
                     const who = document.createDocumentFragment();
                     who.append(el('span', 'dt-name', r.who_name || 'Someone'));
                     if (r.phone) who.append(el('span', 'dt-sub', r.phone));
-                    const back = textButton(null, { small: true });
+                    const back = textButton(null);
                     back.append(ico(I.logIn), document.createTextNode('Book back in'));
                     back.onclick = async () => {
                         if (!await uiConfirm((r.unit.name || 'This unit') + ' is back from '
@@ -373,7 +373,7 @@
             const rHead = el('div', 'card-head');
             rHead.append(el('h3', 'card-title', 'The register'));
             if (d.can_manage) {
-                const add = textButton(null, { small: true });
+                const add = textButton(null);
                 add.append(ico(I.plus), document.createTextNode('Add a unit'));
                 add.onclick = () => loanUnitModal(null);
                 const act = el('div', 'card-act'); act.append(add); rHead.append(act);
@@ -402,12 +402,12 @@
                     let outB = '';
                     if (u.status === 'in') {
                         /* Secondary: the page's one teal is the header's Loan out. */
-                        outB = textButton(null, { small: true });
+                        outB = textButton(null);
                         outB.append(ico(I.logOut), document.createTextNode('Loan out'));
                         outB.onclick = () => loanOutModal(u);
                     }
                     const acts = document.createDocumentFragment();
-                    const hist = textButton(null, { small: true });
+                    const hist = textButton(null);
                     hist.append(ico(I.history), document.createTextNode('History'));
                     hist.onclick = () => loanHistoryModal(u);
                     acts.append(hist);
@@ -418,7 +418,7 @@
                            is an admin's; REPRINTING a tag that already exists is
                            anyone's, because a peeled label is found by whoever
                            is holding the projector. The tag is its own column. */
-                        const sk = textButton(null, { small: true });
+                        const sk = textButton(null);
                         const sw = el('span', 'swap');
                         const w1 = el('span'); w1.append(ico(I.printer), document.createTextNode('Reprint'));
                         const w2 = el('span'); w2.append(ico(I.printer), document.createTextNode('Serial sticker'));
@@ -526,7 +526,7 @@
                Connection card's tag, and with it on that tag says so. */
             /* Refresh reloads the page's data, so it is the header's, worded
                (12 Oct 2026); it sat in the Connection card's head. */
-            const rf = textButton(null, { small: true }); rf.type = 'button';
+            const rf = textButton(null); rf.type = 'button';
             rf.append(ico(I.refresh), document.createTextNode('Refresh'));
             rf.onclick = () => { rf.disabled = true; refreshConnector().finally(() => { rf.disabled = false; }); };
             box.append(pageHead({ view: 'connector', title: 'Xero sync', line: 'Shopify orders, refunds and customers, sent into Xero.', actions: [rf] }));
@@ -670,7 +670,7 @@
                 if (more.length) end.push(infoButton('About Auto Run', { title: on ? 'Auto Run on' : 'Auto Run off', body: more }));
                 /* The switch sits on the line it switches. */
                 if (connIsAdmin()) {
-                    const t = textButton(on ? 'Turn Auto Run off' : 'Turn Auto Run on', { small: true });
+                    const t = textButton(on ? 'Turn Auto Run off' : 'Turn Auto Run on');
                     t.onclick = async () => {
                         if (!on && !await uiConfirm(
                             'Turn Auto Run on? Every 10 minutes the connector will check for new '
@@ -710,7 +710,7 @@
                 + 'nothing. ' + (connIsAdmin() ? 'Send does exactly what the review showed.' : 'An admin sends exactly what it showed.') });
             rHead.append(titleInfo(rTitle, rTitleInfo));
             const rAct = el('div', 'card-act');
-            const rev = textButton(null, { small: true });
+            const rev = textButton(null);
             rev.append(ico(I.eye), document.createTextNode('Run review'));
             rev.disabled = running;
             rev.onclick = async () => {
@@ -723,7 +723,7 @@
                does not arm Send: the button and the card under it agree. */
             const revAborted = !!(connReview && connReview.result && connReview.result.aborted);
             if (admin) {
-                const send = textButton(null, { kind: 'primary', small: true });
+                const send = textButton(null, { kind: 'primary' });
                 send.append(ico(I.send), document.createTextNode('Send to Xero'));
                 /* Review-before-send, enforced: the button only arms once a
                    completed review is on screen, and a Send spends it. */
@@ -1288,7 +1288,7 @@
                     'How it behaves. Credentials are not on this form: they stay on the '
                     + 'service, and the server will not accept them from here.' });
                 xHead.append(titleInfo(xt, xtInfo));
-                const toggle = textButton(connSettingsOpen ? 'Hide settings' : 'Change settings', { small: true });
+                const toggle = textButton(connSettingsOpen ? 'Hide settings' : 'Change settings');
                 toggle.onclick = async () => {
                     if (connSettingsOpen) { connSettingsOpen = false; connSettingsEdits = {}; renderConnector(); return; }
                     toggle.disabled = true;
@@ -1447,7 +1447,7 @@
                 qHead.append(titleInfo(qt, infoButton('About quarantine', { title: 'Quarantine log', body: 'Held back for bad data. Fix the cause, then retry.' })));
                 if (connIsAdmin()) {
                     const qAct = el('div', 'card-act');
-                    const rt = textButton(null, { small: true });
+                    const rt = textButton(null);
                     rt.append(ico(I.refresh), document.createTextNode('Retry failed'));
                     rt.disabled = running;
                     rt.onclick = async () => {

@@ -1,14 +1,14 @@
     @layer parts {
-        .seclink { background: transparent; border: 0; font: inherit; font-weight: var(--weight-medium); cursor: pointer; padding: 0; text-align: left; }
-        .linkish { border: 0; background: none; padding: 0; font: inherit; font-size: var(--text-xs); line-height: var(--lh-caption);
+        .link-inline { background: transparent; border: 0; font: inherit; font-weight: var(--weight-medium); cursor: pointer; padding: 0; text-align: left; }
+        .link-caption { border: 0; background: none; padding: 0; font: inherit; font-size: var(--text-xs); line-height: var(--lh-caption);
             font-weight: var(--weight-medium); cursor: pointer; }
         /* A standalone link ("Show all", "More in the Guide"): teal words at
            500 with a 14 arrow 2 after them. Not underlined: it stands alone, so
            the arrow carries what an underline does in running text. */
-        .link { display: inline-flex; align-items: center; gap: var(--sp-0-5); padding: 0; border: 0; background: none;
+        .link-go { display: inline-flex; align-items: center; gap: var(--sp-0-5); padding: 0; border: 0; background: none;
             font: inherit; font-weight: var(--weight-medium); color: var(--text-link); text-decoration: none; cursor: pointer; border-radius: var(--radius-tag); }
-        .link svg { width: var(--icon-sm); height: var(--icon-sm); stroke-width: var(--icon-stroke-s); }
-        .link:active { color: var(--text-link-hover); }
-        @media (hover: hover) { .link:hover { color: var(--text-link-hover); } }
-        @media (max-width: 640px) { .link { min-height: var(--control-h-lg); } }
+        .link-go svg { width: var(--icon-sm); height: var(--icon-sm); stroke-width: var(--icon-stroke-s); }
+        .link-go:active { color: var(--text-link-hover); }
+        @media (hover: hover) { .link-go:hover { color: var(--text-link-hover); } }
+        @media (max-width: 640px) { .link-go { min-height: var(--control-h-lg); } }
     }

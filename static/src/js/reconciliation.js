@@ -197,7 +197,7 @@
                     disconnecting = false;
                 };
                 if (xs.connected || mb.connected) {
-                    const manage = textButton(null, { small: true });
+                    const manage = textButton(null);
                     manage.type = 'button';
                     /* Name first, caret last: the house menu trigger. */
                     manage.append(document.createTextNode('Manage'), ico(I.chevDown));
@@ -212,7 +212,7 @@
                    still connect makes that card's Connect it. A sweep then still
                    reads what it can, and skips the rest. */
                 const swTeal = xs.connected && !xs.needs_reconnect && (mb.connected || !mb.can_connect);
-                const sw = textButton(null, { small: true, kind: swTeal ? 'primary' : '' });
+                const sw = textButton(null, { kind: swTeal ? 'primary' : '' });
                 sw.type = 'button';
                 /* The busy word swaps in at the same width, keeping its icon. */
                 const swIdle = el('span'), swBusy = el('span');
@@ -234,7 +234,7 @@
                 /* With the link refused, Reconnect is the one teal action. Only
                    the master account may start the walk, as with Connect. */
                 if (xs.needs_reconnect && (!teamMe || teamMe.role === 'master')) {
-                    const rc = textButton(null, { kind: 'primary', small: true });
+                    const rc = textButton(null, { kind: 'primary' });
                     rc.type = 'button';
                     rc.append(ico(I.logIn), document.createTextNode('Reconnect Xero'));
                     rc.onclick = async () => {
@@ -350,7 +350,7 @@
                 s1.append(document.createTextNode('Add this callback URL to your Google OAuth client.'));
                 const uriRow = el('div', 'act-row');
                 uriRow.append(el('code', 'setup-code', mb.redirect_uri || ''));
-                const cp = textButton(null, { small: true });
+                const cp = textButton(null);
                 cp.append(ico(I.copy), document.createTextNode('Copy'));
                 cp.onclick = async () => {
                     try { await navigator.clipboard.writeText(mb.redirect_uri || '');
@@ -379,7 +379,7 @@
                     who.value = mb.last_try || '';
                     /* Teal while Xero needs nothing, so Sweep now steps down for it;
                        Connect Xero or Reconnect is the teal action while Xero does. */
-                    const go = textButton(null, { small: true, kind: xs.connected && !xs.needs_reconnect ? 'primary' : '' });
+                    const go = textButton(null, { kind: xs.connected && !xs.needs_reconnect ? 'primary' : '' });
                     go.append(ico(I.mail), document.createTextNode('Connect the accounts mailbox'));
                     go.onclick = async () => {
                         /* The tab is opened SYNCHRONOUSLY, inside the click, and
@@ -461,7 +461,7 @@
                 if (st.setup.redirect_uri) {
                     const ur = el('div', 'act-row');
                     ur.append(el('code', 'setup-code', st.setup.redirect_uri));
-                    const ucp = textButton(null, { small: true }); ucp.type = 'button';
+                    const ucp = textButton(null); ucp.type = 'button';
                     ucp.append(ico(I.copy), document.createTextNode('Copy'));
                     ucp.onclick = async () => {
                         try { await navigator.clipboard.writeText(st.setup.redirect_uri); toastOk('Redirect URI copied.'); }
@@ -529,7 +529,7 @@
             rHead.append(rTitle);
             /* On the toolbar, not in the card header: the same class of
                control sits on the toolbar one tab away. */
-            const exp = textButton(null, { small: true }); exp.append(ico(I.download), document.createTextNode('Export CSV'));
+            const exp = textButton(null); exp.append(ico(I.download), document.createTextNode('Export CSV'));
             exp.onclick = reconCSV;
             list.append(rHead);
             /* Filters as you type, so its clear button clears the list too
@@ -556,7 +556,7 @@
                the filters that are said there. */
             let sevTag = null;
             if (reconFilter.severity) {
-                sevTag = textButton(null, { small: true }); sevTag.type = 'button';
+                sevTag = textButton(null); sevTag.type = 'button';
                 const sevWord = (RECON_SEV[reconFilter.severity] || [reconFilter.severity])[0];
                 sevTag.append(document.createTextNode(sevWord), ico(I.x));
                 sevTag.setAttribute('aria-label', 'Show every severity, not only ' + sevWord);
@@ -582,7 +582,7 @@
                 /* Filters that hide everything are not an all clear: with
                    21 open the page said "Nothing needs attention." */
                 if (reconFilter.severity || reconFilter.status || reconFilter.q) {
-                    const clr = textButton('Clear filters', { small: true }); clr.type = 'button';
+                    const clr = textButton('Clear filters'); clr.type = 'button';
                     clr.onclick = () => {
                         /* The box too: a redraw keeps what is typed in a focused
                            box, and would put the search straight back. */
@@ -644,7 +644,7 @@
                 + 'private window, where there is no session to get in the way.'));
             const line = el('div', 'act-row');
             line.append(el('code', 'setup-code', absUrl));
-            const copy = textButton(null, { small: true });
+            const copy = textButton(null);
             copy.append(ico(I.copy), document.createTextNode('Copy link'));
             copy.onclick = async () => {
                 try { await navigator.clipboard.writeText(absUrl); toastOk('Link copied.'); }
@@ -908,7 +908,7 @@
             reasonIn.type = 'text';
             reasonIn.placeholder = 'Why is this being ignored? (required)'; reasonIn.setAttribute('aria-label', 'Reason for ignoring');
             const reasonErr = el('p', 'rd-err', 'Say why it is being ignored.'); reasonErr.hidden = true; reasonErr.id = 'rd-reason-err';
-            const reasonGo = textButton('Ignore with this reason', { small: true }); reasonGo.type = 'button';
+            const reasonGo = textButton('Ignore with this reason'); reasonGo.type = 'button';
             reasonGo.onclick = async () => {
                 if (!reasonIn.value.trim()) { markInvalid(reasonIn, true); reasonIn.setAttribute('aria-describedby', reasonErr.id); reasonErr.hidden = false; reasonIn.focus(); return; }
                 markInvalid(reasonIn, false); reasonErr.hidden = true;
@@ -950,7 +950,7 @@
             } else {
                 aiH.append(infoButton('What the AI may and may not do', { title: 'AI interpretation', body:
                     'The AI reads only the evidence shown, must cite what it relies on, and its answer is recorded as interpretation, never as fact.' }));
-                const inv = textButton(null, { small: true }); inv.type = 'button';
+                const inv = textButton(null); inv.type = 'button';
                 const invIdle = el('span'), invBusy = el('span');
                 invIdle.append(ico(I.spark), document.createTextNode('Investigate with AI'));
                 invBusy.append(ico(I.spark), document.createTextNode('Investigating\u2026'));

@@ -17,7 +17,7 @@
         /* The size is what the item is for: the name gives way to it. */
         .dmenu-item > .dsearch-sub { flex: none; margin-left: auto; padding-left: var(--sp-2); color: var(--text-tertiary); }
         /* 12px, the size of the trigger it hangs off. Every menu in the app is
-           opened by a .btn-sm filter chip; at 14 the label grew two steps
+           opened by a filter chip button; at 14 the label grew two steps
            between the button and its own list, so the control changed scale the
            moment it opened. The 28px item height is unaffected - it is set. */
         /* A menu row is a nav row (the mix, spec 6): 32 tall, a 6 corner, a 16
@@ -61,13 +61,13 @@
         .dpanel.ipop { width: var(--pop-w); max-width: calc(100vw - 2 * var(--sp-4)); min-width: 0; padding: var(--pop-pad); gap: var(--sp-2); }
         .ipop h3 { margin: 0; font-size: var(--text-body); line-height: var(--lh-control); font-weight: var(--weight-semibold); color: var(--text-primary); }
         .ipop p { margin: 0; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }
-        .ipop .link { align-self: flex-start; margin-top: var(--sp-1); }
+        .ipop .link-go { align-self: flex-start; margin-top: var(--sp-1); }
         
         
         
         
         
-        /* On a phone a standalone link is a 40 target (a link inside a sentence is not a .link). */
+        /* On a phone a standalone link is a 40 target (a link inside a sentence is not a .link-go). */
         
         .drive-title { margin: 0; font-size: var(--text-body); font-weight: var(--weight-medium); }
         .drive-p, .drive-note { margin: 0; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }

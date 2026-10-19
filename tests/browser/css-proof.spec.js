@@ -2,6 +2,7 @@
 // written to CSS_PROOF_OUT. Skipped unless that is set, so the browser suite
 // itself never runs it.
 const fs = require('fs');
+const zlib = require('zlib');
 const path = require('path');
 const { test } = require('@playwright/test');
 const S = require('./support');
@@ -22,6 +23,7 @@ for (const s of SCREENS) {
     await S.settle(page, w);
     const f = await C.fingerprint(page);
     fs.mkdirSync(OUT, { recursive: true });
-    fs.writeFileSync(path.join(OUT, `${info.project.name}-${s.id.replace(/~/g, '-')}.json`), JSON.stringify(f));
+    // Gzipped: a state's fingerprint is some 9 MB of much-repeated text, 108 of them a run.
+    fs.writeFileSync(path.join(OUT, `${info.project.name}-${s.id.replace(/~/g, '-')}.json.gz`), zlib.gzipSync(JSON.stringify(f)));
   });
 }

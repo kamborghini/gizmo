@@ -178,7 +178,7 @@
             .ov-hero { flex-wrap: wrap; gap: var(--sp-4); }
             .ov-hero h2 { font-size: var(--text-2xl); }
             /* The actions take a row of their own under the title, sharing it. */
-            .ov-hero-act > .btn:not(.btn-icon) { flex: 1 1 auto; }
+            .ov-hero-act > .btn:not(.btn-square) { flex: 1 1 auto; }
             .ov-hero > div:not(.badge):not(.ov-hero-act) { flex: 1 1 200px; min-width: 0; }
             .ov-hero > .ov-hero-act { flex: 1 1 100%; }
             /* The stamp takes its own line; the buttons stay together under it. */
@@ -195,7 +195,7 @@
             /* A rail of three words or more wraps rather than running past the gutter, each button at its
                own width. A stamp and a Refresh stay on one line. */
             .ov-hero-act:has(> .btn + .btn + .btn) { flex-wrap: wrap; }
-            .ov-hero-act:has(> .btn + .btn + .btn) > .btn:not(.btn-icon) { flex: none; }
+            .ov-hero-act:has(> .btn + .btn + .btn) > .btn:not(.btn-square) { flex: none; }
             /* With the widget grid's Customize beside Refresh the row is
                fuller than the stamp's full-width basis leaves room for, and the
                icon button was squeezed to 18px wide under its 28px height. On

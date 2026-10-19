@@ -1850,7 +1850,7 @@ def t_a_link_is_still_identifiable_without_colour():
     reference underlines its links too."""
     style = HTML[HTML.index("<style>"):HTML.index("</style>")]
     for sel in [".lbl-num-link, .modal-order-link, .action-link", ".mail-order-name", ".miss-open",
-                ".seclink", ".sk-more", ".linkish"]:
+                ".link-inline", ".sk-more", ".link-caption"]:
         m = re.search(r"\n\s+" + re.escape(sel) + r" \{", style)
         i = m.start() if m else -1
         ok(i >= 0, "the %s rule is still there" % sel)
@@ -2178,8 +2178,7 @@ def t_xero_sync_is_a_band_a_status_line_and_its_tables():
     ok("cx-health" not in fn and "cx-chips" not in fn, "no health box or chip row: the status line says it once")
     ok("el('div', 'cx-statl')" in fn and "'Latest review'" in fn, "one status line")
     ok("el('div', 'cx-rv')" in fn and "'Needs attention'" in fn and "'Send will'" in fn, "the matrix beside Needs attention")
-    ok("cxBtn('btn btn-primary'" not in fn and "'btn btn-primary'" not in fn and "kind: 'primary' }" not in fn.replace("kind: 'primary', small: true }", "")
-       and fn.count("'btn btn-sm btn-primary'") + fn.count("kind: 'primary', small: true") == 1,
+    ok("cxBtn('btn btn-primary'" not in fn and "'btn btn-primary'" not in fn and fn.count("kind: 'primary'") == 1,
        "Send to Xero is the one teal")
     ok("pairNodes(hCard, qCard, 'runs', 'Runs and quarantine', { fit: true })" in fn and "'Quarantine log'" in fn,
        "the runs beside the quarantine log, at the runs' natural width")
@@ -2226,10 +2225,10 @@ def t_the_production_manager_opens_an_order_under_its_row_at_every_width():
     ok("display: grid" in pv and "grid-template-columns: max-content minmax(0, 1fr)" in pv, "the band is two columns: the label, and its words")
     ok("grid-template-rows: auto auto minmax(0, 1fr)" in pv, "the words stay together at the label's top, the last row taking the rest")
     ok(".lbl-preview > .lbl-frame { grid-column: 1; grid-row: 1 / span 3; }" in CSS, "the label on the left, the words beside its top")
-    ok("pnBtn = textButton(null, { small: true, kind: labelSel ? '' : 'primary' });" in SCRIPT, "Print new steps down while an order is open")
+    ok("pnBtn = textButton(null, { kind: labelSel ? '' : 'primary' });" in SCRIPT, "Print new steps down while an order is open")
     cq = fn_src("function renderCustomQueue(")
-    ok("const rp = textButton(null, { small: true });" in cq and "'btn btn-sm btn-primary'" not in cq, "a custom shipment's Reprint label is plain")
-    ok("textButton(null, { small: true, cls: 'lbl-slot' })" in cq and ".lbl-actions .lbl-slot { visibility: hidden; }" in CSS,
+    ok("const rp = textButton(null);" in cq and "'btn btn-primary'" not in cq, "a custom shipment's Reprint label is plain")
+    ok("textButton(null, { cls: 'lbl-slot' })" in cq and ".lbl-actions .lbl-slot { visibility: hidden; }" in CSS,
        "and a shipment with no tracking keeps an empty slot, so Reprint label lines up (OPS-11)")
     ok(re.search(r"--qc-w:\s*128px;", CSS), "the counters are about as wide as their words")
     ok("grid-template-columns: var(--ono-w) minmax(220px, max-content) minmax(0, 1fr) max-content max-content;" in CSS,
@@ -2294,7 +2293,7 @@ def t_loan_units_lends_from_its_header_and_chases_from_out_now():
     with no units at all the page has one empty state, the register's; and a
     unit's history is a small table."""
     fn = fn_src("function renderLoans(")
-    ok("const lend = shelf.length ? textButton(null, { kind: 'primary', small: true }) : null;" in fn and "actions: lend ? [lend] : []" in fn and "loanOutModal(null, shelf)" in fn,
+    ok("const lend = shelf.length ? textButton(null, { kind: 'primary' }) : null;" in fn and "actions: lend ? [lend] : []" in fn and "loanOutModal(null, shelf)" in fn,
        "the header's teal Loan out")
     mo = fn_src("function loanOutModal(")
     ok("function loanOutModal(unit, choices) {" in SCRIPT and "crmField(grid, 'Unit', unitSel);" in mo, "which asks which unit, from the shelf")
@@ -2598,8 +2597,8 @@ def t_every_phone_target_is_a_finger_wide():
     32 with its hit area, and three text links (a sector's name, a skill's Show
     all, What's new's Open) were 15 to 20 tall. Each keeps its look and gets an
     invisible 40 high target, as Claim and the clear buttons already have."""
-    ok(":is(.track-btn, .seclink, .sk-more, .rel-open) { position: relative; }" in CSS
-       and ":is(.track-btn, .seclink, .sk-more, .rel-open)::after { content: \"\"; position: absolute; left: 0; right: 0; top: 50%; height: var(--control-h-lg); margin-top: calc(var(--control-h-lg) / -2); }" in CSS,
+    ok(":is(.track-btn, .link-inline, .sk-more, .rel-open) { position: relative; }" in CSS
+       and ":is(.track-btn, .link-inline, .sk-more, .rel-open)::after { content: \"\"; position: absolute; left: 0; right: 0; top: 50%; height: var(--control-h-lg); margin-top: calc(var(--control-h-lg) / -2); }" in CSS,
        "Track and the three links get a 40 high target across their own width")
     ok(".action .check::after { content: \"\"; position: absolute; inset: calc(-1 * var(--sp-3)); }" in CSS, "and the tick's reaches 40")
 
@@ -2695,7 +2694,7 @@ def t_a_phone_keeps_three_small_things_on_shared_lines():
     tick box opened the second line, away from the name it ticks; and
     Activity's "Everything (261)" was cut off in its select, its total being
     the heading's count already."""
-    ok("const xbtn = textButton(null, { small: true, cls: 'p-export' }); xbtn.append(ico(I.download), el('span', 'p-export-txt', 'Export CSV')); xbtn.setAttribute('aria-label', 'Export CSV');" in SCRIPT
+    ok("const xbtn = textButton(null, { cls: 'p-export' }); xbtn.append(ico(I.download), el('span', 'p-export-txt', 'Export CSV')); xbtn.setAttribute('aria-label', 'Export CSV');" in SCRIPT
        and "@media (max-width: 640px) { .btn.p-export { width: var(--control-h); padding: 0; justify-content: center; } .p-export > .p-export-txt { display: none; } }" in CSS,
        "Export CSV is its icon on a phone, beside the other two")
     ok("@media (max-width: 640px) { .ktable.crm-contact-table > tbody > tr > td.tick { order: -2; } .ktable.crm-contact-table > tbody > tr > td.kt-main { flex: 1 1 calc(100% - var(--sp-8) - var(--sp-3)); } }" in CSS,
@@ -2743,7 +2742,7 @@ def t_team_people_keeps_one_teal():
     Create, both teal, were open under it."""
     rp = fn_src("function renderTeamPeople(")
     ok("const busy = teamNewOpen || d.users.some(u => u.id === teamTabsOpen && u.role !== 'master');" in rp
-       and "const add = textButton(null, { small: true, kind: busy ? '' : 'primary' });" in rp,
+       and "const add = textButton(null, { kind: busy ? '' : 'primary' });" in rp,
        "New account steps down while a form under it has the teal")
 
 
@@ -3946,7 +3945,7 @@ def t_the_table_toolbar_and_pager_match_the_reference():
     srch = CSS.split("\n        .tbl-search {")[1].split("}")[0]
     ok("height: var(--control-h)" in srch and "width: var(--search-w)" in srch, "the search field is 32 by 280 (the mix)")
     ok("padding: 0 var(--sp-3)" in srch and "gap: var(--control-gap)" in srch, "its glyph 12 in and 8 from the words")
-    btn = CSS.split(".btn-sm {")[1].split("}")[0]
+    btn = re.split(r"\n\s+\.btn \{", CSS)[1].split("}")[0]
     ok("min-height: var(--control-h)" in btn and "padding: 0 var(--sp-3)" in btn, "toolbar buttons are the one 32 button")
     step = CSS.split(".tbl-step {")[1].split("}")[0]
     ok("width: var(--control-h)" in step and "height: var(--control-h)" in step, "pager steps are 32 squares")
@@ -4642,8 +4641,7 @@ def t_every_control_is_the_same_height_as_every_other():
         ok("min-height: var(--control-h)" in block or "var(--control-h)" in block, why + " are 32px")
     ok("input[type=date], input[type=time] { height: var(--control-h); }" in CSS,
        "and a native date control is pinned, since it carries its own height")
-    sm = CSS.split(".btn-sm {")[1].split("}")[0]
-    ok("min-height: var(--control-h)" in sm, "and the small button is the same 32: the mix has no 28 text button")
+    ok(".btn-sm" not in re.sub(r"/\*.*?\*/", "", CSS, flags=re.S), "and there is no small button: the mix has no 28 text button (19 Oct 2026: the name went too)")
 
 
 @test
@@ -8914,20 +8912,21 @@ def t_the_design_rules_live_in_one_document():
     doc = open(path, encoding="utf-8").read()
     for heading in ("## Principles", "## Tokens", "## Recipes", "## Layout", "## Parts", "### Windows", "### Buttons",
                     "### Icon buttons", "### Links", "### Switches", "### Fields", "### Names", "### Rows", "### Tick rows",
-                    "### Tables", "## Adding a part"):
+                    "### Tables", "## Layers", "## Adding a part"):
         ok(heading in doc, "it has " + heading)
     ok("static/src/css/tokens.css" in doc and "static/src/js/part-dialog.js" in doc, "it names where values and parts live")
     for spec in ("2026-09-07-design-system-tokens-design.md", "2026-10-05-brand-design-system-design.md",
                  "2026-10-06-reactor-mix-design.md", "2026-10-13-panels-design.md", "2026-10-15-window-part-design.md",
                  "2026-10-19-buttons-and-links-design.md", "2026-10-19-switches-and-fields-design.md",
-                 "2026-10-19-rows-design.md", "2026-10-19-panels-and-tables-design.md"):
+                 "2026-10-19-rows-design.md", "2026-10-19-panels-and-tables-design.md", "2026-10-19-stylesheet-layers-design.md"):
         ok(spec in doc, "it links " + spec)
     for guard in ("t_every_corner_is_a_role", "t_every_defined_token_is_read", "t_every_window_is_built_and_closed_by_the_part",
                   "t_every_icon_button_is_built_by_the_part", "t_every_text_link_is_built_by_the_part",
                   "t_every_ordinary_button_is_built_by_the_part", "t_every_captioned_field_is_built_by_the_part",
                   "t_the_switch_fixers_stay_gone", "t_no_field_is_named_only_by_its_placeholder",
                   "t_no_row_is_a_pretend_button", "t_every_tick_row_is_built_by_the_part",
-                  "t_every_table_is_built_by_the_part", "t_the_panel_rule_is_the_stylesheets"):
+                  "t_every_table_is_built_by_the_part", "t_the_panel_rule_is_the_stylesheets",
+                  "t_the_stylesheet_opens_with_its_layers", "t_the_script_sets_no_styling", "t_the_legacy_names_are_gone", "t_css_proof_is_wired"):
         ok(guard in doc and ("def " + guard + "(") in open(__file__, encoding="utf-8").read(), "it names the guard " + guard)
 
 @test
@@ -8945,9 +8944,9 @@ globalThis.ico = (s) => { const n = el('span', 'ic'); n.innerHTML = s; return n;
 """ + button_part() + r"""
 const out = {};
 const b = textButton('Save'); out.plain = [b.className, b.textContent];
-out.primarySmall = textButton('Save', { kind: 'primary', small: true }).className;
+out.primary = textButton('Save', { kind: 'primary' }).className;
 const d = textButton(null, { kind: 'danger', cls: 'disp-book' }); out.danger = [d.className, d.textContent];
-out.square = textButton(null, { small: true, square: true }).className;
+out.square = textButton(null, { square: true }).className;
 const c = textButton('Copy', { icon: I.x }); out.icon = [c.children[0].className, c.textContent];
 const x = iconButton(I.x, 'Close'); out.x = [x.className, x.getAttribute('aria-label'), x.title];
 out.small = iconButton(I.trash, 'Delete note', { size: 'small', tone: 'danger' }).className;
@@ -8963,18 +8962,18 @@ console.log(JSON.stringify(out));
 """
     got = _run_node(js)
     ok(got["plain"] == ["btn", "Save"], "a plain button: %r" % got)
-    ok(got["primarySmall"] == "btn btn-sm btn-primary", "kind and size, in the stylesheet's order")
+    ok(got["primary"] == "btn btn-primary", "the kind, in the stylesheet's order (there is no small button: 19 Oct 2026)")
     ok(got["danger"] == ["btn btn-danger disp-book", ""], "a layout hook rides along; no text, an empty button")
-    ok(got["square"] == "btn btn-sm btn-icon", "the bordered square")
+    ok(got["square"] == "btn btn-square", "the bordered square")
     ok(got["icon"] == ["ic", "Copy"], "an icon before the words")
     ok(got["x"] == ["icon-btn", "Close", "Close"], "an icon button, named")
     ok(got["small"] == "icon-btn icon-btn-sm del", "small, with the danger tone")
     ok(got["tag"] == "icon-btn icon-btn-tag", "the size inside a tag")
     ok(got["tip"] == ["Rename", "Rename this conversation"], "a short tooltip can sit beside the full spoken name: %r" % got)
     ok("needs a label" in got["unnamed"], "an icon button without a name is refused")
-    ok(got["caption"] == "linkish" and got["inline"] == "seclink", "one link: caption and inline")
-    ok(got["go"] == ["link", "ic"], "the stand-alone link carries its chevron")
-    ok(got["cls"] == "linkish auth-back", "and a layout hook")
+    ok(got["caption"] == "link-caption" and got["inline"] == "link-inline", "one link: caption and inline")
+    ok(got["go"] == ["link-go", "ic"], "the stand-alone link carries its chevron")
+    ok(got["cls"] == "link-caption auth-back", "and a layout hook")
     ok(got["goIcon"] == ["<svg chev/>", "<svg arrow/>"], "a chevron by default, or the icon it is given: %r" % got)
 
 
@@ -9004,7 +9003,7 @@ def t_small_icon_buttons_keep_their_size_on_a_phone():
     its size and gets an invisible 40 target, so a toast's cross or a chip's
     cross does not balloon."""
     phone = "\n".join(re.findall(r"@media \(max-width: 640px\) \{(.*?)\n        \}", CSS, re.S))
-    ok(":is(.icon-btn:not(.icon-btn-sm, .icon-btn-tag), .btn-sm.btn-icon, .topbar .icon-btn, .topbar-search) { min-width: var(--control-h-lg); }" in phone,
+    ok(":is(.icon-btn:not(.icon-btn-sm, .icon-btn-tag), .btn.btn-square, .topbar .icon-btn, .topbar-search) { min-width: var(--control-h-lg); }" in phone,
        "the 40-wide rule leaves small and tag alone")
     ok(re.search(r":is\([^)]*\.icon-btn-sm, \.icon-btn-tag[^)]*\)::after \{\s*left: 50%", phone), "they get the centred 40 target")
     ok(re.search(r":is\([^)]*\.icon-btn-sm, \.icon-btn-tag[^)]*\) \{ position: relative; \}", phone), "anchored to themselves")
@@ -9060,7 +9059,7 @@ def t_every_text_link_is_built_by_the_part():
     """Four link styles (linkish, seclink, link, auth-link) for one idea. link()
     builds the one house link at caption size, at the size of its sentence, or
     standing alone with a chevron."""
-    bad = _built_by_hand(["el('button', 'linkish", "el('button', 'seclink", "el('button', 'a-metric seclink",
+    bad = _built_by_hand(["el('button', 'link-caption", "el('button', 'link-inline", "el('button', 'a-metric link-inline",
                           "el('button', 'link'", "el('button', 'auth-link"])
     ok(not bad, "links built by hand: %s" % bad)
 
@@ -9368,9 +9367,9 @@ def t_css_proof_is_wired():
 
 
 LAYER_PARTS = {   # a part's file: (the classes it owns, one of which a selector must name)
-    "button": ({"btn", "btn-primary", "btn-danger", "btn-ghost", "btn-sm", "btn-icon", "ghost", "ic"}, {"btn", "btn-primary", "btn-danger", "btn-sm", "btn-icon"}),
+    "button": ({"btn", "btn-primary", "btn-danger", "btn-ghost", "btn-square", "ghost", "ic"}, {"btn", "btn-primary", "btn-danger", "btn-square"}),
     "icon-button": ({"icon-btn", "icon-btn-sm", "icon-btn-tag", "del", "ok"}, {"icon-btn"}),
-    "link": ({"linkish", "seclink", "link"}, {"linkish", "seclink", "link"}),
+    "link": ({"link-caption", "link-inline", "link-go"}, {"link-caption", "link-inline", "link-go"}),
     "field": ({"pfield", "field-help"}, {"pfield", "field-help"}),
     "switch": ({"toggle", "sw", "on"}, {"toggle"}),
     "tick-row": ({"tick-row"}, {"tick-row"}),
@@ -9487,6 +9486,29 @@ def t_the_script_sets_no_styling():
     properties for values from data."""
     bad = _script_styling()
     ok(not bad, "%d styles set by the script: %s" % (len(bad), bad[:8]))
+
+
+@test
+def t_the_legacy_names_are_gone():
+    """Stage 3, piece 6: five class names the parts built were left from
+    before them: btn-sm (the same 32 button as btn), btn-icon (the square),
+    and the three links' seclink, linkish and link. The small button and its
+    option are gone; the rest are named for what they are: link-inline,
+    link-caption, link-go and btn-square. The frozen print functions keep
+    the classes they build."""
+    bare = re.sub(r"/\*.*?\*/", "", CSS, flags=re.S)
+    for old in ("btn-sm", "btn-icon", "seclink", "linkish", "link"):
+        ok(not re.search(r"\.%s(?![\w-])" % re.escape(old), bare), "no rule names .%s" % old)
+    rest = SCRIPT
+    for sig in ("function printShippingLabelsFor(", "function printLabelImages(", "function printLabels(", "function printDispatchManifest(",
+                "function printStockUsage(", "function printDaySheet(", "function printGuide(", "function labelSheet(", "function loanStickerSheet("):
+        if sig in rest:
+            rest = rest.replace(_body_of(sig), "")
+    for old in ("btn-sm", "btn-icon", "seclink", "linkish"):
+        ok(not re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(old), rest), "no script builds %s" % old)
+    bp = button_part()
+    ok("o.small" not in bp and not re.search(r"small:\s*true", rest), "textButton has no small option, and nothing asks for one")
+    ok("' btn-square'" in bp and "'link-inline'" in bp and "'link-go'" in bp and "'link-caption'" in bp, "the parts build the new names")
 
 
 @test
@@ -10018,7 +10040,7 @@ function renderMail() { paints += 1; }
 function mailInputBusy() { return false; }
 async function refreshMailQuiet() { calls.push('/api/mail/board'); }
 function paintMailThread(m) {
-  const full = el('button', 'linkish', 'Read the full emails'); full.dataset.mailReadonly = '';
+  const full = el('button', 'link-caption', 'Read the full emails'); full.dataset.mailReadonly = '';
   m.body.append(el('button', 'btn', 'Reply'), full);
 }
 """ + dialog_harness() + "\n" + "\n".join(fn_src(f) for f in ("function mailModal(", "async function openMailThread(")) + r"""
@@ -11292,7 +11314,7 @@ def t_the_run_health_box_says_when_and_in_words():
     # The connection, now lines in the band (12 Oct 2026): each named, the switch on its line.
     ok("el('div', 'band-src-h', 'Connection')" in fn and "cfg.shop || 'Not set on the service'" in fn, "the connection's lines each have a name")
     ok("credentials and mapping live on the connector service" not in fn, "not one run-on line of dots")
-    i = fn.index("const t = textButton(on ? 'Turn Auto Run off' : 'Turn Auto Run on', { small: true });")
+    i = fn.index("const t = textButton(on ? 'Turn Auto Run off' : 'Turn Auto Run on');")
     ok("end.push(t);" in fn[i:i + 1600] and "sAct.append(t);" not in fn, "the Auto Run switch sits on the Auto Run line")
     ok(".band-src-e {" in CSS, "at its end")
 
@@ -11462,7 +11484,7 @@ def t_the_queue_rows_use_the_small_control():
     """C-05: the production queue's row buttons were 32px beside the 28px
     buttons in the same card's head and toolbar."""
     fn = fn_src("function renderLabels(") if "function renderLabels(" in SCRIPT else SCRIPT
-    ok("const pv = textButton(null, { small: true });" in SCRIPT and "const pr = textButton(null, { small: true });" in SCRIPT,
+    ok("const pv = textButton(null);" in SCRIPT and "const pr = textButton(null);" in SCRIPT,
        "the row buttons are the small control")
     ok(".lbl-actions .btn:has(> .lbl-btn-txt) { padding: 0; min-width: var(--control-h-md);" in CSS,
        "and an icon-only button is square at that size, without squeezing a button that has only words")
@@ -12232,7 +12254,7 @@ def t_the_day_sheet_leaves_projectors_out_and_says_so():
        "projectors are taken out before anything else is counted")
     ok("projector or accessory" in body and "projectors or accessories" in body,
        "and the sheet says how many it left out")
-    cov = SCRIPT[SCRIPT.index("const fix = textButton('Resolve', { small: true });") - 400:][:600]
+    cov = SCRIPT[SCRIPT.index("const fix = textButton('Resolve');") - 400:][:600]
     ok("!r.order_problem" in cov, "Resolve is offered only for a gap in the size list")
 
 
@@ -12556,7 +12578,7 @@ def t_the_spacing_pass_holds():
     guide = SCRIPT.split("function renderGuide() {")[1].split("\n        function ")[0]
     ok("heroAct(" not in guide and "box._desc" not in SCRIPT and "box._print" not in SCRIPT,
        "the Guide's header is the same on every tab")
-    ok("const b = textButton(null, { small: true }); b.textContent = 'Try again';" in SCRIPT, "every Try again is the small button")
+    ok("const b = textButton(null); b.textContent = 'Try again';" in SCRIPT, "every Try again is the small button")
     mail = SCRIPT.split("function renderMail() {")[1][:6000]
     ok("el('h3', 'card-title', 'Connect the shared mailbox')" in mail and "'setting-title'" not in mail and ".style.cssText" not in mail,
        "the Inbox setup card is built from the shared parts, with no sizes of its own")
@@ -12937,10 +12959,8 @@ def t_a_button_is_the_mix_button():
         ok(prop in b, ".btn: " + prop)
     act = re.split(r"\n\s+\.btn:active \{", CSS)[1].split("}")[0]
     ok("background: var(--press)" in act and "translateY" not in act, "pressed is one step darker and does not move")
-    sm = CSS.split(".btn-sm {")[1].split("}")[0]
-    ok("min-height: var(--control-h)" in sm and "padding: 0 var(--sp-3)" in sm and "font-size: var(--text-body)" in sm,
-       "btn-sm is the same 32 button")
-    ok(".btn-sm.btn-icon { width: var(--control-h);" in CSS, "an icon button is a 32 square")
+    ok(".btn-sm" not in re.sub(r"/\*.*?\*/", "", CSS, flags=re.S), "there is no small button (it was the same 32; 19 Oct 2026 the name went too)")
+    ok(".btn.btn-square { width: var(--control-h);" in CSS, "an icon button is a 32 square")
     ok(re.search(r"\.icon-btn \{[^}]*min-width: var\(--control-h\); min-height: var\(--control-h\)", CSS),
        "and so is a ghost icon button")
     p = CSS.split(".btn-primary {")[1].split("}")[0]
@@ -13418,7 +13438,7 @@ def t_an_explanation_waits_behind_an_info_button():
     for fname in ("function dropMenu(", "function dropPanel("):
         f = fn_src(fname)
         ok("tokenNum('--pop-offset')" in f and "r.bottom + 4" not in f, fname + " opens 8 from its trigger")
-    link = re.split(r"\n\s+\.link \{", CSS)[1].split("}")[0]
+    link = re.split(r"\n\s+\.link-go \{", CSS)[1].split("}")[0]
     ok("color: var(--text-link)" in link and "font-weight: var(--weight-medium)" in link and "text-decoration: none" in link,
        "a standalone link is teal words at 500 with an arrow, not underlined")
     base = CSS.split("\n        .info {")[1].split("}")[0]
@@ -14238,7 +14258,7 @@ def t_worth_and_why_stack_at_12_and_cash_warnings_do_not_pile_up():
     wc = fn_src("function fcWorthCard(latest, sc, al) {")
     ok("cash.length > 1" in wc and "' more month'" in wc and "cash.slice(1)" not in wc and wc.count("'msg error'") == 1,
        "one warning, then the count of further months")
-    ok("@media (max-width: 640px) { .link { min-height: var(--control-h-lg); } }" in CSS and ".fc-worth .sec-tools > .link" not in CSS,
+    ok("@media (max-width: 640px) { .link-go { min-height: var(--control-h-lg); } }" in CSS and ".fc-worth .sec-tools > .link-go" not in CSS,
        "Show all is 40 on a phone, from the global link rule (its own copy was the same rule, measured: 40 tall at 390, 20 at 1440, unchanged)")
 
 
@@ -14305,7 +14325,7 @@ def t_the_production_manager_is_the_mix_page():
     ok("box.append(hero);" in fn and "box.append(prodQueues(" in fn and "if (data.partial_note)" in fn
        and fn.index("box.append(hero);") < fn.index("box.append(prodQueues(") < fn.index("if (data.partial_note)"),
        "the counters are built straight after the header, the partial-sweep notice after them")
-    ok(".ov-hero-act:has(> .btn + .btn + .btn) > .btn:not(.btn-icon) { flex: none; }" in CSS and ".ov-hero-act:has(> .btn + .btn + .btn) { flex-wrap: wrap; }" in CSS,
+    ok(".ov-hero-act:has(> .btn + .btn + .btn) > .btn:not(.btn-square) { flex: none; }" in CSS and ".ov-hero-act:has(> .btn + .btn + .btn) { flex-wrap: wrap; }" in CSS,
        "a phone rail of three words wraps, each at its own width, instead of running past the gutter")
 
 
@@ -14321,7 +14341,7 @@ def t_an_order_row_is_a_hairline_row_and_the_open_one_is_one_block():
     edge: the wash and the hover bleed 8 past the column with box-shadow, and the
     open order's teal bar is drawn on the bleed's outer edge."""
     fn = fn_src("function renderLabels() {")
-    for part in ("const pv = textButton(null, { small: true });", "el('span', 'lbl-btn-txt swap')", "ico(pvOn ? I.eyeOff : I.eye)",
+    for part in ("const pv = textButton(null);", "el('span', 'lbl-btn-txt swap')", "ico(pvOn ? I.eyeOff : I.eye)",
                  "if (pvOn && !unproc && !shipMode) pr.classList.add('btn-primary');", "el('figure', 'lbl-frame')",
                  "const p2 = textButton();", "db.classList.add('grp');", "rd.classList.add('grp');"):
         ok(part in fn, "renderLabels: " + part)
@@ -15100,11 +15120,11 @@ def t_a_standalone_link_is_a_40_target_on_a_phone():
     """Carried from the Phase 3 review: the shared .link ('More in the Guide' in every popover, 'Show all') was
     under 40 tall on a phone outside the one place that sized it. At 640 and under it is 40 tall everywhere; an
     inline link inside a sentence is not a .link and is unchanged."""
-    rule = "@media (max-width: 640px) { .link { min-height: var(--control-h-lg); } }"
+    rule = "@media (max-width: 640px) { .link-go { min-height: var(--control-h-lg); } }"
     ok(rule in CSS, "a standalone link is 40 tall at 640 and under")
-    ok(CSS.index(rule) > CSS.index("\n        .link { display: inline-flex;"), "after its base rule")
-    ok(".fc-worth .sec-tools > .link" not in CSS, "and Show all, a .link in a section's tools, needs no rule of its own")
-    ok("textLink('More in the Guide', { size: 'go', icon: I.arrowRight })" in SCRIPT, "the popover's Guide link is a .link")
+    ok(CSS.index(rule) > CSS.index("\n        .link-go { display: inline-flex;"), "after its base rule")
+    ok(".fc-worth .sec-tools > .link-go" not in CSS, "and Show all, a .link-go in a section's tools, needs no rule of its own")
+    ok("textLink('More in the Guide', { size: 'go', icon: I.arrowRight })" in SCRIPT, "the popover's Guide link is a .link-go")
 
 
 @test
@@ -15204,7 +15224,7 @@ def t_the_pre_measure_fold_is_in():
         return ms[0].group(1) if ms else ""
     for stale in ("a 28px square", "28px bordered tile", "the 28px the card actions above it are", "the page sets 24 between"):
         ok(stale not in CSS, "stale comment gone: " + stale)
-    ok(".fc-worth .sec-tools > .link" not in CSS and "@media (max-width: 640px) { .link { min-height: var(--control-h-lg); } }" in CSS,
+    ok(".fc-worth .sec-tools > .link-go" not in CSS and "@media (max-width: 640px) { .link-go { min-height: var(--control-h-lg); } }" in CSS,
        "Show all reads the global 40 link rule")
     cm = rule(".chart-modal .modal-body")
     ok("padding: var(--sp-4) var(--sp-4) var(--sp-6);" in cm, "the chart window pads 16 at its sides")
@@ -15417,7 +15437,7 @@ def t_the_phone_toolbar_and_both_head_shapes_hold_in_every_state():
        "Print shipping labels has the whole line to itself, under the pair")
     sel = _phone_rule(".q-card .tbl-tools-r > select")
     ok(sel and "flex: 1 1 100%" in sel and "order: 2" in sel, "and the size choice is the line after it")
-    ok("slBtn = textButton(null, { small: true, cls: 'ship-btn' });" in SCRIPT, "the button carries the class the phone rule reads")
+    ok("slBtn = textButton(null, { cls: 'ship-btn' });" in SCRIPT, "the button carries the class the phone rule reads")
     ok("flex: 1 1 0; min-width: 0" not in CSS.split("The Production Manager's toolbar buttons")[1][:600],
        "no zero basis squeezes a third button into the pair's row")
     # The head without an (i): the h2 is a direct child of .ph-text and must still take row 1 across all four columns.
@@ -15518,10 +15538,10 @@ def t_every_link_has_the_one_underline():
                 bad.append(sel.split("{")[-1].strip()[-50:] + " colour " + m.group(1).strip())
     ok(not bad, "links with an underline of their own: " + "; ".join(bad))
     rec = CSS.split("ONE LINK.")[1][:900]
-    ok(":is(.linkish, .miss-open, .lbl-num-link, .modal-order-link, .action-link, .rel-open, .md-a, .followed-link, .sk-more, .seclink, .proof-ext, .mail-order-name) {" in rec
-       and ":is(.linkish, .miss-open, .lbl-num-link, .modal-order-link, .action-link, .rel-open, .md-a, .followed-link, .sk-more, .seclink, .proof-ext, .mail-order-name):hover {" in rec,
+    ok(":is(.link-caption, .miss-open, .lbl-num-link, .modal-order-link, .action-link, .rel-open, .md-a, .followed-link, .sk-more, .link-inline, .proof-ext, .mail-order-name) {" in rec
+       and ":is(.link-caption, .miss-open, .lbl-num-link, .modal-order-link, .action-link, .rel-open, .md-a, .followed-link, .sk-more, .link-inline, .proof-ext, .mail-order-name):hover {" in rec,
        "Skills' more, a section's link, the proof's open and a mail order's name are in the recipe, hover and all")
-    for sel in (".sk-more", ".seclink", ".proof-ext", ".mail-order-name"):
+    for sel in (".sk-more", ".link-inline", ".proof-ext", ".mail-order-name"):
         ok(not re.search(r"\n\s*(@media \(hover: hover\) \{ )?" + re.escape(sel) + r"(:hover)? \{[^}]*text-decoration", CSS), sel + " keeps no underline rule of its own")
     crm = _winner(".crm-cline a", "text-decoration-color")
     ok(crm == "var(--link-underline)" and _winner(".crm-cline a", "text-underline-offset") == "var(--sp-1)", "the CRM contact link carries the recipe's tokens")
@@ -15778,7 +15798,7 @@ def t_reconciliation_tells_the_truth_about_its_links_filters_and_sweeps():
     ok("'Reconnect Xero'" in fn and "api('/api/recon/xero-link', {})" in fn,
        "and offers Reconnect through the same walk as Connect")
     ok("'Ask the master account to reconnect Xero.'" in fn, "which only the master account may start, so others are told who")
-    ok("const swTeal = xs.connected && !xs.needs_reconnect" in fn and "textButton(null, { small: true, kind: swTeal ? 'primary' : '' })" in fn,
+    ok("const swTeal = xs.connected && !xs.needs_reconnect" in fn and "textButton(null, { kind: swTeal ? 'primary' : '' })" in fn,
        "Reconnect is then the one teal action and Sweep now steps down")
     watch = fn_src("function watchReconXero(")
     ok("st.xero.connected && !st.xero.needs_reconnect" in watch,

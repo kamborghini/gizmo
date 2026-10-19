@@ -7,7 +7,7 @@
 // The controls forced: the first two of each kind (tag, classes, holder's
 // classes) in the state, so a list of fifty alike rows costs two.
 const CONTROLS = 'button, a[href], [role="button"], [role="tab"], input, select, textarea, summary, [tabindex="0"]';
-const PER_KIND = 2;
+const PER_KIND = Number(process.env.CSS_PROOF_PER_KIND || 2);   // more, to cover a state whose kinds a change merged
 const SUBTREE = 40;
 const HOLDERS = 3;
 
@@ -133,18 +133,18 @@ module.exports = { fingerprint, compare, properties, unseen, CONTROLS };
 // node tests/browser/computed.js <base dir> <head1 dir> <head2 dir>: the report,
 // exit 1 when any state changed.
 if (require.main === module) {
-  const fs = require('fs'), path = require('path');
+  const fs = require('fs'), path = require('path'), zlib = require('zlib');
   const [baseDir, h1Dir, h2Dir] = process.argv.slice(2);
-  const load = (d, f) => JSON.parse(fs.readFileSync(path.join(d, f), 'utf8'));
+  const load = (d, f) => JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(d, f))).toString('utf8'));
   let changed = 0, states = 0;
-  const files = fs.readdirSync(baseDir).filter(f => f.endsWith('.json')).sort();
+  const files = fs.readdirSync(baseDir).filter(f => f.endsWith('.json.gz')).sort();
   for (const f of files) {
     if (!fs.existsSync(path.join(h1Dir, f)) || !fs.existsSync(path.join(h2Dir, f))) { console.log(f + ': not shot on the head'); changed++; continue; }
     const diff = compare(load(baseDir, f), load(h1Dir, f), load(h2Dir, f));
     states++;
     if (!diff.length) continue;
     changed++;
-    console.log(f.replace(/\.json$/, '') + ': ' + diff.length + ' changed');
+    console.log(f.replace(/\.json\.gz$/, '') + ': ' + diff.length + ' changed');
     for (const d of diff.slice(0, 12)) {
       if (d.only) { console.log('  ' + d.key + ' (only on the ' + d.only + ')'); continue; }
       console.log('  ' + d.key + '\n' + d.props.slice(0, 6).map(p => '    ' + p.prop + ': ' + p.base + ' -> ' + p.head).join('\n'));

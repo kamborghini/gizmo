@@ -182,7 +182,7 @@
             return act;
         }
         function refreshBtn(onClick, label) {
-            const b = textButton(null, { small: true, square: true });
+            const b = textButton(null, { square: true });
             b.type = 'button'; b.append(ico(I.refresh));
             b.title = label || 'Refresh'; b.setAttribute('aria-label', label || 'Refresh');
             b.onclick = () => { setBusy(b, true); Promise.resolve().then(onClick).finally(() => setBusy(b, false)); };

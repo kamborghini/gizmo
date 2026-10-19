@@ -28,14 +28,10 @@
         .btn-danger { background: var(--action-danger-soft); border-color: transparent; color: var(--error); }
         @media (hover: hover) { .btn-danger:hover { background: var(--action-danger-soft-hover); border-color: transparent; color: var(--error); } }
         .btn-danger:active { background: var(--action-danger-soft-active); border-color: transparent; }
-        /* An icon-only small button is one control wide: a square at the control height (32; 40 on touch). */
-        .btn-sm.btn-icon { width: var(--control-h); padding: 0; justify-content: center; }
+        /* A square holding one icon is one control wide: a square at the control height (32; 40 on touch). */
+        .btn.btn-square { width: var(--control-h); padding: 0; justify-content: center; }
         @media (hover: hover) { .btn.ghost:hover { background: var(--surface-tertiary); } }
         .btn.ghost { background: transparent; border-color: transparent; box-shadow: none; }
         .btn.ghost .ic { color: var(--text-tertiary); }
-        /* The mix has no 28 text button: btn-sm is the same 32 button, kept as
-           a name so its call sites need no change. */
-        .btn-sm { min-height: var(--control-h); padding: 0 var(--sp-3); font-size: var(--text-body); gap: var(--control-gap); border-radius: var(--radius-control); }
-        .btn-sm svg { width: var(--icon-md); height: var(--icon-md); }
-        @media (max-width: 640px) { .btn-sm.btn-icon { width: var(--control-h-lg); } }
+        @media (max-width: 640px) { .btn.btn-square { width: var(--control-h-lg); } }
     }

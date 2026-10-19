@@ -200,9 +200,9 @@
             const sort = el('select', 'psel'); sort.setAttribute('aria-label', 'Sort products');
             [['revenue_desc', 'Revenue: high to low'], ['revenue_asc', 'Revenue: low to high'], ['units_desc', 'Units: high to low'], ['units_asc', 'Units: low to high'], ['newest', 'Newest first'], ['oldest', 'Oldest first'], ['updated', 'Recently updated'], ['price_desc', 'Price: high to low'], ['price_asc', 'Price: low to high'], ['title', 'Title A to Z']].forEach(([v, l]) => { const o = el('option', null, l); o.value = v; if (v === pState.sort) o.selected = true; sort.append(o); });
             sort.onchange = () => { pState.sort = sort.value; drawList(); };
-            const fbtn = textButton(null, { small: true, cls: pState.showFilters ? 'on' : '' }); fbtn.append(ico(I.sliders), document.createTextNode('Filters')); fbtn.onclick = () => { pState.showFilters = !pState.showFilters; rerender(); };
-            const cbtn = textButton(null, { small: true, cls: pState.compare ? 'on' : '' }); cbtn.textContent = 'Compare periods'; cbtn.onclick = () => { pState.compare = !pState.compare; rerender(); };
-            const xbtn = textButton(null, { small: true, cls: 'p-export' }); xbtn.append(ico(I.download), el('span', 'p-export-txt', 'Export CSV')); xbtn.setAttribute('aria-label', 'Export CSV');
+            const fbtn = textButton(null, { cls: pState.showFilters ? 'on' : '' }); fbtn.append(ico(I.sliders), document.createTextNode('Filters')); fbtn.onclick = () => { pState.showFilters = !pState.showFilters; rerender(); };
+            const cbtn = textButton(null, { cls: pState.compare ? 'on' : '' }); cbtn.textContent = 'Compare periods'; cbtn.onclick = () => { pState.compare = !pState.compare; rerender(); };
+            const xbtn = textButton(null, { cls: 'p-export' }); xbtn.append(ico(I.download), el('span', 'p-export-txt', 'Export CSV')); xbtn.setAttribute('aria-label', 'Export CSV');
             pAct.append(fbtn, cbtn, xbtn);
             pCard.append(tableTools([searchWrap, periodSeg], [sort]));
 
@@ -296,7 +296,7 @@
                 listWrap.innerHTML = '';
                 /* One line and the way back when nothing matches (12 Oct 2026). */
                 const none = el('div', 'empty-state');
-                const clr = textButton(null, { small: true }); clr.type = 'button'; clr.textContent = 'Clear search';
+                const clr = textButton(null); clr.type = 'button'; clr.textContent = 'Clear search';
                 clr.onclick = () => { pState.q = ''; rerender(); };
                 const nt = el('div', 'empty-txt'); nt.append(el('p', 'empty-line', 'No products match these filters.'));
                 const ni = el('span', 'empty-ic'); ni.setAttribute('aria-hidden', 'true'); ni.append(ico(I.search));

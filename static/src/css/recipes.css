@@ -41,9 +41,9 @@
         /* ONE LINK. Teal, underlined in a quiet line that turns teal on hover, at
            the size of the text around it unless the place sets one. Links came in
            seven styles: teal, ink, grey, underlined or not, 12px or body size. */
-        :is(.linkish, .miss-open, .lbl-num-link, .modal-order-link, .action-link, .rel-open, .md-a, .followed-link, .sk-more, .seclink, .proof-ext, .mail-order-name) {
+        :is(.link-caption, .miss-open, .lbl-num-link, .modal-order-link, .action-link, .rel-open, .md-a, .followed-link, .sk-more, .link-inline, .proof-ext, .mail-order-name) {
             color: var(--text-link); text-decoration: underline; text-underline-offset: var(--sp-1); text-decoration-color: var(--link-underline); }
-        @media (hover: hover) { :is(.linkish, .miss-open, .lbl-num-link, .modal-order-link, .action-link, .rel-open, .md-a, .followed-link, .sk-more, .seclink, .proof-ext, .mail-order-name):hover {
+        @media (hover: hover) { :is(.link-caption, .miss-open, .lbl-num-link, .modal-order-link, .action-link, .rel-open, .md-a, .followed-link, .sk-more, .link-inline, .proof-ext, .mail-order-name):hover {
             text-decoration-color: currentColor; } }
         /* A table of contents is a list of places, not running text: teal names
            whose underline appears under the pointer, not two rows of underlines. */

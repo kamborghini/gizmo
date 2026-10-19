@@ -71,7 +71,7 @@
                does: each report's Refresh sits in its own page header now,
                beside the stamp it renews (heroAct). Chat's New chat stays. */
             if (v === 'chat') {
-                act.append(ico(I.plus), document.createTextNode('New chat')); act.className = 'btn btn-sm btn-primary'; act.onclick = () => newConvo(); renderChat();
+                act.append(ico(I.plus), document.createTextNode('New chat')); act.className = 'btn btn-primary'; act.onclick = () => newConvo(); renderChat();
                 /* The applied skills' names: after a reload the list had not
                    been read, so the chip said 'A skill'. */
                 if (!skills.length && tabAllowed('skills')) loadSkills();

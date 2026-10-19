@@ -457,7 +457,7 @@
             /* The same page as the other queues (the mix): the same header with
                its live line and Refresh, the same counters and tabs, then the
                house search and the list. */
-            const newShip = textButton(null, { small: true });
+            const newShip = textButton(null);
             newShip.append(ico(I.plus), document.createTextNode('New shipment'));
             newShip.onclick = openCustomShip;
             const head = pageHead({ view: 'labels', title: 'Production Manager', live: Date.now(),
@@ -515,7 +515,7 @@
                         .filter(Boolean).join('  ·  ')));
                     const acts = el('div', 'lbl-actions');
                     if (!sh.canceled && sh.tracking) {
-                        const cp = textButton(null, { small: true });
+                        const cp = textButton(null);
                         cp.title = 'Copy tracking'; cp.append(ico(I.copy), el('span', 'lbl-btn-txt', 'Copy tracking'));
                         cp.onclick = async () => {
                             try { await navigator.clipboard.writeText(sh.tracking); toastOk('Tracking copied'); }
@@ -525,12 +525,12 @@
                     } else {
                         /* An empty slot as wide as Copy tracking, so Reprint label
                            lines up down the list (OPS-11). */
-                        const slot = textButton(null, { small: true, cls: 'lbl-slot' }); slot.type = 'button'; slot.tabIndex = -1; slot.setAttribute('aria-hidden', 'true');
+                        const slot = textButton(null, { cls: 'lbl-slot' }); slot.type = 'button'; slot.tabIndex = -1; slot.setAttribute('aria-hidden', 'true');
                         slot.append(ico(I.copy), el('span', 'lbl-btn-txt', 'Copy tracking'));
                         acts.append(slot);
                     }
                     /* Plain: nine teal Reprint labels down a list were nine primaries. */
-                    const rp = textButton(null, { small: true });
+                    const rp = textButton(null);
                     rp.append(ico(I.printer), el('span', 'lbl-btn-txt', 'Reprint label'));
                     rp.title = 'Reprint label';
                     if (sh.has_label === false) {
@@ -631,7 +631,7 @@
             const tools = el('div');
             let pnBtn = null, allBtn = null, slBtn = null, filtTabs = null;
             // A parcel that is not an order: paste an address and book it.
-            const newShip = textButton(null, { small: true });
+            const newShip = textButton(null);
             newShip.append(ico(I.plus), document.createTextNode('New shipment'));
             newShip.title = 'Book a courier to an address you paste in, with no Shopify order behind it';
             newShip.onclick = openCustomShip;
@@ -639,7 +639,7 @@
             /* Says what it will do rather than only what it is: once an
                arrangement is chosen the button carries it, so nobody has to
                remember what the next booking is going to ask for. */
-            const coll = textButton(null, { small: true, cls: collectionForRun ? 'on' : '' });
+            const coll = textButton(null, { cls: collectionForRun ? 'on' : '' });
             coll.append(ico(I.cal), document.createTextNode(
                 collectionForRun ? ('Collection: ' + collectionSummary()) : 'Collections'));
             coll.title = 'How each courier collects, and a one-off change for the next booking';
@@ -647,13 +647,13 @@
             bar.append(coll);
             if (unprinted.length && unprinted.length < printable.length) {
                 /* One teal: while an order is open its Print is the one. */
-                pnBtn = textButton(null, { small: true, kind: labelSel ? '' : 'primary' });
+                pnBtn = textButton(null, { kind: labelSel ? '' : 'primary' });
                 pnBtn.append(ico(I.printer), document.createTextNode('Print new (' + unprinted.length + ')'));
                 pnBtn.onclick = () => printLabels(unprinted);
             }
             if (printable.length) {
                 // Cancelled, refunded and already-fulfilled orders never join a bulk print.
-                allBtn = textButton(null, { small: true });
+                allBtn = textButton(null);
                 allBtn.append(ico(I.printer), document.createTextNode('Print all (' + printable.length + ')'));
                 allBtn.onclick = () => printLabels(printable);
             }
@@ -663,7 +663,7 @@
                4x6 sheet, and they are never the same run. */
             const shipLabels = shown.filter(shipLabelEligible);
             if (shipLabels.length) {
-                slBtn = textButton(null, { small: true, cls: 'ship-btn' });
+                slBtn = textButton(null, { cls: 'ship-btn' });
                 slBtn.append(ico(I.printer), document.createTextNode(
                     'Print shipping labels (' + shipLabels.length + ')'));
                 slBtn.title = 'Reprint the courier labels for dispatched orders in this list';
@@ -697,7 +697,7 @@
                     if (again) { again.value = typed; again.focus(); try { again.setSelectionRange(at, at); } catch (e) {} }
                 }, 180);
             };
-            const oldf = textButton(null, { small: true, cls: labelsOldest ? 'on' : '' });
+            const oldf = textButton(null, { cls: labelsOldest ? 'on' : '' });
             oldf.append(ico(I.sort), document.createTextNode(labelsOldest ? 'Oldest first' : 'Newest first'));
             oldf.title = 'Flip the queue order';
             oldf.onclick = () => { labelsOldest = !labelsOldest; renderLabels(); };
@@ -786,7 +786,7 @@
             /* No title: the counters carry the count it gave. One order opened
                from Shopify says so. */
             if (data.single) qCard.append(el('p', 'q-note', 'One order, opened from Shopify. Refresh for all.'));
-            const more = textButton(null, { small: true });
+            const more = textButton(null);
             /* The house menu trigger: its name, then the caret, like Manage and
                the filters. A grid icon read as a view switch. */
             more.classList.add('more-btn'); more.setAttribute('aria-label', 'More');
@@ -894,7 +894,7 @@
                 row.append(who);
                 row.append(el('div', 'lbl-meta', fmtDate(o.created_at)));
                 const acts = el('div', 'lbl-actions');
-                const pv = textButton(null, { small: true }); pv.title = labelSel === o.id ? 'Hide label preview' : 'Preview label';
+                const pv = textButton(null); pv.title = labelSel === o.id ? 'Hide label preview' : 'Preview label';
                 /* Preview and Hide hold one width (the mix, spec 6), so no column
                    moves when a row opens: both words lie in one cell and the one
                    not in use is hidden. */
@@ -906,18 +906,18 @@
                 pv.onclick = (e) => { e.stopPropagation(); labelSel = (labelSel === o.id ? null : o.id); renderLabels(); };
                 acts.append(pv);
                 if (canEditOrders() && o.status !== 'cancelled') {
-                    const ed = textButton(null, { small: true }); ed.title = 'Change the delivery address or contact details';
+                    const ed = textButton(null); ed.title = 'Change the delivery address or contact details';
                     ed.append(ico(I.edit), el('span', 'lbl-btn-txt', 'Edit'));
                     ed.onclick = (e) => { e.stopPropagation(); openOrderEdit(o); };
                     acts.append(ed);
                 }
                 if (o.proposal_url) {
-                    const pf = textButton(null, { small: true }); pf.title = 'Preview the proposal proof';
+                    const pf = textButton(null); pf.title = 'Preview the proposal proof';
                     pf.append(ico(I.globe), el('span', 'lbl-btn-txt', 'Proof'));
                     pf.onclick = (e) => { e.stopPropagation(); openProposal(o); };
                     acts.append(pf);
                 }
-                const pr = textButton(null, { small: true }); pr.title = 'Print label'; pr.append(ico(I.printer), el('span', 'lbl-btn-txt', 'Print'));
+                const pr = textButton(null); pr.title = 'Print label'; pr.append(ico(I.printer), el('span', 'lbl-btn-txt', 'Print'));
                 /* The open order's Print is the screen's one primary action (the
                    mix, spec 8.2), unless its row has its own: To ship's Dispatch,
                    Unprocessed's Ready to make. */
@@ -928,7 +928,7 @@
                     // The release gate: out of Unprocessed, into To make. Same
                     // tag move the amber strip's Add to queue performs.
                     if (!o.status) {
-                        const rd = textButton(null, { kind: 'primary', small: true });
+                        const rd = textButton(null, { kind: 'primary' });
                         rd.title = 'Remove the Unprocessed tag and add IP, so this order joins To make';
                         rd.append(ico(I.check), el('span', 'lbl-btn-txt', 'Ready to make'));
                         rd.onclick = (e) => { e.stopPropagation(); readyToMake(o, rd); };
@@ -938,7 +938,7 @@
                 } else {
                 if (o.status !== 'cancelled') {
                     const dispatched = !!dsp.tracking_number && !dsp.canceled;
-                    const db = textButton(null, { small: true, kind: !dispatched && queueMode === 'ship' ? 'primary' : '', cls: dispatched ? 'on' : '' });
+                    const db = textButton(null, { kind: !dispatched && queueMode === 'ship' ? 'primary' : '', cls: dispatched ? 'on' : '' });
                     db.title = dispatched ? 'View shipment / reprint label' : 'Dispatch a courier for this order';
                     db.append(ico(I.truck), el('span', 'lbl-btn-txt', dispatched ? 'Shipment' : 'Dispatch'));
                     db.onclick = (e) => { e.stopPropagation(); openDispatch(o); };
@@ -946,7 +946,7 @@
                     acts.append(db);
                 }
                 if (!o.status) {
-                    const mk = textButton(null, { small: true, cls: st.made_at ? 'on' : '' });
+                    const mk = textButton(null, { cls: st.made_at ? 'on' : '' });
                     mk.title = st.made_at ? 'Made ' + fmtDate(st.made_at) + '. Click to unmark.' : 'Mark this order as made';
                     mk.append(ico(I.check), el('span', 'lbl-btn-txt', st.made_at ? 'Made' : 'Mark made'));
                     mk.onclick = (e) => { e.stopPropagation(); toggleMade(o); };
@@ -1121,7 +1121,7 @@
                         left.append(el('div', 'field-help', rhs));
                         line.append(left);
                         if (canEdit) {
-                            const del = textButton('Remove', { small: true });
+                            const del = textButton('Remove');
                             del.onclick = async () => {
                                 if (!await uiConfirm('Remove the rule for "' + model + '"? It goes back to '
                                     + 'whatever the size list says, which may be nothing.',
@@ -1333,7 +1333,7 @@
                        (no projector on it, or two sizes) is not a gap in the
                        size list: a size rule would not settle it. */
                     if (sizeRulesCanEdit && !r.order_problem) {
-                        const fix = textButton('Resolve', { small: true });
+                        const fix = textButton('Resolve');
                         fix.onclick = () => openSizeRuleModal(r, () => runCoverage());
                         act.append(fix);
                     }

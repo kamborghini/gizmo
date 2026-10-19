@@ -31,7 +31,7 @@
                     if (fresh) {
                         const box = el('div', 'drive-pw');
                         const code = el('code', null, fresh);
-                        const cp = textButton(null, { small: true }); cp.type = 'button'; cp.append(ico(I.copy), document.createTextNode('Copy'));
+                        const cp = textButton(null); cp.type = 'button'; cp.append(ico(I.copy), document.createTextNode('Copy'));
                         cp.onclick = () => copyText(fresh, 'Drive password copied.');
                         box.append(code, cp);
                         body.append(box, el('p', 'drive-note', 'Shown once. Let Finder keep it in your keychain; if it is lost, make a new one.'));
@@ -40,7 +40,7 @@
                                                                   : 'You have no drive password yet.'));
                     }
                     const acts = el('div', 'dpanel-row');
-                    const make = textButton(st.has ? 'Make a new one' : 'Make a drive password', { kind: 'primary', small: true });
+                    const make = textButton(st.has ? 'Make a new one' : 'Make a drive password', { kind: 'primary' });
                     make.type = 'button';
                     make.onclick = async () => {
                         if (st.has && !await uiConfirm('Make a new drive password? The old one stops working, so Finder will ask for the new one.',
@@ -51,7 +51,7 @@
                     };
                     acts.append(make);
                     if (st.has) {
-                        const rm = textButton('Remove', { small: true }); rm.type = 'button';
+                        const rm = textButton('Remove'); rm.type = 'button';
                         rm.onclick = async () => {
                             setBusy(rm, true);
                             try { paint(await api('/api/files/drive', { op: 'remove' })); toastOk('Drive password removed. Finder can no longer open the drive as you.'); }
@@ -324,7 +324,7 @@
             if (rows.length) tHead.append(el('p', 'card-desc', 'Deleted for good after 30 days.'));
             if (rows.length) {
                 const tAct = el('div', 'card-act');
-                const emp = textButton(null, { small: true }); emp.append(ico(I.trash), document.createTextNode('Empty the trash'));
+                const emp = textButton(null); emp.append(ico(I.trash), document.createTextNode('Empty the trash'));
                 emp.onclick = async () => {
                     if (!(await uiConfirm('Delete everything in the trash for good? '
                         + (rows.length === 1 ? '1 file' : rows.length + ' files') + ' ('
@@ -360,13 +360,13 @@
                 const acts = el('div', 'files-acts wide');
                 // The small scale, like every other control in this card: at
                 // the 32px one these rows stood 4px taller than the browser's.
-                const back = textButton(null, { small: true }); back.textContent = 'Put back';
+                const back = textButton(null); back.textContent = 'Put back';
                 back.onclick = async () => {
                     back.disabled = true;
                     try { await filesOp('/api/files/file', { op: 'restore', id: f.id }); renderFiles(); }
                     catch (e) { back.disabled = false; toastError(e.message || 'Could not restore the file.'); }
                 };
-                const gone = textButton(null, { small: true }); gone.textContent = 'Delete now';
+                const gone = textButton(null); gone.textContent = 'Delete now';
                 gone.onclick = async () => {
                     if (!(await uiConfirm('Delete "' + f.name + '" for good? It cannot be put back after this.',
                                           { title: 'Delete for good', okText: 'Delete for good' }))) return;
@@ -733,16 +733,16 @@
                 bar.append(el('span', null, filesSel.size === 1 ? '1 file selected'
                     : filesSel.size + ' files selected'));
                 // The toolbar above this bar is at the small scale; so is it.
-                const mv = textButton('Move', { small: true });
+                const mv = textButton('Move');
                 mv.onclick = () => openMovePicker([...filesSel], () => { paintCrumbs(); paintList(); });
-                const tr = textButton('Trash', { small: true });
+                const tr = textButton('Trash');
                 tr.onclick = async () => {
                     try { await filesOp('/api/files/file', { op: 'trash', ids: [...filesSel] }); }
                     catch (e) { toastError(e.message); }
                     filesSel.clear();
                     renderFiles();
                 };
-                const clear = textButton('Clear', { small: true });
+                const clear = textButton('Clear');
                 clear.onclick = () => {
                     filesSel.clear();
                     listHost.querySelectorAll('.files-row.selected').forEach(r => {

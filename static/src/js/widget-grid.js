@@ -479,18 +479,18 @@
                 const rendered = wgOnPage(root);
                 const n = wgEdit.draft.hidden.filter(id => rendered.has(id)).length;
                 if (n) {
-                    const more = button('hidden', 'btn btn-sm', () => wgShowHiddenMenu(view, more));
+                    const more = button('hidden', 'btn', () => wgShowHiddenMenu(view, more));
                     label(more, 'Show hidden (' + n + ')');
                     want.push(more);
                 }
-                const reset = button('reset', 'btn btn-sm', () => wgReset(view));
+                const reset = button('reset', 'btn', () => wgReset(view));
                 label(reset, 'Reset');
-                const done = button('done', 'btn btn-sm btn-primary', () => wgCommit(view, false));
+                const done = button('done', 'btn btn-primary', () => wgCommit(view, false));
                 label(done, 'Done');
                 if (!!wgEdit.saving !== done.hasAttribute('aria-busy')) setBusy(done, !!wgEdit.saving);
                 want.push(reset, done);
             } else {
-                const cust = button('customize', 'btn btn-sm', () => wgToggle(view));
+                const cust = button('customize', 'btn', () => wgToggle(view));
                 cust.setAttribute('data-wg-customize', '');
                 wgAttr(cust, 'aria-pressed', 'false');
                 label(cust, 'Customise', I.settings);
