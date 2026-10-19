@@ -89,6 +89,15 @@ def field_part():
     return SCRIPT[SCRIPT.index(FIELD_START):SCRIPT.index(FIELD_END)]
 
 
+ROW_START = "/* ---------- the row parts ----------"
+ROW_END = "/* ---------- the row parts end ---------- */"
+
+
+def row_part():
+    """The row parts' source (static/src/js/part-row.js) as the page has it."""
+    return SCRIPT[SCRIPT.index(ROW_START):SCRIPT.index(ROW_END)]
+
+
 @test
 def t_the_script_parses():
     """A duplicate `const` in a 5,700-line file is invisible until the page dies."""
@@ -9154,6 +9163,55 @@ def t_no_field_is_named_only_by_its_placeholder():
         if not named:
             bad.append(SCRIPT[m.start():m.start() + 60].split("\n")[0])
     ok(not bad, "named only by a placeholder: %s" % bad)
+
+
+@test
+def t_a_row_opens_from_its_own_button_and_its_controls_keep_theirs():
+    """Stage 3, piece 4: a row that opens something is no longer a pretend
+    button holding other controls. A real button, named for the row, opens
+    it, and its Enter stops there; a click anywhere on the row still opens it,
+    except on a control of its own."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + row_part() + r"""
+const out = {}; let opened = 0, docKeys = 0, rowClicks = 0;
+document.addEventListener('keydown', () => { docKeys++; });
+const row = el('div', 'mrow');
+const open = () => { opened++; };
+const b = rowOpener('Open: Invoice copy please, from Accounts Team', open);
+const tick = document.createElement('input'); tick.type = 'checkbox';
+const words = el('span', 'msubj', 'Invoice copy please');
+row.append(b, tick, words); document.body.append(row);
+opensOnClick(row, open);
+row.addEventListener('click', () => { rowClicks++; });
+out.button = [b.className, b.getAttribute('aria-label'), b.tagName];
+b.click(); out.byButton = [opened, rowClicks];
+dispatch(b, new Ev('keydown', { key: 'Enter', bubbles: true })); out.docKeys = docKeys;
+tick.click(); out.byTick = opened;
+words.click(); out.byWords = opened;
+console.log(JSON.stringify(out));
+"""
+    got = _run_node(js)
+    ok(got["button"] == ["row-open sr-only", "Open: Invoice copy please, from Accounts Team", "BUTTON"], "a real, named button: %r" % got)
+    ok(got["byButton"] == [1, 0], "it opens the row once, and the click stops at it")
+    ok(got["docKeys"] == 0, "its Enter never reaches a page-wide shortcut")
+    ok(got["byTick"] == 1, "a click on the row's own tick does not open it")
+    ok(got["byWords"] == 2, "a click anywhere else on the row does")
+
+
+@test
+def t_a_tick_row_is_one_recipe():
+    """Tick-and-words rows had two text looks (dispatch's notify and insurance
+    ticks were 12 grey). tickRow() builds them all; one rule gives the words."""
+    if _node_ok():
+        got = _run_node(MINIDOM + row_part() + "console.log(JSON.stringify([tickRow('tm-tabpick').className, tickRow().className]));")
+        ok(got == ["tick-row tm-tabpick", "tick-row"], "the shared class and the screen's own: %r" % got)
+    rule = re.search(r"\.tick-row \{([^}]*)\}", CSS)
+    ok(rule and "font-size: var(--text-body)" in rule.group(1) and "color: var(--text-primary)" in rule.group(1), "the body text in primary ink")
+    for fam in (".disp-notify", ".disp-insure"):
+        r = re.search(re.escape(fam) + r" \{([^}]*)\}", CSS)
+        ok(r and "font-size" not in r.group(1) and "color" not in r.group(1), fam + " keeps only its spacing")
 
 
 @test

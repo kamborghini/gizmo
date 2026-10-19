@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-19",
+   "title": "Rows and ticks",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "Rows that open something are proper controls for a screen reader, the dispatch ticks use the same words as every other, and Memory's links are easier to tap."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-19",
    "title": "Switches and fields",
    "items": [
     {

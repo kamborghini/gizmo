@@ -688,7 +688,7 @@
         .disp-opt-shop b { color: var(--text-primary); font-weight: var(--weight-medium); }
         @media (prefers-reduced-motion: reduce) { .disp-opt, .disp-opt::before { transition: none; } }
         .disp-confirm { margin-top: var(--sp-3); }
-        .disp-notify { display: flex; align-items: flex-start; gap: var(--sp-2); font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary);
+        .disp-notify { display: flex; align-items: flex-start; gap: var(--sp-2);
             padding: var(--sp-2) 0; cursor: pointer; }
         .disp-book.needs-requote { background: var(--warning); border-color: var(--warning); }
         .disp-charge { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--warning); margin: var(--sp-1) 0 var(--sp-2-5); }

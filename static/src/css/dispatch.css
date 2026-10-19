@@ -30,8 +30,7 @@
         .disp-boxedit > input.disp-boxdef { width: var(--box-xs); height: var(--box-xs); flex: none;
             accent-color: var(--control-accent); cursor: pointer; margin: 0; }
         .disp-addbox { margin-top: var(--sp-2); }
-        .disp-insure { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-5) 0 0;
-            font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); cursor: pointer; }
+        .disp-insure { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-5) 0 0; cursor: pointer; }
         .disp-insure input[type=number] { height: var(--control-h); width: 112px; box-sizing: border-box; margin: 0; }
         .disp-quote { margin-top: var(--sp-4); }
         .disp-dest-name { font-weight: var(--weight-medium); font-size: var(--text-body); }

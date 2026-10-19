@@ -186,3 +186,6 @@
         @media (max-width: 900px) { .sk-item { grid-template-columns: minmax(0, 1fr); } }
         .sk-main { min-width: 0; }
         .sk-side { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); }
+        /* A tick (or a radio) and its words: one recipe (tickRow(), docs/DESIGN.md).
+           The screen's own class sets only its spacing. */
+        .tick-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-primary); cursor: pointer; }
