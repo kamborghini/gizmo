@@ -9306,6 +9306,23 @@ def t_the_ask_panel_sits_in_its_panel():
 
 
 @test
+def t_css_proof_is_wired():
+    """Stage 3, piece 6: a stylesheet change is proved to change nothing by
+    make css-proof, which shoots every element's final style on every
+    measured state (hover and focus forced on the controls) on the base and
+    twice on the branch, on ports of its own, and compares."""
+    mk = open(os.path.join(ROOT, "Makefile"), encoding="utf-8").read()
+    ok("\ncss-proof:\n\t$(PY) tests/browser/css_proof.py --base $(BASE)" in mk and "BASE ?= origin/main" in mk, "make css-proof runs the proof against BASE")
+    spec = open(os.path.join(ROOT, "tests", "browser", "css-proof.spec.js"), encoding="utf-8").read()
+    ok("test.skip(!OUT, 'the proof runs only from make css-proof');" in spec, "the browser suite itself never runs it")
+    py = open(os.path.join(ROOT, "tests", "browser", "css_proof.py"), encoding="utf-8").read()
+    ok("BASE_PORT, HEAD_PORT = 8942, 8941" in py and "8930" not in py, "on ports of its own, never the suite's 8930")
+    js = open(os.path.join(ROOT, "tests", "browser", "computed.js"), encoding="utf-8").read()
+    ok("CSS.forcePseudoState" in js and "['focus', 'focus-visible']" in js and "'::before', '::after'" in js,
+       "hover and keyboard focus forced, pseudo-elements included")
+
+
+@test
 def t_a_tick_row_is_one_recipe():
     """Tick-and-words rows had two text looks (dispatch's notify and insurance
     ticks were 12 grey). tickRow() builds them all; one rule gives the words."""

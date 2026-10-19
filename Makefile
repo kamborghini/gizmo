@@ -18,7 +18,7 @@
 
 PY ?= .venv/bin/python
 
-.PHONY: help install run test test-frontend test-forecast test-browser sweep sast env-doc api-doc check lock ext-check shopify-deploy shopify-release
+.PHONY: help install run test test-frontend test-forecast test-browser css-proof sweep sast env-doc api-doc check lock ext-check shopify-deploy shopify-release
 
 help:
 	@sed -n '4,18p' Makefile
@@ -91,6 +91,13 @@ api-doc:
 # passes --require.
 ext-check:
 	$(PY) tools/ext_check.py
+
+# The proof that a stylesheet change changed nothing: every element's final
+# style on every measured state, hover and focus forced on the controls,
+# against BASE (default origin/main). Ports 8941 and 8942.
+BASE ?= origin/main
+css-proof:
+	$(PY) tests/browser/css_proof.py --base $(BASE) $(if $(ONLY),--only '$(ONLY)')
 
 check: test-frontend test-forecast sweep sast ext-check test-browser
 	$(PY) tools/env_reference.py --check
