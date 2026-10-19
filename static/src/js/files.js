@@ -233,8 +233,8 @@
            four 40 targets do not fit beside a file's name. The button lives in
            the actions cell, so the row keeps the list's columns. */
         function filesMore(acts, items, name) {
-            const b = el('button', 'icon-btn files-more'); b.type = 'button'; b.innerHTML = I.moreH;
-            b.setAttribute('aria-label', 'Actions for ' + name); b.setAttribute('aria-haspopup', 'menu');
+            const b = iconButton(I.moreH, 'Actions for ' + name, { cls: 'files-more' });
+            b.setAttribute('aria-haspopup', 'menu');
             b.onclick = (e) => { e.stopPropagation(); dropMenu(b, items); };
             acts.append(b);
         }
@@ -628,12 +628,12 @@
                 /* Owner is who made the folder (12 Oct 2026): it was blank. */
                 row.append(filesCols(byName(f.by), tot.at ? fmtDate(tot.at) : '', tot.size ? fmtBytes(tot.size) : ''));
                 const acts = el('div', 'files-acts');
-                const rn = el('button', 'icon-btn'); rn.innerHTML = I.edit; rn.title = 'Rename folder';
+                const rn = iconButton(I.edit, 'Rename folder');
                 rn.onclick = () => inlineRename(row, name, f.name, async (v) => {
                     try { await filesOp('/api/files/folder', { op: 'rename', id: fid, name: v }); filesReveal.add(fid); } catch (e) { toastError(e.message); }
                     paintList();
                 });
-                const del = el('button', 'icon-btn'); del.innerHTML = I.trash; del.title = 'Delete folder (must be empty)';
+                const del = iconButton(I.trash, 'Delete folder (must be empty)');
                 del.onclick = async () => {
                     try { await filesOp('/api/files/folder', { op: 'delete', id: fid }); paintCrumbs(); paintList(); }
                     catch (e) { toastError(e.message || 'Could not delete the folder.'); }
@@ -684,11 +684,11 @@
                 row.append(name);
                 row.append(filesCols(byName(f.by), fmtDate(f.uploaded_at || f.created_at), fmtBytes(f.size)));
                 const acts = el('div', 'files-acts');
-                const dl = el('button', 'icon-btn'); dl.innerHTML = I.download; dl.title = 'Download';
+                const dl = iconButton(I.download, 'Download');
                 dl.onclick = () => download(fid);
-                const mv = el('button', 'icon-btn'); mv.innerHTML = I.moveTo; mv.title = 'Move to folder';
+                const mv = iconButton(I.moveTo, 'Move to folder');
                 mv.onclick = () => openMovePicker([fid], () => { paintCrumbs(); paintList(); });
-                const rn = el('button', 'icon-btn'); rn.innerHTML = I.edit; rn.title = 'Rename';
+                const rn = iconButton(I.edit, 'Rename');
                 rn.onclick = () => inlineRename(row, name, f.name, async (v) => {
                     // A rename must not quietly cost the file its type.
                     const oldExt = f.name.includes('.') ? f.name.split('.').pop() : '';
@@ -696,7 +696,7 @@
                     try { await filesOp('/api/files/file', { op: 'rename', id: fid, name: v }); filesReveal.add(fid); } catch (e) { toastError(e.message); }
                     paintList();
                 });
-                const del = el('button', 'icon-btn'); del.innerHTML = I.trash; del.title = 'Move to trash';
+                const del = iconButton(I.trash, 'Move to trash');
                 del.onclick = async () => {
                     try { await filesOp('/api/files/file', { op: 'trash', id: fid }); renderFiles(); }
                     catch (e) { toastError(e.message || 'Could not delete the file.'); }

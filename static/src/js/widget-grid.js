@@ -540,8 +540,7 @@
                    hold. A block with no heading took a band to hold a bare x. */
                 let x = n.querySelector(':scope > .wg-hide');
                 if (!x) {
-                    x = el('button', 'icon-btn wg-hide'); x.type = 'button';
-                    x.append(ico(I.eyeOff));
+                    x = iconButton(I.eyeOff, 'Hide ' + name, { cls: 'wg-hide' });
                     x.onclick = () => wgHide(view, n);
                     n.append(x);
                 }

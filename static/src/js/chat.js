@@ -36,8 +36,7 @@
         function chatTitle(c) {
             const h = el('div', 'chat-title');
             const t = el('h2', 'chat-h', c.title || 'Conversation'); t.title = c.title || '';
-            const ren = el('button', 'mem-btn'); ren.type = 'button'; ren.innerHTML = I.edit;
-            ren.title = 'Rename'; ren.setAttribute('aria-label', 'Rename this conversation');
+            const ren = iconButton(I.edit, 'Rename this conversation', { size: 'small', title: 'Rename' });
             ren.onclick = () => {
                 const inp = el('input', 'field-sm chat-rename'); inp.value = c.title || ''; inp.maxLength = 80;
                 inp.setAttribute('aria-label', 'Conversation name');
@@ -49,7 +48,7 @@
                     const v = inp.value.trim();
                     if (keep && v && v !== c.title) { c.title = v; c.renamed = true; save(); renderSidebar(); }
                     renderChat(true);
-                    const again = document.querySelector('#chat-log .chat-title .mem-btn'); if (again) again.focus();
+                    const again = document.querySelector('#chat-log .chat-title .icon-btn'); if (again) again.focus();
                 };
                 inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); done(true); } if (e.key === 'Escape') { e.stopPropagation(); done(false); } });
                 inp.addEventListener('blur', () => done(true));
@@ -117,8 +116,7 @@
             head.append(av, el('h3', 'who', 'Reactor'));
             if (deepTurn(t)) head.append(el('span', 'tag', 'Deep analysis'));
             if (t.at) head.append(el('span', 'resp-at', chatStamp(t.at)));
-            const copy = el('button', 'mem-btn resp-copy'); copy.type = 'button'; copy.innerHTML = I.copy;
-            copy.title = 'Copy this answer'; copy.setAttribute('aria-label', 'Copy this answer');
+            const copy = iconButton(I.copy, 'Copy this answer', { size: 'small', cls: 'resp-copy' });
             copy.onclick = () => copyText(structuredToText(t.structured, 20000), 'Answer copied.');
             head.append(copy);
             m.append(head);
@@ -446,8 +444,7 @@
             ids.forEach(id => {
                 const chip = el('span', 'sk-chip');
                 chip.append(ico(I.book), el('span', null, skillTitle(id) || 'A skill'));
-                const x = el('button', 'sk-chip-x'); x.type = 'button'; x.innerHTML = I.x;
-                x.setAttribute('aria-label', 'Stop applying ' + (skillTitle(id) || 'this skill')); x.title = 'Stop applying';
+                const x = iconButton(I.x, 'Stop applying ' + (skillTitle(id) || 'this skill'), { size: 'tag', title: 'Stop applying' });
                 x.onclick = () => { c.skills = c.skills.filter(k => k !== id); save(); syncComposer(); $('input').focus(); };
                 chip.append(x); host.append(chip);
             });

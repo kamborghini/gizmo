@@ -11,20 +11,12 @@
         .mem-meta { font-size: var(--text-xs); color: var(--text-tertiary); margin-top: var(--sp-1); line-height: var(--lh-caption); }
         .mem-when { display: none; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); margin-top: var(--sp-1); }
         .mem-acts { display: flex; gap: var(--sp-1); justify-content: flex-end; }
-        .mem-btn { border: 0; background: transparent; color: var(--text-tertiary); padding: var(--sp-1); border-radius: var(--radius-control); display: grid; place-items: center; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
-        .mem-btn svg { width: var(--icon-md); height: var(--icon-md); }
-        .mem-btn > .ic { display: grid; place-items: center; }
-        /* A finger-sized target on a touch screen, with room between. */
+        /* A finger-sized target on a touch screen, with room between: a small icon
+           button (a dense row's actions, a cross) is the control's 32 under a finger. */
         @media (pointer: coarse) {
-            .mem-btn { min-width: var(--control-h); min-height: var(--control-h); }
+            .icon-btn.icon-btn-sm { min-width: var(--control-h); min-height: var(--control-h); }
             .mem-acts, .sk-acts { gap: var(--sp-2); }
         }
-        /* A skill's icon actions sit beside its Use in chat button, so they are that button's 32 (not the 24 a row of icons alone keeps). */
-        .sk-acts .mem-btn { min-width: var(--control-h); min-height: var(--control-h); }
-        @media (hover: hover) { .mem-btn:hover { background: var(--surface-tertiary); color: var(--text-primary); } }
-        .mem-btn:active { background: var(--surface-sunken); }
-        @media (hover: hover) { .mem-btn.ok:hover { color: var(--success); background: var(--success-bg); } }
-        @media (hover: hover) { .mem-btn.del:hover { color: var(--error); background: var(--error-bg); } }
         .mem-edit, .mem-add { display: grid; gap: var(--sp-2); }
         .mem-edit-top { display: flex; align-items: center; justify-content: flex-start; gap: var(--sp-3); }
         /* The note editor at its measure, Kind beside its label (12 Oct 2026, WS-24). */
@@ -37,7 +29,7 @@
         .field-msg[hidden] { display: none; }
         /* .btn sets its own display, which beats the browser's [hidden]: a
            Split into 0 skills and a Save as a skill showed on every editor. */
-        .btn[hidden], .mem-btn[hidden] { display: none; }
+        .btn[hidden], .icon-btn[hidden] { display: none; }
         /* The note keeps a readable column: on an iPad it was a 54px ribbon,
            one word a line, and the table scrolled its buttons out of view.
            The stacked rows below are chosen by the card's width, not the

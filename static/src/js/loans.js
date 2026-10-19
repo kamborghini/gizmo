@@ -431,13 +431,10 @@
                         acts.append(sk);
                     }
                     if (d.can_manage) {
-                        const ed = el('button', 'icon-btn'); ed.innerHTML = I.edit;
-                        ed.title = 'Edit this unit'; ed.setAttribute('aria-label', 'Edit ' + u.name);
+                        const ed = iconButton(I.edit, 'Edit ' + u.name, { title: 'Edit this unit' });
                         ed.onclick = () => loanUnitModal(u);
                         /* Retiring keeps the history, so its mark is an archive box, not a bin. */
-                        const rt = el('button', 'icon-btn'); rt.innerHTML = u.status === 'retired' ? I.archiveRestore : I.archive;
-                        rt.title = u.status === 'retired' ? 'Put it back in the register' : 'Retire this unit';
-                        rt.setAttribute('aria-label', (u.status === 'retired' ? 'Unretire ' : 'Retire ') + u.name);
+                        const rt = iconButton(u.status === 'retired' ? I.archiveRestore : I.archive, (u.status === 'retired' ? 'Unretire ' : 'Retire ') + u.name, { title: u.status === 'retired' ? 'Put it back in the register' : 'Retire this unit' });
                         rt.onclick = async () => {
                             const back = u.status === 'retired';
                             if (!back && !await uiConfirm('Retire ' + u.name

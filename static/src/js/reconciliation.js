@@ -864,8 +864,7 @@
             const lead = el('div', 'rd-lead');
             lead.append(el('span', 'rd-title', e.title || ''));
             if (e.basis === 'ai_extraction') lead.append(el('span', 'lbl-chip warn', RECON_AI_SCAN));
-            const x = el('button', 'icon-btn'); x.type = 'button'; x.innerHTML = I.x;
-            x.setAttribute('aria-label', 'Close');
+            const x = iconButton(I.x, 'Close');
             x.onclick = (ev) => { ev.stopPropagation(); reconOpen = null; renderRecon(); };
             lead.append(x); d.append(lead);
             const cols = el('div', 'rd-cols');

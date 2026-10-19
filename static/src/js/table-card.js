@@ -266,8 +266,7 @@
                 /* In an answer, one action can be copied on its own, for an
                    email or a task. */
                 if (state) {
-                    const cp = el('button', 'mem-btn act-copy'); cp.type = 'button'; cp.append(ico(I.copy));
-                    cp.title = 'Copy this action'; cp.setAttribute('aria-label', 'Copy: ' + String(a.text || '').slice(0, 60));
+                    const cp = iconButton(I.copy, 'Copy: ' + String(a.text || '').slice(0, 60), { size: 'small', cls: 'act-copy', title: 'Copy this action' });
                     cp.onclick = (e) => { e.stopPropagation(); copyText(a.text || '', 'Action copied.'); };
                     row.append(cp);
                 }

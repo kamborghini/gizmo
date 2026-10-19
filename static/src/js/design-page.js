@@ -267,8 +267,7 @@
                 const card = el('section', 'card guide-card'); card.id = 'g-' + sec.id;
                 /* The print icon beside the title (12 Oct 2026, WS-53): it sat at the card's far edge. */
                 const head = el('div', 'card-head');
-                const p = el('button', 'mem-btn'); p.type = 'button'; p.append(ico(I.printer));
-                p.title = 'Print this section'; p.setAttribute('aria-label', 'Print ' + sec.h);
+                const p = iconButton(I.printer, 'Print ' + sec.h, { size: 'small', title: 'Print this section' });
                 p.onclick = () => printGuide([sec]);
                 const tr = el('div', 'title-row'); tr.append(el('h3', 'card-title', sec.h), p);
                 head.append(tr); card.append(head);

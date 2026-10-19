@@ -669,8 +669,8 @@
                         loadTeam();
                     } });
                     if (items.length) {
-                        const more = el('button', 'icon-btn'); more.type = 'button'; more.innerHTML = I.moreH;
-                        more.setAttribute('aria-label', 'More for ' + (u.name || u.username)); more.setAttribute('aria-haspopup', 'menu');
+                        const more = iconButton(I.moreH, 'More for ' + (u.name || u.username));
+                        more.setAttribute('aria-haspopup', 'menu');
                         more.onclick = (e) => { e.stopPropagation(); dropMenu(more, items); };
                         acts.append(more);
                     }

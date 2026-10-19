@@ -445,8 +445,7 @@
                 const tot = rows.reduce((a, r) => a + (r.outstanding || 0), 0);
                 h.append(el('b', null, c.name), el('span', 'lbl-meta', rows.length + (rows.length === 1 ? ' order' : ' orders')
                     + ' \u00b7 ' + liaMoney(tot, cur) + ' outstanding'));
-                const x = el('button', 'icon-btn'); x.type = 'button'; x.innerHTML = I.x;
-                x.setAttribute('aria-label', 'Close ' + c.name);
+                const x = iconButton(I.x, 'Close ' + c.name);
                 x.onclick = (e) => { e.stopPropagation(); liaOpen = null; renderLiability(); };
                 h.append(x); det.append(h);
                 const duo = el('div', 'duo');

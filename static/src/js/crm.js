@@ -1134,7 +1134,7 @@
                 } catch (e) { toastError(e.message); }
             };
             top.append(arch);
-            const del = el('button', 'icon-btn'); del.innerHTML = I.trash; del.title = 'Delete (restorable for 30 days)';
+            const del = iconButton(I.trash, 'Delete (restorable for 30 days)');
             del.onclick = async () => {
                 if (!await uiConfirm('Delete this deal? It can be restored from the Bin for 30 days.',
                                      { title: 'Delete deal', okText: 'Delete' })) return;
@@ -2335,7 +2335,7 @@
                 const un = el('button', 'btn', 'Unarchive');
                 un.onclick = async () => { try { await crmOp('/api/crm/lead', { op: 'unarchive', id: leadId }); m.close(); } catch (e) { toastError(e.message); } };
                 bar.append(un);
-                const del = el('button', 'icon-btn'); del.innerHTML = I.trash; del.title = 'Delete this lead for good';
+                const del = iconButton(I.trash, 'Delete this lead for good');
                 del.onclick = async () => {
                     if (!await uiConfirm('Delete this lead for good?', { title: 'Delete lead', okText: 'Delete' })) return;
                     try { await crmOp('/api/crm/lead', { op: 'delete', id: leadId }); m.close(); }
@@ -2366,9 +2366,9 @@
                     const rot = crmText(String(s.rot_days || ''), 'rot'); rot.type = 'number'; rot.min = '0';
                     rot.className = 'disp-num'; rot.title = 'Rot after N days untouched (0 = never)';
                     rot.oninput = () => { s.rot_days = parseInt(rot.value, 10) || 0; };
-                    const up = el('button', 'icon-btn'); up.innerHTML = I.up; up.title = 'Move up';
+                    const up = iconButton(I.up, 'Move up');
                     up.onclick = () => { if (i > 0) { working.splice(i - 1, 0, working.splice(i, 1)[0]); paint(); } };
-                    const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove stage';
+                    const rm = iconButton(I.x, 'Remove stage');
                     rm.onclick = () => { working.splice(i, 1); paint(); };
                     r.append(name, prob, rot, up, rm);
                     rows.append(r);
@@ -2409,7 +2409,7 @@
                     COLOR_OPTS.forEach(c => col.append(new Option(c, c)));
                     col.value = COLOR_OPTS.includes(l.color) ? l.color : 'gray';
                     col.onchange = () => { l.color = col.value; paintLabs(); };
-                    const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove label';
+                    const rm = iconButton(I.x, 'Remove label');
                     rm.onclick = () => { labs.splice(i, 1); paintLabs(); };
                     r.append(dot, name, col, rm);
                     lrows.append(r);

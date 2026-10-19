@@ -28,7 +28,8 @@
             const tone = o.tone === 'danger' ? ' del' : o.tone === 'ok' ? ' ok' : '';
             const b = el('button', 'icon-btn' + size + tone + (o.cls ? ' ' + o.cls : ''));
             b.innerHTML = icon;
-            b.title = label;
+            /* The spoken name is the full one; the tooltip may be its short form. */
+            b.title = o.title || label;
             b.setAttribute('aria-label', label);
             return b;
         }

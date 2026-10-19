@@ -51,7 +51,7 @@
                 b.onclick = () => { t.remove(); opts.action.fn(); };
                 t.append(b);
             }
-            const x = el('button', 'toast-x'); x.innerHTML = I.x; x.title = 'Dismiss';
+            const x = iconButton(I.x, 'Dismiss', { size: 'small' });
             x.onclick = () => t.remove();
             t.append(x);
             host.append(t);
@@ -127,7 +127,7 @@
             const t = host && host.lastElementChild; if (!t) return;
             const b = el('button', 'btn btn-sm'); b.type = 'button'; b.textContent = label;
             b.onclick = () => { t.remove(); fn(); };
-            t.insertBefore(b, t.querySelector('.toast-x'));
+            t.insertBefore(b, t.querySelector('.icon-btn'));
         }
         async function loadMemory(only) {
             /* Each part draws as soon as its own answer lands. Awaited one after
@@ -232,8 +232,7 @@
                 acts.append(cc);
             }
             if (mayAct) {
-                const del = el('button', 'mem-btn del'); del.innerHTML = I.trash;
-                del.setAttribute('aria-label', 'Delete tracked change: ' + (it.text || '').slice(0, 60)); del.title = 'Delete';
+                const del = iconButton(I.trash, 'Delete tracked change: ' + (it.text || '').slice(0, 60), { size: 'small', tone: 'danger', title: 'Delete' });
                 del.onclick = async () => {
                     if (!await uiConfirm('Delete the tracked change "' + (it.text || '').slice(0, 80) + '"? Its figures go with it.',
                         { title: 'Delete tracked change', okText: 'Delete' })) return;
@@ -537,8 +536,8 @@
             const box = el('div', 'mem-acts');
             const label = (verb) => verb + ': ' + String(m.text || '').slice(0, 60);
             const btn = (icon, verb, cls, fn) => {
-                const b = el('button', 'mem-btn' + (cls ? ' ' + cls : '')); b.type = 'button'; b.append(ico(icon)); b.title = verb;
-                b.setAttribute('aria-label', label(verb)); b.onclick = fn; box.append(b); return b;
+                const b = iconButton(icon, label(verb), { size: 'small', cls: cls, title: verb });
+                b.onclick = fn; box.append(b); return b;
             };
             /* Only what the server allows this account (_member_may_set): a
                member ticks off, reopens or dismisses a follow-up an admin

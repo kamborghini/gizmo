@@ -201,7 +201,7 @@
                 paintSkills();
                 /* The first of the files just added, so Tab walks on through the rest. */
                 const row = skHost.card.querySelectorAll('.sk-upload .sk-up')[have];
-                const f = row && (row.querySelector('.sk-input') || row.querySelector('.mem-btn'));
+                const f = row && (row.querySelector('.sk-input') || row.querySelector('.icon-btn'));
                 if (f) f.focus();
             });
         }
@@ -435,8 +435,7 @@
             const r = el('div', 'sk-up');
             const top = el('div', 'sk-up-top');
             top.append(ico(I.book), el('span', 'sk-up-name', u.name), el('span', 'sk-up-size', kb(u.size || 0)));
-            const rm = el('button', 'mem-btn'); rm.type = 'button'; rm.append(ico(I.x));
-            rm.title = 'Leave this file out'; rm.setAttribute('aria-label', 'Leave out ' + u.name);
+            const rm = iconButton(I.x, 'Leave out ' + u.name, { size: 'small', title: 'Leave this file out' });
             rm.disabled = busy;
             rm.onclick = () => {
                 if (skView.busy) return;
@@ -444,7 +443,7 @@
                 if (!skView.uploads.length) skView.uploads = null;
                 paintSkills();
                 const next = skHost.card.querySelectorAll('.sk-upload .sk-up')[Math.min(k, (skView.uploads || []).length - 1)];
-                const f = next && (next.querySelector('.sk-input') || next.querySelector('.mem-btn'));
+                const f = next && (next.querySelector('.sk-input') || next.querySelector('.icon-btn'));
                 if (f) f.focus(); else { const b = skHost.card.querySelector('.card-act .btn'); if (b) b.focus(); }
             };
             top.append(rm); r.append(top);
@@ -661,14 +660,11 @@
             use.title = 'Ask a question with this skill applied';
             use.onclick = () => useSkillInChat(s.id);
             use.hidden = !tabAllowed('chat');
-            const dl = el('button', 'mem-btn'); dl.type = 'button'; dl.append(ico(I.download)); dl.title = 'Download as Markdown';
-            dl.setAttribute('aria-label', 'Download ' + (s.title || 'skill') + ' as Markdown');
+            const dl = iconButton(I.download, 'Download ' + (s.title || 'skill') + ' as Markdown', { title: 'Download as Markdown' });
             dl.onclick = () => downloadSkill(s);
-            const edit = el('button', 'mem-btn'); edit.type = 'button'; edit.innerHTML = I.edit; edit.title = 'Edit';
-            edit.setAttribute('aria-label', 'Edit ' + (s.title || 'skill'));
+            const edit = iconButton(I.edit, 'Edit ' + (s.title || 'skill'), { title: 'Edit' });
             edit.onclick = () => { if (!skillGuard()) return; skView.editId = s.id; skView.adding = false; paintSkills(); };
-            const del = el('button', 'mem-btn del'); del.type = 'button'; del.innerHTML = I.trash; del.title = 'Delete';
-            del.setAttribute('aria-label', 'Delete ' + (s.title || 'skill'));
+            const del = iconButton(I.trash, 'Delete ' + (s.title || 'skill'), { tone: 'danger', title: 'Delete' });
             del.onclick = async () => {
                 if (!await uiConfirm('Delete the skill "' + (s.title || '') + '"? Reactor stops following it straight away, and it cannot be brought back.',
                     { title: 'Delete skill', okText: 'Delete' })) return;

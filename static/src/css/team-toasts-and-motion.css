@@ -145,9 +145,7 @@
         .toast.bad { border-left-color: var(--error); }
         .toast.good { border-left-color: var(--success); }
         .toast-msg { flex: 1 1 auto; line-height: var(--lh-control); }
-        .toast-x { background: none; border: 0; color: var(--text-tertiary); cursor: pointer; padding: 0; line-height: var(--lh-none); flex: none; }
-        .toast-x { min-width: var(--control-h-sm); min-height: var(--control-h-sm); display: grid; place-items: center; }
-        .toast-x svg { width: var(--icon-sm); height: var(--icon-sm); }
+        .toast > .icon-btn { flex: none; }
         /* Not on the colour token: this fade is paired with the 320ms
            removal timer in toast(), so the two have to say the same number. */
         .toast.out { opacity: 0; transition: opacity .32s var(--ease); }

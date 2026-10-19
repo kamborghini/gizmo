@@ -324,7 +324,7 @@
                     val.oninput = () => { c.value = val.value; };
                     row.append(f, o2, val);
                     if (r.conditions.length > 1) {
-                        const x = el('button', 'icon-btn'); x.innerHTML = I.x; x.title = 'Remove';
+                        const x = iconButton(I.x, 'Remove');
                         x.onclick = () => { r.conditions.splice(i, 1); paintConds(); };
                         row.append(x);
                     }

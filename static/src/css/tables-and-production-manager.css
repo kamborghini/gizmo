@@ -31,8 +31,6 @@
         .alert-row .a-metric { flex: 1; color: var(--text-primary); }
         .alert-row .a-pct { font-weight: var(--weight-medium); font-variant-numeric: tabular-nums; }
         .alert-row .a-pct.up { color: var(--success); } .alert-row .a-pct.down { color: var(--error); }
-        .alert-x { background: transparent; border: 0; color: var(--text-tertiary); padding: var(--sp-1); border-radius: var(--radius-control); display: grid; place-items: center; cursor: pointer; }
-        @media (hover: hover) { .alert-x:hover { color: var(--text-primary); background: var(--surface-tertiary); } } .alert-x svg { width: var(--icon-sm); height: var(--icon-sm); }
         /* production labels */
         .lbl-toolbar { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); flex-wrap: wrap; }
         /* Reports and setup: reachable in one click, but visibly subordinate to the

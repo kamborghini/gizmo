@@ -612,7 +612,7 @@
                     ins[k] = inp;
                 });
                 ins.weight.addEventListener('input', () => { weightTouched = true; });
-                const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove this parcel';
+                const rm = iconButton(I.x, 'Remove this parcel');
                 rm.onclick = () => { const i = boxRows.indexOf(row); if (i >= 0) boxRows.splice(i, 1); rowb.remove(); staleQuote(); };
                 const row = { el: rowb, sel, ins };
                 function applyPreset(id) {
@@ -756,7 +756,7 @@
                         hIn.value = pre.hs || ''; oIn.value = pre.origin || 'GB';
                     }
                     else { oIn.value = 'GB'; }
-                    const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove line';
+                    const rm = iconButton(I.x, 'Remove line');
                     const line = { dIn, qIn, pIn, hIn, oIn, key: (pre && pre.key) || '' };
                     rm.onclick = () => { const i = customsLines.indexOf(line); if (i >= 0) customsLines.splice(i, 1); rowc.remove(); };
                     rowc.append(dIn, qIn, pIn, hIn, oIn, rm);
@@ -1585,7 +1585,7 @@
                     i.placeholder = k === 'weight' ? 'kg' : k.slice(0, 1).toUpperCase() + k.slice(1) + ' cm';
                     i.oninput = staleQuote; ins[k] = i;
                 });
-                const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove this parcel';
+                const rm = iconButton(I.x, 'Remove this parcel');
                 const row = { el: rowb, ins };
                 rm.onclick = () => { const i = boxRows.indexOf(row); if (i >= 0) boxRows.splice(i, 1); rowb.remove(); staleQuote(); };
                 sel.onchange = () => {
@@ -1761,7 +1761,7 @@
                     const price = mk('Unit £', 'disp-num'); price.type = 'number'; price.min = '0'; price.step = '0.01';
                     const hs = mk('HS code', 'disp-num', quote.default_hs_code || '');
                     const orig = mk('Origin', 'disp-num', 'GB');
-                    const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove this line';
+                    const rm = iconButton(I.x, 'Remove this line');
                     const entry = { desc: desc, qty: qty, price: price, hs: hs, orig: orig };
                     rm.onclick = () => {
                         const i = customsRows.indexOf(entry);
@@ -2314,7 +2314,7 @@
                         inp.oninput = () => b[k] = parseFloat(inp.value) || 0;
                         rowb.append(inp);
                     });
-                    const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove';
+                    const rm = iconButton(I.x, 'Remove');
                     rm.onclick = () => {
                         if (boxes[i].id === defaultBoxId) defaultBoxId = '';
                         boxes.splice(i, 1); renderBoxes();

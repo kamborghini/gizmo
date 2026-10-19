@@ -142,7 +142,7 @@
                 t.remove();
             };
             t.append(u);
-            const x = el('button', 'toast-x'); x.innerHTML = I.x; x.title = 'Dismiss';
+            const x = iconButton(I.x, 'Dismiss', { size: 'small' });
             x.onclick = () => t.remove();
             t.append(x);
             host.append(t);
@@ -1296,7 +1296,7 @@
             }
             const head = el('div', 'cov-head');
             head.append(el('h3', null, 'Size list coverage'));
-            const x = el('button', 'alert-x'); x.innerHTML = I.x; x.title = 'Dismiss';
+            const x = iconButton(I.x, 'Dismiss', { size: 'small' });
             x.onclick = () => { labelsCoverage = null; renderLabels(); };
             head.append(x);
             card.append(head);
@@ -1692,7 +1692,7 @@
                             inp.className = 'tm-field'; inp.style.cssText = 'width:76px;flex:none;padding:var(--sp-1) var(--sp-2)';
                             inp.setAttribute('aria-label', 'Final quantity for ' + r.family + ' ' + r.size);
                             inp.oninput = () => { r.final = inp.value; };
-                            const rm = el('button', 'icon-btn'); rm.innerHTML = I.x; rm.title = 'Remove this line (not actually used)';
+                            const rm = iconButton(I.x, 'Remove this line (not actually used)');
                             rm.onclick = () => { sheet.splice(i, 1); paintSheet(); };
                             const est = el('td', 'num', String(r.estimated));
                             est.style.color = 'var(--text-tertiary)';

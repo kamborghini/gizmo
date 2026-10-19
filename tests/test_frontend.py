@@ -134,7 +134,7 @@ def t_every_modal_still_has_a_working_close():
     built by dialog() now, which wires its X to close and names it."""
     part = dialog_part()
     ok("if (x) x.onclick = close;" in part, "the part wires its X to close")
-    ok("x.setAttribute('aria-label', 'Close')" in part, "and names it")
+    ok("x = iconButton(I.x, 'Close');" in part, "and names it, through the icon button part")
 
 
 @test
@@ -155,11 +155,6 @@ def t_untrusted_text_never_reaches_innerHTML():
     there to make survivable.
     """
     STATIC = ("svg", "LABEL_LOGO", "o.icon", "icon")
-    # iconButton() puts its icon in with innerHTML: every call must hand it one
-    # of the page's own icon constants, never text from anywhere else.
-    for m in re.finditer(r"\biconButton\(\s*([^,)]+)", SCRIPT):
-        ok(m.group(1).strip().startswith("I.") or m.group(1).strip() == "icon",
-           "iconButton is handed an icon constant, not " + m.group(1)[:40])
 
     def static_markup(expr: str) -> bool:
         e = expr.strip()
@@ -173,6 +168,11 @@ def t_untrusted_text_never_reaches_innerHTML():
         return (e.startswith(("'", '"')) or e.startswith("I.") or e.startswith("I[")
                 or e in STATIC)
 
+    # iconButton() puts its icon in with innerHTML: every call must hand it one
+    # of the page's own icon constants, never text from anywhere else.
+    for m in re.finditer(r"\biconButton\(\s*([^,)]+)", SCRIPT):
+        ok(static_markup(m.group(1)) or m.group(1).strip() == "icon",
+           "iconButton is handed an icon constant, not " + m.group(1)[:40])
     for m in re.finditer(r"\.(?:innerHTML|outerHTML)\s*\+?=\s*([^;\n]+)", SCRIPT):
         val = m.group(1).strip()
         ok(static_markup(val),
@@ -1224,8 +1224,8 @@ def t_icon_only_buttons_clear_the_minimum():
     rule = re.search(r"\.icon-btn \{.*?\}", HTML, re.S).group(0)
     ok("min-width: var(--control-h)" in rule and "min-height: var(--control-h)" in rule,
        "icon buttons carry an explicit 32 floor rather than inheriting one from their glyph")
-    ok(re.search(r"\.toast-x \{ min-width: var\(--control-h-sm\); min-height: var\(--control-h-sm\)", HTML),
-       "so does the toast dismiss, which sits on its own over the page")
+    ok(re.search(r"\.icon-btn\.icon-btn-sm \{ min-width: var\(--control-h-sm\); min-height: var\(--control-h-sm\)", HTML),
+       "so do the small ones, the toast's dismiss among them, which sits on its own over the page")
 
 
 @test
@@ -2081,7 +2081,7 @@ def t_liability_owing_is_a_table_with_the_account_opened_beside_its_email():
     det = fn_src("function liaDetail(") if "function liaDetail(" in SCRIPT else ""
     ok("el('div', 'duo')" in det and "chasePanel(c, cur)" in det and "'Value and paid'" in det and "'Terms and channel'" in det,
        "its orders beside the chase email, two-line cells so both fit")
-    ok("aria-label', 'Close ' + c.name" in det, "and an X beside its name closes it")
+    ok("iconButton(I.x, 'Close ' + c.name)" in det, "and an X beside its name closes it")
     # Final review I-3: the line keeps the paid-but-tagged strip and drops its stale stamp (t_nothing_owed_still_says_what_is_paid_but_tagged).
     ok("'Nothing is owed.'" in fn and "emptyState({ icon: I.wallet," in fn, "nothing owed is one line, not six £0 tiles and a card")
     ok("r.after" in fn_src("function dtable("), "a table row can carry its detail under it")
@@ -2132,7 +2132,7 @@ def t_reconciliation_is_a_band_a_sweep_line_and_a_table():
     ok("after: reconOpen && reconOpen.id === e.id ? reconDetailNode() : null" in fn, "an opened one opens under its row")
     rd = fn_src("function paintReconDetail(")
     ok("el('div', 'rd-cols')" in rd and ".rd-cols { display: grid;" in CSS, "the detail is two columns")
-    ok("x.setAttribute('aria-label', 'Close')" in rd and "x.innerHTML = I.x" in rd, "closed by an X beside its sentence")
+    ok("iconButton(I.x, 'Close')" in rd, "closed by an X beside its sentence")
     ok("const stbar = segmented(" in rd, "status is the house chooser")
     ok("el('dl', 'rd-sum')" in rd, "the arithmetic is an aligned sum")
     ok("el('div', 'rd-verdict')" in rd and "'rd-meter'" in rd, "the verdict is a tag and a confidence meter")
@@ -2481,7 +2481,7 @@ def t_customise_puts_its_controls_on_the_blocks_first_line():
     band at its top to hold a bare x on the corner, and nothing said where to
     take hold of a block to drag it."""
     dec = fn_src("function wgDecorate(")
-    ok("x.append(ico(I.eyeOff));" in dec and "el('span', 'wg-grip')" in dec, "the hide control is an eye-off, and a grip says where to take hold")
+    ok("iconButton(I.eyeOff, 'Hide ' + name, { cls: 'wg-hide' })" in dec and "el('span', 'wg-grip')" in dec, "the hide control is an eye-off, and a grip says where to take hold")
     hide = CSS.split(".ov-wrap.wg-editing > [data-widget] > .wg-hide {")[1].split("}")[0]
     ok("top: 0; right: 0;" in hide, "the hide control sits on the block's first line")
     ok(":not(:has(> .card-head)) { padding-top: var(--sp-8); }" not in CSS, "with no band reserved for it")
@@ -6900,7 +6900,7 @@ def t_every_control_family_declares_its_states():
                 ".nav-item": ("hover", "active"), ".chip": ("hover", "active", "disabled"),
                 ".segmented > button": ("hover", "active", "disabled"), ".mail-claim": ("hover", "active", "disabled"),
                 ".send": ("hover", "active", "disabled"), ".dmenu-item": ("hover", "active"),
-                ".convo": ("hover", "active"), ".mem-btn": ("hover", "active"), ".track-btn": ("hover", "active"),
+                ".convo": ("hover", "active"), ".track-btn": ("hover", "active"),
                 ".tab": ("hover", "active"),
                 ".wg-hide": ("hover", "active", "disabled")}
     for sel, states in families.items():
@@ -7985,7 +7985,7 @@ def t_a_printed_grid_is_one_column_and_leaves_the_customize_controls_off():
        "the hide buttons and every header control are dropped from print")
     controls = _wg_fn("function wgControls(")
     ok("b.setAttribute('data-wg-control', key);" in controls, "every header control carries the attribute print hides")
-    ok("el('button', 'icon-btn wg-hide')" in _wg_fn("function wgDecorate("), "and every hide button the class")
+    ok("iconButton(I.eyeOff, 'Hide ' + name, { cls: 'wg-hide' })" in _wg_fn("function wgDecorate("), "and every hide button the class")
 
 
 @test
@@ -8624,7 +8624,7 @@ def dialog_harness():
     and no CSS.escape, so plain stand-ins come first."""
     return ("globalThis.I = globalThis.I || { x: '' };\n"
             "globalThis.requestAnimationFrame = globalThis.requestAnimationFrame || ((f) => setTimeout(f, 0));\n"
-            "globalThis.CSS = globalThis.CSS || { escape: (s) => String(s) };\n" + dialog_part())
+            "globalThis.CSS = globalThis.CSS || { escape: (s) => String(s) };\n" + button_part() + dialog_part())
 
 
 @test
@@ -8883,6 +8883,7 @@ const c = button('Copy', { icon: I.x }); out.icon = [c.children[0].className, c.
 const x = iconButton(I.x, 'Close'); out.x = [x.className, x.getAttribute('aria-label'), x.title];
 out.small = iconButton(I.trash, 'Delete note', { size: 'small', tone: 'danger' }).className;
 out.tag = iconButton(I.x, 'Remove', { size: 'tag' }).className;
+const r = iconButton(I.x, 'Rename this conversation', { size: 'small', title: 'Rename' }); out.tip = [r.title, r.getAttribute('aria-label')];
 try { iconButton(I.x, ''); out.unnamed = 'built'; } catch (e) { out.unnamed = e.message; }
 out.caption = link('Undo').className;
 out.inline = link('Education', { size: 'inline' }).className;
@@ -8899,6 +8900,7 @@ console.log(JSON.stringify(out));
     ok(got["x"] == ["icon-btn", "Close", "Close"], "an icon button, named")
     ok(got["small"] == "icon-btn icon-btn-sm del", "small, with the danger tone")
     ok(got["tag"] == "icon-btn icon-btn-tag", "the size inside a tag")
+    ok(got["tip"] == ["Rename", "Rename this conversation"], "a short tooltip can sit beside the full spoken name: %r" % got)
     ok("needs a label" in got["unnamed"], "an icon button without a name is refused")
     ok(got["caption"] == "linkish" and got["inline"] == "seclink", "one link: caption and inline")
     ok(got["go"] == ["link", "ic"], "the stand-alone link carries its chevron")
@@ -8935,6 +8937,51 @@ def t_small_icon_buttons_keep_their_size_on_a_phone():
        "the 40-wide rule leaves small and tag alone")
     ok(re.search(r":is\([^)]*\.icon-btn-sm, \.icon-btn-tag[^)]*\)::after \{\s*left: 50%", phone), "they get the centred 40 target")
     ok(re.search(r":is\([^)]*\.icon-btn-sm, \.icon-btn-tag[^)]*\) \{ position: relative; \}", phone), "anchored to themselves")
+
+def _built_by_hand(patterns, part="js/part-button.js"):
+    """Lines outside the button parts that build a button with any of these openings."""
+    sys.path.insert(0, ROOT)
+    import pagesource
+    bad = []
+    for rel in pagesource.manifest(ROOT)["js"]:
+        if rel == part:
+            continue
+        src = open(os.path.join(ROOT, pagesource.SRC, rel), encoding="utf-8").read()
+        for pat in patterns:
+            for m in re.finditer(re.escape(pat), src):
+                bad.append("%s:%d" % (rel, src[:m.start()].count("\n") + 1))
+    return bad
+
+
+@test
+def t_every_icon_button_is_built_by_the_part():
+    """Five icon-button recipes, each with its own size, hover and corner, and
+    some with no name a screen reader could read. iconButton() builds them all
+    now, in three sizes, always named."""
+    bad = _built_by_hand(["el('button', 'icon-btn", "el('button', 'mem-btn", "el('button', 'alert-x'",
+                          "el('button', 'toast-x'", "el('button', 'sk-chip-x'"])
+    ok(not bad, "icon buttons built by hand: %s" % bad)
+    ok(not re.search(r"\biconButton\(\s*[^,()]+\)", SCRIPT), "every iconButton call passes a label")
+
+
+@test
+def t_the_retired_button_recipes_are_gone():
+    """mem-btn, alert-x, toast-x and sk-chip-x were four copies of one control.
+    A script still looking one up would find nothing and a row action or a
+    close would silently stop working."""
+    for name in ("mem-btn", "alert-x", "toast-x", "sk-chip-x"):
+        ok(not re.search(r"(?<![\w-])" + re.escape(name) + r"(?![\w-])", SCRIPT), name + " is gone from the script")
+        ok(not re.search(r"(?<![\w-])" + re.escape(name) + r"(?![\w-])", CSS), name + " is gone from the stylesheet")
+
+
+@test
+def t_skills_row_actions_stay_regular():
+    """Skills' row actions sit beside "Use in chat", a 32 button, so they stay
+    the regular 32, not the 24 of a dense row."""
+    seg = SCRIPT[SCRIPT.index("'sk-acts'") - 200:SCRIPT.index("'sk-acts'") + 2500]
+    calls = re.findall(r"iconButton\([^;]*\)", seg)
+    ok(calls, "the Skills row builds its actions with iconButton")
+    ok(all("size:" not in c for c in calls), "and none of them is small: %r" % calls)
 
 
 @test
@@ -9607,7 +9654,7 @@ function prodStateOf(o) { return labelsCache.data.state[String(o.id)] || {}; }
 async function api(path, body) {
   return { ok: true, kept: ['5'], state: { '5': { made_at: '2026-09-20', printed_at: '2026-09-22T10:00:00Z' }, '6': {} } };
 }
-""" + fn_src("function undoPrintBar(ids)") + r"""
+""" + button_part() + fn_src("function undoPrintBar(ids)") + r"""
 const findBtn = (n, t) => { if (n.tagName === 'BUTTON' && n.textContent === t) return n; for (const c of n.children || []) { const f = findBtn(c, t); if (f) return f; } return null; };
 (async () => {
   undoPrintBar([5, 6]);
@@ -11184,7 +11231,7 @@ def t_the_skills_and_memory_pages_ask_before_losing_anything():
 def t_what_the_checker_found_stays_fixed():
     """The independent check of the Workspace rework (24 Sep) found sixteen
     regressions; these are the ones a source check can hold."""
-    ok(".btn[hidden], .mem-btn[hidden] { display: none; }" in CSS,
+    ok(".btn[hidden], .icon-btn[hidden] { display: none; }" in CSS,
        "a hidden button is hidden: .btn's own display beat [hidden], so Split into 0 skills showed on every editor")
     ok("splitSkill(bo.value.trim(), skillCaps.body).length < 2) return;" in fn_src("function skillEditor("),
        "and Split does nothing unless a new skill really needs splitting")
@@ -13312,7 +13359,7 @@ def t_every_target_on_a_phone_fits_a_finger():
        and ".toggle:has(> .sw:only-child) { justify-content: flex-end; }" in b,
        "a short tab, a pager step, a contents link and a switch with no word are 40 wide too, the switch's track staying at the end (Task 45: found by the app measure)")
     ok("padding-right: calc(var(--control-h-lg) - var(--control-h-sm))" in b, "an info button's target grows away from its words")
-    for sel in (".sidebar .icon-btn", ".brand", ".mem-btn", ".crm-ticon", ".crm-col-add", ".sizes-open", ".files-name", ".guide-toc-link", ".miss-open", ".action-link", "details summary"):
+    for sel in (".sidebar .icon-btn", ".brand", ".crm-ticon", ".crm-col-add", ".sizes-open", ".files-name", ".guide-toc-link", ".miss-open", ".action-link", "details summary"):
         ok(sel in b.split("The rest of what a finger meets")[1] if "The rest of what a finger meets" in b else False, sel + " is a 40 target too")
     ok(".guide-tools { grid-template-columns: minmax(0, 1fr); }" in b, "the Guide's search row shrinks to its track")
     ok(".az button { flex: none; height: var(--control-h-lg); min-width: var(--control-h-lg); }" in b, "the Size list's A to Z is a swipeable line of 40 squares")
@@ -13371,14 +13418,14 @@ def t_the_phone_and_chart_review_fixes_hold():
     b = blocks[0] if blocks else ""
     ok(".send { width: var(--control-h-lg); height: var(--control-h-lg); }" in b, "Send is 40 by 40 on a phone")
     ok("#input { min-height: var(--control-h-lg); }" in b, "and the input is at least 40 tall (its auto-grow sets only a taller height)")
-    ok(":is(.convo .del, .toast-x, .tbl-search .tbl-clear, .alert-x, .sk-chip-x, .fchip button, .icon-btn-sm, .icon-btn-tag) { position: relative; }" in b,
+    ok(":is(.convo .del, .tbl-search .tbl-clear, .fchip button, .icon-btn-sm, .icon-btn-tag) { position: relative; }" in b,
        "the small glyph buttons are the containing block for their hit area")
     shared = ".ov-wrap.wg-editing > [data-widget] > .wg-hide)::after {"
     ok(shared in b, "the hit-area rule is there")
     sbody = b.split(shared)[1].split("}")[0] if shared in b else ""
     ok('content: ""; position: absolute; height: var(--control-h-lg);' in sbody and "width" not in sbody and "left" not in sbody,
        "the rule shared by the squares sets only their height (a shared width or left would out-rank each one's own, since its list carries the hide button's long selector)")
-    ok(":is(.toast-x, .alert-x, .sk-chip-x, .fchip button, .icon-btn-sm, .icon-btn-tag)::after {\n                left: 50%; top: 50%; width: var(--control-h-lg);" in b,
+    ok(":is(.fchip button, .icon-btn-sm, .icon-btn-tag)::after {\n                left: 50%; top: 50%; width: var(--control-h-lg);" in b,
        "a button with no neighbour on a side has a 40 square centred on it")
     ok(".tbl-search .tbl-clear::after { left: 0; top: 50%; margin: calc(var(--control-h-lg) / -2) 0 0; width: min(var(--control-h-lg), calc(100% + var(--sp-2) + var(--bw-hairline))); }" in b,
        "the clear button's square starts at its left edge, never over the input, and runs right to the field's own edge")
@@ -14289,7 +14336,7 @@ const MEM_FROM = { chat: 'Chat', merchant: 'Added here', 'tracked change': 'Trac
 const fmtDate = (d) => '5 Oct'; const ico = () => el('span'); const I = new Proxy({}, { get: () => '' });
 const canEditInstructions = () => true; const memOp = () => {}; const memGuard = () => true; const uiConfirm = async () => true;
 let memInject = 40; let memories = [];
-""" + fn_src("function memSentIds()") + "\n" + fn_src("function memRow(m, sent)") + r"""
+""" + button_part() + fn_src("function memSentIds()") + "\n" + fn_src("function memRow(m, sent)") + r"""
 // 12 Oct 2026 (WS-22): Kind holds one tag; the states sit under the note, in .mem-states.
 const kinds = (tr) => tr.children[0].children.map(c => c.textContent).concat(((tr.children[1].children.find(x => x.className === 'mem-states') || {}).children || []).map(c => c.textContent));
 const kindCell = (tr) => tr.children[0].children.map(c => c.textContent);
@@ -14687,7 +14734,8 @@ def t_what_the_app_measure_found_stays_fixed():
     ok(_token_raw("control-pad-y") == "var(--sp-1)", "a field's vertical padding is 4: its 32 is the min-height's and the line centres in it")
     ok(CSS.count("calc((100% - var(--measure)) / 2)") == 0, "and no rule pads by a share of its container")
     # Found in the data-filled states (the Inbox, Files, Skills and the CRM board, seeded in the page).
-    ok(".sk-acts .mem-btn { min-width: var(--control-h); min-height: var(--control-h); }" in CSS,
+    sk = SCRIPT[SCRIPT.index("'sk-acts'"):SCRIPT.index("'sk-acts'") + 2500]
+    ok("iconButton(" in sk and not re.search(r"iconButton\([^;]*size:", sk),
        "a skill's icon actions are the 32 of the Use in chat button beside them, not a 24 beside a 32")
     ok("s.style.color = 'color-mix(in srgb, ' + c + ' 80%, var(--ink))'" in fn_src("function crmChip(name) {"),
        "a label chip's words are its colour darkened toward ink, so amber, orange and green clear 4.5 on their tint")
