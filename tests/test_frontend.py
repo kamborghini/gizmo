@@ -80,6 +80,15 @@ def button_part():
     return SCRIPT[SCRIPT.index(BUTTON_START):SCRIPT.index(BUTTON_END)]
 
 
+FIELD_START = "/* ---------- the field parts ----------"
+FIELD_END = "/* ---------- the field parts end ---------- */"
+
+
+def field_part():
+    """The switch and field parts' source (static/src/js/part-field.js) as the page has it."""
+    return SCRIPT[SCRIPT.index(FIELD_START):SCRIPT.index(FIELD_END)]
+
+
 @test
 def t_the_script_parses():
     """A duplicate `const` in a 5,700-line file is invisible until the page dies."""
@@ -860,15 +869,13 @@ def t_restore_from_backup_is_treated_as_destructive():
 @test
 def t_a_switch_reports_its_state():
     """Toggles were given role=switch but never aria-checked, so a screen reader
-    announced 'switch' and stopped. They are also built inside modals long after
-    load, so a one-shot pass at startup missed most of them."""
-    ok("function syncToggles" in SCRIPT, "one shared pass sets role, tabindex and state")
-    ok("aria-checked" in SCRIPT, "and it actually reports the state")
-    ok("MutationObserver" in SCRIPT and "syncToggles()" in SCRIPT,
-       "toggles built after load are covered too")
-    ok("requestAnimationFrame" in re.search(
-        r"new MutationObserver\(\(\) => \{.*?\}\)\.observe", SCRIPT, re.S).group(0),
-       "batched, or one tab repaint would run it hundreds of times")
+    announced 'switch' and stopped. Every switch is a real one now: built by
+    switchBtn() or written into the page as a switch, and turned by setSwitch(),
+    which sets its look and its state together."""
+    ok("function setSwitch(" in field_part() and "sw.setAttribute('aria-checked'" in field_part(),
+       "one part turns a switch and says its state")
+    ok("b.setAttribute('role', 'switch'); b.setAttribute('aria-checked'" in SCRIPT, "a switch built in the script is one from the start")
+    ok(not re.search(r'<div class="toggle"', HTML), "and none in the page is a bare box")
 
 
 @test
@@ -2522,7 +2529,7 @@ def t_a_phone_reads_every_table_as_two_line_rows():
     sh = fn_src("function syncTableHeads(") if "function syncTableHeads(" in SCRIPT else ""
     ok("table.ktable > :is(tbody, tfoot) > tr:not([data-kh])" in sh and "td.dataset.h = h" in sh and "td.classList.add('kt-main')" in sh,
        "each body cell carries its column's head, and the head marked kt-main names the cell that leads")
-    ok("syncToggles(); syncTableHeads();" in SCRIPT, "stamped in the one batched pass, wherever a table is built")
+    ok("syncTableHeads(); syncPanels();" in SCRIPT, "stamped in the one batched pass, wherever a table is built")
     ph = CSS.split("/* R13: on a phone a table's rows are two lines")[1].split("\n        }\n")[0] if "/* R13: on a phone a table's rows are two lines" in CSS else ""
     ok(KT + " { display: block; min-width: 0; }" in ph and KT + " > thead { display: none; }" in ph, "no head row and no sideways scroll")
     ok(KT + " > :is(tbody, tfoot) > tr { display: flex; flex-wrap: wrap;" in ph, "a row wraps its cells")
@@ -4399,8 +4406,7 @@ def t_every_control_has_a_name_that_survives_typing():
        "tableSearch names its input from its placeholder")
     for factory in ("mkSel", "selField", "numField", "dateField"):
         seg = SCRIPT.split("const " + factory + " = ")[1][:220]
-        ok("el('label', 'pfield')" in seg, factory + " wraps in a real label")
-        ok("el('span', null, label)" in seg, "with the caption as a span, not a nested label")
+        ok("formField(label)" in seg, factory + " wraps in a real label (formField(), its caption a span, not a nested label)")
     # The sweep: every select creation must be followed by a name source.
     nameless = []
     for m in _re2.finditer(r"(?:el\('select'|document\.createElement\('select'\))", SCRIPT):
@@ -4412,7 +4418,7 @@ def t_every_control_has_a_name_that_survives_typing():
         before = SCRIPT[max(0, m.start() - 300):m.start()]
         named = ("aria-label" in ctx or ".title = " in ctx
                  or "crmField(" in ctx or "authField" in before
-                 or "el('label'" in before[-200:] or "dpanel-row" in before[-200:])
+                 or "el('label'" in before[-200:] or "formField(" in before[-200:] or "dpanel-row" in before[-200:])
         if not named:
             nameless.append(SCRIPT[:m.start()].count("\n") + 1)
     ok(not nameless, "selects with no accessible name near script lines: " + str(nameless))
@@ -5350,7 +5356,7 @@ def t_the_skills_captions_are_real_labels():
     """They were sibling <label>s with no `for`: visible text that named nothing,
     so both fields announced as bare inputs."""
     ed, up = fn_src("function skillEditor("), fn_src("function uploadRow(")
-    ok(ed.count("el('label', 'sk-field')") == 3 and up.count("el('label', 'sk-field')") == 2,
+    ok(ed.count("{ cls: 'sk-field' })") == 3 and up.count("{ cls: 'sk-field' })") == 2,
        "the one skills editor wraps each of its three fields in its label, and so does a file being added")
     ok("el('div', 'sk-field')" not in SCRIPT, "and no orphan caption is left")
 
@@ -8891,16 +8897,17 @@ def t_the_design_rules_live_in_one_document():
     ok(os.path.exists(path), "docs/DESIGN.md exists")
     doc = open(path, encoding="utf-8").read()
     for heading in ("## Principles", "## Tokens", "## Recipes", "## Layout", "## Parts", "### Windows", "### Buttons",
-                    "### Icon buttons", "### Links", "## Adding a part"):
+                    "### Icon buttons", "### Links", "### Switches", "### Fields", "### Names", "## Adding a part"):
         ok(heading in doc, "it has " + heading)
     ok("static/src/css/tokens.css" in doc and "static/src/js/part-dialog.js" in doc, "it names where values and parts live")
     for spec in ("2026-09-07-design-system-tokens-design.md", "2026-10-05-brand-design-system-design.md",
                  "2026-10-06-reactor-mix-design.md", "2026-10-13-panels-design.md", "2026-10-15-window-part-design.md",
-                 "2026-10-19-buttons-and-links-design.md"):
+                 "2026-10-19-buttons-and-links-design.md", "2026-10-19-switches-and-fields-design.md"):
         ok(spec in doc, "it links " + spec)
     for guard in ("t_every_corner_is_a_role", "t_every_defined_token_is_read", "t_every_window_is_built_and_closed_by_the_part",
                   "t_every_icon_button_is_built_by_the_part", "t_every_text_link_is_built_by_the_part",
-                  "t_every_ordinary_button_is_built_by_the_part"):
+                  "t_every_ordinary_button_is_built_by_the_part", "t_every_captioned_field_is_built_by_the_part",
+                  "t_the_switch_fixers_stay_gone", "t_no_field_is_named_only_by_its_placeholder"):
         ok(guard in doc and ("def " + guard + "(") in open(__file__, encoding="utf-8").read(), "it names the guard " + guard)
 
 @test
@@ -9064,6 +9071,133 @@ def t_every_ordinary_button_is_built_by_the_part():
         if line not in frozen_lines:
             bad.append(where)
     ok(not bad, "%d ordinary buttons built by hand: %s" % (len(bad), bad[:12]))
+
+
+@test
+def t_settings_switches_are_named_switches():
+    """Stage 3, piece 3: the five Settings switches were bare boxes with no
+    name a screen reader could read, made to work after drawing. They are
+    switches in the markup now, named by the title beside them."""
+    for key in ('data-pref="track_inventory"', 'data-pref="concise"', 'data-pref="proactive"',
+                'data-pref="flag_anomalies"', 'id="sched-toggle"'):
+        m = re.search(r'<button type="button" class="toggle" role="switch" aria-checked="(?:true|false)"[^>]*' + re.escape(key) + r'[^>]*>', HTML) \
+            or re.search(r'<button type="button" class="toggle"[^>]*' + re.escape(key) + r'[^>]*role="switch"[^>]*>', HTML)
+        ok(m, key + " is a switch button")
+        lab = re.search(r'aria-labelledby="([^"]+)"', m.group(0))
+        ok(lab, key + " names itself by its title")
+        t = re.search(r'id="' + re.escape(lab.group(1)) + r'"[^>]*>([^<]+)<', HTML)
+        ok(t and t.group(1).strip(), key + " points at a title that exists")
+    # The schedule's frequency list beside them. Its row is shown until
+    # Settings has read the schedule and hidden only if auto-refresh is off,
+    # so the browser suite's no-unnamed-control check saw it or not by
+    # timing, and with auto-refresh on a screen reader heard an unnamed list.
+    sel = re.search(r'<select id="sched-freq"[^>]*>', HTML)
+    ok(sel and 'aria-labelledby="sched-freq-title"' in sel.group(0), "the frequency list is named by its title")
+    ok(re.search(r'id="sched-freq-title"[^>]*>Frequency<', HTML), "and that title exists")
+
+
+@test
+def t_a_switch_says_its_state_and_a_locked_one_does_not_move():
+    """setSwitch() turns the look and the spoken state together, so a save
+    that fails and flips a switch back says so; a switch someone may not
+    change does not move when pressed."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + field_part() + r"""
+let profile = { prefs: { concise: false } }; const DEFAULT_PREFS = { concise: false };
+const calls = []; async function api(path, body) { calls.push(path); throw new Error('offline'); }
+function cacheProfile() {} function toastError() {}
+const b = el('button', 'toggle'); b.dataset.pref = 'concise';
+const prefToggles = () => [b];
+""" + fn_src("async function savePrefToggle(") + r"""
+(async () => {
+  const out = {};
+  setSwitch(b, true); out.on = [b.classList.contains('on'), b.getAttribute('aria-checked')];
+  setSwitch(b, false); out.off = [b.classList.contains('on'), b.getAttribute('aria-checked')];
+  await savePrefToggle(b); out.failed = [b.classList.contains('on'), b.getAttribute('aria-checked'), calls.length];
+  b.setAttribute('aria-disabled', 'true'); await savePrefToggle(b);
+  out.locked = [b.classList.contains('on'), calls.length];
+  console.log(JSON.stringify(out));
+})();
+"""
+    got = _run_node(js)
+    ok(got["on"] == [True, "true"] and got["off"] == [False, "false"], "the look and the state together: %r" % got)
+    ok(got["failed"] == [False, "false", 1], "a failed save flips both back")
+    ok(got["locked"] == [False, 1], "a locked switch does not move or save")
+
+
+@test
+def t_the_switch_fixers_stay_gone():
+    """syncToggles stamped a role and a state on every .toggle after drawing,
+    and a page-wide key handler pressed them. Every switch is a real one now."""
+    ok("function syncToggles(" not in SCRIPT and "syncToggles()" not in SCRIPT, "no switch stamp")
+    ok("contains('toggle') && (e.key === 'Enter'" not in SCRIPT, "no page-wide switch key handler")
+
+
+@test
+def t_a_field_is_its_caption_and_its_control():
+    """formField() builds every captioned field: the house label above its
+    control, the control added now or afterwards, a help line under it."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + field_part() + r"""
+const out = {};
+const inp = el('input');
+const a = formField('Postcode', inp);
+out.a = [a.tagName, a.className, a.children[0].tagName, a.children[0].textContent, a.children[1] === inp];
+const b = formField('Town', null, { cls: 'disp-fld' });
+out.b = [b.className, b.children.length];
+const later = el('input'); b.append(later); out.later = b.children[1] === later;
+const c = formField('Code', el('input'), { help: 'Six digits' });
+const last = c.children[c.children.length - 1];
+out.c = [last.tagName, last.className, last.textContent];
+console.log(JSON.stringify(out));
+"""
+    got = _run_node(js)
+    ok(got["a"] == ["LABEL", "pfield", "SPAN", "Postcode", True], "a label holding its caption, then its control: %r" % got)
+    ok(got["b"] == ["pfield disp-fld", 1] and got["later"], "a layout hook rides along, and a control can come afterwards")
+    ok(got["c"] == ["P", "field-help", "Six digits"], "a help line under the control")
+
+
+@test
+def t_every_captioned_field_is_built_by_the_part():
+    """Four wrappers (pfield, disp-fld, disp-addr-f, sk-field) with two caption
+    looks. formField() builds them all with the house label."""
+    bad = _built_by_hand(["el('label', 'pfield'", "el('label', 'disp-fld'", "el('label', 'disp-addr-f'", "el('label', 'sk-field'"],
+                         part="js/part-field.js")
+    ok(not bad, "captioned fields built by hand: %s" % bad)
+    for name in ("disp-fld-lab", "disp-addr-lab"):
+        ok(name not in SCRIPT and name not in CSS, name + " is retired")
+
+
+@test
+def t_no_field_is_named_only_by_its_placeholder():
+    """A placeholder is a name only until someone types. Every input or text
+    box the script makes and gives a placeholder is also named: by its own
+    aria-label, aria-labelledby or title, by a caption built round it
+    (formField, crmField, the Design page's sample field, a label linked by
+    its id), or by whoever it is handed back to (a factory such as crmText)."""
+    def enclosing(pos):
+        a = max(SCRIPT.rfind("\n        function ", 0, pos), SCRIPT.rfind("\n        async function ", 0, pos))
+        b = [j for j in (SCRIPT.find("\n        function ", pos), SCRIPT.find("\n        async function ", pos)) if j >= 0]
+        return SCRIPT[a:min(b) if b else len(SCRIPT)]
+    bad = []
+    for m in re.finditer(r"(\w+)\.placeholder\s*=", SCRIPT):
+        x, body = m.group(1), enclosing(m.start())
+        if not re.search(r"\b" + re.escape(x) + r"\s*=\s*(?:el\('(?:input|textarea)'|document\.createElement\('(?:input|textarea)'\)|crmText\()", body):
+            continue
+        X = re.escape(x)
+        named = (re.search(X + r"\.setAttribute\('aria-label(?:ledby)?'", body) or re.search(X + r"\.title\s*=", body)
+                 or re.search(r"\b(?:formField|crmField|field)\([^;]*\b" + X + r"\b", body)
+                 or re.search(r"return " + X + r"\b", body)
+                 or (re.search(X + r"\.id\s*=", body) and ".htmlFor = " in body)
+                 or any(re.search(re.escape(w) + r"\.append\([^;]*\b" + X + r"\b", body)
+                        for w in re.findall(r"(\w+)\s*=\s*formField\(", body)))
+        if not named:
+            bad.append(SCRIPT[m.start():m.start() + 60].split("\n")[0])
+    ok(not bad, "named only by a placeholder: %s" % bad)
 
 
 @test
@@ -10931,7 +11065,7 @@ def t_settings_saves_one_way():
        "Save profile sits under the four text fields it saves")
     ok("prefToggles().forEach(t => t.onclick = function () { savePrefToggle(this); });" in SCRIPT, "a preference saves when it is changed")
     fn = fn_src("async function savePrefToggle(")
-    ok("t.classList.toggle('on', was);" in fn and "toastError(" in fn, "and a switch the server refused goes back and says so")
+    ok("setSwitch(t, was);" in fn and "toastError(" in fn, "and a switch the server refused goes back and says so")
     ok("api('/api/profile', { prefs: prefs })" in fn and "profile: " not in fn.split("api('/api/profile'")[1][:40],
        "a switch sends the switches alone, never this page's copy of the text (the server merges them)")
     close = fn_src("function closeSettings(")
@@ -11925,7 +12059,7 @@ def t_the_design_page_is_the_source_of_truth_made_visible():
     ok("box.querySelectorAll(':scope > .tabs > .tab')" in seg, "and the Guide's own tabs are told apart from the examples")
     fn = SCRIPT.split("function paintDesign(host) {")[1].split("\n        function ")[0]
     for part in ("tabStrip(", "segmented(", "metricsStrip(", "loadFailure(", "refreshBtn(", "'ktable-wrap'", "'ktable'",
-                 "'btn btn-primary'", "'chip'", "'empty'", "el('label', 'pfield')", "'field-help'", "'field-msg'",
+                 "'btn btn-primary'", "'chip'", "'empty'", "formField(", "'field-help'", "'field-msg'",
                  "toastOk(", "toastError("):
         ok(part in fn, "the page draws %s with the real thing" % part)
     block = SCRIPT.split("const DS_COLOURS = [")[1].split("function paintDesign(host) {")[0]
@@ -12904,7 +13038,7 @@ def t_each_section_of_a_page_is_a_panel():
     panel, a pair's halves and what a plain wrapper holds included; the
     header, tabs, choosers, notices and the Production Manager's counters
     stay on the grey page."""
-    ok("syncToggles(); syncTableHeads(); syncPanels();" in SCRIPT, "stamped in the one batched pass")
+    ok("syncTableHeads(); syncPanels();" in SCRIPT, "stamped in the one batched pass")
     if not _node_ok():
         print("       (node unavailable, skipped)")
         return

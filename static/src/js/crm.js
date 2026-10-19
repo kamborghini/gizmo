@@ -808,8 +808,8 @@
             return { body: win.body, close: win.close, head: win.head, foot: foot };
         }
         function crmField(host, label, input) {
-            const w = el('label', 'disp-addr-f');
-            w.append(el('span', 'disp-addr-lab', label), input);
+            const w = formField(label, null, { cls: 'disp-addr-f' });
+            w.append(input);
             host.append(w); return input;
         }
         function crmText(val, ph) {
@@ -1275,7 +1275,7 @@
             const comp = el('div', 'crm-focus');
             comp.append(el('div', 'disp-subhead', 'Add'));
             const ta = document.createElement('textarea');
-            ta.className = 'lia-chase-body'; ta.rows = 2; ta.placeholder = 'A note about this deal…';
+            ta.className = 'lia-chase-body'; ta.rows = 2; ta.placeholder = 'A note about this deal…'; ta.setAttribute('aria-label', 'A note about this deal');
             ta.value = draft;
             comp.append(ta);
             const cbar = el('div', 'disp-actions');
@@ -1779,7 +1779,7 @@
                     if (master) {
                         const cell = el('td', 'tick');
                         const cb = document.createElement('input');
-                        cb.type = 'checkbox'; cb.checked = crmContactSel.has(c.id);
+                        cb.type = 'checkbox'; cb.checked = crmContactSel.has(c.id); cb.setAttribute('aria-label', 'Select ' + c.name);
                         cb.onclick = (e) => { e.stopPropagation();
                             cb.checked ? crmContactSel.add(c.id) : crmContactSel.delete(c.id); paint(); };
                         cell.append(cb); tr.append(cell);
@@ -1962,7 +1962,7 @@
                 nn.append(el('div', 'disp-subhead', 'Notes'));
                 const ta = document.createElement('textarea');
                 ta.className = 'lia-chase-body'; ta.rows = 2;
-                ta.placeholder = 'A note about ' + cc.name + '…';
+                ta.placeholder = 'A note about ' + cc.name + '…'; ta.setAttribute('aria-label', 'A note about ' + cc.name);
                 nn.append(ta);
                 const nbar = el('div', 'disp-actions');
                 const nbtn = textButton('Save note');
@@ -2285,7 +2285,7 @@
                 nn.append(r);
             });
             const ta = document.createElement('textarea');
-            ta.className = 'lia-chase-body'; ta.rows = 2; ta.placeholder = 'A note about this lead…';
+            ta.className = 'lia-chase-body'; ta.rows = 2; ta.placeholder = 'A note about this lead…'; ta.setAttribute('aria-label', 'A note about this lead');
             nn.append(ta);
             const nbar = el('div', 'disp-actions');
             const noteBtn = textButton('Save note');

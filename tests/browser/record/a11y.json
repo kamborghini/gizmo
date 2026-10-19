@@ -12,17 +12,14 @@
   "crm~activities@phone": {},
   "crm~activities@wide": {},
   "crm~contacts@laptop": {
-    "label": 10,
     "nested-interactive": 10,
     "target-size": 10
   },
   "crm~contacts@phone": {
-    "label": 10,
     "nested-interactive": 10,
     "target-size": 4
   },
   "crm~contacts@wide": {
-    "label": 10,
     "nested-interactive": 10,
     "target-size": 10
   },

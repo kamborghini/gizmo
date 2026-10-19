@@ -134,8 +134,7 @@
             const inputs = {};
             [['company', 'Company name'], ['address', 'Address'], ['phone', 'Phone'],
              ['website', 'Website'], ['legal', 'Legal line']].forEach(pair => {
-                const f = el('label', 'pfield');
-                f.append(el('span', null, pair[1]));
+                const f = formField(pair[1]);
                 const i = crmText(slots[pair[0]] || '', pair[1]);
                 i.maxLength = 200;
                 i.readOnly = !lead;
@@ -599,8 +598,7 @@
             const wrap = el('div');
             wrap.style.display = 'none';
             const mk = (name, ph) => {
-                const l = el('label', 'pfield');
-                l.append(el('span', null, name));
+                const l = formField(name);
                 const i = crmText('', ph);
                 i.inputMode = 'email'; i.spellcheck = false;
                 l.append(i); wrap.append(l);
@@ -703,8 +701,7 @@
             body.append(el('p', 'card-sub', 'It goes out from '
                 + ((mailCache && mailCache.address) || 'the shared mailbox')
                 + ', and replies come back to the board.'));
-            const toL = el('label', 'pfield');
-            toL.append(el('span', null, 'To'));
+            const toL = formField('To');
             const to = crmText('', 'name@company.com, another@company.com');
             /* inputMode, not type=email. A multiple email input runs the HTML
                value sanitiser on every write: it splits on the commas and
@@ -732,8 +729,7 @@
             /* Not awaited: the window opens now, and the book arrives while the
                subject is being typed. A failure leaves a plain text field. */
             mailAddressBook();
-            const subL = el('label', 'pfield');
-            subL.append(el('span', null, 'Subject'));
+            const subL = formField('Subject');
             const subject = crmText('', 'What it is about');
             subL.append(subject);
             body.append(subL);
@@ -1284,7 +1280,7 @@
                 });
                 const note = document.createElement('input');
                 note.type = 'text'; note.className = 'disp-text';
-                note.placeholder = 'Handover note (optional)'; note.style.flex = '1';
+                note.placeholder = 'Handover note (optional)'; note.setAttribute('aria-label', 'Handover note'); note.style.flex = '1';
                 const go = textButton('Assign');
                 go.onclick = async () => {
                     go.disabled = true;
@@ -1353,7 +1349,7 @@
             const nrow = el('div', 'mail-statebar');
             const ninput = document.createElement('input');
             ninput.type = 'text'; ninput.className = 'disp-text';
-            ninput.placeholder = 'Add a note for the team (the customer never sees these)';
+            ninput.placeholder = 'Add a note for the team (the customer never sees these)'; ninput.setAttribute('aria-label', 'A note for the team');
             ninput.style.flex = '1';
             const nbtn = textButton('Add note');
             nbtn.onclick = async () => {

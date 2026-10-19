@@ -40,7 +40,6 @@
         .disp-dims { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-2); margin-bottom: var(--sp-1); }
         .disp-origin { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); }
         .disp-fld { display: flex; flex-direction: column; gap: var(--sp-1); }
-        .disp-fld-lab { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); font-weight: var(--weight-medium); }
         .disp-num { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-field);
             color: var(--text-primary); font: inherit; font-size: var(--text-body); padding: var(--control-pad-y) var(--sp-2); line-height: var(--lh-control);
             min-height: var(--control-h); width: 100%; }
@@ -53,7 +52,6 @@
         .disp-addr-grid select { max-width: 100%; }
         .disp-addr-f { display: flex; flex-direction: column; gap: var(--sp-1); }
         .disp-addr-f > .field-help { margin: 0; }
-        .disp-addr-lab { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); font-weight: var(--weight-medium); }
         .disp-text { background: var(--surface-primary); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-field);
             color: var(--text-primary); font: inherit; font-size: var(--text-body); padding: var(--control-pad-y) var(--sp-2-5); line-height: var(--lh-control);
             min-height: var(--control-h); width: 100%; box-sizing: border-box; }

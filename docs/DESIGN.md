@@ -132,6 +132,35 @@ icon given). It builds the legacy classes `linkish`, `seclink` and `link`. The
 sign-in card's links are caption links. Guards:
 `t_every_text_link_is_built_by_the_part`, `t_the_sign_in_card_uses_the_house_link`.
 
+### Switches
+
+A switch is a button with the switch role that says its own state.
+`switchBtn(label, on, onToggle)` (with the structured-response parts) builds
+one in the script; the Settings switches are written into the page as
+switches, named by the title beside them (`aria-labelledby`, the line under it
+as `aria-describedby`). `setSwitch(sw, on)` in `static/src/js/part-field.js`
+turns a switch's look and its spoken state together, so nothing stamps a state
+on afterwards ([spec](superpowers/specs/2026-10-19-switches-and-fields-design.md)).
+Guards: `t_settings_switches_are_named_switches`, `t_the_switch_fixers_stay_gone`.
+
+### Fields
+
+`formField(caption, control, opts)` builds every captioned field: the house
+label (14 medium, primary ink) above its control, a help line under it
+(`opts.help`), a screen's layout hook (`opts.cls`). The control may be added
+afterwards. The look of the field itself is one recipe applied to the element.
+Guard: `t_every_captioned_field_is_built_by_the_part`.
+
+### Names
+
+Every control has a name a screen reader reads out: a caption built round it,
+an `aria-label`, an `aria-labelledby` or a title. A placeholder is not a name:
+it goes as soon as someone types. A box in a list is named for its row
+("Select Marcus Bell"). The browser suite checks every visible control on every
+measured screen and in every window the keyboard journeys open, with zero
+tolerance. Guards: `t_no_field_is_named_only_by_its_placeholder` and the
+browser suite's "controls with no name".
+
 ## Adding a part
 
 A part lives in its own section, `static/src/js/part-<name>.js`, listed in

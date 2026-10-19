@@ -39,6 +39,7 @@ for (const s of SCREENS) {
     const m = await P.measure(page);
     expect(m.sideways, 'sideways scroll').toEqual([]);
     expect(m.spill, 'content spilling out of its panel').toEqual([]);
+    expect(await P.unnamed(page), 'controls with no name').toEqual([]);
 
     const ax = await new AxeBuilder({ page }).withTags(TAGS).analyze();
     const a11y = R.check('a11y', key, R.counts(ax.violations.map(v => [v.id, v.nodes.length])));

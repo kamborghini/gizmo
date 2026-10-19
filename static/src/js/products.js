@@ -211,15 +211,15 @@
                 if (pState.customFrom == null) pState.customFrom = Math.max(0, months.length - 6);
                 if (pState.customTo == null) pState.customTo = months.length - 1;
                 const cr = el('div', 'row1');
-                const mkSel = (val, on, label) => { const f = el('label', 'pfield'); f.append(el('span', null, label)); const s = el('select', 'psel'); months.forEach((mk, idx) => { const o = el('option', null, monthYear(mk)); o.value = idx; if (idx === val) o.selected = true; s.append(o); }); s.onchange = () => { on(+s.value); drawList(); }; f.append(s); return f; };
+                const mkSel = (val, on, label) => { const f = formField(label); const s = el('select', 'psel'); months.forEach((mk, idx) => { const o = el('option', null, monthYear(mk)); o.value = idx; if (idx === val) o.selected = true; s.append(o); }); s.onchange = () => { on(+s.value); drawList(); }; f.append(s); return f; };
                 cr.append(mkSel(pState.customFrom, v => pState.customFrom = v, 'From'), mkSel(pState.customTo, v => pState.customTo = v, 'To'));
                 tools.append(cr);
             }
 
             const fp = el('div', 'pfilters' + (pState.showFilters ? ' show' : ''));
-            const selField = (label, value, opts, on, words) => { const f = el('label', 'pfield'); f.append(el('span', null, label)); const s = el('select', 'psel'); const a = el('option', null, 'Any'); a.value = ''; s.append(a); opts.forEach(o => { const op = el('option', null, (words && words[o]) || o); op.value = o; if (o === value) op.selected = true; s.append(op); }); s.onchange = () => { on(s.value); drawList(); pchips(); }; f.append(s); return f; };
-            const numField = (label, value, on) => { const f = el('label', 'pfield'); f.append(el('span', null, label)); const i = el('input', 'psel pnum'); i.type = 'number'; i.min = '0'; if (value != null) i.value = value; i.oninput = () => { on(i.value === '' ? null : Number(i.value)); drawList(); pchips(); }; f.append(i); return f; };
-            const dateField = (label, value, on) => { const f = el('label', 'pfield'); f.append(el('span', null, label)); const i = el('input', 'psel'); i.type = 'date'; if (value) i.value = value; i.onchange = () => { on(i.value); drawList(); pchips(); }; f.append(i); return f; };
+            const selField = (label, value, opts, on, words) => { const f = formField(label); const s = el('select', 'psel'); const a = el('option', null, 'Any'); a.value = ''; s.append(a); opts.forEach(o => { const op = el('option', null, (words && words[o]) || o); op.value = o; if (o === value) op.selected = true; s.append(op); }); s.onchange = () => { on(s.value); drawList(); pchips(); }; f.append(s); return f; };
+            const numField = (label, value, on) => { const f = formField(label); const i = el('input', 'psel pnum'); i.type = 'number'; i.min = '0'; if (value != null) i.value = value; i.oninput = () => { on(i.value === '' ? null : Number(i.value)); drawList(); pchips(); }; f.append(i); return f; };
+            const dateField = (label, value, on) => { const f = formField(label); const i = el('input', 'psel'); i.type = 'date'; if (value) i.value = value; i.onchange = () => { on(i.value); drawList(); pchips(); }; f.append(i); return f; };
             fp.append(selField('Status', pState.status, ['active', 'draft', 'archived'], v => pState.status = v, P_STATUS));
             fp.append(selField('Stock', pState.stock, ['in', 'low', 'out', 'untracked'], v => pState.stock = v, P_STOCK));
             if ((productList.vendors || []).length) fp.append(selField('Vendor', pState.vendor, productList.vendors, v => pState.vendor = v));
@@ -230,7 +230,7 @@
             fp.append(numField('Min units', pState.minUnits, v => pState.minUnits = v));
             fp.append(dateField('Created after', pState.createdAfter, v => pState.createdAfter = v));
             fp.append(dateField('Created before', pState.createdBefore, v => pState.createdBefore = v));
-            const tf = el('label', 'pfield'); tf.append(el('span', null, 'Tag')); const tagIn = el('input', 'psel'); tagIn.placeholder = 'e.g. trade'; if (pState.tag) tagIn.value = pState.tag; tagIn.oninput = () => { pState.tag = tagIn.value; drawList(); pchips(); }; tf.append(tagIn); fp.append(tf);
+            const tf = formField('Tag'); const tagIn = el('input', 'psel'); tagIn.placeholder = 'e.g. trade'; if (pState.tag) tagIn.value = pState.tag; tagIn.oninput = () => { pState.tag = tagIn.value; drawList(); pchips(); }; tf.append(tagIn); fp.append(tf);
             tools.append(fp);
             pCard.append(tools);
 

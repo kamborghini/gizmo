@@ -1182,13 +1182,11 @@
             // 1. A size of its own.
             let sizeIn, domIn;
             opt('set', 'Give it a production size', (pane) => {
-                const f = el('label', 'pfield');
-                f.append(el('span', null, 'Production size (mm)'));
+                const f = formField('Production size (mm)');
                 sizeIn = el('input', 'psel'); sizeIn.type = 'text';
                 sizeIn.placeholder = 'e.g. 37.5'; sizeIn.inputMode = 'decimal';
                 f.append(sizeIn); pane.append(f);
-                const f2 = el('label', 'pfield');
-                f2.append(el('span', null, 'Only for one customer (optional)'));
+                const f2 = formField('Only for one customer (optional)');
                 domIn = el('input', 'psel'); domIn.type = 'text';
                 domIn.placeholder = 'their email domain, e.g. acme.co.uk';
                 f2.append(domIn); pane.append(f2);
@@ -1198,8 +1196,7 @@
             // 2. Another name for something already on the sheet.
             let target = null, targetLine;
             opt('alias', 'It is another name for a model already on the list', (pane) => {
-                const f = el('label', 'pfield');
-                f.append(el('span', null, 'Search the size list'));
+                const f = formField('Search the size list');
                 const q = el('input', 'psel'); q.type = 'text';
                 q.placeholder = 'Start typing a model on the list…';
                 f.append(q); pane.append(f);
@@ -1496,7 +1493,7 @@
             const { overlay, modal, head, x, body } = win;
             const bar = el('div', 'lbl-toolbar');
             const dt = document.createElement('input');
-            dt.type = 'date'; dt.className = 'lbl-size';
+            dt.type = 'date'; dt.className = 'lbl-size'; dt.setAttribute('aria-label', 'Date');
             dt.value = new Date().toLocaleDateString('en-CA');
             bar.append(el('span', 'cov-line', 'Everything booked on'), dt);
             const pr = textButton(); pr.append(ico(I.printer), document.createTextNode('Print'));
@@ -1614,7 +1611,7 @@
             const { overlay, modal, head, x, body } = win;
             const bar = el('div', 'lbl-toolbar');
             const dt = document.createElement('input');
-            dt.type = 'date'; dt.className = 'lbl-size';
+            dt.type = 'date'; dt.className = 'lbl-size'; dt.setAttribute('aria-label', 'Date');
             dt.value = new Date().toLocaleDateString('en-CA');
             bar.append(el('span', 'cov-line', 'Everything marked made on'), dt);
             const pr = textButton(); pr.append(ico(I.printer), document.createTextNode('Print'));
@@ -1709,7 +1706,7 @@
                         szIn.className = 'tm-field'; szIn.placeholder = 'Size mm'; szIn.setAttribute('aria-label', 'Size in millimetres');
                         szIn.style.cssText = 'width:82px;flex:none;padding:var(--sp-1) var(--sp-2)';
                         const qIn = document.createElement('input');
-                        qIn.type = 'number'; qIn.min = '1'; qIn.max = '10000'; qIn.placeholder = 'Qty';
+                        qIn.type = 'number'; qIn.min = '1'; qIn.max = '10000'; qIn.placeholder = 'Qty'; qIn.setAttribute('aria-label', 'Quantity');
                         qIn.className = 'tm-field'; qIn.style.cssText = 'width:70px;flex:none;padding:var(--sp-1) var(--sp-2)';
                         const addB = textButton(); addB.append(ico(I.plus), document.createTextNode('Add'));
                         addB.title = 'Add something that was used but not in the estimate';
