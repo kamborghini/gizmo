@@ -358,7 +358,7 @@
                 const label = res.match.manufacturer + ' ' + res.match.model;
                 const shown = ((sizesPane && sizesPane.rows) || []).some(r => r.manufacturer === res.match.manufacturer && r.model === res.match.model);
                 if (!shown) return el('b', null, label);
-                const b = el('button', 'seclink', label); b.type = 'button';
+                const b = textLink(label, { size: 'inline' }); b.type = 'button';
                 b.title = 'Show it in the list'; b.onclick = () => sizesReveal(res.match); return b;
             };
             if (res.excluded) txt.append('The label prints no size and no CHECK: the name is ruled not a gobo.');
@@ -611,7 +611,7 @@
             if (near.length) {
                 box.append(' The nearest ' + (near.length > 1 ? 'sizes' : 'size') + ' the bench cuts: ');
                 near.forEach((v, k) => {
-                    const b = el('button', 'seclink', v + ' mm'); b.type = 'button';
+                    const b = textLink(v + ' mm', { size: 'inline' }); b.type = 'button';
                     b.onclick = () => { st.q = v + 'mm'; st.page = 1; renderSizes(); };
                     if (k) box.append(' and ');
                     box.append(b);

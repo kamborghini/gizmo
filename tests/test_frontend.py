@@ -8864,14 +8864,14 @@ def t_the_design_rules_live_in_one_document():
 @test
 def t_the_button_parts_build_todays_classes():
     """Stage 3, piece 2 (docs/superpowers/specs/2026-10-19-buttons-and-links-design.md):
-    three parts build every button. button() and link() build the classes the
+    three parts build every button. button() and textLink() build the classes the
     stylesheet already styles; iconButton() builds the one icon-button recipe
     in three sizes, and always gives it a name."""
     if not _node_ok():
         print("       (node unavailable, skipped)")
         return
     js = MINIDOM + r"""
-globalThis.I = { chev: '<svg/>', x: '<svg/>', trash: '<svg/>' };
+globalThis.I = { chev: '<svg chev/>', x: '<svg x/>', trash: '<svg trash/>', arrowRight: '<svg arrow/>' };
 globalThis.ico = (s) => { const n = el('span', 'ic'); n.innerHTML = s; return n; };
 """ + button_part() + r"""
 const out = {};
@@ -8885,10 +8885,11 @@ out.small = iconButton(I.trash, 'Delete note', { size: 'small', tone: 'danger' }
 out.tag = iconButton(I.x, 'Remove', { size: 'tag' }).className;
 const r = iconButton(I.x, 'Rename this conversation', { size: 'small', title: 'Rename' }); out.tip = [r.title, r.getAttribute('aria-label')];
 try { iconButton(I.x, ''); out.unnamed = 'built'; } catch (e) { out.unnamed = e.message; }
-out.caption = link('Undo').className;
-out.inline = link('Education', { size: 'inline' }).className;
-const g = link('Show all', { size: 'go' }); out.go = [g.className, g.children[g.children.length - 1].className];
-out.cls = link('Back', { cls: 'auth-back' }).className;
+out.caption = textLink('Undo').className;
+out.inline = textLink('Education', { size: 'inline' }).className;
+const g = textLink('Show all', { size: 'go' }); out.go = [g.className, g.children[g.children.length - 1].className];
+out.cls = textLink('Back', { cls: 'auth-back' }).className;
+const g2 = textLink('More in the Guide', { size: 'go', icon: I.arrowRight }); out.goIcon = [g.children[g.children.length - 1].innerHTML, g2.children[g2.children.length - 1].innerHTML];
 console.log(JSON.stringify(out));
 """
     got = _run_node(js)
@@ -8905,6 +8906,7 @@ console.log(JSON.stringify(out));
     ok(got["caption"] == "linkish" and got["inline"] == "seclink", "one link: caption and inline")
     ok(got["go"] == ["link", "ic"], "the stand-alone link carries its chevron")
     ok(got["cls"] == "linkish auth-back", "and a layout hook")
+    ok(got["goIcon"] == ["<svg chev/>", "<svg arrow/>"], "a chevron by default, or the icon it is given: %r" % got)
 
 
 @test
@@ -8982,6 +8984,27 @@ def t_skills_row_actions_stay_regular():
     calls = re.findall(r"iconButton\([^;]*\)", seg)
     ok(calls, "the Skills row builds its actions with iconButton")
     ok(all("size:" not in c for c in calls), "and none of them is small: %r" % calls)
+
+
+@test
+def t_every_text_link_is_built_by_the_part():
+    """Four link styles (linkish, seclink, link, auth-link) for one idea. link()
+    builds the one house link at caption size, at the size of its sentence, or
+    standing alone with a chevron."""
+    bad = _built_by_hand(["el('button', 'linkish", "el('button', 'seclink", "el('button', 'a-metric seclink",
+                          "el('button', 'link'", "el('button', 'auth-link"])
+    ok(not bad, "links built by hand: %s" % bad)
+
+
+@test
+def t_the_sign_in_card_uses_the_house_link():
+    """The sign-in card's links were black and underlined only under the
+    pointer. Cameron, 19 Oct: they are the house link, at caption size."""
+    ok(not re.search(r"(?<![\w-])auth-link(?![\w-])", SCRIPT), "auth-link is gone from the script")
+    ok(not re.search(r"(?<![\w-])auth-link(?![\w-])", CSS), "and from the stylesheet")
+    for call in ("textLink('Start again', { cls: 'auth-back' })", "textLink('Sign in as someone else', { cls: 'auth-back' })",
+                 "textLink('Forgot password?')"):
+        ok(SCRIPT.count(call) == 1, call + " builds its link")
 
 
 @test
@@ -9600,7 +9623,7 @@ async function uiConfirm() { return true; }
 async function refreshMailQuiet() {}
 function toastError(m) { toasts.push('error: ' + m); } function toastOk(m) { toasts.push('ok: ' + m); }
 function paintMailBody() {}
-""" + fn_src("function mailTick(cb)") + "\n" + fn_src("function paintMailBulk(rows)") + "\n" + fn_src("function mailOfferUndo(") + r"""
+""" + button_part() + fn_src("function mailTick(cb)") + "\n" + fn_src("function paintMailBulk(rows)") + "\n" + fn_src("function mailOfferUndo(") + r"""
 const findBtn = (host, text) => { const walk = (n) => { if (n.tagName === 'BUTTON' && n.textContent === text) return n;
   for (const c of n.children || []) { const f = walk(c); if (f) return f; } return null; }; return walk(host); };
 (async () => {
@@ -14569,7 +14592,7 @@ def t_a_standalone_link_is_a_40_target_on_a_phone():
     ok(rule in CSS, "a standalone link is 40 tall at 640 and under")
     ok(CSS.index(rule) > CSS.index("\n        .link { display: inline-flex;"), "after its base rule")
     ok(".fc-worth .sec-tools > .link" not in CSS, "and Show all, a .link in a section's tools, needs no rule of its own")
-    ok("el('button', 'link', 'More in the Guide')" in SCRIPT, "the popover's Guide link is a .link")
+    ok("textLink('More in the Guide', { size: 'go', icon: I.arrowRight })" in SCRIPT, "the popover's Guide link is a .link")
 
 
 @test
@@ -14772,7 +14795,7 @@ def t_the_forecast_chart_and_lists_match_the_mockup():
     ok("var(--weight-semibold)" in last and "var(--text-primary)" in last and "var(--text-xs)" in last and "var(--lh-caption)" in last,
        "the label is caption, 600, ink")
     wc = fn_src("function fcWorthCard(latest, sc, al) {")
-    ok("all.append(ico(I.chev))" in wc and "I.arrowRight" not in wc, "Show all ends in the chevron, not an arrow")
+    ok("textLink('Show all', { size: 'go' })" in wc and "I.arrowRight" not in wc, "Show all ends in the chevron (the go link's own), not an arrow")
     ok("@container fcnumbers (max-width: 1000px) { .rlist.cols-2 { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; } }" in CSS
        and "@media (max-width: 1100px) { .rlist.cols-2" not in CSS and "@media (max-width: 900px) { .rlist.cols-2" not in CSS,
        "and the list stacks with the pair above it, by its own width (1000), where its 5 is too narrow for a row's words (the audit found one ending in an ellipsis at 1024)")

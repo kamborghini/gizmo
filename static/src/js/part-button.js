@@ -8,7 +8,7 @@
              the stylesheet is put in layers: it is the same 32 button);
            - iconButton(): one icon-only recipe in three sizes from the tokens
              (32, 24, 20), the grey icon with one hover, and a name always;
-           - link(): one text link, teal and underlined, at caption size, at
+           - textLink(): one text link, teal and underlined, at caption size, at
              the size of its sentence, or standing alone with a chevron. */
         function button(text, opts) {
             const o = opts || {};
@@ -33,11 +33,11 @@
             b.setAttribute('aria-label', label);
             return b;
         }
-        function link(text, opts) {
+        function textLink(text, opts) {
             const o = opts || {};
             const base = o.size === 'inline' ? 'seclink' : o.size === 'go' ? 'link' : 'linkish';
             const a = el('button', base + (o.cls ? ' ' + o.cls : ''), text);
-            if (o.size === 'go') a.append(ico(I.chev));
+            if (o.size === 'go') a.append(ico(o.icon || I.chev));
             return a;
         }
         /* ---------- the button parts end ---------- */

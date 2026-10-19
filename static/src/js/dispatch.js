@@ -1441,7 +1441,7 @@
                     if (sub.length) row.append(el('div', 'coll-row-sub', sub.join(' \u00b7 ')));
                     /* The van has been and gone and another parcel needs one:
                        clearing lets the next booking ask again. */
-                    const clr = el('button', 'linkish', 'The van has been, book another');
+                    const clr = textLink('The van has been, book another');
                     clr.onclick = async () => {
                         if (!await uiConfirm('Clear the record of ' + r.label + '\u2019s collection today? '
                             + 'The next parcel booked with them will ask for a new one, which is a '

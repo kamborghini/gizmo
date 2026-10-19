@@ -608,16 +608,16 @@
             };
             const cc = mk('Cc', 'name@company.com');
             const bcc = mk('Bcc', 'nobody sees this line');
-            const link = el('button', 'linkish', 'Cc / Bcc');
-            link.setAttribute('aria-expanded', 'false');
+            const ccLink = textLink('Cc / Bcc');
+            ccLink.setAttribute('aria-expanded', 'false');
             const toggle = () => {
                 const open = wrap.style.display === 'none';
                 wrap.style.display = open ? '' : 'none';
-                link.setAttribute('aria-expanded', open ? 'true' : 'false');
+                ccLink.setAttribute('aria-expanded', open ? 'true' : 'false');
                 if (open) cc.focus();
             };
-            link.onclick = toggle;
-            host.append(link, wrap);
+            ccLink.onclick = toggle;
+            host.append(ccLink, wrap);
             /* Shown as soon as there is something in them, so a Reply all or a
                reopened panel never hides an address that is going to be used. */
             const reveal = () => {
@@ -947,7 +947,7 @@
                 if (o.tracking) {
                     const tr = el('div', 'mail-order-track');
                     tr.append(el('span', null, (o.carrier || 'Courier') + '  ' + o.tracking));
-                    const cp = el('button', 'linkish', 'Copy');
+                    const cp = textLink('Copy');
                     cp.onclick = async () => {
                         try { await navigator.clipboard.writeText(o.tracking); toastOk('Tracking copied'); }
                         catch (e) { toastError('Could not copy. Select it by hand.'); }
@@ -955,7 +955,7 @@
                     tr.append(cp);
                     row.append(tr);
                 }
-                const use = el('button', 'linkish', 'Put this in the reply');
+                const use = textLink('Put this in the reply');
                 use.onclick = () => {
                     const panel = m.body.querySelector('.mail-draft');
                     const line = o.sentence.charAt(0).toUpperCase() + o.sentence.slice(1) + '.';
@@ -1181,7 +1181,7 @@
                     if (already) {
                         row.append(el('span', 'mail-order-stage made', 'saved'));
                     } else {
-                        const save = el('button', 'linkish', 'Save to Files');
+                        const save = textLink('Save to Files');
                         save.onclick = async () => {
                             /* Not the browser's own prompt dialog: Chrome removed
                                it inside a cross-origin iframe, which is where this
@@ -1311,7 +1311,7 @@
             /* Previews are all the board stores. The real text is fetched on
                demand and never kept: it is customer correspondence, and the
                board has no need to hold it. */
-            const full = el('button', 'linkish', 'Read the full emails');
+            const full = textLink('Read the full emails');
             full.dataset.mailReadonly = '';   // the text is fetched and never kept: still only reading
             full.onclick = async () => {
                 full.disabled = true; full.textContent = 'Reading\u2026';

@@ -252,7 +252,7 @@
             const search = tableSearch('Search the guide…', guideView.q, (v) => { guideView.q = v; filterBook(); });
             const toc = el('nav', 'guide-toc'); toc.setAttribute('aria-label', 'Contents');
             secs.forEach(sec => {
-                const a = el('button', 'linkish guide-toc-link', sec.h); a.type = 'button';
+                const a = textLink(sec.h, { cls: 'guide-toc-link' }); a.type = 'button';
                 a.onclick = () => { const t = $('g-' + sec.id); if (t) { t.scrollIntoView({ block: 'start' }); const h = t.querySelector('h3'); if (h) { h.tabIndex = -1; h.focus({ preventScroll: true }); } } };
                 toc.append(a);
             });

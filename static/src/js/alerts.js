@@ -49,13 +49,13 @@
                    check that can settle it. */
                 let metric;
                 if (/size list/i.test(label)) {
-                    metric = el('button', 'a-metric seclink');
+                    metric = textLink(null, { size: 'inline', cls: 'a-metric' });
                     metric.textContent = label;
                     metric.title = 'Open the size check and resolve this';
                     metric.onclick = () => { setView('labels'); runCoverage(); };
                 } else if (a.tab === 'settings' && /privacy requests/i.test(label)) {
                     /* Where the request is dealt with, not just a notice of it. */
-                    metric = el('button', 'a-metric seclink');
+                    metric = textLink(null, { size: 'inline', cls: 'a-metric' });
                     metric.textContent = label;
                     metric.title = 'Open Settings, Privacy requests';
                     metric.onclick = openPrivacyRequests;
@@ -77,9 +77,9 @@
             thead.append(htr); tbl.append(thead); const tb = el('tbody');
             rows.forEach(r => {
                 const tr = el('tr'); const c0 = el('td', 'kw');
-                const link = el('button', 'seclink'); link.textContent = r.sector || '';
-                link.title = 'Open this sector in Customers'; link.onclick = () => { customersSeg = r.sector; setView('customers'); };
-                c0.append(link); tr.append(c0);
+                const sl = textLink(r.sector || '', { size: 'inline' });
+                sl.title = 'Open this sector in Customers'; sl.onclick = () => { customersSeg = r.sector; setView('customers'); };
+                c0.append(sl); tr.append(c0);
                 tr.append(el('td', 'num', fmtMoney(r.revenue || 0, cur)));
                 tr.append(el('td', 'num', (r.orders || 0).toLocaleString()));
                 tr.append(el('td', 'num', fmtMoney(r.aov || 0, cur)));

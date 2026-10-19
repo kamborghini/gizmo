@@ -1369,7 +1369,7 @@
                             if (!n || !n.back) return;
                             const fv = String(n.back.value == null ? '' : n.back.value);
                             const said = key === 'RECONCILE_MODE' ? (CX_MODE[fv] || fv) : fv;
-                            const back = el('button', 'linkish', n.back.from === 'env' ? 'Use the service’s value (' + said + ')'
+                            const back = textLink(n.back.from === 'env' ? 'Use the service’s value (' + said + ')'
                                 : fv ? 'Use the default (' + said + ')' : 'Clear it');
                             back.type = 'button';
                             /* Puts back what applies with nothing saved; Save then

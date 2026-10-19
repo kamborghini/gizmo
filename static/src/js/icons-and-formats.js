@@ -239,8 +239,8 @@
                     if (o.title) box.append(el('h3', null, o.title));
                     [].concat(o.body || []).filter(Boolean).forEach(t => box.append(typeof t === 'string' ? el('p', null, t) : t));
                     if (o.guide) {
-                        const a = el('button', 'link', 'More in the Guide');
-                        a.type = 'button'; a.append(ico(I.arrowRight));
+                        const a = textLink('More in the Guide', { size: 'go', icon: I.arrowRight });
+                        a.type = 'button';
                         a.onclick = () => { closeDMenu(); openGuideAt(o.guide[0], o.guide[1] || ''); };
                         box.append(a);
                     }

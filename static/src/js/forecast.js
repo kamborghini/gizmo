@@ -310,7 +310,7 @@
             if (sales.length) { const n = el('span', 'cnt', String(sales.length)); n.append(el('span', 'sr-only', sales.length === 1 ? ' month' : ' months')); head.append(n); }
             if (sales.length > 3) {
                 const tools = el('div', 'sec-tools');
-                const all = el('button', 'link', 'Show all'); all.type = 'button'; all.append(ico(I.chev));
+                const all = textLink('Show all', { size: 'go' }); all.type = 'button';
                 all.onclick = () => fcPage('Worth looking at', () => fcWorthTable(latest, sales.slice().sort((a, b) => a.month < b.month ? -1 : 1)));
                 tools.append(all); head.append(tools);
             }

@@ -145,7 +145,7 @@
                 };
                 go.onclick = submit;
                 inCode.onkeydown = (e) => { if (e.key === 'Enter' && !e.repeat) submit(); };
-                const back = el('button', 'auth-link auth-back', 'Start again');
+                const back = textLink('Start again', { cls: 'auth-back' });
                 back.onclick = () => { ov.dataset.mode = ''; authShow('login'); };
                 card.append(fc, err2, go, back);
                 setTimeout(() => inCode.focus(), 50);
@@ -214,7 +214,7 @@
                         wgLoadLayouts();
                     } catch (e) { err.textContent = e.message; go.disabled = false; }
                 };
-                const back = el('button', 'auth-link auth-back', 'Sign in as someone else');
+                const back = textLink('Sign in as someone else', { cls: 'auth-back' });
                 back.onclick = () => { setAppSession(''); ov.dataset.mode = ''; authShow('login'); };
                 card.append(fc, fp, err, go, back);
             } else {
@@ -246,7 +246,7 @@
                    an admin resets a password from Team, which hands over a
                    starter password that has to be changed on first use. The
                    link says so rather than pretending to send anything. */
-                const forgot = el('button', 'auth-link', 'Forgot password?');
+                const forgot = textLink('Forgot password?');
                 forgot.type = 'button';
                 const help = el('p', 'auth-note', 'Ask an admin to reset it in Team. They will give '
                     + 'you a starter password, and you choose your own the first time you sign in with it.');

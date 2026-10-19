@@ -613,7 +613,7 @@
                 note.append(document.createTextNode(hidden.length
                     + (hidden.length === 1 ? ' unread email is' : ' unread emails are')
                     + ' not in this view. '));
-                const go = el('button', 'linkish', 'Show unread');
+                const go = textLink('Show unread');
                 go.onclick = () => { mailFilter = 'unread'; mailSel.clear(); mailCursor = -1; renderMail(); };
                 note.append(go);
                 host.append(note);
@@ -652,7 +652,7 @@
             const bar = el('div', 'mail-hidden-note');
             bar.append(document.createTextNode(
                 n + ' email' + (n === 1 ? '' : 's') + ' ' + what + '. '));
-            const go = el('button', 'linkish', 'Undo');
+            const go = textLink('Undo');
             go.onclick = async () => {
                 go.disabled = true;
                 /* A bulk action over more than one batch holds one token per
@@ -682,7 +682,7 @@
             bar.append(document.createTextNode(
                 (n === 40 ? '40+' : n) + ' result' + (n === 1 ? '' : 's')
                 + ' in the whole mailbox for "' + mailFound.q + '". '));
-            const back = el('button', 'linkish', 'Back to the board');
+            const back = textLink('Back to the board');
             back.onclick = () => {
                 mailFound = null; mailQ = ''; mailCursor = -1;
                 renderMail();
