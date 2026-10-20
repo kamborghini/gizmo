@@ -29946,9 +29946,76 @@ def t_move_proof_is_wired():
     ok(any("def b" in g for g in got), "a moved function with one changed value is named: %s" % got)
     local = dict(head, **{"gizmo/dispatch.py": head["gizmo/dispatch.py"].replace("return x", "return core.x")})
     ok(any("core.x" in g for g in mp.prove(base, local)), "a local read through a prefix is named")
+    declared = dict(head, **{"gizmo/dispatch.py": head["gizmo/dispatch.py"].replace("x = 2\n", "x = 2\n    x = x * 1\n")})
+    st = {}
+    eq(mp.prove(base, declared, st, declared=("b",)), [], "a change named as intended is not a difference")
+    eq([d[0] for d in st["declared"]], ["b"], "it is shown instead")
+    looks = {k: v.replace("x = 2", "x = len(globals())") for k, v in base.items()}
+    looks_head = {k: v.replace("x = 2", "x = len(globals())") for k, v in head.items()}
+    ok(any("globals()" in g for g in mp.prove(looks, looks_head)),
+       "a moved function that looks its module up by name is named")
     order = dict(head, **{first: head[first].replace("    routes_dispatch.register(mcp, registry)\n\n", "")
                           .replace("        return 3\n", "        return 3\n\n    routes_dispatch.register(mcp, registry)\n")})
     ok(any("order" in g for g in mp.prove(base, order)), "routes registered in another order are named")
+
+# ---- The floor (stage 4, piece 2) -----------------------------------------
+# The store, the error log and the AI client sit beneath every area: they
+# import nothing from copilot.py, so an area can import them directly.
+
+FLOOR = ["gizmo/config.py", "gizmo/store.py", "gizmo/errors.py", "gizmo/ai.py"]
+
+@test
+def t_no_module_looks_itself_up_by_name():
+    """A function that finds its module's names through globals() (or vars(),
+    or sys.modules[__name__]) changes meaning when it moves: it would read or
+    clear the new module's names, and neither the move script nor the proof
+    can see it. copilot.py's _drop_memory_stores is the one such function, and
+    it stays there."""
+    import ast as _ast
+    from tools import sources
+    bad = []
+    for rel in sources.COPILOT_FILES[1:]:
+        for x in _ast.walk(_ast.parse(open(os.path.join(sources.ROOT, rel), encoding="utf-8").read())):
+            if (isinstance(x, _ast.Call) and isinstance(x.func, _ast.Name)
+                    and (x.func.id == "globals" or (x.func.id == "vars" and not x.args))):
+                bad.append(f"{rel}:{x.lineno} {x.func.id}()")
+            elif isinstance(x, _ast.Subscript) and _ast.unparse(x) == "sys.modules[__name__]":
+                bad.append(f"{rel}:{x.lineno} sys.modules[__name__]")
+    eq(bad, [], "a module moved out of copilot.py looks its own names up by name")
+
+@test
+def t_the_floor_imports_nothing_above_it():
+    """The floor never reaches copilot.py, server.py or an area, directly or
+    through a module it imports, wherever in it the import is written."""
+    import ast as _ast
+    from tools import sources
+    mods = _app_module_files()
+    for rel in FLOOR:
+        ok(os.path.exists(os.path.join(sources.ROOT, rel)), rel + " exists")
+    floor = {f[:-3].replace("/", ".") for f in FLOOR}
+    above = {"copilot", "server"} | {m for m in mods if m.startswith("gizmo.") and m not in floor | {"gizmo.__init__"}}
+    def reached(mod):
+        tree = _ast.parse(open(os.path.join(sources.ROOT, mods[mod]), encoding="utf-8").read())
+        out = set()
+        for x in _ast.walk(tree):
+            if isinstance(x, _ast.Import):
+                out |= {a.name for a in x.names}
+            elif isinstance(x, _ast.ImportFrom) and x.module and not x.level:
+                out |= {x.module + "." + a.name for a in x.names} | {x.module}
+        return {m for m in out if m in mods}
+    bad = []
+    for start in sorted(floor):
+        seen, todo = set(), [(start, start)]
+        while todo:
+            mod, path = todo.pop()
+            if mod in seen:
+                continue
+            seen.add(mod)
+            for nxt in reached(mod):
+                if nxt in above:
+                    bad.append(path + " -> " + nxt)
+                todo.append((nxt, path + " -> " + nxt))
+    eq(sorted(set(bad)), [], "the floor reaches above itself")
 
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
