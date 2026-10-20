@@ -5,6 +5,7 @@ const os = require('os');
 const path = require('path');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'record-'));
+test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 process.env.BROWSER_RUN = path.join(tmp, 'run');
 process.env.BROWSER_RECORD = path.join(tmp, 'record');
 fs.mkdirSync(process.env.BROWSER_RECORD, { recursive: true });
