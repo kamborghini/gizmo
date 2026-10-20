@@ -1,6 +1,17 @@
 {
  "releases": [
   {
+   "date": "2026-10-20",
+   "title": "A camera test",
+   "items": [
+    {
+     "kind": "added",
+     "tab": null,
+     "text": "Settings has a camera test, for the account owner only. It checks whether a phone can scan shelf labels from inside Reactor, ahead of the stock sheet moving in, and nothing it reads is saved or sent."
+    }
+   ]
+  },
+  {
    "date": "2026-10-19",
    "title": "A tidier stylesheet",
    "items": [

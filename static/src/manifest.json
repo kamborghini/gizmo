@@ -94,6 +94,7 @@
   "js/account-menu-and-search.js",
   "js/page-observers.js",
   "js/settings.js",
+  "js/camera-test.js",
   "js/wire-up.js"
  ]
 }

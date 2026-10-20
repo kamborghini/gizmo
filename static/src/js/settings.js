@@ -300,6 +300,21 @@
                 rs.onclick = () => rsInput.click();
                 bkActs.append(rs, rsInput);
             }
+            /* The camera test (a throwaway, 20 Oct 2026: see js/camera-test.js),
+               the owner's alone, like the backup buttons above. */
+            if (!teamMe || teamMe.role === 'master') {
+                const camRow = el('div', 'setting-row');
+                const camText = el('div');
+                camText.append(el('div', 'setting-title', 'Camera test'),
+                    el('div', 'setting-sub', 'Try a phone camera on shelf labels from inside Reactor, before the stock '
+                        + 'sheet moves in. Nothing is saved.'));
+                const camActs = el('div', 'row-acts');
+                const camBtn = textButton('Open the camera test');
+                camBtn.onclick = () => openCameraTest(camBtn);
+                camActs.append(camBtn);
+                camRow.append(camText, camActs);
+                host.append(camRow);
+            }
         }
         /* Ask for the person's own password before a change that a borrowed
            session must not be able to make alone. Resolves to the password,

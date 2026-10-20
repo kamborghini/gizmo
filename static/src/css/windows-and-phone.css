@@ -130,3 +130,8 @@
             .az::-webkit-scrollbar { display: none; }
             .az button { flex: none; height: var(--control-h-lg); min-width: var(--control-h-lg); }
         }
+        /* The camera test (a throwaway, 20 Oct 2026: delete with js/camera-test.js). */
+        .camera-test-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-block: var(--sp-3); }
+        .camera-test-lines { margin: 0; padding-left: var(--sp-5); }
+        .camera-test-video { display: block; width: 100%; max-height: 50vh; border-radius: var(--radius-inset); }
+        .camera-test-video[hidden] { display: none; }

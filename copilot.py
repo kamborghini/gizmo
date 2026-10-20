@@ -134,7 +134,10 @@ _API_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+    # The camera is the page's own (camera=(self)) for the camera test in
+    # Settings, a throwaway ahead of the stock sheet's label scanning moving
+    # in; nothing framed inside the page, and nothing else, gets it.
+    "Permissions-Policy": "camera=(self), microphone=(), geolocation=(), payment=()",
 }
 
 # --- Abuse / cost controls --------------------------------------------------

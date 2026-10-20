@@ -3239,6 +3239,17 @@ def t_the_locks_match_their_pins_and_carry_hashes():
 
 
 @test
+def t_only_the_page_itself_may_use_the_camera():
+    """The camera test in Settings needs the page's own camera; nothing framed
+    inside the page gets it, and the microphone, location and payment stay
+    shut to everyone."""
+    pp = copilot._API_HEADERS["Permissions-Policy"]
+    ok("camera=(self)" in pp, pp)
+    for shut in ("microphone=()", "geolocation=()", "payment=()"):
+        ok(shut in pp, pp)
+
+
+@test
 def t_the_suite_cannot_reach_the_network():
     """The guard itself: a name, an address given as numbers (which skips the
     name lookup on the async path) and a name that merely starts like a
