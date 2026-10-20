@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-20",
+   "title": "Skills, memory and chat on their own",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "The assistant's skills, its memory, what it has learned about the store and the chat itself now each live on their own, so a change elsewhere cannot upset them. Nothing looks different."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-20",
    "title": "Privacy, loans and work sessions on their own",
    "items": [
     {

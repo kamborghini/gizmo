@@ -171,8 +171,8 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/learn` | POST | memory | `_guard` |  | `_team_level` | `copilot.learn_route` |  |
-| `/api/learn/run` | POST | memory | `_guard` | rank admin, AI slot |  | `copilot.learn_run_route` |  |
+| `/api/learn` | POST | memory | `_guard` |  | `_team_level` | `gizmo.routes.knowledge.learn_route` |  |
+| `/api/learn/run` | POST | memory | `_guard` | rank admin, AI slot |  | `gizmo.routes.knowledge.learn_run_route` |  |
 
 ## `/api/liability`
 
@@ -226,7 +226,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/memory` | POST | memory | `_guard` |  | `_team_level` | `copilot.memory_route` |  |
+| `/api/memory` | POST | memory | `_guard` |  | `_team_level` | `gizmo.routes.memory.memory_route` |  |
 
 ## `/api/order`
 
@@ -326,8 +326,8 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/skills` | POST | skills | `_guard` | max body SKILLS_BODY_MAX, cap SKILLS_BODY_MAX | `_team_level`, `_team_role` | `copilot.skills_route` |  |
-| `/api/skills/read` | POST | skills | `_guard` | rank admin, AI slot |  | `copilot.skills_read_route` |  |
+| `/api/skills` | POST | skills | `_guard` | max body SKILLS_BODY_MAX, cap SKILLS_BODY_MAX | `_team_level`, `_team_role` | `gizmo.routes.skills.skills_route` |  |
+| `/api/skills/read` | POST | skills | `_guard` | rank admin, AI slot |  | `gizmo.routes.skills.skills_read_route` |  |
 
 ## `/api/status`
 

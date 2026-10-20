@@ -19,6 +19,8 @@ logger = logging.getLogger("shopify_mcp.copilot")
 def register(mcp, registry):
     """Add the work sessions' routes to the app."""
 
+    # ---- Work routes ------------------------------------------------------
+    # The clock. Timestamps are minted HERE, never accepted from the browser.
     @mcp.custom_route("/api/work/clock", methods=["POST"])
     async def work_clock_route(request: Request):
         err, body, who = await gate._guard(request)

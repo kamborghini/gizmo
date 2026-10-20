@@ -23,6 +23,26 @@ from gizmo import shopify
 logger = logging.getLogger("shopify_mcp.copilot")
 
 
+# ---------------------------------------------------------------------------
+# CRM: the sales desk, modelled on Pipedrive.
+#
+# The shape it copies is deliberate. Pipedrive's whole design is one idea,
+# activity-based selling: you cannot control whether a deal closes, only
+# whether it always has a next action scheduled, so the product nags exactly
+# when it does not. Everything here serves that idea: the four activity states
+# on a card (overdue red, due-today green, NOTHING SCHEDULED amber warning,
+# future grey; having no next step is deliberately louder than being late),
+# the column sort those states drive, the follow-up prompt when the last open
+# activity on a deal is completed, and rotting when a deal sits untouched.
+#
+# One store, local JSON, same discipline as every other store here: atomic
+# writes, the poison guard, no await between load and write. People and
+# organisations can link to Shopify customers, which the read-only registry
+# already reaches; nothing in the CRM ever writes to Shopify, and none of it
+# is visible to the AI chat.
+# ---------------------------------------------------------------------------
+
+
 CRM_PATH = os.environ.get("CRM_PATH", "/data/crm.json")
 # These are a guard against an unbounded file, not a retention policy. They
 # were set when the CRM held what somebody typed in by hand; once it holds an
@@ -439,6 +459,15 @@ def _crm_deal_fields(body: dict, d: dict, deal: dict) -> None:
         deal["custom"] = cust
 
 
+# ---------------------------------------------------------------------------
+# Website enquiries -> the CRM. The storefront contact form has no API: Shopify
+# sends each submission as a notification email into the shared inbox this app
+# already syncs. Recognised threads become a deal in the "Contact Made" stage,
+# with the sender as a person and the message as the deal's first note - so an
+# enquiry is pipeline the moment it lands, not an email waiting to be retyped.
+# ---------------------------------------------------------------------------
+
+
 def _crm_enquiry_stage(d: dict) -> str:
     """The 'Contact Made' column by name, however the pipeline spells it;
     an enquiry with no such column still lands somewhere visible."""
@@ -789,7 +818,7 @@ def _crm_erase_links(d: dict, pids: set, orgs_touched=()) -> tuple:
         erased += 1
     return erased, threads
 
-# ---- CRM routes -------------------------------------------------------
+# ---- The CRM's door: its routes are in gizmo/routes/crm.py -----------
 async def _crm_guard(request: Request):
     """(error_response, body, who). The CRM is buttons in the app's own UI,
     so it uses the same session auth as everything else; the AI never sees
