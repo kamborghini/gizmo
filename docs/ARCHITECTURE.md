@@ -66,8 +66,9 @@ team's accounts and sign-in (`gizmo/team.py`, its routes in
 the activity log (`gizmo/activity.py`), the order book
 (`gizmo/orderbook.py`), production and its label builder
 (`gizmo/production.py`; what the bench prints is pinned by
-`t_the_printed_labels_do_not_change`) and the Size list
-(`gizmo/size_list.py`). They read each other through the
+`t_the_printed_labels_do_not_change`), the Size list
+(`gizmo/size_list.py`), the CRM (`gizmo/crm.py`, read as `salesdesk`) and the
+shared inbox (`gizmo/mail.py`), each with its routes in `gizmo/routes/`. They read each other through the
 module's name and `copilot.py` as `core.NAME`, and import `copilot` last.
 `copilot.py` reads them the same way, except names it takes by their own:
 the ones the frozen print route reads, and `_guard` and `_json`, the door
@@ -214,8 +215,11 @@ can leave a test testing nothing. The guards below make that a failure, and
    `add_routes`; say what stays though it sits among them.
 2. **Move by script.** Cut statements whole, keeping their text and order,
    into `gizmo/<area>.py`, and the routes into `gizmo/routes/<area>.py`
-   inside `register(mcp, registry)`, which `add_routes` calls where they
-   stood so the route table keeps its order. Find each global read with
+   inside `register(mcp, registry)`, which `add_routes` calls where the
+   area's first route stood. Routes scattered through the table may be
+   gathered there: only `/dav{sub_path:path}` has a pattern and no two routes
+   share a path, so no request changes hands, and `make move-proof` checks
+   exactly that. Find each global read with
    `symtable`: in the area a name that stays becomes `core.NAME` (`import
    copilot as core`), in `copilot.py` a moved name becomes `<alias>.NAME`. A
    `global` across the line becomes an attribute assignment. Keep the logger
