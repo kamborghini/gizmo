@@ -492,7 +492,7 @@ def _mail_attach_name(name: str) -> str:
     replaces the slashes leaves the dots, and the dots are the half that
     matters when the string is going into a key."""
     base = str(name or "").replace("\\", "/").rsplit("/", 1)[-1]
-    return core._files_clean_name(re.sub(r"\.{2,}", ".", base))
+    return fileserver._files_clean_name(re.sub(r"\.{2,}", ".", base))
 
 
 def _mail_attachment_ok(key: str, uid: str) -> bool:
@@ -505,7 +505,7 @@ def _mail_attachment_ok(key: str, uid: str) -> bool:
     if k.startswith(f"mail/{uid}/"):
         return True
     return any(f.get("r2_key") == k and f.get("status") == "active"
-               for f in (core._load_files().get("files") or {}).values())
+               for f in (fileserver._load_files().get("files") or {}).values())
 
 
 def _mail_part_name(key: str) -> str:
@@ -553,14 +553,14 @@ async def _mail_fetch_parts(files: list, uid: str, inline_keys: list = None):
         # object in memory to discover it was too big - on a single worker,
         # which takes dispatch, labels and the inbox down with the inbox.
         try:
-            size = await asyncio.to_thread(core._files_head, key)
+            size = await asyncio.to_thread(fileserver._files_head, key)
         except Exception:
             size = None
         if size is not None and size > budget:
             raise ValueError(f"{_mail_part_name(key)} does not fit: attachments come to "
                              "more than 25MB in total.")
         try:
-            obj = await asyncio.to_thread(core._r2_call, "get_object", Key=key)
+            obj = await asyncio.to_thread(fileserver._r2_call, "get_object", Key=key)
             return await asyncio.to_thread(obj["Body"].read)
         except Exception as e:
             raise ValueError(f"{_mail_part_name(key)} is missing from storage.") from e
@@ -577,7 +577,7 @@ async def _mail_fetch_parts(files: list, uid: str, inline_keys: list = None):
         # could leave as invoice.hta - from the shop's own address, with its
         # SPF and DKIM behind it. That is the shape of the control's absence.
         nm = _mail_attach_name(f.get("name") or _mail_part_name(key))
-        if core._file_ext(nm) in core._DANGEROUS_EXT:
+        if fileserver._file_ext(nm) in fileserver._DANGEROUS_EXT:
             raise ValueError(f"{nm} is a program, not a document. Rename it or send a link.")
         out_files.append({"name": nm,
                           "type": _mail_part_type(f.get("type"), "application/octet-stream"),
@@ -631,10 +631,10 @@ async def _mail_logo_part(key: str):
     Decoration, and treated as such: a logo that cannot be read drops the
     message to the text footer with a warning in the log, because the footer
     is decoration and the message is not."""
-    if not key or not core._files_configured():
+    if not key or not fileserver._files_configured():
         return None
     try:
-        obj = await asyncio.to_thread(core._r2_call, "get_object", Key=key)
+        obj = await asyncio.to_thread(fileserver._r2_call, "get_object", Key=key)
         data = await asyncio.to_thread(obj["Body"].read)
     except Exception as e:
         logger.warning("mail: the footer logo could not be read (%s); "
@@ -645,7 +645,7 @@ async def _mail_logo_part(key: str):
         return None
     name = key.rsplit("/", 1)[-1]
     return {"cid": "logo", "name": name,
-            "type": core._files_preview_mime(name) or "image/png", "data": data}
+            "type": fileserver._files_preview_mime(name) or "image/png", "data": data}
 
 
 _mail_sweep_last = {"t": 0.0}
@@ -657,12 +657,12 @@ def _mail_sweep_attachments() -> None:
     Once a message has gone, the copy in Gmail is the record; the bucket copy
     is scaffolding. mail/footer/ is NEVER touched: the logo there is a
     setting, and sweeping a setting would quietly undo a lead's decision."""
-    if not core._files_configured():
+    if not fileserver._files_configured():
         return
     cutoff = (datetime.now(timezone.utc) - timedelta(days=MAIL_ATTACH_DAYS)).timestamp()
-    s3, token, doomed = core._files_s3(), None, []
+    s3, token, doomed = fileserver._files_s3(), None, []
     while True:
-        kw = {"Bucket": core.R2_BUCKET, "Prefix": "mail/", "MaxKeys": 1000}
+        kw = {"Bucket": fileserver.R2_BUCKET, "Prefix": "mail/", "MaxKeys": 1000}
         if token:
             kw["ContinuationToken"] = token
         page = s3.list_objects_v2(**kw) or {}
@@ -677,7 +677,7 @@ def _mail_sweep_attachments() -> None:
         if not token:
             break
     for i in range(0, len(doomed), 1000):
-        s3.delete_objects(Bucket=core.R2_BUCKET,
+        s3.delete_objects(Bucket=fileserver.R2_BUCKET,
                           Delete={"Objects": doomed[i:i + 1000], "Quiet": True})
     if doomed:
         logger.info("mail: swept %d old attachment(s) from the bucket", len(doomed))
@@ -1948,7 +1948,7 @@ async def _mail_parts_size(files: list, inline: list) -> tuple:
     total = 0
     for a in list(files) + list(inline):
         try:
-            size = await asyncio.to_thread(core._files_head, a["key"])
+            size = await asyncio.to_thread(fileserver._files_head, a["key"])
         except Exception:
             return 0, "Storage did not answer, so the files could not be checked."
         if not size:
@@ -2014,14 +2014,14 @@ def _mail_folder_path(d: dict, segs: list, who: str) -> str:
     without anybody creating folders by hand first."""
     parent = ""
     for seg in segs:
-        name = core._files_clean_name(seg)
+        name = fileserver._files_clean_name(seg)
         if not name:
             continue
         nxt = next((fid for fid, f in d["folders"].items()
                     if str(f.get("parent_id") or "") == parent
                     and f.get("name", "").lower() == name.lower()), None)
         if nxt is None:
-            nxt = core._files_id(d, "d")
+            nxt = fileserver._files_id(d, "d")
             d["folders"][nxt] = {"name": name, "parent_id": parent,
                                  "created_at": datetime.now(timezone.utc).isoformat()}
         parent = nxt
@@ -2037,3 +2037,4 @@ from gizmo import dispatch as desk  # noqa: E402
 from gizmo import gate  # noqa: E402
 from gizmo import team  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import files as fileserver  # noqa: E402

@@ -424,7 +424,7 @@ def build_app():
     # by a pattern that also matched ordinary names beginning with an
     # underscore. They are invisible and on course to be deleted.
     try:
-        copilot.rescue_misfiled_junk()
+        copilot.fileserver.rescue_misfiled_junk()
     except Exception:
         logger.exception("files: junk rescue failed; continuing")
     app = mcp.streamable_http_app(**MCP_HTTP)

@@ -602,10 +602,10 @@ class OpsFakeS3:
     def upload_fileobj(self, Fileobj, Bucket, Key):
         self.objects[Key] = len(Fileobj.read())
 OPS_S3 = OpsFakeS3()
-copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY = "acct", "ak", "sk"
-copilot._files_s3_client = OPS_S3
-copilot._files_ready.update({"bucket": False, "cors": False, "error": ""})
-copilot._files_mem = None
+fileserver.R2_ACCOUNT_ID, fileserver.R2_ACCESS_KEY_ID, fileserver.R2_SECRET_ACCESS_KEY = "acct", "ak", "sk"
+fileserver._files_s3_client = OPS_S3
+fileserver._files_ready.update({"bucket": False, "cors": False, "error": ""})
+fileserver._files_mem = None
 OPS_FOLDERS = {}
 def _folder(name, parent=""):
     r = post("/api/files/folder", {"op": "add", "name": name, "parent_id": OPS_FOLDERS.get(parent, "")})
@@ -639,7 +639,7 @@ for _n, _s, _m, _f in (
 _ok200(post("/api/files/file", {"op": "trash", "id": OPS_FILES["old-price-list-2025.pdf"]}), "trash old price list")
 # Who uploaded what, and when (b): the files store's own writer, so the Owner
 # and Modified columns are not all one person on one day.
-_fd = copilot._load_files()
+_fd = fileserver._load_files()
 _owners = [OPS_MASTER, OPS_TEAM["priya"], OPS_TEAM["owen"], OPS_TEAM["grace"]]
 for _i, (_n, _fid) in enumerate(sorted(OPS_FILES.items())):
     _rec = _fd["files"][_fid]
@@ -648,7 +648,7 @@ for _i, (_n, _fid) in enumerate(sorted(OPS_FILES.items())):
     _rec["created_at"] = _rec["uploaded_at"] = _when
 for _i, _fid in enumerate(OPS_FOLDERS.values()):
     _fd["folders"][_fid]["created_at"] = _at(70 + _i * 5, hour=10).isoformat()
-copilot._write_files(_fd)
+fileserver._write_files(_fd)
 
 print("operations seed: %d orders, %d custom shipments, %d deals, %d units, %d threads, %d files"
       % (len(OPS_ORDERS), len(OPS_CUSTOM), len(OPS_DEALS) + len(_HIST), len(OPS_UNITS),

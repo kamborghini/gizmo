@@ -14,6 +14,7 @@ import tokenvault
 import totp
 
 import copilot as core
+from gizmo import webdav
 from gizmo import mail
 from gizmo import activity
 from gizmo import gate
@@ -362,7 +363,7 @@ def register(mcp, registry):
             return gate._json({"error": "The change could not be saved. The data volume may be "
                                    "unwritable; check Settings, Connections."}, 500)
         team._drop_sessions(uid=uid)          # every session dies with the old password
-        core._dav_drop_cache(uid)             # and so does the drive's cached credential
+        webdav._dav_drop_cache(uid)             # and so does the drive's cached credential
         token = team._new_session(uid)        # except this one, freshly minted
         activity._track(uid, "auth", "changed their password")
         return gate._json({"ok": True, "session": token})
@@ -504,7 +505,7 @@ def register(mcp, registry):
                 team._write_users(d)
                 if not on:
                     team._drop_sessions(uid=target)   # off means off, this second
-                    core._dav_drop_cache(target)
+                    webdav._dav_drop_cache(target)
                     mail._mail_release_owned(target, "account switched off")
                     try:
                         core._work_close_open(target, who, "closed automatically when the account was switched off",
@@ -611,7 +612,7 @@ def register(mcp, registry):
                 u.pop("dav_pw_at", None)
                 team._write_users(d)
                 team._drop_sessions(uid=target)       # the old password's sessions die
-                core._dav_drop_cache(target)
+                webdav._dav_drop_cache(target)
                 activity._track(who, "team", "reset a password", label)
                 return gate._json({"ok": True, "starter_password": starter,
                               "users": core._team_public_list(d)})
@@ -637,7 +638,7 @@ def register(mcp, registry):
                 u["deleted"], u["active"] = True, False
                 team._write_users(d)
                 team._drop_sessions(uid=target)
-                core._dav_drop_cache(target)
+                webdav._dav_drop_cache(target)
                 mail._mail_release_owned(target, "account deleted")
                 try:
                     core._work_close_open(target, who, "closed automatically when the account was deleted",

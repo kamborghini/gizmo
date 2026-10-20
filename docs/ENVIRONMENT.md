@@ -80,22 +80,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `STORE_CONTEXT_CAP` | `"4000"` | copilot |  |
 | `TREND_MONTHS` | `"24"` | copilot |  |
 
-## copilot.py - Files: the office file server, without the office
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `APP_URL` | `None` | copilot, server |  |
-| `FILES_PATH` | `"/data/files.json"` | copilot |  |
-| `FILES_QUOTA_GB` | `"50"` | copilot |  |
-| `FILES_REAP_MAX` | `"4000"` | copilot | keys per reaper tick |
-| `FILES_REAP_SECONDS` | `"20"` | copilot | and its deadline |
-| `R2_ACCESS_KEY_ID` | `""` | copilot |  |
-| `R2_ACCOUNT_ID` | `""` | copilot |  |
-| `R2_BUCKET` | `"gizmo-files"` | copilot |  |
-| `R2_ENDPOINT` | `None` | copilot |  |
-| `R2_SECRET_ACCESS_KEY` | `""` | copilot |  |
-| `RAILWAY_PUBLIC_DOMAIN` | `None` | copilot, server |  |
-
 ## copilot.py - Impact tracking — "close the loop": snapshot headline metric
 
 | Variable | Default | Read by | Notes |
@@ -158,12 +142,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `ALERT_EMAIL_TO` | `""` | copilot |  |
 | `RESEND_API_KEY` | `""` | copilot |  |
 | `WATCH_PATH` | `"/data/watch.json"` | copilot |  |
-
-## copilot.py - Shopify -> Xero connector: a separate, audited Node service 
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `DAV_TRACE` | `None` | copilot |  |
 
 ## copilot.py - Stock bridge: the glass a Mark made consumes flows into the 
 
@@ -257,6 +235,22 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 |---|---|---|---|
 | `ERRORS_PATH` | `"/data/app_errors.json"` | gizmo.errors |  |
 
+## gizmo/files.py - Files: the office file server, without the office
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `APP_URL` | `None` | gizmo.files, server |  |
+| `FILES_PATH` | `"/data/files.json"` | gizmo.files |  |
+| `FILES_QUOTA_GB` | `"50"` | gizmo.files |  |
+| `FILES_REAP_MAX` | `"4000"` | gizmo.files | keys per reaper tick |
+| `FILES_REAP_SECONDS` | `"20"` | gizmo.files | and its deadline |
+| `R2_ACCESS_KEY_ID` | `""` | gizmo.files |  |
+| `R2_ACCOUNT_ID` | `""` | gizmo.files |  |
+| `R2_BUCKET` | `"gizmo-files"` | gizmo.files |  |
+| `R2_ENDPOINT` | `None` | gizmo.files |  |
+| `R2_SECRET_ACCESS_KEY` | `""` | gizmo.files |  |
+| `RAILWAY_PUBLIC_DOMAIN` | `None` | gizmo.files, server |  |
+
 ## gizmo/gate.py - top
 
 | Variable | Default | Read by | Notes |
@@ -318,6 +312,12 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `PRODUCTION_LABEL_TAG` | `"IP"` | gizmo.production | order tag that means "in production" |
 | `PRODUCTION_STATE_MAX` | `"1000"` | gizmo.production |  |
 | `PRODUCTION_STATE_PATH` | `"/data/production_state.json"` | gizmo.production |  |
+
+## gizmo/routes/files.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `DAV_TRACE` | `None` | gizmo.routes.files |  |
 
 ## gizmo/size_list.py - top
 

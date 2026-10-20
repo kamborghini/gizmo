@@ -231,10 +231,11 @@ def run(spec_path, root, write):
     spec = json.load(open(spec_path, encoding="utf-8"))
     report, problems, notes = [], [], []
     P = lambda rel: os.path.join(root, rel)
-    src = open(P("copilot.py"), encoding="utf-8").read()
+    MAIN = sources.copilot_files(root)[0]     # copilot.py, named in one place
+    src = open(P(MAIN), encoding="utf-8").read()
     LINES = src.splitlines(keepends=True)
     tree = ast.parse(src)
-    st = symtable.symtable(src, "copilot.py", "exec")
+    st = symtable.symtable(src, MAIN, "exec")
     areas = {a["name"]: a for a in spec["areas"]}
     AL = {n: a.get("alias", n) for n, a in areas.items()}
     groups = {g["name"]: g for g in spec.get("routes", [])}
@@ -412,7 +413,7 @@ def run(spec_path, root, write):
                 problems.append(f"{fn} at {ln} has a local `{alias}` and would read a moved name through it")
 
     # the other files: core.NAME / copilot.NAME for a moved name
-    def attr_edits(rel, owners):
+    def attr_edits(rel, owners, through=False):
         text = open(P(rel), encoding="utf-8").read()
         lines = text.splitlines(keepends=True)
         t = ast.parse(text)
@@ -420,8 +421,8 @@ def run(spec_path, root, write):
         for x in ast.walk(t):
             if (isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and x.value.id in owners
                     and x.attr in moved and x.attr not in keep_copies):
-                ed[x.lineno].append((_col(lines, x.lineno, x.col_offset), _col(lines, x.lineno, x.end_col_offset),
-                                     AL[DEST[x.attr]] + "." + x.attr))
+                new = (x.value.id + "." if through else "") + AL[DEST[x.attr]] + "." + x.attr
+                ed[x.lineno].append((_col(lines, x.lineno, x.col_offset), _col(lines, x.lineno, x.end_col_offset), new))
                 used.add(DEST[x.attr])
         if ed:
             # a function with a local named like an alias it would now read through
@@ -445,7 +446,12 @@ def run(spec_path, root, write):
             continue
         others[rel] = attr_edits(rel, {"core"})
     if os.path.exists(P("server.py")):
-        others["server.py"] = attr_edits("server.py", {"copilot"})
+        # server.py imports copilot inside its functions (as _c): it reaches a
+        # moved name through copilot.py's own name for the module.
+        stree = ast.parse(open(P("server.py"), encoding="utf-8").read())
+        server_aliases = {a.asname or a.name for x in ast.walk(stree) if isinstance(x, ast.Import)
+                          for a in x.names if a.name == "copilot"}
+        others["server.py"] = attr_edits("server.py", server_aliases, through=True)
     for f in sorted(glob.glob(P("tests/**/*.py"), recursive=True)):
         others[os.path.relpath(f, root)] = attr_edits(os.path.relpath(f, root), {"copilot", "_c", "_cp"})
 
@@ -570,7 +576,7 @@ def run(spec_path, root, write):
         if ks:
             add.append(f"from {a['file'][:-3].replace('/', '.')} import {', '.join(ks)}\n")
     lines_after[at:at] = add
-    open(P("copilot.py"), "w", encoding="utf-8").write("".join(lines_after))
+    open(P(MAIN), "w", encoding="utf-8").write("".join(lines_after))
 
     new_imports = "".join(sib_line(d) + "\n" for d in areas)
     for rel, (text, used, n) in others.items():
@@ -582,12 +588,16 @@ def run(spec_path, root, write):
             add = "".join(sib_line(d) + noqa + "\n" for d in sorted(used))
             text = text[:m.end()] + add + text[m.end():] if m else add + text
         elif rel == "server.py":
-            m = re.search(r"^import [^\n]*\bcopilot\b[^\n]*\n", text, re.M)
-            text = text[:m.end()] + "".join(sib_line(d) + "\n" for d in sorted(used)) + text[m.end():]
+            pass                      # it reads the moved names through copilot (above)
         elif rel.endswith("test_dispatch.py") and "seed" not in rel:
-            gz = [x for x in re.finditer(r"^from gizmo[^\n]*\n", text, re.M)]
-            at_ = gz[-1].end() if gz else re.search(r"^import [^\n]*\bcopilot\b[^\n]*\n", text, re.M).end()
-            text = text[:at_] + new_imports + text[at_:]
+            # after the prelude's last top-level gizmo import (or its copilot
+            # import): found by the parser, so never inside a string
+            ttop = [n for n in ast.parse(text).body if isinstance(n, (ast.Import, ast.ImportFrom))]
+            last = next((n for n in reversed(ttop) if isinstance(n, ast.ImportFrom) and (n.module or "").startswith("gizmo")),
+                        next((n for n in reversed(ttop) if isinstance(n, ast.Import) and any(a.name == "copilot" for a in n.names)), None))
+            tl = text.splitlines(keepends=True)
+            tl[last.end_lineno:last.end_lineno] = [new_imports]
+            text = "".join(tl)
         open(P(rel), "w", encoding="utf-8").write(text)
     report.append("written")
     return 0, report
