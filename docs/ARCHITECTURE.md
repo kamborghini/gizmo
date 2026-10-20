@@ -43,9 +43,18 @@ server ──► copilot ──► integrations (worldoptions, xero, google_mail
 each other through the module's name, never a copied name: the dispatch desk
 (`gizmo/dispatch.py`, its routes in `gizmo/routes/dispatch.py`) reads
 `copilot.py` as `core.NAME`, and `copilot.py` reads the desk as `desk.NAME`.
-Neither reads the other as it loads, so either can be imported first; the
-cycle shrinks as the store, the request check, orders and the AI client move
-out in turn.
+Neither reads the other as it loads, so either can be imported first.
+
+Beneath every area is the floor, modules that import nothing above them
+(`t_the_floor_imports_nothing_above_it`): `gizmo/config.py` (settings),
+`gizmo/store.py` (every JSON store, the one writer, the cache, the poison
+guard), `gizmo/errors.py` (the error log) and `gizmo/ai.py` (the AI client:
+models, the call and its fallbacks, usage, the spend cap). Everything reads
+them through the module's name: `jsonstore.NAME`, `errors.NAME`,
+`claude.NAME`. An area imports the floor directly; what it still reads from
+`copilot.py` through `core.` shrinks as the request check, accounts, orders
+and production move out in turn. The store names no area: an area that keeps
+something built from a store registers `jsonstore.when_forgotten(fn)`.
 
 Acyclic otherwise, and it stays that way. An integration never imports the app: it
 takes what it needs as arguments and returns plain data. `server.py` hands
@@ -195,8 +204,10 @@ can leave a test testing nothing. The guards below make that a failure, and
    `global` across the line becomes an attribute assignment. Keep the logger
    name `shopify_mcp.copilot`.
 3. **Nothing across at import time.** What an area needs as it loads moves
-   first, to `gizmo/config.py` (settings) or `gizmo/store.py` (the stores'
-   shared pieces).
+   first, into the floor. A function that finds its module's names by name
+   (`globals()`, `vars()`, `sys.modules[__name__]`) cannot move: moved, it
+   reads the new module's names (`t_no_module_looks_itself_up_by_name`;
+   `_drop_memory_stores` stays in `copilot.py` for this reason).
 4. **Re-point the tests** that patch or read a moved name to the area's
    module. `t_no_test_patches_a_name_nobody_reads` fails on a patch that
    would land on nothing, on a copied name a patch would miss, and on a
@@ -210,9 +221,12 @@ can leave a test testing nothing. The guards below make that a failure, and
    exactly what it still reads from `copilot.py`, and each later move
    shortens it.
 6. **The proof.** `make move-proof BASE=origin/main` prints "nothing but the
-   move", or names each statement lost, added or changed and each prefix
-   put on a local. `make api-doc` changes only the moved handlers' module;
-   `make env-doc` only the moved settings' headings.
+   move", or names each statement lost, added or changed, each prefix put on
+   a local and each moved statement that looks its module up by name. A
+   change made on purpose is named with `DECLARED=a,b` and printed before
+   and after; everything else must still match. `make api-doc` changes only
+   the moved handlers' module; `make env-doc` only the moved settings'
+   headings.
 7. **Frozen code keeps its bytes.** If a frozen function (the printed
    labels' route) reads a moved name, `copilot.py` takes that name from the
    area by name, which the guard allows only for a name no test patches and
