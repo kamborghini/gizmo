@@ -580,6 +580,30 @@ def t_custom_shipments_have_a_home_on_the_desk():
 
 
 @test
+def t_the_control_that_hides_a_shipment_is_not_drawn_for_the_team():
+    """A control a member cannot use should not tell them the setting exists:
+    the whole point of an admin-only shipment is that nobody else knows there
+    is one. So the row's Hide button is drawn from can_hide, which the server
+    sends with the rows it already filtered, and the booking window's tick
+    from the same rank rule the order editor uses. Neither is the gate:
+    /api/custom/visibility is admin rank and the booking route ignores the
+    field from anyone else."""
+    cq = fn_src("function renderCustomQueue(")
+    ok("canHide = !!r.can_hide" in cq,
+       "the list takes its answer from the server that filtered the rows, not from its own guess at a rank")
+    ok(_re.search(r"if \(canHide\) \{", cq), "and draws the control only then")
+    ok("'/api/custom/visibility'" in cq, "the control posts to the route that checks rank")
+    ok("Hide from team" in cq and "Show the team" in cq, "it reads both ways round")
+    ok("Admin only" in cq, "and a hidden row says so, so an admin is never misled about who can see it")
+    cs = fn_src("async function openCustomShip(")
+    ok("if (canHideShipments())" in cs, "the booking window offers the tick to an admin only")
+    ok("admin_only: !!(privCb && privCb.checked)" in cs,
+       "and a window that never drew one books a visible shipment rather than sending a bare true")
+    ok(_re.search(r"function canHideShipments\(\) \{[^}]*master: 3, admin: 2", SCRIPT),
+       "the rank rule is the one the rest of the desk uses")
+
+
+@test
 def t_inbox_reads_as_a_list_with_bulk_triage():
     """The merchant's own words after first connecting: it imported all mail,
     nothing is assigned, and it needs to look like a Gmail inbox. So: rows by

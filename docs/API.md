@@ -3,7 +3,7 @@
 Generated from the code by `tools/route_reference.py`; do not edit by hand.
 `make api-doc` rewrites it, and CI fails when it is stale.
 
-150 routes. **Tab** is the tab that opens a route (`_TAB_ROUTES`); an `/api/` route no tab claims is refused unless it is on `_OPEN_API`. **Door** is the guard the handler opens with (`_guard` is the one door: rate window, tab, session, rank, AI slot, body); `own check` means the route authenticates itself (a hook, a webhook, OAuth, print, assets). **Checks** are the permission helpers the handler calls itself.
+151 routes. **Tab** is the tab that opens a route (`_TAB_ROUTES`); an `/api/` route no tab claims is refused unless it is on `_OPEN_API`. **Door** is the guard the handler opens with (`_guard` is the one door: rate window, tab, session, rank, AI slot, body); `own check` means the route authenticates itself (a hook, a webhook, OAuth, print, assets). **Checks** are the permission helpers the handler calls itself.
 
 ## `/`
 
@@ -71,9 +71,10 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/custom/book` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.custom_book_route` | Book a courier to a pasted address. |
-| `/api/custom/list` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.custom_list_route` | Pasted-address shipments already booked. |
+| `/api/custom/book` | POST | labels | `_guard` |  | `_team_level` | `gizmo.routes.dispatch.custom_book_route` | Book a courier to a pasted address. |
+| `/api/custom/list` | POST | labels | `_guard` |  | `_team_level` | `gizmo.routes.dispatch.custom_list_route` | Pasted-address shipments already booked. |
 | `/api/custom/quote` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.custom_quote_route` | Price couriers to a pasted address. |
+| `/api/custom/visibility` | POST | labels | `_guard` | rank admin |  | `gizmo.routes.dispatch.custom_visibility_route` | Keep one pasted-address shipment to admins, or let it back out. |
 
 ## `/api/customer-history`
 
@@ -98,11 +99,11 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
 | `/api/dispatch/book` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.dispatch_book_route` | Book the chosen courier (CHARGES the WO account), fulfill + tag. |
-| `/api/dispatch/cancel` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.dispatch_cancel_route` | Cancel a booked shipment at World Options (best-effort). |
+| `/api/dispatch/cancel` | POST | labels | `_guard` |  | `_team_level` | `gizmo.routes.dispatch.dispatch_cancel_route` | Cancel a booked shipment at World Options (best-effort). |
 | `/api/dispatch/collections` | POST | labels | `_guard` |  | `_team_level` | `gizmo.routes.dispatch.dispatch_collections_route` | What is coming, and from whom, on a given day. |
 | `/api/dispatch/diagnose` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.dispatch_diagnose_route` | Why is a courier service missing? |
-| `/api/dispatch/label` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.dispatch_label_route` | Return the stored label(s) for an already-dispatched order (reprint). |
-| `/api/dispatch/manifest` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.dispatch_manifest_route` | Everything booked on one day (Europe/London): the driver handover list and the sheet to check the World Options invoice against. |
+| `/api/dispatch/label` | POST | labels | `_guard` |  | `_team_level` | `gizmo.routes.dispatch.dispatch_label_route` | Return the stored label(s) for an already-dispatched order (reprint). |
+| `/api/dispatch/manifest` | POST | labels | `_guard` |  | `_team_level` | `gizmo.routes.dispatch.dispatch_manifest_route` | Everything booked on one day (Europe/London): the driver handover list and the sheet to check the World Options invoice against. |
 | `/api/dispatch/parse-address` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.parse_address_route` | Turn a pasted block of text into address fields. |
 | `/api/dispatch/quote` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.dispatch_quote_route` | Price couriers for one order. |
 
