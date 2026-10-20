@@ -8809,6 +8809,23 @@ console.log(JSON.stringify({
 
 
 @test
+def t_the_camera_test_is_the_owners_and_lets_the_camera_go():
+    """A throwaway (20 Oct 2026) ahead of the stock sheet moving in: can a
+    phone scan shelf labels from inside the Shopify admin? It is the owner's
+    alone, it is built by the window part, closing it stops the camera, and
+    nothing it reads leaves the phone. Delete with js/camera-test.js."""
+    fn = fn_src("function openCameraTest(")
+    ok("dialog({ title: 'Camera test', opener: opener, onClose: stopCamera })" in fn, "a window from the part, closing stops the camera")
+    ok("stream.getTracks().forEach(t => t.stop())" in fn, "stopping lets every track go, so the camera light goes off")
+    ok("api(" not in fn and "fetch(" not in fn and "XMLHttpRequest" not in fn, "nothing is sent anywhere")
+    ok("sh.scanner.capture()" in fn and "navigator.mediaDevices.getUserMedia(" in fn, "both ways are tried")
+    i = SCRIPT.index("const camBtn = textButton('Open the camera test');")
+    ok("if (!teamMe || teamMe.role === 'master') {" in SCRIPT[i - 900:i], "the row is the owner's alone, like the backup buttons")
+    import json as _json
+    ok("js/camera-test.js" in _json.load(open(os.path.join(ROOT, "static", "src", "manifest.json")))["js"], "the section is in the page")
+
+
+@test
 def t_a_confirm_dialog_answers_for_the_focused_button():
     """A12 in the 2026-09-22 bug audit. Enter was bound on the document and
     answered yes wherever focus was: Tab to Cancel, Enter, and Book & dispatch
