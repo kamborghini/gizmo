@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-20",
+   "title": "The dispatch desk on its own",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "The dispatch desk's code now lives on its own, so a change elsewhere in the app can no longer upset booking, labels or collections. Nothing looks different."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-20",
    "title": "A camera test",
    "items": [
     {

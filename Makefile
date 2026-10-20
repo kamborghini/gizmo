@@ -18,7 +18,7 @@
 
 PY ?= .venv/bin/python
 
-.PHONY: help install run test test-frontend test-forecast test-browser css-proof sweep sast env-doc api-doc check lock ext-check shopify-deploy shopify-release
+.PHONY: help install run test test-frontend test-forecast test-browser css-proof move-proof sweep sast env-doc api-doc check lock ext-check shopify-deploy shopify-release
 
 help:
 	@sed -n '4,18p' Makefile
@@ -80,7 +80,7 @@ sweep:
 # The same files and threshold as CI's blocking step, so a scan failure is
 # seen before a push rather than after a deploy (a SHA-1 fingerprint once
 # reached main this way). Installs the pinned scanner if it is missing.
-SAST_FILES = copilot.py pagesource.py server.py google_mail.py google_data.py xero.py worldoptions.py recon.py mailmime.py eori.py tokenvault.py logdrain.py totp.py pipedrive.py perf.py
+SAST_FILES = copilot.py pagesource.py server.py google_mail.py google_data.py xero.py worldoptions.py recon.py mailmime.py eori.py tokenvault.py logdrain.py totp.py pipedrive.py perf.py gizmo
 sast:
 	@$(PY) -m bandit --version >/dev/null 2>&1 || $(PY) -m pip install --quiet bandit==1.9.4
 	$(PY) -m bandit -q -lll -iii -r $(SAST_FILES)
@@ -102,6 +102,12 @@ ext-check:
 BASE ?= origin/main
 css-proof:
 	$(PY) tests/browser/css_proof.py --base $(BASE) $(if $(ONLY),--only '$(ONLY)')
+
+# The proof that a move out of copilot.py into gizmo/ moved code and changed
+# nothing: every statement found again, prefixes only on module globals, the
+# routes in the same order (tools/move_proof.py), against BASE.
+move-proof:
+	$(PY) tools/move_proof.py --base $(BASE)
 
 check: test-frontend test-forecast sweep sast ext-check test-browser
 	$(PY) tools/env_reference.py --check

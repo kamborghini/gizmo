@@ -19,8 +19,29 @@ import os
 import re
 import sys
 
-MODULES = ["server", "copilot"]
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sources  # noqa: E402  (copilot.py and the modules split out of it)
+
 OUT = os.path.join("docs", "API.md")
+
+
+def module_files(root):
+    """(module, file) for each module that registers routes: server.py, then
+    copilot.py and the modules split out of it."""
+    return [("server", "server.py")] + [(f[:-3].replace("/", "."), f) for f in sources.copilot_files(root)]
+
+
+def _called(call):
+    """The name a call reaches: f(...), or core.f(...) in a module moved out of
+    copilot.py, which reads copilot.py as core."""
+    f = call.func
+    if isinstance(f, ast.Name):
+        return f.id
+    if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id == "core":
+        return f.attr
+    return None
+
+
 DOORS = {"_guard", "_mail_guard", "_crm_guard", "_files_guard", "_auth_guard", "_team_guard"}
 CHECKS = {"_team_level", "_team_role", "_user_tabs", "_uid_has_tab", "_live_uid", "_secret_ok",
           "_forecast_token_ok", "_verify_session_token", "_shop_gate", "_can_force_tool"}
@@ -57,10 +78,10 @@ def _rank(node):
 def _door(fn):
     """(door, terms) from the first call to a door in the handler's body."""
     for node in ast.walk(fn):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in DOORS:
+        if isinstance(node, ast.Call) and _called(node) in DOORS:
             terms = []
             kw = {k.arg: k.value for k in node.keywords if k.arg}
-            if node.func.id == "_team_guard" and len(node.args) > 1:
+            if _called(node) == "_team_guard" and len(node.args) > 1:
                 terms.append("rank " + _rank(node.args[1]))
             if "min_level" in kw:
                 terms.append("rank " + _rank(kw["min_level"]))
@@ -71,15 +92,15 @@ def _door(fn):
                     terms.append(k.replace("_", " ") + " " + ast.unparse(kw[k]))
             if isinstance(kw.get("body"), ast.Constant) and kw["body"].value is False:
                 terms.append("reads its own body")
-            return node.func.id, ", ".join(terms)
+            return _called(node), ", ".join(terms)
     return "own check", ""
 
 
 def _checks(fn):
     names = set()
     for node in ast.walk(fn):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            n = node.func.id
+        if isinstance(node, ast.Call) and _called(node):
+            n = _called(node)
             if n in CHECKS or re.search(r"verify|hmac", n, re.I):
                 names.add(n)
     return sorted(names)
@@ -93,12 +114,12 @@ def _about(fn):
 
 
 def collect(root):
-    copilot_tree = ast.parse(open(os.path.join(root, "copilot.py"), encoding="utf-8").read())
+    copilot_tree = ast.parse(open(os.path.join(root, sources.copilot_files(root)[0]), encoding="utf-8").read())
     tab_routes = _literal(copilot_tree, "_TAB_ROUTES") or ()
     open_api = _literal(copilot_tree, "_OPEN_API") or ()
     rows = []
-    for mod in MODULES:
-        path = os.path.join(root, mod + ".py")
+    for mod, rel in module_files(root):
+        path = os.path.join(root, rel)
         tree = copilot_tree if mod == "copilot" else ast.parse(open(path, encoding="utf-8").read())
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):

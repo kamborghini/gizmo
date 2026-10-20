@@ -38,7 +38,16 @@ server ──► copilot ──► integrations (worldoptions, xero, google_mail
                    ──► libraries    (tokenvault, totp, logdrain)
 ```
 
-Acyclic, and it stays that way. An integration never imports the app: it
+`copilot.py` is being split into the `gizmo/` package one area at a time
+(see "Moving an area out" below). An area moved out and `copilot.py` read
+each other through the module's name, never a copied name: the dispatch desk
+(`gizmo/dispatch.py`, its routes in `gizmo/routes/dispatch.py`) reads
+`copilot.py` as `core.NAME`, and `copilot.py` reads the desk as `desk.NAME`.
+Neither reads the other as it loads, so either can be imported first; the
+cycle shrinks as the store, the request check, orders and the AI client move
+out in turn.
+
+Acyclic otherwise, and it stays that way. An integration never imports the app: it
 takes what it needs as arguments and returns plain data. `server.py` hands
 its Shopify *write* capabilities into `copilot.add_routes` as arguments
 rather than `copilot` importing `server`; the assistant's tool registry
@@ -121,6 +130,9 @@ and what each turns off. Everything else defaults to "that feature is off".
 | `tests/test_forecast.py` | The forecast package | The app |
 | `tests/browser/` | Every screen in Chromium at phone, laptop and wide sizes, in a world seeded through the app's own code: script errors, failed or outside requests, writes, sideways scroll, spill, the panel rules, accessibility (axe, WCAG 2.2 AA) and three windows by keyboard | Firefox and Safari; the Shopify admin frame itself |
 
+`make move-proof` (`tools/move_proof.py`) compares the code with a base ref
+after a move out of `copilot.py`: see "Moving an area out".
+
 The browser suite holds panel-rule and accessibility findings in a ratchet
 (`tests/browser/record/`): a pull request fails if a count goes up, and if
 one goes down without the record being lowered to match.
@@ -166,12 +178,51 @@ must not run every tick.
 **A tab.** A key in `TAB_KEYS`, its routes in `_TAB_ROUTES`, and — if the
 assistant gets tools for it — those tools in `_TOOL_TABS`.
 
+## Moving an area out of copilot.py
+
+The tests reach module state by name (`copilot.X = stub`), so code that moves
+can leave a test testing nothing. The guards below make that a failure, and
+`make move-proof` proves a move moved code and changed nothing.
+
+1. **Inventory.** The area's top-level statements by line, and its routes in
+   `add_routes`; say what stays though it sits among them.
+2. **Move by script.** Cut statements whole, keeping their text and order,
+   into `gizmo/<area>.py`, and the routes into `gizmo/routes/<area>.py`
+   inside `register(mcp, registry)`, which `add_routes` calls where they
+   stood so the route table keeps its order. Find each global read with
+   `symtable`: in the area a name that stays becomes `core.NAME` (`import
+   copilot as core`), in `copilot.py` a moved name becomes `<alias>.NAME`. A
+   `global` across the line becomes an attribute assignment. Keep the logger
+   name `shopify_mcp.copilot`.
+3. **Nothing across at import time.** What an area needs as it loads moves
+   first, to `gizmo/config.py` (settings) or `gizmo/store.py` (the stores'
+   shared pieces).
+4. **Re-point the tests** that patch or read a moved name to the area's
+   module. `t_no_test_patches_a_name_nobody_reads` fails on a patch that
+   would land on nothing, on a copied name a patch would miss, and on a
+   module keeping its own copy (a clock, a client) the test does not patch.
+5. **The guards.** `tools/sources.py` lists `copilot.py` and every module
+   split out of it; every check that reads the code reads it through there
+   (`t_nothing_reads_copilot_py_by_name`), and both security scans cover the
+   package. `t_the_split_modules_read_no_unbound_name` catches a name left
+   behind on a path no test drives; `t_either_module_imports_first` the
+   import order; each area's borrowed list (`t_what_dispatch_borrows`) names
+   exactly what it still reads from `copilot.py`, and each later move
+   shortens it.
+6. **The proof.** `make move-proof BASE=origin/main` prints "nothing but the
+   move", or names each statement lost, added or changed and each prefix
+   put on a local. `make api-doc` changes only the moved handlers' module;
+   `make env-doc` only the moved settings' headings.
+7. **Frozen code keeps its bytes.** If a frozen function (the printed
+   labels' route) reads a moved name, `copilot.py` takes that name from the
+   area by name, which the guard allows only for a name no test patches and
+   nothing rebinds, and the area imports `copilot` last.
+
 ## What is deliberately the way it is
 
-- **`copilot.py` is one file.** The split into a package is designed (audit
-  §6) and deferred (§7): the test suite reaches module state by name, and the
-  deploy pipeline has no gate yet. Do it one section at a time, dispatch
-  first, after the gate.
+- **`copilot.py` is split one area at a time.** The package is the one the
+  September audit designed (§6); the dispatch desk went first (20 Oct 2026).
+  Each area is its own pull request, a pure move, by the recipe below.
 - **JSON stores, not a database.** The trade-off is written down in the
   audit (§4). The trigger to revisit is a measured slow save.
 - **The page is one script in sections.** `static/src/` holds the shell, the
