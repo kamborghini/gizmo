@@ -30112,6 +30112,27 @@ def t_the_team_routes_register_in_place():
         ok(path not in src, path + " is registered by the team's own routes")
     eq(inspect.getsource(routes_team).count("@mcp.custom_route("), 10, "the 10 sign-in and team routes")
 
+@test
+def t_the_printed_labels_do_not_change():
+    """Production labels never change by accident: what the bench prints for
+    the suite's order, the label data and the document the printer gets at
+    each stock size, is pinned to its bytes as they were before the orders and
+    production code left copilot.py (20 Oct 2026). The size is applied when it
+    prints, so both sizes give one document. A change to a label on purpose
+    re-pins these with the reason."""
+    import hashlib, json as _json
+    h = lambda b: hashlib.sha256(b.encode("utf-8")).hexdigest()[:16]
+    def go():
+        ensure_auth()
+        data = run(copilot.run_production_labels({}, order_id=12345))
+        eq(h(_json.dumps(data, sort_keys=True, indent=1, default=str)), "52682bb6d8726c1a", "the label data is unchanged")
+        for size in ("4x6", "4x4"):
+            r = client.post("/print/production-labels/sign", json={"ids": "12345", "size": size},
+                            headers={"Authorization": "Bearer " + tok()})
+            eq(r.status_code, 200, r.text[:200])
+            eq(h(client.get(r.json()["path"]).text), "9c58d003359d2683", "the printed document is unchanged at " + size)
+    with_accounts(go)
+
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a
