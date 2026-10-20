@@ -14,6 +14,7 @@ import tokenvault
 import totp
 
 import copilot as core
+from gizmo import mail
 from gizmo import activity
 from gizmo import gate
 from gizmo import team
@@ -504,7 +505,7 @@ def register(mcp, registry):
                 if not on:
                     team._drop_sessions(uid=target)   # off means off, this second
                     core._dav_drop_cache(target)
-                    core._mail_release_owned(target, "account switched off")
+                    mail._mail_release_owned(target, "account switched off")
                     try:
                         core._work_close_open(target, who, "closed automatically when the account was switched off",
                                          "closed a session when an account was switched off")
@@ -530,7 +531,7 @@ def register(mcp, registry):
                 # account change; the person's own door is /api/mail/settings.
                 if not may_manage():
                     return gate._json({"error": "You cannot manage that account."}, 403)
-                text, why = core._mail_clean_sign_off(body.get("text"))
+                text, why = mail._mail_clean_sign_off(body.get("text"))
                 if why:
                     return gate._json({"error": why}, 400)
                 u["sign_off"] = text
@@ -593,7 +594,7 @@ def register(mcp, registry):
                     # had failed.
                     team._write_users(d)
                     if "mail" not in tabs:
-                        core._mail_release_owned(target, "mail tab switched off")
+                        mail._mail_release_owned(target, "mail tab switched off")
                 activity._track(who, "team", "changed tab access", detail)
             elif op == "reset_password":
                 if not may_manage():
@@ -637,7 +638,7 @@ def register(mcp, registry):
                 team._write_users(d)
                 team._drop_sessions(uid=target)
                 core._dav_drop_cache(target)
-                core._mail_release_owned(target, "account deleted")
+                mail._mail_release_owned(target, "account deleted")
                 try:
                     core._work_close_open(target, who, "closed automatically when the account was deleted",
                                      "closed a session when an account was deleted")

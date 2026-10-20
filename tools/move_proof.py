@@ -13,7 +13,9 @@ the head's copilot.py and package with the base's:
   (a name one of these modules gives another) as the plain name;
 - a prefix stands only where the plain name was a module global: never where
   a parameter, a local or a closure of that name is in scope;
-- the routes are registered in the same order;
+- the routes are registered in the same order, or gathered into another only
+  where no request could change hands (no two routes whose order changed
+  could both answer one request: a pattern route and a path it matches);
 - nothing else is added or lost but imports, the package's module docstrings
   and loggers, and the register() shells and calls that carry the routes;
 - no moved statement finds its module's names by name (globals(), vars(),
@@ -31,6 +33,7 @@ import ast
 import collections
 import copy
 import os
+import re
 import subprocess
 import sys
 
@@ -203,6 +206,49 @@ def _route_path(n):
     return None
 
 
+def _pattern(path):
+    """A route path as Starlette matches it, as a regex: {name:path} takes the
+    rest, {name:int} digits, {name} one segment. None for a literal path."""
+    if "{" not in path:
+        return None
+    out = []
+    for lit, name, conv in re.findall(r"([^{]*)(?:\{([^}:]+)(?::([^}]+))?\})?", path):
+        out.append(re.escape(lit))
+        if name:
+            out.append({"path": ".*", "int": "[0-9]+"}.get(conv or "", "[^/]+"))
+    return "".join(out)
+
+
+def _overlap(p, q):
+    """Could one request be answered by either route? Two patterns might; a
+    pattern and a literal path when the pattern matches it; two literals only
+    when they are the same path."""
+    rp, rq = _pattern(p), _pattern(q)
+    if rp and rq:
+        return True
+    if rp or rq:
+        return re.fullmatch(rp or rq, q if rp else p) is not None
+    return p == q
+
+
+def _order_problems(border, horder):
+    """Routes may be gathered into another order only where no request could
+    change hands: same paths, each once, and no two routes whose order changed
+    could both answer one request."""
+    if sorted(border) != sorted(horder):
+        return [f"the routes are not the same: {len(horder)} where the base had {len(border)}"]
+    if len(set(border)) != len(border):
+        return [] if border == horder else ["the routes are registered in another order, and a path appears twice"]
+    path = lambda r: ast.literal_eval(r) if r[:1] in "'\"" else r
+    pos = {r: i for i, r in enumerate(horder)}
+    out = []
+    for i, p in enumerate(border):
+        for q in border[i + 1:]:
+            if pos[p] > pos[q] and _overlap(path(p), path(q)):
+                out.append(f"the routes are registered in another order: {q} now before {p}, and one could answer the other's requests")
+    return out
+
+
 def _units(files, problems, declared=frozenset()):
     """(units, route order): every statement to match, keyed by its
     normalized tree, and the route paths in the order they are registered."""
@@ -224,10 +270,9 @@ def _units(files, problems, declared=frozenset()):
                       ((path == first and n.name == "add_routes") or
                        (path.startswith("gizmo/routes/") and n.name == "register")))
             if not holder:
-                if path != first and _looks_itself_up(n) and _name(n) not in declared:
-                    problems.append(f"{_label(path, n)} uses {_looks_itself_up(n)}: moved, it reads this module's names")
                 norm = _norm(n, prefixes, set(), problems, _label(path, n))
-                units.append((ast.dump(norm), _label(path, n), path, _name(norm), ast.unparse(norm)))
+                looks = _looks_itself_up(n) if path != first else None
+                units.append((ast.dump(norm), _label(path, n), path, _name(norm), ast.unparse(norm), looks))
                 continue
             if n.name == "register":
                 registers[_module(path)] = n
@@ -235,7 +280,7 @@ def _units(files, problems, declared=frozenset()):
                 shell = copy.copy(n)
                 shell.body = []
                 norm = _norm(shell, prefixes, set(), problems, _label(path, n))
-                units.append((ast.dump(norm), _label(path, n) + " (its signature)", path, None, ast.unparse(norm)))
+                units.append((ast.dump(norm), _label(path, n) + " (its signature)", path, None, ast.unparse(norm), None))
             inner = _own_names(n)
             for j, s in enumerate(n.body):
                 if n.name == "register" and j == 0 and _is_doc(s):
@@ -243,10 +288,9 @@ def _units(files, problems, declared=frozenset()):
                 if _is_register_call(s, prefixes):
                     continue
                 lab = _label(path, s)
-                if path != first and _looks_itself_up(s) and _name(s) not in declared:
-                    problems.append(f"{lab} uses {_looks_itself_up(s)}: moved, it reads this module's names")
                 norm = _norm(s, prefixes, inner, problems, lab)
-                units.append((ast.dump(norm), lab, path, _name(norm), ast.unparse(norm)))
+                looks = _looks_itself_up(s) if path != first else None
+                units.append((ast.dump(norm), lab, path, _name(norm), ast.unparse(norm), looks))
     order = []
     tree = trees[first]
     aliases = _aliases(tree, family)
@@ -278,6 +322,12 @@ def prove(base, head, stats=None, declared=()):
                 pair[side] = u[4] if pair[side] is None else pair[side] + "\n" + u[4]
     bu = [u for u in bu if u[3] not in declared]
     hu = [u for u in hu if u[3] not in declared]
+    # A statement that finds its module by name, newly in a package module:
+    # one already there in the base did not move.
+    already = {(u[2], u[0]) for u in bu}
+    for u in hu:
+        if u[5] and (u[2], u[0]) not in already:
+            problems.append(f"{u[1]} uses {u[5]}: moved, it reads this module's names")
     b, h = collections.Counter(u[0] for u in bu), collections.Counter(u[0] for u in hu)
     lost, added = b - h, h - b
     for key, lab, *_ in bu:
@@ -290,16 +340,14 @@ def prove(base, head, stats=None, declared=()):
             added[key] -= 1
     for name in declared - set(shown):
         problems.append(f"declared as an intended change, but nothing is called {name}")
-    if border != horder:
-        problems.append("the routes are registered in another order: "
-                        + next((f"{x} where the base had {y}" for x, y in zip(horder, border) if x != y),
-                               f"{len(horder)} routes where the base had {len(border)}"))
+    problems += _order_problems(border, horder)
     if stats is not None:
         where_b = collections.defaultdict(set)
         for k, _, p, *_ in bu:
             where_b[k].add(p)
         stats.update(statements=len(bu), moved=sum(1 for k, _, p, *_ in hu if p not in where_b.get(k, {p})),
-                     routes=len(horder), declared=[(n, a, b) for n, (a, b) in shown.items()])
+                     routes=len(horder), routes_moved=border != horder,
+                     declared=[(n, a, b) for n, (a, b) in shown.items()])
     return problems
 
 
@@ -341,7 +389,9 @@ def main(argv=None):
         print(f"{len(problems)} differences from {args.base} beyond the move")
         return 1
     print(f"nothing but the move: {stats['statements']} statements found again, {stats['moved']} of them "
-          f"in another file, {stats['routes']} routes in the same order ({args.base})"
+          f"in another file, {stats['routes']} routes "
+          + ("gathered where no request could change hands" if stats["routes_moved"] else "in the same order")
+          + f" ({args.base})"
           + (f", and {len(stats['declared'])} intended changes shown above" if stats["declared"] else ""))
     return 0
 
