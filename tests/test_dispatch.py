@@ -4388,6 +4388,107 @@ def t_a_custom_shipment_is_invisible_to_the_order_queue():
         shopify._tool_json = saved
 
 
+@test
+def t_a_shipment_kept_to_admins_reaches_no_member_by_any_route():
+    """Some shipments are nobody else's business. An admin marks one admin
+    only, and from then on a member must not be able to reach it by ANY of the
+    three doors it was visible through: the Custom shipments queue, the day's
+    manifest (a printable sheet any signed-in person can ask for, carrying the
+    customer, the reference and the tracking number), and a label reprint,
+    whose id is a guessable string rather than something only the queue knows.
+    Hiding it from the list alone would have left the other two open."""
+    reset_dispatch(); reset_prod()
+    r = post("/api/custom/book", custom_body(id="cshidden0001", reference="Private job"))
+    eq(r.status_code, 200, r.text)
+    sid = r.json()["id"]
+    r2 = post("/api/custom/book", custom_body(id="csopen000001", reference="Normal job"))
+    eq(r2.status_code, 200, r2.text)
+    eq(post("/api/custom/visibility", {"id": sid, "admin_only": True}).status_code, 200,
+       "the master marks it")
+
+    _uid, msess, _pw = ready_user("Mel Member", "mel_ship", role="member")
+    seen = post_s(msess, "/api/custom/list", {}).json()
+    eq([s["reference"] for s in seen["shipments"]], ["Normal job"],
+       "a member's queue carries only the shipment that was left open")
+    eq(seen.get("can_hide"), False, "and the member is not offered the control")
+
+    from datetime import datetime as dt
+    from zoneinfo import ZoneInfo
+    today = dt.now(ZoneInfo("Europe/London")).date().isoformat()
+    rows = post_s(msess, "/api/dispatch/manifest", {"date": today}).json()["rows"]
+    eq([x["order_name"] for x in rows if x["order_id"].startswith("adhoc:")], ["Normal job"],
+       "nor does the hidden one reach the handover sheet")
+    eq(post_s(msess, "/api/dispatch/label", {"id": sid}).status_code, 404,
+       "and its label answers as if there were no such shipment")
+    # Both values would have to be guessed to get here, which the three
+    # filters above make implausible rather than impossible. A cancel voids a
+    # paid label, so it does not rest on that.
+    tn = post("/api/custom/list", {}).json()["shipments"]
+    tn = next(s for s in tn if s["id"] == sid)["tracking"]
+    eq(post_s(msess, "/api/dispatch/cancel", {"id": sid, "tracking_number": tn}).status_code, 400,
+       "and a member who knew both its key and its tracking number still cannot void its label")
+
+    # The admin still has all three.
+    mine = post("/api/custom/list", {}).json()
+    eq(sorted(s["reference"] for s in mine["shipments"]), ["Normal job", "Private job"],
+       "the admin sees both")
+    ok(next(s for s in mine["shipments"] if s["id"] == sid)["admin_only"],
+       "and is told which one is hidden, so the row can say so")
+    eq(mine.get("can_hide"), True, "the admin is offered the control")
+    eq(post("/api/dispatch/label", {"id": sid}).status_code, 200, "the admin can still reprint it")
+
+
+@test
+def t_only_an_admin_can_hide_a_shipment_or_bring_one_back():
+    """Both directions are admin rank. A member who could clear the mark would
+    read everything it was set for, and a member who could set one could hide a
+    shipment from the people who have to pack and send it. The mark also means
+    nothing on an order: an order's dispatch record is read by the queues, the
+    margin report and Shopify, so hiding one would hide the order itself."""
+    reset_dispatch(); reset_prod()
+    sid = post("/api/custom/book", custom_body(id="csrank000001")).json()["id"]
+    _uid, msess, _pw = ready_user("Mo Member", "mo_ship", role="member")
+    eq(post_s(msess, "/api/custom/visibility", {"id": sid, "admin_only": True}).status_code, 403,
+       "a member cannot hide one")
+    eq(post("/api/custom/list", {}).json()["shipments"][0]["admin_only"], False,
+       "and nothing was written")
+    eq(post("/api/custom/visibility", {"id": sid, "admin_only": True}).status_code, 200, "the master can")
+    eq(post_s(msess, "/api/custom/visibility", {"id": sid, "admin_only": False}).status_code, 403,
+       "and a member cannot undo it either")
+    ok(post("/api/custom/list", {}).json()["shipments"][0]["admin_only"], "it is still hidden")
+    # A REAL order, on the dispatch record, so the refusal can only come from
+    # the ad-hoc check. Asking about an order that was never dispatched would
+    # be refused for not existing and would prove nothing.
+    eq(post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX}).status_code, 200,
+       "an order is dispatched")
+    ok("12345" in desk._load_dispatch(), "and is on the record")
+    eq(post("/api/custom/visibility", {"id": "12345", "admin_only": True}).status_code, 400,
+       "an order is refused: hiding one would hide it from the queues, the margin "
+       "report and Shopify, which all have to see it")
+    ok(not desk._is_private(desk._load_dispatch()["12345"]), "and nothing was written to it")
+    eq(post("/api/custom/visibility", {"id": "adhoc:nosuchthing", "admin_only": True}).status_code, 400,
+       "so is a shipment that was never booked")
+
+
+@test
+def t_a_member_cannot_book_a_shipment_the_desk_will_never_see():
+    """The booking window offers the tick to an admin only, but the field rides
+    in the request body, where anyone can put it. A member's booking is not
+    refused for asking - the shipment is real and the money is spent - it
+    simply books the way a member's booking always has: visible."""
+    reset_dispatch(); reset_prod()
+    _uid, msess, _pw = ready_user("Mia Member", "mia_ship", role="member")
+    r = post_s(msess, "/api/custom/book", custom_body(id="csmember0001", admin_only=True))
+    eq(r.status_code, 200, r.text)
+    rows = post("/api/custom/list", {}).json()["shipments"]
+    eq(rows[0]["admin_only"], False, "the member's shipment is on the desk's queue like any other")
+    r2 = post("/api/custom/book", custom_body(id="csadmin00001", admin_only=True))
+    eq(r2.status_code, 200, r2.text)
+    hidden = [s for s in post("/api/custom/list", {}).json()["shipments"] if s["admin_only"]]
+    eq([s["id"] for s in hidden], [r2.json()["id"]],
+       "an admin's booking is hidden from the moment it exists, with no second step")
+
+
 # ---- Chase desk -------------------------------------------------------------
 
 def lia_order(num, days_ago, outstanding, email="accounts@acme.co.uk", company="Acme Events Ltd", oid=None):
@@ -29946,7 +30047,7 @@ def t_dispatch_routes_register_in_place():
     for path in ("/api/dispatch/", "/api/shipping/", "/api/custom/", "/api/eori/", '"/api/margin'):
         ok(path not in src, path + " is registered by the desk's own routes")
     own = inspect.getsource(routes_dispatch)
-    eq(own.count("@mcp.custom_route("), 15, "the desk's 15 routes")
+    eq(own.count("@mcp.custom_route("), 16, "the desk's 16 routes")
 
 @test
 def t_the_desks_store_error_is_a_store_error():

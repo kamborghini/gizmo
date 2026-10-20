@@ -474,7 +474,7 @@
             const host = el('div', 'lbl-list');
             card.append(host);
             box.append(card);
-            let rows = [];
+            let rows = [], canHide = false;
             paint = () => {
                 host.innerHTML = '';
                 const q = customQ.toLowerCase();
@@ -498,6 +498,14 @@
                     const nameLine = el('span', 'lbl-nameline');
                     if (sh.customer) nameLine.append(el('span', 'lbl-name' + (sh.canceled ? ' is-cancelled' : ''), sh.customer));
                     if (sh.canceled) nameLine.append(el('span', 'lbl-chip bad', 'Cancelled'));
+                    /* Only an admin ever receives one of these rows, so the
+                       chip is not a permission check: it is the reminder that
+                       what is on this row is not on anyone else's. */
+                    if (sh.admin_only) {
+                        const pc = el('span', 'lbl-chip warn', 'Admin only');
+                        pc.title = 'Hidden from the team: off their Custom shipments queue and the day’s manifest';
+                        nameLine.append(pc);
+                    }
                     who.append(nameLine);
                     /* The carrier line and the contents are ONE item under the
                        name: in the widest layout each child of this box is a
@@ -547,6 +555,31 @@
                         rp.disabled = false;
                     };
                     acts.append(rp);
+                    /* Hide or show, for an admin only. canHide comes from the
+                       answer that carried these rows, so the page never has to
+                       work out its own rank: the server that filtered the list
+                       is the one that says whether the control belongs. */
+                    if (canHide) {
+                        const hv = textButton(null);
+                        const on = !!sh.admin_only;
+                        hv.append(ico(on ? I.eye : I.eyeOff),
+                                  el('span', 'lbl-btn-txt', on ? 'Show the team' : 'Hide from team'));
+                        hv.title = on ? 'Put this shipment back on the team’s queue and manifest'
+                            : 'Keep this shipment to admins: off the team’s queue and the day’s manifest';
+                        hv.onclick = async () => {
+                            hv.disabled = true;
+                            try {
+                                await api('/api/custom/visibility', { id: sh.id, admin_only: !on });
+                                sh.admin_only = !on;
+                                toastOk(!on ? 'Hidden from the team.' : 'The team can see it again.');
+                                paint();
+                            } catch (e) {
+                                toastError(e.message || 'Could not change who can see it.');
+                                hv.disabled = false;
+                            }
+                        };
+                        acts.append(hv);
+                    }
                     row.append(acts);
                     list.append(row);
                 });
@@ -558,6 +591,7 @@
             try {
                 const r = await api('/api/custom/list', { limit: 200 });
                 rows = r.shipments || [];
+                canHide = !!r.can_hide;
                 tabCount(box, 'shipments', rows.length, 'shipments');
             } catch (e) {
                 host.innerHTML = '';

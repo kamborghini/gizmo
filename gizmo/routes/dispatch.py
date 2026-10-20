@@ -34,7 +34,7 @@ logger = logging.getLogger("shopify_mcp.copilot")
 
 
 def register(mcp, registry):
-    """Add the desk's 15 routes to the app."""
+    """Add the desk's 16 routes to the app."""
     @mcp.custom_route("/api/shipping/config", methods=["POST"])
     async def shipping_config_route(request: Request):
         """Get or set shipping settings. The API key is write-only: it is saved
@@ -276,7 +276,12 @@ def register(mcp, registry):
                 contents=str(body.get("contents") or ""),
                 declared=declared,
                 customs_body=(body.get("customs") if isinstance(body.get("customs"), dict) else None),
-                signature=str(body.get("signature") or ""), by=str(who or ""))
+                signature=str(body.get("signature") or ""), by=str(who or ""),
+                # Only an admin can ask for this. A member's request is not an
+                # error - the shipment simply books the way a member's always
+                # has, visible to the desk.
+                admin_only=(bool(body.get("admin_only"))
+                            and team._team_level(who) >= team.ROLE_LEVELS["admin"]))
             if not res.get("error"):
                 svc = str(option.get("service") or "").strip()[:40]
                 activity._track(who, "dispatch", "booked a custom shipment",
@@ -303,7 +308,10 @@ def register(mcp, registry):
             limit = max(1, min(int(body.get("limit") or 200), 500))
         except (TypeError, ValueError):
             limit = 200
-        rows = desk._custom_shipments(limit)
+        # An admin sees the hidden ones; everyone else is never told they
+        # exist, which is the whole point of the mark.
+        may = team._team_level(_who) >= team.ROLE_LEVELS["admin"]
+        rows = desk._custom_shipments(limit, include_private=may)
         q = str(body.get("q") or "").strip().lower()[:80]
         if q:
             rows = [r for r in rows if q in " ".join(str(r.get(k) or "") for k in
@@ -312,7 +320,29 @@ def register(mcp, registry):
         # so say it here rather than letting the button fail.
         for r in rows:
             r["has_label"] = bool(desk._load_dispatch_labels(r.get("id")))
-        return gate._json({"shipments": rows})
+        # So the page knows whether to draw the control at all. The server is
+        # the gate either way: /api/custom/visibility refuses the rest.
+        return gate._json({"shipments": rows, "can_hide": may})
+
+    @mcp.custom_route("/api/custom/visibility", methods=["POST"])
+    async def custom_visibility_route(request: Request):
+        """Keep one pasted-address shipment to admins, or let it back out.
+
+        Admin-rank only, both to set and to clear: a member who could clear it
+        could read everything it was hidden for, and a member who could set it
+        could hide a shipment from the people who have to send it."""
+        err, body, who = await gate._guard(request, min_level=team.ROLE_LEVELS["admin"])
+        if err:
+            return err
+        key = str(body.get("id") or "")
+        on = bool(body.get("admin_only"))
+        ok, why = desk._set_custom_private(key, on)
+        if not ok:
+            return gate._json({"error": why}, 400)
+        activity._track(who, "dispatch",
+                        "hid a custom shipment from the team" if on
+                        else "showed a custom shipment to the team", key[:60])
+        return gate._json({"ok": True, "admin_only": on})
 
     @mcp.custom_route("/api/dispatch/collections", methods=["POST"])
     async def dispatch_collections_route(request: Request):
@@ -472,6 +502,13 @@ def register(mcp, registry):
         oid = desk._shipment_key(body)
         if not oid:
             return gate._json({"error": "No shipment given."}, 400)
+        # A hidden shipment's label carries the name and address it was hidden
+        # for, and an id is guessable in a way the queue's rows are not, so the
+        # same answer as a shipment that does not exist.
+        if (desk._is_private((desk._load_dispatch() or {}).get(str(oid)))
+                and team._team_level(_who) < team.ROLE_LEVELS["admin"]):
+            return gate._json({"error": "No stored label for this shipment. It may have been dispatched "
+                                   "before labels were saved, or on another device."}, 404)
         labels = desk._load_dispatch_labels(oid)
         if not labels:
             return gate._json({"error": "No stored label for this shipment. It may have been dispatched "
@@ -529,10 +566,16 @@ def register(mcp, registry):
                 return gate._json({"error": "Date must be YYYY-MM-DD."}, 400)
         else:
             day = datetime.now(london).date()
+        # The handover sheet is printable by anyone signed in, so it is the
+        # other place a hidden shipment would have named its customer, its
+        # address and its tracking number.
+        may = team._team_level(_who) >= team.ROLE_LEVELS["admin"]
         rows = []
         for oid, e in desk._load_dispatch().items():
             ts = str(e.get("dispatched_at") or "")
             if not ts or not e.get("tracking_number"):
+                continue
+            if not may and desk._is_private(e):
                 continue
             try:
                 when = datetime.fromisoformat(ts)
@@ -626,6 +669,14 @@ def register(mcp, registry):
         async with orderbook._dispatch_lock(oid or tn):
             if oid:
                 cur = (desk._load_dispatch().get(str(oid)) or {})
+                # Someone who cannot see a shipment cannot void its label
+                # either. Reaching here means both the key and the tracking
+                # number were guessed, which the filtered list, manifest and
+                # label make implausible rather than impossible; a cancel
+                # spends the booking, so it does not rely on that.
+                if (desk._is_private(cur)
+                        and team._team_level(_who) < team.ROLE_LEVELS["admin"]):
+                    return gate._json({"error": "No shipment given."}, 400)
                 have = str(cur.get("tracking_number") or "").strip()
                 if have and have != tn:
                     return gate._json({"error": "That tracking number is not this order's current "

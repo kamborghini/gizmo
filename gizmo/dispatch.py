@@ -328,6 +328,16 @@ def _is_adhoc(key) -> bool:
     return str(key or "").startswith(_ADHOC)
 
 
+def _is_private(entry) -> bool:
+    """True for a shipment an admin has marked as theirs to see.
+
+    Only ever set on an ad-hoc shipment. An order's dispatch record is read by
+    the queues, the margin report and Shopify itself, so hiding one would mean
+    hiding the order; a pasted-address shipment belongs to nothing else and can
+    be kept to the people who booked it."""
+    return bool(isinstance(entry, dict) and entry.get("admin_only"))
+
+
 def _label_path(key) -> str:
     """Where a shipment's stored label lives. Order ids keep their existing bare
     filename; an ad-hoc key is reduced to characters a filename can hold."""
@@ -1783,7 +1793,7 @@ async def run_custom_book(registry: dict, shipment_id: str, option: dict, dest: 
                           boxes: list, insurance: str = "", reference: str = "",
                           contents: str = "", declared: float = 0.0,
                           customs_body: Optional[dict] = None, signature: str = "",
-                          by: str = "") -> dict:
+                          by: str = "", admin_only: bool = False) -> dict:
     """Book a courier to a pasted address. THIS SPENDS MONEY.
 
     Deliberately not a branch inside the order booking path: that path exists to
@@ -1800,13 +1810,13 @@ async def run_custom_book(registry: dict, shipment_id: str, option: dict, dest: 
     async with orderbook._dispatch_lock(key):
         return await _custom_book_locked(registry, key, option, dest, boxes, insurance,
                                          reference, contents, declared, customs_body,
-                                         signature, by)
+                                         signature, by, admin_only)
 
 
 async def _custom_book_locked(registry: dict, key: str, option: dict, dest: dict,
                               boxes: list, insurance: str, reference: str, contents: str,
                               declared: float, customs_body: Optional[dict],
-                              signature: str, by: str) -> dict:
+                              signature: str, by: str, admin_only: bool = False) -> dict:
     book_store = _load_dispatch()
     if DISPATCH_STATE_PATH in jsonstore._poisoned_stores:
         return {"error": "The dispatch record is unreadable, so the app cannot tell whether this "
@@ -1895,6 +1905,10 @@ async def _custom_book_locked(registry: dict, key: str, option: dict, dest: dict
             # field is what would otherwise make that happen later.
             "notify": False,
             "custom": True,
+            # Set at the booking, not after it: a shipment that is nobody
+            # else's business is hidden from the moment it exists, rather
+            # than sitting in the queue until someone remembers to hide it.
+            "admin_only": bool(admin_only),
             "contents": str(contents or "").strip()[:100],
             "declared": declared,
             "address": {k: dest.get(k, "") for k in
@@ -1918,15 +1932,22 @@ async def _custom_book_locked(registry: dict, key: str, option: dict, dest: dict
     }
 
 
-def _custom_shipments(limit: int = 40) -> list:
+def _custom_shipments(limit: int = 40, include_private: bool = True) -> list:
     """Recent pasted-address shipments, newest first. The only way back to one of
     these after the window closes: they are not in the queue, because there is no
-    order for them to be a row of."""
+    order for them to be a row of.
+
+    `include_private` False drops the ones an admin has kept to admins. It
+    defaults to True because this is the store's own reader: the caller that
+    knows who is asking is the one that decides."""
     out = []
     for key, e in (_load_dispatch() or {}).items():
         if not _is_adhoc(key) or not isinstance(e, dict):
             continue
+        if not include_private and _is_private(e):
+            continue
         out.append({"id": key, "reference": e.get("order_name") or "",
+                    "admin_only": _is_private(e),
                     "customer": e.get("customer") or "",
                     "carrier": e.get("carrier_label") or e.get("carrier_name") or "",
                     "service": e.get("service_name") or "",
@@ -1939,6 +1960,30 @@ def _custom_shipments(limit: int = 40) -> list:
                     "contents": e.get("contents") or ""})
     out.sort(key=lambda r: str(r.get("at") or ""), reverse=True)
     return out[:max(1, min(int(limit or 40), 200))]
+
+
+def _set_custom_private(key, on: bool) -> tuple:
+    """Mark one pasted-address shipment admin-only, or let it back out.
+
+    (ok, why). Refuses anything that is not an ad-hoc shipment already on the
+    record: an order's key here would hide a real order from the queues that
+    have to show it, and a key with nothing behind it would write a record for
+    a shipment that was never booked."""
+    k = str(key or "")
+    if not _is_adhoc(k):
+        return False, "Only a custom shipment can be hidden."
+    if k not in (_load_dispatch() or {}):
+        return False, "That shipment is not on the dispatch record."
+
+    def mutate(entry):
+        if on:
+            entry["admin_only"] = True
+        else:
+            entry.pop("admin_only", None)
+        return entry
+
+    _update_dispatch(k, mutate)
+    return True, ""
 
 
 # Flag combinations tried when the merchant reports a service they expected but
