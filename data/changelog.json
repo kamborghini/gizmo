@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-20",
+   "title": "Custom shipments only admins see",
+   "items": [
+    {
+     "kind": "added",
+     "tab": "labels",
+     "text": "A custom shipment can be kept to admins. Tick Admin only when you book it, or press Hide from team on its row afterwards, and it leaves the team's Custom shipments queue and the day's manifest. Only an admin sees the button, the tick, or that such a shipment exists."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-20",
    "title": "Sign-in and the door on their own",
    "items": [
     {

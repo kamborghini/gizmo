@@ -370,6 +370,15 @@
             return !teamMe || ({ master: 3, admin: 2 }[teamMe.role] || 0) >= 2;
         }
 
+        /* Who may keep a custom shipment to admins, and who may see one that is
+           kept. The same rank rule and the same reasoning as above: the server
+           decides, and this only stops offering a control that would be
+           refused. A hidden shipment never reaches a member's page at all, so
+           there is nothing here for this to get wrong in the other direction. */
+        function canHideShipments() {
+            return !teamMe || ({ master: 3, admin: 2 }[teamMe.role] || 0) >= 2;
+        }
+
         /* The fields Shopify still lets you change on a placed order, in the
            app's own address shape. There is no "name": Shopify builds an
            address's name from first + last, so offering one would report a save
@@ -1609,6 +1618,20 @@
             insWrap.append(insCb, el('span', null, 'Insure this shipment for £'), insAmt);
             body.append(insWrap);
 
+            /* ---- admin only ----
+               Drawn for an admin and for nobody else: a member who cannot use
+               it should not be told the setting is there. The server ignores
+               the field from anyone who is not one, so a page that is wrong
+               about its own role books a visible shipment, never a hidden one. */
+            let privCb = null;
+            if (canHideShipments()) {
+                const privWrap = tickRow('disp-adminonly');
+                privCb = document.createElement('input'); privCb.type = 'checkbox';
+                privWrap.append(privCb, el('span', null,
+                    'Admin only: keep this shipment off the team\u2019s queue and manifest'));
+                body.append(privWrap);
+            }
+
             function collectBoxes() {
                 const out = [];
                 for (const r of boxRows) {
@@ -1846,6 +1869,7 @@
                             reference: refIn.value.trim(), contents: contentsIn.value.trim(),
                             signature: chosen.signature_type || '',
                             customs: collectCustoms(),
+                            admin_only: !!(privCb && privCb.checked),
                         });
                         booking = false;
                         renderBookedSafe(r);
