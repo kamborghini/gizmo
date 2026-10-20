@@ -30305,6 +30305,132 @@ def t_the_crm_and_mail_routes_are_gathered():
     eq((inspect.getsource(routes_crm).count("@mcp.custom_route("), inspect.getsource(routes_mail).count("@mcp.custom_route(")),
        (8, 26), "8 CRM routes; 24 mail routes and the Gmail connect pair")
 
+_TOY_COPILOT = '''"""A made-up app for the move tool's test."""
+import logging
+import os
+from typing import Optional
+from gizmo import floor_stub
+
+logger = logging.getLogger("toy")
+
+KEEP = 1
+X_PATH = os.environ.get("X_PATH", "/data/x.json")
+
+_x_mem: Optional[dict] = None
+
+
+def _x_load(path: str = "") -> dict:
+    return {"path": path or X_PATH}
+
+
+def keep() -> dict:
+    return _x_load()
+
+
+def reset() -> None:
+    global _x_mem
+    _x_mem = None
+
+
+def _x_note(d: Optional[dict]) -> int:
+    return KEEP + len(d or {})
+
+
+def add_routes(mcp, registry):
+    @mcp.custom_route("/api/x/a", methods=["POST"])
+    async def x_a(request):
+        return _x_load()
+
+    @mcp.custom_route("/api/y", methods=["POST"])
+    async def y(request):
+        return keep()
+
+    @mcp.custom_route("/api/x/b", methods=["POST"])
+    async def x_b(request):
+        return _x_note(None)
+'''
+
+_TOY_TEST = '''import copilot
+from gizmo import floor_stub
+
+
+def t_patch():
+    copilot._x_load = lambda: {}
+'''
+
+_TOY_SPEC = {"areas": [{"name": "x", "file": "gizmo/x.py", "alias": "x", "prefix": "^(_x_|X_)",
+                        "extra": [], "exclude": [], "floor": False, "doc": "The x area."}],
+             "routes": [{"name": "routes_x", "file": "gizmo/routes/x.py", "area": "x", "paths": ["/api/x/"],
+                         "helpers": [], "doc": "The x routes.", "register_doc": "Add the x routes."}],
+             "note": "the x area"}
+
+
+def _toy_repo(name, copilot_text=_TOY_COPILOT, spec=None):
+    """A made-up repository in the scratch folder: copilot.py, a gizmo
+    package, one test, and a move description."""
+    import json as _json
+    root = os.path.join(SCRATCH, name)
+    _sh.rmtree(root, ignore_errors=True)
+    for d in ("gizmo/routes", "tests", "tools/moves"):
+        os.makedirs(os.path.join(root, d), exist_ok=True)
+    files = {"copilot.py": copilot_text, "gizmo/__init__.py": "", "gizmo/routes/__init__.py": "",
+             "gizmo/floor_stub.py": '"""Stands in for the floor."""\n', "tests/test_dispatch.py": _TOY_TEST}
+    for rel, text in files.items():
+        open(os.path.join(root, rel), "w").write(text)
+    open(os.path.join(root, "tools/moves/x.json"), "w").write(_json.dumps(spec or _TOY_SPEC))
+    return root
+
+
+def _run_move(root, write=True):
+    import subprocess as _sp
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return _sp.run([sys.executable, os.path.join(here, "tools", "move_area.py"), os.path.join(root, "tools/moves/x.json"),
+                    "--repo", root] + (["--write"] if write else []), capture_output=True, text=True, timeout=120)
+
+
+@test
+def t_move_area_moves_a_toy_area():
+    """tools/move_area.py, the committed move tool, run on a made-up
+    repository: what it writes is nothing but the move (prove() agrees), with
+    every lesson of the first five moves built in."""
+    import importlib.util, subprocess as _sp
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    spec_ = importlib.util.spec_from_file_location("move_proof", os.path.join(here, "tools", "move_proof.py"))
+    mp = importlib.util.module_from_spec(spec_); spec_.loader.exec_module(mp)
+    root = _toy_repo("toy-move")
+    r = _run_move(root)
+    eq(r.returncode, 0, r.stdout[-800:] + r.stderr[-800:])
+    read = lambda rel: open(os.path.join(root, rel)).read()
+    area, cop, routes, test_ = read("gizmo/x.py"), read("copilot.py"), read("gizmo/routes/x.py"), read("tests/test_dispatch.py")
+    ok("def _x_load(" in area and "X_PATH = " in area and "_x_mem: Optional[dict] = None" in area, "the area's names moved")
+    ok("from typing import Optional" in area, "with the import an annotation needs")
+    ok("core.KEEP" in area and area.rstrip().endswith("import copilot as core  # noqa: E402"), "borrowing through core, imported last")
+    ok("return x._x_load()" in cop, "copilot reads the area through its name")
+    ok("global _x_mem" not in cop and "x._x_mem = None" in cop, "a global line for a moved name goes; the write goes through the module")
+    eq(cop.count("routes_x.register(mcp, registry)"), 1, "the routes are gathered")
+    ok(cop.index("routes_x.register(mcp, registry)") < cop.index('"/api/y"'), "where the first stood")
+    eq(routes.count("@mcp.custom_route("), 2, "both of the area's routes")
+    ok("x._x_load = lambda" in test_, "the test patches the area")
+    base = {"copilot.py": _TOY_COPILOT, "gizmo/__init__.py": "", "gizmo/floor_stub.py": '"""Stands in for the floor."""\n',
+            "gizmo/routes/__init__.py": ""}
+    head = {"copilot.py": cop, "gizmo/__init__.py": "", "gizmo/floor_stub.py": '"""Stands in for the floor."""\n',
+            "gizmo/routes/__init__.py": "", "gizmo/routes/x.py": routes, "gizmo/x.py": area}
+    eq(mp.prove(base, head, declared=("reset",)), [], "prove(): nothing but the move")
+    for first in ("gizmo.x", "copilot", "gizmo.routes.x"):
+        rr = _sp.run([sys.executable, "-c", f"import {first}, copilot, gizmo.x"], cwd=root, capture_output=True, text=True)
+        eq(rr.returncode, 0, f"{first} first: " + rr.stderr[-400:])
+    # an alias that is a local where it would be read: nothing written
+    clash = _toy_repo("toy-clash", _TOY_COPILOT + "\n\ndef clash():\n    x = 1\n    return x + len(_x_load())\n")
+    r = _run_move(clash)
+    ok(r.returncode != 0 and "local" in r.stdout, "a local named like the alias stops the move: " + r.stdout[-300:])
+    ok(not os.path.exists(os.path.join(clash, "gizmo/x.py")), "and nothing is written")
+    # a statement binding two areas' names: nothing written
+    two = dict(_TOY_SPEC, areas=_TOY_SPEC["areas"] + [{"name": "y", "file": "gizmo/y.py", "alias": "yy", "prefix": "^KEEP$",
+                                                       "extra": [], "exclude": [], "floor": False, "doc": "y"}])
+    both = _toy_repo("toy-two", _TOY_COPILOT.replace("KEEP = 1\nX_PATH =", "KEEP, X_PATH = 1, "), two)
+    r = _run_move(both)
+    ok(r.returncode != 0 and "across" in r.stdout, "a statement binding two areas' names stops the move: " + r.stdout[-300:])
+
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a
