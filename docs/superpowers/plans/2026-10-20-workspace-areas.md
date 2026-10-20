@@ -35,7 +35,7 @@
 
 ### Task 2: Skills, memory, store knowledge and the chat loop
 
-- [ ] **Step 1: Failing tests**: `t_the_workspace_routes_are_gathered` (one register call each for skills, memory, knowledge; no `/api/skills`, `/api/memory` or `/api/learn` route left in `add_routes`; 2, 1, 2 routes in the modules; `/api/chat` and `/api/chat/stream` still in `add_routes`); `t_either_module_imports_first` gains the seven modules.
+- [ ] **Step 1: Failing tests**: `t_the_workspace_routes_are_gathered` (one register call each for skills, memory, knowledge; no `/api/skills`, `/api/memory` or `/api/learn` route left in `add_routes`; 2, 1, 2 routes in the modules; `/api/chat` and `/api/chat/stream` still in `add_routes`); `t_either_module_imports_first` gains the seven modules. And a pin written before the move, passing before and after it: `t_the_scheduled_audits_carry_memory_knowledge_and_skills` (the four reports' runs, faked, each receive a memory, the store knowledge and a matching skill).
 - [ ] **Step 2:** The description; dry run; settle in the description; `--write`. Text checks; references; release note.
 - [ ] **Step 3: Run** every guard, the label pin, the suites. **Commit.**
 
