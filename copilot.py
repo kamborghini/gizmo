@@ -74,8 +74,8 @@ from gizmo.config import _env_num
 from gizmo.store import StoreUnwritable
 from gizmo import dispatch as desk
 # The printed labels' route is frozen byte for byte (t_the_printed_sheets_do_not_change),
-# so these two are read here by their own names: one table, one loader, never
-# patched or rebound (t_no_test_patches_a_name_nobody_reads would say).
+# so it reads these two by their own names. A copy is safe only for a name no
+# test patches and nothing rebinds, which t_no_test_patches_a_name_nobody_reads checks.
 from gizmo.dispatch import LABEL_STOCK_MM, _load_dispatch
 from gizmo.routes import dispatch as routes_dispatch
 logger = logging.getLogger("shopify_mcp.copilot")

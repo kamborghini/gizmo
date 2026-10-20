@@ -22,13 +22,15 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sources  # noqa: E402  (copilot.py and the modules split out of it)
 
+OUT = os.path.join("docs", "API.md")
 
 
 def module_files(root):
     """(module, file) for each module that registers routes: server.py, then
     copilot.py and the modules split out of it."""
     return [("server", "server.py")] + [(f[:-3].replace("/", "."), f) for f in sources.copilot_files(root)]
-OUT = os.path.join("docs", "API.md")
+
+
 def _called(call):
     """The name a call reaches: f(...), or core.f(...) in a module moved out of
     copilot.py, which reads copilot.py as core."""
