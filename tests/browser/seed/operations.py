@@ -42,7 +42,7 @@ def _ok200(r, what):
 #    POST /api/team/user {"op": "create"} exactly as make_user() in the tests.
 OPS_TEAM = {}
 # Another group's seed may already have made them: reuse by username.
-_existing = {u.get("username"): uid for uid, u in copilot._load_users()["users"].items() if not u.get("deleted")}
+_existing = {u.get("username"): uid for uid, u in team._load_users()["users"].items() if not u.get("deleted")}
 for _name, _uname, _role in (("Priya Hale", "priya", "admin"), ("Owen Marsh", "owen", "member"),
                              ("Grace Okafor", "grace", "member")):
     if _uname in _existing:
@@ -547,10 +547,10 @@ for _tid, _owner, _state, _note in (
 # t_mail_notes_presence_and_team_panel; the colleagues' through the users
 # store's writer (b), since the route only sets the caller's own.
 _ok200(post("/api/mail/presence", {"presence": "office"}), "presence")
-_ud = copilot._load_users()
+_ud = team._load_users()
 for _uname, _p in (("priya", "office"), ("owen", "home"), ("grace", "out")):
     _ud["users"][OPS_TEAM[_uname]]["presence"] = _p
-copilot._write_users(_ud)
+team._write_users(_ud)
 
 # ============================ FILES (R2 stand-in, c) =========================
 # The bucket is the in-process FakeS3 the tests use (copied from

@@ -41,16 +41,16 @@ def _make_user(name, username, role="member"):
     j = _r.json()
     return [u["id"] for u in j["users"] if u["username"] == username][0], j["starter_password"]
 def _bare(path, body):                      # bare() from the tests: a Shopify token, no app session
-    copilot._rl_hits.clear(); copilot._rl_global.clear()
+    gate._rl_hits.clear(); gate._rl_global.clear()
     return client.post(path, json=body, headers={"Authorization": "Bearer " + tok()})
 def _login(username, pw):
     return _bare("/api/auth/login", {"username": username, "password": pw})
 def _ready_user(name, username, role="member", pw="seed-chosen-pw-2026"):
     uid, starter = _make_user(name, username, role)
-    copilot._login_hits.clear()
+    team._login_hits.clear()
     s0 = _login(username, starter).json()["session"]
     post_s(s0, "/api/auth/password", {"current": starter, "new": pw})
-    copilot._login_hits.clear()
+    team._login_hits.clear()
     return uid, _login(username, pw).json()["session"]
 
 _WS_PEOPLE = {}
@@ -72,10 +72,10 @@ assert post("/api/team/user", {"op": "sizes", "id": _WS_PEOPLE["hattie"][0], "ca
 _WSU = {k: v[0] for k, v in _WS_PEOPLE.items()}
 _WSS = {k: v[1] for k, v in _WS_PEOPLE.items()}
 # Last sign-ins spread out (b): the accounts register, through its own writer.
-_ud = copilot._load_users()
+_ud = team._load_users()
 for k, days in (("priya", 0.2), ("owen", 1.1), ("hattie", 2.4), ("jonah", 0.15), ("lena", 0.3), ("gemma", 41)):
     _ud["users"][_WSU[k]]["last_login_at"] = _iso(_NOW - _td(days=days))
-copilot._write_users(_ud)
+team._write_users(_ud)
 
 # ---------------------------------------------------------------- Team: the work clock (b) + (a)
 # Finished shifts for the two part-timers over the last fortnight, written with the
@@ -154,11 +154,11 @@ for days_ago, hh, mm, who, area, action, detail in (
     when = _ldn(days_ago, hh, mm)
     if when < _NOW:
         _e(when, who, area, action, detail, system=(who == ""))
-_led = copilot._load_events()
+_led = activity._load_events()
 _led.extend(_ev)
 _led.sort(key=lambda r: r.get("t", ""))
-copilot._events_dirty = True
-copilot._events_flush()
+activity._events_dirty = True
+activity._events_flush()
 
 # ---------------------------------------------------------------- Memory: notes (a) + (b)
 # Admin notes through the route (payload shape from t_memory_and_skills_routes_edit_refuse_and_fail_honestly).

@@ -81,6 +81,17 @@ from gizmo import dispatch as desk
 # test patches and nothing rebinds, which t_no_test_patches_a_name_nobody_reads checks.
 from gizmo.dispatch import LABEL_STOCK_MM, _load_dispatch
 from gizmo.routes import dispatch as routes_dispatch
+# Moved out of this file (stage 4): accounts and sign-in, the door, the
+# activity log. Read as team.NAME, gate.NAME, activity.NAME, except eight it
+# reads by their own names: the six the frozen print route reads, and _guard
+# and _json, the door every route here opens with and the answer it gives (a
+# copy is safe only for a name no test patches and nothing rebinds, which
+# t_no_test_patches_a_name_nobody_reads checks).
+from gizmo import activity, gate, team
+from gizmo.team import _live_uid, _uid_has_tab, _verify_session_token
+from gizmo.gate import _API_HEADERS, _guard, _json, _pre_checks
+from gizmo.activity import _track
+from gizmo.routes import team as routes_team
 logger = logging.getLogger("shopify_mcp.copilot")
 
 
@@ -116,29 +127,6 @@ SHOPIFY_STORE      = os.environ.get("SHOPIFY_STORE", "")        # used to pin se
 # Public base URL (e.g. https://your-app.up.railway.app). When set, the Google
 # OAuth redirect URI is derived from it rather than the request Host header.
 APP_BASE_URL       = os.environ.get("APP_BASE_URL", "").strip()
-
-# Headers applied to every API/page response (defense in depth).
-_API_HEADERS = {
-    # Authenticated JSON, and the browser's own disk cache and back-forward
-    # cache are shared with whoever uses the machine next. The page shell sets
-    # its own (it must revalidate, not vanish), so it spreads these FIRST.
-    "Cache-Control": "no-store",
-    "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
-    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-    # The camera is the page's own (camera=(self)) for the camera test in
-    # Settings, a throwaway ahead of the stock sheet's label scanning moving
-    # in; nothing framed inside the page, and nothing else, gets it.
-    "Permissions-Policy": "camera=(self), microphone=(), geolocation=(), payment=()",
-}
-
-# --- Abuse / cost controls --------------------------------------------------
-RATE_WINDOW      = _env_num(int, os.environ.get("RATE_LIMIT_WINDOW", "60"), "60", "RATE_LIMIT_WINDOW")      # seconds
-RATE_MAX_CLIENT  = _env_num(int, os.environ.get("RATE_LIMIT_PER_CLIENT", "120"), "120", "RATE_LIMIT_PER_CLIENT")  # requests/window/client
-# 30/min was reachable by one busy operator: a single order costs up to four
-# calls (history, quote, book, mark made) before any refresh or tab switch.
-RATE_MAX_GLOBAL  = _env_num(int, os.environ.get("RATE_LIMIT_GLOBAL", "150"), "150", "RATE_LIMIT_GLOBAL")     # AI requests/window (cost ceiling)
-MAX_BODY_BYTES   = _env_num(int, os.environ.get("MAX_BODY_BYTES", str(256 * 1024)), str(256 * 1024), "MAX_BODY_BYTES")  # 256 KB
 MAX_MESSAGES     = _env_num(int, os.environ.get("MAX_MESSAGES", "100"), "100", "MAX_MESSAGES")          # chat history length
 MAX_CHAT_CHARS   = _env_num(int, os.environ.get("MAX_CHAT_CHARS", "100000"), "100000", "MAX_CHAT_CHARS")     # total chars in a chat request
 
@@ -1006,7 +994,7 @@ def _skills_for_page(skills: Optional[list] = None) -> list[dict]:
 def _skills_answer(who: str = "") -> "JSONResponse":
     """The skills and the limits for the account asking: the master's skill
     limit is larger, and only the master uploads files."""
-    master = _team_role(who) == "master"
+    master = team._team_role(who) == "master"
     return _json({"skills": _skills_for_page(), "caps": {"title": SKILL_TITLE_CAP,
                                                          "body": SKILL_UPLOAD_CAP if master else SKILL_BODY_CAP,
                                                          "when": SKILL_WHEN_CAP, "always": SKILL_ALWAYS_CAP,
@@ -1502,7 +1490,7 @@ def _save_skill_reading(sid: str, reading: dict, who: str = "", of: str = "") ->
     if not hit:
         raise ValueError("That skill no longer exists.")
     hit["reading"] = dict(reading, of=of or _skill_hash(hit.get("content") or ""),
-                          at=datetime.now(timezone.utc).isoformat(), by=_team_name(who) or "")
+                          at=datetime.now(timezone.utc).isoformat(), by=team._team_name(who) or "")
     if reading.get("when") and (not (hit.get("when") or "").strip() or hit.get("when_from") == "reading"):
         hit["when"] = reading["when"]
         hit["when_from"] = "reading"
@@ -1748,7 +1736,7 @@ def _store_report(parse: bool = True) -> list:
 def _let_go_in_memory(paths) -> list:
     """Let go of the whole-store copies this module holds in memory (see
     jsonstore.holds_in_memory): those whose path is in paths, or every one."""
-    global _mail_mem, _files_mem, _users_mem, _sessions_mem, _work_mem, _events_mem, _loans_mem
+    global _mail_mem, _files_mem, _work_mem, _loans_mem
     gone = []
     if paths is None or MAILBOX_PATH in paths:
         _mail_mem = None
@@ -1756,18 +1744,9 @@ def _let_go_in_memory(paths) -> list:
     if paths is None or FILES_PATH in paths:
         _files_mem = None
         gone.append(FILES_PATH)
-    if paths is None or USERS_PATH in paths:
-        _users_mem = None
-        gone.append(USERS_PATH)
-    if paths is None or SESSIONS_PATH in paths:
-        _sessions_mem = None
-        gone.append(SESSIONS_PATH)
     if paths is None or WORK_PATH in paths:
         _work_mem = None
         gone.append(WORK_PATH)
-    if paths is None or ACTIVITY_PATH in paths:
-        _events_mem = None
-        gone.append(ACTIVITY_PATH)
     if paths is None or LOANS_PATH in paths:
         _loans_mem = None
         gone.append(LOANS_PATH)
@@ -1812,7 +1791,7 @@ def _build_backup_zip():
         # 14 Oct 2026: only the master downloads a backup, which already holds
         # the CRM and the inbox, and a restore without it would leave the
         # forecast without its cash flow until somebody uploaded it again.
-        os.path.basename(SESSIONS_PATH),
+        os.path.basename(team.SESSIONS_PATH),
     }
     buf = io.BytesIO()
     added = 0
@@ -2344,7 +2323,7 @@ def _build_dispatch(registry: dict, uid_of: Optional[Callable] = None) -> Callab
         need = _TOOL_TABS.get(name)
         if need:
             uid = uid_of() if uid_of else None
-            tabs = _user_tabs(uid) if uid else None
+            tabs = team._user_tabs(uid) if uid else None
             if tabs is not None and need not in tabs:
                 # Answered to the MODEL, not raised: it reports the refusal in
                 # words instead of the turn dying, and no data crosses.
@@ -7616,83 +7595,6 @@ async def run_product_audit(registry: dict, product_id: int, extra_system: str =
 
 
 # ---------------------------------------------------------------------------
-# Auth: Shopify session token only (embedded-only; no password fallback)
-# ---------------------------------------------------------------------------
-
-def _verify_session_token(token: str) -> dict:
-    if not SHOPIFY_API_SECRET:
-        raise RuntimeError("SHOPIFY_API_SECRET not configured")
-    claims = jwt.decode(
-        token,
-        SHOPIFY_API_SECRET,
-        algorithms=["HS256"],
-        audience=SHOPIFY_API_KEY or None,
-        leeway=5,
-        options={"require": ["exp", "nbf"], "verify_aud": bool(SHOPIFY_API_KEY)},
-    )
-    dest = claims.get("dest") or ""
-    # Defense in depth: only accept tokens minted for this store.
-    if SHOPIFY_STORE:
-        expected = f"https://{SHOPIFY_STORE}.myshopify.com"
-        if dest != expected:
-            raise jwt.InvalidTokenError("session token dest mismatch")
-    # Shopify guidance: the issuer and destination must reference the same shop host.
-    iss = claims.get("iss") or ""
-    if iss and dest:
-        ih, dh = urlparse(iss).netloc, urlparse(dest).netloc
-        if ih and dh and ih != dh:
-            raise jwt.InvalidTokenError("session token iss/dest host mismatch")
-    return claims
-
-
-AUTH_REFUSALS = {
-    # reason -> what the door says. The reason travels with the 401 so the page
-    # can tell a stale embed token (retry with a fresh one, never reload) from
-    # a dead app session (sign in again), and the login screen can say which.
-    "token": "Shopify rejected this browser's session token. If it keeps happening on one "
-             "computer, check that its clock is set automatically: a clock a minute out makes "
-             "every token look expired.",
-    "session": "Your sign-in has expired. Please log in again.",
-    "inactive": "This account is switched off.",
-    "must_change": "Choose your own password first.",
-}
-
-
-def _authorize(request: Request) -> tuple[bool, Optional[str], str]:
-    """Return (ok, who, reason). The only accepted credential is a verified
-    Shopify session token (Bearer JWT from App Bridge) — the app is
-    embedded-only. `who` is the staff member's own Shopify id, so every action
-    is theirs. A verified id still gets refused when an admin has switched
-    them off. `reason` names the refusal (a key of AUTH_REFUSALS) so the page
-    can answer it correctly instead of treating every 401 as a dead session."""
-    auth = request.headers.get("authorization", "")
-    if auth.startswith("Bearer ") and SHOPIFY_API_SECRET:
-        try:
-            _verify_session_token(auth[7:])
-        except Exception as e:
-            logger.warning(f"session token rejected: {e}")
-            return False, None, "token"
-        # The embed token is only the perimeter. WHO you are is the app's own
-        # session, minted at its login screen; no session, no entry. The one
-        # exception is first-run setup, when no accounts exist yet: the
-        # /api/auth routes handle that themselves and never come through here.
-        uid = _session_uid(request.headers.get("x-app-session"))
-        if not uid:
-            return False, None, "session"
-        u = _team_user(uid)
-        if not u or not u.get("active", True):
-            if u is not None:
-                logger.warning("switched-off account %s was refused", uid)
-            return False, None, "inactive"
-        # A starter password unlocks nothing but the choose-your-own screen:
-        # until the account owns its password, every other route is closed.
-        if u.get("must_change") and not request.url.path.startswith("/api/auth/"):
-            return False, None, "must_change"
-        return True, uid, ""
-    return False, None, "token"
-
-
-# ---------------------------------------------------------------------------
 # Page rendering
 # ---------------------------------------------------------------------------
 
@@ -8039,45 +7941,10 @@ async def _connector_call(method: str, path: str, params: Optional[dict] = None,
     return r.status_code, body
 
 
-def _json(data: dict, status: int = 200) -> JSONResponse:
-    return JSONResponse(data, status_code=status,
-                        headers={**_API_HEADERS, "X-App-Build": _build_id()})
-
-
-def _json_dumps_like_starlette(data) -> bytes:
-    """The bytes JSONResponse would send for `data`, made once so a board that
-    has not changed is not serialised again for every reader."""
-    return json.dumps(data, ensure_ascii=False, allow_nan=False, indent=None,
-                      separators=(",", ":")).encode("utf-8")
-
-
-def _json_body(raw: bytes, status: int = 200) -> Response:
-    """An answer made of bytes _json_dumps_like_starlette made, with the
-    headers every _json answer carries."""
-    return Response(raw, status_code=status, media_type="application/json",
-                    headers={**_API_HEADERS, "X-App-Build": _build_id()})
-
-
-def _json_spliced(head: dict, field: str, raw: bytes) -> Response:
-    """`head` with `raw`, bytes _json_dumps_like_starlette already made,
-    spliced in as `field`, so a big object serialised once (to fingerprint
-    it) is not serialised again inside the answer that carries it."""
-    first = _json_dumps_like_starlette(head)
-    return _json_body(first[:-1] + (b"," if len(first) > 2 else b"")
-                      + _json_dumps_like_starlette(field) + b":" + raw + b"}")
-
-
 # ---------------------------------------------------------------------------
 # Abuse / cost controls — in-memory rate limiting + request-size guards
 # ---------------------------------------------------------------------------
-# Per-process and best-effort (fine at this scale; if the app is ever scaled to
-# multiple instances, move this to a shared store like Redis). asyncio is single
-# threaded and these helpers never await, so no lock is needed.
-_rl_hits: dict[str, list[float]] = {}
-_rl_global: list[float] = []
 _oauth_states: dict[str, float] = {}
-# Sign-in attempts per client, whichever account is being tried.
-_login_hits: dict[str, list[float]] = {}   # state nonce -> expiry (Google OAuth connect flow)
 # EORI checks, app-wide rather than per-client: the limit being respected is
 # the EU service's, and it counts requests from this deployment, not from
 # whichever member of staff happens to be typing.
@@ -8289,122 +8156,6 @@ async def recon_exception(params: ReconExceptionInput) -> str:
     if not e:
         return json.dumps({"error": "No exception with that id."})
     return json.dumps(_recon_exc_public(e, full=True), default=str)
-
-
-def _client_key(request: Request) -> str:
-    # Use the RIGHTMOST X-Forwarded-For entry: proxies append, so the last hop is the
-    # one our own edge observed. The leftmost value is client-supplied and trivially
-    # spoofed, which would hand every request a fresh rate-limit bucket.
-    xff = request.headers.get("x-forwarded-for", "")
-    if xff:
-        parts = [p.strip() for p in xff.split(",") if p.strip()]
-        if parts:
-            return parts[-1]
-    return request.client.host if request.client else "unknown"
-
-
-def _window_ok(bucket: list[float], limit: int, now: float) -> bool:
-    cutoff = now - RATE_WINDOW
-    bucket[:] = [t for t in bucket if t >= cutoff]
-    if len(bucket) >= limit:
-        return False
-    bucket.append(now)
-    return True
-
-
-def _window_hits(bucket: list[float], now: float) -> int:
-    """How many marks the window holds, without adding one."""
-    cutoff = now - RATE_WINDOW
-    bucket[:] = [t for t in bucket if t >= cutoff]
-    return len(bucket)
-
-
-def _pre_checks(request: Request, max_body: Optional[int] = None) -> Optional[JSONResponse]:
-    """The per-client rate window, the body cap, and the tab gate. Anonymous:
-    nothing here needs to know who is asking."""
-    now = time.monotonic()
-    if len(_rl_hits) > 5000:  # guard the dict from unbounded growth
-        _rl_hits.clear()
-    if not _window_ok(_rl_hits.setdefault(_client_key(request), []), RATE_MAX_CLIENT, now):
-        return _json({"error": "Too many requests in the last minute. Wait about a minute "
-                               "and try again. Nothing was booked or charged."}, 429)
-    cl = request.headers.get("content-length", "")
-    if cl.isdigit() and int(cl) > (max_body or MAX_BODY_BYTES):
-        return _json({"error": "Request too large."}, 413)
-    denied = _tab_denied(request)
-    if denied is not None:
-        return denied
-    return None
-
-
-def _ai_slot() -> Optional[JSONResponse]:
-    """A slot in the global AI window - the app's most expensive shared
-    resource. Taken only once the caller is known to be a signed-in account,
-    so a request with no session cannot spend one on its way to a 401."""
-    if not _window_ok(_rl_global, RATE_MAX_GLOBAL, time.monotonic()):
-        return _json({"error": "The assistant is busy right now. Please try again shortly."}, 429)
-    return None
-
-
-@perf.timed("auth")       # Server-Timing: the door, reading the body included
-async def _guard(request: Request, *, ai: bool = False, min_level: int = 0,
-                 max_body: Optional[int] = None, cap: Optional[int] = None,
-                 body: bool = True):
-    """(error_response, body, uid): the one door every signed-in route uses.
-
-    Seventy routes carried their own copy of the same nine lines - rate
-    window, session, body - and five helpers wrapped those lines again, each
-    returning a different tuple. One of the copies spent an AI slot before it
-    had checked the session. The order here is the order: anonymous checks,
-    then who is asking, then what rank they hold, then the paid window, then
-    the body. `body=False` is for a route that reads its own body later, after
-    a check the caller wants to make first."""
-    pre = _pre_checks(request, max_body=max_body)
-    if pre:
-        return pre, None, ""
-    ok, who, reason = _authorize(request)
-    if not ok:
-        return _json({"error": AUTH_REFUSALS.get(reason, "Unauthorized"), "reason": reason or "session"}, 401), None, ""
-    uid = str(who or "")
-    perf.admit()            # Server-Timing is for people the door let in
-    if ai:
-        perf.no_record()    # a Claude answer is long by design
-    if min_level and _team_level(uid) < min_level:
-        return _json({"error": "Only an admin can do that."}, 403), None, ""
-    if ai:
-        busy = _ai_slot()
-        if busy:
-            return busy, None, ""
-    if not body:
-        return None, {}, uid
-    parsed = await _read_json_capped(request, cap=cap)
-    if parsed is None:
-        return _json({"error": "Request too large."}, 413), None, ""
-    return None, parsed, uid
-
-
-async def _read_json_capped(request: Request, cap: Optional[int] = None) -> Optional[dict]:
-    """Read + parse the JSON body, enforcing MAX_BODY_BYTES on the bytes ACTUALLY
-    read (not just the Content-Length header). Returns {} for empty/invalid bodies,
-    or None if the body exceeds the cap (the caller should answer 413). This bounds
-    peak memory even for chunked/unlabeled request bodies."""
-    total, chunks = 0, []
-    try:
-        async for chunk in request.stream():
-            total += len(chunk)
-            if total > (cap or MAX_BODY_BYTES):
-                return None
-            chunks.append(chunk)
-    except Exception:
-        return {}
-    raw = b"".join(chunks)
-    if not raw:
-        return {}
-    try:
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -8746,9 +8497,9 @@ async def _watchdog_tick(registry: dict) -> bool:
                                              "before (a corrupt file or a missing data volume).",
                                              "The app will show its first-run setup screen; recreate the "
                                              "master account, then the team's accounts."])
-            _sessions_sweep()
+            team._sessions_sweep()
             _work_close_orphans()
-            _events_flush()   # belt for the debounced ledger writes
+            activity._events_flush()   # belt for the debounced ledger writes
         except Exception:
             logger.exception("team register check failed")
 
@@ -9333,7 +9084,7 @@ def _crm_shape(d: dict) -> dict:
             "label_colors": d.get("label_colors") or dict(_CRM_LABEL_COLORS),
             "settings": d["settings"], "today": iso,
             "badge": badge, "new_leads": new_leads,
-            "team": _crm_team_list(), "names": _team_names(),
+            "team": _crm_team_list(), "names": team._team_names(),
             "imported_at": d.get("pd_imported_at") or "",
             "trash": len(trash),
             "trash_items": [{"id": v["id"], "title": v.get("title") or "",
@@ -9375,7 +9126,7 @@ jsonstore.when_forgotten(_crm_store_forgotten)
 
 
 def _crm_board_key():
-    return (jsonstore._stat_key(CRM_PATH), jsonstore._stat_key(USERS_PATH), _crm_today().isoformat(),
+    return (jsonstore._stat_key(CRM_PATH), jsonstore._stat_key(team.USERS_PATH), _crm_today().isoformat(),
             datetime.now(timezone.utc).strftime("%Y-%m-%dT%H"))
 
 
@@ -9385,7 +9136,7 @@ def _crm_board_build(d: dict, key) -> tuple:
     kept under the next). It is kept only when `d` is the store as read for
     that key: a read that failed hands back an empty CRM from a file that has
     not changed, and a kept empty board would be served until the next write."""
-    raw = _json_dumps_like_starlette(_crm_shape(d))
+    raw = gate._json_dumps_like_starlette(_crm_shape(d))
     rev = hashlib.blake2b(raw, digest_size=8).hexdigest()
     hit = jsonstore._json_cache.get(CRM_PATH)
     if (key[0] is not None and CRM_PATH not in jsonstore._poisoned_stores
@@ -9407,7 +9158,7 @@ def _crm_board() -> tuple:
 def _crm_answer(raw: bytes, rev: str, head: Optional[dict] = None) -> Response:
     """An answer that carries the board: `head` and the revision, with the
     board's own bytes spliced in as "crm"."""
-    return _json_spliced({**(head or {}), "rev": rev}, "crm", raw)
+    return gate._json_spliced({**(head or {}), "rev": rev}, "crm", raw)
 
 
 def _crm_team_list() -> list:
@@ -9415,10 +9166,10 @@ def _crm_team_list() -> list:
     purpose — a name and an id, nothing an account page holds."""
     rows = []
     try:
-        for uid, u in _load_users()["users"].items():
+        for uid, u in team._load_users()["users"].items():
             if u.get("deleted") or not u.get("active", True):
                 continue
-            tabs = _user_tabs(uid)
+            tabs = team._user_tabs(uid)
             if tabs is not None and "crm" not in tabs:
                 continue
             rows.append({"uid": uid, "name": u.get("name") or u.get("username") or ""})
@@ -9885,7 +9636,7 @@ def _files_sent(d: dict) -> tuple:
     those bytes. The page sends the revision back and an unchanged store is
     not sent again; like the CRM's, it moves only when what would be sent
     moves (the 2026-10-12 speed audit, S9)."""
-    raw = _json_dumps_like_starlette(_files_shape(d))
+    raw = gate._json_dumps_like_starlette(_files_shape(d))
     return raw, hashlib.blake2b(raw, digest_size=8).hexdigest()
 
 
@@ -9898,7 +9649,7 @@ def _files_delta(d: dict, files=(), folders=()) -> dict:
     the storage error (an upload is often what finds storage back) and the
     names of the people who uploaded."""
     out = {"files": {}, "trash": {}, "folders": {}, "used": _files_usage(d),
-           "setup_error": _files_ready["error"], "names": _team_names()}
+           "setup_error": _files_ready["error"], "names": team._team_names()}
     for k in files:
         v = d["files"].get(k)
         out["files"][k] = v if v and v.get("status") == "active" and not v.get("hidden") else None
@@ -9915,7 +9666,7 @@ def _files_shape(d: dict) -> dict:
                       if v.get("status") == "active" and not v.get("hidden")},
             "trash": [{**v, "id": k} for k, v in d["files"].items() if v.get("trashed_at")],
             "used": used, "quota": int(FILES_QUOTA_GB * 1024 * 1024 * 1024),
-            "names": _team_names(),   # resolves `by` ids to people at render time
+            "names": team._team_names(),   # resolves `by` ids to people at render time
             "configured": _files_configured(), "setup_error": _files_ready["error"]}
 
 
@@ -10214,7 +9965,7 @@ def _mail_rule_apply(store: dict, t: dict, rule: dict) -> str:
     elif who and not t.get("owner"):
         t["owner"], t["owner_since"] = who, _mail_now()
         t["state"], t["done_at"] = "assigned", ""
-        did.append("assigned to " + (_team_name(who) or "someone"))
+        did.append("assigned to " + (team._team_name(who) or "someone"))
         rule.pop("broken", None)
     folder = str(rule.get("folder") or "").strip()
     if folder and who != "_broken":
@@ -10343,7 +10094,7 @@ MAIL_REPLIES_MAX = 50
 def _mail_sign_off(uid) -> str:
     """One person's sign-off. Lives on the account, not the mail store: it is
     their name, and it has to survive the mailbox being reconnected."""
-    u = _team_user(uid)
+    u = team._team_user(uid)
     return str((u or {}).get("sign_off") or "")
 
 
@@ -11030,10 +10781,10 @@ async def _mail_enquiries_file(store: dict) -> None:
 def _mail_can_own(uid: str) -> bool:
     """An account can hold email only if it exists, is switched on, and can
     open the mail tab: an owner who cannot see the board is a buried email."""
-    u = _team_user(uid)
+    u = team._team_user(uid)
     if not u or not u.get("active", True):
         return False
-    tabs = _user_tabs(uid)
+    tabs = team._user_tabs(uid)
     return tabs is None or "mail" in tabs
 
 
@@ -11244,7 +10995,7 @@ def _mail_want_label(t: dict) -> str:
     if t.get("state") == "done":
         return "Copilot/Done"
     owner = t.get("owner") or ""
-    return f"Copilot/{_team_name(owner)}" if (owner and _team_name(owner)) else ""
+    return f"Copilot/{team._team_name(owner)}" if (owner and team._team_name(owner)) else ""
 
 
 MAIL_LABEL_BACKOFF = 600      # a thread that refuses to sync waits this long
@@ -11362,7 +11113,7 @@ async def _mail_label_reconcile(store: dict, limit: int = 12, budget: float = 6.
         async with sem:
             before = t.get("gmail_label")
             t["label_tried_at"] = time.time()
-            await _mail_sync_labels(t, _team_name(t.get("owner") or ""))
+            await _mail_sync_labels(t, team._team_name(t.get("owner") or ""))
             if t.get("gmail_label") == before:
                 t["label_retry_at"] = time.time() + MAIL_LABEL_BACKOFF
     try:
@@ -11531,7 +11282,7 @@ async def _mail_labels_later(tid: str) -> None:
             t = store.get("threads", {}).get(tid)
             if not t:
                 return
-            if await _mail_sync_labels(t, _team_name(t.get("owner") or "")) and _mail_mem is store:
+            if await _mail_sync_labels(t, team._team_name(t.get("owner") or "")) and _mail_mem is store:
                 _write_mail(store)
         finally:
             _mail_lock.release()
@@ -11592,7 +11343,7 @@ def _mail_pending_shape(p) -> Optional[dict]:
     if not isinstance(p, dict) or not p:
         return None
     return {"at": p.get("at") or "",
-            "by_name": _team_name(p.get("by") or "") or p.get("by_name") or "",
+            "by_name": team._team_name(p.get("by") or "") or p.get("by_name") or "",
             "to": p.get("to") or ""}
 
 
@@ -11638,7 +11389,7 @@ def _mail_board_shape(store: dict, window: bool = False) -> list:
         out.append({"id": t.get("id"), "subject": t.get("subject") or "(no subject)",
                     "from_name": t.get("from_name") or "", "from_email": t.get("from_email") or "",
                     "state": t.get("state"), "owner": t.get("owner") or "",
-                    "owner_name": _team_name(t["owner"]) if t.get("owner") else "",
+                    "owner_name": team._team_name(t["owner"]) if t.get("owner") else "",
                     "first_at": t.get("first_at"), "last_at": t.get("last_at"),
                     "state_at": t.get("state_at"), "done_at": t.get("done_at") or "",
                     "msg_count": t.get("msg_count", 0), "snippet": (t.get("snippet") or "")[:140],
@@ -11652,7 +11403,7 @@ def _mail_board_shape(store: dict, window: bool = False) -> list:
                     # anything it started to send and never confirmed.
                     "sent_at": t.get("sent_at") or "",
                     "sent_by": t.get("sent_by") or "",
-                    "sent_by_name": _team_name(t["sent_by"]) if t.get("sent_by") else "",
+                    "sent_by_name": team._team_name(t["sent_by"]) if t.get("sent_by") else "",
                     "sent_to": t.get("sent_to") or "",
                     "started_to": t.get("started_to") or "",
                     "send_pending": _mail_pending_shape(t.get("send_pending"))})
@@ -11735,13 +11486,13 @@ def _mail_team_shape() -> list:
             c = counts.setdefault(t["owner"], {"assigned": 0, "progress": 0, "waiting": 0})
             c[t["state"]] += 1
     rows = []
-    for uid, u in _load_users()["users"].items():
+    for uid, u in team._load_users()["users"].items():
         if u.get("deleted") or not u.get("active", True):
             continue
         c = counts.get(uid, {})
         rows.append({"uid": uid, "name": u.get("name") or u.get("username") or "",
                      "colour": u.get("colour") or "",
-                     "lead": ROLE_LEVELS.get(u.get("role", "member"), 1) >= 2,
+                     "lead": team.ROLE_LEVELS.get(u.get("role", "member"), 1) >= 2,
                      "can_own": _mail_can_own(uid),
                      "presence": u.get("presence") or "",
                      "assigned": c.get("assigned", 0), "progress": c.get("progress", 0),
@@ -11780,7 +11531,7 @@ def _crm_deal_threads(d: dict, deal: dict) -> list:
                      "snippet": t.get("snippet") or "", "last_at": t.get("last_at") or "",
                      "msg_count": t.get("msg_count") or 0,
                      "state": t.get("state") or "", "unread": bool(t.get("unread")),
-                     "owner_name": _team_name(t.get("owner")) if t.get("owner") else ""})
+                     "owner_name": team._team_name(t.get("owner")) if t.get("owner") else ""})
     rows.sort(key=lambda r: r["last_at"], reverse=True)
     return rows[:20]
 
@@ -12669,25 +12420,6 @@ def _mail_crm_match(email: str) -> Optional[dict]:
     except Exception:
         pass
     return None
-
-
-# ---------------------------------------------------------------------------
-# Team: the app's own accounts. Shopify has no authority here.
-#
-# The embed token still gates the PERIMETER (a request must come from inside
-# the shop's Shopify admin at all), but WHO you are is the app's own business:
-# a register of accounts with scrypt-hashed passwords, server-side sessions,
-# and a rank order of roles. master (Cameron) outranks admin outranks member;
-# every management action is checked as "does the actor outrank the target,
-# and is the action within the actor's rank" on the server, per request.
-#
-# Passwords are never stored, logged, or echoed: the register keeps only
-# scrypt hashes, and the one time a password ever appears in a response is
-# the single showing of a generated starter password to the admin who asked
-# for it, already flagged must_change.
-# ---------------------------------------------------------------------------
-USERS_PATH = os.environ.get("USERS_PATH", "/data/users.json")
-SESSIONS_PATH = os.environ.get("SESSIONS_PATH", "/data/sessions.json")
 # ---------------------------------------------------------------------------
 # What's new: the release notes that ship WITH the release, and the desk's own
 # feature requests. The changelog is a repo file, so the running build always
@@ -12761,9 +12493,6 @@ def _write_feedback(d: dict) -> None:
 
 
 FEEDBACK_STATES = ("open", "planned", "shipped", "declined")
-
-
-ACTIVITY_PATH = os.environ.get("ACTIVITY_PATH", "/data/activity.json")
 PRIVACY_LOG_PATH = os.environ.get("PRIVACY_LOG_PATH", "/data/privacy_log.json")
 
 
@@ -13767,83 +13496,7 @@ def _redact_retry_pending() -> int:
             out = _redact_customer(p["email"], p.get("customer_id") or "", retry=True)
             left += 1 if out.get("failed") else 0
     return left
-
-
-ACTIVITY_MAX = _env_num(int, os.environ.get("ACTIVITY_MAX", "8000"), "8000", "ACTIVITY_MAX")
-SESSION_HOURS = _env_num(float, os.environ.get("SESSION_HOURS", "24"), "24", "SESSION_HOURS")
-# The sliding window alone let a session used once a day live forever, and a
-# stolen one with it. A month is longer than any shift pattern here.
-SESSION_MAX_DAYS = _env_num(float, os.environ.get("SESSION_MAX_DAYS", "30"), "30", "SESSION_MAX_DAYS")
 DAV_FAIL_PER_MIN = 20      # wrong drive passwords per client per minute before 429
-MFA_FAIL_LIMIT = 10        # wrong second-factor codes per account before it pauses
-LOGIN_FAIL_LIMIT = 5
-# A real hash to verify against when the username does not exist, so an unknown
-# user costs the same time as a wrong password and the response cannot be used
-# to enumerate accounts. Built once at import.
-_PW_DUMMY = ""   # filled just below _hash_pw, which is defined further down
-LOGIN_LOCK_MINUTES = 15
-# Each consecutive lock lasts longer than the last. Without it, serving a lock
-# handed the guesser a fresh five attempts every quarter of an hour - twenty an
-# hour, for as long as they cared to keep going. A person who has genuinely
-# forgotten their password tries a few times and asks for a reset; nobody
-# reaches the fourth lock by accident.
-LOGIN_LOCK_STEPS = (15, 30, 60, 240)
-# The login form's own ceiling, well under the app-wide 120/minute. Guessing
-# does not need a wide door, and legitimate sign-in never needs more than a
-# handful in a minute.
-LOGIN_MAX_PER_MIN = 8
-ROLE_LEVELS = {"master": 3, "admin": 2, "member": 1, "parttime": 1}
-_users_mem: Optional[dict] = None
-_sessions_mem: Optional[dict] = None
-
-
-def _hash_pw(pw: str, salt: Optional[bytes] = None) -> str:
-    salt = salt or os.urandom(16)
-    h = hashlib.scrypt(pw.encode("utf-8"), salt=salt, n=2 ** 14, r=8, p=1)
-    return salt.hex() + "$" + h.hex()
-
-
-def _check_pw(pw: str, stored: str) -> bool:
-    try:
-        salt_hex, h_hex = stored.split("$", 1)
-        h = hashlib.scrypt(pw.encode("utf-8"), salt=bytes.fromhex(salt_hex), n=2 ** 14, r=8, p=1)
-        return hmac.compare_digest(h.hex(), h_hex)
-    except Exception:
-        return False
-
-
-def _note_wrong_password(d: dict, u: dict, uid: str, where: str = "",
-                         now: Optional[datetime] = None) -> None:
-    """One wrong password, wherever it was typed: the login, the password
-    change, or the second-factor settings. They share one counter and one
-    escalating lock, because a guesser does not care which form accepts the
-    guess. The password change used to keep its own flat fifteen minutes,
-    and the second-factor settings had no counter at all."""
-    now = now or datetime.now(timezone.utc)
-    u["fails"] = int(u.get("fails") or 0) + 1
-    if u["fails"] >= LOGIN_FAIL_LIMIT:
-        u["fails"] = 0
-        step = min(int(u.get("locks") or 0), len(LOGIN_LOCK_STEPS) - 1)
-        u["locks"] = int(u.get("locks") or 0) + 1
-        mins = LOGIN_LOCK_STEPS[step]
-        u["lock_until"] = (now + timedelta(minutes=mins)).isoformat()
-        _track(uid, "auth", "account paused",
-               "too many wrong passwords%s; locked for %d minutes" % (where, mins))
-    try:
-        _write_users(d)
-    except RuntimeError:
-        pass
-
-
-def _locked_now(u: dict) -> bool:
-    return str(u.get("lock_until") or "") > datetime.now(timezone.utc).isoformat()
-
-
-
-_PW_DUMMY = _hash_pw(secrets.token_urlsafe(16))
-
-def _users_default() -> dict:
-    return {"version": 2, "seq": 0, "users": {}}
 
 
 def reseal_secrets_at_rest() -> dict:
@@ -13859,7 +13512,6 @@ def reseal_secrets_at_rest() -> dict:
     already sealed. Never raises: a store that cannot be re-sealed is worth a
     log line, not a deployment that will not start.
     """
-    global _users_mem
     out = {"enabled": tokenvault.enabled(), "sealed": 0, "stores": {}}
     if not tokenvault.enabled():
         logger.warning("token vault: encryption at rest is OFF. The refresh tokens and "
@@ -13882,13 +13534,13 @@ def reseal_secrets_at_rest() -> dict:
         out["stores"][name] = n
         out["sealed"] += n
     try:
-        n = tokenvault.reseal_users(USERS_PATH, ("mfa_secret", "mfa_pending"))
+        n = tokenvault.reseal_users(team.USERS_PATH, ("mfa_secret", "mfa_pending"))
         out["stores"]["mfa"] = n
         out["sealed"] += n
         if n:
             # The file on disk changed underneath the cache. Drop it, or the
             # next write puts the plaintext straight back.
-            _users_mem = None
+            team._users_mem = None
     except Exception:
         logger.exception("token vault: could not re-seal the MFA secrets")
     # Said on every boot, whether or not anything changed. Logging only when a
@@ -13926,7 +13578,7 @@ def token_vault_state() -> dict:
         present += 1
         (sealed if tokenvault.is_sealed(v) else plain).append(name)
     try:
-        users = (jsonstore._load_json_store(USERS_PATH, "users_store", None) or {}).get("users") or {}
+        users = (jsonstore._load_json_store(team.USERS_PATH, "users_store", None) or {}).get("users") or {}
         for rec in users.values():
             if not isinstance(rec, dict):
                 continue
@@ -13938,152 +13590,6 @@ def token_vault_state() -> dict:
         pass
     return {"enabled": tokenvault.enabled(), "stored": present,
             "sealed": len(sealed), "plaintext": sorted(set(plain))}
-
-
-def _load_users() -> dict:
-    global _users_mem
-    if _users_mem is None:
-        d = jsonstore._load_json_store(USERS_PATH, "users_store", None)
-        if isinstance(d, dict) and d.get("version") == 2 and "users" in d:
-            _users_mem = d
-        else:
-            if isinstance(d, dict) and d.get("users"):
-                # The short-lived Shopify-identity register: set aside, start clean.
-                try:
-                    os.replace(USERS_PATH, USERS_PATH + ".v1.bak")
-                    logger.info("team: v1 register archived; the app now owns its accounts")
-                except OSError:
-                    pass
-            _users_mem = _users_default()
-        _master_reset_check(_users_mem)
-    return _users_mem
-
-
-def _write_users(d: dict) -> None:
-    """Raises when the register cannot be made durable, so an account change
-    is never reported as done while only the memory copy holds it."""
-    global _users_mem
-    if not jsonstore._store_writable(USERS_PATH):
-        _users_mem = None      # the caller already mutated the shared object
-        raise RuntimeError("users register is not writable")
-    try:
-        # Owner-only, like the token files beside it: this register holds the
-        # password hashes, the second-factor secrets and the recovery codes.
-        jsonstore._write_json_store(USERS_PATH, "users_store", d, private=True)
-    except Exception:
-        _users_mem = None
-        raise
-    _users_mem = d
-
-
-def _load_sessions() -> dict:
-    global _sessions_mem
-    if _sessions_mem is None:
-        d = jsonstore._load_json_store(SESSIONS_PATH, "sessions", None)
-        _sessions_mem = d if isinstance(d, dict) else {}
-    return _sessions_mem
-
-
-def _write_sessions(d: dict) -> None:
-    global _sessions_mem
-    _sessions_mem = d
-    if not jsonstore._store_writable(SESSIONS_PATH):
-        return    # sessions are re-creatable; losing them only forces a login
-    # A session row is a live credential's hash and who it belongs to; it gets
-    # the same mode as the register it authenticates against.
-    jsonstore._write_json_store(SESSIONS_PATH, "sessions", d, private=True)
-
-
-SESSIONS_PER_USER = _env_num(int, os.environ.get("SESSIONS_PER_USER", "12"), "12", "SESSIONS_PER_USER")
-
-
-# Half-finished logins. In memory only and deliberately so: a ticket is worth
-# nothing after a restart, which is the safe direction, and it never belongs in
-# a file that gets backed up. Bounded, so a flood of password-only attempts
-# cannot grow it without limit.
-_mfa_tickets: dict = {}
-_mfa_tries: dict = {}            # ticket -> wrong codes so far
-MFA_TICKET_SECONDS = 180
-MFA_MAX_TRIES = 5                # a six-digit code, guessed five times, is not being guessed
-
-
-def _mfa_ticket(uid: str) -> str:
-    now = time.time()
-    for k in [k for k, v in _mfa_tickets.items() if v[1] < now]:
-        _mfa_tickets.pop(k, None)
-    if len(_mfa_tickets) > 500:
-        _mfa_tickets.clear()
-    t = secrets.token_urlsafe(32)
-    _mfa_tickets[t] = (str(uid), now + MFA_TICKET_SECONDS)
-    return t
-
-
-def _mfa_ticket_uid(ticket: str):
-    """Who this half-login belongs to, or None. Expiry is checked here so a
-    ticket left lying around stops working on its own."""
-    v = _mfa_tickets.get(str(ticket or ""))
-    if not v:
-        return None
-    uid, until = v
-    if until < time.time():
-        _mfa_tickets.pop(str(ticket), None)
-        return None
-    return uid
-
-
-def _mfa_ticket_spend(ticket: str) -> None:
-    """One ticket, one session. Leaving it usable would turn a single password
-    entry into an unlimited supply of logins for as long as it lived."""
-    _mfa_tickets.pop(str(ticket or ""), None)
-
-
-def _new_session(uid: str) -> str:
-    """Mint a session for a user. The raw token goes to the browser once;
-    the store keeps only its hash, so the file can never impersonate anyone."""
-    raw = secrets.token_urlsafe(32)
-    key = hashlib.sha256(raw.encode()).hexdigest()
-    s = _load_sessions()
-    s[key] = {"uid": uid,
-              "exp": (datetime.now(timezone.utc) + timedelta(hours=SESSION_HOURS)).isoformat(),
-              "created_at": datetime.now(timezone.utc).isoformat()}
-    # A ceiling per account, oldest first. Every other store in the app has one;
-    # without it a scripted login loop grows this file unboundedly and each mint
-    # rewrites the whole thing.
-    mine = sorted([(v.get("created_at") or "", k) for k, v in s.items() if v.get("uid") == uid])
-    for _at, old_key in mine[:max(0, len(mine) - SESSIONS_PER_USER)]:
-        s.pop(old_key, None)
-    _write_sessions(s)
-    return raw
-
-
-def _session_uid(raw: Optional[str]) -> Optional[str]:
-    if not raw:
-        return None
-    s = _load_sessions()
-    row = s.get(hashlib.sha256(str(raw).encode()).hexdigest())
-    if not row:
-        return None
-    now = datetime.now(timezone.utc)
-    if str(row.get("exp") or "") < now.isoformat():
-        return None
-    try:
-        born = datetime.fromisoformat(str(row.get("created_at") or ""))
-        if (now - born).total_seconds() > SESSION_MAX_DAYS * 86400:
-            s.pop(hashlib.sha256(str(raw).encode()).hexdigest(), None)
-            _write_sessions(s)
-            return None
-    except ValueError:
-        pass
-    # Sliding window: steady work never logs you out mid-shift. The bump is
-    # written at most every few hours, not per request.
-    try:
-        exp = datetime.fromisoformat(str(row.get("exp")))
-        if (exp - now).total_seconds() < (SESSION_HOURS - 4) * 3600:
-            row["exp"] = (now + timedelta(hours=SESSION_HOURS)).isoformat()
-            _write_sessions(s)
-    except Exception:
-        pass
-    return str(row.get("uid") or "") or None
 
 
 def _terms_flag(order_id, ok: bool, note: str = "") -> None:
@@ -14194,68 +13700,12 @@ async def _net30_on_release(registry: dict, order_id, order: Optional[dict] = No
                      + str(r.get("detail") or "unknown error"))}
 
 
-def _live_uid(request) -> str:
-    """The caller's gizmo account id from the app session, but ONLY if that
-    account is still real: present, switched on, not deleted, and past the
-    forced first-password change. _session_uid alone answers "this token
-    parses", which is not the same question - reading it raw let a starter
-    password reach a route that _authorize would have refused."""
-    uid = _session_uid(request.headers.get("x-app-session")) or ""
-    if not uid:
-        return ""
-    u = _team_user(uid)
-    if not u or u.get("deleted") or not u.get("active", True) or u.get("must_change"):
-        return ""
-    return uid
-
-
-def _uid_has_tab(uid: str, tab: str) -> bool:
-    tabs = _user_tabs(uid)
-    return tabs is None or tab in tabs
-
-
 def _dav_drop_cache(uid: str) -> None:
     """A password change or revocation must also forget the drive's cached
     credential, or the OLD password could mount for up to ten more minutes."""
     for k, v in list(_dav_auth_cache.items()):
         if isinstance(v, tuple) and v and v[0] == uid:
             _dav_auth_cache.pop(k, None)
-
-
-def _drop_sessions(uid: Optional[str] = None, token: Optional[str] = None) -> None:
-    s = _load_sessions()
-    if token:
-        s.pop(hashlib.sha256(str(token).encode()).hexdigest(), None)
-    if uid:
-        for k in [k for k, v in s.items() if v.get("uid") == uid]:
-            s.pop(k)
-    _write_sessions(s)
-
-
-def _sessions_sweep() -> None:
-    s = _load_sessions()
-    now = datetime.now(timezone.utc).isoformat()
-    dead = [k for k, v in s.items() if str(v.get("exp") or "") < now]
-    if dead:
-        for k in dead:
-            s.pop(k)
-        _write_sessions(s)
-
-
-def _team_user(uid: Optional[str]) -> Optional[dict]:
-    if not uid:
-        return None
-    u = _load_users()["users"].get(str(uid))
-    return None if not u or u.get("deleted") else u
-
-
-def _team_role(uid: Optional[str]) -> str:
-    u = _team_user(uid)
-    return u.get("role", "member") if u else "member"
-
-
-def _team_level(uid: Optional[str]) -> int:
-    return ROLE_LEVELS.get(_team_role(uid), 0) if _team_user(uid) else 0
 
 
 def _may_edit_sizes(uid: Optional[str]) -> bool:
@@ -14265,10 +13715,10 @@ def _may_edit_sizes(uid: Optional[str]) -> bool:
     order is made from, so it is a grant an admin makes deliberately per person,
     the same way a tab is - not something inherited by having an account. Admins
     hold it by rank; everyone else only if it was handed to them."""
-    u = _team_user(uid)
+    u = team._team_user(uid)
     if not u:
         return False
-    if ROLE_LEVELS.get(u.get("role"), 0) >= ROLE_LEVELS["admin"]:
+    if team.ROLE_LEVELS.get(u.get("role"), 0) >= team.ROLE_LEVELS["admin"]:
         return True
     return bool(u.get("can_sizes"))
 
@@ -14281,175 +13731,12 @@ def _may_send_mail(uid: Optional[str]) -> bool:
     over the shop's own address, so it is a grant an admin makes deliberately
     per person rather than something inherited by having an Inbox tab. Admins
     hold it by rank; everyone else only if it was handed to them."""
-    u = _team_user(uid)
+    u = team._team_user(uid)
     if not u:
         return False
-    if ROLE_LEVELS.get(u.get("role"), 0) >= ROLE_LEVELS["admin"]:
+    if team.ROLE_LEVELS.get(u.get("role"), 0) >= team.ROLE_LEVELS["admin"]:
         return True
     return bool(u.get("can_send"))
-
-
-def _team_name(uid: str) -> str:
-    u = _load_users()["users"].get(str(uid))
-    return (u or {}).get("name") or ""
-
-
-def _team_names() -> dict:
-    """uid -> display name, deleted accounts included: history keeps its
-    names even after an account is removed."""
-    return {uid: (u.get("name") or "") for uid, u in _load_users()["users"].items()}
-
-
-# How long a break-glass password stays usable. Long enough to redeploy, read
-# the log and sign in; short enough that the copy left in the deploy log is
-# useless to anyone who reads it later.
-MASTER_RESET_MINUTES = _env_num(int, os.environ.get("MASTER_RESET_MINUTES", "30"), "30", "MASTER_RESET_MINUTES")
-_master_reset_done = False
-
-
-def _master_reset_check(d: dict) -> None:
-    """Break-glass for a forgotten master password: set MASTER_RESET=yes in
-    Railway, redeploy, read the one-time password from the deploy logs, log
-    in (forced to choose a new password), then REMOVE the variable."""
-    global _master_reset_done
-    if _master_reset_done or not os.environ.get("MASTER_RESET"):
-        return
-    _master_reset_done = True
-    for uid, u in d["users"].items():
-        if u.get("role") == "master" and not u.get("deleted"):
-            starter = secrets.token_urlsafe(9)
-            u["pw"] = _hash_pw(starter)
-            u["must_change"] = True
-            # The password goes into a deploy log that is retained and readable
-            # by anyone with project access, so it must not stay usable. It is
-            # for the next few minutes and the sign-in that follows; after that
-            # the log holds a dead string.
-            u["pw_expires_at"] = (datetime.now(timezone.utc)
-                                  + timedelta(minutes=MASTER_RESET_MINUTES)).isoformat()
-            u["fails"], u["lock_until"], u["locks"] = 0, "", 0
-            try:
-                _write_users(d)
-            except Exception:
-                logger.exception("master reset could not be saved")
-                return
-            logger.error("MASTER RESET: temporary password for %s is: %s  "
-                         "It stops working in %d minutes. Sign in with it now, choose a "
-                         "new password, and REMOVE the MASTER_RESET variable.",
-                         u.get("username"), starter, MASTER_RESET_MINUTES,
-                         # Deliberately in the platform's own log, where only the
-                         # operator can read it - and deliberately NOT shipped to
-                         # the log drain, which is a third party.
-                         extra={"no_drain": True})
-            _track(uid, "auth", "master password reset", "via the break-glass reset")
-            return
-
-
-# Tab access: which parts of the app an account may open. None means all.
-# The master is never restricted. Enforcement is central (in _pre_checks) via
-# this path map, so hiding a tab in the page is never the only lock.
-TAB_KEYS = ("overview", "seo", "keywords", "products", "customers", "liability",
-            "crm", "loans", "mail", "files", "labels", "sizes", "memory", "skills", "chat",
-            "recon", "forecast", "connector")
-# API routes that belong to no tab and are open to every signed-in account:
-# the sign-in flow, a person's own clock, profile and card layouts, and the admin routes,
-# which refuse non-admins themselves. Anything else under /api/ that is not in
-# _TAB_ROUTES is refused (see _tab_denied).
-_OPEN_API = ("/api/auth/", "/api/team/", "/api/work/", "/api/google/status", "/api/alerts",
-             "/api/usage", "/api/cache", "/api/profile", "/api/layouts", "/api/status", "/api/updates",
-             "/api/schedule", "/api/backup", "/api/restore", "/api/privacy")
-
-_TAB_ROUTES = (
-    ("/api/overview", "overview"), ("/api/seo", "seo"), ("/api/keyword", "keywords"),
-    ("/api/recon", "recon"),
-    ("/api/forecast", "forecast"),
-    ("/api/eori/", "labels"),
-    ("/api/connector", "connector"),
-    ("/api/products", "products"), ("/api/product", "products"),
-    # customer-history also serves the CRM's deal modal (the Shopify card on a
-    # linked person), so either tab opens it.
-    ("/api/customers", "customers"), ("/api/customer-history", ("customers", "crm")),
-    ("/api/customer-tags", "customers"), ("/api/reorder-radar", "customers"),
-    ("/api/liability", "liability"),
-    ("/api/crm/", "crm"), ("/api/loans", "loans"),
-    ("/api/mail/", "mail"), ("/api/files/", "files"),
-    ("/api/production-labels", "labels"), ("/api/production-state", "labels"),
-    ("/api/order/", "labels"),
-    ("/api/dispatch/", "labels"), ("/api/custom/", "labels"),
-    ("/api/stock-usage", "labels"), ("/api/margin", "labels"),
-    # The size sheet and its rulings serve the Production Manager's size check
-    # and the Size list tab alike; the rule route keeps its own edit grant.
-    ("/api/gobo-sizes", ("labels", "sizes")),
-    # The EORI checker is part of preparing a customs invoice, so it lives
-    # behind the same tab as the dispatch panel that prints one.
-    ("/api/eori", "labels"),
-    ("/api/memory", "memory"), ("/api/learn", "memory"), ("/api/impact", "memory"),
-    ("/api/skills", "skills"), ("/api/chat", "chat"),
-    ("/api/shipping", "labels"),
-    ("/print/production-labels", "labels"),
-)
-
-
-# Tabs nobody inherits merely by having an account. Reconciliation holds the
-# company's accounting records, its bank line and the finance mailbox, so a new
-# stock or dispatch login must not arrive already holding the books: an admin
-# hands it over deliberately, or not at all.
-# The connector WRITES to the accounting ledger, so like the books it is
-# handed over deliberately, never inherited with an account.
-# The forecast holds the cash flow plan and where the company stands against
-# it, which is the books' own kind of secret, so it is handed over the same way.
-OPT_IN_TABS = ("recon", "connector", "forecast")
-DEFAULT_TABS = tuple(k for k in TAB_KEYS if k not in OPT_IN_TABS)
-
-
-def _user_tabs(uid: Optional[str]):
-    """None = everything, and only the master gets that. An account with no
-    tab list of its own gets the DEFAULT set, which is not the whole set. An
-    id that names no live account (unknown, or deleted) gets nothing: this
-    check fails closed rather than trusting every caller to have proven the
-    account first."""
-    u = _team_user(uid)
-    if not u:
-        return []
-    if u.get("role") == "master":
-        return None
-    t = u.get("tabs")
-    if not isinstance(t, list):
-        return list(DEFAULT_TABS)
-    return [k for k in t if k in TAB_KEYS]
-
-
-def _tab_denied(request: Request) -> Optional[JSONResponse]:
-    """The central lock. Only ever a 403: a 401 here would read as a dead
-    session and bounce the person to the login screen in a loop."""
-    path = request.url.path
-    # Longest prefix wins: /api/production-labels must map to labels, not
-    # fall to the shorter /api/product entry.
-    tab, best = None, 0
-    for p, t in _TAB_ROUTES:
-        if path.startswith(p) and len(p) > best:
-            tab, best = t, len(p)
-    uid = _session_uid(request.headers.get("x-app-session"))
-    if not uid or not _team_user(uid):
-        # Not our concern here; _authorize answers 401. A session whose
-        # account is gone (deleted, or the register lost) must reach that 401,
-        # which sends the page to sign in or set up, not this gate's 403.
-        return None
-    if not tab:
-        # Deny by default. A route under /api/ that no tab claims is either on
-        # the short list below (self-service and admin routes that carry their
-        # own role checks) or it is a route somebody added without deciding who
-        # may call it, and the honest answer to that is no, loudly, in testing.
-        if path.startswith("/api/") and not any(path.startswith(p) for p in _OPEN_API):
-            logger.warning("route %s has no tab mapping and is not on _OPEN_API; refused", path)
-            return _json({"error": "That part of the app is not open to your account."}, 403)
-        return None
-    tabs = _user_tabs(uid)
-    allowed = (tab,) if isinstance(tab, str) else tab
-    if tabs is None or any(t in tabs for t in allowed):
-        return None
-    _track_denied(uid, path)
-    return _json({"error": "That part of the app is switched off for your account. "
-                           "Ask an admin if you need it."}, 403)
 
 
 # ---------------------------------------------------------------------------
@@ -14731,7 +14018,7 @@ def _loans_board(d: dict, who: str) -> dict:
                 "crm_person_id": lo.get("crm_person_id") or "",
                 "crm_org_id": lo.get("crm_org_id") or "",
                 "out_at": lo.get("out_at") or "", "due_at": lo.get("due_at") or "",
-                "out_by_name": _team_name(lo.get("out_by") or "") or "",
+                "out_by_name": team._team_name(lo.get("out_by") or "") or "",
                 "note": lo.get("note") or "",
                 "days_out": _loan_days_out(lo.get("out_at")),
                 "state": _loan_state(lo, chase)})
@@ -14741,7 +14028,7 @@ def _loans_board(d: dict, who: str) -> dict:
                        "in": sum(1 for u in units if u["status"] == "in"),
                        "late": sum(1 for r in out_rows if r["state"] == "late")},
             "settings": {"chase_days": chase},
-            "can_manage": _team_level(who) >= ROLE_LEVELS["admin"]}
+            "can_manage": team._team_level(who) >= team.ROLE_LEVELS["admin"]}
 
 
 def _loan_history(d: dict, unit_id: str) -> list:
@@ -14840,7 +14127,7 @@ def _fmt_secs(secs: int) -> str:
 def _work_monitored(uid: Optional[str]) -> bool:
     """Role-driven, checked at the moment it matters: change the role and the
     monitoring follows by itself."""
-    return _team_role(uid) == "parttime"
+    return team._team_role(uid) == "parttime"
 
 
 def _work_open_session(uid: Optional[str]) -> Optional[dict]:
@@ -14868,7 +14155,7 @@ def _work_close_open(uid: str, by: str, note: str, action: str) -> Optional[dict
     ws.update({"corrected": True, "corrected_by": by, "corrected_at": nowu.isoformat(), "note": note})
     w["sessions"].append(ws)
     _write_work(w)
-    _track(by, "work", action, _team_name(uid) or uid)
+    _track(by, "work", action, team._team_name(uid) or uid)
     return ws
 
 
@@ -14879,9 +14166,9 @@ def _work_close_orphans() -> list:
     for good, so the hourly team check sweeps them up."""
     # An unreadable or empty register reads as nobody, and nobody would mean
     # every shift on the board: the watchdog alerts on that, this does nothing.
-    if USERS_PATH in jsonstore._poisoned_stores or _team_setup_needed():
+    if team.USERS_PATH in jsonstore._poisoned_stores or _team_setup_needed():
         return []
-    users = (_load_users() or {}).get("users") or {}
+    users = (team._load_users() or {}).get("users") or {}
     closed = []
     for uid in list((_load_work().get("open") or {}).keys()):
         u = users.get(uid)
@@ -14912,7 +14199,7 @@ def _work_secs(uid: str, day_from: str) -> int:
 
 
 def _team_setup_needed() -> bool:
-    return not any(not u.get("deleted") for u in _load_users()["users"].values())
+    return not any(not u.get("deleted") for u in team._load_users()["users"].values())
 
 
 # First-run setup makes the master account, and it opens whenever the accounts
@@ -14936,7 +14223,7 @@ def _data_volume_warning() -> str:
     if not (os.environ.get("RAILWAY_ENVIRONMENT")  # set by Railway; the volume check runs only there
             or os.environ.get("RAILWAY_PROJECT_ID")):  # set by Railway; the volume check runs only there
         return ""
-    d = os.path.realpath(os.path.dirname(USERS_PATH) or "/data")
+    d = os.path.realpath(os.path.dirname(team.USERS_PATH) or "/data")
     p = d
     while p and p != os.path.dirname(p):
         if os.path.ismount(p):
@@ -14959,174 +14246,15 @@ def _user_public(uid: str, u: dict) -> dict:
             # so the UI must not show a switch that looks revocable when it is not.
             "colour": u.get("colour") or "",
             "can_sizes": bool(u.get("can_sizes")),
-            "sizes_by_rank": ROLE_LEVELS.get(u.get("role") or "member", 0) >= ROLE_LEVELS["admin"],
+            "sizes_by_rank": team.ROLE_LEVELS.get(u.get("role") or "member", 0) >= team.ROLE_LEVELS["admin"],
             # Sending email out as the shop reads the same way: the raw grant
             # and the by-rank one are reported apart, so the Team screen never
             # shows an admin a switch that would not actually revoke anything.
             "can_send": bool(u.get("can_send")),
-            "send_by_rank": ROLE_LEVELS.get(u.get("role") or "member", 0) >= ROLE_LEVELS["admin"],
+            "send_by_rank": team.ROLE_LEVELS.get(u.get("role") or "member", 0) >= team.ROLE_LEVELS["admin"],
             # The current value travels with the list so an admin editing it
             # sees what they are overwriting rather than setting it blind.
             "sign_off": str(u.get("sign_off") or "")}
-
-
-_events_mem: Optional[list] = None
-_events_dirty = False
-_events_flush_pending = False
-
-
-def _load_events() -> list:
-    global _events_mem
-    if _events_mem is None:
-        d = jsonstore._load_json_store(ACTIVITY_PATH, "events", [])
-        _events_mem = d if isinstance(d, list) else []
-    return _events_mem
-
-
-def _events_flush() -> None:
-    """Write the ledger to disk. Called a few seconds after activity (never
-    inline with a request), hourly from the watchdog, and at shutdown; a hard
-    crash can lose at most those few seconds of metrics, never work."""
-    global _events_dirty, _events_flush_pending
-    _events_flush_pending = False
-    if not _events_dirty:
-        return
-    try:
-        rows = _load_events()
-        if jsonstore._store_writable(ACTIVITY_PATH):
-            jsonstore._write_json_store(ACTIVITY_PATH, "events", rows)
-        _events_dirty = False
-    except Exception:
-        logger.exception("activity ledger write failed")
-
-
-atexit.register(_events_flush)
-
-
-_login_noise = {"hour": "", "count": 0, "logged": 0}
-LOGIN_NOISE_ROWS = 10      # ledger rows per hour for unknown-username failures
-_deny_noise = {"hour": "", "logged": 0}
-DENY_NOISE_ROWS = 20       # ledger rows per hour for closed-tab refusals
-
-
-def _track_denied(uid: str, path: str) -> None:
-    """A signed-in account asking for a tab it does not have. One is a stale
-    browser; a run of them is somebody probing. Listed the first few an hour,
-    then not - the ledger must not be flushable from a member account."""
-    hour = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H")
-    if _deny_noise["hour"] != hour:
-        _deny_noise.update({"hour": hour, "logged": 0})
-    if _deny_noise["logged"] < DENY_NOISE_ROWS:
-        _deny_noise["logged"] += 1
-        _track(uid, "auth", "refused a closed tab", path[:120])
-    elif _deny_noise["logged"] == DENY_NOISE_ROWS:
-        _deny_noise["logged"] += 1
-        _track("", "auth", "refusals continuing",
-               "further closed-tab refusals this hour are not being listed")
-
-
-def _track_login_refusal(uid: str, reason: str, username: str = "") -> None:
-    """A failed login for an account that EXISTS but cannot sign in.
-
-    These were written one row per attempt, unthrottled. The ledger is a
-    fixed-size FIFO of 8000 rows, so anyone who could reach the login form and
-    knew one username - a switched-off ex-employee's, say - could push every
-    record of who booked a courier label, who marked orders made and who
-    changed team access out of the far end. The paused and switched-off
-    branches have no lockout of their own, so nothing else bounded them.
-
-    Coalesced on the same hourly budget as the unknown-username path: the first
-    few in full, then counted and said once.
-    """
-    _track_login_noise(username or "(known account)", uid=uid, reason=reason)
-
-
-def _track_login_noise(username: str, uid: str = "", reason: str = "") -> None:
-    """Failed logins for usernames that do not exist are the one ledger write
-    an unauthenticated caller can drive. Log the first few an hour in full,
-    then count silently and say so once - the audit history must not be
-    evictable by anyone who can reach the login form."""
-    hour = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H")
-    if _login_noise["hour"] != hour:
-        _login_noise.update({"hour": hour, "count": 0, "logged": 0})
-    _login_noise["count"] += 1
-    if _login_noise["logged"] < LOGIN_NOISE_ROWS:
-        _login_noise["logged"] += 1
-        _track(uid, "auth", "failed login",
-               reason or f"unknown username {username[:40]}")
-    elif _login_noise["logged"] == LOGIN_NOISE_ROWS:
-        _login_noise["logged"] += 1
-        _track("", "auth", "failed logins continuing",
-               "further failed sign-ins this hour are not being listed")
-
-
-def _track(sub: Optional[str], area: str, action: str, detail: str = "") -> None:
-    """One line in the ledger. Appends in memory and lets a debounced flush
-    carry it to disk, so no request pays for a full-file rewrite."""
-    global _events_dirty, _events_flush_pending
-    try:
-        rows = _load_events()
-        e = {"t": datetime.now(timezone.utc).isoformat(),
-             "sub": str(sub or ""), "area": area,
-             "action": str(action)[:80], "detail": str(detail)[:200]}
-        if not sub:
-            e["src"] = "system"    # webhooks, schedulers, integrations: never a person
-        elif _work_monitored(sub):
-            ws = _work_open_session(sub)
-            if ws:
-                e["ws"] = ws.get("id")   # billable: on the clock
-        rows.append(e)
-        # Also off the box. The ledger is a file on the volume it audits, so
-        # whatever loses the volume loses the evidence with it. Never allowed
-        # to raise: an audit trail must not be able to fail a booking.
-        try:
-            logdrain.audit(e)
-        except Exception:
-            pass
-        if len(rows) > ACTIVITY_MAX:
-            del rows[:len(rows) - ACTIVITY_MAX]
-        _events_dirty = True
-        try:
-            loop = asyncio.get_running_loop()
-            if not _events_flush_pending:
-                _events_flush_pending = True
-                loop.call_later(3, _events_flush)
-        except RuntimeError:
-            _events_flush()    # no loop here (boot, threads): write now
-    except Exception:
-        logger.exception("activity ledger write failed")
-
-
-def _team_counts(events: list, days: int = 30) -> dict:
-    """Per-person tallies over the window, grouped the way the shop thinks:
-    made, dispatched, files, sales desk, everything else."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    out: dict = {}
-    for e in events:
-        if e.get("t", "") < cutoff:
-            continue
-        sub = str(e.get("sub") or "")
-        c = out.setdefault(sub, {"made": 0, "dispatched": 0, "files": 0, "crm": 0, "other": 0})
-        a, area = str(e.get("action") or ""), e.get("area")
-        # Tallies mean WORK: undos subtract, and only real completions add.
-        if a == "marked made":
-            c["made"] += 1
-        elif a == "un-marked made":
-            c["made"] -= 1
-        elif a.startswith("booked a"):
-            c["dispatched"] += 1
-        elif a == "cancelled a shipment":
-            c["dispatched"] -= 1
-        elif a == "uploaded a file":
-            c["files"] += 1
-        elif area == "crm":
-            c["crm"] += 1
-        else:
-            c["other"] += 1
-    for c in out.values():
-        for k in c:
-            c[k] = max(0, c[k])
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -15167,7 +14295,7 @@ def _dav_check_auth(header: str):
         return None, 401
     username = username.strip().lower()
     now = time.time()
-    d = _load_users()
+    d = team._load_users()
     uid = next((k for k, u in d["users"].items()
                 if not u.get("deleted") and u.get("username") == username), None)
     u = d["users"].get(uid) if uid else None
@@ -15196,7 +14324,7 @@ def _dav_check_auth(header: str):
     # guards the account password, which the drive no longer takes, and
     # checking it let anyone who knew a username shut that person's Finder
     # with five wrong web passwords (audit R-C4).
-    if _user_tabs(uid) is not None and "files" not in (_user_tabs(uid) or []):
+    if team._user_tabs(uid) is not None and "files" not in (team._user_tabs(uid) or []):
         refused("the Files tab is switched off for their account")
         return level(403)
     if u.get("must_change"):
@@ -15215,7 +14343,7 @@ def _dav_check_auth(header: str):
         refused("they have not made a drive password on the Files page")
         return level(401)
     if not hmac.compare_digest(hashlib.sha256(pw.encode("utf-8")).hexdigest(), str(u.get("dav_pw"))):
-        _track_login_refusal(uid, "wrong drive password at the file drive")
+        activity._track_login_refusal(uid, "wrong drive password at the file drive")
         return None, 401
     return uid, None
 
@@ -15737,7 +14865,7 @@ def _mail_store_sick():
                            "Check Settings, Connections."}, 503)
 
 def _mail_lead(uid: str) -> bool:
-    return _team_level(uid) >= 2
+    return team._team_level(uid) >= 2
 
 def _mail_not_yours(t: dict, who: str):
     """The single-owner rule for WRITING into a conversation, shared by
@@ -15745,7 +14873,7 @@ def _mail_not_yours(t: dict, who: str):
     customer thread is a bigger act than moving its state, which is
     already owner-or-lead."""
     if not _mail_lead(who) and t.get("owner") and t.get("owner") != who:
-        return _json({"error": (_team_name(t["owner"]) or "Someone") + " is dealing with "
+        return _json({"error": (team._team_name(t["owner"]) or "Someone") + " is dealing with "
                                "this one. Ask them, or ask a lead to reassign it."}, 403)
     return None
 
@@ -16393,7 +15521,7 @@ def _files_ok(d: dict, extra: Optional[dict] = None, action: str = "",
     if delta is not None:
         return _json({"ok": True, **(extra or {}), "delta": delta})
     raw, rev = _files_sent(d)
-    return _json_spliced({"ok": True, **(extra or {}), "rev": rev}, "store", raw)
+    return gate._json_spliced({"ok": True, **(extra or {}), "rev": rev}, "store", raw)
 
 # ---- Auth + Team routes -----------------------------------------------
 # The app's own front door. Every route here still demands the Shopify
@@ -16415,7 +15543,7 @@ async def _auth_guard(request: Request):
         return pre, None
     if not _shop_gate(request):
         return _json({"error": "Unauthorized"}, 401), None
-    body = await _read_json_capped(request)
+    body = await gate._read_json_capped(request)
     if body is None:
         return _json({"error": "Request too large."}, 413), None
     return None, body
@@ -16440,13 +15568,13 @@ def _auth_me(uid: str, u: dict) -> dict:
     to disagree about what a person is allowed to do."""
     return {"id": uid, "name": u.get("name"), "role": u.get("role"),
             "must_change": bool(u.get("must_change")),
-            "tabs": _user_tabs(uid),
+            "tabs": team._user_tabs(uid),
             # Sending email out as the shop is a per-person grant, and an
             # admin holds it by rank. Both, separately, because the page
             # must not offer a switch that would revoke nothing.
             "can_send": bool(u.get("can_send")),
-            "send_by_rank": (ROLE_LEVELS.get(u.get("role") or "member", 0)
-                             >= ROLE_LEVELS["admin"])}
+            "send_by_rank": (team.ROLE_LEVELS.get(u.get("role") or "member", 0)
+                             >= team.ROLE_LEVELS["admin"])}
 
 # ---- Team management --------------------------------------------------
 async def _team_guard(request: Request, min_level: int):
@@ -16457,7 +15585,7 @@ async def _team_guard(request: Request, min_level: int):
 
 def _team_public_list(d: dict) -> list:
     users = [_user_public(uid, u) for uid, u in d["users"].items() if not u.get("deleted")]
-    users.sort(key=lambda u: (-ROLE_LEVELS.get(u["role"], 0), u["name"] or "~"))
+    users.sort(key=lambda u: (-team.ROLE_LEVELS.get(u["role"], 0), u["name"] or "~"))
     return users
 
 def _day_starts():
@@ -16780,7 +15908,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Unauthorized"}, 401)
         # No session and no rate window, like the Shopify webhook receiver: the
         # secret is the gate, and the reader caps what it will hold in memory.
-        body = await _read_json_capped(request, cap=FORECAST_MAX_BYTES)
+        body = await gate._read_json_capped(request, cap=FORECAST_MAX_BYTES)
         if body is None:
             return _json({"error": "Request too large."}, 413)
         if not isinstance(body, dict):
@@ -16857,7 +15985,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "The forecast hook is switched off: no hook token is set on this server."}, 503)
         if not _forecast_token_ok(request):
             return _json({"error": "Unauthorized"}, 401)
-        body = await _read_json_capped(request, cap=4096)
+        body = await gate._read_json_capped(request, cap=4096)
         if body is None:
             return _json({"error": "Request too large."}, 413)
         if not isinstance(body, dict):
@@ -16885,7 +16013,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                       "ledger": {"results": (led.get("results") or [])[-24:],
                                  "open": sorted(led.get("predicted") or {})[-6:]},
                       "hook_configured": bool(FORECAST_INGEST_TOKEN),
-                      "can_upload": _team_level(who) >= ROLE_LEVELS["admin"]})
+                      "can_upload": team._team_level(who) >= team.ROLE_LEVELS["admin"]})
 
     @mcp.custom_route("/api/forecast/workbook", methods=["POST"])
     async def forecast_workbook_upload_route(request: Request):
@@ -16898,9 +16026,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, _b, who = await _guard(request, max_body=cap, body=False)
         if err:
             return err
-        if _team_level(who) < ROLE_LEVELS["admin"]:
+        if team._team_level(who) < team.ROLE_LEVELS["admin"]:
             return _json({"error": "Only an admin can replace the cash flow workbook."}, 403)
-        body = await _read_json_capped(request, cap=cap)
+        body = await gate._read_json_capped(request, cap=cap)
         if body is None:
             return _json({"error": "That file is too large (8 MB cap)."}, 413)
         name = str(body.get("name") or "Cash Flow.xlsx")[:120]
@@ -16920,7 +16048,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "That file is not an .xlsx workbook."}, 400)
         state = _forecast_state()
         meta = {"name": name, "size": len(raw), "uploaded_at": datetime.now(timezone.utc).isoformat(),
-                "by": _team_name(who) or ""}
+                "by": team._team_name(who) or ""}
         state["workbook"] = {**meta, "data_b64": base64.b64encode(raw).decode("ascii")}
         jsonstore._write_json_store(FORECAST_PATH, "forecast", state)
         return _json({"ok": True, "workbook": meta})
@@ -16991,12 +16119,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         each waiting for an admin to erase or stop (see _redact_hold), and the
         data requests to answer. An admin's: erasing is for good, and stopping
         one keeps a customer's records against what Shopify asked."""
-        err, body, who = await _guard(request, min_level=ROLE_LEVELS["admin"])
+        err, body, who = await _guard(request, min_level=team.ROLE_LEVELS["admin"])
         if err:
             return err
         op = str(body.get("op") or "list")
         notice = ""
-        name = _team_name(who) or "an admin"
+        name = team._team_name(who) or "an admin"
         _load_privacy_log()
         if PRIVACY_LOG_PATH in jsonstore._poisoned_stores:
             return _json({"error": "The privacy requests cannot be read just now, so none can be shown. "
@@ -17147,7 +16275,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         except anthropic.APIError as e:
             logger.exception("Anthropic API error")
             return _json({"error": claude._ai_error_words(e)}, 502)
-        _chat_after(result, history, held=_team_level(_who) < ROLE_LEVELS["admin"], by=_team_name(_who))
+        _chat_after(result, history, held=team._team_level(_who) < team.ROLE_LEVELS["admin"], by=team._team_name(_who))
         result["deep"] = deep
         return _json(result)
 
@@ -17186,8 +16314,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             try:
                 result = await run_chat(history, dispatch_for(_who), tools, model, extra,
                                         emit=q.put, effort=_effort_for(model, deep), deep=deep)
-                _chat_after(result, history, held=_team_level(_who) < ROLE_LEVELS["admin"],
-                            by=_team_name(_who))
+                _chat_after(result, history, held=team._team_level(_who) < team.ROLE_LEVELS["admin"],
+                            by=team._team_name(_who))
                 result["deep"] = deep
                 await q.put({"type": "done", "result": result})
             except anthropic.APIError as e:
@@ -17251,7 +16379,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # click from a tab whose read had failed, or that another admin had
         # saved past, wrote its stale or empty text over the stored text.
         if isinstance(body.get("prefs"), dict) and not isinstance(body.get("profile"), dict):
-            if _team_level(_who) < ROLE_LEVELS["admin"]:
+            if team._team_level(_who) < team.ROLE_LEVELS["admin"]:
                 return _json({"error": "Only an admin can change the store profile."}, 403)
             try:
                 held = _load_profile()
@@ -17266,7 +16394,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 return _json({"error": "The setting could not be saved. Try again, or tell Cameron if it keeps happening."}, 500)
         # Save when a profile object is supplied; otherwise just load.
         if isinstance(body.get("profile"), dict):
-            if _team_level(_who) < ROLE_LEVELS["admin"]:
+            if team._team_level(_who) < team.ROLE_LEVELS["admin"]:
                 return _json({"error": "Only an admin can change the store profile."}, 403)
             try:
                 saved = _save_profile(body["profile"])
@@ -17290,7 +16418,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if err:
             return err
         if not who:
-            return _json({"error": AUTH_REFUSALS["session"], "reason": "session"}, 401)
+            return _json({"error": team.AUTH_REFUSALS["session"], "reason": "session"}, 401)
         # Any of these keys makes it a change, so a save that forgot its view
         # is told so instead of quietly answered with a read.
         if not any(k in body for k in ("view", "order", "hidden", "reset")):
@@ -17386,7 +16514,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # Notes are read into every answer and report for every account, so
         # adding, correcting and deleting them is an admin's call. Marking a
         # follow-up done changes no words, and stays open (audit R-003).
-        if op in ("add", "update", "delete") and _team_level(who) < ROLE_LEVELS["admin"]:
+        if op in ("add", "update", "delete") and team._team_level(who) < team.ROLE_LEVELS["admin"]:
             return _json({"error": "Only an admin can add, correct or delete notes."}, 403)
         try:
             if op == "add" and isinstance(body.get("items"), list):
@@ -17397,7 +16525,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 _track(who, "memory", "added to memory", str(len(body["items"])) + " item(s)")
             elif op == "set_status" and body.get("id"):
                 status = str(body.get("status") or "done")
-                if _team_level(who) < ROLE_LEVELS["admin"]:
+                if team._team_level(who) < team.ROLE_LEVELS["admin"]:
                     # Dismissing takes a note out of every answer, and keeping
                     # or reopening one puts it in (audit R-003).
                     note = next((m for m in _load_memory() if m.get("id") == str(body["id"])), None)
@@ -17434,12 +16562,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, body, who = await _guard(request, max_body=SKILLS_BODY_MAX, cap=SKILLS_BODY_MAX)
         if err:
             return err
-        master = _team_role(who) == "master"
+        master = team._team_role(who) == "master"
         cap = SKILL_UPLOAD_CAP if master else SKILL_BODY_CAP
         op = body.get("op")
         # Skills run as instructions in every admin's chat, every report and
         # every email draft, so writing one is an admin's call (audit R-003).
-        if op in ("add", "update", "delete") and _team_level(who) < ROLE_LEVELS["admin"]:
+        if op in ("add", "update", "delete") and team._team_level(who) < team.ROLE_LEVELS["admin"]:
             return _json({"error": "Only an admin can add, change or delete skills."}, 403)
         if op == "add" and body.get("file") and not master:
             return _json({"error": "Only the master account can upload skills from files. Write the skill here instead, "
@@ -17475,7 +16603,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # AI run, so it has its own door and spends the AI window there.
         # An admin's to run: the reading's rules and when-note go into every
         # account's answers, like the skill itself (found verifying R-003).
-        err, body, who = await _guard(request, ai=True, min_level=ROLE_LEVELS["admin"])
+        err, body, who = await _guard(request, ai=True, min_level=team.ROLE_LEVELS["admin"])
         if err:
             return err
         skills = _load_skills()
@@ -17510,7 +16638,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # This one route carries several tabs' cached results, so the tab map
         # cannot gate it wholesale: filter each section to what this account
         # may open, or a tab restriction would leak here.
-        allowed = _user_tabs(who)
+        allowed = team._user_tabs(who)
         def ok_tab(tab):
             return allowed is None or tab in allowed
         out = {k: cache[k] for k in ("overview", "seo", "keywords")
@@ -17552,7 +16680,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 emailed = False
                 try:
                     emailed = bool(await _send_alert_email(
-                        "Reactor: " + (_team_name(who) or "someone") + " asked for a feature",
+                        "Reactor: " + (team._team_name(who) or "someone") + " asked for a feature",
                         [title, detail or "(no detail given)"]
                         + (["Asked from the " + item["where"] + " page."] if item["where"] else [])))
                 except Exception:
@@ -17560,7 +16688,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 return _json({"ok": True, "item": item, "emailed": emailed})
             if op == "state":
                 # Triage. Admin+, because it speaks for the whole desk.
-                if _team_level(who) < ROLE_LEVELS["admin"]:
+                if team._team_level(who) < team.ROLE_LEVELS["admin"]:
                     return _json({"error": "Only an admin can triage requests."}, 403)
                 rid = str(body.get("id") or "")
                 state = str(body.get("state") or "")
@@ -17578,7 +16706,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 _track(who, "updates", "marked a request " + state, (hit.get("title") or "")[:60])
                 return _json({"ok": True, "item": hit})
             if op == "delete":
-                if _team_level(who) < ROLE_LEVELS["admin"]:
+                if team._team_level(who) < team.ROLE_LEVELS["admin"]:
                     return _json({"error": "Only an admin can remove requests."}, 403)
                 rid = str(body.get("id") or "")
                 d["items"] = [x for x in d.get("items", []) if x.get("id") != rid]
@@ -17602,7 +16730,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                 and (x.get("state_at") or "") > (seen.get("requests") or ""))
             new_for_triage = sum(1 for x in d.get("items", []) if x.get("state") == "open"
                                  and (x.get("at") or "") > (seen.get("requests") or ""))
-            can_triage = _team_level(who) >= ROLE_LEVELS["admin"]
+            can_triage = team._team_level(who) >= team.ROLE_LEVELS["admin"]
             unread = {"releases": max(0, len(_load_changelog()) - int(seen.get("releases") or 0)),
                       "requests": mine_answered + (new_for_triage if can_triage else 0)}
             if op == "version":
@@ -17611,7 +16739,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"ok": True, "releases": _load_changelog(),
                           "version": _app_version(), "unread": unread, "seen": seen,
                           "requests": d.get("items", [])[:200],
-                          "names": _team_names(), "me": who,
+                          "names": team._team_names(), "me": who,
                           "can_triage": can_triage})
         except (RuntimeError, OSError):
             # A read-only or full volume is a SAVE failure with a cause the
@@ -17630,7 +16758,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return err
         try:
             if isinstance(body.get("config"), dict):
-                if _team_level(_who) < ROLE_LEVELS["admin"]:
+                if team._team_level(_who) < team.ROLE_LEVELS["admin"]:
                     return _json({"error": "Only an admin can change the schedule."}, 403)
                 cfg = _save_schedule(body["config"])
                 _track(_who, "settings", "changed the audit schedule")
@@ -17667,7 +16795,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, _body, _who = await _guard(request, body=False)
         if err:
             return err
-        body = await _read_json_capped(request)
+        body = await gate._read_json_capped(request)
         days = 30
         if isinstance(body, dict):
             try:
@@ -17707,7 +16835,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 added = {"id": secrets.token_hex(5), "text": text,
                          "source": str(body.get("source") or "copilot")[:24],
                          "baseline": snap, "started_at": snap["at"], "status": "tracking",
-                         "by_uid": str(who or ""), "by": _team_name(who) if who else ""}
+                         "by_uid": str(who or ""), "by": team._team_name(who) if who else ""}
                 items.insert(0, added)
                 items = _write_impact(items)
                 return _json({"item": added, "impact": _impact_with_deltas(items, snap), "current": snap})
@@ -17716,7 +16844,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # drop an admin's change, or conclude it into a note that
                 # waits, where the admin's own Conclude could no longer reach.
                 mine = next((x for x in items if x.get("id") == body["id"]), None)
-                if mine is not None and _team_level(who) < ROLE_LEVELS["admin"] \
+                if mine is not None and team._team_level(who) < team.ROLE_LEVELS["admin"] \
                         and not (mine.get("by_uid") and mine.get("by_uid") == str(who or "")):
                     return _json({"error": "Only an admin or the person who tracked it can change that."}, 403)
             if op == "delete" and body.get("id"):
@@ -17733,11 +16861,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                             # or concluded it; a change from before anyone
                             # was recorded waits too (R-003).
                             tracker = str(x.get("by_uid") or "")
-                            held = (_team_level(who) < ROLE_LEVELS["admin"]
-                                    or not tracker or _team_level(tracker) < ROLE_LEVELS["admin"])
+                            held = (team._team_level(who) < team.ROLE_LEVELS["admin"]
+                                    or not tracker or team._team_level(tracker) < team.ROLE_LEVELS["admin"])
                             _add_memories([{"type": "insight", "text": _impact_learning_text(x, cur)}],
                                           source="tracked change", held=held,
-                                          by=(x.get("by") or _team_name(who) or "a tracked change") if held else "")
+                                          by=(x.get("by") or team._team_name(who) or "a tracked change") if held else "")
                             if held:
                                 out_held = True
                         except Exception:
@@ -17763,7 +16891,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def learn_run_route(request: Request):
         # The one AI run on the Memory page, with a door of its own so the
         # paid window is spent by the door like every other paid route.
-        err, _body, _who = await _guard(request, ai=True, min_level=ROLE_LEVELS["admin"])
+        err, _body, _who = await _guard(request, ai=True, min_level=team.ROLE_LEVELS["admin"])
         if err:
             return err
         try:
@@ -17791,7 +16919,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if op == "learn":
             return _json({"error": "Reload the page, then press Learn again."}, 400)
         # Quoted as authoritative background into every answer: an admin's to change (audit R-003).
-        if op in ("save", "delete") and _team_level(_who) < ROLE_LEVELS["admin"]:
+        if op in ("save", "delete") and team._team_level(_who) < team.ROLE_LEVELS["admin"]:
             return _json({"error": "Only an admin can change the store knowledge."}, 403)
         if op == "save":
             # A person correcting what was learned: it is quoted as authoritative
@@ -17809,7 +16937,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 data = _save_knowledge(text, list(held.get("sources") or []))
                 data["edited_at"] = data["learned_at"]
                 data["learned_at"] = held.get("learned_at") or data["learned_at"]
-                data["edited_by"] = _team_name(_who) or ""
+                data["edited_by"] = team._team_name(_who) or ""
                 if jsonstore._store_writable(KNOWLEDGE_PATH):
                     jsonstore._write_json_store(KNOWLEDGE_PATH, None, data)
                 _track(_who, "memory", "edited the store knowledge")
@@ -17860,9 +16988,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, _body, who = await _guard(request, max_body=big, body=False)
         if err:
             return err
-        if _team_level(who) < ROLE_LEVELS["admin"]:
+        if team._team_level(who) < team.ROLE_LEVELS["admin"]:
             return _json({"error": "Only an admin can replace the size list."}, 403)
-        body = await _read_json_capped(request, cap=big)
+        body = await gate._read_json_capped(request, cap=big)
         if body is None:
             return _json({"error": "That file is too large (2 MB cap)."}, 413)
         text = str(body.get("csv") or "")
@@ -18018,7 +17146,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not _may_edit_sizes(who):
             return _json({"error": "You do not have access to edit the size list. "
                           "An admin can grant it on the Team tab."}, 403)
-        body = await _read_json_capped(request)
+        body = await gate._read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
         op = str(body.get("op") or "")
@@ -18177,7 +17305,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # retyping it: a redirect URI that differs by one character is
             # the single most common way this setup fails.
             setup = {}
-            if _team_role(who) == "master" and not google_mail.connected():
+            if team._team_role(who) == "master" and not google_mail.connected():
                 setup = {"project": google_mail.project_number(),
                          "redirect_uri": _gmail_redirect_uri(request)}
             rows = _mail_board_shape(store, window=True)
@@ -18205,12 +17333,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # minute (the 2026-10-12 speed audit, S6). A poll that holds it
             # is sent that time alone; anything else gets the whole board,
             # serialised once and the time and revision added to its end.
-            raw = _json_dumps_like_starlette(out)
+            raw = gate._json_dumps_like_starlette(out)
             rev = hashlib.blake2b(raw, digest_size=8).hexdigest()
             synced = store.get("synced_at") or ""
             if not body.get("force") and str(body.get("rev") or "") == rev:
                 return _json({"same": True, "rev": rev, "synced_at": synced})
-            return _json_body(raw[:-1] + b"," + _json_dumps_like_starlette({"synced_at": synced, "rev": rev})[1:])
+            return gate._json_body(raw[:-1] + b"," + gate._json_dumps_like_starlette({"synced_at": synced, "rev": rev})[1:])
         except Exception:
             logger.exception("mail board failed")
             return _json({"error": "Couldn't load the inbox board."}, 500)
@@ -18235,8 +17363,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         now = time.monotonic()
         v = _mail_viewers.setdefault(t["id"], {})
         v[who] = now
-        viewers = [_team_name(u) for u, ts in v.items()
-                   if u != who and now - ts < MAIL_VIEW_SECONDS and _team_name(u)]
+        viewers = [team._team_name(u) for u, ts in v.items()
+                   if u != who and now - ts < MAIL_VIEW_SECONDS and team._team_name(u)]
         return _json({"thread": {**{k: t.get(k) for k in
                                     ("id", "subject", "from_name", "from_email", "state",
                                      "owner", "first_at", "last_at", "state_at", "done_at",
@@ -18244,8 +17372,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                      "files", "saved_files", "crm_deal_id",
                                      "in_inbox", "sent_at", "sent_by", "sent_to",
                                      "started_to")},
-                                 "owner_name": _team_name(t["owner"]) if t.get("owner") else "",
-                                 "sent_by_name": (_team_name(t["sent_by"])
+                                 "owner_name": team._team_name(t["owner"]) if t.get("owner") else "",
+                                 "sent_by_name": (team._team_name(t["sent_by"])
                                                   if t.get("sent_by") else ""),
                                  "send_pending": _mail_pending_shape(t.get("send_pending")),
                                  "messages": t.get("messages", [])},
@@ -18255,7 +17383,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                       # locked out of the CRM does not learn membership,
                       # org names, or ids through the side door of an email.
                       "crm": (_mail_crm_match(t.get("from_email") or "")
-                              if (_user_tabs(who) is None or "crm" in _user_tabs(who)) else None),
+                              if (team._user_tabs(who) is None or "crm" in team._user_tabs(who)) else None),
                       "me": who, "lead": _mail_lead(who)})
 
     @mcp.custom_route("/api/mail/viewing", methods=["POST"])
@@ -18276,8 +17404,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         v[who] = now
         for u in [u for u, ts in v.items() if now - ts > MAIL_VIEW_SECONDS * 4]:
             v.pop(u, None)
-        return _json({"viewers": [_team_name(u) for u, ts in v.items()
-                                  if u != who and now - ts < MAIL_VIEW_SECONDS and _team_name(u)]})
+        return _json({"viewers": [team._team_name(u) for u, ts in v.items()
+                                  if u != who and now - ts < MAIL_VIEW_SECONDS and team._team_name(u)]})
 
     @mcp.custom_route("/api/mail/claim", methods=["POST"])
     async def mail_claim_route(request: Request):
@@ -18291,7 +17419,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if sick:
             return sick
         if t.get("owner"):
-            return _json({"error": f"{_team_name(t['owner']) or 'Someone'} already has this one. "
+            return _json({"error": f"{team._team_name(t['owner']) or 'Someone'} already has this one. "
                                    "Ask a lead to reassign it."}, 409)
         t["owner"], t["owner_since"] = who, _mail_now()
         t["state"], t["state_at"] = "assigned", _mail_now()
@@ -18340,16 +17468,16 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if note:
             t.setdefault("notes", []).append({"at": _mail_now(), "by": who, "text": note})
         if target:
-            _mail_log(t, who, "assigned to " + (_team_name(target) or "someone"),
+            _mail_log(t, who, "assigned to " + (team._team_name(target) or "someone"),
                       ("handover: " + note[:80]) if note else "")
         else:
             _mail_log(t, who, "released", ("note: " + note[:80]) if note else "")
         _write_mail(_load_mail())
         _mail_labels_soon(t["id"])
         _track(who, "mail",
-               ("assigned an email to " + (_team_name(target) or "someone")) if target
+               ("assigned an email to " + (team._team_name(target) or "someone")) if target
                else "released an email",
-               (t.get("subject") or "")[:60] + ((" (was " + (_team_name(prev) or "?") + ")")
+               (t.get("subject") or "")[:60] + ((" (was " + (team._team_name(prev) or "?") + ")")
                                                 if prev and target and prev != target else ""))
         return _json({"ok": True})
 
@@ -18514,7 +17642,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                          + "\n<<<" + fence + "\n" + said + "\n" + fence + ">>>")
         prev = str(body.get("previous") or "").strip()
         crm = (_mail_crm_match(t.get("from_email") or "")
-               if (_user_tabs(who) is None or "crm" in _user_tabs(who)) else None)
+               if (team._user_tabs(who) is None or "crm" in team._user_tabs(who)) else None)
         facts = []
         if crm:
             # The name and org are whatever was typed into the CRM - which for
@@ -18542,7 +17670,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         ctx = {}
         tgt = _mail_reply_target(msgs, addr)
         same = tgt.get("to") and tgt["to"] == (t.get("from_email") or "").strip().lower()
-        if not (_user_tabs(who) is not None and "customers" not in _user_tabs(who)):
+        if not (team._user_tabs(who) is not None and "customers" not in team._user_tabs(who)):
             if same:
                 try:
                     ctx = await _mail_orders_for(tgt["to"])
@@ -18567,7 +17695,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # that said 'customer'.
         playbooks = _skills_for_draft((t.get("subject") or "") + "\n"
                                       + "\n".join((m.get("text") or "")[:3900] for m in msgs[-2:]) + "\n" + guidance)
-        prompt = ("You are writing as " + (_team_name(who) or "a member of staff")
+        prompt = ("You are writing as " + (team._team_name(who) or "a member of staff")
                   + ", who is dealing with this email.\n\n"
                   + ("Known facts you MAY use:\n" + "\n".join(facts) + "\n\n" if facts else "")
                   + ("The shop's own playbooks that fit this email, each in a <skill> block. Follow them "
@@ -18594,7 +17722,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # was the one that neither took nor respected one.
         # (Checked here, as the reconciliation's investigate does: only the one
         # door hands out slots, and this route's Save is no AI call at all.)
-        if not _window_ok(_rl_global, RATE_MAX_GLOBAL, time.monotonic()):
+        if not gate._window_ok(gate._rl_global, gate.RATE_MAX_GLOBAL, time.monotonic()):
             return _json({"error": "The assistant is busy right now. Please try again shortly."}, 429)
         try:
             claude._ai_kind.set("draft")
@@ -19154,7 +18282,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not _files_configured():
             return _json({"error": "The files store is not set up, so there is nowhere "
                                    "to put it."}, 400)
-        if _user_tabs(who) is not None and "files" not in _user_tabs(who):
+        if team._user_tabs(who) is not None and "files" not in team._user_tabs(who):
             return _json({"error": "You do not have the Files tab."}, 403)
         msg_id = str(body.get("msg") or "")
         att_id = str(body.get("att") or "")
@@ -19343,7 +18471,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         t, missing = _mail_thread_or_404(body)
         if missing:
             return missing
-        if _user_tabs(who) is not None and "customers" not in _user_tabs(who):
+        if team._user_tabs(who) is not None and "customers" not in team._user_tabs(who):
             # The same courtesy the CRM chip observes: an account locked out
             # of customers does not learn their order history sideways.
             return _json({"orders": []})
@@ -19404,13 +18532,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             text, why = _mail_clean_sign_off(body.get("text"))
             if why:
                 return _json({"error": why}, 400)
-            d = _load_users()
+            d = team._load_users()
             u = d["users"].get(str(who))
             if not u:
                 return _json({"error": "That account does not exist."}, 400)
             u["sign_off"] = text
             try:
-                _write_users(d)
+                team._write_users(d)
             except Exception:
                 logger.exception("mail: the sign-off could not be saved")
                 return _json({"error": "The accounts register cannot be written right "
@@ -19607,7 +18735,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 v = str(c.get("value") or "").strip()[:200]
                 if f in MAIL_RULE_FIELDS and o in MAIL_RULE_OPS and v:
                     conds.append({"field": f, "op": o, "value": v})
-            pool = [u for u in (src.get("pool") or []) if _team_user(u)][:12]
+            pool = [u for u in (src.get("pool") or []) if team._team_user(u)][:12]
             assign = str(src.get("assign") or "")
             if assign not in ("", "_round") and not _mail_can_own(assign):
                 assign = ""
@@ -19770,7 +18898,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if op == "claim":
                 if t.get("owner"):
                     skipped.append({"id": tid,
-                                    "why": (_team_name(t["owner"]) or "someone") + " already has it"})
+                                    "why": (team._team_name(t["owner"]) or "someone") + " already has it"})
                     continue
                 t["owner"], t["owner_since"] = who, _mail_now()
                 t["state"], t["done_at"] = "assigned", ""
@@ -19790,7 +18918,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         t["state"], t["done_at"] = "assigned", ""
                 else:
                     t["state"], t["done_at"] = "unassigned", ""
-                _mail_log(t, who, ("assigned to " + (_team_name(target) or "someone"))
+                _mail_log(t, who, ("assigned to " + (team._team_name(target) or "someone"))
                           if target else "released")
             else:
                 if not lead and t.get("owner") != who:
@@ -19809,7 +18937,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             before.append(snap)
             done += 1
         _write_mail(_load_mail())
-        label = {"claim": "claimed", "assign": ("assigned to " + (_team_name(target) or "the room")
+        label = {"claim": "claimed", "assign": ("assigned to " + (team._team_name(target) or "the room")
                                                 if target else "released"),
                  "state": ("marked done" if state == "done" else "moved to " + state)}[op]
         if done:
@@ -19895,12 +19023,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         p = str(body.get("presence") or "")
         if p not in MAIL_PRESENCE and p != "":
             return _json({"error": "Pick a real presence."}, 400)
-        d = _load_users()
+        d = team._load_users()
         u = d["users"].get(who)
         if not u:
             return _json({"error": "Unauthorized"}, 401)
         u["presence"] = p
-        _write_users(d)
+        team._write_users(d)
         return _json({"ok": True, "presence": p})
 
     @mcp.custom_route("/api/restore", methods=["POST"])
@@ -19915,9 +19043,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, _body, who = await _guard(request, max_body=big, body=False)
         if err:
             return err
-        if _team_role(who) != "master":
+        if team._team_role(who) != "master":
             return _json({"error": "Only the master admin can restore a backup."}, 403)
-        body = await _read_json_capped(request, cap=big)
+        body = await gate._read_json_capped(request, cap=big)
         if body is None:
             return _json({"error": "That file is too large (120 MB cap)."}, 413)
         import io as _io
@@ -19930,7 +19058,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         data_dir = os.path.dirname(SCHEDULE_PATH) or "/data"
         # Only what the backup itself writes, and never live credentials or
         # sessions: the same exclusions the backup applies, applied again.
-        blocked = {os.path.basename(desk.WO_SECRET_PATH), os.path.basename(SESSIONS_PATH),
+        blocked = {os.path.basename(desk.WO_SECRET_PATH), os.path.basename(team.SESSIONS_PATH),
                    os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json")),
                    os.path.basename(getattr(google_mail, "TOKEN_PATH", "gmail_oauth.json")),
                    os.path.basename(getattr(xero_api, "TOKEN_PATH", "xero_oauth.json")),
@@ -19986,7 +19114,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # so no new request can race the restore (this request already holds
         # its authorisation), and the files lock is held through the writes so
         # an upload in flight commits before us, never after us.
-        _write_sessions({})
+        team._write_sessions({})
         _dav_auth_cache.clear()
         restored_names = []
         # Live state, not data: an erasure owed now and how long the store
@@ -19997,12 +19125,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         live_watch = _load_watch()
         live_watch = live_watch if isinstance(live_watch, dict) else {}
         def _drop_all_caches():
-            global _events_dirty
             # Every memory copy, from the one list: the loan register was
             # missing from the hand-kept one here, so a restored loans.json
             # was overwritten by the pre-restore register on the next loan.
             jsonstore._drop_memory_stores()
-            _events_dirty = False
+            activity._events_dirty = False
             _dav_auth_cache.clear()
             jsonstore._json_cache.clear()
         async with _files_lock:
@@ -20075,7 +19202,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         restored = len(restored_names)
         # Every memory copy now lies; drop them all and start from disk truth.
         _drop_all_caches()
-        _write_sessions({})          # already empty; re-assert against the restored disk
+        team._write_sessions({})          # already empty; re-assert against the restored disk
         # Written AFTER the caches are dropped, so it lands in the RESTORED
         # ledger: the history now on the volume is the backup's, and this is
         # the line that says where it came from and who did it. Without it the
@@ -20083,7 +19210,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         _track(who, "settings", "restored a backup",
                f"{restored} files; the history before this line is from the backup"
                + (f" built {built_at}" if built_at else ""))
-        _events_flush()
+        activity._events_flush()
         logger.warning("backup restored by %s: %d files; all sessions dropped", who, restored)
         return _json({"ok": True, "restored": restored, "backup_built_at": built_at,
                       "files": sorted(restored_names), "skipped": sorted(skipped),
@@ -20104,10 +19231,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # accounts register, so an admin could take home every password hash
         # (including the master's) and grind it offline - while not being
         # trusted to restore. Export and restore now need the same standing.
-        if _team_role(who) != "master":
+        if team._team_role(who) != "master":
             return _json({"error": "Only the master account can download a backup, because "
                                    "it contains the accounts register."}, 403)
-        body = await _read_json_capped(request)
+        body = await gate._read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
         # Off the event loop, as the pre-import snapshot is: deflating the
@@ -20150,9 +19277,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if err:
             return err
         uid = _live_uid(request)
-        if _team_level(uid) < ROLE_LEVELS["admin"]:
+        if team._team_level(uid) < team.ROLE_LEVELS["admin"]:
             return _json({"error": "Only an admin can change an order."}, 403)
-        body = await _read_json_capped(request)
+        body = await gate._read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
         oid = str(body.get("order_id") or "").strip()
@@ -20404,7 +19531,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, body, who = await _mail_guard(request)
         if err:
             return err
-        if _team_role(who) != "master":
+        if team._team_role(who) != "master":
             return _json({"error": "Only the master account can import."}, 403)
         if not pipedrive.configured():
             return _json({"error": "No Pipedrive token is set on the server."}, 400)
@@ -20472,7 +19599,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, _body, who = await _mail_guard(request)
         if err:
             return err
-        if _team_role(who) != "master":
+        if team._team_role(who) != "master":
             return _json({"error": "Only the master account can look at Pipedrive."}, 403)
         if not pipedrive.configured():
             return _json({"error": "No Pipedrive token is set on the server. Add one from an "
@@ -20558,7 +19685,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # not read correspondence through the side door of a deal.
                 out = {"ok": True, "notes": deal.get("notes") or [],
                        "changelog": deal.get("changelog") or []}
-                tabs = _user_tabs(actor)
+                tabs = team._user_tabs(actor)
                 if tabs is None or "mail" in tabs:
                     out["threads"] = _crm_deal_threads(d, deal)
                     out["mail_days"] = MAIL_TRACK_DAYS
@@ -20775,7 +19902,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # This returns Shopify customer names, emails and lifetime
                 # spend. It is a CUSTOMERS read wearing a CRM route, so an
                 # account denied that tab must not reach it from here.
-                tabs = _user_tabs(actor)
+                tabs = team._user_tabs(actor)
                 if tabs is not None and "customers" not in tabs:
                     return _json({"error": "Searching Shopify customers needs the Customers "
                                            "tab, which is switched off for your account."}, 403)
@@ -20929,7 +20056,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # Clearing test/sample contacts in one pass. Master-only and
                 # guarded per record: anyone on an OPEN deal is skipped and
                 # NAMED, never silently removed from under live pipeline.
-                if _team_role(actor) != "master":
+                if team._team_role(actor) != "master":
                     return _json({"error": "Only the master account can bulk-delete contacts."}, 403)
                 kind = "orgs" if str(body.get("kind") or "") == "org" else "persons"
                 ref = "org_id" if kind == "orgs" else "person_id"
@@ -20956,7 +20083,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if op == "shopify_link_sweep":
                 # Bulk fill of every unlinked contact. Master-only, like the
                 # import: it writes 2,800 records in one press.
-                if _team_role(actor) != "master":
+                if team._team_role(actor) != "master":
                     return _json({"error": "Only the master account can run the link sweep."}, 403)
                 rep = await _crm_shopify_link_sweep(registry)
                 d = _load_crm()
@@ -21141,7 +20268,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # changes the board under everyone. Every sibling that rewrites this
         # store the same way (import, survey, bulk delete, link sweep) is
         # already role-gated; this one was reachable by anyone with the tab.
-        if _team_level(actor) < ROLE_LEVELS["admin"]:
+        if team._team_level(actor) < team.ROLE_LEVELS["admin"]:
             return _json({"error": "Only an admin can change the pipeline, its labels "
                                    "or the lost reasons."}, 403)
         try:
@@ -21255,12 +20382,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if err:
             return err
         op = str(body.get("op") or "")
-        d = _load_users()
+        d = team._load_users()
         u = d["users"].get(who)
         if not u:
             return _json({"error": "Your account could not be found."}, 404)
         if op in ("create", "remove"):
-            if USERS_PATH in jsonstore._poisoned_stores:
+            if team.USERS_PATH in jsonstore._poisoned_stores:
                 return _json({"error": "The accounts could not be read, so nothing can change until they are repaired."}, 503)
             pw = ""
             if op == "create":
@@ -21271,7 +20398,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 u.pop("dav_pw", None)
                 u.pop("dav_pw_at", None)
             try:
-                _write_users(d)
+                team._write_users(d)
             except RuntimeError:
                 return _json({"error": "The drive password could not be saved. Try again."}, 500)
             _dav_drop_cache(who)
@@ -21293,7 +20420,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # again. One with none, open from before this update, gets it.
             if str((body or {}).get("rev") or "") == rev:
                 return _json({"same": True, "rev": rev})
-            return _json_spliced({"rev": rev}, "store", raw)
+            return gate._json_spliced({"rev": rev}, "store", raw)
         except Exception:
             logger.exception("files tree failed")
             return _json({"error": "Couldn't load the files."}, 500)
@@ -21595,7 +20722,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                      action=("put files in the trash" if op == "trash"
                                              else "moved files"), detail=label, who=_who)
                 if op == "empty_trash":
-                    if _team_level(_who) < ROLE_LEVELS["admin"]:
+                    if team._team_level(_who) < team.ROLE_LEVELS["admin"]:
                         return _json({"error": "Only an admin can delete files for good."}, 403)
                     doomed = [k for k, v in d["files"].items() if v.get("trashed_at")]
                     if not doomed:
@@ -21655,7 +20782,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     # the space frees), the key joins the doomed list, and the
                     # hourly reaper removes the bytes from the bucket. The
                     # trash is the undo; skipping it is an admin's call.
-                    if _team_level(_who) < ROLE_LEVELS["admin"]:
+                    if team._team_level(_who) < team.ROLE_LEVELS["admin"]:
                         return _json({"error": "Only an admin can delete files for good."}, 403)
                     if not f.get("trashed_at"):
                         return _json({"error": "Only files already in the trash can be "
@@ -21677,637 +20804,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
 
 
-    @mcp.custom_route("/api/auth/state", methods=["POST"])
-    async def auth_state_route(request: Request):
-        err, _body = await _auth_guard(request)
-        if err:
-            return err
-        if _team_setup_needed():
-            return _json({"setup": True, "logged_in": False})
-        uid = _session_uid(request.headers.get("x-app-session"))
-        u = _team_user(uid)
-        if not u or not u.get("active", True):
-            return _json({"setup": False, "logged_in": False})
-        return _json({"setup": False, "logged_in": True, "me": _auth_me(uid, u)})
-
-    @mcp.custom_route("/api/auth/setup", methods=["POST"])
-    async def auth_setup_route(request: Request):
-        # First run only: create the master account. The moment one account
-        # exists this door is bricked shut.
-        err, body = await _auth_guard(request)
-        if err:
-            return err
-        if not _team_setup_needed():
-            return _json({"error": "The app is already set up."}, 400)
-        # The sign-in form's own ceiling applies: the code is a password.
-        if len(_login_hits) > 5000:
-            _login_hits.clear()
-        if not _window_ok(_login_hits.setdefault(_client_key(request), []),
-                          LOGIN_MAX_PER_MIN, time.monotonic()):
-            return _json({"error": "Too many attempts from here. Wait a minute and try again."}, 429)
-        if not SETUP_CODE:
-            return _json({"error": "First-time setup is locked. Whoever runs the server sets a one-time setup "
-                                   "code first, then you type it here.", "reason": "setup_locked"}, 403)
-        if not hmac.compare_digest(str(body.get("setup_code") or "").strip().encode("utf-8"),
-                                   SETUP_CODE.encode("utf-8")):
-            logger.warning("first-run setup refused: wrong setup code")
-            return _json({"error": "That setup code is not right."}, 403)
-        name = str(body.get("name") or "").strip()[:60]
-        username = _clean_username(body.get("username"))
-        pw = str(body.get("password") or "")
-        if not name or not username:
-            return _json({"error": "A name and a username are both needed."}, 400)
-        if len(pw) < 8:
-            return _json({"error": "The password needs at least 8 characters."}, 400)
-        try:
-            d = _load_users()
-            d["seq"] = int(d.get("seq") or 0) + 1
-            uid = f"u{d['seq']}"
-            d["users"][uid] = {"name": name, "username": username, "pw": _hash_pw(pw),
-                               "role": "master", "active": True, "deleted": False,
-                               "must_change": False, "fails": 0, "lock_until": "",
-                               "created_at": datetime.now(timezone.utc).isoformat(),
-                               "last_login_at": datetime.now(timezone.utc).isoformat()}
-            _write_users(d)
-            try:
-                state = _load_watch()
-                state["team_established"] = True
-                _save_watch(state)
-            except Exception:
-                logger.exception("could not record that setup happened")
-            token = _new_session(uid)
-            _track(uid, "team", "set up the app", f"{name} is the master admin")
-            return _json({"ok": True, "session": token, "me": _auth_me(uid, d["users"][uid])})
-        except RuntimeError:
-            return _json({"error": "The account could not be saved. The data volume may be "
-                                   "unwritable; check the server's storage."}, 500)
-
-    @mcp.custom_route("/api/auth/login", methods=["POST"])
-    async def auth_login_route(request: Request):
-        err, body = await _auth_guard(request)
-        if err:
-            return err
-        # The login form's OWN ceiling. _pre_checks allows 120 requests a
-        # minute, which is right for a page listing orders and far too wide for
-        # one that checks passwords: the per-account lockout does nothing
-        # against someone spraying a single password across many usernames.
-        if len(_login_hits) > 5000:
-            _login_hits.clear()
-        if not _window_ok(_login_hits.setdefault(_client_key(request), []),
-                          LOGIN_MAX_PER_MIN, time.monotonic()):
-            return _json({"error": "Too many sign-in attempts from here. Wait a "
-                                   "minute and try again."}, 429)
-        username = _clean_username(body.get("username"))
-        pw = str(body.get("password") or "")
-        d = _load_users()
-        uid = _find_username(d, username)
-        u = d["users"].get(uid) if uid else None
-        now = datetime.now(timezone.utc)
-        # One vague answer for every failure: which part was wrong is nobody's
-        # business at the door.
-        vague = _json({"error": "That username and password do not match."}, 401)
-        if not u:
-            # Spend what an existing account would: three of the four failure
-            # paths returned before _check_pw ran, so the response TIME answered
-            # the question the vague body refuses to. One dummy verify levels it.
-            _check_pw(pw, _PW_DUMMY)
-            # Coalesced, not one row per attempt. The ledger is a fixed-size
-            # FIFO, and this endpoint is reachable by any Shopify staff user of
-            # the store with no gizmo account at all - unbounded rows here let
-            # a burst of bad logins flush the whole audit history out of it.
-            _track_login_noise(username)
-            return vague
-        if str(u.get("lock_until") or "") > now.isoformat():
-            # Locked answers exactly like wrong: a different reply would tell
-            # a guesser which usernames exist.
-            _track_login_refusal(uid, "account is paused")
-            return vague
-        if not u.get("active", True):
-            _track_login_refusal(uid, "account is switched off")
-            return vague
-        exp = str(u.get("pw_expires_at") or "")
-        if exp and exp < now.isoformat():
-            # A break-glass password that was never used in time. Refused
-            # exactly like a wrong one, so the reply says nothing about which
-            # accounts exist or which are mid-reset.
-            _track_login_refusal(uid, "the temporary password had expired")
-            return vague
-        if not _check_pw(pw, u.get("pw") or ""):
-            _note_wrong_password(d, u, uid, now=now)
-            _track_login_refusal(uid, "wrong password")
-            return vague
-        u["fails"] = 0
-        u["lock_until"] = ""
-        # The escalation goes with them: proving you are the account holder
-        # ends the run of locks, so one bad afternoon cannot make every
-        # future mistake cost four hours.
-        u["locks"] = 0
-        u["last_login_at"] = now.isoformat()
-        try:
-            _write_users(d)
-        except RuntimeError:
-            pass
-        if u.get("mfa_secret"):
-            # The password was right and that is now only half of it. A ticket,
-            # not a session: short-lived, single-use, and it carries no
-            # authority of its own - it only names who is half way in.
-            ticket = _mfa_ticket(uid)
-            _track(uid, "auth", "password accepted, waiting on the second factor")
-            return _json({"ok": True, "mfa": True, "ticket": ticket})
-        token = _new_session(uid)
-        _track(uid, "auth", "logged in")
-        return _json({"ok": True, "session": token, "me": _auth_me(uid, u)})
-
-    @mcp.custom_route("/api/auth/mfa", methods=["POST"])
-    async def auth_mfa_route(request: Request):
-        """Turn a second factor on, or ask whether it is on. Behind a session:
-        you enrol as yourself, from inside."""
-        err, body, who = await _guard(request)
-        if err:
-            return err
-        op = str(body.get("op") or "status")
-        d = _load_users()
-        u = d["users"].get(str(who))
-        if not u:
-            return _json({"error": "That account does not exist."}, 400)
-        if op == "status":
-            return _json({"enabled": bool(u.get("mfa_secret")),
-                          "recovery_left": len(u.get("mfa_recovery") or [])})
-        if op in ("start", "off"):
-            # The password, again, from inside the session. A session is a
-            # token in a browser; the second factor exists for the day that
-            # token is in the wrong hands, and a change to it that the token
-            # alone could make would be a lock whose key hangs on the door.
-            if _locked_now(u):
-                return _json({"error": "Too many wrong attempts. Try again in a few minutes."}, 429)
-            if not _check_pw(str(body.get("current") or ""), u.get("pw") or ""):
-                _note_wrong_password(d, u, who, " at the second-factor settings")
-                _track(who, "auth", "refused a second-factor change", "wrong password")
-                return _json({"error": "Enter your current password to change two-step sign-in."}, 400)
-            u["fails"] = 0
-        if op == "start":
-            # Held UNCONFIRMED until a code proves the app really has it.
-            # Enrolling on "I scanned it" is how people lock themselves out.
-            secret = totp.new_secret()
-            u["mfa_pending"] = tokenvault.seal(secret)
-            _write_users(d)
-            _track(who, "auth", "started setting up a second factor")
-            return _json({"secret": secret,
-                          "uri": totp.provisioning_uri(secret, u.get("username") or "user")})
-        if op == "confirm":
-            pending = u.get("mfa_pending")
-            if not pending:
-                return _json({"error": "Start setting up the second factor first."}, 400)
-            secret = tokenvault.unseal(str(pending))
-            if not totp.verify(secret, body.get("code")):
-                return _json({"error": "That code did not match. Check the clock on "
-                              "your phone and try the current code."}, 400)
-            codes = totp.recovery_codes(8)
-            u["mfa_secret"] = tokenvault.seal(secret)
-            u["mfa_recovery"] = [totp.hash_recovery(c) for c in codes]
-            u["mfa_at"] = datetime.now(timezone.utc).isoformat()
-            u["mfa_counter"] = totp.verify_counter(secret, body.get("code"))
-            u["mfa_fails"] = 0
-            u.pop("mfa_pending", None)
-            _write_users(d)
-            _track(who, "auth", "turned on a second factor")
-            # The only time these are readable. They are stored hashed.
-            return _json({"ok": True, "recovery": codes})
-        if op == "off":
-            for k in ("mfa_secret", "mfa_recovery", "mfa_pending", "mfa_counter", "mfa_fails"):
-                u.pop(k, None)
-            _write_users(d)
-            _track(who, "auth", "turned off their second factor")
-            return _json({"ok": True})
-        return _json({"error": "Unknown operation."}, 400)
-
-    @mcp.custom_route("/api/auth/mfa-verify", methods=["POST"])
-    async def auth_mfa_verify_route(request: Request):
-        """Finish a login. Anonymous by necessity - there is no session yet -
-        so it goes through the same door guard as login, and the ticket is what
-        proves the password step already happened."""
-        err, body = await _auth_guard(request)
-        if err:
-            return err
-        uid = _mfa_ticket_uid(str(body.get("ticket") or ""))
-        vague = _json({"error": "That code did not match."}, 401)
-        if not uid:
-            return _json({"error": "That sign-in has expired. Start again."}, 401)
-        d = _load_users()
-        u = d["users"].get(uid)
-        if not u or not u.get("mfa_secret"):
-            return vague
-        if _locked_now(u):
-            # The password step already passed, so the lock here is the
-            # code's own: ten misses across any number of tickets pauses the
-            # account, and a pause reads exactly like a wrong code.
-            _track_login_refusal(uid, "account is paused")
-            return vague
-        given = str(body.get("code") or "")
-        secret = tokenvault.unseal(str(u["mfa_secret"]))
-        matched = totp.verify_counter(secret, given, last_counter=u.get("mfa_counter"))
-        if matched >= 0:
-            u["mfa_counter"] = max(int(u.get("mfa_counter") or 0), matched)
-            u["mfa_fails"] = 0
-        else:
-            idx = totp.check_recovery(given, u.get("mfa_recovery") or [])
-            if idx < 0:
-                # Coalesced like the password path: a ticket costs one right
-                # password, and tickets are minted eight a minute, so one row
-                # per wrong code was a ledger-flushing loop for anyone holding
-                # a password. Ten misses against the ACCOUNT pauses it, on the
-                # same escalating clock as wrong passwords.
-                _track_login_refusal(uid, "wrong second-factor code")
-                u["mfa_fails"] = int(u.get("mfa_fails") or 0) + 1
-                if u["mfa_fails"] >= MFA_FAIL_LIMIT:
-                    u["mfa_fails"] = 0
-                    step = min(int(u.get("locks") or 0), len(LOGIN_LOCK_STEPS) - 1)
-                    u["locks"] = int(u.get("locks") or 0) + 1
-                    mins = LOGIN_LOCK_STEPS[step]
-                    u["lock_until"] = (datetime.now(timezone.utc) + timedelta(minutes=mins)).isoformat()
-                    _track(uid, "auth", "account paused",
-                           "too many wrong second-factor codes; locked for %d minutes" % mins)
-                try:
-                    _write_users(d)
-                except RuntimeError:
-                    pass
-                # Wrong codes spend the ticket. Five misses inside one
-                # three-minute window is not a person mistyping.
-                ticket = str(body.get("ticket") or "")
-                _mfa_tries[ticket] = _mfa_tries.get(ticket, 0) + 1
-                if _mfa_tries[ticket] >= MFA_MAX_TRIES:
-                    _mfa_tickets.pop(ticket, None)
-                    _mfa_tries.pop(ticket, None)
-                    _track_login_refusal(uid, "too many wrong codes; the sign-in was ended")
-                    return _json({"error": "Too many wrong codes. Sign in again."}, 401)
-                return vague
-            # Spent. A recovery code is one journey back in, not a password.
-            u["mfa_recovery"] = [h for i, h in enumerate(u["mfa_recovery"]) if i != idx]
-            _track(uid, "auth", "used a recovery code",
-                   f"{len(u['mfa_recovery'])} left")
-        u["last_login_at"] = datetime.now(timezone.utc).isoformat()
-        try:
-            _write_users(d)
-        except RuntimeError:
-            pass
-        _mfa_ticket_spend(str(body.get("ticket") or ""))
-        token = _new_session(uid)
-        _track(uid, "auth", "logged in")
-        return _json({"ok": True, "session": token, "me": _auth_me(uid, u)})
-
-    @mcp.custom_route("/api/auth/logout", methods=["POST"])
-    async def auth_logout_route(request: Request):
-        err, _body = await _auth_guard(request)
-        if err:
-            return err
-        raw = request.headers.get("x-app-session")
-        uid = _session_uid(raw)
-        _drop_sessions(token=raw)
-        if uid:
-            _track(uid, "auth", "logged out")
-        return _json({"ok": True})
-
-    @mcp.custom_route("/api/auth/password", methods=["POST"])
-    async def auth_password_route(request: Request):
-        # Change your OWN password: the current one is always required, so a
-        # borrowed open session cannot quietly take over the account.
-        err, body = await _auth_guard(request)
-        if err:
-            return err
-        uid = _session_uid(request.headers.get("x-app-session"))
-        u = _team_user(uid)
-        if not u or not u.get("active", True):
-            return _json({"error": "Unauthorized"}, 401)
-        # A borrowed session gets the same wall the front door has: the login
-        # counts failures and locks; without the same rule here, an unattended
-        # open session was an unlimited offline-speed guessing oracle for the
-        # password itself (which is what unlocks the Finder drive).
-        now_dt = datetime.now(timezone.utc)
-        if str(u.get("lock_until") or "") > now_dt.isoformat():
-            return _json({"error": "Too many wrong attempts. Try again in a few minutes."}, 429)
-        current, new = str(body.get("current") or ""), str(body.get("new") or "")
-        if not _check_pw(current, u.get("pw") or ""):
-            d0 = _load_users()
-            _note_wrong_password(d0, d0["users"].get(uid) or {}, uid,
-                                 " at the password change", now=now_dt)
-            _track(uid, "auth", "failed password change", "wrong current password")
-            return _json({"error": "The current password is wrong."}, 400)
-        if len(new) < 8:
-            return _json({"error": "The new password needs at least 8 characters."}, 400)
-        try:
-            d = _load_users()
-            d["users"][uid]["pw"] = _hash_pw(new)
-            d["users"][uid]["must_change"] = False
-            d["users"][uid]["fails"] = 0
-            d["users"][uid]["lock_until"] = ""
-            d["users"][uid]["locks"] = 0
-            # The expiry belonged to the break-glass password, not to this one:
-            # left behind, the master's chosen password would stop working half
-            # an hour later and lock them out of their own app.
-            d["users"][uid].pop("pw_expires_at", None)
-            # A new password retires the drive's too: if the old one was known,
-            # a drive password may have been made with it.
-            d["users"][uid].pop("dav_pw", None)
-            d["users"][uid].pop("dav_pw_at", None)
-            _write_users(d)
-        except RuntimeError:
-            return _json({"error": "The change could not be saved. The data volume may be "
-                                   "unwritable; check Settings, Connections."}, 500)
-        _drop_sessions(uid=uid)          # every session dies with the old password
-        _dav_drop_cache(uid)             # and so does the drive's cached credential
-        token = _new_session(uid)        # except this one, freshly minted
-        _track(uid, "auth", "changed their password")
-        return _json({"ok": True, "session": token})
-
-
-    @mcp.custom_route("/api/team/me", methods=["POST"])
-    async def team_me_route(request: Request):
-        err, _body, who = await _guard(request, body=False)
-        if err:
-            return err
-        u = _team_user(who) or {}
-        return _json({"me": {"sub": who, "id": who, "name": u.get("name") or "",
-                             "role": u.get("role") or "member", "grace": False,
-                             "tabs": _user_tabs(who)}})
-
-    @mcp.custom_route("/api/team/board", methods=["POST"])
-    async def team_board_route(request: Request):
-        err, packed = await _team_guard(request, ROLE_LEVELS["admin"])
-        if err:
-            return err
-        who, _body = packed
-        try:
-            d = _load_users()
-            events = _load_events()
-            users = [_user_public(uid, u) for uid, u in d["users"].items() if not u.get("deleted")]
-            users.sort(key=lambda u: (-ROLE_LEVELS.get(u["role"], 0), u["name"] or "~"))
-            return _json({"users": users, "events": events[-600:][::-1],
-                          "counts": _team_counts(events), "names": _team_names(),
-                          "me": who, "my_role": _team_role(who)})
-        except Exception:
-            logger.exception("team board failed")
-            return _json({"error": "Couldn't load the team."}, 500)
-
-    @mcp.custom_route("/api/team/user", methods=["POST"])
-    async def team_user_route(request: Request):
-        err, packed = await _team_guard(request, ROLE_LEVELS["admin"])
-        if err:
-            return err
-        who, body = packed
-        op = str(body.get("op") or "")
-        my_level = _team_level(who)
-        try:
-            d = _load_users()
-            if op == "create":
-                # Admins mint members; only the master mints admins.
-                name = str(body.get("name") or "").strip()[:60]
-                username = _clean_username(body.get("username"))
-                role = str(body.get("role") or "member")
-                if role not in ("admin", "member", "parttime"):
-                    return _json({"error": "New accounts are admin, member or part-time."}, 400)
-                if role == "admin" and my_level < ROLE_LEVELS["master"]:
-                    return _json({"error": "Only the master admin can create admins."}, 403)
-                if not name or not username:
-                    return _json({"error": "A name and a username are both needed."}, 400)
-                if _find_username(d, username):
-                    return _json({"error": "That username is already taken."}, 400)
-                starter = _starter_password()
-                d["seq"] = int(d.get("seq") or 0) + 1
-                uid = f"u{d['seq']}"
-                d["users"][uid] = {"name": name, "username": username,
-                                   "colour": _next_team_colour(d["users"]),
-                                   "pw": _hash_pw(starter), "role": role, "active": True,
-                                   "deleted": False, "must_change": True, "fails": 0,
-                                   "lock_until": "",
-                                   "created_at": datetime.now(timezone.utc).isoformat(),
-                                   "last_login_at": ""}
-                _write_users(d)
-                _track(who, "team", "created an account", f"{name} ({role})")
-                # The one and only showing of the starter password, to the
-                # admin who asked for it. It is already marked must-change.
-                return _json({"ok": True, "id": uid, "starter_password": starter,
-                              "users": _team_public_list(d)})
-            target = str(body.get("id") or body.get("sub") or "")
-            u = d["users"].get(target)
-            if not u or u.get("deleted"):
-                return _json({"error": "That account does not exist."}, 400)
-            their_level = ROLE_LEVELS.get(u.get("role"), 1)
-            label = u.get("name") or "an unnamed account"
-            # The rank rule, once: you must OUTRANK who you manage, and the
-            # master outranks everyone but is above being managed at all.
-            def may_manage() -> bool:
-                if u.get("role") == "master":
-                    return False
-                if my_level >= ROLE_LEVELS["master"]:
-                    return True
-                return my_level > their_level
-            if op == "rename":
-                if target != who and not may_manage():
-                    return _json({"error": "You cannot manage that account."}, 403)
-                name = str(body.get("name") or "").strip()[:60]
-                if not name:
-                    return _json({"error": "The name cannot be empty."}, 400)
-                u["name"] = name
-                _write_users(d)
-                _track(who, "team", "renamed an account", f"{label} is now {name}")
-            elif op == "username":
-                if target != who and not may_manage():
-                    return _json({"error": "You cannot manage that account."}, 403)
-                username = _clean_username(body.get("username"))
-                if not username:
-                    return _json({"error": "The username cannot be empty."}, 400)
-                other = _find_username(d, username)
-                if other and other != target:
-                    return _json({"error": "That username is already taken."}, 400)
-                u["username"] = username
-                _write_users(d)
-                _track(who, "team", "changed a username", label)
-            elif op == "role":
-                role = str(body.get("role") or "")
-                if my_level < ROLE_LEVELS["master"]:
-                    return _json({"error": "Only the master admin changes roles."}, 403)
-                if role not in ("admin", "member", "parttime"):
-                    return _json({"error": "Roles are admin, member or part-time."}, 400)
-                if u.get("role") == "master":
-                    return _json({"error": "The master admin cannot be demoted."}, 400)
-                was_pt = u.get("role") == "parttime"
-                u["role"] = role
-                _write_users(d)
-                if was_pt and role != "parttime":
-                    # No longer monitored, so an open shift cannot just hang:
-                    # close it now, recorded as this admin's correction.
-                    try:
-                        _work_close_open(target, who, "closed automatically when the role changed",
-                                         "closed a session on role change")
-                    except Exception:
-                        logger.exception("could not close the work session on role change")
-                _track(who, "team", "changed a role",
-                       f"{label} is now " + {"admin": "an admin", "member": "a member",
-                                             "parttime": "part-time"}[role])
-            elif op == "active":
-                on = bool(body.get("active"))
-                if u.get("role") == "master":
-                    return _json({"error": "The master admin cannot be switched off."}, 400)
-                if not may_manage():
-                    return _json({"error": "You cannot manage that account."}, 403)
-                if target == who:
-                    return _json({"error": "You cannot switch off your own access."}, 400)
-                u["active"] = on
-                _write_users(d)
-                if not on:
-                    _drop_sessions(uid=target)   # off means off, this second
-                    _dav_drop_cache(target)
-                    _mail_release_owned(target, "account switched off")
-                    try:
-                        _work_close_open(target, who, "closed automatically when the account was switched off",
-                                         "closed a session when an account was switched off")
-                    except Exception:
-                        logger.exception("could not close the work session of a switched-off account")
-                _track(who, "team", "changed access",
-                       f"{label}'s access was switched {'on' if on else 'off'}")
-            elif op == "colour":
-                if not may_manage():
-                    return _json({"error": "You cannot manage that account."}, 403)
-                colour = str(body.get("colour") or "").strip().lower()
-                # A NAME from the palette, never a colour value. The CRM learned
-                # this when a Pipedrive label coloured url(//evil.co/a) reached
-                # style.background and beaconed every render of the board.
-                if colour not in TEAM_COLOUR_NAMES:
-                    return _json({"error": "Pick one of the team colours."}, 400)
-                u["colour"] = colour
-                _write_users(d)
-                _track(who, "team", "changed a colour", f"{label} is now {colour}")
-            elif op == "sign_off":
-                # Somebody who has left, or who never filled it in, still needs
-                # a name on outgoing email. Same rank rule as every other
-                # account change; the person's own door is /api/mail/settings.
-                if not may_manage():
-                    return _json({"error": "You cannot manage that account."}, 403)
-                text, why = _mail_clean_sign_off(body.get("text"))
-                if why:
-                    return _json({"error": why}, 400)
-                u["sign_off"] = text
-                _write_users(d)
-                _track(who, "team", "changed an email sign-off",
-                       f"{label}: " + (text[:60] if text else "cleared"))
-            elif op == "sizes":
-                # Who may change what the bench cuts. Admins hold it by rank and
-                # cannot be toggled: switching it off would read as a revocation
-                # that the permission check would then ignore.
-                if not may_manage():
-                    return _json({"error": "You cannot manage that account."}, 403)
-                if ROLE_LEVELS.get(u.get("role") or "member", 0) >= ROLE_LEVELS["admin"]:
-                    return _json({"error": "Admins can already edit the size list; "
-                                  "the grant is for members and part-timers."}, 400)
-                grant = bool(body.get("can_sizes"))
-                u["can_sizes"] = grant
-                _write_users(d)
-                detail = (f"{label} can edit the size list" if grant
-                          else f"{label} can no longer edit the size list")
-                _track(who, "team", "changed size-list access", detail)
-            elif op == "send":
-                # Who may send email out of the shared mailbox as the shop.
-                # Same shape as the size list, and admins hold it by rank for
-                # the same reason: a switch that reads as a revocation the
-                # permission check would then ignore is worse than no switch.
-                if not may_manage():
-                    return _json({"error": "You cannot manage that account."}, 403)
-                if ROLE_LEVELS.get(u.get("role") or "member", 0) >= ROLE_LEVELS["admin"]:
-                    return _json({"error": "Admins can already send email from Reactor; "
-                                  "the grant is for members and part-timers."}, 400)
-                grant = bool(body.get("can_send"))
-                u["can_send"] = grant
-                _write_users(d)
-                detail = (f"{label} can send email from Reactor" if grant
-                          else f"{label} can no longer send email from Reactor")
-                _track(who, "team", "changed email-sending access", detail)
-            elif op == "tabs":
-                if not may_manage():
-                    return _json({"error": "You cannot manage that account."}, 403)
-                raw = body.get("tabs")
-                if raw is None:
-                    # No list of its own, which is NOT the same as every tab:
-                    # _user_tabs resolves that to DEFAULT_TABS, and the opt-in
-                    # tabs are not in it. The ledger has to say what actually
-                    # happened, or it records a grant that was never made.
-                    u.pop("tabs", None)
-                    detail = (f"{label} can open the default tabs (not "
-                              + ", ".join(OPT_IN_TABS) + ")")
-                    _write_users(d)
-                else:
-                    if not isinstance(raw, list):
-                        return _json({"error": "Tabs must be a list, or null for everything."}, 400)
-                    tabs = [k for k in raw if k in TAB_KEYS]
-                    u["tabs"] = tabs
-                    detail = f"{label} can open: " + (", ".join(tabs) if tabs else "nothing")
-                    # Persist the record FIRST: releasing their email is a
-                    # CONSEQUENCE of the tab change, and doing it first left the
-                    # threads released while the merchant was told the change
-                    # had failed.
-                    _write_users(d)
-                    if "mail" not in tabs:
-                        _mail_release_owned(target, "mail tab switched off")
-                _track(who, "team", "changed tab access", detail)
-            elif op == "reset_password":
-                if not may_manage():
-                    return _json({"error": "You cannot manage that account."}, 403)
-                starter = _starter_password()
-                u["pw"] = _hash_pw(starter)
-                u["must_change"] = True
-                u["fails"], u["lock_until"], u["locks"] = 0, "", 0
-                # This one is handed over in person, not written to a log, so
-                # it does not expire - and it must not inherit an expiry left
-                # behind by an earlier break-glass reset.
-                u.pop("pw_expires_at", None)
-                u.pop("dav_pw", None)            # and the drive password with them
-                u.pop("dav_pw_at", None)
-                _write_users(d)
-                _drop_sessions(uid=target)       # the old password's sessions die
-                _dav_drop_cache(target)
-                _track(who, "team", "reset a password", label)
-                return _json({"ok": True, "starter_password": starter,
-                              "users": _team_public_list(d)})
-            elif op == "reset_mfa":
-                # The phone is gone. Same rank rule as a password reset: the
-                # person loses the second factor, keeps the password, and is
-                # told in the ledger who did it.
-                if not may_manage():
-                    return _json({"error": "You cannot manage that account."}, 403)
-                if not u.get("mfa_secret") and not u.get("mfa_pending"):
-                    return _json({"error": "That account has no second factor to reset."}, 400)
-                for k in ("mfa_secret", "mfa_recovery", "mfa_pending", "mfa_counter",
-                          "mfa_fails", "mfa_at"):
-                    u.pop(k, None)
-                _write_users(d)
-                _track(who, "team", "reset a second factor", label)
-                return _json({"ok": True, "users": _team_public_list(d)})
-            elif op == "delete":
-                if my_level < ROLE_LEVELS["master"]:
-                    return _json({"error": "Only the master admin can delete accounts."}, 403)
-                if u.get("role") == "master":
-                    return _json({"error": "The master admin cannot be deleted."}, 400)
-                u["deleted"], u["active"] = True, False
-                _write_users(d)
-                _drop_sessions(uid=target)
-                _dav_drop_cache(target)
-                _mail_release_owned(target, "account deleted")
-                try:
-                    _work_close_open(target, who, "closed automatically when the account was deleted",
-                                     "closed a session when an account was deleted")
-                except Exception:
-                    logger.exception("could not close the work session of a deleted account")
-                _track(who, "team", "deleted an account", label)
-            else:
-                return _json({"error": "Unknown team action."}, 400)
-            return _json({"ok": True, "users": _team_public_list(d)})
-        except RuntimeError:
-            global _users_mem
-            _users_mem = None   # memory diverged from disk; the next read takes disk truth
-            return _json({"error": "The change could not be saved. The data volume may be "
-                                   "unwritable; check Settings, Connections."}, 500)
-        except Exception:
-            logger.exception("team user op failed")
-            return _json({"error": "That change could not be made. Check the server logs."}, 500)
+    # The sign-in and team routes (gizmo/routes/team.py), registered here so
+    # the route table keeps its order.
+    routes_team.register(mcp, registry)
 
 
     # ---- WebDAV route -----------------------------------------------------
@@ -22328,15 +20827,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 "Allow": "OPTIONS, PROPFIND, GET, HEAD, PUT, MKCOL, DELETE, MOVE, COPY, LOCK, UNLOCK"})
         # The drive has no Shopify perimeter, so it gets its own rate ceiling:
         # generous for Finder's request storms, a wall against a scanner.
-        if not _window_ok(_rl_hits.setdefault("dav:" + _client_key(request), []),
-                          max(RATE_MAX_CLIENT, 300), time.monotonic()):
+        if not gate._window_ok(gate._rl_hits.setdefault("dav:" + gate._client_key(request), []),
+                          max(gate.RATE_MAX_CLIENT, 300), time.monotonic()):
             return Response(status_code=429, headers=hdrs)
         # The ceiling above is generous on purpose. Twenty misses a minute
         # from one client is not Finder retrying a keychain entry: refuse
         # before checking. This, not a lock by username, is what slows guessing.
         auth_hdr = request.headers.get("authorization", "")
-        fails = _rl_hits.setdefault("davfail:" + _client_key(request), [])
-        if auth_hdr.startswith("Basic ") and _window_hits(fails, time.monotonic()) >= DAV_FAIL_PER_MIN:
+        fails = gate._rl_hits.setdefault("davfail:" + gate._client_key(request), [])
+        if auth_hdr.startswith("Basic ") and gate._window_hits(fails, time.monotonic()) >= DAV_FAIL_PER_MIN:
             return Response(status_code=429, headers=hdrs)
         uid, code = _dav_check_auth(auth_hdr)
         if code == 401 and auth_hdr.startswith("Basic "):
@@ -22715,7 +21214,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if err:
             return err
         op = str(body.get("op") or "board")
-        admin = _team_level(who) >= ROLE_LEVELS["admin"]
+        admin = team._team_level(who) >= team.ROLE_LEVELS["admin"]
         keeper = _json({"error": "Only an admin can change the unit register."}, 403)
         d = _load_loans()
 
@@ -22988,13 +21487,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/work/board", methods=["POST"])
     async def work_board_route(request: Request):
-        err, packed = await _team_guard(request, ROLE_LEVELS["admin"])
+        err, packed = await _team_guard(request, team.ROLE_LEVELS["admin"])
         if err:
             return err
         _who, _body = packed
         try:
             d = _load_work()
-            users = _load_users()["users"]
+            users = team._load_users()["users"]
             today, week, month = _day_starts()
             now = datetime.now(timezone.utc)
             open_rows = []
@@ -23004,7 +21503,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 except Exception:
                     secs = 0
                 open_rows.append({**ws, "secs": secs})
-            events = _load_events()
+            events = activity._load_events()
             by_ws: dict = {}
             for e in events:
                 if e.get("ws"):
@@ -23021,7 +21520,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             for s in recent:
                 s = s  # sessions carry corrections inline
             return _json({"open": open_rows, "sessions": recent, "totals": totals,
-                          "event_counts": by_ws, "names": _team_names()})
+                          "event_counts": by_ws, "names": team._team_names()})
         except Exception:
             logger.exception("work board failed")
             return _json({"error": "Couldn't load the work board."}, 500)
@@ -23030,7 +21529,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def work_resolve_route(request: Request):
         # An admin closing a forgotten clock-out. The original start stands;
         # the correction wears its author and lands on the ledger.
-        err, packed = await _team_guard(request, ROLE_LEVELS["admin"])
+        err, packed = await _team_guard(request, team.ROLE_LEVELS["admin"])
         if err:
             return err
         who, body = packed
@@ -23053,7 +21552,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             d["sessions"].append(ws)
             _write_work(d)
             _track(who, "work", "resolved a work session",
-                   f"closed {(_team_name(uid) or uid)}'s open session at {_fmt_secs(ws['secs'])}")
+                   f"closed {(team._team_name(uid) or uid)}'s open session at {_fmt_secs(ws['secs'])}")
             return _json({"ok": True, "session": ws})
         except RuntimeError:
             return _json({"error": "The correction could not be saved. The data volume may "
@@ -23061,7 +21560,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/api/work/report", methods=["POST"])
     async def work_report_route(request: Request):
-        err, packed = await _team_guard(request, ROLE_LEVELS["admin"])
+        err, packed = await _team_guard(request, team.ROLE_LEVELS["admin"])
         if err:
             return err
         _who, body = packed
@@ -23084,12 +21583,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     if (not uid or s.get("uid") == uid)
                     and (not frm or _london_day(s.get("start")) >= frm)
                     and (not to or _london_day(s.get("start")) <= to)]
-            events = _load_events()
+            events = activity._load_events()
             counts = {}
             for e in events:
                 if e.get("ws"):
                     counts[e["ws"]] = counts.get(e["ws"], 0) + 1
-            names = _team_names()
+            names = team._team_names()
             total = sum(int(s.get("secs") or 0) for s in rows)
             return _json({"sessions": rows, "total_secs": total, "count": len(rows),
                           "event_counts": counts, "csv": _work_csv(rows, names, counts)})
@@ -23362,7 +21861,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if signer and not _uid_has_tab(signer, "labels"):
             return JSONResponse({"error": "Production Manager is switched off for your account."},
                                 status_code=403, headers={**_API_HEADERS, **cors})
-        body = await _read_json_capped(request)
+        body = await gate._read_json_capped(request)
         if body is None:
             return JSONResponse({"error": "Request too large."}, status_code=413, headers={**_API_HEADERS, **cors})
         raw_ids = str(body.get("ids") or "")[:2000]
@@ -23756,7 +22255,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/oauth/xero/start", methods=["GET"])
     async def xero_start(request: Request):
-        if not _window_ok(_rl_hits.setdefault("oauth:" + _client_key(request), []), RATE_MAX_CLIENT, time.monotonic()):
+        if not gate._window_ok(gate._rl_hits.setdefault("oauth:" + gate._client_key(request), []), gate.RATE_MAX_CLIENT, time.monotonic()):
             return PlainTextResponse("Too many requests", status_code=429, headers=_API_HEADERS)
         if not xero_api.client_configured():
             return _oauth_page("Not configured", "Add Xero's client ID and secret in the app's hosting settings first.")
@@ -23847,7 +22346,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # Turning the automation on or off. Admin only, and the state
                 # lives on the connector's volume rather than here, so gizmo
                 # cannot drift out of step with what is actually running.
-                if _team_level(who) < ROLE_LEVELS["admin"]:
+                if team._team_level(who) < team.ROLE_LEVELS["admin"]:
                     return _json({"error": "Only an admin can turn Auto Run on or off."}, 403)
                 on = bool(body.get("enabled"))
                 code, data = await _connector_call("POST", "/api/autorun",
@@ -23859,7 +22358,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 return _json({"available": True, "data": data}, code if code >= 400 else 200)
 
             if op == "settings_save":
-                if _team_level(who) < ROLE_LEVELS["admin"]:
+                if team._team_level(who) < team.ROLE_LEVELS["admin"]:
                     return _json({"error": "Only an admin can change the connector's settings."}, 403)
                 fields = body.get("fields")
                 if not isinstance(fields, dict) or not fields:
@@ -23900,7 +22399,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if since and not re.match(r"^\d{4}-\d{2}-\d{2}$", since):
                     return _json({"error": "The date needs to be a date, for example 2026-08-01."}, 400)
                 dry = bool(body.get("dryRun"))
-                if not dry and _team_level(who) < ROLE_LEVELS["admin"]:
+                if not dry and team._team_level(who) < team.ROLE_LEVELS["admin"]:
                     return _json({"error": "Only an admin can write notes onto Xero invoices."}, 403)
                 params = {}
                 if since:
@@ -23927,7 +22426,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if not order:
                     return _json({"error": "Say which order to send (e.g. #104300)."}, 400)
                 dry = bool(body.get("dryRun"))
-                if not dry and _team_level(who) < ROLE_LEVELS["admin"]:
+                if not dry and team._team_level(who) < team.ROLE_LEVELS["admin"]:
                     return _json({"error": "Only an admin can send documents to Xero."}, 403)
                 params = {"order": order}
                 if dry:
@@ -23947,7 +22446,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if not tag:
                     return _json({"error": "Say which tag to send (e.g. xero-price-check)."}, 400)
                 dry = bool(body.get("dryRun"))
-                if not dry and _team_level(who) < ROLE_LEVELS["admin"]:
+                if not dry and team._team_level(who) < team.ROLE_LEVELS["admin"]:
                     return _json({"error": "Only an admin can send documents to Xero."}, 403)
                 params = {"tag": tag}
                 if dry:
@@ -23960,7 +22459,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 return _json({"available": True, "data": data}, code if code >= 400 else 200)
             if op in ("send", "retry"):
                 # These write invoices and credit notes into Xero.
-                if _team_level(who) < ROLE_LEVELS["admin"]:
+                if team._team_level(who) < team.ROLE_LEVELS["admin"]:
                     return _json({"error": "Only an admin can send documents to Xero."}, 403)
                 if op == "send":
                     code, data = await _connector_call("POST", "/api/sync")
@@ -24011,7 +22510,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         docs = _load_recon_docs()
         xs = xero_api.status()
         setup = {}
-        if _team_role(who) == "master" and not xs["connected"]:
+        if team._team_role(who) == "master" and not xs["connected"]:
             # The setup aids, like Gmail's: the EXACT redirect URI and the env
             # var names, so the developer-app walk cannot go wrong by a
             # character. The secret itself never appears anywhere.
@@ -24031,7 +22530,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                       "mailbox": {"connected": fin["connected"],
                                   "address": fin["address"],
                                   "client": fin["client"],
-                                  "can_connect": _team_role(who) == "master",
+                                  "can_connect": team._team_role(who) == "master",
                                   "redirect_uri": _gmail_fin_redirect_uri(request),
                                   # The Cloud project is the numeric prefix of the
                                   # client id, so the console link can go straight
@@ -24054,7 +22553,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, _body, who = await _guard(request, body=False)
         if err:
             return err
-        if _team_role(who) != "master":
+        if team._team_role(who) != "master":
             return _json({"error": "Only the master account can connect Xero."}, 403)
         if not xero_api.client_configured():
             return _json({"error": "The server has no Xero credentials yet. Add Xero's client ID "
@@ -24076,9 +22575,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, _body, who = await _guard(request, body=False)
         if err:
             return err
-        if _team_role(who) != "master":
+        if team._team_role(who) != "master":
             return _json({"error": "Only the master account can connect the accounts mailbox."}, 403)
-        body = await _read_json_capped(request)
+        body = await gate._read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
         if not google_mail.client_configured():
@@ -24120,9 +22619,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, _body, who = await _guard(request, body=False)
         if err:
             return err
-        if _team_role(who) != "master":
+        if team._team_role(who) != "master":
             return _json({"error": "Only the master account can disconnect."}, 403)
-        body = await _read_json_capped(request)
+        body = await gate._read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
         what = str(body.get("what") or "")
@@ -24178,7 +22677,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def recon_sweep_route(request: Request):
         # ai=True: a sweep can read documents with the model. The rank is
         # checked before the AI slot is spent, so a member cannot burn one.
-        err, body, who = await _guard(request, ai=True, min_level=ROLE_LEVELS["admin"])
+        err, body, who = await _guard(request, ai=True, min_level=team.ROLE_LEVELS["admin"])
         if err:
             return err
         if not xero_api.connected():
@@ -24232,7 +22731,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 return _json({"error": "Ignoring a discrepancy needs a reason."}, 400)
             e["history"] = (e.get("history") or []) + [{
                 "at": datetime.now(timezone.utc).isoformat(),
-                "by": _team_name(who) or who, "from": e["status"], "to": new, "note": note}]
+                "by": team._team_name(who) or who, "from": e["status"], "to": new, "note": note}]
             e["status"], e["status_note"] = new, note
             e["updated"] = datetime.now(timezone.utc).isoformat()
             _write_recon(d)
@@ -24241,7 +22740,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if op == "investigate":
             # The same global AI budget as chat: an investigation is a model
             # call, and the limiter exists so one tab cannot starve the rest.
-            if not _window_ok(_rl_global, RATE_MAX_GLOBAL, time.monotonic()):
+            if not gate._window_ok(gate._rl_global, gate.RATE_MAX_GLOBAL, time.monotonic()):
                 return _json({"error": "The assistant is busy right now. Try again shortly."}, 429)
             verdict = await recon_engine.investigate(e, _load_recon_cache())
             # RELOAD before writing: the AI call awaited for seconds, and a
@@ -24261,7 +22760,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/oauth/google/start", methods=["GET"])
     async def google_start(request: Request):
-        if not _window_ok(_rl_hits.setdefault("oauth:" + _client_key(request), []), RATE_MAX_CLIENT, time.monotonic()):
+        if not gate._window_ok(gate._rl_hits.setdefault("oauth:" + gate._client_key(request), []), gate.RATE_MAX_CLIENT, time.monotonic()):
             return PlainTextResponse("Too many requests", status_code=429, headers=_API_HEADERS)
         if not google_data.oauth_client_configured():
             return _oauth_page("Not configured", "Add Google's client ID and secret in the app's hosting settings first.")
@@ -24316,7 +22815,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/oauth/gmail/start", methods=["GET"])
     async def gmail_start(request: Request):
-        if not _window_ok(_rl_hits.setdefault("oauth:" + _client_key(request), []), RATE_MAX_CLIENT, time.monotonic()):
+        if not gate._window_ok(gate._rl_hits.setdefault("oauth:" + gate._client_key(request), []), gate.RATE_MAX_CLIENT, time.monotonic()):
             return PlainTextResponse("Too many requests", status_code=429, headers=_API_HEADERS)
         if not google_mail.client_configured():
             return _oauth_page("Not configured", "Add Google's client ID and secret in the app's hosting settings first.")
@@ -24376,8 +22875,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     @mcp.custom_route("/oauth/gmail-finance/start", methods=["GET"])
     async def gmail_finance_start(request: Request):
-        if not _window_ok(_rl_hits.setdefault("oauth:" + _client_key(request), []),
-                          RATE_MAX_CLIENT, time.monotonic()):
+        if not gate._window_ok(gate._rl_hits.setdefault("oauth:" + gate._client_key(request), []),
+                          gate.RATE_MAX_CLIENT, time.monotonic()):
             return PlainTextResponse("Too many requests", status_code=429, headers=_API_HEADERS)
         if not google_mail.client_configured():
             return _oauth_page("Not configured", "Add Google's client ID and secret in the app's hosting settings first.")
@@ -24469,7 +22968,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, _body, who = await _mail_guard(request)
         if err:
             return err
-        if _team_role(who) != "master":
+        if team._team_role(who) != "master":
             return _json({"error": "Only the master account can connect the mailbox."}, 403)
         if not google_mail.client_configured():
             return _json({"error": "The server has no Google client configured yet. "
@@ -24489,7 +22988,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, _body, who = await _mail_guard(request)
         if err:
             return err
-        if _team_role(who) != "master":
+        if team._team_role(who) != "master":
             return _json({"error": "Only the master account can disconnect the mailbox."}, 403)
         google_mail.disconnect()
         _track(who, "mail", "disconnected the mailbox")
@@ -24504,9 +23003,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         err, _body, who = await _guard(request, body=False)
         if err:
             return err
-        if _team_role(who) not in ("master", "admin"):
+        if team._team_role(who) not in ("master", "admin"):
             return _json({"error": "Connection status is for admins."}, 403)
-        body = await _read_json_capped(request)
+        body = await gate._read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
         api_version = _api_version

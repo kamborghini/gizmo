@@ -21,6 +21,9 @@ from starlette.requests import Request
 
 import copilot as core
 from gizmo import dispatch as desk
+from gizmo import activity
+from gizmo import gate
+from gizmo import team
 from gizmo import ai as claude
 
 # The same logger as copilot.py's, so the routes' log lines read as before.
@@ -33,14 +36,14 @@ def register(mcp, registry):
     async def shipping_config_route(request: Request):
         """Get or set shipping settings. The API key is write-only: it is saved
         server-side and never returned; the UI only ever sees connected + last4."""
-        err, body, who = await core._guard(request)
+        err, body, who = await gate._guard(request)
         if err:
             return err
         op = str(body.get("op") or "get").lower()
         if op != "set":
-            return core._json({"config": desk._shipping_public(desk._load_shipping())})
-        if core._team_level(who) < core.ROLE_LEVELS["admin"]:
-            return core._json({"error": "Only an admin can change the shipping settings."}, 403)
+            return gate._json({"config": desk._shipping_public(desk._load_shipping())})
+        if team._team_level(who) < team.ROLE_LEVELS["admin"]:
+            return gate._json({"error": "Only an admin can change the shipping settings."}, 403)
         cfg = desk._load_shipping()
         if "origin" in body:
             cfg["origin"] = desk._clean_origin(body.get("origin"))
@@ -61,16 +64,16 @@ def register(mcp, registry):
             if tkey in body:
                 tv = str(body.get(tkey) or "").strip()
                 if tv and not desk._TIME_RE.match(tv):
-                    return core._json({"error": "Collection times must be in 24-hour HH:MM form, "
+                    return gate._json({"error": "Collection times must be in 24-hour HH:MM form, "
                                            "e.g. 14:00."}, 400)
                 cfg[tkey] = tv
         if str(cfg.get("ready_time") or "") and str(cfg.get("close_time") or "") \
                 and cfg["ready_time"] >= cfg["close_time"]:
-            return core._json({"error": "The collection ready time must be before the close time."}, 400)
+            return gate._json({"error": "The collection ready time must be before the close time."}, 400)
         if body.get("collection_option"):
             co = str(body.get("collection_option")).strip()
             if worldoptions and co not in worldoptions.COLLECTION_OPTIONS:
-                return core._json({"error": "Unknown collection arrangement."}, 400)
+                return gate._json({"error": "Unknown collection arrangement."}, 400)
             cfg["collection_option"] = co
         for lkey in ("label_size_production", "label_size_shipping"):
             if lkey in body:
@@ -78,7 +81,7 @@ def register(mcp, registry):
                 if want not in desk.LABEL_STOCK:
                     # Refused rather than coerced: a silent fallback would print
                     # a run on the wrong stock and nobody would know why.
-                    return core._json({"error": "That is not a label size this app can print."}, 400)
+                    return gate._json({"error": "That is not a label size this app can print."}, 400)
                 cfg[lkey] = want
         for skey, cap in (("eori", 30), ("vat_number", 30), ("default_hs_code", 20), ("trade_term", 20)):
             if skey in body:
@@ -86,12 +89,12 @@ def register(mcp, registry):
         if body.get("export_reason"):
             er = str(body.get("export_reason")).strip()
             if worldoptions and er not in worldoptions.EXPORT_REASONS:
-                return core._json({"error": "Unknown export reason."}, 400)
+                return gate._json({"error": "Unknown export reason."}, 400)
             cfg["export_reason"] = er
         if body.get("duties_payor"):
             dp = str(body.get("duties_payor")).strip()
             if worldoptions and dp not in worldoptions.DUTIES_PAYORS:
-                return core._json({"error": "Unknown duties choice."}, 400)
+                return gate._json({"error": "Unknown duties choice."}, 400)
             cfg["duties_payor"] = dp
         if isinstance(body.get("collection_by_carrier"), dict):
             # Only carriers we recognise, only arrangements the courier offers.
@@ -110,7 +113,7 @@ def register(mcp, registry):
         if body.get("plugin_code"):
             pcv = str(body.get("plugin_code")).strip()
             if worldoptions and pcv not in worldoptions.PLUGIN_CODES:
-                return core._json({"error": "Unknown plugin code."}, 400)
+                return gate._json({"error": "Unknown plugin code."}, 400)
             cfg["plugin_code"] = pcv or "Web_Service"
         if body.get("base_url"):
             base = str(body.get("base_url")).strip()[:200]
@@ -119,13 +122,13 @@ def register(mcp, registry):
                 if worldoptions:
                     worldoptions.set_base_url(cfg["base_url"])
         desk._save_shipping(cfg)
-        core._track(who, "settings", "changed shipping settings",
+        activity._track(who, "settings", "changed shipping settings",
                "courier credentials updated" if any(k in body for k in ("meter_number", "key", "password"))
                else "origin, boxes or preferences")
         # Credentials: only persist non-empty values, and only when not env-managed.
         if worldoptions and any(k in body for k in ("meter_number", "key", "password")):
             if desk._wo_creds_from_env():
-                return core._json({"error": "World Options credentials are set on the server "
+                return gate._json({"error": "World Options credentials are set on the server "
                                        "and can't be changed from here."}, 400)
             meter = body.get("meter_number"); key = body.get("key"); pw = body.get("password")
             meter = str(meter).strip() if isinstance(meter, str) and meter.strip() else None
@@ -135,24 +138,24 @@ def register(mcp, registry):
                 desk._save_wo_creds(meter=meter, key=key, password=pw)
         if worldoptions:
             desk._wo_boot()   # re-push creds + plugin + base into the client
-        return core._json({"config": desk._shipping_public(desk._load_shipping()), "ok": True})
+        return gate._json({"config": desk._shipping_public(desk._load_shipping()), "ok": True})
 
     @mcp.custom_route("/api/shipping/validate", methods=["POST"])
     async def shipping_validate_route(request: Request):
         """Confirm the World Options credentials work by pricing a tiny test parcel
         (read-only; never charges)."""
-        err, body, _who = await core._guard(request)
+        err, body, _who = await gate._guard(request)
         if err:
             return err
         if not worldoptions or not worldoptions.configured():
-            return core._json({"ok": False, "error": "No credentials set."}, 200)
+            return gate._json({"ok": False, "error": "No credentials set."}, 200)
         try:
             res = await worldoptions.validate()
-            return core._json({"ok": bool(res.get("ok")), "message": res.get("message") or "",
+            return gate._json({"ok": bool(res.get("ok")), "message": res.get("message") or "",
                           "error": ("" if res.get("ok") else res.get("message") or "")})
         except Exception:
             logger.exception("shipping validate failed")
-            return core._json({"ok": False, "error": "Couldn't reach World Options."}, 200)
+            return gate._json({"ok": False, "error": "Couldn't reach World Options."}, 200)
 
     @mcp.custom_route("/api/eori/check", methods=["POST"])
     async def eori_check_route(request: Request):
@@ -162,21 +165,21 @@ def register(mcp, registry):
         the customs paperwork right before a parcel leaves. The answer is only
         ever advisory - see eori.py for why an unreachable service must read as
         "unknown" here and never as "invalid"."""
-        err, body, who = await core._guard(request)
+        err, body, who = await gate._guard(request)
         if err:
             return err
         raw = body.get("number")
         kind = eori.classify(raw)
         if kind == "bad":
-            return core._json({"error": "That is not an EORI number. They start with a "
+            return gate._json({"error": "That is not an EORI number. They start with a "
                                    "two-letter country code, for example "
                                    "DE123456789012345."}, 400)
         # Our own ceiling, separate from the per-client one in _pre_checks. The
         # EU service publishes a request limit and answers a flood with nothing
         # at all, so the thing being protected here is not this app: it is our
         # ability to get an answer out of Brussels for the next hour.
-        if not core._window_ok(core._eori_hits, core.EORI_MAX_PER_MIN, time.monotonic()):
-            return core._json({"error": "Slow down: too many checks in a minute."}, 429)
+        if not gate._window_ok(core._eori_hits, core.EORI_MAX_PER_MIN, time.monotonic()):
+            return gate._json({"error": "Slow down: too many checks in a minute."}, 429)
         try:
             res = await eori.check(raw)
         except Exception:
@@ -184,34 +187,34 @@ def register(mcp, registry):
             # so reaching here means a bug on our side. It still must not read
             # as a verdict on the customer's number.
             logger.exception("EORI check failed")
-            return core._json({"error": "The EORI check could not be run."}, 502)
+            return gate._json({"error": "The EORI check could not be run."}, 502)
         # Worth a ledger line: it names a third party we asked about a customer,
         # and "we checked and it came back invalid" is a claim someone may later
         # have to stand behind.
-        core._track(who, "settings", "checked an EORI number",
+        activity._track(who, "settings", "checked an EORI number",
                res["number"] + " - " + res["status"])
-        return core._json(res)
+        return gate._json(res)
 
     @mcp.custom_route("/api/dispatch/parse-address", methods=["POST"])
     async def parse_address_route(request: Request):
         """Turn a pasted block of text into address fields. Free, and local unless
         the local pass cannot place something."""
-        err, body, _who = await core._guard(request)
+        err, body, _who = await gate._guard(request)
         if err:
             return err
         text = str(body.get("text") or "")[:4000]
         if not text.strip():
-            return core._json({"error": "Paste an address first."}, 400)
+            return gate._json({"error": "Paste an address first."}, 400)
         local = desk._parse_address(text)
         if local["confident"] or not claude.ANTHROPIC_API_KEY:
-            return core._json({"address": local["address"], "source": "local",
+            return gate._json({"address": local["address"], "source": "local",
                           "note": ("" if local["confident"] else
                                    "Some of this could not be read. Check every field.")})
         try:
             ai = await desk._ai_address(text)
         except Exception as e:
             logger.exception("AI address parse failed")
-            return core._json({"address": local["address"], "source": "local",
+            return gate._json({"address": local["address"], "source": "local",
                           "note": "Some of this could not be read. Check every field."})
         # Prefer Claude's reading, but never let it blank a field the local pass
         # did find: it is the one that read the text literally.
@@ -219,19 +222,19 @@ def register(mcp, registry):
         for k, v in ai.items():
             if str(v or "").strip():
                 merged[k] = v
-        return core._json({"address": merged, "source": "ai",
+        return gate._json({"address": merged, "source": "ai",
                       "note": "Read with AI because the layout was unusual. Check every field."})
 
     @mcp.custom_route("/api/custom/quote", methods=["POST"])
     async def custom_quote_route(request: Request):
         """Price couriers to a pasted address. Free / read-only, no charge."""
-        err, body, _who = await core._guard(request)
+        err, body, _who = await gate._guard(request)
         if err:
             return err
         dest = desk._clean_address(body.get("address") or {})
         boxes, err = desk._clean_parcel_list(body)
         if err:
-            return core._json({"error": err}, 400)
+            return gate._json({"error": err}, 400)
         try:
             declared = float(body.get("declared") or 0)
         except (TypeError, ValueError):
@@ -239,23 +242,23 @@ def register(mcp, registry):
         try:
             res = await desk.run_custom_quote(registry, dest, boxes,
                                          insurance=desk._insurance_amount(body), declared=declared)
-            return core._json(res, 400 if res.get("error") else 200)
+            return gate._json(res, 400 if res.get("error") else 200)
         except Exception:
             logger.exception("custom quote failed")
-            return core._json({"error": "Couldn't get courier quotes. Check the server logs."}, 500)
+            return gate._json({"error": "Couldn't get courier quotes. Check the server logs."}, 500)
 
     @mcp.custom_route("/api/custom/book", methods=["POST"])
     async def custom_book_route(request: Request):
         """Book a courier to a pasted address. THIS SPENDS MONEY."""
-        err, body, who = await core._guard(request)
+        err, body, who = await gate._guard(request)
         if err:
             return err
         option = body.get("option")
         if not isinstance(option, dict):
-            return core._json({"error": "Pick a courier service first."}, 400)
+            return gate._json({"error": "Pick a courier service first."}, 400)
         boxes, err = desk._clean_parcel_list(body)
         if err:
-            return core._json({"error": err}, 400)
+            return gate._json({"error": err}, 400)
         try:
             declared = float(body.get("declared") or 0)
         except (TypeError, ValueError):
@@ -273,13 +276,13 @@ def register(mcp, registry):
                 signature=str(body.get("signature") or ""), by=str(who or ""))
             if not res.get("error"):
                 svc = str(option.get("service") or "").strip()[:40]
-                core._track(who, "dispatch", "booked a custom shipment",
+                activity._track(who, "dispatch", "booked a custom shipment",
                        (str(body.get("reference") or "pasted address")[:30]
                         + (" · " + svc if svc else "")))
-            return core._json(res, 400 if res.get("error") else 200)
+            return gate._json(res, 400 if res.get("error") else 200)
         except Exception:
             logger.exception("custom booking failed")
-            return core._json({"error": "The booking failed. It MAY still have been booked and "
+            return gate._json({"error": "The booking failed. It MAY still have been booked and "
                                    "charged: check your World Options portal before trying again."}, 500)
 
     @mcp.custom_route("/api/custom/list", methods=["POST"])
@@ -290,7 +293,7 @@ def register(mcp, registry):
         reachable from inside the booking window: a person looking for last
         month's label had to press a button that reads like "spend money
         again". They get their own queue on the desk instead."""
-        err, body, _who = await core._guard(request)
+        err, body, _who = await gate._guard(request)
         if err:
             return err
         try:
@@ -306,7 +309,7 @@ def register(mcp, registry):
         # so say it here rather than letting the button fail.
         for r in rows:
             r["has_label"] = bool(desk._load_dispatch_labels(r.get("id")))
-        return core._json({"shipments": rows})
+        return gate._json({"shipments": rows})
 
     @mcp.custom_route("/api/dispatch/collections", methods=["POST"])
     async def dispatch_collections_route(request: Request):
@@ -317,7 +320,7 @@ def register(mcp, registry):
         there is nothing to query. This is gizmo's own record of the collections
         IT booked, which is why the panel says so rather than implying it read
         the courier's diary."""
-        err, body, who = await core._guard(request)
+        err, body, who = await gate._guard(request)
         if err:
             return err
         day = str(body.get("date") or "")[:10] or desk._dispatch_today()
@@ -350,8 +353,8 @@ def register(mcp, registry):
             })
         if body.get("op") == "clear":
             code = str(body.get("carrier") or "").strip().upper()
-            if core._team_level(who) < core.ROLE_LEVELS["admin"]:
-                return core._json({"error": "Only an admin can clear a collection."}, 403)
+            if team._team_level(who) < team.ROLE_LEVELS["admin"]:
+                return gate._json({"error": "Only an admin can clear a collection."}, 403)
             if code:
                 # A marker, not a deletion: the booking that secured this
                 # collection is still on the dispatch record and would simply
@@ -360,9 +363,9 @@ def register(mcp, registry):
                 d[code] = {"date": day, "cleared": True,
                            "at": datetime.now(timezone.utc).isoformat()}
                 desk._write_collections(d)
-                core._track(who, "dispatch", "cleared a collection", code + " for " + day)
-                return core._json({"ok": True, "cleared": code})
-        return core._json({"date": day, "rows": rows,
+                activity._track(who, "dispatch", "cleared a collection", code + " for " + day)
+                return gate._json({"ok": True, "cleared": code})
+        return gate._json({"date": day, "rows": rows,
                       "note": "Collections World Options confirmed on the booking, by their own "
                               "reference. Their service cannot be asked what is scheduled, so a "
                               "collection booked in their portal rather than here will not show."})
@@ -370,7 +373,7 @@ def register(mcp, registry):
     @mcp.custom_route("/api/dispatch/quote", methods=["POST"])
     async def dispatch_quote_route(request: Request):
         """Price couriers for one order. Free / read-only, no charge."""
-        err, body, _who = await core._guard(request)
+        err, body, _who = await gate._guard(request)
         if err:
             return err
         try:
@@ -378,22 +381,22 @@ def register(mcp, registry):
         except (TypeError, ValueError, OverflowError):
             oid = 0
         if not oid:
-            return core._json({"error": "No order id given."}, 400)
+            return gate._json({"error": "No order id given."}, 400)
         boxes, perr = desk._clean_parcel_list(body)
         if perr:
-            return core._json({"error": perr}, 400)
+            return gate._json({"error": perr}, 400)
         try:
             res = await desk.run_dispatch_quote(registry, oid, boxes, insurance=desk._insurance_amount(body))
-            return core._json(res, 400 if res.get("error") else 200)
+            return gate._json(res, 400 if res.get("error") else 200)
         except Exception:
             logger.exception("dispatch quote route failed")
-            return core._json({"error": "Couldn't get courier quotes."}, 500)
+            return gate._json({"error": "Couldn't get courier quotes."}, 500)
 
     @mcp.custom_route("/api/dispatch/diagnose", methods=["POST"])
     async def dispatch_diagnose_route(request: Request):
         """Why is a courier service missing? Quotes the same parcel several ways
         and reports what each returns. Free and read-only."""
-        err, body, _who = await core._guard(request)
+        err, body, _who = await gate._guard(request)
         if err:
             return err
         try:
@@ -401,21 +404,21 @@ def register(mcp, registry):
         except (TypeError, ValueError, OverflowError):
             oid = 0
         if not oid:
-            return core._json({"error": "No order id given."}, 400)
+            return gate._json({"error": "No order id given."}, 400)
         boxes, perr = desk._clean_parcel_list(body)
         if perr:
-            return core._json({"error": perr}, 400)
+            return gate._json({"error": perr}, 400)
         try:
             res = await desk.run_dispatch_diagnose(registry, oid, boxes)
-            return core._json(res, 400 if res.get("error") else 200)
+            return gate._json(res, 400 if res.get("error") else 200)
         except Exception:
             logger.exception("dispatch diagnose failed")
-            return core._json({"error": "Couldn't run the service check."}, 500)
+            return gate._json({"error": "Couldn't run the service check."}, 500)
 
     @mcp.custom_route("/api/dispatch/book", methods=["POST"])
     async def dispatch_book_route(request: Request):
         """Book the chosen courier (CHARGES the WO account), fulfill + tag."""
-        err, body, _who = await core._guard(request)
+        err, body, _who = await gate._guard(request)
         if err:
             return err
         try:
@@ -423,18 +426,18 @@ def register(mcp, registry):
         except (TypeError, ValueError, OverflowError):
             oid = 0
         if not oid:
-            return core._json({"error": "No order id given."}, 400)
+            return gate._json({"error": "No order id given."}, 400)
         option = body.get("option") if isinstance(body.get("option"), dict) else {}
         boxes, perr = desk._clean_parcel_list(body)
         if perr:
-            return core._json({"error": perr}, 400)
+            return gate._json({"error": perr}, 400)
         notify = body.get("notify")
         notify = None if notify is None else bool(notify)
         customs_body = body.get("customs") if isinstance(body.get("customs"), dict) else None
         try:
             co = str(body.get("collection_option") or "").strip()
             if co and worldoptions and co not in worldoptions.COLLECTION_OPTIONS:
-                return core._json({"error": "That is not a collection arrangement World Options offers."}, 400)
+                return gate._json({"error": "That is not a collection arrangement World Options offers."}, 400)
             desk._book_confirmed.set(bool(body.get("confirm_unknown")))
             res = await desk.run_dispatch_book(registry, oid, option, boxes, notify=notify,
                                           force=bool(body.get("force")),
@@ -445,11 +448,11 @@ def register(mcp, registry):
             if not res.get("error"):
                 nm = re.sub(r"[^#\w-]", "", str(body.get("name") or ""))[:20] or f"order {oid}"
                 svc = str(option.get("service") or "").strip()[:40]
-                core._track(_who, "dispatch", "booked a courier", (nm + (" · " + svc if svc else "")))
-            return core._json(res, 400 if res.get("error") else 200)
+                activity._track(_who, "dispatch", "booked a courier", (nm + (" · " + svc if svc else "")))
+            return gate._json(res, 400 if res.get("error") else 200)
         except Exception:
             logger.exception("dispatch book route failed")
-            return core._json({"error": "Something went wrong while booking. It MAY still have been "
+            return gate._json({"error": "Something went wrong while booking. It MAY still have been "
                                    "booked and charged: press Refresh, and check this order in "
                                    "your World Options portal before trying again."}, 500)
 
@@ -458,17 +461,17 @@ def register(mcp, registry):
         """Return the stored label(s) for an already-dispatched order (reprint).
         Read-only; the SOAP API has no fetch-by-tracking service, so labels are
         kept from the booking."""
-        err, body, _who = await core._guard(request)
+        err, body, _who = await gate._guard(request)
         if err:
             return err
         # Either a Shopify order or a pasted-address shipment: both keep their
         # label in the same place, so reprint is one path.
         oid = desk._shipment_key(body)
         if not oid:
-            return core._json({"error": "No shipment given."}, 400)
+            return gate._json({"error": "No shipment given."}, 400)
         labels = desk._load_dispatch_labels(oid)
         if not labels:
-            return core._json({"error": "No stored label for this shipment. It may have been dispatched "
+            return gate._json({"error": "No stored label for this shipment. It may have been dispatched "
                                    "before labels were saved, or on another device."}, 404)
         # Self-heal: an order booked while labels were stored as LINKS gets the real
         # file downloaded on its next open, and the fix is saved back.
@@ -505,13 +508,13 @@ def register(mcp, registry):
         out = {"ok": True, "labels": labels}
         if tech:
             out["tech"] = tech
-        return core._json(out)
+        return gate._json(out)
 
     @mcp.custom_route("/api/dispatch/manifest", methods=["POST"])
     async def dispatch_manifest_route(request: Request):
         """Everything booked on one day (Europe/London): the driver handover list
         and the sheet to check the World Options invoice against. Read-only."""
-        err, body, _who = await core._guard(request)
+        err, body, _who = await gate._guard(request)
         if err:
             return err
         want = str((body or {}).get("date") or "").strip()
@@ -520,7 +523,7 @@ def register(mcp, registry):
             try:
                 day = datetime.strptime(want, "%Y-%m-%d").date()
             except ValueError:
-                return core._json({"error": "Date must be YYYY-MM-DD."}, 400)
+                return gate._json({"error": "Date must be YYYY-MM-DD."}, 400)
         else:
             day = datetime.now(london).date()
         rows = []
@@ -571,7 +574,7 @@ def register(mcp, registry):
         # is worse than no total: it reconciles, and it is wrong. Say how many
         # rows are behind each figure.
         missing = len(live) - len(_counted("amount"))
-        return core._json({"ok": True, "date": day.isoformat(), "rows": rows,
+        return gate._json({"ok": True, "date": day.isoformat(), "rows": rows,
                       "totals": {"shipments": len(live),
                                  "priced": len(_counted("amount")),
                                  "unpriced": missing,
@@ -585,7 +588,7 @@ def register(mcp, registry):
     @mcp.custom_route("/api/margin", methods=["POST"])
     async def margin_route(request: Request):
         """What dispatched orders actually made. Read-only, no AI."""
-        err, body, _who = await core._guard(request)
+        err, body, _who = await gate._guard(request)
         if err:
             return err
         try:
@@ -593,22 +596,22 @@ def register(mcp, registry):
         except (TypeError, ValueError):
             days = 30
         try:
-            return core._json(await desk.run_margin_report(registry, days))
+            return gate._json(await desk.run_margin_report(registry, days))
         except Exception:
             logger.exception("margin report failed")
-            return core._json({"error": "Could not build the margin report."}, 500)
+            return gate._json({"error": "Could not build the margin report."}, 500)
 
     @mcp.custom_route("/api/dispatch/cancel", methods=["POST"])
     async def dispatch_cancel_route(request: Request):
         """Cancel a booked shipment at World Options (best-effort)."""
-        err, body, _who = await core._guard(request)
+        err, body, _who = await gate._guard(request)
         if err:
             return err
         if not worldoptions or not worldoptions.configured():
-            return core._json({"error": "World Options is not connected."}, 400)
+            return gate._json({"error": "World Options is not connected."}, 400)
         tn = str(body.get("tracking_number") or "").strip()
         if not tn:
-            return core._json({"error": "No tracking number given."}, 400)
+            return gate._json({"error": "No tracking number given."}, 400)
         oid = desk._shipment_key(body)
         # The tracking number and the order key arrive as two INDEPENDENT
         # client values, and the shipment modal is built once at open time. A
@@ -622,16 +625,16 @@ def register(mcp, registry):
                 cur = (desk._load_dispatch().get(str(oid)) or {})
                 have = str(cur.get("tracking_number") or "").strip()
                 if have and have != tn:
-                    return core._json({"error": "That tracking number is not this order's current "
+                    return gate._json({"error": "That tracking number is not this order's current "
                                            "shipment - it was re-booked since this page was "
                                            "opened. Refresh and try again."}, 409)
             try:
                 res = await worldoptions.cancel(tn)
             except worldoptions.WorldOptionsError as e:
-                return core._json({"error": str(e)}, 400)
+                return gate._json({"error": str(e)}, 400)
             except Exception:
                 logger.exception("dispatch cancel failed")
-                return core._json({"error": "Couldn't cancel the shipment."}, 500)
+                return gate._json({"error": "Couldn't cancel the shipment."}, 500)
             return await _finish_cancel(oid, tn, res, _who)
 
     async def _finish_cancel(oid, tn, res, _who):
@@ -645,16 +648,16 @@ def register(mcp, registry):
                 desk._update_dispatch(oid, _mark_cancelled)
             except desk.DispatchStoreUnwritable:
                 logger.exception("could not record the cancellation of %s", oid)
-                return core._json({"error": "The shipment was cancelled at World Options, but that "
+                return gate._json({"error": "The shipment was cancelled at World Options, but that "
                                        "could not be recorded here. Do NOT re-book yet: check "
                                        "the data volume, then refresh."}, 500)
-            core._track(_who, "dispatch", "cancelled a shipment",
+            activity._track(_who, "dispatch", "cancelled a shipment",
                    (entry.get("order_name") or str(oid))[:30])
             # A pasted-address shipment has no order behind it: the void at World
             # Options is the whole cancellation, and there is nothing in Shopify to
             # put back. Everything below this line is order repair.
             if desk._is_adhoc(oid):
-                return core._json({"ok": True, "note": note, "canceled": True})
+                return gate._json({"ok": True, "note": note, "canceled": True})
             # Undo what the booking did in Shopify, so the customer is not left
             # with dead tracking and the order can be re-dispatched cleanly.
             fid = entry.get("fulfillment_id")
@@ -698,4 +701,4 @@ def register(mcp, registry):
                                        remove=(desk.DISPATCHED_TAG, *desk.LEGACY_DISPATCHED_TAGS))
             except Exception:
                 logger.exception("tag revert after cancel failed for order %s", oid)
-        return core._json({"ok": True, "shipment": res, "note": note})
+        return gate._json({"ok": True, "shipment": res, "note": note})

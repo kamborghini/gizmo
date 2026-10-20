@@ -11,8 +11,9 @@ the handler makes for itself, and the first sentence of its docstring.
     python tools/route_reference.py --write   # regenerate docs/API.md
     python tools/route_reference.py --check   # exit 1 when the file is stale (CI)
 
-The tab map is read from copilot's own _TAB_ROUTES and _OPEN_API literals, so
-this imports nothing from the app. Zero dependencies, like env_reference.py.
+The tab map is read from the _TAB_ROUTES and _OPEN_API literals, wherever in
+copilot.py or the modules split out of it they stand, so this imports nothing
+from the app. Zero dependencies, like env_reference.py.
 """
 import ast
 import os
@@ -31,13 +32,28 @@ def module_files(root):
     return [("server", "server.py")] + [(f[:-3].replace("/", "."), f) for f in sources.copilot_files(root)]
 
 
+# The names a module gives copilot.py and the modules split out of it
+# (core, team, gate, desk ...), set for each module as it is read.
+_ALIASES: set = set()
+
+
+def _family_aliases(tree, family):
+    out = set()
+    for n in tree.body:
+        if isinstance(n, ast.Import):
+            out |= {a.asname or a.name for a in n.names if a.name in family}
+        elif isinstance(n, ast.ImportFrom) and n.module and not n.level:
+            out |= {a.asname or a.name for a in n.names if f"{n.module}.{a.name}" in family}
+    return out
+
+
 def _called(call):
-    """The name a call reaches: f(...), or core.f(...) in a module moved out of
-    copilot.py, which reads copilot.py as core."""
+    """The name a call reaches: f(...), or m.f(...) where m is copilot.py or a
+    module split out of it (core.f, team.f, gate.f)."""
     f = call.func
     if isinstance(f, ast.Name):
         return f.id
-    if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id == "core":
+    if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id in _ALIASES:
         return f.attr
     return None
 
@@ -115,12 +131,17 @@ def _about(fn):
 
 def collect(root):
     copilot_tree = ast.parse(open(os.path.join(root, sources.copilot_files(root)[0]), encoding="utf-8").read())
-    tab_routes = _literal(copilot_tree, "_TAB_ROUTES") or ()
-    open_api = _literal(copilot_tree, "_OPEN_API") or ()
+    # The tab map lives with the door: in copilot.py once, in gizmo/gate.py now.
+    family = [ast.parse(open(os.path.join(root, f), encoding="utf-8").read()) for f in sources.copilot_files(root)]
+    tab_routes = next((v for v in (_literal(t, "_TAB_ROUTES") for t in family) if v), ())
+    open_api = next((v for v in (_literal(t, "_OPEN_API") for t in family) if v), ())
     rows = []
+    family_mods = {f[:-3].replace("/", ".") for f in sources.copilot_files(root)}
     for mod, rel in module_files(root):
         path = os.path.join(root, rel)
         tree = copilot_tree if mod == "copilot" else ast.parse(open(path, encoding="utf-8").read())
+        _ALIASES.clear()
+        _ALIASES.update(_family_aliases(tree, family_mods))
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue

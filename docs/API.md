@@ -21,13 +21,13 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/auth/login` | POST | any account | `_auth_guard` |  |  | `copilot.auth_login_route` |  |
-| `/api/auth/logout` | POST | any account | `_auth_guard` |  |  | `copilot.auth_logout_route` |  |
-| `/api/auth/mfa` | POST | any account | `_guard` |  |  | `copilot.auth_mfa_route` | Turn a second factor on, or ask whether it is on. |
-| `/api/auth/mfa-verify` | POST | any account | `_auth_guard` |  |  | `copilot.auth_mfa_verify_route` | Finish a login. |
-| `/api/auth/password` | POST | any account | `_auth_guard` |  |  | `copilot.auth_password_route` |  |
-| `/api/auth/setup` | POST | any account | `_auth_guard` |  |  | `copilot.auth_setup_route` |  |
-| `/api/auth/state` | POST | any account | `_auth_guard` |  |  | `copilot.auth_state_route` |  |
+| `/api/auth/login` | POST | any account | `_auth_guard` |  |  | `gizmo.routes.team.auth_login_route` |  |
+| `/api/auth/logout` | POST | any account | `_auth_guard` |  |  | `gizmo.routes.team.auth_logout_route` |  |
+| `/api/auth/mfa` | POST | any account | `_guard` |  |  | `gizmo.routes.team.auth_mfa_route` | Turn a second factor on, or ask whether it is on. |
+| `/api/auth/mfa-verify` | POST | any account | `_auth_guard` |  |  | `gizmo.routes.team.auth_mfa_verify_route` | Finish a login. |
+| `/api/auth/password` | POST | any account | `_auth_guard` |  |  | `gizmo.routes.team.auth_password_route` |  |
+| `/api/auth/setup` | POST | any account | `_auth_guard` |  |  | `gizmo.routes.team.auth_setup_route` |  |
+| `/api/auth/state` | POST | any account | `_auth_guard` |  |  | `gizmo.routes.team.auth_state_route` |  |
 
 ## `/api/backup`
 
@@ -345,9 +345,9 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/team/board` | POST | any account | `_team_guard` | rank admin | `_team_role` | `copilot.team_board_route` |  |
-| `/api/team/me` | POST | any account | `_guard` | reads its own body | `_user_tabs` | `copilot.team_me_route` |  |
-| `/api/team/user` | POST | any account | `_team_guard` | rank admin | `_team_level` | `copilot.team_user_route` |  |
+| `/api/team/board` | POST | any account | `_team_guard` | rank admin | `_team_role` | `gizmo.routes.team.team_board_route` |  |
+| `/api/team/me` | POST | any account | `_guard` | reads its own body | `_user_tabs` | `gizmo.routes.team.team_me_route` |  |
+| `/api/team/user` | POST | any account | `_team_guard` | rank admin | `_team_level` | `gizmo.routes.team.team_user_route` |  |
 
 ## `/api/updates`
 
