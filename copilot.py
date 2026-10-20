@@ -92,6 +92,11 @@ from gizmo.team import _live_uid, _uid_has_tab, _verify_session_token
 from gizmo.gate import _API_HEADERS, _guard, _json, _pre_checks
 from gizmo.activity import _track
 from gizmo.routes import team as routes_team
+# Moved out of this file (stage 4): the way to Shopify, the order book,
+# production and the Size list. Read as shopify., orderbook., production.,
+# size_list., except the five the frozen print route reads, by their own names.
+from gizmo import orderbook, production, shopify, size_list
+from gizmo.production import _LABEL_LOGO_SVG, _load_prod_state, _mark_printed, _release_bg, run_production_labels
 logger = logging.getLogger("shopify_mcp.copilot")
 
 
@@ -118,7 +123,6 @@ LOW_STOCK_THRESHOLD = _env_num(int, os.environ.get("LOW_STOCK_THRESHOLD", "5"), 
 # 250-order pages we will page through so the request stays responsive.
 TREND_MONTHS = _env_num(int, os.environ.get("TREND_MONTHS", "24"), "24", "TREND_MONTHS")
 PRODUCT_TREND_MONTHS = _env_num(int, os.environ.get("PRODUCT_TREND_MONTHS", "12"), "12", "PRODUCT_TREND_MONTHS")
-ORDER_PAGE_CAP = _env_num(int, os.environ.get("ORDER_PAGE_CAP", "30"), "30", "ORDER_PAGE_CAP")
 # App Bridge identity = the app's Client ID + secret. Accept either the
 # SHOPIFY_API_KEY/SECRET names or the SHOPIFY_CLIENT_ID/SECRET names (same values).
 SHOPIFY_API_KEY    = os.environ.get("SHOPIFY_API_KEY") or os.environ.get("SHOPIFY_CLIENT_ID", "")
@@ -180,14 +184,6 @@ CHANGELOG_PATH     = os.environ.get("CHANGELOG_PATH",
                                     os.path.join(os.path.dirname(__file__), "data", "changelog.json"))
 ALERTS_MAX         = _env_num(int, os.environ.get("ALERTS_MAX", "60"), "60", "ALERTS_MAX")
 SCHEDULE_CHECK_SECS = _env_num(int, os.environ.get("SCHEDULE_CHECK_SECS", "900"), "900", "SCHEDULE_CHECK_SECS")       # how often the scheduler wakes to check
-PRODUCTION_TAG     = os.environ.get("PRODUCTION_LABEL_TAG", "IP")              # order tag that means "in production"
-PRODUCTION_DAYS    = _env_num(int, os.environ.get("PRODUCTION_LABEL_DAYS", "180"), "180", "PRODUCTION_LABEL_DAYS")       # how far back to look for tagged orders
-# The Shopify product type of a catalogue (stock) gobo. A stock gobo is its own
-# name on a label; the custom products ("Custom Gobo", "Custom Gobos") are not,
-# and still need a fixture before anything is sized.
-STOCK_GOBO_TYPE    = "gobo"
-GOBO_SIZES_PATH    = os.environ.get("GOBO_SIZES_PATH",
-                                    os.path.join(os.path.dirname(__file__), "data", "gobo-sizes.csv"))
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")   # composer.js; the page itself is joined by pagesource.py from static/src
 _page_cache: Optional[str] = None   # the shell: the page with its CSS and JS lifted out
@@ -1691,9 +1687,6 @@ def _page_context_to_system(ctx) -> str:
 # made, then measure how they moved since. Proves whether advice worked.
 # ---------------------------------------------------------------------------
 
-PRODUCTION_STATE_PATH = os.environ.get("PRODUCTION_STATE_PATH", "/data/production_state.json")
-PRODUCTION_STATE_MAX = _env_num(int, os.environ.get("PRODUCTION_STATE_MAX", "1000"), "1000", "PRODUCTION_STATE_MAX")
-
 
 STORE_REPORT_PARSE_MIN = 1024 * 1024     # measure the parse of anything this big
 
@@ -1957,107 +1950,6 @@ def _london_hm(iso) -> str:
         return str(iso or "")
 
 
-def _load_prod_state() -> dict:
-    return jsonstore._load_json_cached(PRODUCTION_STATE_PATH, "orders", {})
-
-
-PRODUCTION_ARCHIVE_PATH = os.environ.get(
-    "PRODUCTION_ARCHIVE_PATH",
-    os.path.join(os.path.dirname(PRODUCTION_STATE_PATH) or ".", "production_state_archive.jsonl"))
-
-
-class ProdStateUnwritable(StoreUnwritable):
-    """The production state could not be saved. Raised rather than returned,
-    because the caller has usually ALREADY fulfilled Shopify and booked glass
-    by this point - reporting success would leave the merchant believing a
-    stamp exists that will vanish on the next reload."""
-
-
-def _write_prod_state(orders: dict) -> dict:
-    if not jsonstore._store_writable(PRODUCTION_STATE_PATH):
-        jsonstore._forget_store(PRODUCTION_STATE_PATH)
-        raise ProdStateUnwritable("the production state store is not writable")
-    if len(orders) > PRODUCTION_STATE_MAX:
-        # Evict the least-recently-touched entries. Sort by the NEWEST stamp so an
-        # order printed months ago but made yesterday is treated as recent, not
-        # stale. Any evicted entry that carries a made_at is archived first, so the
-        # per-day stock-usage HISTORY it feeds survives the eviction.
-        def newest(kv):
-            e = kv[1]
-            return max(str(e.get("printed_at") or ""), str(e.get("made_at") or ""))
-        keep = sorted(orders.items(), key=newest)
-        evicted = keep[:-PRODUCTION_STATE_MAX]
-        archive = [{"order_id": oid, "made_at": e["made_at"]}
-                   for oid, e in evicted if e.get("made_at")]
-        if archive:
-            try:
-                os.makedirs(os.path.dirname(PRODUCTION_ARCHIVE_PATH) or ".", exist_ok=True)
-                with open(PRODUCTION_ARCHIVE_PATH, "a", encoding="utf-8") as fh:
-                    for rec in archive:
-                        fh.write(json.dumps(rec) + "\n")
-            except Exception:
-                logger.exception("production archive append failed")
-        orders = dict(keep[-PRODUCTION_STATE_MAX:])
-    jsonstore._write_json_store(PRODUCTION_STATE_PATH, "orders", orders)
-    return orders
-
-
-def _archived_made(order_ids_wanted: set) -> dict:
-    """{order_id: made_at} for archived (evicted) made stamps, so stock-usage
-    history for a past day still finds orders that fell out of the live state."""
-    out: dict = {}
-    try:
-        with open(PRODUCTION_ARCHIVE_PATH, "r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except ValueError:
-                    continue
-                oid, ma = str(rec.get("order_id") or ""), rec.get("made_at")
-                if oid and ma:
-                    out[oid] = ma   # last write wins (a re-made order)
-    except FileNotFoundError:
-        pass
-    except Exception:
-        logger.exception("production archive read failed")
-    return out
-
-
-def _mark_printed(order_ids: list) -> bool:
-    """Best-effort: a failed stamp must never break a print. Returns whether the
-    stamp actually persisted so callers can say so."""
-    try:
-        state = _load_prod_state()
-        if not jsonstore._store_writable(PRODUCTION_STATE_PATH):
-            return False
-        now = datetime.now(timezone.utc).isoformat()
-        for oid in order_ids:
-            entry = state.setdefault(str(oid), {})
-            entry["printed_at"] = now
-        _write_prod_state(state)
-        return True
-    except ProdStateUnwritable:
-        return False          # the caller already reports this to the merchant
-    except Exception:
-        logger.exception("production state: printed stamp failed")
-        return False
-
-
-def _mark_made(order_id, on: bool) -> dict:
-    state = _load_prod_state()
-    entry = state.setdefault(str(order_id), {})
-    if on:
-        entry["made_at"] = datetime.now(timezone.utc).isoformat()
-    else:
-        entry.pop("made_at", None)
-    if not entry:
-        state.pop(str(order_id), None)
-    return _write_prod_state(state)
-
-
 def _load_impact() -> list[dict]:
     return jsonstore._load_json_store(IMPACT_PATH, "items", [])
 
@@ -2248,7 +2140,7 @@ async def run_learn(registry: dict) -> dict:
     primary, hosts = await _resolve_domains(registry)
     if not primary:
         raise RuntimeError("Could not resolve the store's domain to learn from.")
-    shop = await _tool_json(registry, "shopify_get_shop", {})
+    shop = await shopify._tool_json(registry, "shopify_get_shop", {})
     urls = await _discover_content_urls(primary, hosts, LEARN_MAX_PAGES)
     pages = []
     for u in urls:
@@ -2732,27 +2624,6 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
 # Overview — live KPIs (computed deterministically) + AI insight pass
 # ---------------------------------------------------------------------------
 
-async def _tool_json(registry: dict, name: str, args: dict) -> dict:
-    func, model = registry[name]
-    raw = None
-    try:
-        raw = await func(model(**(args or {})))
-        return json.loads(raw)
-    except Exception:
-        # Signal failure rather than an empty result: callers must not report a
-        # throttled/errored fetch as a real zero (that produces false alerts).
-        # What the tool said is kept, so a caller can tell "not there" from
-        # "not answered".
-        logger.warning("shopify tool %s failed; treating as unavailable", name)
-        return {"_failed": True, "_said": str(raw or "")[:300]}
-
-
-def _shopify_gone(d) -> bool:
-    """A read that Shopify answered with "no such thing" (a deleted order), as
-    opposed to one that was not answered. Retrying the first never helps."""
-    said = str((d or {}).get("_said") or (d or {}).get("error") or "") if isinstance(d, dict) else ""
-    return bool(re.search(r"resource not found|\b404\b", said, re.I))
-
 
 def _ok(d) -> bool:
     """True when a _tool_json result is real data (not a swallowed failure)."""
@@ -2800,12 +2671,12 @@ async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tupl
     # week cut a busy week off, and only the AI was told ("up to 250").
     m14: dict = {}
     shop, o14, custr, cntr, prodr, ga, gsc = await asyncio.gather(
-        _tool_json(registry, "shopify_get_shop", {}),
-        _paginate_orders(registry, days=14, meta=m14,
+        shopify._tool_json(registry, "shopify_get_shop", {}),
+        orderbook._paginate_orders(registry, days=14, meta=m14,
                          fields="id,created_at,total_price,current_total_price,cancelled_at,test,"
                                 "financial_status,fulfillment_status,line_items"),
-        _tool_json(registry, "shopify_list_customers", {"created_at_min": d7, "limit": 250}),
-        _tool_json(registry, "shopify_count_products", {}),
+        shopify._tool_json(registry, "shopify_list_customers", {"created_at_min": d7, "limit": 250}),
+        shopify._tool_json(registry, "shopify_count_products", {}),
         _all_products(registry, "id,title,variants") if track_inventory else _ret(([], True, False)),
         google_data.ga4_summary(28) if ga4_on else _ret({}),
         google_data.gsc_overview(28) if gsc_on else _ret({}),
@@ -2918,7 +2789,7 @@ async def _sector_sales(registry: dict, days: int = 28) -> list:
         ometa: dict = {}
         customers, orders = await asyncio.gather(
             _paginate_customers(registry, meta=cmeta),
-            _orders_snapshot(registry, days=days,
+            orderbook._orders_snapshot(registry, days=days,
                              fields="id,total_price,current_total_price,created_at,customer,"
                                     "cancelled_at,test,financial_status", meta=ometa),
         )
@@ -2992,7 +2863,7 @@ async def _overview_trends(registry: dict) -> dict:
     ga4_on, gsc_on = google_data.ga4_configured(), google_data.gsc_configured()
     # Fetch the Shopify order history and both Google timeseries at once.
     orders, ts, gts = await asyncio.gather(
-        _orders_snapshot(registry, days=len(months) * 31),
+        orderbook._orders_snapshot(registry, days=len(months) * 31),
         google_data.ga4_timeseries(min(TREND_MONTHS, 24) * 31) if ga4_on else _ret({}),
         google_data.gsc_timeseries(480) if gsc_on else _ret({}),
         return_exceptions=True,
@@ -3110,7 +2981,7 @@ async def _resolve_domains(registry: dict) -> tuple[str, set]:
     """Return (primary_domain, allowed_hosts) for the store. Cached per process."""
     if _domains_cache.get("primary"):
         return _domains_cache["primary"], _domains_cache["hosts"]
-    shop = await _tool_json(registry, "shopify_get_shop", {})
+    shop = await shopify._tool_json(registry, "shopify_get_shop", {})
     myshop = shop.get("myshopify_domain") or (f"{SHOPIFY_STORE}.myshopify.com" if SHOPIFY_STORE else "")
     primary = shop.get("domain") or myshop
     hosts = {h.lower() for h in (primary, myshop) if h}
@@ -3319,7 +3190,7 @@ async def _all_products(registry: dict, fields: str) -> tuple:
     Overview's low-stock count and the loan-unit picker."""
     products, since_id, pages = [], 0, 0
     while True:
-        data = await _tool_json(registry, "shopify_list_products",
+        data = await shopify._tool_json(registry, "shopify_list_products",
                                 {"limit": 250, "since_id": since_id, "fields": fields})
         if not _ok(data):
             return products, False, False
@@ -3329,8 +3200,8 @@ async def _all_products(registry: dict, fields: str) -> tuple:
         if len(batch) < 250:
             return products, True, False
         since_id = max(int(p.get("id") or 0) for p in batch)
-        if pages >= ORDER_PAGE_CAP:
-            more = await _tool_json(registry, "shopify_list_products",
+        if pages >= orderbook.ORDER_PAGE_CAP:
+            more = await shopify._tool_json(registry, "shopify_list_products",
                                     {"limit": 1, "since_id": since_id, "fields": "id"})
             return products, True, bool(_ok(more) and more.get("products"))
 
@@ -3607,11 +3478,11 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
         _seo_product_signals(registry),
         _http_get(f"https://{primary}/robots.txt", allowed_hosts=hosts),
         _http_get(f"https://{primary}/sitemap.xml", allowed_hosts=hosts),
-        _tool_json(registry, "shopify_list_products", {"limit": SEO_SAMPLE_PAGES, "fields": "handle"}),
+        shopify._tool_json(registry, "shopify_list_products", {"limit": SEO_SAMPLE_PAGES, "fields": "handle"}),
         google_data.gsc_overview(28) if gsc_on else _ret({}),
         google_data.gsc_top_queries(28) if gsc_on else _ret({}),
         google_data.ga4_summary(28) if ga4_on else _ret({}),
-        _tool_json(registry, "shopify_get_shop", {}),
+        shopify._tool_json(registry, "shopify_get_shop", {}),
         _orders_28d(registry),
     )
     rs, rtext = robots
@@ -3712,7 +3583,7 @@ async def run_keywords(registry: dict, extra_system: str = "") -> dict:
         google_data.gsc_overview(days) if gsc_ok else _ret({}),
         google_data.gsc_top_queries(days, limit=100) if gsc_ok else _ret({}),
         google_data.ga4_ads(days) if ga4_ok else _ret({}),
-        _tool_json(registry, "shopify_get_shop", {}),
+        shopify._tool_json(registry, "shopify_get_shop", {}),
     )
     shop = shop or {}
     currency = shop.get("currency", "")
@@ -3795,7 +3666,7 @@ async def run_keyword_scan(registry: dict, url: str, extra_system: str = "") -> 
 async def _orders_28d(registry: dict, meta: Optional[dict] = None) -> list:
     """The last 28 days of orders, every page of them (one page of 250 cut a
     busy month short), through the shared snapshot."""
-    return await _orders_snapshot(registry, days=28, meta=meta,
+    return await orderbook._orders_snapshot(registry, days=28, meta=meta,
                                   fields="id,created_at,total_price,current_total_price,line_items,"
                                          "cancelled_at,test,financial_status,customer")
 
@@ -3842,2571 +3713,10 @@ def _month_axis(months: int) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Order sweep snapshot
-#
-# Sweeping the store is the most expensive read this app makes: up to 30 pages
-# of 250 orders, chained by since_id so they cannot run in parallel. The
-# production queue reruns it on every flip between To make / To ship /
-# Complete, and all three tabs ask for the SAME window and fields, differing
-# only in a local tag filter. One snapshot therefore serves all three, and a
-# tab flip drops from ~30 sequential Shopify calls to none.
-#
-# Freshness rests on three mechanisms because they cover different mutations:
-#   - every write THIS app makes to an order, and Shopify's order webhook,
-#     names the order (_orders_changed): each snapshot keeps the rest of the
-#     store and reads that order again, by id, before it answers anyone. Each
-#     used to retire every snapshot, so one Production Manager action cost two
-#     full sweeps (the 2026-10-12 speed audit, X1);
-#   - Refresh, and a change nobody can name, still retire every snapshot at
-#     once (_bust_orders), as everything did before;
-#   - a short TTL bounds how long a change Shopify never told us about can stay
-#     invisible: webhooks are at-least-once and occasionally late or lost.
-#
-# Two things are deliberately NOT cached. A failed sweep, because "nothing
-# owed" must never be an artefact of a throttled fetch. And the shaped label
-# payload, because production state, dispatch state and the gobo size sheet all
-# change it without touching Shopify; those are cheap local reads and stay live.
-# ---------------------------------------------------------------------------
-# How long a swept order list may be reused. Every queue segment needs the SAME
-# sweep, so at 45 seconds a merchant who read one screen before clicking the
-# next paid the whole 8-page fan-out again. Correctness does not rest on the
-# TTL: an order webhook or a write by the app names its order, which every
-# snapshot reads again before it answers (_orders_changed), and Refresh retires
-# them all (_bust_orders), so a real change is never waited out.
-ORDER_CACHE_SECS = _env_num(int, os.environ.get("ORDER_CACHE_SECS", "180"), "180", "ORDER_CACHE_SECS")
-# Distinct (days, fields) sweeps kept. There are about seven in the codebase,
-# so with a longer TTL this became the binding constraint rather than the
-# clock: at 6, an Overview or Margins run could evict the production queue's
-# entry and make the next click cold again.
-ORDER_CACHE_MAX  = 8
-_orders_cache: dict = {}      # (days, fields) -> {"at", "orders", "meta", "pending"}
-_orders_inflight: dict = {}   # (days, fields) -> the Task sweeping, so concurrent misses share one fetch
-_orders_refreshing: dict = {}  # (days, fields) -> the Task reading its pending orders again, by id
-_orders_flight: dict = {}     # (days, fields) -> ids that changed while that key's sweep was in flight
-_orders_epoch = 0             # bumped by every change, named (_orders_changed) or not (_bust_orders)
-_orders_full_epoch = 0        # bumped only by _bust_orders: what retires every snapshot
-# More changed orders than this at once and one sweep is cheaper than reading
-# them again one by one (Shopify's ids filter takes at most 250 a page).
-ORDER_REFRESH_MAX = 50
-
-
-# ---------------------------------------------------------------------------
-# Webhooks: how the desk stays live.
-#
-# Without these the app is blind between reads: the order snapshot has a 45s
-# TTL, and an edit made in the Shopify admin (a payment landing, a tag changed,
-# a refund) stays invisible until the clock runs out. Shopify POSTs order
-# events here instead; each verified event names its order, which every
-# snapshot reads again from Shopify before it answers, so the next read of any
-# tab reflects reality within seconds. The TTL stays as the backstop, because
-# webhooks are at-least-once, unordered and occasionally late; the payload only
-# says which order to read again and is never used as state.
-# ---------------------------------------------------------------------------
-WEBHOOK_MAX_BYTES = 1024 * 1024        # a full order payload, with headroom
-# version: the Shopify version the last event was sent in, from its own header.
-# The subscriptions keep the version they were made with, which nothing else
-# here shows, and an old one silently moves forward when Shopify retires it.
-_webhook_state = {"last_at": 0.0, "last_topic": "", "count": 0, "ensured": None, "version": ""}
-_webhook_seen: dict = {}               # delivery id -> monotonic time (dedupe)
-
-
-def _webhook_note_delivery(delivery_id: str) -> bool:
-    """True if this delivery is new. Shopify redelivers on any slow response,
-    so the same event arriving twice must not read as two events."""
-    now = time.monotonic()
-    if len(_webhook_seen) > 500:
-        cutoff = now - 600
-        for k in [k for k, t in _webhook_seen.items() if t < cutoff]:
-            _webhook_seen.pop(k, None)
-    if delivery_id in _webhook_seen:
-        return False
-    _webhook_seen[delivery_id] = now
-    return True
-
-
-def _refresh_asked(body: dict) -> bool:
-    """True when the merchant pressed Refresh, having discarded the snapshots.
-
-    Refresh has to mean Shopify is re-read: the reports it sits on are the ones
-    a merchant checks straight after editing something in the admin, and there
-    are no webhooks to tell us about that edit. It clears every window rather
-    than just this report's, which costs one extra sweep on whatever is opened
-    next and is still no worse than the old behaviour of always sweeping."""
-    if not isinstance(body, dict) or not body.get("fresh"):
-        return False
-    _bust_orders()
-    return True
-
-
-def _bust_orders() -> None:
-    """Retire every cached order sweep, finished or still running.
-
-    Called straight after each write this app makes to order tags or fulfilment
-    status, which are exactly the fields the queues filter on, and when the
-    merchant presses Refresh. Bumping the epoch stops a sweep already in flight
-    from storing its result, since that result was taken before the write.
-
-    Clearing _orders_inflight matters just as much: a sweep of two years of
-    orders takes long enough that a merchant can edit something in Shopify and
-    press Refresh while it is still running. Left joinable, that sweep would
-    answer the Refresh with the picture from before their edit, which on the
-    liability ledger means chasing an invoice that has just been paid. Anyone
-    already awaiting it keeps their own reference and still gets an answer; it
-    simply stops being the answer for callers that arrive after the write.
-
-    Still the blunt instrument, deliberately: Refresh, and any change nobody
-    can name (an order event whose body cannot be read). Where the app knows
-    WHICH order changed it says so with _orders_changed, which keeps the
-    snapshots and reads that order again instead (the 2026-10-12 speed audit,
-    X1: one Production Manager action used to cost two full sweeps)."""
-    global _orders_epoch, _orders_full_epoch
-    _orders_epoch += 1
-    _orders_full_epoch += 1
-    _orders_cache.clear()
-    _orders_inflight.clear()
-    _orders_refreshing.clear()
-    _orders_flight.clear()
-
-
-def _orders_changed(order_ids) -> None:
-    """These orders changed: a write this app has just made to them, or
-    Shopify's webhook saying so. Every snapshot is kept, and each of these
-    orders is read again from Shopify, by id, before any snapshot is used
-    again (_orders_snapshot), so no answer can carry the order as it was.
-
-    That holds for a sweep still in flight too: the ids are recorded against
-    it, so its result is kept and then put right rather than thrown away, and
-    a caller who joins it after the change is answered with the order as it
-    is now. Ids that cannot be read as order ids fall back to _bust_orders."""
-    ids = set()
-    for i in order_ids or ():
-        try:
-            ids.add(int(i))
-        except (TypeError, ValueError, OverflowError):
-            pass
-    if not ids or ORDER_CACHE_SECS <= 0:
-        # Nothing cached to put right (the cache switched off): detach any
-        # sweep in flight, exactly as every change used to.
-        _bust_orders()
-        return
-    global _orders_epoch
-    _orders_epoch += 1
-    for entry in _orders_cache.values():
-        entry["pending"].update(ids)
-    for flight in _orders_flight.values():
-        flight.update(ids)
-
-
-async def _sweep_orders(registry: dict, days: int, fields: str, key) -> tuple:
-    """One shared sweep: fetches, stores if it is worth storing, and returns
-    (orders, meta, ids named as changed while it ran) to every caller waiting
-    on it."""
-    full_epoch = _orders_full_epoch    # retired by _bust_orders, or not
-    flight: set = set()                # orders named as changed while this runs
-    _orders_flight[key] = flight
-    meta: dict = {}
-    try:
-        orders = await _paginate_orders(registry, days=days, fields=fields, meta=meta)
-        # Store only a complete sweep not retired meanwhile: "nothing owed"
-        # must never be a cached artefact of a throttled fetch. Orders named
-        # as changed while it ran are stored as pending, to be read again.
-        if ORDER_CACHE_SECS > 0 and not meta.get("failed") and _orders_full_epoch == full_epoch:
-            _orders_cache[key] = {"at": time.monotonic(), "orders": orders,
-                                  "meta": dict(meta), "pending": set(flight), "reading": set()}
-            while len(_orders_cache) > ORDER_CACHE_MAX:
-                _orders_cache.pop(min(_orders_cache, key=lambda k: _orders_cache[k]["at"]), None)
-        return orders, meta, flight
-    finally:
-        if _orders_flight.get(key) is flight:
-            _orders_flight.pop(key, None)
-        if _orders_inflight.get(key) is asyncio.current_task():
-            _orders_inflight.pop(key, None)
-
-
-def _order_created(o: dict):
-    try:
-        t = datetime.fromisoformat(str(o.get("created_at") or "").replace("Z", "+00:00"))
-        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
-    except ValueError:
-        return None
-
-
-async def _refresh_orders(registry: dict, key) -> bool:
-    """Read a snapshot's pending orders again, by id, and put them in place:
-    the order as Shopify has it now, with the same fields the sweep asked
-    for, inserted if it is new to the window, dropped if it is gone or older
-    than the window. True when the snapshot is current again; False when it
-    was dropped (the read failed, too many changed at once, or everything was
-    retired meanwhile), and the caller sweeps instead."""
-    entry = _orders_cache.get(key)
-    if entry is None:
-        return False
-    ids = sorted(entry["pending"])
-    if not ids:
-        return True
-    if len(ids) > ORDER_REFRESH_MAX or entry["meta"].get("truncated"):
-        # Too many for one read, or a sweep the page cap cut short: that holds
-        # the oldest orders only, and adding a newer one an event named would
-        # make a list no sweep returns. One sweep is the honest answer.
-        _orders_cache.pop(key, None)
-        return False
-    # Taken off the to-read list, but held as being read until they land: a
-    # load arriving meanwhile must wait for this read, not take the snapshot
-    # for current (_orders_snapshot checks both).
-    entry["pending"] = set()
-    entry["reading"] = set(ids)
-    try:
-        return await _refresh_orders_read(registry, key, entry, ids)
-    except BaseException:
-        if _orders_cache.get(key) is entry:
-            _orders_cache.pop(key, None)    # half put right is not put right
-        raise
-
-
-async def _refresh_orders_read(registry: dict, key, entry: dict, ids: list) -> bool:
-    days, fields = key
-    names = [f for f in fields.split(",") if f]
-    full_epoch = _orders_full_epoch
-    res = await _tool_json(registry, "shopify_list_orders",
-                           {"status": "any", "ids": ",".join(str(i) for i in ids), "limit": 250,
-                            "fields": ",".join(names + ([] if "created_at" in names else ["created_at"]))})
-    if _orders_full_epoch != full_epoch or _orders_cache.get(key) is not entry:
-        return False                   # retired, or replaced, while this was reading
-    if not _ok(res):
-        _orders_cache.pop(key, None)   # never leave the old order standing in for the new
-        return False
-    # The same cut _paginate_orders makes with created_at_min, so an order the
-    # sweep would not have returned is not kept either.
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    fresh = {}
-    for o in res.get("orders") or []:
-        try:
-            oid = int(o.get("id"))
-        except (TypeError, ValueError):
-            continue
-        if oid in ids:
-            fresh[oid] = o
-    rows = {}
-    for o in entry["orders"]:
-        try:
-            rows[int(o.get("id"))] = o
-        except (TypeError, ValueError):
-            continue
-    for oid in ids:
-        o = fresh.get(oid)
-        made = _order_created(o) if o else None
-        if o is None or made is None or made < cutoff:
-            rows.pop(oid, None)        # deleted, or outside the window the sweep reads
-            continue
-        if "created_at" not in names:
-            o = {k: v for k, v in o.items() if k != "created_at"}
-        rows[oid] = o
-    entry["orders"] = [rows[i] for i in sorted(rows)]   # ascending id, as the sweep pages them
-    entry["reading"] = set()
-    return True
-
-
-async def _orders_snapshot(registry: dict, days: int,
-                           fields: str = "id,created_at,total_price,current_total_price,line_items,"
-                                         "cancelled_at,test,financial_status",
-                           meta: Optional[dict] = None, force: bool = False) -> list:
-    """Orders from the last `days`, reusing a recent sweep when there is one.
-
-    Same contract as _paginate_orders, including the `meta` out-parameter, so
-    callers that tell a throttled fetch apart from an empty store keep working.
-    `force` is the merchant pressing Refresh: it discards everything first, so
-    an edit made in the Shopify admin shows up immediately."""
-    key = (int(days), fields)
-    if force:
-        _bust_orders()   # nothing already running may answer this
-    else:
-        # Drop anything past its window on the way in. A sweep holds names,
-        # addresses and emails; once it is too old to be used it should not
-        # still be sitting in memory waiting for someone to ask for that key.
-        now = time.monotonic()
-        for k, v in list(_orders_cache.items()):
-            if now - v["at"] >= ORDER_CACHE_SECS:
-                _orders_cache.pop(k, None)
-
-    async def swept() -> tuple:
-        """(orders, meta, ids named while it ran, whether THIS caller started
-        it). A starter's request predates every change named while its sweep
-        ran, so answering it from that sweep is what every read always did; a
-        caller that joined a running sweep may have arrived after a change."""
-        task = _orders_inflight.get(key)
-        mine = task is None or task.done()
-        if mine:
-            task = asyncio.ensure_future(_sweep_orders(registry, days, fields, key))
-            _orders_inflight[key] = task   # no await between the read and the write, so these cannot interleave
-        # Shielded: a browser hanging up must not cancel the sweep others are waiting on.
-        return (*await asyncio.shield(task), mine)
-
-    async def refreshed() -> None:
-        task = _orders_refreshing.get(key)
-        if task is None or task.done():
-            task = asyncio.ensure_future(_refresh_orders(registry, key))
-            _orders_refreshing[key] = task
-        await asyncio.shield(task)
-        if _orders_refreshing.get(key) is task:
-            _orders_refreshing.pop(key, None)
-
-    def answer(orders, m):
-        if meta is not None:
-            meta.update(m)
-        return orders
-
-    # A snapshot with orders named as changed (_orders_changed) is put right,
-    # by id, before it answers anyone: it is current only when nothing is
-    # pending AND nothing is being read. Bounded: a change landing during each
-    # read could otherwise keep this going; after three rounds the answer is
-    # one fresh sweep, which is what every read used to be.
-    last = None        # a sweep this caller may be answered from (see swept)
-    for rnd in range(4):
-        hit = _orders_cache.get(key) if ORDER_CACHE_SECS > 0 else None
-        if hit is not None and not hit["pending"] and not hit["reading"]:
-            return answer(hit["orders"], hit["meta"])
-        if rnd == 3:
-            break
-        if hit is not None:
-            if last is not None and (len(hit["pending"]) > ORDER_REFRESH_MAX
-                                     or hit["meta"].get("truncated")):
-                # Too many changes to read one by one, or a sweep cut short:
-                # the caller that started this sweep is answered from it, as
-                # it always was, and the changes wait for the next load.
-                return answer(*last)
-            await refreshed()
-            continue
-        orders, m, flight, mine = await swept()
-        # A joiner of a sweep that saw a change is never answered from it.
-        last = (orders, m) if (mine or not flight) else None
-        if key not in _orders_cache:
-            # Not stored: the cache is off, the sweep failed (said in meta),
-            # or everything was retired while it ran. Its callers keep its
-            # answer, as they always have, except a caller that joined it
-            # while an order was named as changed: that one may hold the
-            # order as it was, and sweeps again rather than being answered.
-            if last is None and rnd < 2:
-                continue
-            return answer(orders, m)
-    # Still changing after three rounds. One more read by id when that can
-    # put the snapshot right, then one fresh sweep, which is what every read
-    # used to be (it starts after this caller arrived, so it is current).
-    hit = _orders_cache.get(key) if ORDER_CACHE_SECS > 0 else None
-    if hit is not None and len(hit["pending"]) <= ORDER_REFRESH_MAX and not hit["meta"].get("truncated"):
-        await refreshed()
-        hit = _orders_cache.get(key)
-        if hit is not None and not hit["pending"] and not hit["reading"]:
-            return answer(hit["orders"], hit["meta"])
-    _orders_cache.pop(key, None)
-    orders, m, _flight, _mine = await swept()
-    return answer(orders, m)
-
-
-async def _paginate_orders(registry: dict, days: int, max_pages: int = ORDER_PAGE_CAP,
-                           fields: str = "id,created_at,total_price,line_items",
-                           meta: Optional[dict] = None) -> list:
-    """Page through orders created in the last `days`, ascending by id (since_id),
-    capped at max_pages * 250. Pulls only the requested fields. When `meta` is
-    given it is filled with {"failed": bool, "truncated": bool} so money/AR callers
-    can tell a throttled or capped fetch apart from a genuinely complete one
-    (a swallowed failure must never read as "nothing owed")."""
-    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    out: list = []
-    since_id, pages = 0, 0
-    failed = truncated = False
-    while pages < max_pages:
-        res = await _tool_json(registry, "shopify_list_orders",
-                               {"status": "any", "created_at_min": since, "limit": 250,
-                                "since_id": since_id, "fields": fields})
-        if not _ok(res):
-            failed = True
-            break
-        batch = res.get("orders", [])
-        if not batch:
-            break
-        out += batch
-        pages += 1
-        if len(batch) < 250:
-            break
-        since_id = max((o.get("id") or 0) for o in batch)
-        if pages >= max_pages:
-            truncated = True   # more pages existed than the cap allows
-    if meta is not None:
-        meta["failed"], meta["truncated"] = failed, truncated
-    return out
-
-
-
-
-def _orders_product_monthly(orders: list, months: list) -> dict:
-    """{product_id: {"units": {mk: int}, "revenue": {mk: float}}} within the months."""
-    mset = set(months)
-    out: dict = {}
-    for o in orders:
-        if not _order_counts(o):
-            continue
-        mk = _month_key(o.get("created_at"))
-        if mk not in mset:
-            continue
-        for li in o.get("line_items", []):
-            pid = li.get("product_id")
-            if not pid:
-                continue
-            qty = li.get("quantity") or 0
-            d = out.setdefault(pid, {"units": {}, "revenue": {}})
-            d["units"][mk] = d["units"].get(mk, 0) + qty
-            d["revenue"][mk] = d["revenue"].get(mk, 0.0) + float(li.get("price") or 0) * qty
-    return out
-
-
-# ---------------------------------------------------------------------------
 # Production labels: orders carrying the production tag, shaped for printing a
 # picking/production label (order number, who it is for, and what to build).
 # No AI is involved; this is a plain Shopify read.
 # ---------------------------------------------------------------------------
-
-def _admin_order_url(order_id) -> str:
-    """The Shopify admin page for an order. An order number on screen should
-    always be a door, not a label."""
-    store = (SHOPIFY_STORE or "").split(".")[0]
-    return (f"https://admin.shopify.com/store/{store}/orders/{order_id}"
-            if store and str(order_id or "").isdigit() else "")
-
-
-def _order_tags(order: dict) -> list:
-    raw = order.get("tags")
-    if isinstance(raw, str):
-        return [t.strip() for t in raw.split(",") if t.strip()]
-    return [str(t).strip() for t in (raw or []) if str(t).strip()]
-
-
-def _has_tag(order: dict, tag: str) -> bool:
-    want = (tag or "").strip().lower()
-    return any(t.lower() == want for t in _order_tags(order))
-
-
-def _label_party(order: dict) -> tuple:
-    """(company, person) for the label. A company name wins when the order has one,
-    falling back to the customer's own name."""
-    ship = order.get("shipping_address") or {}
-    bill = order.get("billing_address") or {}
-    cust = order.get("customer") or {}
-    dflt = cust.get("default_address") or {}
-    company = next((str(c).strip() for c in (ship.get("company"), bill.get("company"), dflt.get("company"))
-                    if c and str(c).strip()), "")
-    person = " ".join(p for p in [str(cust.get("first_name") or "").strip(),
-                                  str(cust.get("last_name") or "").strip()] if p).strip()
-    if not person:
-        person = next((str(n).strip() for n in (ship.get("name"), bill.get("name"), cust.get("email"))
-                       if n and str(n).strip()), "")
-    return company, person
-
-
-def _variant_is_real(li: dict) -> bool:
-    vt = str(li.get("variant_title") or "").strip()
-    return bool(vt) and vt.lower() != "default title"
-
-
-_PRICE_SUFFIX_RE = re.compile(r"[\s\-|,·]*[\(\[]?\s*[+-]?\s*[£$€]\s*\d[\d,]*(?:\.\d+)?\s*[\)\]]?\s*$")
-
-
-def _strip_price(v) -> str:
-    """Drop a trailing price from an option value: the store's dropdowns price the
-    add-ons, so "Monochrome Glass - Original £85" reaches the order as one string.
-    A production label never shows prices."""
-    s = str(v or "").strip()
-    while True:
-        cut = _PRICE_SUFFIX_RE.sub("", s).strip()
-        if cut == s:
-            return s
-        s = cut
-
-
-def _line_options(li: dict, option_names: dict) -> list:
-    """Selected options for a line item, as [{name, value}].
-
-    Two sources, both shown: custom line-item properties (already name/value, e.g.
-    "Gobo Size"), and variant options, whose names come from the product's option
-    definitions so a variant reads "Gobo Size: 20 Watt Range" rather than a bare value."""
-    opts: list = []
-    seen = set()
-
-    def add(name: str, value: str) -> None:
-        name, value = str(name or "").strip(), _strip_price(value)
-        if not value:
-            return
-        key = (name.lower(), value.lower())
-        if key in seen:
-            return
-        seen.add(key)
-        opts.append({"name": name, "value": value})
-
-    for p in (li.get("properties") or []):
-        if isinstance(p, dict):
-            nm = str(p.get("name") or "").strip()
-            if nm.startswith("_"):      # Shopify convention for hidden/internal properties
-                continue
-            add(nm, p.get("value"))
-
-    if _variant_is_real(li):
-        values = [v.strip() for v in str(li.get("variant_title")).split(" / ")]
-        names = option_names.get(li.get("product_id")) or []
-        for i, val in enumerate(values):
-            add(names[i] if i < len(names) else "Option", val)
-    return opts
-
-
-# Product option names are a definition, not data: nothing in this app writes
-# products, and the merchant changes an option name close to never. Uncached,
-# a queue load spent up to 40 Shopify calls re-learning that a gobo has a
-# "Gobo Size" option. Held per process, so a redeploy relearns them; a miss is
-# harmless anyway (the variant renders as the generic "Option").
-OPTION_CACHE_SECS = _env_num(int, os.environ.get("OPTION_CACHE_SECS", "21600"), "21600", "OPTION_CACHE_SECS")   # 6 hours
-OPTION_CACHE_MAX  = 500
-_option_names_cache: dict = {}   # product_id -> {"at": monotonic, "names": [...]}
-
-
-def _product_ids(product_ids) -> list:
-    """De-duped, blanks out, and bounded at 40: a line past the cap keeps the
-    generic text it always had."""
-    return [p for p in dict.fromkeys(product_ids) if p][:40]
-
-
-async def _product_meta(registry: dict, product_ids) -> dict:
-    """Map product_id -> {"names": its option names, "type": its product type}.
-    One product read answers both, so the option names a label prints and the
-    type that tells a stock gobo from a custom one share a cache entry."""
-    return await _product_meta_fetch(registry, _product_ids(product_ids))
-
-
-async def _product_names_and_types(registry: dict, names_ids, type_ids) -> tuple:
-    """(option names by product, product types by product) for a queue: each
-    list bounded on its own as before, and everything either needs fetched
-    in one go. Asked separately, the types were a second round after the
-    names (the 2026-10-12 speed audit, X7)."""
-    a, b = _product_ids(names_ids), _product_ids(type_ids)
-    meta = await _product_meta_fetch(registry, list(dict.fromkeys(a + b)))
-    return ({p: meta[p]["names"] for p in a}, {p: meta[p]["type"] for p in b})
-
-
-async def _product_meta_fetch(registry: dict, ids: list) -> dict:
-    if not ids:
-        return {}
-    now = time.monotonic()
-    out, misses = {}, []
-    for pid in ids:
-        hit = _option_names_cache.get(pid)
-        # An entry cached before the type was recorded is a miss, not "no type".
-        if hit and (now - hit["at"]) < OPTION_CACHE_SECS and "type" in hit:
-            out[pid] = {"names": hit["names"], "type": hit["type"]}
-        else:
-            misses.append(pid)
-    if not misses:
-        return out
-
-    async def one(pid):
-        d = await _tool_json(registry, "shopify_get_product", {"product_id": pid})
-        if not _ok(d):
-            return pid, [], "", False
-        return (pid, [str(o.get("name") or "").strip() for o in (d.get("options") or [])],
-                str(d.get("product_type") or "").strip(), True)
-
-    async def all_at_once():
-        # One read for every product missing (the 2026-10-12 speed audit, X7).
-        # A product it did not return is blank this time and asked for again
-        # next time, as a failed single read was; if the read itself fails,
-        # the products are read one at a time as they always were.
-        got = {}
-        for i in range(0, len(misses), 100):
-            got.update(await _product_meta_reader(misses[i:i + 100]))
-        return [(pid, got[pid]["names"], got[pid]["type"], True) if pid in got else (pid, [], "", False)
-                for pid in misses]
-
-    answers = None
-    if _product_meta_reader is not None:
-        try:
-            answers = await all_at_once()
-        except Exception as e:
-            logger.warning("products read in one go failed (%s); reading them one at a time", type(e).__name__)
-    if answers is None:
-        answers = await asyncio.gather(*[one(i) for i in misses])
-    for pid, names, ptype, good in answers:
-        out[pid] = {"names": names, "type": ptype}
-        if good:   # a failed read is not an answer, so it is never cached
-            _option_names_cache[pid] = {"at": time.monotonic(), "names": names, "type": ptype}
-    while len(_option_names_cache) > OPTION_CACHE_MAX:
-        _option_names_cache.pop(min(_option_names_cache,
-                                    key=lambda k: _option_names_cache[k]["at"]), None)
-    return out
-
-
-async def _product_option_names(registry: dict, product_ids) -> dict:
-    """Map product_id -> its option names (e.g. ["Gobo Size"])."""
-    return {pid: m["names"] for pid, m in (await _product_meta(registry, product_ids)).items()}
-
-
-async def _product_types(registry: dict, product_ids) -> dict:
-    """Map product_id -> its Shopify product type ("Gobo", "Custom Gobo", ...)."""
-    return {pid: m["type"] for pid, m in (await _product_meta(registry, product_ids)).items()}
-
-
-_gobo_cache = {"mtime": None, "by_mm": {}, "by_model": {}, "by_mm_loose": {}, "by_model_loose": {},
-               "by_mm_digit": {}, "by_model_digit": {}, "rows": [], "domain_rules": []}
-GOBO_ALIASES_PATH = os.environ.get("GOBO_ALIASES_PATH",
-                                   os.path.join(os.path.dirname(__file__), "data", "gobo-aliases.csv"))
-GOBO_OVERRIDES_PATH = os.environ.get("GOBO_OVERRIDES_PATH",
-                                     os.path.join(os.path.dirname(__file__), "data", "gobo-overrides.csv"))
-GOBO_SIZES_LIVE = os.environ.get("GOBO_SIZES_LIVE", "/data/gobo-sizes.csv")
-# The two rule files the app EDITS. The repo copies are seeds that ship with
-# the code; a rule saved in the app has to outlive the container that saved it,
-# so it is written to the volume, and the volume copy wins on read - exactly
-# how the size sheet already works (_sizes_path). Until this existed the
-# editor wrote into the container's own filesystem, which a redeploy replaces.
-GOBO_OVERRIDES_LIVE = os.environ.get("GOBO_OVERRIDES_LIVE", "/data/gobo-overrides.csv")
-GOBO_ALIASES_LIVE = os.environ.get("GOBO_ALIASES_LIVE", "/data/gobo-aliases.csv")
-
-# The two rule files, and the columns their loaders read. A merchant's ruling on
-# a model lives here rather than in the sheet, so replacing the sheet never
-# throws the rulings away.
-# kind -> (seed in the repo, live copy on the volume, the columns the loader reads)
-GOBO_RULE_FILES = {
-    "override": (GOBO_OVERRIDES_PATH, GOBO_OVERRIDES_LIVE,
-                 ["Manufacturer", "Model", "Customer Email Domain", "Production Size (mm)"]),
-    "alias": (GOBO_ALIASES_PATH, GOBO_ALIASES_LIVE, ["Manufacturer", "Store Model", "List Model"]),
-}
-
-
-def _rule_path(kind: str) -> str:
-    """The rule file the app READS: the volume copy when there is one, else the
-    seed that shipped with the code. Writes always go to the volume copy."""
-    seed, live, _header = GOBO_RULE_FILES[kind]
-    return live if os.path.isfile(live) else seed
-
-
-def _gobo_rule_rows(kind: str) -> list:
-    """Every row of one rule file, as plain dicts. A missing file is an empty
-    list; an unreadable one RAISES, because reporting "no rules" for a file that
-    exists would invite the merchant to add a duplicate of a rule already there."""
-    header = GOBO_RULE_FILES[kind][2]
-    path = _rule_path(kind)
-    import csv as _csv
-    try:
-        with open(path, newline="", encoding="utf-8-sig") as fh:
-            return [{k: str(r.get(k) or "").strip() for k in header}
-                    for r in _csv.DictReader(fh)]
-    except FileNotFoundError:
-        return []
-
-
-def _write_gobo_rule_rows(kind: str, rows: list) -> None:
-    """Atomic, keeping the five most recent generations. These files decide the
-    glass a real order is cut from, so a half-written one must never be readable
-    and a bad edit must always have something to go back to."""
-    _seed, path, header = GOBO_RULE_FILES[kind]
-    import csv as _csv
-    import io as _io
-    import shutil
-    buf = _io.StringIO()
-    w = _csv.DictWriter(buf, fieldnames=header, lineterminator="\n")
-    w.writeheader()
-    for r in rows:
-        w.writerow({k: r.get(k, "") for k in header})
-    text = buf.getvalue()
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    if os.path.isfile(path):
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
-        btmp = path + ".bak.tmp"
-        shutil.copyfile(path, btmp)
-        os.replace(btmp, f"{path}.{stamp}.bak")
-        base = os.path.basename(path)
-        d = os.path.dirname(path) or "."
-        baks = sorted(f for f in os.listdir(d)
-                      if f.startswith(base + ".") and f.endswith(".bak"))
-        for stale in baks[:-5]:
-            try:
-                os.remove(os.path.join(d, stale))
-            except OSError:
-                pass
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="") as fh:
-        fh.write(text)
-    os.replace(tmp, path)
-    # Force the next read to reload. The cache keys on mtime, and a write plus a
-    # lookup inside the same clock tick would otherwise answer from the state
-    # BEFORE the rule was saved - telling the merchant their ruling did nothing.
-    _gobo_cache["mtime"] = None
-
-
-def _sheet_size(raw) -> str:
-    """A size cell as the label and the stock sheet use it: the plain number
-    when the cell is one ("37.5", "86 mm", "86.0" -> "37.5", "86", "86"), the
-    trimmed text otherwise, so a cell nobody can read still shows what it says."""
-    txt = str(raw or "").strip()
-    return (_clean_gobo_size(txt) or txt) if txt else ""
-
-
-def _clean_gobo_size(raw) -> Optional[str]:
-    """A production size, or None if it is not one. Free text is refused rather
-    than stored: whatever is here is what the bench reads off the label."""
-    txt = str(raw or "").strip().rstrip("m").rstrip("m").strip()
-    if not txt:
-        return None
-    try:
-        v = float(txt)
-    except (TypeError, ValueError):
-        return None
-    if not (v == v) or v <= 0 or v > 500:   # NaN, zero, and nonsense are all not a size
-        return None
-    out = f"{v:.2f}".rstrip("0").rstrip(".")
-    return out or None
-
-
-def _sizes_path() -> str:
-    """The size sheet the app reads: an uploaded copy on the data volume wins;
-    the repo file remains the fallback (and the fresh-deploy seed)."""
-    return GOBO_SIZES_LIVE if os.path.isfile(GOBO_SIZES_LIVE) else GOBO_SIZES_PATH
-
-
-def _norm_key(v) -> str:
-    return re.sub(r"\s+", " ", str(v or "").strip().lower())
-
-
-def _loose_key(v) -> str:
-    """Punctuation-insensitive key: "Source Four B-Size" == "Source Four (B Size)"."""
-    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", str(v or "").lower())).strip()
-
-
-def _digit_key(v) -> str:
-    """Loose key that also splits letter-digit boundaries, so the store's "EVE E100Z"
-    meets the sheet's "EVE E-100Z" ("eve e 100 z" both ways)."""
-    return re.sub(r"\s+", " ",
-                  re.sub(r"(?<=[a-z])(?=[0-9])|(?<=[0-9])(?=[a-z])", " ", _loose_key(v))).strip()
-
-
-def _word_run_in(needle: tuple, hay: tuple) -> bool:
-    """True when needle appears in hay as a CONTIGUOUS word run. Contiguity is what
-    keeps "Source Four B Size" out of "Source Four Effects Gate B Size"."""
-    n = len(needle)
-    if not n or n > len(hay):
-        return False
-    return any(hay[i:i + n] == needle for i in range(len(hay) - n + 1))
-
-
-def _gobo_sizes() -> dict:
-    """Model -> production size lookup from the merchant's CSV, reloaded when it,
-    the aliases file or the overrides file changes. Multi-model cells ("VR8, VRX,
-    VRXSR") index each model. Keys map to LISTS because the sheet genuinely
-    repeats some (manufacturer, model) rows with different sizes; those must flag
-    for review, never pick-one. Two companion files survive sheet replacements:
-    data/gobo-aliases.csv maps spellings the store's dropdowns use ("40W/80W")
-    onto sheet models ("40/80 Watt Range"); data/gobo-overrides.csv carries the
-    merchant's rulings - fix a model's size (creating the row if the sheet lacks
-    it), drop a row entirely (size "exclude"), or set a size that applies only to
-    orders from one customer email domain."""
-    try:
-        sizes_path = _sizes_path()
-        mtime = os.path.getmtime(sizes_path)
-    except OSError:
-        return _gobo_cache
-    def _mt(p):
-        try:
-            return os.path.getmtime(p)
-        except OSError:
-            return None
-    alias_path, override_path = _rule_path("alias"), _rule_path("override")
-    # The paths are part of the key: the first save moves a rule file from the
-    # seed to the volume, and that switch must reload even if the stamps match.
-    mtime = (sizes_path, mtime, alias_path, _mt(alias_path), override_path, _mt(override_path))
-    if _gobo_cache["mtime"] == mtime:
-        return _gobo_cache
-    import csv as _csv
-    by_mm, by_model, by_mm_loose, by_model_loose = {}, {}, {}, {}
-    by_mm_digit, by_model_digit, rows = {}, {}, []
-
-    def index_model(entry: dict, nm: str, lm: str, model: str):
-        key = _norm_key(model)
-        if not key:
-            return
-        by_mm.setdefault((nm, key), []).append(entry)
-        by_model.setdefault(key, []).append(entry)
-        lkey = _loose_key(model)
-        if lkey:
-            by_mm_loose.setdefault((lm, lkey), []).append(entry)
-            by_model_loose.setdefault(lkey, []).append(entry)
-            rows.append((lm, tuple(lkey.split()), entry))
-        dkey = _digit_key(model)
-        if dkey:
-            by_mm_digit.setdefault((lm, dkey), []).append(entry)
-            by_model_digit.setdefault(dkey, []).append(entry)
-
-    excludes, sets, domain_rules, dead_aliases = set(), {}, [], 0
-    try:
-        with open(override_path, newline="", encoding="utf-8-sig") as fh:
-            for row in _csv.DictReader(fh):
-                mfr = str(row.get("Manufacturer") or "").strip()
-                model = str(row.get("Model") or "").strip()
-                domain = str(row.get("Customer Email Domain") or "").strip().lstrip("@").lower()
-                size = str(row.get("Production Size (mm)") or "").strip()
-                key = (_norm_key(mfr), _norm_key(model))
-                if not key[1] or not size:
-                    continue
-                if domain:
-                    domain_rules.append({"key": key, "domain": domain, "size": size,
-                                         "manufacturer": mfr, "model": model})
-                elif size.lower() == "exclude":
-                    excludes.add(key)
-                else:
-                    sets[key] = {"manufacturer": mfr, "model": model, "size": size}
-    except FileNotFoundError:
-        pass
-    except Exception:
-        logger.exception("gobo overrides: failed to load %s", override_path)
-
-    try:
-        with open(sizes_path, newline="", encoding="utf-8-sig") as fh:
-            for row in _csv.DictReader(fh):
-                entry = {
-                    "manufacturer": str(row.get("Manufacturer") or "").strip(),
-                    "model": str(row.get("Model") or "").strip(),
-                    # Normalised as it is read: "86 mm" and "86.0" are 86, the key the
-                    # bezel rule and the day sheet look up. Kept raw, an "86 mm" line
-                    # booked 86mm glass instead of a 64.9 blank and a ring.
-                    "production_size": _sheet_size(row.get("Closest Production Size (mm)")),
-                    "review": str(row.get("Production Review") or "").strip(),
-                }
-                nm = _norm_key(entry["manufacturer"])
-                lm = _loose_key(entry["manufacturer"])
-                for model in entry["model"].split(","):
-                    key = (nm, _norm_key(model))
-                    if key in excludes:
-                        continue
-                    ruled = sets.get(key)
-                    if ruled:
-                        # A ruling on one model of a multi-model row must NOT mutate
-                        # the shared entry, or its siblings inherit the wrong size.
-                        e = dict(entry)
-                        e["production_size"] = ruled["size"]
-                        e["review"] = ""
-                        index_model(e, nm, lm, model)
-                    else:
-                        index_model(entry, nm, lm, model)
-    except Exception:
-        logger.exception("gobo sizes: failed to load %s", sizes_path)
-        return _gobo_cache
-    # Rulings for models the sheet does not have become rows of their own.
-    for key, ruled in sets.items():
-        if key not in by_mm:
-            entry = {"manufacturer": ruled["manufacturer"], "model": ruled["model"],
-                     "production_size": ruled["size"], "review": ""}
-            index_model(entry, key[0], _loose_key(ruled["manufacturer"]), ruled["model"])
-    try:
-        with open(alias_path, newline="", encoding="utf-8-sig") as fh:
-            for row in _csv.DictReader(fh):
-                mfr = str(row.get("Manufacturer") or "").strip()
-                store = str(row.get("Store Model") or "").strip()
-                target = str(row.get("List Model") or "").strip()
-                hits = (by_mm.get((_norm_key(mfr), _norm_key(target)))
-                        or by_model.get(_norm_key(target)) or [])
-                for entry in hits:
-                    index_model(entry, _norm_key(mfr), _loose_key(mfr), store)
-                if not hits:
-                    dead_aliases += 1
-                    logger.warning("gobo aliases: %r -> %r matches nothing in the size list", store, target)
-    except FileNotFoundError:
-        pass
-    except Exception:
-        logger.exception("gobo aliases: failed to load %s", alias_path)
-    try:
-        sheet_at = datetime.fromtimestamp(os.path.getmtime(sizes_path), timezone.utc).isoformat()
-    except OSError:
-        sheet_at = None
-    _gobo_cache.update({"mtime": mtime, "lookup_memo": {}, "maker_keys": None,
-                        "by_mm": by_mm, "by_model": by_model,
-                        "by_mm_loose": by_mm_loose, "by_model_loose": by_model_loose,
-                        "by_mm_digit": by_mm_digit, "by_model_digit": by_model_digit,
-                        "rows": rows, "domain_rules": domain_rules,
-                        # Kept, not just counted: a model ruled "not a gobo" has
-                        # to stop being reported as a miss, and until this was
-                        # here the ruling only skipped SHEET rows - so excluding
-                        # a model that was never on the sheet did nothing at all.
-                        "excludes": excludes,
-                        "health": {"models": len(by_model), "dead_aliases": dead_aliases,
-                                   "overrides": len(sets) + len(excludes) + len(domain_rules),
-                                   "sheet_at": sheet_at}})
-    logger.info("gobo sizes: loaded %d model keys from %s (%d domain rules)",
-                len(by_model), sizes_path, len(domain_rules))
-    return _gobo_cache
-
-
-_GOBO_INDEXES = {"strict": ("by_mm", "by_model"), "loose": ("by_mm_loose", "by_model_loose"),
-                 "digit": ("by_mm_digit", "by_model_digit")}
-
-
-def _gobo_resolve_key(cache: dict, manufacturer: str, key: str, which: str, own_only: bool = False):
-    """Entries for one candidate key, or ("ambiguous"|None). Manufacturer+model
-    first; model alone only when every row with that model is from one maker,
-    and not at all when own_only asks for the maker's own rows alone."""
-    mm_name, bm_name = _GOBO_INDEXES[which]
-    entries = cache[mm_name].get((manufacturer, key)) if manufacturer else None
-    if entries:
-        return entries, None
-    if own_only:
-        return None, None
-    candidates = cache[bm_name].get(key) or []
-    keyfn = _norm_key if which == "strict" else _loose_key
-    makers = {keyfn(e["manufacturer"]) for e in candidates}
-    if len(makers) == 1:
-        return candidates, None
-    if len(makers) > 1:
-        return None, "ambiguous"
-    return None, None
-
-
-def _gobo_contain(cache: dict, lmfr: str, words: tuple):
-    """Rows whose model shares a contiguous word run with the part. Within the
-    named maker's own rows both directions match: "viva" inside "Robin Viva",
-    "BMFL" as the head of "BMFL Spot". The cross-maker fallback (for maker-name
-    mismatches like store "Infinity" vs sheet "Showtec") only matches the store's
-    full part INSIDE a sheet model, never the reverse: one-word sheet models like
-    "Spot" or "Zoom" would otherwise latch onto anything containing that word.
-    Cross-maker matches must also all come from a single maker."""
-    if not words:
-        return None, None
-    hits = [(lm, e) for lm, rw, e in cache["rows"]
-            if lm == lmfr and (_word_run_in(words, rw) or _word_run_in(rw, words))] if lmfr else []
-    if not hits:
-        hits = [(lm, e) for lm, rw, e in cache["rows"] if _word_run_in(words, rw)]
-        if len({lm for lm, _ in hits}) > 1:
-            return None, "ambiguous"
-    return ([e for _, e in hits] or None), None
-
-
-def _gobo_resolve_part(cache: dict, nmfr: str, lmfr: str, part: str, notes: set):
-    """One store-written model name -> matching sheet rows, trying exact keys
-    (strict, punctuation-insensitive, digit-boundary), then parenthetical and
-    manufacturer-prefix stripping, then word-run containment.
-
-    The order's own maker comes first. Its exact keys are tried before any
-    other maker's, and another maker's model by the same name gives way to
-    the maker's own models that START with the words named: 'Robe' 'Spot'
-    printed Vari-Lite's 'VL4000 Beamwash, Spot' at 37.5, over Robe's own Spot
-    160, Spot 250 and Spot 575 at 26.5 (Cameron: "make "robe spot" print
-    Robe's size, not Vari-Lite's"). That is all that changed: a name that
-    stayed with its own maker answers as it did, so 'Clay Paky' 'Profile'
-    still says CHECK rather than pick Profile Plus SV from the many that
-    contain the word; and a maker's own models that merely contain the words
-    stay after the other maker's exact name, as a store maker can be a
-    product family ('EVL' 'EVL Pro 250' is Mad's). Rows that disagree on
-    size come back together, so the label says CHECK rather than guess."""
-    variants = [(_norm_key(part), "strict"), (_loose_key(part), "loose"), (_digit_key(part), "digit")]
-    stripped = re.sub(r"\([^)]*\)", " ", part)
-    if stripped.strip() and stripped != part:
-        variants += [(_norm_key(stripped), "strict"), (_loose_key(stripped), "loose"),
-                     (_digit_key(stripped), "digit")]
-    lpart = _loose_key(part)
-    unprefixed = lpart[len(lmfr):].strip() if lmfr and lpart.startswith(lmfr + " ") else ""
-    if unprefixed:
-        variants.append((unprefixed, "loose"))
-    keys = [kw for kw in dict.fromkeys(variants) if kw[0]]
-    cands = [tuple(c.split()) for c in dict.fromkeys([lpart, _loose_key(stripped)]) if c]
-    own_head = None
-    if lmfr:
-        for key, which in keys:
-            entries, _note = _gobo_resolve_key(cache, nmfr if which == "strict" else lmfr, key, which, own_only=True)
-            if entries:
-                return entries
-        own = [(rw, e) for lm, rw, e in cache["rows"] if lm == lmfr]
-        # The maker's name typed into the model ('Robe Spot') is searched without it too.
-        own_cands = cands + ([tuple(unprefixed.split())] if unprefixed and tuple(unprefixed.split()) not in cands else [])
-        for words in own_cands:
-            own_head = [e for rw, e in own if rw[:len(words)] == words] or None
-            if own_head:
-                break
-    for key, which in keys:
-        entries, note = _gobo_resolve_key(cache, nmfr if which == "strict" else lmfr, key, which)
-        if entries:
-            if own_head and any(_loose_key(e["manufacturer"]) != lmfr for e in entries):
-                return own_head
-            return entries
-        if note == "ambiguous":
-            notes.add("ambiguous")
-    for words in cands:
-        entries, note = _gobo_contain(cache, lmfr, words)
-        if entries:
-            return entries
-        if note == "ambiguous":
-            notes.add("ambiguous")
-    return None
-
-
-def _gobo_lookup(manufacturer: str, model: str, cache: Optional[dict] = None):
-    """(entry, review_reason). The store's Model values can bundle several models
-    ("ESPRITE, iESPRITE (Not iESPRITE LTL WB)", "Ikon LED / Ikon IR") and spell
-    them differently from the sheet ("Source Four (B Size)" vs "Source Four
-    B-Size", "Robin Viva" vs "Viva", "EVE E100Z" vs "EVE E-100Z"), so the whole
-    value is tried first and then each comma or slash part, through exact keys,
-    stripped forms and word-run containment. Never guesses: parts that match
-    different sizes, duplicate sheet rows with different sizes, ambiguity and
-    misses all come back as review reasons instead of a size."""
-    cache = cache or _gobo_sizes()
-    raw = str(model or "").strip()
-    if not raw:
-        return None, "No model specified on this item"
-    nmfr, lmfr = _norm_key(manufacturer), _loose_key(manufacturer)
-    # A MISS is the expensive case: it falls through every index and ends in a
-    # word-run scan of all 2,155 sheet rows, measured at 0.63 ms against 0.008
-    # ms for a hit. A small manufacturer sells the same fixtures over and over,
-    # so the same miss is paid again for every line item of every order in the
-    # queue: 67 ms to shape 900 orders with no misses, 1,799 ms at 30% misses.
-    # The memo lives on the sheet cache and is thrown away with it, so a
-    # re-uploaded sheet can never be answered from the old one.
-    memo = cache.setdefault("lookup_memo", {})
-    memo_key = (nmfr, raw)
-    if memo_key in memo:
-        return memo[memo_key]
-    notes: set = set()
-    resolved = _gobo_resolve_part(cache, nmfr, lmfr, raw, notes)
-    if not resolved:
-        parts = [p for p in re.split(r"[,/]", raw) if p.strip()]
-        if len(parts) > 1:
-            resolved = []
-            # "Rogue R2 / R3" means Rogue R3, not any maker's R3: later parts first
-            # try the first part's family words ("Rogue") in front of their own.
-            head = " ".join(_loose_key(parts[0]).split()[:-1])
-            for i, part in enumerate(parts):
-                got = _gobo_resolve_part(cache, nmfr, lmfr, head + " " + part, notes) if i and head else None
-                resolved.extend(got or _gobo_resolve_part(cache, nmfr, lmfr, part, notes) or [])
-    def _out(result):
-        memo[memo_key] = result
-        return result
-
-    if not resolved:
-        if "ambiguous" in notes:
-            return _out((None, "Model matches more than one manufacturer in the size list"))
-        return _out((None, "Model not found in the size list"))
-    sizes = {e["production_size"] for e in resolved}
-    if len(sizes) > 1:
-        return _out((None, "More than one production size listed for this model"))
-    hit = resolved[0]
-    if not hit["production_size"]:
-        return _out((hit, (hit["review"] or "No production size listed for this model")))
-    return _out((hit, None))
-
-
-def _gobo_sheet_listing(who: Optional[str] = None) -> dict:
-    """The whole sheet as the Size list tab shows it: every row with its holder,
-    image and production sizes, and the merchant's rulings laid over it (a set
-    size, an exclusion, a size for one customer's domain), plus rulings on
-    models the sheet does not carry, which are rows of their own. Read from the
-    sheet the lookup reads, so the tab and the label never disagree."""
-    import csv as _csv
-    sets, sets_raw, excl, domains = {}, {}, set(), {}
-    for r in _gobo_rule_rows("override"):
-        mfr, model = str(r.get("Manufacturer") or "").strip(), str(r.get("Model") or "").strip()
-        key = (_norm_key(mfr), _norm_key(model))
-        size = str(r.get("Production Size (mm)") or "").strip()
-        dom = str(r.get("Customer Email Domain") or "").strip().lstrip("@").lower()
-        if not key[1] or not size:
-            continue
-        sets_raw.setdefault(key, (mfr, model))
-        if dom:
-            domains.setdefault(key, []).append({"domain": dom, "size": size})
-        elif size.lower() == "exclude":
-            excl.add(key)
-        else:
-            sets[key] = size
-    aliases = [{"manufacturer": str(r.get("Manufacturer") or ""), "store_model": str(r.get("Store Model") or ""),
-                "list_model": str(r.get("List Model") or "")} for r in _gobo_rule_rows("alias")]
-    path = _sizes_path()
-    rows, seen = [], set()
-    with open(path, newline="", encoding="utf-8-sig") as fh:
-        for r in _csv.DictReader(fh):
-            mfr = str(r.get("Manufacturer") or "").strip()
-            model = str(r.get("Model") or "").strip()
-            if not model:
-                continue
-            key = (_norm_key(mfr), _norm_key(model))
-            seen.add(key)
-            row = {"manufacturer": mfr, "model": model,
-                   "glass": str(r.get("Glass Diameter (mm)") or "").strip(),
-                   "image": str(r.get("Image Diameter (mm)") or "").strip(),
-                   "produced": _sheet_size(r.get("Closest Production Size (mm)")),
-                   "undercut": str(r.get("Undercut (mm)") or "").strip(),
-                   "review": str(r.get("Production Review") or "").strip(),
-                   "notes": str(r.get("Notes") or "").strip()}
-            if key in excl:
-                row["ruling"] = "exclude"
-            elif key in sets:
-                row["ruling"] = sets[key]
-            if key in domains:
-                row["domain_rulings"] = domains[key]
-            rows.append(row)
-    for key, (mfr, model) in sets_raw.items():
-        if key in seen:
-            continue
-        row = {"manufacturer": mfr, "model": model, "glass": "", "image": "", "produced": "", "undercut": "",
-               "review": "", "notes": "Not on the sheet: a ruling made in the app.", "off_sheet": True}
-        if key in excl:
-            row["ruling"] = "exclude"
-        elif key in sets:
-            row["ruling"] = sets[key]
-        if key in domains:
-            row["domain_rulings"] = domains[key]
-        rows.append(row)
-    rows.sort(key=lambda x: (x["manufacturer"].lower(), x["model"].lower()))
-    try:
-        updated = datetime.fromtimestamp(os.path.getmtime(path), timezone.utc).isoformat()
-    except OSError:
-        updated = None
-    return {"rows": rows, "aliases": aliases, "count": len(rows),
-            "shorthand": {"makers": _GOBO_MAKER_SHORT, "words": _GOBO_WORD_GROUPS},
-            "rulings": len(sets) + len(excl) + sum(len(v) for v in domains.values()),
-            "sheet": {"live": path == GOBO_SIZES_LIVE, "updated": updated},
-            "can_edit": _may_edit_sizes(who)}
-
-
-# The merchant's brand lockup, lifted from their own label tool ("Order Label
-# Printing.html"). Attribute quotes normalized to singles for embedding.
-_LABEL_LOGO_SVG = "<svg class='lg' xmlns='http://www.w3.org/2000/svg' viewBox='0 0 267.36 51.79'><g><path fill='#111' d='M32.08,2.2c3.79,0,11.01.3,16.85,2.31,5.16,1.77,7.78,4.38,7.78,7.74,0,4.08-4.3,11.34-10.69,18.07-9.12,9.61-20.43,16.85-26.29,16.85-2.14,0-6.42-3.75-10.78-11.97C4.79,27.34,2.2,18.36,2.2,11.76c0-3.74,1.55-4.7,5.07-6l.49-.18c3.39-1.26,9.06-3.38,24.31-3.38M32.08,0C15.7,0,10.05,2.39,6.51,3.7,2.98,5,0,6.4,0,11.76c0,15.11,12.11,37.62,19.73,37.62,6.91,0,18.85-8.03,27.88-17.54,6.53-6.88,11.29-14.66,11.29-19.59C58.91,2.38,43.15,0,32.08,0'/><path fill='#111' d='M80.07,14.81c-.66-.53-1.44-.92-2.35-1.18-.91-.26-1.9-.39-2.97-.39h-3.36s-1.17,0-1.17,0h-2.36s0,18.34,0,18.34h3.53s0-5.53,0-5.53h2.5c1.8,0,3.31-.25,4.53-.74s2.15-1.21,2.78-2.17c.63-.95.94-2.13.94-3.52,0-1.07-.18-2.02-.54-2.82-.36-.81-.87-1.47-1.53-2M77.46,22.33c-.71.56-1.78.83-3.21.83h-2.86v-7.06h3.11c1.37,0,2.39.29,3.04.88.66.58.99,1.46.99,2.63,0,1.26-.36,2.17-1.07,2.72'/><path fill='#111' d='M91.4,16.74c-.76,0-1.42.21-1.97.64-.56.43-1.01,1.09-1.36,2-.35.91-.58,2.09-.69,3.56h-.33s.17-5.86.17-5.86h-3.09s.03,7.14.03,7.14v7.37s3.5,0,3.5,0v-5.73c.06-1.15.22-2.13.49-2.93.27-.81.65-1.42,1.14-1.85.49-.43,1.08-.64,1.76-.64.28,0,.58.04.92.13.33.08.67.21,1,.37l.17-3.81c-.3-.15-.59-.25-.89-.31-.3-.06-.57-.08-.83-.08'/><path fill='#111' d='M107.27,20.11c-.61-1.13-1.46-1.98-2.53-2.56-1.07-.57-2.3-.86-3.67-.86s-2.57.28-3.64.83c-1.07.56-1.93,1.4-2.56,2.53-.63,1.13-.94,2.56-.94,4.28s.31,3.1.92,4.23c.61,1.13,1.46,1.98,2.53,2.56,1.07.57,2.31.86,3.7.86s2.54-.27,3.63-.82c1.08-.55,1.94-1.39,2.56-2.52.62-1.13.93-2.56.93-4.28s-.31-3.12-.92-4.25M104.21,27.1c-.28.71-.67,1.26-1.18,1.63s-1.14.56-1.88.56c-1.15,0-2.05-.44-2.7-1.32-.65-.88-.97-2.11-.97-3.68,0-1,.14-1.86.42-2.57.28-.71.68-1.26,1.2-1.64.52-.38,1.15-.57,1.89-.57s1.41.2,1.96.61c.55.41.96.98,1.25,1.72.29.74.43,1.64.43,2.7,0,1-.14,1.86-.42,2.57'/><path fill='#111' d='M112.25,11.88c-.7,0-1.24.15-1.61.45-.37.3-.56.73-.56,1.31s.19,1.01.56,1.31.91.44,1.61.44,1.24-.15,1.61-.46c.37-.31.56-.73.56-1.26,0-.57-.19-1.01-.56-1.32-.37-.31-.91-.46-1.61-.46'/><path fill='#111' d='M110.5,31.03c0,.93-.2,1.52-.61,1.76-.41.25-1.08.31-2.03.18l.28,3.06c.28.06.54.1.79.14.25.04.5.06.74.06.67,0,1.27-.1,1.81-.31.54-.2,1-.52,1.38-.94.38-.43.67-.97.88-1.63.2-.66.31-1.44.31-2.35v-13.92s-3.53,0-3.53,0v13.95Z'/><path fill='#111' d='M126.39,27.46c-.11.34-.29.65-.53.92-.24.27-.55.49-.93.65-.38.17-.86.25-1.43.25-1.24,0-2.19-.4-2.85-1.21-.6-.73-.91-1.81-.96-3.2l9.79-.12c.13-1.22.08-2.32-.14-3.31-.22-.98-.6-1.83-1.14-2.54-.54-.71-1.23-1.26-2.07-1.64-.84-.38-1.82-.57-2.93-.57-1.17,0-2.19.2-3.06.61-.87.41-1.59.97-2.17,1.7-.57.72-1.01,1.56-1.29,2.52-.29.95-.43,1.98-.43,3.07s.14,2.06.43,2.96c.29.9.73,1.68,1.32,2.34.59.66,1.34,1.17,2.24,1.54.9.37,1.97.56,3.21.56,1.09,0,2.03-.14,2.82-.43.79-.29,1.44-.67,1.94-1.15.51-.48.89-1.04,1.14-1.67.25-.63.39-1.29.43-1.97l-3.2-.33c-.02.35-.08.7-.19,1.04M121.24,20.13c.53-.41,1.18-.61,1.96-.61.72,0,1.32.17,1.81.51.48.34.83.83,1.04,1.47.12.35.18.75.2,1.19l-6.43.1c.06-.34.13-.67.24-.97.26-.73.65-1.3,1.18-1.71'/><path fill='#111' d='M141.43,27.46c-.2.53-.53.96-.97,1.29-.45.33-1.06.5-1.84.5s-1.42-.19-1.97-.56c-.56-.37-.98-.92-1.28-1.65-.3-.73-.44-1.64-.44-2.74,0-.83.08-1.55.25-2.14.17-.59.41-1.09.72-1.49.31-.4.68-.69,1.1-.88.42-.19.88-.28,1.4-.28.59,0,1.11.12,1.54.36.43.24.77.59,1.01,1.06.24.46.36,1.03.36,1.7l3.17-.5c.02-1-.19-1.91-.64-2.72-.44-.82-1.11-1.47-2-1.97-.89-.5-2.02-.75-3.39-.75-1.19,0-2.22.2-3.11.6-.89.4-1.63.95-2.21,1.67-.58.71-1.02,1.54-1.32,2.47-.3.94-.44,1.95-.44,3.04s.14,2.04.43,2.95c.29.91.73,1.7,1.32,2.39.59.69,1.34,1.22,2.25,1.6.91.38,1.97.57,3.2.57,1.09,0,2.04-.15,2.85-.44.81-.3,1.47-.71,2-1.25.53-.54.92-1.16,1.17-1.86.25-.7.37-1.46.35-2.28l-3.22-.33c.02.57-.07,1.13-.28,1.65'/><path fill='#111' d='M152.8,28.75c-.57,0-1.03-.16-1.36-.47-.33-.31-.5-.83-.5-1.56v-6.75h3.67s0-2.89,0-2.89h-3.67v-3.22s-2.08,0-2.08,0l-.14,1.11c-.07.78-.28,1.36-.63,1.75-.34.39-.91.61-1.71.67h-.69s-.03,2.5-.03,2.5h1.84v7.09c0,1.67.37,2.9,1.13,3.71.75.81,1.88,1.21,3.4,1.21.37,0,.77-.03,1.2-.1.43-.07.9-.18,1.42-.35v-3.22c-.26.19-.55.32-.88.4-.33.08-.64.12-.96.12'/><path fill='#111' d='M165.92,27.46c-.11.34-.29.65-.53.92-.24.27-.55.49-.93.65-.38.17-.86.25-1.43.25-1.24,0-2.19-.4-2.85-1.21-.6-.73-.91-1.81-.96-3.2l9.79-.12c.13-1.22.08-2.32-.14-3.31-.22-.98-.6-1.83-1.14-2.54-.54-.71-1.23-1.26-2.07-1.64-.84-.38-1.82-.57-2.93-.57-1.17,0-2.19.2-3.06.61-.87.41-1.59.97-2.17,1.7-.57.72-1.01,1.56-1.29,2.52-.29.95-.43,1.98-.43,3.07s.14,2.06.43,2.96c.29.9.73,1.68,1.32,2.34.59.66,1.34,1.17,2.24,1.54.9.37,1.97.56,3.21.56,1.09,0,2.03-.14,2.82-.43.79-.29,1.44-.67,1.94-1.15.51-.48.89-1.04,1.14-1.67.25-.63.39-1.29.43-1.97l-3.2-.33c-.02.35-.08.7-.19,1.04M160.76,20.13c.53-.41,1.18-.61,1.96-.61.72,0,1.32.17,1.81.51.48.34.83.83,1.04,1.47.12.35.18.75.2,1.19l-6.43.1c.06-.34.13-.67.24-.97.26-.73.65-1.3,1.18-1.71'/><path fill='#111' d='M181.34,12.24v4.34c0,.46.02.98.07,1.54.05.57.11,1.16.19,1.78.08.62.18,1.28.29,1.99h-.36c-.19-1.15-.49-2.11-.9-2.88-.42-.77-.96-1.35-1.63-1.74-.67-.39-1.46-.58-2.39-.58-1.15,0-2.14.3-2.99.89-.84.59-1.49,1.45-1.94,2.57-.45,1.12-.68,2.49-.68,4.1,0,1.71.25,3.13.75,4.28.5,1.15,1.18,2.01,2.04,2.58.86.57,1.84.86,2.93.86.87,0,1.63-.19,2.28-.56.65-.37,1.19-.92,1.61-1.65s.75-1.64.97-2.71h.31s-.11,4.53-.11,4.53h3.09s-.03-6.14-.03-6.14l.03-13.2h-3.53ZM181.34,24.5c0,.56-.08,1.1-.24,1.64-.16.54-.39,1.03-.68,1.47-.3.44-.67.8-1.11,1.06-.45.26-.95.39-1.5.39-.69,0-1.26-.19-1.74-.58-.47-.39-.84-.94-1.1-1.64-.26-.7-.39-1.51-.39-2.42s.13-1.75.39-2.46c.26-.71.63-1.27,1.11-1.68.48-.41,1.06-.61,1.72-.61.46,0,.88.09,1.25.28.37.19.7.43.99.74.29.31.52.66.71,1.06.19.4.33.81.43,1.24.1.43.15.84.15,1.25v.28Z'/><rect fill='#111' x='193.82' y='13.24' width='3.56' height='18.34'/><path fill='#111' d='M220.64,18.41c-.39-.57-.87-1-1.43-1.29-.57-.29-1.23-.43-1.99-.43-.91,0-1.7.22-2.36.65-.67.44-1.21,1.11-1.63,2.02-.42.91-.7,2.08-.85,3.53h-.31c.02-1.37-.11-2.52-.37-3.43-.27-.92-.7-1.61-1.28-2.07-.58-.46-1.34-.69-2.26-.69s-1.65.21-2.29.64c-.64.43-1.15,1.09-1.54,2-.39.91-.67,2.09-.83,3.56h-.33s.17-5.81.17-5.81h-3.03s.03,6.67.03,6.67v7.84s3.53,0,3.53,0v-5.42c0-1.39.14-2.56.43-3.5.29-.95.67-1.66,1.15-2.14s1.04-.72,1.67-.72c.5,0,.91.15,1.24.46.32.31.57.76.74,1.36.17.6.25,1.38.25,2.32v7.64s3.45,0,3.45,0v-5.45c.02-1.33.16-2.47.43-3.4.27-.94.65-1.66,1.14-2.17.49-.51,1.06-.76,1.71-.76.5,0,.91.15,1.24.46.32.31.57.77.72,1.39.16.62.24,1.4.24,2.35v7.59s3.53,0,3.53,0v-8.01c0-1.15-.09-2.15-.28-3.02-.19-.86-.47-1.58-.86-2.15'/><path fill='#111' d='M236.76,27.61c-.02-.67-.03-1.32-.03-1.97v-2.67c0-1.39-.23-2.55-.68-3.49-.45-.94-1.13-1.63-2.02-2.1-.89-.46-1.98-.69-3.28-.69-.78,0-1.54.09-2.28.28-.74.19-1.42.48-2.03.88-.61.4-1.11.93-1.49,1.6-.38.67-.61,1.48-.68,2.45l3.17.5c.06-.72.25-1.29.57-1.71.32-.42.72-.71,1.2-.89.47-.18.96-.26,1.46-.26.8,0,1.43.19,1.9.58.47.39.71.93.71,1.61,0,.31-.09.56-.26.72-.18.17-.5.3-.96.4-.46.1-1.14.24-2.03.4-.87.13-1.69.29-2.45.49-.76.19-1.43.46-2,.81-.57.34-1.02.79-1.33,1.33-.31.55-.47,1.24-.47,2.07,0,.94.19,1.71.58,2.29.39.58.9,1.02,1.54,1.31.64.29,1.35.43,2.13.43.98,0,1.85-.21,2.61-.63.76-.42,1.38-.98,1.86-1.68.48-.7.8-1.49.97-2.36h.25v2.21s0,2.07,0,2.07h3.11c-.02-.65-.03-1.31-.04-1.97s-.02-1.33-.04-2M232.82,27.03c-.26.52-.58.95-.96,1.28-.38.33-.79.58-1.22.75-.44.17-.87.25-1.29.25-.63,0-1.13-.17-1.51-.5-.38-.33-.57-.79-.57-1.36,0-.5.13-.9.4-1.2.27-.3.62-.53,1.06-.69.43-.17.91-.3,1.43-.39.52-.09,1.03-.18,1.54-.26.51-.08.97-.2,1.39-.35.09-.03.16-.08.24-.11v.75c-.07.7-.24,1.32-.5,1.83'/><path fill='#111' d='M250.95,28.3c-.58-.22-1.16-.36-1.74-.4-.57-.05-1.04-.07-1.39-.07h-4.22c-.28,0-.53-.01-.76-.04-.23-.03-.42-.07-.56-.14-.14-.07-.21-.17-.21-.32,0-.17.12-.35.35-.54.23-.19.59-.4,1.07-.62.39.07.75.12,1.08.15.33.03.67.04,1,.04,1.28,0,2.36-.16,3.24-.49.88-.32,1.54-.78,1.99-1.36.44-.58.67-1.25.67-1.99s-.27-1.37-.81-1.88c-.54-.51-1.46-.88-2.78-1.1v-.33s4.81.64,4.81.64v-2.83s-7.23,0-7.23,0c-1.33,0-2.47.2-3.42.6-.95.4-1.67.95-2.17,1.67-.5.71-.75,1.53-.75,2.46,0,1.06.3,1.92.9,2.6.6.68,1.46,1.1,2.57,1.26v.33c-1.17.15-2,.42-2.5.81-.5.39-.75.83-.75,1.33,0,.54.26.94.79,1.21.53.27,1.29.4,2.29.4v.31c-1.3.19-2.28.54-2.93,1.06-.66.52-.99,1.19-.99,2,0,.61.21,1.14.63,1.6.42.45,1.11.81,2.07,1.06.96.25,2.25.37,3.86.37,1.8,0,3.28-.16,4.45-.49,1.17-.33,2.04-.82,2.63-1.49.58-.67.87-1.52.87-2.56,0-.93-.2-1.64-.6-2.15-.4-.51-.89-.88-1.47-1.1M243.35,20.02c.5-.48,1.18-.72,2.03-.72s1.52.24,2.02.72c.49.48.74,1.1.74,1.86s-.24,1.33-.71,1.78c-.47.45-1.14.67-1.99.67-.57,0-1.07-.1-1.5-.31-.43-.2-.75-.5-.99-.88-.23-.38-.35-.81-.35-1.29,0-.74.25-1.35.75-1.84M249.52,32.34c-.28.24-.76.42-1.46.54-.69.12-1.68.18-2.96.18-.72,0-1.35-.03-1.88-.08-.53-.05-.94-.18-1.24-.36-.3-.19-.45-.46-.45-.83s.16-.69.47-.97c.31-.28.87-.54,1.67-.78h3.59c.24,0,.51.01.81.03.3.02.59.07.88.15.29.08.52.22.71.42.19.19.28.48.28.85,0,.33-.14.62-.42.86'/><path fill='#111' d='M264.17,26.41c-.02.35-.08.7-.19,1.04-.11.34-.29.65-.53.92-.24.27-.55.49-.93.65-.38.17-.86.25-1.43.25-1.24,0-2.19-.4-2.85-1.21-.6-.73-.91-1.81-.96-3.2l9.79-.12c.13-1.22.08-2.32-.14-3.31-.22-.98-.6-1.83-1.14-2.54-.54-.71-1.23-1.26-2.07-1.64-.84-.38-1.82-.57-2.93-.57-1.17,0-2.19.2-3.06.61-.87.41-1.59.97-2.17,1.7-.57.72-1.01,1.56-1.29,2.52-.29.95-.43,1.98-.43,3.07s.14,2.06.43,2.96c.29.9.73,1.68,1.32,2.34.59.66,1.34,1.17,2.24,1.54.9.37,1.97.56,3.21.56,1.09,0,2.03-.14,2.82-.43.79-.29,1.44-.67,1.95-1.15.51-.48.89-1.04,1.14-1.67.25-.63.39-1.29.43-1.97l-3.2-.33ZM258.82,20.13c.53-.41,1.18-.61,1.96-.61.72,0,1.32.17,1.81.51.48.34.83.83,1.04,1.47.12.35.18.75.2,1.19l-6.43.1c.06-.34.13-.67.24-.97.26-.73.65-1.3,1.18-1.71'/></g><g><path fill='#111' d='M68.07,49.38v-9.25h2.02v9.25h-2.02ZM69.5,41.81v-1.68h5.27v1.68h-5.27ZM69.5,45.47v-1.51h4.61v1.51h-4.61ZM69.5,49.38v-1.68h5.27v1.68h-5.27Z'/><path fill='#111' d='M75.32,49.38l2.4-3.69-2.38-3.67h2.34l1.28,2.58h.13l1.25-2.58h2.33l-2.33,3.67,2.36,3.69h-2.36l-1.26-2.57h-.11l-1.3,2.57h-2.33Z'/><path fill='#111' d='M83.45,51.51v-9.49h1.75l-.03,2.23h.14c.1-.54.26-.99.48-1.35.21-.36.49-.63.81-.81.33-.18.71-.27,1.16-.27.59,0,1.1.15,1.53.45.43.3.76.74.99,1.31.23.57.34,1.28.34,2.11s-.12,1.55-.35,2.13c-.23.58-.56,1.02-.99,1.31-.43.29-.92.44-1.48.44-.45,0-.84-.09-1.16-.28s-.6-.46-.81-.83c-.22-.36-.37-.82-.48-1.36h-.17c.06.3.1.59.15.88s.07.57.1.85c.02.28.04.54.04.79v1.88h-2.02ZM87.08,47.91c.33,0,.6-.1.82-.29.22-.19.38-.45.49-.78s.16-.7.16-1.11-.06-.8-.17-1.13-.28-.59-.5-.78c-.22-.19-.5-.28-.81-.28-.24,0-.46.05-.66.16s-.37.26-.51.45c-.15.19-.25.42-.33.67-.07.26-.11.54-.11.83v.15c0,.23.03.45.08.66.05.21.12.4.22.57s.21.32.34.46c.14.13.29.23.46.3.17.07.35.11.53.11Z'/><path fill='#111' d='M95.11,49.58c-.65,0-1.2-.09-1.67-.28s-.85-.45-1.15-.79c-.3-.34-.52-.73-.67-1.19s-.22-.95-.22-1.49.07-1.06.22-1.54.36-.91.66-1.28.67-.66,1.11-.87.98-.32,1.58-.32,1.1.1,1.54.3c.44.2.8.49,1.07.86.28.37.46.82.57,1.32.1.51.12,1.07.04,1.69l-5.52.07v-1.12l4.09-.07-.41.63c.05-.45.02-.83-.08-1.14-.1-.31-.26-.55-.48-.71-.22-.16-.5-.24-.83-.24-.36,0-.67.1-.91.29s-.42.46-.54.81c-.12.35-.18.76-.18,1.25,0,.79.15,1.37.46,1.74.3.37.74.56,1.31.56.26,0,.48-.04.66-.11s.32-.17.43-.29c.11-.12.19-.26.24-.43.05-.16.08-.33.08-.51l1.84.2c0,.34-.07.66-.2.97-.12.31-.31.6-.56.85s-.58.45-1,.6-.91.22-1.5.22Z'/><path fill='#111' d='M99.35,49.38v-7.36h1.74l-.04,2.89h.17c.06-.74.17-1.33.34-1.78.17-.45.4-.77.68-.97.28-.2.61-.3.98-.3.13,0,.27.02.43.05.15.03.31.09.47.16l-.1,2.2c-.18-.09-.36-.16-.54-.21s-.35-.07-.5-.07c-.34,0-.62.09-.86.28-.23.19-.42.46-.55.83-.13.36-.2.8-.21,1.32v2.97h-2.02Z'/><path fill='#111' d='M107.89,49.55c-.81,0-1.42-.21-1.82-.64-.4-.43-.6-1.09-.6-1.99v-3.29h-.9v-1.4h.31c.45-.04.77-.17.97-.39s.31-.56.35-1.03l.07-.43h1.18v1.65h1.79v1.64h-1.79v3.1c0,.36.08.61.25.76.17.15.39.23.67.23.16,0,.31-.02.46-.06.15-.04.29-.1.42-.17v1.82c-.28.08-.53.14-.76.17-.22.03-.43.04-.6.04Z'/><path fill='#111' d='M113.33,49.58c-.49,0-.94-.05-1.35-.15-.42-.1-.77-.25-1.07-.46-.3-.21-.53-.47-.69-.79-.16-.32-.25-.71-.25-1.17l1.71-.29c.02.31.1.57.24.77.14.21.34.36.59.46.25.1.56.15.91.15.37,0,.68-.06.91-.18.23-.12.35-.31.35-.56,0-.17-.05-.3-.16-.39s-.28-.18-.51-.25c-.23-.07-.54-.15-.91-.24-.42-.1-.82-.21-1.18-.32-.37-.11-.69-.24-.97-.41-.28-.16-.5-.37-.65-.63s-.23-.58-.23-.96c0-.49.13-.9.39-1.25.26-.35.62-.61,1.09-.81.47-.19,1.02-.29,1.65-.29.58,0,1.11.09,1.58.26s.85.44,1.14.81c.28.37.42.85.41,1.44l-1.71.28c0-.28-.05-.52-.18-.71-.13-.2-.3-.34-.52-.44-.22-.1-.48-.15-.79-.15-.36,0-.65.07-.86.2s-.32.31-.32.53c0,.18.07.32.2.43s.32.2.57.27c.25.08.56.15.93.22.34.07.68.15,1.02.25.35.1.66.23.95.4.29.17.53.39.71.66.18.27.27.62.27,1.04,0,.46-.13.86-.39,1.21-.26.35-.63.61-1.11.79-.48.18-1.07.27-1.76.27Z'/><path fill='#111' d='M121.51,41.25c-.39,0-.69-.08-.9-.25-.21-.16-.31-.4-.31-.72s.1-.57.31-.74c.21-.16.5-.25.9-.25s.71.08.91.25c.21.17.31.41.31.73s-.1.55-.31.71-.51.25-.91.25ZM120.52,49.38v-7.36h2.02v7.36h-2.02Z'/><path fill='#111' d='M123.85,49.38v-7.36h1.71l-.04,2.85h.15c.07-.68.21-1.25.42-1.7.21-.45.48-.79.83-1.01.35-.22.78-.34,1.29-.34.82,0,1.44.28,1.86.84.42.56.62,1.42.62,2.57v4.15h-2.02v-3.91c0-.65-.1-1.14-.29-1.44-.19-.31-.49-.46-.89-.46-.34,0-.63.11-.87.34-.24.22-.43.57-.56,1.02s-.2,1.04-.2,1.74v2.72h-2.02Z'/><path fill='#111' d='M134.99,49.38v-9.25h2.02v9.25h-2.02ZM136.42,46.69v-1.63h1.93c.64,0,1.13-.13,1.46-.38.33-.26.49-.68.49-1.28,0-.55-.15-.96-.45-1.24-.3-.28-.76-.41-1.37-.41h-2.06v-1.61h2.17c.55,0,1.06.07,1.51.2s.86.33,1.19.6c.34.27.6.61.79,1.02.19.41.28.9.28,1.46,0,.71-.16,1.31-.48,1.8-.32.49-.8.86-1.42,1.11-.63.25-1.4.37-2.31.37h-1.72Z'/><path fill='#111' d='M143.3,49.38v-7.36h1.74l-.04,2.89h.17c.06-.74.17-1.33.34-1.78.17-.45.4-.77.68-.97.28-.2.61-.3.98-.3.13,0,.27.02.43.05.15.03.31.09.47.16l-.1,2.2c-.18-.09-.36-.16-.54-.21-.18-.05-.35-.07-.5-.07-.34,0-.62.09-.86.28-.23.19-.42.46-.55.83s-.2.8-.21,1.32v2.97h-2.02Z'/><path fill='#111' d='M152.13,49.58c-.71,0-1.34-.15-1.89-.43-.55-.29-.98-.72-1.29-1.29-.31-.57-.47-1.29-.47-2.14s.16-1.62.48-2.19c.32-.57.75-1,1.31-1.28.56-.28,1.18-.42,1.87-.42s1.35.14,1.9.43.98.71,1.29,1.29c.31.57.47,1.3.47,2.17s-.16,1.62-.48,2.19c-.32.57-.76.99-1.31,1.27-.55.28-1.18.41-1.88.41ZM152.19,48.06c.34,0,.62-.09.86-.26.23-.17.41-.43.53-.76.12-.34.18-.74.18-1.22,0-.51-.07-.95-.2-1.3-.13-.35-.32-.63-.57-.82-.25-.19-.55-.29-.9-.29-.33,0-.61.09-.84.27s-.41.43-.53.77c-.12.34-.18.75-.18,1.23,0,.76.14,1.34.43,1.76s.7.62,1.22.62Z'/><path fill='#111' d='M156.58,51.79c-.1,0-.21,0-.32-.02-.11-.01-.23-.04-.35-.06l-.17-1.72c.42.04.72,0,.9-.14.18-.13.27-.4.27-.81v-7.01h2.02v7.07c0,.48-.05.89-.16,1.23s-.27.63-.48.84c-.21.21-.46.37-.74.48-.29.1-.6.15-.96.15ZM157.89,41.25c-.39,0-.69-.08-.9-.25-.21-.16-.31-.4-.31-.72s.1-.57.31-.74c.21-.16.5-.25.9-.25s.71.08.91.25c.21.17.31.41.31.73s-.1.55-.31.71c-.21.17-.51.25-.91.25Z'/><path fill='#111' d='M163.67,49.58c-.64,0-1.2-.09-1.67-.28-.47-.19-.85-.45-1.15-.79-.3-.34-.52-.73-.67-1.19-.14-.46-.22-.95-.22-1.49s.07-1.06.22-1.54c.15-.49.37-.91.66-1.28.29-.37.67-.66,1.12-.87.45-.21.98-.32,1.58-.32s1.1.1,1.54.3.8.49,1.07.86.46.82.57,1.32c.1.51.12,1.07.04,1.69l-5.52.07v-1.12l4.09-.07-.41.63c.05-.45.02-.83-.08-1.14-.1-.31-.26-.55-.48-.71s-.5-.24-.83-.24c-.36,0-.67.1-.91.29-.24.19-.42.46-.54.81-.12.35-.18.76-.18,1.25,0,.79.15,1.37.46,1.74.3.37.74.56,1.31.56.26,0,.48-.04.66-.11s.32-.17.43-.29c.11-.12.19-.26.24-.43.05-.16.08-.33.08-.51l1.84.2c0,.34-.08.66-.2.97-.12.31-.31.6-.56.85-.25.25-.58.45-1,.6s-.91.22-1.5.22Z'/><path fill='#111' d='M171.37,49.58c-.64,0-1.19-.1-1.65-.29-.47-.19-.85-.46-1.16-.81s-.53-.75-.68-1.21c-.15-.46-.22-.95-.22-1.49s.07-1.05.22-1.53c.15-.48.37-.9.67-1.26.3-.37.68-.65,1.14-.86.46-.21,1.01-.31,1.63-.31.71,0,1.29.13,1.75.39s.8.6,1.02,1.02c.22.42.32.89.29,1.41l-1.79.28c0-.34-.04-.61-.15-.83s-.27-.39-.47-.5-.44-.17-.71-.17c-.24,0-.46.04-.65.13s-.36.23-.5.41c-.14.19-.25.42-.32.71-.07.29-.11.62-.11,1,0,.51.07.95.2,1.3.13.36.33.62.58.8.25.18.56.27.92.27s.65-.08.86-.25c.21-.16.36-.37.44-.63s.12-.52.1-.78l1.84.18c.02.4-.03.78-.15,1.14-.12.36-.31.68-.58.96s-.61.5-1.04.66c-.43.16-.93.24-1.51.24Z'/><path fill='#111' d='M178.29,49.55c-.81,0-1.42-.21-1.82-.64-.4-.43-.6-1.09-.6-1.99v-3.29h-.9v-1.4h.31c.45-.04.77-.17.97-.39s.31-.56.35-1.03l.07-.43h1.18v1.65h1.79v1.64h-1.79v3.1c0,.36.08.61.25.76.17.15.39.23.67.23.16,0,.31-.02.46-.06s.29-.1.42-.17v1.82c-.28.08-.53.14-.76.17s-.43.04-.6.04Z'/><path fill='#111' d='M183.91,49.58c-.64,0-1.2-.09-1.67-.28-.47-.19-.85-.45-1.15-.79-.3-.34-.52-.73-.67-1.19-.14-.46-.22-.95-.22-1.49s.07-1.06.22-1.54c.15-.49.37-.91.66-1.28.29-.37.67-.66,1.12-.87.45-.21.98-.32,1.58-.32s1.1.1,1.54.3.8.49,1.07.86.46.82.57,1.32c.1.51.12,1.07.04,1.69l-5.52.07v-1.12l4.09-.07-.41.63c.05-.45.02-.83-.08-1.14-.1-.31-.26-.55-.48-.71s-.5-.24-.83-.24c-.36,0-.67.1-.91.29-.24.19-.42.46-.54.81-.12.35-.18.76-.18,1.25,0,.79.15,1.37.46,1.74.3.37.74.56,1.31.56.26,0,.48-.04.66-.11s.32-.17.43-.29c.11-.12.19-.26.24-.43.05-.16.08-.33.08-.51l1.84.2c0,.34-.08.66-.2.97-.12.31-.31.6-.56.85-.25.25-.58.45-1,.6s-.91.22-1.5.22Z'/><path fill='#111' d='M190.85,49.58c-.55,0-1.04-.15-1.48-.44-.43-.29-.78-.73-1.03-1.31-.25-.58-.38-1.3-.38-2.17,0-.82.11-1.52.34-2.08.22-.57.55-1,.97-1.3.42-.3.93-.45,1.51-.45.45,0,.84.09,1.18.28.34.19.61.47.82.85.21.38.37.86.47,1.45h.18c-.06-.34-.11-.66-.15-.97s-.08-.61-.1-.88c-.02-.28-.04-.53-.04-.76v-2.23h2.02v9.83h-1.75l.03-2.27h-.15c-.1.54-.26,1-.48,1.37s-.48.64-.81.83-.7.27-1.14.27ZM191.53,47.94c.25,0,.48-.06.68-.17s.37-.27.5-.47c.13-.2.24-.43.32-.69.07-.26.11-.53.11-.82v-.15c0-.22-.03-.44-.08-.66-.05-.21-.12-.41-.22-.59-.09-.18-.21-.33-.34-.46-.13-.13-.28-.23-.45-.31-.17-.08-.35-.11-.53-.11-.33,0-.6.1-.82.3-.22.2-.39.47-.5.8s-.17.71-.17,1.14.06.78.18,1.11c.12.33.29.59.52.79.22.19.49.29.8.29Z'/><path fill='#111' d='M203.09,49.58c-.63,0-1.18-.07-1.66-.21-.48-.14-.89-.34-1.22-.6-.33-.26-.58-.58-.74-.97-.16-.38-.25-.82-.25-1.32l1.86-.45c0,.45.09.81.27,1.09s.43.49.76.62.68.2,1.07.2c.36,0,.66-.04.92-.13.26-.09.46-.21.6-.36.14-.15.21-.33.21-.54,0-.25-.09-.46-.28-.62-.19-.16-.44-.29-.75-.4s-.67-.21-1.06-.3c-.42-.11-.84-.23-1.25-.36-.41-.13-.79-.29-1.12-.5-.34-.21-.61-.47-.81-.79-.2-.32-.3-.73-.3-1.21,0-.58.14-1.08.43-1.49.29-.42.7-.74,1.24-.96.54-.22,1.17-.34,1.89-.34s1.37.12,1.93.36c.56.24.99.58,1.29,1.04.3.45.44,1,.4,1.65l-1.84.37c0-.29-.03-.55-.11-.77-.08-.22-.2-.41-.36-.57-.16-.15-.35-.27-.58-.35-.23-.08-.49-.12-.79-.12-.34,0-.62.05-.86.14-.23.09-.41.22-.53.37-.12.15-.18.33-.18.53,0,.25.09.45.27.6s.43.28.75.38.68.21,1.08.31c.4.09.81.21,1.21.34.41.13.79.3,1.14.51.35.21.63.49.83.83.21.34.31.77.31,1.28,0,.59-.15,1.09-.46,1.5-.31.41-.75.72-1.31.94s-1.24.32-2.01.32Z'/><path fill='#111' d='M208.9,41.25c-.39,0-.69-.08-.9-.25-.21-.16-.31-.4-.31-.72s.1-.57.31-.74c.21-.16.5-.25.9-.25s.71.08.91.25c.21.17.31.41.31.73s-.1.55-.31.71c-.21.17-.51.25-.91.25ZM207.9,49.38v-7.36h2.02v7.36h-2.02Z'/><path fill='#111' d='M214.14,51.68c-.82,0-1.48-.06-1.97-.19-.49-.13-.84-.31-1.05-.54-.21-.23-.32-.51-.32-.83,0-.41.16-.75.49-1,.33-.26.82-.43,1.47-.51v-.14c-.5,0-.89-.07-1.16-.21-.27-.14-.4-.35-.4-.63,0-.26.13-.5.38-.7.25-.21.67-.34,1.25-.39v-.17c-.54-.08-.96-.3-1.27-.64s-.46-.79-.46-1.32c0-.48.13-.9.38-1.25.25-.36.62-.64,1.1-.85.48-.21,1.07-.31,1.76-.31h3.69v1.57l-2.45-.31v.17c.7.1,1.19.28,1.46.52s.41.55.41.91-.11.69-.34.97-.56.51-1,.67c-.44.16-1,.25-1.66.25-.17,0-.34,0-.52-.03-.18-.02-.37-.05-.57-.08-.21.1-.36.2-.46.29-.1.09-.15.17-.15.25,0,.06.03.1.08.13.06.03.13.06.22.07s.2.02.32.02h2.19c.19,0,.43.01.72.04.29.02.59.09.88.21.29.12.54.31.74.57s.3.64.3,1.12c0,.53-.15.97-.44,1.32-.29.35-.74.61-1.35.78-.6.17-1.37.25-2.29.25ZM214.2,49.95c.63,0,1.1-.03,1.42-.08.32-.06.54-.13.67-.24.12-.1.18-.23.18-.38,0-.16-.04-.29-.13-.38-.08-.09-.19-.16-.32-.2-.13-.04-.25-.06-.38-.06-.13,0-.24,0-.34,0h-1.84c-.35.09-.6.2-.74.33-.14.13-.21.27-.21.43,0,.17.07.29.2.38s.33.14.58.17c.25.03.55.04.9.04ZM214.35,45.62c.38,0,.68-.1.88-.31s.31-.49.31-.84-.11-.66-.32-.88-.51-.34-.88-.34-.67.11-.89.34-.33.51-.33.87c0,.23.05.44.15.62.1.18.24.31.42.41.18.09.4.14.67.14Z'/><path fill='#111' d='M219.13,49.38v-7.36h1.71l-.04,2.85h.15c.08-.68.21-1.25.42-1.7.21-.45.48-.79.83-1.01.35-.22.78-.34,1.29-.34.82,0,1.44.28,1.86.84.42.56.62,1.42.62,2.57v4.15h-2.02v-3.91c0-.65-.1-1.14-.29-1.44s-.49-.46-.89-.46c-.34,0-.63.11-.87.34-.24.22-.43.57-.56,1.02s-.2,1.04-.2,1.74v2.72h-2.02Z'/><path fill='#111' d='M229.07,49.58c-.38,0-.74-.07-1.07-.21-.33-.14-.59-.36-.79-.66-.2-.3-.3-.69-.3-1.16,0-.44.08-.8.25-1.07.17-.28.4-.5.69-.67.29-.17.63-.31,1.02-.41.38-.1.79-.18,1.21-.25.44-.08.77-.15,1-.2.23-.05.39-.12.48-.2s.13-.2.13-.35c0-.3-.11-.54-.32-.71s-.51-.26-.88-.26c-.23,0-.46.04-.69.13-.22.08-.41.23-.56.43s-.23.47-.25.82l-1.81-.27c.04-.51.15-.94.35-1.29s.45-.62.77-.83c.32-.21.67-.36,1.06-.45.39-.09.79-.14,1.2-.14.69,0,1.27.13,1.73.38.46.25.81.62,1.04,1.11.23.49.34,1.1.34,1.82v1.32c0,.32,0,.64,0,.97,0,.33.01.66.02.98,0,.32.02.65.03.97h-1.78c0-.33,0-.66,0-1,0-.34,0-.7,0-1.07h-.14c-.08.42-.23.8-.48,1.14-.24.34-.55.62-.93.82-.38.21-.82.31-1.31.31ZM229.88,48.08c.19,0,.38-.04.58-.11s.39-.18.57-.33c.18-.15.33-.35.45-.59.12-.24.2-.53.22-.86v-.59h.35c-.1.11-.25.21-.46.28-.2.08-.42.13-.65.18-.23.04-.47.08-.71.13-.24.04-.46.1-.66.18-.2.08-.36.18-.48.32-.12.13-.18.31-.18.53,0,.27.09.48.27.63.18.15.41.22.69.22Z'/><path fill='#111' d='M237.8,51.68c-.82,0-1.48-.06-1.97-.19-.49-.13-.84-.31-1.05-.54-.21-.23-.32-.51-.32-.83,0-.41.16-.75.49-1,.33-.26.82-.43,1.47-.51v-.14c-.5,0-.89-.07-1.16-.21-.27-.14-.4-.35-.4-.63,0-.26.13-.5.38-.7.25-.21.67-.34,1.25-.39v-.17c-.54-.08-.96-.3-1.27-.64s-.46-.79-.46-1.32c0-.48.13-.9.38-1.25.25-.36.62-.64,1.1-.85.48-.21,1.07-.31,1.76-.31h3.69v1.57l-2.45-.31v.17c.7.1,1.19.28,1.46.52s.41.55.41.91-.11.69-.34.97-.56.51-1,.67c-.44.16-1,.25-1.66.25-.17,0-.34,0-.52-.03-.18-.02-.37-.05-.57-.08-.21.1-.36.2-.46.29-.1.09-.15.17-.15.25,0,.06.03.1.08.13.06.03.13.06.22.07s.2.02.32.02h2.19c.19,0,.43.01.72.04.29.02.59.09.88.21.29.12.54.31.74.57s.3.64.3,1.12c0,.53-.15.97-.44,1.32-.29.35-.74.61-1.35.78-.6.17-1.37.25-2.29.25ZM237.86,49.95c.63,0,1.1-.03,1.42-.08.32-.06.54-.13.67-.24.12-.1.18-.23.18-.38,0-.16-.04-.29-.13-.38-.08-.09-.19-.16-.32-.2-.13-.04-.25-.06-.38-.06-.13,0-.24,0-.34,0h-1.84c-.35.09-.6.2-.74.33-.14.13-.21.27-.21.43,0,.17.07.29.2.38s.33.14.58.17c.25.03.55.04.9.04ZM238.01,45.62c.38,0,.68-.1.88-.31s.31-.49.31-.84-.11-.66-.32-.88-.51-.34-.88-.34-.67.11-.89.34-.33.51-.33.87c0,.23.05.44.15.62.1.18.24.31.42.41.18.09.4.14.67.14Z'/><path fill='#111' d='M245.95,49.58c-.64,0-1.2-.09-1.67-.28-.47-.19-.85-.45-1.15-.79-.3-.34-.52-.73-.67-1.19-.14-.46-.22-.95-.22-1.49s.07-1.06.22-1.54c.15-.49.37-.91.66-1.28.29-.37.67-.66,1.12-.87.45-.21.98-.32,1.58-.32s1.1.1,1.54.3.8.49,1.07.86.46.82.57,1.32c.1.51.12,1.07.04,1.69l-5.52.07v-1.12l4.09-.07-.41.63c.05-.45.02-.83-.08-1.14-.1-.31-.26-.55-.48-.71s-.5-.24-.83-.24c-.36,0-.67.1-.91.29-.24.19-.42.46-.54.81-.12.35-.18.76-.18,1.25,0,.79.15,1.37.46,1.74.3.37.74.56,1.31.56.26,0,.48-.04.66-.11s.32-.17.43-.29c.11-.12.19-.26.24-.43.05-.16.08-.33.08-.51l1.84.2c0,.34-.08.66-.2.97-.12.31-.31.6-.56.85-.25.25-.58.45-1,.6s-.91.22-1.5.22Z'/></g></svg>"
-
-
-def _order_email_domain(o: dict) -> str:
-    email = str(o.get("email") or o.get("contact_email")
-                or (o.get("customer") or {}).get("email") or "")
-    return email.split("@")[-1].strip().lower() if "@" in email else ""
-
-
-def _gobo_domain_size(manufacturer: str, model: str, entry, domain: str, cache: Optional[dict] = None):
-    """A size ruling that applies only to orders from one customer email domain
-    (e.g. Ayrton Diablo prints 25 for dbnaudile.co.uk, 25.5 for everyone else).
-    Matched against both the store-written model name and the resolved sheet row."""
-    if not domain:
-        return None
-    keys = {(_norm_key(manufacturer), _norm_key(model))}
-    if entry:
-        keys.add((_norm_key(entry["manufacturer"]), _norm_key(entry["model"])))
-    for r in (cache or _gobo_sizes())["domain_rules"]:
-        if r["domain"] == domain and r["key"] in keys:
-            return r["size"]
-    return None
-
-
-# Shorthand the trade writes for makers and words, for the Size list's search
-# and for reading a maker off the front of a typed name. The store's own
-# spellings of a model belong in the aliases file instead, where the label
-# reads them too: nothing here changes what a label prints.
-# Not "vl" for Vari-Lite: it starts their models (VL2500), and "vl 2500 spot"
-# was read as maker Vari-Lite, model "2500 spot", which found another row.
-_GOBO_MAKER_SHORT = {"adj": "American DJ", "hes": "High End Systems", "glp": "German Light Products",
-                     "rj": "Robert Juliat", "cp": "Clay Paky"}
-# Words written either way: any one of a group finds the others.
-_GOBO_WORD_GROUPS = [["jr", "jnr", "junior"], ["s4", "source four"],
-                     ["1", "one"], ["2", "two"], ["3", "three"], ["4", "four"], ["5", "five"],
-                     ["6", "six"], ["7", "seven"], ["8", "eight"], ["9", "nine"], ["10", "ten"]]
-
-
-def _gobo_maker_keys(cache: dict) -> dict:
-    """Loose key -> sheet maker, for every way a typed name can start with a
-    maker: its whole name, run together ("claypaky"), a shorthand ("adj"), or
-    the first words of its name when no other maker starts the same way
-    ("martin" for Martin Professional, "high end" for High End Systems; not
-    "light", which starts two) and no model on the sheet has those words
-    ("studio" is in High End Systems' Studio Spot 575, so it is not read as
-    Studio Due). Built once per sheet snapshot."""
-    keys = cache.get("maker_keys")
-    if keys is not None:
-        return keys
-    makers = sorted({e["manufacturer"] for _lm, _w, e in (cache.get("rows") or []) if e.get("manufacturer")})
-    by_loose = {_loose_key(m): m for m in makers if _loose_key(m)}
-    starts: dict = {}
-    for lk in by_loose:
-        w = lk.split()
-        for n in range(1, len(w)):
-            if len(w[0]) >= 3:
-                starts.setdefault(" ".join(w[:n]), set()).add(lk)
-    keys = {}
-    for lk, m in by_loose.items():
-        keys[lk] = m
-        keys.setdefault(lk.replace(" ", ""), m)
-    in_models = {" " + " ".join(w) + " " for _lm, w, _e in (cache.get("rows") or [])}
-    for pre, owners in starts.items():
-        if len(owners) == 1 and pre not in keys and not any(" " + pre + " " in t for t in in_models):
-            keys[pre] = by_loose[next(iter(owners))]
-    model_words = {x for _lm, w, _e in (cache.get("rows") or []) for x in w}
-    for short, m in _GOBO_MAKER_SHORT.items():
-        # A shorthand that starts a model's word is that model's, not a maker.
-        if _loose_key(m) in by_loose and not any(x.startswith(short) and x != short for x in model_words):
-            keys.setdefault(short, by_loose[_loose_key(m)])
-    cache["maker_keys"] = keys
-    return keys
-
-
-def _gobo_split_maker(q: str, cache: dict):
-    """(maker, model) when the typed name starts with a maker, the longest one
-    that fits, leaving the model as it was written; ("", q) otherwise. At
-    least one word is always left for the model."""
-    words = _loose_key(q).split()
-    keys = _gobo_maker_keys(cache)
-    # A maker's name alone ("clay paky") names no model: "clay" and "paky"
-    # would be read as a maker and a model.
-    if " ".join(words) in keys:
-        return "", q
-    for n in range(min(4, len(words) - 1), 0, -1):
-        maker = keys.get(" ".join(words[:n]))
-        if not maker:
-            continue
-        toks, used, i = q.split(), 0, 0
-        while i < len(toks) and used < n:
-            used += len(_loose_key(toks[i]).split())
-            i += 1
-        # A typed word that runs over the maker's end ("High-EndSolaSpot")
-        # cannot be cut cleanly: read the whole name as the model instead.
-        if used == n and i < len(toks):
-            return maker, " ".join(toks[i:])
-    return "", q
-
-
-def _gobo_check(q: str) -> dict:
-    """What a label prints for a fixture named in free text, through the very
-    lookup the labels print with. The whole name is tried as a model first:
-    a maker's name also starts other makers' models (Showtec's Infinity IS
-    100, Mad's EVL Pro 250), and the sheet knows those as models. Then the
-    maker read off the front and the rest as its model. The first that finds
-    a row answers; if none does, the maker's reading gives the reason, being
-    the more particular. A name ruled not a gobo prints no size, as the label
-    shapes it, and is said to be. The sizes set for one customer come with
-    the answer."""
-    cache = _gobo_sizes()
-    # A memo of its own: a typed name is not an order line, and the label's
-    # memo would keep every name anyone typed until the sheet next reloads.
-    view = dict(cache)
-    view["lookup_memo"] = {}
-    q = re.sub(r"\s+", " ", str(q or "")).strip()[:120]
-    maker, model = _gobo_split_maker(q, cache)
-    if maker and (_norm_key(maker), _norm_key(model)) in (cache.get("excludes") or set()):
-        return {"q": q, "manufacturer": maker, "model": model, "match": None, "size": "",
-                "reason": "", "excluded": True, "domains": []}
-    got = None
-    for mfr, mdl in [("", q)] + ([(maker, model)] if maker else []):
-        entry, reason = _gobo_lookup(mfr, mdl, cache=view)
-        if entry:
-            got = (mfr, mdl, entry, reason)
-            break
-        if got is None or mfr:
-            got = (mfr, mdl, entry, reason)
-    mfr, mdl, entry, reason = got
-    keys = {(_norm_key(mfr), _norm_key(mdl))}
-    if entry:
-        keys.add((_norm_key(entry["manufacturer"]), _norm_key(entry["model"])))
-    domains = [{"domain": r["domain"], "size": r["size"]} for r in cache.get("domain_rules") or [] if r["key"] in keys]
-    return {"q": q, "manufacturer": mfr, "model": mdl,
-            "match": ({"manufacturer": entry["manufacturer"], "model": entry["model"]} if entry else None),
-            "size": (entry["production_size"] if entry and not reason else ""),
-            "reason": reason or "", "excluded": False, "domains": domains}
-
-
-def _item_prop(li: dict, name: str) -> str:
-    want = _norm_key(name)
-    for p in (li.get("properties") or []):
-        if isinstance(p, dict) and _norm_key(p.get("name")) == want:
-            return str(p.get("value") or "").strip()
-    return ""
-
-
-def _short_glass(v) -> str:
-    """Label-friendly glass type: "Monochrome Glass - Original" prints as
-    "Mono - Original", "Colour Glass - Copy" as "Colour - Copy"."""
-    s = _strip_price(v)
-    s = re.sub(r"\bmonochrome\b", "Mono", s, flags=re.I)
-    s = re.sub(r"\s*\bglass\b", "", s, flags=re.I)
-    return re.sub(r"\s+", " ", s).strip()
-
-
-# Product titles that carry no information on a label: the customer's own
-# artwork has no name on these, so the quoted title line is dropped.
-_GENERIC_TITLES = {"create your own gobo"}
-
-
-def _label_skip_item(title: str) -> bool:
-    """Line items that are charges, not things to build: never on a label."""
-    return _norm_key(title).startswith("additional shipping charge")
-
-
-def _item_glass(li: dict) -> str:
-    """Glass type for the label: the Glass Type property when present, else
-    derived from the SKU or variant, where the store's option sets encode it
-    (e.g. SKU "Create your own gobo-Monochrome Glass-copy")."""
-    v = _item_prop(li, "Glass Type")
-    if v:
-        return _short_glass(v)
-    hay = (str(li.get("sku") or "") + " " + str(li.get("variant_title") or "")).lower()
-    if "monochrome" in hay or re.search(r"\bmono\b", hay):
-        fam = "Mono"
-    elif "colour" in hay or "color" in hay:
-        fam = "Colour"
-    elif "heavy matted" in hay or re.search(r"\bhm\b", hay):
-        fam = "HM"
-    else:
-        return ""
-    if "copy" in hay:
-        return fam + " - Copy"
-    if "original" in hay:
-        return fam + " - Original"
-    return fam
-
-
-def _item_model(li: dict, manufacturer: str) -> str:
-    """The item's model, wherever the store's option sets put it: a plain "Model"
-    property, or a per-manufacturer dropdown like "American DJ Models: Ikon
-    Profile". The manufacturer's own dropdown wins over any other leftover one."""
-    v = _item_prop(li, "Model")
-    if v:
-        return v
-    nmfr = _norm_key(manufacturer)
-    fallback = ""
-    for p in (li.get("properties") or []):
-        if not isinstance(p, dict):
-            continue
-        name = _norm_key(p.get("name"))
-        val = str(p.get("value") or "").strip()
-        if not val or not (name.endswith(" models") or name.endswith(" model")):
-            continue
-        if nmfr and name.startswith(nmfr):
-            return val
-        fallback = fallback or val
-    return fallback
-
-
-def _line_has_model(li: dict) -> bool:
-    """Whether a line names the fixture it is sized for, read exactly the way
-    the label reads it. Only lines that do NOT need their product type fetched,
-    which keeps that fetch small however long the production queue is."""
-    return bool(_strip_price(_item_model(li, _strip_price(_item_prop(li, "Manufacturer")))))
-
-
-# A gobo the Quote Engine sells with a projector names no fixture of its own:
-# its variant says so ("Single Colour Glass Original With Projector (Quote) /
-# IH") because its fixture is the projector on the same order (#104453).
-_WITH_PROJECTOR_RE = re.compile(r"\bwith projector\b", re.I)
-_PROJECTOR_WATTS_RE = re.compile(r"\b(\d{1,3})\s*(?:watt|w)\b", re.I)
-PROJECTOR_TYPE = "projector"
-
-
-def _with_projector_variant(li: dict) -> bool:
-    return bool(_WITH_PROJECTOR_RE.search(str(li.get("variant_title") or "") + " " + str(li.get("name") or "")))
-
-
-def _sold_with_projector(li: dict) -> bool:
-    """A With Projector gobo that is cut for the projector on its order. The old
-    quote machine wrote the gobo's fixture into one "Note" property instead
-    ("Manufacturer: Standard\nStandard Models: B Size"), which nothing here
-    reads, and #103894's said B Size beside a 20 Watt: such a line keeps its
-    CHECK rather than be cut against what it says."""
-    return (_with_projector_variant(li)
-            and not re.search(r"(?im)^\s*manufacturer\s*:", _item_prop(li, "Note")))
-
-
-def _projector_watts(li: dict) -> int:
-    """A projector line's wattage ("Projected Image 40 Watt LED Weatherproof
-    Gobo Projector" is 40), or 0 for anything else. Read from what the line
-    says, not its product type: the type Projector also covers rain hoods,
-    lenses, holders and bundles, which name wattages too ("Rain Hood (40W &
-    80W)") but never "Gobo Projector"; and the old quote machine sold projectors
-    as "Outdoor Gobo Projectors" typed Custom Gobos, named in the variant."""
-    if _line_has_model(li) or _with_projector_variant(li):
-        return 0
-    text = str(li.get("title") or "") + " " + str(li.get("variant_title") or "")
-    if "gobo projector" not in text.lower():
-        return 0
-    m = _PROJECTOR_WATTS_RE.search(text)
-    return int(m.group(1)) if m else 0
-
-
-def _projector_entries(watts: int, cache: dict) -> list:
-    """The size list's Projected Image rows naming this wattage ("40/80 Watt
-    Range" for a 40 or an 80), rulings applied. Read from the rows rather than
-    through the lookup, whose spellings are uneven here: "80 Watt" finds its
-    row and "40 Watt" does not. A row is matched by its own name or by the name
-    an alias gave it, so pointing "300 Watt" at a row in the size check settles
-    a 300 Watt; and a row named for the wattage itself ("40 Watt", made by a
-    size rule) wins over a range that includes it, so ruling it decides."""
-    exact, ranged, seen = [], [], set()
-    for lm, words, e in cache.get("rows") or []:
-        model = str(e.get("model") or "")
-        own = " ".join(words)
-        if lm != "projected image" or ("watt" not in own and "watt" not in model.lower()):
-            continue
-        if str(watts) not in set(re.findall(r"\d+", own)) | set(re.findall(r"\d+", model)):
-            continue
-        is_exact = own == "%d watt" % watts
-        key = (is_exact, _norm_key(model), str(e.get("production_size") or ""))
-        if key not in seen:
-            seen.add(key)
-            (exact if is_exact else ranged).append(e)
-    return exact or ranged
-
-
-def _projector_size(o: dict, cache: dict) -> dict:
-    """What a With Projector gobo on order `o` is cut at (Cameron, 2026-10-02):
-    the size of the projector on the same order. {"size", "note", "entry"} when
-    every projector on the order agrees; otherwise {"reason"}, the CHECK the
-    label prints, with "fix" when a size rule would settle it: the (maker,
-    model) of a wattage the size list has no row for."""
-    lines = [li for li in (o.get("line_items") or []) if _line_qty(li) > 0]
-    # An upgrade changes which projector the customer gets ("Projector
-    # Upgrade", "80 Watt to 200 Watt"): which size is for a person to say.
-    if any(not _line_has_model(li) and re.search(r"\bupgrade\b", str(li.get("title") or "") + " "
-                                                 + str(li.get("variant_title") or ""), re.I) for li in lines):
-        return {"reason": "Sold with a projector, and this order upgrades one: check which size"}
-    watts = set()
-    for li in lines:
-        w = _projector_watts(li)
-        if not w:
-            continue
-        # Our rows are for our projectors. Another maker's (an Evica GP10 is
-        # 22.5, not our 10 Watt's 37.5) is for a person to size.
-        maker = _gobo_split_maker(str(li.get("title") or ""), cache)[0]
-        if maker and _norm_key(maker) != "projected image":
-            return {"reason": "Sold with a projector by %s: check its size" % maker}
-        watts.add(w)
-    watts = sorted(watts)
-    if not watts:
-        return {"reason": "Sold with a projector, but no projector is on this order"}
-    domain = _order_email_domain(o)
-    sizes, entry, by_domain = set(), None, False
-    for w in watts:
-        # A size the size check set for this customer on the wattage itself.
-        mine = _gobo_domain_size("Projected Image", "%d Watt" % w, None, domain, cache=cache)
-        if mine:
-            sizes.add(mine)
-            by_domain = True
-            continue
-        got = set()
-        for e in _projector_entries(w, cache):
-            d = _gobo_domain_size(e["manufacturer"], e["model"], e, domain, cache=cache)
-            by_domain = by_domain or bool(d)
-            got.add(d or str(e.get("production_size") or ""))
-            entry = entry or e
-        if not got or "" in got:
-            return {"reason": "No size list row for the %d Watt projector on this order" % w,
-                    "fix": ("Projected Image", "%d Watt" % w)}
-        if len(got) > 1:
-            # The size list's own clash: a rule on the wattage settles it.
-            return {"reason": "The size list gives the %d Watt projector two sizes" % w,
-                    "fix": ("Projected Image", "%d Watt" % w)}
-        sizes |= got
-    names = [str(w) for w in watts]
-    named = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
-    if len(sizes) > 1:
-        return {"reason": "Sold with a projector: this order has %s Watt projectors, cut at different sizes" % named}
-    if by_domain:
-        note = "Size for this customer"
-    else:
-        note = "For the %s Watt projector%s on this order" % (named, "" if len(watts) == 1 else "s")
-        if entry and entry.get("review"):
-            note += ". " + entry["review"]
-    return {"size": sizes.pop(), "note": note, "entry": entry}
-
-
-UNPROCESSED_TAG = os.environ.get("UNPROCESSED_TAG", "Unprocessed")
-MADE_TAG = os.environ.get("MADE_TAG", "PC")
-PROPOSAL_HOST = os.environ.get("PROPOSAL_HOST", "quote.projectedimage.com")
-_PROPOSAL_RE = re.compile(r"https://" + re.escape(PROPOSAL_HOST) + r"/proof/[A-Za-z0-9]+")
-_order_tag_writer = None
-_payment_terms_writer = None
-_scope_reader = None
-_tax_id_reader = None
-_product_meta_reader = None
-_forecast_reader = None   # the forecast job's four store reads, made with the app's credential
-_install_checker = None   # "installed" / "gone" / "unknown": asked before a shop/redact erases
-_customer_checker = None  # "live" / "gone" / "unknown": asked before a customers/redact erases
-# The Shopify version the server talks to, handed over by add_routes. Never
-# found by the server's module name: production starts `python server.py`,
-# which Python files under __main__, so a lookup by name finds nothing there.
-_api_version = ""
-_order_writer = None
-# The tag that marks an order sold on account: releasing one to production is
-# the moment its 30-day clock should start ticking in Shopify.
-PO_UNPAID_TAG = os.environ.get("PO_UNPAID_TAG", "purchase order unpaid")
-_fulfillment_writer = None
-_fulfillment_canceler = None
-_webhook_ensurer = None
-_tag_locks: dict = {}
-_dispatch_locks: dict = {}
-
-
-def _dispatch_lock(order_id) -> "asyncio.Lock":
-    # Keyed on the string, not int(), so an ad-hoc shipment (adhoc:<uuid>) gets a
-    # lock too. int() here used to raise before the lock was even taken, which the
-    # route reported as "it MAY have been booked and charged" for a request that
-    # never reached World Options.
-    key = str(order_id)
-    lock = _dispatch_locks.get(key)
-    if lock is None:
-        if len(_dispatch_locks) > 500:   # ad-hoc ids are one per shipment, so this grows
-            for k, l in [(k, l) for k, l in _dispatch_locks.items() if not l.locked()][:250]:
-                _dispatch_locks.pop(k, None)
-        lock = _dispatch_locks[key] = asyncio.Lock()
-    return lock
-
-
-def _tag_lock(order_id) -> "asyncio.Lock":
-    key = int(order_id)
-    lock = _tag_locks.get(key)
-    if lock is None:
-        if len(_tag_locks) > 500:   # one per order ever tagged; prune the idle ones
-            for k, l in [(k, l) for k, l in _tag_locks.items() if not l.locked()][:250]:
-                _tag_locks.pop(k, None)
-        lock = _tag_locks[key] = asyncio.Lock()
-    return lock
-
-
-async def _sync_order_tags(registry: dict, order_id, add=(), remove=(), unless=(),
-                           allow_dead: bool = False, outcome: Optional[dict] = None) -> tuple:
-    """Move an order along the tag workflow (Unprocessed -> IP -> PC) without
-    touching any other tag. Set-based, case-insensitive: re-running an action
-    can never duplicate a tag or leave conflicting statuses. Dead orders
-    (cancelled, refunded, fulfilled) are left alone. Returns (ok, note).
-
-    The GET-modify-PUT is serialized per order with a lock: without it, the SPA
-    stamp and the print doc's background sync (or two quick clicks) could both
-    read the same tag string and the second PUT would clobber the first
-    (e.g. dropping the just-added IP, or resurrecting Unprocessed)."""
-    if _order_tag_writer is None:
-        return False, "Tag updates are not enabled on this server."
-    try:
-        async with _tag_lock(order_id):
-            o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
-            if not _ok(o) or not o.get("id"):
-                return False, "Couldn't read the order to update its tags."
-            if outcome is not None:
-                outcome["order"] = o      # read once: a release's terms check uses it too
-            if _order_status(o) and not allow_dead:
-                # Cancelled, refunded or fulfilled: tags stay as they are. The
-                # app may be finding this out here, before Shopify's webhook,
-                # and the queues and the missed-orders strip go on what they
-                # last saw until something says the order changed.
-                _orders_changed([order_id])
-                return True, ""
-            cur = _order_tags(o)
-            if unless:
-                # An order that already carries one of these is past the move
-                # being asked for (a reprint of a made order is not a release).
-                keep = {_norm_key(t) for t in unless}
-                if any(_norm_key(t) in keep for t in cur):
-                    if outcome is not None:
-                        outcome["kept"] = True   # told apart from a move, for the caller that cares
-                    _orders_changed([order_id])   # past the bench in Shopify: likewise
-                    return True, ""
-            drop = {_norm_key(t) for t in add} | {_norm_key(t) for t in remove}
-            new = [t for t in cur if _norm_key(t) not in drop] + list(add)
-            if {_norm_key(t) for t in new} == {_norm_key(t) for t in cur}:
-                return True, ""   # already in the right state: no write
-            try:
-                await _order_tag_writer(int(order_id), ", ".join(new))
-            finally:
-                # The queues are filtered on tags, so this write changes what a
-                # sweep returns. On the way out even if the write raised: a
-                # half-applied change must not leave the old order behind.
-                _orders_changed([order_id])
-            return True, ""
-    except httpx.HTTPStatusError as e:
-        if e.response is not None and e.response.status_code in (401, 403):
-            logger.warning("order tag update refused (%s): the access token lacks write_orders",
-                           e.response.status_code)
-            return False, ("Tags couldn't update: the app's access token doesn't have the "
-                           "write_orders permission yet.")
-        logger.exception("order tag update failed")
-        return False, "Tags couldn't update: Shopify refused the change."
-    except Exception:
-        logger.exception("order tag update failed")
-        return False, "Tags couldn't update. Check the server logs."
-
-
-# What the panel may change. `name` is deliberately absent: Shopify derives an
-# address's name from first + last, so a form offering "name" would report a
-# save and change nothing.
-_EDIT_ADDR_KEYS = ("firstname", "lastname", "company", "street", "street2",
-                   "city", "state", "postcode", "country", "phone")
-_EDIT_EMAIL = re.compile(r"^[^@\s]+@[^@\s.]+\.[^@\s]+$")
-# A courier prints each address line in a fixed width. Longer still saves - this
-# is Shopify's record, not the label - but the person typing should be told.
-COURIER_LINE_CHARS = 35
-
-
-def _clean_edit_fields(body: dict, current: dict) -> tuple:
-    """Validate an edit and merge it over what the order already has.
-
-    Shopify REPLACES the whole shipping address, so a form that posted only the
-    fields it happened to show would silently blank the rest. Everything is
-    therefore merged over the order's current address before it goes, and a key
-    the caller did not send keeps its existing value rather than becoming "".
-
-    The address is then put through the SAME validators the courier booking uses.
-    An address that passes here has to pass there minutes later, and the two
-    standards drifting apart is how a merchant fixes an address in the app and is
-    still refused at the dispatch window.
-    """
-    out, changed, warn = {}, [], []
-    if isinstance(body.get("ship_to"), dict):
-        sent = body["ship_to"]
-        merged = {k: str(current.get(k) or "") for k in _EDIT_ADDR_KEYS}
-        for k in _EDIT_ADDR_KEYS:
-            if k in sent:
-                merged[k] = str(sent.get(k) or "")
-        merged = {k: v for k, v in desk._clean_address(merged).items() if k in _EDIT_ADDR_KEYS}
-        why = desk._addr_ready(merged) or desk._country_ready(merged)
-        if why:
-            return None, why, [], []
-        for k in _EDIT_ADDR_KEYS:
-            if merged.get(k, "") != str(current.get(k) or ""):
-                changed.append(k)
-        for k in ("street", "street2"):
-            if len(merged.get(k, "")) > COURIER_LINE_CHARS:
-                warn.append("The " + ("first" if k == "street" else "second")
-                            + " address line is longer than the "
-                            + str(COURIER_LINE_CHARS) + " characters a courier label prints.")
-        out["ship_to"] = merged
-    for k, cap in (("email", 200), ("phone", 60), ("note", 5000)):
-        if k in body:
-            v = str(body.get(k) or "").strip()[:cap]
-            if v != str(current.get(k) or ""):
-                changed.append(k)
-            out[k] = v
-    email = out.get("email", "")
-    if email and not _EDIT_EMAIL.match(email):
-        return None, "That email address does not look right.", [], []
-    return out, "", changed, warn
-
-
-def _live_booking(order_id) -> dict:
-    """The order's courier booking, if one is live. A cancelled shipment is not
-    one: the parcel is not moving and the address is free to change."""
-    e = _load_dispatch().get(str(order_id)) or {}
-    return e if (e.get("tracking_number") and not e.get("canceled")) else {}
-
-
-async def _order_editable(registry: dict, order_id) -> tuple:
-    """What the panel prefills from, read LIVE rather than off the queue sweep.
-
-    Three reasons it cannot reuse the order object the Production Manager
-    already holds: that object's note has had the proposal URL surgically
-    removed and is cut to 500 characters, so round-tripping it would delete the
-    artwork proof link from Shopify for good; the sweep is cached for up to 45s
-    and the panel then sits open while somebody types; and the guards below have
-    to be decided on the order as it is now, not as it was when the queue loaded.
-    """
-    o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
-    if not _ok(o) or not o.get("id"):
-        return None, "Couldn't read that order from Shopify."
-    booked = _live_booking(order_id)
-    return {
-        "order_id": o.get("id"),
-        "name": o.get("name") or "",
-        "ship_to": _ship_to(o),
-        # The RAW note. The queue's copy has had the proposal URL cut out of it
-        # and the remainder truncated to 500 characters, so prefilling a form
-        # from that one and saving would delete the artwork proof link from
-        # Shopify for good. Prefilled from here, an untouched note round-trips
-        # byte for byte and the link survives because it never left.
-        "note": str(o.get("note") or ""),
-        "status": _order_status(o),
-        "booked": ({"carrier": booked.get("carrier") or "",
-                    "service": booked.get("service") or "",
-                    "tracking": booked.get("tracking_number") or "",
-                    "at": booked.get("dispatched_at") or ""} if booked else None),
-    }, ""
-
-
-_ADDR_COMPARE = ("street", "street2", "postcode", "city", "country")
-
-
-def _addr_key(a: dict) -> tuple:
-    return tuple(" ".join(str((a or {}).get(k) or "").lower().split()) for k in _ADDR_COMPARE)
-
-
-def _flag_address_divergence(order_id, live: dict) -> None:
-    """A live booking cut for a different address than the order now has is
-    marked, so the fulfilment path stops instead of emailing tracking for a
-    parcel going somewhere else. Only when the booking recorded its address."""
-    try:
-        e = (_load_dispatch().get(str(order_id)) or {})
-        booked_at = e.get("booked_address")
-        if (e.get("tracking_number") and not e.get("canceled") and not e.get("fulfilled")
-                and isinstance(booked_at, dict) and not e.get("address_changed_at")
-                and _addr_key(booked_at) != _addr_key(live)):
-            desk._update_dispatch(order_id, lambda x: x.update(
-                {"address_changed_at": datetime.now(timezone.utc).isoformat()}))
-    except Exception:
-        logger.exception("could not compare the booked address for %s", order_id)
-
-
-def _rest_totals(o: dict) -> dict:
-    """An order's tax and total from a REST read, in the shape the order writer
-    returns them. Not the amount outstanding: GraphQL's is documented as signed
-    (negative when the customer is owed), REST's is not, so a note built from a
-    REST read says what the totals alone can say."""
-    cur = str(o.get("currency") or "")
-    def money(key):
-        return {"amount": str(o.get(key) or ""), "currency": cur}
-    return {"tax": money("current_total_tax"), "total": money("current_total_price"),
-            "outstanding": {"amount": "", "currency": cur}}
-
-
-def _tax_change_note(before: dict, totals: dict) -> str:
-    """What an address edit did to the order's tax, said plainly, or ''.
-
-    From Shopify API 2026-10 a new shipping address on an unfulfilled order
-    recalculates its tax: a UK address corrected to an export destination, or
-    the other way, changes the total and so what the customer owes. Shopify
-    makes the change; this says so, rather than leave it to be found."""
-    def num(v):
-        try:
-            return round(float(v), 2)
-        except (TypeError, ValueError):
-            return None
-    was, now = before.get("tax") or {}, totals.get("tax") or {}
-    tax_was, tax_now = num(was.get("amount")), num(now.get("amount"))
-    if tax_was is None or tax_now is None or tax_was == tax_now:
-        return ""
-    cur = str(now.get("currency") or was.get("currency") or "")
-    def fmt(x):
-        return ("\u00a3%.2f" % x) if cur in ("GBP", "") else ("%s %.2f" % (cur, x))
-    total_was = num((before.get("total") or {}).get("amount"))
-    total_now = num((totals.get("total") or {}).get("amount"))
-    # Shopify's amount outstanding after the change, signed: above nothing the
-    # customer owes it, below nothing it is theirs to be refunded. It already
-    # counts what they paid, which the change in total alone does not.
-    owed = num((totals.get("outstanding") or {}).get("amount"))
-    msg = ("Shopify recalculated the tax for the new address: " + fmt(tax_was) + " before, "
-           + fmt(tax_now) + " now")
-    if total_now is not None:
-        msg += ", so the order total is " + fmt(total_now)
-    if owed is not None:
-        if owed > 0:
-            return msg + ". The customer now owes " + fmt(owed) + "."
-        if owed < 0:
-            return msg + ". " + fmt(-owed) + " is due back to them: refund it in Shopify."
-        return msg + ". Nothing more is owed either way."
-    # No amount outstanding to go on (the order was read back after a lost
-    # answer): only the change in total, said as what it might mean.
-    if total_was is not None and total_now is not None and total_now != total_was:
-        if total_now < total_was:
-            return msg + (". If they had paid in full, " + fmt(total_was - total_now)
-                          + " is due back to them: check the order in Shopify.")
-        return msg + (". If they had paid in full, " + fmt(total_now - total_was)
-                      + " more is due: check the order in Shopify.")
-    return msg + "."
-
-
-async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
-    """Apply a merchant's edit to a placed order.
-
-    Returns (ok, message, changed, name, warnings).
-
-    Serialized on the same per-order lock the tag writer uses: an edit and a
-    Ready-to-make pressed together would otherwise read the same order and race.
-    """
-    if _order_writer is None:
-        return False, "Order edits are not enabled on this server.", [], "", []
-    name = ""
-    try:
-        async with _tag_lock(order_id):
-            o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
-            if not _ok(o) or not o.get("id"):
-                return False, "Couldn't read the order to edit it.", [], "", []
-            name = str(o.get("name") or "")
-            # A cancelled order is a closed record. Its sibling, the tag writer,
-            # makes the same call and leaves finished orders alone.
-            dead = _order_status(o)
-            if dead in ("cancelled", "refunded"):
-                return False, ("That order is " + dead + ", so it is a closed record - "
-                               "Shopify will not take changes to it."), [], name, []
-            current = dict(_ship_to(o))
-            current["note"] = str(o.get("note") or "")
-            fields, why, changed, warn = _clean_edit_fields(body, current)
-            if fields is None:
-                return False, why, [], name, []
-            if not changed:
-                # Provably wrote nothing, so nothing is stale. Busting here would
-                # cost a full store sweep for a save that did not save anything.
-                # But a booked label cut for a different address is still worth
-                # saying out loud: a retry after a lost answer finds the change
-                # already made, and without this the divergence was never marked.
-                _flag_address_divergence(order_id, current)
-                return True, "", [], name, []
-            # The parcel may already be moving under the old address. Changing
-            # Shopify does NOT change a label that is printed and booked, so the
-            # merchant has to say out loud that they know that.
-            if "ship_to" in fields:
-                # The order's own province code goes back as a code whatever
-                # its shape (Dublin is "D", Tokyo "JP-13"), not as the
-                # deprecated free-text province.
-                own = str(((o.get("shipping_address") or {}).get("province_code")) or "").strip()
-                if own and str(fields["ship_to"].get("state") or "").strip() == own:
-                    fields["ship_to"]["state_is_code"] = True
-            booked = _live_booking(order_id)
-            if booked and "ship_to" in fields and not body.get("confirm_booked"):
-                return False, ("A courier label is already booked for this order ("
-                               + (booked.get("carrier") or "courier")
-                               + " " + (booked.get("tracking_number") or "")
-                               + "). Changing the address here does not change that "
-                               "label or the courier's booking."), [], name, []
-            r = await _order_writer(int(order_id), fields)
-            if not r.get("ok") and r.get("reason") == "unknown":
-                # The answer was lost, not necessarily the change: read the order
-                # and see. "Shopify refused the change" was said over edits that
-                # had landed, and the retry then found nothing to do.
-                _orders_changed([order_id])
-                again = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
-                if _ok(again) and again.get("id"):
-                    now_there = dict(_ship_to(again))
-                    now_there["note"] = str(again.get("note") or "")
-                    _f2, _w2, still, _warn2 = _clean_edit_fields(body, now_there)
-                    if not still:
-                        r = {"ok": True, "totals": _rest_totals(again)}
-                if not r.get("ok"):
-                    return False, ("Shopify did not answer, so it is not known whether the change "
-                                   "was made. Open the order in Shopify to check before trying again."), \
-                        [], name, []
-            if not r.get("ok"):
-                reason = str(r.get("reason") or "")
-                detail = str(r.get("detail") or "")
-                if reason == "permission":
-                    return False, ("The order couldn't be changed: the app's access token "
-                                   "doesn't have the write_orders permission yet."), [], name, []
-                return False, ("Shopify refused the change"
-                               + (": " + detail if detail else ".")), [], name, []
-            note = _tax_change_note(_rest_totals(o), r.get("totals") or {})
-            if note:
-                warn = list(warn) + [note]
-                changed = list(changed) + ["tax recalculated"]
-            if booked and "ship_to" in fields:
-                # Mark the divergence so the fulfilment path can refuse rather
-                # than email the customer tracking for a parcel addressed
-                # somewhere else.
-                desk._update_dispatch(order_id, lambda e: e.update(
-                    {"address_changed_at": datetime.now(timezone.utc).isoformat()}))
-    except Exception:
-        # A write may have landed before this raised, so the order is suspect.
-        _orders_changed([order_id])
-        logger.exception("order edit failed for order %s", order_id)
-        return False, "The order couldn't be changed. Check the server logs.", [], name, []
-    # The queues read the address straight off the cached sweep, so the order
-    # is read again before the snapshot answers anyone.
-    _orders_changed([order_id])
-    return True, "", changed, name, warn
-
-
-async def _release_bg(registry: dict, order_ids: list) -> None:
-    """The tail of a big print run: the same tag move and Net-30 attach the
-    interactive path does, paced, off the request. A 60-order batch is ~5
-    Shopify round-trips each; done inline the browser gives up long before the
-    server does, rolls back its printed stamps, and the team's view and Shopify
-    then disagree about which orders were released. Never raises."""
-    async def once(oid) -> bool:
-        try:
-            seen: dict = {}
-            okd, note, released = await _release_tags(registry, oid, seen)
-            if not okd:
-                logger.warning("background release: tag refused for order %s: %s", oid, note)
-                return False
-            if not released:
-                return True       # already made or shipped: nothing to release
-            # _net30_on_release records its own outcome on the order, so a
-            # failure out here is not lost to the log: the queue row shows it.
-            await _net30_on_release(registry, oid, order=seen.get("order"))
-            return True
-        except Exception:
-            logger.exception("background release failed for order %s", oid)
-            return False
-
-    failed = []
-    for oid in order_ids:
-        if not await once(oid):
-            failed.append(oid)
-        await asyncio.sleep(0.6)
-    if failed:
-        await asyncio.sleep(10)      # let a throttling burst clear, then one retry round
-        for oid in failed:
-            if not await once(oid):
-                logger.error("release still failing for order %s after a retry", oid)
-            await asyncio.sleep(0.6)
-
-
-async def _dispatch_move_tags(registry: dict, order_id, allow_dead: bool = False) -> tuple:
-    """Move an order onto the finished tag (Complete): add it, drop the workflow
-    tags (Unprocessed / IP / PC). Called while the order is still unfulfilled so
-    the write is not skipped as a 'dead' order; allow_dead is for the order
-    that turned out to be fulfilled already, which still has to leave To ship.
-    Returns (ok, note)."""
-    return await _sync_order_tags(
-        registry, order_id,
-        add=(desk.DISPATCHED_TAG,),
-        remove=(UNPROCESSED_TAG, PRODUCTION_TAG, MADE_TAG), allow_dead=allow_dead)
-
-
-async def _release_tags(registry: dict, order_id, seen: Optional[dict] = None) -> tuple:
-    """Unprocessed -> IP for an order going to the bench: (ok, note, released).
-
-    An order already made or shipped is left where it is, with released
-    False: a reprint of a damaged label from To ship is not a release, and it
-    used to put the made order back into To make beside its PC tag and run
-    the Net-30 attach a second time. The stamps here are the first check; an
-    order that carries PC or Complete in Shopify with no stamp is left alone
-    by the sync itself."""
-    oid = str(order_id)
-    made = bool((_load_prod_state().get(oid) or {}).get("made_at"))
-    # Fulfilled, not merely booked: a label is booked before the gobo is
-    # made, and an order with a label waiting in To make is still released.
-    shipped = bool((_load_dispatch().get(oid) or {}).get("fulfilled"))
-    if made or shipped:
-        return True, "", False
-    out: dict = {}
-    okd, note = await _sync_order_tags(registry, order_id, add=[PRODUCTION_TAG],
-                                       remove=[UNPROCESSED_TAG],
-                                       unless=(MADE_TAG, desk.DISPATCHED_TAG, *desk.LEGACY_DISPATCHED_TAGS),
-                                       outcome=out)
-    if seen is not None and out.get("order"):
-        seen["order"] = out["order"]
-    return okd, note, bool(okd and not out.get("kept"))
-
-
-async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = None,
-                            ack_address: bool = False) -> dict:
-    """The single gate for telling Shopify (and the customer) an order shipped.
-
-    Booking a courier label is preparation, not shipping: the gobo may not be
-    made yet. So fulfilment fires only when BOTH are true - the order is marked
-    made AND a live label is booked - triggered by whichever happens last.
-    Idempotent: an already-fulfilled order is a no-op.
-
-    Returns {fulfilled, reason, detail, notified, tag_note}."""
-    oid = int(order_id)
-    entry = dict(_load_dispatch().get(str(oid)) or {})
-    made = bool((_load_prod_state().get(str(oid)) or {}).get("made_at"))
-    tracking = str(entry.get("tracking_number") or "").strip()
-
-    if entry.get("fulfilled"):
-        return {"fulfilled": True, "reason": "already", "notified": bool(entry.get("notified")),
-                "detail": "", "tag_note": ""}
-    if not tracking or entry.get("canceled"):
-        return {"fulfilled": False, "reason": "no_label", "notified": False,
-                "detail": "No courier label is booked for this order yet.", "tag_note": ""}
-    if not made:
-        return {"fulfilled": False, "reason": "not_made", "notified": False,
-                "detail": "Label booked. Shopify is fulfilled and the customer emailed "
-                          "when you mark this order made.", "tag_note": ""}
-    # An address changed in the Shopify admin never passes through the app's
-    # own edit route, so it is compared here too, the last moment before
-    # tracking goes out. A failed read does not hold the order: the label and
-    # the made gobo are real, and a Shopify outage must not stop the bench.
-    booked_at = entry.get("booked_address")
-    if (isinstance(booked_at, dict) and not ack_address and not entry.get("address_changed_at")
-            and not entry.get("address_acked_at")):
-        try:
-            live = await _tool_json(registry, "shopify_get_order", {"order_id": oid})
-            if _ok(live) and live.get("id"):
-                _flag_address_divergence(oid, _ship_to(live))
-                entry = dict(_load_dispatch().get(str(oid)) or {})
-        except Exception:
-            logger.exception("could not read order %s to compare its address", oid)
-    # The delivery address was edited AFTER this label was booked. Fulfilling now
-    # would email the customer tracking for a parcel that is on its way to the
-    # address the label was cut from, while the order page shows the new one -
-    # the one moment where saying nothing is worse than stopping.
-    if entry.get("address_changed_at") and not ack_address:
-        return {"fulfilled": False, "reason": "address_changed", "notified": False,
-                "detail": ("The delivery address was changed after this label was booked, "
-                           "so the parcel is on its way to the address the label was cut "
-                           "from, not the one on the order now. Cancel the shipment and "
-                           "book again, or confirm that the parcel went to the right place."),
-                "tag_note": ""}
-    if entry.get("address_changed_at") and ack_address:
-        # Asked and answered. Clear it so the order is not stopped twice, and so
-        # a later genuine edit through the app can raise it again; the read of
-        # the live order above is not repeated for an answered question.
-        try:
-            _acked = datetime.now(timezone.utc).isoformat()
-            desk._update_dispatch(oid, lambda e: (e.pop("address_changed_at", None),
-                                             e.update({"address_acked_at": _acked}), e)[2])
-        except Exception:
-            logger.exception("could not clear the address-change flag on %s", oid)
-
-    do_notify = entry.get("notify", True) if notify is None else bool(notify)
-    # Tag BEFORE fulfilling: _sync_order_tags deliberately skips orders Shopify
-    # reports as cancelled/refunded/fulfilled, so a tag written afterwards would
-    # be silently dropped and the order would never reach the Dispatched queue.
-    tag_ok, tag_note = await _dispatch_move_tags(registry, oid)
-    fulfillment = {"ok": False, "reason": "not_attempted"}
-    if _fulfillment_writer is not None:
-        try:
-            fulfillment = await _fulfillment_writer(
-                oid,
-                tracking_number=tracking,
-                # Shopify only auto-links tracking in the customer email for carrier
-                # names it recognizes; WO's enum codes (ROYALMAIL, EVRISEND) are not.
-                tracking_company=(worldoptions.shopify_carrier(entry.get("carrier_known")
-                                                               or entry.get("carrier_name") or "")
-                                  if worldoptions else (entry.get("carrier_name") or "")),
-                tracking_url=None,
-                notify_customer=do_notify,
-            )
-            _orders_changed([order_id])   # fulfillment_status is a swept field
-        except Exception:
-            logger.exception("fulfillment failed for order %s", oid)
-            _orders_changed([order_id])   # it may still have landed before the error
-            fulfillment = {"ok": False, "reason": "error",
-                           "detail": "Shopify fulfillment failed; the label is still valid. "
-                                     "You can fulfill the order manually in Shopify."}
-
-    if tag_ok:
-        tag_note = ""
-    if not fulfillment.get("ok") and fulfillment.get("reason") == "nothing_to_fulfill":
-        # Shopify has nothing left to fulfil. If that is because the order is
-        # already fulfilled, treat it as done: otherwise the record keeps
-        # fulfilled=False, every later pass re-enters and gets the same answer,
-        # and the order shows as dispatched-but-unfulfilled for ever while the
-        # customer already has their tracking. Read the order to find out; this
-        # branch is rare, so the extra call costs nothing in the normal case.
-        current = await _tool_json(registry, "shopify_get_order", {"order_id": oid})
-        if _ok(current) and _order_status(current) == "fulfilled":
-            logger.info("order %s was already fulfilled in Shopify; recording it", oid)
-            fulfillment = {"ok": True, "reason": "already_fulfilled", "fulfillment_id": None,
-                           "detail": "already fulfilled in Shopify; no fulfilment or email went from here"}
-            # The tag move above skipped it as a dead order, so it sat in To
-            # ship under its PC tag for good. It is complete: file it so.
-            tag_ok, tag_note = await _dispatch_move_tags(registry, oid, allow_dead=True)
-            if tag_ok:
-                tag_note = ""
-    # Nothing was created here for an order Shopify already had fulfilled, so
-    # no tracking email went from here either, whatever the record was asked.
-    sent_here = bool(fulfillment.get("ok")) and fulfillment.get("reason") != "already_fulfilled"
-    if not fulfillment.get("ok") and fulfillment.get("reason") != "unknown":
-        # Put the order back where it was: it has not shipped after all. Not
-        # when the outcome is unknown: it may have shipped, and a revert then
-        # put a fulfilled order back in To ship under a "failed" message.
-        try:
-            await _sync_order_tags(registry, oid, add=(MADE_TAG,),
-                                   remove=(desk.DISPATCHED_TAG, *desk.LEGACY_DISPATCHED_TAGS))
-        except Exception:
-            logger.exception("tag revert after failed fulfillment failed for order %s", oid)
-    if fulfillment.get("ok"):
-        def _mark_fulfilled(e):
-            e.update({"fulfilled": True, "fulfillment_id": fulfillment.get("fulfillment_id"),
-                      "notified": bool(do_notify and sent_here),
-                      "fulfilled_at": datetime.now(timezone.utc).isoformat()})
-            return e
-        try:
-            desk._update_dispatch(oid, _mark_fulfilled)
-        except desk.DispatchStoreUnwritable:
-            logger.exception("order %s was fulfilled in Shopify but the dispatch "
-                             "record could not be updated", oid)
-            tag_note = ((tag_note + " ") if tag_note else "") + (
-                "Shopify has the fulfilment, but the app could not save its own copy. "
-                "It may still show this order as waiting.")
-    return {"fulfilled": bool(fulfillment.get("ok")),
-            "reason": fulfillment.get("reason") or ("ok" if fulfillment.get("ok") else "error"),
-            "detail": fulfillment.get("detail") or "",
-            "notified": bool(do_notify and sent_here),
-            "tag_note": tag_note}
-
-
-async def _unfulfill_dispatch(registry: dict, order_id) -> str:
-    """Undo a fulfilment when an order is un-marked made (it is not shipped after
-    all). Cancels the Shopify fulfilment so the customer is not left holding live
-    tracking. Returns a note for the UI."""
-    oid = int(order_id)
-    entry = (_load_dispatch().get(str(oid)) or {})     # read only, for the guard below
-    if not entry.get("fulfilled"):
-        return ""
-    note = ""
-    fid = entry.get("fulfillment_id")
-    if fid and _fulfillment_canceler is not None:
-        try:
-            fc = await _fulfillment_canceler(int(fid))
-            _orders_changed([order_id])   # fulfillment_status is a swept field
-            note = ("" if fc.get("ok") else
-                    "The order is still marked fulfilled in Shopify (" + (fc.get("detail") or "")
-                    + "). Cancel that fulfillment in Shopify so the customer is not left with "
-                      "tracking for something that has not shipped.")
-        except Exception:
-            logger.exception("fulfillment cancel failed for order %s", oid)
-            _orders_changed([order_id])   # it may still have landed before the error
-            note = ("The order is still marked fulfilled in Shopify. Cancel that fulfillment "
-                    "there so the customer is not left with tracking for an unshipped order.")
-    # Re-read here: the store may have gained a booking while Shopify was thinking,
-    # and the snapshot taken above no longer describes what is on disk.
-    def _clear(e):
-        e["fulfilled"] = False
-        e["notified"] = False
-        e.pop("fulfillment_id", None)
-        return e
-    try:
-        desk._update_dispatch(oid, _clear)
-    except desk.DispatchStoreUnwritable:
-        logger.exception("could not clear the fulfilment record for order %s", oid)
-        note = ((note + " ") if note else "") + ("The app could not save this change, "
-                                                 "so it may still show as fulfilled.")
-    return note
-
-
-def _extract_proposal(note: str) -> tuple:
-    """(proposal_url, note_without_it). Only the store's own quote domain is ever
-    recognized: an arbitrary URL in a customer note must never become a clickable
-    embed. The label prints the cleaned note; the URL becomes the Preview button."""
-    m = _PROPOSAL_RE.search(note or "")
-    if not m:
-        return "", (note or "")
-    cleaned = (note or "").replace(m.group(0), "")
-    cleaned = re.sub(r"Proposal link:\s*", "", cleaned, flags=re.I)
-    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-    return m.group(0), cleaned
-
-
-def _parse_due_date(v):
-    """A customer-typed deadline as a date, or None. The store's option sets write
-    "13 August 2026" (Date Required) and "30-08-2026" (Wedding Date); this is a UK
-    store, so numeric dates are ALWAYS day-first, never American month-first."""
-    s = re.sub(r"\s+", " ", str(v or "").strip())
-    if not s:
-        return None
-    for fmt in ("%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y", "%d %B %Y", "%d %b %Y",
-                "%d %B %y", "%d %b %y", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(s, fmt).date()
-        except ValueError:
-            continue
-    return None
-
-
-def _order_due(o: dict):
-    """The order's completion deadline, from the dates the customer already gave:
-    each item's "Date Required" (the explicit deadline) or, failing that, its
-    "Wedding Date" (the gobo must exist by the wedding). The earliest date across
-    the order's items wins. Returns a date or None."""
-    dues = []
-    for li in (o.get("line_items") or []):
-        if _label_skip_item(str(li.get("title") or li.get("name") or "")):
-            continue
-        d = _parse_due_date(_item_prop(li, "Date Required")) or _parse_due_date(_item_prop(li, "Wedding Date"))
-        if d:
-            dues.append(d)
-    return min(dues) if dues else None
-
-
-def _fmt_due(d) -> str:
-    """"13 Aug", with the year only when it is not this year."""
-    if not d:
-        return ""
-    out = f"{d.day} {d.strftime('%b')}"
-    return out if d.year == _london_today().year else out + f" {d.year}"
-
-
-def _order_status(o: dict) -> str:
-    """What the workbench must know before making anything: cancelled and refunded
-    orders must never be built; fulfilled ones are probably stale tags."""
-    if o.get("cancelled_at"):
-        return "cancelled"
-    if str(o.get("financial_status") or "").lower() in ("refunded", "voided"):
-        return "refunded"
-    if str(o.get("fulfillment_status") or "").lower() == "fulfilled":
-        return "fulfilled"
-    return ""
-
-
-def _order_country(country, postcode) -> str:
-    """The country an order is really going to. A customer can choose United
-    Kingdom and give a Jersey or Guernsey postcode, and those islands are
-    outside the UK customs area: read as GB, the parcel was quoted domestic
-    and booked with no declaration. The Isle of Man is inside it, so an IM
-    postcode stays GB. The pasted-address parser already knew this (B12)."""
-    cc = str(country or "").strip().upper()
-    if cc in ("GB", "UK"):
-        m = re.match(r"\s*([A-Za-z]{2})[0-9]", str(postcode or ""))
-        if m and m.group(1).upper() in ("JE", "GY"):
-            return {"JE": "JE", "GY": "GG"}[m.group(1).upper()]
-    return str(country or "")
-
-
-def _ship_to(o: dict) -> dict:
-    """The order's delivery address in our internal address shape (for a quote)."""
-    a = o.get("shipping_address") or o.get("billing_address") or {}
-    cust = o.get("customer") or {}
-    return {
-        "name":      a.get("name") or "",
-        "company":   a.get("company") or "",
-        "firstname": a.get("first_name") or cust.get("first_name") or "",
-        "lastname":  a.get("last_name") or cust.get("last_name") or "",
-        # Shopify's two lines STAY two lines: couriers cap each address line at 35
-        # characters, and joining them manufactured over-long lines from good data.
-        "street":    str(a.get("address1") or "").strip(),
-        "street2":   str(a.get("address2") or "").strip(),
-        "postcode":  a.get("zip") or "",
-        "city":      a.get("city") or "",
-        "state":     a.get("province_code") or a.get("province") or "",
-        "country":   _order_country(a.get("country_code"), a.get("zip")),
-        "phone":     a.get("phone") or o.get("phone") or cust.get("phone") or "",
-        "email":     o.get("email") or cust.get("email") or "",
-    }
-
-
-def _line_qty(li: dict) -> int:
-    """How many of a line the customer still has on the order.
-
-    Shopify keeps `quantity` at what was ORDERED. A refund or an order edit
-    lowers `current_quantity` and leaves `quantity` alone, so a label read
-    from `quantity` printed the refunded gobo, the bench cut it, the stock
-    app booked its glass and the customs declaration carried its value.
-    Everything that makes, weighs, declares or books glass for a line reads
-    this instead. A line with no quantity at all counts as one, as before."""
-    q = li.get("current_quantity")
-    if q is None:
-        q = li.get("quantity")
-    if q is None:
-        return 1
-    try:
-        return max(0, int(q))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _order_weight_kg(o: dict) -> float:
-    """Best-effort parcel weight from Shopify per-item grams (0 when not recorded)."""
-    grams = 0.0
-    for li in (o.get("line_items") or []):
-        if _label_skip_item(str(li.get("title") or li.get("name") or "")):
-            continue
-        g = li.get("grams")
-        if g:
-            grams += float(g) * float(_line_qty(li))
-    return round(grams / 1000.0, 3) if grams else 0.0
-
-
-# The shop's own record: its name, address, phone and email. It changes when
-# the merchant edits it in Shopify, which is to say almost never, and it was
-# re-fetched on every dispatch quote and every booking - a Shopify round trip
-# added to a path where somebody is already waiting on a courier.
-#
-# Cached ONLY on success. A failed read must never become an answer, so a
-# Shopify hiccup falls through to the empty dict exactly as it did before.
-_shop_cache: dict = {}
-SHOP_CACHE_SECS = _env_num(int, os.environ.get("SHOP_CACHE_SECS", "900"), "900", "SHOP_CACHE_SECS")
-
-
-async def _shop_record(registry: dict) -> dict:
-    hit = _shop_cache.get("v")
-    if hit and time.monotonic() - _shop_cache.get("at", 0) < SHOP_CACHE_SECS:
-        return hit
-    try:
-        shop = await _tool_json(registry, "shopify_get_shop", {})
-    except Exception:
-        shop = {}
-    shop = shop if isinstance(shop, dict) and _ok(shop) else {}
-    if shop:
-        _shop_cache.update({"v": shop, "at": time.monotonic()})
-    return shop
-
-
-async def _origin_address(registry: dict) -> dict:
-    """Our shop's dispatch origin: the saved Settings address, else the Shopify
-    shop address as a sensible default."""
-    o = dict(desk._load_shipping().get("origin") or {})
-    # Always merge per-field with the Shopify shop record: a saved origin that
-    # lacks phone/email must not lose the shop's (bookings REQUIRE both).
-    shop = await _shop_record(registry)
-
-    return {
-        "name":      o.get("name") or shop.get("name") or "",
-        "company":   o.get("company") or shop.get("name") or "",
-        "firstname": o.get("firstname") or "",
-        "lastname":  o.get("lastname") or "",
-        "street":    o.get("street") or str(shop.get("address1") or "").strip(),
-        "street2":   o.get("street2") or str(shop.get("address2") or "").strip(),
-        "postcode":  o.get("postcode") or shop.get("zip") or "",
-        "city":      o.get("city") or shop.get("city") or "",
-        "state":     o.get("state") or shop.get("province_code") or shop.get("province") or "",
-        "country":   o.get("country") or shop.get("country_code") or "",
-        "phone":     o.get("phone") or shop.get("phone") or "",
-        "email":     o.get("email") or shop.get("email") or "",
-    }
-
-
-
-def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None,
-                       types: Optional[dict] = None) -> dict:
-    """One order in the shape the label UI prints."""
-    company, person = _label_party(o)
-    domain = _order_email_domain(o)
-    due = _order_due(o)
-    cache = cache or _gobo_sizes()   # one sheet snapshot for the whole order
-    proposal_url, note_clean = _extract_proposal(str(o.get("note") or "").strip())
-    items = []
-    with_projector = None   # what a With Projector gobo is cut at, worked out once
-    for li in (o.get("line_items") or []):
-        if _label_skip_item(str(li.get("title") or li.get("name") or "")):
-            continue
-        qty = _line_qty(li)
-        if qty <= 0:
-            continue    # refunded or edited off the order: nothing to make
-        mfr = _strip_price(_item_prop(li, "Manufacturer"))
-        model = _strip_price(_item_model(li, mfr))
-        # A projector or a projector accessory (a rain hood, a lens, a bundle)
-        # is not cut: it prints by name, with no size and no CHECK, and uses no
-        # glass (Cameron, 2026-10-02). #104453 printed its 40 Watt as a second
-        # "CHECK No model specified" the bench could not tell from the gobo's.
-        ptype = str((types or {}).get(li.get("product_id")) or "").strip().lower()
-        projector = not mfr and not model and (ptype == PROJECTOR_TYPE or bool(_projector_watts(li)))
-        sold_with = not mfr and not model and not projector and _sold_with_projector(li)
-        # A model ruled not a gobo (Resolve, in the Size check) is not cut:
-        # no size and no CHECK, printed by its name as a stock gobo is, with a
-        # line saying why. The lookup does not read those rulings, and its
-        # word-run step found a neighbouring row: Chauvet Rogue R2 Spot Metal,
-        # ruled not a gobo, printed 26.5, the Rogue R2 Spot's size.
-        not_gobo = projector or (bool(model) and (_norm_key(mfr), _norm_key(model)) in (cache.get("excludes") or set()))
-        entry, reason = (None, "") if not_gobo else _gobo_lookup(mfr, model, cache=cache)
-        dsize = None if not_gobo else _gobo_domain_size(mfr, model, entry, domain, cache=cache)
-        title = str(li.get("title") or li.get("name") or "Item").strip()
-        # A stock gobo IS its name. Its fixture usually arrives as free text
-        # (Item Notes) or not at all, so "No model specified" put a CHECK on
-        # something nobody needed to check - and a flagged row drops the name,
-        # so the bench saw two CHECK rows and could not tell Electric Smoke
-        # from Smoke & Mirrors. A stock gobo that DOES name its fixture (the
-        # wedding gobos do) still goes through the lookup and keeps its size;
-        # an unknown product type keeps the CHECK, which is the safe side.
-        stock = ptype == STOCK_GOBO_TYPE
-        if stock and not model:
-            entry, reason, dsize = None, "", None
-        size = dsize or (entry["production_size"] if (entry and not reason) else "")
-        size_note = ("Not a gobo" if not_gobo else "Size for this customer" if dsize
-                     else (entry["review"] if entry and entry["production_size"] and entry["review"] else ""))
-        why = "" if dsize else (reason or "")
-        if projector:
-            # The variant says which projector or accessory ("40W with Rain
-            # Hood", "B Size Glass Gobo Holder"), on the line under the name,
-            # which wraps; a bare wattage only repeats the title.
-            variant = str(li.get("variant_title") or "").strip()
-            size, why = "", ""
-            size_note = ("" if not variant or _norm_key(variant) == "default title"
-                         or re.fullmatch(r"\d+\s*w(att)?", variant, re.I) else variant)
-        elif sold_with:
-            # Cut for the projector on the same order; two projector sizes,
-            # or none, is for a person to decide, and the CHECK says which.
-            if with_projector is None:
-                with_projector = _projector_size(o, cache)
-            entry = with_projector.get("entry")
-            size = with_projector.get("size") or ""
-            size_note = with_projector.get("note") or ""
-            why = with_projector.get("reason") or ""
-        items.append({
-            "title": title,
-            "artwork": ("" if _norm_key(title) in _GENERIC_TITLES else title),
-            "quantity": qty,
-            "sku": str(li.get("sku") or "").strip(),
-            "options": _line_options(li, names),
-            "manufacturer": mfr or (entry["manufacturer"] if entry else ""),
-            "model": model,
-            "glass_type": _item_glass(li),
-            "price": str(li.get("price") or ""),
-            "production_size": size,
-            "size_note": size_note,
-            "review_reason": why,
-            "stock": stock,
-            "not_gobo": not_gobo,
-            "projector": projector,
-        })
-    return {
-        "id": o.get("id"),
-        "order_number": o.get("order_number") or str(o.get("name") or "").lstrip("#"),
-        "name": o.get("name"),
-        "admin_url": _admin_order_url(o.get("id")),
-        "created_at": o.get("created_at"),
-        "company": company,
-        "customer": person,
-        "display_name": company or person or "Customer",
-        "is_company": bool(company),
-        "status": _order_status(o),
-        "due": (due.isoformat() if due else ""),
-        "due_label": _fmt_due(due),
-        "due_soon": bool(due and (due - _london_today()).days <= 2),
-        "proposal_url": proposal_url,
-        "note": note_clean[:500],
-        "customer_id": (o.get("customer") or {}).get("id"),
-        "items": items,
-        # For the Dispatch flow (World Options): where it ships and a weight hint.
-        "ship_to": _ship_to(o),
-        "weight_hint": _order_weight_kg(o),
-        "currency": o.get("currency") or o.get("presentment_currency") or "",
-        # Total goods value: customs totals, declared values and insurance prefill.
-        "goods_value": desk._order_goods_value(o),
-        # What the customer paid for delivery, so the courier pick is not blind.
-        # What they actually paid: after a free-shipping code, VAT included.
-        "shipping_paid": (lambda sl: ({"title": str(sl[0].get("title") or ""),
-                                       "price": "%.2f" % desk._shipping_paid(o, ex_vat=False)}
-                                      if sl else None))(o.get("shipping_lines") or []),
-    }
-
-
-async def run_production_labels(registry: dict, tag: Optional[str] = None,
-                                days: Optional[int] = None,
-                                order_id: Optional[int] = None,
-                                fresh: bool = False,
-                                state: Optional[dict] = None,
-                                dispatch: Optional[dict] = None) -> dict:
-    """`state` and `dispatch` let a CALLER that is already fetching many orders
-    read those two stores once instead of once per order. Printing fifty labels
-    re-parsed a 324 KB and a 572 KB store fifty times each: 266 ms of blocking
-    parse on the event loop for 5 ms of actual data. Left as None, every path
-    behaves exactly as before and reads them fresh."""
-    # Deep-link path (the admin's More actions menu): fetch ONE order by id,
-    # regardless of tag or age, so the merchant can print for exactly that order.
-    if order_id:
-        o = await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
-        if not _ok(o) or not o.get("id"):
-            return {"tag": PRODUCTION_TAG, "days": 0, "count": 0, "orders": [],
-                    "error_note": "Order not found.", "missing": _shopify_gone(o)}
-        names, types = await _product_names_and_types(
-            registry, [li.get("product_id") for li in (o.get("line_items") or []) if _variant_is_real(li)],
-            [li.get("product_id") for li in (o.get("line_items") or []) if not _line_has_model(li)])
-        shaped = _shape_label_order(o, names, cache=_gobo_sizes(), types=types)
-        oid = str(shaped["id"])
-        st = state if state is not None else _load_prod_state()
-        dp = dispatch if dispatch is not None else _load_dispatch()
-        return {"tag": PRODUCTION_TAG, "days": 0, "count": 1, "orders": [shaped],
-                "state": {oid: st.get(oid, {})},
-                "dispatch": {oid: dp.get(oid, {})},
-                "single": True}
-
-    tag = (tag or PRODUCTION_TAG).strip() or PRODUCTION_TAG
-    days = max(1, min(int(days or PRODUCTION_DAYS), 730))
-    fields = ("id,order_number,name,created_at,tags,email,customer,billing_address,"
-              "shipping_address,line_items,note,cancelled_at,fulfillment_status,"
-              "financial_status,shipping_lines,taxes_included")
-    # meta carries {failed, truncated} from the pagination. Without it a sweep
-    # that died on page 2 returned the pages it had and the queue rendered as
-    # though the missing orders simply did not exist - a short list nobody
-    # could tell was short.
-    meta = {}
-    orders = await _orders_snapshot(registry, days=days, fields=fields, force=fresh, meta=meta)
-    want = [tag] + ([t for t in desk.LEGACY_DISPATCHED_TAGS]
-                    if tag.strip().lower() == desk.DISPATCHED_TAG.strip().lower() else [])
-    tagged = [o for o in orders if any(_has_tag(o, t) for t in want)]
-    tagged.sort(key=lambda o: str(o.get("created_at") or ""), reverse=True)
-    # The flow's three queues counted from the same snapshot (the mix's queue
-    # counters, 2026-10-06), so the bench sees every queue's size at once
-    # without another Shopify call.
-    counts = {key: sum(1 for o in orders if _has_tag(o, qtag))
-              for key, qtag in (("unprocessed", UNPROCESSED_TAG), ("make", PRODUCTION_TAG), ("ship", MADE_TAG))}
-
-    # Only lines that name no fixture need their product type, so that list
-    # stays small however long the queue is; a line past the cap simply keeps
-    # the CHECK it had, which is the safe direction.
-    names, types = await _product_names_and_types(
-        registry,
-        [li.get("product_id") for o in tagged for li in (o.get("line_items") or []) if _variant_is_real(li)],
-        [li.get("product_id") for o in tagged for li in (o.get("line_items") or []) if not _line_has_model(li)],
-    )
-    sheet = _gobo_sizes()   # one snapshot for the whole list
-    shaped = [_shape_label_order(o, names, cache=sheet, types=types) for o in tagged]
-    state = _load_prod_state()
-    disp = _load_dispatch()
-    partial = ""
-    if meta.get("failed") or meta.get("truncated"):
-        partial = ("Shopify did not answer for the whole window, so this list may be "
-                   "missing orders. Press Refresh in a moment.")
-    return {"tag": tag, "days": days, "count": len(tagged), "orders": shaped,
-            "partial_note": partial, "counts": counts,
-            "state": {str(s["id"]): state[str(s["id"])] for s in shaped if str(s["id"]) in state},
-            "dispatch": desk._dispatch_with_live_labels(
-                {str(s["id"]): disp[str(s["id"])] for s in shaped if str(s["id"]) in disp})}
-
-
-# The missed-orders answer, per tag, kept until any order is known to have
-# changed or two minutes pass (the 2026-10-12 speed audit, X7). Every load of
-# the Make queue walked every open order in the shop for it. The app's own
-# writes, Shopify's order webhooks and Refresh all move _orders_epoch; the
-# two minutes catch anything that does not.
-MISSING_CACHE_SECS = 120
-_missing_cache: dict = {}
-
-
-async def run_missing_production(registry: dict, tag: Optional[str] = None) -> dict:
-    """Paid, unfulfilled, not-cancelled orders that contain gobo items but never
-    got the production tag: the ones that silently never reach the workbench.
-    A plain Shopify read, no AI."""
-    tag = (tag or PRODUCTION_TAG).strip() or PRODUCTION_TAG
-    hit = _missing_cache.get(tag)
-    if hit and hit["epoch"] == _orders_epoch and time.monotonic() - hit["at"] < MISSING_CACHE_SECS:
-        return hit["result"]
-    # It names customers: once it can no longer be served it is not held,
-    # even if the scan below fails.
-    _missing_cache.pop(tag, None)
-    # Taken before the scan: a change during it makes what it finds stale.
-    epoch = _orders_epoch
-    result = await _missing_scan(registry, tag)
-    # Kept only if no order changed while it read: one that did (a click on
-    # the strip, a webhook) made this answer stale before it landed.
-    if not result.get("error") and epoch == _orders_epoch:
-        _missing_cache[tag] = {"at": time.monotonic(), "epoch": epoch, "result": result}
-    return result
-
-
-async def _missing_scan(registry: dict, tag: str) -> dict:
-    # Every open order, paged: one page of 100 left the rest unchecked, and
-    # the oldest, the ones longest at risk of never reaching the bench, were
-    # the ones past it. The page is told when the read stopped at its cap.
-    fields = ("id,order_number,name,created_at,tags,cancelled_at,fulfillment_status,"
-              "financial_status,line_items,customer,billing_address,shipping_address,note")
-    open_orders, since_id, pages, truncated = [], 0, 0, False
-    while True:
-        res = await _tool_json(registry, "shopify_list_orders",
-                               {"status": "open", "limit": 250, "since_id": since_id, "fields": fields})
-        if not _ok(res):
-            return {"error": "Couldn't read your orders from Shopify. Try again in a moment."}
-        batch = res.get("orders") or []
-        open_orders += batch
-        pages += 1
-        if len(batch) < 250:
-            break
-        since_id = max(int(o.get("id") or 0) for o in batch)
-        if pages >= ORDER_PAGE_CAP:
-            truncated = True
-            break
-    data = {"orders": open_orders}
-    store = (SHOPIFY_STORE or "").split(".")[0]
-    missing = []
-    for o in (data.get("orders") or []):
-        # Skip anything anywhere in the workflow: in production (IP), made (PC),
-        # or dispatched. Only orders that never entered it are "missing".
-        if _has_tag(o, tag) or _has_tag(o, MADE_TAG) or _has_tag(o, desk.DISPATCHED_TAG) \
-                or any(_has_tag(o, t) for t in desk.LEGACY_DISPATCHED_TAGS) \
-                or _order_status(o):
-            continue
-        if str(o.get("financial_status") or "").lower() not in ("paid", "partially_paid", "authorized", "partially_refunded"):
-            continue
-        gobo = 0
-        for li in (o.get("line_items") or []):
-            if _label_skip_item(str(li.get("title") or li.get("name") or "")):
-                continue
-            mfr = _strip_price(_item_prop(li, "Manufacturer"))
-            if mfr or _item_model(li, mfr) or _with_projector_variant(li):
-                gobo += 1
-        if not gobo:
-            continue
-        company, person = _label_party(o)
-        proposal_url, _note = _extract_proposal(str(o.get("note") or "").strip())
-        missing.append({
-            "id": o.get("id"),
-            "name": str(o.get("name") or "").strip() or ("#" + str(o.get("order_number") or "")),
-            "company": company or person or "",
-            "proposal_url": proposal_url,
-            "created_at": o.get("created_at"),
-            "gobo_items": gobo,
-            "admin_url": (f"https://admin.shopify.com/store/{store}/orders/{o.get('id')}" if store else ""),
-        })
-    missing.sort(key=lambda m: str(m.get("created_at") or ""))
-    return {"tag": tag, "checked": len(data.get("orders") or []), "missing": missing[:20],
-            "missing_total": len(missing), "truncated": truncated}
 
 
 LIABILITY_TAGS = [t.strip() for t in os.environ.get(
@@ -6596,7 +3906,7 @@ async def run_liability(registry: dict) -> dict:
               "total_outstanding,financial_status,currency,cancelled_at,payment_terms,"
               "billing_address,shipping_address")
     meta: dict = {}
-    orders = await _orders_snapshot(registry, days=730, fields=fields, meta=meta)
+    orders = await orderbook._orders_snapshot(registry, days=730, fields=fields, meta=meta)
     if meta.get("failed"):
         # A throttled or errored page must never read as money not owed.
         return {"error": "Couldn't read all your orders from Shopify just now (it may be busy). "
@@ -6604,7 +3914,7 @@ async def run_liability(registry: dict) -> dict:
     store = (SHOPIFY_STORE or "").split(".")[0]
     rows, stale, currency = [], [], ""
     for o in orders:
-        matched = [t for t in LIABILITY_TAGS if _has_tag(o, t)]
+        matched = [t for t in LIABILITY_TAGS if orderbook._has_tag(o, t)]
         if not matched or o.get("cancelled_at"):
             continue
         currency = currency or str(o.get("currency") or "")
@@ -6625,7 +3935,7 @@ async def run_liability(registry: dict) -> dict:
             stale.append({"name": name, "admin_url": admin_url})
             continue
         days, label, source, due = _liability_terms(o)
-        company, person = _label_party(o)
+        company, person = production._label_party(o)
         cust = (o.get("customer") or {})
         created = None
         try:
@@ -6658,7 +3968,7 @@ async def run_liability(registry: dict) -> dict:
             "status": status, "bucket": bucket,
             "channel": _liability_channel(matched[0]),
             "channels": [_liability_channel(t) for t in matched],
-            "tags": _order_tags(o),
+            "tags": orderbook._order_tags(o),
             "email": str(o.get("email") or cust.get("email") or ""),
         })
     # Customer roll-up.
@@ -6859,7 +4169,7 @@ def _zeta_catalog_combos() -> list:
     the bezel rule first: an 86 or 100 order sends 64.9 glass plus a ring, so
     the catalogue lists those lines, never 86 glass that will not exist."""
     sheet = sorted({str(e.get("production_size") or "").strip()
-                    for entries in (_gobo_sizes().get("by_model") or {}).values()
+                    for entries in (size_list._gobo_sizes().get("by_model") or {}).values()
                     for e in entries if str(e.get("production_size") or "").strip()},
                    key=lambda v: (float(v) if v.replace(".", "", 1).isdigit() else 9999))
     glass, rings = [], []
@@ -7005,7 +4315,7 @@ async def run_stock_usage(registry: dict, date_str: str) -> dict:
     # Live state plus the archive of evicted made stamps, so a past day still
     # sees orders that fell out of the capped live state.
     stamps = {oid: e.get("made_at") for oid, e in _load_prod_state().items() if e.get("made_at")}
-    for oid, ma in _archived_made(set()).items():
+    for oid, ma in production._archived_made(set()).items():
         stamps.setdefault(oid, ma)
     made_ids = []
     for oid, raw in stamps.items():
@@ -7064,14 +4374,14 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
     (any status, newest first), every Model run through the exact lookup the labels
     print with, failures grouped by model + reason. A plain Shopify read, no AI."""
     n = max(1, min(int(orders_count or 200), 250))
-    data = await _tool_json(registry, "shopify_list_orders",
+    data = await shopify._tool_json(registry, "shopify_list_orders",
                             {"status": "any", "limit": n,
                              "fields": "id,order_number,name,created_at,email,customer,line_items"})
     if not _ok(data):
         # A throttled or failed fetch must never read as "everything matches".
         return {"error": "Couldn't read your orders from Shopify. Try again in a moment."}
     orders = (data.get("orders") or [])[:n]
-    sheet = _gobo_sizes()   # one snapshot for the whole scan
+    sheet = size_list._gobo_sizes()   # one snapshot for the whole scan
     items_seen = gobo_items = sized = no_model = ruled_out = 0
     flagged: dict = {}
     def flag(o, oname, mfr, model, reason, order_problem=False):
@@ -7083,22 +4393,22 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
             f["order_problem"] = True
         f["count"] += 1
         if oname not in [x["name"] for x in f["orders"]] and len(f["orders"]) < 3:
-            f["orders"].append({"name": oname, "admin_url": _admin_order_url(o.get("id"))})
+            f["orders"].append({"name": oname, "admin_url": orderbook._admin_order_url(o.get("id"))})
 
     for o in orders:
         oname = str(o.get("name") or "").strip() or ("#" + str(o.get("order_number") or ""))
-        domain = _order_email_domain(o)
+        domain = size_list._order_email_domain(o)
         with_projector = None
         for li in (o.get("line_items") or []):
             items_seen += 1
-            mfr = _strip_price(_item_prop(li, "Manufacturer"))
-            model = _strip_price(_item_model(li, mfr))
-            if not model and not mfr and _sold_with_projector(li):
+            mfr = production._strip_price(production._item_prop(li, "Manufacturer"))
+            model = production._strip_price(production._item_model(li, mfr))
+            if not model and not mfr and production._sold_with_projector(li):
                 # A gobo sold with a projector names no fixture but is a gobo,
                 # sized by the projector on its order exactly as its label is.
                 gobo_items += 1
                 if with_projector is None:
-                    with_projector = _projector_size(o, sheet)
+                    with_projector = production._projector_size(o, sheet)
                 if with_projector.get("size"):
                     sized += 1
                 else:
@@ -7110,15 +4420,15 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
                 # No gobo options at all: an accessory or plain product, not a miss.
                 no_model += 1
                 continue
-            if (_norm_key(mfr), _norm_key(model)) in (sheet.get("excludes") or set()):
+            if (size_list._norm_key(mfr), size_list._norm_key(model)) in (sheet.get("excludes") or set()):
                 # The merchant has ruled this is not a gobo. Counted apart from
                 # both the sized and the flagged: it is not being made, and it is
                 # not a gap in the list either.
                 ruled_out += 1
                 continue
             gobo_items += 1
-            entry, reason = _gobo_lookup(mfr, model, cache=sheet)
-            if reason and _gobo_domain_size(mfr, model, entry, domain, cache=sheet):
+            entry, reason = size_list._gobo_lookup(mfr, model, cache=sheet)
+            if reason and size_list._gobo_domain_size(mfr, model, entry, domain, cache=sheet):
                 reason = None
             if not reason:
                 sized += 1
@@ -7149,11 +4459,11 @@ async def run_products_list(registry: dict, months_window: Optional[int] = None)
     if not ok:
         return {"error": "Shopify did not answer the product list, so nothing is shown rather "
                          "than an empty or partial catalogue. Try again in a moment."}
-    shop = await _tool_json(registry, "shopify_get_shop", {})
+    shop = await shopify._tool_json(registry, "shopify_get_shop", {})
     currency = shop.get("currency", "")
 
-    orders = [o for o in await _orders_snapshot(registry, days=len(months) * 31) if _order_counts(o)]
-    bucket = _orders_product_monthly(orders, months)
+    orders = [o for o in await orderbook._orders_snapshot(registry, days=len(months) * 31) if _order_counts(o)]
+    bucket = orderbook._orders_product_monthly(orders, months)
     cutoff28 = datetime.now(timezone.utc) - timedelta(days=28)
     units28: dict = {}
     rev28: dict = {}
@@ -7222,14 +4532,14 @@ async def run_products_list(registry: dict, months_window: Optional[int] = None)
 # Customers & retention analytics (from Shopify customers + orders)
 # ---------------------------------------------------------------------------
 
-async def _paginate_customers(registry: dict, max_pages: int = ORDER_PAGE_CAP,
+async def _paginate_customers(registry: dict, max_pages: int = orderbook.ORDER_PAGE_CAP,
                               meta: Optional[dict] = None) -> list:
     fields = "id,first_name,last_name,email,orders_count,total_spent,created_at,updated_at,state,tags,default_address"
     out: list = []
     since_id, pages = 0, 0
     failed = truncated = False
     while pages < max_pages:
-        res = await _tool_json(registry, "shopify_list_customers",
+        res = await shopify._tool_json(registry, "shopify_list_customers",
                                {"limit": 250, "since_id": since_id, "fields": fields})
         if not _ok(res):
             failed = True
@@ -7256,7 +4566,7 @@ async def run_reorder_radar(registry: dict) -> dict:
     customers, so the sector analytics see the whole trade side."""
     om, cm = {}, {}
     orders, customers = await asyncio.gather(
-        _orders_snapshot(registry, days=540, fields="id,name,created_at,customer,line_items", meta=om),
+        orderbook._orders_snapshot(registry, days=540, fields="id,name,created_at,customer,line_items", meta=om),
         _paginate_customers(registry, meta=cm))
     if om.get("failed") or cm.get("failed"):
         return {"error": "Couldn't read all your orders and customers from Shopify just now. "
@@ -7295,10 +4605,10 @@ async def run_reorder_radar(registry: dict) -> dict:
         last_items = []
         for li in (lasto.get("line_items") or []):
             title = str(li.get("title") or "").strip()
-            if _label_skip_item(title):
+            if production._label_skip_item(title):
                 continue
-            mfr = _strip_price(_item_prop(li, "Manufacturer"))
-            model = _strip_price(_item_model(li, mfr))
+            mfr = production._strip_price(production._item_prop(li, "Manufacturer"))
+            model = production._strip_price(production._item_model(li, mfr))
             last_items.append(" ".join(x for x in [mfr, model] if x) or title)
             if len(last_items) >= 3:
                 break
@@ -7364,9 +4674,9 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
     cmeta: dict = {}
     ometa: dict = {}
     shop, all_customers, orders = await asyncio.gather(
-        _tool_json(registry, "shopify_get_shop", {}),
+        shopify._tool_json(registry, "shopify_get_shop", {}),
         _paginate_customers(registry, meta=cmeta),
-        _orders_snapshot(registry, days=len(months) * 31, fields="id,created_at,customer", meta=ometa),
+        orderbook._orders_snapshot(registry, days=len(months) * 31, fields="id,created_at,customer", meta=ometa),
     )
     # A read that failed is not a store with no customers: analysed as one,
     # it showed zeros, paid the model to explain them, and saved them as the
@@ -7509,7 +4819,7 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
 
 async def run_product_audit(registry: dict, product_id: int, extra_system: str = "") -> dict:
     claude._ai_kind.set("product")
-    p = await _tool_json(registry, "shopify_get_product", {"product_id": product_id})
+    p = await shopify._tool_json(registry, "shopify_get_product", {"product_id": product_id})
     if not p or not p.get("id"):
         raise RuntimeError("Product not found.")
     extra_system = extra_system + _skills_to_system(" ".join(["product plan", str(p.get("title") or ""),
@@ -7534,7 +4844,7 @@ async def run_product_audit(registry: dict, product_id: int, extra_system: str =
                 qty = li.get("quantity") or 0
                 units += qty
                 rev += float(li.get("price") or 0) * qty
-    shop = await _tool_json(registry, "shopify_get_shop", {})
+    shop = await shopify._tool_json(registry, "shopify_get_shop", {})
     currency = shop.get("currency", "")
     imgs = p.get("images", []) or []
 
@@ -7584,8 +4894,8 @@ async def run_product_audit(registry: dict, product_id: int, extra_system: str =
     trend = {"units": [], "revenue": []}
     try:
         months = _month_axis(PRODUCT_TREND_MONTHS)
-        p_orders = await _orders_snapshot(registry, days=len(months) * 31)
-        b = _orders_product_monthly(p_orders, months).get(product_id, {"units": {}, "revenue": {}})
+        p_orders = await orderbook._orders_snapshot(registry, days=len(months) * 31)
+        b = orderbook._orders_product_monthly(p_orders, months).get(product_id, {"units": {}, "revenue": {}})
         trend = {"units": [{"label": mk, "value": b["units"].get(mk, 0)} for mk in months],
                  "revenue": [{"label": mk, "value": round(b["revenue"].get(mk, 0.0), 2)} for mk in months]}
     except Exception:
@@ -7853,7 +5163,7 @@ def _frame_headers(request: Request) -> dict:
         + "; "
         # The store's own quote domain is allowed so the Proof modal can embed
         # proposal pages; nothing else may be framed.
-        f"frame-src https://*.shopify.com https://{PROPOSAL_HOST}"
+        f"frame-src https://*.shopify.com https://{orderbook.PROPOSAL_HOST}"
         + (" " + _files_endpoint() if _files_configured() else "")   # in-app PDF preview
         + "; "
         "base-uri 'self'; form-action 'self'; object-src 'none'; "
@@ -8365,7 +5675,7 @@ async def _watchdog_tick(registry: dict) -> bool:
     _watch_last_tick = now
     state = _load_watch()
     try:
-        shop = await _tool_json(registry, "shopify_get_shop", {})
+        shop = await shopify._tool_json(registry, "shopify_get_shop", {})
         up = _ok(shop) and bool(shop.get("name"))
         fails = 0 if up else int(state.get("probe_fails") or 0) + 1
         state["probe_fails"] = fails
@@ -8375,9 +5685,9 @@ async def _watchdog_tick(registry: dict) -> bool:
             _add_alerts([{"tab": "settings", "tab_label": "Connections",
                           "metric": "Shopify connection is failing; data may be stale", "pct": None}])
             refused = False
-            if _install_checker is not None:
+            if shopify._install_checker is not None:
                 try:
-                    refused = (await _install_checker()) == "gone"
+                    refused = (await shopify._install_checker()) == "gone"
                 except Exception:
                     refused = False
             if refused:
@@ -8449,10 +5759,10 @@ async def _watchdog_tick(registry: dict) -> bool:
         # Webhook subscriptions are a standing repair, not an install step:
         # Shopify silently deletes one after sustained delivery failure (an
         # outage on our side), so re-assert them every tick.
-        if up and _webhook_ensurer is not None:
+        if up and shopify._webhook_ensurer is not None:
             try:
-                _webhook_state["ensured"] = await _webhook_ensurer()
-                gone = (_webhook_state["ensured"] or {}).get("foreign_removed") or []
+                orderbook._webhook_state["ensured"] = await shopify._webhook_ensurer()
+                gone = (orderbook._webhook_state["ensured"] or {}).get("foreign_removed") or []
                 if gone:
                     # A subscription made with this app's credentials and
                     # pointing at another host copies orders out of the
@@ -12246,7 +9556,7 @@ async def _crm_shopify_link_sweep(registry: dict, max_pages: int = 40) -> dict:
     since = 0
     pages = 0
     for _ in range(max_pages):
-        res = await _tool_json(registry, "shopify_list_customers",
+        res = await shopify._tool_json(registry, "shopify_list_customers",
                                {"limit": 250, "since_id": since, "fields": "id,email"})
         # A swallowed failure must never read as "no more customers". _tool_json
         # returns {"_failed": True} for a throttle, a 5xx or a timeout, and
@@ -12566,8 +9876,8 @@ def _redact_shop() -> dict:
         return {"wiped": 0, "archive": "", "refused": "archive"}
     wiped = 0
     stores = (CRM_PATH, MAILBOX_PATH, desk.DISPATCH_STATE_PATH, CHASE_LOG_PATH,
-              desk.COLLECTIONS_PATH, desk.CUSTOMS_MEMORY_PATH, PRODUCTION_STATE_PATH,
-              PRODUCTION_ARCHIVE_PATH, FILES_PATH)
+              desk.COLLECTIONS_PATH, desk.CUSTOMS_MEMORY_PATH, production.PRODUCTION_STATE_PATH,
+              production.PRODUCTION_ARCHIVE_PATH, FILES_PATH)
     for path in stores:
         try:
             if os.path.isfile(path):
@@ -12633,9 +9943,9 @@ async def _shop_redact_attempt(down_since) -> str:
     credential AND the app's own reads have been refused for
     SHOP_REDACT_DOWN_HOURS AND the archive was written first."""
     state = "unknown"
-    if _install_checker is not None:
+    if shopify._install_checker is not None:
         try:
-            state = await _install_checker()
+            state = await shopify._install_checker()
         except Exception:
             logger.exception("shop/redact: the install check failed")
     if state == "installed":
@@ -12743,7 +10053,7 @@ async def _shop_redact_checked(delivery: str) -> Response:
         outcome = "unknown"
     if not recorded and outcome not in ("installed", "erased"):
         if delivery:
-            _webhook_seen.pop(delivery, None)
+            orderbook._webhook_seen.pop(delivery, None)
         _shop_redact_settle("unrecorded")
         return PlainTextResponse("retry", status_code=503)
     _shop_redact_settle(outcome)
@@ -13253,14 +10563,14 @@ async def _customer_state(h: dict, addresses: Optional[list] = None) -> str:
     """'live' when Shopify still has a customer with this id or with any of
     the addresses the erasure would take, 'gone' when it has none of them,
     'unknown' when it could not be asked about all of them."""
-    if _customer_checker is None:
+    if shopify._customer_checker is None:
         return "unknown"
     addrs = [a for a in (addresses or [h.get("email")]) if a][:10]
     seen = []
     for k, a in enumerate(addrs):
         try:
             st = await asyncio.wait_for(
-                _customer_checker(str(h.get("customer_id") or "") if k == 0 else "", str(a)), 20)
+                shopify._customer_checker(str(h.get("customer_id") or "") if k == 0 else "", str(a)), 20)
         except Exception:
             logger.warning("customers/redact: the customer check did not answer")
             st = "unknown"
@@ -13590,114 +10900,6 @@ def token_vault_state() -> dict:
         pass
     return {"enabled": tokenvault.enabled(), "stored": present,
             "sealed": len(sealed), "plaintext": sorted(set(plain))}
-
-
-def _terms_flag(order_id, ok: bool, note: str = "") -> None:
-    """Remember, on the order itself, that its payment terms did not attach.
-
-    A toast is gone the moment the page moves on, and the tail of a big print
-    run has no toast at all - its failures only ever reached the server log,
-    where a dispatch desk never looks. The queue row reads this and shows the
-    order in red until the terms are actually on it. Best-effort by design: a
-    flag that cannot be saved must never break a release."""
-    try:
-        state = _load_prod_state()
-        entry = state.get(str(order_id)) or {}
-        if ok:
-            if not entry.get("terms_error"):
-                return                      # nothing to clear, nothing to write
-            entry.pop("terms_error", None)
-            entry.pop("terms_error_at", None)
-        else:
-            if entry.get("terms_error") == note[:200]:
-                return                      # same problem as last time
-            entry["terms_error"] = note[:200] or "The 30-day payment terms could not be added."
-            entry["terms_error_at"] = datetime.now(timezone.utc).isoformat()
-        if not entry:
-            state.pop(str(order_id), None)
-        else:
-            state[str(order_id)] = entry
-        if jsonstore._store_writable(PRODUCTION_STATE_PATH):
-            _write_prod_state(state)
-    except Exception:
-        logger.exception("could not record the payment-terms outcome for order %s", order_id)
-
-
-async def _net30_on_release(registry: dict, order_id, order: Optional[dict] = None) -> dict:
-    """Start an account order's 30-day clock when it is released to production.
-
-    Every path that moves Unprocessed -> IP is a release: the Ready-to-make
-    button, the missed-orders strip, AND printing the labels (which is the
-    ordinary way an order enters the workbench). Attaching terms on only one
-    of them meant the normal lifecycle produced an invoice with no due date.
-    Returns {"account": was this an account order, "ok": did the terms end up
-    right, "note": what to tell the merchant}. A VERDICT, not prose: the
-    caller used to decide success by reading the note's first words, so the
-    commonest outcome of all - terms UPDATED from due-on-receipt to Net 30 -
-    came out as a red failure toast because its sentence starts differently.
-    Never raises: the release itself must not fail with this.
-
-    `order` is the order the release's tag move just read, when there was
-    one: its account tag and whether it is dead are what this checks, and
-    moving the workflow tags changes neither, so it is not read a second
-    time (the 2026-10-12 speed audit, X7)."""
-    quiet = {"account": False, "ok": True, "note": ""}
-    if _payment_terms_writer is None:
-        return quiet
-    try:
-        o = order if isinstance(order, dict) and order.get("id") \
-            else await _tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
-        if not _ok(o):
-            # A read that FAILED is not proof the order is not on account.
-            return {"account": True, "ok": False,
-                    "note": "Could not check whether this order needs 30-day payment terms."}
-        if not any(_norm_key(t) == _norm_key(PO_UNPAID_TAG) for t in _order_tags(o)):
-            return quiet
-        # _sync_order_tags leaves DEAD orders alone (cancelled, refunded, already
-        # fulfilled) and still answers ok, so the release carried on and put
-        # 30-day terms on an order that will never be invoiced - and told the
-        # merchant it had been released. Nothing was moved, so nothing is due.
-        dead = _order_status(o)
-        if dead:
-            return {"account": True, "ok": True,
-                    "note": "No payment terms added: this order is " + str(dead) + "."}
-    except Exception:
-        logger.exception("net30: pre-release order read failed for %s", order_id)
-        return {"account": True, "ok": False,
-                "note": "Could not check whether this order needs 30-day payment terms."}
-    try:
-        r = await _payment_terms_writer(int(order_id))
-    except Exception:
-        logger.exception("net30: attach failed for %s", order_id)
-        return {"account": True, "ok": False,
-                "note": "Released, but the 30-day payment terms could not be added."}
-    finally:
-        # The ledger reads payment_terms; it may have landed whatever came back.
-        _orders_changed([order_id])
-    _terms_flag(order_id, ok=bool(r.get("ok")), note=str(r.get("detail") or ""))
-    if r.get("ok"):
-        # Say what actually happened to the order, not what was hoped for. The
-        # old wording claimed "already on the order" whenever Shopify refused
-        # the create - which it does for ANY order that already carries terms,
-        # so an order on due-on-receipt reported as being on 30-day terms.
-        if r.get("already"):
-            note = "30-day payment terms were already on the order."
-        elif r.get("updated"):
-            note = ("Payment terms changed from " + str(r.get("was") or "the previous terms")
-                    + " to Net 30.")
-        else:
-            note = "30-day payment terms added."
-        return {"account": True, "ok": True, "note": note}
-    if r.get("reason") == "unknown":
-        # Not a failure: Shopify may have taken them. Still one to look at, so
-        # the row stays marked, but in words that do not say they are missing.
-        return {"account": True, "ok": False, "unknown": True,
-                "note": ("Released. Shopify did not answer about the 30-day payment terms and "
-                         "the check afterwards failed too, so it is not known whether they are "
-                         "on the order: look at it in Shopify before adding them again.")}
-    return {"account": True, "ok": False,
-            "note": ("Released, but the 30-day payment terms could not be added: "
-                     + str(r.get("detail") or "unknown error"))}
 
 
 def _dav_drop_cache(uid: str) -> None:
@@ -14678,7 +11880,7 @@ async def _webhook_body(request: Request):
     try:
         async for chunk in request.stream():
             total += len(chunk)
-            if total > WEBHOOK_MAX_BYTES:
+            if total > orderbook.WEBHOOK_MAX_BYTES:
                 return None, PlainTextResponse("Too large", status_code=413)
             chunks.append(chunk)
     except Exception:
@@ -15711,22 +12913,19 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     # The write capabilities the server hands over. None of them ever joins any
     # tool registry: the AI can read the store; only the app's own print / Mark
     # made / Dispatch actions can touch tags or fulfillments.
-    global _order_tag_writer, _fulfillment_writer, _fulfillment_canceler, _webhook_ensurer
-    global _payment_terms_writer, _order_writer, _scope_reader, _tax_id_reader, _forecast_reader
-    global _install_checker, _customer_checker, _api_version, _product_meta_reader
-    _api_version = api_version
-    _product_meta_reader = product_meta_reader
-    _customer_checker = customer_checker
-    _scope_reader = scope_reader
-    _forecast_reader = forecast_reader
-    _install_checker = install_checker
-    _tax_id_reader = tax_id_reader
-    _order_tag_writer = order_tag_writer
-    _fulfillment_writer = fulfillment_writer
-    _fulfillment_canceler = fulfillment_canceler
-    _webhook_ensurer = webhook_ensurer
-    _payment_terms_writer = payment_terms_writer
-    _order_writer = order_writer
+    shopify._api_version = api_version
+    shopify._product_meta_reader = product_meta_reader
+    shopify._customer_checker = customer_checker
+    shopify._scope_reader = scope_reader
+    shopify._forecast_reader = forecast_reader
+    shopify._install_checker = install_checker
+    shopify._tax_id_reader = tax_id_reader
+    shopify._order_tag_writer = order_tag_writer
+    shopify._fulfillment_writer = fulfillment_writer
+    shopify._fulfillment_canceler = fulfillment_canceler
+    shopify._webhook_ensurer = webhook_ensurer
+    shopify._payment_terms_writer = payment_terms_writer
+    shopify._order_writer = order_writer
     desk._wo_boot()
     # Shopify tools + live SEO tools + Google data tools (the last only if configured)
     chat_registry = {**registry, **_build_seo_tools(registry), **_build_google_tools(),
@@ -15756,7 +12955,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         return await google_mail.get_thread(thread_id, acct=_fin)
 
     recon_engine.configure(
-        registry=registry, tool_json=_tool_json,
+        registry=registry, tool_json=shopify._tool_json,
         mail_connected=lambda: google_mail.connected(_fin),
         gmail_bytes=_fin_bytes, mail_search=_fin_search, mail_thread=_fin_thread,
         ai_call=_recon_ai_call, xero=xero_api,
@@ -15839,7 +13038,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         try:
             async for chunk in request.stream():
                 total += len(chunk)
-                if total > WEBHOOK_MAX_BYTES:
+                if total > orderbook.WEBHOOK_MAX_BYTES:
                     return PlainTextResponse("Too large", status_code=413)
                 chunks.append(chunk)
         except Exception:
@@ -15863,7 +13062,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             logger.warning("webhook: %s was delivered to the orders endpoint", topic)
             return PlainTextResponse("Wrong endpoint for this topic", status_code=422)
         delivery = str(request.headers.get("x-shopify-webhook-id") or "")
-        if delivery and not _webhook_note_delivery(delivery):
+        if delivery and not orderbook._webhook_note_delivery(delivery):
             return PlainTextResponse("ok", status_code=200)   # a redelivery, already handled
         # The order this event is about is read again from Shopify on the next
         # load; the payload names it and is never used as state. One that
@@ -15872,13 +13071,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             _event_order = json.loads(raw).get("id")
             if not _event_order:
                 raise ValueError("no order id")
-            _orders_changed([_event_order])
+            orderbook._orders_changed([_event_order])
         except Exception:
-            _bust_orders()
-        _webhook_state["last_at"] = time.time()
-        _webhook_state["last_topic"] = str(request.headers.get("x-shopify-topic") or "")
-        _webhook_state["version"] = str(request.headers.get("x-shopify-api-version") or "")[:16]
-        _webhook_state["count"] += 1
+            orderbook._bust_orders()
+        orderbook._webhook_state["last_at"] = time.time()
+        orderbook._webhook_state["last_topic"] = str(request.headers.get("x-shopify-topic") or "")
+        orderbook._webhook_state["version"] = str(request.headers.get("x-shopify-api-version") or "")[:16]
+        orderbook._webhook_state["count"] += 1
         try:
             # Deferred, so the whole-store scan never stalls the receiver (a
             # slow ack makes Shopify retry and eventually delete the
@@ -15990,9 +13189,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Request too large."}, 413)
         if not isinstance(body, dict):
             return _json({"error": "A JSON object is required."}, 400)
-        if _forecast_reader is None:
+        if shopify._forecast_reader is None:
             return _json({"error": "The store is not connected."}, 503)
-        out = await _forecast_reader(str(body.get("op") or ""), body)
+        out = await shopify._forecast_reader(str(body.get("op") or ""), body)
         if out.get("error"):
             return _json({"error": out["error"]}, int(out.get("status") or 502))
         return _json({"data": out.get("data")})
@@ -16072,7 +13271,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         _ensure_scheduler(registry)
         topic = str(request.headers.get("x-shopify-topic") or "")
         delivery = str(request.headers.get("x-shopify-webhook-id") or "")
-        if delivery and not _webhook_note_delivery(delivery):
+        if delivery and not orderbook._webhook_note_delivery(delivery):
             return PlainTextResponse("ok", status_code=200)   # a redelivery
         try:
             body = json.loads(raw.decode("utf-8", "replace")) or {}
@@ -16088,7 +13287,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 held = _redact_hold(email, cid)
                 if held is None:
                     if delivery:
-                        _webhook_seen.pop(delivery, None)
+                        orderbook._webhook_seen.pop(delivery, None)
                     _redact_unrecorded()
                     return PlainTextResponse("retry", status_code=503)
                 if held and held.get("new"):
@@ -16101,7 +13300,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 if not _ask_hold(email, cid):
                     # Not kept: sent back for Shopify to retry, as an erasure is.
                     if delivery:
-                        _webhook_seen.pop(delivery, None)
+                        orderbook._webhook_seen.pop(delivery, None)
                     _redact_unrecorded()
                     return PlainTextResponse("retry", status_code=503)
                 _privacy_mail()
@@ -16356,7 +13555,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         extra = _profile_to_system(profile) + _memory_to_system() + _knowledge_to_system() + _skills_to_system("overview report revenue orders customers products stock")
         track = (profile.get("prefs") or {}).get("track_inventory", True)
         try:
-            _refresh_asked(body)
+            orderbook._refresh_asked(body)
             result = await run_overview(registry, extra, bool(track))
         except RuntimeError as e:
             return _json({"error": str(e)}, 500)
@@ -17016,41 +14215,41 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         bad = [(i + 2, str(r.get("Model") or "").strip(), str(r.get("Closest Production Size (mm)") or "").strip())
                for i, r in enumerate(rows)
                if str(r.get("Closest Production Size (mm)") or "").strip()
-               and _clean_gobo_size(r.get("Closest Production Size (mm)")) is None]
+               and size_list._clean_gobo_size(r.get("Closest Production Size (mm)")) is None]
         if bad:
             shown = "; ".join(f"row {n} ({m or 'no model'}): \"{v[:20]}\"" for n, m, v in bad[:5])
             return _json({"error": f"{len(bad)} size cell(s) are not a size in mm, so nothing was "
                                    f"changed: {shown}" + (" and more." if len(bad) > 5 else ".")}, 400)
-        before = (_gobo_sizes().get("health") or {}).get("models") or 0
+        before = (size_list._gobo_sizes().get("health") or {}).get("models") or 0
         if model_rows < 50 or model_rows < before * 0.5:
             return _json({"error": f"That file only has {model_rows} model rows; the current sheet has "
                           f"{before}. Refusing to replace it. If this shrink is intentional, "
                           "send the file to your developer instead."}, 400)
         try:
-            os.makedirs(os.path.dirname(GOBO_SIZES_LIVE) or ".", exist_ok=True)
-            if os.path.isfile(GOBO_SIZES_LIVE):
+            os.makedirs(os.path.dirname(size_list.GOBO_SIZES_LIVE) or ".", exist_ok=True)
+            if os.path.isfile(size_list.GOBO_SIZES_LIVE):
                 # Dated generations, atomically written, newest five kept: one bad
                 # upload can never destroy the only recovery copy.
                 import shutil
                 stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
-                btmp = GOBO_SIZES_LIVE + ".bak.tmp"
-                shutil.copyfile(GOBO_SIZES_LIVE, btmp)
-                os.replace(btmp, f"{GOBO_SIZES_LIVE}.{stamp}.bak")
-                baks = sorted(f for f in os.listdir(os.path.dirname(GOBO_SIZES_LIVE) or ".")
-                              if f.startswith(os.path.basename(GOBO_SIZES_LIVE) + ".") and f.endswith(".bak"))
+                btmp = size_list.GOBO_SIZES_LIVE + ".bak.tmp"
+                shutil.copyfile(size_list.GOBO_SIZES_LIVE, btmp)
+                os.replace(btmp, f"{size_list.GOBO_SIZES_LIVE}.{stamp}.bak")
+                baks = sorted(f for f in os.listdir(os.path.dirname(size_list.GOBO_SIZES_LIVE) or ".")
+                              if f.startswith(os.path.basename(size_list.GOBO_SIZES_LIVE) + ".") and f.endswith(".bak"))
                 for stale_bak in baks[:-5]:
                     try:
-                        os.remove(os.path.join(os.path.dirname(GOBO_SIZES_LIVE) or ".", stale_bak))
+                        os.remove(os.path.join(os.path.dirname(size_list.GOBO_SIZES_LIVE) or ".", stale_bak))
                     except OSError:
                         pass
-            tmp = GOBO_SIZES_LIVE + ".tmp"
+            tmp = size_list.GOBO_SIZES_LIVE + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
                 fh.write(text)
-            os.replace(tmp, GOBO_SIZES_LIVE)
+            os.replace(tmp, size_list.GOBO_SIZES_LIVE)
         except Exception:
             logger.exception("size sheet write failed")
             return _json({"error": "Couldn't save the new sheet to the data volume."}, 500)
-        health = _gobo_sizes().get("health") or {}
+        health = size_list._gobo_sizes().get("health") or {}
         logger.info("gobo sizes: sheet replaced via upload (%d csv rows, %s model keys)",
                     len(rows), health.get("models"))
         _track(who, "sizes", "replaced the size list", f"{len(rows)} rows")
@@ -17067,8 +14266,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if err:
             return err
         try:
-            return _json({"overrides": _gobo_rule_rows("override"),
-                          "aliases": _gobo_rule_rows("alias"),
+            return _json({"overrides": size_list._gobo_rule_rows("override"),
+                          "aliases": size_list._gobo_rule_rows("alias"),
                           "can_edit": _may_edit_sizes(who)})
         except Exception:
             logger.exception("gobo rules read failed")
@@ -17083,7 +14282,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if err:
             return err
         try:
-            return _json(_gobo_sheet_listing(who))
+            return _json(size_list._gobo_sheet_listing(who))
         except Exception:
             logger.exception("gobo list read failed")
             return _json({"error": "Couldn't read the size list."}, 500)
@@ -17099,7 +14298,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if len(q) < 2:
             return _json({"error": "Type at least two letters of a fixture."}, 400)
         try:
-            return _json(_gobo_check(q))
+            return _json(size_list._gobo_check(q))
         except Exception:
             logger.exception("gobo check failed")
             return _json({"error": "Couldn't check that name against the size list."}, 500)
@@ -17116,7 +14315,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if len(q) < 2:
             return _json({"models": []})
         seen, out = set(), []
-        for entry in (_gobo_sizes().get("rows") or []):
+        for entry in (size_list._gobo_sizes().get("rows") or []):
             e = entry[2] if isinstance(entry, tuple) else entry
             if not isinstance(e, dict):
                 continue
@@ -17163,15 +14362,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                       "not for one customer."}, 400)
                     size = "exclude"
                 else:
-                    size = _clean_gobo_size(body.get("size"))
+                    size = size_list._clean_gobo_size(body.get("size"))
                     if not size:
                         return _json({"error": "That is not a production size. Give it in "
                                       "millimetres, for example 37.5."}, 400)
-                rows = _gobo_rule_rows("override")
+                rows = size_list._gobo_rule_rows("override")
                 hit = None
                 for r in rows:
-                    if (_norm_key(r["Manufacturer"]) == _norm_key(mfr)
-                            and _norm_key(r["Model"]) == _norm_key(model)
+                    if (size_list._norm_key(r["Manufacturer"]) == size_list._norm_key(mfr)
+                            and size_list._norm_key(r["Model"]) == size_list._norm_key(model)
                             and r["Customer Email Domain"].lstrip("@").lower() == domain):
                         hit = r
                         break
@@ -17182,7 +14381,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     rows.append({"Manufacturer": mfr, "Model": model,
                                  "Customer Email Domain": domain,
                                  "Production Size (mm)": size})
-                _write_gobo_rule_rows("override", rows)
+                size_list._write_gobo_rule_rows("override", rows)
                 what = ("excluded" if size == "exclude"
                         else f"set to {size} mm" + (f" for @{domain}" if domain else ""))
                 _track(who, "sizes", "changed a size rule",
@@ -17191,34 +14390,34 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 target = str(body.get("list_model") or "").strip()[:120]
                 if not target:
                     return _json({"error": "Which model on the list is it another name for?"}, 400)
-                entry, reason = _gobo_lookup(mfr, target)
+                entry, reason = size_list._gobo_lookup(mfr, target)
                 if reason:
                     return _json({"error": f"\u201c{target}\u201d is not on the size list, so "
                                   "pointing at it would leave the rule dead. Pick from the list, "
                                   "or give this model a size instead."}, 400)
-                rows = _gobo_rule_rows("alias")
+                rows = size_list._gobo_rule_rows("alias")
                 for r in rows:
-                    if (_norm_key(r["Manufacturer"]) == _norm_key(mfr)
-                            and _norm_key(r["Store Model"]) == _norm_key(model)):
+                    if (size_list._norm_key(r["Manufacturer"]) == size_list._norm_key(mfr)
+                            and size_list._norm_key(r["Store Model"]) == size_list._norm_key(model)):
                         r["List Model"] = target
                         break
                 else:
                     rows.append({"Manufacturer": mfr, "Store Model": model, "List Model": target})
-                _write_gobo_rule_rows("alias", rows)
+                size_list._write_gobo_rule_rows("alias", rows)
                 _track(who, "sizes", "changed a size rule",
                        f"{mfr} {model} reads as {target}")
             elif op == "remove":
                 kind = "alias" if str(body.get("kind") or "") == "alias" else "override"
-                rows = _gobo_rule_rows(kind)
+                rows = size_list._gobo_rule_rows(kind)
                 mcol = "Store Model" if kind == "alias" else "Model"
                 keep = [r for r in rows
-                        if not (_norm_key(r["Manufacturer"]) == _norm_key(mfr)
-                                and _norm_key(r[mcol]) == _norm_key(model)
+                        if not (size_list._norm_key(r["Manufacturer"]) == size_list._norm_key(mfr)
+                                and size_list._norm_key(r[mcol]) == size_list._norm_key(model)
                                 and (kind == "alias"
                                      or r["Customer Email Domain"].lstrip("@").lower() == domain))]
                 if len(keep) == len(rows):
                     return _json({"error": "That rule is no longer there."}, 400)
-                _write_gobo_rule_rows(kind, keep)
+                size_list._write_gobo_rule_rows(kind, keep)
                 _track(who, "sizes", "removed a size rule", f"{mfr} {model}")
             else:
                 return _json({"error": "Unknown operation."}, 400)
@@ -17227,13 +14426,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Couldn't save that rule to the data volume."}, 500)
         # Re-read through the same lookup the labels print with, so the answer
         # says what the bench will actually see rather than what was intended.
-        entry, reason = _gobo_lookup(mfr, model)
-        health = _gobo_sizes().get("health") or {}
+        entry, reason = size_list._gobo_lookup(mfr, model)
+        health = size_list._gobo_sizes().get("health") or {}
         return _json({"ok": True, "resolves": not reason, "reason": reason or "",
                       "size": (entry.get("production_size") if isinstance(entry, dict) else None),
                       "dead_aliases": health.get("dead_aliases", 0),
-                      "overrides": _gobo_rule_rows("override"),
-                      "aliases": _gobo_rule_rows("alias")})
+                      "overrides": size_list._gobo_rule_rows("override"),
+                      "aliases": size_list._gobo_rule_rows("alias")})
 
     @mcp.custom_route("/api/reorder-radar", methods=["POST"])
     async def reorder_radar_route(request: Request):
@@ -17260,14 +14459,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not cid:
             return _json({"error": "No customer id given."}, 400)
         try:
-            data = await _tool_json(registry, "shopify_get_customer_orders",
+            data = await shopify._tool_json(registry, "shopify_get_customer_orders",
                                     {"customer_id": cid, "limit": 50, "status": "any"})
             if not _ok(data):
                 return _json({"error": "Couldn't read that customer's orders."}, 502)
             orders = sorted((data.get("orders") or []), key=lambda o: str(o.get("created_at") or ""), reverse=True)
             return _json({"count": len(orders),
                           "recent": [{"name": o.get("name"), "created_at": o.get("created_at"),
-                                      "admin_url": _admin_order_url(o.get("id"))}
+                                      "admin_url": orderbook._admin_order_url(o.get("id"))}
                                      for o in orders[:3]]})
         except Exception:
             logger.exception("Customer history failed")
@@ -18211,7 +15410,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not email or "@" not in email:
             return {"orders": []}
         try:
-            res = await _tool_json(registry, "shopify_search_customers", {"query": email})
+            res = await shopify._tool_json(registry, "shopify_search_customers", {"query": email})
         except Exception:
             logger.exception("mail: customer lookup failed")
             return {"orders": [], "error": "Could not reach Shopify."}
@@ -18220,7 +15419,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not cust:
             return {"orders": []}
         try:
-            data = await _tool_json(registry, "shopify_get_customer_orders",
+            data = await shopify._tool_json(registry, "shopify_get_customer_orders",
                                     {"customer_id": cust.get("id"), "limit": 20, "status": "any"})
         except Exception:
             logger.exception("mail: order lookup failed")
@@ -18250,7 +15449,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # on the floor. Only fulfilled means it went.
                 "fulfilled": bool(d.get("fulfilled")),
                 "cancelled_at": o.get("cancelled_at") or "",
-                "admin_url": _admin_order_url(o.get("id")),
+                "admin_url": orderbook._admin_order_url(o.get("id")),
             })
         return {"customer": {"name": " ".join(x for x in [cust.get("first_name"),
                                                           cust.get("last_name")] if x).strip(),
@@ -19286,11 +16485,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not oid.isdigit():
             return _json({"error": "Which order?"}, 400)
         if str(body.get("op") or "") == "read":
-            data, why = await _order_editable(registry, int(oid))
+            data, why = await orderbook._order_editable(registry, int(oid))
             if data is None:
                 return _json({"error": why}, 400)
             return _json(data)
-        done, why, changed, name, warn = await _edit_order(registry, int(oid), body)
+        done, why, changed, name, warn = await orderbook._edit_order(registry, int(oid), body)
         if not done:
             return _json({"error": why or "The order couldn't be changed."}, 400)
         if changed:
@@ -19327,13 +16526,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 head, tail = ids[:RELEASE_INLINE_MAX], ids[RELEASE_INLINE_MAX:]
                 for oid in head:
                     seen: dict = {}
-                    okd, note, released = await _release_tags(registry, oid, seen)
+                    okd, note, released = await production._release_tags(registry, oid, seen)
                     if not okd and note:
                         notes.append(note)
                         continue
                     if not released:
                         continue      # a reprint of a made or shipped order is not a release
-                    tn = await _net30_on_release(registry, oid, order=seen.get("order"))
+                    tn = await production._net30_on_release(registry, oid, order=seen.get("order"))
                     if tn["account"]:
                         # Per ORDER. Flattened to one boolean and the first
                         # three notes, a batch could show a red toast whose
@@ -19379,8 +16578,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         if not entry:
                             state.pop(str(oid), None)
                 try:
-                    _write_prod_state(state)
-                except ProdStateUnwritable:
+                    production._write_prod_state(state)
+                except production.ProdStateUnwritable:
                     return _json({"error": "The print stamps could not be cleared. Check the "
                                            "data volume in Settings, Connections."}, 503)
                 _track(_who, "production", "undid a print",
@@ -19392,9 +16591,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     # Unprocessed put a made order on course for To make again.
                     if oid in past:
                         continue
-                    okd, note = await _sync_order_tags(registry, oid,
-                                                       add=[UNPROCESSED_TAG], remove=[PRODUCTION_TAG],
-                                                       unless=(MADE_TAG, desk.DISPATCHED_TAG,
+                    okd, note = await orderbook._sync_order_tags(registry, oid,
+                                                       add=[orderbook.UNPROCESSED_TAG], remove=[production.PRODUCTION_TAG],
+                                                       unless=(orderbook.MADE_TAG, desk.DISPATCHED_TAG,
                                                                *desk.LEGACY_DISPATCHED_TAGS))
                     if not okd and note:
                         notes.append(note)
@@ -19412,8 +16611,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # app: if the stamp cannot be saved, stop here rather than doing
                 # the irreversible half and reporting success.
                 try:
-                    state = _mark_made(oid, on)
-                except ProdStateUnwritable:
+                    state = production._mark_made(oid, on)
+                except production.ProdStateUnwritable:
                     logger.exception("made: production state unwritable for %s", oid)
                     return _json({"error": "The made stamp could not be saved, so nothing "
                                            "was fulfilled or booked. Check the data volume "
@@ -19432,8 +16631,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     # (The lock is taken HERE, not inside the helper: the
                     # booking path already holds it and asyncio locks are not
                     # reentrant.)
-                    async with _dispatch_lock(oid):
-                        ready = await _fulfill_if_ready(
+                    async with orderbook._dispatch_lock(oid):
+                        ready = await orderbook._fulfill_if_ready(
                             registry, oid, ack_address=bool(body.get("ack_address")))
                     ship_reason = str(ready.get("reason") or "")
                     fulfilled, notified = ready["fulfilled"], ready["notified"]
@@ -19459,14 +16658,14 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         okd, note = True, ""
                         ship_note = ready["detail"]
                     else:
-                        okd, note = await _sync_order_tags(registry, oid, add=[MADE_TAG],
-                                                           remove=[PRODUCTION_TAG])
+                        okd, note = await orderbook._sync_order_tags(registry, oid, add=[orderbook.MADE_TAG],
+                                                           remove=[production.PRODUCTION_TAG])
                         if ready["reason"] not in ("no_label",):
                             ship_note = ready["detail"]
                 else:
-                    ship_note = await _unfulfill_dispatch(registry, oid)
-                    okd, note = await _sync_order_tags(registry, oid, add=[PRODUCTION_TAG],
-                                                       remove=[MADE_TAG, desk.DISPATCHED_TAG, *desk.LEGACY_DISPATCHED_TAGS])
+                    ship_note = await orderbook._unfulfill_dispatch(registry, oid)
+                    okd, note = await orderbook._sync_order_tags(registry, oid, add=[production.PRODUCTION_TAG],
+                                                       remove=[orderbook.MADE_TAG, desk.DISPATCHED_TAG, *desk.LEGACY_DISPATCHED_TAGS])
                 # The shelf's ledger: made books the glass at the stock app,
                 # un-made returns it. Local state is already saved, so a bridge
                 # failure only queues a retry, never blocks the workbench.
@@ -19483,7 +16682,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Unknown op."}, 400)
         except Exception:
             logger.exception("Production state update failed")
-            jsonstore._forget_store(PRODUCTION_STATE_PATH)   # a half-made change must not be served
+            jsonstore._forget_store(production.PRODUCTION_STATE_PATH)   # a half-made change must not be served
             return _json({"error": "Couldn't update production state."}, 500)
 
     @mcp.custom_route("/api/liability", methods=["POST"])
@@ -19493,7 +16692,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if err:
             return err
         try:
-            _refresh_asked(body)
+            orderbook._refresh_asked(body)
             res = await run_liability(registry)
             return _json(res, 502 if res.get("error") else 200)
         except Exception:
@@ -19909,7 +17108,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 q = str(body.get("q") or "").strip()[:80]
                 if not q:
                     return _json({"matches": []})
-                res = await _tool_json(registry, "shopify_search_customers", {"query": q})
+                res = await shopify._tool_json(registry, "shopify_search_customers", {"query": q})
                 out = []
                 for c in (res.get("customers") or [])[:8]:
                     nm = " ".join(x for x in [c.get("first_name"), c.get("last_name")] if x).strip()
@@ -21724,7 +18923,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # where it is. An Undo on a made order's reprint used to leave it
             # tagged Unprocessed, and this button then put it back in To make.
             seen: dict = {}
-            okd, note, released = await _release_tags(registry, oid, seen)
+            okd, note, released = await production._release_tags(registry, oid, seen)
             # This button sits on the missed-orders strip, and pressing it
             # says that row may be wrong: an order cancelled or tagged in
             # Shopify's admin before the app heard of it is read here, moves
@@ -21732,8 +18931,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # kept strip would bring the row straight back. Saying the order
             # changed also stops a strip scan already reading Shopify from
             # keeping what it saw, and has the queues read it again.
-            _missing_cache.clear()
-            _orders_changed([oid])
+            production._missing_cache.clear()
+            orderbook._orders_changed([oid])
             if not okd:
                 return _json({"error": note or "Couldn't tag the order."}, 502)
             nm = re.sub(r"[^#\w-]", "", str(body.get("name") or ""))[:20] or f"order {oid}"
@@ -21746,7 +18945,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # primary action and must not fail with it, but a purchase order
             # silently missing its payment terms is an unpaid invoice nobody
             # chases. Shared with the print path so every release behaves alike.
-            terms = await _net30_on_release(registry, oid, order=seen.get("order"))
+            terms = await production._net30_on_release(registry, oid, order=seen.get("order"))
             if terms["account"] and terms["ok"]:
                 _track(_who, "production", "put an account order on 30-day terms", nm)
             return _json({"ok": True, "po_unpaid": terms["account"],
@@ -21770,7 +18969,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if err:
             return err
         try:
-            res = await run_missing_production(registry)
+            res = await production.run_missing_production(registry)
             return _json(res, 502 if res.get("error") else 200)
         except Exception:
             logger.exception("Missing-production scan failed")
@@ -22180,7 +19379,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         except (TypeError, ValueError):
             months = None
         try:
-            _refresh_asked(body)
+            orderbook._refresh_asked(body)
             return _json(await run_products_list(registry, months))
         except Exception:
             logger.exception("Product list failed")
@@ -22194,7 +19393,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         segment = (body.get("segment") or "").strip()[:80]
         extra = _profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system() + _skills_to_system("customers retention sectors trade repeat lifetime value")
         try:
-            _refresh_asked(body)
+            orderbook._refresh_asked(body)
             res = await run_customers(registry, extra, segment=segment or None)
             if res.get("error"):
                 return _json(res, 502)      # nothing worked out, nothing saved
@@ -22597,7 +19796,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Type the accounts mailbox address first. Without it "
                                    "Google opens whichever account this browser is already "
                                    "signed into."}, 400)
-        if not _EDIT_EMAIL.match(want):
+        if not orderbook._EDIT_EMAIL.match(want):
             return _json({"error": "That does not look like an email address."}, 400)
         if want.strip().lower() == (google_mail.address() or "").strip().lower():
             return _json({"error": "That is the Inbox tab's mailbox. Reconciliation needs the "
@@ -23008,10 +20207,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         body = await gate._read_json_capped(request)
         if body is None:
             return _json({"error": "Request too large."}, 413)
-        api_version = _api_version
+        api_version = shopify._api_version
         shop_ok, shop_name, currency = False, None, None
         try:
-            shop = await _tool_json(registry, "shopify_get_shop", {})
+            shop = await shopify._tool_json(registry, "shopify_get_shop", {})
             if shop and shop.get("name"):
                 shop_ok, shop_name, currency = True, shop.get("name"), shop.get("currency")
         except Exception:
@@ -23026,11 +20225,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         except Exception as e:
             vol_ok, vol_detail = False, str(e)[:200]
         watch = _load_watch()
-        health = _gobo_sizes().get("health") or {}
+        health = size_list._gobo_sizes().get("health") or {}
         scope_state = {"checked": False, "missing": {}, "error": ""}
-        if _scope_reader is not None and shop_ok:
+        if shopify._scope_reader is not None and shop_ok:
             try:
-                got = await _scope_reader()
+                got = await shopify._scope_reader()
                 scope_state = {"checked": not got.get("error"),
                                "missing": got.get("missing") or {},
                                "error": got.get("error") or ""}
@@ -23055,7 +20254,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             "gmail": google_mail.status(),
             "shipping": {"ok": bool(worldoptions and worldoptions.configured()),
                          "available": bool(worldoptions),
-                         "fulfillment": bool(_fulfillment_writer is not None)},
+                         "fulfillment": bool(shopify._fulfillment_writer is not None)},
             "volume": {"ok": vol_ok, "detail": vol_detail,
                        "poisoned": sorted(os.path.basename(p) for p in jsonstore._poisoned_stores),
                        # Sizes, and the parse cost of anything over a megabyte:
@@ -23075,11 +20274,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # Live updates: whether Shopify is pushing order events to the app,
             # and when one last arrived. Without them the desk falls back to the
             # short cache and the Refresh button, which still work.
-            "webhooks": {"ok": bool((_webhook_state.get("ensured") or {}).get("ok")),
-                         "detail": (_webhook_state.get("ensured") or {}).get("detail") or "",
-                         "last_event_at": (_webhook_state["last_at"] or None),
-                         "version": _webhook_state.get("version") or None,
-                         "events": _webhook_state["count"]},
+            "webhooks": {"ok": bool((orderbook._webhook_state.get("ensured") or {}).get("ok")),
+                         "detail": (orderbook._webhook_state.get("ensured") or {}).get("detail") or "",
+                         "last_event_at": (orderbook._webhook_state["last_at"] or None),
+                         "version": orderbook._webhook_state.get("version") or None,
+                         "events": orderbook._webhook_state["count"]},
             # The stock bridge: glass booked at the stock app when orders are
             # marked made. Pending = bookings still waiting on a retry.
             "stock_bridge": {"configured": _zeta_configured(),

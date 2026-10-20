@@ -174,7 +174,7 @@ for _o in OPS_ORDERS.values():
 DASH["orders"].extend(OPS_ORDERS.values())
 DASH["orders"].sort(key=lambda o: int(o["id"]))
 
-_OPS_PREV_TOOL_JSON = copilot._tool_json
+_OPS_PREV_TOOL_JSON = shopify._tool_json
 async def ops_shopify(registry, name, args):
     args = args or {}
     if name == "shopify_get_shop":
@@ -192,23 +192,23 @@ async def ops_shopify(registry, name, args):
             names, ptype = _PRODUCTS[pid]
             return {"id": pid, "options": [{"name": n} for n in names], "product_type": ptype}
     return await _OPS_PREV_TOOL_JSON(registry, name, args)
-copilot._tool_json = ops_shopify
+shopify._tool_json = ops_shopify
 
-_OPS_PREV_TAGS = copilot._order_tag_writer
+_OPS_PREV_TAGS = shopify._order_tag_writer
 async def ops_tag_writer(order_id, tags):
     o = OPS_ORDERS.get(int(order_id))
     if o is not None:
         o["tags"] = tags
     return await _OPS_PREV_TAGS(order_id, tags)
-copilot._order_tag_writer = ops_tag_writer
+shopify._order_tag_writer = ops_tag_writer
 
-_OPS_PREV_FULFIL = copilot._fulfillment_writer
+_OPS_PREV_FULFIL = shopify._fulfillment_writer
 async def ops_fulfil(order_id, tracking_number=None, tracking_company=None, tracking_url=None, notify_customer=True):
     o = OPS_ORDERS.get(int(order_id))
     if o is not None:
         o["fulfillment_status"] = "fulfilled"
     return await _OPS_PREV_FULFIL(order_id, tracking_number, tracking_company, tracking_url, notify_customer)
-copilot._fulfillment_writer = ops_fulfil
+shopify._fulfillment_writer = ops_fulfil
 
 # World Options (c): the prelude's fake SOAP answers every booking with one
 # tracking number; this gives each booking its own, so the lists read true.
@@ -352,11 +352,11 @@ _ok200(post("/api/shipping/config", {"op": "set", "meter_number": "METER-9999", 
                                                 "depth": 25, "weight": 1.4}],
                                      "default_box_id": "small"}), "shipping config")
 # Printed stamps (b): the store's own writer, as the print path calls it.
-copilot._mark_printed([880201, 880202, 880301, 880302, 880303, 880401, 880402])
+production._mark_printed([880201, 880202, 880301, 880302, 880303, 880401, 880402])
 # Made (b): the made stamp writer (the route also fulfils and books glass at
 # the stock app; the stamp is all the queue reads).
 for _oid in (880301, 880302, 880303, 880401, 880402):
-    copilot._mark_made(_oid, True)
+    production._mark_made(_oid, True)
 # Complete (a): two made orders booked through the real dispatch route; a made
 # order with a label fulfils on booking, and ops_tag_writer files it as Complete.
 for _oid in (880401, 880402):

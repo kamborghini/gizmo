@@ -54,7 +54,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `FEEDBACK_PATH` | `"/data/feedback.json"` | copilot | feature requests from the desk |
 | `FORECAST_INGEST_TOKEN` | `""` | copilot | shared secret the nightly forecasting service presents to /hooks/forecast/*; empty switches the hooks off |
 | `FORECAST_PATH` | `"/data/forecast.json"` | copilot | the nightly forecasting service's latest run, and the cash flow workbook an admin uploaded (base64), in one store |
-| `GOBO_SIZES_PATH` | `os.path.join(os.path.dirname(__file__), "data", "gobo-siz...` | copilot |  |
 | `IMPACT_MAX` | `"100"` | copilot |  |
 | `IMPACT_PATH` | `"/data/impact.json"` | copilot | tracked-action impact log |
 | `KNOWLEDGE_CAP` | `"8000"` | copilot | max stored knowledge chars |
@@ -68,9 +67,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `MEMORY_INJECT` | `"40"` | copilot | max of each kind injected into prompts |
 | `MEMORY_MAX` | `"500"` | copilot | max stored memories |
 | `MEMORY_PATH` | `"/data/store_memory.json"` | copilot |  |
-| `ORDER_PAGE_CAP` | `"30"` | copilot |  |
-| `PRODUCTION_LABEL_DAYS` | `"180"` | copilot | how far back to look for tagged orders |
-| `PRODUCTION_LABEL_TAG` | `"IP"` | copilot | order tag that means "in production" |
 | `PRODUCT_TREND_MONTHS` | `"12"` | copilot |  |
 | `PROFILE_FIELD_CAP` | `"6000"` | copilot |  |
 | `PROFILE_PATH` | `"/data/store_profile.json"` | copilot |  |
@@ -116,9 +112,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `BACKUP_FILE_MAX` | `str(60 * 1024 * 1024)` | copilot |  |
 | `BACKUP_SNAPSHOT_DIR` | `"/data/snapshots"` | copilot |  |
 | `BACKUP_STATE_PATH` | `"/data/backup_state.json"` | copilot |  |
-| `PRODUCTION_ARCHIVE_PATH` | `os.path.join(os.path.dirname(PRODUCTION_STATE_PATH) or "....` | copilot |  |
-| `PRODUCTION_STATE_MAX` | `"1000"` | copilot |  |
-| `PRODUCTION_STATE_PATH` | `"/data/production_state.json"` | copilot |  |
 
 ## copilot.py - Keyword scraper for arbitrary external URLs (SSRF-guarded) +
 
@@ -139,12 +132,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `WORK_MIN_SECS` | `"60"` | copilot |  |
 | `WORK_PATH` | `"/data/worklog.json"` | copilot |  |
 
-## copilot.py - Order sweep snapshot
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `ORDER_CACHE_SECS` | `"180"` | copilot |  |
-
 ## copilot.py - Page rendering
 
 | Variable | Default | Read by | Notes |
@@ -156,20 +143,9 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
-| `GOBO_ALIASES_LIVE` | `"/data/gobo-aliases.csv"` | copilot |  |
-| `GOBO_ALIASES_PATH` | `os.path.join(os.path.dirname(__file__), "data", "gobo-ali...` | copilot |  |
-| `GOBO_OVERRIDES_LIVE` | `"/data/gobo-overrides.csv"` | copilot |  |
-| `GOBO_OVERRIDES_PATH` | `os.path.join(os.path.dirname(__file__), "data", "gobo-ove...` | copilot |  |
-| `GOBO_SIZES_LIVE` | `"/data/gobo-sizes.csv"` | copilot |  |
 | `LIABILITY_DEFAULT_TERMS` | `"30"` | copilot |  |
 | `LIABILITY_DUE_SOON_DAYS` | `"7"` | copilot |  |
 | `LIABILITY_TAGS` | `"Purchase order unpaid, Bank transfer unpaid, Procurement...` | copilot |  |
-| `MADE_TAG` | `"PC"` | copilot |  |
-| `OPTION_CACHE_SECS` | `"21600"` | copilot | 6 hours |
-| `PO_UNPAID_TAG` | `"purchase order unpaid"` | copilot |  |
-| `PROPOSAL_HOST` | `"quote.[shop domain]"` | copilot |  |
-| `SHOP_CACHE_SECS` | `"900"` | copilot |  |
-| `UNPROCESSED_TAG` | `"Unprocessed"` | copilot |  |
 
 ## copilot.py - Reconciliation stores + the read-only tools the chat is give
 
@@ -309,6 +285,50 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `RATE_LIMIT_GLOBAL` | `"150"` | gizmo.gate | AI requests/window (cost ceiling) |
 | `RATE_LIMIT_PER_CLIENT` | `"120"` | gizmo.gate | requests/window/client |
 | `RATE_LIMIT_WINDOW` | `"60"` | gizmo.gate | seconds |
+
+## gizmo/orderbook.py - Order sweep snapshot
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `ORDER_CACHE_SECS` | `"180"` | gizmo.orderbook |  |
+
+## gizmo/orderbook.py - Webhooks: how the desk stays live
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `MADE_TAG` | `"PC"` | gizmo.orderbook |  |
+| `PO_UNPAID_TAG` | `"purchase order unpaid"` | gizmo.orderbook |  |
+| `PROPOSAL_HOST` | `"quote.[shop domain]"` | gizmo.orderbook |  |
+| `SHOP_CACHE_SECS` | `"900"` | gizmo.orderbook |  |
+| `UNPROCESSED_TAG` | `"Unprocessed"` | gizmo.orderbook |  |
+
+## gizmo/orderbook.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `ORDER_PAGE_CAP` | `"30"` | gizmo.orderbook |  |
+
+## gizmo/production.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `OPTION_CACHE_SECS` | `"21600"` | gizmo.production | 6 hours |
+| `PRODUCTION_ARCHIVE_PATH` | `os.path.join(os.path.dirname(PRODUCTION_STATE_PATH) or "....` | gizmo.production |  |
+| `PRODUCTION_LABEL_DAYS` | `"180"` | gizmo.production | how far back to look for tagged orders |
+| `PRODUCTION_LABEL_TAG` | `"IP"` | gizmo.production | order tag that means "in production" |
+| `PRODUCTION_STATE_MAX` | `"1000"` | gizmo.production |  |
+| `PRODUCTION_STATE_PATH` | `"/data/production_state.json"` | gizmo.production |  |
+
+## gizmo/size_list.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `GOBO_ALIASES_LIVE` | `"/data/gobo-aliases.csv"` | gizmo.size_list |  |
+| `GOBO_ALIASES_PATH` | `os.path.join(_REPO, "data", "gobo-aliases.csv")` | gizmo.size_list |  |
+| `GOBO_OVERRIDES_LIVE` | `"/data/gobo-overrides.csv"` | gizmo.size_list |  |
+| `GOBO_OVERRIDES_PATH` | `os.path.join(_REPO, "data", "gobo-overrides.csv")` | gizmo.size_list |  |
+| `GOBO_SIZES_LIVE` | `"/data/gobo-sizes.csv"` | gizmo.size_list |  |
+| `GOBO_SIZES_PATH` | `os.path.join(_REPO, "data", "gobo-sizes.csv")` | gizmo.size_list |  |
 
 ## gizmo/team.py - Team: the app's own accounts. Shopify has no authority here
 
