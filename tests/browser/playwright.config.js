@@ -28,7 +28,10 @@ module.exports = defineConfig({
     { name: 'wide', use: { viewport: { width: 1920, height: 1080 } } },
   ],
   webServer: {
-    command: `${PY} tests/browser/serve.py`,
+    // exec: Playwright runs this through /bin/sh, and Linux's sh stays as the
+    // server's parent, so the process it stops and waits for (below) would be
+    // the shell, gone at once while the server was still tidying up.
+    command: `exec ${PY} tests/browser/serve.py`,
     cwd: ROOT,
     url: `http://127.0.0.1:${PORT}/`,
     timeout: 180000,
