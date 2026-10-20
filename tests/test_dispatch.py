@@ -30505,6 +30505,14 @@ def t_move_area_moves_routes_after_their_area():
     eq(mp.prove(base, head), [], "prove(): nothing but the move")
     rr = _sp.run([sys.executable, "-c", "import gizmo.routes.old, copilot"], cwd=root, capture_output=True, text=True)
     eq(rr.returncode, 0, rr.stderr[-400:])
+    # a route reading a value add_routes builds as it runs: moved, it would
+    # fail only when a request came in, so nothing is written
+    built = cop.replace("def add_routes(mcp, registry):\n", "def add_routes(mcp, registry):\n    built = dict(registry)\n") \
+               .replace("return old.f() + KEEP", "return old.f() + len(built)")
+    root2 = _toy_repo("toy-built", built, spec, {"gizmo/old.py": old})
+    r = _run_move(root2)
+    ok(r.returncode != 0 and "reads add_routes' built" in r.stdout, "a route reading add_routes' own value stops the move: " + r.stdout[-300:])
+    ok(not os.path.exists(os.path.join(root2, "gizmo/routes/old.py")), "and nothing is written")
 
 @test
 def t_the_privacy_loans_and_work_routes_are_gathered():
