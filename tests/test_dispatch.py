@@ -129,6 +129,7 @@ _socket.socket.connect, _socket.socket.connect_ex = _no_connect, _no_connect_ex
 import jwt
 import server, copilot, worldoptions, pipedrive
 import pagesource
+from tools.sources import copilot_source, COPILOT_FILES
 import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
@@ -681,7 +682,7 @@ def t_settings_names_the_shopify_version_the_server_runs():
     eq(r.json()["shopify"]["api_version"], server.API_VERSION,
        "the version the server talks to Shopify with, with no module named server")
     ok(not re.search(r"sys\.modules(\.get\(|\[)\s*[\'\"]server[\'\"]",
-                     open(os.path.join(os.path.dirname(copilot.__file__), "copilot.py"), encoding="utf-8").read()),
+                     copilot_source()),
        "copilot never looks the server up by module name: in production it is __main__")
 
 @test
@@ -864,8 +865,7 @@ def t_a_session_less_label_url_can_read_but_not_release():
     cannot be required - but a URL minted without a gizmo account behind it
     must not stamp orders printed or release them into production, which is a
     real workflow change that was reachable by anyone denied the tab."""
-    src = open(os.path.join(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__))), "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     i = src.index('mode = "rw" if signer else "ro"')
     ok('f"{raw_ids}|{exp}|{mode}"' in src[i:i + 400],
        "the mode is inside the signature, so it cannot be edited into the URL")
@@ -3155,8 +3155,7 @@ def t_an_oversized_label_is_refused_rather_than_rendered():
 def t_print_cors_credentials_go_only_to_this_shop():
     # Every Shopify merchant owns a *.myshopify.com origin, so a wildcard on that
     # suffix handed credentialed CORS to every store on Shopify.
-    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                            "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     ok('origin.endswith(".myshopify.com")' not in src,
        "no bare *.myshopify.com origin match remains")
     ok("own_shop and origin == own_shop" in src, "only this shop's own domain matches")
@@ -5048,8 +5047,7 @@ def t_the_privacy_webhooks_are_declared_where_shopify_reads_them():
 def _api_routes():
     """Every /api route the app registers, with the methods it accepts."""
     import io as _io
-    text = _io.open(os.path.join(os.path.dirname(__file__), "..", "copilot.py"),
-                    encoding="utf-8").read()
+    text = copilot_source()
     out = []
     for m in re.finditer(r'custom_route\("(/api/[^"]+)",\s*methods=\[([^\]]*)\]', text):
         methods = re.findall(r'"([A-Z]+)"', m.group(2))
@@ -5095,8 +5093,7 @@ def t_no_api_route_skips_the_pre_checks():
     live. A handler that reaches _authorize without it is authenticated but
     ungated - it would serve a tab the account was never given."""
     import io as _io
-    text = _io.open(os.path.join(os.path.dirname(__file__), "..", "copilot.py"),
-                    encoding="utf-8").read()
+    text = copilot_source()
     # Delegation counts. The mail, CRM, files, team and work routes reach
     # _pre_checks through a shared guard rather than calling it inline, and
     # asserting the literal call would flag forty correct handlers - the test
@@ -8651,8 +8648,7 @@ def t_the_order_webhook_never_writes_the_crm_from_a_thread():
     loads, mutates and writes with no await in between. A worker thread runs
     in genuine parallel and can install a stale snapshot over a won deal, or
     truncate the store through the shared .tmp path."""
-    src = open(os.path.join(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__))), "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     hook = src[src.index("async def order_webhook"):]
     hook = hook[:hook.index("@mcp.custom_route", 10)]
     ok("run_in_executor" not in hook,
@@ -8665,8 +8661,7 @@ def t_the_bare_token_print_route_demands_a_live_account():
     """With no x-app-session the tab check short-circuited, so a Shopify admin
     denied Production Manager (or switched off entirely) could hand-drive the
     URL, read every order on it and release them to production."""
-    src = open(os.path.join(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__))), "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     i = src.index("doc_who = _live_uid(request)")
     seg = src[i:i + 400]
     ok("if not doc_who:" in seg, "no session is a refusal, not a skipped check")
@@ -11844,8 +11839,7 @@ def t_the_drive_cannot_be_filled_or_confused_by_duplicate_names():
 def t_the_reaper_batches_and_gives_up_before_it_wedges_the_lock():
     """One key per round trip with no cap meant an R2 outage held the files
     lock ~30s per key, stalling Files, the drive and the scheduler."""
-    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                            "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     fn = src[src.index("def _files_reap("):]
     fn = fn[:fn.index("\ndef ", 1)]
     ok("delete_objects" in fn, "the reaper deletes in batches")
@@ -12450,7 +12444,7 @@ def t_the_chat_tool_gate_is_bound_per_run():
     writing and reading it. A chat turn is minutes of awaits, so a second
     person starting a chat would re-point it before the first turn's tools
     ran - and that person's permissions would be the ones enforced."""
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     eq(src.count("run_chat(history, dispatch_for(_who)"), 2,
        "both /api/chat and /api/chat/stream bind the asker to their own run")
     ok("_chat_actor" not in src, "and no module-level asker slot survives")
@@ -12731,7 +12725,7 @@ def t_the_mail_board_does_not_ship_two_years_of_finished_mail():
 def t_the_pre_import_snapshot_does_not_block_the_event_loop():
     """It deflates the whole data volume. Inline, the process stops serving -
     including the order webhook, which Shopify gives 5 seconds."""
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     seg = src.split("The one irreversible moment gets a snapshot")[1][:400]
     ok("to_thread" in seg, "the pre-import snapshot runs off the loop: " + seg[:160])
 
@@ -13037,7 +13031,7 @@ def t_the_admin_print_document_never_half_releases():
     """It cannot carry a gizmo session, so its URL is read-only and it changes
     nothing. If it ever does write, it must do a WHOLE release - tags and
     terms - not the half that leaves an invoice with no due date."""
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     ok("_sync_tags_bg" not in src, "the tag-only background release is gone")
     seg = src.split("printed_ids = [o[\"id\"]")[1][:900]
     ok("_release_bg" in seg, "the print document releases in full when it may write")
@@ -13632,7 +13626,7 @@ def t_the_system_learns_which_source_is_right_from_closed_months():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     simple = open(os.path.join(root, "forecast", "simple.py"), encoding="utf-8").read()
     nightly = open(os.path.join(root, "forecast", "nightly.py"), encoding="utf-8").read()
-    src = open(os.path.join(root, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
 
     led = src.split("def _forecast_ledger(", 1)[1].split("\n    @mcp", 1)[0]
     ok("if not math.isfinite(v) or name in slot:" in led,
@@ -13984,7 +13978,7 @@ def t_the_nightly_service_holds_no_shopify_secret():
     ok("run_bulk_orders(store, pull_from)" in nightly and "fetch_products(store)" in nightly,
        "both Shopify reads go through the store chosen")
     ok('"/hooks/forecast/shopify"' in ingest and '"/hooks/forecast/shopify"' in
-       open(os.path.join(root, "copilot.py"), encoding="utf-8").read(),
+       copilot_source(),
        "the job and Reactor name the same hook")
     ok("def shop_host(" in ingest and 'shop if "." in shop else shop + ".myshopify.com"' in ingest,
        "either spelling of the shop reaches Shopify at the same address")
@@ -14342,7 +14336,7 @@ def t_a_model_ruled_not_a_gobo_prints_no_size_on_its_label():
     finally:
         copilot._write_gobo_rule_rows("override", rows)
     # The size check still counts it apart, as before.
-    ok("ruled_out" in open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read(), "the size check keeps its own count")
+    ok("ruled_out" in copilot_source(), "the size check keeps its own count")
 
 @test
 def t_an_order_is_sized_from_its_own_makers_models_before_another_makers():
@@ -14921,7 +14915,7 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
         eq(redact("rc1-e").status_code, 200, "answered, not a crash")
         ok(os.path.isfile(copilot.CRM_PATH), "and not erased")
         # The watchdog tries it every hour, against its own record of the outage.
-        src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+        src = copilot_source()
         ok('await _shop_redact_retry(state.get("shopify_down"))' in src, "the hourly tick tries what is owed")
         ok("_ensure_scheduler(registry)" in src.split("async def privacy_webhook", 1)[1][:1500],
            "and a privacy request starts the scheduler, as an uninstalled app is never opened")
@@ -15134,7 +15128,7 @@ def t_a_members_notes_wait_for_an_admin_before_any_answer_reads_them():
         ok("Trade orders ship on Tuesdays." in copilot._memory_to_system(), "an admin's note is read at once")
         ok(not result2.get("held"), "and nothing is said to be waiting")
         # The chat route decides by who is asking.
-        src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+        src = copilot_source()
         eq(src.count('_chat_after(result, history, held=_team_level(_who) < ROLE_LEVELS["admin"]'), 2,
            "both chat routes hold a member's notes")
         # A member cannot keep it, nor dismiss someone else's fact.
@@ -15713,7 +15707,7 @@ def t_a_signed_customer_redact_waits_for_an_admin():
         eq(ask("damaged@example.com", 1200, "cr-dm").status_code, 200)
         eq([h["email"] for h in held()], ["damaged@example.com"], "damaged lists are replaced, the request kept")
         # The hourly tick runs it first, before anything that can fail.
-        src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+        src = copilot_source()
         tick = src.split("async def _watchdog_tick", 1)[1]
         ok(tick.index("await _redact_hold_due(check=up)") < tick.index("run_label_coverage")
            and tick.index("_redact_retry_pending()") < tick.index("run_label_coverage"),
@@ -15972,7 +15966,7 @@ def t_recon_chat_tools_are_tab_gated_and_read_only():
     import copilot as _cp
     for name in ("recon_summary", "recon_exceptions", "recon_exception"):
         eq(_cp._TOOL_TABS.get(name), "recon", name + " is gated on the recon tab")
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     seg = src.split("async def recon_summary")[1].split("_oauth_states")[0] \
         if "_oauth_states" in src.split("async def recon_summary")[1][:9000] \
         else src.split("async def recon_summary")[1][:9000]
@@ -16272,7 +16266,7 @@ def t_every_gmail_call_goes_to_the_account_it_was_asked_for():
 
 @test
 def t_reconciliation_is_wired_to_the_finance_mailbox_only():
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     seg = src.split("recon_engine.configure(")[1][:400]
     ok("mail_store" not in seg,
        "the engine no longer receives the Inbox tab's store at all")
@@ -16287,7 +16281,7 @@ def t_connecting_the_sales_mailbox_as_accounts_is_refused():
     """The likeliest mistake in the whole walk: whoever clicks the link is
     probably already signed in as the sales mailbox. Agreeing would leave
     reconciliation reading the wrong post and reporting a clean board."""
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     cb = src.split("async def gmail_finance_callback")[1].split("\n    @mcp.custom_route")[0]
     ok("addr.strip().lower() == sales.strip().lower()" in cb,
        "the two addresses are compared, tolerant of case and whitespace")
@@ -16299,7 +16293,7 @@ def t_connecting_the_sales_mailbox_as_accounts_is_refused():
 
 @test
 def t_the_finance_token_is_a_credential_not_a_backup_item():
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     eq(src.count('getattr(google_mail, "FINANCE_TOKEN_PATH"'), 2,
        "excluded from the backup AND blocked at restore, like every other token")
 
@@ -16676,7 +16670,7 @@ def t_xero_connects_by_button_too():
         saved = (xero_api.CLIENT_ID, xero_api.CLIENT_SECRET)
         xero_api.CLIENT_ID = xero_api.CLIENT_SECRET = "demo"
         try:
-            src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+            src = copilot_source()
             ok("YOUR_CONNECT_SECRET" not in src,
                "no placeholder secret is handed to anyone, for either connection")
             r = post("/api/recon/xero-link", {})
@@ -17253,7 +17247,7 @@ def t_a_booking_can_carry_its_own_collection_arrangement():
     is asked for ALONGSIDE a parcel. The arrangement was buried in Settings and
     applied to every booking; it can now be chosen for one job, because a
     different job may go out with a different carrier."""
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     ok("collection_option: str = \"\"" in src, "the booking takes one")
     i = src.index("_asked_collection = str(collection_option")
     seg = ' '.join(src[i:i + 160].split())
@@ -17652,7 +17646,7 @@ def t_a_collection_belongs_to_the_day_the_van_comes():
     eq(plan2["arrangement"], "I_Already_Have_Collection_Scheduled",
        "while a second parcel for the same day rides the one already booked")
     # And the record keeps the ready date so the day can be worked out later.
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     eq(src.count('"ready_date": _ready_dmy'), 1,
        "the record stores the day the courier was asked to come, in the one place records are made")
     eq(src.count("await _book_and_record("), 2,
@@ -17713,7 +17707,7 @@ def t_a_custom_shipment_books_the_collection_its_courier_needs():
     """It sent the standing setting whatever the courier was, so a DHL custom
     shipment asked for whatever UPS is set to - and it never recorded the van it
     had just booked, so nothing after it knew."""
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     eq(src.count("collection_option=str(cfg.get(\"collection_option\") or \"\")"), 0,
        "no booking path sends the standing setting regardless of courier")
     eq(src.count("_record_collection("), 2,
@@ -17754,7 +17748,7 @@ def t_the_courier_reference_is_never_printed_as_markup():
        "a bare reference is still a reference")
     eq(worldoptions.parse_collection(None)["ref"], "", "and nothing is nothing")
     # Every place it is shown reads it through the parser.
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     eq(src.count("parse_collection("), 2,
        "both the collections view and the manifest column parse it")
     html = pagesource.join(HERE)
@@ -17895,7 +17889,7 @@ def t_a_booked_collection_is_written_down_before_anything_can_fail():
     """It is recorded straight after the courier is booked and charged, inside
     the stretch that must not raise. If it were not, a crash between booking and
     recording would let the next parcel book a second pickup."""
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     i = src.index("_record_collection(shipment.get(\"carrier_name\") or option.get(\"carrier_name\")")
     charged = src.index("From here the courier is BOOKED and the account is charged")
     ok(charged < i, "it is recorded after the booking is known to have succeeded")
@@ -17930,7 +17924,7 @@ def t_each_courier_carries_its_own_collection_arrangement():
        == copilot.COLLECTION_MESSAGES["I_Need_To_Book_A_Collection"],
        "and which, for the other")
     # Only real carriers and real arrangements survive a save.
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     i = src.index('if isinstance(body.get("collection_by_carrier"), dict):')
     seg = src[i:i + 800]
     ok("valid_c" in seg and "carrier_choices()" in seg, "the carrier must be one we know")
@@ -18026,7 +18020,7 @@ def t_a_quote_that_will_not_price_hands_over_the_evidence():
     # Nothing to show is not a panel with nothing in it.
     eq(copilot._wo_tech(_Boom("no detail")), {}, "an error carrying no evidence makes no panel")
     # One implementation, so the two paths cannot drift apart again.
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     eq(src.count("def _wo_tech("), 1, "there is exactly one of these")
     ok(src.count("_wo_tech(") >= 3, "and both the quote and the booking paths call it")
 
@@ -18149,7 +18143,7 @@ def t_an_inbox_click_writes_the_mailbox_once_not_twice():
         copilot._write_mail = saved
     # Since 2026-10-12 the label trip runs after the answer, in one place
     # (_mail_labels_later), and that is where the follow-up write is guarded.
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     eq(src.count("if await _mail_sync_labels("), 1,
        "the one follow-up write is guarded on there being something to write")
     eq(src.count('_mail_labels_soon(t["id"])'), 3,
@@ -21252,7 +21246,7 @@ def t_the_courier_credentials_are_sealed_like_every_other_credential():
         eq(creds["key"], "KEY-super-secret", "and it opens again for the courier call")
         eq(creds["password"], "PW-very-secret")
         eq(oct(os.stat(copilot.WO_SECRET_PATH).st_mode & 0o777), "0o600", "0600 from creation")
-        src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+        src = copilot_source()
         ok('("world_options", WO_SECRET_PATH' in src,
            "and the boot re-seal covers it, so an existing plaintext file is fixed")
     finally:
@@ -21302,7 +21296,7 @@ def t_the_break_glass_password_never_leaves_the_operators_console():
         ok("Ab3dEf9hIjKl" not in json.dumps(got), "the starter password did not travel")
     finally:
         logdrain.stop()
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     seg = src.split("MASTER RESET: temporary password")[1][:600]
     ok('"no_drain": True' in seg, "and the real call site carries the flag")
 
@@ -21498,7 +21492,7 @@ def t_an_oauth_landing_page_cannot_be_framed():
     # A nested helper, so it is read where it is written: the Google and Xero
     # callback results are the only pages the app serves outside the shell, and
     # the shell's frame-ancestors never applied to them.
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     seg = src.split("def _oauth_page(")[1][:1600]
     ok("default-src 'none'" in seg, "no scripts at all on the callback pages")
     ok("frame-ancestors 'none'" in seg, "and they cannot be framed")
@@ -21601,7 +21595,7 @@ def t_every_json_store_reaches_disk_through_the_one_writer():
     what makes every store get every property; this is what keeps the next
     store from writing its own loop."""
     import ast as _ast
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     tree = _ast.parse(src)
     def owners(needle):
         out = set()
@@ -21670,7 +21664,7 @@ def t_add_routes_holds_routes_and_nothing_it_could_have_shared():
     function, so it should be one. The exceptions are the handful that close
     over the tool registry add_routes is handed, which genuinely cannot."""
     import ast as _ast, builtins as _bi
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     tree = _ast.parse(src)
     ar = next(n for n in tree.body if getattr(n, "name", "") == "add_routes")
 
@@ -21735,7 +21729,7 @@ def t_a_handler_uses_the_caller_it_was_handed_not_one_left_in_a_box():
     lands between the two, which nothing enforced, and the last route to be
     written was reading it 101 lines after its guard. Every door here returns
     (err, body, who) instead."""
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     ok("_crm_actor" not in src, "no shared dict holds the current caller")
     ok("return None, body, who" in src.split("async def _crm_guard", 1)[1][:900],
        "the CRM door hands the caller back, the same shape as _guard")
@@ -21751,7 +21745,7 @@ def t_every_signed_in_route_goes_through_the_one_door():
     copy spent an AI slot before it had checked the session. The session is
     checked in one place now; this keeps it there."""
     import ast as _ast
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     tree = _ast.parse(src)
     spans = [(n.lineno, n.end_lineno, n.name) for n in _ast.walk(tree)
              if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and n.name != "add_routes"]
@@ -21832,7 +21826,7 @@ def t_the_api_reference_is_generated_from_the_code():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     rows = mod.collect(HERE)
-    src = "".join(open(os.path.join(HERE, m + ".py"), encoding="utf-8").read() for m in mod.MODULES)
+    src = "".join(open(os.path.join(HERE, f), encoding="utf-8").read() for _, f in mod.module_files(HERE))
     eq(len(rows), len(re.findall(r"@\w+\.custom_route\(", src)), "every route decorator is a row")
     by = {r["path"]: r for r in rows}
     eq(by["/api/backup"]["door"], "_guard", "the backup route opens with the one door")
@@ -22604,8 +22598,7 @@ def t_every_memory_copy_of_a_store_is_on_the_one_list():
     """Restore and shop/redact drop the caches from one registry. A `_mem`
     global added without a row there is the next cache to outlive its file:
     the loan register was the last one, forgotten from a hand-kept list."""
-    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "copilot.py"),
-               encoding="utf-8").read()
+    src = copilot_source()
     declared = set(re.findall(r"^(_[a-z_]+_mem)\b", src, re.M))
     eq(declared, set(copilot._memory_stores().values()),
        "every whole-object cache is dropped by restore and shop/redact")
@@ -26325,7 +26318,7 @@ def t_a_handover_that_failed_once_moves_the_gmail_label_whole():
 def t_an_ai_draft_waits_its_turn_in_the_ai_window():
     """A29. Drafting a reply with Claude neither took nor respected a slot in
     the global AI window."""
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     seg = src.split("async def mail_draft_route(")[1].split("resp = await _xcreate(_anthropic(), model=MODEL_DEEP")[0]
     ok("_window_ok(_rl_global, RATE_MAX_GLOBAL" in seg, "the compose checks the AI window before the call")
 
@@ -26370,7 +26363,7 @@ def t_booked_labels_are_not_held_in_memory():
 @test
 def t_the_backup_download_is_built_off_the_event_loop():
     """A42. Deflating the whole volume inline stalled every request and webhook."""
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     seg = src.split('@mcp.custom_route("/api/backup"')[1][:2500]
     ok("await asyncio.to_thread(_build_backup_zip)" in seg, "off the loop, as the pre-import snapshot is")
 
@@ -26560,7 +26553,7 @@ def t_each_request_takes_the_effort_its_model_accepts():
 
 @test
 def t_opus_5_5_is_the_default_and_counted_at_its_price():
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     ok('or "claude-opus-5-5"\n' in src and 'os.environ.get("ANTHROPIC_MODEL_DEEP", "claude-opus-5-5")' in src,
        "both tiers default to Opus 5.5")
     # $4 in, $20 out, cache reads at 0.05x input, writes at 1.25x.
@@ -26698,7 +26691,7 @@ def t_an_ai_failure_says_what_it_was():
     eq(copilot._model_name("claude-sonnet-5"), "Claude Sonnet 5")
     eq(copilot._model_name("claude-haiku-4-5-20251001"), "Claude Haiku 4.5")
     eq(copilot._model_name("anthropic.claude-opus-4-8"), "Claude Opus 4.8")
-    src = open(os.path.join(HERE, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     ok('"The AI service returned an error. Please try again."}' not in src and src.count("_ai_error_words(e)}") >= 11,
        "every AI route says the reason")
 
@@ -29088,7 +29081,8 @@ def t_no_hosting_or_setting_name_reaches_a_person_from_the_server():
     machine = {("server.py", "_boot_report"),           # the boot log's list of what is off
                ("server.py", "_error"),                 # the MCP tools' answers, read by the model
                ("server.py", "__call__"),               # the /mcp lock, read by an MCP client
-               ("copilot.py", "_verify_session_token")}  # its refusal is only logged
+               ("copilot", "_verify_session_token")}     # its refusal is only logged
+    # copilot.py and the modules split out of it are one place here ("copilot").
     not_words = {"gizmo-build|", "gizmo"}                # a hash seed and a MIME boundary
     bad = []
 
@@ -29103,13 +29097,14 @@ def t_no_hosting_or_setting_name_reaches_a_person_from_the_server():
                 and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str)):
             kids.remove(body[0])                         # a docstring
         if (isinstance(node, ast.Constant) and isinstance(node.value, str) and not hush
-                and (name, fn) not in machine and node.value not in not_words
+                and ("copilot" if name in COPILOT_FILES else name, fn) not in machine
+                and node.value not in not_words
                 and not re.fullmatch(r"[A-Z][A-Z0-9_]*", node.value) and words.search(node.value)):
             bad.append("%s:%d %s" % (name, node.lineno, node.value[:80]))
         for k in kids:
             visit(k, name, fn, hush)
-    for name in ("copilot.py", "server.py", "recon.py", "xero.py", "google_mail.py", "google_data.py",
-                 "pipedrive.py", "tokenvault.py", "worldoptions.py", "eori.py"):
+    for name in COPILOT_FILES + ["server.py", "recon.py", "xero.py", "google_mail.py", "google_data.py",
+                                 "pipedrive.py", "tokenvault.py", "worldoptions.py", "eori.py"]:
         visit(ast.parse(open(os.path.join(root, name), encoding="utf-8").read()), name, "", False)
     ok(not bad, "%d strings a person reads name the hosting, the code name or a setting: %s"
        % (len(bad), "; ".join(bad[:8])))
@@ -29600,6 +29595,204 @@ def t_a_release_that_finds_shopify_ahead_of_the_app_says_the_order_changed():
             ORDER["tags"], ORDER["cancelled_at"] = saved[1], saved[2]
             reset_prod()
     with_accounts(go)
+
+# ---- Moving code out of copilot.py without a test going blind --------------
+# Stage 4 of the 14 October audit moves areas out of copilot.py into the gizmo
+# package. A test that sets `copilot.NAME = stub` tests nothing once the code
+# reading NAME lives elsewhere, and a check that reads copilot.py's text passes
+# with nothing to look at. These three guards make either a failure instead.
+
+def _app_module_files():
+    """Module name -> repo-relative file, for every module of the app."""
+    from tools import sources
+    return {f[:-3].replace("/", "."): f for f in sources.APP_MODULES}
+
+def _module_facts(rel):
+    """What a module binds at its top level, declares global, reads, copies.
+
+    binds: names a top-level statement binds (inside a top-level if or try
+    too); rebound: names a `global` statement lets a function rebind; reads:
+    every name read anywhere; copies: (from-module, name, line) for each
+    `from <module> import name`."""
+    import ast as _ast
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    tree = _ast.parse(open(os.path.join(root, rel), encoding="utf-8").read())
+    binds, rebound, reads, copies = set(), set(), set(), []
+    def bind_stmt(n):
+        if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef, _ast.ClassDef)):
+            binds.add(n.name)
+        elif isinstance(n, (_ast.Import, _ast.ImportFrom)):
+            for a in n.names:
+                binds.add((a.asname or a.name).split(".")[0])
+        elif isinstance(n, (_ast.Assign, _ast.AnnAssign, _ast.AugAssign)):
+            for t in (n.targets if isinstance(n, _ast.Assign) else [n.target]):
+                for x in _ast.walk(t):
+                    if isinstance(x, _ast.Name):
+                        binds.add(x.id)
+        elif isinstance(n, (_ast.If, _ast.Try, _ast.With)):
+            for part in ("body", "orelse", "finalbody", "handlers"):
+                for c in getattr(n, part, []) or []:
+                    for s in (c.body if isinstance(c, _ast.ExceptHandler) else [c]):
+                        bind_stmt(s)
+    for n in tree.body:
+        bind_stmt(n)
+    via = {}    # alias -> module, for `import m`, `import m as a`, `from p import m`
+    for x in _ast.walk(tree):
+        if isinstance(x, _ast.Global):
+            rebound.update(x.names)
+        elif isinstance(x, _ast.Name) and isinstance(x.ctx, _ast.Load):
+            reads.add(x.id)
+        elif isinstance(x, _ast.Import):
+            for a in x.names:
+                via[a.asname or a.name.split(".")[0]] = a.name
+        elif isinstance(x, _ast.ImportFrom) and x.module and not x.level:
+            for a in x.names:
+                copies.append((x.module, a.name, x.lineno))
+                via[a.asname or a.name] = x.module + "." + a.name
+    # names this module reads on another through its name: `google_mail.send_message`
+    elsewhere = {(via[x.value.id], x.attr) for x in _ast.walk(tree)
+                 if isinstance(x, _ast.Attribute) and isinstance(x.ctx, _ast.Load)
+                 and isinstance(x.value, _ast.Name) and x.value.id in via}
+    return {"binds": binds | rebound, "rebound": rebound, "reads": reads, "copies": copies,
+            "elsewhere": elsewhere}
+
+def _test_patches():
+    """Every `module.NAME = …` (and setattr) in the tests on a module of the app.
+
+    -> list of (module, NAME, file, line, top-level function or None)."""
+    import ast as _ast, glob as _glob
+    mods = _app_module_files()
+    here = os.path.dirname(os.path.abspath(__file__))
+    out = []
+    for path in sorted(_glob.glob(os.path.join(here, "**", "*.py"), recursive=True)):
+        tree = _ast.parse(open(path, encoding="utf-8").read())
+        alias = {}
+        for x in _ast.walk(tree):
+            if isinstance(x, _ast.Import):
+                for a in x.names:
+                    if a.name in mods:
+                        alias[a.asname or a.name.split(".")[0]] = a.name
+            elif isinstance(x, _ast.ImportFrom) and x.module and not x.level:
+                for a in x.names:
+                    full = x.module + "." + a.name
+                    if full in mods:
+                        alias[a.asname or a.name] = full
+        rel = os.path.relpath(path, os.path.dirname(here))
+        def visit(node, top):
+            for c in _ast.iter_child_nodes(node):
+                t = top
+                if top is None and isinstance(c, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                    t = c.name
+                targets = []
+                if isinstance(c, (_ast.Assign, _ast.AugAssign, _ast.AnnAssign)):
+                    for tg in (c.targets if isinstance(c, _ast.Assign) else [c.target]):
+                        targets += [y for y in _ast.walk(tg) if isinstance(y, _ast.Attribute)]
+                    for y in targets:
+                        if isinstance(y.ctx, _ast.Store) and isinstance(y.value, _ast.Name) and y.value.id in alias:
+                            out.append((alias[y.value.id], y.attr, rel, c.lineno, t))
+                if (isinstance(c, _ast.Call) and isinstance(c.func, _ast.Name) and c.func.id == "setattr"
+                        and len(c.args) >= 2 and isinstance(c.args[0], _ast.Name) and c.args[0].id in alias
+                        and isinstance(c.args[1], _ast.Constant) and isinstance(c.args[1].value, str)):
+                    out.append((alias[c.args[0].id], c.args[1].value, rel, c.lineno, t))
+                visit(c, t)
+        visit(tree, None)
+    return out
+
+# A test that patches one module's copy of a name another module also keeps,
+# where the other copy is not part of what the test means to change. Each is
+# (patched module, name, the module with its own copy): the reason.
+SHARED_COPIES = {
+    ("server", "SHOPIFY_STORE", "copilot"):
+        "the Shopify client tests drive server._request, which builds the shop's "
+        "address from server's own; copilot's copy pins session tokens and the "
+        "frame rule, which those tests never reach",
+    ("copilot", "SHOPIFY_STORE", "server"):
+        "the frame-ancestors test reads copilot._frame_headers alone",
+    ("copilot", "httpx", "server"):
+        "the connector settings test routes copilot's calls to the connector; "
+        "server's client talks to Shopify, which that test never reaches",
+}
+
+@test
+def t_no_test_patches_a_name_nobody_reads():
+    """Three ways a patch in a test can test nothing, each a failure here.
+
+    (a) the module patched does not bind or does not read the name (it moved);
+    (b) another module copied the name with `from m import name`, so the patch
+        never reaches the copy (a copy is allowed only of a name no test
+        patches and no `global` rebinds);
+    (c) another of the server's own modules (server, copilot, gizmo.*) keeps a
+        copy of its own and reads it, and the test does not patch that one
+        too (or SHARED_COPIES says why it need not).
+    A name counts as read when its module reads it, or another module reads
+    it through the module's name (`google_mail.send_message`)."""
+    mods = _app_module_files()
+    facts = {m: _module_facts(f) for m, f in mods.items()}
+    read_through = {pair for fx in facts.values() for pair in fx["elsewhere"]}
+    patches = _test_patches()
+    ok(len(patches) > 500, f"the scan finds the suite's patches ({len(patches)})")
+    patched = {(m, n) for m, n, *_ in patches}
+    bad = []
+    for m, n, f, line, top in patches:
+        if n not in facts[m]["binds"]:
+            bad.append(f"{f}:{line} sets {m}.{n}, which {m} does not bind")
+        elif n not in facts[m]["reads"] and (m, n) not in read_through:
+            bad.append(f"{f}:{line} sets {m}.{n}, which nothing reads")
+    for m, fx in facts.items():
+        for frm, n, line in fx["copies"]:
+            if frm in mods and ((frm, n) in patched or n in facts[frm]["rebound"]):
+                bad.append(f"{mods[m]}:{line} copies {n} from {frm}, which a test patches or a global rebinds there")
+    by_top = {}
+    for m, n, f, line, top in patches:
+        by_top.setdefault((f, top), set()).add((m, n))
+    # (c) among the server's own modules, where code moves between files:
+    # server.py, copilot.py and the modules split out of copilot.py. The
+    # integration modules each keep their own client (httpx) by design.
+    own = {"server", "copilot"} | {m for m in mods if m.startswith("gizmo.")}
+    for m, n, f, line, top in patches:
+        if m not in own:
+            continue
+        for o, fx in facts.items():
+            if o == m or o not in own or n not in fx["binds"] or n not in fx["reads"]:
+                continue
+            if (o, n) in by_top.get((f, top), set()) or (m, n, o) in SHARED_COPIES:
+                continue
+            bad.append(f"{f}:{line} sets {m}.{n} but {o} reads its own {n}")
+    eq(sorted(set(bad)), [], "patches that would test nothing")
+
+@test
+def t_nothing_reads_copilot_py_by_name():
+    """Only tools/sources.py names copilot.py's file: the rest read the code
+    through it, so a check still sees code that moved out into gizmo/."""
+    import ast as _ast, glob as _glob
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    name = "copilot" + ".py"
+    found = []
+    for path in sorted(_glob.glob(os.path.join(root, "tests", "**", "*.py"), recursive=True)
+                       + _glob.glob(os.path.join(root, "tools", "*.py"))):
+        rel = os.path.relpath(path, root)
+        if rel == os.path.join("tools", "sources.py"):
+            continue
+        for x in _ast.walk(_ast.parse(open(path, encoding="utf-8").read())):
+            if (isinstance(x, _ast.Constant) and isinstance(x.value, str)
+                    and re.fullmatch(r"[\w./-]*" + re.escape(name), x.value)):
+                found.append(f"{rel}:{x.lineno}")
+    eq(found, [], "reads " + name + " by name; use tools/sources.py")
+
+@test
+def t_the_security_scans_cover_every_app_module():
+    """The Makefile's and CI's bandit runs name every module of the app, so a
+    module split out of copilot.py is scanned like the rest."""
+    from tools import sources
+    root = sources.ROOT
+    make = open(os.path.join(root, "Makefile"), encoding="utf-8").read()
+    ci = open(os.path.join(root, ".github", "workflows", "tests.yml"), encoding="utf-8").read()
+    lists = {"Makefile": re.search(r"^SAST_FILES\s*=\s*(.+)$", make, re.M).group(1).split(),
+             "CI": [w for w in re.search(r"bandit -q[^\n]*", ci).group(0).split()[1:] if not w.startswith("-")]}
+    for where, paths in lists.items():
+        missing = [m for m in sources.APP_MODULES
+                   if not any(m == p or m.startswith(p.rstrip("/") + "/") for p in paths)]
+        eq(missing, [], where + "'s security scan leaves out")
 
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The

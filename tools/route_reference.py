@@ -19,7 +19,15 @@ import os
 import re
 import sys
 
-MODULES = ["server", "copilot"]
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sources  # noqa: E402  (copilot.py and the modules split out of it)
+
+
+
+def module_files(root):
+    """(module, file) for each module that registers routes: server.py, then
+    copilot.py and the modules split out of it."""
+    return [("server", "server.py")] + [(f[:-3].replace("/", "."), f) for f in sources.copilot_files(root)]
 OUT = os.path.join("docs", "API.md")
 DOORS = {"_guard", "_mail_guard", "_crm_guard", "_files_guard", "_auth_guard", "_team_guard"}
 CHECKS = {"_team_level", "_team_role", "_user_tabs", "_uid_has_tab", "_live_uid", "_secret_ok",
@@ -93,12 +101,12 @@ def _about(fn):
 
 
 def collect(root):
-    copilot_tree = ast.parse(open(os.path.join(root, "copilot.py"), encoding="utf-8").read())
+    copilot_tree = ast.parse(open(os.path.join(root, sources.copilot_files(root)[0]), encoding="utf-8").read())
     tab_routes = _literal(copilot_tree, "_TAB_ROUTES") or ()
     open_api = _literal(copilot_tree, "_OPEN_API") or ()
     rows = []
-    for mod in MODULES:
-        path = os.path.join(root, mod + ".py")
+    for mod, rel in module_files(root):
+        path = os.path.join(root, rel)
         tree = copilot_tree if mod == "copilot" else ast.parse(open(path, encoding="utf-8").read())
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):

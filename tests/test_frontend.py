@@ -10,6 +10,7 @@ import json, os, re, subprocess, sys, tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 import pagesource
+from tools.sources import copilot_source, COPILOT_FILES
 HTML = pagesource.join(ROOT)
 # Node helpers that take a page file get the joined page in a temporary file.
 _PAGE_TMP = tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf-8")
@@ -1085,7 +1086,7 @@ def t_the_shopify_print_offers_every_stock_and_starts_on_the_production_size():
     stock is a shop setting, not something chosen at the print button, so both
     actions now offer exactly the sizes the server knows and open on the
     production printer's saved size, which the signing call hands back."""
-    src = open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     block = src[src.index("LABEL_STOCK = ("):]
     server = set(re.findall(r'"([0-9a-z]+)"', block[:block.index(")")]))
     for ext in ("print-label-order", "print-label-bulk"):
@@ -1904,7 +1905,7 @@ def t_the_production_queue_links_its_order_numbers():
     ok("row.append(orderA(orderNo(o), o.admin_url, 'lbl-num lbl-num-link'))" in SCRIPT,
        "the queue row's order number is the link")
     ok('"admin_url": _admin_order_url(o.get("id")),' in
-       open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read(),
+       copilot_source(),
        "and the label order payload carries the url, like every other order payload")
     ok(re.search(r"\.lbl-num-link[^{]*\{[^}]*var\(--text-brand\)", HTML),
        "it reads as a link, while .lbl-num keeps the tabular column geometry")
@@ -1964,7 +1965,7 @@ def t_the_edit_panel_offers_only_what_shopify_will_change():
 def t_a_parcel_whose_address_moved_is_not_quietly_fulfilled():
     """Mark made is what emails the customer their tracking. If the address was
     edited after the label was booked, the parcel is going somewhere else."""
-    py = open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()
+    py = copilot_source()
     ok('"reason": "address_changed"' in py, "the fulfilment gate stops for it")
     ok('"needs_ack": (ship_reason == "address_changed")' in py,
        "and tells the workbench, because only a human knows where the parcel went")
@@ -2344,7 +2345,7 @@ def t_the_team_activity_filters_on_the_account_id_the_board_sends():
     carried u.sub, which /api/team/board never sends, so picking anyone showed
     "Nothing recorded for that view yet." The board sends each account as id,
     and each event names its account by that id as sub."""
-    srv = open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()
+    srv = copilot_source()
     ok('return {"id": uid, "name": u.get("name") or ""' in srv, "an account is sent with its id")
     fd = fn_src("function renderTeamFeed(")
     ok("u.sub" not in fd, "no person is offered by a field the server never sends")
@@ -3482,7 +3483,7 @@ def t_the_size_list_finds_a_fixture_however_it_is_written():
        "a size the bench does not cut names the nearest it does, each a search")
     ok("const SIZES_QSORTS = [['match', 'Best match']].concat(SIZES_SORTS);" in SCRIPT, "Best match is offered while searching")
     ok("defs.push(['Search: ' + st.q" not in SCRIPT, "the search is in its box, not repeated as a chip")
-    ok("\"shorthand\": {\"makers\": _GOBO_MAKER_SHORT, \"words\": _GOBO_WORD_GROUPS}" in open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read(), "the listing carries the shorthand table")
+    ok("\"shorthand\": {\"makers\": _GOBO_MAKER_SHORT, \"words\": _GOBO_WORD_GROUPS}" in copilot_source(), "the listing carries the shorthand table")
 
 
 @test
@@ -3704,7 +3705,7 @@ def t_reconciliation_is_not_ticked_by_default():
     so the Team picker ticked it, unnamed, for every account on the default
     tabs, and any save of that panel granted it."""
     import ast
-    src = open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     tree = ast.parse(src)
     consts = {}
     for node in tree.body:
@@ -6106,7 +6107,7 @@ def t_the_composer_is_its_own_file_served_like_the_app_script():
     stale composer can never be handed to a browser."""
     ok("function mountComposer(" in COMPOSER and "window.mountComposer = mountComposer" in COMPOSER,
        "the file exports one mount function onto the window")
-    src = open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()
+    src = copilot_source()
     ok('"/assets/composer.js"' in src and '_asset_hashes["composer"]' in src,
        "hashed and routed like app.js")
     ok("composer.js?v=" in src, "the shell loads it by hash")
@@ -6333,7 +6334,7 @@ def t_the_four_inch_square_stock_exists_and_the_two_sides_agree():
     ok("'4x4'" in sizes, "4 x 4 is on the list")
     ok("101.6" in sizes.split("'4x4'")[1].split("}")[0], "and it is square, in millimetres")
     client = set(re.findall(r"'([0-9a-z]+)': \{ w:", sizes))
-    src = open("copilot.py", encoding="utf-8").read()
+    src = copilot_source()
     block = src[src.index("LABEL_STOCK = ("):]
     server = set(re.findall(r'"([0-9a-z]+)"', block[:block.index(")")]))
     ok(client == server,
@@ -6434,7 +6435,7 @@ def t_the_loan_units_tab_is_fully_plumbed():
     ok("'loans'" in SCRIPT.split("const APP_VIEWS = [")[1].split("]")[0]
        and "APP_VIEWS.forEach(name => $('view-' + name)" in SCRIPT.split("function setView(v) {")[1][:900],
        "it is in the list of views setView shows and hides")
-    src = open("copilot.py", encoding="utf-8").read()
+    src = copilot_source()
     ok('"loans"' in src.split("TAB_KEYS = (")[1][:320], "the server knows the same grant key")
     ok('("/api/loans", "loans")' in src, "and gates the route behind it")
 
@@ -7882,7 +7883,7 @@ def t_the_widget_grid_watches_every_view_setview_shows():
     for v in app:
         if v == "chat": continue
         ok(('id="%s"' % ("ov-content" if v == "overview" else v + "-content")) in HTML, "the root for %s exists" % v)
-    py = open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()
+    py = copilot_source()
     server = re.findall(r'"(\w+)"', py.split("LAYOUT_VIEWS = (")[1].split(")")[0])
     ok(sorted(server) == sorted(v for v in app if v != "chat"), "and the server accepts a layout for exactly those views")
     ok("new MutationObserver(" in layer and "observe(root, { childList: true })" in layer
@@ -11616,7 +11617,7 @@ def t_the_browser_suites_world_is_invented():
     # The shop's own domain, read off the quote site's default so this test
     # does not carry it either (as the environment reference's test does).
     host = re.search(r'PROPOSAL_HOST = os\.environ\.get\("PROPOSAL_HOST", "([^"]+)"\)',
-                     open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()).group(1)
+                     copilot_source()).group(1)
     domain = host.split(".", 1)[1]
     named = []
     for dirpath, _dirs, files in os.walk(base):
@@ -11648,7 +11649,7 @@ def t_the_release_notes_are_ui_copy_and_keep_up_with_the_app():
     ok(tabs <= views, "every note's Open goes to a real page: %s" % (tabs - views))
     newest = max(r["date"] for r in data["releases"])
     try:
-        last = subprocess.run(["git", "log", "-1", "--format=%cs", "--", "static/src", "pagesource.py", "copilot.py"],
+        last = subprocess.run(["git", "log", "-1", "--format=%cs", "--", "static/src", "pagesource.py", "gizmo"] + COPILOT_FILES,
                               cwd=ROOT, capture_output=True, text=True, timeout=20).stdout.strip()
     except Exception:
         last = ""
@@ -12699,7 +12700,7 @@ def t_the_printed_sheets_do_not_change():
     body = CSS.split("\n        body {")[1].split("}")[0]
     ok("font-size: var(--text-sm); line-height: var(--lh-body);" in body,
        "the A4 sheets still inherit 14px on a 1.5 line from body")
-    py = open(os.path.join(ROOT, "copilot.py"), encoding="utf-8").read()
+    py = copilot_source()
     start = '    @mcp.custom_route("/print/production-labels", methods=["GET", "OPTIONS"])'
     ok(start in py, "the server's print route is still there")
     a = py.index(start)

@@ -19,6 +19,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sources  # noqa: E402  (copilot.py and the modules split out of it)
+
 MODULES = ["server", "copilot", "eori", "google_data", "google_mail", "logdrain",
            "pipedrive", "recon", "tokenvault", "worldoptions", "xero"]
 OUT = os.path.join("docs", "ENVIRONMENT.md")
@@ -51,13 +54,16 @@ def _section_for(banners, lineno):
 def collect(root):
     """[(name, module, section, default, comment, lineno)] for every read."""
     found = []
-    for mod in MODULES:
-        path = os.path.join(root, mod + ".py")
+    family = sources.copilot_files(root)
+    files = [rel for m in MODULES for rel in (family if m == "copilot" else [m + ".py"])]
+    for rel in files:
+        mod = rel[:-3].replace("/", ".")
+        path = os.path.join(root, rel)
         if not os.path.isfile(path):
             continue
         src = open(path, encoding="utf-8").read()
         lines = src.splitlines()
-        banners = _banner_index(lines) if mod == "copilot" else []
+        banners = _banner_index(lines) if rel in family else []
         tree = ast.parse(src)
         for node in ast.walk(tree):
             name = default = None
@@ -108,13 +114,14 @@ def render(root):
            "never in the code, and never paste a secret into chat or a document."
            + (" `[shop domain]` stands for the shop's own website domain, which those "
               "defaults carry." if shop else ""), ""]
-    # Group: server.py first, then copilot.py by section, then the other modules.
+    # Group: server.py first, then copilot.py and the modules split out of it by
+    # section, then the other modules.
     groups = {}
     for name, e in by_name.items():
         if e["module"] == "server":
             key = ("0", "server.py")
-        elif e["module"] == "copilot":
-            key = ("1", "copilot.py - " + (e["section"] or "top"))
+        elif e["module"] == "copilot" or e["module"].startswith("gizmo."):
+            key = ("1", e["module"].replace(".", "/") + ".py - " + (e["section"] or "top"))
         else:
             key = ("2", e["module"] + ".py")
         groups.setdefault(key, []).append((name, e))
