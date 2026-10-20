@@ -1745,26 +1745,38 @@ def _store_report(parse: bool = True) -> list:
     return out[:12]
 
 
-def _memory_stores() -> dict:
-    """Every store the app keeps a whole-object copy of in memory, beside the
-    path it mirrors. The one list: restore and shop/redact replace or remove
-    files under a running process, and a copy that outlived its file put the
-    old contents straight back (the mailbox and Files caches after a redact,
-    the loan register after a restore, each forgotten from a hand-kept list).
-    A `_mem` global without a row here fails a test."""
-    return {MAILBOX_PATH: "_mail_mem", FILES_PATH: "_files_mem", USERS_PATH: "_users_mem",
-            SESSIONS_PATH: "_sessions_mem", WORK_PATH: "_work_mem",
-            ACTIVITY_PATH: "_events_mem", LOANS_PATH: "_loans_mem"}
+def _let_go_in_memory(paths) -> list:
+    """Let go of the whole-store copies this module holds in memory (see
+    jsonstore.holds_in_memory): those whose path is in paths, or every one."""
+    global _mail_mem, _files_mem, _users_mem, _sessions_mem, _work_mem, _events_mem, _loans_mem
+    gone = []
+    if paths is None or MAILBOX_PATH in paths:
+        _mail_mem = None
+        gone.append(MAILBOX_PATH)
+    if paths is None or FILES_PATH in paths:
+        _files_mem = None
+        gone.append(FILES_PATH)
+    if paths is None or USERS_PATH in paths:
+        _users_mem = None
+        gone.append(USERS_PATH)
+    if paths is None or SESSIONS_PATH in paths:
+        _sessions_mem = None
+        gone.append(SESSIONS_PATH)
+    if paths is None or WORK_PATH in paths:
+        _work_mem = None
+        gone.append(WORK_PATH)
+    if paths is None or ACTIVITY_PATH in paths:
+        _events_mem = None
+        gone.append(ACTIVITY_PATH)
+    if paths is None or LOANS_PATH in paths:
+        _loans_mem = None
+        gone.append(LOANS_PATH)
+    return gone
 
 
-def _drop_memory_stores(paths=None) -> None:
-    """Forget the in-memory copy of each store (every one when `paths` is
-    None) and its cached parse, so the next read comes from disk."""
-    g = globals()
-    for path, name in _memory_stores().items():
-        if paths is None or path in paths:
-            g[name] = None
-            jsonstore._forget_store(path)
+jsonstore.holds_in_memory(_let_go_in_memory)
+
+
 _last_error_alert = 0.0
 
 
@@ -12838,7 +12850,7 @@ def _redact_shop() -> dict:
     # serving the erased threads and the mail loop wrote every one of them
     # back to disk inside a minute; the Files cache did the same on its next
     # tick, so the erasure the privacy log recorded had not happened.
-    _drop_memory_stores(set(stores))
+    jsonstore._drop_memory_stores(set(stores))
     for path in stores:
         jsonstore._forget_store(path)
     for acct in (google_mail.SALES, google_mail.FINANCE):
@@ -13222,7 +13234,7 @@ def _redact_customer(email: str, customer_id="", retry: bool = False,
         _write_mail(store)
     except Exception:
         logger.exception("redact: mailbox")
-        _drop_memory_stores({MAILBOX_PATH})   # a half-made change must not be served
+        jsonstore._drop_memory_stores({MAILBOX_PATH})   # a half-made change must not be served
         erased = before
         failed.append("the mailbox")
 
@@ -19989,7 +20001,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # Every memory copy, from the one list: the loan register was
             # missing from the hand-kept one here, so a restored loans.json
             # was overwritten by the pre-restore register on the next loan.
-            _drop_memory_stores()
+            jsonstore._drop_memory_stores()
             _events_dirty = False
             _dav_auth_cache.clear()
             jsonstore._json_cache.clear()

@@ -22609,14 +22609,38 @@ def t_shop_redact_erases_what_memory_holds_too():
 
 
 @test
-def t_every_memory_copy_of_a_store_is_on_the_one_list():
-    """Restore and shop/redact drop the caches from one registry. A `_mem`
-    global added without a row there is the next cache to outlive its file:
-    the loan register was the last one, forgotten from a hand-kept list."""
-    src = copilot_source()
-    declared = set(re.findall(r"^(_[a-z_]+_mem)\b", src, re.M))
-    eq(declared, set(copilot._memory_stores().values()),
-       "every whole-object cache is dropped by restore and shop/redact")
+def t_every_memory_copy_of_a_store_is_let_go():
+    """Restore and shop/redact let go of every whole-store copy held in memory
+    (a copy that outlives its file puts the old contents straight back: the
+    mailbox and Files after a redact, the loan register after a restore). Each
+    module registers with the store how to let go of its own, so nothing
+    reaches into another module's names, and a `_mem` copy nobody lets go of
+    fails here. Paths are read when the drop runs."""
+    import importlib
+    held = []
+    for rel in COPILOT_FILES:
+        mod = importlib.import_module(rel[:-3].replace("/", "."))
+        text = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), rel), encoding="utf-8").read()
+        held += [(mod, n) for n in re.findall(r"^(_[a-z_]+_mem)\b", text, re.M)]
+    ok(len(held) >= 7, "the scan finds the copies (%d)" % len(held))
+    saved = [(m, n, getattr(m, n)) for m, n in held]
+    path = copilot.USERS_PATH
+    mark = object()
+    try:
+        for m, n in held:
+            setattr(m, n, mark)
+        jsonstore._drop_memory_stores()
+        eq(["%s.%s" % (m.__name__, n) for m, n in held if getattr(m, n) is not None], [], "every copy let go")
+        for m, n in held:
+            setattr(m, n, mark)
+        copilot.USERS_PATH = os.path.join(SCRATCH, "users-elsewhere.json")
+        jsonstore._drop_memory_stores({copilot.USERS_PATH})
+        eq(["%s.%s" % (m.__name__, n) for m, n in held if getattr(m, n) is None], ["copilot._users_mem"],
+           "a drop naming one store lets go of that one only, at the path it has now")
+    finally:
+        copilot.USERS_PATH = path
+        for m, n, v in saved:
+            setattr(m, n, v)
 
 
 @test

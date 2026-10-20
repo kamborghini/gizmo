@@ -114,6 +114,29 @@ def _forget_store(path: str) -> None:
         fn(path)
 
 
+# Areas that keep a whole store in memory (a `_mem` copy) say how to let go
+# of it: drop(paths) clears each of its copies whose path is in paths (every
+# one when paths is None) and returns the paths it let go of. Restore and
+# shop/redact replace or remove files under a running process, and a copy
+# that outlived its file put the old contents straight back (the mailbox and
+# Files after a redact, the loan register after a restore). Each module
+# clears its own names, so none reaches into another's.
+_holders: list = []
+
+
+def holds_in_memory(drop) -> None:
+    """Register how a module lets go of the stores it holds in memory."""
+    _holders.append(drop)
+
+
+def _drop_memory_stores(paths=None) -> None:
+    """Forget the in-memory copy of each store (every one when `paths` is
+    None) and its cached parse, so the next read comes from disk."""
+    for drop in _holders:
+        for path in drop(paths):
+            _forget_store(path)
+
+
 @perf.timed("store")      # Server-Timing: writing a store to disk
 def _write_json_store(path: str, key: Optional[str], data, *, private: bool = False) -> None:
     """The one way a store reaches disk.
