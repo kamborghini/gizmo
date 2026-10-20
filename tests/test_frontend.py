@@ -5,7 +5,7 @@ nothing catches a rule that quietly loses the cascade. Every assertion here
 corresponds to a bug that actually reached the merchant, in the shape that let it
 through, so a regression fails here instead of at the dispatch desk.
 """
-import json, os, re, subprocess, sys, tempfile
+import json, os, re, shutil, subprocess, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -16084,8 +16084,10 @@ def t_settings_offer_no_switch_for_shop_delivery():
 
 
 def _page_root(shell, css, js):
-    """A throwaway static/src with the given shell and one section of each kind."""
+    """A throwaway static/src with the given shell and one section of each
+    kind, removed when the suite exits."""
     root = tempfile.mkdtemp(prefix="pagesource-")
+    atexit.register(shutil.rmtree, root, ignore_errors=True)
     src = os.path.join(root, "static", "src")
     os.makedirs(os.path.join(src, "css")); os.makedirs(os.path.join(src, "js"))
     open(os.path.join(src, "shell.html"), "w", encoding="utf-8").write(shell)
@@ -16122,6 +16124,22 @@ def t_a_shell_without_its_markers_is_refused():
             ok("static/src/shell.html" in str(e), "the refusal names the shell: %s" % e)
         else:
             raise AssertionError("a shell without exactly one of each marker was joined: %r" % shell)
+
+
+@test
+def t_a_run_leaves_nothing_in_the_temp_dir():
+    """Each throwaway static/src was a pagesource-* folder in the system temp
+    dir that nothing removed, four a run: 558 of them by 20 October 2026. The
+    two tests that make them are run again in a child pointed at an empty temp
+    dir of its own, which must still be empty once the child has exited."""
+    tmp = tempfile.mkdtemp(prefix="frontend-temp-test-")
+    try:
+        r = subprocess.run([sys.executable, os.path.abspath(__file__)], env=dict(os.environ, ONLY="shell_with", TMPDIR=tmp),
+                           capture_output=True, text=True, timeout=300)
+        ok("2 passed, 0 failed" in r.stdout, "the two page-root tests ran: " + r.stdout[-400:] + r.stderr[-400:])
+        ok(os.listdir(tmp) == [], "a run left %r in the temp dir" % sorted(os.listdir(tmp)))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 @test
