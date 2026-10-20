@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-20",
+   "title": "Orders and production on their own",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "How the app reads orders and builds production labels now each live on their own, so a change elsewhere cannot alter a label. Nothing looks different."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-20",
    "title": "Sign-in and the door on their own",
    "items": [
     {

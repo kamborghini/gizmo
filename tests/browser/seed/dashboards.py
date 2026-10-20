@@ -366,7 +366,7 @@ def _page(rows, args):
     return [_dcopy.deepcopy(r) for r in rows[:lim]]
 
 
-DASH["prev_tool_json"] = copilot._tool_json
+DASH["prev_tool_json"] = shopify._tool_json
 
 
 async def dash_tool_json(registry, name, args):
@@ -415,7 +415,7 @@ async def dash_tool_json(registry, name, args):
     return await DASH["prev_tool_json"](registry, name, args)
 
 
-copilot._tool_json = dash_tool_json
+shopify._tool_json = dash_tool_json
 
 
 # =============================================================================
@@ -792,7 +792,7 @@ def seed_recon():
     try:
         sw = _ok(post("/api/recon/sweep", {}), "recon sweep")
     finally:
-        rc.configure(xero=xero_api, tool_json=copilot._tool_json)
+        rc.configure(xero=xero_api, tool_json=shopify._tool_json)
     DASH["recon_sweep"] = sw
     ex = _ok(post("/api/recon/exceptions", {}), "recon exceptions")["exceptions"]
     by_kind = {e["kind"]: e for e in ex}

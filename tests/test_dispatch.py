@@ -135,6 +135,7 @@ from gizmo import store as jsonstore
 from gizmo import errors
 from gizmo import ai as claude
 from gizmo import activity, gate, team
+from gizmo import orderbook, production, shopify, size_list
 import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
@@ -185,8 +186,8 @@ async def fake_tool_json(registry, name, args):
     if name == "shopify_get_shop": return dict(SHOP)
     if name == "shopify_list_orders": return {"orders": []}
     return {}
-REAL_TOOL_JSON = copilot._tool_json
-copilot._tool_json = fake_tool_json
+REAL_TOOL_JSON = shopify._tool_json
+shopify._tool_json = fake_tool_json
 
 TAG_WRITES = []
 async def fake_tag_writer(order_id, tags):
@@ -195,12 +196,12 @@ FULFILLED = []
 async def fake_fulfillment(order_id, tracking_number=None, tracking_company=None, tracking_url=None, notify_customer=True):
     FULFILLED.append({"order_id": order_id, "tracking": tracking_number, "company": tracking_company, "notify": notify_customer})
     return {"ok": True, "fulfillment_id": 555, "status": "success"}
-copilot._order_tag_writer = fake_tag_writer
-copilot._fulfillment_writer = fake_fulfillment
+shopify._order_tag_writer = fake_tag_writer
+shopify._fulfillment_writer = fake_fulfillment
 CANCELED_FULFILLMENTS = []
 async def fake_canceler(fulfillment_id):
     CANCELED_FULFILLMENTS.append(int(fulfillment_id)); return {"ok": True}
-copilot._fulfillment_canceler = fake_canceler
+shopify._fulfillment_canceler = fake_canceler
 def reset_dispatch():
     json.dump({"orders": {}}, open(SCRATCH + "/dispatch_state.json", "w"))
     # A booking left unresolved by one test is not another test's business.
@@ -303,10 +304,10 @@ client = TestClient(server.build_app())
 # uninstall). A test that needs an answer sets its own.
 async def _install_unknown():
     return "unknown"
-copilot._install_checker = _install_unknown
+shopify._install_checker = _install_unknown
 async def _customer_unknown(cid, email):
     return "unknown"
-copilot._customer_checker = _customer_unknown
+shopify._customer_checker = _customer_unknown
 # Shopify's answer to the suite's dummy token is a refusal, and that is what the
 # two other readers the routes call on their own give back here: the Settings
 # permissions read (an error, never a scope reported missing) and the customs
@@ -314,15 +315,15 @@ copilot._customer_checker = _customer_unknown
 # real address for these. A test that needs an answer sets its own.
 async def _scopes_refused(max_age=900.0):
     return {"scopes": [], "missing": {}, "error": "Shopify refused the suite's dummy token"}
-copilot._scope_reader = _scopes_refused
+shopify._scope_reader = _scopes_refused
 async def _tax_id_refused(order_id):
     return {"tax_id": "", "source": "", "error": "Shopify refused the suite's dummy token"}
-copilot._tax_id_reader = _tax_id_refused
+shopify._tax_id_reader = _tax_id_refused
 # The products read in one GraphQL call (the fourth speed audit item, X7): the
 # suite's dummy token is refused, so the per-product reads the tests stub stand.
 async def _product_meta_refused(product_ids):
     raise RuntimeError("Shopify refused the suite's dummy token")
-copilot._product_meta_reader = _product_meta_refused
+shopify._product_meta_reader = _product_meta_refused
 # Google, likewise. The Gmail syncs that tests start post their dummy refresh
 # token to Google's token door, which refuses it; here that door gives the same
 # refusal word for word (asked once, 2 October 2026) and nothing else on Google
@@ -659,7 +660,7 @@ def t_cancel_route():
 
 @test
 def t_dispatch_state_in_labels():
-    res = run(copilot.run_production_labels({}, order_id=12345))
+    res = run(production.run_production_labels({}, order_id=12345))
     ok("dispatch" in res, "dispatch map")
     eq(res["dispatch"]["12345"]["tracking_number"], "WO1234567890", "tracking flows to UI")
 
@@ -763,12 +764,12 @@ def t_a_partial_customer_crawl_is_never_reported_as_a_clean_sweep():
             if len(calls) == 1:
                 return {"customers": [{"id": 1000 + i, "email": f"p{i}@x.com"} for i in range(250)]}
             return {"_failed": True}          # Shopify stops answering
-        saved = copilot._tool_json
-        copilot._tool_json = flaky
+        saved = shopify._tool_json
+        shopify._tool_json = flaky
         try:
             rep = run_async(copilot._crm_shopify_link_sweep({}))
         finally:
-            copilot._tool_json = saved
+            shopify._tool_json = saved
         ok(not rep["complete"], "a failed page is not the end of the customers")
         ok("again" in rep["problem"].lower(), rep["problem"])
         # A crawl that runs out of PAGES says so too.
@@ -780,11 +781,11 @@ def t_a_partial_customer_crawl_is_never_reported_as_a_clean_sweep():
             return {"customers": [{"id": 9000 + n * 250 + i, "email": f"q{n}_{i}@x.com"}
                                   for i in range(250)]}
         calls2 = []
-        copilot._tool_json = endless
+        shopify._tool_json = endless
         try:
             rep2 = run_async(copilot._crm_shopify_link_sweep({}, max_pages=2))
         finally:
-            copilot._tool_json = saved
+            shopify._tool_json = saved
         ok(not rep2["complete"], "hitting the page ceiling is a partial crawl")
         ok("not linked yet" in rep2["problem"], rep2["problem"])
     with_accounts(go)
@@ -886,27 +887,27 @@ def t_a_successful_net30_update_is_not_reported_as_a_failure():
     for a job that worked."""
     def go():
         ensure_auth()
-        saved_w, saved_tags = copilot._payment_terms_writer, ORDER["tags"]
+        saved_w, saved_tags = shopify._payment_terms_writer, ORDER["tags"]
         ORDER["tags"] = "Unprocessed, purchase order unpaid"
         try:
             async def updated(order_id):
                 return {"ok": True, "updated": True, "was": "Due on receipt"}
-            copilot._payment_terms_writer = updated
+            shopify._payment_terms_writer = updated
             r = post("/api/production-labels/queue", {"order_id": 12345, "name": "#104239"}).json()
             ok(r["po_unpaid"], r)
             ok(r["terms_ok"], "an UPDATE is a success, whatever its sentence looks like")
             ok("Net 30" in r["terms_note"], r["terms_note"])
             async def created(order_id):
                 return {"ok": True}
-            copilot._payment_terms_writer = created
+            shopify._payment_terms_writer = created
             ok(post("/api/production-labels/queue", {"order_id": 12345}).json()["terms_ok"])
             async def already(order_id):
                 return {"ok": True, "already": True}
-            copilot._payment_terms_writer = already
+            shopify._payment_terms_writer = already
             ok(post("/api/production-labels/queue", {"order_id": 12345}).json()["terms_ok"])
             async def refused(order_id):
                 return {"ok": False, "detail": "The access token lacks write_payment_terms."}
-            copilot._payment_terms_writer = refused
+            shopify._payment_terms_writer = refused
             bad = post("/api/production-labels/queue", {"order_id": 12345}).json()
             ok(not bad["terms_ok"] and "write_payment_terms" in bad["terms_note"], bad)
             # An ordinary order is not an account order at all.
@@ -914,7 +915,7 @@ def t_a_successful_net30_update_is_not_reported_as_a_failure():
             plain = post("/api/production-labels/queue", {"order_id": 12345}).json()
             ok(not plain["po_unpaid"] and plain["terms_ok"] and not plain["terms_note"], plain)
         finally:
-            copilot._payment_terms_writer, ORDER["tags"] = saved_w, saved_tags
+            shopify._payment_terms_writer, ORDER["tags"] = saved_w, saved_tags
     with_accounts(go)
 
 @test
@@ -925,23 +926,23 @@ def t_printing_an_account_order_reports_its_payment_terms_too():
     def go():
         ensure_auth()
         reset_prod(); reset_dispatch()    # a fulfilled record left by another test would make this a reprint
-        saved_w, saved_tags = copilot._payment_terms_writer, ORDER["tags"]
+        saved_w, saved_tags = shopify._payment_terms_writer, ORDER["tags"]
         ORDER["tags"] = "Unprocessed, purchase order unpaid"
         try:
             async def refused(order_id):
                 return {"ok": False, "detail": "no Net 30 template on this store"}
-            copilot._payment_terms_writer = refused
+            shopify._payment_terms_writer = refused
             r = post("/api/production-state", {"op": "printed", "ids": [12345]}).json()
             ok("terms_ok" in r, "the print path reports the outcome at all")
             ok(not r["terms_ok"], r)
             ok("could not be added" in r["terms_note"], r["terms_note"])
             async def okw(order_id):
                 return {"ok": True, "updated": True, "was": "Due on receipt"}
-            copilot._payment_terms_writer = okw
+            shopify._payment_terms_writer = okw
             r2 = post("/api/production-state", {"op": "printed", "ids": [12345]}).json()
             ok(r2["terms_ok"], r2)
         finally:
-            copilot._payment_terms_writer, ORDER["tags"] = saved_w, saved_tags
+            shopify._payment_terms_writer, ORDER["tags"] = saved_w, saved_tags
     with_accounts(go)
 
 @test
@@ -1036,8 +1037,8 @@ def t_an_international_quote_carries_the_customers_own_tax_id():
     async def reader(order_id):
         seen.append(int(order_id))
         return {"tax_id": "ESB12345678", "source": "the order's Spanish tax credential"}
-    saved = copilot._tax_id_reader
-    copilot._tax_id_reader = reader
+    saved = shopify._tax_id_reader
+    shopify._tax_id_reader = reader
     try:
         got = run_async(desk._order_tax_id({"id": 12345}))
         eq(got["receiver_tax_id"], "ESB12345678")
@@ -1046,19 +1047,19 @@ def t_an_international_quote_carries_the_customers_own_tax_id():
         # No id on file is an empty box, not a failure.
         async def none(order_id):
             return {"tax_id": "", "source": ""}
-        copilot._tax_id_reader = none
+        shopify._tax_id_reader = none
         eq(run_async(desk._order_tax_id({"id": 1}))["receiver_tax_id"], "")
         # A lookup that BLOWS UP must never stop a dispatch.
         async def boom(order_id):
             raise RuntimeError("Shopify said no")
-        copilot._tax_id_reader = boom
+        shopify._tax_id_reader = boom
         eq(run_async(desk._order_tax_id({"id": 1})),
            {"receiver_tax_id": "", "receiver_tax_source": ""})
         # And with no reader wired at all.
-        copilot._tax_id_reader = None
+        shopify._tax_id_reader = None
         eq(run_async(desk._order_tax_id({"id": 1}))["receiver_tax_id"], "")
     finally:
-        copilot._tax_id_reader = saved
+        shopify._tax_id_reader = saved
 
 @test
 def t_gobos_cross_a_border_as_glass_optical_filters():
@@ -1387,7 +1388,7 @@ def t_shipping_paid_in_shape():
     saved = ORDER
     ORDER = {**ORDER, "shipping_lines": [{"title": "Standard Delivery", "price": "4.95"}]}
     try:
-        res = run(copilot.run_production_labels({}, order_id=12345))
+        res = run(production.run_production_labels({}, order_id=12345))
         sp = res["orders"][0].get("shipping_paid")
         eq(sp["title"], "Standard Delivery", "title")
         eq(sp["price"], "4.95", "price")
@@ -1714,8 +1715,8 @@ def t_dispatched_tag_survives_fulfilment():
                           "company": tracking_company, "notify": notify_customer})
         ORDER = {**ORDER, "fulfillment_status": "fulfilled"}
         return {"ok": True, "fulfillment_id": 555, "status": "success"}
-    saved_writer = copilot._fulfillment_writer
-    copilot._fulfillment_writer = flipping_fulfillment
+    saved_writer = shopify._fulfillment_writer
+    shopify._fulfillment_writer = flipping_fulfillment
     try:
         post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX})
         TAG_WRITES.clear()
@@ -1726,7 +1727,7 @@ def t_dispatched_tag_survives_fulfilment():
         ok(any("complete" in t[1].lower() for t in TAG_WRITES),
            "Complete tag actually written: " + str(TAG_WRITES))
     finally:
-        copilot._fulfillment_writer = saved_writer
+        shopify._fulfillment_writer = saved_writer
         ORDER = saved
 
 @test
@@ -1734,8 +1735,8 @@ def t_failed_fulfilment_reverts_the_tag():
     reset_dispatch(); reset_prod(); TAG_WRITES.clear()
     async def refusing(order_id, **kw):
         return {"ok": False, "reason": "permission", "detail": "needs write_fulfillments"}
-    saved_writer = copilot._fulfillment_writer
-    copilot._fulfillment_writer = refusing
+    saved_writer = shopify._fulfillment_writer
+    shopify._fulfillment_writer = refusing
     try:
         post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX})
         TAG_WRITES.clear()
@@ -1746,7 +1747,7 @@ def t_failed_fulfilment_reverts_the_tag():
         ok("complete" not in last.lower(), "the finished tag is reverted after the failure: " + last)
         ok("pc" in [t.strip() for t in last.split(",")], "left as made")
     finally:
-        copilot._fulfillment_writer = saved_writer
+        shopify._fulfillment_writer = saved_writer
 
 @test
 def t_live_data_shapes_are_cleaned():
@@ -1870,10 +1871,10 @@ def t_failed_dispatched_tag_is_reported():
     reset_dispatch(); reset_prod()
     async def refusing_tags(order_id, tags):
         raise RuntimeError("shopify said no")
-    saved = copilot._order_tag_writer
+    saved = shopify._order_tag_writer
     try:
         post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX})
-        copilot._order_tag_writer = refusing_tags
+        shopify._order_tag_writer = refusing_tags
         r = mark_made()
         eq(r.status_code, 200, r.text)
         b = r.json()
@@ -1882,7 +1883,7 @@ def t_failed_dispatched_tag_is_reported():
            "operator is told the tag failed: " + str(b.get("ship_note")))
         ok(b.get("tag_note"), "tag_note surfaced rather than discarded")
     finally:
-        copilot._order_tag_writer = saved
+        shopify._order_tag_writer = saved
 
 @test
 def t_shop_delivery_is_never_offered():
@@ -2758,7 +2759,7 @@ def t_customs_lines_carry_the_cost_price_and_the_products_own_hs_code():
                                          "harmonized_system_code": "9008.50.00",
                                          "country_code_of_origin": "GB"}]}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
         r = post("/api/dispatch/quote", {"order_id": 12345, "box": BOX})
         eq(r.status_code, 200, r.text)
@@ -2786,24 +2787,24 @@ def t_customs_lines_carry_the_cost_price_and_the_products_own_hs_code():
         eq(proj["origin"], "GB", "Shopify origin wins when set")
         eq(gobo["origin"], "GB", "a gobo with no Shopify origin is UK")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 @test
 def t_domestic_quotes_do_not_pay_for_customs_lookups():
     reset_dispatch(); reset_prod()
     called = []
-    real = copilot._tool_json
+    real = shopify._tool_json
     async def spy(registry, name, args):
         called.append(name)
         return await real(registry, name, args)
-    copilot._tool_json = spy
+    shopify._tool_json = spy
     try:
         r = post("/api/dispatch/quote", {"order_id": 12345, "box": BOX})
         eq(r.status_code, 200, r.text)
         eq(r.json().get("customs_items"), [], "no customs payload on a GB order")
         ok("shopify_get_variant" not in called, "no variant reads for a domestic parcel")
     finally:
-        copilot._tool_json = real
+        shopify._tool_json = real
 
 @test
 def t_every_tool_the_customs_lookup_uses_is_registered():
@@ -2838,7 +2839,7 @@ def t_projectors_default_to_china_when_shopify_has_no_origin():
                 {"id": 9222, "cost": "12.00", "harmonized_system_code": ""},
             ]}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
         r = post("/api/dispatch/quote", {"order_id": 12345, "box": BOX})
         items = r.json().get("customs_items") or []
@@ -2849,7 +2850,7 @@ def t_projectors_default_to_china_when_shopify_has_no_origin():
         eq(items[1]["needs_cost"], False, "gobo declares sale value by design, no flag")
         eq(items[1]["hs_code"], "9002.20.000", "gobo HS filled even with none in Shopify")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 @test
 def t_a_source_four_junior_is_a_66mm_gobo_however_it_is_spelled():
@@ -2864,7 +2865,7 @@ def t_a_source_four_junior_is_a_66mm_gobo_however_it_is_spelled():
                   # The Revolution had the identical twin-row disease: 53.3 on
                   # 'Source Four Revolution', 66 on 'Revolution'. Ruled: 66.
                   "Source Four Revolution", "Revolution", "S4 Revolution"):
-        hit, review = copilot._gobo_lookup("ETC", model)
+        hit, review = size_list._gobo_lookup("ETC", model)
         ok(hit is not None and review is None, model + " -> " + repr(review))
         eq(hit["production_size"], "66", model + " must cut at 66 mm, got " + hit["production_size"])
 
@@ -2879,9 +2880,9 @@ def t_releasing_an_unpaid_purchase_order_starts_its_30_day_clock():
     calls = []
     async def fake_terms(order_id):
         calls.append(int(order_id)); return {"ok": True}
-    saved_terms = copilot._payment_terms_writer
+    saved_terms = shopify._payment_terms_writer
     saved_tags = ORDER["tags"]
-    copilot._payment_terms_writer = fake_terms
+    shopify._payment_terms_writer = fake_terms
     try:
         # Tag spelled with different case and spacing still counts.
         ORDER["tags"] = "Unprocessed, Purchase Order  Unpaid"
@@ -2892,14 +2893,14 @@ def t_releasing_an_unpaid_purchase_order_starts_its_30_day_clock():
         # Releasing again after Shopify says terms exist stays calm.
         async def already(order_id):
             calls.append(int(order_id)); return {"ok": True, "already": True}
-        copilot._payment_terms_writer = already
+        shopify._payment_terms_writer = already
         r2 = post("/api/production-labels/queue", {"order_id": 12345, "name": "#104239"}).json()
         ok(r2["terms_ok"] and "already" in r2["terms_note"], r2)
         # An order that WAS on other terms says so, rather than claiming the
         # order already had 30-day terms it never had.
         async def moved(order_id):
             return {"ok": True, "updated": True, "was": "Due on receipt"}
-        copilot._payment_terms_writer = moved
+        shopify._payment_terms_writer = moved
         r2b = post("/api/production-labels/queue", {"order_id": 12345, "name": "#104239"}).json()
         eq(r2b["terms_note"], "Payment terms changed from Due on receipt to Net 30.")
         # An ordinary order: no terms call at all.
@@ -2912,13 +2913,13 @@ def t_releasing_an_unpaid_purchase_order_starts_its_30_day_clock():
         async def refused(order_id):
             return {"ok": False, "reason": "permission",
                     "detail": "The access token lacks write_payment_terms."}
-        copilot._payment_terms_writer = refused
+        shopify._payment_terms_writer = refused
         r3 = post("/api/production-labels/queue", {"order_id": 12345, "name": "#104239"})
         eq(r3.status_code, 200, "the release still succeeds")
         j3 = r3.json()
         ok(not j3["terms_ok"] and "write_payment_terms" in j3["terms_note"], j3)
     finally:
-        copilot._payment_terms_writer = saved_terms
+        shopify._payment_terms_writer = saved_terms
         ORDER["tags"] = saved_tags
 
 @test
@@ -2944,7 +2945,7 @@ def t_gobo_projectors_are_projectors_not_gobos():
             return {"inventory_items": [{"id": 9111, "cost": "425.00",
                                          "harmonized_system_code": "9008.50.00"}]}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
         r = post("/api/dispatch/quote", {"order_id": 12345, "box": BOX})
         it = (r.json().get("customs_items") or [])[0]
@@ -2953,7 +2954,7 @@ def t_gobo_projectors_are_projectors_not_gobos():
         eq(it["hs_code"], "9008.50.00", "its own HS code, not the gobo blanket")
         eq(it["origin"], "CN", "projector origin rule still applies")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 @test
 def t_shopify_address_lines_stay_separate_and_within_the_courier_cap():
@@ -2987,7 +2988,7 @@ def t_shopify_address_lines_stay_separate_and_within_the_courier_cap():
 
 @test
 def t_ship_to_carries_both_shopify_lines():
-    shaped = copilot._ship_to({"shipping_address": {
+    shaped = orderbook._ship_to({"shipping_address": {
         "address1": "Momentum Logistics Park", "address2": "Unit 1 Ash Drive",
         "city": "Washington", "zip": "NE38 0LT", "country_code": "GB", "name": "A B"}})
     eq(shaped["street"], "Momentum Logistics Park", "line one")
@@ -3516,7 +3517,7 @@ def t_a_remembered_value_beats_the_derived_one():
             return {"inventory_items": [{"id": 9111, "cost": "425.00",
                                          "harmonized_system_code": "9008.50.00"}]}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
         r = post("/api/dispatch/quote", {"order_id": 12345, "box": BOX})
         it = (r.json().get("customs_items") or [])[0]
@@ -3524,7 +3525,7 @@ def t_a_remembered_value_beats_the_derived_one():
         eq(it["value_basis"], "remembered", "and it says so, so it can be corrected knowingly")
         eq(it["key"], "v111", "keyed to the variant so the next order finds it")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
         try:
             os.remove(desk.CUSTOMS_MEMORY_PATH)
         except FileNotFoundError:
@@ -3570,7 +3571,7 @@ def t_margin_is_net_of_vat_discounts_goods_and_carriage():
         if name == "shopify_get_inventory_items":
             return {"inventory_items": [{"id": 9111, "cost": "30.00"}]}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     desk.COST_CACHE_PATH = SCRATCH + "/cost_cache.json"
     try:
         os.remove(desk.COST_CACHE_PATH)
@@ -3591,7 +3592,7 @@ def t_margin_is_net_of_vat_discounts_goods_and_carriage():
         eq(res["totals"]["margin"], 25.1, "and it totals")
         eq(res["totals"]["courier_inc_vat_rows"], 1, "counted so the UI can say so")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 @test
 def t_an_item_without_a_cost_is_flagged_not_counted_as_profit():
@@ -3612,7 +3613,7 @@ def t_an_item_without_a_cost_is_flagged_not_counted_as_profit():
         if name == "shopify_get_inventory_items":
             return {"inventory_items": [{"id": 9222, "cost": ""}]}   # no cost set
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     desk.COST_CACHE_PATH = SCRATCH + "/cost_cache2.json"
     try:
         res = run(desk.run_margin_report({}, days=30))
@@ -3622,7 +3623,7 @@ def t_an_item_without_a_cost_is_flagged_not_counted_as_profit():
         eq(res["totals"]["counted"], 0, "excluded from the totals")
         eq(res["orders_incomplete"], 1, "and counted as incomplete")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 @test
 def t_variant_costs_are_cached_so_a_report_is_not_hundreds_of_calls():
@@ -3640,7 +3641,7 @@ def t_variant_costs_are_cached_so_a_report_is_not_hundreds_of_calls():
             return {"inventory_items": [{"id": int(i), "cost": "5.00"}
                                         for i in args["ids"].split(",")]}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
         first = run(desk._variant_costs({}, [1, 2, 3]))
         eq(first, {1: "5.00", 2: "5.00", 3: "5.00"}, "costs resolved")
@@ -3650,7 +3651,7 @@ def t_variant_costs_are_cached_so_a_report_is_not_hundreds_of_calls():
         eq(again, first, "same answer from cache")
         eq(calls["n"], used, "and no further calls at all")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 @test
 def t_unfulfilling_one_order_cannot_erase_another_booking():
@@ -3666,16 +3667,16 @@ def t_unfulfilling_one_order_cannot_erase_another_booking():
         desk._record_dispatch(222, {"tracking_number": "T222", "fulfilled": False,
                                        "dispatched_at": "2026-08-13T09:00:05+00:00"})
         return {"ok": True}
-    saved = copilot._fulfillment_canceler
-    copilot._fulfillment_canceler = slow_cancel
+    saved = shopify._fulfillment_canceler
+    shopify._fulfillment_canceler = slow_cancel
     try:
-        run(copilot._unfulfill_dispatch({}, 111))
+        run(orderbook._unfulfill_dispatch({}, 111))
         store = desk._load_dispatch()
         ok("222" in store, "the booking made during the await SURVIVES: " + str(sorted(store)))
         eq(store["222"]["tracking_number"], "T222", "with its tracking intact")
         eq(store["111"].get("fulfilled"), False, "and the un-fulfil still applied")
     finally:
-        copilot._fulfillment_canceler = saved
+        shopify._fulfillment_canceler = saved
 
 @test
 def t_a_cancelled_shipment_stops_claiming_it_is_fulfilled():
@@ -3685,7 +3686,7 @@ def t_a_cancelled_shipment_stops_claiming_it_is_fulfilled():
                                      "dispatched_at": "2026-08-13T09:00:00+00:00"})
     async def canceler(fid):
         return {"ok": True}
-    savedc = copilot._fulfillment_canceler; copilot._fulfillment_canceler = canceler
+    savedc = shopify._fulfillment_canceler; shopify._fulfillment_canceler = canceler
     async def voider(service, action, inner, retryable=True):
         return ET.fromstring(VOID_XML)
     saveds = worldoptions._soap_call; worldoptions._soap_call = voider
@@ -3697,7 +3698,7 @@ def t_a_cancelled_shipment_stops_claiming_it_is_fulfilled():
         eq(e.get("fulfilled"), False, "and no longer claims to be fulfilled")
         ok("fulfillment_id" not in e, "the dead fulfilment id is dropped")
     finally:
-        copilot._fulfillment_canceler = savedc
+        shopify._fulfillment_canceler = savedc
         worldoptions._soap_call = saveds
 
 @test
@@ -3709,14 +3710,14 @@ def t_rebooking_still_asks_when_shopify_never_undid_the_fulfilment():
     desk._record_dispatch(12345, {"tracking_number": "T1", "canceled": True,
                                      "fulfilled": True, "fulfillment_id": 777,
                                      "dispatched_at": "2026-08-13T09:00:00+00:00"})
-    saved_status = copilot._order_status
-    copilot._order_status = lambda o: "fulfilled"
+    saved_status = orderbook._order_status
+    orderbook._order_status = lambda o: "fulfilled"
     try:
         r = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX})
         body = r.json()
         ok(body.get("needs_force"), "still asks before spending: " + json.dumps(body)[:160])
     finally:
-        copilot._order_status = saved_status
+        orderbook._order_status = saved_status
 
 @test
 def t_a_timeout_wording_is_never_treated_as_transient():
@@ -3740,16 +3741,16 @@ def t_an_order_already_fulfilled_in_shopify_stops_being_retried_forever():
     mark_made(12345, True)
     async def already(oid, **kw):
         return {"ok": False, "reason": "nothing_to_fulfill", "detail": "no open fulfillment orders"}
-    savedw = copilot._fulfillment_writer; copilot._fulfillment_writer = already
-    saveds = copilot._order_status; copilot._order_status = lambda o: "fulfilled"
+    savedw = shopify._fulfillment_writer; shopify._fulfillment_writer = already
+    saveds = orderbook._order_status; orderbook._order_status = lambda o: "fulfilled"
     TAG_WRITES.clear()
     try:
-        res = run(copilot._fulfill_if_ready({}, 12345))
+        res = run(orderbook._fulfill_if_ready({}, 12345))
         eq(res["fulfilled"], True, "treated as done: " + json.dumps(res)[:140])
         eq(desk._load_dispatch()["12345"]["fulfilled"], True, "and recorded, so it stops retrying")
     finally:
-        copilot._fulfillment_writer = savedw
-        copilot._order_status = saveds
+        shopify._fulfillment_writer = savedw
+        orderbook._order_status = saveds
     # B11 in the 2026-09-19 bug audit: nothing was created here, so nobody was
     # emailed from here, and the order still has to leave To ship. Straight
     # through the gate this time, with the stamps set by hand, so the made
@@ -3757,12 +3758,12 @@ def t_an_order_already_fulfilled_in_shopify_stops_being_retried_forever():
     reset_dispatch(); reset_prod()
     desk._record_dispatch(12345, {"tracking_number": "T1", "fulfilled": False, "carrier_name": "UPS",
                                      "notify": True, "dispatched_at": "2026-08-13T09:00:00+00:00"})
-    copilot._mark_made(12345, True)
-    copilot._fulfillment_writer = already
-    copilot._order_status = lambda o: "fulfilled"
+    production._mark_made(12345, True)
+    shopify._fulfillment_writer = already
+    orderbook._order_status = lambda o: "fulfilled"
     TAG_WRITES.clear()
     try:
-        res = run(copilot._fulfill_if_ready({}, 12345))
+        res = run(orderbook._fulfill_if_ready({}, 12345))
         eq(res["reason"], "already_fulfilled", json.dumps(res)[:200])
         eq(res["notified"], False, "no tracking email went from here")
         eq(desk._load_dispatch()["12345"]["notified"], False, "and the record says so")
@@ -3770,8 +3771,8 @@ def t_an_order_already_fulfilled_in_shopify_stops_being_retried_forever():
         ok(moved and "Complete" in moved[-1] and "PC" not in moved[-1],
            "filed as complete although Shopify reads it as fulfilled: " + str(TAG_WRITES))
     finally:
-        copilot._fulfillment_writer = savedw
-        copilot._order_status = saveds
+        shopify._fulfillment_writer = savedw
+        orderbook._order_status = saveds
         reset_dispatch(); reset_prod()
 
 @test
@@ -3820,16 +3821,16 @@ def t_orders_tagged_before_the_rename_still_show_in_the_finished_queue():
         if name == "shopify_list_orders":
             return {"orders": [old_order, new_order]}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
-        res = run(copilot.run_production_labels({}, tag=desk.DISPATCHED_TAG))
+        res = run(production.run_production_labels({}, tag=desk.DISPATCHED_TAG))
         ids = sorted(o["id"] for o in res["orders"])
         eq(ids, [777, 888], "both the old and the new tag appear: " + str(ids))
         # A different queue must NOT pick up the legacy word.
-        res2 = run(copilot.run_production_labels({}, tag=copilot.MADE_TAG))
+        res2 = run(production.run_production_labels({}, tag=orderbook.MADE_TAG))
         eq([o["id"] for o in res2["orders"]], [], "the legacy tag only widens the finished queue")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 
 # ---- Order sweep snapshot ---------------------------------------------------
@@ -3839,16 +3840,16 @@ def t_orders_tagged_before_the_rename_still_show_in_the_finished_queue():
 
 def with_cache(fn, secs=45):
     """Run fn with the order snapshot enabled and a clean slate."""
-    was = copilot.ORDER_CACHE_SECS
-    copilot.ORDER_CACHE_SECS = secs
-    copilot._bust_orders()
-    copilot._orders_inflight.clear()
+    was = orderbook.ORDER_CACHE_SECS
+    orderbook.ORDER_CACHE_SECS = secs
+    orderbook._bust_orders()
+    orderbook._orders_inflight.clear()
     try:
         return fn()
     finally:
-        copilot.ORDER_CACHE_SECS = was
-        copilot._bust_orders()
-        copilot._orders_inflight.clear()
+        orderbook.ORDER_CACHE_SECS = was
+        orderbook._bust_orders()
+        orderbook._orders_inflight.clear()
 
 QUEUE_ORDERS = [
     {"id": 777, "order_number": 1, "name": "#1", "created_at": "2026-08-12T09:00:00Z",
@@ -3874,12 +3875,12 @@ def t_the_three_queues_share_one_sweep_instead_of_three():
     # Flipping To make -> To ship -> Complete asks for the same window and the
     # same fields every time; only the local tag filter differs.
     calls, tools = sweep_counter()
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
         def go():
-            a = run(copilot.run_production_labels({}, tag="IP"))
-            b = run(copilot.run_production_labels({}, tag="PC"))
-            c = run(copilot.run_production_labels({}, tag=desk.DISPATCHED_TAG))
+            a = run(production.run_production_labels({}, tag="IP"))
+            b = run(production.run_production_labels({}, tag="PC"))
+            c = run(production.run_production_labels({}, tag=desk.DISPATCHED_TAG))
             return a, b, c
         a, b, c = with_cache(go)
         eq(calls["n"], 1, "one sweep served all three queues")
@@ -3887,26 +3888,26 @@ def t_the_three_queues_share_one_sweep_instead_of_three():
         eq([o["id"] for o in b["orders"]], [888], "and To ship still filters correctly")
         eq([o["id"] for o in c["orders"]], [], "and Complete still filters correctly")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 @test
 def t_a_tag_write_retires_the_snapshot_immediately():
     # The queues are filtered on tags, so an order that has just been moved must
     # not still be sitting in the queue it left.
     calls, tools = sweep_counter()
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
         def go():
-            run(copilot.run_production_labels({}, tag="IP"))
+            run(production.run_production_labels({}, tag="IP"))
             first = calls["n"]
-            run(copilot.run_production_labels({}, tag="IP"))
+            run(production.run_production_labels({}, tag="IP"))
             eq(calls["n"], first, "a repeat load costs nothing")
-            copilot._bust_orders()          # Refresh, or a change nobody can name
-            run(copilot.run_production_labels({}, tag="IP"))
+            orderbook._bust_orders()          # Refresh, or a change nobody can name
+            run(production.run_production_labels({}, tag="IP"))
             eq(calls["n"], first + 1, "and the write forced a re-read")
         with_cache(go)
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 @test
 def t_the_queue_counts_ride_along_from_the_same_sweep():
@@ -3920,16 +3921,16 @@ def t_the_queue_counts_ride_along_from_the_same_sweep():
          "tags": "IP, Rush", "line_items": [], "customer": {}, "shipping_address": {}},
     ]
     calls, tools = sweep_counter(orders)
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
-        res = with_cache(lambda: run(copilot.run_production_labels({}, tag="PC")))
+        res = with_cache(lambda: run(production.run_production_labels({}, tag="PC")))
         eq(res.get("counts"), {"unprocessed": 1, "make": 2, "ship": 1}, "every flow queue is counted")
         eq([o["id"] for o in res["orders"]], [888], "the queue asked for is unchanged")
         eq(calls["n"], 1, "from the one sweep")
-        one = run(copilot.run_production_labels({}, order_id=12345))
+        one = run(production.run_production_labels({}, order_id=12345))
         ok("counts" not in one, "the one-order deep link swept nothing, so it counts nothing")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 @test
 def t_a_tag_write_through_the_real_path_busts_the_snapshot():
@@ -3939,35 +3940,35 @@ def t_a_tag_write_through_the_real_path_busts_the_snapshot():
         if name == "shopify_get_order":
             return {"id": 777, "tags": "Unprocessed", "fulfillment_status": None, "cancelled_at": None}
         return await tools(registry, name, args)
-    saved = copilot._tool_json; copilot._tool_json = both
+    saved = shopify._tool_json; shopify._tool_json = both
     try:
         def go():
-            run(copilot.run_production_labels({}, tag="IP"))
+            run(production.run_production_labels({}, tag="IP"))
             first = calls["n"]
             TAG_WRITES.clear()
-            run(copilot._sync_order_tags({}, 777, add=["IP"], remove=["Unprocessed"]))
+            run(orderbook._sync_order_tags({}, 777, add=["IP"], remove=["Unprocessed"]))
             ok(TAG_WRITES, "the tag write happened")
-            run(copilot.run_production_labels({}, tag="IP"))
+            run(production.run_production_labels({}, tag="IP"))
             eq(calls["n"], first + 1, "and it re-read the store afterwards")
         with_cache(go)
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 @test
 def t_refresh_re_reads_shopify_even_inside_the_window():
     # The merchant tagged something in the Shopify admin; there are no webhooks,
     # so Refresh is the only way to see it before the TTL runs out.
     calls, tools = sweep_counter()
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
         def go():
-            run(copilot.run_production_labels({}, tag="IP"))
+            run(production.run_production_labels({}, tag="IP"))
             first = calls["n"]
-            run(copilot.run_production_labels({}, tag="IP", fresh=True))
+            run(production.run_production_labels({}, tag="IP", fresh=True))
             eq(calls["n"], first + 1, "Refresh went back to Shopify")
         with_cache(go)
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 @test
 def t_refresh_on_the_money_views_also_re_reads_shopify():
@@ -3975,20 +3976,20 @@ def t_refresh_on_the_money_views_also_re_reads_shopify():
     # (no webhooks), so Refresh there has to reach Shopify, not a 45-second-old
     # sweep, or the merchant chases someone who has already paid.
     calls, tools = sweep_counter()
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
         def go():
-            run(copilot._orders_snapshot({}, days=730, fields="id,tags"))
+            run(orderbook._orders_snapshot({}, days=730, fields="id,tags"))
             first = calls["n"]
-            eq(copilot._refresh_asked({}), False, "an ordinary load keeps the snapshot")
-            run(copilot._orders_snapshot({}, days=730, fields="id,tags"))
+            eq(orderbook._refresh_asked({}), False, "an ordinary load keeps the snapshot")
+            run(orderbook._orders_snapshot({}, days=730, fields="id,tags"))
             eq(calls["n"], first, "and costs nothing")
-            eq(copilot._refresh_asked({"fresh": True}), True, "Refresh discards it")
-            run(copilot._orders_snapshot({}, days=730, fields="id,tags"))
+            eq(orderbook._refresh_asked({"fresh": True}), True, "Refresh discards it")
+            run(orderbook._orders_snapshot({}, days=730, fields="id,tags"))
             eq(calls["n"], first + 1, "so the next read goes to Shopify")
         with_cache(go)
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 @test
 def t_refresh_never_joins_a_sweep_that_started_before_it():
@@ -4005,16 +4006,16 @@ def t_refresh_never_joins_a_sweep_that_started_before_it():
             return {"orders": [{"id": 9, "tags": "Purchase order unpaid",
                                 "financial_status": "paid" if state["paid"] else "pending"}]}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
         def go():
             async def scenario():
                 slow = asyncio.ensure_future(
-                    copilot._orders_snapshot({}, days=730, fields="id,tags,financial_status"))
+                    orderbook._orders_snapshot({}, days=730, fields="id,tags,financial_status"))
                 await asyncio.sleep(0.01)      # the sweep is now in flight
                 state["paid"] = True           # they mark it paid in the Shopify admin
-                copilot._refresh_asked({"fresh": True})   # and press Refresh
-                after = await copilot._orders_snapshot({}, days=730,
+                orderbook._refresh_asked({"fresh": True})   # and press Refresh
+                after = await orderbook._orders_snapshot({}, days=730,
                                                        fields="id,tags,financial_status")
                 await slow
                 return after
@@ -4023,23 +4024,23 @@ def t_refresh_never_joins_a_sweep_that_started_before_it():
             eq(pages["n"], 2, "because it swept again rather than joining the one in flight")
         with_cache(go)
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 @test
 def t_a_failed_sweep_is_never_cached():
     # "Nothing owed" must never be an artefact of a throttled fetch.
     calls, tools = sweep_counter(fail=True)
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
         def go():
             meta = {}
-            run(copilot._orders_snapshot({}, days=180, fields="id,tags", meta=meta))
+            run(orderbook._orders_snapshot({}, days=180, fields="id,tags", meta=meta))
             ok(meta.get("failed"), "the failure is reported to the caller")
-            run(copilot._orders_snapshot({}, days=180, fields="id,tags"))
+            run(orderbook._orders_snapshot({}, days=180, fields="id,tags"))
             eq(calls["n"], 2, "and the next caller retries rather than reading a cached failure")
         with_cache(go)
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 @test
 def t_concurrent_queue_loads_share_one_sweep():
@@ -4052,18 +4053,18 @@ def t_concurrent_queue_loads_share_one_sweep():
             await asyncio.sleep(0.01)      # long enough for the others to arrive
             return {"orders": list(QUEUE_ORDERS)}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
         def go():
             async def three():
-                return await asyncio.gather(*[copilot.run_production_labels({}, tag="IP")
+                return await asyncio.gather(*[production.run_production_labels({}, tag="IP")
                                               for _ in range(3)])
             res = run(three())
             eq(calls["n"], 1, "one sweep, three callers")
             eq([len(r["orders"]) for r in res], [1, 1, 1], "and every caller got the answer")
         with_cache(go)
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 @test
 def t_different_windows_do_not_borrow_each_others_orders():
@@ -4074,16 +4075,16 @@ def t_different_windows_do_not_borrow_each_others_orders():
             seen.append(args.get("created_at_min"))
             return {"orders": []}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
         def go():
-            run(copilot._orders_snapshot({}, days=28, fields="id"))
-            run(copilot._orders_snapshot({}, days=730, fields="id"))
+            run(orderbook._orders_snapshot({}, days=28, fields="id"))
+            run(orderbook._orders_snapshot({}, days=730, fields="id"))
             eq(len(seen), 2, "two windows, two sweeps")
             ok(seen[0] != seen[1], "and each asked Shopify for its own window")
         with_cache(go)
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 @test
 def t_product_options_are_learned_once_not_per_queue_load():
@@ -4095,18 +4096,18 @@ def t_product_options_are_learned_once_not_per_queue_load():
             calls["n"] += 1
             return {"id": args["product_id"], "options": [{"name": "Gobo Size"}]}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
-    copilot._option_names_cache.clear()
+    saved = shopify._tool_json; shopify._tool_json = tools
+    production._option_names_cache.clear()
     try:
-        first = run(copilot._product_option_names({}, [11, 12]))
+        first = run(production._product_option_names({}, [11, 12]))
         eq(first, {11: ["Gobo Size"], 12: ["Gobo Size"]}, "options resolved")
         eq(calls["n"], 2, "one call per product")
-        again = run(copilot._product_option_names({}, [11, 12]))
+        again = run(production._product_option_names({}, [11, 12]))
         eq(again, first, "same answer from cache")
         eq(calls["n"], 2, "and no further calls at all")
     finally:
-        copilot._tool_json = saved
-        copilot._option_names_cache.clear()
+        shopify._tool_json = saved
+        production._option_names_cache.clear()
 
 @test
 def t_a_product_that_could_not_be_read_is_not_remembered_as_empty():
@@ -4119,16 +4120,16 @@ def t_a_product_that_could_not_be_read_is_not_remembered_as_empty():
                 return {"_failed": True}
             return {"id": args["product_id"], "options": [{"name": "Gobo Size"}]}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
-    copilot._option_names_cache.clear()
+    saved = shopify._tool_json; shopify._tool_json = tools
+    production._option_names_cache.clear()
     try:
-        eq(run(copilot._product_option_names({}, [11])), {11: []}, "a failed read yields nothing")
+        eq(run(production._product_option_names({}, [11])), {11: []}, "a failed read yields nothing")
         state["ok"] = True
-        eq(run(copilot._product_option_names({}, [11])), {11: ["Gobo Size"]}, "and is retried later")
+        eq(run(production._product_option_names({}, [11])), {11: ["Gobo Size"]}, "and is retried later")
         eq(calls["n"], 2, "so the failure was not cached")
     finally:
-        copilot._tool_json = saved
-        copilot._option_names_cache.clear()
+        shopify._tool_json = saved
+        production._option_names_cache.clear()
 
 
 # ---- Custom address dispatch ------------------------------------------------
@@ -4283,13 +4284,13 @@ def t_a_custom_shipment_stays_out_of_the_order_margin_report():
         if name == "shopify_list_orders":
             return {"orders": []}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
         res = run(desk.run_margin_report({}, days=30))
         eq(res["rows"], [], "no row at all")
         ok("incomplete" not in json.dumps(res), "and nothing reported as missing data")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 @test
 def t_a_custom_shipment_appears_on_the_days_manifest():
@@ -4378,13 +4379,13 @@ def t_a_custom_shipment_is_invisible_to_the_order_queue():
                                 "created_at": "2026-08-12T09:00:00Z",
                                 "line_items": [], "customer": {}, "shipping_address": {}}]}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
-        res = run(copilot.run_production_labels({}, tag="IP"))
+        res = run(production.run_production_labels({}, tag="IP"))
         eq(list(res["dispatch"].keys()), [], "the queue carries no ad-hoc dispatch state")
         eq([o["id"] for o in res["orders"]], [12345], "and the real order is untouched")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 
 # ---- Chase desk -------------------------------------------------------------
@@ -4404,7 +4405,7 @@ def with_liability(orders_list, fn):
         if name == "shopify_list_orders":
             return {"orders": list(orders_list)}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
         os.remove(copilot.CHASE_LOG_PATH)
     except FileNotFoundError:
@@ -4412,7 +4413,7 @@ def with_liability(orders_list, fn):
     try:
         return fn()
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 @test
 def t_the_chase_email_says_what_is_owed_and_by_which_orders():
@@ -4516,17 +4517,17 @@ def wh_headers(raw, secret=SECRET, topic="orders/updated", delivery="d1",
 def t_a_signed_order_event_retires_the_order_snapshot():
     # Since 2026-10-12 a named order is read again rather than every snapshot
     # retired (_orders_changed); the event must still reach it.
-    copilot._webhook_seen.clear()
+    orderbook._webhook_seen.clear()
     raw = json.dumps({"id": 1}).encode()
-    named, saved = [], copilot._orders_changed
-    copilot._orders_changed = lambda ids: (named.append(list(ids)), saved(ids))
+    named, saved = [], orderbook._orders_changed
+    orderbook._orders_changed = lambda ids: (named.append(list(ids)), saved(ids))
     try:
         r = client.post("/webhooks/orders", content=raw, headers=wh_headers(raw, delivery="ev1"))
     finally:
-        copilot._orders_changed = saved
+        orderbook._orders_changed = saved
     eq(r.status_code, 200, r.text)
     eq(named, [[1]], "the event's order is named, so every snapshot reads it again")
-    ok(copilot._webhook_state["count"] >= 1, "and the event was counted")
+    ok(orderbook._webhook_state["count"] >= 1, "and the event was counted")
 
 @test
 def t_settings_names_the_version_shopify_sends_order_events_in():
@@ -4534,7 +4535,7 @@ def t_settings_names_the_version_shopify_sends_order_events_in():
     and nothing showed which: an old one only moves forward, silently, when
     Shopify retires it. Each event says its version in a header; the last one
     is kept and Settings shows it beside the time of the last event."""
-    copilot._webhook_seen.clear()
+    orderbook._webhook_seen.clear()
     raw = json.dumps({"id": 3}).encode()
     h = dict(wh_headers(raw, delivery="ev-version"), **{"X-Shopify-API-Version": "2026-10"})
     eq(client.post("/webhooks/orders", content=raw, headers=h).status_code, 200)
@@ -5158,7 +5159,7 @@ def t_a_member_without_the_grant_is_refused_by_the_route():
         eq(r.status_code, 403, r.text)
         ok("size list" in r.json().get("error", ""), "and told where the grant comes from")
         # The refusal must be real: nothing reached the file.
-        rows = copilot._gobo_rule_rows("override")
+        rows = size_list._gobo_rule_rows("override")
         eq(any(x["Model"] == "Ungranted" for x in rows), False,
            "a refused request writes nothing")
     with_accounts(go)
@@ -5218,7 +5219,7 @@ def t_the_route_refuses_a_size_that_is_not_a_size():
             r = post("/api/gobo-sizes/rule",
                      {"op": "set", "manufacturer": "Showtec", "model": "BadSize", "size": bad})
             eq(r.status_code, 400, f"{bad!r} must be refused, got {r.status_code}")
-        rows = copilot._gobo_rule_rows("override")
+        rows = size_list._gobo_rule_rows("override")
         eq(any(x["Model"] == "BadSize" for x in rows), False, "and none of them were saved")
     with_accounts(go)
 
@@ -5252,7 +5253,7 @@ def t_the_model_search_answers_from_the_real_sheet():
         # Whatever comes back must be usable as an alias target, which is the
         # only reason this endpoint exists.
         first = hits[0]
-        _entry, reason = copilot._gobo_lookup(first["manufacturer"], first["model"])
+        _entry, reason = size_list._gobo_lookup(first["manufacturer"], first["model"])
         eq(reason, None, "the top hit resolves, so aliasing onto it is not a dead rule")
         eq((post("/api/gobo-sizes/models", {"q": "x"}).json().get("models")), [],
            "a one-character term searches nothing rather than returning the sheet")
@@ -5296,7 +5297,7 @@ def redact_through_the_hold(raw, delivery):
 def t_a_redact_request_erases_the_crm_person():
     """Relationship data goes. This is the half of the split with no legal
     obligation to keep it."""
-    copilot._webhook_seen.clear()
+    orderbook._webhook_seen.clear()
     email = "jo.redact@example.com"
     _seed_person_and_shipment(email)
     raw = json.dumps({"customer": {"id": 555, "email": email},
@@ -5311,7 +5312,7 @@ def t_a_redact_request_keeps_the_dispatch_record_and_notes_it():
     """The other half. A customs and export record is retained under a legal
     obligation, so erasing it would trade one exposure for another - but it has
     to carry evidence the request was honoured."""
-    copilot._webhook_seen.clear()
+    orderbook._webhook_seen.clear()
     email = "jo.keep@example.com"
     _seed_person_and_shipment(email)
     raw = json.dumps({"customer": {"id": 556, "email": email},
@@ -5327,7 +5328,7 @@ def t_a_redact_request_keeps_the_dispatch_record_and_notes_it():
 def t_a_redact_request_erases_only_that_persons_email_threads():
     """The mailbox is relationship data too. And the blast radius matters more
     than the erasure: wiping one person must not touch anyone else's thread."""
-    copilot._webhook_seen.clear()
+    orderbook._webhook_seen.clear()
     store = copilot._load_mail()
     store.setdefault("threads", {})
     store["threads"]["tgone"] = {"id": "tgone", "from_email": "Gone@Example.com",
@@ -5350,14 +5351,14 @@ def t_shop_redact_takes_a_backup_before_it_erases_anything():
     and customs history, so an uninstall during testing would destroy it. The
     erasure is real; the backup is what makes a misfire survivable."""
     from datetime import datetime, timedelta, timezone
-    copilot._webhook_seen.clear()
+    orderbook._webhook_seen.clear()
     calls = []
-    real, checker = copilot._build_backup_zip, copilot._install_checker
+    real, checker = copilot._build_backup_zip, shopify._install_checker
     copilot._build_backup_zip = lambda *a, **k: (calls.append(1), real(*a, **k))[1]
 
     async def gone():
         return "gone"
-    copilot._install_checker = gone   # Shopify has confirmed the uninstall
+    shopify._install_checker = gone   # Shopify has confirmed the uninstall
     w = copilot._load_watch()         # ...and the store has been unreadable for two days
     w["shopify_down"] = (datetime.now(timezone.utc) - timedelta(hours=46)).isoformat()
     copilot._save_watch(w)
@@ -5368,7 +5369,7 @@ def t_shop_redact_takes_a_backup_before_it_erases_anything():
         eq(r.status_code, 200, r.text)
         ok(calls, "a backup was taken before anything was erased")
     finally:
-        copilot._build_backup_zip, copilot._install_checker = real, checker
+        copilot._build_backup_zip, shopify._install_checker = real, checker
         w = copilot._load_watch()
         w.pop("shopify_down", None)
         copilot._save_watch(w)
@@ -5394,7 +5395,7 @@ def t_a_privacy_webhook_without_a_valid_signature_is_refused():
 def t_a_data_request_is_recorded_rather_than_answered_automatically():
     """Supplying the data is a human step with a 30-day clock. The app's job is
     to receive the request and make sure it is not lost."""
-    copilot._webhook_seen.clear()
+    orderbook._webhook_seen.clear()
     raw = json.dumps({"customer": {"id": 777, "email": "asks@example.com"},
                       "shop_domain": "test-store.myshopify.com"}).encode()
     r = client.post("/webhooks/privacy", content=raw,
@@ -5421,15 +5422,15 @@ def t_an_oversized_chunked_body_is_cut_off_not_buffered():
 
 @test
 def t_a_redelivered_event_does_not_count_twice():
-    copilot._webhook_seen.clear()
+    orderbook._webhook_seen.clear()
     raw = json.dumps({"id": 3}).encode()
     h = wh_headers(raw, delivery="same-delivery-id")
     client.post("/webhooks/orders", content=raw, headers=h)
-    epoch_after_first = copilot._orders_epoch
-    count_after_first = copilot._webhook_state["count"]
+    epoch_after_first = orderbook._orders_epoch
+    count_after_first = orderbook._webhook_state["count"]
     client.post("/webhooks/orders", content=raw, headers=h)
-    eq(copilot._orders_epoch, epoch_after_first, "a redelivery does not retire the snapshot again")
-    eq(copilot._webhook_state["count"], count_after_first, "or count as a second event")
+    eq(orderbook._orders_epoch, epoch_after_first, "a redelivery does not retire the snapshot again")
+    eq(orderbook._webhook_state["count"], count_after_first, "or count as a second event")
 
 @test
 def t_webhook_registration_is_a_standing_repair():
@@ -6565,7 +6566,7 @@ def t_a_stock_gobo_prints_its_name_not_a_check():
                  {"title": "Mystery Gobo", "quantity": 1, "product_id": 104, "properties": []},
              ]}
     types = {101: "Gobo", 102: "Gobo", 103: "Custom Gobos"}          # 104 unknown
-    shaped = copilot._shape_label_order(order, {}, cache=copilot._gobo_sizes(), types=types)
+    shaped = production._shape_label_order(order, {}, cache=size_list._gobo_sizes(), types=types)
     stock, sized, custom, unknown = shaped["items"]
     eq(stock["review_reason"], "", "a stock gobo with no fixture is not a CHECK")
     eq(stock["artwork"], "Smoke & Mirrors Gobo", "it prints its own name")
@@ -6576,7 +6577,7 @@ def t_a_stock_gobo_prints_its_name_not_a_check():
     eq(unknown["review_reason"], "No model specified on this item", "an unknown product type keeps the CHECK")
     ok(unknown["stock"] is False, "and is not treated as stock")
     # Without types at all (an older caller) nothing changes.
-    plain = copilot._shape_label_order(order, {}, cache=copilot._gobo_sizes())
+    plain = production._shape_label_order(order, {}, cache=size_list._gobo_sizes())
     eq(plain["items"][0]["review_reason"], "No model specified on this item",
        "no type information is the old behaviour exactly")
 
@@ -6609,7 +6610,7 @@ def t_a_gobo_sold_with_a_projector_is_cut_for_that_projector():
     its order, through the Projected Image row in the size list that names its
     wattage; two projector sizes, or none, is a CHECK that says so; a plain
     fixture-less custom gobo keeps its CHECK."""
-    sheet = copilot._gobo_sizes()
+    sheet = size_list._gobo_sizes()
     ok(any(r[0] == "projected image" for r in sheet.get("rows") or []),
        "the size list has its Projected Image rows")
     def gobo(**kw):
@@ -6624,7 +6625,7 @@ def t_a_gobo_sold_with_a_projector_is_cut_for_that_projector():
     def shape(*lines, types=None, email="buyer@acme.co.uk"):
         o = {"id": 1, "name": "#104453", "order_number": 104453, "note": "", "tags": "Unprocessed",
              "email": email, "line_items": list(lines)}
-        return copilot._shape_label_order(o, {}, cache=copilot._gobo_sizes(), types=types)["items"]
+        return production._shape_label_order(o, {}, cache=size_list._gobo_sizes(), types=types)["items"]
     types = {900: "Custom Gobos", 901: "Projector", 902: "Projector", 903: "Projector"}
 
     # #104453 itself: a With Projector gobo and a 40 Watt weatherproof.
@@ -6752,7 +6753,7 @@ def t_a_gobo_sold_with_a_projector_is_cut_for_that_projector():
     eq((g["production_size"], p["review_reason"]), ("53.3", ""), "the name alone is enough")
 
     # A size for one customer applies through the projector's row too.
-    cache = copilot._gobo_sizes()
+    cache = size_list._gobo_sizes()
     saved = list(cache["domain_rules"])
     try:
         cache["domain_rules"].append({"key": ("projected image", "40/80 watt range"), "domain": "acme.co.uk",
@@ -6782,11 +6783,11 @@ def t_coverage_counts_gobos_sold_with_a_projector():
         if name == "shopify_list_orders":
             return {"orders": orders}
         return await fake_tool_json(registry, name, args)
-    copilot._tool_json = tj
+    shopify._tool_json = tj
     try:
         r = run_async(copilot.run_label_coverage({}, 10))
     finally:
-        copilot._tool_json = fake_tool_json
+        shopify._tool_json = fake_tool_json
     eq((r["gobo_items"], r["sized"], r["skipped_no_model"]), (3, 1, 2),
        "three gobos, one sized by its projector; the two projectors are accessories")
     by = {f["orders"][0]["name"]: f for f in r["flagged"]}
@@ -6873,11 +6874,11 @@ def t_the_unprocessed_queue_lists_waiting_orders_and_release_moves_them_to_ip():
         if name == "shopify_get_order":
             return dict(next(o for o in store["orders"] if o["id"] == args["order_id"]))
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
-        res = run(copilot.run_production_labels({}, tag="Unprocessed"))
+        res = run(production.run_production_labels({}, tag="Unprocessed"))
         eq([o["id"] for o in res["orders"]], [701], "only the waiting order shows")
-        res2 = run(copilot.run_production_labels({}, tag="IP"))
+        res2 = run(production.run_production_labels({}, tag="IP"))
         eq([o["id"] for o in res2["orders"]], [702], "and it is not in To make yet")
         # The release: the same tag move the amber strip performs.
         r = post("/api/production-labels/queue", {"order_id": 701})
@@ -6887,7 +6888,7 @@ def t_the_unprocessed_queue_lists_waiting_orders_and_release_moves_them_to_ip():
         ok("IP" in [t.strip() for t in wrote.split(",")], "IP added: " + wrote)
         ok("Unprocessed" not in wrote, "Unprocessed removed: " + wrote)
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 
 @test
@@ -7763,11 +7764,11 @@ def t_a_row_printed_by_name_starts_after_its_count_and_wraps():
            "LED Weatherproof Gobo Projector&quot;</span>" in doc, "the projector's row starts after its count and wraps")
         ok("<div class='it'><span class='iqs'>1x 53.3mm</span>" in doc, "the sized gobo's row is as it was")
         ok(".it.named .iqs { min-width: 0; }" in doc, "and the count's column is not held wide for it")
-    copilot._tool_json = tj
+    shopify._tool_json = tj
     try:
         with_accounts(go)
     finally:
-        copilot._tool_json = fake_tool_json
+        shopify._tool_json = fake_tool_json
 
 
 @test
@@ -8681,30 +8682,30 @@ def t_status_reports_a_write_the_install_cannot_actually_do():
     because the lookup itself failed."""
     def go():
         ensure_auth()
-        saved = copilot._scope_reader
+        saved = shopify._scope_reader
         try:
             async def missing():
                 return {"scopes": ["read_orders", "write_orders"], "error": "",
                         "missing": {"write_payment_terms": "putting an unpaid purchase "
                                                            "order on 30-day terms"}}
-            copilot._scope_reader = missing
+            shopify._scope_reader = missing
             sc = post("/api/status", {}).json()["shopify"]["scopes"]
             ok(sc["checked"], sc)
             ok("write_payment_terms" in sc["missing"], sc)
             async def granted():
                 return {"scopes": ["write_payment_terms"], "error": "", "missing": {}}
-            copilot._scope_reader = granted
+            shopify._scope_reader = granted
             sc2 = post("/api/status", {}).json()["shopify"]["scopes"]
             eq(sc2["missing"], {}, "a granted install reports nothing missing")
             ok(sc2["checked"])
             async def broken():
                 return {"scopes": [], "error": "Shopify answered 503", "missing": {}}
-            copilot._scope_reader = broken
+            shopify._scope_reader = broken
             sc3 = post("/api/status", {}).json()["shopify"]["scopes"]
             eq(sc3["missing"], {}, "a failed lookup is UNKNOWN, never 'missing'")
             ok(not sc3["checked"] and sc3["error"], sc3)
         finally:
-            copilot._scope_reader = saved
+            shopify._scope_reader = saved
     with_accounts(go)
 
 @test
@@ -8802,8 +8803,8 @@ def t_backup_is_exhaustive_by_construction():
         good_ext = base.lower().endswith((".json", ".jsonl", ".csv", ".bak"))
         if not ((in_data_top or in_labels or in_repo) and good_ext):
             misses.append(f"{name} -> {val}")
-    ok(copilot.GOBO_SIZES_LIVE.lower().endswith(".csv")
-       and os.path.dirname(copilot.GOBO_SIZES_LIVE) == data_dir,
+    ok(size_list.GOBO_SIZES_LIVE.lower().endswith(".csv")
+       and os.path.dirname(size_list.GOBO_SIZES_LIVE) == data_dir,
        "the live size sheet is inside the backup's reach")
     eq(misses, [], "stores the backup would MISS: " + "; ".join(misses))
 
@@ -11058,15 +11059,15 @@ def t_mail_order_context_matches_only_the_exact_sender():
                  "total_price": "248.00", "currency": "GBP"},
                 {"id": 502, "name": "#1188", "created_at": "2026-07-02T09:00:00Z",
                  "total_price": "96.00", "currency": "GBP"}]}
-        saved = copilot._tool_json
-        copilot._tool_json = fake_tool
-        prod = copilot._load_prod_state()
+        saved = shopify._tool_json
+        shopify._tool_json = fake_tool
+        prod = production._load_prod_state()
         disp = desk._load_dispatch()
         try:
             prod["501"] = {"made_at": "2026-08-12T10:00:00Z", "printed_at": "2026-08-11T10:00:00Z"}
             disp["501"] = {"tracking_number": "4512339981", "carrier_label": "DPD",
                            "dispatched_at": "2026-08-13T10:00:00Z", "fulfilled": True}
-            copilot._write_prod_state(prod)
+            production._write_prod_state(prod)
             desk._write_dispatch(disp)
             r = post("/api/mail/orders", {"id": "t1"})
             eq(r.status_code, 200, r.text)
@@ -11082,7 +11083,7 @@ def t_mail_order_context_matches_only_the_exact_sender():
             _seed_thread("t2", frm=("Stranger", "nobody@elsewhere.com"))
             eq(post("/api/mail/orders", {"id": "t2"}).json()["orders"], [])
         finally:
-            copilot._tool_json = saved
+            shopify._tool_json = saved
     with_mail(go)
 
 @test
@@ -11098,8 +11099,8 @@ def t_mail_booked_label_is_not_shipped():
                                        "first_name": "Jo", "orders_count": 1}]}
             return {"orders": [{"id": 700, "name": "#1300",
                                 "created_at": "2026-08-18T09:00:00Z"}]}
-        saved = copilot._tool_json
-        copilot._tool_json = fake_tool
+        saved = shopify._tool_json
+        shopify._tool_json = fake_tool
         disp = desk._load_dispatch()
         try:
             disp["700"] = {"tracking_number": "TRK1", "carrier_label": "DPD",
@@ -11113,7 +11114,7 @@ def t_mail_booked_label_is_not_shipped():
             sent2 = post("/api/mail/orders", {"id": "t1"}).json()["orders"][0]["sentence"]
             ok(sent2.startswith("#1300, shipped"), sent2)
         finally:
-            copilot._tool_json = saved
+            shopify._tool_json = saved
     with_mail(go)
 
 @test
@@ -11145,9 +11146,9 @@ def t_mail_draft_withholds_order_facts_when_the_reply_goes_elsewhere():
         async def fake_tool(reg, name, args):
             looked_up.append(args)
             return {"customers": [], "orders": []}
-        saved = (_gm.read_thread, claude._xcreate, claude.ANTHROPIC_API_KEY, copilot._tool_json)
+        saved = (_gm.read_thread, claude._xcreate, claude.ANTHROPIC_API_KEY, shopify._tool_json)
         _gm.read_thread, claude._xcreate = fake_read, fake_create
-        claude.ANTHROPIC_API_KEY, copilot._tool_json = "x", fake_tool
+        claude.ANTHROPIC_API_KEY, shopify._tool_json = "x", fake_tool
         try:
             r = post("/api/mail/draft", {"id": "t1", "op": "compose"})
             eq(r.status_code, 200, r.text)
@@ -11157,7 +11158,7 @@ def t_mail_draft_withholds_order_facts_when_the_reply_goes_elsewhere():
             ok("somebody-else@elsewhere.com" in prompt, prompt[:300])
             eq(looked_up, [], "and no orders were even fetched")
         finally:
-            _gm.read_thread, claude._xcreate, claude.ANTHROPIC_API_KEY, copilot._tool_json = saved
+            _gm.read_thread, claude._xcreate, claude.ANTHROPIC_API_KEY, shopify._tool_json = saved
     with_mail(go)
 
 @test
@@ -11519,8 +11520,8 @@ def t_every_release_path_starts_the_30_day_clock():
     calls = []
     async def fake_terms(order_id):
         calls.append(int(order_id)); return {"ok": True}
-    saved_terms, saved_tags = copilot._payment_terms_writer, ORDER["tags"]
-    copilot._payment_terms_writer = fake_terms
+    saved_terms, saved_tags = shopify._payment_terms_writer, ORDER["tags"]
+    shopify._payment_terms_writer = fake_terms
     try:
         ORDER["tags"] = "Unprocessed, purchase order unpaid"
         r = post("/api/production-state", {"op": "printed", "ids": [12345]}).json()
@@ -11531,7 +11532,7 @@ def t_every_release_path_starts_the_30_day_clock():
         post("/api/production-state", {"op": "printed", "ids": [12345]})
         eq(calls, [], "no unpaid tag, no terms")
     finally:
-        copilot._payment_terms_writer, ORDER["tags"] = saved_terms, saved_tags
+        shopify._payment_terms_writer, ORDER["tags"] = saved_terms, saved_tags
 
 # ---- payment terms -------------------------------------------------------
 def _terms_stub(current_terms, mutation_errors=None, capture=None):
@@ -11764,15 +11765,15 @@ def t_the_app_never_reports_success_for_a_write_that_did_not_happen():
     reset_dispatch(); reset_prod()
     # 1. Mark made refuses rather than half-completing. A CORRUPT store is the
     # real scenario: loading it is what marks it unwritable.
-    with open(copilot.PRODUCTION_STATE_PATH, "w", encoding="utf-8") as fh:
+    with open(production.PRODUCTION_STATE_PATH, "w", encoding="utf-8") as fh:
         fh.write("{ this is not json")
     try:
-        copilot._load_prod_state()          # poisons the store, as in production
+        production._load_prod_state()          # poisons the store, as in production
         r = post("/api/production-state", {"op": "made", "id": 12345, "name": "#104239"})
         eq(r.status_code, 503, "an unwritable state store stops the whole operation")
         ok("nothing was fulfilled" in r.json()["error"], r.json()["error"])
     finally:
-        jsonstore._poisoned_stores.discard(copilot.PRODUCTION_STATE_PATH)
+        jsonstore._poisoned_stores.discard(production.PRODUCTION_STATE_PATH)
         reset_prod()
     # 2. A failed mailbox write must not leave the mutation live in memory.
     def go():
@@ -11803,14 +11804,14 @@ def t_a_short_sweep_says_so_instead_of_looking_like_a_quiet_day():
         if name == "shopify_list_orders":
             return {"_failed": True, "error": "429 throttled"}
         return await fake_tool_json(registry, name, args)
-    saved = copilot._tool_json
-    copilot._tool_json = flaky
-    copilot._bust_orders()
+    saved = shopify._tool_json
+    shopify._tool_json = flaky
+    orderbook._bust_orders()
     try:
-        out = run_async(copilot.run_production_labels({}, tag="IP", fresh=True))
+        out = run_async(production.run_production_labels({}, tag="IP", fresh=True))
         ok(out.get("partial_note"), "a failed sweep is reported, not rendered as an empty queue")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 @test
 def t_the_drive_cannot_be_filled_or_confused_by_duplicate_names():
@@ -11920,12 +11921,12 @@ def t_the_link_sweep_will_not_guess_when_two_customers_share_an_email():
                 return {"customers": [{"id": 1, "email": "dup@x.com"},
                                       {"id": 2, "email": "dup@x.com"}]}
             return {}
-        saved = copilot._tool_json
-        copilot._tool_json = tools
+        saved = shopify._tool_json
+        shopify._tool_json = tools
         try:
             rep = run_async(copilot._crm_shopify_link_sweep({}))
         finally:
-            copilot._tool_json = saved
+            shopify._tool_json = saved
         eq(rep["ambiguous"], 1, "an email two customers share is ambiguous, not a guess")
         ok(not copilot._load_crm()["persons"][p].get("shopify_customer_id"), "left unlinked")
     with_accounts(go)
@@ -11994,12 +11995,12 @@ def t_the_link_sweep_matches_contacts_to_shopify_customers_without_guessing():
                     {"id": 73, "email": "a@one.com"},
                     {"id": 74, "email": "b@two.com"}]}
             return {}
-        saved = copilot._tool_json
-        copilot._tool_json = tools
+        saved = shopify._tool_json
+        shopify._tool_json = tools
         try:
             rep = run_async(copilot._crm_shopify_link_sweep({}))
         finally:
-            copilot._tool_json = saved
+            shopify._tool_json = saved
         eq(rep["linked"], 1, rep)
         eq(rep["already"], 1, rep)
         eq(rep["ambiguous"], 1, rep)
@@ -12149,7 +12150,7 @@ async def fake_order_writer(order_id, fields):
     return {"ok": True}
 
 
-copilot._order_writer = fake_order_writer
+shopify._order_writer = fake_order_writer
 
 
 def _edit(body):
@@ -12222,7 +12223,7 @@ def t_a_country_name_becomes_the_code_a_courier_needs():
 def t_the_recipient_is_first_and_last_not_a_name_field():
     """Shopify derives an address's name from first + last, so a panel offering
     "name" would report a save and change nothing."""
-    ok("name" not in copilot._EDIT_ADDR_KEYS, "name is not in the editable set")
+    ok("name" not in orderbook._EDIT_ADDR_KEYS, "name is not in the editable set")
     r = _edit({"ship_to": {"firstname": "Joanne"}})
     ok(r.status_code == 200 and r.json()["changed"] == ["firstname"],
        "but the first name is editable: %s" % r.text[:120])
@@ -12254,7 +12255,7 @@ def t_the_proposal_proof_link_survives_an_untouched_note():
     removed and the rest cut to 500 characters. Prefilling a form from THAT and
     saving would delete the artwork proof link from Shopify for good. The panel
     reads the raw note instead, so an untouched note round-trips byte for byte."""
-    saved = copilot._tool_json
+    saved = shopify._tool_json
     raw = ("Rush job for the Friday get-in.\n\nProposal link: "
            "https://quote.projectedimage.co.uk/p/abc123\n\n" + ("x" * 700))
 
@@ -12262,7 +12263,7 @@ def t_the_proposal_proof_link_survives_an_untouched_note():
         if name == "shopify_get_order":
             o = dict(ORDER); o["note"] = raw; return o
         return await saved(registry, name, args)
-    copilot._tool_json = noted
+    shopify._tool_json = noted
     try:
         r = _edit({"op": "read"})
         ok(r.json()["note"] == raw, "the read hands back the note exactly as Shopify holds it")
@@ -12279,25 +12280,25 @@ def t_the_proposal_proof_link_survives_an_untouched_note():
         ok("quote.projectedimage.co.uk" in ORDER_WRITES[0][1]["note"],
            "and the proposal link is still in what goes to Shopify")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 
 @test
 def t_a_cancelled_order_is_a_closed_record():
-    saved = copilot._tool_json
+    saved = shopify._tool_json
 
     async def dead(registry, name, args):
         if name == "shopify_get_order":
             o = dict(ORDER); o["cancelled_at"] = "2026-08-02T00:00:00Z"; return o
         return await saved(registry, name, args)
-    copilot._tool_json = dead
+    shopify._tool_json = dead
     try:
         r = _edit({"ship_to": {"postcode": "M1 5GH"}})
         ok(r.status_code == 400, "refused, got %s" % r.status_code)
         ok("cancelled" in r.text, "and says why: " + r.text[:130])
         ok(not ORDER_WRITES, "nothing written")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 
 @test
@@ -12329,14 +12330,14 @@ def t_a_diverged_parcel_is_not_silently_fulfilled_and_emailed():
     reset_dispatch(); reset_prod()
     desk._record_dispatch(12345, {"tracking_number": "T-2", "carrier": "DPD",
                                      "address_changed_at": "2026-08-21T09:00:00Z"})
-    copilot._mark_made(12345, True)
+    production._mark_made(12345, True)
     try:
         FULFILLED.clear()
-        r = run(copilot._fulfill_if_ready({}, 12345))
+        r = run(orderbook._fulfill_if_ready({}, 12345))
         ok(not r["fulfilled"], "it stops")
         ok(r["reason"] == "address_changed", "for the right reason: %s" % r["reason"])
         ok(not FULFILLED, "and nothing was fulfilled or emailed")
-        r2 = run(copilot._fulfill_if_ready({}, 12345, ack_address=True))
+        r2 = run(orderbook._fulfill_if_ready({}, 12345, ack_address=True))
         ok(r2["fulfilled"], "acknowledged, it proceeds: %s" % r2.get("reason"))
         ok(not desk._load_dispatch()["12345"].get("address_changed_at"),
            "and the flag clears, so the same order is not stopped twice")
@@ -12890,7 +12891,7 @@ def t_a_cancelled_order_is_not_put_on_thirty_day_terms():
     invoiced - then reported it as released."""
     def go():
         ensure_auth(); reset_prod()
-        saved_w, saved_tags, saved_status = (copilot._payment_terms_writer, ORDER["tags"],
+        saved_w, saved_tags, saved_status = (shopify._payment_terms_writer, ORDER["tags"],
                                              ORDER.get("cancelled_at"))
         calls = []
 
@@ -12898,7 +12899,7 @@ def t_a_cancelled_order_is_not_put_on_thirty_day_terms():
             calls.append(order_id)
             return {"ok": True, "created": True}
         try:
-            copilot._payment_terms_writer = writer
+            shopify._payment_terms_writer = writer
             ORDER["tags"] = "Unprocessed, purchase order unpaid"
             ORDER["cancelled_at"] = "2026-08-02T09:00:00Z"
             r = post("/api/production-labels/queue", {"order_id": 12345}).json()
@@ -12907,7 +12908,7 @@ def t_a_cancelled_order_is_not_put_on_thirty_day_terms():
             ok("cancel" in (r.get("terms_note") or "").lower(),
                "the note says why: %s" % r.get("terms_note"))
         finally:
-            copilot._payment_terms_writer, ORDER["tags"] = saved_w, saved_tags
+            shopify._payment_terms_writer, ORDER["tags"] = saved_w, saved_tags
             if saved_status is None:
                 ORDER.pop("cancelled_at", None)
             else:
@@ -12922,7 +12923,7 @@ def t_a_batch_names_the_orders_whose_terms_failed():
     that actually failed was never named."""
     def go():
         ensure_auth(); reset_prod()
-        saved_w, saved_tags = copilot._payment_terms_writer, ORDER["tags"]
+        saved_w, saved_tags = shopify._payment_terms_writer, ORDER["tags"]
         try:
             ORDER["tags"] = "Unprocessed, purchase order unpaid"
 
@@ -12930,7 +12931,7 @@ def t_a_batch_names_the_orders_whose_terms_failed():
                 if int(order_id) == 12347:
                     return {"ok": False, "detail": "Shopify refused the terms."}
                 return {"ok": True, "created": True}
-            copilot._payment_terms_writer = writer
+            shopify._payment_terms_writer = writer
             r = post("/api/production-state",
                      {"op": "printed", "ids": [12345, 12346, 12347]}).json()
             per = {t["order"]: t["ok"] for t in (r.get("terms") or [])}
@@ -12940,7 +12941,7 @@ def t_a_batch_names_the_orders_whose_terms_failed():
             ok("refused" in r["terms_note"].lower(),
                "and the summary carries the FAILURE, not three successes: " + r["terms_note"])
         finally:
-            copilot._payment_terms_writer, ORDER["tags"] = saved_w, saved_tags
+            shopify._payment_terms_writer, ORDER["tags"] = saved_w, saved_tags
     with_accounts(go)
 
 
@@ -12950,25 +12951,25 @@ def t_a_terms_failure_stays_on_the_order_until_it_is_fixed():
     print run has no toast at all. The queue row has to carry it."""
     def go():
         ensure_auth(); reset_prod()
-        saved_w, saved_tags = copilot._payment_terms_writer, ORDER["tags"]
+        saved_w, saved_tags = shopify._payment_terms_writer, ORDER["tags"]
         try:
             ORDER["tags"] = "Unprocessed, purchase order unpaid"
 
             async def bad(order_id):
                 return {"ok": False, "detail": "Shopify refused the terms."}
-            copilot._payment_terms_writer = bad
+            shopify._payment_terms_writer = bad
             post("/api/production-labels/queue", {"order_id": 12345})
-            st = copilot._load_prod_state().get("12345") or {}
+            st = production._load_prod_state().get("12345") or {}
             ok(st.get("terms_error"), "the order carries the problem: %s" % st)
 
             async def good(order_id):
                 return {"ok": True, "created": True}
-            copilot._payment_terms_writer = good
+            shopify._payment_terms_writer = good
             post("/api/production-labels/queue", {"order_id": 12345})
-            st2 = copilot._load_prod_state().get("12345") or {}
+            st2 = production._load_prod_state().get("12345") or {}
             ok(not st2.get("terms_error"), "and it clears when the terms attach: %s" % st2)
         finally:
-            copilot._payment_terms_writer, ORDER["tags"] = saved_w, saved_tags
+            shopify._payment_terms_writer, ORDER["tags"] = saved_w, saved_tags
     with_accounts(go)
 
 
@@ -12978,7 +12979,7 @@ def t_the_background_tail_of_a_print_run_attaches_terms_too():
     paced behind it. The tail is a release like any other."""
     def go():
         ensure_auth(); reset_prod()
-        saved_w, saved_tags = copilot._payment_terms_writer, ORDER["tags"]
+        saved_w, saved_tags = shopify._payment_terms_writer, ORDER["tags"]
         seen = []
         try:
             ORDER["tags"] = "Unprocessed, purchase order unpaid"
@@ -12986,7 +12987,7 @@ def t_the_background_tail_of_a_print_run_attaches_terms_too():
             async def writer(order_id):
                 seen.append(int(order_id))
                 return {"ok": True, "created": True}
-            copilot._payment_terms_writer = writer
+            shopify._payment_terms_writer = writer
             saved_sleep = copilot.asyncio.sleep
 
             async def no_wait(_s):
@@ -12995,12 +12996,12 @@ def t_the_background_tail_of_a_print_run_attaches_terms_too():
             try:
                 # The registry is only ever handed to _tool_json, which this
                 # harness replaces wholesale, so an empty one is honest here.
-                run_async(copilot._release_bg({}, [12345, 12346]))
+                run_async(production._release_bg({}, [12345, 12346]))
             finally:
                 copilot.asyncio.sleep = saved_sleep
             eq(sorted(seen), [12345, 12346], "every tail order got its terms: %s" % seen)
         finally:
-            copilot._payment_terms_writer, ORDER["tags"] = saved_w, saved_tags
+            shopify._payment_terms_writer, ORDER["tags"] = saved_w, saved_tags
     with_accounts(go)
 
 
@@ -13012,20 +13013,20 @@ def t_the_real_writer_meets_the_release_route():
     def go():
         ensure_auth(); reset_prod()
         import server as _srv
-        saved_req, saved_w, saved_tags = _srv._request, copilot._payment_terms_writer, ORDER["tags"]
+        saved_req, saved_w, saved_tags = _srv._request, shopify._payment_terms_writer, ORDER["tags"]
         _srv._net30_template["id"] = ""
         try:
             ORDER["tags"] = "Unprocessed, purchase order unpaid"
             _srv._request = _terms_stub2({"id": "gid://shopify/PaymentTerms/77",
                                           "paymentTermsName": "Due on receipt",
                                           "paymentTermsType": "RECEIPT", "dueInDays": None})
-            copilot._payment_terms_writer = _srv.set_order_payment_terms_net30
+            shopify._payment_terms_writer = _srv.set_order_payment_terms_net30
             r = post("/api/production-labels/queue", {"order_id": 12345}).json()
             ok(r["terms_ok"], "the real writer's UPDATE reads as success: %s" % r)
             ok("Due on receipt" in r["terms_note"] and "Net 30" in r["terms_note"],
                "and the note says what changed: %s" % r.get("terms_note"))
         finally:
-            _srv._request, copilot._payment_terms_writer = saved_req, saved_w
+            _srv._request, shopify._payment_terms_writer = saved_req, saved_w
             ORDER["tags"] = saved_tags
             _srv._net30_template["id"] = ""
     with_accounts(go)
@@ -14182,7 +14183,7 @@ def t_an_m_size_holder_takes_an_m_size_gobo():
     eq(bad, [], "every 65.5 mm (M-size) holder is cut at 66")
     ok(len([r for r in rows if r["Glass Diameter (mm)"].strip() == "65.5"]) >= 68,
        "and the holders themselves still say what they measure")
-    hit, why = copilot._gobo_lookup("Chauvet", "Ovation E2 FC")
+    hit, why = size_list._gobo_lookup("Chauvet", "Ovation E2 FC")
     ok(hit is not None and hit["production_size"] == "66" and not why and not hit["review"],
        f"104357's fixture -> {hit and hit['production_size']} ({why}, {hit and hit['review']!r})")
     sg = [r for r in rows if r["Model"].strip() == "SHOWGUN"]
@@ -14202,7 +14203,7 @@ def t_the_standard_holder_sizes_resolve_to_their_nominal_glass():
     want = {"A Size": "100", "B Size": "86", "M Size": "66", "D Size": "53.3", "E Size": "37.5"}
     for model, size in want.items():
         for mfr in ("Standard", "Standard Size"):
-            hit, why = copilot._gobo_lookup(mfr, model)
+            hit, why = size_list._gobo_lookup(mfr, model)
             ok(hit is not None and hit["production_size"] == size and not why,
                f"{mfr} / {model} -> {hit and hit['production_size']} ({why})")
     seed = open(os.path.join(HERE, "data", "gobo-overrides.csv"), encoding="utf-8").read()
@@ -14263,24 +14264,24 @@ def t_the_size_list_asks_the_label_what_a_typed_name_prints():
         ok(j["match"] is not None, q + ": and the label finds it")
     j = chk("Light Sky Spot")
     ok(j["manufacturer"] in ("Light Sky", ""), "'light' starts two makers, so it alone reads as no maker")
-    eq(copilot._gobo_split_maker("light fantastic", copilot._gobo_sizes()), ("", "light fantastic"), "a shared first word is no maker")
-    eq(copilot._gobo_split_maker("ETC", copilot._gobo_sizes()), ("", "ETC"), "a maker alone leaves no model, so it is read as the model")
+    eq(size_list._gobo_split_maker("light fantastic", size_list._gobo_sizes()), ("", "light fantastic"), "a shared first word is no maker")
+    eq(size_list._gobo_split_maker("ETC", size_list._gobo_sizes()), ("", "ETC"), "a maker alone leaves no model, so it is read as the model")
     j = chk("Chauvet Rogue R2 Spot Metal")
     ok(j["excluded"] and j["match"] is None and j["size"] == "" and j["reason"] == "",
        "a model ruled not a gobo prints no size and no CHECK, as the label shapes it")
     for q, maker, model in (("Studio Spot 575", "High End Systems", "Studio Spot 575"),
                             ("EVL Pro 250", "Mad", "EVL Pro 250"), ("Infinity IS 100", "Showtec", "Infinity IS 100")):
         eq(chk(q)["match"], {"manufacturer": maker, "model": model}, q + ": a maker's name that starts another maker's model is read as the model")
-    keys = copilot._gobo_maker_keys(copilot._gobo_sizes())
+    keys = size_list._gobo_maker_keys(size_list._gobo_sizes())
     ok("studio" not in keys and "martin" in keys and "high end" in keys, "a first word that is in a model is no maker's")
-    ok("vl" not in keys and "vl" not in copilot._GOBO_MAKER_SHORT, "'vl' starts Vari-Lite's models, so it is no maker's shorthand")
-    eq(copilot._gobo_split_maker("clay paky", copilot._gobo_sizes()), ("", "clay paky"), "a maker's name alone names no model")
+    ok("vl" not in keys and "vl" not in size_list._GOBO_MAKER_SHORT, "'vl' starts Vari-Lite's models, so it is no maker's shorthand")
+    eq(size_list._gobo_split_maker("clay paky", size_list._gobo_sizes()), ("", "clay paky"), "a maker's name alone names no model")
     j = chk("vl 2500 spot")
     ok(j["manufacturer"] == "" and (j["match"] is None or "VL2500" in j["match"]["model"]), "and 'vl 2500 spot' is not read as maker Vari-Lite")
-    before = len(copilot._gobo_sizes().get("lookup_memo") or {})
+    before = len(size_list._gobo_sizes().get("lookup_memo") or {})
     for n in range(20):
         chk("never an order line %d" % n)
-    eq(len(copilot._gobo_sizes().get("lookup_memo") or {}), before, "typed names are not kept in the label's memo")
+    eq(len(size_list._gobo_sizes().get("lookup_memo") or {}), before, "typed names are not kept in the label's memo")
     j = chk("Ayrton Diablo")
     ok({"domain": "dbnaudile.co.uk", "size": "25"} in j["domains"], "with the size set for one customer's orders")
     j = chk("Clay Paky Sharpy")
@@ -14292,7 +14293,7 @@ def t_the_size_list_asks_the_label_what_a_typed_name_prints():
     lst = post("/api/gobo-sizes/list", {}).json()
     eq(lst["shorthand"]["makers"]["adj"], "American DJ", "the shorthand travels with the listing")
     ok(["4", "four"] in lst["shorthand"]["words"], "number words too")
-    for short, maker in copilot._GOBO_MAKER_SHORT.items():
+    for short, maker in size_list._GOBO_MAKER_SHORT.items():
         ok(any(r["manufacturer"] == maker for r in lst["rows"]), short + " names a maker on the sheet")
     owen, sess, _pw = ready_user("Olive", "olive")
     eq(post("/api/team/user", {"op": "tabs", "id": owen, "tabs": ["sizes"]}).status_code, 200)
@@ -14310,9 +14311,9 @@ def t_a_model_ruled_not_a_gobo_prints_no_size_on_its_label():
     CHECK and a line saying why, uses no glass on the day sheets or in the
     stock app, and a size set for one customer does not bring a size back."""
     P = lambda **kv: [{"name": k, "value": v} for k, v in kv.items()]
-    cache = copilot._gobo_sizes()
+    cache = size_list._gobo_sizes()
     ok(("chauvet", "rogue r2 spot metal") in cache["excludes"], "the seed rules it not a gobo")
-    hit, why = copilot._gobo_lookup("Chauvet", "Rogue R2 Spot Metal", cache=cache)
+    hit, why = size_list._gobo_lookup("Chauvet", "Rogue R2 Spot Metal", cache=cache)
     ok(hit is not None and hit["production_size"], "the lookup alone would size it from a neighbour, which is the fault")
     order = {"id": 7, "name": "#7", "order_number": 7, "note": "", "tags": "IP", "email": "a@example.com",
              "line_items": [
@@ -14321,7 +14322,7 @@ def t_a_model_ruled_not_a_gobo_prints_no_size_on_its_label():
                  {"title": "Custom Gobo", "quantity": 1, "product_id": 1,
                   "properties": P(Manufacturer="Chauvet", Model="Rogue R2 Spot")},
              ]}
-    ruled, plain = copilot._shape_label_order(order, {}, cache=cache)["items"]
+    ruled, plain = production._shape_label_order(order, {}, cache=cache)["items"]
     eq((ruled["production_size"], ruled["review_reason"]), ("", ""), "no size and no CHECK")
     ok(ruled["not_gobo"] is True and ruled["size_note"] == "Not a gobo", "said, on the label, under its name")
     eq(ruled["quantity"], 2, "the line is still on the label")
@@ -14330,16 +14331,16 @@ def t_a_model_ruled_not_a_gobo_prints_no_size_on_its_label():
     eq(lines, [{"size": plain["production_size"], "family": "(type not recorded)", "qty": 1}],
        "no glass used, and nothing 'to resolve', on the day sheets or in the stock app")
     # A size for one customer does not undo the ruling.
-    rows = copilot._gobo_rule_rows("override")
+    rows = size_list._gobo_rule_rows("override")
     added = {"Manufacturer": "Chauvet", "Model": "Rogue R2 Spot Metal", "Customer Email Domain": "example.com",
              "Production Size (mm)": "25"}
-    copilot._write_gobo_rule_rows("override", rows + [added])
+    size_list._write_gobo_rule_rows("override", rows + [added])
     try:
-        again = copilot._shape_label_order(order, {}, cache=copilot._gobo_sizes())["items"][0]
+        again = production._shape_label_order(order, {}, cache=size_list._gobo_sizes())["items"][0]
         eq((again["production_size"], again["review_reason"], again["not_gobo"]), ("", "", True),
            "the ruling wins over a size for one customer")
     finally:
-        copilot._write_gobo_rule_rows("override", rows)
+        size_list._write_gobo_rule_rows("override", rows)
     # The size check still counts it apart, as before.
     ok("ruled_out" in copilot_source(), "the size check keeps its own count")
 
@@ -14354,7 +14355,7 @@ def t_an_order_is_sized_from_its_own_makers_models_before_another_makers():
     and every ruling answers as before; a name that stayed with its own maker
     (Clay Paky 'Profile') still says CHECK; and a store maker that is a
     product family still reaches the family's row under its real maker."""
-    look = lambda m, x: copilot._gobo_lookup(m, x)
+    look = lambda m, x: size_list._gobo_lookup(m, x)
     hit, why = look("Robe", "Spot")
     ok(hit and hit["manufacturer"] == "Robe" and hit["model"].startswith("Spot") and not why, "Robe's own Spot series: %r %r" % (hit, why))
     eq(hit["production_size"], "26.5", "at Robe's size")
@@ -14376,14 +14377,14 @@ def t_an_order_is_sized_from_its_own_makers_models_before_another_makers():
     ok(hit and hit["manufacturer"] == "Prolight Concepts", "and the aliases still do")
     # Every name on the sheet still finds its own row, under its own maker.
     import csv as _csv
-    sheet = list(_csv.DictReader(open(copilot._sizes_path(), encoding="utf-8-sig")))
+    sheet = list(_csv.DictReader(open(size_list._sizes_path(), encoding="utf-8-sig")))
     bad = []
     for r in sheet:
         m, x = r["Manufacturer"].strip(), r["Model"].strip()
-        if (copilot._norm_key(m), copilot._norm_key(x)) in copilot._gobo_sizes()["excludes"]:
+        if (size_list._norm_key(m), size_list._norm_key(x)) in size_list._gobo_sizes()["excludes"]:
             continue
         hit, why = look(m, x)
-        if hit is not None and copilot._loose_key(hit["manufacturer"]) != copilot._loose_key(m):
+        if hit is not None and size_list._loose_key(hit["manufacturer"]) != size_list._loose_key(m):
             bad.append((m, x, hit["manufacturer"]))
     eq(bad, [], "no sheet name is sized from another maker")
     j = post("/api/gobo-sizes/check", {"q": "robe spot"}).json()
@@ -14818,8 +14819,8 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
     sure it is honoured. The alerts are said once per outcome per six hours,
     so forgeries cannot flood the privacy log or the email allowance."""
     from datetime import datetime, timedelta, timezone
-    copilot._webhook_seen.clear()
-    saved = (copilot._install_checker, copilot._spawn_bg, copilot._build_backup_zip)
+    orderbook._webhook_seen.clear()
+    saved = (shopify._install_checker, copilot._spawn_bg, copilot._build_backup_zip)
     spawned = []
 
     def spawn(coro):
@@ -14830,7 +14831,7 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
 
     async def checker():
         return verdict["v"]
-    copilot._install_checker, copilot._spawn_bg = checker, spawn
+    shopify._install_checker, copilot._spawn_bg = checker, spawn
     copilot._shop_redact_said.clear()
     saved_watch = copilot._load_watch()
     raw = json.dumps({"shop_id": 1, "shop_domain": "test-store.myshopify.com"}).encode()
@@ -14911,11 +14912,11 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
         eq(run(copilot._shop_redact_retry(None)), None, "nothing owed, nothing tried")
         # No way to ask Shopify is no confirmation; a broken watch record is
         # not an erasure either.
-        copilot._install_checker = None
+        shopify._install_checker = None
         ok(seed(), "reseeded")
         eq(redact("rc1-d").status_code, 200)
         ok(os.path.isfile(copilot.CRM_PATH) and isinstance(owed(), dict), "not erased, owed")
-        copilot._install_checker = checker
+        shopify._install_checker = checker
         copilot._save_watch(["not", "an", "object"])
         eq(redact("rc1-e").status_code, 200, "answered, not a crash")
         ok(os.path.isfile(copilot.CRM_PATH), "and not erased")
@@ -14933,14 +14934,14 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
         jsonstore._json_cache.clear()
         try:
             eq(redact("rc1-f").status_code, 503, "not recorded: Shopify is asked to send it again")
-            ok("rc1-f" not in copilot._webhook_seen, "and the retry is not taken for a duplicate")
+            ok("rc1-f" not in orderbook._webhook_seen, "and the retry is not taken for a duplicate")
         finally:
             open(copilot.PRIVACY_LOG_PATH, "wb").write(good)
             jsonstore._json_cache.clear()
             jsonstore._poisoned_stores.discard(copilot.PRIVACY_LOG_PATH)
     finally:
-        copilot._install_checker, copilot._spawn_bg, copilot._build_backup_zip = saved
-        copilot._webhook_seen.clear()
+        shopify._install_checker, copilot._spawn_bg, copilot._build_backup_zip = saved
+        orderbook._webhook_seen.clear()
         copilot._shop_redact_said.clear()
         copilot._shop_owed_set(None)
         copilot._save_watch(saved_watch if isinstance(saved_watch, dict) else {})
@@ -15463,8 +15464,8 @@ def t_a_signed_customer_redact_waits_for_an_admin():
     the app and by email naming nobody, and reminded daily as the thirty days
     run out. Nothing is erased without an admin."""
     from datetime import datetime, timedelta, timezone
-    copilot._webhook_seen.clear()
-    saved = (copilot._customer_checker, copilot._spawn_bg, copilot._send_alert_email)
+    orderbook._webhook_seen.clear()
+    saved = (shopify._customer_checker, copilot._spawn_bg, copilot._send_alert_email)
     spawned, sent_mail, queued = [], {"ok": True}, []
 
     def spawn(coro):
@@ -15490,7 +15491,7 @@ def t_a_signed_customer_redact_waits_for_an_admin():
 
     async def checker(cid, email):
         return "live" if email in live_for["addrs"] else ("unknown" if email == "unsure@example.com" else "gone")
-    copilot._spawn_bg, copilot._customer_checker, copilot._send_alert_email = spawn, checker, send
+    copilot._spawn_bg, shopify._customer_checker, copilot._send_alert_email = spawn, checker, send
     copilot._redact_hold_said.clear()
 
     def held():
@@ -15601,10 +15602,10 @@ def t_a_signed_customer_redact_waits_for_an_admin():
         async def counting(cid, email):
             calls.append(email)
             return "gone"
-        copilot._customer_checker = counting
+        shopify._customer_checker = counting
         ra(copilot._redact_hold_due(check=False))
         eq(calls, [], "Shopify is not asked while it is down")
-        copilot._customer_checker = checker
+        shopify._customer_checker = checker
         # Reminded as the thirty days run out, once a day, in the app too.
         copilot._redact_hold_write(lambda hs: [{**x, "received": (datetime.now(timezone.utc) - timedelta(days=22)).isoformat()} for x in hs])
         copilot._redact_hold_said.clear()
@@ -15644,7 +15645,7 @@ def t_a_signed_customer_redact_waits_for_an_admin():
         spawned.clear()
         try:
             eq(ask("late2@example.com", 996, "cr-6").status_code, 503, "not recorded: sent again")
-            ok("cr-6" not in copilot._webhook_seen, "and the retry is not taken for a duplicate")
+            ok("cr-6" not in orderbook._webhook_seen, "and the retry is not taken for a duplicate")
             ok(any("could not record" in a["subject"] for a in mails()), mails())
         finally:
             open(copilot.PRIVACY_LOG_PATH, "wb").write(good)
@@ -15722,11 +15723,11 @@ def t_a_signed_customer_redact_waits_for_an_admin():
     finally:
         for c in queued:
             c.close()
-        copilot._customer_checker, copilot._spawn_bg, copilot._send_alert_email = saved
+        shopify._customer_checker, copilot._spawn_bg, copilot._send_alert_email = saved
         for k in ("held", "stopped", "asks"):
             copilot._redact_hold_write(lambda xs: [], key=k)
         copilot._redact_hold_said.clear()
-        copilot._webhook_seen.clear()
+        orderbook._webhook_seen.clear()
 
 @test
 def t_the_customer_check_calls_only_an_answer_that_found_nobody_gone():
@@ -17883,9 +17884,11 @@ def t_the_collection_tests_hold_in_the_hour_after_midnight():
     from gizmo.routes import dispatch as routes_dispatch, team as routes_team
     saved = copilot.datetime
     # Every module that reads a clock: copilot.py, the desk and its routes, the
-    # error log, the AI client, the team and its routes, the activity log.
+    # error log, the AI client, the team and its routes, the activity log, the
+    # order book, production and the Size list.
     copilot.datetime = desk.datetime = routes_dispatch.datetime = errors.datetime = claude.datetime = _Frozen
     team.datetime = routes_team.datetime = activity.datetime = _Frozen
+    orderbook.datetime = production.datetime = size_list.datetime = _Frozen
     try:
         eq(copilot._london_today().isoformat(), "2026-07-15", "the code's day is London's, a day ahead of UTC in this hour")
         t_a_collection_is_read_from_the_couriers_own_reference()
@@ -17893,6 +17896,7 @@ def t_the_collection_tests_hold_in_the_hour_after_midnight():
     finally:
         copilot.datetime = desk.datetime = routes_dispatch.datetime = errors.datetime = claude.datetime = saved
         team.datetime = routes_team.datetime = activity.datetime = saved
+        orderbook.datetime = production.datetime = size_list.datetime = saved
 
 @test
 def t_a_booked_collection_is_written_down_before_anything_can_fail():
@@ -18168,27 +18172,27 @@ def t_a_gobo_miss_is_only_paid_once_per_sheet():
     rows: measured at 0.63 ms against 0.008 ms for a hit. The same fixtures come
     back order after order, so without a memo the same scan is repeated for
     every line item in the queue."""
-    cache = copilot._gobo_sizes()
+    cache = size_list._gobo_sizes()
     cache.setdefault("lookup_memo", {}).clear()
     miss = ("Nonesuch Lighting", "Fixture That Does Not Exist 9000")
-    r1 = copilot._gobo_lookup(*miss, cache=cache)
+    r1 = size_list._gobo_lookup(*miss, cache=cache)
     eq(r1[0], None, "it is genuinely a miss")
     ok(len(cache["lookup_memo"]) == 1, "and the answer was remembered")
     t0 = time.perf_counter()
     for _ in range(200):
-        rn = copilot._gobo_lookup(*miss, cache=cache)
+        rn = size_list._gobo_lookup(*miss, cache=cache)
     per = (time.perf_counter() - t0) / 200
     eq(rn, r1, "the remembered answer is the same answer")
     ok(per < 0.0001, "and costs almost nothing to repeat: %.4f ms" % (per * 1000))
 
     # A hit is remembered too, and by reference to the same sheet row.
-    copilot._gobo_lookup("Robe", "Robin Viva", cache=cache)
+    size_list._gobo_lookup("Robe", "Robin Viva", cache=cache)
     before = len(cache["lookup_memo"])
     ok(before >= 1, "hits are remembered as well")
 
     # And a new sheet must never be answered out of the old one's memo.
-    copilot._gobo_cache["mtime"] = -1
-    fresh = copilot._gobo_sizes()
+    size_list._gobo_cache["mtime"] = -1
+    fresh = size_list._gobo_sizes()
     eq(fresh.get("lookup_memo"), {},
        "reloading the sheet throws the memo away with it")
 
@@ -18476,10 +18480,10 @@ def t_a_size_rule_only_accepts_something_that_is_a_size():
     """Whatever is stored here is what the bench reads off the label, so free
     text is refused rather than kept."""
     for good, want in [("37.5", "37.5"), ("37.5mm", "37.5"), (" 25 ", "25"), ("12.345", "12.35")]:
-        got = copilot._clean_gobo_size(good)
+        got = size_list._clean_gobo_size(good)
         assert got == want, f"{good!r} should clean to {want!r}, got {got!r}"
     for bad in ("", "0", "-3", "abc", "501", None, "37..5", "big"):
-        assert copilot._clean_gobo_size(bad) is None, f"{bad!r} is not a production size"
+        assert size_list._clean_gobo_size(bad) is None, f"{bad!r} is not a production size"
 
 
 @test
@@ -18488,7 +18492,7 @@ def t_ruling_a_model_out_actually_stops_it_being_reported():
     ever skipped rows ALREADY on the sheet, so excluding a model that was never
     there did nothing - the weekly scan kept flagging it while the merchant had
     been told the ruling was saved. The scan has to read the same set."""
-    sheet = copilot._gobo_sizes()
+    sheet = size_list._gobo_sizes()
     assert "excludes" in sheet, "the exclude set reaches the coverage scan at all"
     assert isinstance(sheet.get("excludes"), set), "as a set of (manufacturer, model) keys"
     import inspect as _i
@@ -18501,7 +18505,7 @@ def t_ruling_a_model_out_actually_stops_it_being_reported():
 def t_a_rule_write_is_atomic_backed_up_and_re_read():
     """These two files decide the glass a real order is cut from."""
     import inspect as _i
-    src = _i.getsource(copilot._write_gobo_rule_rows)
+    src = _i.getsource(size_list._write_gobo_rule_rows)
     assert "os.replace(tmp, path)" in src, "the live file is swapped in atomically"
     assert ".bak" in src, "and the previous generation is kept"
     assert '_gobo_cache["mtime"] = None' in src, (
@@ -20778,13 +20782,13 @@ def t_the_register_finds_a_projector_in_the_shop():
                       {"id": 122, "title": "Black", "sku": "EPS-2250-B"}]},
         {"id": 13, "title": "Glass gobo 37.5mm", "status": "active", "vendor": "Projected Image",
          "variants": [{"id": 131, "title": "Default Title", "sku": "GOBO-375"}]}]}
-    hits, saved = [], copilot._tool_json
+    hits, saved = [], shopify._tool_json
     async def fake(registry, name, args):
         if name == "shopify_list_products":
             hits.append(args)
             return catalogue
         return await saved(registry, name, args)
-    copilot._tool_json = fake
+    shopify._tool_json = fake
     copilot._loan_products.update({"at": 0.0, "rows": []})
     try:
         ensure_auth()
@@ -20810,7 +20814,7 @@ def t_the_register_finds_a_projector_in_the_shop():
         eq(unit["sku"], "EPS-2250-W", "the unit remembers what it was picked from")
         eq(unit["product_id"], "12")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
         copilot._loan_products.update({"at": 0.0, "rows": []})
 
 
@@ -21178,7 +21182,7 @@ def t_an_erasure_survives_the_next_pipedrive_import():
     def go():
         ensure_auth()
         crm_wipe()
-        copilot._webhook_seen.clear()
+        orderbook._webhook_seen.clear()
         async def fake_export(progress=None):
             return dict(PD_EXPORT)
         saved = (pipedrive.export, pipedrive.API_TOKEN)
@@ -21209,7 +21213,7 @@ def t_an_erased_persons_email_is_not_re_imported_by_the_next_sync():
     so a deleted thread was simply 'not in threads' and came straight back."""
     def go():
         ensure_auth()
-        copilot._webhook_seen.clear()
+        orderbook._webhook_seen.clear()
         store = copilot._load_mail()
         store.setdefault("threads", {})["tgone"] = {
             "id": "tgone", "from_email": "erase.me@example.com",
@@ -21325,7 +21329,7 @@ def t_a_drain_url_that_is_not_https_is_not_installed():
 def t_the_orders_webhook_takes_order_topics_only():
     """Shopify counts a 200 as handled. A privacy topic acknowledged by the
     orders door would be a redaction request that quietly never happened."""
-    copilot._webhook_seen.clear()
+    orderbook._webhook_seen.clear()
     raw = json.dumps({"customer": {"id": 1, "email": "x@example.com"}}).encode()
     r = client.post("/webhooks/orders", content=raw,
                     headers=wh_headers(raw, topic="customers/redact", delivery="wrong1"))
@@ -21565,26 +21569,26 @@ def t_a_size_rule_saved_in_the_app_lands_on_the_volume_not_in_the_image():
     volume - and the volume copy is what the lookup reads from then on."""
     def go():
         ensure_auth()
-        live, seed = copilot.GOBO_OVERRIDES_LIVE, copilot.GOBO_OVERRIDES_PATH
+        live, seed = size_list.GOBO_OVERRIDES_LIVE, size_list.GOBO_OVERRIDES_PATH
         try:
             os.remove(live)
         except FileNotFoundError:
             pass
-        copilot._gobo_cache["mtime"] = None
+        size_list._gobo_cache["mtime"] = None
         try:
-            eq(copilot._rule_path("override"), seed, "with no volume copy, the seed is read")
-            before = len(copilot._gobo_rule_rows("override"))
+            eq(size_list._rule_path("override"), seed, "with no volume copy, the seed is read")
+            before = len(size_list._gobo_rule_rows("override"))
             r = post("/api/gobo-sizes/rule",
                      {"op": "set", "manufacturer": "Showtec", "model": "Volume", "size": "37.5"})
             eq(r.status_code, 200, r.text)
             ok(os.path.isfile(live), "the save created the volume copy")
-            eq(copilot._rule_path("override"), live, "which is read from now on")
-            rows = copilot._gobo_rule_rows("override")
+            eq(size_list._rule_path("override"), live, "which is read from now on")
+            rows = size_list._gobo_rule_rows("override")
             ok(any(x["Model"] == "Volume" for x in rows), "with the new rule in it")
             eq(len(rows), before + 1, "and every seed rule carried across with it")
             ok("Volume" not in open(seed, encoding="utf-8").read(),
                "the seed inside the image is untouched")
-            sheet = copilot._gobo_sizes()
+            sheet = size_list._gobo_sizes()
             hits = [e for k, es in sheet["by_mm"].items() if k == ("showtec", "volume") for e in es]
             ok(hits and hits[0].get("production_size") == "37.5",
                "and the size lookup answers from the volume copy: %r" % hits[:1])
@@ -21593,7 +21597,7 @@ def t_a_size_rule_saved_in_the_app_lands_on_the_volume_not_in_the_image():
                 os.remove(live)
             except FileNotFoundError:
                 pass
-            copilot._gobo_cache["mtime"] = None
+            size_list._gobo_cache["mtime"] = None
     with_accounts(go)
 
 
@@ -21940,25 +21944,25 @@ def t_a_failed_write_forgets_the_cached_store():
     write is refused, the memory copy already carries a change that never
     reached disk - and every later reader would trust it. Memory never
     outlives a failed write."""
-    p = copilot.PRODUCTION_STATE_PATH
+    p = production.PRODUCTION_STATE_PATH
     try:
         os.remove(p)
     except FileNotFoundError:
         pass
     jsonstore._forget_store(p)
-    copilot._write_prod_state({"7": {"printed_at": "2026-09-01T00:00:00+00:00"}})
-    state = copilot._load_prod_state()
+    production._write_prod_state({"7": {"printed_at": "2026-09-01T00:00:00+00:00"}})
+    state = production._load_prod_state()
     state["7"]["made_at"] = "2026-09-07T00:00:00+00:00"       # mutated in memory...
     jsonstore._poisoned_stores.add(p)
     try:
         try:
-            copilot._write_prod_state(state)                       # ...and the write is refused
+            production._write_prod_state(state)                       # ...and the write is refused
             ok(False, "should have raised")
-        except copilot.ProdStateUnwritable:
+        except production.ProdStateUnwritable:
             pass
     finally:
         jsonstore._poisoned_stores.discard(p)
-    eq(copilot._load_prod_state()["7"].get("made_at"), None,
+    eq(production._load_prod_state()["7"].get("made_at"), None,
        "the unsaved change is gone: the next read came from the disk that never had it")
     # The CRM's per-read normalisation now runs once per file version.
     crm_wipe()
@@ -22046,12 +22050,12 @@ def t_a_size_that_is_not_a_number_neither_crashes_nor_uploads():
         buf = _io.StringIO()
         wr = _csv.DictWriter(buf, fieldnames=list(src[0].keys()))
         wr.writeheader(); wr.writerows(src)
-        before = open(copilot.GOBO_SIZES_LIVE, encoding="utf-8").read() if os.path.exists(copilot.GOBO_SIZES_LIVE) else None
+        before = open(size_list.GOBO_SIZES_LIVE, encoding="utf-8").read() if os.path.exists(size_list.GOBO_SIZES_LIVE) else None
         r = post("/api/gobo-sizes/upload", {"csv": buf.getvalue()})
         eq(r.status_code, 400, r.text)
         ok("not a size" in r.json()["error"] and "TBC" in r.json()["error"] and f"row {at + 2}" in r.json()["error"],
            "the bad cell is named: " + r.json()["error"])
-        after = open(copilot.GOBO_SIZES_LIVE, encoding="utf-8").read() if os.path.exists(copilot.GOBO_SIZES_LIVE) else None
+        after = open(size_list.GOBO_SIZES_LIVE, encoding="utf-8").read() if os.path.exists(size_list.GOBO_SIZES_LIVE) else None
         eq(after, before, "and nothing was changed")
     with_accounts(go)
 
@@ -22064,12 +22068,12 @@ def t_the_products_tab_says_so_when_shopify_does_not_answer():
         if name == "shopify_list_products":
             return {"_failed": True}
         return {} if name != "shopify_list_orders" else {"orders": []}
-    saved = copilot._tool_json
-    copilot._tool_json = failed
+    saved = shopify._tool_json
+    shopify._tool_json = failed
     try:
         res = run_async(copilot.run_products_list({}, 1))
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
     ok("did not answer" in res.get("error", ""), "an error, not an empty catalogue: " + json.dumps(res)[:160])
     seen = []
     async def paged(registry, name, args):
@@ -22081,11 +22085,11 @@ def t_the_products_tab_says_so_when_shopify_does_not_answer():
         if name == "shopify_list_orders":
             return {"orders": []}
         return {}
-    copilot._tool_json = paged
+    shopify._tool_json = paged
     try:
         res = run_async(copilot.run_products_list({}, 1))
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
     eq(len(res["products"]), 503, "every product, not the first 250")
     eq(seen, [0, 250, 500], "paged by since_id")
     eq(res["truncated"], False)
@@ -22222,8 +22226,8 @@ def t_a_size_cell_is_read_as_the_number_the_bench_uses():
     and a ring. The sheet is normalised as it is read."""
     for raw, want in (("86 mm", "86"), ("86.0", "86"), ("37.5", "37.5"), (" 64.9 ", "64.9"),
                       ("TBC", "TBC"), ("", "")):
-        eq(copilot._sheet_size(raw), want, repr(raw))
-    ok(copilot._sheet_size("86 mm") in copilot._BEZEL_UP, "and it is the key the bezel rule knows")
+        eq(size_list._sheet_size(raw), want, repr(raw))
+    ok(size_list._sheet_size("86 mm") in copilot._BEZEL_UP, "and it is the key the bezel rule knows")
 
 
 @test
@@ -22281,12 +22285,12 @@ def t_every_product_reader_reads_the_whole_catalogue_or_says_it_could_not():
                                   "body_html": "", "images": [], "variants": [{"id": 1, "inventory_quantity": 1}]}
                                  for i in range(min(int(args.get("limit") or 250), left))]}
         return tools, calls
-    saved = copilot._tool_json
+    saved = shopify._tool_json
     try:
-        copilot._tool_json, calls = catalogue(260)
+        shopify._tool_json, calls = catalogue(260)
         prods, okd, cut = run_async(copilot._all_products({}, "id"))
         eq((len(prods), okd, cut), (260, True, False))
-        copilot._tool_json, _c = catalogue(600, fail_after=1)
+        shopify._tool_json, _c = catalogue(600, fail_after=1)
         eq(run_async(copilot._all_products({}, "id"))[1], False, "a failed page is a failed read")
         sig = run_async(copilot._seo_product_signals({}))
         ok(sig.get("unavailable"), "the SEO audit knows its read failed")
@@ -22314,11 +22318,11 @@ def t_every_product_reader_reads_the_whole_catalogue_or_says_it_could_not():
         except RuntimeError:
             raised = True
         ok(raised, "the loan picker's failed read is an error the route reports, not 'no matches'")
-        copilot._tool_json, _c = catalogue(300)
+        shopify._tool_json, _c = catalogue(300)
         copilot._loan_products.update({"at": 0.0, "rows": []})
         eq(len(run_async(copilot._loan_product_rows({}))), 300, "the loan picker reaches every product")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
         copilot._loan_products.update({"at": 0.0, "rows": []})
 
 
@@ -22392,7 +22396,7 @@ def t_the_margin_report_counts_only_what_is_still_on_the_order():
         if name == "shopify_get_inventory_items":
             return {"inventory_items": [{"id": 9111, "cost": "30.00"}]}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     desk.COST_CACHE_PATH = SCRATCH + "/cost_cache2.json"
     try:
         os.remove(desk.COST_CACHE_PATH)
@@ -22404,7 +22408,7 @@ def t_the_margin_report_counts_only_what_is_still_on_the_order():
         eq(row["revenue"], 90.0, "one of two units left: (200 - 20) / 2")
         eq(row["goods_cost"], 30.0, "and one unit's cost")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
         reset_dispatch()
     for oid in (801, 802):
         desk._record_dispatch(oid, {"tracking_number": f"T{oid}", "carrier_name": "UPS", "order_name": f"#{oid}",
@@ -22412,7 +22416,7 @@ def t_the_margin_report_counts_only_what_is_still_on_the_order():
     async def none(registry, name, args):
         return {"orders": []} if name == "shopify_list_orders" else {"_failed": True}
     saved_max = desk.MARGIN_BACKFILL_MAX
-    copilot._tool_json, desk.MARGIN_BACKFILL_MAX = none, 1
+    shopify._tool_json, desk.MARGIN_BACKFILL_MAX = none, 1
     try:
         res = run_async(desk.run_margin_report({}, days=30))
         notes = sorted(r["incomplete"] for r in res["rows"] if str(r.get("order_id")) in ("801", "802"))
@@ -22420,7 +22424,7 @@ def t_the_margin_report_counts_only_what_is_still_on_the_order():
         ok(any("could not be loaded from Shopify" in n for n in notes), "the one fetched and refused says so")
         ok(any("reads at most 1 such orders" in n for n in notes), "the one past the bound says why: " + str(notes))
     finally:
-        copilot._tool_json, desk.MARGIN_BACKFILL_MAX = saved, saved_max
+        shopify._tool_json, desk.MARGIN_BACKFILL_MAX = saved, saved_max
         reset_dispatch()
     # The list read itself failed: an order missing from it says nothing
     # about its age, and Shopify is refusing, so the back-fill stops asking.
@@ -22432,8 +22436,8 @@ def t_the_margin_report_counts_only_what_is_still_on_the_order():
         if name == "shopify_get_order":
             singles.append(args.get("order_id"))
         return {"_failed": True}
-    copilot._tool_json, desk.MARGIN_BACKFILL_MAX = refusing, 1
-    copilot._bust_orders()
+    shopify._tool_json, desk.MARGIN_BACKFILL_MAX = refusing, 1
+    orderbook._bust_orders()
     try:
         res = run_async(desk.run_margin_report({}, days=31))
         notes = [r["incomplete"] for r in res["rows"]]
@@ -22445,7 +22449,7 @@ def t_the_margin_report_counts_only_what_is_still_on_the_order():
         run_async(desk.run_margin_report({}, days=32))
         eq(len(singles), 3, "three refusals in a row and the back-fill stops asking")
     finally:
-        copilot._tool_json, desk.MARGIN_BACKFILL_MAX = saved, saved_max
+        shopify._tool_json, desk.MARGIN_BACKFILL_MAX = saved, saved_max
         reset_dispatch()
 
 
@@ -22550,12 +22554,12 @@ def t_the_watchdog_clears_the_outage_flag_when_shopify_is_back():
         return None
     async def skip(*a, **k):
         return {"error": "skip"}
-    saved = (copilot._tool_json, copilot._send_alert_email, copilot._zeta_drain,
+    saved = (shopify._tool_json, copilot._send_alert_email, copilot._zeta_drain,
              copilot._zeta_configured, copilot._files_tick, copilot.run_label_coverage,
-             copilot._webhook_ensurer, copilot._watch_last_tick)
-    copilot._tool_json, copilot._send_alert_email = probe, mail
+             shopify._webhook_ensurer, copilot._watch_last_tick)
+    shopify._tool_json, copilot._send_alert_email = probe, mail
     copilot._zeta_drain, copilot._zeta_configured = noop, (lambda: False)
-    copilot._files_tick, copilot.run_label_coverage, copilot._webhook_ensurer = (lambda: None), skip, None
+    copilot._files_tick, copilot.run_label_coverage, shopify._webhook_ensurer = (lambda: None), skip, None
     def clean():
         w = copilot._load_watch()
         w.pop("shopify_down", None)
@@ -22579,9 +22583,9 @@ def t_the_watchdog_clears_the_outage_flag_when_shopify_is_back():
         copilot._watch_last_tick = time.time()
         ok(run_async(copilot._watchdog_tick({})), "the between-hours answer is up too")
     finally:
-        (copilot._tool_json, copilot._send_alert_email, copilot._zeta_drain,
+        (shopify._tool_json, copilot._send_alert_email, copilot._zeta_drain,
          copilot._zeta_configured, copilot._files_tick, copilot.run_label_coverage,
-         copilot._webhook_ensurer, copilot._watch_last_tick) = saved
+         shopify._webhook_ensurer, copilot._watch_last_tick) = saved
         clean()
 
 
@@ -22897,11 +22901,11 @@ def t_a_label_reckons_required_by_where_the_bench_is():
     try:
         o = dict(ORDER, line_items=[{"title": "Custom Gobo", "quantity": 1, "product_id": 1,
                                      "properties": [{"name": "Date Required", "value": "21/09/2026"}]}])
-        eq(copilot._shape_label_order(o, {})["due_soon"], True, "two days away is soon")
+        eq(production._shape_label_order(o, {})["due_soon"], True, "two days away is soon")
         o["line_items"][0]["properties"][0]["value"] = "22/09/2026"
-        eq(copilot._shape_label_order(o, {})["due_soon"], False)
-        eq(copilot._fmt_due(_date(2026, 12, 25)), "25 Dec")
-        eq(copilot._fmt_due(_date(2027, 1, 2)), "2 Jan 2027")
+        eq(production._shape_label_order(o, {})["due_soon"], False)
+        eq(orderbook._fmt_due(_date(2026, 12, 25)), "25 Dec")
+        eq(orderbook._fmt_due(_date(2027, 1, 2)), "2 Jan 2027")
         eq(copilot._loan_state({"due_at": "2026-09-19"}, 14), "ok", "a loan due today is not late yet")
         eq(copilot._loan_state({"due_at": "2026-09-18"}, 14), "late")
     finally:
@@ -22919,14 +22923,14 @@ def t_a_refunded_line_is_not_made_weighed_or_declared():
         {"title": "Custom Gobo", "quantity": 1, "current_quantity": 0, "price": "127.50",
          "grams": 75, "product_id": 1},
         {"title": "Custom Gobo", "quantity": 3, "price": "10.00", "grams": 10, "product_id": 1}])
-    shaped = copilot._shape_label_order(o, {})
+    shaped = production._shape_label_order(o, {})
     eq([it["quantity"] for it in shaped["items"]], [1, 3],
        "the refunded line is gone; a line Shopify never edited keeps its ordered count")
     eq(desk._order_goods_value(o), 157.5, "declared at what is still on the order")
-    eq(copilot._order_weight_kg(o), 0.105)
+    eq(orderbook._order_weight_kg(o), 0.105)
     eq([c["quantity"] for c in run_async(desk._customs_items({}, o))], [1, 3])
-    eq(copilot._line_qty({"quantity": 2}), 2)
-    eq(copilot._line_qty({}), 1, "a line with no quantity at all counts as one, as before")
+    eq(orderbook._line_qty({"quantity": 2}), 2)
+    eq(orderbook._line_qty({}), 1, "a line with no quantity at all counts as one, as before")
 
 
 @test
@@ -23034,7 +23038,7 @@ def t_the_margin_report_reaches_an_order_dispatched_weeks_after_it_was_placed():
         if name == "shopify_get_inventory_items":
             return {"inventory_items": [{"id": 9111, "cost": "30.00"}]}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     desk.COST_CACHE_PATH = SCRATCH + "/cost_cache.json"
     try:
         os.remove(desk.COST_CACHE_PATH)
@@ -23047,7 +23051,7 @@ def t_the_margin_report_reaches_an_order_dispatched_weeks_after_it_was_placed():
         eq(row["revenue"], 100.0)
         eq(row["goods_cost"], 30.0)
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
         reset_dispatch()
 
 
@@ -23072,8 +23076,8 @@ def t_reprinting_a_made_orders_label_is_not_a_release():
     async def terms(order_id):
         terms_calls.append(int(order_id))
         return {"ok": True, "already": True, "name": "Net 30"}
-    saved = (copilot._tool_json, copilot._payment_terms_writer)
-    copilot._tool_json, copilot._payment_terms_writer = pc, terms
+    saved = (shopify._tool_json, shopify._payment_terms_writer)
+    shopify._tool_json, shopify._payment_terms_writer = pc, terms
     try:
         r = post("/api/production-state", {"op": "printed", "ids": [12345]})
         eq(r.status_code, 200, r.text)
@@ -23084,7 +23088,7 @@ def t_reprinting_a_made_orders_label_is_not_a_release():
             if name == "shopify_get_order":
                 return dict(ORDER, tags="Unprocessed, purchase order unpaid")
             return await fake_tool_json(registry, name, args)
-        copilot._tool_json = fresh
+        shopify._tool_json = fresh
         TAG_WRITES.clear()
         r = post("/api/production-state", {"op": "printed", "ids": [12345]})
         moved = [t for o, t in TAG_WRITES if o == 12345]
@@ -23092,7 +23096,7 @@ def t_reprinting_a_made_orders_label_is_not_a_release():
            "an order that is neither is released as before: " + str(TAG_WRITES))
         eq(terms_calls, [12345], "and a real release starts the account order's clock")
     finally:
-        copilot._tool_json, copilot._payment_terms_writer = saved
+        shopify._tool_json, shopify._payment_terms_writer = saved
         reset_prod()
 
 
@@ -23294,11 +23298,11 @@ def t_the_overview_counts_only_sales_that_happened():
         if name == "shopify_count_products":
             return {"count": 0}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
         metrics, _extra = run_async(copilot._compute_metrics({}, track_inventory=False))
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
     by = {m["label"]: m["value"] for m in metrics}
     eq(by.get("Revenue (7d)"), copilot._money(100.0, "GBP"), by)
     eq(by.get("Orders (7d)"), "1", by)
@@ -23307,7 +23311,7 @@ def t_the_overview_counts_only_sales_that_happened():
     rows = [{"created_at": month + "-10T10:00:00Z", "line_items": [{"product_id": 5, "quantity": 2, "price": "10.00"}]},
             {"created_at": month + "-11T10:00:00Z", "cancelled_at": month + "-11T11:00:00Z",
              "line_items": [{"product_id": 5, "quantity": 9, "price": "10.00"}]}]
-    eq(copilot._orders_product_monthly(rows, [month])[5]["units"][month], 2, "the cancelled order's units are not sold")
+    eq(orderbook._orders_product_monthly(rows, [month])[5]["units"][month], 2, "the cancelled order's units are not sold")
 
 
 @test
@@ -23515,13 +23519,13 @@ def t_a_made_orders_reprint_undo_and_ready_to_make_leave_it_made():
     reset_prod(); TAG_WRITES.clear()
     saved_tags = ORDER["tags"]; ORDER["tags"] = "PC"
     try:
-        copilot._mark_made(12345, True)
+        production._mark_made(12345, True)
         eq(post("/api/production-state", {"op": "printed", "ids": [12345]}).status_code, 200)
         r = post("/api/production-state", {"op": "unprinted", "ids": [12345]})
         eq(r.status_code, 200, r.text)
         ok(not any("unprocessed" in t.lower() for _o, t in TAG_WRITES),
            "Undo on a made order's reprint does not send it back to Unprocessed: " + str(TAG_WRITES))
-        ok(copilot._load_prod_state()["12345"].get("made_at"), "and it is still made")
+        ok(production._load_prod_state()["12345"].get("made_at"), "and it is still made")
         TAG_WRITES.clear()
         q = post("/api/production-labels/queue", {"order_id": 12345, "name": "#104239"})
         eq(q.status_code, 200, q.text)
@@ -25538,18 +25542,18 @@ def t_a_redact_a_store_refused_is_said_and_retried():
             return None
         async def skip(*a, **k):
             return {"error": "skip"}
-        saved = (copilot._tool_json, copilot._send_alert_email, copilot._zeta_drain, copilot._zeta_configured,
-                 copilot._files_tick, copilot.run_label_coverage, copilot._webhook_ensurer,
+        saved = (shopify._tool_json, copilot._send_alert_email, copilot._zeta_drain, copilot._zeta_configured,
+                 copilot._files_tick, copilot.run_label_coverage, shopify._webhook_ensurer,
                  copilot._watch_last_tick, copilot._redact_retry_pending)
-        copilot._tool_json, copilot._send_alert_email, copilot._zeta_drain = probe, noop, noop
+        shopify._tool_json, copilot._send_alert_email, copilot._zeta_drain = probe, noop, noop
         copilot._zeta_configured, copilot._files_tick = (lambda: False), (lambda: None)
-        copilot.run_label_coverage, copilot._webhook_ensurer, copilot._watch_last_tick = skip, None, 0.0
+        copilot.run_label_coverage, shopify._webhook_ensurer, copilot._watch_last_tick = skip, None, 0.0
         copilot._redact_retry_pending = lambda: ran.append(1) or saved[-1]()
         try:
             run_async(copilot._watchdog_tick({}))
         finally:
-            (copilot._tool_json, copilot._send_alert_email, copilot._zeta_drain, copilot._zeta_configured,
-             copilot._files_tick, copilot.run_label_coverage, copilot._webhook_ensurer,
+            (shopify._tool_json, copilot._send_alert_email, copilot._zeta_drain, copilot._zeta_configured,
+             copilot._files_tick, copilot.run_label_coverage, shopify._webhook_ensurer,
              copilot._watch_last_tick, copilot._redact_retry_pending) = saved
         eq(ran, [1], "the hourly tick runs the retry")
         eq(desk._load_dispatch()["4242"].get("redacted_request_at"), asked,
@@ -25662,14 +25666,14 @@ def t_the_missing_check_reads_every_open_order():
             rows = sorted((o for o in orders if o["id"] > sid), key=lambda o: o["id"])
             return {"orders": [dict(o) for o in rows[:int(args.get("limit") or 50)]]}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
-        res = run_async(copilot.run_missing_production({}))
+        res = run_async(production.run_missing_production({}))
         eq(res["checked"], 261, "every open order is read")
         eq([m["name"] for m in res["missing"]], ["#1"], "and the oldest untagged one is found")
         eq(res["truncated"], False)
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 
 @test
@@ -25686,10 +25690,10 @@ def t_a_projector_wattage_is_settled_by_any_size_rule():
             {"title": "Projected Image %d Watt LED Weatherproof Gobo Projector" % watts, "quantity": 1,
              "product_id": 901, "properties": [], "sku": "P%d" % watts}]}
     def gobo_of(o):
-        return copilot._shape_label_order(o, {}, cache=copilot._gobo_sizes(),
+        return production._shape_label_order(o, {}, cache=size_list._gobo_sizes(),
                                           types={900: "Custom Gobos", 901: "Projector"})["items"][0]
-    paths = {k: copilot.GOBO_RULE_FILES[k][1] for k in ("override", "alias")}
-    seeds = {k: open(copilot.GOBO_RULE_FILES[k][0], encoding="utf-8").read() for k in paths}
+    paths = {k: size_list.GOBO_RULE_FILES[k][1] for k in ("override", "alias")}
+    seeds = {k: open(size_list.GOBO_RULE_FILES[k][0], encoding="utf-8").read() for k in paths}
     saved = {k: (open(p_, encoding="utf-8").read() if os.path.exists(p_) else None) for k, p_ in paths.items()}
     def put(kind, line):
         os.makedirs(os.path.dirname(paths[kind]), exist_ok=True)
@@ -25725,12 +25729,12 @@ def t_a_projector_wattage_is_settled_by_any_size_rule():
         eq(gobo_of(order(80))["production_size"], "53.3", "and leaves the rest of the range alone")
         # Two rows naming the same wattage at different sizes is the size
         # list's own clash: the size check offers a rule on the wattage.
-        row = lambda model, size: ("projected image", tuple(copilot._loose_key(model).split()),
+        row = lambda model, size: ("projected image", tuple(size_list._loose_key(model).split()),
                                    {"manufacturer": "Projected Image", "model": model,
                                     "production_size": size, "review": ""})
         clash = {"rows": [row("40/80 Watt Range", "53.3"), row("40 Watt Range Weatherproof", "50")],
                  "domain_rules": [], "excludes": set()}
-        eq(copilot._projector_size(order(40), clash),
+        eq(production._projector_size(order(40), clash),
            {"reason": "The size list gives the 40 Watt projector two sizes", "fix": ("Projected Image", "40 Watt")},
            "a clash in the size list carries the rule that settles it")
     finally:
@@ -25753,12 +25757,12 @@ def t_the_missing_check_counts_a_gobo_sold_with_a_projector():
         if name == "shopify_list_orders":
             return {"orders": [dict(o)] if not int(args.get("since_id") or 0) else []}
         return {}
-    saved = copilot._tool_json; copilot._tool_json = tools
+    saved = shopify._tool_json; shopify._tool_json = tools
     try:
-        res = run_async(copilot.run_missing_production({}))
+        res = run_async(production.run_missing_production({}))
         eq([m["name"] for m in res["missing"]], ["#7"], "it is reported as missing from production")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 
 @test
@@ -25767,7 +25771,7 @@ def t_a_stock_sheet_with_unread_orders_is_not_sent_as_final():
     not read, un-booking the glass their automatic bookings recorded."""
     from zoneinfo import ZoneInfo
     ensure_auth(); reset_dispatch(); reset_prod()
-    copilot._mark_made(12345, True); copilot._mark_made(777, True)
+    production._mark_made(12345, True); production._mark_made(777, True)
     async def tools(registry, name, args):
         if name == "shopify_get_order":
             return {"_failed": True} if int(args["order_id"]) == 777 else _copy.deepcopy(ORDER)
@@ -25777,8 +25781,8 @@ def t_a_stock_sheet_with_unread_orders_is_not_sent_as_final():
     sent = []
     async def sheet(payload):
         sent.append(payload); return {"ok": True}
-    saved = (copilot._tool_json, copilot._zeta_send_sheet, copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN)
-    copilot._tool_json, copilot._zeta_send_sheet = tools, sheet
+    saved = (shopify._tool_json, copilot._zeta_send_sheet, copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN)
+    shopify._tool_json, copilot._zeta_send_sheet = tools, sheet
     copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN = "https://zeta.test", "tok"
     try:
         today = datetime.now(ZoneInfo("Europe/London")).date().isoformat()
@@ -25797,7 +25801,7 @@ def t_a_stock_sheet_with_unread_orders_is_not_sent_as_final():
                 if name == "shopify_get_order":
                     return dict(gone) if int(args["order_id"]) == 777 else _copy.deepcopy(ORDER)
                 return dict(SHOP) if name == "shopify_get_shop" else {}
-            copilot._tool_json = tools
+            shopify._tool_json = tools
             sent.clear()
             r = post("/api/stock-usage/send", {"date": today, "lines": [
                 {"family": "Mono", "size": "37.5", "estimated": 0, "final": 0}]})
@@ -25805,7 +25809,7 @@ def t_a_stock_sheet_with_unread_orders_is_not_sent_as_final():
             eq(sent[0]["order_ids"], ["12345"], "the gone order is not in the FINAL sheet")
             ok("777" in r.json()["note"] and "stays booked" in r.json()["note"], r.text)
     finally:
-        copilot._tool_json, copilot._zeta_send_sheet, copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN = saved
+        shopify._tool_json, copilot._zeta_send_sheet, copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN = saved
         reset_prod()
 
 
@@ -25834,8 +25838,8 @@ def t_a_tool_read_keeps_what_shopify_said():
            "u": (lambda m: _aio_ret("Request timed out \u2014 try again."), lambda **k: None)}
     a = asyncio.run(REAL_TOOL_JSON(reg, "t", {}))
     b = asyncio.run(REAL_TOOL_JSON(reg, "u", {}))
-    ok(not copilot._ok(a) and copilot._shopify_gone(a), a)
-    ok(not copilot._ok(b) and not copilot._shopify_gone(b), b)
+    ok(not copilot._ok(a) and shopify._shopify_gone(a), a)
+    ok(not copilot._ok(b) and not shopify._shopify_gone(b), b)
 
 
 @test
@@ -25844,7 +25848,7 @@ def t_a_channel_islands_postcode_ships_as_its_own_country():
     quoted domestic and booked with no customs declaration."""
     def to(zip_, cc="GB"):
         o = _copy.deepcopy(ORDER); o["shipping_address"].update({"zip": zip_, "country_code": cc})
-        return copilot._ship_to(o)["country"]
+        return orderbook._ship_to(o)["country"]
     eq((to("JE2 3AB"), to("GY1 1AA"), to("IM1 1AA"), to("M1 2AB"), to("JE2 3AB", "JE")),
        ("JE", "GG", "GB", "GB", "JE"), "Jersey and Guernsey leave the UK customs area; the Isle of Man does not")
 
@@ -25998,8 +26002,8 @@ def t_an_unknown_fulfilment_or_terms_outcome_is_not_called_a_failure():
                 o["tags"] = TAG_WRITES[-1][1]
             return o
         return await fake_tool_json(registry, name, args)
-    saved = (_srv._request, copilot._fulfillment_writer, copilot._tool_json)
-    _srv._request, copilot._fulfillment_writer, copilot._tool_json = req, _srv.create_order_fulfillment, tools
+    saved = (_srv._request, shopify._fulfillment_writer, shopify._tool_json)
+    _srv._request, shopify._fulfillment_writer, shopify._tool_json = req, _srv.create_order_fulfillment, tools
     try:
         r = mark_made().json()
         eq(r["fulfilled"], False)
@@ -26008,7 +26012,7 @@ def t_an_unknown_fulfilment_or_terms_outcome_is_not_called_a_failure():
         eq([t for _o, t in TAG_WRITES[1:]], [],
            "and the tags were not put back as if it had not shipped")
     finally:
-        _srv._request, copilot._fulfillment_writer, copilot._tool_json = saved
+        _srv._request, shopify._fulfillment_writer, shopify._tool_json = saved
         reset_dispatch(); reset_prod()
     # Net-30: the create's answer lost, and the check afterwards fails too.
     calls = {"n": 0}
@@ -26033,15 +26037,15 @@ def t_an_unknown_fulfilment_or_terms_outcome_is_not_called_a_failure():
         _srv._net30_template.clear(); _srv._net30_template.update(saved2[1])
     # And its one caller does not turn "not known" back into "could not be
     # added" (found by the round-4 review).
-    saved3 = (copilot._payment_terms_writer, ORDER.get("tags"))
+    saved3 = (shopify._payment_terms_writer, ORDER.get("tags"))
     async def unknown_writer(oid):
         return {"ok": False, "reason": "unknown", "detail": "it is not known whether the order is on 30-day terms."}
-    copilot._payment_terms_writer, ORDER["tags"] = unknown_writer, copilot.PO_UNPAID_TAG
+    shopify._payment_terms_writer, ORDER["tags"] = unknown_writer, orderbook.PO_UNPAID_TAG
     try:
-        v = run_async(copilot._net30_on_release({}, 12345))
+        v = run_async(production._net30_on_release({}, 12345))
         ok(v.get("unknown") and "could not be added" not in v["note"] and "not known" in v["note"], v)
     finally:
-        copilot._payment_terms_writer, ORDER["tags"] = saved3
+        shopify._payment_terms_writer, ORDER["tags"] = saved3
         reset_prod()
 
 
@@ -26107,8 +26111,8 @@ def t_a_lost_answer_to_an_address_edit_is_settled_by_reading_the_order():
     async def req(method, path, params=None, body=None, **kw):
         live["shipping_address"]["zip"] = body["variables"]["input"]["shippingAddress"]["zip"]
         raise _hx.ReadTimeout("")
-    saved = (copilot._tool_json, _srv._request, copilot._order_writer)
-    copilot._tool_json, _srv._request, copilot._order_writer = tools, req, _srv.update_order_fields
+    saved = (shopify._tool_json, _srv._request, shopify._order_writer)
+    shopify._tool_json, _srv._request, shopify._order_writer = tools, req, _srv.update_order_fields
     try:
         r = post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 6JK"}, "confirm_booked": True})
         eq(r.status_code, 200, "the change landed, and is reported as made: " + r.text)
@@ -26121,7 +26125,7 @@ def t_a_lost_answer_to_an_address_edit_is_settled_by_reading_the_order():
         post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 6JK"}, "confirm_booked": True})
         ok(desk._load_dispatch()["12345"].get("address_changed_at"), "whichever edit found it done")
     finally:
-        copilot._tool_json, _srv._request, copilot._order_writer = saved
+        shopify._tool_json, _srv._request, shopify._order_writer = saved
         reset_dispatch()
 
 
@@ -26154,8 +26158,8 @@ def t_an_address_edit_that_changes_the_tax_says_so():
             stale = dict(order, currentTotalTaxSet=m("20.00"))
             return {"data": {"orderUpdate": {"order": stale, "userErrors": []}}}
         return {"data": {"order": order}}
-    saved = (copilot._tool_json, _srv._request, copilot._order_writer)
-    copilot._tool_json, _srv._request, copilot._order_writer = tools, req, _srv.update_order_fields
+    saved = (shopify._tool_json, _srv._request, shopify._order_writer)
+    shopify._tool_json, _srv._request, shopify._order_writer = tools, req, _srv.update_order_fields
     try:
         r = post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 6JK"}})
         eq(r.status_code, 200, r.text)
@@ -26184,16 +26188,16 @@ def t_an_address_edit_that_changes_the_tax_says_so():
         ok(r.json()["warnings"][-1].endswith("The customer now owes \u00a310.00."), r.json()["warnings"])
         # Read back after a lost answer (REST, no signed amount outstanding):
         # only what the change in total can say, hedged.
-        note = copilot._tax_change_note(
+        note = orderbook._tax_change_note(
             {"tax": {"amount": "20.00", "currency": "GBP"}, "total": {"amount": "120.00", "currency": "GBP"}},
-            copilot._rest_totals({"current_total_tax": "0.00", "current_total_price": "100.00", "currency": "GBP"}))
+            orderbook._rest_totals({"current_total_tax": "0.00", "current_total_price": "100.00", "currency": "GBP"}))
         ok(note.endswith("If they had paid in full, \u00a320.00 is due back to them: check the order in Shopify."), note)
         answer.update({"tax": "20.00", "total": "120.00", "outstanding": "0.00"})
         r = post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 8BB"}})
         eq(r.json()["warnings"], [], "nothing is said when the tax did not change (every version before 2026-10)")
         ok("tax recalculated" not in r.json()["changed"], "and nothing is recorded")
     finally:
-        copilot._tool_json, _srv._request, copilot._order_writer = saved
+        shopify._tool_json, _srv._request, shopify._order_writer = saved
         reset_dispatch()
 
 
@@ -26232,8 +26236,8 @@ def t_an_edit_sends_the_orders_own_province_code_back_as_a_code():
         if name == "shopify_get_order":
             return _copy.deepcopy(live)
         return await fake_tool_json(registry, name, args)
-    saved = copilot._tool_json
-    copilot._tool_json = tools
+    saved = shopify._tool_json
+    shopify._tool_json = tools
     try:
         r = _edit({"ship_to": {"street2": "Floor 2"}})
         eq(r.status_code, 200, r.text)
@@ -26242,7 +26246,7 @@ def t_an_edit_sends_the_orders_own_province_code_back_as_a_code():
         import server as _srv
         eq(_srv._addr_input(ship).get("provinceCode"), "D", "and goes to Shopify as provinceCode")
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
         reset_dispatch()
 
 
@@ -26311,8 +26315,8 @@ def t_a_failed_customer_read_is_not_analysed_as_no_customers():
     called = []
     async def xc(client, **kw):
         called.append(1); raise AssertionError("no AI call")
-    saved = (copilot._tool_json, claude._xcreate)
-    copilot._tool_json, claude._xcreate = tools, xc
+    saved = (shopify._tool_json, claude._xcreate)
+    shopify._tool_json, claude._xcreate = tools, xc
     try:
         r = post("/api/customers", {})
         eq(r.status_code, 502, r.text[:200])
@@ -26320,7 +26324,7 @@ def t_a_failed_customer_read_is_not_analysed_as_no_customers():
         eq((copilot._load_analysis_cache().get("customers_segments") or {}).get("__all__", {}).get("snapshot", {}).get("metrics", {}).get("Customers"),
            None, "and no zero baseline saved")
     finally:
-        copilot._tool_json, claude._xcreate = saved
+        shopify._tool_json, claude._xcreate = saved
 
 
 @test
@@ -28146,13 +28150,13 @@ def _shop_orders():
 
 
 def _with_shop(fn, orders=None):
-    saved = copilot._tool_json
+    saved = shopify._tool_json
     shop = _FakeShop(orders or _shop_orders(), other=saved)
-    copilot._tool_json = shop.tools
+    shopify._tool_json = shop.tools
     try:
         return with_cache(lambda: fn(shop))
     finally:
-        copilot._tool_json = saved
+        shopify._tool_json = saved
 
 
 @test
@@ -28161,14 +28165,14 @@ def t_one_production_action_reads_one_order_not_the_whole_store():
     each used to retire every snapshot, so the next two loads swept the
     whole store. Each now reads the one order again, by id."""
     def go(shop):
-        run(copilot.run_production_labels({}, tag="IP"))
+        run(production.run_production_labels({}, tag="IP"))
         eq(shop.kinds(), ["sweep"], "the first load sweeps")
         shop.calls.clear()
-        run(copilot._sync_order_tags({}, 777, add=["PC"], remove=["IP"]))
+        run(orderbook._sync_order_tags({}, 777, add=["PC"], remove=["IP"]))
         shop.orders[777]["tags"] = "PC"                    # what Shopify now holds
-        ip = run(copilot.run_production_labels({}, tag="IP"))
-        copilot._orders_changed([777])                     # the webhook echoing the write
-        pc = run(copilot.run_production_labels({}, tag="PC"))
+        ip = run(production.run_production_labels({}, tag="IP"))
+        orderbook._orders_changed([777])                     # the webhook echoing the write
+        pc = run(production.run_production_labels({}, tag="PC"))
         eq(shop.kinds(), ["ids", "ids"], "two reads of one order, no sweep: %r" % shop.kinds())
         eq([o["id"] for o in ip["orders"]], [], "the order left To make")
         eq(sorted(o["id"] for o in pc["orders"]), [777, 888], "and is in To ship")
@@ -28187,7 +28191,7 @@ def t_a_snapshot_patched_by_id_is_exactly_a_full_sweep():
 
     def go(shop):
         def full():
-            return run(copilot._paginate_orders({}, days=180, fields=fields))
+            return run(orderbook._paginate_orders({}, days=180, fields=fields))
         changes = [
             ("a tag moved", lambda: shop.orders[777].update(tags="PC"), [777]),
             ("paid", lambda: shop.orders[888].update(financial_status="paid"), [888]),
@@ -28199,18 +28203,18 @@ def t_a_snapshot_patched_by_id_is_exactly_a_full_sweep():
             ("deleted", lambda: shop.orders.pop(999), [999]),
             ("two at once", lambda: (shop.orders[777].update(tags="IP"), shop.orders[888].update(tags="IP")), [777, 888]),
         ]
-        run(copilot._orders_snapshot({}, days=180, fields=fields))
+        run(orderbook._orders_snapshot({}, days=180, fields=fields))
         for what, change, ids in changes:
             change()
-            copilot._orders_changed(ids)
+            orderbook._orders_changed(ids)
             shop.calls.clear()
-            got = run(copilot._orders_snapshot({}, days=180, fields=fields))
+            got = run(orderbook._orders_snapshot({}, days=180, fields=fields))
             eq(shop.kinds(), ["ids"], what + ": read by id only: %r" % shop.kinds())
             eq(got, full(), what + ": the patched snapshot is the full sweep, order for order")
             for tag in ("IP", "PC", desk.DISPATCHED_TAG):
-                cached = run(copilot.run_production_labels({}, tag=tag))
-                copilot._bust_orders()
-                fresh = run(copilot.run_production_labels({}, tag=tag))
+                cached = run(production.run_production_labels({}, tag=tag))
+                orderbook._bust_orders()
+                fresh = run(production.run_production_labels({}, tag=tag))
                 eq((cached["orders"], cached.get("counts")), (fresh["orders"], fresh.get("counts")),
                    what + ": the %s queue is the same either way" % tag)
     _with_shop(go)
@@ -28226,18 +28230,18 @@ def t_a_change_during_a_sweep_is_caught_not_thrown_away():
         shop.delay = 0.05
 
         async def scenario():
-            early = asyncio.ensure_future(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+            early = asyncio.ensure_future(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags"))
             await asyncio.sleep(0.01)                  # the sweep is in flight
             shop.orders[777]["tags"] = "PC"
-            copilot._orders_changed([777])
-            late = asyncio.ensure_future(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+            orderbook._orders_changed([777])
+            late = asyncio.ensure_future(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags"))
             return await early, await late
         early, late = run(scenario())
         for who, got in (("an early caller", early), ("a late one", late)):
             eq({o["id"]: o["tags"] for o in got}[777], "PC", who + " sees the change")
         eq(shop.kinds(), ["sweep", "ids"], "one sweep, kept, then one order: %r" % shop.kinds())
         shop.calls.clear()
-        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        run(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags"))
         eq(shop.kinds(), [], "and the next load costs nothing")
     _with_shop(go)
 
@@ -28247,13 +28251,13 @@ def t_a_failed_read_by_id_falls_back_to_a_full_sweep():
     """A read of one order that fails must not leave the old one in place:
     the snapshot is dropped and the store swept, as before."""
     def go(shop):
-        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        run(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags"))
         shop.orders[777]["tags"] = "PC"
         shop.fail_ids = True
-        copilot._orders_changed([777])
+        orderbook._orders_changed([777])
         shop.calls.clear()
         meta = {}
-        got = run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags", meta=meta))
+        got = run(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags", meta=meta))
         eq(shop.kinds(), ["ids", "sweep"], "tried the order, then swept: %r" % shop.kinds())
         eq({o["id"]: o["tags"] for o in got}[777], "PC", "and the answer is current")
         ok(not meta.get("failed"), "and complete")
@@ -28266,20 +28270,20 @@ def t_an_order_event_names_its_order_and_a_garbled_one_retires_everything():
     again on the next load. An event whose body cannot be read retires every
     snapshot, as every event used to."""
     def go(shop):
-        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
-        copilot._webhook_seen.clear()
+        run(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        orderbook._webhook_seen.clear()
         raw = json.dumps({"id": 777, "tags": "ignored: the payload is never state"}).encode()
         r = client.post("/webhooks/orders", content=raw, headers=wh_headers(raw, delivery="x1-a"))
         eq(r.status_code, 200, r.text)
         shop.calls.clear()
-        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        run(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags"))
         eq(shop.kinds(), ["ids"], "the event's order is read by id: %r" % shop.kinds())
         eq(shop.calls[0][1]["ids"], "777")
         raw = b"not json"
         r = client.post("/webhooks/orders", content=raw, headers=wh_headers(raw, delivery="x1-b"))
         eq(r.status_code, 200, r.text)
         shop.calls.clear()
-        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        run(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags"))
         eq(shop.kinds(), ["sweep"], "an unreadable event still retires everything: %r" % shop.kinds())
     _with_shop(go)
 
@@ -28290,18 +28294,18 @@ def t_adding_payment_terms_rereads_the_order():
     so for up to the cache's three minutes the ledger could show the order
     without them; the order is now read again on the next load."""
     def go(shop):
-        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
-        saved = (copilot._payment_terms_writer, ORDER.get("tags"))
+        run(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        saved = (shopify._payment_terms_writer, ORDER.get("tags"))
 
         async def writer(oid):
             return {"ok": True}
-        copilot._payment_terms_writer, ORDER["tags"] = writer, copilot.PO_UNPAID_TAG
+        shopify._payment_terms_writer, ORDER["tags"] = writer, orderbook.PO_UNPAID_TAG
         try:
-            run(copilot._net30_on_release({}, 777))
+            run(production._net30_on_release({}, 777))
         finally:
-            copilot._payment_terms_writer, ORDER["tags"] = saved
+            shopify._payment_terms_writer, ORDER["tags"] = saved
         shop.calls.clear()
-        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        run(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags"))
         ok(("ids" in shop.kinds()) and "777" in [c[1].get("ids") for c in shop.calls],
            "the order with new terms is read again: %r" % shop.calls)
     try:
@@ -28319,15 +28323,15 @@ def t_a_load_during_a_read_by_id_waits_for_it():
     clean-looking snapshot and was answered with the old order: on the ledger,
     a paid invoice still owed."""
     def go(shop):
-        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,financial_status"))
+        run(orderbook._orders_snapshot({}, days=180, fields="id,created_at,financial_status"))
         shop.orders[888]["financial_status"] = "paid"
-        copilot._orders_changed([888])
+        orderbook._orders_changed([888])
         shop.delay = 0.05
 
         async def two():
-            a = asyncio.ensure_future(copilot._orders_snapshot({}, days=180, fields="id,created_at,financial_status"))
+            a = asyncio.ensure_future(orderbook._orders_snapshot({}, days=180, fields="id,created_at,financial_status"))
             await asyncio.sleep(0.01)              # the read by id is in flight
-            b = await copilot._orders_snapshot({}, days=180, fields="id,created_at,financial_status")
+            b = await orderbook._orders_snapshot({}, days=180, fields="id,created_at,financial_status")
             return await a, b
         a, b = run(two())
         for who, got in (("the first load", a), ("a load during its read", b)):
@@ -28342,25 +28346,25 @@ def t_with_the_cache_off_a_named_change_detaches_the_sweep():
     shared; a write used to detach it, so the reload after the write swept
     afresh. A named change does the same again."""
     shop = _FakeShop(_shop_orders())
-    saved, was = copilot._tool_json, copilot.ORDER_CACHE_SECS
-    copilot._tool_json, copilot.ORDER_CACHE_SECS = shop.tools, 0
-    copilot._bust_orders()
+    saved, was = shopify._tool_json, orderbook.ORDER_CACHE_SECS
+    shopify._tool_json, orderbook.ORDER_CACHE_SECS = shop.tools, 0
+    orderbook._bust_orders()
     try:
         shop.delay = 0.05
 
         async def scenario():
-            early = asyncio.ensure_future(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+            early = asyncio.ensure_future(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags"))
             await asyncio.sleep(0.01)
             shop.orders[777]["tags"] = "PC"
-            copilot._orders_changed([777])
-            late = await copilot._orders_snapshot({}, days=180, fields="id,created_at,tags")  # early still sweeping
+            orderbook._orders_changed([777])
+            late = await orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags")  # early still sweeping
             return await early, late
         _early, late = run(scenario())
         eq({o["id"]: o["tags"] for o in late}[777], "PC", "the reload after the write sees it")
         eq(shop.kinds(), ["sweep", "sweep"], "because it swept afresh, as before")
     finally:
-        copilot._tool_json, copilot.ORDER_CACHE_SECS = saved, was
-        copilot._bust_orders()
+        shopify._tool_json, orderbook.ORDER_CACHE_SECS = saved, was
+        orderbook._bust_orders()
 
 
 @test
@@ -28373,13 +28377,13 @@ def t_a_late_joiner_is_never_answered_from_a_sweep_that_was_not_kept():
         shop.delay = 0.05
 
         async def scenario():
-            first = asyncio.ensure_future(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+            first = asyncio.ensure_future(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags"))
             await asyncio.sleep(0.01)
             shop.orders[777]["tags"] = "PC"
-            copilot._orders_changed([777])
-            late = asyncio.ensure_future(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+            orderbook._orders_changed([777])
+            late = asyncio.ensure_future(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags"))
             await asyncio.sleep(0.01)
-            copilot._bust_orders()                 # Refresh pressed on another page
+            orderbook._bust_orders()                 # Refresh pressed on another page
             return await first, await late
         _first, late = run(scenario())
         eq({o["id"]: o["tags"] for o in late}[777], "PC", "the late load sees the change")
@@ -28393,9 +28397,9 @@ def t_a_snapshot_made_current_is_not_thrown_away():
     def go(shop):
         def hook(kind, n):
             if n in (1, 2):
-                copilot._orders_changed([777])     # the write during the sweep, its echo during the read
+                orderbook._orders_changed([777])     # the write during the sweep, its echo during the read
         shop.on_call = hook
-        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        run(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags"))
         eq(shop.kinds(), ["sweep", "ids", "ids"], "no sweep after it is current: %r" % shop.kinds())
     _with_shop(go)
 
@@ -28405,14 +28409,14 @@ def t_a_storm_of_changes_costs_one_sweep_not_two():
     """Review CONC4. More changes than can be read by id at once, arriving
     while a sweep ran, made one load sweep twice."""
     def go(shop):
-        saved = copilot.ORDER_REFRESH_MAX
-        copilot.ORDER_REFRESH_MAX = 2
+        saved = orderbook.ORDER_REFRESH_MAX
+        orderbook.ORDER_REFRESH_MAX = 2
         try:
-            shop.on_call = lambda kind, n: copilot._orders_changed([777, 888, 999])
-            run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+            shop.on_call = lambda kind, n: orderbook._orders_changed([777, 888, 999])
+            run(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags"))
             eq(shop.kinds().count("sweep"), 1, "one sweep: %r" % shop.kinds())
         finally:
-            copilot.ORDER_REFRESH_MAX = saved
+            orderbook.ORDER_REFRESH_MAX = saved
     _with_shop(go)
 
 
@@ -28423,19 +28427,19 @@ def t_a_cut_short_sweep_is_swept_again_not_added_to():
     orders = [dict(_shop_orders()[0], id=10000 + i, name="#%d" % i, created_at=_ago(2)) for i in range(260)]
 
     def go(shop):
-        saved = copilot._paginate_orders
-        copilot._paginate_orders = lambda *a, **k: saved(*a, **{**k, "max_pages": 1})
+        saved = orderbook._paginate_orders
+        orderbook._paginate_orders = lambda *a, **k: saved(*a, **{**k, "max_pages": 1})
         try:
             meta = {}
-            got = run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags", meta=meta))
+            got = run(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags", meta=meta))
             ok(meta.get("truncated") and len(got) == 250, "the sweep was cut short")
-            copilot._orders_changed([10259])       # an order past the cut
+            orderbook._orders_changed([10259])       # an order past the cut
             shop.calls.clear()
-            got = run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+            got = run(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags"))
             eq(shop.kinds(), ["sweep"], "swept again: %r" % shop.kinds())
             ok(10259 not in {o["id"] for o in got}, "and nothing a sweep would not return")
         finally:
-            copilot._paginate_orders = saved
+            orderbook._paginate_orders = saved
     _with_shop(go, orders)
 
 
@@ -28445,13 +28449,13 @@ def t_an_order_event_with_a_number_too_big_still_retires_everything():
     delivery was recorded, so Shopify's retry was taken as handled and
     nothing was retired."""
     def go(shop):
-        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
-        copilot._webhook_seen.clear()
+        run(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        orderbook._webhook_seen.clear()
         raw = b'{"id": 1e400}'
         r = client.post("/webhooks/orders", content=raw, headers=wh_headers(raw, delivery="big-1"))
         eq(r.status_code, 200, r.text)
         shop.calls.clear()
-        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+        run(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags"))
         eq(shop.kinds(), ["sweep"], "every snapshot was retired: %r" % shop.kinds())
     _with_shop(go)
 
@@ -28470,24 +28474,24 @@ def t_a_load_that_joined_a_cut_short_sweep_after_a_payment_sees_it_paid():
                    financial_status="pending") for i in range(260)]
 
     def go(shop):
-        saved = copilot._paginate_orders
-        copilot._paginate_orders = lambda *a, **k: saved(*a, **{**k, "max_pages": 1})
+        saved = orderbook._paginate_orders
+        orderbook._paginate_orders = lambda *a, **k: saved(*a, **{**k, "max_pages": 1})
         shop.delay = 0.05
         try:
             async def scenario():
                 first = asyncio.ensure_future(
-                    copilot._orders_snapshot({}, days=730, fields="id,created_at,financial_status"))
+                    orderbook._orders_snapshot({}, days=730, fields="id,created_at,financial_status"))
                 await asyncio.sleep(0.01)                   # the long sweep is under way
                 shop.orders[10005]["financial_status"] = "paid"
-                copilot._orders_changed([10005])            # Shopify says it was paid
-                joined = await copilot._orders_snapshot({}, days=730, fields="id,created_at,financial_status")
+                orderbook._orders_changed([10005])            # Shopify says it was paid
+                joined = await orderbook._orders_snapshot({}, days=730, fields="id,created_at,financial_status")
                 await first
                 return joined
             joined = run(scenario())
             eq({o["id"]: o["financial_status"] for o in joined}[10005], "paid",
                "a load joining after the payment sees it paid")
         finally:
-            copilot._paginate_orders = saved
+            orderbook._paginate_orders = saved
     _with_shop(go, orders)
 
 
@@ -28498,22 +28502,22 @@ def t_the_reload_after_a_write_is_never_answered_from_before_it():
     a sweep that started before the write and was answered from it: the order
     stayed in the queue it had just left."""
     def go(shop):
-        saved = copilot.ORDER_REFRESH_MAX
-        copilot.ORDER_REFRESH_MAX = 2
+        saved = orderbook.ORDER_REFRESH_MAX
+        orderbook.ORDER_REFRESH_MAX = 2
         shop.delay = 0.05
         try:
             async def scenario():
-                other = asyncio.ensure_future(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags"))
+                other = asyncio.ensure_future(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags"))
                 await asyncio.sleep(0.01)                   # another tab's sweep is under way
                 shop.orders[777]["tags"] = "PC"
-                copilot._orders_changed([777, 888, 999])    # the write, and a burst of events
-                reload = await copilot._orders_snapshot({}, days=180, fields="id,created_at,tags")
+                orderbook._orders_changed([777, 888, 999])    # the write, and a burst of events
+                reload = await orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags")
                 await other
                 return reload
             reload = run(scenario())
             eq({o["id"]: o["tags"] for o in reload}[777], "PC", "the reload sees its own write")
         finally:
-            copilot.ORDER_REFRESH_MAX = saved
+            orderbook.ORDER_REFRESH_MAX = saved
     _with_shop(go)
 
 
@@ -28525,9 +28529,9 @@ def t_a_failing_shopify_is_not_asked_again_by_the_load_that_started_the_sweep():
     says it cannot read), as it always was."""
     def go(shop):
         shop.fail_sweeps = True
-        shop.on_call = lambda kind, n: copilot._orders_changed([777])
+        shop.on_call = lambda kind, n: orderbook._orders_changed([777])
         meta = {}
-        run(copilot._orders_snapshot({}, days=180, fields="id,created_at,tags", meta=meta))
+        run(orderbook._orders_snapshot({}, days=180, fields="id,created_at,tags", meta=meta))
         eq(shop.kinds(), ["sweep"], "one sweep: %r" % shop.kinds())
         ok(meta.get("failed"), "and the failure is said")
     _with_shop(go)
@@ -29301,13 +29305,13 @@ def t_a_queue_learns_its_products_in_one_read():
         if name == "shopify_get_product":
             singles.append(args["product_id"])
         return {}
-    saved = (copilot._product_meta_reader, copilot._tool_json)
-    copilot._product_meta_reader, copilot._tool_json = reader, tools
-    copilot._option_names_cache.clear()
+    saved = (shopify._product_meta_reader, shopify._tool_json)
+    shopify._product_meta_reader, shopify._tool_json = reader, tools
+    production._option_names_cache.clear()
     try:
         names_ids = list(range(1, 46))            # 45: the first 40 count
         type_ids = list(range(30, 80))            # 50, overlapping: the first 40 count
-        names, types = run(copilot._product_names_and_types({}, names_ids, type_ids))
+        names, types = run(production._product_names_and_types({}, names_ids, type_ids))
         eq(len(reads), 1, "one read for both lists")
         eq(singles, [], "and no product read one at a time")
         eq(sorted(reads[0]), sorted(set(range(1, 41)) | set(range(30, 70))), "for the first 40 of each")
@@ -29315,16 +29319,16 @@ def t_a_queue_learns_its_products_in_one_read():
         eq(sorted(types), list(range(30, 70)), "types for the first 40 type lines")
         eq(names[7], fx[7]["names"], "with what the product holds")
         eq(types[31], fx[31]["type"])
-        eq((types.get(50), 50 in copilot._option_names_cache), ("", False),
+        eq((types.get(50), 50 in production._option_names_cache), ("", False),
            "a product the read did not return is blank this time and asked for again next time")
         reads.clear()
-        names2, types2 = run(copilot._product_names_and_types({}, names_ids, type_ids))
+        names2, types2 = run(production._product_names_and_types({}, names_ids, type_ids))
         eq((names2, {k: v for k, v in types2.items() if k != 50}), (names, {k: v for k, v in types.items() if k != 50}),
            "the same answer again")
         eq(reads, [[50]], "from memory, but for the one it did not have")
     finally:
-        copilot._product_meta_reader, copilot._tool_json = saved
-        copilot._option_names_cache.clear()
+        shopify._product_meta_reader, shopify._tool_json = saved
+        production._option_names_cache.clear()
 
 
 @test
@@ -29345,17 +29349,17 @@ def t_a_failed_products_read_falls_back_to_reading_them_one_by_one():
             return {"id": pid, "product_type": fx[pid]["type"],
                     "options": [{"name": n, "position": i + 1} for i, n in enumerate(fx[pid]["names"])]}
         return {}
-    saved = (copilot._product_meta_reader, copilot._tool_json)
-    copilot._product_meta_reader, copilot._tool_json = reader, tools
-    copilot._option_names_cache.clear()
+    saved = (shopify._product_meta_reader, shopify._tool_json)
+    shopify._product_meta_reader, shopify._tool_json = reader, tools
+    production._option_names_cache.clear()
     try:
-        names, types = run(copilot._product_names_and_types({}, [1, 2, 3], [3, 4]))
+        names, types = run(production._product_names_and_types({}, [1, 2, 3], [3, 4]))
         eq(sorted(singles), [1, 2, 3, 4], "each product read once")
         eq(names, {p: fx[p]["names"] for p in (1, 2, 3)})
         eq(types, {p: fx[p]["type"] for p in (3, 4)})
     finally:
-        copilot._product_meta_reader, copilot._tool_json = saved
-        copilot._option_names_cache.clear()
+        shopify._product_meta_reader, shopify._tool_json = saved
+        production._option_names_cache.clear()
 
 
 @test
@@ -29413,11 +29417,11 @@ def t_a_release_reads_its_order_once():
             if name == "shopify_get_order":
                 reads.append(args.get("order_id"))
             return await fake_tool_json(registry, name, args)
-        saved = (copilot._tool_json, copilot._payment_terms_writer, ORDER["tags"])
+        saved = (shopify._tool_json, shopify._payment_terms_writer, ORDER["tags"])
 
         async def writer(order_id):
             return {"ok": True, "updated": True, "was": "Due on receipt"}
-        copilot._tool_json, copilot._payment_terms_writer = counting, writer
+        shopify._tool_json, shopify._payment_terms_writer = counting, writer
         ORDER["tags"] = "Unprocessed, purchase order unpaid"
         try:
             r = post("/api/production-labels/queue", {"order_id": 12345, "name": "#104239"}).json()
@@ -29429,7 +29433,7 @@ def t_a_release_reads_its_order_once():
             ok(not plain["po_unpaid"] and plain["terms_ok"], plain)
             eq(reads, [12345], "an ordinary order too")
         finally:
-            copilot._tool_json, copilot._payment_terms_writer, ORDER["tags"] = saved
+            shopify._tool_json, shopify._payment_terms_writer, ORDER["tags"] = saved
             reset_prod()
     with_accounts(go)
 
@@ -29450,40 +29454,40 @@ def t_the_missed_orders_check_is_not_scanned_again_until_an_order_changes():
                                 "financial_status": "paid", "line_items": [{"title": "Gobo", "properties": [
                                     {"name": "Manufacturer", "value": "Martin"}]}]}]}
         return {}
-    saved = copilot._tool_json
-    copilot._tool_json = tools
-    copilot._missing_cache.clear()
+    saved = shopify._tool_json
+    shopify._tool_json = tools
+    production._missing_cache.clear()
     try:
-        a = run(copilot.run_missing_production({}))
-        b = run(copilot.run_missing_production({}))
+        a = run(production.run_missing_production({}))
+        b = run(production.run_missing_production({}))
         eq(len(scans), 1, "two looks, one scan")
         eq(a, b, "the same answer")
-        copilot._orders_changed([9])
-        run(copilot.run_missing_production({}))
+        orderbook._orders_changed([9])
+        run(production.run_missing_production({}))
         eq(len(scans), 2, "an order known to have changed scans again")
-        copilot._bust_orders()
-        run(copilot.run_missing_production({}))
+        orderbook._bust_orders()
+        run(production.run_missing_production({}))
         eq(len(scans), 3, "and so does a Refresh")
-        run(copilot.run_missing_production({}, tag="Other"))
+        run(production.run_missing_production({}, tag="Other"))
         eq(len(scans), 4, "another tag is its own answer")
-        saved_ttl = copilot.MISSING_CACHE_SECS
-        copilot.MISSING_CACHE_SECS = 0
+        saved_ttl = production.MISSING_CACHE_SECS
+        production.MISSING_CACHE_SECS = 0
         try:
-            run(copilot.run_missing_production({}))
+            run(production.run_missing_production({}))
             eq(len(scans), 5, "and two minutes on, it scans again")
         finally:
-            copilot.MISSING_CACHE_SECS = saved_ttl
+            production.MISSING_CACHE_SECS = saved_ttl
 
         async def failing(registry, name, args):
             scans.append(1)
             return {"_failed": True}
-        copilot._tool_json = failing
-        copilot._missing_cache.clear()
-        ok(run(copilot.run_missing_production({})).get("error"), "a failed scan says so")
-        ok(run(copilot.run_missing_production({})).get("error") and len(scans) == 7, "and is not kept")
+        shopify._tool_json = failing
+        production._missing_cache.clear()
+        ok(run(production.run_missing_production({})).get("error"), "a failed scan says so")
+        ok(run(production.run_missing_production({})).get("error") and len(scans) == 7, "and is not kept")
     finally:
-        copilot._tool_json = saved
-        copilot._missing_cache.clear()
+        shopify._tool_json = saved
+        production._missing_cache.clear()
 
 
 @test
@@ -29516,19 +29520,19 @@ def t_adding_a_missed_order_to_the_queue_always_checks_the_strip_again():
             if name == "shopify_get_order":
                 return now9()
             return await fake_tool_json(registry, name, args)
-        saved = copilot._tool_json
-        copilot._tool_json = tools
+        saved = shopify._tool_json
+        shopify._tool_json = tools
         try:
-            first = run(copilot.run_missing_production({}))
+            first = run(production.run_missing_production({}))
             eq([m["name"] for m in first["missing"]], ["#9"], "the strip lists it")
             state["cancelled"] = True                  # cancelled in Shopify; no webhook yet
             r = post("/api/production-labels/queue", {"order_id": 9, "name": "#9"})
             eq(r.status_code, 200, r.text)
-            after = run(copilot.run_missing_production({}))
+            after = run(production.run_missing_production({}))
             eq(len(scans), 2, "the strip was checked again after the click")
             eq(after["missing"], [], "and the cancelled order is gone from it")
         finally:
-            copilot._tool_json = saved
+            shopify._tool_json = saved
             reset_prod()
     with_accounts(go)
 
@@ -29548,19 +29552,19 @@ def t_a_stale_missed_orders_answer_is_not_kept_in_memory():
 
     async def failing(registry, name, args):
         return {"_failed": True}
-    saved = copilot._tool_json
-    copilot._missing_cache.clear()
+    saved = shopify._tool_json
+    production._missing_cache.clear()
     try:
-        copilot._tool_json = ok_tools
-        run(copilot.run_missing_production({}))
-        ok(copilot._missing_cache, "an answer is kept")
-        copilot._orders_changed([9])
-        copilot._tool_json = failing
-        ok(run(copilot.run_missing_production({})).get("error"), "the scan after the change fails")
-        eq(copilot._missing_cache, {}, "and the old answer is not held")
+        shopify._tool_json = ok_tools
+        run(production.run_missing_production({}))
+        ok(production._missing_cache, "an answer is kept")
+        orderbook._orders_changed([9])
+        shopify._tool_json = failing
+        ok(run(production.run_missing_production({})).get("error"), "the scan after the change fails")
+        eq(production._missing_cache, {}, "and the old answer is not held")
     finally:
-        copilot._tool_json = saved
-        copilot._missing_cache.clear()
+        shopify._tool_json = saved
+        production._missing_cache.clear()
 
 
 @test
@@ -29579,23 +29583,23 @@ def t_a_missed_orders_scan_that_saw_an_order_change_is_not_kept():
                                 "financial_status": "paid", "line_items": [{"title": "Gobo", "properties": [
                                     {"name": "Manufacturer", "value": "Martin"}]}]}]}
         return {}
-    saved = copilot._tool_json
-    copilot._tool_json = slow
-    copilot._missing_cache.clear()
+    saved = shopify._tool_json
+    shopify._tool_json = slow
+    production._missing_cache.clear()
     try:
         async def scenario():
             gate["ev"] = asyncio.Event()
-            scan = asyncio.ensure_future(copilot.run_missing_production({}))
+            scan = asyncio.ensure_future(production.run_missing_production({}))
             await asyncio.sleep(0.01)                  # the scan is reading Shopify
-            copilot._orders_changed([9])               # #9 changed meanwhile
+            orderbook._orders_changed([9])               # #9 changed meanwhile
             gate["ev"].set()
             return await scan
         res = run(scenario())
         eq([m["name"] for m in res["missing"]], ["#9"], "the scan still answers the look that asked")
-        eq(copilot._missing_cache, {}, "but its answer is not kept")
+        eq(production._missing_cache, {}, "but its answer is not kept")
     finally:
-        copilot._tool_json = saved
-        copilot._missing_cache.clear()
+        shopify._tool_json = saved
+        production._missing_cache.clear()
 
 
 @test
@@ -29610,30 +29614,30 @@ def t_a_release_that_finds_shopify_ahead_of_the_app_says_the_order_changed():
     def go():
         ensure_auth()
         reset_prod(); reset_dispatch()
-        saved = (copilot._tool_json, ORDER["tags"], ORDER.get("cancelled_at"))
+        saved = (shopify._tool_json, ORDER["tags"], ORDER.get("cancelled_at"))
         try:
             # cancelled in Shopify, the app not told
             ORDER["tags"], ORDER["cancelled_at"] = "Unprocessed", "2026-10-13T08:00:00Z"
-            e0 = copilot._orders_epoch
-            ok_, note, released = run(copilot._release_tags({}, 12345))
-            ok(copilot._orders_epoch > e0, "a dead order found on release is an order that changed")
+            e0 = orderbook._orders_epoch
+            ok_, note, released = run(production._release_tags({}, 12345))
+            ok(orderbook._orders_epoch > e0, "a dead order found on release is an order that changed")
             # tagged PC in Shopify's admin, the app not told
             ORDER["tags"], ORDER["cancelled_at"] = "PC", None
-            e1 = copilot._orders_epoch
-            run(copilot._release_tags({}, 12345))
-            ok(copilot._orders_epoch > e1, "and so is one already past the bench")
+            e1 = orderbook._orders_epoch
+            run(production._release_tags({}, 12345))
+            ok(orderbook._orders_epoch > e1, "and so is one already past the bench")
             # already in To make: an ordinary reprint
             ORDER["tags"] = "IP"
-            e2 = copilot._orders_epoch
-            run(copilot._release_tags({}, 12345))
-            eq(copilot._orders_epoch, e2, "an order already where it was asked to go says nothing")
+            e2 = orderbook._orders_epoch
+            run(production._release_tags({}, 12345))
+            eq(orderbook._orders_epoch, e2, "an order already where it was asked to go says nothing")
             # and a click on the strip always does
-            e3 = copilot._orders_epoch
+            e3 = orderbook._orders_epoch
             r = post("/api/production-labels/queue", {"order_id": 12345, "name": "#104239"})
             eq(r.status_code, 200, r.text)
-            ok(copilot._orders_epoch > e3, "a click on the strip says the order changed")
+            ok(orderbook._orders_epoch > e3, "a click on the strip says the order changed")
         finally:
-            copilot._tool_json = saved[0]
+            shopify._tool_json = saved[0]
             ORDER["tags"], ORDER["cancelled_at"] = saved[1], saved[2]
             reset_prod()
     with_accounts(go)
@@ -29767,6 +29771,9 @@ SHARED_COPIES = {
     ("copilot", "httpx", "server"):
         "the connector settings test routes copilot's calls to the connector; "
         "server's client talks to Shopify, which that test never reaches",
+    ("copilot", "httpx", "gizmo.orderbook"):
+        "the order book uses httpx only to name an error it catches (HTTPStatusError); "
+        "the connector settings test reads no order",
 }
 
 @test
@@ -29862,15 +29869,8 @@ def t_the_security_scans_cover_every_app_module():
 # What dispatch still reads from copilot.py. Each area that moves out (the
 # store, the request check, orders, the AI client) takes names off this list.
 BORROWED = {
-    # the store
-    "_dispatch_lock",
-    # the request check's answers
-    "_eori_hits", "_ok", "_tool_json", "EORI_MAX_PER_MIN",
-    # orders and Shopify
-    "_ADDR_COMPARE", "_admin_order_url", "_fulfill_if_ready", "_fulfillment_canceler",
-    "_label_skip_item", "_line_qty", "_load_prod_state", "_order_status", "_orders_changed",
-    "_orders_snapshot", "_origin_address", "_ship_to", "_sync_order_tags", "_tax_id_reader",
-    "MADE_TAG", "PRODUCTION_TAG",
+    # the answers and the EORI checker's rate window
+    "_ok", "_eori_hits", "EORI_MAX_PER_MIN",
     # the clock
     "_london_hm", "_london_today",
 }
@@ -29907,6 +29907,8 @@ def t_the_split_modules_read_no_unbound_name():
                 n = s.get_name()
                 if n.startswith((".", "__conditional")):    # the compiler's own (3.14 annotations)
                     continue
+                if n in ("__file__", "__name__", "__doc__", "__spec__"):   # every module has these
+                    continue
                 if (t is top or s.is_global()) and s.is_referenced() and n not in bound and not hasattr(_bi, n):
                     bad.append(f"{rel}: {t.get_name()} reads {n}")
             for c in t.get_children():
@@ -29923,7 +29925,9 @@ def t_either_module_imports_first():
     for first, then in (("gizmo.dispatch", "copilot"), ("copilot", "gizmo.dispatch"),
                         ("gizmo.routes.dispatch", "copilot"), ("gizmo.team", "copilot"),
                         ("gizmo.gate", "copilot"), ("gizmo.activity", "copilot"),
-                        ("gizmo.routes.team", "copilot")):
+                        ("gizmo.routes.team", "copilot"), ("gizmo.orderbook", "copilot"),
+                        ("gizmo.production", "copilot"), ("gizmo.size_list", "copilot"),
+                        ("gizmo.shopify", "copilot")):
         r = _sp.run([sys.executable, "-c", f"import {first}, {then}; import gizmo.dispatch as d, copilot as c; "
                      "assert c.desk is d and d.core is c; print('ok')"],
                     cwd=root, env=dict(os.environ), capture_output=True, text=True, timeout=120)
@@ -30001,6 +30005,19 @@ def t_move_proof_is_wired():
     looks_head = {k: v.replace("x = 2", "x = len(globals())") for k, v in head.items()}
     ok(any("globals()" in g for g in mp.prove(looks, looks_head)),
        "a moved function that looks its module up by name is named")
+    here = {k: v.replace("x = 2", "x = __file__") for k, v in base.items()}
+    here_head = {k: v.replace("x = 2", "x = __file__") for k, v in head.items()}
+    ok(any("__file__" in g for g in mp.prove(here, here_head)),
+       "a moved statement that finds a path from its module's own file is named")
+    eq(mp.prove(here, here_head, declared=("b",)), [], "unless it is declared, and so shown")
+    glob_base = {first: base[first].replace("def add_routes(mcp, registry):\n",
+                                            "def add_routes(mcp, registry):\n    global w\n    w = mcp\n")}
+    glob_head = dict(head, **{first: head[first].replace("def add_routes(mcp, registry):\n",
+                                                          "def add_routes(mcp, registry):\n    desk.w = mcp\n"),
+                              "gizmo/dispatch.py": head["gizmo/dispatch.py"] + "w = None\n"})
+    glob_base[first] = glob_base[first].replace("import os\n", "import os\nw = None\n")
+    ok(any("global w" in g for g in mp.prove(glob_base, glob_head)), "a global line that went is named")
+    eq(mp.prove(glob_base, glob_head, declared=("global",)), [], "and declared as global, shown")
     order = dict(head, **{first: head[first].replace("    routes_dispatch.register(mcp, registry)\n\n", "")
                           .replace("        return 3\n", "        return 3\n\n    routes_dispatch.register(mcp, registry)\n")})
     ok(any("order" in g for g in mp.prove(base, order)), "routes registered in another order are named")
@@ -30009,7 +30026,7 @@ def t_move_proof_is_wired():
 # The store, the error log and the AI client sit beneath every area: they
 # import nothing from copilot.py, so an area can import them directly.
 
-FLOOR = ["gizmo/config.py", "gizmo/store.py", "gizmo/errors.py", "gizmo/ai.py"]
+FLOOR = ["gizmo/config.py", "gizmo/store.py", "gizmo/errors.py", "gizmo/ai.py", "gizmo/shopify.py"]
 
 @test
 def t_no_module_looks_itself_up_by_name():
@@ -30124,7 +30141,7 @@ def t_the_printed_labels_do_not_change():
     h = lambda b: hashlib.sha256(b.encode("utf-8")).hexdigest()[:16]
     def go():
         ensure_auth()
-        data = run(copilot.run_production_labels({}, order_id=12345))
+        data = run(production.run_production_labels({}, order_id=12345))
         eq(h(_json.dumps(data, sort_keys=True, indent=1, default=str)), "52682bb6d8726c1a", "the label data is unchanged")
         for size in ("4x6", "4x4"):
             r = client.post("/print/production-labels/sign", json={"ids": "12345", "size": size},
@@ -30132,6 +30149,25 @@ def t_the_printed_labels_do_not_change():
             eq(r.status_code, 200, r.text[:200])
             eq(h(client.get(r.json()["path"]).text), "9c58d003359d2683", "the printed document is unchanged at " + size)
     with_accounts(go)
+
+@test
+def t_the_size_lists_seed_files_are_the_repos():
+    """The Size list's seed rules default to the repository's data folder,
+    found from the module's own file. Moved into gizmo/, a path built from
+    __file__ would quietly look in gizmo/data instead, and the suite, which
+    sets every path, would never notice: so the defaults are read here with
+    the settings cleared."""
+    import subprocess as _sp
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GOBO_")}
+    r = _sp.run([sys.executable, "-c", "import os, copilot\nfrom gizmo import size_list as s\n"
+                 "print(os.path.abspath(s.GOBO_SIZES_PATH)); print(os.path.abspath(s.GOBO_ALIASES_PATH)); "
+                 "print(os.path.abspath(s.GOBO_OVERRIDES_PATH))"],
+                cwd=root, env=env, capture_output=True, text=True, timeout=120)
+    eq(r.returncode, 0, r.stderr[-400:])
+    eq(r.stdout.split(), [os.path.join(root, "data", f) for f in ("gobo-sizes.csv", "gobo-aliases.csv", "gobo-overrides.csv")],
+       "the seeds are the repository's")
+    ok(all(os.path.exists(p) for p in r.stdout.split()), "and they exist")
 
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
@@ -30141,7 +30177,7 @@ for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     team._login_hits.clear()
     # A missed-orders answer is kept until an order changes, and one test's
     # stubbed shop is not the next test's: nothing changes between them.
-    copilot._missing_cache.clear()
+    production._missing_cache.clear()
     reached = len(NET_REACHED)
     try:
         fn()

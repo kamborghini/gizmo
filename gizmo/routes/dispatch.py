@@ -20,6 +20,9 @@ except Exception:                     # keep the app booting if the connector is
 from starlette.requests import Request
 
 import copilot as core
+from gizmo import orderbook
+from gizmo import production
+from gizmo import shopify
 from gizmo import dispatch as desk
 from gizmo import activity
 from gizmo import gate
@@ -541,7 +544,7 @@ def register(mcp, registry):
                 continue
             rows.append({
                 "order_id": oid,
-                "admin_url": core._admin_order_url(oid),
+                "admin_url": orderbook._admin_order_url(oid),
                 "order_name": e.get("order_name") or ("#" + str(oid)),
                 "customer": e.get("customer") or "",
                 "carrier": (e.get("carrier_label")
@@ -620,7 +623,7 @@ def register(mcp, registry):
         # the number must be the order's CURRENT shipment. The whole exchange
         # runs under the dispatch lock, the same one the booking path holds,
         # so a cancel cannot interleave with a book.
-        async with core._dispatch_lock(oid or tn):
+        async with orderbook._dispatch_lock(oid or tn):
             if oid:
                 cur = (desk._load_dispatch().get(str(oid)) or {})
                 have = str(cur.get("tracking_number") or "").strip()
@@ -661,10 +664,10 @@ def register(mcp, registry):
             # Undo what the booking did in Shopify, so the customer is not left
             # with dead tracking and the order can be re-dispatched cleanly.
             fid = entry.get("fulfillment_id")
-            if fid and core._fulfillment_canceler is not None:
+            if fid and shopify._fulfillment_canceler is not None:
                 try:
-                    fc = await core._fulfillment_canceler(int(fid))
-                    core._orders_changed([oid])   # fulfillment_status is a swept field
+                    fc = await shopify._fulfillment_canceler(int(fid))
+                    orderbook._orders_changed([oid])   # fulfillment_status is a swept field
                     if fc.get("ok"):
                         # The fulfilment is genuinely gone, so the record must stop
                         # claiming otherwise: a stale fulfillment_id makes a later
@@ -694,10 +697,10 @@ def register(mcp, registry):
                         "cancel that fulfillment in Shopify so the tracking is not left dead.")
             # Put the order back in the queue it actually belongs to: an order that
             # was never made must return to production, not claim to be made.
-            was_made = bool((core._load_prod_state().get(str(oid)) or {}).get("made_at"))
+            was_made = bool((production._load_prod_state().get(str(oid)) or {}).get("made_at"))
             try:
-                await core._sync_order_tags(registry, oid,
-                                       add=(core.MADE_TAG if was_made else core.PRODUCTION_TAG,),
+                await orderbook._sync_order_tags(registry, oid,
+                                       add=(orderbook.MADE_TAG if was_made else production.PRODUCTION_TAG,),
                                        remove=(desk.DISPATCHED_TAG, *desk.LEGACY_DISPATCHED_TAGS))
             except Exception:
                 logger.exception("tag revert after cancel failed for order %s", oid)

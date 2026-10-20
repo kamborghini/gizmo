@@ -17,7 +17,8 @@ the head's copilot.py and package with the base's:
 - nothing else is added or lost but imports, the package's module docstrings
   and loggers, and the register() shells and calls that carry the routes;
 - no moved statement finds its module's names by name (globals(), vars(),
-  sys.modules[__name__]): moved, it would read the new module's.
+  sys.modules[__name__]) or a path from its own file (__file__): moved, it
+  would read the new module's.
 
 Statements changed on purpose are named with --declared (make move-proof
 DECLARED=a,b) and printed before and after instead.
@@ -160,6 +161,8 @@ def _name(n):
     if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call):
         f = n.value.func
         return f.attr if isinstance(f, ast.Attribute) else ast.unparse(f)
+    if isinstance(n, ast.Global):
+        return "global"          # a global line that went, its writes now through the module
     return None
 
 
@@ -172,6 +175,8 @@ def _looks_itself_up(n):
             return x.func.id + "()"
         if isinstance(x, ast.Subscript) and ast.unparse(x) == "sys.modules[__name__]":
             return "sys.modules[__name__]"
+        if isinstance(x, ast.Name) and x.id in ("__file__", "__name__"):
+            return x.id             # a path or name found from the module's own file
     return None
 
 
@@ -198,7 +203,7 @@ def _route_path(n):
     return None
 
 
-def _units(files, problems):
+def _units(files, problems, declared=frozenset()):
     """(units, route order): every statement to match, keyed by its
     normalized tree, and the route paths in the order they are registered."""
     family = {_module(p) for p in files}
@@ -219,7 +224,7 @@ def _units(files, problems):
                       ((path == first and n.name == "add_routes") or
                        (path.startswith("gizmo/routes/") and n.name == "register")))
             if not holder:
-                if path != first and _looks_itself_up(n):
+                if path != first and _looks_itself_up(n) and _name(n) not in declared:
                     problems.append(f"{_label(path, n)} uses {_looks_itself_up(n)}: moved, it reads this module's names")
                 norm = _norm(n, prefixes, set(), problems, _label(path, n))
                 units.append((ast.dump(norm), _label(path, n), path, _name(norm), ast.unparse(norm)))
@@ -238,7 +243,7 @@ def _units(files, problems):
                 if _is_register_call(s, prefixes):
                     continue
                 lab = _label(path, s)
-                if path != first and _looks_itself_up(s):
+                if path != first and _looks_itself_up(s) and _name(s) not in declared:
                     problems.append(f"{lab} uses {_looks_itself_up(s)}: moved, it reads this module's names")
                 norm = _norm(s, prefixes, inner, problems, lab)
                 units.append((ast.dump(norm), lab, path, _name(norm), ast.unparse(norm)))
@@ -262,9 +267,9 @@ def prove(base, head, stats=None, declared=()):
     back in stats["declared"] as (name, before, after), either side None when
     it is new or gone."""
     problems = []
-    bu, border = _units(base, problems)
-    hu, horder = _units(head, problems)
     declared = set(declared)
+    bu, border = _units(base, problems, declared)
+    hu, horder = _units(head, problems, declared)
     shown = collections.OrderedDict()
     for side, units in ((0, bu), (1, hu)):
         for u in units:

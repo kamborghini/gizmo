@@ -1904,7 +1904,7 @@ def t_an_order_number_is_a_door_and_opens_beside_the_queue():
 def t_the_production_queue_links_its_order_numbers():
     ok("row.append(orderA(orderNo(o), o.admin_url, 'lbl-num lbl-num-link'))" in SCRIPT,
        "the queue row's order number is the link")
-    ok('"admin_url": _admin_order_url(o.get("id")),' in
+    ok('"admin_url": orderbook._admin_order_url(o.get("id")),' in
        copilot_source(),
        "and the label order payload carries the url, like every other order payload")
     ok(re.search(r"\.lbl-num-link[^{]*\{[^}]*var\(--text-brand\)", HTML),

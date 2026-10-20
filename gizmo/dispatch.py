@@ -929,7 +929,7 @@ def _line_unit_net(li: dict) -> Optional[float]:
         ordered = int(li.get("quantity") or 0)
     except (TypeError, ValueError):
         ordered = 0
-    ordered = ordered or core._line_qty(li) or 1
+    ordered = ordered or orderbook._line_qty(li) or 1
     return max(0.0, unit - _line_discount(li) / ordered)
 
 
@@ -940,12 +940,12 @@ def _order_goods_value(o: dict) -> float:
     had been paid."""
     total = 0.0
     for li in (o.get("line_items") or []):
-        if core._label_skip_item(str(li.get("title") or li.get("name") or "")):
+        if production._label_skip_item(str(li.get("title") or li.get("name") or "")):
             continue
         unit = _line_unit_net(li)
         if unit is None:
             continue
-        total += unit * core._line_qty(li)
+        total += unit * orderbook._line_qty(li)
     return round(total, 2)
 
 
@@ -968,7 +968,7 @@ def _goods_summary(o: dict) -> str:
     titles = []
     for li in (o.get("line_items") or []):
         t = str(li.get("title") or li.get("name") or "").strip()
-        if not t or core._label_skip_item(t):
+        if not t or production._label_skip_item(t):
             continue
         t = _customs_title(t)
         if t and t not in titles:
@@ -1019,7 +1019,7 @@ async def _variant_costs(registry: dict, variant_ids: list) -> dict:
             (known if inv else unknown).append((vid, inv))
 
         async def _inv_id(vid):
-            v = await core._tool_json(registry, "shopify_get_variant", {"variant_id": vid})
+            v = await shopify._tool_json(registry, "shopify_get_variant", {"variant_id": vid})
             return vid, (v or {}).get("inventory_item_id")
         looked_up = await asyncio.gather(*[_inv_id(v) for v, _ in unknown],
                                          return_exceptions=True)
@@ -1030,7 +1030,7 @@ async def _variant_costs(registry: dict, variant_ids: list) -> dict:
         for i in range(0, len(ids), 100):          # their cap is 100 per call
             chunk = ids[i:i + 100]
             try:
-                res = await core._tool_json(registry, "shopify_get_inventory_items",
+                res = await shopify._tool_json(registry, "shopify_get_inventory_items",
                                        {"ids": ",".join(chunk)})
                 for it in (res or {}).get("inventory_items") or []:
                     by_inv[int(it.get("id") or 0)] = str(it.get("cost") or "")
@@ -1189,7 +1189,7 @@ async def run_margin_report(registry: dict, days: int = 30) -> dict:
                 "No dispatched orders in this period."}
 
     meta = {}
-    orders = await core._orders_snapshot(
+    orders = await orderbook._orders_snapshot(
         registry, days=days + 14, meta=meta,
         fields=("id,name,created_at,currency,taxes_included,total_price,"
                 "subtotal_price,total_discounts,line_items,shipping_lines,customer"))
@@ -1209,7 +1209,7 @@ async def run_margin_report(registry: dict, days: int = 30) -> dict:
     read_short = bool(meta.get("failed") or meta.get("truncated"))
     misses = 0
     for oid in older[:MARGIN_BACKFILL_MAX]:
-        o = await core._tool_json(registry, "shopify_get_order", {"order_id": int(oid)})
+        o = await shopify._tool_json(registry, "shopify_get_order", {"order_id": int(oid)})
         if core._ok(o) and o.get("id"):
             by_id[oid] = o
             misses = 0
@@ -1230,7 +1230,7 @@ async def run_margin_report(registry: dict, days: int = 30) -> dict:
         o = by_id.get(oid)
         if not o:
             rows.append({"order_id": oid, "order_name": entry.get("order_name") or ("#" + oid),
-                         "admin_url": core._admin_order_url(oid),
+                         "admin_url": orderbook._admin_order_url(oid),
                          "incomplete": (f"placed long before this period, and the report reads at most "
                                         f"{MARGIN_BACKFILL_MAX} such orders one by one: choose a shorter period"
                                         if oid in unread and not read_short
@@ -1241,13 +1241,13 @@ async def run_margin_report(registry: dict, days: int = 30) -> dict:
         goods_cost = 0.0
         unknown = []
         for li in o.get("line_items") or []:
-            if core._label_skip_item(str(li.get("title") or li.get("name") or "")):
+            if production._label_skip_item(str(li.get("title") or li.get("name") or "")):
                 continue
             # What is still on the order. The line's discount and VAT were
             # allocated across the quantity ORDERED, so its net total is scaled
             # by the share that remains; a refunded unit used to stay in both
             # the revenue and the goods cost.
-            qty = core._line_qty(li)
+            qty = orderbook._line_qty(li)
             try:
                 ordered = int(li.get("quantity") or 0)
             except (TypeError, ValueError):
@@ -1275,7 +1275,7 @@ async def run_margin_report(registry: dict, days: int = 30) -> dict:
                 break
         row = {
             "order_id": oid,
-            "admin_url": core._admin_order_url(oid),
+            "admin_url": orderbook._admin_order_url(oid),
             "order_name": o.get("name") or entry.get("order_name") or ("#" + oid),
             "customer": entry.get("customer") or "",
             "dispatched": when.astimezone(london).strftime("%d %b"),
@@ -1342,10 +1342,10 @@ async def _order_tax_id(o: dict) -> dict:
 
     Never fatal and never guessed: no id simply means the operator types one
     as they always have."""
-    if core._tax_id_reader is None or not o.get("id"):
+    if shopify._tax_id_reader is None or not o.get("id"):
         return {"receiver_tax_id": "", "receiver_tax_source": ""}
     try:
-        got = await core._tax_id_reader(int(o["id"]))
+        got = await shopify._tax_id_reader(int(o["id"]))
     except Exception:
         logger.exception("tax id lookup failed for order %s", o.get("id"))
         return {"receiver_tax_id": "", "receiver_tax_source": ""}
@@ -1359,14 +1359,14 @@ async def _customs_items(registry: dict, o: dict) -> list:
     goods are worth to the merchant, not what the customer paid, so the cost price
     is the right value; the sale price is only a fallback when no cost is set."""
     lines = [li for li in (o.get("line_items") or [])
-             if not core._label_skip_item(str(li.get("title") or li.get("name") or ""))
-             and core._line_qty(li) > 0]
+             if not production._label_skip_item(str(li.get("title") or li.get("name") or ""))
+             and orderbook._line_qty(li) > 0]
 
     async def _inv_id(li):
         vid = li.get("variant_id")
         if not vid:
             return None
-        v = await core._tool_json(registry, "shopify_get_variant", {"variant_id": int(vid)})
+        v = await shopify._tool_json(registry, "shopify_get_variant", {"variant_id": int(vid)})
         return (v or {}).get("inventory_item_id")
 
     inv_ids = await asyncio.gather(*[_inv_id(li) for li in lines], return_exceptions=True)
@@ -1375,7 +1375,7 @@ async def _customs_items(registry: dict, o: dict) -> list:
     want = sorted({int(i) for i in inv_ids if i})
     if want:
         try:
-            res = await core._tool_json(registry, "shopify_get_inventory_items",
+            res = await shopify._tool_json(registry, "shopify_get_inventory_items",
                                    {"ids": ",".join(str(i) for i in want[:100])})
             for it in (res or {}).get("inventory_items") or []:
                 by_id[it.get("id")] = it
@@ -1444,7 +1444,7 @@ async def _customs_items(registry: dict, o: dict) -> list:
             "key": key,
             "title": title,
             "customs_description": customs_desc,
-            "quantity": core._line_qty(li),
+            "quantity": orderbook._line_qty(li),
             "price": price,
             "cost": cost,
             "unit_value": unit_value,
@@ -1585,16 +1585,16 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
         return {"error": "World Options is not connected. Add your credentials in Settings."}
 
     o, origin = await asyncio.gather(
-        core._tool_json(registry, "shopify_get_order", {"order_id": int(order_id)}),
-        core._origin_address(registry))
+        shopify._tool_json(registry, "shopify_get_order", {"order_id": int(order_id)}),
+        orderbook._origin_address(registry))
     if not core._ok(o) or not o.get("id"):
         return {"error": "Order not found."}
-    if core._order_status(o) == "cancelled":
+    if orderbook._order_status(o) == "cancelled":
         return {"error": "This order is cancelled; it should not be dispatched."}
-    if core._order_status(o) == "refunded":
+    if orderbook._order_status(o) == "refunded":
         return {"error": "This order was refunded; dispatching it would ship goods the "
                          "customer has been paid back for."}
-    dest = core._ship_to(o)
+    dest = orderbook._ship_to(o)
     why = _addr_ready(dest)
     if why:
         return {"error": f"This order's shipping address can't be quoted. {why}. "
@@ -1678,7 +1678,7 @@ async def run_custom_quote(registry: dict, dest: dict, boxes: list,
     why = _country_ready(dest)
     if why:
         return {"error": why}
-    origin = await core._origin_address(registry)
+    origin = await orderbook._origin_address(registry)
     why = _addr_ready(origin)
     if why:
         return {"error": f"Your dispatch (origin) address is incomplete. {why}. "
@@ -1797,7 +1797,7 @@ async def run_custom_book(registry: dict, shipment_id: str, option: dict, dest: 
     key = _custom_id(shipment_id)
     if not key:
         return {"error": "This shipment has no id. Close the window and start it again."}
-    async with core._dispatch_lock(key):
+    async with orderbook._dispatch_lock(key):
         return await _custom_book_locked(registry, key, option, dest, boxes, insurance,
                                          reference, contents, declared, customs_body,
                                          signature, by)
@@ -1825,7 +1825,7 @@ async def _custom_book_locked(registry: dict, key: str, option: dict, dest: dict
     why = _country_ready(dest)
     if why:
         return {"error": why}
-    origin = await core._origin_address(registry)
+    origin = await orderbook._origin_address(registry)
     why = _addr_ready(origin)
     if why:
         return {"error": f"Your dispatch (origin) address is incomplete. {why}. "
@@ -1960,13 +1960,13 @@ async def run_dispatch_diagnose(registry: dict, order_id, boxes: list) -> dict:
     explained with evidence instead of guessed at."""
     if not worldoptions or not worldoptions.configured():
         return {"error": "World Options is not connected. Add your credentials in Settings."}
-    o = await core._tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
+    o = await shopify._tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
     if not core._ok(o) or not o.get("id"):
         return {"error": "Order not found."}
-    dest = core._ship_to(o)
+    dest = orderbook._ship_to(o)
     if _addr_ready(dest):
         return {"error": "This order's shipping address is incomplete, so it cannot be quoted."}
-    origin = await core._origin_address(registry)
+    origin = await orderbook._origin_address(registry)
     if _addr_ready(origin):
         return {"error": "Your dispatch address is incomplete. Set it under Settings, Shipping."}
     cfg = _load_shipping()
@@ -2030,7 +2030,7 @@ async def run_dispatch_book(registry: dict, order_id, option: dict, boxes: list,
         return {"error": "World Options is not connected. Add your credentials in Settings."}
     if not isinstance(option, dict) or not option.get("service_type_code"):
         return {"error": "A courier option must be selected before booking."}
-    async with core._dispatch_lock(order_id):
+    async with orderbook._dispatch_lock(order_id):
         return await _dispatch_book_locked(registry, order_id, option, boxes, notify, force,
                                            insurance, signature, customs_body, by,
                                            collection_option)
@@ -2475,7 +2475,7 @@ async def _book_and_record(*, key, order_label: str, log_label: str, option: dic
         "international": international,
         # The address the label was cut for, so an edit made after it (or one
         # whose answer was lost) can be compared with it.
-        "booked_address": {k: str((dest or {}).get(k) or "") for k in core._ADDR_COMPARE},
+        "booked_address": {k: str((dest or {}).get(k) or "") for k in orderbook._ADDR_COMPARE},
         "dropoff": (dropoff_shop or {}).get("name") or "",
         "delivery_shop": (delivery_shop or {}).get("name") or "",
         **entry_extra,
@@ -2511,25 +2511,25 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
                          + " tracking " + existing.get("tracking_number", "")
                          + ". Cancel that shipment first if you need to rebook."}
 
-    o = await core._tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
+    o = await shopify._tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
     if not core._ok(o) or not o.get("id"):
         return {"error": "Order not found."}
-    if core._order_status(o) == "cancelled":
+    if orderbook._order_status(o) == "cancelled":
         return {"error": "This order is cancelled; it should not be dispatched."}
-    if core._order_status(o) == "refunded":
+    if orderbook._order_status(o) == "refunded":
         return {"error": "This order was refunded; dispatching it would ship goods the "
                          "customer has been paid back for."}
-    if (core._order_status(o) == "fulfilled"
+    if (orderbook._order_status(o) == "fulfilled"
             and not (existing.get("canceled") and not existing.get("fulfilled"))
             and not force):
         return {"error": "Shopify shows this order as already fulfilled, which usually means "
                          "it has shipped. If you are sure, book it from the World Options "
                          "portal, or retry with the confirmation.",
                 "needs_force": True}
-    dest = core._ship_to(o)
+    dest = orderbook._ship_to(o)
     if _addr_ready(dest):
         return {"error": "This order's shipping address is incomplete; fix it in Shopify first."}
-    origin = await core._origin_address(registry)
+    origin = await orderbook._origin_address(registry)
     if _addr_ready(origin):
         return {"error": "Your dispatch (origin) address is incomplete. Set it under Settings, Shipping."}
     cfg = _load_shipping()
@@ -2604,7 +2604,7 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
     # Booking a label is preparation, not shipping: fulfilment waits until the
     # order is ALSO marked made. If it already is, this fulfils right now.
     try:
-        ready = await core._fulfill_if_ready(registry, int(order_id), notify=do_notify)
+        ready = await orderbook._fulfill_if_ready(registry, int(order_id), notify=do_notify)
     except Exception:
         logger.exception("post-booking fulfilment check failed for order %s", order_id)
         ready = {"fulfilled": False, "reason": "error", "notified": False, "tag_note": "",
@@ -2715,3 +2715,6 @@ def _clean_origin(raw) -> dict:
 # Last, so the whole desk is defined before copilot.py runs: copilot.py takes
 # two names from it as it loads, and either module may be imported first.
 import copilot as core  # noqa: E402
+from gizmo import orderbook  # noqa: E402
+from gizmo import production  # noqa: E402
+from gizmo import shopify  # noqa: E402
