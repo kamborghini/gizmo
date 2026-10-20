@@ -134,6 +134,7 @@ from gizmo import dispatch as desk
 from gizmo import store as jsonstore
 from gizmo import errors
 from gizmo import ai as claude
+from gizmo import activity, gate, team
 import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
@@ -352,7 +353,7 @@ def ensure_auth():
     harness lazily creates/logs into the master account the first time."""
     if APP_AUTH["session"]:
         return APP_AUTH["session"]
-    copilot._rl_hits.clear(); copilot._rl_global.clear()
+    gate._rl_hits.clear(); gate._rl_global.clear()
     h = {"Authorization": "Bearer " + tok()}
     st = client.post("/api/auth/state", json={}, headers=h).json()
     if st.get("setup"):
@@ -365,11 +366,11 @@ def ensure_auth():
     APP_AUTH["session"], APP_AUTH["master"] = r["session"], r["me"]["id"]
     return APP_AUTH["session"]
 def post(path, body):
-    copilot._rl_hits.clear(); copilot._rl_global.clear()   # the suite outpaces the app's rate limiter
+    gate._rl_hits.clear(); gate._rl_global.clear()   # the suite outpaces the app's rate limiter
     return client.post(path, json=body, headers={"Authorization": "Bearer " + tok(),
                                                  "X-App-Session": ensure_auth()})
 def post_s(session, path, body):
-    copilot._rl_hits.clear(); copilot._rl_global.clear()
+    gate._rl_hits.clear(); gate._rl_global.clear()
     return client.post(path, json=body, headers={"Authorization": "Bearer " + tok(),
                                                  "X-App-Session": session})
 
@@ -951,34 +952,34 @@ def t_a_break_glass_password_stops_working():
     def go():
         import copy as _copy
         ensure_auth()                      # with_accounts starts with no users at all
-        d = copilot._load_users()
+        d = team._load_users()
         uid = next(k for k, u in d["users"].items() if u.get("role") == "master")
         before = _copy.deepcopy(d["users"][uid])
         try:
             os.environ["MASTER_RESET"] = "yes"
-            copilot._master_reset_done = False
-            copilot._master_reset_check(d)
-            u = copilot._load_users()["users"][uid]
+            team._master_reset_done = False
+            team._master_reset_check(d)
+            u = team._load_users()["users"][uid]
             ok(u.get("pw_expires_at"), "the logged password carries an expiry")
             ok(u.get("must_change"), "and still forces a new one at sign-in")
             # Aged past its window, it is refused exactly like a wrong password.
-            d2 = copilot._load_users()
+            d2 = team._load_users()
             d2["users"][uid]["pw_expires_at"] = "2000-01-01T00:00:00+00:00"
-            copilot._write_users(d2)
+            team._write_users(d2)
             r = bare("/api/auth/login", {"username": before.get("username"), "password": "anything"})
             eq(r.status_code, 401, "an expired break-glass password is dead")
             # Choosing a real password clears the expiry, or the master would
             # be locked out of their own app half an hour later.
-            d3 = copilot._load_users()
+            d3 = team._load_users()
             d3["users"][uid]["pw_expires_at"] = ""
-            copilot._write_users(d3)
-            ok(not copilot._load_users()["users"][uid].get("pw_expires_at"))
+            team._write_users(d3)
+            ok(not team._load_users()["users"][uid].get("pw_expires_at"))
         finally:
             os.environ.pop("MASTER_RESET", None)
-            copilot._master_reset_done = False
-            dd = copilot._load_users()
+            team._master_reset_done = False
+            dd = team._load_users()
             dd["users"][uid] = before
-            copilot._write_users(dd)
+            team._write_users(dd)
     with_accounts(go)
 
 @test
@@ -3246,7 +3247,7 @@ def t_only_the_page_itself_may_use_the_camera():
     """The camera test in Settings needs the page's own camera; nothing framed
     inside the page gets it, and the microphone, location and payment stay
     shut to everyone."""
-    pp = copilot._API_HEADERS["Permissions-Policy"]
+    pp = gate._API_HEADERS["Permissions-Policy"]
     ok("camera=(self)" in pp, pp)
     for shut in ("microphone=()", "geolocation=()", "payment=()"):
         ok(shut in pp, pp)
@@ -4769,7 +4770,7 @@ def t_the_totp_secret_is_not_stored_in_the_clear():
         try:
             j = post("/api/auth/mfa", {"op": "start", "current": MASTER_PW}).json()
             post("/api/auth/mfa", {"op": "confirm", "code": totp.code(j["secret"])})
-            raw = open(copilot.USERS_PATH, encoding="utf-8").read()
+            raw = open(team.USERS_PATH, encoding="utf-8").read()
             ok(j["secret"] not in raw, "the secret is not sitting in the users file")
         finally:
             os.environ.pop("TOKEN_ENCRYPTION_KEY", None)
@@ -4869,13 +4870,13 @@ def t_the_audit_ledger_is_mirrored_off_the_volume_it_audits():
     logdrain.stop()
     logdrain.install("https://sink.example/ingest", sender=lambda b: got.extend(b))
     try:
-        copilot._track("u1", "sizes", "changed a size rule", "Showtec EagleStrike set to 37.5 mm")
+        activity._track("u1", "sizes", "changed a size rule", "Showtec EagleStrike set to 37.5 mm")
         logdrain.flush(timeout=3)
         ok(any(e.get("kind") == "audit" and "size rule" in str(e.get("action", ""))
                for e in got), "the ledger line left the box")
     finally:
         logdrain.stop()
-    src = _i.getsource(copilot._track)
+    src = _i.getsource(activity._track)
     ok("except Exception" in src.split("logdrain.audit")[1][:120],
        "and a drain failure can never fail the thing being audited")
 
@@ -5079,7 +5080,7 @@ def t_no_api_route_answers_without_a_session():
         if path in ANON_BY_DESIGN:
             continue
         method = "POST" if "POST" in methods else methods[0]
-        copilot._rl_hits.clear(); copilot._rl_global.clear()
+        gate._rl_hits.clear(); gate._rl_global.clear()
         try:
             r = client.request(method, path, json={},
                                headers={"Authorization": "Bearer " + tok()})
@@ -7391,7 +7392,7 @@ def t_files_concurrent_uploads_do_not_clobber_the_store():
     def go(fake):
         import httpx
         async def race():
-            copilot._rl_hits.clear(); copilot._rl_global.clear()
+            gate._rl_hits.clear(); gate._rl_global.clear()
             transport = httpx.ASGITransport(app=server.mcp.streamable_http_app(**server.MCP_HTTP))
             headers = {"Authorization": "Bearer " + tok(), "X-App-Session": ensure_auth()}
             async with httpx.AsyncClient(transport=transport, base_url="http://testserver",
@@ -7441,13 +7442,13 @@ def with_accounts(fn):
     """Run fn against a fresh, empty accounts world. On exit everything is
     wiped again so the harness's lazy master is recreated for later tests."""
     def wipe():
-        copilot._users_mem = None
-        copilot._sessions_mem = None
+        team._users_mem = None
+        team._sessions_mem = None
         copilot._work_mem = None
-        copilot._events_mem = None
-        copilot._events_dirty = False
+        activity._events_mem = None
+        activity._events_dirty = False
         APP_AUTH["session"] = APP_AUTH["master"] = ""
-        for p in (copilot.USERS_PATH, copilot.SESSIONS_PATH, copilot.ACTIVITY_PATH,
+        for p in (team.USERS_PATH, team.SESSIONS_PATH, activity.ACTIVITY_PATH,
                   copilot.WORK_PATH):
             try:
                 os.remove(p)
@@ -7461,7 +7462,7 @@ def with_accounts(fn):
         wipe()
 
 def bare(path, body):
-    copilot._rl_hits.clear(); copilot._rl_global.clear()
+    gate._rl_hits.clear(); gate._rl_global.clear()
     return client.post(path, json=body, headers={"Authorization": "Bearer " + tok()})
 
 def make_user(name, username, role="member"):
@@ -7492,10 +7493,10 @@ def ready_user(name, username, role="member", pw="chosen-pw-123456"):
     # Account SETUP, not a sign-in burst: a test that builds eight accounts is
     # not one browser making sixteen attempts in a minute. Cleared here rather
     # than in login(), which would make the ceiling unobservable everywhere.
-    copilot._login_hits.clear()
+    team._login_hits.clear()
     s0 = login(username, starter).json()["session"]
     post_s(s0, "/api/auth/password", {"current": starter, "new": pw})
-    copilot._login_hits.clear()
+    team._login_hits.clear()
     return uid, login(username, pw).json()["session"], pw
 
 @test
@@ -7539,10 +7540,10 @@ def t_auth_login_is_vague_locked_and_logged():
         # Enough wrong passwords to trip the ACCOUNT lock, clearing the
         # per-client ceiling between them: that is a separate control with its
         # own test, and it would answer 429 before this one ever locks.
-        for _ in range(copilot.LOGIN_FAIL_LIMIT + 1):
-            copilot._login_hits.clear()
+        for _ in range(team.LOGIN_FAIL_LIMIT + 1):
+            team._login_hits.clear()
             login("cameron", "wrong-password")
-        copilot._login_hits.clear()
+        team._login_hits.clear()
         r3 = login("cameron", MASTER_PW)
         eq(r3.status_code, 401, "the pause blocks even the right password")
         eq(r3.json()["error"], r.json()["error"],
@@ -7559,13 +7560,13 @@ def t_auth_login_is_vague_locked_and_logged():
 def t_auth_passwords_are_hashed_and_never_echoed():
     def go():
         ensure_auth()
-        raw = open(copilot.USERS_PATH).read()
+        raw = open(team.USERS_PATH).read()
         ok(MASTER_PW not in raw, "no plain text password on disk")
         b = post("/api/team/board", {}).json()
         ok(all("pw" not in u and "password" not in u for u in b["users"]),
            "no password material in any response")
         uid, starter = make_user("Owen", "owen")
-        ok(starter not in open(copilot.USERS_PATH).read(), "starter passwords are hashed too")
+        ok(starter not in open(team.USERS_PATH).read(), "starter passwords are hashed too")
     with_accounts(go)
 
 @test
@@ -7667,9 +7668,9 @@ def t_auth_logout_ends_exactly_that_session():
 def t_auth_a_lost_register_means_setup_not_a_free_for_all():
     def go():
         ensure_auth()
-        with open(copilot.USERS_PATH, "w") as fh:
+        with open(team.USERS_PATH, "w") as fh:
             fh.write("{not json")
-        copilot._users_mem = None
+        team._users_mem = None
         eq(post("/api/files/tree", {}).status_code, 401,
            "with the accounts lost, nobody is silently let in")
         st = bare("/api/auth/state", {}).json()
@@ -7697,11 +7698,11 @@ def t_auth_counts_mean_work_not_events():
     def go():
         ensure_auth()
         boss = APP_AUTH["master"]
-        copilot._track(boss, "production", "marked made", "#1")
-        copilot._track(boss, "production", "marked made", "#2")
-        copilot._track(boss, "production", "un-marked made", "#2")
-        copilot._track(boss, "dispatch", "booked a courier", "#1")
-        copilot._track(boss, "dispatch", "cancelled a shipment", "#1")
+        activity._track(boss, "production", "marked made", "#1")
+        activity._track(boss, "production", "marked made", "#2")
+        activity._track(boss, "production", "un-marked made", "#2")
+        activity._track(boss, "dispatch", "booked a courier", "#1")
+        activity._track(boss, "dispatch", "cancelled a shipment", "#1")
         c = post("/api/team/board", {}).json()["counts"][boss]
         eq(c["made"], 1, "an undo subtracts a made")
         eq(c["dispatched"], 0, "a cancellation subtracts a booking")
@@ -8131,8 +8132,8 @@ def t_work_the_clock_is_the_servers_and_only_for_parttime():
         ok(r.json()["session"]["start"].startswith("20"),
            "the browser's timestamp was ignored; the server minted its own")
         eq(post_s(sess, "/api/work/clock", {"op": "in"}).status_code, 400, "no double clock-in")
-        copilot._track("SYS-TEST-NOBODY", "production", "marked made", "#x")
-        copilot._track("", "production", "marked made", "#hook")
+        activity._track("SYS-TEST-NOBODY", "production", "marked made", "#x")
+        activity._track("", "production", "marked made", "#hook")
         # Backdate the open session so it reads as a real shift: a sub-minute
         # clock cycle is a mis-tap and is deliberately not recorded.
         _w = copilot._load_work()
@@ -8153,12 +8154,12 @@ def t_work_events_are_stamped_only_on_the_clock():
     def go():
         ensure_auth()
         pt, sess, pw = ready_user("Poppy", "poppy", role="parttime")
-        copilot._track(pt, "production", "marked made", "#off-clock")
+        activity._track(pt, "production", "marked made", "#off-clock")
         post_s(sess, "/api/work/clock", {"op": "in"})
-        copilot._track(pt, "production", "marked made", "#on-clock")
-        copilot._track("", "production", "marked made", "#system")
+        activity._track(pt, "production", "marked made", "#on-clock")
+        activity._track("", "production", "marked made", "#system")
         post_s(sess, "/api/work/clock", {"op": "out"})
-        copilot._track(pt, "production", "marked made", "#after")
+        activity._track(pt, "production", "marked made", "#after")
         ev = post("/api/team/board", {}).json()["events"]
         by_detail = {e["detail"]: e for e in ev if e.get("detail", "").startswith("#")}
         ok("ws" not in by_detail["#off-clock"], "off the clock is not billable")
@@ -8169,7 +8170,7 @@ def t_work_events_are_stamped_only_on_the_clock():
         # the role drives it: change the role and the monitoring stops by itself
         post_s(login("poppy", pw).json()["session"], "/api/work/clock", {"op": "in"})
         post("/api/team/user", {"op": "role", "id": pt, "role": "member"})
-        copilot._track(pt, "production", "marked made", "#as-member")
+        activity._track(pt, "production", "marked made", "#as-member")
         ev2 = post("/api/team/board", {}).json()["events"]
         row = next(e for e in ev2 if e.get("detail") == "#as-member")
         ok("ws" not in row, "a role change ends the monitoring on its own")
@@ -8513,12 +8514,12 @@ def t_dav_refusals_explain_themselves_and_caches_die_with_the_password():
 def t_ledger_is_write_behind_but_never_loses_reads():
     def go():
         ensure_auth()
-        copilot._track(APP_AUTH["master"], "production", "marked made", "#wb-test")
+        activity._track(APP_AUTH["master"], "production", "marked made", "#wb-test")
         ev = post("/api/team/board", {}).json()["events"]
         ok(any(e.get("detail") == "#wb-test" for e in ev),
            "an event reads back instantly from memory")
-        copilot._events_flush()
-        rows = json.load(open(copilot.ACTIVITY_PATH))["events"]
+        activity._events_flush()
+        rows = json.load(open(activity.ACTIVITY_PATH))["events"]
         ok(any(e.get("detail") == "#wb-test" for e in rows), "and the flush lands it on disk")
     with_accounts(go)
 
@@ -8528,19 +8529,19 @@ def t_restore_is_master_only_and_round_trips_the_volume():
         ensure_auth()
         import base64 as b64
         owen, osess, opw = ready_user("Owen", "owen")
-        copilot._track(APP_AUTH["master"], "team", "marker", "#before-backup")
-        copilot._events_flush()
+        activity._track(APP_AUTH["master"], "team", "marker", "#before-backup")
+        activity._events_flush()
         buf, added = copilot._build_backup_zip()
         ok(added > 0, "the backup holds files")
         blob = b64.b64encode(buf.getvalue()).decode()
         eq(post_s(osess, "/api/restore", {"zip": blob}).status_code, 403,
            "an admin below master cannot restore")
         # simulate the fresh-volume world: wipe accounts and ledger
-        for p in (copilot.USERS_PATH, copilot.ACTIVITY_PATH):
+        for p in (team.USERS_PATH, activity.ACTIVITY_PATH):
             os.remove(p)
-        copilot._users_mem = None
-        copilot._events_mem = None
-        copilot._events_dirty = False
+        team._users_mem = None
+        activity._events_mem = None
+        activity._events_dirty = False
         APP_AUTH["session"] = APP_AUTH["master"] = ""
         # first-run setup on the "new region", then restore
         r = bare("/api/auth/setup", {"name": "Temp", "username": "temp", "password": "temporary-123",
@@ -8783,7 +8784,7 @@ def t_backup_is_exhaustive_by_construction():
     backup's reach fails HERE, not during a migration."""
     data_dir = os.path.dirname(copilot.SCHEDULE_PATH)
     excluded = {os.path.basename(desk.WO_SECRET_PATH),
-                os.path.basename(copilot.SESSIONS_PATH)}
+                os.path.basename(team.SESSIONS_PATH)}
     misses = []
     for name in dir(copilot):
         if not name.endswith("_PATH") or name.startswith("_"):
@@ -11749,7 +11750,7 @@ def t_a_borrowed_session_cannot_grind_the_password_change():
     def go():
         ensure_auth()
         uid, sess, pw = ready_user("Guessy", "guessy")
-        for _ in range(copilot.LOGIN_FAIL_LIMIT):
+        for _ in range(team.LOGIN_FAIL_LIMIT):
             post_s(sess, "/api/auth/password", {"current": "wrong-guess", "new": "brandnewpw1"})
         r = post_s(sess, "/api/auth/password", {"current": pw, "new": "brandnewpw1"})
         eq(r.status_code, 429, "the account locks, exactly as the front door does")
@@ -12373,7 +12374,7 @@ def t_only_an_admin_can_change_an_order():
 def t_the_edit_route_is_mapped_to_a_tab():
     """_tab_denied fails open for any path it does not recognise, so a route
     that is not mapped is not gated at all."""
-    paths = [p for p, _t in copilot._TAB_ROUTES]
+    paths = [p for p, _t in gate._TAB_ROUTES]
     ok(any("/api/order/edit".startswith(p) for p in paths),
        "/api/order/edit resolves to a tab")
 
@@ -12411,7 +12412,7 @@ def t_chat_cannot_read_customers_a_tab_denies():
         ok(who["uid"], "and it has an id: " + r.text[:160])
         t = post("/api/team/user", {"op": "tabs", "id": who["uid"], "tabs": ["chat", "labels"]})
         ok(t.status_code == 200, "and its tabs are set: " + t.text[:140])
-        eq(copilot._user_tabs(who["uid"]), ["chat", "labels"], "no customers tab")
+        eq(team._user_tabs(who["uid"]), ["chat", "labels"], "no customers tab")
         out = run_async(dispatch("shopify_get_customer", {"customer_id": 1}))
         ok(not calls, "the tool never ran")
         ok("Refused" in out and "customers" in out, "and the model was told why: " + out[:140])
@@ -12427,18 +12428,18 @@ def t_an_account_that_does_not_exist_opens_no_tab():
     named no live account. Harmless only while every caller had already
     proven the account live (8 Sept second pass): the check fails closed."""
     def go():
-        eq(copilot._user_tabs("u-nobody-has-this-id"), [], "an unknown account has no tabs")
+        eq(team._user_tabs("u-nobody-has-this-id"), [], "an unknown account has no tabs")
         r = post("/api/team/user", {"op": "create", "name": "Gone", "username": "gone",
                                     "role": "member", "tabs": ["chat", "labels"]})
         ok(r.status_code == 200, "made an account: " + r.text[:140])
         uid = r.json().get("id") or ""
-        ok(copilot._uid_has_tab(uid, "chat"), "which can open its own tab")
+        ok(team._uid_has_tab(uid, "chat"), "which can open its own tab")
         r = post("/api/team/user", {"op": "delete", "id": uid})
         ok(r.status_code == 200, "then deleted it: " + r.text[:140])
-        eq(copilot._user_tabs(uid), [], "a deleted account has no tabs")
-        ok(not copilot._uid_has_tab(uid, "chat"), "so it cannot reach one it once had")
-        master = next(k for k, u in copilot._load_users()["users"].items() if u.get("role") == "master")
-        eq(copilot._user_tabs(master), None, "the master still opens everything")
+        eq(team._user_tabs(uid), [], "a deleted account has no tabs")
+        ok(not team._uid_has_tab(uid, "chat"), "so it cannot reach one it once had")
+        master = next(k for k, u in team._load_users()["users"].items() if u.get("role") == "master")
+        eq(team._user_tabs(master), None, "the master still opens everything")
     with_accounts(go)
 
 
@@ -14125,8 +14126,8 @@ def t_the_forecast_hook_takes_only_its_token_and_the_tab_reads_the_run():
         eq(j["workbook"]["name"], "Cash Flow.xlsx", "and the tab says which workbook is on file")
         ok("data_b64" not in j["workbook"], "without the bytes themselves")
         # the tab is a grant, opt-in like the books, and its routes are mapped to it
-        ok("forecast" in copilot.TAB_KEYS and "forecast" in copilot.OPT_IN_TABS, "the tab is a grant nobody inherits")
-        ok(any(p == "/api/forecast" and t == "forecast" for p, t in copilot._TAB_ROUTES), "its routes are claimed by it")
+        ok("forecast" in team.TAB_KEYS and "forecast" in team.OPT_IN_TABS, "the tab is a grant nobody inherits")
+        ok(any(p == "/api/forecast" and t == "forecast" for p, t in gate._TAB_ROUTES), "its routes are claimed by it")
     finally:
         copilot.FORECAST_INGEST_TOKEN = saved
 
@@ -14225,8 +14226,8 @@ def t_the_size_list_tab_reads_the_whole_sheet_with_the_rulings_over_it():
     ok(j["rulings"] >= 1 and isinstance(j["aliases"], list) and "live" in j["sheet"], "the rulings, the aliases and which sheet it is")
     ok(j["can_edit"] is True, "the master may rule")
     ok(any(x.get("off_sheet") for x in j["rows"]) or True, "rulings on models the sheet lacks are rows of their own")
-    ok("sizes" in copilot.TAB_KEYS and "sizes" not in copilot.OPT_IN_TABS, "the tab is a default grant: reference data for the bench")
-    ok(any(p == "/api/gobo-sizes" and "sizes" in t for p, t in copilot._TAB_ROUTES), "its routes admit the tab")
+    ok("sizes" in team.TAB_KEYS and "sizes" not in team.OPT_IN_TABS, "the tab is a default grant: reference data for the bench")
+    ok(any(p == "/api/gobo-sizes" and "sizes" in t for p, t in gate._TAB_ROUTES), "its routes admit the tab")
     owen, sess, _pw = ready_user("Owen", "owen")
     eq(post("/api/team/user", {"op": "tabs", "id": owen, "tabs": ["sizes"]}).status_code, 200)
     r = post_s(sess, "/api/gobo-sizes/list", {})
@@ -14521,7 +14522,7 @@ def t_the_desktop_ai_endpoint_reads_and_every_call_is_recorded():
         eq(client.post("/mcp", json={}, headers={"Authorization": "Bearer "}).status_code, 503, "no token, locked")
         server.MCP_BEARER_TOKEN = "t" * 40
         eq(client.post("/mcp", json={}, headers={"Authorization": "Bearer wrong"}).status_code, 401, "wrong token refused")
-        before = len(copilot._load_events())
+        before = len(activity._load_events())
         call = {"jsonrpc": "2.0", "id": 7, "method": "tools/call",
                 "params": {"name": "shopify_get_shop", "arguments": {"secret_search": "jo@example.com"}}}
         try:
@@ -14531,7 +14532,7 @@ def t_the_desktop_ai_endpoint_reads_and_every_call_is_recorded():
                                                     "Accept": "application/json, text/event-stream"})
         except RuntimeError:
             pass
-        new = [e for e in copilot._load_events()[before:] if e.get("area") == "mcp"]
+        new = [e for e in activity._load_events()[before:] if e.get("area") == "mcp"]
         eq([e["detail"] for e in new], ["shopify_get_shop"], "the call is in the ledger, by tool name")
         ok("jo@example.com" not in json.dumps(new), "and never with its arguments")
         # A call no record could be made of is not run: padded past the
@@ -14548,20 +14549,20 @@ def t_the_desktop_ai_endpoint_reads_and_every_call_is_recorded():
             ok(r.status_code != 500, "positional params are read, not a crash")
         except RuntimeError:
             pass
-        eq([e["detail"] for e in copilot._load_events()[before:] if e.get("area") == "mcp"],
+        eq([e["detail"] for e in activity._load_events()[before:] if e.get("area") == "mcp"],
            ["shopify_get_shop", "?"], "and recorded, nameless")
         # One message per request: a batch of thousands wrote thousands of
         # rows and pushed every other record out of the ledger.
-        n0 = len(copilot._load_events())
+        n0 = len(activity._load_events())
         batch = json.dumps([call] * 500).encode()
         eq(client.post("/mcp", content=batch, headers=auth).status_code, 400, "a batch is refused")
-        eq(len(copilot._load_events()), n0, "and writes nothing")
+        eq(len(activity._load_events()), n0, "and writes nothing")
         weird = dict(call, params={"name": "shopify_get_shop <script>alert(1)</script> " + "x" * 90})
         try:
             client.post("/mcp", json=weird, headers=auth)
         except RuntimeError:
             pass
-        eq(copilot._load_events()[-1]["detail"], "?", "a name that is not a tool's name is not copied in")
+        eq(activity._load_events()[-1]["detail"], "?", "a name that is not a tool's name is not copied in")
     finally:
         server.MCP_BEARER_TOKEN = saved
 
@@ -14639,15 +14640,15 @@ def t_the_order_tools_need_the_customers_page():
     async def fake(_p):
         return "the order"
     reg = {"shopify_get_order": (fake, lambda **k: {})}
-    saved = copilot._user_tabs
+    saved = team._user_tabs
     try:
-        copilot._user_tabs = lambda uid: {"labels", "chat"}
+        team._user_tabs = lambda uid: {"labels", "chat"}
         out = run_async(copilot._build_dispatch(reg, uid_of=lambda: "u1")("shopify_get_order", {"order_id": 1}))
         ok(out.startswith("Refused") and "the order" not in out, out)
-        copilot._user_tabs = lambda uid: {"customers", "chat"}
+        team._user_tabs = lambda uid: {"customers", "chat"}
         eq(run_async(copilot._build_dispatch(reg, uid_of=lambda: "u1")("shopify_get_order", {"order_id": 1})), "the order")
     finally:
-        copilot._user_tabs = saved
+        team._user_tabs = saved
 
 
 @test
@@ -14746,14 +14747,14 @@ def t_first_run_setup_needs_the_servers_setup_code():
         eq(copilot._data_volume_warning(), "", "off Railway, nothing to say")
         os.environ["RAILWAY_ENVIRONMENT"] = "production"
         ok("not on a mounted volume" in copilot._data_volume_warning(), "on Railway, a scratch folder is not a volume")
-        saved_p = copilot.USERS_PATH
-        copilot.USERS_PATH = "/dev/users.json"
+        saved_p = team.USERS_PATH
+        team.USERS_PATH = "/dev/users.json"
         try:
             eq(copilot._data_volume_warning(), "", "a folder on a mount point is on a volume")
-            copilot.USERS_PATH = "/users.json"
+            team.USERS_PATH = "/users.json"
             ok(copilot._data_volume_warning(), "the container's own root disk is not")
         finally:
-            copilot.USERS_PATH = saved_p
+            team.USERS_PATH = saved_p
     finally:
         os.environ.pop("RAILWAY_ENVIRONMENT", None)
         for k, v in saved_env.items():
@@ -14777,7 +14778,7 @@ def t_the_finder_drive_takes_a_password_of_its_own():
         r = post_s(sess, "/api/files/drive", {"op": "create"}).json()
         dpw = r["password"]
         ok(len(dpw) >= 20, "a long random password")
-        stored = copilot._load_users()["users"][uid]
+        stored = team._load_users()["users"][uid]
         eq(stored["dav_pw"], hashlib.sha256(dpw.encode()).hexdigest(), "kept only as its SHA-256")
         ok(dpw not in json.dumps(stored), "never in plain text")
         ok("password" not in post_s(sess, "/api/files/drive", {}).json(), "and shown only once")
@@ -14787,16 +14788,16 @@ def t_the_finder_drive_takes_a_password_of_its_own():
         # Wrong guesses under someone's name do not shut their drive: a
         # random 24-character password needs no lock, and one let anyone
         # who knew a username keep that person's Finder closed (R-C4).
-        for _ in range(copilot.LOGIN_FAIL_LIMIT * 3):
+        for _ in range(team.LOGIN_FAIL_LIMIT * 3):
             eq(copilot._dav_check_auth(hdr("guess")["Authorization"]), (None, 401))
         ok(copilot._dav_check_auth(hdr(dpw)["Authorization"])[0] == uid, "the right one still opens it")
         # Nor do wrong web passwords: that lock guards the account password,
         # which the drive does not take.
-        for _ in range(copilot.LOGIN_FAIL_LIMIT + 1):
+        for _ in range(team.LOGIN_FAIL_LIMIT + 1):
             login("ivy_drive", "wrong-password-000")
-        ok(copilot._load_users()["users"][uid].get("lock_until"), "the web sign-in is paused")
+        ok(team._load_users()["users"][uid].get("lock_until"), "the web sign-in is paused")
         ok(copilot._dav_check_auth(hdr(dpw)["Authorization"])[0] == uid, "the drive is not")
-        copilot._login_hits.clear()
+        team._login_hits.clear()
         post_s(sess, "/api/files/drive", {"op": "remove"})
         eq(copilot._dav_check_auth(hdr(dpw)["Authorization"]), (None, 401), "removed, it stops at once")
         copilot._dav_fail_cache.clear()
@@ -15133,7 +15134,7 @@ def t_a_members_notes_wait_for_an_admin_before_any_answer_reads_them():
         ok(not result2.get("held"), "and nothing is said to be waiting")
         # The chat route decides by who is asking.
         src = copilot_source()
-        eq(src.count('_chat_after(result, history, held=_team_level(_who) < ROLE_LEVELS["admin"]'), 2,
+        eq(src.count('_chat_after(result, history, held=team._team_level(_who) < team.ROLE_LEVELS["admin"]'), 2,
            "both chat routes hold a member's notes")
         # A member cannot keep it, nor dismiss someone else's fact.
         pid = note["id"]
@@ -15152,7 +15153,7 @@ def t_a_members_notes_wait_for_an_admin_before_any_answer_reads_them():
         r = post("/api/memory", {"op": "set_status", "id": pid, "status": "open"})
         eq(r.status_code, 200, r.text)
         ok("bank account" in copilot._memory_to_system(), "kept by an admin, it is read")
-        ok(any(e.get("action") == "kept a note waiting for an admin" for e in copilot._load_events()[-5:]),
+        ok(any(e.get("action") == "kept a note waiting for an admin" for e in activity._load_events()[-5:]),
            "and the ledger says who kept it")
         # A tracked change a member concludes leaves a waiting learning.
         item = post_s(msess, "/api/impact", {"op": "add", "text": "Raise the gobo holder price"}).json()["item"]
@@ -15208,7 +15209,7 @@ def t_a_members_notes_wait_for_an_admin_before_any_answer_reads_them():
                 {"type": "fact", "text": "Samples go out second class."}]}}
         real_chat = copilot.run_chat
         copilot.run_chat = answer
-        copilot._rl_global.clear()
+        gate._rl_global.clear()
         try:
             r = post_s(msess, "/api/chat", {"message": "remember that samples go out second class"})
             eq(r.status_code, 200, r.text[:200])
@@ -15821,20 +15822,20 @@ def t_a_refused_request_says_why_so_the_page_can_answer_it():
     window. The door now names the refusal, so the page can fetch a fresh
     token and retry once for a bad token, and only sign out for a dead session."""
     ensure_auth()
-    copilot._rl_hits.clear(); copilot._rl_global.clear()
+    gate._rl_hits.clear(); gate._rl_global.clear()
     r = client.post("/api/status", json={}, headers={"Authorization": "Bearer not-a-token",
                                                       "X-App-Session": APP_AUTH["session"]})
     eq(r.status_code, 401)
     eq(r.json()["reason"], "token", "a rejected embed token says so")
     ok("clock" in r.json()["error"], "and points at the one cause a person can fix at the desk")
-    copilot._rl_hits.clear(); copilot._rl_global.clear()
+    gate._rl_hits.clear(); gate._rl_global.clear()
     r = client.post("/api/status", json={}, headers={"Authorization": "Bearer " + tok()})
     eq(r.status_code, 401)
     eq(r.json()["reason"], "session", "a good token with no app session is a sign-in")
-    copilot._rl_hits.clear(); copilot._rl_global.clear()
+    gate._rl_hits.clear(); gate._rl_global.clear()
     r = client.post("/api/status", json={}, headers={"Authorization": "Bearer " + tok(), "X-App-Session": "stale-session"})
     eq(r.json()["reason"], "session", "and so is a session the app no longer holds")
-    ok(set(copilot.AUTH_REFUSALS) == {"token", "session", "inactive", "must_change"}, "four reasons, each with its own words")
+    ok(set(team.AUTH_REFUSALS) == {"token", "session", "inactive", "must_change"}, "four reasons, each with its own words")
 
 @test
 def t_recon_reports_money_at_stake_by_severity():
@@ -16814,7 +16815,7 @@ def t_only_the_master_can_disconnect():
         sess = ch.json().get("session") or sess
         # Hand this admin the tab explicitly, so what the test proves is the
         # master-only check and not the opt-in gate in front of it.
-        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": list(copilot.TAB_KEYS)})
+        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": list(team.TAB_KEYS)})
         for what in ("xero", "mailbox"):
             rr = post_s(sess, "/api/recon/disconnect", {"what": what})
             eq(rr.status_code, 403, "an admin cannot disconnect " + what)
@@ -17070,7 +17071,7 @@ def t_the_books_are_not_handed_out_with_the_account():
         r = post("/api/team/user", {"op": "create", "name": "Nia", "username": "niax",
                                     "role": "member"})
         uid, pw = r.json()["id"], r.json()["starter_password"]
-        tabs = copilot._user_tabs(uid)
+        tabs = team._user_tabs(uid)
         ok(isinstance(tabs, list), "a member is not given the unrestricted None")
         ok("recon" not in tabs, "and reconciliation is not in the default grant")
         ok("labels" in tabs and "mail" in tabs,
@@ -17469,9 +17470,9 @@ def t_the_connector_tab_is_a_guarded_proxy():
     like the books, and anything that writes is admin-only."""
     import copilot as _c
     # Opt-in, never inherited with an account.
-    ok("connector" in _c.TAB_KEYS and "connector" in _c.OPT_IN_TABS,
+    ok("connector" in team.TAB_KEYS and "connector" in team.OPT_IN_TABS,
        "the tab exists and is handed over deliberately")
-    ok(any(p == "/api/connector" for p, _t in _c._TAB_ROUTES),
+    ok(any(p == "/api/connector" for p, _t in gate._TAB_ROUTES),
        "and the route is behind the tab gate")
 
     # Unconfigured: says so, calls nothing.
@@ -17879,17 +17880,19 @@ def t_the_collection_tests_hold_in_the_hour_after_midnight():
         def now(cls, tz=None):
             base = _real.datetime(2026, 7, 14, 23, 30, tzinfo=_real.timezone.utc)
             return base.astimezone(tz) if tz else base.replace(tzinfo=None)
-    from gizmo.routes import dispatch as routes_dispatch
+    from gizmo.routes import dispatch as routes_dispatch, team as routes_team
     saved = copilot.datetime
     # Every module that reads a clock: copilot.py, the desk and its routes, the
-    # error log and the AI client.
+    # error log, the AI client, the team and its routes, the activity log.
     copilot.datetime = desk.datetime = routes_dispatch.datetime = errors.datetime = claude.datetime = _Frozen
+    team.datetime = routes_team.datetime = activity.datetime = _Frozen
     try:
         eq(copilot._london_today().isoformat(), "2026-07-15", "the code's day is London's, a day ahead of UTC in this hour")
         t_a_collection_is_read_from_the_couriers_own_reference()
         t_one_collection_a_day_per_courier_not_one_per_parcel()
     finally:
         copilot.datetime = desk.datetime = routes_dispatch.datetime = errors.datetime = claude.datetime = saved
+        team.datetime = routes_team.datetime = activity.datetime = saved
 
 @test
 def t_a_booked_collection_is_written_down_before_anything_can_fail():
@@ -18103,7 +18106,7 @@ def t_a_real_route_comes_back_compressed():
                                           "emails": ["c%d@example.com" % i],
                                           "job_title": "Lighting designer, touring and theatre"})
             eq(r.status_code, 200, r.text[:120])
-        copilot._rl_hits.clear(); copilot._rl_global.clear()
+        gate._rl_hits.clear(); gate._rl_global.clear()
         r = client.post("/api/crm/board", json={},
                         headers={"Authorization": "Bearer " + tok(),
                                  "X-App-Session": ensure_auth(),
@@ -18328,8 +18331,8 @@ def t_granting_every_tab_grants_every_tab():
                                     "role": "member"})
         uid, pw = r.json()["id"], r.json()["starter_password"]
         # What the tab panel sends when every box is ticked.
-        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": list(copilot.TAB_KEYS)})
-        ok("recon" in (copilot._user_tabs(uid) or []),
+        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": list(team.TAB_KEYS)})
+        ok("recon" in (team._user_tabs(uid) or []),
            "an explicitly complete grant includes the books")
 
         lg = client.post("/api/auth/login", json={"username": "ruthx", "password": pw},
@@ -18343,8 +18346,8 @@ def t_granting_every_tab_grants_every_tab():
         # And the null form, which means "no list of its own", must not be
         # written into the record as a grant of everything.
         post("/api/team/user", {"op": "tabs", "id": uid, "tabs": None})
-        ok("recon" not in (copilot._user_tabs(uid) or []), "null falls back to the default set")
-        ev = [e for e in copilot._load_events()[-12:] if "access" in json.dumps(e).lower()
+        ok("recon" not in (team._user_tabs(uid) or []), "null falls back to the default set")
+        ev = [e for e in activity._load_events()[-12:] if "access" in json.dumps(e).lower()
               or "open" in json.dumps(e).lower()]
         said = json.dumps(ev)
         ok("can open everything" not in said,
@@ -18813,9 +18816,9 @@ def t_eori_the_request_matches_the_shape_the_eu_service_actually_wants():
 @test
 def t_eori_route_is_gated_exactly_like_the_shipping_config_route():
     route = _copilot_src("eori_check_route")
-    ok("await core._guard(request" in route, "the same door: rate window, tab gate, session, body cap")
+    ok("await gate._guard(request" in route, "the same door: rate window, tab gate, session, body cap")
     # The tab lock is driven by the path table, not by the route body.
-    ok(("/api/eori", "labels") in copilot._TAB_ROUTES,
+    ok(("/api/eori", "labels") in gate._TAB_ROUTES,
        "the checker sits behind the labels/dispatch tab, like /api/shipping")
 
 
@@ -19685,15 +19688,15 @@ def t_an_api_route_nobody_mapped_is_refused_not_allowed():
         ensure_auth()
         uid, sess, _ = ready_user("Ann", "ann")
         post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["mail"]})
-        r = copilot._tab_denied(Req("/api/never-mapped/thing", sess))
+        r = gate._tab_denied(Req("/api/never-mapped/thing", sess))
         ok(r is not None and r.status_code == 403, "unmapped: refused for a member")
-        r = copilot._tab_denied(Req("/api/never-mapped/thing", APP_AUTH["session"]))
+        r = gate._tab_denied(Req("/api/never-mapped/thing", APP_AUTH["session"]))
         ok(r is not None and r.status_code == 403, "unmapped: refused for the master too, so it is noticed")
-        ok(copilot._tab_denied(Req("/api/team/me", sess)) is None, "the open list stays open")
-        r = copilot._tab_denied(Req("/api/eori/check", sess))
+        ok(gate._tab_denied(Req("/api/team/me", sess)) is None, "the open list stays open")
+        r = gate._tab_denied(Req("/api/eori/check", sess))
         ok(r is not None and r.status_code == 403, "the EORI checker belongs to the labels tab")
         post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["mail", "labels"]})
-        ok(copilot._tab_denied(Req("/api/eori/check", sess)) is None)
+        ok(gate._tab_denied(Req("/api/eori/check", sess)) is None)
     with_mail(go)
 
 
@@ -19805,7 +19808,7 @@ def t_five_wrong_codes_end_the_sign_in():
     uid, sess, pw = ready_user("Ann", "ann")
     import totp as _totp
     secret = _totp.new_secret()
-    d = copilot._load_users(); d["users"][uid]["mfa_secret"] = secret; copilot._write_users(d)
+    d = team._load_users(); d["users"][uid]["mfa_secret"] = secret; team._write_users(d)
     r = post("/api/auth/login", {"username": "ann", "password": pw})
     ticket = r.json().get("ticket"); ok(ticket, r.text)
     for _ in range(4):
@@ -19853,10 +19856,10 @@ def t_the_password_register_is_as_private_as_the_tokens_beside_it():
     and every token file next to them were owner-only."""
     import stat
     ensure_auth()
-    copilot._write_users(copilot._load_users())
-    copilot._write_sessions(copilot._load_sessions())
-    for path, what in ((copilot.USERS_PATH, "the users register"),
-                       (copilot.SESSIONS_PATH, "the session store")):
+    team._write_users(team._load_users())
+    team._write_sessions(team._load_sessions())
+    for path, what in ((team.USERS_PATH, "the users register"),
+                       (team.SESSIONS_PATH, "the session store")):
         mode = stat.S_IMODE(os.stat(path).st_mode)
         eq(mode & 0o077, 0, "%s is owner-only: %o" % (what, mode))
 
@@ -19873,8 +19876,8 @@ def t_the_drive_door_does_not_answer_whether_a_username_exists():
     ensure_auth()
     uid, _sess, _pw = ready_user("Dee", "dee-dav")
     eq(post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["files"]}).status_code, 200)
-    spent, real = [], copilot._check_pw
-    copilot._check_pw = lambda pw, stored: (spent.append(1), real(pw, stored))[1]
+    spent, real = [], team._check_pw
+    team._check_pw = lambda pw, stored: (spent.append(1), real(pw, stored))[1]
     try:
         def knock(user, password):
             spent.clear()
@@ -19885,13 +19888,13 @@ def t_the_drive_door_does_not_answer_whether_a_username_exists():
         unknown = knock("no-such-person-at-all", "not-the-password")
         eq(known, 0, "a real username runs no scrypt at the drive")
         eq(unknown, known, "and an unknown one costs exactly the same work")
-        off = copilot._load_users()
+        off = team._load_users()
         off["users"][uid]["active"] = False
-        copilot._write_users(off)
+        team._write_users(off)
         eq(knock("dee-dav", "not-the-password"), known,
            "so does a real account that has been switched off")
     finally:
-        copilot._check_pw = real
+        team._check_pw = real
 
 
 
@@ -20070,7 +20073,7 @@ def t_deleting_a_unit_that_is_out_is_allowed_but_leaves_a_line_saying_so():
        "a unit with a customer can still be deleted")
     board = post("/api/loans", {"op": "board"}).json()
     ok(all(r["unit"]["id"] != unit for r in board["out"]), "and it leaves the out list")
-    line = next((e for e in reversed(copilot._load_events())
+    line = next((e for e in reversed(activity._load_events())
                  if e.get("area") == "loans" and "deleted" in e.get("action", "")), None)
     ok(line is not None, "the delete is on the ledger")
     ok("Out and gone" in line["detail"], "with the name of what went")
@@ -20550,18 +20553,18 @@ def t_the_audit_ledger_cannot_be_flushed_through_the_login_form():
     and the paused and switched-off branches have no lockout of their own - so
     anyone who knew one username could push every record of who booked a
     courier label or changed team access out of the far end."""
-    before = dict(copilot._login_noise)
-    start = len(copilot._load_events())
+    before = dict(activity._login_noise)
+    start = len(activity._load_events())
     try:
-        copilot._login_noise.update({"hour": "", "count": 0, "logged": 0})
+        activity._login_noise.update({"hour": "", "count": 0, "logged": 0})
         for _ in range(200):
-            copilot._track_login_refusal("u-ghost", "account is switched off")
-        added = len(copilot._load_events()) - start
-        ok(added <= copilot.LOGIN_NOISE_ROWS + 1,
+            activity._track_login_refusal("u-ghost", "account is switched off")
+        added = len(activity._load_events()) - start
+        ok(added <= activity.LOGIN_NOISE_ROWS + 1,
            "200 attempts wrote %d rows; the budget is %d"
-           % (added, copilot.LOGIN_NOISE_ROWS + 1))
+           % (added, activity.LOGIN_NOISE_ROWS + 1))
         ok(added >= 1, "but the first ones ARE recorded, or an attack is invisible")
-        rows = copilot._load_events()[-added:]
+        rows = activity._load_events()[-added:]
         ok(any("switched off" in str(r.get("detail") or "") for r in rows),
            "and they say why the sign-in was refused")
         ok(any(r.get("sub") == "u-ghost" for r in rows),
@@ -20570,7 +20573,7 @@ def t_the_audit_ledger_cannot_be_flushed_through_the_login_form():
         # EVERY refusal path must go through it, so none is left unbounded.
         import inspect
         src = copilot_source()
-        noise = inspect.getsource(copilot._track_login_noise)
+        noise = inspect.getsource(activity._track_login_noise)
         marker = '_track(uid, "auth", "failed login"'
         # Exactly one such write may exist, and it must be the coalescer's own
         # - that one is bounded by the hourly budget. A second is a route
@@ -20579,7 +20582,7 @@ def t_the_audit_ledger_cannot_be_flushed_through_the_login_form():
            "every refusal path goes through the coalescer, not around it")
         ok(marker in noise, "and the one that remains is the coalescer's")
     finally:
-        copilot._login_noise.update(before)
+        activity._login_noise.update(before)
 
 
 @test
@@ -20590,19 +20593,19 @@ def t_five_wrong_passwords_pause_the_account_and_each_lock_lasts_longer():
     Somebody who has genuinely forgotten asks for a reset; nobody reaches the
     fourth lock by accident."""
     ensure_auth()
-    eq(copilot.LOGIN_FAIL_LIMIT, 5, "five attempts, as asked")
+    eq(team.LOGIN_FAIL_LIMIT, 5, "five attempts, as asked")
     uid, sess, pw = ready_user("Lock", "lock-test")
-    for i in range(copilot.LOGIN_FAIL_LIMIT - 1):
+    for i in range(team.LOGIN_FAIL_LIMIT - 1):
         # The per-client ceiling is a different control with its own test; it
         # would otherwise answer 429 before the account ever locks.
-        copilot._login_hits.clear()
+        team._login_hits.clear()
         eq(login("lock-test", "wrong-" + str(i)).status_code, 401,
            "attempt %d is refused but does not lock" % (i + 1))
-        ok(not (copilot._load_users()["users"][uid].get("lock_until") or ""),
+        ok(not (team._load_users()["users"][uid].get("lock_until") or ""),
            "still open after %d" % (i + 1))
-    copilot._login_hits.clear()
+    team._login_hits.clear()
     eq(login("lock-test", "wrong-last").status_code, 401)
-    u = copilot._load_users()["users"][uid]
+    u = team._load_users()["users"][uid]
     ok(u.get("lock_until"), "the fifth locks it")
     eq(int(u.get("locks") or 0), 1)
 
@@ -20612,17 +20615,17 @@ def t_five_wrong_passwords_pause_the_account_and_each_lock_lasts_longer():
                       - _dt.now(_tz.utc)).total_seconds() / 60)
 
     first = lock_minutes(u)
-    ok(abs(first - copilot.LOGIN_LOCK_STEPS[0]) <= 1,
-       "the first lock is %d minutes" % copilot.LOGIN_LOCK_STEPS[0])
+    ok(abs(first - team.LOGIN_LOCK_STEPS[0]) <= 1,
+       "the first lock is %d minutes" % team.LOGIN_LOCK_STEPS[0])
 
     # Serve the lock, then fail five more: the second lock must be longer.
-    d = copilot._load_users()
+    d = team._load_users()
     d["users"][uid]["lock_until"] = ""
-    copilot._write_users(d)
-    for i in range(copilot.LOGIN_FAIL_LIMIT):
-        copilot._login_hits.clear()
+    team._write_users(d)
+    for i in range(team.LOGIN_FAIL_LIMIT):
+        team._login_hits.clear()
         login("lock-test", "again-" + str(i))
-    u2 = copilot._load_users()["users"][uid]
+    u2 = team._load_users()["users"][uid]
     second = lock_minutes(u2)
     ok(second > first,
        "the second lock (%d min) must outlast the first (%d min), or serving one "
@@ -20630,12 +20633,12 @@ def t_five_wrong_passwords_pause_the_account_and_each_lock_lasts_longer():
     eq(int(u2.get("locks") or 0), 2)
 
     # Getting in clears the run of locks.
-    d = copilot._load_users()
+    d = team._load_users()
     d["users"][uid]["lock_until"] = ""
-    copilot._write_users(d)
-    copilot._login_hits.clear()
+    team._write_users(d)
+    team._login_hits.clear()
     eq(login("lock-test", pw).status_code, 200, "the right password still works")
-    u3 = copilot._load_users()["users"][uid]
+    u3 = team._load_users()["users"][uid]
     eq(int(u3.get("locks") or 0), 0,
        "and proving who you are ends the escalation, so one bad afternoon does "
        "not make every later mistake cost four hours")
@@ -20646,14 +20649,14 @@ def t_the_sign_in_form_has_a_tighter_ceiling_than_the_rest_of_the_app():
     """The per-account lockout does nothing against one password sprayed
     across many usernames. The app-wide limit is 120 a minute, which is right
     for a page listing orders and far too wide for one checking passwords."""
-    ok(copilot.LOGIN_MAX_PER_MIN < copilot.RATE_MAX_CLIENT,
+    ok(team.LOGIN_MAX_PER_MIN < gate.RATE_MAX_CLIENT,
        "the sign-in ceiling is tighter than the app's")
-    copilot._login_hits.clear()
+    team._login_hits.clear()
     codes = [login("nobody-at-all", "x").status_code
-             for _ in range(copilot.LOGIN_MAX_PER_MIN + 3)]
+             for _ in range(team.LOGIN_MAX_PER_MIN + 3)]
     ok(429 in codes, "spraying usernames is stopped by the client ceiling")
     eq(codes.count(429), 3, "and it stops exactly at the limit")
-    copilot._login_hits.clear()
+    team._login_hits.clear()
 
 
 @test
@@ -20973,10 +20976,10 @@ def t_turning_off_or_rebinding_the_second_factor_takes_the_password():
         eq(post("/api/auth/mfa", {"op": "status"}).json()["enabled"], False)
         # Wrong passwords here are wrong passwords: the same counter, the
         # same escalating pause as the login.
-        for _ in range(copilot.LOGIN_FAIL_LIMIT):
+        for _ in range(team.LOGIN_FAIL_LIMIT):
             post("/api/auth/mfa", {"op": "start", "current": "wrong-wrong"})
         eq(post("/api/auth/mfa", {"op": "start", "current": MASTER_PW}).status_code, 429, "paused")
-        copilot._login_hits.clear()
+        team._login_hits.clear()
         eq(login("cameron", MASTER_PW).status_code, 401, "and the front door is paused with it")
     with_accounts(go)
 
@@ -20995,7 +20998,7 @@ def t_a_code_from_a_phone_a_step_ahead_cannot_be_replayed():
         t1 = login("cameron", MASTER_PW).json()["ticket"]
         eq(bare("/api/auth/mfa-verify", {"ticket": t1, "code": ahead}).status_code, 200,
            "a phone one step ahead is within the skew")
-        copilot._login_hits.clear()
+        team._login_hits.clear()
         t2 = login("cameron", MASTER_PW).json()["ticket"]
         eq(bare("/api/auth/mfa-verify", {"ticket": t2, "code": ahead}).status_code, 401,
            "and the same code is spent, not good a second time")
@@ -21014,18 +21017,18 @@ def t_ten_wrong_second_factor_codes_pause_the_account():
         j = post("/api/auth/mfa", {"op": "start", "current": MASTER_PW}).json()
         post("/api/auth/mfa", {"op": "confirm", "code": totp.code(j["secret"])})
         for _ in range(3):
-            copilot._login_hits.clear()
+            team._login_hits.clear()
             tick = login("cameron", MASTER_PW).json()["ticket"]
             for _ in range(4):
                 bare("/api/auth/mfa-verify", {"ticket": tick, "code": "000000"})
-        copilot._login_hits.clear()
+        team._login_hits.clear()
         r = login("cameron", MASTER_PW)
         eq(r.status_code, 401, "twelve misses: paused, and the pause reads like a wrong password")
         ok("do not match" in r.json()["error"], r.text)
-        rows = [e for e in copilot._load_events() if e.get("action") == "account paused"]
+        rows = [e for e in activity._load_events() if e.get("action") == "account paused"]
         ok(rows and "second-factor" in rows[-1]["detail"], rows[-1:])
-        listed = [e for e in copilot._load_events() if "second-factor code" in e.get("detail", "")]
-        ok(len(listed) <= copilot.LOGIN_NOISE_ROWS, "coalesced, not one row per miss: %d" % len(listed))
+        listed = [e for e in activity._load_events() if "second-factor code" in e.get("detail", "")]
+        ok(len(listed) <= activity.LOGIN_NOISE_ROWS, "coalesced, not one row per miss: %d" % len(listed))
     with_accounts(go)
 
 
@@ -21037,12 +21040,12 @@ def t_an_admin_can_reset_a_lost_second_factor():
         owen, sess, pw = ready_user("Owen", "owen")
         j = post_s(sess, "/api/auth/mfa", {"op": "start", "current": pw}).json()
         eq(post_s(sess, "/api/auth/mfa", {"op": "confirm", "code": totp.code(j["secret"])}).status_code, 200)
-        copilot._login_hits.clear()
+        team._login_hits.clear()
         eq(login("owen", pw).json().get("mfa"), True, "the password alone is now half a login")
-        team = post("/api/team/user", {"op": "reset_mfa", "id": owen})
-        eq(team.status_code, 200, team.text)
-        eq([u for u in team.json()["users"] if u["id"] == owen][0]["mfa"], False, "the list says it is gone")
-        copilot._login_hits.clear()
+        res = post("/api/team/user", {"op": "reset_mfa", "id": owen})
+        eq(res.status_code, 200, res.text)
+        eq([u for u in res.json()["users"] if u["id"] == owen][0]["mfa"], False, "the list says it is gone")
+        team._login_hits.clear()
         ok(login("owen", pw).json().get("session"), "and the password signs them in again")
         eq(post("/api/team/user", {"op": "reset_mfa", "id": owen}).status_code, 400, "nothing left to reset")
         ian, ian_sess, ian_pw = ready_user("Ian", "ian", role="admin")
@@ -21051,7 +21054,7 @@ def t_an_admin_can_reset_a_lost_second_factor():
         eq(post_s(sess, "/api/team/user", {"op": "reset_mfa", "id": ian}).status_code, 403,
            "a member cannot reset an admin's")
         eq(post("/api/team/user", {"op": "reset_mfa", "id": ian}).status_code, 200, "the master can")
-        ok(any(e.get("action") == "reset a second factor" for e in copilot._load_events()), "and it is in the ledger")
+        ok(any(e.get("action") == "reset a second factor" for e in activity._load_events()), "and it is in the ledger")
     with_accounts(go)
 
 
@@ -21095,9 +21098,9 @@ def t_a_session_ends_after_thirty_days_however_active():
         from datetime import datetime as _dt, timezone as _tz, timedelta as _td
         _owen, sess, _pw = ready_user("Owen", "owen")
         eq(post_s(sess, "/api/team/me", {}).status_code, 200)
-        s = copilot._load_sessions()
+        s = team._load_sessions()
         s[_h.sha256(sess.encode()).hexdigest()]["created_at"] = (_dt.now(_tz.utc) - _td(days=31)).isoformat()
-        copilot._write_sessions(s)
+        team._write_sessions(s)
         eq(post_s(sess, "/api/team/me", {}).status_code, 401, "a month old: gone, however recently used")
     with_accounts(go)
 
@@ -21110,20 +21113,20 @@ def t_wrong_drive_passwords_stop_costing_a_hash_after_twenty_a_minute():
     def go():
         ensure_auth()
         import base64 as b64
-        copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear(); copilot._rl_hits.clear()
+        copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear(); gate._rl_hits.clear()
         calls = {"n": 0}
-        real = copilot._check_pw
+        real = team._check_pw
         def counting(pw, stored):
             calls["n"] += 1
             return real(pw, stored)
-        copilot._check_pw = counting
+        team._check_pw = counting
         try:
             codes = []
             for i in range(25):
                 bad = {"Authorization": "Basic " + b64.b64encode(f"nobody{i}:guess".encode()).decode()}
                 codes.append(client.request("PROPFIND", "/dav/", headers={**bad, "Depth": "0"}).status_code)
         finally:
-            copilot._check_pw = real
+            team._check_pw = real
         eq(codes[:20], [401] * 20, "twenty misses are answered like misses")
         eq(codes[20:], [429] * 5, "the rest are refused before anything is hashed")
         ok(calls["n"] <= 20, "at most one hash per miss, none after: %d" % calls["n"])
@@ -21138,14 +21141,14 @@ def t_a_refused_tab_is_in_the_ledger_a_bounded_number_of_times():
         ensure_auth()
         owen, sess, _pw = ready_user("Owen", "owen")
         eq(post("/api/team/user", {"op": "tabs", "id": owen, "tabs": ["labels"]}).status_code, 200)
-        copilot._deny_noise.update({"hour": "", "logged": 0})
-        for _ in range(copilot.DENY_NOISE_ROWS + 5):
+        activity._deny_noise.update({"hour": "", "logged": 0})
+        for _ in range(activity.DENY_NOISE_ROWS + 5):
             eq(post_s(sess, "/api/files/tree", {}).status_code, 403)
-        rows = [e for e in copilot._load_events() if e.get("action") == "refused a closed tab"]
-        eq(len(rows), copilot.DENY_NOISE_ROWS, "the first twenty are listed")
+        rows = [e for e in activity._load_events() if e.get("action") == "refused a closed tab"]
+        eq(len(rows), activity.DENY_NOISE_ROWS, "the first twenty are listed")
         eq(rows[0]["sub"], owen, "naming the account")
         ok(rows[0]["detail"].startswith("/api/files/tree"), rows[0]["detail"])
-        more = [e for e in copilot._load_events() if e.get("action") == "refusals continuing"]
+        more = [e for e in activity._load_events() if e.get("action") == "refusals continuing"]
         eq(len(more), 1, "then one line saying the rest are not listed")
     with_accounts(go)
 
@@ -21155,14 +21158,14 @@ def t_wrong_current_passwords_escalate_like_the_front_door():
     def go():
         ensure_auth()
         owen, sess, pw = ready_user("Owen", "owen")
-        for _ in range(copilot.LOGIN_FAIL_LIMIT):
+        for _ in range(team.LOGIN_FAIL_LIMIT):
             post_s(sess, "/api/auth/password", {"current": "nope-nope-nope", "new": "something-new-12"})
         eq(post_s(sess, "/api/auth/password", {"current": pw, "new": "something-new-12"}).status_code,
            429, "paused")
-        copilot._login_hits.clear()
+        team._login_hits.clear()
         eq(login("owen", pw).status_code, 401, "the pause is the account's, so the login is paused too")
-        eq(copilot._load_users()["users"][owen].get("locks"), 1, "and it counts toward the escalation")
-        rows = [e for e in copilot._load_events() if e.get("action") == "account paused"]
+        eq(team._load_users()["users"][owen].get("locks"), 1, "and it counts toward the escalation")
+        rows = [e for e in activity._load_events() if e.get("action") == "account paused"]
         ok("at the password change" in rows[-1]["detail"], rows[-1]["detail"])
     with_accounts(go)
 
@@ -21364,7 +21367,7 @@ def t_the_pre_redact_archive_does_not_live_forever():
 def t_authenticated_json_is_not_stored_by_any_cache():
     """A shared dispatch PC: the browser's disk and back-forward caches outlive
     the session that fetched the customer list."""
-    eq(copilot._API_HEADERS.get("Cache-Control"), "no-store")
+    eq(gate._API_HEADERS.get("Cache-Control"), "no-store")
     r = post("/api/team/me", {})
     eq(r.headers.get("cache-control"), "no-store", "on a real API answer")
     shell = client.get("/", headers={"Authorization": "Bearer " + tok()})
@@ -21510,10 +21513,10 @@ def t_the_streaming_chat_route_checks_the_session_before_it_spends_an_ai_slot():
     unauthenticated caller was taking a slot from it on the way to a 401 -
     and the page never sent the session header at all, so every chat turn
     paid for that round trip before falling back."""
-    copilot._rl_global.clear()
+    gate._rl_global.clear()
     r = bare("/api/chat/stream", {"message": "hello"})
     eq(r.status_code, 401, "no app session, no answer")
-    eq(len(copilot._rl_global), 0, "and no slot was spent getting there")
+    eq(len(gate._rl_global), 0, "and no slot was spent getting there")
     src = pagesource.join(HERE)
     seg = src.split("async function streamChat(")[1][:1200]
     ok("X-App-Session" in seg, "and the page now sends the session on the streaming call")
@@ -21783,7 +21786,7 @@ def t_the_door_checks_rank_before_it_spends_an_ai_slot():
         r = post_s(sess, "/api/recon/sweep", {})
         eq(r.status_code, 403, r.text)
         ok("admin" in r.json()["error"], r.text)
-        eq(len(copilot._rl_global), 0, "a member's refused sweep did not spend an AI slot")
+        eq(len(gate._rl_global), 0, "a member's refused sweep did not spend an AI slot")
     with_accounts(go)
 
 
@@ -22326,9 +22329,9 @@ def t_an_open_shift_left_by_a_removed_account_is_swept_up():
     def go():
         ensure_auth()
         a, _s, _p = ready_user("Cy Bench", "cyb", role="parttime")
-        d = copilot._load_users()
+        d = team._load_users()
         d["users"][a]["deleted"], d["users"][a]["active"] = True, False
-        copilot._write_users(d)
+        team._write_users(d)
         w = copilot._load_work()
         w["open"][a] = {"id": "w-old", "uid": a, "start": "2026-09-01T08:00:00+00:00"}
         w["open"]["ghost"] = {"id": "w-ghost", "uid": "ghost", "start": "2026-09-01T08:00:00+00:00"}
@@ -22356,14 +22359,14 @@ def t_a_broken_accounts_file_clocks_nobody_out():
         for uid in (b, c):
             w["open"][uid] = {"id": "w-" + uid, "uid": uid, "start": "2026-09-01T08:00:00+00:00"}
         copilot._write_work(w)
-        with open(copilot.USERS_PATH, "w") as fh:
+        with open(team.USERS_PATH, "w") as fh:
             fh.write("{ not json")
-        copilot._users_mem = None
+        team._users_mem = None
         try:
             eq(copilot._work_close_orphans(), [], "nothing is closed on an unreadable register")
             eq(sorted(copilot._load_work()["open"]), sorted([b, c]), "both are still clocked in")
         finally:
-            jsonstore._poisoned_stores.discard(copilot.USERS_PATH)
+            jsonstore._poisoned_stores.discard(team.USERS_PATH)
     with_accounts(go)
 
 
@@ -22507,14 +22510,14 @@ def t_boot_reseal_reads_the_register_as_the_app_writes_it():
         os.environ["TOKEN_ENCRYPTION_KEY"] = "a-long-random-key-for-the-test"
         _tv._key.cache_clear()
         try:
-            copilot._write_users({"version": 2, "users": {
+            team._write_users({"version": 2, "users": {
                 "u1": {"name": "Ada", "username": "ada", "role": "master",
                        "mfa_secret": "PLAINSECRET"}}})
-            eq(json.load(open(copilot.USERS_PATH))["users_store"]["users"]["u1"]["mfa_secret"],
+            eq(json.load(open(team.USERS_PATH))["users_store"]["users"]["u1"]["mfa_secret"],
                "PLAINSECRET", "enrolled before the key: plaintext on disk")
             out = copilot.reseal_secrets_at_rest()
             eq(out["stores"].get("mfa"), 1, out)
-            on_disk = json.load(open(copilot.USERS_PATH))["users_store"]["users"]["u1"]["mfa_secret"]
+            on_disk = json.load(open(team.USERS_PATH))["users_store"]["users"]["u1"]["mfa_secret"]
             ok(_tv.is_sealed(on_disk), "sealed on disk")
             eq(_tv.unseal(on_disk), "PLAINSECRET", "and still opens, so nobody is locked out")
             eq(copilot.token_vault_state()["plaintext"], [], "and the settings panel agrees")
@@ -22609,14 +22612,38 @@ def t_shop_redact_erases_what_memory_holds_too():
 
 
 @test
-def t_every_memory_copy_of_a_store_is_on_the_one_list():
-    """Restore and shop/redact drop the caches from one registry. A `_mem`
-    global added without a row there is the next cache to outlive its file:
-    the loan register was the last one, forgotten from a hand-kept list."""
-    src = copilot_source()
-    declared = set(re.findall(r"^(_[a-z_]+_mem)\b", src, re.M))
-    eq(declared, set(copilot._memory_stores().values()),
-       "every whole-object cache is dropped by restore and shop/redact")
+def t_every_memory_copy_of_a_store_is_let_go():
+    """Restore and shop/redact let go of every whole-store copy held in memory
+    (a copy that outlives its file puts the old contents straight back: the
+    mailbox and Files after a redact, the loan register after a restore). Each
+    module registers with the store how to let go of its own, so nothing
+    reaches into another module's names, and a `_mem` copy nobody lets go of
+    fails here. Paths are read when the drop runs."""
+    import importlib
+    held = []
+    for rel in COPILOT_FILES:
+        mod = importlib.import_module(rel[:-3].replace("/", "."))
+        text = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), rel), encoding="utf-8").read()
+        held += [(mod, n) for n in re.findall(r"^(_[a-z_]+_mem)\b", text, re.M)]
+    ok(len(held) >= 7, "the scan finds the copies (%d)" % len(held))
+    saved = [(m, n, getattr(m, n)) for m, n in held]
+    path = team.USERS_PATH
+    mark = object()
+    try:
+        for m, n in held:
+            setattr(m, n, mark)
+        jsonstore._drop_memory_stores()
+        eq(["%s.%s" % (m.__name__, n) for m, n in held if getattr(m, n) is not None], [], "every copy let go")
+        for m, n in held:
+            setattr(m, n, mark)
+        team.USERS_PATH = os.path.join(SCRATCH, "users-elsewhere.json")
+        jsonstore._drop_memory_stores({team.USERS_PATH})
+        eq(["%s.%s" % (m.__name__, n) for m, n in held if getattr(m, n) is None], ["gizmo.team._users_mem"],
+           "a drop naming one store lets go of that one only, at the path it has now")
+    finally:
+        team.USERS_PATH = path
+        for m, n, v in saved:
+            setattr(m, n, v)
 
 
 @test
@@ -23226,7 +23253,7 @@ def t_a_finder_rename_keeps_the_sidecar_a_sidecar():
         d["seq"] = 2
         copilot._write_files(d)
         def dav(method, path, **kw):
-            copilot._rl_hits.clear(); copilot._rl_global.clear()
+            gate._rl_hits.clear(); gate._rl_global.clear()
             return client.request(method, "/dav" + path, headers={**auth, **kw.pop("headers", {})}, **kw)
         eq(dav("MOVE", "/Artwork/proof.pdf", headers={"Destination": "http://testserver/dav/Artwork/final.pdf"}).status_code, 201)
         eq(dav("MOVE", "/Artwork/._proof.pdf", headers={"Destination": "http://testserver/dav/Artwork/._final.pdf"}).status_code, 201)
@@ -23465,7 +23492,7 @@ def t_the_chat_stream_says_it_has_started_before_the_answer():
         _a, sess, _p = ready_user("Fay Chat", "fayc", role="admin")
         saved = copilot.run_chat
         copilot.run_chat = slow_answer
-        copilot._rl_global.clear()
+        gate._rl_global.clear()
         try:
             r = post_s(sess, "/api/chat/stream", {"message": "hello"})
             events = [json.loads(l[5:]) for l in r.text.split("\n") if l.startswith("data:")]
@@ -23845,16 +23872,16 @@ def t_reading_the_store_knowledge_takes_no_ai_slot_and_it_can_be_corrected():
         copilot._save_knowledge("Glass gobos take three days.", ["https://shop.test/"])
         # Signed in first: a first sign-in resets the rate windows.
         hdrs = {"Authorization": "Bearer " + tok(), "X-App-Session": ensure_auth()}
-        copilot._rl_hits.clear()
+        gate._rl_hits.clear()
         now = time.monotonic()
-        copilot._rl_global[:] = [now] * copilot.RATE_MAX_GLOBAL      # the AI window is full
+        gate._rl_global[:] = [now] * gate.RATE_MAX_GLOBAL      # the AI window is full
         r = client.post("/api/learn", json={}, headers=hdrs)
         eq(r.status_code, 200, "a plain read is not an AI run: " + r.text)
         eq(r.json()["knowledge"]["knowledge"], "Glass gobos take three days.")
-        copilot._rl_hits.clear()
+        gate._rl_hits.clear()
         r = client.post("/api/learn/run", json={}, headers=hdrs)
         eq(r.status_code, 429, "a learn still waits for a slot")
-        copilot._rl_global.clear()
+        gate._rl_global.clear()
         r = post("/api/learn", {"op": "save", "knowledge": "Glass gobos take four days."})
         eq(r.status_code, 200, r.text)
         k = r.json()["knowledge"]
@@ -23862,7 +23889,7 @@ def t_reading_the_store_knowledge_takes_no_ai_slot_and_it_can_be_corrected():
         eq(k["sources"], ["https://shop.test/"], "the pages read are kept")
         ok(k.get("edited_at") and k.get("edited_by") == "Cameron", "and who corrected it, and when")
     finally:
-        copilot._rl_global.clear()
+        gate._rl_global.clear()
         copilot.KNOWLEDGE_PATH = saved[0]
 
 @test
@@ -24104,9 +24131,9 @@ def t_a_reading_is_honest_about_what_it_read():
         copilot._add_skill("Pricing", "Glass £85.")
         sid = copilot._load_skills()[0]["id"]
         hdrs = {"Authorization": "Bearer " + tok(), "X-App-Session": ensure_auth()}
-        copilot._rl_hits.clear(); copilot._rl_global[:] = [time.monotonic()] * copilot.RATE_MAX_GLOBAL
+        gate._rl_hits.clear(); gate._rl_global[:] = [time.monotonic()] * gate.RATE_MAX_GLOBAL
         eq(client.post("/api/skills/read", json={"id": sid}, headers=hdrs).status_code, 429, "it waits for the AI window")
-        copilot._rl_global.clear()
+        gate._rl_global.clear()
         r = post("/api/skills/read", {"id": sid})
         sk = [x for x in r.json()["skills"] if x["id"] == sid][0]
         eq(sk["reading"]["rules"], ["Quote glass at £85."], "a single rule given as text is one rule")
@@ -24131,7 +24158,7 @@ def t_a_reading_is_honest_about_what_it_read():
         open(copilot.SKILLS_PATH, "w").write(good)
         jsonstore._poisoned_stores.discard(copilot.SKILLS_PATH)
     finally:
-        copilot._rl_global.clear()
+        gate._rl_global.clear()
         claude._xcreate = sx
         _ws_restore(saved)
 
@@ -26056,7 +26083,7 @@ def t_a_malformed_number_setting_falls_back_instead_of_stopping_the_app():
     import subprocess
     eq(copilot._env_num(int, "60s", "60", "MAIL_LOOP_SECS"), 60)
     eq(copilot._env_num(float, "", "24", "SESSION_HOURS"), 24.0)
-    r = subprocess.run([sys.executable, "-c", "import copilot; print(copilot.SESSION_HOURS, copilot.MAIL_LOOP_SECS)"],
+    r = subprocess.run([sys.executable, "-c", "import copilot; from gizmo import team; print(team.SESSION_HOURS, copilot.MAIL_LOOP_SECS)"],
                        env={**os.environ, "SESSION_HOURS": "", "MAIL_LOOP_SECS": "60s"},
                        cwd=HERE, capture_output=True, text=True)
     eq(r.returncode, 0, r.stderr[-400:])
@@ -26654,7 +26681,7 @@ def t_deep_analysis_is_more_thinking_and_the_answer_says_it_was_deep():
         _a, sess, _p = ready_user("Dee Deep", "deed", role="admin")
         saved = copilot.run_chat
         copilot.run_chat = answer
-        copilot._rl_global.clear()
+        gate._rl_global.clear()
         try:
             r = post_s(sess, "/api/chat", {"message": "hello", "deep": True})
             eq(r.json()["deep"], True)
@@ -26805,7 +26832,7 @@ def t_a_failed_chat_tells_the_page_the_reason():
         _a, sess, _p = ready_user("Rae Reason", "raer", role="admin")
         saved = copilot.run_chat
         copilot.run_chat = refused
-        copilot._rl_global.clear()
+        gate._rl_global.clear()
         try:
             r = post_s(sess, "/api/chat", {"message": "hello"})
             eq(r.status_code, 502)
@@ -26879,7 +26906,7 @@ def t_only_the_master_uploads_skills_and_its_limit_is_larger():
         # The master: the larger limit, uploads, and a body over the usual request limit.
         big = ("## Part\n" + ("Trade £85 " + "£" * 50 + "\n") * 40) * 80
         big = big[:copilot.SKILL_UPLOAD_CAP - 10].strip()
-        ok(len(json.dumps({"content": big}, ensure_ascii=False).encode("utf-8")) > copilot.MAX_BODY_BYTES
+        ok(len(json.dumps({"content": big}, ensure_ascii=False).encode("utf-8")) > gate.MAX_BODY_BYTES
            and len(big) > copilot.SKILL_BODY_CAP * 4, "over the usual request limit: %d" % len(big))
         r = post("/api/skills", {"op": "add", "title": "Trade book", "content": big, "file": "trade-book.md"})
         eq(r.status_code, 200, r.text[:300])
@@ -26889,7 +26916,7 @@ def t_only_the_master_uploads_skills_and_its_limit_is_larger():
         eq(r.status_code, 400)
         # From anyone else, a body that size is read but not saved: their limit is the usual one.
         pad = "£\n" * 90000
-        ok(len(json.dumps({"content": pad}, ensure_ascii=False).encode("utf-8")) > copilot.MAX_BODY_BYTES)
+        ok(len(json.dumps({"content": pad}, ensure_ascii=False).encode("utf-8")) > gate.MAX_BODY_BYTES)
         r = post_s(sess, "/api/skills", {"op": "add", "title": "Padded", "content": pad})
         eq(r.status_code, 400, r.text[:200])
         # And nobody sends more than a skill at the master's limit could need.
@@ -27633,7 +27660,7 @@ def t_only_a_signed_in_request_sees_or_counts_its_timing():
         ready_user("Ruth", "ruth")
         perf.ROUTES.clear()
         h = {"Authorization": "Bearer " + tok()}
-        for p in (copilot._rl_hits, copilot._rl_global, copilot._login_hits):
+        for p in (gate._rl_hits, gate._rl_global, team._login_hits):
             p.clear()
         real = client.post("/api/auth/login", json={"username": "ruth", "password": "wrong-password-1"}, headers=h)
         fake = client.post("/api/auth/login", json={"username": "nobody-here", "password": "wrong-password-1"},
@@ -27644,7 +27671,7 @@ def t_only_a_signed_in_request_sees_or_counts_its_timing():
         names = lambda r: sorted(k for k in r.headers.keys() if k not in ("content-length", "date"))
         eq(names(real), names(fake), "and the two answers carry the same headers")
         for _ in range(5):
-            copilot._rl_hits.clear(); copilot._rl_global.clear()
+            gate._rl_hits.clear(); gate._rl_global.clear()
             r = client.post("/api/crm/board", json={}, headers=h)     # no session
             eq(r.status_code, 401)
             eq(r.headers.get("server-timing"), None, "a refused request learns nothing from the timing")
@@ -28698,10 +28725,10 @@ def t_the_crm_revision_is_the_board_itself():
         _uid, _s, pw = ready_user("Print Probe", "printprobe")
         post("/api/crm/contact", {"op": "person_add", "name": "Print Probe", "emails": ["pp@example.com"]})
         rev = post("/api/crm/board", {}).json()["rev"]
-        before = jsonstore._stat_key(copilot.USERS_PATH)
+        before = jsonstore._stat_key(team.USERS_PATH)
         eq(login("printprobe", "not-the-password-1").status_code, 401, "a wrong password")
         eq(login("printprobe", pw).status_code, 200, "and a sign-in")
-        ok(jsonstore._stat_key(copilot.USERS_PATH) != before, "both written to the team's file")
+        ok(jsonstore._stat_key(team.USERS_PATH) != before, "both written to the team's file")
         eq(post("/api/crm/board", {"rev": rev}).json(), {"same": True, "rev": rev},
            "and the board, which neither changed, is not sent again")
         real = copilot._crm_shape
@@ -28766,7 +28793,7 @@ def _files_race(*calls):
     import httpx
 
     async def race():
-        copilot._rl_hits.clear(); copilot._rl_global.clear()
+        gate._rl_hits.clear(); gate._rl_global.clear()
         transport = httpx.ASGITransport(app=server.mcp.streamable_http_app(**server.MCP_HTTP))
         headers = {"Authorization": "Bearer " + tok(), "X-App-Session": ensure_auth()}
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver",
@@ -29837,9 +29864,8 @@ def t_the_security_scans_cover_every_app_module():
 BORROWED = {
     # the store
     "_dispatch_lock",
-    # the request check and answers
-    "_eori_hits", "_guard", "_json", "_ok", "_team_level", "_tool_json", "_track", "_window_ok",
-    "EORI_MAX_PER_MIN", "ROLE_LEVELS",
+    # the request check's answers
+    "_eori_hits", "_ok", "_tool_json", "EORI_MAX_PER_MIN",
     # orders and Shopify
     "_ADDR_COMPARE", "_admin_order_url", "_fulfill_if_ready", "_fulfillment_canceler",
     "_label_skip_item", "_line_qty", "_load_prod_state", "_order_status", "_orders_changed",
@@ -29895,7 +29921,9 @@ def t_either_module_imports_first():
     import subprocess as _sp
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     for first, then in (("gizmo.dispatch", "copilot"), ("copilot", "gizmo.dispatch"),
-                        ("gizmo.routes.dispatch", "copilot")):
+                        ("gizmo.routes.dispatch", "copilot"), ("gizmo.team", "copilot"),
+                        ("gizmo.gate", "copilot"), ("gizmo.activity", "copilot"),
+                        ("gizmo.routes.team", "copilot")):
         r = _sp.run([sys.executable, "-c", f"import {first}, {then}; import gizmo.dispatch as d, copilot as c; "
                      "assert c.desk is d and d.core is c; print('ok')"],
                     cwd=root, env=dict(os.environ), capture_output=True, text=True, timeout=120)
@@ -30070,12 +30098,26 @@ def t_a_banners_closing_rule_opens_no_section():
              "", rule, "# Shipping, settings", "# and state.", rule, "Y = 2"]
     eq([t for _, t in env._banner_index(lines)], ["Configuration", "Shipping, settings"], "two banners, two titles")
 
+@test
+def t_the_team_routes_register_in_place():
+    """The sign-in and team routes are registered by one call where they stood
+    in add_routes, so the route table keeps its order; none is left behind."""
+    import inspect
+    from gizmo.routes import team as routes_team
+    src = inspect.getsource(copilot.add_routes)
+    i = src.index("routes_team.register(mcp, registry)")
+    ok(src.rindex('@mcp.custom_route("/api/files/file"', 0, i) < i
+       < src.index('@mcp.custom_route("/dav{sub_path:path}"', i), "between the routes that stood either side")
+    for path in ('"/api/auth/', '"/api/team/'):
+        ok(path not in src, path + " is registered by the team's own routes")
+    eq(inspect.getsource(routes_team).count("@mcp.custom_route("), 10, "the 10 sign-in and team routes")
+
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a
     # handful, which is what LOGIN_MAX_PER_MIN is sized for. The ceiling has
     # its own test rather than being weakened for everyone else's sake.
-    copilot._login_hits.clear()
+    team._login_hits.clear()
     # A missed-orders answer is kept until an order changes, and one test's
     # stubbed shop is not the next test's: nothing changes between them.
     copilot._missing_cache.clear()

@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-20",
+   "title": "Sign-in and the door on their own",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "Signing in, the team's accounts and the check every request passes now each live on their own, so a change elsewhere cannot weaken them. Nothing looks different."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-20",
    "title": "The app's foundations on their own",
    "items": [
     {

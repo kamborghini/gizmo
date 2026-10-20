@@ -63,7 +63,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `LEARN_MAX_PAGES` | `"12"` | copilot | pages crawled when learning |
 | `LEARN_PAGE_CHARS` | `"3000"` | copilot | text kept per page |
 | `LOW_STOCK_THRESHOLD` | `"5"` | copilot |  |
-| `MAX_BODY_BYTES` | `str(256 * 1024)` | copilot | 256 KB |
 | `MAX_CHAT_CHARS` | `"100000"` | copilot | total chars in a chat request |
 | `MAX_MESSAGES` | `"100"` | copilot | chat history length |
 | `MEMORY_INJECT` | `"40"` | copilot | max of each kind injected into prompts |
@@ -75,9 +74,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `PRODUCT_TREND_MONTHS` | `"12"` | copilot |  |
 | `PROFILE_FIELD_CAP` | `"6000"` | copilot |  |
 | `PROFILE_PATH` | `"/data/store_profile.json"` | copilot |  |
-| `RATE_LIMIT_GLOBAL` | `"150"` | copilot | AI requests/window (cost ceiling) |
-| `RATE_LIMIT_PER_CLIENT` | `"120"` | copilot | requests/window/client |
-| `RATE_LIMIT_WINDOW` | `"60"` | copilot | seconds |
 | `RECON_CACHE_PATH` | `"/data/recon_cache.json"` | copilot |  |
 | `RECON_DOCS_PATH` | `"/data/recon_docs.json"` | copilot |  |
 | `RECON_PATH` | `"/data/recon.json"` | copilot |  |
@@ -226,13 +222,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `ZETA_SYNC_TOKEN` | `""` | copilot |  |
 | `ZETA_URL` | `""` | copilot |  |
 
-## copilot.py - Team: the app's own accounts. Shopify has no authority here
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `SESSIONS_PATH` | `"/data/sessions.json"` | copilot |  |
-| `USERS_PATH` | `"/data/users.json"` | copilot |  |
-
 ## copilot.py - WebDAV: the Files store as a native Finder drive. macOS moun
 
 | Variable | Default | Read by | Notes |
@@ -251,15 +240,15 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
-| `ACTIVITY_MAX` | `"8000"` | copilot |  |
-| `ACTIVITY_PATH` | `"/data/activity.json"` | copilot |  |
-| `MASTER_RESET` | `None` | copilot |  |
-| `MASTER_RESET_MINUTES` | `"30"` | copilot |  |
 | `PRIVACY_LOG_PATH` | `"/data/privacy_log.json"` | copilot |  |
 | `RAILWAY_GIT_COMMIT_SHA` | `None` | copilot, server |  |
-| `SESSIONS_PER_USER` | `"12"` | copilot |  |
-| `SESSION_HOURS` | `"24"` | copilot |  |
-| `SESSION_MAX_DAYS` | `"30"` | copilot |  |
+
+## gizmo/activity.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `ACTIVITY_MAX` | `"8000"` | gizmo.activity |  |
+| `ACTIVITY_PATH` | `"/data/activity.json"` | gizmo.activity |  |
 
 ## gizmo/ai.py - top
 
@@ -311,6 +300,27 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
 | `ERRORS_PATH` | `"/data/app_errors.json"` | gizmo.errors |  |
+
+## gizmo/gate.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `MAX_BODY_BYTES` | `str(256 * 1024)` | gizmo.gate | 256 KB |
+| `RATE_LIMIT_GLOBAL` | `"150"` | gizmo.gate | AI requests/window (cost ceiling) |
+| `RATE_LIMIT_PER_CLIENT` | `"120"` | gizmo.gate | requests/window/client |
+| `RATE_LIMIT_WINDOW` | `"60"` | gizmo.gate | seconds |
+
+## gizmo/team.py - Team: the app's own accounts. Shopify has no authority here
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `MASTER_RESET` | `None` | gizmo.team |  |
+| `MASTER_RESET_MINUTES` | `"30"` | gizmo.team |  |
+| `SESSIONS_PATH` | `"/data/sessions.json"` | gizmo.team |  |
+| `SESSIONS_PER_USER` | `"12"` | gizmo.team |  |
+| `SESSION_HOURS` | `"24"` | gizmo.team |  |
+| `SESSION_MAX_DAYS` | `"30"` | gizmo.team |  |
+| `USERS_PATH` | `"/data/users.json"` | gizmo.team |  |
 
 ## eori.py
 
