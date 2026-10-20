@@ -1,0 +1,35 @@
+{
+  "note": "customer-data erasure, the loan register and work sessions, with their routes",
+  "areas": [
+    {"name": "privacy", "file": "gizmo/privacy.py", "alias": "privacy",
+     "prefix": "^(_erase|_ERASE|ERASE_|_redact|_REDACT|REDACT_|_privacy|_PRIVACY|PRIVACY_)",
+     "extra": ["_load_privacy_log", "_plist", "_held_requests", "_open_asks", "_customer_state"],
+     "exclude": [], "floor": false,
+     "doc": "Customer-data erasure: the scrubber, the keys and matching that decide what belongs to one person, the sweep, shop and customer redaction, the requests held for an admin, and the privacy log. Moved out of copilot.py (stage 4 of the 14 October audit); its routes (the privacy settings and Shopify's privacy webhook) are in gizmo/routes/privacy.py. Read as `privacy.NAME`."},
+    {"name": "loans", "file": "gizmo/loans.py", "alias": "loans",
+     "prefix": "^(_loan|_LOAN|LOAN)", "extra": ["_load_loans", "_write_loans", "_let_go_of_loans_in_memory"],
+     "exclude": [], "floor": false,
+     "doc": "Loan units: the projectors that go out to customers, and where they are. The register and its copy in memory, the board. Moved out of copilot.py (stage 4 of the 14 October audit); its route is in gizmo/routes/loans.py. Read as `loans.NAME`."},
+    {"name": "work", "file": "gizmo/work.py", "alias": "work",
+     "prefix": "^(_work|_WORK|WORK_)", "extra": ["_load_work", "_write_work", "_let_go_of_work_in_memory"],
+     "exclude": [], "floor": false,
+     "doc": "Work sessions: clocking in and out, for part-time accounts. The sessions store and its copy in memory, who is monitored, the open session. Moved out of copilot.py (stage 4 of the 14 October audit); its routes are in gizmo/routes/work.py. Read as `work.NAME`."}
+  ],
+  "routes": [
+    {"name": "routes_privacy", "file": "gizmo/routes/privacy.py", "area": "privacy",
+     "paths": ["/api/privacy", "/webhooks/privacy"], "helpers": [],
+     "doc": "The privacy routes: the privacy settings, and Shopify's privacy webhook (data requests and redactions). Gathered from add_routes (stage 4 of the 14 October audit) where the first stood; their paths are literal, so no request changes hands.",
+     "register_doc": "Add the privacy routes to the app.",
+     "comment": "The privacy routes (gizmo/routes/privacy.py), gathered where the first stood."},
+    {"name": "routes_loans", "file": "gizmo/routes/loans.py", "area": "loans",
+     "paths": ["/api/loans"], "helpers": [],
+     "doc": "The loan register's route, moved from add_routes (stage 4 of the 14 October audit) where it stood.",
+     "register_doc": "Add the loan register's route to the app.",
+     "comment": "The loan register's route (gizmo/routes/loans.py)."},
+    {"name": "routes_work", "file": "gizmo/routes/work.py", "area": "work",
+     "paths": ["/api/work"], "helpers": [],
+     "doc": "The work sessions' routes, gathered from add_routes (stage 4 of the 14 October audit) where the first stood; their paths are literal, so no request changes hands.",
+     "register_doc": "Add the work sessions' routes to the app.",
+     "comment": "The work sessions' routes (gizmo/routes/work.py), gathered where the first stood."}
+  ]
+}

@@ -140,8 +140,8 @@ def _track(sub: Optional[str], area: str, action: str, detail: str = "") -> None
              "action": str(action)[:80], "detail": str(detail)[:200]}
         if not sub:
             e["src"] = "system"    # webhooks, schedulers, integrations: never a person
-        elif core._work_monitored(sub):
-            ws = core._work_open_session(sub)
+        elif work._work_monitored(sub):
+            ws = work._work_open_session(sub)
             if ws:
                 e["ws"] = ws.get("id")   # billable: on the clock
         rows.append(e)
@@ -170,3 +170,4 @@ def _track(sub: Optional[str], area: str, action: str, detail: str = "") -> None
 # takes names from these modules as it loads, and any of them may be imported
 # first. Read as core.NAME and sibling.NAME, never a copied name.
 import copilot as core  # noqa: E402
+from gizmo import work  # noqa: E402

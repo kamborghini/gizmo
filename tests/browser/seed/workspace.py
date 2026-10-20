@@ -81,7 +81,7 @@ team._write_users(_ud)
 # Finished shifts for the two part-timers over the last fortnight, written with the
 # work log's own writer in the shape the clock route appends ({id, uid, start, end,
 # secs}; a correction adds corrected/corrected_by/corrected_at/note, as /api/work/resolve does).
-_w = copilot._load_work()
+_w = work._load_work()
 _shifts = []
 for days_ago, who, (h0, m0), (h1, m1) in (
         (12, "jonah", (9, 0), (13, 30)), (11, "lena", (13, 0), (17, 15)), (10, "jonah", (9, 5), (14, 0)),
@@ -102,14 +102,14 @@ _fix.update({"corrected": True, "corrected_by": _WSU["priya"],
              "note": "left the bench without clocking out"})
 _w["sessions"] = _shifts
 _w["seq"] = len(_shifts)
-copilot._write_work(_w)
+work._write_work(_w)
 # Jonah on the clock now: the real clock route with his own session (a), then the
 # start moved back three hours, exactly as t_work_the_clock_is_the_servers_and_only_for_parttime does (b).
 assert post_s(_WSS["jonah"], "/api/work/clock", {"op": "in"}).status_code == 200
-_w = copilot._load_work()
+_w = work._load_work()
 _open = _w["open"][_WSU["jonah"]]
 _open["start"] = _iso(_NOW - _td(hours=3, minutes=10))
-copilot._write_work(_w)
+work._write_work(_w)
 
 # ---------------------------------------------------------------- Team: the activity ledger (b)
 # The ledger's rows as _track writes them ({t, sub, area, action, detail}, "src":

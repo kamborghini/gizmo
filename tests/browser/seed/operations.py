@@ -421,14 +421,14 @@ for _n, _who, _org, _person, _due, _note in (
                                           "crm_org_id": OPS_ORGS.get(_org, ""), "crm_person_id": OPS_PEOPLE.get(_person, ""),
                                           "phone": "01632 9604" + str(len(_OUT)).zfill(2), "due_at": _due,
                                           "note": _note}), "loan out " + _n)["loan"]["id"]
-_ld = copilot._load_loans()
+_ld = loans._load_loans()
 for _n, _days in (("Loan 1", 6), ("Loan 3", 19), ("Loan 5", 41), ("Loan 6", 2)):
     _ld["loans"][_OUT[_n]]["out_at"] = _at(_days, hour=11).isoformat()
 for _lo in _ld["loans"].values():
     if _lo.get("back_at"):
         _lo["out_at"] = _at(35, hour=9).isoformat()
         _lo["back_at"] = _at(27, hour=16).isoformat()
-copilot._write_loans(_ld)
+loans._write_loans(_ld)
 # Loan 2 stays on the shelf; Loan 4 is back on the shelf with history.
 
 # ============================ INBOX (Gmail stand-in, c) ======================

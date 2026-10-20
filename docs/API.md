@@ -136,12 +136,12 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/gobo-sizes/check` | POST | labels or sizes | `_guard` |  |  | `copilot.gobo_check_route` | What a label prints for a fixture named in free text, for the Size list's search. |
-| `/api/gobo-sizes/list` | POST | labels or sizes | `_guard` | reads its own body |  | `copilot.gobo_list_route` | The whole sheet with the rulings over it, for the Size list tab. |
-| `/api/gobo-sizes/models` | POST | labels or sizes | `_guard` |  |  | `copilot.gobo_models_route` | Models already on the sheet, for the picker behind 'this is another name for'. |
-| `/api/gobo-sizes/rule` | POST | labels or sizes | `_guard` | reads its own body |  | `copilot.gobo_rule_route` | Resolve one flagged model, from inside the app. |
-| `/api/gobo-sizes/rules` | POST | labels or sizes | `_guard` | reads its own body |  | `copilot.gobo_rules_route` | The merchant's standing rulings on models, and whether this person may change them. |
-| `/api/gobo-sizes/upload` | POST | labels or sizes | `_guard` | max body big, reads its own body | `_team_level` | `copilot.gobo_sizes_upload_route` | Self-serve size sheet update: validate the CSV hard, keep a .bak of the previous sheet, and report the before/after so a bad file can't quietly wipe the size... |
+| `/api/gobo-sizes/check` | POST | labels or sizes | `_guard` |  |  | `gizmo.routes.size_list.gobo_check_route` | What a label prints for a fixture named in free text, for the Size list's search. |
+| `/api/gobo-sizes/list` | POST | labels or sizes | `_guard` | reads its own body |  | `gizmo.routes.size_list.gobo_list_route` | The whole sheet with the rulings over it, for the Size list tab. |
+| `/api/gobo-sizes/models` | POST | labels or sizes | `_guard` |  |  | `gizmo.routes.size_list.gobo_models_route` | Models already on the sheet, for the picker behind 'this is another name for'. |
+| `/api/gobo-sizes/rule` | POST | labels or sizes | `_guard` | reads its own body |  | `gizmo.routes.size_list.gobo_rule_route` | Resolve one flagged model, from inside the app. |
+| `/api/gobo-sizes/rules` | POST | labels or sizes | `_guard` | reads its own body |  | `gizmo.routes.size_list.gobo_rules_route` | The merchant's standing rulings on models, and whether this person may change them. |
+| `/api/gobo-sizes/upload` | POST | labels or sizes | `_guard` | max body big, reads its own body | `_team_level` | `gizmo.routes.size_list.gobo_sizes_upload_route` | Self-serve size sheet update: validate the CSV hard, keep a .bak of the previous sheet, and report the before/after so a bad file can't quietly wipe the size... |
 
 ## `/api/impact`
 
@@ -185,7 +185,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/loans` | POST | loans | `_guard` |  | `_team_level` | `copilot.loans_route` | Loan projectors: the register of what the shop owns, and where each one is. |
+| `/api/loans` | POST | loans | `_guard` |  | `_team_level` | `gizmo.routes.loans.loans_route` | Loan projectors: the register of what the shop owns, and where each one is. |
 
 ## `/api/mail`
 
@@ -232,7 +232,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/order/edit` | POST | labels | `_guard` | reads its own body | `_live_uid`, `_team_level` | `copilot.order_edit_route` | Read or change the delivery address and contact details on a placed order. |
+| `/api/order/edit` | POST | labels | `_guard` | reads its own body | `_live_uid`, `_team_level` | `gizmo.routes.orderbook.order_edit_route` | Read or change the delivery address and contact details on a placed order. |
 
 ## `/api/overview`
 
@@ -244,7 +244,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/privacy` | POST | any account | `_guard` | rank admin |  | `copilot.privacy_requests_route` | Settings, Privacy requests: the customer erasures Shopify asked for, each waiting for an admin to erase or stop (see _redact_hold), and the data requests to ... |
+| `/api/privacy` | POST | any account | `_guard` | rank admin |  | `gizmo.routes.privacy.privacy_requests_route` | Settings, Privacy requests: the customer erasures Shopify asked for, each waiting for an admin to erase or stop (see _redact_hold), and the data requests to ... |
 
 ## `/api/product`
 
@@ -256,16 +256,16 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/production-labels` | POST | labels | `_guard` |  |  | `copilot.production_labels_route` |  |
-| `/api/production-labels/coverage` | POST | labels | `_guard` |  |  | `copilot.labels_coverage_route` |  |
-| `/api/production-labels/missing` | POST | labels | `_guard` |  |  | `copilot.labels_missing_route` |  |
-| `/api/production-labels/queue` | POST | labels | `_guard` |  |  | `copilot.labels_queue_route` |  |
+| `/api/production-labels` | POST | labels | `_guard` |  |  | `gizmo.routes.production.production_labels_route` |  |
+| `/api/production-labels/coverage` | POST | labels | `_guard` |  |  | `gizmo.routes.production.labels_coverage_route` |  |
+| `/api/production-labels/missing` | POST | labels | `_guard` |  |  | `gizmo.routes.production.labels_missing_route` |  |
+| `/api/production-labels/queue` | POST | labels | `_guard` |  |  | `gizmo.routes.production.labels_queue_route` |  |
 
 ## `/api/production-state`
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/production-state` | POST | labels | `_guard` |  |  | `copilot.production_state_route` |  |
+| `/api/production-state` | POST | labels | `_guard` |  |  | `gizmo.routes.production.production_state_route` |  |
 
 ## `/api/products`
 
@@ -366,11 +366,11 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/work/board` | POST | any account | `_team_guard` | rank admin |  | `copilot.work_board_route` |  |
-| `/api/work/clock` | POST | any account | `_guard` |  |  | `copilot.work_clock_route` |  |
-| `/api/work/report` | POST | any account | `_team_guard` | rank admin |  | `copilot.work_report_route` |  |
-| `/api/work/resolve` | POST | any account | `_team_guard` | rank admin |  | `copilot.work_resolve_route` |  |
-| `/api/work/status` | POST | any account | `_guard` | reads its own body |  | `copilot.work_status_route` |  |
+| `/api/work/board` | POST | any account | `_team_guard` | rank admin |  | `gizmo.routes.work.work_board_route` |  |
+| `/api/work/clock` | POST | any account | `_guard` |  |  | `gizmo.routes.work.work_clock_route` |  |
+| `/api/work/report` | POST | any account | `_team_guard` | rank admin |  | `gizmo.routes.work.work_report_route` |  |
+| `/api/work/resolve` | POST | any account | `_team_guard` | rank admin |  | `gizmo.routes.work.work_resolve_route` |  |
+| `/api/work/status` | POST | any account | `_guard` | reads its own body |  | `gizmo.routes.work.work_status_route` |  |
 
 ## `/assets`
 
@@ -438,5 +438,5 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/webhooks/orders` | POST | outside the tab map | own check |  |  | `copilot.order_webhook` | Shopify's order events. |
-| `/webhooks/privacy` | POST | outside the tab map | own check |  |  | `copilot.privacy_webhook` | Shopify's three mandatory compliance topics, on one receiver. |
+| `/webhooks/orders` | POST | outside the tab map | own check |  |  | `gizmo.routes.orderbook.order_webhook` | Shopify's order events. |
+| `/webhooks/privacy` | POST | outside the tab map | own check |  |  | `gizmo.routes.privacy.privacy_webhook` | Shopify's three mandatory compliance topics, on one receiver. |

@@ -69,8 +69,11 @@ the activity log (`gizmo/activity.py`), the order book
 `t_the_printed_labels_do_not_change`), the Size list
 (`gizmo/size_list.py`), the CRM (`gizmo/crm.py`, read as `salesdesk`) and the
 shared inbox (`gizmo/mail.py`), Files (`gizmo/files.py`, read as
-`fileserver`) and the Finder drive (`gizmo/webdav.py`), each with its routes
-in `gizmo/routes/`. They read each other through the
+`fileserver`), the Finder drive (`gizmo/webdav.py`), customer-data erasure
+(`gizmo/privacy.py`), the loan register (`gizmo/loans.py`) and work sessions
+(`gizmo/work.py`), each with its routes in `gizmo/routes/` (production's, the
+Size list's and the order book's too; the printed-label routes stay in
+`add_routes`, their bytes pinned). They read each other through the
 module's name and `copilot.py` as `core.NAME`, and import `copilot` last.
 `copilot.py` reads them the same way, except names it takes by their own:
 the ones the frozen print route reads, and `_guard` and `_json`, the door
@@ -220,7 +223,8 @@ can leave a test testing nothing. The guards below make that a failure, and
    its route groups; see `tools/moves/README.md`), run the tool without
    `--write` and settle in the description whatever it reports (a name the
    prefix missed shows in what the area borrows; an alias that is a local
-   somewhere stops it), then `--write`. What it does: cut statements whole, keeping their text and order,
+   somewhere stops it), then `--write`. A description with no areas moves
+   only routes, for an area that moved earlier. What it does: cut statements whole, keeping their text and order,
    into `gizmo/<area>.py`, and the routes into `gizmo/routes/<area>.py`
    inside `register(mcp, registry)`, which `add_routes` calls where the
    area's first route stood. Routes scattered through the table may be

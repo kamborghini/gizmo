@@ -612,7 +612,7 @@ def _files_tick() -> None:
         except Exception:
             logger.warning("mail: the attachment sweep did not finish; next tick retries")
         try:
-            core._redact_archive_reap()
+            privacy._redact_archive_reap()
         except Exception:
             logger.warning("privacy: the pre-redact archive sweep did not finish")
 _FILES_STORE_FAIL = ("The change could not be saved. The data volume may be "
@@ -646,3 +646,4 @@ from gizmo import mail  # noqa: E402
 from gizmo import team  # noqa: E402
 from gizmo import webdav  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import privacy  # noqa: E402

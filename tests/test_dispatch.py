@@ -139,6 +139,9 @@ from gizmo import orderbook, production, shopify, size_list
 from gizmo import crm as salesdesk, mail
 from gizmo import files as fileserver
 from gizmo import webdav
+from gizmo import privacy
+from gizmo import loans
+from gizmo import work
 import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
@@ -5390,7 +5393,7 @@ def redact_through_the_hold(raw, delivery):
                     headers=wh_headers(raw, topic="customers/redact", delivery=delivery))
     eq(r.status_code, 200, r.text)
     addr = str(json.loads(raw)["customer"]["email"]).strip().lower()
-    h = [x for x in copilot._held_requests() if x["email"] == addr]
+    h = [x for x in privacy._held_requests() if x["email"] == addr]
     ok(h, "it is held for an admin, not erased on arrival")
     ensure_auth()
     shown = [x for x in post("/api/privacy", {}).json()["held"] if x["id"] == h[0]["id"]][0]
@@ -5506,7 +5509,7 @@ def t_a_data_request_is_recorded_rather_than_answered_automatically():
     r = client.post("/webhooks/privacy", content=raw,
                     headers=wh_headers(raw, topic="customers/data_request", delivery="pr5"))
     eq(r.status_code, 200, r.text)
-    log = copilot._load_privacy_log()
+    log = privacy._load_privacy_log()
     ok(any(e.get("topic") == "customers/data_request"
            and e.get("email") == "asks@example.com" for e in log.get("events", [])),
        "the request is on the ledger with who asked")
@@ -7550,12 +7553,12 @@ def with_accounts(fn):
     def wipe():
         team._users_mem = None
         team._sessions_mem = None
-        copilot._work_mem = None
+        work._work_mem = None
         activity._events_mem = None
         activity._events_dirty = False
         APP_AUTH["session"] = APP_AUTH["master"] = ""
         for p in (team.USERS_PATH, team.SESSIONS_PATH, activity.ACTIVITY_PATH,
-                  copilot.WORK_PATH):
+                  work.WORK_PATH):
             try:
                 os.remove(p)
             except FileNotFoundError:
@@ -8242,9 +8245,9 @@ def t_work_the_clock_is_the_servers_and_only_for_parttime():
         activity._track("", "production", "marked made", "#hook")
         # Backdate the open session so it reads as a real shift: a sub-minute
         # clock cycle is a mis-tap and is deliberately not recorded.
-        _w = copilot._load_work()
+        _w = work._load_work()
         _w["open"][pt]["start"] = "2026-08-01T09:00:00+00:00"
-        copilot._write_work(_w)
+        work._write_work(_w)
         eq(post_s(sess, "/api/work/clock", {"op": "out"}).status_code, 200)
         eq(post_s(sess, "/api/work/clock", {"op": "out"}).status_code, 400,
            "no clock-out when not clocked in")
@@ -8297,9 +8300,9 @@ def t_work_resolve_is_a_recorded_correction_and_reports_add_up():
         ok(any(e["action"] == "resolved a work session" for e in ev), "and is on the ledger")
         s2 = login("poppy", pw).json()["session"]
         post_s(s2, "/api/work/clock", {"op": "in"})
-        _w = copilot._load_work()          # a real shift, not a sub-minute mis-tap
+        _w = work._load_work()          # a real shift, not a sub-minute mis-tap
         _w["open"][pt]["start"] = "2026-08-01T09:00:00+00:00"
-        copilot._write_work(_w)
+        work._write_work(_w)
         post_s(s2, "/api/work/clock", {"op": "out"})
         rep = post("/api/work/report", {"uid": pt}).json()
         eq(rep["count"], 2, "both sessions in the report")
@@ -11788,12 +11791,12 @@ def t_a_sub_minute_clock_cycle_cannot_flush_the_payroll_log():
     def go():
         ensure_auth()
         pt, sess, _pw = ready_user("Flick", "flick", role="parttime")
-        before = len(copilot._load_work()["sessions"])
+        before = len(work._load_work()["sessions"])
         for _ in range(3):
             post_s(sess, "/api/work/clock", {"op": "in"})
             r = post_s(sess, "/api/work/clock", {"op": "out"}).json()
             ok(r.get("dropped"), "a sub-minute cycle is not recorded: " + str(r))
-        eq(len(copilot._load_work()["sessions"]), before,
+        eq(len(work._load_work()["sessions"]), before,
            "so the fixed-size work log cannot be evicted by clocking in and out")
     with_accounts(go)
 
@@ -12046,7 +12049,7 @@ def t_status_and_payroll_export_are_locked_down():
         eq(post("/api/status", {}).status_code, 200, "the master can")
     with_accounts(go)
     # The payroll CSV armours a formula-triggering name.
-    ok(callable(getattr(copilot, "_load_work", None)))
+    ok(callable(getattr(work, "_load_work", None)))
 
 @test
 def t_bulk_delete_clears_sample_contacts_but_never_live_pipeline():
@@ -14950,7 +14953,7 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
                            headers=wh_headers(raw, topic="shop/redact", delivery=delivery))
 
     def owed():
-        return copilot._load_privacy_log().get("shop_owed")
+        return privacy._load_privacy_log().get("shop_owed")
 
     def down(hours):
         w = copilot._load_watch()
@@ -14976,7 +14979,7 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
         for k in range(20):
             redact("rc1-flood-%d" % k)
         eq(len(mails()), 1, "twenty more forgeries: not twenty more emails")
-        eq(sum(1 for e in copilot._load_privacy_log()["events"] if e.get("detail", "").startswith("refused")), 1,
+        eq(sum(1 for e in privacy._load_privacy_log()["events"] if e.get("detail", "").startswith("refused")), 1,
            "nor twenty more privacy records")
         # Cannot tell: owed, and tried again every hour.
         verdict["v"] = "unknown"
@@ -15013,7 +15016,7 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
         ok(not os.path.isfile(salesdesk.CRM_PATH), "a confirmed uninstall with an archive erases")
         eq(owed(), None, "and nothing is owed")
         ok(any(e.get("topic") == "shop/redact" and "erased" in e.get("detail", "")
-               for e in copilot._load_privacy_log()["events"]), "and says so")
+               for e in privacy._load_privacy_log()["events"]), "and says so")
         eq(run(copilot._shop_redact_retry(None)), None, "nothing owed, nothing tried")
         # No way to ask Shopify is no confirmation; a broken watch record is
         # not an erasure either.
@@ -15034,16 +15037,16 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
         copilot._shop_owed_set(None)
         copilot._save_watch({})
         verdict["v"] = "unknown"
-        good = open(copilot.PRIVACY_LOG_PATH, "rb").read()
-        open(copilot.PRIVACY_LOG_PATH, "w").write("{not json")     # a log that no longer parses
+        good = open(privacy.PRIVACY_LOG_PATH, "rb").read()
+        open(privacy.PRIVACY_LOG_PATH, "w").write("{not json")     # a log that no longer parses
         jsonstore._json_cache.clear()
         try:
             eq(redact("rc1-f").status_code, 503, "not recorded: Shopify is asked to send it again")
             ok("rc1-f" not in orderbook._webhook_seen, "and the retry is not taken for a duplicate")
         finally:
-            open(copilot.PRIVACY_LOG_PATH, "wb").write(good)
+            open(privacy.PRIVACY_LOG_PATH, "wb").write(good)
             jsonstore._json_cache.clear()
-            jsonstore._poisoned_stores.discard(copilot.PRIVACY_LOG_PATH)
+            jsonstore._poisoned_stores.discard(privacy.PRIVACY_LOG_PATH)
     finally:
         shopify._install_checker, copilot._spawn_bg, copilot._build_backup_zip = saved
         orderbook._webhook_seen.clear()
@@ -15479,34 +15482,34 @@ def t_restoring_the_pre_redact_archive_does_not_erase_again():
         old = (datetime.now(timezone.utc) - timedelta(hours=46)).isoformat()
         copilot._shop_owed_set({"since": old, "tries": 0})
         w = copilot._load_watch(); w["shopify_down"] = old; copilot._save_watch(w)
-        copilot._redact_hold_write(lambda hs: [{"id": "hbefore", "email": "before@example.com", "received": old}])
+        privacy._redact_hold_write(lambda hs: [{"id": "hbefore", "email": "before@example.com", "received": old}])
         buf, _added = copilot._build_backup_zip()
         blob = b64.b64encode(buf.getvalue()).decode()
         copilot._shop_owed_set(None)                     # settled since
         w = copilot._load_watch(); w.pop("shopify_down", None); copilot._save_watch(w)
         # Since the backup: the waiting one was stopped (as any settlement is,
         # with a decision recorded), and a new one arrived.
-        copilot._privacy_decision("before@example.com", "", "stopped", "Ada")
-        copilot._redact_hold_write(lambda hs: [{"id": "hafter", "email": "after@example.com", "received": old}])
+        privacy._privacy_decision("before@example.com", "", "stopped", "Ada")
+        privacy._redact_hold_write(lambda hs: [{"id": "hafter", "email": "after@example.com", "received": old}])
         r = post("/api/restore", {"zip": blob})
         eq(r.status_code, 200, r.text[:200])
-        eq(copilot._load_privacy_log().get("shop_owed"), None, "nothing owed comes back with the archive")
+        eq(privacy._load_privacy_log().get("shop_owed"), None, "nothing owed comes back with the archive")
         eq(copilot._load_watch().get("shopify_down"), None, "nor the old outage")
-        eq([h["id"] for h in copilot._held_requests()], ["hafter"],
+        eq([h["id"] for h in privacy._held_requests()], ["hafter"],
            "the customer erasures waiting now stay, and a settled one does not come back")
-        copilot._redact_hold_write(lambda hs: [])
+        privacy._redact_hold_write(lambda hs: [])
         # Evidence since the backup is kept, a data request since it stays,
         # and an erasure confirmed since it is owed again.
         li = login("cameron", MASTER_PW)
         APP_AUTH["session"], APP_AUTH["master"] = li.json()["session"], li.json()["me"]["id"]
         buf, _added = copilot._build_backup_zip()
         blob = b64.b64encode(buf.getvalue()).decode()
-        copilot._privacy_note("customers/redact", "gone.since@example.com", "", "erased: confirmed by Ada")
-        copilot._privacy_decision("gone.since@example.com", "", "erased", "Ada")
+        privacy._privacy_note("customers/redact", "gone.since@example.com", "", "erased: confirmed by Ada")
+        privacy._privacy_decision("gone.since@example.com", "", "erased", "Ada")
         copilot._ask_hold("asked.since@example.com", "")
         r = post("/api/restore", {"zip": blob})
         eq(r.status_code, 200, r.text[:200])
-        pl = copilot._load_privacy_log()
+        pl = privacy._load_privacy_log()
         ok(any(e.get("email") == "gone.since@example.com" for e in pl["events"]), "the event since is kept")
         ok(any(a.get("email") == "asked.since@example.com" for a in pl.get("asks") or []), "the data request stays")
         ok(any(p.get("email") == "gone.since@example.com" for p in pl.get("pending") or []),
@@ -15514,41 +15517,41 @@ def t_restoring_the_pre_redact_archive_does_not_erase_again():
         li = login("cameron", MASTER_PW)
         APP_AUTH["session"], APP_AUTH["master"] = li.json()["session"], li.json()["me"]["id"]
         # Onto a fresh volume (no live log at all), the backup's waiting requests stay.
-        copilot._redact_hold_write(lambda hs: [{"id": "hfresh", "email": "fresh@example.com", "received": old}])
+        privacy._redact_hold_write(lambda hs: [{"id": "hfresh", "email": "fresh@example.com", "received": old}])
         buf, _added = copilot._build_backup_zip()
         blob = b64.b64encode(buf.getvalue()).decode()
-        os.remove(copilot.PRIVACY_LOG_PATH)
+        os.remove(privacy.PRIVACY_LOG_PATH)
         jsonstore._json_cache.clear()
         r = post("/api/restore", {"zip": blob})
         eq(r.status_code, 200, r.text[:200])
-        eq([h["id"] for h in copilot._held_requests()], ["hfresh"], "nothing waiting is wiped by an empty live log")
+        eq([h["id"] for h in privacy._held_requests()], ["hfresh"], "nothing waiting is wiped by an empty live log")
         li = login("cameron", MASTER_PW)
         APP_AUTH["session"], APP_AUTH["master"] = li.json()["session"], li.json()["me"]["id"]
         # An erasure confirmed BEFORE the backup was built is not owed again.
         for k in ("pending", "decisions"):
-            copilot._redact_hold_write(lambda xs: [], key=k)
-        copilot._privacy_decision("before.backup@example.com", "", "erased", "Ada")
+            privacy._redact_hold_write(lambda xs: [], key=k)
+        privacy._privacy_decision("before.backup@example.com", "", "erased", "Ada")
         buf, _added = copilot._build_backup_zip()
         blob = b64.b64encode(buf.getvalue()).decode()
         r = post("/api/restore", {"zip": blob})
         eq(r.status_code, 200, r.text[:200])
-        ok(not any(p.get("email") == "before.backup@example.com" for p in copilot._load_privacy_log().get("pending") or []),
+        ok(not any(p.get("email") == "before.backup@example.com" for p in privacy._load_privacy_log().get("pending") or []),
            "an erasure the backup already reflects is not run again")
         li = login("cameron", MASTER_PW)
         APP_AUTH["session"], APP_AUTH["master"] = li.json()["session"], li.json()["me"]["id"]
-        copilot._redact_hold_write(lambda hs: [])
+        privacy._redact_hold_write(lambda hs: [])
         # An unreadable live log is what the restore repairs: the backup's lists stay.
-        copilot._redact_hold_write(lambda hs: [{"id": "hin", "email": "in.backup@example.com", "received": old}])
+        privacy._redact_hold_write(lambda hs: [{"id": "hin", "email": "in.backup@example.com", "received": old}])
         buf, _added = copilot._build_backup_zip()
         blob = b64.b64encode(buf.getvalue()).decode()
-        open(copilot.PRIVACY_LOG_PATH, "w").write("{not json")
+        open(privacy.PRIVACY_LOG_PATH, "w").write("{not json")
         jsonstore._json_cache.clear()
         r = post("/api/restore", {"zip": blob})
         eq(r.status_code, 200, r.text[:200])
-        eq([h["id"] for h in copilot._held_requests()], ["hin"], "the backup's waiting request is not wiped")
-        copilot._redact_hold_write(lambda hs: [])
+        eq([h["id"] for h in privacy._held_requests()], ["hin"], "the backup's waiting request is not wiped")
+        privacy._redact_hold_write(lambda hs: [])
         for k in ("asks", "decisions", "pending"):
-            copilot._redact_hold_write(lambda xs: [], key=k)
+            privacy._redact_hold_write(lambda xs: [], key=k)
         li = login("cameron", MASTER_PW)
         APP_AUTH["session"], APP_AUTH["master"] = li.json()["session"], li.json()["me"]["id"]
     with_accounts(go)
@@ -15597,10 +15600,10 @@ def t_a_signed_customer_redact_waits_for_an_admin():
     async def checker(cid, email):
         return "live" if email in live_for["addrs"] else ("unknown" if email == "unsure@example.com" else "gone")
     copilot._spawn_bg, shopify._customer_checker, copilot._send_alert_email = spawn, checker, send
-    copilot._redact_hold_said.clear()
+    privacy._redact_hold_said.clear()
 
     def held():
-        return copilot._held_requests()
+        return privacy._held_requests()
 
     def ask(email, cid, delivery):
         raw = json.dumps({"customer": {"id": cid, "email": email},
@@ -15618,7 +15621,7 @@ def t_a_signed_customer_redact_waits_for_an_admin():
     def go():
         ensure_auth()
         for k in ("held", "stopped", "asks", "decisions"):
-            copilot._redact_hold_write(lambda xs: [], key=k)
+            privacy._redact_hold_write(lambda xs: [], key=k)
         jsonstore._write_json_store(copilot.ALERTS_PATH, None, [])
         _a, msess, _p = ready_user("Mo Member", "mo_priv", role="member")
         _b, asess, _q = ready_user("Ada Admin", "ada_priv", role="admin")
@@ -15635,9 +15638,9 @@ def t_a_signed_customer_redact_waits_for_an_admin():
         ok(still_there("forged@example.com"), "nothing is erased on the signature alone")
         eq([h["email"] for h in held()], ["forged@example.com"], "it waits for an admin")
         eq(sum(1 for n, _ in spawned if n == "_redact_hold_check"), 1, "Shopify is asked about the customer")
-        ok(any(a.get("metric") == copilot._PRIVACY_ALERT for a in copilot._load_alerts() if isinstance(a, dict)),
+        ok(any(a.get("metric") == privacy._PRIVACY_ALERT for a in copilot._load_alerts() if isinstance(a, dict)),
            "the app says so")
-        ra(copilot._redact_hold_check(held()[0]["id"]))
+        ra(privacy._redact_hold_check(held()[0]["id"]))
         eq(held()[0]["shopify"], "gone", "what Shopify said is kept for the admin")
         ok(mails() and "waiting" in mails()[-1]["subject"], mails())
         ok(not any("forged@example.com" in l for l in mails()[-1]["lines"]), "and the email names nobody")
@@ -15647,8 +15650,8 @@ def t_a_signed_customer_redact_waits_for_an_admin():
         eq(sum(1 for n, _ in spawned if n == "_redact_hold_check"), 1, "and is not checked again for it")
         # Nothing erases it but an admin, however long it waits.
         old = (datetime.now(timezone.utc) - timedelta(days=29)).isoformat()
-        copilot._redact_hold_write(lambda hs: [{**h, "received": old} for h in hs])
-        ra(copilot._redact_hold_due())
+        privacy._redact_hold_write(lambda hs: [{**h, "received": old} for h in hs])
+        ra(privacy._redact_hold_due())
         ok(still_there("forged@example.com"), "twenty-nine days on, still there")
         # Only an admin sees or settles them.
         eq(post_s(msess, "/api/privacy", {}).status_code, 403, "a member cannot")
@@ -15663,7 +15666,7 @@ def t_a_signed_customer_redact_waits_for_an_admin():
         ok(any("stopped" in a["subject"] for a in mails()), mails())
         eq(post_s(asess, "/api/privacy", {"op": "stop", "id": lst["held"][0]["id"]}).status_code, 404,
            "a second admin acting on it finds it gone")
-        ok(any(x.get("action") == "stopped" for x in copilot._load_privacy_log().get("decisions") or []),
+        ok(any(x.get("action") == "stopped" for x in privacy._load_privacy_log().get("decisions") or []),
            "the decision is kept apart from the event log")
         ask("forged@example.com", 991, "cr-1c")
         lst = post_s(asess, "/api/privacy", {}).json()
@@ -15672,7 +15675,7 @@ def t_a_signed_customer_redact_waits_for_an_admin():
         # The advice covers every address the erasure would take.
         live_for["addrs"] = {"val@example.com"}
         ask("val.old@example.com", 0, "cr-v")
-        ra(copilot._redact_hold_check(held()[0]["id"]))
+        ra(privacy._redact_hold_check(held()[0]["id"]))
         eq(held()[0]["shopify"], "live", "Shopify still has the contact's other address: said")
         post_s(asess, "/api/privacy", {"op": "stop", "id": held()[0]["id"]})
         # How far it reaches is worked out when shown, and checked at the click.
@@ -15696,41 +15699,41 @@ def t_a_signed_customer_redact_waits_for_an_admin():
         eq((r.status_code, r.json()["notice"]), (200, "Erased."), r.text[:200])
         ok(not still_there("real@example.com") and not still_there("rae3@example.com"),
            "exactly what was shown went")
-        ok(any(x.get("action") == "erased" for x in copilot._load_privacy_log().get("decisions") or []))
+        ok(any(x.get("action") == "erased" for x in privacy._load_privacy_log().get("decisions") or []))
         # Shopify cannot be asked: the last answer stands; not asked while it is down.
         ask("unsure@example.com", 993, "cr-3")
         hid = held()[0]["id"]
-        copilot._redact_hold_set(hid, shopify="gone", checked_at="2026-09-01T00:00:00+00:00")
-        ra(copilot._redact_hold_due())
+        privacy._redact_hold_set(hid, shopify="gone", checked_at="2026-09-01T00:00:00+00:00")
+        ra(privacy._redact_hold_due())
         eq(held()[0]["shopify"], "gone", "a failed check keeps the last answer")
         calls = []
         async def counting(cid, email):
             calls.append(email)
             return "gone"
         shopify._customer_checker = counting
-        ra(copilot._redact_hold_due(check=False))
+        ra(privacy._redact_hold_due(check=False))
         eq(calls, [], "Shopify is not asked while it is down")
         shopify._customer_checker = checker
         # Reminded as the thirty days run out, once a day, in the app too.
-        copilot._redact_hold_write(lambda hs: [{**x, "received": (datetime.now(timezone.utc) - timedelta(days=22)).isoformat()} for x in hs])
-        copilot._redact_hold_said.clear()
+        privacy._redact_hold_write(lambda hs: [{**x, "received": (datetime.now(timezone.utc) - timedelta(days=22)).isoformat()} for x in hs])
+        privacy._redact_hold_said.clear()
         jsonstore._write_json_store(copilot.ALERTS_PATH, None, [])     # dismissed by someone
         spawned.clear()
-        ra(copilot._redact_hold_due())
-        ra(copilot._redact_hold_due())
+        ra(privacy._redact_hold_due())
+        ra(privacy._redact_hold_due())
         eq(sum(1 for a in mails() if "still waiting" in a["subject"]), 1, "a reminder, once a day")
-        ok(any(a.get("metric") == copilot._PRIVACY_ALERT for a in copilot._load_alerts() if isinstance(a, dict)),
+        ok(any(a.get("metric") == privacy._PRIVACY_ALERT for a in copilot._load_alerts() if isinstance(a, dict)),
            "and the notice is back in the app")
         # An email that did not go is not counted as gone.
         post_s(asess, "/api/privacy", {"op": "stop", "id": held()[0]["id"]})
         sent_mail["ok"] = False
-        copilot._redact_hold_said.clear()
+        privacy._redact_hold_said.clear()
         ask("nomail@example.com", 994, "cr-4")
-        ra(copilot._redact_hold_check(held()[0]["id"]))
+        ra(privacy._redact_hold_check(held()[0]["id"]))
         eq(held()[0]["mailed"], False, "no email configured: still to be mailed")
         sent_mail["ok"] = True
-        copilot._redact_hold_said.clear()
-        ra(copilot._redact_hold_due())
+        privacy._redact_hold_said.clear()
+        ra(privacy._redact_hold_due())
         eq(held()[0]["mailed"], True, "and it goes the next hour")
         post_s(asess, "/api/privacy", {"op": "stop", "id": held()[0]["id"]})
         # The CRM unreadable: its reach is not known, so it is not erased.
@@ -15744,8 +15747,8 @@ def t_a_signed_customer_redact_waits_for_an_admin():
             jsonstore._poisoned_stores.discard(salesdesk.CRM_PATH)
         post_s(asess, "/api/privacy", {"op": "stop", "id": held()[0]["id"]})
         # A request that cannot be recorded is sent back, and the master told.
-        good = open(copilot.PRIVACY_LOG_PATH, "rb").read()
-        open(copilot.PRIVACY_LOG_PATH, "w").write("{not json")
+        good = open(privacy.PRIVACY_LOG_PATH, "rb").read()
+        open(privacy.PRIVACY_LOG_PATH, "w").write("{not json")
         jsonstore._json_cache.clear()
         spawned.clear()
         try:
@@ -15753,31 +15756,31 @@ def t_a_signed_customer_redact_waits_for_an_admin():
             ok("cr-6" not in orderbook._webhook_seen, "and the retry is not taken for a duplicate")
             ok(any("could not record" in a["subject"] for a in mails()), mails())
         finally:
-            open(copilot.PRIVACY_LOG_PATH, "wb").write(good)
+            open(privacy.PRIVACY_LOG_PATH, "wb").write(good)
             jsonstore._json_cache.clear()
-            jsonstore._poisoned_stores.discard(copilot.PRIVACY_LOG_PATH)
+            jsonstore._poisoned_stores.discard(privacy.PRIVACY_LOG_PATH)
         # A log whose events are broken keeps what waits.
         ask("kept@example.com", 997, "cr-7")
-        pl = copilot._load_privacy_log()
+        pl = privacy._load_privacy_log()
         pl["events"] = "broken"
-        jsonstore._write_json_store(copilot.PRIVACY_LOG_PATH, None, pl)
-        ok(copilot._held_requests(), "the waiting requests survive a broken event list")
+        jsonstore._write_json_store(privacy.PRIVACY_LOG_PATH, None, pl)
+        ok(privacy._held_requests(), "the waiting requests survive a broken event list")
         # A flood past the cap is sent back, and noted.
-        cap = copilot.REDACT_HELD_MAX
-        copilot.REDACT_HELD_MAX = len(held())
+        cap = privacy.REDACT_HELD_MAX
+        privacy.REDACT_HELD_MAX = len(held())
         try:
             eq(ask("one-too-many@example.com", 998, "cr-8").status_code, 503, "past the cap: sent back")
             ok(any(e.get("email") == "one-too-many@example.com" and "not held" in e.get("detail", "")
-                   for e in copilot._load_privacy_log()["events"]), "and noted")
+                   for e in privacy._load_privacy_log()["events"]), "and noted")
         finally:
-            copilot.REDACT_HELD_MAX = cap
+            privacy.REDACT_HELD_MAX = cap
         # Data requests: their own list, until answered, however old.
         raw = json.dumps({"customer": {"id": 777, "email": "asks@example.com"}}).encode()
         client.post("/webhooks/privacy", content=raw,
                     headers=wh_headers(raw, topic="customers/data_request", delivery="cr-dr"))
         while queued:
             run_async(queued.pop(0))
-        copilot._redact_hold_write(lambda xs: [{**a, "received": (datetime.now(timezone.utc) - timedelta(days=61)).isoformat()}
+        privacy._redact_hold_write(lambda xs: [{**a, "received": (datetime.now(timezone.utc) - timedelta(days=61)).isoformat()}
                                                for a in xs], key="asks")
         asks = post_s(asess, "/api/privacy", {}).json()["data_requests"]
         mine = [a for a in asks if a["email"] == "asks@example.com"]
@@ -15787,19 +15790,19 @@ def t_a_signed_customer_redact_waits_for_an_admin():
         # A long list: the oldest shown, the rest counted; Stop all settles a flood.
         for k in range(3):
             ask("flood%d@example.com" % k, 1100 + k, "cr-fl%d" % k)
-        lim = copilot.REDACT_LIST_MAX
-        copilot.REDACT_LIST_MAX = 2
+        lim = privacy.REDACT_LIST_MAX
+        privacy.REDACT_LIST_MAX = 2
         try:
             lst = post_s(asess, "/api/privacy", {}).json()
             eq((len(lst["held"]), lst["held_more"]), (2, len(held()) - 2), "shown in part, the rest counted")
         finally:
-            copilot.REDACT_LIST_MAX = lim
+            privacy.REDACT_LIST_MAX = lim
         r = post_s(asess, "/api/privacy", {"op": "stop_all"}).json()
         eq(r["held"], [], "every one stopped")
         ok(r["notice"].startswith("Stopped ") and "Nothing was erased" in r["notice"], r["notice"])
         # Data requests past their cap: the newest is sent back, no older one dropped.
-        cap = copilot.REDACT_ASKS_MAX
-        copilot.REDACT_ASKS_MAX = len(copilot._open_asks()) + 1
+        cap = privacy.REDACT_ASKS_MAX
+        privacy.REDACT_ASKS_MAX = len(privacy._open_asks()) + 1
         try:
             for k, dl in ((1, 200), (2, 503)):
                 raw = json.dumps({"customer": {"id": 800 + k, "email": "ask%d@example.com" % k}}).encode()
@@ -15807,21 +15810,21 @@ def t_a_signed_customer_redact_waits_for_an_admin():
                                headers=wh_headers(raw, topic="customers/data_request", delivery="cr-da%d" % k)).status_code,
                    dl, "past the cap, the newest is refused")
         finally:
-            copilot.REDACT_ASKS_MAX = cap
+            privacy.REDACT_ASKS_MAX = cap
         # Damaged records do not lose a request or break the list.
-        copilot._redact_hold_write(lambda xs: [{"id": "tz", "email": "naive@example.com",
+        privacy._redact_hold_write(lambda xs: [{"id": "tz", "email": "naive@example.com",
                                                 "received": "2026-09-01T10:00:00"}])
         eq(post_s(asess, "/api/privacy", {}).status_code, 200, "a date with no timezone")
-        pl = copilot._load_privacy_log()
+        pl = privacy._load_privacy_log()
         pl["held"], pl["stopped"] = {"not": "a list"}, 7
-        jsonstore._write_json_store(copilot.PRIVACY_LOG_PATH, None, pl)
+        jsonstore._write_json_store(privacy.PRIVACY_LOG_PATH, None, pl)
         eq(ask("damaged@example.com", 1200, "cr-dm").status_code, 200)
         eq([h["email"] for h in held()], ["damaged@example.com"], "damaged lists are replaced, the request kept")
         # The hourly tick runs it first, before anything that can fail.
         src = copilot_source()
         tick = src.split("async def _watchdog_tick", 1)[1]
-        ok(tick.index("await _redact_hold_due(check=up)") < tick.index("run_label_coverage")
-           and tick.index("_redact_retry_pending()") < tick.index("run_label_coverage"),
+        ok(tick.index("await privacy._redact_hold_due(check=up)") < tick.index("run_label_coverage")
+           and tick.index("privacy._redact_retry_pending()") < tick.index("run_label_coverage"),
            "before the size-list check, which failed every hour once")
     try:
         with_accounts(go)
@@ -15830,8 +15833,8 @@ def t_a_signed_customer_redact_waits_for_an_admin():
             c.close()
         shopify._customer_checker, copilot._spawn_bg, copilot._send_alert_email = saved
         for k in ("held", "stopped", "asks"):
-            copilot._redact_hold_write(lambda xs: [], key=k)
-        copilot._redact_hold_said.clear()
+            privacy._redact_hold_write(lambda xs: [], key=k)
+        privacy._redact_hold_said.clear()
         orderbook._webhook_seen.clear()
 
 @test
@@ -15909,15 +15912,15 @@ def t_the_erasure_takes_exactly_whom_it_always_took():
                 if addr in {str(e).strip().lower() for e in (v.get("emails") or [])}
                 or str(v.get("email") or "").strip().lower() == addr]
         for k, v in persons.items():
-            if k not in mine and any(copilot._erase_same_person(copilot._erase_words_of(v),
-                                                                copilot._erase_words_of(persons[m])) for m in mine):
+            if k not in mine and any(privacy._erase_same_person(privacy._erase_words_of(v),
+                                                                privacy._erase_words_of(persons[m])) for m in mine):
                 mine.append(k)
         return mine
-    index = copilot._redact_index(d)
+    index = privacy._redact_index(d)
     for n in range(40):
         addr = "u%d@example.com" % n
-        eq(copilot._redact_people(d, addr, index)[0], old(addr), addr)
-        eq(copilot._redact_people(d, addr)[0], old(addr), addr + " without an index")
+        eq(privacy._redact_people(d, addr, index)[0], old(addr), addr)
+        eq(privacy._redact_people(d, addr)[0], old(addr), addr + " without an index")
 
 
 @test
@@ -17974,6 +17977,22 @@ def t_one_collection_a_day_per_courier_not_one_per_parcel():
 
 
 
+def _every_clock(value):
+    """Set the clock (the datetime class) in copilot.py and in every module
+    split out of it that reads its own, to value: a class, or what an earlier
+    call returned, to put each back. Returns what was there. A test that
+    calls this patches every clock, and t_no_test_patches_a_name_nobody_reads
+    counts it so; naming each module by hand went stale with every move."""
+    import importlib, datetime as _dt
+    out = []
+    for rel in COPILOT_FILES:
+        m = importlib.import_module(rel[:-3].replace("/", "."))
+        if "datetime" in vars(m):
+            out.append((m, m.datetime))
+            m.datetime = dict((id(k), v) for k, v in value)[id(m)] if isinstance(value, list) else value
+    return [(m, v) for m, v in out]
+
+
 @test
 def t_the_collection_tests_hold_in_the_hour_after_midnight():
     """Two of the collection tests built "today" from the UTC date while the code reckons the day in London, so
@@ -17986,28 +18005,13 @@ def t_the_collection_tests_hold_in_the_hour_after_midnight():
         def now(cls, tz=None):
             base = _real.datetime(2026, 7, 14, 23, 30, tzinfo=_real.timezone.utc)
             return base.astimezone(tz) if tz else base.replace(tzinfo=None)
-    from gizmo.routes import dispatch as routes_dispatch, team as routes_team
-    saved = copilot.datetime
-    # Every module that reads a clock: copilot.py, the desk and its routes, the
-    # error log, the AI client, the team and its routes, the activity log, the
-    # order book, production, the Size list, the CRM and the inbox and its routes.
-    copilot.datetime = desk.datetime = routes_dispatch.datetime = errors.datetime = claude.datetime = _Frozen
-    from gizmo.routes import files as routes_files
-    fileserver.datetime = routes_files.datetime = webdav.datetime = _Frozen
-    team.datetime = routes_team.datetime = activity.datetime = _Frozen
-    orderbook.datetime = production.datetime = size_list.datetime = _Frozen
-    from gizmo.routes import mail as routes_mail
-    salesdesk.datetime = mail.datetime = routes_mail.datetime = _Frozen
+    saved = _every_clock(_Frozen)
     try:
         eq(copilot._london_today().isoformat(), "2026-07-15", "the code's day is London's, a day ahead of UTC in this hour")
         t_a_collection_is_read_from_the_couriers_own_reference()
         t_one_collection_a_day_per_courier_not_one_per_parcel()
     finally:
-        copilot.datetime = desk.datetime = routes_dispatch.datetime = errors.datetime = claude.datetime = saved
-        fileserver.datetime = routes_files.datetime = webdav.datetime = saved
-        team.datetime = routes_team.datetime = activity.datetime = saved
-        orderbook.datetime = production.datetime = size_list.datetime = saved
-        salesdesk.datetime = mail.datetime = routes_mail.datetime = saved
+        _every_clock(saved)
 
 @test
 def t_a_booked_collection_is_written_down_before_anything_can_fail():
@@ -20101,11 +20105,11 @@ def t_a_loan_is_late_by_its_date_and_only_amber_by_its_age():
     yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
     post("/api/loans", {"op": "out", "unit_id": u1, "who_name": "A", "due_at": yesterday})
     post("/api/loans", {"op": "out", "unit_id": u2, "who_name": "B"})
-    d = copilot._load_loans()
+    d = loans._load_loans()
     for lo in d["loans"].values():
         if lo["unit_id"] == u2:
             lo["out_at"] = (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()
-    copilot._write_loans(d)
+    loans._write_loans(d)
     late, old = _loan_row(u1), _loan_row(u2)
     eq(late["state"], "late", "past its due date")
     eq(old["state"], "due", "no date, but older than the chase threshold")
@@ -20900,7 +20904,7 @@ def t_the_register_finds_a_projector_in_the_shop():
             return catalogue
         return await saved(registry, name, args)
     shopify._tool_json = fake
-    copilot._loan_products.update({"at": 0.0, "rows": []})
+    loans._loan_products.update({"at": 0.0, "rows": []})
     try:
         ensure_auth()
         r = post("/api/loans", {"op": "products", "q": "epson"})
@@ -20926,7 +20930,7 @@ def t_the_register_finds_a_projector_in_the_shop():
         eq(unit["product_id"], "12")
     finally:
         shopify._tool_json = saved
-        copilot._loan_products.update({"at": 0.0, "rows": []})
+        loans._loan_products.update({"at": 0.0, "rows": []})
 
 
 
@@ -20989,7 +20993,7 @@ def t_only_an_admin_mints_a_tag_but_anyone_can_reprint_one():
     eq(r.status_code, 403, "minting an asset tag is part of keeping the register")
     ok("admin" in r.json()["error"],
        "and the refusal says who can do it, not just no")
-    ok(copilot._load_loans()["units"][unit].get("asset_tag") in (None, ""),
+    ok(loans._load_loans()["units"][unit].get("asset_tag") in (None, ""),
        "a refused mint leaves the unit untagged rather than half-tagged")
 
     minted = post("/api/loans", {"op": "sticker", "unit_id": unit})
@@ -21000,7 +21004,7 @@ def t_only_an_admin_mints_a_tag_but_anyone_can_reprint_one():
     eq(again.status_code, 200, "once it has a number, a member can reprint it")
     eq(again.json()["tag"], tag, "and gets the SAME number, never a second one")
     ok(again.json()["qr"] and again.json()["barcode"], "with both codes drawn")
-    eq(copilot._load_loans()["units"][unit]["asset_tag"], tag,
+    eq(loans._load_loans()["units"][unit]["asset_tag"], tag,
        "and the reprint changed nothing on the register")
 
 
@@ -21016,7 +21020,7 @@ def t_an_asset_tag_is_random_unambiguous_and_never_reissued():
     d = {"units": {}, "loans": {}, "seq": 0}
     seen = set()
     for i in range(400):
-        tag = copilot._loan_mint_tag(d)
+        tag = loans._loan_mint_tag(d)
         ok(re.match(r"^PI-[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$", tag),
            "shape and alphabet: %s" % tag)
         ok(tag not in seen, "the same tag was minted twice: %s" % tag)
@@ -21032,21 +21036,21 @@ def t_a_tag_already_on_a_machine_is_never_handed_out_again():
     that assertion passes just as happily with the check deleted, which is
     exactly what it did. With a two-letter alphabet there are only two tags
     to be had, so the third mint HAS to notice both are taken."""
-    saved = (copilot.LOAN_TAG_ALPHABET, copilot.LOAN_TAG_LENGTH)
-    copilot.LOAN_TAG_ALPHABET, copilot.LOAN_TAG_LENGTH = "AB", 1
+    saved = (loans.LOAN_TAG_ALPHABET, loans.LOAN_TAG_LENGTH)
+    loans.LOAN_TAG_ALPHABET, loans.LOAN_TAG_LENGTH = "AB", 1
     try:
         d = {"units": {}, "loans": {}, "seq": 0}
-        first = copilot._loan_mint_tag(d)
+        first = loans._loan_mint_tag(d)
         d["units"]["1"] = {"asset_tag": first}
-        second = copilot._loan_mint_tag(d)
+        second = loans._loan_mint_tag(d)
         d["units"]["2"] = {"asset_tag": second}
         ok(first != second, "the second mint avoided the first: %s then %s" % (first, second))
         eq({first, second}, {"PI-A", "PI-B"}, "which are the only two tags that exist")
-        third = copilot._loan_mint_tag(d)
+        third = loans._loan_mint_tag(d)
         ok(third not in (first, second), "with both taken it still does not repeat one")
         eq(len(third), len("PI-") + 3, "it lengthens rather than duplicate: %s" % third)
     finally:
-        copilot.LOAN_TAG_ALPHABET, copilot.LOAN_TAG_LENGTH = saved
+        loans.LOAN_TAG_ALPHABET, loans.LOAN_TAG_LENGTH = saved
 
 
 @test
@@ -21445,7 +21449,7 @@ def t_the_orders_webhook_takes_order_topics_only():
     r = client.post("/webhooks/orders", content=raw,
                     headers=wh_headers(raw, topic="customers/redact", delivery="wrong1"))
     eq(r.status_code, 422, "not 200: Shopify must retry or alert, not tick it off")
-    ok(copilot._load_privacy_log() is not None)
+    ok(privacy._load_privacy_log() is not None)
     raw2 = json.dumps({"id": 2}).encode()
     eq(client.post("/webhooks/orders", content=raw2,
                    headers=wh_headers(raw2, topic="orders/updated", delivery="right1")
@@ -21465,11 +21469,11 @@ def t_the_pre_redact_archive_does_not_live_forever():
         open(p, "wb").write(b"PK\x03\x04")
     os.utime(old, (_t.time() - 40 * 86400, _t.time() - 40 * 86400))
     try:
-        eq(copilot._redact_archive_reap(), 1, "one archive was old enough")
+        eq(privacy._redact_archive_reap(), 1, "one archive was old enough")
         eq(os.path.exists(old), False, "the 40-day-old copy is gone")
         eq(os.path.exists(new), True, "today's is not")
         ok(any(e.get("topic") == "archive/expire"
-               for e in copilot._load_privacy_log()["events"]), "and it is evidenced")
+               for e in privacy._load_privacy_log()["events"]), "and it is evidenced")
     finally:
         for p in (old, new):
             try:
@@ -21724,7 +21728,8 @@ def t_every_json_store_reaches_disk_through_the_one_writer():
     def owners(needle):
         out = set()
         for n in _ast.walk(tree):
-            if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and n.name != "add_routes":
+            # add_routes and each area's register() only hold the routes
+            if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and n.name not in ("add_routes", "register"):
                 if needle in _ast.get_source_segment(src, n):
                     out.add(n.name)
         return out
@@ -22100,13 +22105,13 @@ def t_a_removed_part_timer_is_not_left_clocked_in():
         ensure_auth()
         a, _s1, _p1 = ready_user("Ann Bench", "annb", role="parttime")
         b, _s2, _p2 = ready_user("Bo Bench", "bob", role="parttime")
-        w = copilot._load_work()
+        w = work._load_work()
         for uid in (a, b):
             w["open"][uid] = {"id": "w-" + uid, "uid": uid, "start": "2026-09-19T08:00:00+00:00"}
-        copilot._write_work(w)
+        work._write_work(w)
         eq(post("/api/team/user", {"op": "delete", "id": a}).status_code, 200)
         eq(post("/api/team/user", {"op": "active", "id": b, "active": False}).status_code, 200)
-        w = copilot._load_work()
+        w = work._load_work()
         eq(sorted(w["open"]), [], "neither is still clocked in")
         closed = {s["uid"]: s for s in w["sessions"] if s.get("id", "").startswith("w-")}
         eq(sorted(closed), sorted([a, b]), "both shifts were closed into the ledger")
@@ -22422,19 +22427,19 @@ def t_every_product_reader_reads_the_whole_catalogue_or_says_it_could_not():
         ok(any(l.startswith("product checks not run: Shopify did not answer") for l in labels), labels)
         eq(copilot._metric_snapshot({"score": _score, "metrics": kpis})["metrics"].get("SEO score"),
            None, "so nothing is saved for the alert to compare")
-        copilot._loan_products.update({"at": 0.0, "rows": []})
+        loans._loan_products.update({"at": 0.0, "rows": []})
         raised = False
         try:
-            run_async(copilot._loan_product_rows({}))
+            run_async(loans._loan_product_rows({}))
         except RuntimeError:
             raised = True
         ok(raised, "the loan picker's failed read is an error the route reports, not 'no matches'")
         shopify._tool_json, _c = catalogue(300)
-        copilot._loan_products.update({"at": 0.0, "rows": []})
-        eq(len(run_async(copilot._loan_product_rows({}))), 300, "the loan picker reaches every product")
+        loans._loan_products.update({"at": 0.0, "rows": []})
+        eq(len(run_async(loans._loan_product_rows({}))), 300, "the loan picker reaches every product")
     finally:
         shopify._tool_json = saved
-        copilot._loan_products.update({"at": 0.0, "rows": []})
+        loans._loan_products.update({"at": 0.0, "rows": []})
 
 
 @test
@@ -22447,15 +22452,15 @@ def t_an_open_shift_left_by_a_removed_account_is_swept_up():
         d = team._load_users()
         d["users"][a]["deleted"], d["users"][a]["active"] = True, False
         team._write_users(d)
-        w = copilot._load_work()
+        w = work._load_work()
         w["open"][a] = {"id": "w-old", "uid": a, "start": "2026-09-01T08:00:00+00:00"}
         w["open"]["ghost"] = {"id": "w-ghost", "uid": "ghost", "start": "2026-09-01T08:00:00+00:00"}
-        copilot._write_work(w)
-        eq(copilot._work_close_orphans(), [a], "the removed account's shift is closed")
-        eq(list(copilot._load_work()["open"]), ["ghost"],
+        work._write_work(w)
+        eq(work._work_close_orphans(), [a], "the removed account's shift is closed")
+        eq(list(work._load_work()["open"]), ["ghost"],
            "and one the register has never heard of is left alone: delete is a soft delete, "
            "so a missing account means a lost register, not a removal")
-        eq(copilot._work_close_orphans(), [], "and a second pass finds nothing")
+        eq(work._work_close_orphans(), [], "and a second pass finds nothing")
     with_accounts(go)
 
 
@@ -22470,16 +22475,16 @@ def t_a_broken_accounts_file_clocks_nobody_out():
         ensure_auth()
         b, _s, _p = ready_user("Di Bench", "dib", role="parttime")
         c, _s2, _p2 = ready_user("Ed Bench", "edb", role="parttime")
-        w = copilot._load_work()
+        w = work._load_work()
         for uid in (b, c):
             w["open"][uid] = {"id": "w-" + uid, "uid": uid, "start": "2026-09-01T08:00:00+00:00"}
-        copilot._write_work(w)
+        work._write_work(w)
         with open(team.USERS_PATH, "w") as fh:
             fh.write("{ not json")
         team._users_mem = None
         try:
-            eq(copilot._work_close_orphans(), [], "nothing is closed on an unreadable register")
-            eq(sorted(copilot._load_work()["open"]), sorted([b, c]), "both are still clocked in")
+            eq(work._work_close_orphans(), [], "nothing is closed on an unreadable register")
+            eq(sorted(work._load_work()["open"]), sorted([b, c]), "both are still clocked in")
         finally:
             jsonstore._poisoned_stores.discard(team.USERS_PATH)
     with_accounts(go)
@@ -22713,7 +22718,7 @@ def t_shop_redact_erases_what_memory_holds_too():
         f = fileserver._load_files()
         f["files"]["f1"] = {"name": "secret.pdf", "status": "active"}
         fileserver._write_files(f)
-        r = copilot._redact_shop()
+        r = privacy._redact_shop()
         ok(r["wiped"] >= 2, r)
         eq(mail._load_mail()["threads"], {}, "the erased threads are not served from memory")
         eq(fileserver._load_files()["files"], {}, "nor the erased files")
@@ -22769,35 +22774,35 @@ def t_restore_reaches_the_loan_register():
     def go():
         ensure_auth()
         import base64 as b64
-        d = copilot._load_loans()
+        d = loans._load_loans()
         d["units"]["u1"] = {"name": "Loan 1", "created_at": "2026-09-01T00:00:00+00:00"}
-        copilot._write_loans(d)
+        loans._write_loans(d)
         buf, _added = copilot._build_backup_zip()
         blob = b64.b64encode(buf.getvalue()).decode()
-        d = copilot._load_loans()
+        d = loans._load_loans()
         d["units"].pop("u1")
         d["units"]["u2"] = {"name": "Loan 2", "created_at": "2026-09-02T00:00:00+00:00"}
-        copilot._write_loans(d)
+        loans._write_loans(d)
         rr = post("/api/restore", {"zip": blob})
         eq(rr.status_code, 200, rr.text)
         li = login("cameron", MASTER_PW)          # every session died with the restore
         APP_AUTH["session"], APP_AUTH["master"] = li.json()["session"], li.json()["me"]["id"]
-        eq(sorted(copilot._load_loans()["units"]), ["u1"], "the restored register is what is served")
-        copilot._write_loans(copilot._load_loans())
-        eq(sorted(json.load(open(copilot.LOANS_PATH))["loans_store"]["units"]), ["u1"],
+        eq(sorted(loans._load_loans()["units"]), ["u1"], "the restored register is what is served")
+        loans._write_loans(loans._load_loans())
+        eq(sorted(json.load(open(loans.LOANS_PATH))["loans_store"]["units"]), ["u1"],
            "and the next write keeps it")
     def outer():
-        copilot._loans_mem = None
+        loans._loans_mem = None
         try:
-            os.remove(copilot.LOANS_PATH)
+            os.remove(loans.LOANS_PATH)
         except FileNotFoundError:
             pass
         try:
             go()
         finally:
-            copilot._loans_mem = None
+            loans._loans_mem = None
             try:
-                os.remove(copilot.LOANS_PATH)
+                os.remove(loans.LOANS_PATH)
             except FileNotFoundError:
                 pass
     with_accounts(outer)
@@ -22987,7 +22992,7 @@ def t_the_payroll_sheet_and_the_work_board_reckon_days_in_london():
              "end": "2026-07-01T12:00:00+00:00", "secs": 12600},
             {"id": "w2", "uid": "u1", "start": "2026-06-30T23:30:00+00:00",
              "end": "2026-07-01T01:00:00+00:00", "secs": 5400}]
-    csv = copilot._work_csv(rows, {"u1": "Pat"}, {"w1": 2}).split("\n")
+    csv = work._work_csv(rows, {"u1": "Pat"}, {"w1": 2}).split("\n")
     eq(csv[1], "Pat,2026-07-01,09:30,13:00,3.50,2,")
     eq(csv[2], "Pat,2026-07-01,00:30,02:00,1.50,0,", "half past midnight in London, not the 30th")
     eq(copilot._london_day("2026-06-30T23:30:00+00:00"), "2026-07-01")
@@ -23017,8 +23022,8 @@ def t_a_label_reckons_required_by_where_the_bench_is():
         eq(production._shape_label_order(o, {})["due_soon"], False)
         eq(orderbook._fmt_due(_date(2026, 12, 25)), "25 Dec")
         eq(orderbook._fmt_due(_date(2027, 1, 2)), "2 Jan 2027")
-        eq(copilot._loan_state({"due_at": "2026-09-19"}, 14), "ok", "a loan due today is not late yet")
-        eq(copilot._loan_state({"due_at": "2026-09-18"}, 14), "late")
+        eq(loans._loan_state({"due_at": "2026-09-19"}, 14), "ok", "a loan due today is not late yet")
+        eq(loans._loan_state({"due_at": "2026-09-18"}, 14), "late")
     finally:
         copilot._london_today = saved
 
@@ -24631,7 +24636,7 @@ def t_an_erasure_takes_the_deals_leads_and_enquiry_email_too():
         d["leads"]["l1"] = {"id": "l1", "title": "Jo Smith lead", "person_id": "p1"}
         d["activities"]["a1"] = {"id": "a1", "subject": "Call Jo", "deal_id": "d1", "pd_id": "888"}
         salesdesk._write_crm(d)
-        out = copilot._redact_customer(addr, "555")
+        out = privacy._redact_customer(addr, "555")
         d = salesdesk._load_crm()
         eq((d["deals"].get("d1"), d["leads"].get("l1"), d["activities"].get("a1")), (None, None, None),
            "the deal, the lead and the deal's task are gone")
@@ -24658,9 +24663,9 @@ def t_an_erasure_takes_the_deals_leads_and_enquiry_email_too():
                             "org_id": "o1", "status": "won", "value": 18000, "pd_id": "999",
                             "notes": [{"id": "n2", "text": "Ann Other on 07700 900555 signed it off"}]}
         salesdesk._write_crm(d)
-        copilot._redact_customer("jo.smith@example.com", "555")
-        copilot._redact_customer("ann@other.com", "556")
-        copilot._redact_customer("sales@firm.co", "557")
+        privacy._redact_customer("jo.smith@example.com", "555")
+        privacy._redact_customer("ann@other.com", "556")
+        privacy._redact_customer("sales@firm.co", "557")
         st = mail._load_mail()
         ok("b1" in st["threads"], "Bob's thread stays: he wrote it")
         ok("jo.smith@example.com" not in st["threads"]["b1"]["snippet"], "with Jo's address scrubbed from it")
@@ -25018,7 +25023,7 @@ def t_an_erasure_stays_erased_and_takes_only_theirs():
         mail._mail_apply_thread(st, bob, MBOX)
         mail._write_mail(st)
         for a in ("sarah@ns.co.uk", "jo@photo.com", "will@ns.co.uk"):
-            copilot._redact_customer(a, "1")
+            privacy._redact_customer(a, "1")
         d = salesdesk._load_crm()
         deal, act = d["deals"]["d1"], d["activities"]["a1"]
         ok("Sarah" not in deal["title"] and "Sarah" not in act["subject"] and "0191" not in act["note"],
@@ -25073,7 +25078,7 @@ def t_an_erased_persons_organisation_deals_keep_updating_without_them():
         _pd.export, _pd.API_TOKEN = fake_export, "t"
         try:
             eq(post("/api/crm/import", {"go": True}).status_code, 200)
-            copilot._redact_customer("sarah@lumen.co.uk", "901")
+            privacy._redact_customer("sarah@lumen.co.uk", "901")
             d = salesdesk._load_crm()
             raw = json.dumps(d).lower()
             for bit in ("whitfield", "sarah@lumen.co.uk", "s.whitfield@lumen.co.uk", "0191 111", "0191111"):
@@ -25134,7 +25139,7 @@ def t_an_erased_address_keeps_its_person_out_of_every_import():
     import pipedrive as _pd
     def go():
         ensure_auth(); crm_wipe()
-        copilot._redact_customer("nina@lumen.co.uk", "902")          # never in the CRM
+        privacy._redact_customer("nina@lumen.co.uk", "902")          # never in the CRM
         st = mail._load_mail()
         st["redacted"] = list(st.get("redacted") or []) + ["olga@lumen.co.uk"]   # an erasure from before
         mail._write_mail(st)
@@ -25187,7 +25192,7 @@ def t_the_erasure_matcher_takes_whole_names_and_numbers_only():
     numbers whatever their spelling, names of two words or more in order,
     surname first only with a comma, ordinary words only with a capital, and
     never across a new line, a sentence, an address or a link."""
-    sc = copilot._erase_scrubber(words=["Sarah Whitfield", "sarah@ns.co.uk", "0191 111 2222", "Will",
+    sc = privacy._erase_scrubber(words=["Sarah Whitfield", "sarah@ns.co.uk", "0191 111 2222", "Will",
                                          "Anne-Marie O’Neill", "Mob: 07700 900123 (mobile)",
                                          "sean.o'brien@lumen.co.uk", "Dr Sarah Jane Whitfield",
                                          "Sarah & Tom Whitfield", "Will Price", "Stage Door",
@@ -25232,29 +25237,29 @@ def t_the_erasure_matcher_takes_whole_names_and_numbers_only():
     ]
     for text, want in cases:
         eq(sc(text), want, text)
-    eq(copilot._erase_scrubber(words=["Will", "12"]), None, "nothing that could be matched safely: no scrubber")
+    eq(privacy._erase_scrubber(words=["Will", "12"]), None, "nothing that could be matched safely: no scrubber")
     # Stored names with a nickname, letters after them, a digit, a slash.
     for stored, verbatim in (("Sarah 'Sal' Whitfield", "Deal: [erased] - 12 gobos"),
                              ("Sarah Whitfield, LD", "Deal: [erased], LD - 12 gobos"),
                              ("Sarah Whitfield (Panto 2024)", "Deal: [erased] - 12 gobos"),
                              ("Sarah Whitfield 2", "Deal: [erased] - 12 gobos"),
                              ("Sarah Whitfield / Lumen", "Deal: [erased] - 12 gobos")):
-        one = copilot._erase_scrubber(words=[stored])
+        one = privacy._erase_scrubber(words=[stored])
         eq(one("Deal: " + stored + " - 12 gobos"), verbatim, stored)
         eq(one("Sarah Whitfield rang"), "[erased] rang", stored)
-    ok(not any(c[1] in ("sarah panto", "panto sarah") for c in copilot._erase_canon("Sarah Whitfield (Panto 2024)")),
+    ok(not any(c[1] in ("sarah panto", "panto sarah") for c in privacy._erase_canon("Sarah Whitfield (Panto 2024)")),
        "no first-and-last made of a bracketed note")
     # Somebody live holds the same number, address or name: it is theirs too.
-    alive = copilot._erase_alive([{"name": "Tom Baker", "emails": ["sales@ns.co.uk"], "phones": ["0191 111 2222"]},
+    alive = privacy._erase_alive([{"name": "Tom Baker", "emails": ["sales@ns.co.uk"], "phones": ["0191 111 2222"]},
                                   {"name": "Sarah Whitfield", "emails": ["sw@crucible.co.uk"]}])
-    sa = copilot._erase_scrubber(words=["Sarah Whitfield", "sales@ns.co.uk", "0191 111 2222", "07700 900123"], alive=alive)
+    sa = privacy._erase_scrubber(words=["Sarah Whitfield", "sales@ns.co.uk", "0191 111 2222", "07700 900123"], alive=alive)
     eq(sa("Office 0191 111 2222, sales@ns.co.uk, Sarah Whitfield, mob 07700 900123"),
        "Office 0191 111 2222, sales@ns.co.uk, Sarah Whitfield, mob [erased]")
     eq(sa("Sarah Whitfield's deal", True), "[erased]'s deal", "but in her own former records her name is hers")
     # The same from the keyed hashes alone.
     d = {}
-    copilot._erase_remember(d, ["Sarah Whitfield", "0191 111 2222"], ["20"], request="sarah@ns.co.uk")
-    hs = copilot._erase_scrubber(d)
+    privacy._erase_remember(d, ["Sarah Whitfield", "0191 111 2222"], ["20"], request="sarah@ns.co.uk")
+    hs = privacy._erase_scrubber(d)
     eq(hs("Whitfield, Sarah on 0191 111 2222 via sarah@ns.co.uk"), "[erased] on [erased] via [erased]")
     ok(hs.knows("req", "Sarah@NS.co.uk") and hs.knows("phone", "01911112222")
        and not hs.knows("req", "0191 111 2222"), "an exact test, and only the asked-for address recognises")
@@ -25265,7 +25270,7 @@ def t_the_erasure_matcher_takes_whole_names_and_numbers_only():
     ok("sarah" not in raw and "0191 111 2222" not in raw and "01911112222" not in raw, "nothing in the clear")
     old = d["erased_salt"]
     d["erased_salt"] = "not hex"
-    copilot._erase_remember(d, ["Jo Smith"])
+    privacy._erase_remember(d, ["Jo Smith"])
     ok(d["erased_salt"] != old and all(m["kid"] == "none" for m in d["erased_marks"]),
        "a damaged salt starts the marks again under a new one")
 
@@ -25282,22 +25287,22 @@ def t_erasure_marks_take_their_key_from_the_token_vault():
         os.environ["TOKEN_ENCRYPTION_KEY"] = "a-long-enough-test-key-for-scrypt-0123456789"
         _tv._key.cache_clear()
         d = {}
-        copilot._erase_remember(d, ["07700 954321"], [], request="x@y.com")
+        privacy._erase_remember(d, ["07700 954321"], [], request="x@y.com")
         salt = d["erased_salt"]
-        guess = copilot._erase_hash(bytes.fromhex(salt), "phone", "07700954321")
+        guess = privacy._erase_hash(bytes.fromhex(salt), "phone", "07700954321")
         ok(all(m["h"] != guess for m in d["erased_marks"]), "the file's salt alone does not reproduce a mark")
-        ok(copilot._erase_scrubber(d)("ring 07700 954321") == "ring [erased]", "the app still matches")
-        eq(copilot._erase_stale_marks(d), 0)
+        ok(privacy._erase_scrubber(d)("ring 07700 954321") == "ring [erased]", "the app still matches")
+        eq(privacy._erase_stale_marks(d), 0)
         # Marks made before any key existed are still readable once one is set.
         os.environ.pop("TOKEN_ENCRYPTION_KEY", None); _tv._key.cache_clear()
         early = {}
-        copilot._erase_remember(early, ["07700 111222"], [], request="early@y.com")
+        privacy._erase_remember(early, ["07700 111222"], [], request="early@y.com")
         os.environ["TOKEN_ENCRYPTION_KEY"] = "a-long-enough-test-key-for-scrypt-0123456789"; _tv._key.cache_clear()
-        eq(copilot._erase_stale_marks(early), 0, "setting a key for the first time blocks nothing")
-        eq(copilot._erase_scrubber(early)("ring 07700 111222"), "ring [erased]", "and the early marks still match")
+        eq(privacy._erase_stale_marks(early), 0, "setting a key for the first time blocks nothing")
+        eq(privacy._erase_scrubber(early)("ring 07700 111222"), "ring [erased]", "and the early marks still match")
         os.environ["TOKEN_ENCRYPTION_KEY"] = "a-different-key-for-scrypt-9876543210-abcdef"
         _tv._key.cache_clear()
-        ok(copilot._erase_stale_marks(d) and "encryption key" in copilot._erase_import_blocker(d),
+        ok(privacy._erase_stale_marks(d) and "encryption key" in privacy._erase_import_blocker(d),
            "a changed key is said, and blocks the import")
     finally:
         if saved is None:
@@ -25332,7 +25337,7 @@ def t_a_colleague_who_shares_an_erased_persons_number_is_not_erased():
         _pd.export, _pd.API_TOKEN = fake_export, "t"
         try:
             post("/api/crm/import", {"go": True})
-            copilot._redact_customer("sarah@lumen.co.uk", "905")
+            privacy._redact_customer("sarah@lumen.co.uk", "905")
             for _ in range(2):
                 r = post("/api/crm/import", {"go": True}).json()
                 eq(r["report"]["erased"]["people"], 1, "only Sarah is recognised: %r" % r["report"]["erased"])
@@ -25457,7 +25462,7 @@ def t_the_second_review_of_the_erasure_scrub_holds():
             return {v["pd_id"]: v["title"] for v in salesdesk._load_crm()["deals"].values()}
         try:
             post("/api/crm/import", {"go": True})
-            copilot._redact_customer("sarah@lumen.co.uk", "907")
+            privacy._redact_customer("sarah@lumen.co.uk", "907")
             lumen = [o for o in salesdesk._load_crm()["orgs"].values() if o.get("pd_id") == "10"][0]
             eq(lumen["custom"], {"Key contact": "[erased]"}, "her organisation is cleaned at once, whatever the namesake")
             # Tom leaves, here and in Pipedrive. Nobody live lists the
@@ -25496,7 +25501,7 @@ def t_the_second_review_of_the_erasure_scrub_holds():
             eq(titles()["38"], "Priya Kumar - new venue rig", "the successor is not erased through the shared address")
             # The box office contact, stored under the firm's own name, asks
             # to be erased: the firm's name is not a person's.
-            copilot._redact_customer("boxoffice@lumen.co.uk", "908")
+            privacy._redact_customer("boxoffice@lumen.co.uk", "908")
             post("/api/crm/import", {"go": True})
             eq(titles()["36"], "Lumen Events panto rig, ring 0191 496 0000", "the firm keeps its name")
             ok(not any(p.get("pd_id") == "27" for p in salesdesk._load_crm()["persons"].values()), "the contact itself goes")
@@ -25542,7 +25547,7 @@ def t_an_erasure_and_every_import_clean_every_field_that_can_name_them():
             d["deals"][won]["lost_comment"] = "Ring Sarah Whitfield on 07700 900123 in the spring"
             d["deals"][won]["edited_here"] = True
             salesdesk._write_crm(d)
-            copilot._redact_customer("sarah@lumen.co.uk", "906")
+            privacy._redact_customer("sarah@lumen.co.uk", "906")
             for label in ("after the erasure", "after an import"):
                 d = salesdesk._load_crm()
                 o = [v for v in d["orgs"].values() if v.get("pd_id") == "10"][0]
@@ -25631,13 +25636,13 @@ def t_a_redact_a_store_refused_is_said_and_retried():
         reset_dispatch()
         desk._record_dispatch(4242, {"email": "kim@x.com", "tracking_number": "T-42"})
         try:
-            out = copilot._redact_customer("kim@x.com", "9")
+            out = privacy._redact_customer("kim@x.com", "9")
             ok("the CRM" in out["failed"], out)
             asked = desk._load_dispatch()["4242"].get("redacted_request_at")
             ok(asked, "the kept booking records when the request came in")
-            last = copilot._load_privacy_log()["events"][-1]["detail"]
+            last = privacy._load_privacy_log()["events"][-1]["detail"]
             ok("NOT YET ERASED from the CRM" in last, "the record says what was not done: " + last)
-            ok(any(p["email"] == "kim@x.com" for p in copilot._load_privacy_log().get("pending") or []),
+            ok(any(p["email"] == "kim@x.com" for p in privacy._load_privacy_log().get("pending") or []),
                "and it is owed")
         finally:
             jsonstore._poisoned_stores.discard(salesdesk.CRM_PATH)
@@ -25655,23 +25660,23 @@ def t_a_redact_a_store_refused_is_said_and_retried():
             return {"error": "skip"}
         saved = (shopify._tool_json, copilot._send_alert_email, copilot._zeta_drain, copilot._zeta_configured,
                  fileserver._files_tick, copilot.run_label_coverage, shopify._webhook_ensurer,
-                 copilot._watch_last_tick, copilot._redact_retry_pending)
+                 copilot._watch_last_tick, privacy._redact_retry_pending)
         shopify._tool_json, copilot._send_alert_email, copilot._zeta_drain = probe, noop, noop
         copilot._zeta_configured, fileserver._files_tick = (lambda: False), (lambda: None)
         copilot.run_label_coverage, shopify._webhook_ensurer, copilot._watch_last_tick = skip, None, 0.0
-        copilot._redact_retry_pending = lambda: ran.append(1) or saved[-1]()
+        privacy._redact_retry_pending = lambda: ran.append(1) or saved[-1]()
         try:
             run_async(copilot._watchdog_tick({}))
         finally:
             (shopify._tool_json, copilot._send_alert_email, copilot._zeta_drain, copilot._zeta_configured,
              fileserver._files_tick, copilot.run_label_coverage, shopify._webhook_ensurer,
-             copilot._watch_last_tick, copilot._redact_retry_pending) = saved
+             copilot._watch_last_tick, privacy._redact_retry_pending) = saved
         eq(ran, [1], "the hourly tick runs the retry")
         eq(desk._load_dispatch()["4242"].get("redacted_request_at"), asked,
            "and the retry leaves that time alone")
         reset_dispatch()
         ok(not any(p.get("id") == "p1" for p in salesdesk._load_crm()["persons"].values()), "and she is gone")
-        eq(copilot._load_privacy_log().get("pending"), [], "nothing is owed any more")
+        eq(privacy._load_privacy_log().get("pending"), [], "nothing is owed any more")
     with_mail(go)
 
 
@@ -25690,12 +25695,12 @@ def t_a_redact_that_stops_part_way_through_the_crm_leaves_nothing_half_made_in_m
         salesdesk._write_crm(d)
         def stops(*a, **k):
             raise RuntimeError("the erasure stopped part way")
-        saved = copilot._erase_remember          # the last step before the write
-        copilot._erase_remember = stops
+        saved = privacy._erase_remember          # the last step before the write
+        privacy._erase_remember = stops
         try:
-            out = copilot._redact_customer(addr, "9")
+            out = privacy._redact_customer(addr, "9")
         finally:
-            copilot._erase_remember = saved
+            privacy._erase_remember = saved
         eq(out["failed"], ["the CRM"], "the CRM is said to have failed")
         d = salesdesk._load_crm()
         ok("p1" in d["persons"] and "l1" in d["leads"],
@@ -25704,7 +25709,7 @@ def t_a_redact_that_stops_part_way_through_the_crm_leaves_nothing_half_made_in_m
         on_disk = json.load(open(salesdesk.CRM_PATH))["crm"]
         ok("p1" in on_disk["persons"] and "l1" in on_disk["leads"],
            "and the next save does not write half an erasure")
-        eq(copilot._redact_customer(addr, "9", retry=True)["failed"], [], "the hourly retry finishes it")
+        eq(privacy._redact_customer(addr, "9", retry=True)["failed"], [], "the hourly retry finishes it")
         d = salesdesk._load_crm()
         ok("p1" not in d["persons"] and "l1" not in d["leads"], "and she is gone")
     with_mail(go)
@@ -25726,12 +25731,12 @@ def t_a_redact_that_stops_part_way_through_the_mailbox_leaves_nothing_half_made_
         saved = mail._mail_erased_rx          # runs after their threads are taken off
         mail._mail_erased_rx = stops
         try:
-            out = copilot._redact_customer(addr, "9")
+            out = privacy._redact_customer(addr, "9")
         finally:
             mail._mail_erased_rx = saved
         eq(out["failed"], ["the mailbox"], "the mailbox is said to have failed")
         ok("k1" in mail._load_mail()["threads"], "the board read next is the one on disk")
-        eq(copilot._redact_customer(addr, "9", retry=True)["failed"], [], "the hourly retry finishes it")
+        eq(privacy._redact_customer(addr, "9", retry=True)["failed"], [], "the hourly retry finishes it")
         ok("k1" not in mail._load_mail()["threads"], "and her thread is gone")
     with_mail(go)
 
@@ -25749,7 +25754,7 @@ def t_a_redact_that_stops_part_way_through_the_bookings_leaves_nothing_half_made
             json.dump({"orders": {"4242": {"email": addr, "tracking_number": "T-42"},
                                   "4243": "not a booking"}}, fh)
         try:
-            copilot._redact_customer(addr, "9")
+            privacy._redact_customer(addr, "9")
             ok(not desk._load_dispatch()["4242"].get("redacted_request_at"),
                "the bookings read next are the ones on disk")
         finally:
@@ -25970,27 +25975,27 @@ def t_old_shifts_are_archived_and_still_on_the_payroll_report():
     report for an older period came back short without a word."""
     def go():
         ensure_auth()
-        saved = (copilot.WORK_KEEP, copilot.WORK_ARCHIVE_PATH)
-        copilot.WORK_KEEP = 3
-        copilot.WORK_ARCHIVE_PATH = SCRATCH + "/worklog_archive_a18.jsonl"
+        saved = (work.WORK_KEEP, work.WORK_ARCHIVE_PATH)
+        work.WORK_KEEP = 3
+        work.WORK_ARCHIVE_PATH = SCRATCH + "/worklog_archive_a18.jsonl"
         try:
             try:
-                os.remove(copilot.WORK_ARCHIVE_PATH)
+                os.remove(work.WORK_ARCHIVE_PATH)
             except FileNotFoundError:
                 pass
-            w = copilot._load_work()
+            w = work._load_work()
             w["sessions"] = []
             for i in range(5):
                 w["sessions"].append({"id": "w%d" % i, "uid": "u9", "start": "2026-0%d-01T09:00:00+00:00" % (i + 1),
                                       "end": "2026-0%d-01T12:00:00+00:00" % (i + 1), "secs": 10800})
-                copilot._write_work(w)
-            eq(len(copilot._load_work()["sessions"]), 3, "the live log keeps its cap")
-            eq(len(copilot._work_archived()), 2, "what left it is archived")
+                work._write_work(w)
+            eq(len(work._load_work()["sessions"]), 3, "the live log keeps its cap")
+            eq(len(work._work_archived()), 2, "what left it is archived")
             r = post("/api/work/report", {"from": "2026-01-01", "to": "2026-12-31"})
             eq(r.json()["count"], 5, "and the report still has every shift")
         finally:
-            copilot.WORK_KEEP, copilot.WORK_ARCHIVE_PATH = saved
-            w = copilot._load_work(); w["sessions"] = []; copilot._write_work(w)
+            work.WORK_KEEP, work.WORK_ARCHIVE_PATH = saved
+            w = work._load_work(); w["sessions"] = []; work._write_work(w)
     with_accounts(go)
 
 
@@ -30051,7 +30056,11 @@ def t_either_module_imports_first():
                         ("gizmo.production", "copilot"), ("gizmo.size_list", "copilot"),
                         ("gizmo.shopify", "copilot"), ("gizmo.crm", "copilot"), ("gizmo.mail", "copilot"),
                         ("gizmo.routes.crm", "copilot"), ("gizmo.routes.mail", "copilot"),
-                        ("gizmo.files", "copilot"), ("gizmo.webdav", "copilot"), ("gizmo.routes.files", "copilot")):
+                        ("gizmo.files", "copilot"), ("gizmo.webdav", "copilot"), ("gizmo.routes.files", "copilot"),
+                        ("gizmo.privacy", "copilot"), ("gizmo.loans", "copilot"), ("gizmo.work", "copilot"),
+                        ("gizmo.routes.privacy", "copilot"), ("gizmo.routes.loans", "copilot"),
+                        ("gizmo.routes.work", "copilot"), ("gizmo.routes.production", "copilot"),
+                        ("gizmo.routes.size_list", "copilot"), ("gizmo.routes.orderbook", "copilot")):
         r = _sp.run([sys.executable, "-c", f"import {first}, {then}; import gizmo.dispatch as d, copilot as c; "
                      "assert c.desk is d and d.core is c; print('ok')"],
                     cwd=root, env=dict(os.environ), capture_output=True, text=True, timeout=120)
@@ -30064,9 +30073,9 @@ def t_dispatch_routes_register_in_place():
     import inspect
     from gizmo.routes import dispatch as routes_dispatch
     src = inspect.getsource(copilot.add_routes)
-    i = src.index("routes_dispatch.register(mcp, registry)")
-    ok(src.rindex('@mcp.custom_route("/api/production-labels/queue"', 0, i) < i
-       < src.index('@mcp.custom_route("/api/production-labels/missing"', i), "between the routes that stood either side")
+    # Where it stands is make move-proof's to check (its neighbours have since
+    # moved out too); here, that it is there once.
+    eq(src.count("routes_dispatch.register(mcp, registry)"), 1, "one call")
     for path in ("/api/dispatch/", "/api/shipping/", "/api/custom/", "/api/eori/", '"/api/margin'):
         ok(path not in src, path + " is registered by the desk's own routes")
     own = inspect.getsource(routes_dispatch)
@@ -30370,6 +30379,7 @@ from gizmo import nothing_real
 
 def t_patch():
     copilot._x_load = lambda: {}
+    assert callable(getattr(copilot, "_x_load", None))
 '''
 
 _TOY_SPEC = {"areas": [{"name": "x", "file": "gizmo/x.py", "alias": "x", "prefix": "^(_x_|X_)",
@@ -30379,7 +30389,7 @@ _TOY_SPEC = {"areas": [{"name": "x", "file": "gizmo/x.py", "alias": "x", "prefix
              "note": "the x area"}
 
 
-def _toy_repo(name, copilot_text=_TOY_COPILOT, spec=None):
+def _toy_repo(name, copilot_text=_TOY_COPILOT, spec=None, extra=None):
     """A made-up repository in the scratch folder: copilot.py, a gizmo
     package, one test, and a move description."""
     import json as _json
@@ -30390,6 +30400,7 @@ def _toy_repo(name, copilot_text=_TOY_COPILOT, spec=None):
     files = {_TOY_MAIN: copilot_text, "gizmo/__init__.py": "", "gizmo/routes/__init__.py": "",
              "gizmo/floor_stub.py": '"""Stands in for the floor."""\n', "tests/test_dispatch.py": _TOY_TEST,
              "server.py": "def boot():\n    import copilot\n    return copilot._x_load()\n"}
+    files.update(extra or {})
     for rel, text in files.items():
         open(os.path.join(root, rel), "w").write(text)
     open(os.path.join(root, "tools/moves/x.json"), "w").write(_json.dumps(spec or _TOY_SPEC))
@@ -30426,6 +30437,7 @@ def t_move_area_moves_a_toy_area():
     ok(cop.index("routes_x.register(mcp, registry)") < cop.index('"/api/y"'), "where the first stood")
     eq(routes.count("@mcp.custom_route("), 2, "both of the area's routes")
     ok("x._x_load = lambda" in test_, "the test patches the area")
+    ok('getattr(x, "_x_load", None)' in test_, "and a getattr by the name's string follows it too")
     ok("from gizmo import floor_stub\nfrom gizmo import x\n" in test_ and '"""\nfrom gizmo import nothing_real\n"""' in test_,
        "the suite's prelude imports the area after its own imports, not inside a string")
     ok("return copilot.x._x_load()" in read("server.py"),
@@ -30463,6 +30475,69 @@ def t_the_files_routes_are_gathered():
     for path in ('"/api/files/', '"/dav'):
         ok(path not in src, path + " is registered by the Files routes")
     eq(inspect.getsource(routes_files).count("@mcp.custom_route("), 8, "the 7 Files routes and the drive's")
+
+@test
+def t_move_area_moves_routes_after_their_area():
+    """A route group whose area moved in an earlier piece: its routes follow,
+    gathered where the first stood, still reaching the area through its name."""
+    import importlib.util, subprocess as _sp
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    spec_ = importlib.util.spec_from_file_location("move_proof", os.path.join(here, "tools", "move_proof.py"))
+    mp = importlib.util.module_from_spec(spec_); spec_.loader.exec_module(mp)
+    old = '"""An area moved in an earlier piece."""\n\n\ndef f():\n    return core.KEEP\n\n\nimport copilot as core  # noqa: E402\n'
+    cop = _TOY_COPILOT.replace("from gizmo import floor_stub\n", "from gizmo import floor_stub\nfrom gizmo import old\n") + (
+        '\n    @mcp.custom_route("/api/old/c", methods=["POST"])\n    async def old_c(request):\n        return old.f() + KEEP\n')
+    spec = {"note": "the old area's routes", "areas": [],
+            "routes": [{"name": "routes_old", "file": "gizmo/routes/old.py", "area": "old", "paths": ["/api/old/"],
+                        "helpers": [], "doc": "The old area's routes.", "register_doc": "Add them."}]}
+    root = _toy_repo("toy-routes", cop, spec, {"gizmo/old.py": old})
+    r = _run_move(root)
+    eq(r.returncode, 0, r.stdout[-600:] + r.stderr[-600:])
+    read = lambda rel: open(os.path.join(root, rel)).read()
+    routes, head_cop = read("gizmo/routes/old.py"), read(_TOY_MAIN)
+    ok("return old.f() + core.KEEP" in routes and "from gizmo import old" in routes,
+       "the route reaches the area through its name, and copilot.py through core")
+    eq(head_cop.count("routes_old.register(mcp, registry)"), 1, "gathered into one call")
+    ok('"/api/old/c"' not in head_cop, "and gone from add_routes")
+    base = {_TOY_MAIN: cop, "gizmo/__init__.py": "", "gizmo/floor_stub.py": '"""Stands in for the floor."""\n',
+            "gizmo/old.py": old, "gizmo/routes/__init__.py": ""}
+    head = dict(base, **{_TOY_MAIN: head_cop, "gizmo/routes/old.py": routes})
+    eq(mp.prove(base, head), [], "prove(): nothing but the move")
+    rr = _sp.run([sys.executable, "-c", "import gizmo.routes.old, copilot"], cwd=root, capture_output=True, text=True)
+    eq(rr.returncode, 0, rr.stderr[-400:])
+
+@test
+def t_the_privacy_loans_and_work_routes_are_gathered():
+    """The privacy route and Shopify's privacy webhook, the loan register's and
+    the work sessions' routes, each registered by one call in add_routes."""
+    import inspect
+    from gizmo.routes import loans as routes_loans, privacy as routes_privacy, work as routes_work
+    src = inspect.getsource(copilot.add_routes)
+    for call in ("routes_privacy.register(mcp, registry)", "routes_loans.register(mcp, registry)",
+                 "routes_work.register(mcp, registry)"):
+        eq(src.count(call), 1, call)
+    for path in ('"/api/privacy', '"/webhooks/privacy', '"/api/loans', '"/api/work'):
+        ok(path not in src, path + " is registered by its area's routes")
+    eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_privacy, routes_loans, routes_work)],
+       [2, 1, 5], "2 privacy routes, 1 loans route, 5 work routes")
+
+@test
+def t_the_moved_areas_routes_follow_them():
+    """Production's, the Size list's and the order book's routes follow their
+    areas into gizmo/routes/, each group registered by one call. The two
+    printed-label routes stay in add_routes: their bytes are pinned."""
+    import inspect
+    from gizmo.routes import orderbook as routes_orderbook, production as routes_production, size_list as routes_size_list
+    src = inspect.getsource(copilot.add_routes)
+    for call in ("routes_production.register(mcp, registry)", "routes_size_list.register(mcp, registry)",
+                 "routes_orderbook.register(mcp, registry)"):
+        eq(src.count(call), 1, call)
+    for path in ('"/api/production-labels', '"/api/production-state', '"/api/gobo-sizes', '"/api/order/', '"/webhooks/orders'):
+        ok(path not in src, path + " follows its area")
+    ok('@mcp.custom_route("/print/production-labels", methods=["GET", "OPTIONS"])' in src
+       and '"/print/production-labels/sign"' in src, "the printed-label routes stay where they are")
+    eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_production, routes_size_list, routes_orderbook)],
+       [5, 6, 2], "5 production routes, 6 Size list routes, 2 order routes")
 
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The

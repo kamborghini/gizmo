@@ -98,14 +98,9 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
-| `LOANS_PATH` | `"/data/loans.json"` | copilot |  |
 | `RAILWAY_ENVIRONMENT` | `None` | copilot | set by Railway; the volume check runs only there |
 | `RAILWAY_PROJECT_ID` | `None` | copilot | set by Railway; the volume check runs only there |
 | `SETUP_CODE` | `""` | copilot | set only while first-run setup is needed, then remove; unset locks setup |
-| `WORK_ARCHIVE_PATH` | `os.path.join(os.path.dirname(WORK_PATH) or ".", "worklog_...` | copilot |  |
-| `WORK_KEEP` | `"2000"` | copilot |  |
-| `WORK_MIN_SECS` | `"60"` | copilot |  |
-| `WORK_PATH` | `"/data/worklog.json"` | copilot |  |
 
 ## copilot.py - Page rendering
 
@@ -155,17 +150,10 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `ZETA_SYNC_TOKEN` | `""` | copilot |  |
 | `ZETA_URL` | `""` | copilot |  |
 
-## copilot.py - WebDAV: the Files store as a native Finder drive. macOS moun
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `REDACT_ARCHIVE_DAYS` | `"30"` | copilot |  |
-
 ## copilot.py - What's new: the release notes that ship WITH the release, an
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
-| `PRIVACY_LOG_PATH` | `"/data/privacy_log.json"` | copilot |  |
 | `RAILWAY_GIT_COMMIT_SHA` | `None` | copilot, server |  |
 
 ## gizmo/activity.py - top
@@ -260,6 +248,12 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `RATE_LIMIT_PER_CLIENT` | `"120"` | gizmo.gate | requests/window/client |
 | `RATE_LIMIT_WINDOW` | `"60"` | gizmo.gate | seconds |
 
+## gizmo/loans.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `LOANS_PATH` | `"/data/loans.json"` | gizmo.loans |  |
+
 ## gizmo/mail.py - Attachments on the way OUT. They live in the bucket under ma
 
 | Variable | Default | Read by | Notes |
@@ -302,6 +296,18 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 |---|---|---|---|
 | `ORDER_PAGE_CAP` | `"30"` | gizmo.orderbook |  |
 
+## gizmo/privacy.py - WebDAV: the Files store as a native Finder drive. macOS moun
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `REDACT_ARCHIVE_DAYS` | `"30"` | gizmo.privacy |  |
+
+## gizmo/privacy.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `PRIVACY_LOG_PATH` | `"/data/privacy_log.json"` | gizmo.privacy |  |
+
 ## gizmo/production.py - top
 
 | Variable | Default | Read by | Notes |
@@ -341,6 +347,15 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `SESSION_HOURS` | `"24"` | gizmo.team |  |
 | `SESSION_MAX_DAYS` | `"30"` | gizmo.team |  |
 | `USERS_PATH` | `"/data/users.json"` | gizmo.team |  |
+
+## gizmo/work.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `WORK_ARCHIVE_PATH` | `os.path.join(os.path.dirname(WORK_PATH) or ".", "worklog_...` | gizmo.work |  |
+| `WORK_KEEP` | `"2000"` | gizmo.work |  |
+| `WORK_MIN_SECS` | `"60"` | gizmo.work |  |
+| `WORK_PATH` | `"/data/worklog.json"` | gizmo.work |  |
 
 ## eori.py
 
