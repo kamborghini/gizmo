@@ -11,6 +11,7 @@ from gizmo import store as jsonstore
 from gizmo import shopify
 
 import copilot as core
+from gizmo import privacy
 from gizmo import activity
 from gizmo import crm as salesdesk
 from gizmo import gate
@@ -60,7 +61,7 @@ def register(mcp, registry):
             # Checked before the snapshot: a refused import must not deflate
             # the whole volume first, every time it is pressed.
             mail._load_mail()                    # its state decides whether erased people are known
-            why = core._erase_import_blocker(salesdesk._load_crm())
+            why = privacy._erase_import_blocker(salesdesk._load_crm())
             if why:
                 return gate._json({"error": why}, 503)
             # The one irreversible moment gets a snapshot immediately before it.

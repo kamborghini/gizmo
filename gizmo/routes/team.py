@@ -14,6 +14,7 @@ import tokenvault
 import totp
 
 import copilot as core
+from gizmo import work
 from gizmo import webdav
 from gizmo import mail
 from gizmo import activity
@@ -486,7 +487,7 @@ def register(mcp, registry):
                     # No longer monitored, so an open shift cannot just hang:
                     # close it now, recorded as this admin's correction.
                     try:
-                        core._work_close_open(target, who, "closed automatically when the role changed",
+                        work._work_close_open(target, who, "closed automatically when the role changed",
                                          "closed a session on role change")
                     except Exception:
                         logger.exception("could not close the work session on role change")
@@ -508,7 +509,7 @@ def register(mcp, registry):
                     webdav._dav_drop_cache(target)
                     mail._mail_release_owned(target, "account switched off")
                     try:
-                        core._work_close_open(target, who, "closed automatically when the account was switched off",
+                        work._work_close_open(target, who, "closed automatically when the account was switched off",
                                          "closed a session when an account was switched off")
                     except Exception:
                         logger.exception("could not close the work session of a switched-off account")
@@ -641,7 +642,7 @@ def register(mcp, registry):
                 webdav._dav_drop_cache(target)
                 mail._mail_release_owned(target, "account deleted")
                 try:
-                    core._work_close_open(target, who, "closed automatically when the account was deleted",
+                    work._work_close_open(target, who, "closed automatically when the account was deleted",
                                      "closed a session when an account was deleted")
                 except Exception:
                     logger.exception("could not close the work session of a deleted account")

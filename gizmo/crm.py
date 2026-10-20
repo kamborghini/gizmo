@@ -930,20 +930,20 @@ def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
     except Exception:
         logger.exception("crm import: could not read the erased addresses from the mailbox")
         mail_gone = []
-    blocker = core._erase_import_blocker(d)
+    blocker = privacy._erase_import_blocker(d)
     if blocker:
         report["problems"].append(blocker)
-    base = core._erase_scrubber(d, requests=mail_gone)
+    base = privacy._erase_scrubber(d, requests=mail_gone)
     found: dict = {}                    # Pipedrive id -> their words, as Pipedrive has them now
     payload_people = [p for p in (data.get("persons") or []) if str(p.get("pd_id") or "")]
     for p in payload_people:
         pd = str(p["pd_id"])
         if base is None:
             break
-        words = core._erase_words_of(p)
+        words = privacy._erase_words_of(p)
         if any(base.knows("req", e) for e in (p.get("emails") or [])):
             found[pd] = words
-        elif pd in erased_pd and any(base.knows(k, c) for k, c, _n in core._erase_canon(p.get("name")) if k == "name"):
+        elif pd in erased_pd and any(base.knows(k, c) for k, c, _n in privacy._erase_canon(p.get("name")) if k == "name"):
             # By id, only with their NAME: an id Pipedrive gave to their
             # successor keeps the firm's switchboard and office@ address,
             # which must not make the successor erased.
@@ -954,13 +954,13 @@ def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
     if found:
         for p in payload_people:
             pd = str(p["pd_id"])
-            if pd not in found and any(core._erase_same_person(core._erase_words_of(p), w) for w in list(found.values())):
-                found[pd] = core._erase_words_of(p)
+            if pd not in found and any(privacy._erase_same_person(privacy._erase_words_of(p), w) for w in list(found.values())):
+                found[pd] = privacy._erase_words_of(p)
     held = {pd: person_ix[pd] for pd in found
             if person_ix.get(pd) and person_ix[pd] in (d.get("persons") or {})}
     if found:
         for gid, rec in (d.get("persons") or {}).items():
-            if gid not in held.values() and any(core._erase_same_person(core._erase_words_of(rec), w)
+            if gid not in held.values() and any(privacy._erase_same_person(privacy._erase_words_of(rec), w)
                                                  for w in list(found.values())):
                 held["dup:" + gid] = gid
     held_ids = set(held.values())
@@ -968,13 +968,13 @@ def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
     for words in found.values():
         learned.extend(words)
     for gid in held_ids:
-        learned.extend(core._erase_words_of(d["persons"][gid]))
-    alive = core._erase_alive([p for p in payload_people if str(p["pd_id"]) not in found]
+        learned.extend(privacy._erase_words_of(d["persons"][gid]))
+    alive = privacy._erase_alive([p for p in payload_people if str(p["pd_id"]) not in found]
                          + [p for k, p in (d.get("persons") or {}).items()
                             if k not in held_ids and str(p.get("pd_id") or "") not in erased_pd],
                          [o.get("name") for o in (data.get("orgs") or [])]
                          + [o.get("name") for o in (d.get("orgs") or {}).values()])
-    scrub_fn = core._erase_scrubber(d, words=learned, alive=alive, requests=mail_gone)
+    scrub_fn = privacy._erase_scrubber(d, words=learned, alive=alive, requests=mail_gone)
     linked_pd = set(found) | erased_pd
     # Their organisations: the one they were the contact for is theirs to
     # clean, whatever a namesake elsewhere is called.
@@ -1206,7 +1206,7 @@ def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
     held_orgs = {str(d["persons"][g].get("org_id")) for g in held_ids
                  if g in d["persons"] and d["persons"][g].get("org_id")}
     linked_orgs = held_orgs | {org_of[x] for x in linked_org_pd if org_of.get(x)}
-    held_words = {g: (core._erase_words_of(d["persons"][g]),
+    held_words = {g: (privacy._erase_words_of(d["persons"][g]),
                       [x for x in [d["persons"][g].get("pd_id")] + list(d["persons"][g].get("pd_merged_ids") or []) if x])
                   for g in held_ids if g in d["persons"]}
     if not dry:
@@ -1215,7 +1215,7 @@ def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
             if rec is not None:
                 rec["id"] = gid
                 _crm_tombstone_contact(d, "persons", rec)
-    scrubbed_keys |= core._erase_sweep(d, scrub_fn, linked_people=held_ids, apply=not dry,
+    scrubbed_keys |= privacy._erase_sweep(d, scrub_fn, linked_people=held_ids, apply=not dry,
                                   linked_orgs=linked_orgs, skip_people=held_ids)
     if not dry:
         _gone, threads = _crm_erase_links(d, held_ids, held_orgs)
@@ -1223,9 +1223,9 @@ def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
             logger.info("crm import: %d mail thread(s) belonged to a contact erased on request", len(threads))
         known_dead = set(d.get("pd_deleted_persons") or [])
         for words, ids in held_words.values():
-            core._erase_remember(d, words, ids, shared=alive)
+            privacy._erase_remember(d, words, ids, shared=alive)
         for pd, words in found.items():
-            core._erase_remember(d, words, [pd], shared=alive)
+            privacy._erase_remember(d, words, [pd], shared=alive)
             if pd not in known_dead:
                 d.setdefault("pd_deleted_persons", []).append(pd)
                 known_dead.add(pd)
@@ -1252,3 +1252,4 @@ from gizmo import gate  # noqa: E402
 from gizmo import mail  # noqa: E402
 from gizmo import team  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import privacy  # noqa: E402

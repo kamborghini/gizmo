@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-20",
+   "title": "Privacy, loans and work sessions on their own",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "Erasing a customer's data, the loan register and work sessions now each live on their own, so a change elsewhere cannot upset them. Nothing looks different."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-20",
    "title": "Files on their own",
    "items": [
     {

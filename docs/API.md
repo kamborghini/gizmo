@@ -185,7 +185,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/loans` | POST | loans | `_guard` |  | `_team_level` | `copilot.loans_route` | Loan projectors: the register of what the shop owns, and where each one is. |
+| `/api/loans` | POST | loans | `_guard` |  | `_team_level` | `gizmo.routes.loans.loans_route` | Loan projectors: the register of what the shop owns, and where each one is. |
 
 ## `/api/mail`
 
@@ -244,7 +244,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/privacy` | POST | any account | `_guard` | rank admin |  | `copilot.privacy_requests_route` | Settings, Privacy requests: the customer erasures Shopify asked for, each waiting for an admin to erase or stop (see _redact_hold), and the data requests to ... |
+| `/api/privacy` | POST | any account | `_guard` | rank admin |  | `gizmo.routes.privacy.privacy_requests_route` | Settings, Privacy requests: the customer erasures Shopify asked for, each waiting for an admin to erase or stop (see _redact_hold), and the data requests to ... |
 
 ## `/api/product`
 
@@ -366,11 +366,11 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/work/board` | POST | any account | `_team_guard` | rank admin |  | `copilot.work_board_route` |  |
-| `/api/work/clock` | POST | any account | `_guard` |  |  | `copilot.work_clock_route` |  |
-| `/api/work/report` | POST | any account | `_team_guard` | rank admin |  | `copilot.work_report_route` |  |
-| `/api/work/resolve` | POST | any account | `_team_guard` | rank admin |  | `copilot.work_resolve_route` |  |
-| `/api/work/status` | POST | any account | `_guard` | reads its own body |  | `copilot.work_status_route` |  |
+| `/api/work/board` | POST | any account | `_team_guard` | rank admin |  | `gizmo.routes.work.work_board_route` |  |
+| `/api/work/clock` | POST | any account | `_guard` |  |  | `gizmo.routes.work.work_clock_route` |  |
+| `/api/work/report` | POST | any account | `_team_guard` | rank admin |  | `gizmo.routes.work.work_report_route` |  |
+| `/api/work/resolve` | POST | any account | `_team_guard` | rank admin |  | `gizmo.routes.work.work_resolve_route` |  |
+| `/api/work/status` | POST | any account | `_guard` | reads its own body |  | `gizmo.routes.work.work_status_route` |  |
 
 ## `/assets`
 
@@ -439,4 +439,4 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
 | `/webhooks/orders` | POST | outside the tab map | own check |  |  | `copilot.order_webhook` | Shopify's order events. |
-| `/webhooks/privacy` | POST | outside the tab map | own check |  |  | `copilot.privacy_webhook` | Shopify's three mandatory compliance topics, on one receiver. |
+| `/webhooks/privacy` | POST | outside the tab map | own check |  |  | `gizmo.routes.privacy.privacy_webhook` | Shopify's three mandatory compliance topics, on one receiver. |

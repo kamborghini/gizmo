@@ -424,6 +424,14 @@ def run(spec_path, root, write):
         t = ast.parse(text)
         ed = collections.defaultdict(list); used = set()
         for x in ast.walk(t):
+            # getattr/setattr/hasattr(copilot, "NAME", ...): the module named by its string
+            if (isinstance(x, ast.Call) and isinstance(x.func, ast.Name) and x.func.id in ("getattr", "setattr", "hasattr")
+                    and len(x.args) >= 2 and isinstance(x.args[0], ast.Name) and x.args[0].id in owners
+                    and isinstance(x.args[1], ast.Constant) and x.args[1].value in moved and not through):
+                a0 = x.args[0]
+                ed[a0.lineno].append((_col(lines, a0.lineno, a0.col_offset), _col(lines, a0.lineno, a0.end_col_offset),
+                                      AL[DEST[x.args[1].value]]))
+                used.add(DEST[x.args[1].value])
             if (isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and x.value.id in owners
                     and x.attr in moved and x.attr not in keep_copies):
                 new = (x.value.id + "." if through else "") + AL[DEST[x.attr]] + "." + x.attr
