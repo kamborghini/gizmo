@@ -321,7 +321,10 @@ def run(spec_path, root, write):
         for g, spans in group_spans.items():
             for a_, b_, _ in spans:
                 route_line.update({ln: g for ln in range(a_, b_ + 1)})
-    ar_locals = ({a.arg for a in AR.args.args} | {s_.name for s_ in AR.body if isinstance(s_, (ast.FunctionDef, ast.AsyncFunctionDef))}) if AR else set()
+    # every name add_routes binds as it runs (its parameters, nested
+    # functions and the values it assigns): a route moved out cannot read one
+    ar_table = next((c for c in st.get_children() if c.get_name() == "add_routes" and c.get_type() == "function"), None)
+    ar_locals = {s.get_name() for s in ar_table.get_symbols() if s.is_local()} if ar_table else set()
 
     def where(line):
         if line in route_line:

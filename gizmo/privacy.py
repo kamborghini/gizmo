@@ -1375,15 +1375,8 @@ def _redact_retry_pending() -> int:
 
 
 # ---------------------------------------------------------------------------
-# WebDAV: the Files store as a native Finder drive. macOS mounts it with
-# Connect to Server; each person signs in with their own APP account, so a
-# proof saved from a Mac carries their name (and their work session when they
-# are on the clock) exactly like an upload through the page.
-#
-# This is the one surface WITHOUT the Shopify perimeter: Finder cannot carry
-# an embed token. The door is HTTPS + the app's own credentials, with the
-# same wrong-password counters and pause as the login screen, and it opens
-# only for accounts allowed the Files tab.
+# The pre-redact archive: the undo for an uninstall that was a mistake, kept
+# thirty days and then deleted.
 # ---------------------------------------------------------------------------
 
 

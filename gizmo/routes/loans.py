@@ -19,8 +19,6 @@ logger = logging.getLogger("shopify_mcp.copilot")
 def register(mcp, registry):
     """Add the loan register's route to the app."""
 
-    # ---- Work routes ------------------------------------------------------
-    # The clock. Timestamps are minted HERE, never accepted from the browser.
     @mcp.custom_route("/api/loans", methods=["POST"])
     async def loans_route(request: Request):
         """Loan projectors: the register of what the shop owns, and where each

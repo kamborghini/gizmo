@@ -22,6 +22,7 @@ from gizmo import ai as claude
 from gizmo import shopify
 
 import copilot as core
+from gizmo import skills as skillbook
 from gizmo import files as fileserver
 from gizmo import activity
 from gizmo import crm as salesdesk
@@ -459,7 +460,7 @@ def register(mcp, registry):
         # Ranked on what was written, not the labelled transcript: its
         # 'FROM_CUSTOMER sender= when=' words matched every email to any skill
         # that said 'customer'.
-        playbooks = core._skills_for_draft((t.get("subject") or "") + "\n"
+        playbooks = skillbook._skills_for_draft((t.get("subject") or "") + "\n"
                                       + "\n".join((m.get("text") or "")[:3900] for m in msgs[-2:]) + "\n" + guidance)
         prompt = ("You are writing as " + (team._team_name(who) or "a member of staff")
                   + ", who is dealing with this email.\n\n"

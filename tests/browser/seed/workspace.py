@@ -23,9 +23,9 @@ WS_SEED = {}
 # _ws_stores in tests/test_dispatch.py, which redirects them per test). On a Mac
 # /data cannot be made, so every note or skill write answers 500. Same redirect,
 # to the run's scratch dir, done once before anything is written.
-copilot.MEMORY_PATH = SCRATCH + "/store_memory.json"
-copilot.SKILLS_PATH = SCRATCH + "/store_skills.json"
-for _p in (copilot.MEMORY_PATH, copilot.SKILLS_PATH):
+memory.MEMORY_PATH = SCRATCH + "/store_memory.json"
+skillbook.SKILLS_PATH = SCRATCH + "/store_skills.json"
+for _p in (memory.MEMORY_PATH, skillbook.SKILLS_PATH):
     jsonstore._poisoned_stores.discard(_p)
 
 ensure_auth()
@@ -180,16 +180,16 @@ _mid = [m for m in _r.json()["memories"] if m["text"].startswith("Send the revis
 assert post("/api/memory", {"op": "set_status", "id": _mid, "status": "done"}).status_code == 200
 # Notes kept from chat (source "chat") and one from a member's chat waiting for an admin
 # (held=True, by=...), through the store's own writer, as _chat_after calls it.
-copilot._add_memories([{"type": "insight", "text": "Customers who order a projector come back for a second gobo within 60 days about a third of the time."}],
+memory._add_memories([{"type": "insight", "text": "Customers who order a projector come back for a second gobo within 60 days about a third of the time."}],
                       source="chat")
-copilot._add_memories([{"type": "followup", "text": "Holloway Theatre wants a quote for twelve steel gobos before March."}],
+memory._add_memories([{"type": "followup", "text": "Holloway Theatre wants a quote for twelve steel gobos before March."}],
                       source="chat", held=True, by="Owen Castellano")
 # Spread the Added dates over the summer (b): the same list, rewritten by its writer.
-_mem = copilot._load_memory()
+_mem = memory._load_memory()
 for k, m in enumerate(_mem):
     t = _iso(_NOW - _td(days=70 - 7 * k, hours=k))
     m["created"] = m["updated"] = t
-copilot._write_memory(_mem)
+memory._write_memory(_mem)
 
 # ---------------------------------------------------------------- Memory: store knowledge (b) + (a)
 # As t_reading_the_store_knowledge_takes_no_ai_slot_and_it_can_be_corrected: a learned
@@ -200,12 +200,12 @@ _KNOW = ("## What the business sells\nLED gobo projectors for indoor and outdoor
          "## How it sells\nOnline, with trade accounts on 30-day terms. Every custom gobo starts with an "
          "artwork proof.\n\n## Delivery\nUK next day for stock items; custom gobos ship three to five working "
          "days after the proof is approved. Ships to Ireland and Europe.\n\n## Tone\nPlain, helpful and practical.")
-copilot._save_knowledge(_KNOW.replace("five", "six"), ["https://halden-lighting.example.org/",
+knowledge._save_knowledge(_KNOW.replace("five", "six"), ["https://halden-lighting.example.org/",
                         "https://halden-lighting.example.org/pages/about",
                         "https://halden-lighting.example.org/collections/custom-gobos",
                         "https://halden-lighting.example.org/pages/delivery"])
-_k = copilot._load_knowledge(); _k["learned_at"] = _iso(_NOW - _td(days=36))
-jsonstore._write_json_store(copilot.KNOWLEDGE_PATH, None, _k)
+_k = knowledge._load_knowledge(); _k["learned_at"] = _iso(_NOW - _td(days=36))
+jsonstore._write_json_store(knowledge.KNOWLEDGE_PATH, None, _k)
 assert post("/api/learn", {"op": "save", "knowledge": _KNOW}).status_code == 200
 
 # ---------------------------------------------------------------- Memory: tracked changes (b)
@@ -267,7 +267,7 @@ for sk in _SK:
 _skills = {s["title"]: s["id"] for s in _r.json()["skills"]}
 # Reactor's reading of the first skill (the {when, rules, examples, questions} run_skill_reading
 # returns), kept with the skill's own writer.
-copilot._save_skill_reading(_skills["Quoting custom gobos"], {
+skillbook._save_skill_reading(_skills["Quoting custom gobos"], {
     "when": "A customer asks what a custom gobo costs, or sends artwork for one.",
     "rules": ["Ask for the projector model before quoting.",
               "Use glass for photos and gradients; steel for one-colour logos.",

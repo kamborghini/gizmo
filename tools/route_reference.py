@@ -16,6 +16,7 @@ copilot.py or the modules split out of it they stand, so this imports nothing
 from the app. Zero dependencies, like env_reference.py.
 """
 import ast
+import copy
 import os
 import re
 import sys
@@ -45,6 +46,19 @@ def _family_aliases(tree, family):
         elif isinstance(n, ast.ImportFrom) and n.module and not n.level:
             out |= {a.asname or a.name for a in n.names if f"{n.module}.{a.name}" in family}
     return out
+
+
+class _Bare(ast.NodeTransformer):
+    def visit_Attribute(self, x):
+        if isinstance(x.value, ast.Name) and x.value.id in _ALIASES:
+            return ast.Name(x.attr)
+        return self.generic_visit(x)
+
+
+def _bare(node) -> str:
+    """A limit as the code names it: SKILLS_BODY_MAX, whether the route reads
+    it bare or through the module that holds it (skillbook.SKILLS_BODY_MAX)."""
+    return ast.unparse(_Bare().visit(copy.deepcopy(node)))
 
 
 def _called(call):
@@ -105,7 +119,7 @@ def _door(fn):
                 terms.append("AI slot")
             for k in ("max_body", "cap"):
                 if k in kw:
-                    terms.append(k.replace("_", " ") + " " + ast.unparse(kw[k]))
+                    terms.append(k.replace("_", " ") + " " + _bare(kw[k]))
             if isinstance(kw.get("body"), ast.Constant) and kw["body"].value is False:
                 terms.append("reads its own body")
             return _called(node), ", ".join(terms)
