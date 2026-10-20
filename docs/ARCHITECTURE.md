@@ -54,7 +54,18 @@ them through the module's name: `jsonstore.NAME`, `errors.NAME`,
 `claude.NAME`. An area imports the floor directly; what it still reads from
 `copilot.py` through `core.` shrinks as the request check, accounts, orders
 and production move out in turn. The store names no area: an area that keeps
-something built from a store registers `jsonstore.when_forgotten(fn)`.
+something built from a store registers `jsonstore.when_forgotten(fn)`, and
+an area that keeps a whole store in memory registers how to let go of it
+(`jsonstore.holds_in_memory(drop)`), which restore and shop/redact call.
+
+Above the floor, each area moved out so far: the dispatch desk (`desk`), the
+team's accounts and sign-in (`gizmo/team.py`, its routes in
+`gizmo/routes/team.py`), the door every route opens with (`gizmo/gate.py`)
+and the activity log (`gizmo/activity.py`). They read each other through the
+module's name and `copilot.py` as `core.NAME`, and import `copilot` last.
+`copilot.py` reads them the same way, except names it takes by their own:
+the ones the frozen print route reads, and `_guard` and `_json`, the door
+every route here opens with and the answer it gives.
 
 Acyclic otherwise, and it stays that way. An integration never imports the app: it
 takes what it needs as arguments and returns plain data. `server.py` hands
@@ -206,8 +217,11 @@ can leave a test testing nothing. The guards below make that a failure, and
 3. **Nothing across at import time.** What an area needs as it loads moves
    first, into the floor. A function that finds its module's names by name
    (`globals()`, `vars()`, `sys.modules[__name__]`) cannot move: moved, it
-   reads the new module's names (`t_no_module_looks_itself_up_by_name`;
-   `_drop_memory_stores` stays in `copilot.py` for this reason).
+   reads the new module's names (`t_no_module_looks_itself_up_by_name`).
+   None is left. A function that resets another module's state with a
+   `global` statement writes through the module instead (`team._users_mem =
+   None`), and a module that keeps a store in memory lets go of its own
+   (`t_every_memory_copy_of_a_store_is_let_go`).
 4. **Re-point the tests** that patch or read a moved name to the area's
    module. `t_no_test_patches_a_name_nobody_reads` fails on a patch that
    would land on nothing, on a copied name a patch would miss, and on a
@@ -230,7 +244,13 @@ can leave a test testing nothing. The guards below make that a failure, and
 7. **Frozen code keeps its bytes.** If a frozen function (the printed
    labels' route) reads a moved name, `copilot.py` takes that name from the
    area by name, which the guard allows only for a name no test patches and
-   nothing rebinds, and the area imports `copilot` last.
+   nothing rebinds, and the area imports `copilot` last. The same holds for
+   a name every route uses (`_guard`, `_json`), so the idiom reads as before.
+8. **Check the names first.** An alias must not be a local name where the
+   moved names are read: `store`, `ai`, `accounts` and `door` all were
+   somewhere, which is why the modules read as `jsonstore`, `claude`, `team`
+   and `gate`. The move script refuses a clash in the app; in the tests, it
+   fails loudly.
 
 ## What is deliberately the way it is
 
