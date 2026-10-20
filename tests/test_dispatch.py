@@ -30379,7 +30379,7 @@ _TOY_SPEC = {"areas": [{"name": "x", "file": "gizmo/x.py", "alias": "x", "prefix
              "note": "the x area"}
 
 
-def _toy_repo(name, copilot_text=_TOY_COPILOT, spec=None):
+def _toy_repo(name, copilot_text=_TOY_COPILOT, spec=None, extra=None):
     """A made-up repository in the scratch folder: copilot.py, a gizmo
     package, one test, and a move description."""
     import json as _json
@@ -30390,6 +30390,7 @@ def _toy_repo(name, copilot_text=_TOY_COPILOT, spec=None):
     files = {_TOY_MAIN: copilot_text, "gizmo/__init__.py": "", "gizmo/routes/__init__.py": "",
              "gizmo/floor_stub.py": '"""Stands in for the floor."""\n', "tests/test_dispatch.py": _TOY_TEST,
              "server.py": "def boot():\n    import copilot\n    return copilot._x_load()\n"}
+    files.update(extra or {})
     for rel, text in files.items():
         open(os.path.join(root, rel), "w").write(text)
     open(os.path.join(root, "tools/moves/x.json"), "w").write(_json.dumps(spec or _TOY_SPEC))
@@ -30463,6 +30464,36 @@ def t_the_files_routes_are_gathered():
     for path in ('"/api/files/', '"/dav'):
         ok(path not in src, path + " is registered by the Files routes")
     eq(inspect.getsource(routes_files).count("@mcp.custom_route("), 8, "the 7 Files routes and the drive's")
+
+@test
+def t_move_area_moves_routes_after_their_area():
+    """A route group whose area moved in an earlier piece: its routes follow,
+    gathered where the first stood, still reaching the area through its name."""
+    import importlib.util, subprocess as _sp
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    spec_ = importlib.util.spec_from_file_location("move_proof", os.path.join(here, "tools", "move_proof.py"))
+    mp = importlib.util.module_from_spec(spec_); spec_.loader.exec_module(mp)
+    old = '"""An area moved in an earlier piece."""\n\n\ndef f():\n    return core.KEEP\n\n\nimport copilot as core  # noqa: E402\n'
+    cop = _TOY_COPILOT.replace("from gizmo import floor_stub\n", "from gizmo import floor_stub\nfrom gizmo import old\n") + (
+        '\n    @mcp.custom_route("/api/old/c", methods=["POST"])\n    async def old_c(request):\n        return old.f() + KEEP\n')
+    spec = {"note": "the old area's routes", "areas": [],
+            "routes": [{"name": "routes_old", "file": "gizmo/routes/old.py", "area": "old", "paths": ["/api/old/"],
+                        "helpers": [], "doc": "The old area's routes.", "register_doc": "Add them."}]}
+    root = _toy_repo("toy-routes", cop, spec, {"gizmo/old.py": old})
+    r = _run_move(root)
+    eq(r.returncode, 0, r.stdout[-600:] + r.stderr[-600:])
+    read = lambda rel: open(os.path.join(root, rel)).read()
+    routes, head_cop = read("gizmo/routes/old.py"), read(_TOY_MAIN)
+    ok("return old.f() + core.KEEP" in routes and "from gizmo import old" in routes,
+       "the route reaches the area through its name, and copilot.py through core")
+    eq(head_cop.count("routes_old.register(mcp, registry)"), 1, "gathered into one call")
+    ok('"/api/old/c"' not in head_cop, "and gone from add_routes")
+    base = {_TOY_MAIN: cop, "gizmo/__init__.py": "", "gizmo/floor_stub.py": '"""Stands in for the floor."""\n',
+            "gizmo/old.py": old, "gizmo/routes/__init__.py": ""}
+    head = dict(base, **{_TOY_MAIN: head_cop, "gizmo/routes/old.py": routes})
+    eq(mp.prove(base, head), [], "prove(): nothing but the move")
+    rr = _sp.run([sys.executable, "-c", "import gizmo.routes.old, copilot"], cwd=root, capture_output=True, text=True)
+    eq(rr.returncode, 0, rr.stderr[-400:])
 
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The

@@ -21,7 +21,8 @@ stops it, and with --write, when nothing stops it, writes the move:
   go through the module (shown to make move-proof as a declared change);
 - a route group's routes, scattered through add_routes, are gathered into one
   register(mcp, registry) where the first stood (make move-proof checks no
-  request changes hands), with the helpers named for them;
+  request changes hands), with the helpers named for them; its area is one of
+  this move's, or one moved earlier;
 - an alias that is a local name where it would be read, in the app or the
   tests, stops the move; so does __file__ unless the area allows it;
 - the modules split out earlier, server.py, the tests and the browser seeds
@@ -269,6 +270,10 @@ def run(spec_path, root, write):
                     copy_owner[al.asname or al.name] = owner
     area_aliases = {a for a, m in mod_alias.items() if m not in floor_mods}
     imports = set(IMPORTS)
+    for g, gd in groups.items():
+        # a group's area is one of this move's, or one moved earlier that copilot.py binds
+        if gd["area"] not in areas and gd["area"] not in mod_alias:
+            problems.append(f"route group {g}: no area {gd['area']} in this move or bound in copilot.py")
 
     # what moves where
     DEST = {}
@@ -351,7 +356,7 @@ def run(spec_path, root, write):
         if name in OWN or name in DUNDERS - {"__file__"}:
             return
         if name == "__file__":
-            if areas[owner_area(w)].get("allow_file"):
+            if areas.get(owner_area(w), {}).get("allow_file"):
                 notes.append(f"{node.lineno}: {w} builds a path from __file__ (allowed by the description)")
             else:
                 problems.append(f"{node.lineno}: {w} builds a path from __file__, which points into gizmo/ once moved")
@@ -370,7 +375,7 @@ def run(spec_path, root, write):
         if name in imports:
             imports_used[w].add(name); return
         if name in staying:
-            if areas[owner_area(w)].get("floor"):
+            if areas.get(owner_area(w), {}).get("floor"):
                 problems.append(f"{node.lineno}: floor area {w} would read copilot.py's {name}")
             edit(node, "core." + name); borrowed[w].add(name)
             if table is st and w not in groups:
