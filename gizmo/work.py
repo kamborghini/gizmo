@@ -16,6 +16,14 @@ from gizmo import store as jsonstore
 logger = logging.getLogger("shopify_mcp.copilot")
 
 
+# ---------------------------------------------------------------------------
+# Work sessions: clocking in and out, for part-time accounts only. The clock
+# is the SERVER'S: routes take no timestamps from the browser, one session can
+# be open per person, and a close computes its own duration. Whether someone
+# is monitored follows their ROLE at the moment of each event, never a name.
+# Sessions are append-only; an admin resolving a forgotten clock-out closes
+# the session with correction stamps beside the original start, on the ledger.
+# ---------------------------------------------------------------------------
 
 
 WORK_PATH = os.environ.get("WORK_PATH", "/data/worklog.json")

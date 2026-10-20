@@ -70,10 +70,14 @@ the activity log (`gizmo/activity.py`), the order book
 (`gizmo/size_list.py`), the CRM (`gizmo/crm.py`, read as `salesdesk`) and the
 shared inbox (`gizmo/mail.py`), Files (`gizmo/files.py`, read as
 `fileserver`), the Finder drive (`gizmo/webdav.py`), customer-data erasure
-(`gizmo/privacy.py`), the loan register (`gizmo/loans.py`) and work sessions
-(`gizmo/work.py`), each with its routes in `gizmo/routes/` (production's, the
-Size list's and the order book's too; the printed-label routes stay in
-`add_routes`, their bytes pinned). They read each other through the
+(`gizmo/privacy.py`), the loan register (`gizmo/loans.py`), work sessions
+(`gizmo/work.py`), skills (`gizmo/skills.py`, read as `skillbook`), memory
+(`gizmo/memory.py`), store knowledge (`gizmo/knowledge.py`) and the chat loop
+(`gizmo/chat.py`, read as `assistant`), each with its routes in
+`gizmo/routes/` (production's, the Size list's and the order book's too; the
+printed-label routes stay in `add_routes`, their bytes pinned, and so do the
+chat's two, which read the tool list `add_routes` builds from the registry
+it is handed). They read each other through the
 module's name and `copilot.py` as `core.NAME`, and import `copilot` last.
 `copilot.py` reads them the same way, except names it takes by their own:
 the ones the frozen print route reads, and `_guard` and `_json`, the door
@@ -223,7 +227,14 @@ can leave a test testing nothing. The guards below make that a failure, and
    its route groups; see `tools/moves/README.md`), run the tool without
    `--write` and settle in the description whatever it reports (a name the
    prefix missed shows in what the area borrows; an alias that is a local
-   somewhere stops it), then `--write`. A description with no areas moves
+   somewhere stops it), then `--write`. The dry run does not list a function
+   of the area that the prefix missed and that only calls into the area: it
+   stays in `copilot.py` without a word (`_add_skill` did), so look for the
+   area's names in what stays too. A route that reads a value `add_routes`
+   binds as it runs cannot move, and the tool refuses it. A heading whose
+   whole section moves goes with it; one left over code that is not the
+   area's is rewritten to say what is under it, and its text, when it
+   explains the area, goes into the area's module. A description with no areas moves
    only routes, for an area that moved earlier. What it does: cut statements whole, keeping their text and order,
    into `gizmo/<area>.py`, and the routes into `gizmo/routes/<area>.py`
    inside `register(mcp, registry)`, which `add_routes` calls where the
@@ -249,7 +260,10 @@ can leave a test testing nothing. The guards below make that a failure, and
    None`), and a module that keeps a store in memory lets go of its own
    (`t_every_memory_copy_of_a_store_is_let_go`).
 4. **Re-point the tests** that patch or read a moved name to the area's
-   module. `t_no_test_patches_a_name_nobody_reads` fails on a patch that
+   module. The tool follows a name it can read, a string in `getattr`
+   included; a test that reaches one through a variable
+   (`setattr(copilot, path_attr, path)`) is re-pointed by hand, and fails
+   loudly until it is. `t_no_test_patches_a_name_nobody_reads` fails on a patch that
    would land on nothing, on a copied name a patch would miss, and on a
    module keeping its own copy (a clock, a client) the test does not patch.
 5. **The guards.** `tools/sources.py` lists `copilot.py` and every module
@@ -259,7 +273,10 @@ can leave a test testing nothing. The guards below make that a failure, and
    behind on a path no test drives; `t_either_module_imports_first` the
    import order; each area's borrowed list (`t_what_dispatch_borrows`) names
    exactly what it still reads from `copilot.py`, and each later move
-   shortens it.
+   shortens it. A check that walks module names (the backup's reach,
+   `t_backup_is_exhaustive_by_construction`; the clocks, `_every_clock`)
+   walks every module in `tools/sources.py`, or each move quietly takes
+   names out of it.
 6. **The proof.** `make move-proof BASE=origin/main` prints "nothing but the
    move", or names each statement lost, added or changed, each prefix put on
    a local and each moved statement that looks its module up by name. A

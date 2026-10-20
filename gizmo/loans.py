@@ -14,6 +14,15 @@ from gizmo import store as jsonstore
 logger = logging.getLogger("shopify_mcp.copilot")
 
 
+# --------------------------------------------------------------------------
+# Loan units: the projectors that go out to customers, and where they are.
+# Two objects because they answer different questions. A UNIT is a thing the
+# shop owns and keeps forever; a LOAN is one trip it made. Without the unit
+# register "where is the demo projector" has no answer, because the same
+# machine gets typed six different ways over a year.
+# --------------------------------------------------------------------------
+
+
 LOANS_PATH = os.environ.get("LOANS_PATH", "/data/loans.json")
 LOAN_CHASE_DAYS_DEFAULT = 28
 _loans_mem = None

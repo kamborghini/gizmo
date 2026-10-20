@@ -24,6 +24,17 @@ from gizmo import store as jsonstore
 logger = logging.getLogger("shopify_mcp.copilot")
 
 
+# ---------------------------------------------------------------------------
+# Shared inbox: who owns which email. The mailbox itself stays in Gmail —
+# reading and replying happen there — this is the layer Gmail doesn't have:
+# every thread has exactly ONE owner, states age visibly, and a label synced
+# back to Gmail ("Copilot/<Name>") shows the ownership inside Gmail too.
+#
+# Sync is pull, not push: the board re-syncs when its picture is older than
+# MAIL_SYNC_SECONDS, so the person who opens the board pays a small refresh
+# and nobody needs a webhook. threads.list hands back a historyId per thread,
+# so an unchanged thread costs nothing beyond the one listing call.
+# ---------------------------------------------------------------------------
 
 
 MAIL_LOOP_SECS = _env_num(int, os.environ.get("MAIL_LOOP_SECS", "60"), "60", "MAIL_LOOP_SECS")
@@ -1821,7 +1832,7 @@ MAIL_DRAFT_SYSTEM = (
 _MAIL_NO_SEND = ("You are not set up to send email from here. "
                  "Ask a lead to switch it on in Team.")
 
-# ----- Shared inbox: who owns which email ----------------------------
+# ----- The inbox's door and what its routes share (gizmo/routes/mail.py) -
 async def _mail_guard(request: Request):
     """(error_response, body, actor_uid): the one door, for the inbox."""
     return await gate._guard(request)

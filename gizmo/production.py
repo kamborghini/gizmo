@@ -23,6 +23,13 @@ from gizmo import store as jsonstore
 logger = logging.getLogger("shopify_mcp.copilot")
 
 
+# ---------------------------------------------------------------------------
+# Production labels: orders carrying the production tag, shaped for printing a
+# picking/production label (order number, who it is for, and what to build).
+# No AI is involved; this is a plain Shopify read.
+# ---------------------------------------------------------------------------
+
+
 PRODUCTION_TAG     = os.environ.get("PRODUCTION_LABEL_TAG", "IP")              # order tag that means "in production"
 PRODUCTION_DAYS    = _env_num(int, os.environ.get("PRODUCTION_LABEL_DAYS", "180"), "180", "PRODUCTION_LABEL_DAYS")       # how far back to look for tagged orders
 

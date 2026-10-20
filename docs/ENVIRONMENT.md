@@ -20,6 +20,14 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `TOKEN_REFRESH_BUFFER` | `"1800"` | server |  |
 | `WEBHOOK_ALLOWED_HOSTS` | `""` | server | comma-separated host names or addresses (a staging copy of Reactor) whose webhooks the hourly repair keeps |
 
+## copilot.py - Accounts: a work session's length in words, first-run setup 
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `RAILWAY_ENVIRONMENT` | `None` | copilot | set by Railway; the volume check runs only there |
+| `RAILWAY_PROJECT_ID` | `None` | copilot | set by Railway; the volume check runs only there |
+| `SETUP_CODE` | `""` | copilot | set only while first-run setup is needed, then remove; unset locks setup |
+
 ## copilot.py - Chase desk: the weekly session of asking credit customers fo
 
 | Variable | Default | Read by | Notes |
@@ -80,28 +88,12 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 |---|---|---|---|
 | `EXTERNAL_FETCH_MAX` | `str(600 * 1024)` | copilot | bytes of text kept |
 
-## copilot.py - Loan units: the projectors that go out to customers, and whe
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `RAILWAY_ENVIRONMENT` | `None` | copilot | set by Railway; the volume check runs only there |
-| `RAILWAY_PROJECT_ID` | `None` | copilot | set by Railway; the volume check runs only there |
-| `SETUP_CODE` | `""` | copilot | set only while first-run setup is needed, then remove; unset locks setup |
-
 ## copilot.py - Page rendering
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
 | `CONNECTOR_TOKEN` | `None` | copilot |  |
 | `CONNECTOR_URL` | `None` | copilot |  |
-
-## copilot.py - Production labels: orders carrying the production tag, shape
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `LIABILITY_DEFAULT_TERMS` | `"30"` | copilot |  |
-| `LIABILITY_DUE_SOON_DAYS` | `"7"` | copilot |  |
-| `LIABILITY_TAGS` | `"Purchase order unpaid, Bank transfer unpaid, Procurement...` | copilot |  |
 
 ## copilot.py - Reconciliation stores + the read-only tools the chat is give
 
@@ -136,6 +128,14 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `ZETA_SYNC_TOKEN` | `""` | copilot |  |
 | `ZETA_URL` | `""` | copilot |  |
 
+## copilot.py - Unpaid orders on credit terms: the tags that mark them, the 
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `LIABILITY_DEFAULT_TERMS` | `"30"` | copilot |  |
+| `LIABILITY_DUE_SOON_DAYS` | `"7"` | copilot |  |
+| `LIABILITY_TAGS` | `"Purchase order unpaid, Bank transfer unpaid, Procurement...` | copilot |  |
+
 ## copilot.py - What's new: the release notes that ship WITH the release, an
 
 | Variable | Default | Read by | Notes |
@@ -169,7 +169,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 |---|---|---|---|
 | `COPILOT_MAX_TOOL_ROUNDS` | `"12"` | gizmo.chat |  |
 
-## gizmo/crm.py - top
+## gizmo/crm.py - CRM: the sales desk, modelled on Pipedrive
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
@@ -249,7 +249,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `LEARN_MAX_PAGES` | `"12"` | gizmo.knowledge | pages crawled when learning |
 | `LEARN_PAGE_CHARS` | `"3000"` | gizmo.knowledge | text kept per page |
 
-## gizmo/loans.py - top
+## gizmo/loans.py - Loan units: the projectors that go out to customers, and whe
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
@@ -263,7 +263,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `MAIL_BOARD_DONE_DAYS` | `"90"` | gizmo.mail |  |
 | `MAIL_BOARD_MAX` | `"1500"` | gizmo.mail |  |
 
-## gizmo/mail.py - top
+## gizmo/mail.py - Shared inbox: who owns which email. The mailbox itself stays
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
@@ -305,7 +305,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 |---|---|---|---|
 | `ORDER_PAGE_CAP` | `"30"` | gizmo.orderbook |  |
 
-## gizmo/privacy.py - WebDAV: the Files store as a native Finder drive. macOS moun
+## gizmo/privacy.py - The pre-redact archive: the undo for an uninstall that was a
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
@@ -317,7 +317,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 |---|---|---|---|
 | `PRIVACY_LOG_PATH` | `"/data/privacy_log.json"` | gizmo.privacy |  |
 
-## gizmo/production.py - top
+## gizmo/production.py - Production labels: orders carrying the production tag, shape
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
@@ -368,7 +368,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `SESSION_MAX_DAYS` | `"30"` | gizmo.team |  |
 | `USERS_PATH` | `"/data/users.json"` | gizmo.team |  |
 
-## gizmo/work.py - top
+## gizmo/work.py - Work sessions: clocking in and out, for part-time accounts o
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|

@@ -2130,9 +2130,8 @@ def _month_axis(months: int) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Production labels: orders carrying the production tag, shaped for printing a
-# picking/production label (order number, who it is for, and what to build).
-# No AI is involved; this is a plain Shopify read.
+# Unpaid orders on credit terms: the tags that mark them, the payment channel,
+# and the terms and due date each one runs to.
 # ---------------------------------------------------------------------------
 
 
@@ -4408,22 +4407,7 @@ def _ensure_scheduler(registry: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# CRM: the sales desk, modelled on Pipedrive.
-#
-# The shape it copies is deliberate. Pipedrive's whole design is one idea,
-# activity-based selling: you cannot control whether a deal closes, only
-# whether it always has a next action scheduled, so the product nags exactly
-# when it does not. Everything here serves that idea: the four activity states
-# on a card (overdue red, due-today green, NOTHING SCHEDULED amber warning,
-# future grey; having no next step is deliberately louder than being late),
-# the column sort those states drive, the follow-up prompt when the last open
-# activity on a deal is completed, and rotting when a deal sits untouched.
-#
-# One store, local JSON, same discipline as every other store here: atomic
-# writes, the poison guard, no await between load and write. People and
-# organisations can link to Shopify customers, which the read-only registry
-# already reaches; nothing in the CRM ever writes to Shopify, and none of it
-# is visible to the AI chat.
+# Team colours: the colour each account is given, so a row shows whose it is.
 # ---------------------------------------------------------------------------
 # Who owns what, at a glance. The same names the CRM already uses, minus the two
 # greys: as a row tint on an app that is already grey they would read as no
@@ -4445,27 +4429,17 @@ def _next_team_colour(users: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Shared inbox: who owns which email. The mailbox itself stays in Gmail —
-# reading and replying happen there — this is the layer Gmail doesn't have:
-# every thread has exactly ONE owner, states age visibly, and a label synced
-# back to Gmail ("Copilot/<Name>") shows the ownership inside Gmail too.
-#
-# Sync is pull, not push: the board re-syncs when its picture is older than
-# MAIL_SYNC_SECONDS, so the person who opens the board pays a small refresh
-# and nobody needs a webhook. threads.list hands back a historyId per thread,
-# so an unchanged thread costs nothing beyond the one listing call.
+# Connect walks for the accounts mailbox and Xero: the tickets and states each
+# consent walk is waiting on, held in memory.
 # ---------------------------------------------------------------------------
-_fin_connect_tickets: dict = {}      # the same, for the ACCOUNTS mailbox
+_fin_connect_tickets: dict = {}      # ticket -> its expiry and the address asked for (the ACCOUNTS mailbox)
 _fin_expect: dict = {}               # state nonce -> the address that was asked for
 _xero_connect_tickets: dict = {}     # ticket -> expiry, for the Xero consent walk
 
 
 # ---------------------------------------------------------------------------
-# Website enquiries -> the CRM. The storefront contact form has no API: Shopify
-# sends each submission as a notification email into the shared inbox this app
-# already syncs. Recognised threads become a deal in the "Contact Made" stage,
-# with the sender as a person and the message as the deal's first note - so an
-# enquiry is pipeline the moment it lands, not an email waiting to be retyped.
+# Work after a request: a coroutine run once the answer has gone, holding a
+# reference so it is not collected before it runs.
 # ---------------------------------------------------------------------------
 
 
@@ -5043,20 +5017,9 @@ def _save_layout(uid: str, view: str, layout) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Work sessions: clocking in and out, for part-time accounts only. The clock
-# is the SERVER'S: routes take no timestamps from the browser, one session can
-# be open per person, and a close computes its own duration. Whether someone
-# is monitored follows their ROLE at the moment of each event, never a name.
-# Sessions are append-only; an admin resolving a forgotten clock-out closes
-# the session with correction stamps beside the original start, on the ledger.
+# Accounts: a work session's length in words, first-run setup and its code, the
+# data volume check, and an account as the Team screen sees it.
 # ---------------------------------------------------------------------------
-# --------------------------------------------------------------------------
-# Loan units: the projectors that go out to customers, and where they are.
-# Two objects because they answer different questions. A UNIT is a thing the
-# shop owns and keeps forever; a LOAN is one trip it made. Without the unit
-# register "where is the demo projector" has no answer, because the same
-# machine gets typed six different ways over a year.
-# --------------------------------------------------------------------------
 
 
 def _fmt_secs(secs: int) -> str:
@@ -5415,10 +5378,10 @@ def _forecast_ledger(state: dict, body: dict) -> dict:
     in_use = {m: v for m, v in in_use.items() if m in keep or m >= min(keep, default=m)}
     return {"predicted": predicted, "in_use": in_use, "results": results}
 
-# ---- Auth + Team routes -----------------------------------------------
-# The app's own front door. Every route here still demands the Shopify
-# embed token first (the perimeter: requests must come from inside the
-# shop's admin), and then deals in the app's own accounts and sessions.
+# ---- What the sign-in and Team routes share (gizmo/routes/team.py) ----------
+# The app's own front door. Every one of those routes still demands the
+# Shopify embed token first (the perimeter: requests must come from inside
+# the shop's admin), and then deals in the app's own accounts and sessions.
 def _shop_gate(request: Request) -> bool:
     auth = request.headers.get("authorization", "")
     if not (auth.startswith("Bearer ") and SHOPIFY_API_SECRET):
