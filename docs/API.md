@@ -117,13 +117,13 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/files/complete` | POST | files | `_files_guard` |  |  | `copilot.files_complete_route` |  |
-| `/api/files/download-url` | POST | files | `_files_guard` |  |  | `copilot.files_download_route` |  |
-| `/api/files/drive` | POST | files | `_files_guard` |  |  | `copilot.files_drive_route` | The Finder drive's own password: made, replaced and removed here, after a full sign-in (codes included), shown once, kept as a SHA-256. |
-| `/api/files/file` | POST | files | `_files_guard` |  | `_team_level` | `copilot.files_file_route` |  |
-| `/api/files/folder` | POST | files | `_files_guard` |  |  | `copilot.files_folder_route` |  |
-| `/api/files/tree` | POST | files | `_files_guard` |  |  | `copilot.files_tree_route` |  |
-| `/api/files/upload-url` | POST | files | `_files_guard` |  |  | `copilot.files_upload_route` |  |
+| `/api/files/complete` | POST | files | `_files_guard` |  |  | `gizmo.routes.files.files_complete_route` |  |
+| `/api/files/download-url` | POST | files | `_files_guard` |  |  | `gizmo.routes.files.files_download_route` |  |
+| `/api/files/drive` | POST | files | `_files_guard` |  |  | `gizmo.routes.files.files_drive_route` | The Finder drive's own password: made, replaced and removed here, after a full sign-in (codes included), shown once, kept as a SHA-256. |
+| `/api/files/file` | POST | files | `_files_guard` |  | `_team_level` | `gizmo.routes.files.files_file_route` |  |
+| `/api/files/folder` | POST | files | `_files_guard` |  |  | `gizmo.routes.files.files_folder_route` |  |
+| `/api/files/tree` | POST | files | `_files_guard` |  |  | `gizmo.routes.files.files_tree_route` |  |
+| `/api/files/upload-url` | POST | files | `_files_guard` |  |  | `gizmo.routes.files.files_upload_route` |  |
 
 ## `/api/forecast`
 
@@ -391,7 +391,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/dav{sub_path:path}` | OPTIONS, PROPFIND, GET, HEAD, PUT, MKCOL, DELETE, MOVE, COPY, LOCK, UNLOCK | outside the tab map | own check |  |  | `copilot.dav_route` |  |
+| `/dav{sub_path:path}` | OPTIONS, PROPFIND, GET, HEAD, PUT, MKCOL, DELETE, MOVE, COPY, LOCK, UNLOCK | outside the tab map | own check |  |  | `gizmo.routes.files.dav_route` |  |
 
 ## `/fonts`
 

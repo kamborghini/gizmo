@@ -22,6 +22,7 @@ from gizmo import ai as claude
 from gizmo import shopify
 
 import copilot as core
+from gizmo import files as fileserver
 from gizmo import activity
 from gizmo import crm as salesdesk
 from gizmo import dispatch as desk
@@ -539,11 +540,11 @@ def register(mcp, registry):
             return err
         if not core._may_send_mail(who):
             return gate._json({"error": mail._MAIL_NO_SEND}, 403)
-        if not core._files_configured():
+        if not fileserver._files_configured():
             return gate._json({"error": "File storage is not set up, so nothing can be "
                                    "attached. Check Settings, Connections."}, 400)
         name = mail._mail_attach_name(body.get("name"))
-        if core._file_ext(name) in core._DANGEROUS_EXT:
+        if fileserver._file_ext(name) in fileserver._DANGEROUS_EXT:
             return gate._json({"error": f"{name} is a program; Gmail would refuse it and so does this."}, 400)
         ctype = str(body.get("type") or "").strip()[:100] or "application/octet-stream"
         inline = bool(body.get("inline"))
@@ -562,7 +563,7 @@ def register(mcp, registry):
                                    "cannot be bigger than that."}, 400)
         key = f"mail/{who}/{secrets.token_hex(8)}-{name}"
         try:
-            url = await asyncio.to_thread(core._files_sign_put, key, ctype, size)
+            url = await asyncio.to_thread(fileserver._files_sign_put, key, ctype, size)
         except Exception as e:
             logger.warning("mail: attachment presign failed: %s", e)
             return gate._json({"error": "Storage isn't reachable right now. Try again."}, 502)
@@ -583,7 +584,7 @@ def register(mcp, registry):
                 or not re.match(r"^mail/[^/]+/[0-9a-f]{16}-", key):
             return gate._json({"error": "That is not one of your uploads."}, 400)
         try:
-            size = await asyncio.to_thread(core._files_head, key)
+            size = await asyncio.to_thread(fileserver._files_head, key)
         except Exception:
             return gate._json({"error": "Storage did not answer; try again."}, 502)
         if not size:
@@ -592,23 +593,23 @@ def register(mcp, registry):
         if size > mail.MAIL_ATTACH_MAX:
             return gate._json({"error": "That file is over the 25MB a message can carry."}, 400)
         try:
-            head = await asyncio.to_thread(core._files_head_bytes, key)
+            head = await asyncio.to_thread(fileserver._files_head_bytes, key)
         except Exception:
             return gate._json({"error": "Storage did not answer; try again."}, 502)
         name = mail._mail_part_name(key)
         ctype = (str(body.get("type") or "").strip()[:100]
-                 or core._files_preview_mime(name) or "application/octet-stream")
+                 or fileserver._files_preview_mime(name) or "application/octet-stream")
         if bool(body.get("inline")):
             if not ctype.startswith("image/"):
                 return gate._json({"error": "Only an image can go inline in the message."}, 400)
             if size > mail.MAIL_INLINE_MAX:
                 return gate._json({"error": "An inline image has to be under 5MB."}, 400)
-        okv, why, safe = core._file_verdict(name, ctype, head)
-        if okv and bool(body.get("inline")) and core._sniff_kind(head) not in core._IMAGE_EXT.values():
+        okv, why, safe = fileserver._file_verdict(name, ctype, head)
+        if okv and bool(body.get("inline")) and fileserver._sniff_kind(head) not in fileserver._IMAGE_EXT.values():
             okv, why = False, f"{name} is not an image, so it cannot go inline."
         if not okv:
             try:
-                await asyncio.to_thread(core._r2_call, "delete_object", Key=key)
+                await asyncio.to_thread(fileserver._r2_call, "delete_object", Key=key)
             except Exception:
                 logger.warning("mail: refused attachment %s could not be removed", key)
             activity._track(who, "mail", "refused an attachment", why[:200])
@@ -619,7 +620,7 @@ def register(mcp, registry):
             # A short-lived look at our OWN bucket, so the editor can show the
             # image it is about to send. It leaves as a content-id part.
             try:
-                out["url"] = await asyncio.to_thread(core._files_sign_get, key, name, True)
+                out["url"] = await asyncio.to_thread(fileserver._files_sign_get, key, name, True)
             except Exception:
                 logger.warning("mail: could not sign the inline image for preview")
         return gate._json(out)
@@ -1044,14 +1045,14 @@ def register(mcp, registry):
         t, missing = mail._mail_thread_or_404(body)
         if missing:
             return missing
-        if not core._files_configured():
+        if not fileserver._files_configured():
             return gate._json({"error": "The files store is not set up, so there is nowhere "
                                    "to put it."}, 400)
         if team._user_tabs(who) is not None and "files" not in team._user_tabs(who):
             return gate._json({"error": "You do not have the Files tab."}, 403)
         msg_id = str(body.get("msg") or "")
         att_id = str(body.get("att") or "")
-        name = core._files_clean_name(body.get("name") or "attachment")
+        name = fileserver._files_clean_name(body.get("name") or "attachment")
         folder = [p for p in str(body.get("folder") or "").split("/") if p.strip()][:4]
         if not msg_id or not att_id:
             return gate._json({"error": "That attachment is no longer on this email."}, 400)
@@ -1072,15 +1073,15 @@ def register(mcp, registry):
             logger.exception("mail: attachment fetch failed")
             return gate._json({"error": "Could not fetch that attachment from Gmail."}, 502)
         import io as _io
-        okv, why, safe_type = core._file_verdict(name, "", raw[:64])
+        okv, why, safe_type = fileserver._file_verdict(name, "", raw[:64])
         if not okv:
             activity._track(who, "mail", "refused an email attachment", why[:200])
             return gate._json({"error": "Refused: " + why}, 400)
-        async with core._files_lock:
-            d = core._load_files()
+        async with fileserver._files_lock:
+            d = fileserver._load_files()
             used = sum(int(f.get("size") or 0) for f in d["files"].values()
                        if f.get("status") in ("active", "pending") or f.get("trashed_at"))
-            if used + len(raw) > int(core.FILES_QUOTA_GB * 1024 * 1024 * 1024):
+            if used + len(raw) > int(fileserver.FILES_QUOTA_GB * 1024 * 1024 * 1024):
                 return gate._json({"error": "The files store is full."}, 507)
             parent = mail._mail_folder_path(d, folder, who)
             # proof-v2.pdf arriving three times is the normal case here, and
@@ -1091,33 +1092,33 @@ def register(mcp, registry):
                         if f.get("status") == "active"
                         and str(f.get("folder_id") or "") == parent
                         and (f.get("name") or "").lower() == name.lower()), "")
-            fid = core._files_id(d, "f")
+            fid = fileserver._files_id(d, "f")
             key = f"{fid}/{name}"
             d["files"][fid] = {"name": name, "folder_id": parent, "size": len(raw),
-                               "type": safe_type, "sniffed": core._sniff_kind(raw[:64]), "r2_key": key,
+                               "type": safe_type, "sniffed": fileserver._sniff_kind(raw[:64]), "r2_key": key,
                                "status": "pending", "by": who, "replaces": dup,
                                "created_at": datetime.now(timezone.utc).isoformat()}
-            core._write_files(d)
+            fileserver._write_files(d)
         try:
             await asyncio.to_thread(
-                lambda: core._files_s3().upload_fileobj(_io.BytesIO(raw), core.R2_BUCKET, key))
+                lambda: fileserver._files_s3().upload_fileobj(_io.BytesIO(raw), fileserver.R2_BUCKET, key))
         except Exception:
             logger.exception("mail: attachment upload failed")
-            async with core._files_lock:
-                d = core._load_files()
+            async with fileserver._files_lock:
+                d = fileserver._load_files()
                 if d["files"].get(fid, {}).get("status") == "pending":
                     d["files"].pop(fid, None)
-                    core._write_files(d)
+                    fileserver._write_files(d)
             return gate._json({"error": "Could not save it into the files store."}, 502)
-        async with core._files_lock:
-            d = core._load_files()
+        async with fileserver._files_lock:
+            d = fileserver._load_files()
             rec = d["files"].get(fid)
             if rec is not None:
                 rec.update({"status": "active",
                             "uploaded_at": datetime.now(timezone.utc).isoformat()})
                 rec.pop("replaces", "")
-                core._files_supersede(d, fid)
-                core._write_files(d)
+                fileserver._files_supersede(d, fid)
+                fileserver._write_files(d)
         where = "/".join(folder) or "Files"
         mail._mail_log(t, who, "saved " + name + " to " + where)
         t.setdefault("saved_files", []).append({"name": name, "at": mail._mail_now(), "where": where})
@@ -1319,7 +1320,7 @@ def register(mcp, registry):
             if not key:
                 return gate._json({"url": ""})
             try:
-                url = await asyncio.to_thread(core._files_sign_get, key, "logo.png", True)
+                url = await asyncio.to_thread(fileserver._files_sign_get, key, "logo.png", True)
             except Exception:
                 logger.warning("mail: could not sign the footer logo")
                 return gate._json({"url": ""})
@@ -1380,7 +1381,7 @@ def register(mcp, registry):
                 return gate._json({"error": "The logo has to be under 1MB."}, 400)
             key = f"mail/footer/logo-{secrets.token_hex(8)}.{ext}"
             try:
-                url = await asyncio.to_thread(core._files_sign_put, key, ctype[:100], size)
+                url = await asyncio.to_thread(fileserver._files_sign_put, key, ctype[:100], size)
             except Exception as e:
                 logger.warning("mail: logo presign failed: %s", e)
                 return gate._json({"error": "Storage isn't reachable right now. Try again."}, 502)
@@ -1391,18 +1392,18 @@ def register(mcp, registry):
             if not re.match(r"^mail/footer/logo-[0-9a-f]{16}\.(png|jpe?g|gif|webp)$", key):
                 return gate._json({"error": "That is not a logo upload."}, 400)
             try:
-                size = await asyncio.to_thread(core._files_head, key)
+                size = await asyncio.to_thread(fileserver._files_head, key)
             except Exception:
                 return gate._json({"error": "Storage did not answer; try again."}, 502)
             if not size or size > mail.MAIL_LOGO_MAX:
                 return gate._json({"error": "The logo did not land, or is over 1MB."}, 400)
             try:
-                head = await asyncio.to_thread(core._files_head_bytes, key)
+                head = await asyncio.to_thread(fileserver._files_head_bytes, key)
             except Exception:
                 return gate._json({"error": "Storage did not answer; try again."}, 502)
-            if core._sniff_kind(head) not in core._IMAGE_EXT.values():
+            if fileserver._sniff_kind(head) not in fileserver._IMAGE_EXT.values():
                 try:
-                    await asyncio.to_thread(core._r2_call, "delete_object", Key=key)
+                    await asyncio.to_thread(fileserver._r2_call, "delete_object", Key=key)
                 except Exception:
                     pass
                 return gate._json({"error": "That file is not a PNG, JPG, GIF or WebP image."}, 400)

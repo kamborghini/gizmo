@@ -1,0 +1,54 @@
+{
+  "note": "Files (the office file server on the R2 bucket) and the Finder drive, with their routes",
+  "areas": [
+    {
+      "name": "files",
+      "file": "gizmo/files.py",
+      "alias": "fileserver",
+      "prefix": "^(_files|FILES_|_FILES|R2_|_r2)",
+      "extra": [
+        "_load_files",
+        "_write_files",
+        "_let_go_of_files_in_memory",
+        "rescue_misfiled_junk",
+        "_FILENAME_BAD",
+        "_DANGEROUS_EXT",
+        "_IMAGE_EXT",
+        "_KIND_MIME",
+        "_CLAIM_KIND",
+        "_file_ext",
+        "_sniff_kind",
+        "_file_verdict",
+        "_PREVIEW_MIME"
+      ],
+      "exclude": [],
+      "floor": false,
+      "doc": "Files: the office file server, without the office. The R2 bucket's client and its setup, the Files store and its copy in memory, names, kinds and previews, uploads in flight, quota and usage, the reaper, supersede and purge, signed links, and the boot clean-up server.py runs. Moved out of copilot.py (stage 4 of the 14 October audit); its routes are in gizmo/routes/files.py. Read as `fileserver.NAME` (`files` is a local name in the inbox and a test)."
+    },
+    {
+      "name": "webdav",
+      "file": "gizmo/webdav.py",
+      "alias": "webdav",
+      "prefix": "^(_dav|DAV_|_DAV)",
+      "extra": [],
+      "exclude": [],
+      "floor": false,
+      "doc": "The Finder drive: the Files store as a native WebDAV drive, the way macOS mounts it. Its path walking, its sign-in and failure caches, and the XML it answers with. Moved out of copilot.py (stage 4 of the 14 October audit); its route is with the Files routes. Read as `webdav.NAME`."
+    }
+  ],
+  "routes": [
+    {
+      "name": "routes_files",
+      "file": "gizmo/routes/files.py",
+      "area": "files",
+      "paths": [
+        "/api/files/",
+        "/dav"
+      ],
+      "helpers": [],
+      "doc": "The Files routes and the Finder drive's, gathered from add_routes (stage 4 of the 14 October audit) where the first stood. No request changes hands: the drive's is the one route with a pattern, and no other path starts with /dav.",
+      "register_doc": "Add the Files routes and the Finder drive's to the app.",
+      "comment": "The Files routes and the Finder drive's (gizmo/routes/files.py), gathered where the first\n    # stood; no other path starts with /dav, so no request changes hands."
+    }
+  ]
+}

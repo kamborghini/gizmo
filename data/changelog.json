@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-20",
+   "title": "Files on their own",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "The shared files and the Finder drive now live on their own, so a change elsewhere cannot upset an upload or a download. Nothing looks different."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-20",
    "title": "The CRM and mail on their own",
    "items": [
     {

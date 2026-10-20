@@ -137,6 +137,8 @@ from gizmo import ai as claude
 from gizmo import activity, gate, team
 from gizmo import orderbook, production, shopify, size_list
 from gizmo import crm as salesdesk, mail
+from gizmo import files as fileserver
+from gizmo import webdav
 import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
@@ -7191,29 +7193,29 @@ def run_async(coro):
 def with_files(fn, configured=True, s3=None):
     """Run fn(fake_s3) with the file store configured against a fake bucket."""
     fake = s3 or FakeS3()
-    copilot._files_mem = None
-    saved = (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
-             copilot._files_s3_client, dict(copilot._files_ready), copilot.FILES_QUOTA_GB)
+    fileserver._files_mem = None
+    saved = (fileserver.R2_ACCOUNT_ID, fileserver.R2_ACCESS_KEY_ID, fileserver.R2_SECRET_ACCESS_KEY,
+             fileserver._files_s3_client, dict(fileserver._files_ready), fileserver.FILES_QUOTA_GB)
     if configured:
-        copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY = "acct", "ak", "sk"
+        fileserver.R2_ACCOUNT_ID, fileserver.R2_ACCESS_KEY_ID, fileserver.R2_SECRET_ACCESS_KEY = "acct", "ak", "sk"
     else:
-        copilot.R2_ACCOUNT_ID = copilot.R2_ACCESS_KEY_ID = copilot.R2_SECRET_ACCESS_KEY = ""
-    copilot._files_s3_client = fake
-    copilot._files_ready.update({"bucket": False, "cors": False, "error": ""})
+        fileserver.R2_ACCOUNT_ID = fileserver.R2_ACCESS_KEY_ID = fileserver.R2_SECRET_ACCESS_KEY = ""
+    fileserver._files_s3_client = fake
+    fileserver._files_ready.update({"bucket": False, "cors": False, "error": ""})
     try:
-        os.remove(copilot.FILES_PATH)
+        os.remove(fileserver.FILES_PATH)
     except FileNotFoundError:
         pass
     try:
         fn(fake)
     finally:
-        (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
-         copilot._files_s3_client, ready, copilot.FILES_QUOTA_GB) = saved
-        copilot._files_ready.update(ready)
-        copilot._files_mem = None
-        jsonstore._poisoned_stores.discard(copilot.FILES_PATH)
+        (fileserver.R2_ACCOUNT_ID, fileserver.R2_ACCESS_KEY_ID, fileserver.R2_SECRET_ACCESS_KEY,
+         fileserver._files_s3_client, ready, fileserver.FILES_QUOTA_GB) = saved
+        fileserver._files_ready.update(ready)
+        fileserver._files_mem = None
+        jsonstore._poisoned_stores.discard(fileserver.FILES_PATH)
         try:
-            os.remove(copilot.FILES_PATH)
+            os.remove(fileserver.FILES_PATH)
         except FileNotFoundError:
             pass
 
@@ -7275,7 +7277,7 @@ def t_files_upload_guards():
         eq(post("/api/files/upload-url", {"name": "a", "size": 0}).status_code, 400, "empty file")
         eq(post("/api/files/upload-url", {"name": "a", "size": 5 * 1024 ** 4}).status_code, 400, "over the single-file cap")
         eq(post("/api/files/upload-url", {"name": "a", "size": 10, "folder_id": "d404"}).status_code, 400, "vanished folder")
-        copilot.FILES_QUOTA_GB = 0.0000001   # ~107 bytes
+        fileserver.FILES_QUOTA_GB = 0.0000001   # ~107 bytes
         r = post("/api/files/upload-url", {"name": "a", "size": 200})
         eq(r.status_code, 400, "quota")
         ok("storage space" in r.json()["error"], "the quota refusal says why")
@@ -7339,11 +7341,11 @@ def t_files_purge_is_the_only_deleter_of_bytes():
         fake.objects[key2] = 10
         post("/api/files/complete", {"id": up2["id"]})
         post("/api/files/file", {"op": "trash", "id": up2["id"]})
-        d = copilot._load_files()
+        d = fileserver._load_files()
         d["files"][up["id"]]["trashed_at"] = "2026-07-01T00:00:00+00:00"     # 31+ days ago
-        copilot._write_files(d)
-        copilot._files_tick()
-        d2 = copilot._load_files()
+        fileserver._write_files(d)
+        fileserver._files_tick()
+        d2 = fileserver._load_files()
         ok(up["id"] not in d2["files"], "the old trash entry is gone")
         ok(key not in fake.objects, "and its bytes left the bucket")
         ok(up2["id"] in d2["files"], "fresh trash is untouched")
@@ -7354,11 +7356,11 @@ def t_files_purge_is_the_only_deleter_of_bytes():
 def t_files_abandoned_uploads_are_swept():
     def go(fake):
         up = post("/api/files/upload-url", {"name": "ghost.pdf", "size": 10}).json()
-        d = copilot._load_files()
+        d = fileserver._load_files()
         d["files"][up["id"]]["created_at"] = "2026-08-10T00:00:00+00:00"     # days ago, never completed
-        copilot._write_files(d)
-        copilot._files_tick()
-        ok(up["id"] not in copilot._load_files()["files"], "a stale pending upload is dropped")
+        fileserver._write_files(d)
+        fileserver._files_tick()
+        ok(up["id"] not in fileserver._load_files()["files"], "a stale pending upload is dropped")
     with_files(go)
 
 @test
@@ -7377,7 +7379,7 @@ def t_files_download_and_rename():
         eq(r2.status_code, 200)
         name = r2.json()["store"]["files"][up["id"]]["name"]
         ok("/" not in name and not name.startswith("."), "a rename cannot climb paths: " + name)
-        eq(copilot._load_files()["files"][up["id"]]["r2_key"], key,
+        eq(fileserver._load_files()["files"][up["id"]]["r2_key"], key,
            "the bucket key never changes on rename")
     with_files(go)
 
@@ -7388,21 +7390,21 @@ def t_files_presign_failure_is_a_plain_answer_not_a_500():
         r = post("/api/files/upload-url", {"name": "a.pdf", "size": 10})
         eq(r.status_code, 502, r.text)
         ok("Check the storage keys" in r.json()["error"] and "Railway" not in r.json()["error"], r.text)
-        ok(copilot._load_files()["files"] == {}, "no phantom record was kept")
+        ok(fileserver._load_files()["files"] == {}, "no phantom record was kept")
     with_files(go)
 
 @test
 def t_files_corrupt_store_refuses_writes_and_keeps_the_file():
     def go(fake):
-        with open(copilot.FILES_PATH, "w") as fh:
+        with open(fileserver.FILES_PATH, "w") as fh:
             fh.write("{not json")
-        copilot._files_mem = None
+        fileserver._files_mem = None
         r = post("/api/files/tree", {})
         eq(r.status_code, 200, "reads survive a broken store")
         eq(r.json()["store"]["files"], {}, "as empty, never invented")
         r2 = post("/api/files/folder", {"op": "add", "name": "x"})
         eq(r2.status_code, 500, "writes are refused while the store is broken")
-        eq(open(copilot.FILES_PATH).read(), "{not json", "the broken file is preserved for repair")
+        eq(open(fileserver.FILES_PATH).read(), "{not json", "the broken file is preserved for repair")
     with_files(go)
 
 @test
@@ -7423,7 +7425,7 @@ def t_files_storage_wobble_is_not_reported_as_a_lost_upload():
 @test
 def t_files_true_size_is_enforced_at_complete():
     def go(fake):
-        copilot.FILES_QUOTA_GB = 0.0000001   # ~107 bytes
+        fileserver.FILES_QUOTA_GB = 0.0000001   # ~107 bytes
         up = post("/api/files/upload-url", {"name": "liar.pdf", "size": 10}).json()
         key = up["url"].split("?")[0].replace("https://fake-r2.test/", "")
         fake.objects[key] = 999              # claimed 10, sent 999
@@ -7437,7 +7439,7 @@ def t_files_true_size_is_enforced_at_complete():
 @test
 def t_files_pending_uploads_count_toward_the_space():
     def go(fake):
-        copilot.FILES_QUOTA_GB = 0.0000001   # ~107 bytes
+        fileserver.FILES_QUOTA_GB = 0.0000001   # ~107 bytes
         eq(post("/api/files/upload-url", {"name": "a", "size": 60}).status_code, 200)
         r = post("/api/files/upload-url", {"name": "b", "size": 60})
         eq(r.status_code, 400, "two in-flight uploads cannot share the same last bytes")
@@ -7456,9 +7458,9 @@ def t_files_delete_now_frees_space_and_the_reaper_removes_the_bytes():
         eq(r.json()["store"]["used"], 0, "the space frees at once")
         eq(r.json()["store"]["trash"], [], "and the trash entry is gone")
         ok(key in fake.objects, "bytes wait for the reaper, never a route")
-        copilot._files_tick()
+        fileserver._files_tick()
         ok(key not in fake.objects, "the reaper removed the bytes")
-        eq(copilot._load_files()["doomed"], [], "and the doomed list is clear")
+        eq(fileserver._load_files()["doomed"], [], "and the doomed list is clear")
         up2 = post("/api/files/upload-url", {"name": "live.pdf", "size": 10}).json()
         k2 = up2["url"].split("?")[0].replace("https://fake-r2.test/", "")
         fake.objects[k2] = 10
@@ -7477,13 +7479,13 @@ def t_files_a_failed_bucket_delete_is_retried_not_orphaned():
         post("/api/files/file", {"op": "trash", "id": up["id"]})
         post("/api/files/file", {"op": "destroy", "id": up["id"]})
         fake.fail = "bucket unreachable"
-        copilot._files_tick()
-        eq(copilot._load_files()["doomed"], [key], "the key stays doomed when the delete fails")
+        fileserver._files_tick()
+        eq(fileserver._load_files()["doomed"], [key], "the key stays doomed when the delete fails")
         ok(key in fake.objects, "and the bytes are untouched")
         fake.fail = None
-        copilot._files_tick()
+        fileserver._files_tick()
         ok(key not in fake.objects, "the next tick finishes the job")
-        eq(copilot._load_files()["doomed"], [], "and clears the list")
+        eq(fileserver._load_files()["doomed"], [], "and clears the list")
     with_files(go)
 
 @test
@@ -7509,7 +7511,7 @@ def t_files_concurrent_uploads_do_not_clobber_the_store():
             eq(r.status_code, 200, r.text)
         ids = [r.json()["id"] for r in rs]
         eq(len(set(ids)), 3, "three distinct records")
-        d = copilot._load_files()
+        d = fileserver._load_files()
         for i in ids:
             ok(i in d["files"], f"record {i} survived the race")
     with_files(go)
@@ -7534,10 +7536,10 @@ def t_files_r2_endpoint_is_allowed_by_the_page_csp():
 
 @test
 def t_files_disposition_and_names():
-    eq(copilot._files_clean_name("  ../we\x00ird/na me.pdf  "), "_we_ird_na me.pdf")
-    eq(copilot._files_clean_name(""), "untitled")
-    eq(copilot._files_clean_name("x" * 300), "x" * 180)
-    d = copilot._files_disposition('café "q".pdf')
+    eq(fileserver._files_clean_name("  ../we\x00ird/na me.pdf  "), "_we_ird_na me.pdf")
+    eq(fileserver._files_clean_name(""), "untitled")
+    eq(fileserver._files_clean_name("x" * 300), "x" * 180)
+    d = fileserver._files_disposition('café "q".pdf')
     ok("filename*=UTF-8''caf%C3%A9" in d, d)
     ok('\n' not in d and '\r' not in d, "no header injection")
 
@@ -8317,17 +8319,17 @@ def t_dav_speaks_finder_with_the_apps_own_accounts():
         fake_s3.upload_fileobj = fake_upload
         fake_s3.copy_object = lambda **kw: fake_s3.objects.__setitem__(
             kw["Key"], fake_s3.objects.get(kw["CopySource"]["Key"], 0))
-        saved = (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
-                 copilot._files_s3_client)
-        copilot.R2_ACCOUNT_ID = copilot.R2_ACCESS_KEY_ID = copilot.R2_SECRET_ACCESS_KEY = "acct"
-        copilot._files_s3_client = fake_s3
-        copilot._dav_auth_cache.clear()
-        copilot._files_mem = None
+        saved = (fileserver.R2_ACCOUNT_ID, fileserver.R2_ACCESS_KEY_ID, fileserver.R2_SECRET_ACCESS_KEY,
+                 fileserver._files_s3_client)
+        fileserver.R2_ACCOUNT_ID = fileserver.R2_ACCESS_KEY_ID = fileserver.R2_SECRET_ACCESS_KEY = "acct"
+        fileserver._files_s3_client = fake_s3
+        webdav._dav_auth_cache.clear()
+        fileserver._files_mem = None
         try:
-            os.remove(copilot.FILES_PATH)
+            os.remove(fileserver.FILES_PATH)
         except FileNotFoundError:
             pass
-        jsonstore._poisoned_stores.discard(copilot.FILES_PATH)
+        jsonstore._poisoned_stores.discard(fileserver.FILES_PATH)
         try:
             import base64 as b64
             _, _sess, ppw = ready_user("Poppy", "poppy", role="parttime")
@@ -8343,7 +8345,7 @@ def t_dav_speaks_finder_with_the_apps_own_accounts():
             # A real Finder save of a PDF carries PDF bytes; the intake now reads them.
             r3 = client.put("/dav/Proofs/0538 proof.pdf", headers=auth, content=b"%PDF-1.4\n" + b"x" * 491)
             eq(r3.status_code, 201, "a save from Finder lands")
-            st = copilot._load_files()
+            st = fileserver._load_files()
             rec = next(v for v in st["files"].values() if v["name"] == "0538 proof.pdf")
             eq(rec["size"], 500, "with the true size")
             ok(rec["by"], "and the person's account on it")
@@ -8358,7 +8360,7 @@ def t_dav_speaks_finder_with_the_apps_own_accounts():
             eq(client.request("MOVE", "/dav/Proofs/0538 proof.pdf", headers={**auth,
                "Destination": "/dav/Proofs/0538 proof v2.pdf"}).status_code, 201)
             eq(client.request("DELETE", "/dav/Proofs/0538 proof v2.pdf", headers=auth).status_code, 204)
-            st2 = copilot._load_files()
+            st2 = fileserver._load_files()
             rec2 = next(v for v in st2["files"].values() if v["name"] == "0538 proof v2.pdf")
             eq(rec2["status"], "trashed", "a Finder delete is a trash, never a destruction")
             ev = post("/api/team/board", {}).json()["events"]
@@ -8366,11 +8368,11 @@ def t_dav_speaks_finder_with_the_apps_own_accounts():
             lk = client.request("LOCK", "/dav/Proofs", headers=auth)
             eq(lk.status_code, 200, "class 2 for a read-write mount")
         finally:
-            (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
-             copilot._files_s3_client) = saved
-            copilot._dav_auth_cache.clear()
+            (fileserver.R2_ACCOUNT_ID, fileserver.R2_ACCESS_KEY_ID, fileserver.R2_SECRET_ACCESS_KEY,
+             fileserver._files_s3_client) = saved
+            webdav._dav_auth_cache.clear()
             try:
-                os.remove(copilot.FILES_PATH)
+                os.remove(fileserver.FILES_PATH)
             except FileNotFoundError:
                 pass
     with_accounts(go)
@@ -8402,14 +8404,14 @@ def t_audit_dav_cache_respects_revocation_and_own_lockout():
     def go():
         ensure_auth()
         fake = FakeS3()
-        saved = (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
-                 copilot._files_s3_client)
-        copilot.R2_ACCOUNT_ID = copilot.R2_ACCESS_KEY_ID = copilot.R2_SECRET_ACCESS_KEY = "acct"
-        copilot._files_s3_client = fake
-        copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear()
-        copilot._files_mem = None
+        saved = (fileserver.R2_ACCOUNT_ID, fileserver.R2_ACCESS_KEY_ID, fileserver.R2_SECRET_ACCESS_KEY,
+                 fileserver._files_s3_client)
+        fileserver.R2_ACCOUNT_ID = fileserver.R2_ACCESS_KEY_ID = fileserver.R2_SECRET_ACCESS_KEY = "acct"
+        fileserver._files_s3_client = fake
+        webdav._dav_auth_cache.clear(); webdav._dav_fail_cache.clear()
+        fileserver._files_mem = None
         try:
-            os.remove(copilot.FILES_PATH)
+            os.remove(fileserver.FILES_PATH)
         except FileNotFoundError:
             pass
         try:
@@ -8440,12 +8442,12 @@ def t_audit_dav_cache_respects_revocation_and_own_lockout():
             eq(login("poppy", "poppys-own-pw-9").status_code, 200,
                "a stale Finder mount cannot lock the person out of the app")
         finally:
-            (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
-             copilot._files_s3_client) = saved
-            copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear()
-            copilot._files_mem = None
+            (fileserver.R2_ACCOUNT_ID, fileserver.R2_ACCESS_KEY_ID, fileserver.R2_SECRET_ACCESS_KEY,
+             fileserver._files_s3_client) = saved
+            webdav._dav_auth_cache.clear(); webdav._dav_fail_cache.clear()
+            fileserver._files_mem = None
             try:
-                os.remove(copilot.FILES_PATH)
+                os.remove(fileserver.FILES_PATH)
             except FileNotFoundError:
                 pass
     with_accounts(go)
@@ -8545,7 +8547,7 @@ def t_files_bulk_ops_and_empty_trash():
         st3 = r3.json()["store"]
         eq(st3["trash"], [], "the trash is empty")
         eq(st3["used"], 0, "and the space is free")
-        d = copilot._load_files()
+        d = fileserver._load_files()
         eq(len(d["doomed"]), 3, "the bytes wait for the reaper, never a route")
         eq(post("/api/files/file", {"op": "empty_trash"}).status_code, 400,
            "emptying an empty trash says so")
@@ -8565,14 +8567,14 @@ def t_dav_refusals_explain_themselves_and_caches_die_with_the_password():
     def go():
         ensure_auth()
         fake = FakeS3()
-        saved = (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
-                 copilot._files_s3_client)
-        copilot.R2_ACCOUNT_ID = copilot.R2_ACCESS_KEY_ID = copilot.R2_SECRET_ACCESS_KEY = "acct"
-        copilot._files_s3_client = fake
-        copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear()
-        copilot._files_mem = None
+        saved = (fileserver.R2_ACCOUNT_ID, fileserver.R2_ACCESS_KEY_ID, fileserver.R2_SECRET_ACCESS_KEY,
+                 fileserver._files_s3_client)
+        fileserver.R2_ACCOUNT_ID = fileserver.R2_ACCESS_KEY_ID = fileserver.R2_SECRET_ACCESS_KEY = "acct"
+        fileserver._files_s3_client = fake
+        webdav._dav_auth_cache.clear(); webdav._dav_fail_cache.clear()
+        fileserver._files_mem = None
         try:
-            os.remove(copilot.FILES_PATH)
+            os.remove(fileserver.FILES_PATH)
         except FileNotFoundError:
             pass
         try:
@@ -8604,12 +8606,12 @@ def t_dav_refusals_explain_themselves_and_caches_die_with_the_password():
             eq(client.request("PROPFIND", "/dav/", headers={**a2, "Depth": "0"}).status_code, 207,
                "and the new one mounts")
         finally:
-            (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
-             copilot._files_s3_client) = saved
-            copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear()
-            copilot._files_mem = None
+            (fileserver.R2_ACCOUNT_ID, fileserver.R2_ACCESS_KEY_ID, fileserver.R2_SECRET_ACCESS_KEY,
+             fileserver._files_s3_client) = saved
+            webdav._dav_auth_cache.clear(); webdav._dav_fail_cache.clear()
+            fileserver._files_mem = None
             try:
-                os.remove(copilot.FILES_PATH)
+                os.remove(fileserver.FILES_PATH)
             except FileNotFoundError:
                 pass
     with_accounts(go)
@@ -8673,14 +8675,14 @@ def t_dav_refusals_explain_themselves_and_caches_die_with_the_password():
     def go():
         ensure_auth()
         fake = FakeS3()
-        saved = (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
-                 copilot._files_s3_client)
-        copilot.R2_ACCOUNT_ID = copilot.R2_ACCESS_KEY_ID = copilot.R2_SECRET_ACCESS_KEY = "acct"
-        copilot._files_s3_client = fake
-        copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear()
-        copilot._files_mem = None
+        saved = (fileserver.R2_ACCOUNT_ID, fileserver.R2_ACCESS_KEY_ID, fileserver.R2_SECRET_ACCESS_KEY,
+                 fileserver._files_s3_client)
+        fileserver.R2_ACCOUNT_ID = fileserver.R2_ACCESS_KEY_ID = fileserver.R2_SECRET_ACCESS_KEY = "acct"
+        fileserver._files_s3_client = fake
+        webdav._dav_auth_cache.clear(); webdav._dav_fail_cache.clear()
+        fileserver._files_mem = None
         try:
-            os.remove(copilot.FILES_PATH)
+            os.remove(fileserver.FILES_PATH)
         except FileNotFoundError:
             pass
         try:
@@ -8709,12 +8711,12 @@ def t_dav_refusals_explain_themselves_and_caches_die_with_the_password():
             eq(client.request("PROPFIND", "/dav/", headers={**a2, "Depth": "0"}).status_code, 207,
                "and the new one mounts at once")
         finally:
-            (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
-             copilot._files_s3_client) = saved
-            copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear()
-            copilot._files_mem = None
+            (fileserver.R2_ACCOUNT_ID, fileserver.R2_ACCESS_KEY_ID, fileserver.R2_SECRET_ACCESS_KEY,
+             fileserver._files_s3_client) = saved
+            webdav._dav_auth_cache.clear(); webdav._dav_fail_cache.clear()
+            fileserver._files_mem = None
             try:
-                os.remove(copilot.FILES_PATH)
+                os.remove(fileserver.FILES_PATH)
             except FileNotFoundError:
                 pass
     with_accounts(go)
@@ -8950,16 +8952,16 @@ def t_backup_manifest_and_restore_clock_normalisation():
     def go():
         ensure_auth()
         fake = FakeS3()
-        saved = (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
-                 copilot._files_s3_client)
-        copilot.R2_ACCOUNT_ID = copilot.R2_ACCESS_KEY_ID = copilot.R2_SECRET_ACCESS_KEY = "acct"
-        copilot._files_s3_client = fake
-        copilot._files_mem = None
+        saved = (fileserver.R2_ACCOUNT_ID, fileserver.R2_ACCESS_KEY_ID, fileserver.R2_SECRET_ACCESS_KEY,
+                 fileserver._files_s3_client)
+        fileserver.R2_ACCOUNT_ID = fileserver.R2_ACCESS_KEY_ID = fileserver.R2_SECRET_ACCESS_KEY = "acct"
+        fileserver._files_s3_client = fake
+        fileserver._files_mem = None
         try:
-            os.remove(copilot.FILES_PATH)
+            os.remove(fileserver.FILES_PATH)
         except FileNotFoundError:
             pass
-        jsonstore._poisoned_stores.discard(copilot.FILES_PATH)
+        jsonstore._poisoned_stores.discard(fileserver.FILES_PATH)
         try:
             import base64 as b64
             import zipfile as zz
@@ -8973,11 +8975,11 @@ def t_backup_manifest_and_restore_clock_normalisation():
             fake.objects[k2] = 5
             post("/api/files/complete", {"id": done["id"]})
             post("/api/files/file", {"op": "trash", "id": done["id"]})
-            d = copilot._load_files()
+            d = fileserver._load_files()
             d["files"][up["id"]]["created_at"] = "2026-08-01T00:00:00+00:00"   # "days old" pending
             d["files"][done["id"]]["trashed_at"] = "2026-07-01T00:00:00+00:00" # "expired" trash
             d["doomed"] = ["ghost/stale-key.pdf"]
-            copilot._write_files(d)
+            fileserver._write_files(d)
             buf, _ = copilot._build_backup_zip()
             man = json.loads(zz.ZipFile(iio.BytesIO(buf.getvalue())).read("manifest.json"))
             ok(man.get("built_at", "").startswith("20"), "the backup names its build time")
@@ -8993,7 +8995,7 @@ def t_backup_manifest_and_restore_clock_normalisation():
             eq(r.status_code, 200, r.text)
             # sign back in (restore drops sessions) and check the clocks
             APP_AUTH["session"] = ""
-            fd = copilot._load_files()
+            fd = fileserver._load_files()
             mid = fd["files"][up["id"]]
             eq(mid["status"], "trashed", "a photographed mid-flight upload lands in the trash")
             ok(mid["trashed_at"].startswith("2026-08-19") or mid["trashed_at"] > "2026-08-19",
@@ -9001,15 +9003,15 @@ def t_backup_manifest_and_restore_clock_normalisation():
             old = fd["files"][done["id"]]
             ok(old["trashed_at"] > "2026-08-01", "expired trash gets a fresh clock too")
             eq(fd["doomed"], [], "and a restored doomed list never deletes anything")
-            copilot._files_tick()
+            fileserver._files_tick()
             ok(k1 in fake.objects and k2 in fake.objects,
                "the reaper touched nothing after the restore")
         finally:
-            (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
-             copilot._files_s3_client) = saved
-            copilot._files_mem = None
+            (fileserver.R2_ACCOUNT_ID, fileserver.R2_ACCESS_KEY_ID, fileserver.R2_SECRET_ACCESS_KEY,
+             fileserver._files_s3_client) = saved
+            fileserver._files_mem = None
             try:
-                os.remove(copilot.FILES_PATH)
+                os.remove(fileserver.FILES_PATH)
             except FileNotFoundError:
                 pass
     with_accounts(go)
@@ -11124,7 +11126,7 @@ def t_mail_attachment_save_lands_in_the_files_store():
                                                   "name": "logo.eps", "folder": "Artwork/#1201"})
                 eq(r.status_code, 200, r.text)
                 eq(r.json()["where"], "Artwork/#1201")
-                d = copilot._load_files()
+                d = fileserver._load_files()
                 rec = [f for f in d["files"].values() if f["name"] == "logo.eps"]
                 eq(len(rec), 1, "one file record")
                 eq(rec[0]["status"], "active")
@@ -11332,7 +11334,7 @@ def t_mail_attachment_supersedes_the_same_name():
                     r = post("/api/mail/attachment", {"id": "t1", "msg": "m1", "att": "att1",
                                                       "name": "proof.pdf", "folder": "Artwork"})
                     eq(r.status_code, 200, r.text)
-                d = copilot._load_files()
+                d = fileserver._load_files()
                 live = [f for f in d["files"].values()
                         if f["name"] == "proof.pdf" and f["status"] == "active"]
                 eq(len(live), 1, "one live proof.pdf, so the drive can reach it")
@@ -11925,7 +11927,7 @@ def t_the_drive_cannot_be_filled_or_confused_by_duplicate_names():
     the Finder drive, because WebDAV resolves by name."""
     def go(_fake):
         ensure_auth()
-        d = copilot._load_files()
+        d = fileserver._load_files()
         d["files"]["fA"] = {"id": "fA", "name": "proof.pdf", "folder_id": "", "status": "active",
                             "size": 10, "r2_key": "fA/proof.pdf"}
         d["files"]["fB"] = {"id": "fB", "name": "other.pdf", "folder_id": "", "status": "active",
@@ -11933,12 +11935,12 @@ def t_the_drive_cannot_be_filled_or_confused_by_duplicate_names():
         d["files"]["fC"] = {"id": "fC", "name": "proof.pdf", "folder_id": "", "status": "trashed",
                             "trashed_at": "2026-08-01T00:00:00+00:00", "size": 10,
                             "r2_key": "fC/proof.pdf"}
-        copilot._write_files(d)
+        fileserver._write_files(d)
         r = post("/api/files/file", {"op": "rename", "id": "fB", "name": "proof.pdf"})
         eq(r.status_code, 409, "a rename onto an existing name is refused")
         r2 = post("/api/files/file", {"op": "restore", "id": "fC"})
         eq(r2.status_code, 409, "and so is restoring onto one")
-        ok(copilot._load_files()["files"]["fC"]["status"] == "trashed", "the file stays put")
+        ok(fileserver._load_files()["files"]["fC"]["status"] == "trashed", "the file stays put")
         # Renaming to a free name still works.
         eq(post("/api/files/file", {"op": "rename", "id": "fB", "name": "spec.pdf"}).status_code,
            200, "an unused name is fine")
@@ -14887,24 +14889,24 @@ def t_the_finder_drive_takes_a_password_of_its_own():
         ok(dpw not in json.dumps(stored), "never in plain text")
         ok("password" not in post_s(sess, "/api/files/drive", {}).json(), "and shown only once")
         hdr = lambda secret: {"Authorization": "Basic " + b64.b64encode(("ivy_drive:" + secret).encode()).decode()}
-        ok(copilot._dav_check_auth(hdr(dpw)["Authorization"])[0] == uid, "the drive password opens the drive")
-        eq(copilot._dav_check_auth(hdr(pw)["Authorization"]), (None, 401), "the account password does not")
+        ok(webdav._dav_check_auth(hdr(dpw)["Authorization"])[0] == uid, "the drive password opens the drive")
+        eq(webdav._dav_check_auth(hdr(pw)["Authorization"]), (None, 401), "the account password does not")
         # Wrong guesses under someone's name do not shut their drive: a
         # random 24-character password needs no lock, and one let anyone
         # who knew a username keep that person's Finder closed (R-C4).
         for _ in range(team.LOGIN_FAIL_LIMIT * 3):
-            eq(copilot._dav_check_auth(hdr("guess")["Authorization"]), (None, 401))
-        ok(copilot._dav_check_auth(hdr(dpw)["Authorization"])[0] == uid, "the right one still opens it")
+            eq(webdav._dav_check_auth(hdr("guess")["Authorization"]), (None, 401))
+        ok(webdav._dav_check_auth(hdr(dpw)["Authorization"])[0] == uid, "the right one still opens it")
         # Nor do wrong web passwords: that lock guards the account password,
         # which the drive does not take.
         for _ in range(team.LOGIN_FAIL_LIMIT + 1):
             login("ivy_drive", "wrong-password-000")
         ok(team._load_users()["users"][uid].get("lock_until"), "the web sign-in is paused")
-        ok(copilot._dav_check_auth(hdr(dpw)["Authorization"])[0] == uid, "the drive is not")
+        ok(webdav._dav_check_auth(hdr(dpw)["Authorization"])[0] == uid, "the drive is not")
         team._login_hits.clear()
         post_s(sess, "/api/files/drive", {"op": "remove"})
-        eq(copilot._dav_check_auth(hdr(dpw)["Authorization"]), (None, 401), "removed, it stops at once")
-        copilot._dav_fail_cache.clear()
+        eq(webdav._dav_check_auth(hdr(dpw)["Authorization"]), (None, 401), "removed, it stops at once")
+        webdav._dav_fail_cache.clear()
     with_accounts(go)
 
 @test
@@ -17990,6 +17992,8 @@ def t_the_collection_tests_hold_in_the_hour_after_midnight():
     # error log, the AI client, the team and its routes, the activity log, the
     # order book, production, the Size list, the CRM and the inbox and its routes.
     copilot.datetime = desk.datetime = routes_dispatch.datetime = errors.datetime = claude.datetime = _Frozen
+    from gizmo.routes import files as routes_files
+    fileserver.datetime = routes_files.datetime = webdav.datetime = _Frozen
     team.datetime = routes_team.datetime = activity.datetime = _Frozen
     orderbook.datetime = production.datetime = size_list.datetime = _Frozen
     from gizmo.routes import mail as routes_mail
@@ -18000,6 +18004,7 @@ def t_the_collection_tests_hold_in_the_hour_after_midnight():
         t_one_collection_a_day_per_courier_not_one_per_parcel()
     finally:
         copilot.datetime = desk.datetime = routes_dispatch.datetime = errors.datetime = claude.datetime = saved
+        fileserver.datetime = routes_files.datetime = webdav.datetime = saved
         team.datetime = routes_team.datetime = activity.datetime = saved
         orderbook.datetime = production.datetime = size_list.datetime = saved
         salesdesk.datetime = mail.datetime = routes_mail.datetime = saved
@@ -19825,22 +19830,22 @@ passed = failed = 0
 
 @test
 def t_the_first_bytes_name_the_file_not_the_extension():
-    eq(copilot._sniff_kind(b"\x89PNG\r\n\x1a\n...."), "png")
-    eq(copilot._sniff_kind(b"%PDF-1.7 ..."), "pdf")
-    eq(copilot._sniff_kind(b"MZ\x90\x00"), "exe")
-    eq(copilot._sniff_kind(b"\x7fELF"), "elf")
-    eq(copilot._sniff_kind(b"  <!DOCTYPE html><script>"), "html")
-    eq(copilot._sniff_kind(b"#!/bin/sh\n"), "script")
-    eq(copilot._sniff_kind(b"hello"), "")
-    ok(not copilot._file_verdict("report.pdf", "application/pdf", b"MZ\x90")[0], "a program named .pdf")
-    ok(not copilot._file_verdict("invoice.pdf.exe", "application/pdf", b"%PDF-1.4")[0], "the LAST extension is what runs")
-    ok(not copilot._file_verdict("photo.png", "image/png", b"<html><script>")[0], "markup dressed as a picture")
-    ok(not copilot._file_verdict("photo.png", "image/png", b"\xff\xd8\xff")[0], "a JPEG named .png is a lie too")
-    okv, _w, safe = copilot._file_verdict("photo.png", "image/png", b"\x89PNG\r\n\x1a\n")
+    eq(fileserver._sniff_kind(b"\x89PNG\r\n\x1a\n...."), "png")
+    eq(fileserver._sniff_kind(b"%PDF-1.7 ..."), "pdf")
+    eq(fileserver._sniff_kind(b"MZ\x90\x00"), "exe")
+    eq(fileserver._sniff_kind(b"\x7fELF"), "elf")
+    eq(fileserver._sniff_kind(b"  <!DOCTYPE html><script>"), "html")
+    eq(fileserver._sniff_kind(b"#!/bin/sh\n"), "script")
+    eq(fileserver._sniff_kind(b"hello"), "")
+    ok(not fileserver._file_verdict("report.pdf", "application/pdf", b"MZ\x90")[0], "a program named .pdf")
+    ok(not fileserver._file_verdict("invoice.pdf.exe", "application/pdf", b"%PDF-1.4")[0], "the LAST extension is what runs")
+    ok(not fileserver._file_verdict("photo.png", "image/png", b"<html><script>")[0], "markup dressed as a picture")
+    ok(not fileserver._file_verdict("photo.png", "image/png", b"\xff\xd8\xff")[0], "a JPEG named .png is a lie too")
+    okv, _w, safe = fileserver._file_verdict("photo.png", "image/png", b"\x89PNG\r\n\x1a\n")
     ok(okv and safe == "image/png")
-    okv, _w, safe = copilot._file_verdict("page.htm", "text/html", b"<html>")
+    okv, _w, safe = fileserver._file_verdict("page.htm", "text/html", b"<html>")
     ok(okv and safe == "text/plain", "html is stored, but never served as html")
-    okv, _w, safe = copilot._file_verdict("cut-list.csv", "text/csv", b"a,b,c")
+    okv, _w, safe = fileserver._file_verdict("cut-list.csv", "text/csv", b"a,b,c")
     ok(okv and safe == "text/csv")
 
 
@@ -19850,20 +19855,20 @@ def t_an_upload_that_is_not_what_it_says_is_refused_and_removed():
         ensure_auth()
         r = post("/api/files/upload-url", {"name": "quote.pdf", "size": 100, "type": "application/pdf", "folder": ""})
         eq(r.status_code, 200, r.text)
-        d = copilot._load_files()
+        d = fileserver._load_files()
         fid, f = next((k, v) for k, v in d["files"].items() if v.get("name") == "quote.pdf")
         s3.objects[f["r2_key"]] = b"MZ\x90\x00" + b"x" * 96
         r = post("/api/files/complete", {"id": fid})
         eq(r.status_code, 400, r.text); ok("program" in r.json()["error"])
-        ok(fid not in copilot._load_files()["files"], "no phantom record")
+        ok(fid not in fileserver._load_files()["files"], "no phantom record")
         ok(f["r2_key"] not in s3.objects, "and the bytes are gone from the bucket")
         eq(post("/api/files/upload-url", {"name": "setup.exe", "size": 10, "type": "application/octet-stream", "folder": ""}).status_code, 400,
            "a program by name never gets a presigned door")
         r = post("/api/files/upload-url", {"name": "proof.png", "size": 20, "type": "image/png", "folder": ""})
-        d = copilot._load_files(); fid2, f2 = next((k, v) for k, v in d["files"].items() if v.get("name") == "proof.png")
+        d = fileserver._load_files(); fid2, f2 = next((k, v) for k, v in d["files"].items() if v.get("name") == "proof.png")
         s3.objects[f2["r2_key"]] = b"\x89PNG\r\n\x1a\n" + b"x" * 12
         eq(post("/api/files/complete", {"id": fid2}).status_code, 200)
-        eq(copilot._load_files()["files"][fid2]["sniffed"], "png", "what it is, recorded from its bytes")
+        eq(fileserver._load_files()["files"][fid2]["sniffed"], "png", "what it is, recorded from its bytes")
     s3 = FakeS3(); s3.bucket_exists = True
     with_files(lambda _fake: go(), s3=s3)
 
@@ -19991,7 +19996,7 @@ def t_the_drive_door_does_not_answer_whether_a_username_exists():
     try:
         def knock(user, password):
             spent.clear()
-            copilot._dav_check_auth("Basic " + base64.b64encode(
+            webdav._dav_check_auth("Basic " + base64.b64encode(
                 (user + ":" + password).encode()).decode())
             return len(spent)
         known = knock("dee-dav", "not-the-password")
@@ -20777,9 +20782,9 @@ def t_an_ordinary_filename_is_not_treated_as_macos_junk():
     file saved from Finder had all four of those properties by accident."""
     for real in ("_JOB4471-final.eps", "_notes.txt", "_2026 pricing.xlsx",
                  "Quote 4471.pdf", ".hidden-but-mine.txt"):
-        ok(not copilot._DAV_JUNK.match(real), real + " is somebody's work, not junk")
+        ok(not webdav._DAV_JUNK.match(real), real + " is somebody's work, not junk")
     for junk in ("._sidecar", ".DS_Store", "desktop.ini", "Thumbs.db", ".Trashes"):
-        ok(copilot._DAV_JUNK.match(junk), junk + " really is a sidecar")
+        ok(webdav._DAV_JUNK.match(junk), junk + " really is a sidecar")
 
 
 @test
@@ -20787,26 +20792,26 @@ def t_files_wrongly_marked_as_junk_are_rescued_before_the_reaper_gets_them():
     """Correcting the pattern only helps files saved afterwards. A record
     already marked hidden stays hidden and stays on course to be deleted with
     no trash copy, so the records have to be corrected too."""
-    d = copilot._load_files()
+    d = fileserver._load_files()
     d["files"]["f-rescue-1"] = {"name": "_JOB4471-final.eps", "hidden": True,
                                 "status": "active", "uploaded_at": "2020-01-01T00:00:00+00:00"}
     d["files"]["f-rescue-2"] = {"name": "._sidecar", "hidden": True,
                                 "status": "active", "uploaded_at": "2020-01-01T00:00:00+00:00"}
-    copilot._write_files(d)
+    fileserver._write_files(d)
     try:
-        out = copilot.rescue_misfiled_junk()
+        out = fileserver.rescue_misfiled_junk()
         ok(out["rescued"] >= 1, "it rescued something")
-        d2 = copilot._load_files()
+        d2 = fileserver._load_files()
         eq(d2["files"]["f-rescue-1"].get("hidden"), False,
            "a real file is visible again, and out of the reaper's path")
         eq(d2["files"]["f-rescue-2"].get("hidden"), True,
            "a genuine sidecar stays hidden")
-        eq(copilot.rescue_misfiled_junk()["rescued"], 0, "and running again does nothing")
+        eq(fileserver.rescue_misfiled_junk()["rescued"], 0, "and running again does nothing")
     finally:
-        d3 = copilot._load_files()
+        d3 = fileserver._load_files()
         d3["files"].pop("f-rescue-1", None)
         d3["files"].pop("f-rescue-2", None)
-        copilot._write_files(d3)
+        fileserver._write_files(d3)
 
 
 @test
@@ -20820,7 +20825,7 @@ def t_the_name_an_attachment_is_SENT_under_gets_the_same_gate_as_the_upload():
     ok("_DANGEROUS_EXT" in src,
        "the outgoing name is checked, not only the uploaded one")
     ok("_file_ext(nm)" in src, "by its extension")
-    ok("asyncio.to_thread(core._files_head, key)" in src
+    ok("asyncio.to_thread(fileserver._files_head, key)" in src
        and src.index("_files_head") < src.index('"get_object"'),
        "and the object is measured before it is read (off the event loop since 2026-10-12)")
 
@@ -20832,7 +20837,7 @@ def t_an_oversized_attachment_is_refused_before_its_bytes_are_read():
     too big - on a single worker, which takes dispatch, labels and the CRM down
     with the inbox. Source ORDER is not the property; not fetching is."""
     calls = {"head": 0, "get": 0}
-    real = (copilot._files_head, mail._mail_attachment_ok, copilot._files_s3)
+    real = (fileserver._files_head, mail._mail_attachment_ok, fileserver._files_s3)
 
     def fake_head(key):
         calls["head"] += 1
@@ -20843,9 +20848,9 @@ def t_an_oversized_attachment_is_refused_before_its_bytes_are_read():
             calls["get"] += 1
             raise AssertionError("the bytes must never be fetched")
 
-    copilot._files_head = fake_head
+    fileserver._files_head = fake_head
     mail._mail_attachment_ok = lambda k, u: True
-    copilot._files_s3 = lambda: _S3()
+    fileserver._files_s3 = lambda: _S3()
     try:
         raised = ""
         try:
@@ -20857,7 +20862,7 @@ def t_an_oversized_attachment_is_refused_before_its_bytes_are_read():
         eq(calls["get"], 0, "and refused WITHOUT pulling it into memory")
         ok(calls["head"] >= 1, "having been measured first")
     finally:
-        copilot._files_head, mail._mail_attachment_ok, copilot._files_s3 = real
+        fileserver._files_head, mail._mail_attachment_ok, fileserver._files_s3 = real
 
 
 @test
@@ -21223,7 +21228,7 @@ def t_wrong_drive_passwords_stop_costing_a_hash_after_twenty_a_minute():
     def go():
         ensure_auth()
         import base64 as b64
-        copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear(); gate._rl_hits.clear()
+        webdav._dav_auth_cache.clear(); webdav._dav_fail_cache.clear(); gate._rl_hits.clear()
         calls = {"n": 0}
         real = team._check_pw
         def counting(pw, stored):
@@ -21527,15 +21532,15 @@ def t_a_chunked_drive_upload_cannot_spool_past_the_quota():
         ensure_auth()
         import base64 as b64
         fake = FakeS3()
-        saved = (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
-                 copilot._files_s3_client, copilot.FILES_QUOTA_GB)
-        copilot.R2_ACCOUNT_ID = copilot.R2_ACCESS_KEY_ID = copilot.R2_SECRET_ACCESS_KEY = "acct"
-        copilot._files_s3_client = fake
-        copilot.FILES_QUOTA_GB = 4 / (1024 * 1024 * 1024)      # four bytes of room
-        copilot._files_mem = None
-        copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear()
+        saved = (fileserver.R2_ACCOUNT_ID, fileserver.R2_ACCESS_KEY_ID, fileserver.R2_SECRET_ACCESS_KEY,
+                 fileserver._files_s3_client, fileserver.FILES_QUOTA_GB)
+        fileserver.R2_ACCOUNT_ID = fileserver.R2_ACCESS_KEY_ID = fileserver.R2_SECRET_ACCESS_KEY = "acct"
+        fileserver._files_s3_client = fake
+        fileserver.FILES_QUOTA_GB = 4 / (1024 * 1024 * 1024)      # four bytes of room
+        fileserver._files_mem = None
+        webdav._dav_auth_cache.clear(); webdav._dav_fail_cache.clear()
         try:
-            os.remove(copilot.FILES_PATH)
+            os.remove(fileserver.FILES_PATH)
         except FileNotFoundError:
             pass
         # What reaches the CONTAINER'S DISK is the thing at issue, and the test
@@ -21568,12 +21573,12 @@ def t_a_chunked_drive_upload_cannot_spool_past_the_quota():
                "and it stopped writing to disk early: %d bytes spooled" % spooled["n"])
         finally:
             _tf.TemporaryFile = real_tmp
-            (copilot.R2_ACCOUNT_ID, copilot.R2_ACCESS_KEY_ID, copilot.R2_SECRET_ACCESS_KEY,
-             copilot._files_s3_client, copilot.FILES_QUOTA_GB) = saved
-            copilot._files_mem = None
-            copilot._dav_auth_cache.clear()
+            (fileserver.R2_ACCOUNT_ID, fileserver.R2_ACCESS_KEY_ID, fileserver.R2_SECRET_ACCESS_KEY,
+             fileserver._files_s3_client, fileserver.FILES_QUOTA_GB) = saved
+            fileserver._files_mem = None
+            webdav._dav_auth_cache.clear()
             try:
-                os.remove(copilot.FILES_PATH)
+                os.remove(fileserver.FILES_PATH)
             except FileNotFoundError:
                 pass
     with_accounts(go)
@@ -22661,11 +22666,11 @@ def t_the_watchdog_clears_the_outage_flag_when_shopify_is_back():
     async def skip(*a, **k):
         return {"error": "skip"}
     saved = (shopify._tool_json, copilot._send_alert_email, copilot._zeta_drain,
-             copilot._zeta_configured, copilot._files_tick, copilot.run_label_coverage,
+             copilot._zeta_configured, fileserver._files_tick, copilot.run_label_coverage,
              shopify._webhook_ensurer, copilot._watch_last_tick)
     shopify._tool_json, copilot._send_alert_email = probe, alert
     copilot._zeta_drain, copilot._zeta_configured = noop, (lambda: False)
-    copilot._files_tick, copilot.run_label_coverage, shopify._webhook_ensurer = (lambda: None), skip, None
+    fileserver._files_tick, copilot.run_label_coverage, shopify._webhook_ensurer = (lambda: None), skip, None
     def clean():
         w = copilot._load_watch()
         w.pop("shopify_down", None)
@@ -22690,7 +22695,7 @@ def t_the_watchdog_clears_the_outage_flag_when_shopify_is_back():
         ok(run_async(copilot._watchdog_tick({})), "the between-hours answer is up too")
     finally:
         (shopify._tool_json, copilot._send_alert_email, copilot._zeta_drain,
-         copilot._zeta_configured, copilot._files_tick, copilot.run_label_coverage,
+         copilot._zeta_configured, fileserver._files_tick, copilot.run_label_coverage,
          shopify._webhook_ensurer, copilot._watch_last_tick) = saved
         clean()
 
@@ -22705,19 +22710,19 @@ def t_shop_redact_erases_what_memory_holds_too():
         m = mail._load_mail()
         m["threads"]["t1"] = {"from_email": "someone@example.com", "subject": "private"}
         mail._write_mail(m)
-        f = copilot._load_files()
+        f = fileserver._load_files()
         f["files"]["f1"] = {"name": "secret.pdf", "status": "active"}
-        copilot._write_files(f)
+        fileserver._write_files(f)
         r = copilot._redact_shop()
         ok(r["wiped"] >= 2, r)
         eq(mail._load_mail()["threads"], {}, "the erased threads are not served from memory")
-        eq(copilot._load_files()["files"], {}, "nor the erased files")
+        eq(fileserver._load_files()["files"], {}, "nor the erased files")
         ok(not _gm.connected(), "and the mailbox grant is gone, so the sync cannot rebuild the store from Gmail")
         mail._write_mail(mail._load_mail())       # what the mail loop does every minute
-        copilot._write_files(copilot._load_files())
+        fileserver._write_files(fileserver._load_files())
         eq(json.load(open(mail.MAILBOX_PATH))["mailbox"]["threads"], {},
            "and a write cannot bring them back")
-        eq(json.load(open(copilot.FILES_PATH))["files_store"]["files"], {})
+        eq(json.load(open(fileserver.FILES_PATH))["files_store"]["files"], {})
     with_files(lambda fake: with_mail(go))
 
 
@@ -23299,9 +23304,9 @@ def t_a_folder_with_an_upload_in_flight_is_not_deleted_under_it():
         eq(r.status_code, 400, "an upload in flight is an occupant: " + r.text)
         ok("still in progress" in r.json()["error"], r.text)
         # An upload abandoned hours ago is not: the folder shows empty, and is.
-        d = copilot._load_files()
+        d = fileserver._load_files()
         d["files"][up["id"]]["created_at"] = "2026-09-01T00:00:00+00:00"
-        copilot._write_files(d)
+        fileserver._write_files(d)
         r = post("/api/files/folder", {"op": "delete", "id": folder})
         eq(r.status_code, 200, "an abandoned upload does not hold a folder hostage: " + r.text)
         # And the finished file of an upload whose folder went lands at the
@@ -23351,8 +23356,8 @@ def t_a_finder_rename_keeps_the_sidecar_a_sidecar():
         import base64 as b64
         owen, _sess, pw = ready_user("Owen", "owen")
         auth = {"Authorization": "Basic " + b64.b64encode(f"owen:{drive_pw(_sess)}".encode()).decode()}
-        copilot._dav_auth_cache.clear(); copilot._dav_fail_cache.clear()
-        d = copilot._load_files()
+        webdav._dav_auth_cache.clear(); webdav._dav_fail_cache.clear()
+        d = fileserver._load_files()
         now = "2026-09-01T00:00:00+00:00"
         d["folders"]["d1"] = {"name": "Artwork", "parent_id": "", "created_at": now}
         d["files"]["f1"] = {"name": "proof.pdf", "folder_id": "d1", "size": 100, "type": "application/pdf",
@@ -23361,18 +23366,18 @@ def t_a_finder_rename_keeps_the_sidecar_a_sidecar():
                             "r2_key": "f2/._proof.pdf", "status": "active", "by": owen, "created_at": now,
                             "hidden": True}
         d["seq"] = 2
-        copilot._write_files(d)
+        fileserver._write_files(d)
         def dav(method, path, **kw):
             gate._rl_hits.clear(); gate._rl_global.clear()
             return client.request(method, "/dav" + path, headers={**auth, **kw.pop("headers", {})}, **kw)
         eq(dav("MOVE", "/Artwork/proof.pdf", headers={"Destination": "http://testserver/dav/Artwork/final.pdf"}).status_code, 201)
         eq(dav("MOVE", "/Artwork/._proof.pdf", headers={"Destination": "http://testserver/dav/Artwork/._final.pdf"}).status_code, 201)
-        d = copilot._load_files()
+        d = fileserver._load_files()
         eq((d["files"]["f2"]["name"], d["files"]["f2"].get("hidden")), ("._final.pdf", True),
            "the sidecar keeps its dots and stays hidden")
-        eq(copilot._dav_resolve(d, "Artwork/._final.pdf"), ("file", "f2"), "and Finder finds it again")
+        eq(webdav._dav_resolve(d, "Artwork/._final.pdf"), ("file", "f2"), "and Finder finds it again")
         eq((d["files"]["f1"]["name"], d["files"]["f1"].get("hidden")), ("final.pdf", False))
-        eq([v["name"] for v in copilot._files_shape(d)["files"].values()], ["final.pdf"],
+        eq([v["name"] for v in fileserver._files_shape(d)["files"].values()], ["final.pdf"],
            "the app lists the real file alone")
     with_files(go)
 
@@ -25649,17 +25654,17 @@ def t_a_redact_a_store_refused_is_said_and_retried():
         async def skip(*a, **k):
             return {"error": "skip"}
         saved = (shopify._tool_json, copilot._send_alert_email, copilot._zeta_drain, copilot._zeta_configured,
-                 copilot._files_tick, copilot.run_label_coverage, shopify._webhook_ensurer,
+                 fileserver._files_tick, copilot.run_label_coverage, shopify._webhook_ensurer,
                  copilot._watch_last_tick, copilot._redact_retry_pending)
         shopify._tool_json, copilot._send_alert_email, copilot._zeta_drain = probe, noop, noop
-        copilot._zeta_configured, copilot._files_tick = (lambda: False), (lambda: None)
+        copilot._zeta_configured, fileserver._files_tick = (lambda: False), (lambda: None)
         copilot.run_label_coverage, shopify._webhook_ensurer, copilot._watch_last_tick = skip, None, 0.0
         copilot._redact_retry_pending = lambda: ran.append(1) or saved[-1]()
         try:
             run_async(copilot._watchdog_tick({}))
         finally:
             (shopify._tool_json, copilot._send_alert_email, copilot._zeta_drain, copilot._zeta_configured,
-             copilot._files_tick, copilot.run_label_coverage, shopify._webhook_ensurer,
+             fileserver._files_tick, copilot.run_label_coverage, shopify._webhook_ensurer,
              copilot._watch_last_tick, copilot._redact_retry_pending) = saved
         eq(ran, [1], "the hourly tick runs the retry")
         eq(desk._load_dispatch()["4242"].get("redacted_request_at"), asked,
@@ -25997,12 +26002,12 @@ def t_two_uploads_of_one_name_leave_one_active_file():
         ensure_auth()
         a = post("/api/files/upload-url", {"name": "logo.png", "size": 1000, "type": "image/png", "folder_id": ""}).json()
         b = post("/api/files/upload-url", {"name": "logo.png", "size": 2000, "type": "image/png", "folder_id": ""}).json()
-        d = copilot._load_files()
+        d = fileserver._load_files()
         fake.objects[d["files"][a["id"]]["r2_key"]] = 1000
         fake.objects[d["files"][b["id"]]["r2_key"]] = 2000
         eq(post("/api/files/complete", {"id": a["id"]}).status_code, 200)
         eq(post("/api/files/complete", {"id": b["id"]}).status_code, 200)
-        active = [k for k, v in copilot._load_files()["files"].items()
+        active = [k for k, v in fileserver._load_files()["files"].items()
                   if v.get("status") == "active" and v.get("name") == "logo.png"]
         eq(active, [b["id"]], "the later one is the file; the earlier is in the bin")
     with_files(go)
@@ -26528,7 +26533,7 @@ def t_a_folder_holding_only_finders_sidecars_can_be_deleted():
     def go():
         def inner(fake):
             ensure_auth()
-            copilot._dav_auth_cache.clear()
+            webdav._dav_auth_cache.clear()
             _u, _s, pw = ready_user("Poppy", "poppy", role="member")
             auth = {"Authorization": "Basic " + _b64.b64encode(("poppy:" + drive_pw(_s)).encode()).decode()}
             client.request("MKCOL", "/dav/Old job", headers=auth)
@@ -26536,7 +26541,7 @@ def t_a_folder_holding_only_finders_sidecars_can_be_deleted():
             tree = post("/api/files/tree", {}).json()["store"]
             fid = next(k for k, v in tree["folders"].items() if v["name"] == "Old job")
             eq(post("/api/files/folder", {"op": "delete", "id": fid}).status_code, 200)
-            ok(not any(str(v.get("folder_id") or "") == fid for v in copilot._load_files()["files"].values()),
+            ok(not any(str(v.get("folder_id") or "") == fid for v in fileserver._load_files()["files"].values()),
                "and the sidecar went with it")
         with_files(inner)
     with_accounts(go)
@@ -27613,8 +27618,8 @@ def t_an_attachment_is_measured_off_the_event_loop():
         seen.setdefault("client", threading.get_ident())
         return _S3()
 
-    saved = (copilot._files_head, copilot._files_s3, mail._mail_attachment_ok)
-    copilot._files_head, copilot._files_s3 = head, s3
+    saved = (fileserver._files_head, fileserver._files_s3, mail._mail_attachment_ok)
+    fileserver._files_head, fileserver._files_s3 = head, s3
     mail._mail_attachment_ok = lambda key, uid: True
     try:
         async def go():
@@ -27626,7 +27631,7 @@ def t_an_attachment_is_measured_off_the_event_loop():
         for k in ("head", "client", "get", "read"):
             ok(seen[k] != seen["loop"], "the %s call ran off the event loop" % k)
     finally:
-        copilot._files_head, copilot._files_s3, mail._mail_attachment_ok = saved
+        fileserver._files_head, fileserver._files_s3, mail._mail_attachment_ok = saved
 
 
 def _capture_spawn():
@@ -28944,7 +28949,7 @@ def t_an_upload_answers_what_changed_when_the_page_asks():
     def go(fake):
         # Storage had failed when the page last read the store: its banner says
         # so, and the first upload that finds storage back must clear it.
-        copilot._files_ready.update({"error": "RuntimeError: an earlier outage", "at": 0.0})
+        fileserver._files_ready.update({"error": "RuntimeError: an earlier outage", "at": 0.0})
         mine = post("/api/files/tree", {}).json()["store"]
         ok(mine["setup_error"], "the page's copy shows the earlier failure")
         mine["names"] = {}                     # read before a teammate was added
@@ -29016,7 +29021,7 @@ def t_confirming_an_upload_does_not_hold_files_while_storage_answers():
         eq(rc.status_code, 200, rc.text)
         eq(rf.status_code, 200, rf.text)
         eq(order, ["folder", "complete"], "a folder was made while storage was still answering")
-        eq(copilot._load_files()["files"][up["id"]]["status"], "active", "and the upload was still kept")
+        eq(fileserver._load_files()["files"][up["id"]]["status"], "active", "and the upload was still kept")
     with_files(go, s3=slow)
 
 
@@ -29082,7 +29087,7 @@ def t_uploads_during_a_storage_retry_wait_for_its_answer():
 
     def go(fake):
         fake.bucket_exists = True
-        copilot._files_ready.update({"bucket": False, "cors": False,
+        fileserver._files_ready.update({"bucket": False, "cors": False,
                                      "error": "RuntimeError: an earlier outage", "at": time.time() - 120})
 
         def sign(n):
@@ -29090,7 +29095,7 @@ def t_uploads_during_a_storage_retry_wait_for_its_answer():
         rs = _files_race(sign(1), sign(2), sign(3))
         eq([r.status_code for r in rs], [200, 200, 200], [r.text[:120] for r in rs])
         eq(fake.heads, 1, "storage was asked once, and the others took its answer")
-        eq(copilot._files_ready["error"], "", "and the failure is cleared")
+        eq(fileserver._files_ready["error"], "", "and the failure is cleared")
     with_files(go, s3=slow)
 
 
@@ -29105,19 +29110,19 @@ def t_an_upload_holding_files_never_waits_on_a_storage_setup():
     import threading
 
     def go(fake):
-        copilot._files_ready.update({"bucket": False, "cors": False,
+        fileserver._files_ready.update({"bucket": False, "cors": False,
                                      "error": "RuntimeError: an earlier outage", "at": time.time()})
 
         async def scenario(ac):
-            await copilot._files_lock.acquire()          # the hourly sweep holds the store
+            await fileserver._files_lock.acquire()          # the hourly sweep holds the store
             sign = asyncio.ensure_future(ac.post("/api/files/upload-url", json={"name": "c.pdf", "size": 10}))
             await asyncio.sleep(0.3)                     # it passed the fresh failure and queued
-            copilot._files_ready["at"] = time.time() - 120   # the minute is up: another upload retries
-            busy = threading.Thread(target=lambda: (copilot._files_setup_lock.acquire(), time.sleep(1.5),
-                                                    copilot._files_setup_lock.release()))
+            fileserver._files_ready["at"] = time.time() - 120   # the minute is up: another upload retries
+            busy = threading.Thread(target=lambda: (fileserver._files_setup_lock.acquire(), time.sleep(1.5),
+                                                    fileserver._files_setup_lock.release()))
             busy.start()
             await asyncio.sleep(0.05)
-            copilot._files_lock.release()
+            fileserver._files_lock.release()
             await asyncio.sleep(0.05)
             t0 = time.monotonic()
             f = await ac.post("/api/files/folder", json={"op": "add", "name": "Meanwhile"})
@@ -29155,10 +29160,10 @@ def t_while_storage_hangs_an_upload_is_refused_without_waiting_out_the_retry():
     hang = Hanging()
 
     def go(fake):
-        copilot._files_ready.update({"bucket": False, "cors": False,
+        fileserver._files_ready.update({"bucket": False, "cors": False,
                                      "error": "RuntimeError: an earlier outage", "at": time.time() - 120})
-        saved = copilot.FILES_SETUP_WAIT
-        copilot.FILES_SETUP_WAIT = 0.3
+        saved = fileserver.FILES_SETUP_WAIT
+        fileserver.FILES_SETUP_WAIT = 0.3
         took = {}
 
         def sign(n, delay):
@@ -29174,7 +29179,7 @@ def t_while_storage_hangs_an_upload_is_refused_without_waiting_out_the_retry():
         try:
             rs = _files_race(sign(1, 0), sign(2, 0.2))
         finally:
-            copilot.FILES_SETUP_WAIT = saved
+            fileserver.FILES_SETUP_WAIT = saved
         eq([r.status_code for r in rs], [502, 502], [r.text[:80] for r in rs])
         ok(took[2] < 1.0, "the second upload was refused without waiting out the retry: %.2f s" % took[2])
     with_files(go, s3=hang)
@@ -29209,9 +29214,9 @@ def t_one_upload_confirmed_twice_at_once_is_one_file():
             return ac.post("/api/files/complete", json={"id": up["id"]})
         a, b = _files_race(complete, complete)
         eq(sorted([a.status_code, b.status_code]), [200, 400], (a.text, b.text))
-        d = copilot._load_files()
+        d = fileserver._load_files()
         eq([v["status"] for v in d["files"].values()], ["active"], "one file")
-        eq(copilot._files_usage(d), 10, "counted once")
+        eq(fileserver._files_usage(d), 10, "counted once")
     with_files(go, s3=slow)
 
 
@@ -29883,6 +29888,9 @@ SHARED_COPIES = {
     ("copilot", "httpx", "gizmo.routes.mail"):
         "the inbox's routes use httpx only to name an error they catch (ConnectError); "
         "the connector settings test sends no mail",
+    ("copilot", "httpx", "gizmo.routes.files"):
+        "the Finder drive streams downloads from the bucket with its own client; "
+        "the connector settings test reaches no file route",
 }
 
 @test
@@ -30042,7 +30050,8 @@ def t_either_module_imports_first():
                         ("gizmo.routes.team", "copilot"), ("gizmo.orderbook", "copilot"),
                         ("gizmo.production", "copilot"), ("gizmo.size_list", "copilot"),
                         ("gizmo.shopify", "copilot"), ("gizmo.crm", "copilot"), ("gizmo.mail", "copilot"),
-                        ("gizmo.routes.crm", "copilot"), ("gizmo.routes.mail", "copilot")):
+                        ("gizmo.routes.crm", "copilot"), ("gizmo.routes.mail", "copilot"),
+                        ("gizmo.files", "copilot"), ("gizmo.webdav", "copilot"), ("gizmo.routes.files", "copilot")):
         r = _sp.run([sys.executable, "-c", f"import {first}, {then}; import gizmo.dispatch as d, copilot as c; "
                      "assert c.desk is d and d.core is c; print('ok')"],
                     cwd=root, env=dict(os.environ), capture_output=True, text=True, timeout=120)
@@ -30237,14 +30246,14 @@ def t_a_banners_closing_rule_opens_no_section():
 
 @test
 def t_the_team_routes_register_in_place():
-    """The sign-in and team routes are registered by one call where they stood
-    in add_routes, so the route table keeps its order; none is left behind."""
+    """The sign-in and team routes are registered by one call in add_routes;
+    none is left behind."""
     import inspect
     from gizmo.routes import team as routes_team
     src = inspect.getsource(copilot.add_routes)
-    i = src.index("routes_team.register(mcp, registry)")
-    ok(src.rindex('@mcp.custom_route("/api/files/file"', 0, i) < i
-       < src.index('@mcp.custom_route("/dav{sub_path:path}"', i), "between the routes that stood either side")
+    # Where it stands is make move-proof's to check (its neighbours have since
+    # moved out too); here, that it is there once.
+    eq(src.count("routes_team.register(mcp, registry)"), 1, "one call")
     for path in ('"/api/auth/', '"/api/team/'):
         ok(path not in src, path + " is registered by the team's own routes")
     eq(inspect.getsource(routes_team).count("@mcp.custom_route("), 10, "the 10 sign-in and team routes")
@@ -30304,6 +30313,156 @@ def t_the_crm_and_mail_routes_are_gathered():
         ok(path not in src, path + " is registered by the area's own routes")
     eq((inspect.getsource(routes_crm).count("@mcp.custom_route("), inspect.getsource(routes_mail).count("@mcp.custom_route(")),
        (8, 26), "8 CRM routes; 24 mail routes and the Gmail connect pair")
+
+_TOY_MAIN = "copilot" + ".py"     # a made-up repository's main file, not ours
+_TOY_COPILOT = '''"""A made-up app for the move tool's test."""
+import logging
+import os
+from typing import Optional
+from gizmo import floor_stub
+
+logger = logging.getLogger("toy")
+
+KEEP = 1
+X_PATH = os.environ.get("X_PATH", "/data/x.json")
+
+_x_mem: Optional[dict] = None
+
+
+def _x_load(path: str = "") -> dict:
+    return {"path": path or X_PATH}
+
+
+def keep() -> dict:
+    return _x_load()
+
+
+def reset() -> None:
+    global _x_mem
+    _x_mem = None
+
+
+def _x_note(d: Optional[dict]) -> int:
+    return KEEP + len(d or {})
+
+
+def add_routes(mcp, registry):
+    @mcp.custom_route("/api/x/a", methods=["POST"])
+    async def x_a(request):
+        return _x_load()
+
+    @mcp.custom_route("/api/y", methods=["POST"])
+    async def y(request):
+        return keep()
+
+    @mcp.custom_route("/api/x/b", methods=["POST"])
+    async def x_b(request):
+        return _x_note(None)
+'''
+
+_TOY_TEST = '''import copilot
+from gizmo import floor_stub
+
+EXAMPLE = """
+from gizmo import nothing_real
+"""
+
+
+def t_patch():
+    copilot._x_load = lambda: {}
+'''
+
+_TOY_SPEC = {"areas": [{"name": "x", "file": "gizmo/x.py", "alias": "x", "prefix": "^(_x_|X_)",
+                        "extra": [], "exclude": [], "floor": False, "doc": "The x area."}],
+             "routes": [{"name": "routes_x", "file": "gizmo/routes/x.py", "area": "x", "paths": ["/api/x/"],
+                         "helpers": [], "doc": "The x routes.", "register_doc": "Add the x routes."}],
+             "note": "the x area"}
+
+
+def _toy_repo(name, copilot_text=_TOY_COPILOT, spec=None):
+    """A made-up repository in the scratch folder: copilot.py, a gizmo
+    package, one test, and a move description."""
+    import json as _json
+    root = os.path.join(SCRATCH, name)
+    _sh.rmtree(root, ignore_errors=True)
+    for d in ("gizmo/routes", "tests", "tools/moves"):
+        os.makedirs(os.path.join(root, d), exist_ok=True)
+    files = {_TOY_MAIN: copilot_text, "gizmo/__init__.py": "", "gizmo/routes/__init__.py": "",
+             "gizmo/floor_stub.py": '"""Stands in for the floor."""\n', "tests/test_dispatch.py": _TOY_TEST,
+             "server.py": "def boot():\n    import copilot\n    return copilot._x_load()\n"}
+    for rel, text in files.items():
+        open(os.path.join(root, rel), "w").write(text)
+    open(os.path.join(root, "tools/moves/x.json"), "w").write(_json.dumps(spec or _TOY_SPEC))
+    return root
+
+
+def _run_move(root, write=True):
+    import subprocess as _sp
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return _sp.run([sys.executable, os.path.join(here, "tools", "move_area.py"), os.path.join(root, "tools/moves/x.json"),
+                    "--repo", root] + (["--write"] if write else []), capture_output=True, text=True, timeout=120)
+
+
+@test
+def t_move_area_moves_a_toy_area():
+    """tools/move_area.py, the committed move tool, run on a made-up
+    repository: what it writes is nothing but the move (prove() agrees), with
+    every lesson of the first five moves built in."""
+    import importlib.util, subprocess as _sp
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    spec_ = importlib.util.spec_from_file_location("move_proof", os.path.join(here, "tools", "move_proof.py"))
+    mp = importlib.util.module_from_spec(spec_); spec_.loader.exec_module(mp)
+    root = _toy_repo("toy-move")
+    r = _run_move(root)
+    eq(r.returncode, 0, r.stdout[-800:] + r.stderr[-800:])
+    read = lambda rel: open(os.path.join(root, rel)).read()
+    area, cop, routes, test_ = read("gizmo/x.py"), read(_TOY_MAIN), read("gizmo/routes/x.py"), read("tests/test_dispatch.py")
+    ok("def _x_load(" in area and "X_PATH = " in area and "_x_mem: Optional[dict] = None" in area, "the area's names moved")
+    ok("from typing import Optional" in area, "with the import an annotation needs")
+    ok("core.KEEP" in area and area.rstrip().endswith("import copilot as core  # noqa: E402"), "borrowing through core, imported last")
+    ok("return x._x_load()" in cop, "copilot reads the area through its name")
+    ok("global _x_mem" not in cop and "x._x_mem = None" in cop, "a global line for a moved name goes; the write goes through the module")
+    eq(cop.count("routes_x.register(mcp, registry)"), 1, "the routes are gathered")
+    ok(cop.index("routes_x.register(mcp, registry)") < cop.index('"/api/y"'), "where the first stood")
+    eq(routes.count("@mcp.custom_route("), 2, "both of the area's routes")
+    ok("x._x_load = lambda" in test_, "the test patches the area")
+    ok("from gizmo import floor_stub\nfrom gizmo import x\n" in test_ and '"""\nfrom gizmo import nothing_real\n"""' in test_,
+       "the suite's prelude imports the area after its own imports, not inside a string")
+    ok("return copilot.x._x_load()" in read("server.py"),
+       "server.py, which imports copilot inside its functions, reaches the area through copilot's name for it")
+    base = {_TOY_MAIN: _TOY_COPILOT, "gizmo/__init__.py": "", "gizmo/floor_stub.py": '"""Stands in for the floor."""\n',
+            "gizmo/routes/__init__.py": ""}
+    head = {_TOY_MAIN: cop, "gizmo/__init__.py": "", "gizmo/floor_stub.py": '"""Stands in for the floor."""\n',
+            "gizmo/routes/__init__.py": "", "gizmo/routes/x.py": routes, "gizmo/x.py": area}
+    eq(mp.prove(base, head, declared=("reset",)), [], "prove(): nothing but the move")
+    for first in ("gizmo.x", "copilot", "gizmo.routes.x"):
+        rr = _sp.run([sys.executable, "-c", f"import {first}, copilot, gizmo.x"], cwd=root, capture_output=True, text=True)
+        eq(rr.returncode, 0, f"{first} first: " + rr.stderr[-400:])
+    # an alias that is a local where it would be read: nothing written
+    clash = _toy_repo("toy-clash", _TOY_COPILOT + "\n\ndef clash():\n    x = 1\n    return x + len(_x_load())\n")
+    r = _run_move(clash)
+    ok(r.returncode != 0 and "local" in r.stdout, "a local named like the alias stops the move: " + r.stdout[-300:])
+    ok(not os.path.exists(os.path.join(clash, "gizmo/x.py")), "and nothing is written")
+    # a statement binding two areas' names: nothing written
+    two = dict(_TOY_SPEC, areas=_TOY_SPEC["areas"] + [{"name": "y", "file": "gizmo/y.py", "alias": "yy", "prefix": "^KEEP$",
+                                                       "extra": [], "exclude": [], "floor": False, "doc": "y"}])
+    both = _toy_repo("toy-two", _TOY_COPILOT.replace("KEEP = 1\nX_PATH =", "KEEP, X_PATH = 1, "), two)
+    r = _run_move(both)
+    ok(r.returncode != 0 and "across" in r.stdout, "a statement binding two areas' names stops the move: " + r.stdout[-300:])
+
+@test
+def t_the_files_routes_are_gathered():
+    """The Files routes and the Finder drive's, scattered through add_routes,
+    are registered by one call where the first stood. The drive's route is
+    the one with a pattern, and no other path starts with /dav, so no request
+    changes hands (make move-proof checks the order)."""
+    import inspect
+    from gizmo.routes import files as routes_files
+    src = inspect.getsource(copilot.add_routes)
+    eq(src.count("routes_files.register(mcp, registry)"), 1, "one call")
+    for path in ('"/api/files/', '"/dav'):
+        ok(path not in src, path + " is registered by the Files routes")
+    eq(inspect.getsource(routes_files).count("@mcp.custom_route("), 8, "the 7 Files routes and the drive's")
 
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
