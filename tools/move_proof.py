@@ -15,7 +15,12 @@ the head's copilot.py and package with the base's:
   a parameter, a local or a closure of that name is in scope;
 - the routes are registered in the same order;
 - nothing else is added or lost but imports, the package's module docstrings
-  and loggers, and the register() shells and calls that carry the routes.
+  and loggers, and the register() shells and calls that carry the routes;
+- no moved statement finds its module's names by name (globals(), vars(),
+  sys.modules[__name__]): moved, it would read the new module's.
+
+Statements changed on purpose are named with --declared (make move-proof
+DECLARED=a,b) and printed before and after instead.
 
 Comments are not compared. Exit 0 with "nothing but the move", or exit 1
 naming each statement lost, added or changed. Imports nothing from the app.
@@ -143,6 +148,33 @@ def _label(path, n):
     return f"{path}:{n.lineno} {ast.unparse(n).splitlines()[0][:70]}"
 
 
+def _name(n):
+    """What a statement is called, for naming it as an intended change: a def
+    or class name, an assignment's first target, or the function an
+    expression statement calls."""
+    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return n.name
+    if isinstance(n, (ast.Assign, ast.AnnAssign)):
+        t = n.targets[0] if isinstance(n, ast.Assign) else n.target
+        return ast.unparse(t)
+    if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call):
+        f = n.value.func
+        return f.attr if isinstance(f, ast.Attribute) else ast.unparse(f)
+    return None
+
+
+def _looks_itself_up(n):
+    """A statement that finds its module's names by name: globals(), vars()
+    with nothing given, sys.modules[__name__]. Moved, it reads the new module."""
+    for x in ast.walk(n):
+        if (isinstance(x, ast.Call) and isinstance(x.func, ast.Name)
+                and (x.func.id == "globals" or (x.func.id == "vars" and not x.args))):
+            return x.func.id + "()"
+        if isinstance(x, ast.Subscript) and ast.unparse(x) == "sys.modules[__name__]":
+            return "sys.modules[__name__]"
+    return None
+
+
 def _is_doc(n):
     return isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant) and isinstance(n.value.value, str)
 
@@ -187,15 +219,18 @@ def _units(files, problems):
                       ((path == first and n.name == "add_routes") or
                        (path.startswith("gizmo/routes/") and n.name == "register")))
             if not holder:
-                units.append((ast.dump(_norm(n, prefixes, set(), problems, _label(path, n))), _label(path, n), path))
+                if path != first and _looks_itself_up(n):
+                    problems.append(f"{_label(path, n)} uses {_looks_itself_up(n)}: moved, it reads this module's names")
+                norm = _norm(n, prefixes, set(), problems, _label(path, n))
+                units.append((ast.dump(norm), _label(path, n), path, _name(norm), ast.unparse(norm)))
                 continue
             if n.name == "register":
                 registers[_module(path)] = n
             else:
                 shell = copy.copy(n)
                 shell.body = []
-                units.append((ast.dump(_norm(shell, prefixes, set(), problems, _label(path, n))),
-                              _label(path, n) + " (its signature)", path))
+                norm = _norm(shell, prefixes, set(), problems, _label(path, n))
+                units.append((ast.dump(norm), _label(path, n) + " (its signature)", path, None, ast.unparse(norm)))
             inner = _own_names(n)
             for j, s in enumerate(n.body):
                 if n.name == "register" and j == 0 and _is_doc(s):
@@ -203,7 +238,10 @@ def _units(files, problems):
                 if _is_register_call(s, prefixes):
                     continue
                 lab = _label(path, s)
-                units.append((ast.dump(_norm(s, prefixes, inner, problems, lab)), lab, path))
+                if path != first and _looks_itself_up(s):
+                    problems.append(f"{lab} uses {_looks_itself_up(s)}: moved, it reads this module's names")
+                norm = _norm(s, prefixes, inner, problems, lab)
+                units.append((ast.dump(norm), lab, path, _name(norm), ast.unparse(norm)))
     order = []
     tree = trees[first]
     aliases = _aliases(tree, family)
@@ -217,32 +255,46 @@ def _units(files, problems):
     return units, order
 
 
-def prove(base, head, stats=None):
+def prove(base, head, stats=None, declared=()):
     """base, head: {repo path: text}, copilot.py first. -> the problems found;
-    [] when the head is the base moved and nothing else."""
+    [] when the head is the base moved and nothing else. A statement named in
+    `declared` is an intended change: it is left out of the match and given
+    back in stats["declared"] as (name, before, after), either side None when
+    it is new or gone."""
     problems = []
     bu, border = _units(base, problems)
     hu, horder = _units(head, problems)
-    b, h = collections.Counter(k for k, _, _ in bu), collections.Counter(k for k, _, _ in hu)
+    declared = set(declared)
+    shown = collections.OrderedDict()
+    for side, units in ((0, bu), (1, hu)):
+        for u in units:
+            if u[3] in declared:
+                pair = shown.setdefault(u[3], [None, None])
+                pair[side] = u[4] if pair[side] is None else pair[side] + "\n" + u[4]
+    bu = [u for u in bu if u[3] not in declared]
+    hu = [u for u in hu if u[3] not in declared]
+    b, h = collections.Counter(u[0] for u in bu), collections.Counter(u[0] for u in hu)
     lost, added = b - h, h - b
-    for key, lab, _ in bu:
+    for key, lab, *_ in bu:
         if lost[key]:
             problems.append(f"lost or changed in the head: {lab}")
             lost[key] -= 1
-    for key, lab, _ in hu:
+    for key, lab, *_ in hu:
         if added[key]:
             problems.append(f"added or changed in the head: {lab}")
             added[key] -= 1
+    for name in declared - set(shown):
+        problems.append(f"declared as an intended change, but nothing is called {name}")
     if border != horder:
         problems.append("the routes are registered in another order: "
                         + next((f"{x} where the base had {y}" for x, y in zip(horder, border) if x != y),
                                f"{len(horder)} routes where the base had {len(border)}"))
     if stats is not None:
         where_b = collections.defaultdict(set)
-        for k, _, p in bu:
+        for k, _, p, *_ in bu:
             where_b[k].add(p)
-        stats.update(statements=len(bu), moved=sum(1 for k, _, p in hu if p not in where_b.get(k, {p})),
-                     routes=len(horder))
+        stats.update(statements=len(bu), moved=sum(1 for k, _, p, *_ in hu if p not in where_b.get(k, {p})),
+                     routes=len(horder), declared=[(n, a, b) for n, (a, b) in shown.items()])
     return problems
 
 
@@ -267,16 +319,25 @@ def _head_files():
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--base", default="origin/main", help="the ref to compare with (default origin/main)")
+    ap.add_argument("--declared", default="", help="names of statements changed on purpose, comma-separated")
     args = ap.parse_args(argv)
     stats = {}
-    problems = prove(_base_files(args.base), _head_files(), stats)
+    declared = [d.strip() for d in args.declared.split(",") if d.strip()]
+    problems = prove(_base_files(args.base), _head_files(), stats, declared)
+    import difflib
+    for name, before, after in stats.get("declared", []):
+        print(f"intended change: {name}")
+        for line in difflib.unified_diff((before or "").splitlines(), (after or "").splitlines(),
+                                         "before", "after", lineterm="", n=1):
+            print("    " + line)
     for p in problems:
         print(p)
     if problems:
         print(f"{len(problems)} differences from {args.base} beyond the move")
         return 1
     print(f"nothing but the move: {stats['statements']} statements found again, {stats['moved']} of them "
-          f"in another file, {stats['routes']} routes in the same order ({args.base})")
+          f"in another file, {stats['routes']} routes in the same order ({args.base})"
+          + (f", and {len(stats['declared'])} intended changes shown above" if stats["declared"] else ""))
     return 0
 
 

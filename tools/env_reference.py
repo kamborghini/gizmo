@@ -33,11 +33,18 @@ SHOP_DOMAIN_FROM = "PROPOSAL_HOST"
 
 def _banner_index(lines):
     """Line -> the nearest preceding section banner (copilot.py's `# ---- Title`)."""
-    banners = []
+    banners, opened = [], False
     for i, line in enumerate(lines):
-        if re.match(r"^# [-=]{20,}", line) and i + 1 < len(lines) \
-                and lines[i + 1].startswith("# ") and not re.match(r"^# [-=]{5,}", lines[i + 1]):
+        if not re.match(r"^# [-=]{20,}", line):
+            if not line.startswith("#"):
+                opened = False
+            continue
+        if opened:                     # this rule closes the banner above it
+            opened = False
+            continue
+        if i + 1 < len(lines) and lines[i + 1].startswith("# ") and not re.match(r"^# [-=]{5,}", lines[i + 1]):
             banners.append((i + 1, lines[i + 1][2:].strip().rstrip(".")[:60]))
+            opened = True
     return banners
 
 

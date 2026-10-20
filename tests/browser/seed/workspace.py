@@ -26,7 +26,7 @@ WS_SEED = {}
 copilot.MEMORY_PATH = SCRATCH + "/store_memory.json"
 copilot.SKILLS_PATH = SCRATCH + "/store_skills.json"
 for _p in (copilot.MEMORY_PATH, copilot.SKILLS_PATH):
-    copilot._poisoned_stores.discard(_p)
+    jsonstore._poisoned_stores.discard(_p)
 
 ensure_auth()
 _WS_MASTER = APP_AUTH["master"]
@@ -205,7 +205,7 @@ copilot._save_knowledge(_KNOW.replace("five", "six"), ["https://halden-lighting.
                         "https://halden-lighting.example.org/collections/custom-gobos",
                         "https://halden-lighting.example.org/pages/delivery"])
 _k = copilot._load_knowledge(); _k["learned_at"] = _iso(_NOW - _td(days=36))
-copilot._write_json_store(copilot.KNOWLEDGE_PATH, None, _k)
+jsonstore._write_json_store(copilot.KNOWLEDGE_PATH, None, _k)
 assert post("/api/learn", {"op": "save", "knowledge": _KNOW}).status_code == 200
 
 # ---------------------------------------------------------------- Memory: tracked changes (b)
@@ -360,8 +360,8 @@ async def _fake_xcreate(client, **kwargs):
                                       input={"title": "Quoting custom gobos"})], stop_reason="tool_use")
     return _block(content=[_block(type="tool_use", name="present_response", id="toolu_seed_present",
                                   input=_j.loads(_j.dumps(_ANSWERS[asked])))], stop_reason="tool_use")
-_real_xcreate = copilot._xcreate
-copilot._xcreate = _fake_xcreate
+_real_xcreate = claude._xcreate
+claude._xcreate = _fake_xcreate
 def _turn(resp, at):
     return {"role": "assistant", "structured": resp.get("structured"), "model": resp.get("model"),
             "deep": resp.get("deep"), "fell_back": resp.get("fell_back"), "data_used": resp.get("data_used"),
@@ -389,7 +389,7 @@ try:
         title = qs[0] if len(qs[0]) <= 60 else qs[0][:57] + "…"
         _WS_CONVOS.append({"id": "seedconvo" + str(k + 1), "title": title, "ts": ms - 60000, "updated": ms, "turns": turns})
 finally:
-    copilot._xcreate = _real_xcreate
+    claude._xcreate = _real_xcreate
 WS_SEED.update({"master": _WS_MASTER, "users": _WSU, "convos": _WS_CONVOS})
 # What the browser needs: the owner stamp (claimLocalCache keeps the cache only for the
 # signed-in account) and the conversations, for a context init script.

@@ -105,9 +105,10 @@ css-proof:
 
 # The proof that a move out of copilot.py into gizmo/ moved code and changed
 # nothing: every statement found again, prefixes only on module globals, the
-# routes in the same order (tools/move_proof.py), against BASE.
+# routes in the same order (tools/move_proof.py), against BASE. DECLARED names
+# statements changed on purpose, shown before and after.
 move-proof:
-	$(PY) tools/move_proof.py --base $(BASE)
+	$(PY) tools/move_proof.py --base $(BASE) $(if $(DECLARED),--declared '$(DECLARED)')
 
 check: test-frontend test-forecast sweep sast ext-check test-browser
 	$(PY) tools/env_reference.py --check

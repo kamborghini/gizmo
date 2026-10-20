@@ -43,21 +43,14 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `ALERTS_PATH` | `"/data/alerts.json"` | copilot | change alerts from scheduled runs |
 | `ANALYSIS_CACHE_MAX_BYTES` | `"800000"` | copilot | per-entry size guard |
 | `ANALYSIS_CACHE_PATH` | `"/data/analysis_cache.json"` | copilot | last result per AI tab |
-| `ANTHROPIC_API_KEY` | `""` | copilot |  |
 | `ANTHROPIC_EFFORT` | `"high"` | copilot |  |
 | `ANTHROPIC_EFFORT_DEEP` | `"max"` | copilot |  |
-| `ANTHROPIC_MODEL` | `None` | copilot |  |
-| `ANTHROPIC_MODEL_DEEP` | `"claude-opus-5-5"` | copilot |  |
-| `ANTHROPIC_MODEL_FALLBACK` | `"claude-opus-4-8"` | copilot |  |
-| `ANTHROPIC_MODEL_FAST` | `None` | copilot |  |
 | `ANTHROPIC_THINKING` | `"adaptive"` | copilot |  |
 | `APP_BASE_URL` | `""` | copilot |  |
 | `CHANGELOG_PATH` | `os.path.join(os.path.dirname(__file__), "data", "changelo...` | copilot |  |
 | `CHAT_CONTEXT_CAP` | `"12000"` | copilot | max chars of page-report context injected into chat |
-| `COPILOT_MAX_TOKENS` | `"16000"` | copilot | headroom for rich output at high effort (non-streaming-safe) |
 | `COPILOT_MAX_TOOL_ROUNDS` | `"12"` | copilot |  |
 | `COPILOT_TOOL_RESULT_CAP` | `"50000"` | copilot |  |
-| `DAILY_COST_CAP` | `"25"` | copilot | hard $/day AI ceiling (0 disables) |
 | `FEEDBACK_PATH` | `"/data/feedback.json"` | copilot | feature requests from the desk |
 | `FORECAST_INGEST_TOKEN` | `""` | copilot | shared secret the nightly forecasting service presents to /hooks/forecast/*; empty switches the hooks off |
 | `FORECAST_PATH` | `"/data/forecast.json"` | copilot | the nightly forecasting service's latest run, and the cash flow workbook an admin uploaded (base64), in one store |
@@ -103,8 +96,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `SKILL_UPLOAD_CAP` | `"200000"` | copilot |  |
 | `STORE_CONTEXT_CAP` | `"4000"` | copilot |  |
 | `TREND_MONTHS` | `"24"` | copilot |  |
-| `USAGE_MAX` | `"5000"` | copilot | max usage events retained |
-| `USAGE_PATH` | `"/data/usage.json"` | copilot | AI token-usage + cost log (measurement) |
 
 ## copilot.py - Files: the office file server, without the office
 
@@ -122,12 +113,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `R2_SECRET_ACCESS_KEY` | `""` | copilot |  |
 | `RAILWAY_PUBLIC_DOMAIN` | `None` | copilot, server |  |
 
-## copilot.py - How long a swept order list may be reused. Every queue segme
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `ORDER_CACHE_SECS` | `"180"` | copilot |  |
-
 ## copilot.py - Impact tracking — "close the loop": snapshot headline metric
 
 | Variable | Default | Read by | Notes |
@@ -135,24 +120,9 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `BACKUP_FILE_MAX` | `str(60 * 1024 * 1024)` | copilot |  |
 | `BACKUP_SNAPSHOT_DIR` | `"/data/snapshots"` | copilot |  |
 | `BACKUP_STATE_PATH` | `"/data/backup_state.json"` | copilot |  |
-| `ERRORS_PATH` | `"/data/app_errors.json"` | copilot |  |
 | `PRODUCTION_ARCHIVE_PATH` | `os.path.join(os.path.dirname(PRODUCTION_STATE_PATH) or "....` | copilot |  |
 | `PRODUCTION_STATE_MAX` | `"1000"` | copilot |  |
 | `PRODUCTION_STATE_PATH` | `"/data/production_state.json"` | copilot |  |
-
-## copilot.py - Keyed on (path, mtime), not mtime alone: keyed on time only,
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `ACTIVITY_MAX` | `"8000"` | copilot |  |
-| `ACTIVITY_PATH` | `"/data/activity.json"` | copilot |  |
-| `MASTER_RESET` | `None` | copilot |  |
-| `MASTER_RESET_MINUTES` | `"30"` | copilot |  |
-| `PRIVACY_LOG_PATH` | `"/data/privacy_log.json"` | copilot |  |
-| `RAILWAY_GIT_COMMIT_SHA` | `None` | copilot, server |  |
-| `SESSIONS_PER_USER` | `"12"` | copilot |  |
-| `SESSION_HOURS` | `"24"` | copilot |  |
-| `SESSION_MAX_DAYS` | `"30"` | copilot |  |
 
 ## copilot.py - Keyword scraper for arbitrary external URLs (SSRF-guarded) +
 
@@ -172,6 +142,12 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `WORK_KEEP` | `"2000"` | copilot |  |
 | `WORK_MIN_SECS` | `"60"` | copilot |  |
 | `WORK_PATH` | `"/data/worklog.json"` | copilot |  |
+
+## copilot.py - Order sweep snapshot
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `ORDER_CACHE_SECS` | `"180"` | copilot |  |
 
 ## copilot.py - Page rendering
 
@@ -271,6 +247,34 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `MAIL_BOARD_DONE_DAYS` | `"90"` | copilot |  |
 | `MAIL_BOARD_MAX` | `"1500"` | copilot |  |
 
+## copilot.py - What's new: the release notes that ship WITH the release, an
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `ACTIVITY_MAX` | `"8000"` | copilot |  |
+| `ACTIVITY_PATH` | `"/data/activity.json"` | copilot |  |
+| `MASTER_RESET` | `None` | copilot |  |
+| `MASTER_RESET_MINUTES` | `"30"` | copilot |  |
+| `PRIVACY_LOG_PATH` | `"/data/privacy_log.json"` | copilot |  |
+| `RAILWAY_GIT_COMMIT_SHA` | `None` | copilot, server |  |
+| `SESSIONS_PER_USER` | `"12"` | copilot |  |
+| `SESSION_HOURS` | `"24"` | copilot |  |
+| `SESSION_MAX_DAYS` | `"30"` | copilot |  |
+
+## gizmo/ai.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `ANTHROPIC_API_KEY` | `""` | gizmo.ai |  |
+| `ANTHROPIC_MODEL` | `None` | gizmo.ai |  |
+| `ANTHROPIC_MODEL_DEEP` | `"claude-opus-5-5"` | gizmo.ai |  |
+| `ANTHROPIC_MODEL_FALLBACK` | `"claude-opus-4-8"` | gizmo.ai |  |
+| `ANTHROPIC_MODEL_FAST` | `None` | gizmo.ai |  |
+| `COPILOT_MAX_TOKENS` | `"16000"` | gizmo.ai | headroom for rich output at high effort (non-streaming-safe) |
+| `DAILY_COST_CAP` | `"25"` | gizmo.ai | hard $/day AI ceiling (0 disables) |
+| `USAGE_MAX` | `"5000"` | gizmo.ai | max usage events retained |
+| `USAGE_PATH` | `"/data/usage.json"` | gizmo.ai | AI token-usage + cost log (measurement) |
+
 ## gizmo/dispatch.py - Custom address dispatch
 
 | Variable | Default | Read by | Notes |
@@ -301,6 +305,12 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `SHIPPING_PATH` | `"/data/shipping.json"` | gizmo.dispatch |  |
 | `WO_FAILURES_PATH` | `"/data/wo_failures.json"` | gizmo.dispatch |  |
 | `WO_SECRET_PATH` | `"/data/wo_secret.json"` | gizmo.dispatch |  |
+
+## gizmo/errors.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `ERRORS_PATH` | `"/data/app_errors.json"` | gizmo.errors |  |
 
 ## eori.py
 
