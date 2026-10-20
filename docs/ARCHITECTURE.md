@@ -48,10 +48,12 @@ Neither reads the other as it loads, so either can be imported first.
 Beneath every area is the floor, modules that import nothing above them
 (`t_the_floor_imports_nothing_above_it`): `gizmo/config.py` (settings),
 `gizmo/store.py` (every JSON store, the one writer, the cache, the poison
-guard), `gizmo/errors.py` (the error log) and `gizmo/ai.py` (the AI client:
-models, the call and its fallbacks, usage, the spend cap). Everything reads
-them through the module's name: `jsonstore.NAME`, `errors.NAME`,
-`claude.NAME`. An area imports the floor directly; what it still reads from
+guard), `gizmo/errors.py` (the error log), `gizmo/ai.py` (the AI client:
+models, the call and its fallbacks, usage, the spend cap) and
+`gizmo/shopify.py` (the way to Shopify: reads through the tool registry, and
+the write capabilities `server.py` hands in, which `add_routes` stores
+there). Everything reads them through the module's name: `jsonstore.NAME`,
+`errors.NAME`, `claude.NAME`, `shopify.NAME`. An area imports the floor directly; what it still reads from
 `copilot.py` through `core.` shrinks as the request check, accounts, orders
 and production move out in turn. The store names no area: an area that keeps
 something built from a store registers `jsonstore.when_forgotten(fn)`, and
@@ -60,8 +62,12 @@ an area that keeps a whole store in memory registers how to let go of it
 
 Above the floor, each area moved out so far: the dispatch desk (`desk`), the
 team's accounts and sign-in (`gizmo/team.py`, its routes in
-`gizmo/routes/team.py`), the door every route opens with (`gizmo/gate.py`)
-and the activity log (`gizmo/activity.py`). They read each other through the
+`gizmo/routes/team.py`), the door every route opens with (`gizmo/gate.py`),
+the activity log (`gizmo/activity.py`), the order book
+(`gizmo/orderbook.py`), production and its label builder
+(`gizmo/production.py`; what the bench prints is pinned by
+`t_the_printed_labels_do_not_change`) and the Size list
+(`gizmo/size_list.py`). They read each other through the
 module's name and `copilot.py` as `core.NAME`, and import `copilot` last.
 `copilot.py` reads them the same way, except names it takes by their own:
 the ones the frozen print route reads, and `_guard` and `_json`, the door
@@ -218,6 +224,11 @@ can leave a test testing nothing. The guards below make that a failure, and
    first, into the floor. A function that finds its module's names by name
    (`globals()`, `vars()`, `sys.modules[__name__]`) cannot move: moved, it
    reads the new module's names (`t_no_module_looks_itself_up_by_name`).
+   A path built from `__file__` points one folder down once moved into
+   `gizmo/`: rewrite it from the repository (`_REPO`) as a declared change,
+   and test the default with the setting cleared, since the suite sets every
+   path (`t_the_size_lists_seed_files_are_the_repos`). An area imports
+   another area, and `copilot`, last; only the floor goes at the top.
    None is left. A function that resets another module's state with a
    `global` statement writes through the module instead (`team._users_mem =
    None`), and a module that keeps a store in memory lets go of its own
