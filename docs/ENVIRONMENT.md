@@ -106,15 +106,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `USAGE_MAX` | `"5000"` | copilot | max usage events retained |
 | `USAGE_PATH` | `"/data/usage.json"` | copilot | AI token-usage + cost log (measurement) |
 
-## copilot.py - Custom address dispatch
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `LIABILITY_DEFAULT_TERMS` | `"30"` | copilot |  |
-| `LIABILITY_DUE_SOON_DAYS` | `"7"` | copilot |  |
-| `LIABILITY_TAGS` | `"Purchase order unpaid, Bank transfer unpaid, Procurement...` | copilot |  |
-| `WO_RETRY_WAIT_SECS` | `"15"` | copilot |  |
-
 ## copilot.py - Files: the office file server, without the office
 
 | Variable | Default | Read by | Notes |
@@ -141,6 +132,11 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
+| `BACKUP_FILE_MAX` | `str(60 * 1024 * 1024)` | copilot |  |
+| `BACKUP_SNAPSHOT_DIR` | `"/data/snapshots"` | copilot |  |
+| `BACKUP_STATE_PATH` | `"/data/backup_state.json"` | copilot |  |
+| `ERRORS_PATH` | `"/data/app_errors.json"` | copilot |  |
+| `PRODUCTION_ARCHIVE_PATH` | `os.path.join(os.path.dirname(PRODUCTION_STATE_PATH) or "....` | copilot |  |
 | `PRODUCTION_STATE_MAX` | `"1000"` | copilot |  |
 | `PRODUCTION_STATE_PATH` | `"/data/production_state.json"` | copilot |  |
 
@@ -184,15 +180,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `CONNECTOR_TOKEN` | `None` | copilot |  |
 | `CONNECTOR_URL` | `None` | copilot |  |
 
-## copilot.py - Pasted addresses
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `COST_CACHE_PATH` | `"/data/cost_cache.json"` | copilot |  |
-| `CUSTOMS_GOBO_DESCRIPTION` | `"Glass Optical Filter"` | copilot |  |
-| `CUSTOMS_MEMORY_PATH` | `"/data/customs_memory.json"` | copilot |  |
-| `MARGIN_BACKFILL_MAX` | `"60"` | copilot | older orders fetched one by one |
-
 ## copilot.py - Production labels: orders carrying the production tag, shape
 
 | Variable | Default | Read by | Notes |
@@ -202,6 +189,9 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `GOBO_OVERRIDES_LIVE` | `"/data/gobo-overrides.csv"` | copilot |  |
 | `GOBO_OVERRIDES_PATH` | `os.path.join(os.path.dirname(__file__), "data", "gobo-ove...` | copilot |  |
 | `GOBO_SIZES_LIVE` | `"/data/gobo-sizes.csv"` | copilot |  |
+| `LIABILITY_DEFAULT_TERMS` | `"30"` | copilot |  |
+| `LIABILITY_DUE_SOON_DAYS` | `"7"` | copilot |  |
+| `LIABILITY_TAGS` | `"Purchase order unpaid, Bank transfer unpaid, Procurement...` | copilot |  |
 | `MADE_TAG` | `"PC"` | copilot |  |
 | `OPTION_CACHE_SECS` | `"21600"` | copilot | 6 hours |
 | `PO_UNPAID_TAG` | `"purchase order unpaid"` | copilot |  |
@@ -242,28 +232,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `MAIL_TRACK_DAYS` | `"730"` | copilot |  |
 | `RELEASE_INLINE_MAX` | `"12"` | copilot |  |
 
-## copilot.py - Shipping / dispatch (World Options SOAP web service) — setti
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `BACKUP_FILE_MAX` | `str(60 * 1024 * 1024)` | copilot |  |
-| `BACKUP_SNAPSHOT_DIR` | `"/data/snapshots"` | copilot |  |
-| `BACKUP_STATE_PATH` | `"/data/backup_state.json"` | copilot |  |
-| `BOOKING_INTENT_PATH` | `os.path.join(os.path.dirname(DISPATCH_STATE_PATH) or ".",...` | copilot |  |
-| `COLLECTIONS_PATH` | `"/data/collections.json"` | copilot |  |
-| `DISPATCHED_TAG` | `"Complete"` | copilot |  |
-| `DISPATCH_ARCHIVE_PATH` | `os.path.join(os.path.dirname(DISPATCH_STATE_PATH) or ".",...` | copilot |  |
-| `DISPATCH_LABELS_DIR` | `os.path.join(os.path.dirname(DISPATCH_STATE_PATH) or ".",...` | copilot |  |
-| `DISPATCH_LABELS_MAX` | `"400"` | copilot |  |
-| `DISPATCH_STATE_MAX` | `"2000"` | copilot |  |
-| `DISPATCH_STATE_PATH` | `"/data/dispatch_state.json"` | copilot |  |
-| `ERRORS_PATH` | `"/data/app_errors.json"` | copilot |  |
-| `PRODUCTION_ARCHIVE_PATH` | `os.path.join(os.path.dirname(PRODUCTION_STATE_PATH) or "....` | copilot |  |
-| `SHIPPING_PATH` | `"/data/shipping.json"` | copilot |  |
-| `WO_FAILURES_PATH` | `"/data/wo_failures.json"` | copilot |  |
-| `WO_SECRET_PATH` | `"/data/wo_secret.json"` | copilot |  |
-
-## copilot.py - Shipping settings + Dispatch (World Options). The courier AP
+## copilot.py - Shopify -> Xero connector: a separate, audited Node service 
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
@@ -301,6 +270,37 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `ENQUIRY_SENDERS` | `"shopifyemail.com,shopify.com,[shop domain]"` | copilot |  |
 | `MAIL_BOARD_DONE_DAYS` | `"90"` | copilot |  |
 | `MAIL_BOARD_MAX` | `"1500"` | copilot |  |
+
+## gizmo/dispatch.py - Custom address dispatch
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `WO_RETRY_WAIT_SECS` | `"15"` | gizmo.dispatch |  |
+
+## gizmo/dispatch.py - Pasted addresses
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `COST_CACHE_PATH` | `"/data/cost_cache.json"` | gizmo.dispatch |  |
+| `CUSTOMS_GOBO_DESCRIPTION` | `"Glass Optical Filter"` | gizmo.dispatch |  |
+| `CUSTOMS_MEMORY_PATH` | `"/data/customs_memory.json"` | gizmo.dispatch |  |
+| `MARGIN_BACKFILL_MAX` | `"60"` | gizmo.dispatch | older orders fetched one by one |
+
+## gizmo/dispatch.py - Shipping / dispatch (World Options SOAP web service) — setti
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `BOOKING_INTENT_PATH` | `os.path.join(os.path.dirname(DISPATCH_STATE_PATH) or ".",...` | gizmo.dispatch |  |
+| `COLLECTIONS_PATH` | `"/data/collections.json"` | gizmo.dispatch |  |
+| `DISPATCHED_TAG` | `"Complete"` | gizmo.dispatch |  |
+| `DISPATCH_ARCHIVE_PATH` | `os.path.join(os.path.dirname(DISPATCH_STATE_PATH) or ".",...` | gizmo.dispatch |  |
+| `DISPATCH_LABELS_DIR` | `os.path.join(os.path.dirname(DISPATCH_STATE_PATH) or ".",...` | gizmo.dispatch |  |
+| `DISPATCH_LABELS_MAX` | `"400"` | gizmo.dispatch |  |
+| `DISPATCH_STATE_MAX` | `"2000"` | gizmo.dispatch |  |
+| `DISPATCH_STATE_PATH` | `"/data/dispatch_state.json"` | gizmo.dispatch |  |
+| `SHIPPING_PATH` | `"/data/shipping.json"` | gizmo.dispatch |  |
+| `WO_FAILURES_PATH` | `"/data/wo_failures.json"` | gizmo.dispatch |  |
+| `WO_SECRET_PATH` | `"/data/wo_secret.json"` | gizmo.dispatch |  |
 
 ## eori.py
 

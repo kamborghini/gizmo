@@ -71,9 +71,9 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/custom/book` | POST | labels | `_guard` |  |  | `copilot.custom_book_route` | Book a courier to a pasted address. |
-| `/api/custom/list` | POST | labels | `_guard` |  |  | `copilot.custom_list_route` | Pasted-address shipments already booked. |
-| `/api/custom/quote` | POST | labels | `_guard` |  |  | `copilot.custom_quote_route` | Price couriers to a pasted address. |
+| `/api/custom/book` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.custom_book_route` | Book a courier to a pasted address. |
+| `/api/custom/list` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.custom_list_route` | Pasted-address shipments already booked. |
+| `/api/custom/quote` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.custom_quote_route` | Price couriers to a pasted address. |
 
 ## `/api/customer-history`
 
@@ -97,20 +97,20 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/dispatch/book` | POST | labels | `_guard` |  |  | `copilot.dispatch_book_route` | Book the chosen courier (CHARGES the WO account), fulfill + tag. |
-| `/api/dispatch/cancel` | POST | labels | `_guard` |  |  | `copilot.dispatch_cancel_route` | Cancel a booked shipment at World Options (best-effort). |
-| `/api/dispatch/collections` | POST | labels | `_guard` |  | `_team_level` | `copilot.dispatch_collections_route` | What is coming, and from whom, on a given day. |
-| `/api/dispatch/diagnose` | POST | labels | `_guard` |  |  | `copilot.dispatch_diagnose_route` | Why is a courier service missing? |
-| `/api/dispatch/label` | POST | labels | `_guard` |  |  | `copilot.dispatch_label_route` | Return the stored label(s) for an already-dispatched order (reprint). |
-| `/api/dispatch/manifest` | POST | labels | `_guard` |  |  | `copilot.dispatch_manifest_route` | Everything booked on one day (Europe/London): the driver handover list and the sheet to check the World Options invoice against. |
-| `/api/dispatch/parse-address` | POST | labels | `_guard` |  |  | `copilot.parse_address_route` | Turn a pasted block of text into address fields. |
-| `/api/dispatch/quote` | POST | labels | `_guard` |  |  | `copilot.dispatch_quote_route` | Price couriers for one order. |
+| `/api/dispatch/book` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.dispatch_book_route` | Book the chosen courier (CHARGES the WO account), fulfill + tag. |
+| `/api/dispatch/cancel` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.dispatch_cancel_route` | Cancel a booked shipment at World Options (best-effort). |
+| `/api/dispatch/collections` | POST | labels | `_guard` |  | `_team_level` | `gizmo.routes.dispatch.dispatch_collections_route` | What is coming, and from whom, on a given day. |
+| `/api/dispatch/diagnose` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.dispatch_diagnose_route` | Why is a courier service missing? |
+| `/api/dispatch/label` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.dispatch_label_route` | Return the stored label(s) for an already-dispatched order (reprint). |
+| `/api/dispatch/manifest` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.dispatch_manifest_route` | Everything booked on one day (Europe/London): the driver handover list and the sheet to check the World Options invoice against. |
+| `/api/dispatch/parse-address` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.parse_address_route` | Turn a pasted block of text into address fields. |
+| `/api/dispatch/quote` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.dispatch_quote_route` | Price couriers for one order. |
 
 ## `/api/eori`
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/eori/check` | POST | labels | `_guard` |  |  | `copilot.eori_check_route` | Check a customer's EORI number against the EU's validation service. |
+| `/api/eori/check` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.eori_check_route` | Check a customer's EORI number against the EU's validation service. |
 
 ## `/api/files`
 
@@ -219,7 +219,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/margin` | POST | labels | `_guard` |  |  | `copilot.margin_route` | What dispatched orders actually made. |
+| `/api/margin` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.margin_route` | What dispatched orders actually made. |
 
 ## `/api/memory`
 
@@ -318,8 +318,8 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/shipping/config` | POST | labels | `_guard` |  | `_team_level` | `copilot.shipping_config_route` | Get or set shipping settings. |
-| `/api/shipping/validate` | POST | labels | `_guard` |  |  | `copilot.shipping_validate_route` | Confirm the World Options credentials work by pricing a tiny test parcel (read-only; never charges). |
+| `/api/shipping/config` | POST | labels | `_guard` |  | `_team_level` | `gizmo.routes.dispatch.shipping_config_route` | Get or set shipping settings. |
+| `/api/shipping/validate` | POST | labels | `_guard` |  |  | `gizmo.routes.dispatch.shipping_validate_route` | Confirm the World Options credentials work by pricing a tiny test parcel (read-only; never charges). |
 
 ## `/api/skills`
 

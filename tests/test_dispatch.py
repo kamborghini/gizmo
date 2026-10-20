@@ -130,6 +130,7 @@ import jwt
 import server, copilot, worldoptions, pipedrive
 import pagesource
 from tools.sources import copilot_source, COPILOT_FILES
+from gizmo import dispatch as desk
 import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
@@ -698,13 +699,13 @@ def t_backup_excludes_secret():
 def t_env_creds_win():
     os.environ["WO_METER_NUMBER"] = "ENV-METER"
     try:
-        copilot._wo_boot()
+        desk._wo_boot()
         r = post("/api/shipping/config", {"op": "set", "meter_number": "TRY-OVERRIDE"})
         eq(r.status_code, 400, "env creds protect against UI change")
         ok("server" in r.json()["error"], "explains env")
     finally:
         os.environ.pop("WO_METER_NUMBER", None)
-        copilot._wo_boot()
+        desk._wo_boot()
 
 @test
 def t_a_stranger_cannot_write_into_the_crm_by_emailing_the_shop():
@@ -1000,12 +1001,12 @@ def t_the_queue_only_promises_labels_it_still_has():
     FILES are pruned oldest-first - so a months-old order advertises a label
     the volume no longer holds, and a Reprint button counts a stack it cannot
     print. One directory listing tells the truth for every order at once."""
-    os.makedirs(copilot.DISPATCH_LABELS_DIR, exist_ok=True)
-    kept = os.path.join(copilot.DISPATCH_LABELS_DIR, "555001.json")
+    os.makedirs(desk.DISPATCH_LABELS_DIR, exist_ok=True)
+    kept = os.path.join(desk.DISPATCH_LABELS_DIR, "555001.json")
     with open(kept, "w", encoding="utf-8") as fh:
         json.dump({"labels": [{"type": "base64pdf", "value": "x"}]}, fh)
     try:
-        out = copilot._dispatch_with_live_labels({
+        out = desk._dispatch_with_live_labels({
             "555001": {"tracking_number": "A", "has_label": True},   # file present
             "555002": {"tracking_number": "B", "has_label": True},   # file pruned away
             "555003": {"tracking_number": "C", "has_label": False},  # never had one
@@ -1034,7 +1035,7 @@ def t_an_international_quote_carries_the_customers_own_tax_id():
     saved = copilot._tax_id_reader
     copilot._tax_id_reader = reader
     try:
-        got = run_async(copilot._order_tax_id({"id": 12345}))
+        got = run_async(desk._order_tax_id({"id": 12345}))
         eq(got["receiver_tax_id"], "ESB12345678")
         ok("Spanish" in got["receiver_tax_source"], got)
         eq(seen, [12345])
@@ -1042,16 +1043,16 @@ def t_an_international_quote_carries_the_customers_own_tax_id():
         async def none(order_id):
             return {"tax_id": "", "source": ""}
         copilot._tax_id_reader = none
-        eq(run_async(copilot._order_tax_id({"id": 1}))["receiver_tax_id"], "")
+        eq(run_async(desk._order_tax_id({"id": 1}))["receiver_tax_id"], "")
         # A lookup that BLOWS UP must never stop a dispatch.
         async def boom(order_id):
             raise RuntimeError("Shopify said no")
         copilot._tax_id_reader = boom
-        eq(run_async(copilot._order_tax_id({"id": 1})),
+        eq(run_async(desk._order_tax_id({"id": 1})),
            {"receiver_tax_id": "", "receiver_tax_source": ""})
         # And with no reader wired at all.
         copilot._tax_id_reader = None
-        eq(run_async(copilot._order_tax_id({"id": 1}))["receiver_tax_id"], "")
+        eq(run_async(desk._order_tax_id({"id": 1}))["receiver_tax_id"], "")
     finally:
         copilot._tax_id_reader = saved
 
@@ -1061,19 +1062,19 @@ def t_gobos_cross_a_border_as_glass_optical_filters():
     your own gobo" means nothing at a border. The declaration and the waybill
     must agree, and PROJECTORS - whose names also contain "gobo" - must keep
     their own description."""
-    eq(copilot._customs_title("Create your own gobo"), "Glass Optical Filter")
-    eq(copilot._customs_title("CREATE YOUR OWN GOBO"), "Glass Optical Filter",
+    eq(desk._customs_title("Create your own gobo"), "Glass Optical Filter")
+    eq(desk._customs_title("CREATE YOUR OWN GOBO"), "Glass Optical Filter",
        "however it is capitalised")
-    eq(copilot._customs_title("Custom Gobo"), "Glass Optical Filter")
-    eq(copilot._customs_title("B-size monochrome gobo"), "Glass Optical Filter")
+    eq(desk._customs_title("Custom Gobo"), "Glass Optical Filter")
+    eq(desk._customs_title("B-size monochrome gobo"), "Glass Optical Filter")
     # The trap the classification exists for.
-    eq(copilot._customs_title("Projected Image 200 Watt Gobo Projector"),
+    eq(desk._customs_title("Projected Image 200 Watt Gobo Projector"),
        "Projected Image 200 Watt Gobo Projector", "a projector is not a filter")
-    eq(copilot._customs_title("Gobo Projector"), "Gobo Projector")
-    eq(copilot._customs_title("Glass cleaning cloth"), "Glass cleaning cloth",
+    eq(desk._customs_title("Gobo Projector"), "Gobo Projector")
+    eq(desk._customs_title("Glass cleaning cloth"), "Glass cleaning cloth",
        "anything else keeps its own name")
     # The waybill's contents line speaks the same language, and de-duplicates.
-    summary = copilot._goods_summary({"line_items": [
+    summary = desk._goods_summary({"line_items": [
         {"title": "Create your own gobo"}, {"title": "Custom Gobo"},
         {"title": "Projected Image 200 Watt Gobo Projector"},
         {"title": "Additional shipping charge"}]})
@@ -1165,7 +1166,7 @@ def t_book_route_passes_window():
         # The window is a preference now, not the literal sent: booking after 09:30
         # must roll the ready-from forward or WO rejects it as being in the past.
         # The route must send exactly what _collection_ready computes for this cfg.
-        want_d, want_t = copilot._collection_ready({"ready_time": "09:30", "close_time": "17:00"})
+        want_d, want_t = desk._collection_ready({"ready_time": "09:30", "close_time": "17:00"})
         xml = holder["xmls"][-1]
         ok("<wo:ReadyTime>%s</wo:ReadyTime>" % want_t in xml,
            "ready time is the computed future slot (" + want_t + ")")
@@ -1640,7 +1641,7 @@ def t_label_types_png_and_unknown():
 
 @test
 def t_spread_value_remainder():
-    boxes = copilot._spread_value([{}, {}, {}], 100.0)
+    boxes = desk._spread_value([{}, {}, {}], 100.0)
     vals = [b["custom_value"] for b in boxes]
     eq(round(sum(vals), 2), 100.0, "spread sums to total")
     eq(vals[-1], round(100.0 - round(100/3, 2) * 2, 2), "remainder on last box")
@@ -1650,7 +1651,7 @@ def t_one_bad_price_does_not_zero_order():
     o = {"line_items": [{"title": "A", "quantity": 2, "price": "62.50"},
                         {"title": "B", "quantity": 1, "price": "not-a-number"},
                         {"title": "C", "quantity": 3, "price": "10.00"}]}
-    eq(copilot._order_goods_value(o), 155.0, "bad line skipped, others counted")
+    eq(desk._order_goods_value(o), 155.0, "bad line skipped, others counted")
 
 @test
 def t_plugin_code_whitelist():
@@ -1886,7 +1887,7 @@ def t_shop_delivery_is_never_offered():
     service is offered, and the old setting that switched them on is ignored,
     even when it is still saved as on."""
     reset_dispatch(); reset_prod(); _ship_cfg()
-    cfg = copilot._load_shipping(); cfg["show_parcelshop"] = True; copilot._save_shipping(cfg)
+    cfg = desk._load_shipping(); cfg["show_parcelshop"] = True; desk._save_shipping(cfg)
     r = post("/api/shipping/config", {"op": "set", "show_parcelshop": True})
     eq(r.status_code, 200, r.text)
     holder = {"xmls": []}
@@ -2528,7 +2529,7 @@ def t_a_rejected_booking_hands_back_the_evidence():
         for bad in ("testsecret", "shpat_"):
             ok(bad not in json.dumps(tech), bad + " is not in the detail")
         # And it survives the window being closed.
-        rows = copilot._load_wo_failures()
+        rows = desk._load_wo_failures()
         eq(len(rows), 1, "kept on disk")
         eq(rows[0]["order"], "12345", "the stored copy is the same failure")
     finally:
@@ -2611,17 +2612,17 @@ def t_ready_from_is_never_in_the_past():
     from zoneinfo import ZoneInfo
     L = ZoneInfo("Europe/London")
     cfg = {"ready_time": "14:00", "close_time": "17:30"}
-    eq(copilot._collection_ready(cfg, dt(2026, 8, 12, 10, 0, tzinfo=L)),
+    eq(desk._collection_ready(cfg, dt(2026, 8, 12, 10, 0, tzinfo=L)),
        ("12/08/2026", "14:00"), "before the window: the window stands")
-    eq(copilot._collection_ready(cfg, dt(2026, 8, 12, 15, 20, tzinfo=L)),
+    eq(desk._collection_ready(cfg, dt(2026, 8, 12, 15, 20, tzinfo=L)),
        ("12/08/2026", "16:00"), "past the window start: rolled forward, still today")
-    eq(copilot._collection_ready(cfg, dt(2026, 8, 12, 18, 0, tzinfo=L)),
+    eq(desk._collection_ready(cfg, dt(2026, 8, 12, 18, 0, tzinfo=L)),
        ("13/08/2026", "14:00"), "after close: next day")
-    eq(copilot._collection_ready(cfg, dt(2026, 8, 14, 17, 45, tzinfo=L)),
+    eq(desk._collection_ready(cfg, dt(2026, 8, 14, 17, 45, tzinfo=L)),
        ("17/08/2026", "14:00"), "friday evening: monday, not saturday")
-    eq(copilot._collection_ready(cfg, dt(2026, 8, 15, 11, 0, tzinfo=L)),
+    eq(desk._collection_ready(cfg, dt(2026, 8, 15, 11, 0, tzinfo=L)),
        ("17/08/2026", "14:00"), "saturday: monday")
-    d, t = copilot._collection_ready({}, dt(2026, 8, 12, 15, 20, tzinfo=L))
+    d, t = desk._collection_ready({}, dt(2026, 8, 12, 15, 20, tzinfo=L))
     eq((d, t), ("12/08/2026", "16:00"), "no window configured still yields a sane future slot")
 
 BOOK_URL_XML = BOOK_XML.replace(
@@ -2646,7 +2647,7 @@ def t_a_label_link_is_downloaded_into_a_file_at_booking():
         r = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX})
         eq(r.status_code, 200, r.text)
         lbls = r.json()["dispatch"].get("labels") or r.json().get("labels") or []
-        stored = copilot._load_dispatch_labels(12345)
+        stored = desk._load_dispatch_labels(12345)
         eq(stored[0]["type"], "base64pdf", "stored as the FILE, not the link: " + str(stored[0].get("type")))
     finally:
         worldoptions._soap_call = saved; worldoptions.fetch_label = saved_fetch
@@ -2656,7 +2657,7 @@ def t_a_stored_link_label_heals_itself_on_reprint():
     # The order booked BEFORE this fix has a dead link on disk. Opening its label
     # downloads the real file and saves it back.
     reset_dispatch(); reset_prod()
-    copilot._save_dispatch_labels(777, [{"type": "url", "value": "/GetLabel.ashx?id=9"}])
+    desk._save_dispatch_labels(777, [{"type": "url", "value": "/GetLabel.ashx?id=9"}])
     async def fake_fetch(url):
         return {"type": "base64pdf", "value": "JVBERi0xLjQK", "label_type": "PDF"}
     saved_fetch = worldoptions.fetch_label; worldoptions.fetch_label = fake_fetch
@@ -2664,14 +2665,14 @@ def t_a_stored_link_label_heals_itself_on_reprint():
         r = post("/api/dispatch/label", {"order_id": 777})
         eq(r.status_code, 200, r.text)
         eq(r.json()["labels"][0]["type"], "base64pdf", "served as a file")
-        eq(copilot._load_dispatch_labels(777)[0]["type"], "base64pdf", "and healed on disk")
+        eq(desk._load_dispatch_labels(777)[0]["type"], "base64pdf", "and healed on disk")
     finally:
         worldoptions.fetch_label = saved_fetch
 
 @test
 def t_an_unfetchable_link_is_kept_not_lost():
     reset_dispatch(); reset_prod()
-    copilot._save_dispatch_labels(778, [{"type": "url", "value": "/GetLabel.ashx?id=9"}])
+    desk._save_dispatch_labels(778, [{"type": "url", "value": "/GetLabel.ashx?id=9"}])
     async def dead_fetch(url):
         return {}
     # The evidence panel asks the link what it answers; a dead link answers 404.
@@ -2702,12 +2703,12 @@ def t_pdf_labels_gain_print_images():
     doc = pypdfium2.PdfDocument.new(); doc.new_page(288, 432)
     buf = io.BytesIO(); doc.save(buf)
     real_pdf = b64.b64encode(buf.getvalue()).decode()
-    out = copilot._with_print_images([{"type": "base64pdf", "value": real_pdf}])
+    out = desk._with_print_images([{"type": "base64pdf", "value": real_pdf}])
     imgs = out[0].get("print_images") or []
     eq(len(imgs), 1, "one page, one image")
     ok(b64.b64decode(imgs[0]).startswith(b"\x89PNG"), "a real PNG")
     # Broken bytes degrade to no images, never an error: Download still works.
-    out2 = copilot._with_print_images([{"type": "base64pdf", "value": "JVBERi0xLjQK"}])
+    out2 = desk._with_print_images([{"type": "base64pdf", "value": "JVBERi0xLjQK"}])
     eq(out2[0].get("print_images"), None, "unrenderable PDF stays downloadable")
 
 @test
@@ -2718,11 +2719,11 @@ def t_reprint_attaches_print_images_and_saves_them():
     buf = io.BytesIO(); doc.save(buf)
     real_pdf = b64.b64encode(buf.getvalue()).decode()
     reset_dispatch(); reset_prod()
-    copilot._save_dispatch_labels(779, [{"type": "base64pdf", "value": real_pdf}])
+    desk._save_dispatch_labels(779, [{"type": "base64pdf", "value": real_pdf}])
     r = post("/api/dispatch/label", {"order_id": 779})
     eq(r.status_code, 200, r.text)
     ok(r.json()["labels"][0].get("print_images"), "images served for printing")
-    ok(copilot._load_dispatch_labels(779)[0].get("print_images"), "and saved back")
+    ok(desk._load_dispatch_labels(779)[0].get("print_images"), "and saved back")
 
 @test
 def t_customs_lines_carry_the_cost_price_and_the_products_own_hs_code():
@@ -3014,7 +3015,7 @@ def t_a_failed_reply_still_carries_the_envelope():
 @test
 def t_a_transient_failed_reply_is_retried_exactly_once():
     reset_dispatch(); reset_prod()
-    copilot.WO_RETRY_WAIT_SECS = 0          # no real sleeping in tests
+    desk.WO_RETRY_WAIT_SECS = 0          # no real sleeping in tests
     SSL_FAIL = """<Envelope><Body><DoShipmentResponse><DoShipmentResult>
      <Message>The request was aborted: Could not create SSL/TLS secure channel.*|**|*1</Message>
      <NotificationtType>FAILED</NotificationtType>
@@ -3038,7 +3039,7 @@ def t_a_transient_failed_reply_is_retried_exactly_once():
 @test
 def t_a_validation_failure_is_never_retried():
     reset_dispatch(); reset_prod()
-    copilot.WO_RETRY_WAIT_SECS = 0
+    desk.WO_RETRY_WAIT_SECS = 0
     VAL_FAIL = """<Envelope><Body><DoShipmentResponse><DoShipmentResult>
      <Message>Ready date should be in format - dd/MM/yyyy.</Message>
      <NotificationtType>FAILED</NotificationtType>
@@ -3061,7 +3062,7 @@ def t_a_validation_failure_is_never_retried():
 def t_a_post_send_silence_is_never_retried():
     # The first attempt may have booked and charged; a retry could double-book.
     reset_dispatch(); reset_prod()
-    copilot.WO_RETRY_WAIT_SECS = 0
+    desk.WO_RETRY_WAIT_SECS = 0
     calls = {"n": 0}
     async def silent(service, action, inner, retryable=True):
         if service != "ShipmentService":
@@ -3149,7 +3150,7 @@ def t_a_redirect_off_their_hosts_is_not_followed():
 
 @test
 def t_an_oversized_label_is_refused_rather_than_rendered():
-    eq(copilot._pdf_print_images("A" * 24_000_001), [], "a huge base64 blob is not decoded")
+    eq(desk._pdf_print_images("A" * 24_000_001), [], "a huge base64 blob is not decoded")
 
 @test
 def t_print_cors_credentials_go_only_to_this_shop():
@@ -3473,12 +3474,12 @@ def t_the_shopify_api_version_is_supported():
 def t_customs_values_are_remembered_per_product():
     # The store prices custom gobos through option dropdowns, so their base price
     # is zero and every international order needed the real value typed in again.
-    copilot.CUSTOMS_MEMORY_PATH = SCRATCH + "/customs_memory.json"
+    desk.CUSTOMS_MEMORY_PATH = SCRATCH + "/customs_memory.json"
     try:
-        os.remove(copilot.CUSTOMS_MEMORY_PATH)
+        os.remove(desk.CUSTOMS_MEMORY_PATH)
     except FileNotFoundError:
         pass
-    copilot._remember_customs([
+    desk._remember_customs([
         {"key": "v111", "unit_price": 425.0, "hs": "9008.50.00", "country": "CN",
          "description": "Projector"},
         {"key": "t create your own gobo", "unit_price": 38.5, "hs": "9002.20.000",
@@ -3486,15 +3487,15 @@ def t_customs_values_are_remembered_per_product():
         {"key": "v999", "unit_price": 0, "hs": "", "country": "GB"},   # zero: not worth remembering
         {"key": "", "unit_price": 12.0},                                # no key: nothing to file under
     ])
-    mem = copilot._load_customs_memory()
+    mem = desk._load_customs_memory()
     eq(sorted(mem), ["t create your own gobo", "v111"], "only real values, only keyed ones")
     eq(mem["v111"]["unit_value"], "425.00", "stored to the penny")
     eq(mem["t create your own gobo"]["hs"], "9002.20.000", "and its HS code")
 
 @test
 def t_a_remembered_value_beats_the_derived_one():
-    copilot.CUSTOMS_MEMORY_PATH = SCRATCH + "/customs_memory.json"
-    copilot._remember_customs([{"key": "v111", "unit_price": 500.0, "hs": "9008.50.00",
+    desk.CUSTOMS_MEMORY_PATH = SCRATCH + "/customs_memory.json"
+    desk._remember_customs([{"key": "v111", "unit_price": 500.0, "hs": "9008.50.00",
                                 "country": "CN", "description": "Projector"}])
     order = {"id": 12345, "name": "#12345", "currency": "GBP", "email": "c@x.co",
              "shipping_address": {"first_name": "A", "last_name": "B", "address1": "1 Rue",
@@ -3521,7 +3522,7 @@ def t_a_remembered_value_beats_the_derived_one():
     finally:
         copilot._tool_json = saved
         try:
-            os.remove(copilot.CUSTOMS_MEMORY_PATH)
+            os.remove(desk.CUSTOMS_MEMORY_PATH)
         except FileNotFoundError:
             pass
 
@@ -3530,7 +3531,7 @@ def t_a_booking_records_which_staff_member_made_it():
     reset_dispatch(); reset_prod()
     r = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX})
     eq(r.status_code, 200, r.text)
-    entry = copilot._load_dispatch()["12345"]
+    entry = desk._load_dispatch()["12345"]
     # The test token's `sub` claim is the staff user id Shopify sends.
     ok("by" in entry, "the record has a by field")
     from datetime import datetime as dt
@@ -3566,13 +3567,13 @@ def t_margin_is_net_of_vat_discounts_goods_and_carriage():
             return {"inventory_items": [{"id": 9111, "cost": "30.00"}]}
         return {}
     saved = copilot._tool_json; copilot._tool_json = tools
-    copilot.COST_CACHE_PATH = SCRATCH + "/cost_cache.json"
+    desk.COST_CACHE_PATH = SCRATCH + "/cost_cache.json"
     try:
-        os.remove(copilot.COST_CACHE_PATH)
+        os.remove(desk.COST_CACHE_PATH)
     except FileNotFoundError:
         pass
     try:
-        res = run(copilot.run_margin_report({}, days=30))
+        res = run(desk.run_margin_report({}, days=30))
         eq(len(res["rows"]), 1, "the dispatched order is there: " + json.dumps(res)[:200])
         row = res["rows"][0]
         eq(row["revenue"], 90.0, "120 gross less 20 VAT less 10 discount")
@@ -3608,9 +3609,9 @@ def t_an_item_without_a_cost_is_flagged_not_counted_as_profit():
             return {"inventory_items": [{"id": 9222, "cost": ""}]}   # no cost set
         return {}
     saved = copilot._tool_json; copilot._tool_json = tools
-    copilot.COST_CACHE_PATH = SCRATCH + "/cost_cache2.json"
+    desk.COST_CACHE_PATH = SCRATCH + "/cost_cache2.json"
     try:
-        res = run(copilot.run_margin_report({}, days=30))
+        res = run(desk.run_margin_report({}, days=30))
         row = res["rows"][0]
         ok("margin" not in row, "no margin is claimed for it")
         ok("Mystery Item" in row.get("incomplete", ""), "and it names what is missing")
@@ -3621,9 +3622,9 @@ def t_an_item_without_a_cost_is_flagged_not_counted_as_profit():
 
 @test
 def t_variant_costs_are_cached_so_a_report_is_not_hundreds_of_calls():
-    copilot.COST_CACHE_PATH = SCRATCH + "/cost_cache3.json"
+    desk.COST_CACHE_PATH = SCRATCH + "/cost_cache3.json"
     try:
-        os.remove(copilot.COST_CACHE_PATH)
+        os.remove(desk.COST_CACHE_PATH)
     except FileNotFoundError:
         pass
     calls = {"n": 0}
@@ -3637,11 +3638,11 @@ def t_variant_costs_are_cached_so_a_report_is_not_hundreds_of_calls():
         return {}
     saved = copilot._tool_json; copilot._tool_json = tools
     try:
-        first = run(copilot._variant_costs({}, [1, 2, 3]))
+        first = run(desk._variant_costs({}, [1, 2, 3]))
         eq(first, {1: "5.00", 2: "5.00", 3: "5.00"}, "costs resolved")
         used = calls["n"]
         ok(used <= 4, "three variants plus one batched inventory call: " + str(used))
-        again = run(copilot._variant_costs({}, [1, 2, 3]))
+        again = run(desk._variant_costs({}, [1, 2, 3]))
         eq(again, first, "same answer from cache")
         eq(calls["n"], used, "and no further calls at all")
     finally:
@@ -3654,18 +3655,18 @@ def t_unfulfilling_one_order_cannot_erase_another_booking():
     # written back, taking the tracking number of a CHARGED label with it and
     # re-arming the double-book guard.
     reset_dispatch(); reset_prod()
-    copilot._record_dispatch(111, {"tracking_number": "T111", "fulfilled": True,
+    desk._record_dispatch(111, {"tracking_number": "T111", "fulfilled": True,
                                    "fulfillment_id": 555, "dispatched_at": "2026-08-13T09:00:00+00:00"})
     async def slow_cancel(fid):
         # A second operator books an order while Shopify is still thinking.
-        copilot._record_dispatch(222, {"tracking_number": "T222", "fulfilled": False,
+        desk._record_dispatch(222, {"tracking_number": "T222", "fulfilled": False,
                                        "dispatched_at": "2026-08-13T09:00:05+00:00"})
         return {"ok": True}
     saved = copilot._fulfillment_canceler
     copilot._fulfillment_canceler = slow_cancel
     try:
         run(copilot._unfulfill_dispatch({}, 111))
-        store = copilot._load_dispatch()
+        store = desk._load_dispatch()
         ok("222" in store, "the booking made during the await SURVIVES: " + str(sorted(store)))
         eq(store["222"]["tracking_number"], "T222", "with its tracking intact")
         eq(store["111"].get("fulfilled"), False, "and the un-fulfil still applied")
@@ -3675,7 +3676,7 @@ def t_unfulfilling_one_order_cannot_erase_another_booking():
 @test
 def t_a_cancelled_shipment_stops_claiming_it_is_fulfilled():
     reset_dispatch(); reset_prod()
-    copilot._record_dispatch(12345, {"tracking_number": "T1", "fulfilled": True,
+    desk._record_dispatch(12345, {"tracking_number": "T1", "fulfilled": True,
                                      "fulfillment_id": 777, "carrier_name": "UPS",
                                      "dispatched_at": "2026-08-13T09:00:00+00:00"})
     async def canceler(fid):
@@ -3687,7 +3688,7 @@ def t_a_cancelled_shipment_stops_claiming_it_is_fulfilled():
     try:
         r = post("/api/dispatch/cancel", {"order_id": 12345, "tracking_number": "T1"})
         eq(r.status_code, 200, r.text)
-        e = copilot._load_dispatch()["12345"]
+        e = desk._load_dispatch()["12345"]
         eq(e.get("canceled"), True, "marked cancelled")
         eq(e.get("fulfilled"), False, "and no longer claims to be fulfilled")
         ok("fulfillment_id" not in e, "the dead fulfilment id is dropped")
@@ -3701,7 +3702,7 @@ def t_rebooking_still_asks_when_shopify_never_undid_the_fulfilment():
     # Shopify fulfilment could not be undone: the re-book then went through
     # silently and the new tracking never reached the customer.
     reset_dispatch(); reset_prod()
-    copilot._record_dispatch(12345, {"tracking_number": "T1", "canceled": True,
+    desk._record_dispatch(12345, {"tracking_number": "T1", "canceled": True,
                                      "fulfilled": True, "fulfillment_id": 777,
                                      "dispatched_at": "2026-08-13T09:00:00+00:00"})
     saved_status = copilot._order_status
@@ -3717,11 +3718,11 @@ def t_rebooking_still_asks_when_shopify_never_undid_the_fulfilment():
 def t_a_timeout_wording_is_never_treated_as_transient():
     # A timeout is the unknown-outcome case: the shipment may exist. Only clearly
     # infrastructural refusals may be retried.
-    ok(copilot._WO_TRANSIENT_RE.search("Could not create SSL/TLS secure channel"), "ssl is transient")
-    ok(copilot._WO_TRANSIENT_RE.search("Service Unavailable"), "503 wording is transient")
+    ok(desk._WO_TRANSIENT_RE.search("Could not create SSL/TLS secure channel"), "ssl is transient")
+    ok(desk._WO_TRANSIENT_RE.search("Service Unavailable"), "503 wording is transient")
     for never in ("The request timed out", "Operation timeout", "Ready date should be in format",
                   "Customer authentication failed"):
-        eq(bool(copilot._WO_TRANSIENT_RE.search(never)), False, never + " is NOT retried")
+        eq(bool(desk._WO_TRANSIENT_RE.search(never)), False, never + " is NOT retried")
 
 @test
 def t_an_order_already_fulfilled_in_shopify_stops_being_retried_forever():
@@ -3729,7 +3730,7 @@ def t_an_order_already_fulfilled_in_shopify_stops_being_retried_forever():
     # pass got nothing_to_fulfill and left fulfilled=False, so the app re-attempted
     # for ever and showed a dispatched order as unfulfilled.
     reset_dispatch(); reset_prod()
-    copilot._record_dispatch(12345, {"tracking_number": "T1", "fulfilled": False,
+    desk._record_dispatch(12345, {"tracking_number": "T1", "fulfilled": False,
                                      "carrier_name": "UPS", "notify": True,
                                      "dispatched_at": "2026-08-13T09:00:00+00:00"})
     mark_made(12345, True)
@@ -3741,7 +3742,7 @@ def t_an_order_already_fulfilled_in_shopify_stops_being_retried_forever():
     try:
         res = run(copilot._fulfill_if_ready({}, 12345))
         eq(res["fulfilled"], True, "treated as done: " + json.dumps(res)[:140])
-        eq(copilot._load_dispatch()["12345"]["fulfilled"], True, "and recorded, so it stops retrying")
+        eq(desk._load_dispatch()["12345"]["fulfilled"], True, "and recorded, so it stops retrying")
     finally:
         copilot._fulfillment_writer = savedw
         copilot._order_status = saveds
@@ -3750,7 +3751,7 @@ def t_an_order_already_fulfilled_in_shopify_stops_being_retried_forever():
     # through the gate this time, with the stamps set by hand, so the made
     # route's own fulfilment pass does not get there first.
     reset_dispatch(); reset_prod()
-    copilot._record_dispatch(12345, {"tracking_number": "T1", "fulfilled": False, "carrier_name": "UPS",
+    desk._record_dispatch(12345, {"tracking_number": "T1", "fulfilled": False, "carrier_name": "UPS",
                                      "notify": True, "dispatched_at": "2026-08-13T09:00:00+00:00"})
     copilot._mark_made(12345, True)
     copilot._fulfillment_writer = already
@@ -3760,7 +3761,7 @@ def t_an_order_already_fulfilled_in_shopify_stops_being_retried_forever():
         res = run(copilot._fulfill_if_ready({}, 12345))
         eq(res["reason"], "already_fulfilled", json.dumps(res)[:200])
         eq(res["notified"], False, "no tracking email went from here")
-        eq(copilot._load_dispatch()["12345"]["notified"], False, "and the record says so")
+        eq(desk._load_dispatch()["12345"]["notified"], False, "and the record says so")
         moved = [t for o, t in TAG_WRITES if o == 12345]
         ok(moved and "Complete" in moved[-1] and "PC" not in moved[-1],
            "filed as complete although Shopify reads it as fulfilled: " + str(TAG_WRITES))
@@ -3817,7 +3818,7 @@ def t_orders_tagged_before_the_rename_still_show_in_the_finished_queue():
         return {}
     saved = copilot._tool_json; copilot._tool_json = tools
     try:
-        res = run(copilot.run_production_labels({}, tag=copilot.DISPATCHED_TAG))
+        res = run(copilot.run_production_labels({}, tag=desk.DISPATCHED_TAG))
         ids = sorted(o["id"] for o in res["orders"])
         eq(ids, [777, 888], "both the old and the new tag appear: " + str(ids))
         # A different queue must NOT pick up the legacy word.
@@ -3874,7 +3875,7 @@ def t_the_three_queues_share_one_sweep_instead_of_three():
         def go():
             a = run(copilot.run_production_labels({}, tag="IP"))
             b = run(copilot.run_production_labels({}, tag="PC"))
-            c = run(copilot.run_production_labels({}, tag=copilot.DISPATCHED_TAG))
+            c = run(copilot.run_production_labels({}, tag=desk.DISPATCHED_TAG))
             return a, b, c
         a, b, c = with_cache(go)
         eq(calls["n"], 1, "one sweep served all three queues")
@@ -4148,7 +4149,7 @@ def custom_body(**over):
 
 @test
 def t_a_pasted_address_becomes_courier_fields():
-    a = copilot._parse_address(PASTED)
+    a = desk._parse_address(PASTED)
     ok(a["confident"], "a normal UK block reads without help")
     d = a["address"]
     eq(d["postcode"], "NE1 7RH", "postcode")
@@ -4164,7 +4165,7 @@ def t_a_pasted_address_becomes_courier_fields():
 def t_no_address_line_is_ever_silently_dropped():
     # The failure that matters: a line that cannot be classified must still reach
     # the label, because half an address is a lost parcel.
-    a = copilot._parse_address("Jo Bloggs\nThe Old Dairy\nSomewhere Yard\nBack Passage\nYork\nYO1 7HH")
+    a = desk._parse_address("Jo Bloggs\nThe Old Dairy\nSomewhere Yard\nBack Passage\nYork\nYO1 7HH")
     d = a["address"]
     joined = " ".join([d["name"], d["company"], d["street"], d["street2"], d["city"]])
     for line in ("Jo Bloggs", "The Old Dairy", "Somewhere Yard", "Back Passage", "York"):
@@ -4176,13 +4177,13 @@ def t_a_house_number_is_never_read_as_a_postcode():
     # every field along, and because the stolen digits fill the last empty
     # required field the mangled parse is the one that scores confident, so
     # nothing asks Claude and nothing warns the merchant.
-    eq(copilot._find_postcode("1200 Kingston Road", "GB"), ("", "1200 Kingston Road"),
+    eq(desk._find_postcode("1200 Kingston Road", "GB"), ("", "1200 Kingston Road"),
        "a house number leading a street is not a postcode")
-    eq(copilot._find_postcode("123 Main St 90210", "US")[0], "90210",
+    eq(desk._find_postcode("123 Main St 90210", "US")[0], "90210",
        "but a real ZIP after one still is")
-    eq(copilot._find_postcode("10115 Berlin", "DE")[0], "10115",
+    eq(desk._find_postcode("10115 Berlin", "DE")[0], "10115",
        "and Germany writes the postcode before the town")
-    r = copilot._parse_address("Jane Doe\nRiverside Studios\n1200 Kingston Road\nLondon\nUnited Kingdom")
+    r = desk._parse_address("Jane Doe\nRiverside Studios\n1200 Kingston Road\nLondon\nUnited Kingdom")
     a = r["address"]
     eq(a["postcode"], "", "no postcode was invented")
     ok("1200" in a["street"], "the house number stayed on the street line: " + a["street"])
@@ -4194,11 +4195,11 @@ def t_an_unrecognised_country_is_refused_not_truncated():
     # Isle of Man becomes IS, which is Iceland.
     for name, code in [("Isle of Man", "IM"), ("Guernsey", "GG"), ("Bermuda", "BM"),
                        ("Pakistan", "PK"), ("Iraq", "IQ"), ("Costa Rica", "CR")]:
-        eq(copilot._clean_address({"country": name})["country"], code, name)
-    unknown = copilot._clean_address({"country": "Republic of Nowhere"})
+        eq(desk._clean_address({"country": name})["country"], code, name)
+    unknown = desk._clean_address({"country": "Republic of Nowhere"})
     eq(unknown["country"], "Republic of Nowhere", "an unknown name is left as typed")
-    ok(copilot._country_ready(unknown), "and refused rather than guessed at")
-    eq(copilot._country_ready({"country": "GB"}), "", "a real code passes")
+    ok(desk._country_ready(unknown), "and refused rather than guessed at")
+    eq(desk._country_ready({"country": "GB"}), "", "a real code passes")
 
 @test
 def t_a_bad_country_cannot_reach_world_options():
@@ -4213,21 +4214,21 @@ def t_a_bad_country_cannot_reach_world_options():
 
 @test
 def t_an_unreadable_paste_says_so_rather_than_guessing():
-    a = copilot._parse_address("give it to dave when you see him")
+    a = desk._parse_address("give it to dave when you see him")
     ok(not a["confident"], "it does not claim to have read an address")
-    ok(copilot._addr_ready(a["address"]), "and the address is still incomplete")
+    ok(desk._addr_ready(a["address"]), "and the address is still incomplete")
 
 @test
 def t_a_custom_shipment_can_never_be_keyed_like_an_order():
     # The whole safety argument: a Shopify order id is all digits, so a prefixed
     # key cannot collide with one, whatever the browser sends.
-    ok(copilot._custom_id("abc123def").startswith("adhoc:"), "always namespaced")
-    eq(copilot._custom_id("adhoc:abc123def"), "adhoc:abc123def", "already-prefixed is kept")
-    eq(copilot._custom_id("12345"), "", "an order-shaped id is refused")
-    eq(copilot._custom_id("../../etc/passwd"), "", "and so is anything with a path in it")
-    eq(copilot._custom_id(""), "", "and nothing at all")
-    ok(copilot._is_adhoc("adhoc:x"), "recognised")
-    ok(not copilot._is_adhoc("12345"), "an order is not ad-hoc")
+    ok(desk._custom_id("abc123def").startswith("adhoc:"), "always namespaced")
+    eq(desk._custom_id("adhoc:abc123def"), "adhoc:abc123def", "already-prefixed is kept")
+    eq(desk._custom_id("12345"), "", "an order-shaped id is refused")
+    eq(desk._custom_id("../../etc/passwd"), "", "and so is anything with a path in it")
+    eq(desk._custom_id(""), "", "and nothing at all")
+    ok(desk._is_adhoc("adhoc:x"), "recognised")
+    ok(not desk._is_adhoc("12345"), "an order is not ad-hoc")
 
 @test
 def t_a_custom_booking_never_touches_shopify():
@@ -4240,7 +4241,7 @@ def t_a_custom_booking_never_touches_shopify():
     ok(d["id"].startswith("adhoc:"), "under an ad-hoc key: " + d["id"])
     eq(TAG_WRITES, [], "no order was tagged")
     eq(FULFILLED, [], "no order was fulfilled, so no customer was emailed")
-    entry = copilot._load_dispatch()[d["id"]]
+    entry = desk._load_dispatch()[d["id"]]
     ok(entry["tracking_number"], "the charge is recorded")
     eq(entry["notify"], False, "and nothing is armed to email later")
     eq(entry["fulfilled"], False, "there is nothing to fulfil")
@@ -4264,7 +4265,7 @@ def t_the_declared_value_follows_the_insured_amount():
     reset_dispatch(); reset_prod()
     r = post("/api/custom/book", custom_body(id="csvaluetest1", declared=0, insurance=250))
     eq(r.status_code, 200, r.text)
-    eq(copilot._load_dispatch()[r.json()["id"]]["declared"], 250.0,
+    eq(desk._load_dispatch()[r.json()["id"]]["declared"], 250.0,
        "the declared value fell back to what it was insured for")
 
 @test
@@ -4280,7 +4281,7 @@ def t_a_custom_shipment_stays_out_of_the_order_margin_report():
         return {}
     saved = copilot._tool_json; copilot._tool_json = tools
     try:
-        res = run(copilot.run_margin_report({}, days=30))
+        res = run(desk.run_margin_report({}, days=30))
         eq(res["rows"], [], "no row at all")
         ok("incomplete" not in json.dumps(res), "and nothing reported as missing data")
     finally:
@@ -4322,7 +4323,7 @@ def t_cancelling_a_custom_shipment_skips_the_shopify_repair():
     tn = r.json()["dispatch"]["tracking_number"]
     c = post("/api/dispatch/cancel", {"id": sid, "tracking_number": tn})
     eq(c.status_code, 200, c.text)
-    ok(copilot._load_dispatch()[sid]["canceled"], "the record says cancelled")
+    ok(desk._load_dispatch()[sid]["canceled"], "the record says cancelled")
     eq(CANCELED_FULFILLMENTS, [], "no Shopify fulfilment was cancelled")
     eq(TAG_WRITES, [], "and no order was re-tagged")
     # Cancelled means it can be booked again.
@@ -4354,7 +4355,7 @@ def t_an_international_custom_shipment_refuses_to_go_without_a_declaration():
             customs={"lines": [{"description": "Glass gobo", "quantity": 1, "unit_price": 85,
                                 "hs": "70200080", "country": "GB"}]}))
         eq(r2.status_code, 200, r2.text)
-        eq(copilot._load_dispatch()[r2.json()["id"]]["international"], True, "recorded as international")
+        eq(desk._load_dispatch()[r2.json()["id"]]["international"], True, "recorded as international")
     finally:
         if saved_cfg is None:
             os.remove(cfgp)
@@ -5264,11 +5265,11 @@ def _seed_person_and_shipment(email):
     d["persons"]["p9001"] = {"id": "p9001", "name": "Jo Redact",
                              "emails": [email], "phone": "0161 000 0000"}
     copilot._write_crm(d)
-    disp = copilot._load_dispatch()
+    disp = desk._load_dispatch()
     disp["104999"] = {"order_id": "104999", "email": email,
                       "name": "Jo Redact", "address1": "1 Glass Works",
                       "postcode": "M1 1AA", "tracking": "TRK1"}
-    copilot._write_dispatch(disp)
+    desk._write_dispatch(disp)
 
 
 def redact_through_the_hold(raw, delivery):
@@ -5312,7 +5313,7 @@ def t_a_redact_request_keeps_the_dispatch_record_and_notes_it():
     raw = json.dumps({"customer": {"id": 556, "email": email},
                       "shop_domain": "test-store.myshopify.com"}).encode()
     redact_through_the_hold(raw, "pr2")
-    rec = copilot._load_dispatch().get("104999") or {}
+    rec = desk._load_dispatch().get("104999") or {}
     ok(rec, "the shipment record survives")
     eq(rec.get("address1"), "1 Glass Works", "with the address HMRC can ask for")
     ok(rec.get("redacted_request_at"), "and a note that erasure was requested")
@@ -7842,9 +7843,9 @@ def t_the_shopify_print_knows_every_stock_and_starts_on_the_production_size():
     print button."""
     def go():
         ensure_auth()
-        eq(set(copilot.LABEL_STOCK_MM), set(copilot.LABEL_STOCK),
+        eq(set(desk.LABEL_STOCK_MM), set(desk.LABEL_STOCK),
            "the document can print every stock size the shop can choose")
-        eq(copilot.LABEL_STOCK_MM["4x4"], (101.6, 101.6), "4 x 4 is square, in millimetres")
+        eq(desk.LABEL_STOCK_MM["4x4"], (101.6, 101.6), "4 x 4 is square, in millimetres")
         before = post("/api/shipping/config", {"op": "get"}).json()["config"]["label_size_production"]
         try:
             for saved in ("4x4", "4x3", "a4"):
@@ -7854,9 +7855,9 @@ def t_the_shopify_print_knows_every_stock_and_starts_on_the_production_size():
                 eq(r.status_code, 200, r.text[:200])
                 eq(r.json().get("size"), saved, "the action opens on the production printer's size")
             # A saved value the document cannot print is never handed on.
-            cfg = copilot._load_shipping()
+            cfg = desk._load_shipping()
             cfg["label_size_production"] = "9x9"
-            copilot._save_shipping(cfg)
+            desk._save_shipping(cfg)
             r = client.post("/print/production-labels/sign", json={"ids": "12345"},
                             headers={"Authorization": "Bearer " + tok()})
             eq(r.json().get("size"), "4x4", "an unknown saved size falls back to the production default")
@@ -8778,7 +8779,7 @@ def t_backup_is_exhaustive_by_construction():
     stand on the deliberate exclusion list. A new store added outside the
     backup's reach fails HERE, not during a migration."""
     data_dir = os.path.dirname(copilot.SCHEDULE_PATH)
-    excluded = {os.path.basename(copilot.WO_SECRET_PATH),
+    excluded = {os.path.basename(desk.WO_SECRET_PATH),
                 os.path.basename(copilot.SESSIONS_PATH)}
     misses = []
     for name in dir(copilot):
@@ -8791,7 +8792,7 @@ def t_backup_is_exhaustive_by_construction():
         if base in excluded:
             continue
         in_data_top = os.path.dirname(val) == data_dir
-        in_labels = os.path.dirname(val) == copilot.DISPATCH_LABELS_DIR
+        in_labels = os.path.dirname(val) == desk.DISPATCH_LABELS_DIR
         repo_data = os.path.join(os.path.dirname(copilot.__file__), "data")
         in_repo = os.path.dirname(val) == repo_data   # ships with the code AND in the zip
         good_ext = base.lower().endswith((".json", ".jsonl", ".csv", ".bak"))
@@ -8806,8 +8807,8 @@ def t_backup_is_exhaustive_by_construction():
 def t_backup_carries_labels_and_restore_returns_them():
     def go():
         ensure_auth()
-        os.makedirs(copilot.DISPATCH_LABELS_DIR, exist_ok=True)
-        lp = os.path.join(copilot.DISPATCH_LABELS_DIR, "104239.json")
+        os.makedirs(desk.DISPATCH_LABELS_DIR, exist_ok=True)
+        lp = os.path.join(desk.DISPATCH_LABELS_DIR, "104239.json")
         with open(lp, "w") as fh:
             json.dump({"label": "keep-me"}, fh)
         try:
@@ -8911,11 +8912,11 @@ def t_backup_caps_labels_to_the_newest_sixty():
         ensure_auth()
         import zipfile as zz
         import io as iio
-        os.makedirs(copilot.DISPATCH_LABELS_DIR, exist_ok=True)
+        os.makedirs(desk.DISPATCH_LABELS_DIR, exist_ok=True)
         made = []
         try:
             for i in range(65):
-                p = os.path.join(copilot.DISPATCH_LABELS_DIR, f"ord{i:03d}.json")
+                p = os.path.join(desk.DISPATCH_LABELS_DIR, f"ord{i:03d}.json")
                 with open(p, "w") as fh:
                     fh.write("{}")
                 os.utime(p, (1700000000 + i, 1700000000 + i))
@@ -9023,7 +9024,7 @@ def t_custom_shipments_are_findable_and_reprintable_later():
     window, which reads like spending money again."""
     def go():
         ensure_auth()
-        orders = copilot._load_dispatch()
+        orders = desk._load_dispatch()
         orders["adhoc:shipone01"] = {
             "tracking_number": "TRK-AAA", "carrier_label": "DPD",
             "service_name": "Next day", "order_name": "Trade show stand",
@@ -9036,8 +9037,8 @@ def t_custom_shipments_are_findable_and_reprintable_later():
             "dispatched_at": "2026-08-18T10:00:00Z",
         }
         orders["991144"] = {"tracking_number": "ORDER-ONE", "order_name": "#1201"}
-        copilot._write_dispatch(orders)
-        copilot._save_dispatch_labels("adhoc:shipone01", [{"type": "png", "data": "AAA"}])
+        desk._write_dispatch(orders)
+        desk._save_dispatch_labels("adhoc:shipone01", [{"type": "png", "data": "AAA"}])
         r = post("/api/custom/list", {})
         eq(r.status_code, 200, r.text)
         rows = r.json()["shipments"]
@@ -11056,13 +11057,13 @@ def t_mail_order_context_matches_only_the_exact_sender():
         saved = copilot._tool_json
         copilot._tool_json = fake_tool
         prod = copilot._load_prod_state()
-        disp = copilot._load_dispatch()
+        disp = desk._load_dispatch()
         try:
             prod["501"] = {"made_at": "2026-08-12T10:00:00Z", "printed_at": "2026-08-11T10:00:00Z"}
             disp["501"] = {"tracking_number": "4512339981", "carrier_label": "DPD",
                            "dispatched_at": "2026-08-13T10:00:00Z", "fulfilled": True}
             copilot._write_prod_state(prod)
-            copilot._write_dispatch(disp)
+            desk._write_dispatch(disp)
             r = post("/api/mail/orders", {"id": "t1"})
             eq(r.status_code, 200, r.text)
             j = r.json()
@@ -11095,16 +11096,16 @@ def t_mail_booked_label_is_not_shipped():
                                 "created_at": "2026-08-18T09:00:00Z"}]}
         saved = copilot._tool_json
         copilot._tool_json = fake_tool
-        disp = copilot._load_dispatch()
+        disp = desk._load_dispatch()
         try:
             disp["700"] = {"tracking_number": "TRK1", "carrier_label": "DPD",
                            "dispatched_at": "2026-08-19T09:00:00Z", "fulfilled": False}
-            copilot._write_dispatch(disp)
+            desk._write_dispatch(disp)
             sent = post("/api/mail/orders", {"id": "t1"}).json()["orders"][0]["sentence"]
             ok("not handed over yet" in sent, sent)
             ok("shipped" not in sent.replace("not handed over", ""), sent)
             disp["700"]["fulfilled"] = True
-            copilot._write_dispatch(disp)
+            desk._write_dispatch(disp)
             sent2 = post("/api/mail/orders", {"id": "t1"}).json()["orders"][0]["sentence"]
             ok(sent2.startswith("#1300, shipped"), sent2)
         finally:
@@ -11653,7 +11654,7 @@ def t_cancelling_a_shipment_is_bound_to_the_order_current_tracking():
     def go():
         ensure_auth()
         reset_dispatch()
-        copilot._update_dispatch(12345, lambda e: {**e, "tracking_number": "T2",
+        desk._update_dispatch(12345, lambda e: {**e, "tracking_number": "T2",
                                                    "order_name": "#104239"})
         voided = []
         async def fake_cancel(tn):
@@ -11664,7 +11665,7 @@ def t_cancelling_a_shipment_is_bound_to_the_order_current_tracking():
             r = post("/api/dispatch/cancel", {"order_id": 12345, "tracking_number": "T1"})
             eq(r.status_code, 409, "a tracking number that is not the current one is refused")
             eq(voided, [], "and nothing was voided at the courier")
-            ok(not copilot._load_dispatch()["12345"].get("canceled"), "T2 is untouched")
+            ok(not desk._load_dispatch()["12345"].get("canceled"), "T2 is untouched")
             r2 = post("/api/dispatch/cancel", {"order_id": 12345, "tracking_number": "T2"})
             eq(r2.status_code, 200, r2.text)
             eq(voided, ["T2"], "the current shipment cancels normally")
@@ -12300,7 +12301,7 @@ def t_changing_a_booked_parcels_address_has_to_be_said_out_loud():
     """The label is printed and the parcel is moving. Changing Shopify changes
     neither of them."""
     reset_dispatch()
-    copilot._record_dispatch(12345, {"tracking_number": "T-1", "carrier": "DPD",
+    desk._record_dispatch(12345, {"tracking_number": "T-1", "carrier": "DPD",
                                      "dispatched_at": "2026-08-20T09:00:00Z"})
     try:
         r = _edit({"ship_to": {"postcode": "M1 6JK"}})
@@ -12311,7 +12312,7 @@ def t_changing_a_booked_parcels_address_has_to_be_said_out_loud():
         r = _edit({"ship_to": {"postcode": "M1 6JK"}, "confirm_booked": True})
         ok(r.status_code == 200, "confirmed, it goes through: " + r.text[:120])
         ok(len(ORDER_WRITES) == 1, "one write")
-        ok(copilot._load_dispatch()["12345"].get("address_changed_at"),
+        ok(desk._load_dispatch()["12345"].get("address_changed_at"),
            "and the divergence is recorded against the shipment")
     finally:
         reset_dispatch()
@@ -12322,7 +12323,7 @@ def t_a_diverged_parcel_is_not_silently_fulfilled_and_emailed():
     """The whole point of that flag: Mark made would otherwise email the customer
     tracking for a parcel travelling to the address the label was cut from."""
     reset_dispatch(); reset_prod()
-    copilot._record_dispatch(12345, {"tracking_number": "T-2", "carrier": "DPD",
+    desk._record_dispatch(12345, {"tracking_number": "T-2", "carrier": "DPD",
                                      "address_changed_at": "2026-08-21T09:00:00Z"})
     copilot._mark_made(12345, True)
     try:
@@ -12333,7 +12334,7 @@ def t_a_diverged_parcel_is_not_silently_fulfilled_and_emailed():
         ok(not FULFILLED, "and nothing was fulfilled or emailed")
         r2 = run(copilot._fulfill_if_ready({}, 12345, ack_address=True))
         ok(r2["fulfilled"], "acknowledged, it proceeds: %s" % r2.get("reason"))
-        ok(not copilot._load_dispatch()["12345"].get("address_changed_at"),
+        ok(not desk._load_dispatch()["12345"].get("address_changed_at"),
            "and the flag clears, so the same order is not stopped twice")
     finally:
         reset_dispatch(); reset_prod()
@@ -17254,15 +17255,15 @@ def t_a_booking_can_carry_its_own_collection_arrangement():
     ok('_plan["arrangement"]' in seg,
        "and otherwise asks for what the plan says for THIS courier: " + seg[:90])
     # Per carrier first, the standing setting for anyone unconfigured.
-    eq(copilot._collection_for({"collection_by_carrier": {"UPS": "I_Have_Daily_Collection"},
+    eq(desk._collection_for({"collection_by_carrier": {"UPS": "I_Have_Daily_Collection"},
                                 "collection_option": "I_Need_To_Book_A_Collection"}, "UPS"),
        "I_Have_Daily_Collection", "a configured courier uses its own arrangement")
-    eq(copilot._collection_for({"collection_by_carrier": {"UPS": "I_Have_Daily_Collection"},
+    eq(desk._collection_for({"collection_by_carrier": {"UPS": "I_Have_Daily_Collection"},
                                 "collection_option": "I_Need_To_Book_A_Collection"}, "DHL"),
        "I_Need_To_Book_A_Collection", "an unconfigured one falls back to the standing setting")
-    eq(copilot._collection_for({"collection_option": "I_Have_Daily_Collection"}, "ups"),
+    eq(desk._collection_for({"collection_option": "I_Have_Daily_Collection"}, "ups"),
        "I_Have_Daily_Collection", "the carrier code is matched however it is cased")
-    eq(copilot._collection_for({"collection_by_carrier": "not a dict",
+    eq(desk._collection_for({"collection_by_carrier": "not a dict",
                                 "collection_option": "I_Have_Daily_Collection"}, "UPS"),
        "I_Have_Daily_Collection", "and a corrupt map does not take the booking down")
     # It must not accept anything the courier does not offer.
@@ -17281,23 +17282,23 @@ def t_clearing_a_collection_actually_clears_it():
     has been, book another" did nothing at all."""
     from datetime import datetime as _dt, timezone as _tz
     today = copilot._london_today().isoformat()   # the day the code reckons in (London), not the UTC date
-    copilot._write_dispatch({"9001": {"carrier_name": "DHL", "carrier_label": "DHL Express",
+    desk._write_dispatch({"9001": {"carrier_name": "DHL", "carrier_label": "DHL Express",
                                       "collection_date": "CN-1", "order_name": "#1",
                                       "ready_date": "", "dispatched_at": today + "T09:00:00+00:00"}})
-    copilot._write_collections({})
-    ok("DHL" in copilot._collections_for(today), "the courier's booking shows a van coming")
+    desk._write_collections({})
+    ok("DHL" in desk._collections_for(today), "the courier's booking shows a van coming")
     # Clear it the way the route does.
-    copilot._write_collections({"DHL": {"date": today, "cleared": True}})
-    ok("DHL" not in copilot._collections_for(today),
+    desk._write_collections({"DHL": {"date": today, "cleared": True}})
+    ok("DHL" not in desk._collections_for(today),
        "and once cleared it stays cleared, though the booking is still on record")
     # Which means the next parcel asks again, as intended.
     cfg = {"collection_by_carrier": {"DHL": "I_Need_To_Book_A_Collection"}}
-    eq(copilot._collection_plan(cfg, "DHL", copilot._collections_for(today))["arrangement"],
+    eq(desk._collection_plan(cfg, "DHL", desk._collections_for(today))["arrangement"],
        "I_Need_To_Book_A_Collection", "so the next DHL parcel books a fresh one")
     # A clear for a DIFFERENT day does not silence today.
-    copilot._write_collections({"DHL": {"date": "2020-01-01", "cleared": True}})
-    ok("DHL" in copilot._collections_for(today), "yesterday's clear is not today's")
-    copilot._write_collections({}); copilot._write_dispatch({})
+    desk._write_collections({"DHL": {"date": "2020-01-01", "cleared": True}})
+    ok("DHL" in desk._collections_for(today), "yesterday's clear is not today's")
+    desk._write_collections({}); desk._write_dispatch({})
 
 
 @test
@@ -17307,15 +17308,15 @@ def t_the_latest_booking_of_the_day_is_the_one_that_counts():
     its reference is the one that would be read out to the courier."""
     from datetime import datetime as _dt, timezone as _tz
     today = copilot._london_today().isoformat()   # the day the code reckons in (London), not the UTC date
-    copilot._write_dispatch({
+    desk._write_dispatch({
         "1": {"carrier_name": "DHL", "collection_date": "OLD-1", "order_name": "#1",
               "dispatched_at": today + "T08:00:00+00:00"},
         "2": {"carrier_name": "DHL", "collection_date": "NEW-2", "order_name": "#2",
               "dispatched_at": today + "T15:00:00+00:00"},
     })
-    got = copilot._collections_from_dispatch(today)
+    got = desk._collections_from_dispatch(today)
     eq(got["DHL"]["ref"], "NEW-2", "the most recent collection of the day is the live one")
-    copilot._write_dispatch({})
+    desk._write_dispatch({})
 
 
 @test
@@ -17624,25 +17625,25 @@ def t_a_collection_belongs_to_the_day_the_van_comes():
     Monday. The ledger was writing UTC "today", so Monday would look
     uncollected and the first parcel that morning would book, and pay for, a
     second pickup."""
-    eq(copilot._dmy_to_iso("31/08/2026"), "2026-08-31", "their dd/MM/yyyy becomes a real date")
-    eq(copilot._dmy_to_iso("1/9/2026"), "2026-09-01", "single digits too")
-    eq(copilot._dmy_to_iso("rubbish"), "", "and nonsense is not guessed at")
+    eq(desk._dmy_to_iso("31/08/2026"), "2026-08-31", "their dd/MM/yyyy becomes a real date")
+    eq(desk._dmy_to_iso("1/9/2026"), "2026-09-01", "single digits too")
+    eq(desk._dmy_to_iso("rubbish"), "", "and nonsense is not guessed at")
     # The ready date wins over whatever day it happens to be.
-    eq(copilot._collection_target("I_Need_To_Book_A_Collection", "31/08/2026"), "2026-08-31",
+    eq(desk._collection_target("I_Need_To_Book_A_Collection", "31/08/2026"), "2026-08-31",
        "the collection is dated by the day the courier was asked to come")
     # With no ready date it falls back to London's today, not UTC's.
     from zoneinfo import ZoneInfo as _Z
     from datetime import datetime as _dt
     london = _dt.now(_Z("Europe/London")).date().isoformat()
-    eq(copilot._collection_target("I_Need_To_Book_A_Collection"), london,
+    eq(desk._collection_target("I_Need_To_Book_A_Collection"), london,
        "and today means today where the parcels are")
-    eq(copilot._dispatch_today(), london, "which is what the panel asks for too")
+    eq(desk._dispatch_today(), london, "which is what the panel asks for too")
     # A Friday booking for Monday does not suppress Monday.
     cfg = {"collection_by_carrier": {"DHL": "I_Need_To_Book_A_Collection"}}
-    plan = copilot._collection_plan(cfg, "DHL", {"DHL": {"date": "2026-08-28"}}, "31/08/2026")
+    plan = desk._collection_plan(cfg, "DHL", {"DHL": {"date": "2026-08-28"}}, "31/08/2026")
     eq(plan["arrangement"], "I_Need_To_Book_A_Collection",
        "Friday's van does not cover Monday's parcel")
-    plan2 = copilot._collection_plan(cfg, "DHL", {"DHL": {"date": "2026-08-31"}}, "31/08/2026")
+    plan2 = desk._collection_plan(cfg, "DHL", {"DHL": {"date": "2026-08-31"}}, "31/08/2026")
     eq(plan2["arrangement"], "I_Already_Have_Collection_Scheduled",
        "while a second parcel for the same day rides the one already booked")
     # And the record keeps the ready date so the day can be worked out later.
@@ -17666,40 +17667,40 @@ def t_the_quote_asks_about_the_day_the_van_is_coming():
     And it read only this app's ledger, never the courier's own confirmation on
     the dispatch record - so a collection booked on a custom shipment, which
     never wrote that ledger, was invisible."""
-    real_ready = copilot._collection_ready
-    copilot._collection_ready = lambda cfg, now=None: ("31/08/2026", "09:00")
+    real_ready = desk._collection_ready
+    desk._collection_ready = lambda cfg, now=None: ("31/08/2026", "09:00")
     try:
         cfg = {"collection_by_carrier": {"DHL": "I_Need_To_Book_A_Collection"}}
         opts = lambda: [{"carrier_name": "DHL"}, {"carrier_name": "UPS"}]
 
         # Booked late today, so the courier comes on the 31st. Filed there, found there.
-        copilot._write_dispatch({})
-        copilot._write_collections({"DHL": {"date": "2026-08-31", "at": "2026-08-28T17:31:00+00:00"}})
-        o = opts(); copilot._collection_plans(cfg, o)
+        desk._write_dispatch({})
+        desk._write_collections({"DHL": {"date": "2026-08-31", "at": "2026-08-28T17:31:00+00:00"}})
+        o = opts(); desk._collection_plans(cfg, o)
         ok(o[0]["collection_already"], "the second parcel rides the van already booked")
         eq(o[0]["collection_message"], "Collection already booked for today",
            "and is told so rather than asked to book again")
 
         # The courier's own confirmation, with no ledger entry at all.
-        copilot._write_collections({})
-        copilot._write_dispatch({"C1": {"carrier_name": "DHL", "collection_date": "REF-1",
+        desk._write_collections({})
+        desk._write_dispatch({"C1": {"carrier_name": "DHL", "collection_date": "REF-1",
                                         "ready_date": "31/08/2026", "order_name": "custom",
                                         "dispatched_at": "2026-08-28T17:31:00+00:00"}})
-        o = opts(); copilot._collection_plans(cfg, o)
+        o = opts(); desk._collection_plans(cfg, o)
         ok(o[0]["collection_already"],
            "a collection booked on a custom shipment counts just the same")
 
         # Cleared: the van has been, so the next parcel books a fresh one.
-        copilot._write_collections({"DHL": {"date": "2026-08-31", "cleared": True}})
-        o = opts(); copilot._collection_plans(cfg, o)
+        desk._write_collections({"DHL": {"date": "2026-08-31", "cleared": True}})
+        o = opts(); desk._collection_plans(cfg, o)
         ok(not o[0]["collection_already"], "and once cleared it asks again")
         eq(o[0]["collection_option"], "I_Need_To_Book_A_Collection", "with the courier's own arrangement")
 
         # A courier nobody configured still answers, and is not confused with DHL.
         eq(o[1]["collection_option"], "", "an unconfigured courier falls back to the standing setting")
     finally:
-        copilot._collection_ready = real_ready
-        copilot._write_collections({}); copilot._write_dispatch({})
+        desk._collection_ready = real_ready
+        desk._write_collections({}); desk._write_dispatch({})
 
 
 @test
@@ -17716,15 +17717,15 @@ def t_a_custom_shipment_books_the_collection_its_courier_needs():
     ok("_record_collection(shipment.get(\"carrier_name\") or option.get(\"carrier_name\")" in src,
        "including the custom one")
     # The writer only files a van when one was actually asked for.
-    copilot._write_collections({})
-    copilot._record_collection("DHL", "I_Have_Daily_Collection", "31/08/2026")
-    eq(copilot._load_collections(), {}, "a standing daily collection is not a booking")
-    copilot._record_collection("", "I_Need_To_Book_A_Collection", "31/08/2026")
-    eq(copilot._load_collections(), {}, "and a courier with no name is not filed under one")
-    copilot._record_collection("dhl", "I_Need_To_Book_A_Collection", "31/08/2026", "#1", "Express")
-    eq(copilot._load_collections()["DHL"]["date"], "2026-08-31",
+    desk._write_collections({})
+    desk._record_collection("DHL", "I_Have_Daily_Collection", "31/08/2026")
+    eq(desk._load_collections(), {}, "a standing daily collection is not a booking")
+    desk._record_collection("", "I_Need_To_Book_A_Collection", "31/08/2026")
+    eq(desk._load_collections(), {}, "and a courier with no name is not filed under one")
+    desk._record_collection("dhl", "I_Need_To_Book_A_Collection", "31/08/2026", "#1", "Express")
+    eq(desk._load_collections()["DHL"]["date"], "2026-08-31",
        "a real booking is filed against the day the van comes")
-    copilot._write_collections({})
+    desk._write_collections({})
 
 
 @test
@@ -17765,7 +17766,7 @@ def t_a_collection_is_read_from_the_couriers_own_reference():
     it covers shipments booked before the ledger existed."""
     from datetime import datetime as _dt, timezone as _tz
     today = copilot._london_today().isoformat()   # the day the code reckons in (London), not the UTC date
-    copilot._write_dispatch({
+    desk._write_dispatch({
         "9001": {"carrier_name": "DHL", "carrier_label": "DHL Express",
                  "collection_date": "CN-8842", "order_name": "#104294",
                  "dispatched_at": today + "T09:12:00+00:00"},
@@ -17776,7 +17777,7 @@ def t_a_collection_is_read_from_the_couriers_own_reference():
                  "collection_date": "CN-1", "order_name": "#104100",
                  "dispatched_at": "2020-01-01T09:00:00+00:00"},
     })
-    got = copilot._collections_from_dispatch(today)
+    got = desk._collections_from_dispatch(today)
     ok("DHL" in got, "the courier that confirmed a collection is there")
     eq(got["DHL"]["ref"], "CN-8842", "with World Options' own reference")
     eq(got["DHL"]["order"], "#104294", "and the order that secured it")
@@ -17785,10 +17786,10 @@ def t_a_collection_is_read_from_the_couriers_own_reference():
     eq(len([k for k in got if got[k]["date"] == today]), 1, "and only this day counts")
     # And that answer suppresses a second ask.
     cfg = {"collection_by_carrier": {"DHL": "I_Need_To_Book_A_Collection"}}
-    plan = copilot._collection_plan(cfg, "DHL", got)
+    plan = desk._collection_plan(cfg, "DHL", got)
     eq(plan["arrangement"], "I_Already_Have_Collection_Scheduled",
        "so the next DHL parcel does not book a second pickup")
-    copilot._write_dispatch({})
+    desk._write_dispatch({})
 
 
 @test
@@ -17828,36 +17829,36 @@ def t_one_collection_a_day_per_courier_not_one_per_parcel():
                                      "UPS": "I_Have_Daily_Collection"},
            "collection_option": "I_Need_To_Book_A_Collection"}
 
-    first = copilot._collection_plan(cfg, "DHL", {})
+    first = desk._collection_plan(cfg, "DHL", {})
     eq(first["arrangement"], "I_Need_To_Book_A_Collection", "the first DHL parcel asks")
     eq(first["message"], "Book a collection for this shipment", "and says so")
     ok(not first["already"], "nothing is booked yet")
 
-    second = copilot._collection_plan(cfg, "DHL", {"DHL": today})
+    second = desk._collection_plan(cfg, "DHL", {"DHL": today})
     eq(second["arrangement"], "I_Already_Have_Collection_Scheduled",
        "the second DHL parcel of the day does NOT ask again")
     ok(second["already"], "and knows why")
     eq(second["message"], "Collection already booked for today", "and says which day")
 
     # It is per courier: DHL's van does not collect the UPS parcels.
-    eq(copilot._collection_plan(cfg, "UPS", {"DHL": today})["message"],
+    eq(desk._collection_plan(cfg, "UPS", {"DHL": today})["message"],
        "Daily collection scheduled", "UPS is unaffected by DHL's booking")
-    other = copilot._collection_plan({"collection_option": "I_Need_To_Book_A_Collection"},
+    other = desk._collection_plan({"collection_option": "I_Need_To_Book_A_Collection"},
                                      "FEDEX", {"DHL": today})
     eq(other["arrangement"], "I_Need_To_Book_A_Collection",
        "and a courier with nothing booked still asks")
 
     # Yesterday's van is no help today.
-    stale = copilot._collection_plan(cfg, "DHL", {"DHL": "2020-01-01"})
+    stale = desk._collection_plan(cfg, "DHL", {"DHL": "2020-01-01"})
     eq(stale["arrangement"], "I_Need_To_Book_A_Collection", "a stale date does not suppress today")
 
     # A next-day request is held against the day it is FOR.
     nd = dict(cfg, collection_by_carrier={"DHL": "I_Need_To_Book_A_Collection_For_Next_Day"})
-    eq(copilot._collection_target("I_Need_To_Book_A_Collection_For_Next_Day"), tomorrow,
+    eq(desk._collection_target("I_Need_To_Book_A_Collection_For_Next_Day"), tomorrow,
        "a next-day collection is for tomorrow")
-    eq(copilot._collection_plan(nd, "DHL", {"DHL": tomorrow})["arrangement"],
+    eq(desk._collection_plan(nd, "DHL", {"DHL": tomorrow})["arrangement"],
        "I_Already_Have_Collection_Scheduled", "and a second one for the same day does not ask")
-    eq(copilot._collection_plan(nd, "DHL", {"DHL": today})["arrangement"],
+    eq(desk._collection_plan(nd, "DHL", {"DHL": today})["arrangement"],
        "I_Need_To_Book_A_Collection_For_Next_Day",
        "while today's van does not cover tomorrow's parcel")
 
@@ -17875,14 +17876,16 @@ def t_the_collection_tests_hold_in_the_hour_after_midnight():
         def now(cls, tz=None):
             base = _real.datetime(2026, 7, 14, 23, 30, tzinfo=_real.timezone.utc)
             return base.astimezone(tz) if tz else base.replace(tzinfo=None)
+    from gizmo.routes import dispatch as routes_dispatch
     saved = copilot.datetime
-    copilot.datetime = _Frozen
+    # Every module that reads a clock: copilot.py, the desk and its routes.
+    copilot.datetime = desk.datetime = routes_dispatch.datetime = _Frozen
     try:
         eq(copilot._london_today().isoformat(), "2026-07-15", "the code's day is London's, a day ahead of UTC in this hour")
         t_a_collection_is_read_from_the_couriers_own_reference()
         t_one_collection_a_day_per_courier_not_one_per_parcel()
     finally:
-        copilot.datetime = saved
+        copilot.datetime = desk.datetime = routes_dispatch.datetime = saved
 
 @test
 def t_a_booked_collection_is_written_down_before_anything_can_fail():
@@ -17898,12 +17901,12 @@ def t_a_booked_collection_is_written_down_before_anything_can_fail():
     ok("except Exception" in seg,
        "and cannot itself throw: nothing after a charge may raise")
     # Proved, not just read: a store that will not take a write is swallowed.
-    real = copilot._write_collections
-    copilot._write_collections = lambda d: (_ for _ in ()).throw(OSError("disk full"))
+    real = desk._write_collections
+    desk._write_collections = lambda d: (_ for _ in ()).throw(OSError("disk full"))
     try:
-        copilot._record_collection("DHL", "I_Need_To_Book_A_Collection", "31/08/2026")
+        desk._record_collection("DHL", "I_Need_To_Book_A_Collection", "31/08/2026")
     finally:
-        copilot._write_collections = real
+        desk._write_collections = real
 
 
 @test
@@ -17914,14 +17917,14 @@ def t_each_courier_carries_its_own_collection_arrangement():
     costs money - asking a courier that already collects."""
     cfg = {"collection_option": "I_Need_To_Book_A_Collection",
            "collection_by_carrier": {"UPS": "I_Have_Daily_Collection"}}
-    eq(copilot._collection_for(cfg, "UPS"), "I_Have_Daily_Collection",
+    eq(desk._collection_for(cfg, "UPS"), "I_Have_Daily_Collection",
        "UPS is not asked to collect, because it already does")
-    eq(copilot._collection_for(cfg, "DHL"), "I_Need_To_Book_A_Collection",
+    eq(desk._collection_for(cfg, "DHL"), "I_Need_To_Book_A_Collection",
        "DHL is asked, because nothing is standing")
-    eq(copilot.COLLECTION_MESSAGES["I_Have_Daily_Collection"], "Daily collection scheduled",
+    eq(desk.COLLECTION_MESSAGES["I_Have_Daily_Collection"], "Daily collection scheduled",
        "and the desk is told which, in those words")
     ok("Book a collection for this shipment"
-       == copilot.COLLECTION_MESSAGES["I_Need_To_Book_A_Collection"],
+       == desk.COLLECTION_MESSAGES["I_Need_To_Book_A_Collection"],
        "and which, for the other")
     # Only real carriers and real arrangements survive a save.
     src = copilot_source()
@@ -18012,13 +18015,13 @@ def t_a_quote_that_will_not_price_hands_over_the_evidence():
     e = _Boom("Invalid sold to state province code. Valid length is 0 to 5 alphanumeric")
     e.raw = "<s:Fault>...</s:Fault>"
     e.envelope = "<wo:SenderDetails><m:State></m:State></wo:SenderDetails>"
-    tech = copilot._wo_tech(e, "104294")
+    tech = desk._wo_tech(e, "104294")
     eq(tech.get("reply"), "<s:Fault>...</s:Fault>", "what they said comes back")
     ok("State" in (tech.get("request") or ""), "and what we sent, blanks visible")
     eq(tech.get("order"), "104294", "tagged with the order it belongs to")
     ok(tech.get("when"), "and when")
     # Nothing to show is not a panel with nothing in it.
-    eq(copilot._wo_tech(_Boom("no detail")), {}, "an error carrying no evidence makes no panel")
+    eq(desk._wo_tech(_Boom("no detail")), {}, "an error carrying no evidence makes no panel")
     # One implementation, so the two paths cannot drift apart again.
     src = copilot_source()
     eq(src.count("def _wo_tech("), 1, "there is exactly one of these")
@@ -18453,10 +18456,9 @@ def t_payouts_and_disputes_are_pruned_like_everything_else():
 # --- resolving a flagged model from inside the app -------------------------
 
 def _copilot_src(name):
-    """The source of a route defined inside register_routes, by name. The routes
-    are closures, so they cannot be reached with getattr."""
-    import inspect as _i
-    src = _i.getsource(copilot)
+    """The source of a route defined inside add_routes or an area's register(),
+    by name. The routes are closures, so they cannot be reached with getattr."""
+    src = copilot_source()
     i = src.index("async def " + name + "(")
     j = src.index("\n    @mcp.custom_route", i)
     return src[i:j]
@@ -18807,7 +18809,7 @@ def t_eori_the_request_matches_the_shape_the_eu_service_actually_wants():
 @test
 def t_eori_route_is_gated_exactly_like_the_shipping_config_route():
     route = _copilot_src("eori_check_route")
-    ok("await _guard(request" in route, "the same door: rate window, tab gate, session, body cap")
+    ok("await core._guard(request" in route, "the same door: rate window, tab gate, session, body cap")
     # The tab lock is driven by the path table, not by the route body.
     ok(("/api/eori", "labels") in copilot._TAB_ROUTES,
        "the checker sits behind the labels/dispatch tab, like /api/shipping")
@@ -20563,7 +20565,7 @@ def t_the_audit_ledger_cannot_be_flushed_through_the_login_form():
         # The helper coalescing proves nothing if a route still writes directly.
         # EVERY refusal path must go through it, so none is left unbounded.
         import inspect
-        src = inspect.getsource(copilot)
+        src = copilot_source()
         noise = inspect.getsource(copilot._track_login_noise)
         marker = '_track(uid, "auth", "failed login"'
         # Exactly one such write may exist, and it must be the coalescer's own
@@ -21238,21 +21240,21 @@ def t_the_courier_credentials_are_sealed_like_every_other_credential():
     os.environ["TOKEN_ENCRYPTION_KEY"] = "a-long-enough-test-key-for-scrypt-0123456789"
     tokenvault._key.cache_clear()
     try:
-        copilot._save_wo_creds(meter="METER-5555", key="KEY-super-secret", password="PW-very-secret")
-        raw = open(copilot.WO_SECRET_PATH, encoding="utf-8").read()
+        desk._save_wo_creds(meter="METER-5555", key="KEY-super-secret", password="PW-very-secret")
+        raw = open(desk.WO_SECRET_PATH, encoding="utf-8").read()
         ok("KEY-super-secret" not in raw, "the key is not sitting in the file")
         ok("PW-very-secret" not in raw, "nor the password")
-        creds = copilot._load_wo_creds()
+        creds = desk._load_wo_creds()
         eq(creds["key"], "KEY-super-secret", "and it opens again for the courier call")
         eq(creds["password"], "PW-very-secret")
-        eq(oct(os.stat(copilot.WO_SECRET_PATH).st_mode & 0o777), "0o600", "0600 from creation")
+        eq(oct(os.stat(desk.WO_SECRET_PATH).st_mode & 0o777), "0o600", "0600 from creation")
         src = copilot_source()
-        ok('("world_options", WO_SECRET_PATH' in src,
+        ok('("world_options", desk.WO_SECRET_PATH' in src,
            "and the boot re-seal covers it, so an existing plaintext file is fixed")
     finally:
         os.environ.pop("TOKEN_ENCRYPTION_KEY", None)
         tokenvault._key.cache_clear()
-        copilot._save_wo_creds(meter="METER-9999", key="KEY-abc", password="PW-xyz")
+        desk._save_wo_creds(meter="METER-9999", key="KEY-abc", password="PW-xyz")
 
 
 @test
@@ -21519,10 +21521,10 @@ def t_evicted_dispatch_records_are_archived_whole_not_dropped():
     HMRC can ask for within six years - the app says so where it refuses to
     erase them. The live store is capped for speed; what leaves it must not
     vanish, and if it cannot be archived it must not leave."""
-    saved_max, saved_arch = copilot.DISPATCH_STATE_MAX, copilot.DISPATCH_ARCHIVE_PATH
-    copilot.DISPATCH_STATE_MAX = 3
+    saved_max, saved_arch = desk.DISPATCH_STATE_MAX, desk.DISPATCH_ARCHIVE_PATH
+    desk.DISPATCH_STATE_MAX = 3
     try:
-        for p in (copilot.DISPATCH_STATE_PATH, copilot.DISPATCH_ARCHIVE_PATH):
+        for p in (desk.DISPATCH_STATE_PATH, desk.DISPATCH_ARCHIVE_PATH):
             try:
                 os.remove(p)
             except FileNotFoundError:
@@ -21530,19 +21532,19 @@ def t_evicted_dispatch_records_are_archived_whole_not_dropped():
         rows = {str(100 + i): {"dispatched_at": f"2026-09-0{i}T10:00:00+00:00",
                                "name": f"Customer {i}", "address1": f"{i} Glass Works",
                                "tracking": f"TRK{i}"} for i in range(1, 6)}
-        kept = copilot._write_dispatch(dict(rows))
+        kept = desk._write_dispatch(dict(rows))
         eq(sorted(kept), ["103", "104", "105"], "the three newest stay live")
-        arch = [json.loads(l) for l in open(copilot.DISPATCH_ARCHIVE_PATH, encoding="utf-8")]
+        arch = [json.loads(l) for l in open(desk.DISPATCH_ARCHIVE_PATH, encoding="utf-8")]
         eq([a["order_id"] for a in arch], ["101", "102"], "the two oldest were archived first")
         eq(arch[0]["address1"], "1 Glass Works", "whole - the record, not just an id")
         eq(arch[0]["tracking"], "TRK1")
         # An archive that cannot be written means nothing is trimmed.
-        copilot.DISPATCH_ARCHIVE_PATH = os.path.join(copilot.DISPATCH_STATE_PATH, "not-a-dir", "x.jsonl")
-        kept2 = copilot._write_dispatch(dict(rows))
+        desk.DISPATCH_ARCHIVE_PATH = os.path.join(desk.DISPATCH_STATE_PATH, "not-a-dir", "x.jsonl")
+        kept2 = desk._write_dispatch(dict(rows))
         eq(len(kept2), 5, "the live store keeps every row rather than lose one")
     finally:
-        copilot.DISPATCH_STATE_MAX, copilot.DISPATCH_ARCHIVE_PATH = saved_max, saved_arch
-        for p in (copilot.DISPATCH_STATE_PATH, copilot.DISPATCH_ARCHIVE_PATH):
+        desk.DISPATCH_STATE_MAX, desk.DISPATCH_ARCHIVE_PATH = saved_max, saved_arch
+        for p in (desk.DISPATCH_STATE_PATH, desk.DISPATCH_ARCHIVE_PATH):
             try:
                 os.remove(p)
             except FileNotFoundError:
@@ -21712,10 +21714,15 @@ def t_add_routes_holds_routes_and_nothing_it_could_have_shared():
     eq(liftable, set(), "these need nothing from add_routes, so they belong at module level")
 
     # The ones that stay say why: each closes over the registry add_routes is
-    # handed, or over a value built from it.
+    # handed, or over a value built from it. (The sixth, _finish_cancel, moved
+    # with the dispatch desk's routes into their register(mcp, registry).)
     eq({h.name for h in helpers},
-       {"_finish_cancel", "_mail_orders_for", "dispatch_for", "_fin_search", "_fin_thread", "_fin_bytes"},
-       "a nested helper appeared that is not one of the registry-bound six")
+       {"_mail_orders_for", "dispatch_for", "_fin_search", "_fin_thread", "_fin_bytes"},
+       "a nested helper appeared that is not one of the registry-bound five")
+    reg = next(n for n in tree.body if getattr(n, "name", "") == "register")
+    eq({h.name for h in reg.body if isinstance(h, (_ast.FunctionDef, _ast.AsyncFunctionDef))
+        and not any("route" in _ast.unparse(d) for d in h.decorator_list)},
+       {"_finish_cancel"}, "the desk's routes hold one registry-bound helper")
 
     # And it is a route table, not a module in disguise.
     ok(len(helpers) < 10, "add_routes is holding helpers again")
@@ -21834,6 +21841,10 @@ def t_the_api_reference_is_generated_from_the_code():
     eq(by["/api/crm/deal"]["tab"], "crm", "a CRM route is opened by the CRM tab")
     eq(by["/api/alerts"]["tab"], "any account", "an open route says so")
     eq(by["/api/team/user"]["door"], "_team_guard", "a guard helper is named as the door")
+    eq(by["/api/dispatch/book"]["door"], "_guard", "a door reached as core._guard is still the door")
+    eq((by["/api/dispatch/book"]["module"], by["/api/dispatch/book"]["handler"]),
+       ("gizmo.routes.dispatch", "dispatch_book_route"), "and the handler is named where it lives")
+    ok("_team_level" in by["/api/shipping/config"]["checks"], "a check reached as core._team_level is named")
     eq(by["/api/team/user"]["terms"], "rank admin", "with the rank it asks for")
     eq(by["/hooks/forecast/results"]["door"], "own check", "a hook has no session door")
     ok("_forecast_token_ok" in by["/hooks/forecast/results"]["checks"], "and names the check it makes")
@@ -21884,7 +21895,7 @@ def t_a_hot_store_is_read_from_disk_once_until_the_file_changes():
     disk on every request that needed them. The cache is keyed on the file -
     mtime, size, inode - so a restore, a repair by hand or a test writing the
     file directly is a miss without anyone remembering to invalidate."""
-    p = copilot.DISPATCH_STATE_PATH
+    p = desk.DISPATCH_STATE_PATH
     try:
         os.remove(p)
     except FileNotFoundError:
@@ -21898,19 +21909,19 @@ def t_a_hot_store_is_read_from_disk_once_until_the_file_changes():
         return real(path, key, default)
     copilot._load_json_store = counting
     try:
-        copilot._write_dispatch({"1": {"tracking_number": "A", "dispatched_at": "2026-09-01T00:00:00+00:00"}})
-        a = copilot._load_dispatch(); b = copilot._load_dispatch(); copilot._load_dispatch()
+        desk._write_dispatch({"1": {"tracking_number": "A", "dispatched_at": "2026-09-01T00:00:00+00:00"}})
+        a = desk._load_dispatch(); b = desk._load_dispatch(); desk._load_dispatch()
         eq(calls["n"], 0, "after a write the store is what was written; nothing is re-parsed")
         ok(a is b, "and every reader in the process sees one object")
         # Somebody else replaces the file: the next read notices.
         json.dump({"orders": {"1": {"tracking_number": "B", "dispatched_at": "2026-09-01T00:00:00+00:00"}}},
                   open(p, "w", encoding="utf-8"))
-        eq(copilot._load_dispatch()["1"]["tracking_number"], "B", "a file written behind the cache is read fresh")
+        eq(desk._load_dispatch()["1"]["tracking_number"], "B", "a file written behind the cache is read fresh")
         eq(calls["n"], 1)
-        copilot._load_dispatch()
+        desk._load_dispatch()
         eq(calls["n"], 1, "and then served from memory again")
         os.remove(p)
-        eq(copilot._load_dispatch(), {}, "a store that is gone is empty, not remembered")
+        eq(desk._load_dispatch(), {}, "a store that is gone is empty, not remembered")
     finally:
         copilot._load_json_store = real
         copilot._forget_store(p)
@@ -22364,7 +22375,7 @@ def t_the_margin_report_counts_only_what_is_still_on_the_order():
              "line_items": [{"id": 1, "title": "Gobo", "quantity": 2, "current_quantity": 1, "price": "100.00",
                              "variant_id": 111, "discount_allocations": [{"amount": "20.00"}]}],
              "shipping_lines": []}
-    copilot._record_dispatch(778, {"tracking_number": "T8", "carrier_name": "UPS", "order_name": "#778",
+    desk._record_dispatch(778, {"tracking_number": "T8", "carrier_name": "UPS", "order_name": "#778",
                                    "amount_ex_vat": 0.0, "dispatched_at": _dt.now(_tz.utc).isoformat()})
     async def tools(registry, name, args):
         if name == "shopify_list_orders":
@@ -22375,13 +22386,13 @@ def t_the_margin_report_counts_only_what_is_still_on_the_order():
             return {"inventory_items": [{"id": 9111, "cost": "30.00"}]}
         return {}
     saved = copilot._tool_json; copilot._tool_json = tools
-    copilot.COST_CACHE_PATH = SCRATCH + "/cost_cache2.json"
+    desk.COST_CACHE_PATH = SCRATCH + "/cost_cache2.json"
     try:
-        os.remove(copilot.COST_CACHE_PATH)
+        os.remove(desk.COST_CACHE_PATH)
     except FileNotFoundError:
         pass
     try:
-        res = run_async(copilot.run_margin_report({}, days=30))
+        res = run_async(desk.run_margin_report({}, days=30))
         row = next(r for r in res["rows"] if str(r.get("order_id")) == "778")
         eq(row["revenue"], 90.0, "one of two units left: (200 - 20) / 2")
         eq(row["goods_cost"], 30.0, "and one unit's cost")
@@ -22389,45 +22400,45 @@ def t_the_margin_report_counts_only_what_is_still_on_the_order():
         copilot._tool_json = saved
         reset_dispatch()
     for oid in (801, 802):
-        copilot._record_dispatch(oid, {"tracking_number": f"T{oid}", "carrier_name": "UPS", "order_name": f"#{oid}",
+        desk._record_dispatch(oid, {"tracking_number": f"T{oid}", "carrier_name": "UPS", "order_name": f"#{oid}",
                                        "dispatched_at": _dt.now(_tz.utc).isoformat()})
     async def none(registry, name, args):
         return {"orders": []} if name == "shopify_list_orders" else {"_failed": True}
-    saved_max = copilot.MARGIN_BACKFILL_MAX
-    copilot._tool_json, copilot.MARGIN_BACKFILL_MAX = none, 1
+    saved_max = desk.MARGIN_BACKFILL_MAX
+    copilot._tool_json, desk.MARGIN_BACKFILL_MAX = none, 1
     try:
-        res = run_async(copilot.run_margin_report({}, days=30))
+        res = run_async(desk.run_margin_report({}, days=30))
         notes = sorted(r["incomplete"] for r in res["rows"] if str(r.get("order_id")) in ("801", "802"))
         eq(len(notes), 2)
         ok(any("could not be loaded from Shopify" in n for n in notes), "the one fetched and refused says so")
         ok(any("reads at most 1 such orders" in n for n in notes), "the one past the bound says why: " + str(notes))
     finally:
-        copilot._tool_json, copilot.MARGIN_BACKFILL_MAX = saved, saved_max
+        copilot._tool_json, desk.MARGIN_BACKFILL_MAX = saved, saved_max
         reset_dispatch()
     # The list read itself failed: an order missing from it says nothing
     # about its age, and Shopify is refusing, so the back-fill stops asking.
     for oid in range(810, 816):
-        copilot._record_dispatch(oid, {"tracking_number": f"T{oid}", "carrier_name": "UPS", "order_name": f"#{oid}",
+        desk._record_dispatch(oid, {"tracking_number": f"T{oid}", "carrier_name": "UPS", "order_name": f"#{oid}",
                                        "dispatched_at": _dt.now(_tz.utc).isoformat()})
     singles = []
     async def refusing(registry, name, args):
         if name == "shopify_get_order":
             singles.append(args.get("order_id"))
         return {"_failed": True}
-    copilot._tool_json, copilot.MARGIN_BACKFILL_MAX = refusing, 1
+    copilot._tool_json, desk.MARGIN_BACKFILL_MAX = refusing, 1
     copilot._bust_orders()
     try:
-        res = run_async(copilot.run_margin_report({}, days=31))
+        res = run_async(desk.run_margin_report({}, days=31))
         notes = [r["incomplete"] for r in res["rows"]]
         eq(len(notes), 6)
         ok(all(n == "the order could not be loaded from Shopify" for n in notes),
            "no age reason when the read failed: " + str(notes))
-        copilot.MARGIN_BACKFILL_MAX = 60
+        desk.MARGIN_BACKFILL_MAX = 60
         singles.clear()
-        run_async(copilot.run_margin_report({}, days=32))
+        run_async(desk.run_margin_report({}, days=32))
         eq(len(singles), 3, "three refusals in a row and the back-fill stops asking")
     finally:
-        copilot._tool_json, copilot.MARGIN_BACKFILL_MAX = saved, saved_max
+        copilot._tool_json, desk.MARGIN_BACKFILL_MAX = saved, saved_max
         reset_dispatch()
 
 
@@ -22880,9 +22891,9 @@ def t_a_refunded_line_is_not_made_weighed_or_declared():
     shaped = copilot._shape_label_order(o, {})
     eq([it["quantity"] for it in shaped["items"]], [1, 3],
        "the refunded line is gone; a line Shopify never edited keeps its ordered count")
-    eq(copilot._order_goods_value(o), 157.5, "declared at what is still on the order")
+    eq(desk._order_goods_value(o), 157.5, "declared at what is still on the order")
     eq(copilot._order_weight_kg(o), 0.105)
-    eq([c["quantity"] for c in run_async(copilot._customs_items({}, o))], [1, 3])
+    eq([c["quantity"] for c in run_async(desk._customs_items({}, o))], [1, 3])
     eq(copilot._line_qty({"quantity": 2}), 2)
     eq(copilot._line_qty({}), 1, "a line with no quantity at all counts as one, as before")
 
@@ -22926,10 +22937,10 @@ def t_a_crown_dependency_postcode_is_not_read_as_great_britain():
     for text, country in (("Jane Doe\n5 Rue de Paris\nSt Helier\nJersey\nJE2 3AB", "JE"),
                           ("A Person\n1 High St\nSt Peter Port\nGY1 1AA", "GG"),
                           ("Bob\nUnit 3\nDouglas\nIM1 1AA", "IM")):
-        r = copilot._parse_address(text)
+        r = desk._parse_address(text)
         eq(r["address"]["country"], country, text)
         eq(r["confident"], False, "an island address gets a look: customs applies")
-    r = copilot._parse_address("Some Person, 1200 Kingston Road, Manchester, M1 2AB")
+    r = desk._parse_address("Some Person, 1200 Kingston Road, Manchester, M1 2AB")
     eq(r["address"]["country"], "GB")
     eq(r["confident"], True, "and the common paste still lands without a round trip")
 
@@ -22944,27 +22955,27 @@ def t_declared_value_and_customs_prices_are_net_of_discounts():
         {"title": "Custom Gobo", "quantity": 2, "price": "100.00", "grams": 75, "product_id": 1,
          "discount_allocations": [{"amount": "40.00"}]},
         {"title": "Custom Gobo", "quantity": 1, "price": "50.00", "product_id": 1}])
-    eq(copilot._order_goods_value(o), 210.0, "list 250 less the 40 taken off")
-    items = run_async(copilot._customs_items({}, o))
+    eq(desk._order_goods_value(o), 210.0, "list 250 less the 40 taken off")
+    items = run_async(desk._customs_items({}, o))
     eq([i["price"] for i in items], ["80.00", "50.00"], "the unit price the customer paid")
     eq([i["unit_value"] for i in items], ["80.00", "50.00"], "is what a gobo is declared at")
     o["line_items"][0]["current_quantity"] = 1       # one of the two refunded since
-    eq(copilot._order_goods_value(o), 130.0, "the discount is per unit ordered, times what is left")
+    eq(desk._order_goods_value(o), 130.0, "the discount is per unit ordered, times what is left")
     # The per-product memory is for gobos whose base price is zero (priced
     # through options), where the operator typed the value. A gobo with a real
     # sale price is declared at THIS customer's price, never at a value
     # remembered from another order.
-    key = copilot._customs_key(o["line_items"][1], "Custom Gobo")
-    saved = copilot._load_customs_memory
-    copilot._load_customs_memory = lambda: {key: {"unit_value": "37.50", "hs": "", "origin": ""}}
+    key = desk._customs_key(o["line_items"][1], "Custom Gobo")
+    saved = desk._load_customs_memory
+    desk._load_customs_memory = lambda: {key: {"unit_value": "37.50", "hs": "", "origin": ""}}
     try:
-        items = run_async(copilot._customs_items({}, o))
+        items = run_async(desk._customs_items({}, o))
         eq(items[1]["unit_value"], "50.00", "the priced gobo ignores the memory")
         o["line_items"][1]["price"] = "0.00"
-        items = run_async(copilot._customs_items({}, o))
+        items = run_async(desk._customs_items({}, o))
         eq(items[1]["unit_value"], "37.50", "the option-priced gobo takes what was typed last time")
     finally:
-        copilot._load_customs_memory = saved
+        desk._load_customs_memory = saved
 
 
 @test
@@ -22979,7 +22990,7 @@ def t_the_margin_report_reaches_an_order_dispatched_weeks_after_it_was_placed():
            "taxes_included": False, "total_price": "100.00",
            "line_items": [{"id": 1, "title": "Gobo", "quantity": 1, "price": "100.00", "variant_id": 111}],
            "shipping_lines": []}
-    copilot._record_dispatch(777, {"tracking_number": "T7", "carrier_name": "UPS", "order_name": "#777",
+    desk._record_dispatch(777, {"tracking_number": "T7", "carrier_name": "UPS", "order_name": "#777",
                                    "amount_ex_vat": 8.0, "amount": 9.6,
                                    "dispatched_at": _dt.now(_tz.utc).isoformat()})
     async def tools(registry, name, args):
@@ -22993,13 +23004,13 @@ def t_the_margin_report_reaches_an_order_dispatched_weeks_after_it_was_placed():
             return {"inventory_items": [{"id": 9111, "cost": "30.00"}]}
         return {}
     saved = copilot._tool_json; copilot._tool_json = tools
-    copilot.COST_CACHE_PATH = SCRATCH + "/cost_cache.json"
+    desk.COST_CACHE_PATH = SCRATCH + "/cost_cache.json"
     try:
-        os.remove(copilot.COST_CACHE_PATH)
+        os.remove(desk.COST_CACHE_PATH)
     except FileNotFoundError:
         pass
     try:
-        res = run_async(copilot.run_margin_report({}, days=30))
+        res = run_async(desk.run_margin_report({}, days=30))
         row = next(r for r in res["rows"] if str(r.get("order_id")) == "777")
         ok("incomplete" not in row, "fetched on its own, not reported as a load failure: " + json.dumps(row)[:200])
         eq(row["revenue"], 100.0)
@@ -25472,11 +25483,11 @@ def t_a_redact_a_store_refused_is_said_and_retried():
             fh.write("{ broken")
         copilot._json_cache.pop(copilot.CRM_PATH, None)
         reset_dispatch()
-        copilot._record_dispatch(4242, {"email": "kim@x.com", "tracking_number": "T-42"})
+        desk._record_dispatch(4242, {"email": "kim@x.com", "tracking_number": "T-42"})
         try:
             out = copilot._redact_customer("kim@x.com", "9")
             ok("the CRM" in out["failed"], out)
-            asked = copilot._load_dispatch()["4242"].get("redacted_request_at")
+            asked = desk._load_dispatch()["4242"].get("redacted_request_at")
             ok(asked, "the kept booking records when the request came in")
             last = copilot._load_privacy_log()["events"][-1]["detail"]
             ok("NOT YET ERASED from the CRM" in last, "the record says what was not done: " + last)
@@ -25510,7 +25521,7 @@ def t_a_redact_a_store_refused_is_said_and_retried():
              copilot._files_tick, copilot.run_label_coverage, copilot._webhook_ensurer,
              copilot._watch_last_tick, copilot._redact_retry_pending) = saved
         eq(ran, [1], "the hourly tick runs the retry")
-        eq(copilot._load_dispatch()["4242"].get("redacted_request_at"), asked,
+        eq(desk._load_dispatch()["4242"].get("redacted_request_at"), asked,
            "and the retry leaves that time alone")
         reset_dispatch()
         ok(not any(p.get("id") == "p1" for p in copilot._load_crm()["persons"].values()), "and she is gone")
@@ -25588,12 +25599,12 @@ def t_a_redact_that_stops_part_way_through_the_bookings_leaves_nothing_half_made
     def go():
         ensure_auth(); crm_wipe(); reset_dispatch()
         addr = "kim@x.com"
-        with open(copilot.DISPATCH_STATE_PATH, "w", encoding="utf-8") as fh:
+        with open(desk.DISPATCH_STATE_PATH, "w", encoding="utf-8") as fh:
             json.dump({"orders": {"4242": {"email": addr, "tracking_number": "T-42"},
                                   "4243": "not a booking"}}, fh)
         try:
             copilot._redact_customer(addr, "9")
-            ok(not copilot._load_dispatch()["4242"].get("redacted_request_at"),
+            ok(not desk._load_dispatch()["4242"].get("redacted_request_at"),
                "the bookings read next are the ones on disk")
         finally:
             reset_dispatch()
@@ -25874,10 +25885,10 @@ def t_a_booking_whose_answer_was_lost_is_not_booked_again_blind():
         return _ET.fromstring(RATE_XML)
     seen = []
     async def links(labels):
-        seen.append((copilot._load_dispatch().get("12345") or {}).get("tracking_number"))
+        seen.append((desk._load_dispatch().get("12345") or {}).get("tracking_number"))
         return labels
-    saved = (_wo._soap_call, copilot._resolve_label_links)
-    _wo._soap_call, copilot._resolve_label_links = soap, links
+    saved = (_wo._soap_call, desk._resolve_label_links)
+    _wo._soap_call, desk._resolve_label_links = soap, links
     try:
         r1 = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX}).json()
         ok("MAY still" in r1.get("error", ""), r1)
@@ -25889,7 +25900,7 @@ def t_a_booking_whose_answer_was_lost_is_not_booked_again_blind():
         ok(r3.get("ok"), "once someone has checked, it books: " + str(r3)[:200])
         ok(seen and seen[0], "and the tracking number was on record before the label was fetched")
     finally:
-        _wo._soap_call, copilot._resolve_label_links = saved
+        _wo._soap_call, desk._resolve_label_links = saved
         reset_dispatch()
 
 
@@ -25909,8 +25920,8 @@ def t_a_relayed_gateway_timeout_is_never_booked_twice_by_itself():
             sent.append(1)
             return _ET.fromstring(failed if len(sent) == 1 else BOOK_XML)
         return _ET.fromstring(RATE_XML)
-    saved = (_wo._soap_call, copilot.WO_RETRY_WAIT_SECS)
-    _wo._soap_call, copilot.WO_RETRY_WAIT_SECS = soap, 0
+    saved = (_wo._soap_call, desk.WO_RETRY_WAIT_SECS)
+    _wo._soap_call, desk.WO_RETRY_WAIT_SECS = soap, 0
     try:
         r1 = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX}).json()
         eq(len(sent), 1, "sent once, not retried")
@@ -25920,11 +25931,11 @@ def t_a_relayed_gateway_timeout_is_never_booked_twice_by_itself():
         ok("MAY still have been booked" in r1.get("error", ""), r1)
         rx = re.search(r"const BOOKING_UNKNOWN = /(.*?)/i;", pagesource.join(HERE)).group(1)
         ok(re.search(rx, r1["error"], re.I), "the page holds Book on it")
-        ok(copilot._intent_open(12345), "the guard keeps its record")
+        ok(desk._intent_open(12345), "the guard keeps its record")
         r2 = post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX}).json()
         ok(r2.get("unknown_booking") and len(sent) == 1, "the next press is stopped, not sent: %r" % r2)
     finally:
-        _wo._soap_call, copilot.WO_RETRY_WAIT_SECS = saved
+        _wo._soap_call, desk.WO_RETRY_WAIT_SECS = saved
         reset_dispatch()
 
 
@@ -25935,7 +25946,7 @@ def t_an_unknown_fulfilment_or_terms_outcome_is_not_called_a_failure():
     reverted the tags of an order that may have shipped."""
     import server as _srv, httpx as _hx
     ensure_auth(); reset_dispatch(); reset_prod(); TAG_WRITES.clear()
-    copilot._record_dispatch(12345, {"tracking_number": "T-5", "carrier_name": "UPS", "notify": True,
+    desk._record_dispatch(12345, {"tracking_number": "T-5", "carrier_name": "UPS", "notify": True,
                                      "dispatched_at": "2026-09-22T09:00:00Z"})
     state = {"fo": 0}
     async def req(method, path, params=None, body=None, **kw):
@@ -25962,7 +25973,7 @@ def t_an_unknown_fulfilment_or_terms_outcome_is_not_called_a_failure():
         r = mark_made().json()
         eq(r["fulfilled"], False)
         ok("may already be fulfilled" in (r.get("ship_note") or ""), r.get("ship_note"))
-        ok(TAG_WRITES and copilot.DISPATCHED_TAG.lower() in TAG_WRITES[0][1].lower(), TAG_WRITES)
+        ok(TAG_WRITES and desk.DISPATCHED_TAG.lower() in TAG_WRITES[0][1].lower(), TAG_WRITES)
         eq([t for _o, t in TAG_WRITES[1:]], [],
            "and the tags were not put back as if it had not shipped")
     finally:
@@ -26055,7 +26066,7 @@ def t_a_lost_answer_to_an_address_edit_is_settled_by_reading_the_order():
     never marked and Mark made emailed tracking for the old one."""
     import server as _srv, httpx as _hx
     ensure_auth(); reset_dispatch(); reset_prod()
-    copilot._record_dispatch(12345, {"tracking_number": "T-9", "carrier_name": "DPD",
+    desk._record_dispatch(12345, {"tracking_number": "T-9", "carrier_name": "DPD",
                                      "dispatched_at": "2026-09-22T09:00:00Z"})
     live = _copy.deepcopy(ORDER)
     async def tools(registry, name, args):
@@ -26070,14 +26081,14 @@ def t_a_lost_answer_to_an_address_edit_is_settled_by_reading_the_order():
     try:
         r = post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 6JK"}, "confirm_booked": True})
         eq(r.status_code, 200, "the change landed, and is reported as made: " + r.text)
-        ok(copilot._load_dispatch()["12345"].get("address_changed_at"), "and the booked label is marked as diverged")
+        ok(desk._load_dispatch()["12345"].get("address_changed_at"), "and the booked label is marked as diverged")
         # A booking that recorded its address is marked even by a no-change retry.
-        copilot._record_dispatch(12345, {"tracking_number": "T-9", "carrier_name": "DPD",
+        desk._record_dispatch(12345, {"tracking_number": "T-9", "carrier_name": "DPD",
                                          "dispatched_at": "2026-09-22T09:00:00Z",
                                          "booked_address": {"street": "24 Liberty Ave", "street2": "Unit 3",
                                                             "postcode": "M1 2AB", "city": "Manchester", "country": "GB"}})
         post("/api/order/edit", {"order_id": 12345, "ship_to": {"postcode": "M1 6JK"}, "confirm_booked": True})
-        ok(copilot._load_dispatch()["12345"].get("address_changed_at"), "whichever edit found it done")
+        ok(desk._load_dispatch()["12345"].get("address_changed_at"), "whichever edit found it done")
     finally:
         copilot._tool_json, _srv._request, copilot._order_writer = saved
         reset_dispatch()
@@ -26355,8 +26366,8 @@ def t_the_keyword_scan_reads_no_more_than_it_keeps():
 def t_booked_labels_are_not_held_in_memory():
     """A41. Every label written stayed in the store cache until a restart,
     about a megabyte a booking, pruned from disk or not."""
-    copilot._save_dispatch_labels("990001", [{"type": "pdf", "value": "x" * 1000}])
-    ok(not any(str(p).startswith(copilot.DISPATCH_LABELS_DIR) for p in copilot._json_cache),
+    desk._save_dispatch_labels("990001", [{"type": "pdf", "value": "x" * 1000}])
+    ok(not any(str(p).startswith(desk.DISPATCH_LABELS_DIR) for p in copilot._json_cache),
        "a label file is written, not cached")
 
 
@@ -26398,11 +26409,11 @@ def t_what_the_customer_paid_for_delivery_is_what_they_paid():
     o["taxes_included"] = True
     o["shipping_lines"] = [{"title": "Tracked 24", "price": "12.00", "discount_allocations": [],
                             "tax_lines": [{"price": "2.00"}]}]
-    eq(copilot._shipping_paid(o, ex_vat=False), 12.0, "what they paid, VAT in")
-    eq(copilot._shipping_paid(o, ex_vat=True), 10.0, "and ex VAT, for the courier comparison")
+    eq(desk._shipping_paid(o, ex_vat=False), 12.0, "what they paid, VAT in")
+    eq(desk._shipping_paid(o, ex_vat=True), 10.0, "and ex VAT, for the courier comparison")
     o["shipping_lines"][0]["discount_allocations"] = [{"amount": "12.00"}]
     o["shipping_lines"][0]["tax_lines"] = []
-    eq(copilot._shipping_paid(o, ex_vat=False), 0.0, "a free-shipping code is a free delivery")
+    eq(desk._shipping_paid(o, ex_vat=False), 0.0, "a free-shipping code is a free delivery")
     # And the booking records that, not the list price (the round-4 review
     # found the test passed with the record put back to the list price).
     import worldoptions as _wo
@@ -26416,7 +26427,7 @@ def t_what_the_customer_paid_for_delivery_is_what_they_paid():
                                 "discount_allocations": [{"amount": "12.00"}]}]
     try:
         ok(post("/api/dispatch/book", {"order_id": 12345, "option": OPT, "box": BOX}).json().get("ok"), "booked")
-        eq(copilot._load_dispatch()["12345"].get("shipping_paid"), "0.00", "the record says they paid nothing")
+        eq(desk._load_dispatch()["12345"].get("shipping_paid"), "0.00", "the record says they paid nothing")
     finally:
         _wo._soap_call = saved[0]
         for k, v in (("shipping_lines", saved[1]), ("taxes_included", saved[2])):
@@ -28165,7 +28176,7 @@ def t_a_snapshot_patched_by_id_is_exactly_a_full_sweep():
             got = run(copilot._orders_snapshot({}, days=180, fields=fields))
             eq(shop.kinds(), ["ids"], what + ": read by id only: %r" % shop.kinds())
             eq(got, full(), what + ": the patched snapshot is the full sweep, order for order")
-            for tag in ("IP", "PC", copilot.DISPATCHED_TAG):
+            for tag in ("IP", "PC", desk.DISPATCHED_TAG):
                 cached = run(copilot.run_production_labels({}, tag=tag))
                 copilot._bust_orders()
                 fresh = run(copilot.run_production_labels({}, tag=tag))
@@ -29777,6 +29788,10 @@ def t_nothing_reads_copilot_py_by_name():
             if (isinstance(x, _ast.Constant) and isinstance(x.value, str)
                     and re.fullmatch(r"[\w./-]*" + re.escape(name), x.value)):
                 found.append(f"{rel}:{x.lineno}")
+            # inspect.getsource(copilot): the module's file, read by another road
+            if (isinstance(x, _ast.Call) and _ast.unparse(x.func).endswith("getsource") and x.args
+                    and isinstance(x.args[0], _ast.Name) and x.args[0].id in ("copilot", "_c", "_cp")):
+                found.append(f"{rel}:{x.lineno}")
     eq(found, [], "reads " + name + " by name; use tools/sources.py")
 
 @test
@@ -29793,6 +29808,98 @@ def t_the_security_scans_cover_every_app_module():
         missing = [m for m in sources.APP_MODULES
                    if not any(m == p or m.startswith(p.rstrip("/") + "/") for p in paths)]
         eq(missing, [], where + "'s security scan leaves out")
+
+# ---- Dispatch in its own module (stage 4, piece 1) -------------------------
+# The desk moved whole out of copilot.py into gizmo/dispatch.py and its routes
+# into gizmo/routes/dispatch.py. Each side reaches the other through the
+# module's name (dispatch.NAME, core.NAME), never a copied name.
+
+# What dispatch still reads from copilot.py. Each area that moves out (the
+# store, the request check, orders, the AI client) takes names off this list.
+BORROWED = {
+    # the store
+    "_dispatch_lock", "_forget_store", "_load_json_cached", "_load_json_store",
+    "_poisoned_stores", "_store_writable", "_write_json_store", "_write_private_json",
+    # the request check and answers
+    "_eori_hits", "_guard", "_json", "_ok", "_team_level", "_tool_json", "_track",
+    "_window_ok", "EORI_MAX_PER_MIN", "ROLE_LEVELS",
+    # orders and Shopify
+    "_ADDR_COMPARE", "_admin_order_url", "_fulfill_if_ready", "_fulfillment_canceler",
+    "_label_skip_item", "_line_qty", "_load_prod_state", "_order_status", "_orders_changed",
+    "_orders_snapshot", "_origin_address", "_ship_to", "_sync_order_tags", "_tax_id_reader",
+    "MADE_TAG", "PRODUCTION_TAG",
+    # the AI client
+    "_ai_kind", "_anthropic", "_xcreate", "ANTHROPIC_API_KEY", "MODEL_FAST",
+    # the clock and the error log
+    "_london_hm", "_london_today", "_record_error",
+}
+
+def _core_reads(rel):
+    """The names a module reads as core.NAME."""
+    import ast as _ast
+    from tools import sources
+    tree = _ast.parse(open(os.path.join(sources.ROOT, rel), encoding="utf-8").read())
+    return {x.attr for x in _ast.walk(tree) if isinstance(x, _ast.Attribute)
+            and isinstance(x.value, _ast.Name) and x.value.id == "core"}
+
+@test
+def t_what_dispatch_borrows():
+    """The exact set of copilot.py names the desk and its routes read."""
+    got = _core_reads("gizmo/dispatch.py") | _core_reads("gizmo/routes/dispatch.py")
+    eq(sorted(got - BORROWED), [], "dispatch reads core names BORROWED does not list")
+    eq(sorted(BORROWED - got), [], "BORROWED lists names dispatch no longer reads")
+
+@test
+def t_the_split_modules_read_no_unbound_name():
+    """A name a split module reads is bound in it, imported, or a builtin, so a
+    path no test drives cannot meet a NameError in production."""
+    import symtable, builtins as _bi
+    from tools import sources
+    ok("gizmo/dispatch.py" in sources.COPILOT_FILES and "gizmo/routes/dispatch.py" in sources.COPILOT_FILES,
+       "the split modules exist")
+    bad = []
+    for rel in sources.COPILOT_FILES[1:]:
+        top = symtable.symtable(open(os.path.join(sources.ROOT, rel), encoding="utf-8").read(), rel, "exec")
+        bound = {s.get_name() for s in top.get_symbols() if s.is_assigned() or s.is_imported()}
+        def walk(t):
+            for s in t.get_symbols():
+                n = s.get_name()
+                if n.startswith((".", "__conditional")):    # the compiler's own (3.14 annotations)
+                    continue
+                if (t is top or s.is_global()) and s.is_referenced() and n not in bound and not hasattr(_bi, n):
+                    bad.append(f"{rel}: {t.get_name()} reads {n}")
+            for c in t.get_children():
+                walk(c)
+        walk(top)
+    eq(sorted(set(bad)), [], "names read but bound nowhere")
+
+@test
+def t_either_module_imports_first():
+    """Nothing is read across at import time: the desk and copilot.py can each
+    be imported first (a tool or a test may start from either)."""
+    import subprocess as _sp
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for first, then in (("gizmo.dispatch", "copilot"), ("copilot", "gizmo.dispatch"),
+                        ("gizmo.routes.dispatch", "copilot")):
+        r = _sp.run([sys.executable, "-c", f"import {first}, {then}; import gizmo.dispatch as d, copilot as c; "
+                     "assert c.desk is d and d.core is c; print('ok')"],
+                    cwd=root, env=dict(os.environ), capture_output=True, text=True, timeout=120)
+        eq((r.returncode, r.stdout.strip()), (0, "ok"), f"{first} first: {r.stderr[-600:]}")
+
+@test
+def t_dispatch_routes_register_in_place():
+    """The desk's routes are registered by one call where they stood in
+    add_routes, so the route table keeps its order; none is left behind."""
+    import inspect
+    from gizmo.routes import dispatch as routes_dispatch
+    src = inspect.getsource(copilot.add_routes)
+    i = src.index("routes_dispatch.register(mcp, registry)")
+    ok(src.rindex('@mcp.custom_route("/api/production-labels/queue"', 0, i) < i
+       < src.index('@mcp.custom_route("/api/production-labels/missing"', i), "between the routes that stood either side")
+    for path in ("/api/dispatch/", "/api/shipping/", "/api/custom/", "/api/eori/", '"/api/margin'):
+        ok(path not in src, path + " is registered by the desk's own routes")
+    own = inspect.getsource(routes_dispatch)
+    eq(own.count("@mcp.custom_route("), 15, "the desk's 15 routes")
 
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
