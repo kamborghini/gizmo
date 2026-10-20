@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-20",
+   "title": "The CRM and mail on their own",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "The CRM and the shared inbox now each live on their own, so a change elsewhere cannot upset a deal or a reply. Nothing looks different."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-20",
    "title": "Orders and production on their own",
    "items": [
     {

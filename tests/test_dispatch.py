@@ -136,6 +136,7 @@ from gizmo import errors
 from gizmo import ai as claude
 from gizmo import activity, gate, team
 from gizmo import orderbook, production, shopify, size_list
+from gizmo import crm as salesdesk, mail
 import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
@@ -720,7 +721,7 @@ def t_a_stranger_cannot_write_into_the_crm_by_emailing_the_shop():
     itself into that customer's record, marked "Website form"."""
     def go():
         ensure_auth()
-        store = copilot._load_mail()
+        store = mail._load_mail()
         # The real thing: Shopify's own notification address.
         _seed_thread("real1", "New customer message on 25 Aug",
                      frm=("Projected Image", "no-reply@shopifyemail.com"))
@@ -742,9 +743,9 @@ def t_a_stranger_cannot_write_into_the_crm_by_emailing_the_shop():
 def t_an_enquiry_email_line_that_is_not_an_address_is_not_used():
     """Keeping the raw text made every unparsable enquiry collapse onto one
     bogus contact, and suppressed the Reply-To rescue meant for exactly it."""
-    p1 = copilot._mail_parse_enquiry("Name: Dana\nEmail: (not given)\nBody:\nhello")
+    p1 = mail._mail_parse_enquiry("Name: Dana\nEmail: (not given)\nBody:\nhello")
     eq(p1["email"], "", "a non-address is not stored as one")
-    p2 = copilot._mail_parse_enquiry("Name: Dana\nEmail: dana@venue.co.uk\nBody:\nhello")
+    p2 = mail._mail_parse_enquiry("Name: Dana\nEmail: dana@venue.co.uk\nBody:\nhello")
     eq(p2["email"], "dana@venue.co.uk", "a real one still is")
 
 @test
@@ -767,7 +768,7 @@ def t_a_partial_customer_crawl_is_never_reported_as_a_clean_sweep():
         saved = shopify._tool_json
         shopify._tool_json = flaky
         try:
-            rep = run_async(copilot._crm_shopify_link_sweep({}))
+            rep = run_async(salesdesk._crm_shopify_link_sweep({}))
         finally:
             shopify._tool_json = saved
         ok(not rep["complete"], "a failed page is not the end of the customers")
@@ -783,7 +784,7 @@ def t_a_partial_customer_crawl_is_never_reported_as_a_clean_sweep():
         calls2 = []
         shopify._tool_json = endless
         try:
-            rep2 = run_async(copilot._crm_shopify_link_sweep({}, max_pages=2))
+            rep2 = run_async(salesdesk._crm_shopify_link_sweep({}, max_pages=2))
         finally:
             shopify._tool_json = saved
         ok(not rep2["complete"], "hitting the page ceiling is a partial crawl")
@@ -826,10 +827,10 @@ def t_a_binned_deal_still_holds_its_contact():
     post("/api/crm/deal", {"op": "restore", "id": deal})
     post("/api/crm/deal", {"op": "won", "id": deal})
     post("/api/crm/deal", {"op": "delete", "id": deal})
-    d = copilot._load_crm()
+    d = salesdesk._load_crm()
     d["deals"][deal]["deleted_at"] = "2000-01-01T00:00:00+00:00"
-    copilot._write_crm(d)
-    copilot._crm_purge(d); copilot._write_crm(d)
+    salesdesk._write_crm(d)
+    salesdesk._crm_purge(d); salesdesk._write_crm(d)
     eq(post("/api/crm/contact", {"op": "person_delete", "id": per}).status_code, 200)
 
 @test
@@ -846,20 +847,20 @@ def t_a_deleted_deal_is_not_resurrected_by_the_next_import():
         pipedrive.export, pipedrive.API_TOKEN = fake_export, "t"
         try:
             post("/api/crm/import", {"go": True})
-            d = copilot._load_crm()
+            d = salesdesk._load_crm()
             doomed = [x for x in d["deals"].values() if x["pd_id"] == "31"][0]["id"]
             post("/api/crm/deal", {"op": "delete", "id": doomed})
             # The bin empties: that is the moment the tombstone must exist.
-            d = copilot._load_crm()
+            d = salesdesk._load_crm()
             d["deals"][doomed]["deleted_at"] = "2000-01-01T00:00:00+00:00"
-            copilot._write_crm(d)
-            d = copilot._load_crm()
-            copilot._crm_purge(d)
-            copilot._write_crm(d)
-            ok("31" in (copilot._load_crm().get("pd_deleted_deals") or []),
+            salesdesk._write_crm(d)
+            d = salesdesk._load_crm()
+            salesdesk._crm_purge(d)
+            salesdesk._write_crm(d)
+            ok("31" in (salesdesk._load_crm().get("pd_deleted_deals") or []),
                "the deal leaves a tombstone as it goes")
             post("/api/crm/import", {"go": True})
-            back = [x for x in copilot._load_crm()["deals"].values() if x.get("pd_id") == "31"]
+            back = [x for x in salesdesk._load_crm()["deals"].values() if x.get("pd_id") == "31"]
             eq(back, [], "and the import does not bring it back")
         finally:
             pipedrive.export, pipedrive.API_TOKEN = saved
@@ -5219,12 +5220,13 @@ def t_no_api_route_skips_the_pre_checks():
         seg = text[text.index("def " + g + "("):][:1400]
         # A guard proves itself by running the checks, or by delegating to the
         # one door that does - which is what the four domain guards do now.
-        ok("_pre_checks" in seg or "await _guard(request" in seg,
+        ok("_pre_checks" in seg or "await _guard(request" in seg or "await gate._guard(request" in seg,
            f"{g} runs the rate limiter and the body cap, or delegates to the door")
         # The login door is the one guard that does NOT authorize: there is no
         # session yet when you are asking to make one. Everything behind it must.
         if g != "_auth_guard":
-            ok("_authorize" in seg or "await _guard(request" in seg, f"{g} authenticates the caller")
+            ok("_authorize" in seg or "await _guard(request" in seg or "await gate._guard(request" in seg,
+               f"{g} authenticates the caller")
     bad = []
     for m in re.finditer(r'custom_route\("(/api/[^"]+)"[^)]*\)\s*\n\s*async def (\w+)', text):
         path, fn = m.group(1), m.group(2)
@@ -5367,10 +5369,10 @@ def _seed_person_and_shipment(email):
     """A customer who exists in BOTH halves of the split: the CRM, which is
     relationship data and must go, and a dispatch record, which HMRC can ask
     for and must not."""
-    d = copilot._load_crm()
+    d = salesdesk._load_crm()
     d["persons"]["p9001"] = {"id": "p9001", "name": "Jo Redact",
                              "emails": [email], "phone": "0161 000 0000"}
-    copilot._write_crm(d)
+    salesdesk._write_crm(d)
     disp = desk._load_dispatch()
     disp["104999"] = {"order_id": "104999", "email": email,
                       "name": "Jo Redact", "address1": "1 Glass Works",
@@ -5404,7 +5406,7 @@ def t_a_redact_request_erases_the_crm_person():
     raw = json.dumps({"customer": {"id": 555, "email": email},
                       "shop_domain": "test-store.myshopify.com"}).encode()
     redact_through_the_hold(raw, "pr1")
-    eq("p9001" in copilot._load_crm()["persons"], False,
+    eq("p9001" in salesdesk._load_crm()["persons"], False,
        "the CRM person is gone")
 
 
@@ -5430,17 +5432,17 @@ def t_a_redact_request_erases_only_that_persons_email_threads():
     """The mailbox is relationship data too. And the blast radius matters more
     than the erasure: wiping one person must not touch anyone else's thread."""
     orderbook._webhook_seen.clear()
-    store = copilot._load_mail()
+    store = mail._load_mail()
     store.setdefault("threads", {})
     store["threads"]["tgone"] = {"id": "tgone", "from_email": "Gone@Example.com",
                                  "subject": "Please delete me", "state": "open"}
     store["threads"]["tstay"] = {"id": "tstay", "from_email": "other@example.com",
                                  "subject": "Unrelated", "state": "open"}
-    copilot._write_mail(store)
+    mail._write_mail(store)
     raw = json.dumps({"customer": {"id": 558, "email": "gone@example.com"},
                       "shop_domain": "test-store.myshopify.com"}).encode()
     redact_through_the_hold(raw, "pr6")
-    threads = copilot._load_mail()["threads"]
+    threads = mail._load_mail()["threads"]
     eq("tgone" in threads, False, "their thread is gone, matched case-insensitively")
     eq("tstay" in threads, True, "and nobody else's was touched")
 
@@ -5664,10 +5666,10 @@ def t_an_untouched_deal_rots_and_any_touch_resets_it():
     stages[0]["rot_days"] = 2
     post("/api/crm/stages", {"stages": stages})
     # Age the deal by hand: the store is plain JSON.
-    raw = json.load(open(copilot.CRM_PATH))
+    raw = json.load(open(salesdesk.CRM_PATH))
     from datetime import datetime as dt, timedelta as td, timezone as tz
     raw["crm"]["deals"][deal]["touched_at"] = (dt.now(tz.utc) - td(days=3)).isoformat()
-    json.dump(raw, open(copilot.CRM_PATH, "w"))
+    json.dump(raw, open(salesdesk.CRM_PATH, "w"))
     board = post("/api/crm/board", {}).json()["crm"]
     ok(board["deals"][deal]["rotten"], "three untouched days against a two-day limit rots")
     post("/api/crm/deal", {"op": "note_add", "id": deal, "text": "spoke to Sarah"})
@@ -5746,7 +5748,7 @@ def t_a_nonfinite_value_can_never_brick_the_crm_store():
     board = post("/api/crm/board", {})
     eq(board.status_code, 200, "the store still reads")
     eq(board.json()["crm"]["deals"][deal]["value"], 450.0, "and the value is untouched")
-    json.load(open(copilot.CRM_PATH))    # raises if anything non-JSON was written
+    json.load(open(salesdesk.CRM_PATH))    # raises if anything non-JSON was written
 
 @test
 def t_reopening_into_a_deleted_stage_lands_on_a_live_one():
@@ -5769,10 +5771,10 @@ def t_rescheduling_an_activity_resets_rotting():
     stages = post("/api/crm/board", {}).json()["crm"]["stages"]
     stages[0]["rot_days"] = 2
     post("/api/crm/stages", {"stages": stages})
-    raw = json.load(open(copilot.CRM_PATH))
+    raw = json.load(open(salesdesk.CRM_PATH))
     from datetime import datetime as dt, timedelta as td, timezone as tz
     raw["crm"]["deals"][deal]["touched_at"] = (dt.now(tz.utc) - td(days=3)).isoformat()
-    json.dump(raw, open(copilot.CRM_PATH, "w"))
+    json.dump(raw, open(salesdesk.CRM_PATH, "w"))
     ok(post("/api/crm/board", {}).json()["crm"]["deals"][deal]["rotten"], "rotten before")
     post("/api/crm/activity", {"op": "update", "id": aid, "due_date": "2030-01-01"})
     ok(not post("/api/crm/board", {}).json()["crm"]["deals"][deal]["rotten"],
@@ -5788,18 +5790,18 @@ def t_the_size_guard_reports_rather_than_shredding_history():
     aid = post("/api/crm/activity", {"op": "add", "type": "call", "deal_id": deal,
                                      "due_date": "2020-01-01"}).json()["id"]
     post("/api/crm/deal", {"op": "won", "id": deal})
-    saved = copilot.CRM_DEALS_MAX
-    copilot.CRM_DEALS_MAX = 0        # as if the store were far over its guard
+    saved = salesdesk.CRM_DEALS_MAX
+    salesdesk.CRM_DEALS_MAX = 0        # as if the store were far over its guard
     try:
         crm = post("/api/crm/contact", {"op": "org_add", "name": "Trigger"}).json()["crm"]
         ok(deal in crm["deals"], "the closed deal is still there")
         ok(aid in crm["activities"], "and so is its history")
-        d = copilot._load_crm()
+        d = salesdesk._load_crm()
         ok(d.get("over_cap"), "the fault is recorded instead")
         ok(d["over_cap"]["deals"] > 0, d["over_cap"])
     finally:
-        copilot.CRM_DEALS_MAX = saved
-        d = copilot._load_crm(); d.pop("over_cap", None); copilot._write_crm(d)
+        salesdesk.CRM_DEALS_MAX = saved
+        d = salesdesk._load_crm(); d.pop("over_cap", None); salesdesk._write_crm(d)
 
 
 @test
@@ -5812,18 +5814,18 @@ def t_editing_a_contact_keeps_the_addresses_the_form_cannot_show():
     # The form round-trips only the first of each, as it does today.
     post("/api/crm/contact", {"op": "person_update", "id": pid, "name": "Jo Bloggs",
                               "emails": ["jo@work.com"], "phones": ["0191 111"]})
-    p = copilot._load_crm()["persons"][pid]
+    p = salesdesk._load_crm()["persons"][pid]
     eq(p["emails"], ["jo@work.com", "jo@home.com", "jo@old.com"], "the others survived")
     eq(p["phones"], ["0191 111", "07700 900"])
     # Genuinely changing the first one still works, and does not duplicate it.
     post("/api/crm/contact", {"op": "person_update", "id": pid, "name": "Jo Bloggs",
                               "emails": ["jo@new.com"], "phones": ["0191 111"]})
-    p = copilot._load_crm()["persons"][pid]
+    p = salesdesk._load_crm()["persons"][pid]
     eq(p["emails"], ["jo@new.com", "jo@home.com", "jo@old.com"], "changed, not wiped")
     # And a real multi-value edit still replaces the lot.
     post("/api/crm/contact", {"op": "person_update", "id": pid, "name": "Jo Bloggs",
                               "emails": ["a@b.com", "c@d.com"]})
-    eq(copilot._load_crm()["persons"][pid]["emails"], ["a@b.com", "c@d.com"])
+    eq(salesdesk._load_crm()["persons"][pid]["emails"], ["a@b.com", "c@d.com"])
 
 PD_EXPORT = {
     "account": {"name": "Projected Image", "admin": True, "company": "Projected Image UK Ltd",
@@ -5871,10 +5873,10 @@ def crm_wipe():
     """A clean CRM store. Other tests leave deals behind, and an import test is
     about counts."""
     try:
-        os.remove(copilot.CRM_PATH)
+        os.remove(salesdesk.CRM_PATH)
     except FileNotFoundError:
         pass
-    jsonstore._poisoned_stores.discard(copilot.CRM_PATH)
+    jsonstore._poisoned_stores.discard(salesdesk.CRM_PATH)
 
 
 @test
@@ -6010,12 +6012,12 @@ def t_pipedrive_import_previews_then_copies_without_duplicating():
             eq(j["report"]["persons"]["new"], 1)
             eq(j["report"]["orgs"]["new"], 1)
             eq(j["report"]["kept"]["orgs"], 1, "the hand-typed org is counted as kept")
-            eq(len(copilot._load_crm()["deals"]), 0, "and nothing was written")
+            eq(len(salesdesk._load_crm()["deals"]), 0, "and nothing was written")
             # 2. The real run.
             r2 = post("/api/crm/import", {"go": True})
             eq(r2.status_code, 200, r2.text)
             ok(not r2.json()["dry_run"])
-            d = copilot._load_crm()
+            d = salesdesk._load_crm()
             eq(len(d["deals"]), 2)
             eq(len(d["persons"]), 1)
             ok(mine in d["orgs"], "the hand-typed record survived the import")
@@ -6042,7 +6044,7 @@ def t_pipedrive_import_previews_then_copies_without_duplicating():
             r3 = post("/api/crm/import", {"go": True})
             eq(r3.json()["report"]["deals"]["new"], 0, "nothing new the second time")
             eq(r3.json()["report"]["deals"]["updated"], 2)
-            d2 = copilot._load_crm()
+            d2 = salesdesk._load_crm()
             eq(len(d2["deals"]), 2, "and no duplicates")
             eq(len(d2["persons"]), 1)
             eq(len([n for n in d2["deals"][deal30["id"]]["notes"]]), 1, "nor duplicate notes")
@@ -6068,7 +6070,7 @@ def t_pipedrive_import_refuses_a_partial_read():
             r = post("/api/crm/import", {"go": True})
             eq(r.status_code, 502, "half an account is not an import")
             ok("persons" in r.json()["error"], r.text)
-            eq(len(copilot._load_crm()["deals"]), 0, "and nothing was written")
+            eq(len(salesdesk._load_crm()["deals"]), 0, "and nothing was written")
             ok(post("/api/crm/import", {}).json()["dry_run"], "the preview still runs")
         finally:
             pipedrive.export, pipedrive.API_TOKEN = saved
@@ -6221,7 +6223,7 @@ def t_reimport_never_reverts_what_was_edited_in_gizmo():
         pipedrive.export, pipedrive.API_TOKEN = fake_export, "t"
         try:
             post("/api/crm/import", {"go": True})
-            d = copilot._load_crm()
+            d = salesdesk._load_crm()
             lost = [x for x in d["deals"].values() if x["pd_id"] == "31"][0]
             act = [x for x in d["activities"].values() if x["pd_id"] == "41"][0]
             # A month of gizmo work: the lost deal reopens, the task gets done.
@@ -6236,7 +6238,7 @@ def t_reimport_never_reverts_what_was_edited_in_gizmo():
             r = post("/api/crm/import", {"go": True}).json()
             eq(r["report"]["kept_edited"]["deals"], 1, r["report"])
             eq(r["report"]["kept_edited"]["activities"], 1, r["report"])
-            d2 = copilot._load_crm()
+            d2 = salesdesk._load_crm()
             mine = [x for x in d2["deals"].values() if x["pd_id"] == "31"][0]
             eq(mine["status"], "open", "the reopen SURVIVED the re-import")
             eq(mine["title"], "Glass sample", "kept whole, not half-merged")
@@ -6248,7 +6250,7 @@ def t_reimport_never_reverts_what_was_edited_in_gizmo():
             # A timestamp guard did exactly that — the import re-stamped its
             # high-water mark past the edit, and import #3 reverted everything.
             post("/api/crm/import", {"go": True})
-            d3 = copilot._load_crm()
+            d3 = salesdesk._load_crm()
             eq([x for x in d3["deals"].values() if x["pd_id"] == "31"][0]["status"], "open",
                "the edit survives EVERY later import, not just the next one")
             ok([x for x in d3["activities"].values() if x["pd_id"] == "41"][0]["done"])
@@ -6270,7 +6272,7 @@ def t_archiving_and_deleting_in_gizmo_survive_the_next_import():
         pipedrive.export, pipedrive.API_TOKEN = fake_export, "t"
         try:
             post("/api/crm/import", {"go": True})
-            d = copilot._load_crm()
+            d = salesdesk._load_crm()
             lost = [x for x in d["deals"].values() if x["pd_id"] == "31"][0]
             deal30 = [x for x in d["deals"].values() if x["pd_id"] == "30"][0]
             act = [x for x in d["activities"].values() if x["pd_id"] == "41"][0]
@@ -6279,7 +6281,7 @@ def t_archiving_and_deleting_in_gizmo_survive_the_next_import():
             post("/api/crm/deal", {"op": "note_del", "id": deal30["id"], "note_id": nid})
             post("/api/crm/activity", {"op": "delete", "id": act["id"]})
             post("/api/crm/import", {"go": True})
-            d2 = copilot._load_crm()
+            d2 = salesdesk._load_crm()
             ok([x for x in d2["deals"].values() if x["pd_id"] == "31"][0].get("archived"),
                "archived in gizmo stays archived through an import")
             eq([n for n in d2["deals"][deal30["id"]]["notes"] if n.get("pd_id")], [],
@@ -6303,14 +6305,14 @@ def t_a_merge_holds_through_the_next_import():
         pipedrive.export, pipedrive.API_TOKEN = fake_export, "t"
         try:
             post("/api/crm/import", {"go": True})
-            d = copilot._load_crm()
+            d = salesdesk._load_crm()
             imported = [p for p in d["persons"].values() if p["pd_id"] == "20"][0]
             dup = post("/api/crm/contact", {"op": "person_add", "name": "Sarah W."}).json()["id"]
             # Merge the IMPORTED person into the hand-made one: the winner has
             # no pd identity of its own, the loser's must carry across whole.
             post("/api/crm/contact", {"op": "person_merge", "id": imported["id"], "into": dup})
             post("/api/crm/import", {"go": True})
-            d2 = copilot._load_crm()
+            d2 = salesdesk._load_crm()
             eq(len([p for p in d2["persons"].values() if p.get("name") == "Sarah Whitfield"]), 0,
                "the merged duplicate is NOT recreated by the import")
             keeper = d2["persons"][dup]
@@ -6327,9 +6329,9 @@ def t_label_editor_spares_the_contact_label_colours():
     org = post("/api/crm/contact", {"op": "org_add", "name": "Acme"}).json()["id"]
     post("/api/crm/deal", {"op": "add", "title": "Acme deal", "org_id": org})
     # An imported person label sits in the colour map beside the deal labels.
-    d = copilot._load_crm()
+    d = salesdesk._load_crm()
     d["label_colors"]["Repeat customer"] = "green"
-    copilot._write_crm(d)
+    salesdesk._write_crm(d)
     r = post("/api/crm/stages", {"labels": [{"name": "VIP", "color": "purple"}]}).json()
     eq(r["crm"]["label_colors"].get("Repeat customer"), "green",
        "saving the deal labels must not grey out every contact chip")
@@ -6401,14 +6403,14 @@ def t_reimport_spares_stages_made_here_and_the_editor_keeps_their_identity():
             ok(after[0].get("pd_id"), "an imported stage keeps its Pipedrive identity")
             install = after[-1]["id"]
             # A deal moves into the gizmo-made stage...
-            d = copilot._load_crm()
+            d = salesdesk._load_crm()
             lost = [x for x in d["deals"].values() if x["pd_id"] == "31"][0]
             post("/api/crm/deal", {"op": "reopen", "id": lost["id"]})
             post("/api/crm/deal", {"op": "move", "id": lost["id"], "stage_id": install})
             # ...and the next import keeps both the stage and the deal in it.
             r2 = post("/api/crm/import", {"go": True}).json()
             eq(r2["report"]["stages"]["updated"], 2, "the imported stages matched, not duplicated")
-            d2 = copilot._load_crm()
+            d2 = salesdesk._load_crm()
             names = [s["name"] for s in d2["stages"]]
             eq(names, ["Enquiry", "Quoted", "Install booked"], names)
             mine = [x for x in d2["deals"].values() if x["pd_id"] == "31"][0]
@@ -9179,9 +9181,9 @@ def with_mail(fn):
     """Fresh mail store + fresh accounts world; the Gmail module's token file
     is wiped too so connected() answers honestly."""
     def go():
-        copilot._mail_mem = None
-        copilot._mail_viewers.clear()
-        for p in (copilot.MAILBOX_PATH, _gm.TOKEN_PATH):
+        mail._mail_mem = None
+        mail._mail_viewers.clear()
+        for p in (mail.MAILBOX_PATH, _gm.TOKEN_PATH):
             try:
                 os.remove(p)
             except FileNotFoundError:
@@ -9190,8 +9192,8 @@ def with_mail(fn):
         try:
             fn()
         finally:
-            copilot._mail_mem = None
-            copilot._mail_viewers.clear()
+            mail._mail_mem = None
+            mail._mail_viewers.clear()
     with_accounts(go)
 
 def _mk_msg(mid, frm_name, frm_email, at, snippet="hello"):
@@ -9203,14 +9205,14 @@ MBOX = "sales@test-store.co.uk"
 def _seed_thread(tid="t1", subject="Gobo order", n=1, frm=("Jo Bloggs", "jo@customer.com")):
     msgs = [_mk_msg(f"{tid}-m{i}", frm[0], frm[1], f"2026-08-19T0{i}:00:00+00:00")
             for i in range(1, n + 1)]
-    copilot._mail_apply_thread(copilot._load_mail(), {
+    mail._mail_apply_thread(mail._load_mail(), {
         "id": tid, "historyId": "h1", "subject": subject, "messages": msgs}, MBOX)
 
 @test
 def t_mail_arrival_and_message_transitions():
     def go():
         ensure_auth()
-        store = copilot._load_mail()
+        store = mail._load_mail()
         _seed_thread("t1", "Gobo order", n=2)
         t = store["threads"]["t1"]
         eq(t["state"], "unassigned", "a new thread belongs to nobody")
@@ -9218,14 +9220,14 @@ def t_mail_arrival_and_message_transitions():
         eq(t["msg_count"], 2)
         # Our own reply from Gmail is logged but moves nothing.
         t["state"] = "waiting"
-        copilot._mail_apply_thread(store, {"id": "t1", "historyId": "h2", "subject": "Gobo order",
+        mail._mail_apply_thread(store, {"id": "t1", "historyId": "h2", "subject": "Gobo order",
             "messages": [_mk_msg("t1-m1", "Jo Bloggs", "jo@customer.com", "2026-08-19T01:00:00+00:00"),
                          _mk_msg("t1-m2", "Jo Bloggs", "jo@customer.com", "2026-08-19T02:00:00+00:00"),
                          _mk_msg("t1-m3", "Sales", MBOX, "2026-08-19T03:00:00+00:00")]}, MBOX)
         eq(t["state"], "waiting", "our reply does not move the state")
         ok(any(a["action"] == "replied from Gmail" for a in t["activity"]))
         # The customer replying flips waiting back to progress.
-        copilot._mail_apply_thread(store, {"id": "t1", "historyId": "h3", "subject": "Gobo order",
+        mail._mail_apply_thread(store, {"id": "t1", "historyId": "h3", "subject": "Gobo order",
             "messages": [_mk_msg("t1-m3", "Sales", MBOX, "2026-08-19T03:00:00+00:00"),
                          _mk_msg("t1-m4", "Jo Bloggs", "jo@customer.com", "2026-08-19T04:00:00+00:00")]}, MBOX)
         eq(t["state"], "progress", "a customer reply wakes a waiting thread")
@@ -9238,11 +9240,11 @@ def t_mail_reopen_goes_to_the_previous_owner_if_still_active():
     def go():
         ensure_auth()
         uid, _sess, _pw = ready_user("Dan", "dan")
-        store = copilot._load_mail()
+        store = mail._load_mail()
         _seed_thread("t1")
         t = store["threads"]["t1"]
         t["owner"], t["state"], t["done_at"] = uid, "done", "2026-08-01T00:00:00+00:00"
-        copilot._mail_apply_thread(store, {"id": "t1", "historyId": "h9", "subject": "Gobo order",
+        mail._mail_apply_thread(store, {"id": "t1", "historyId": "h9", "subject": "Gobo order",
             "messages": [_mk_msg("t1-m1", "Jo", "jo@customer.com", "2026-08-19T01:00:00+00:00"),
                          _mk_msg("t1-m9", "Jo", "jo@customer.com", "2026-08-19T09:00:00+00:00")]}, MBOX)
         eq(t["state"], "assigned", "a reopened thread returns to its owner")
@@ -9251,7 +9253,7 @@ def t_mail_reopen_goes_to_the_previous_owner_if_still_active():
         # Same again with the owner switched off: back to the room instead.
         post("/api/team/user", {"op": "active", "id": uid, "active": False})
         t["state"], t["done_at"] = "done", "2026-08-01T00:00:00+00:00"
-        copilot._mail_apply_thread(store, {"id": "t1", "historyId": "ha", "subject": "Gobo order",
+        mail._mail_apply_thread(store, {"id": "t1", "historyId": "ha", "subject": "Gobo order",
             "messages": [_mk_msg("t1-m1", "Jo", "jo@customer.com", "2026-08-19T01:00:00+00:00"),
                          _mk_msg("t1-m9", "Jo", "jo@customer.com", "2026-08-19T09:00:00+00:00"),
                          _mk_msg("t1-mb", "Jo", "jo@customer.com", "2026-08-19T10:00:00+00:00")]}, MBOX)
@@ -9268,7 +9270,7 @@ def t_mail_claim_is_first_come_single_owner():
         _seed_thread("t1")
         r = post_s(sess_a, "/api/mail/claim", {"id": "t1"})
         eq(r.status_code, 200, r.text)
-        t = copilot._load_mail()["threads"]["t1"]
+        t = mail._load_mail()["threads"]["t1"]
         eq(t["state"], "assigned")
         r2 = post_s(sess_b, "/api/mail/claim", {"id": "t1"})
         eq(r2.status_code, 409, "one owner per thread is the whole point")
@@ -9280,7 +9282,7 @@ def t_mail_claim_is_first_come_single_owner():
         r4 = post("/api/mail/assign", {"id": "t1", "uid": uid_b,
                                        "note": "Bob knows this customer"})
         eq(r4.status_code, 200, r4.text)
-        t = copilot._load_mail()["threads"]["t1"]
+        t = mail._load_mail()["threads"]["t1"]
         eq(t["owner"], uid_b)
         ok(any(n["text"] == "Bob knows this customer" for n in t["notes"]))
         ok(any("assigned to Bob" in a["action"] for a in t["activity"]))
@@ -9300,7 +9302,7 @@ def t_mail_state_moves_are_owner_or_lead_only():
         eq(post_s(sess_a, "/api/mail/state", {"id": "t1", "state": "nonsense"}).status_code, 400)
         r = post("/api/mail/state", {"id": "t1", "state": "done"})    # the master is a lead
         eq(r.status_code, 200, "a lead can close anyone's thread")
-        t = copilot._load_mail()["threads"]["t1"]
+        t = mail._load_mail()["threads"]["t1"]
         eq(t["state"], "done")
         ok(t["done_at"], "done stamps its time")
         # An unowned thread cannot be moved by a member, but a lead can bin it.
@@ -9314,7 +9316,7 @@ def t_mail_state_moves_are_owner_or_lead_only():
         post_s(sess_a, "/api/mail/claim", {"id": "t3"})
         eq(post_s(sess_b, "/api/mail/assign", {"id": "t3", "uid": ""}).status_code, 403)
         eq(post_s(sess_a, "/api/mail/assign", {"id": "t3", "uid": ""}).status_code, 200)
-        eq(copilot._load_mail()["threads"]["t3"]["state"], "unassigned")
+        eq(mail._load_mail()["threads"]["t3"]["state"], "unassigned")
         # Assigning to a switched-off account is refused.
         post("/api/team/user", {"op": "active", "id": uid_a, "active": False})
         eq(post("/api/mail/assign", {"id": "t3", "uid": uid_a}).status_code, 400)
@@ -9385,7 +9387,7 @@ def t_mail_label_failure_never_blocks_the_claim():
         try:
             r = post_s(sess, "/api/mail/claim", {"id": "t1"})
             eq(r.status_code, 200, "ownership is ours to grant, not Gmail's")
-            t = copilot._load_mail()["threads"]["t1"]
+            t = mail._load_mail()["threads"]["t1"]
             eq(t["owner"] != "", True)
             ok(t["label_error"], "but the failed label is recorded")
         finally:
@@ -9420,14 +9422,14 @@ def t_mail_sync_pipeline_and_history_short_circuit():
             eq(calls["get"], 1)
             # Same historyId again: the listing is enough, no thread fetch.
             # (A board read no longer syncs inline, so the sync is run here.)
-            copilot._load_mail()["synced_at"] = ""     # force staleness
-            run_async(copilot._mail_sync_now())
+            mail._load_mail()["synced_at"] = ""     # force staleness
+            run_async(mail._mail_sync_now())
             eq(calls["list"], 2, "the sync did run")
             eq(calls["get"], 1, "an unchanged thread costs nothing to re-sync")
             # A bumped historyId is fetched again.
             listing[0]["historyId"] = "h2"
-            copilot._load_mail()["synced_at"] = ""
-            run_async(copilot._mail_sync_now())
+            mail._load_mail()["synced_at"] = ""
+            run_async(mail._mail_sync_now())
             eq(calls["get"], 2)
         finally:
             _gm.list_threads, _gm.get_thread = saved
@@ -9458,7 +9460,7 @@ def t_mail_backup_includes_the_board_but_never_the_token():
     def go():
         ensure_auth()
         _seed_thread("t1")
-        copilot._write_mail(copilot._load_mail())
+        mail._write_mail(mail._load_mail())
         _gm.save_connection("rt-secret", MBOX)
         import io, zipfile
         buf, _n = copilot._build_backup_zip()
@@ -9491,7 +9493,7 @@ def t_mail_claim_is_durable_before_the_label_trip():
         _gm.save_connection("rt-test", MBOX)
         seen = {}
         async def probe(name, known):
-            with open(copilot.MAILBOX_PATH, encoding="utf-8") as fh:
+            with open(mail.MAILBOX_PATH, encoding="utf-8") as fh:
                 d = json.load(fh)["mailbox"]
             seen["owner_on_disk"] = bool(d["threads"]["t1"].get("owner"))
             raise _gm.GmailError("gmail is down")
@@ -9501,7 +9503,7 @@ def t_mail_claim_is_durable_before_the_label_trip():
             r = post_s(sess, "/api/mail/claim", {"id": "t1"})
             eq(r.status_code, 200, r.text)
             ok(seen.get("owner_on_disk"), "the claim was durable before Gmail was asked")
-            t = copilot._load_mail()["threads"]["t1"]
+            t = mail._load_mail()["threads"]["t1"]
             ok(t["label_error"], "and the label failure is recorded, not fatal")
         finally:
             _gm.ensure_label = saved
@@ -9518,13 +9520,13 @@ def t_mail_release_on_deactivate_tab_removal_and_delete():
         post_s(sess_b, "/api/mail/claim", {"id": "t2"})
         # Switching Ann off releases her thread to the room.
         post("/api/team/user", {"op": "active", "id": uid_a, "active": False})
-        t1 = copilot._load_mail()["threads"]["t1"]
+        t1 = mail._load_mail()["threads"]["t1"]
         eq(t1["state"], "unassigned", "a switched-off account keeps no email")
         eq(t1["owner"], "")
         ok(any("released" in a["action"] for a in t1["activity"]))
         # Taking Bob's mail tab away does the same...
         post("/api/team/user", {"op": "tabs", "id": uid_b, "tabs": ["overview"]})
-        t2 = copilot._load_mail()["threads"]["t2"]
+        t2 = mail._load_mail()["threads"]["t2"]
         eq(t2["state"], "unassigned", "no mail tab, no owned email")
         # ...and a lead cannot assign to him while it is gone.
         eq(post("/api/mail/assign", {"id": "t2", "uid": uid_b}).status_code, 400,
@@ -9542,7 +9544,7 @@ def t_mail_double_click_state_is_one_move():
         post_s(sess, "/api/mail/claim", {"id": "t1"})
         eq(post_s(sess, "/api/mail/state", {"id": "t1", "state": "progress"}).status_code, 200)
         eq(post_s(sess, "/api/mail/state", {"id": "t1", "state": "progress"}).status_code, 200)
-        t = copilot._load_mail()["threads"]["t1"]
+        t = mail._load_mail()["threads"]["t1"]
         eq(len([a for a in t["activity"] if a["action"] == "started work"]), 1,
            "a double-click is not two moves")
     with_mail(go)
@@ -9553,7 +9555,7 @@ def t_mail_viewing_validates_the_thread_and_sweeps():
         ensure_auth()
         eq(post("/api/mail/viewing", {"id": "garbage-id"}).status_code, 404,
            "the viewers register only tracks real threads")
-        ok("garbage-id" not in copilot._mail_viewers)
+        ok("garbage-id" not in mail._mail_viewers)
     with_mail(go)
 
 @test
@@ -9581,7 +9583,7 @@ def t_mail_label_cache_evicts_on_failure():
         _uid, sess, _ = ready_user("Ann", "ann")
         _seed_thread("t1")
         _gm.save_connection("rt-test", MBOX)
-        store = copilot._load_mail()
+        store = mail._load_mail()
         store["labels"]["Copilot/Ann"] = "DEAD_ID"
         async def boom(tid, add=None, remove=None):
             raise _gm.GmailError("Invalid label")
@@ -9591,7 +9593,7 @@ def t_mail_label_cache_evicts_on_failure():
         _gm.modify_thread, _gm.ensure_label = boom, use_cache
         try:
             eq(post_s(sess, "/api/mail/claim", {"id": "t1"}).status_code, 200)
-            ok("Copilot/Ann" not in copilot._load_mail()["labels"],
+            ok("Copilot/Ann" not in mail._load_mail()["labels"],
                "the dead id is evicted, so the next change re-lists")
         finally:
             _gm.modify_thread, _gm.ensure_label = saved
@@ -9605,7 +9607,7 @@ def t_mail_sync_abandons_when_the_store_is_replaced_under_it():
         ensure_auth()
         _gm.save_connection("rt-test", MBOX)
         async def swapping_list(q, n):
-            copilot._mail_mem = None    # what a restore does mid-await
+            mail._mail_mem = None    # what a restore does mid-await
             return {"threads": [{"id": "tX", "snippet": "s", "historyId": "h1"}],
                     "complete": True}
         async def fake_get(tid):
@@ -9617,7 +9619,7 @@ def t_mail_sync_abandons_when_the_store_is_replaced_under_it():
         try:
             r = post("/api/mail/board", {"force": True})
             eq(r.status_code, 200, r.text)
-            ok("tX" not in copilot._load_mail()["threads"],
+            ok("tX" not in mail._load_mail()["threads"],
                "the orphaned sync walked away instead of writing")
         finally:
             _gm.list_threads, _gm.get_thread = saved
@@ -9653,7 +9655,7 @@ def t_mail_connect_ticket_is_master_only_and_single_use():
                "and no ticket at all is still forbidden")
         finally:
             _gm.OAUTH_CLIENT_ID, _gm.OAUTH_CLIENT_SECRET = saved
-            copilot._mail_connect_tickets.clear()
+            mail._mail_connect_tickets.clear()
     with_mail(go)
 
 @test
@@ -9670,7 +9672,7 @@ def t_mail_bulk_clears_a_backlog_and_reports_what_it_could_not_do():
         r = post_s(sess_a, "/api/mail/bulk", {"op": "claim", "ids": ["b0", "b1", "b2"]})
         eq(r.status_code, 200, r.text)
         eq(r.json()["changed"], 3)
-        threads = copilot._load_mail()["threads"]
+        threads = mail._load_mail()["threads"]
         eq(threads["b0"]["owner"], uid_a)
         eq(threads["b0"]["state"], "assigned")
         # Bob claiming the same ones is told why, per thread, not just refused.
@@ -9687,7 +9689,7 @@ def t_mail_bulk_clears_a_backlog_and_reports_what_it_could_not_do():
                                      "ids": ["b0", "b1", "b2", "b4", "gone"]})
         eq(r4.json()["changed"], 4)
         ok(any(s["id"] == "gone" for s in r4.json()["skipped"]), "a vanished id is named")
-        eq(copilot._load_mail()["threads"]["b1"]["state"], "done")
+        eq(mail._load_mail()["threads"]["b1"]["state"], "done")
         # Staff cannot mass-assign to other people.
         eq(post_s(sess_a, "/api/mail/bulk", {"op": "assign", "uid": uid_a,
                                              "ids": ["b0"]}).status_code, 403)
@@ -9762,7 +9764,7 @@ def t_mail_draft_is_saved_never_sent_and_threaded_to_the_customer():
                "the reply goes to the CUSTOMER, not back to our own mailbox")
             eq(captured["irt"], "<abc@mail>", "and threads onto their message")
             eq(captured["thread_id"], "t1")
-            t = copilot._load_mail()["threads"]["t1"]
+            t = mail._load_mail()["threads"]["t1"]
             ok(t.get("draft_at"), "the thread records that a draft exists")
             ok(any("draft" in a["action"] for a in t["activity"]))
             eq(post_s(sess, "/api/mail/draft", {"id": "t1", "op": "save", "text": ""}).status_code,
@@ -9771,7 +9773,7 @@ def t_mail_draft_is_saved_never_sent_and_threaded_to_the_customer():
             async def unchanged(draft_id):
                 # What we actually put in Gmail, quoted original and all:
                 # still exactly ours, so the save may replace it.
-                return copilot._load_mail()["threads"]["t1"]["draft_text"]
+                return mail._load_mail()["threads"]["t1"]["draft_text"]
             _gm.draft_body = unchanged
             r2 = post_s(sess, "/api/mail/draft", {"id": "t1", "op": "save", "text": "Second go."})
             eq(captured["replaces"], "d1", "the previous draft is cleared up")
@@ -9967,8 +9969,8 @@ def t_a_sent_reply_goes_to_the_customer_and_lands_waiting():
         _gm.read_thread, _gm.send_message = _one_from_customer(), fake_send
         _gm.draft_body, _gm.delete_draft = still_ours, fake_delete
         try:
-            t = copilot._load_mail()["threads"]["t1"]
-            t.update({"draft_id": "d1", "draft_at": copilot._mail_now(),
+            t = mail._load_mail()["threads"]["t1"]
+            t.update({"draft_id": "d1", "draft_at": mail._mail_now(),
                       "draft_to": "jo@customer.com",
                       "draft_text": "Hello Jo, they ship Friday."})
             r = post("/api/mail/send", {"id": "t1", "text": "Hello Jo, they ship Friday."})
@@ -9981,7 +9983,7 @@ def t_a_sent_reply_goes_to_the_customer_and_lands_waiting():
             eq(captured["irt"], "<abc@mail>", "and threads onto their message")
             eq(captured["thread_id"], "t1")
             ok(not captured["new"], "a reply is not a new conversation")
-            t = copilot._load_mail()["threads"]["t1"]
+            t = mail._load_mail()["threads"]["t1"]
             eq(t["state"], "waiting", "the shop is now waiting on them")
             eq(t["sent_to"], "jo@customer.com")
             eq(t["sent_msg_id"], "sent-1")
@@ -10017,7 +10019,7 @@ def t_a_draft_rewritten_in_gmail_survives_the_send():
         _gm.read_thread, _gm.send_message = _one_from_customer(), fake_send
         _gm.draft_body, _gm.delete_draft = edited, fake_delete
         try:
-            t = copilot._load_mail()["threads"]["t1"]
+            t = mail._load_mail()["threads"]["t1"]
             t.update({"draft_id": "d1", "draft_text": "Hello Jo, they ship Friday."})
             eq(post("/api/mail/send", {"id": "t1", "text": "Different words."}
                     ).status_code, 200)
@@ -10037,7 +10039,7 @@ def t_a_send_is_stamped_to_disk_before_gmail_is_asked():
         _seed_thread("t1")
         seen = {}
         async def fake_send(thread_id, to_addr, subject, body_text, **kw):
-            disk = json.load(open(copilot.MAILBOX_PATH))["mailbox"]
+            disk = json.load(open(mail.MAILBOX_PATH))["mailbox"]
             seen["pending"] = disk["threads"]["t1"].get("send_pending") or {}
             return {"id": "sent-1", "thread_id": thread_id}
         saved = (_gm.read_thread, _gm.send_message)
@@ -10066,11 +10068,11 @@ def t_a_failed_send_marks_nothing_sent_and_leaves_no_stamp():
             r = post("/api/mail/send", {"id": "t1", "text": "Hello Jo."})
             eq(r.status_code, 502, r.text)
             ok("Gmail refused this message." in r.json()["error"], r.text)
-            t = copilot._load_mail()["threads"]["t1"]
+            t = mail._load_mail()["threads"]["t1"]
             eq(t.get("sent_at"), None, "nothing is marked sent")
             eq(t.get("send_pending"), None, "and no stamp is left to haunt the board")
             eq(t["state"], "unassigned", "the conversation did not move either")
-            disk = json.load(open(copilot.MAILBOX_PATH))["mailbox"]
+            disk = json.load(open(mail.MAILBOX_PATH))["mailbox"]
             eq(disk["threads"]["t1"].get("send_pending"), None, "cleared on DISK, not just here")
             ok(any("did not complete" in a["action"] for a in t["activity"]),
                "and the thread says a send was attempted: " + str(t["activity"]))
@@ -10107,7 +10109,7 @@ def t_a_send_never_goes_in_a_circle():
                                         "subject": "Hi", "text": "hello"})
             eq(r3.status_code, 400, "one of ours among five of theirs still counts")
             eq(calls, [], "and Gmail was never asked, any of the three times")
-            eq(copilot._load_mail().get("outbound_pending") or [], [], "nothing was stamped")
+            eq(mail._load_mail().get("outbound_pending") or [], [], "nothing was stamped")
         finally:
             _gm.read_thread, _gm.send_message = saved
     with_mail(go)
@@ -10175,27 +10177,27 @@ def t_a_new_conversation_starts_owned_waiting_and_addressed_to_them():
             ok(captured["new"], "Gmail is told this starts a conversation")
             eq(captured["thread_id"], "", "with nothing to attach it to")
             eq(captured["subject"], "Your quote")
-            t = copilot._load_mail()["threads"]["T9"]
+            t = mail._load_mail()["threads"]["T9"]
             eq(t["owner"], uid, "whoever wrote it is holding it")
             eq(t["state"], "waiting")
             eq(t["started_to"], "jo@customer.com, pat@customer.com")
             eq(t["sent_by"], uid)
             ok(any("started this conversation" in a["action"] for a in t["activity"]),
                str(t["activity"]))
-            row = [x for x in copilot._mail_board_shape(copilot._load_mail())
+            row = [x for x in mail._mail_board_shape(mail._load_mail())
                    if x["id"] == "T9"][0]
             eq(row["from_email"], "jo@customer.com",
                "the row shows who it WENT TO, never our own mailbox")
             eq(row["sent_to"], "jo@customer.com, pat@customer.com")
             eq(row["owner_name"], "Ann")
             # The stamp came off; a leftover one from a crash is REPORTED.
-            store = copilot._load_mail()
+            store = mail._load_mail()
             eq(store.get("outbound_pending") or [], [])
             store.setdefault("outbound_pending", []).append(
                 {"at": "2026-09-01T09:00:00+00:00", "by": uid, "to": "lost@customer.com",
                  "subject": "Half sent", "text": "..."})
-            store["synced_at"] = copilot._mail_now()   # no Gmail trip for this read
-            copilot._write_mail(store)
+            store["synced_at"] = mail._mail_now()   # no Gmail trip for this read
+            mail._write_mail(store)
             board = post_s(sess, "/api/mail/board", {}).json()
             eq(len(board["outbound_pending"]), 1, str(board.get("outbound_pending")))
             eq(board["outbound_pending"][0]["to"], "lost@customer.com")
@@ -10240,10 +10242,10 @@ def t_a_dry_send_says_where_it_would_go_and_sends_nothing():
                 body["dry"] = True
                 eq(post("/api/mail/send", body).status_code, 400, why + " is still refused")
             eq(calls, [], "a dry run never sends")
-            t = copilot._load_mail()["threads"]["t1"]
+            t = mail._load_mail()["threads"]["t1"]
             eq(t.get("send_pending"), None, "and never stamps")
             eq(t["state"], "unassigned", "and never moves the board")
-            eq(copilot._load_mail().get("outbound_pending") or [], [])
+            eq(mail._load_mail().get("outbound_pending") or [], [])
         finally:
             _gm.read_thread, _gm.send_message = saved
     with_mail(go)
@@ -10340,7 +10342,7 @@ def t_the_address_book_merges_the_inbox_and_the_crm():
         "p2": {"id": "p2", "name": "Pat Price", "org_id": "", "emails": ["pat@nowhere.test"]},
         "p3": {"id": "p3", "name": "Junk", "org_id": "o1", "emails": ["", "   ", "bad@"]},
     }, "orgs": {"o1": {"id": "o1", "name": "Northlight Studios"}}}
-    rows = copilot._mail_address_book(store, crm, MBOX)
+    rows = mail._mail_address_book(store, crm, MBOX)
     eq([r["email"] for r in rows],
        ["anon@anywhere.test", "zoe@vance.test", "jo.b@northlight.test",
         "jo@northlight.test", "pat@nowhere.test", "sam@elsewhere.test", "ada@ash.test"],
@@ -10355,9 +10357,9 @@ def t_the_address_book_merges_the_inbox_and_the_crm():
        "a missing name stays missing; it never falls back to the address")
     for r in rows:
         eq(sorted(r), ["email", "name", "sub"], "the book carries nothing else")
-    eq(copilot._mail_address_book(store, crm, MBOX.upper()),
+    eq(mail._mail_address_book(store, crm, MBOX.upper()),
        rows, "our own address is ours whatever case it is written in")
-    eq(copilot._mail_address_book({}, {}, MBOX), [], "two empty stores make an empty book")
+    eq(mail._mail_address_book({}, {}, MBOX), [], "two empty stores make an empty book")
 
 @test
 def t_the_address_book_route_serves_both_stores_and_nothing_else():
@@ -10391,18 +10393,18 @@ def t_sync_does_not_call_a_gizmo_send_a_reply_from_gmail():
     hands the message back would tell the room somebody used Gmail instead."""
     def go():
         ensure_auth()
-        store = copilot._load_mail()
+        store = mail._load_mail()
         _seed_thread("t1")
         t = store["threads"]["t1"]
         t["state"], t["sent_msg_id"] = "waiting", "our-reply"
-        copilot._mail_apply_thread(store, {"id": "t1", "historyId": "h2", "subject": "Gobo order",
+        mail._mail_apply_thread(store, {"id": "t1", "historyId": "h2", "subject": "Gobo order",
             "messages": [_mk_msg("t1-m1", "Jo Bloggs", "jo@customer.com", "2026-08-19T01:00:00+00:00"),
                          _mk_msg("our-reply", "Sales", MBOX, "2026-08-19T03:00:00+00:00")]}, MBOX)
         eq(any(a["action"] == "replied from Gmail" for a in t["activity"]), False,
            str(t["activity"]))
         eq(t["state"], "waiting")
         # Somebody actually replying in Gmail is still reported.
-        copilot._mail_apply_thread(store, {"id": "t1", "historyId": "h3", "subject": "Gobo order",
+        mail._mail_apply_thread(store, {"id": "t1", "historyId": "h3", "subject": "Gobo order",
             "messages": [_mk_msg("t1-m9", "Sales", MBOX, "2026-08-19T04:00:00+00:00")]}, MBOX)
         ok(any(a["action"] == "replied from Gmail" for a in t["activity"]), str(t["activity"]))
     with_mail(go)
@@ -10444,27 +10446,27 @@ def t_mail_rule_is_exactly_means_exactly():
             "name": "Newsletter", "done": True,
             "conditions": [{"field": "subject", "op": "is", "value": "newsletter"}]}})
         _seed_thread("r1", subject="Re: newsletter query, can you quote 40 gobos?")
-        eq(copilot._load_mail()["threads"]["r1"]["state"], "unassigned",
+        eq(mail._load_mail()["threads"]["r1"]["state"], "unassigned",
            "a real enquiry containing the word is NOT the word")
         _seed_thread("r2", subject="Newsletter")
-        eq(copilot._load_mail()["threads"]["r2"]["state"], "done", "the exact subject still matches")
+        eq(mail._load_mail()["threads"]["r2"]["state"], "done", "the exact subject still matches")
         # A display name can no longer impersonate an address.
         post("/api/mail/rules", {"op": "save", "rule": {
             "name": "Boss", "done": True,
             "conditions": [{"field": "from", "op": "is", "value": "boss@bigcustomer.com"}]}})
         _seed_thread("r3", subject="hello", frm=("boss@bigcustomer.com", "spoof@spammer.example"))
-        eq(copilot._load_mail()["threads"]["r3"]["state"], "unassigned",
+        eq(mail._load_mail()["threads"]["r3"]["state"], "unassigned",
            "a stranger putting that address in their DISPLAY NAME does not match it")
         _seed_thread("r5", subject="hello", frm=("The Boss", "boss@bigcustomer.com"))
-        eq(copilot._load_mail()["threads"]["r5"]["state"], "done", "the real address does")
+        eq(mail._load_mail()["threads"]["r5"]["state"], "done", "the real address does")
         # A non-address value still matches the name, which is what it is for.
         post("/api/mail/rules", {"op": "save", "rule": {
             "name": "Accounts", "done": True,
             "conditions": [{"field": "from", "op": "is", "value": "Accounts"}]}})
         _seed_thread("r6", subject="hello", frm=("Accounts", "ap@theatre.org"))
-        eq(copilot._load_mail()["threads"]["r6"]["state"], "done", "names still work")
+        eq(mail._load_mail()["threads"]["r6"]["state"], "done", "names still work")
         _seed_thread("r4", subject="hello", frm=("Someone", "boss@bigcustomer.com.evil.com"))
-        eq(copilot._load_mail()["threads"]["r4"]["state"], "unassigned",
+        eq(mail._load_mail()["threads"]["r4"]["state"], "unassigned",
            "but a lookalike address is not an exact match")
     with_mail(go)
 
@@ -10482,13 +10484,13 @@ def t_mail_rule_that_cannot_assign_does_not_let_the_next_one_close_it():
             "name": "Bulk", "done": True,
             "conditions": [{"field": "subject", "op": "contains", "value": "order"}]}})
         _seed_thread("v1", subject="order query", frm=("Boss", "boss@bigcustomer.com"))
-        eq(copilot._load_mail()["threads"]["v1"]["owner"], uid_a, "normally VIP wins")
+        eq(mail._load_mail()["threads"]["v1"]["owner"], uid_a, "normally VIP wins")
         post("/api/team/user", {"op": "tabs", "id": uid_a, "tabs": ["overview"]})
         _seed_thread("v2", subject="order query two", frm=("Boss", "boss@bigcustomer.com"))
-        t = copilot._load_mail()["threads"]["v2"]
+        t = mail._load_mail()["threads"]["v2"]
         eq(t["state"], "unassigned", "a broken VIP rule leaves it VISIBLE, never closed")
         eq(t["owner"], "")
-        rule = [r for r in copilot._load_mail()["rules"] if r["name"] == "VIP"][0]
+        rule = [r for r in mail._load_mail()["rules"] if r["name"] == "VIP"][0]
         ok(rule.get("broken"), "and the filter itself reports the fault")
     with_mail(go)
 
@@ -10511,7 +10513,7 @@ def t_mail_rule_files_into_a_gmail_folder():
             "name": "Vanish", "archive": True,
             "conditions": [{"field": "subject", "op": "contains", "value": "x"}]}}).status_code, 400)
         _seed_thread("n1", subject="Grow your business", frm=("Lead Gen", "hi@leadgenblast.io"))
-        t = copilot._load_mail()["threads"]["n1"]
+        t = mail._load_mail()["threads"]["n1"]
         eq(t["folder"], "Newsletters", "the intent is recorded on arrival")
         ok(t["folder_archive"], "including taking it out of the inbox")
         ok(not t.get("folder_done"), "and Gmail has not been called yet")
@@ -10527,14 +10529,14 @@ def t_mail_rule_files_into_a_gmail_folder():
         saved = (_gm.modify_thread, _gm.ensure_label, _gm.list_threads)
         _gm.modify_thread, _gm.ensure_label, _gm.list_threads = modify, label, listing
         try:
-            copilot._load_mail()["synced_at"] = ""
+            mail._load_mail()["synced_at"] = ""
             post("/api/mail/board", {"force": True})
             filed = [c for c in calls if c["add"] == ["L_Newsletters"]]
             eq(len(filed), 1, "filed exactly once")
             eq(filed[0]["remove"], ["INBOX"], "and taken out of the inbox as asked")
-            eq(copilot._load_mail()["threads"]["n1"]["folder_done"], "Newsletters")
+            eq(mail._load_mail()["threads"]["n1"]["folder_done"], "Newsletters")
             calls.clear()
-            copilot._load_mail()["synced_at"] = ""
+            mail._load_mail()["synced_at"] = ""
             post("/api/mail/board", {"force": True})
             eq([c for c in calls if c["add"] == ["L_Newsletters"]], [],
                "and never filed again on later syncs")
@@ -10645,7 +10647,7 @@ def t_mail_rules_sort_arriving_mail_and_never_steal_live_work():
         post("/api/mail/rules", {"op": "save", "rule": {
             "name": "Invoices", "assign": uid_a,
             "conditions": [{"field": "subject", "op": "contains", "value": "invoice"}]}})
-        store = copilot._load_mail()
+        store = mail._load_mail()
         # Junk closes itself on arrival.
         _seed_thread("j1", subject="Grow your business", frm=("Lead Gen", "hi@leadgenblast.io"))
         eq(store["threads"]["j1"]["state"], "done", "junk never becomes somebody's job")
@@ -10659,7 +10661,7 @@ def t_mail_rules_sort_arriving_mail_and_never_steal_live_work():
         eq(store["threads"]["o1"]["state"], "unassigned")
         # A LATER message must never re-file a live conversation.
         store["threads"]["o1"]["subject"] = "Quote, now about the invoice"
-        copilot._mail_apply_thread(store, {
+        mail._mail_apply_thread(store, {
             "id": "o1", "historyId": "h9", "subject": "Re: invoice attached",
             "messages": [_mk_msg("o1-m1", "Jo", "jo@customer.com", "2026-08-19T01:00:00+00:00"),
                          _mk_msg("o1-m2", "Jo", "jo@customer.com", "2026-08-19T05:00:00+00:00")]}, MBOX)
@@ -10681,7 +10683,7 @@ def t_mail_rules_run_over_existing_leaves_owned_mail_alone():
         r = post("/api/mail/rules", {"op": "run"})
         eq(r.status_code, 200, r.text)
         eq(r.json()["changed"], 1, "only the untouched one is sorted")
-        th = copilot._load_mail()["threads"]
+        th = mail._load_mail()["threads"]
         eq(th["e1"]["owner"], uid_a)
         eq(th["e3"]["state"], "unassigned", "and unrelated mail is left alone")
     with_mail(go)
@@ -10697,7 +10699,7 @@ def t_mail_rules_round_robin_shares_the_load():
             "conditions": [{"field": "subject", "op": "contains", "value": "quote"}]}})
         for i in range(4):
             _seed_thread("q%d" % i, subject="Quote request %d" % i)
-        owners = [copilot._load_mail()["threads"]["q%d" % i]["owner"] for i in range(4)]
+        owners = [mail._load_mail()["threads"]["q%d" % i]["owner"] for i in range(4)]
         eq(owners, [uid_a, uid_b, uid_a, uid_b], "the work alternates between them")
     with_mail(go)
 
@@ -10714,21 +10716,21 @@ def t_mail_rules_edit_toggle_reorder_and_delete():
             "conditions": [{"field": "subject", "op": "contains", "value": "spam"}]}}).json()["id"]
         # First match wins, so order is priority.
         _seed_thread("s1", subject="spam thing")
-        eq(copilot._load_mail()["threads"]["s1"]["state"], "done")
+        eq(mail._load_mail()["threads"]["s1"]["state"], "done")
         post("/api/mail/rules", {"op": "move", "id": b})     # promote Second
         _seed_thread("s2", subject="spam thing two")
-        eq(copilot._load_mail()["threads"]["s2"]["owner"], uid_a, "order decides")
+        eq(mail._load_mail()["threads"]["s2"]["owner"], uid_a, "order decides")
         # Switching one off takes it out of the running, keeping its history.
         post("/api/mail/rules", {"op": "toggle", "id": b})
         _seed_thread("s3", subject="spam thing three")
-        eq(copilot._load_mail()["threads"]["s3"]["state"], "done")
+        eq(mail._load_mail()["threads"]["s3"]["state"], "done")
         # Editing keeps the id and the hit count.
-        before = [r for r in copilot._load_mail()["rules"] if r["id"] == a][0]["hits"]
+        before = [r for r in mail._load_mail()["rules"] if r["id"] == a][0]["hits"]
         ok(before > 0)
         post("/api/mail/rules", {"op": "save", "rule": {
             "id": a, "name": "Renamed", "done": True,
             "conditions": [{"field": "subject", "op": "contains", "value": "spam"}]}})
-        after = [r for r in copilot._load_mail()["rules"] if r["id"] == a][0]
+        after = [r for r in mail._load_mail()["rules"] if r["id"] == a][0]
         eq(after["name"], "Renamed")
         eq(after["hits"], before, "an edit does not reset what the filter has done")
         eq(post("/api/mail/rules", {"op": "delete", "id": a}).status_code, 200)
@@ -10762,7 +10764,7 @@ def t_mail_bulk_assign_matches_the_single_route_exactly():
         post_s(sess_a, "/api/mail/state", {"id": "w1", "state": "waiting"})
         post_s(sess_a, "/api/mail/state", {"id": "w2", "state": "progress"})
         post("/api/mail/bulk", {"op": "assign", "uid": uid_b, "ids": ["w1", "w2", "w3"]})
-        th = copilot._load_mail()["threads"]
+        th = mail._load_mail()["threads"]
         eq(th["w1"]["state"], "waiting", "a handover keeps the waiting signal")
         eq(th["w2"]["state"], "progress", "and keeps work already started")
         eq(th["w3"]["state"], "assigned")
@@ -10773,7 +10775,7 @@ def t_mail_bulk_assign_matches_the_single_route_exactly():
         eq(r.status_code, 200, r.text)
         eq(r.json()["changed"], 1, "her own goes back to the room")
         ok(any("not yours" in s["why"] for s in r.json()["skipped"]), r.text)
-        eq(copilot._load_mail()["threads"]["w1"]["state"], "unassigned")
+        eq(mail._load_mail()["threads"]["w1"]["state"], "unassigned")
     with_mail(go)
 
 @test
@@ -10784,7 +10786,7 @@ def t_mail_bulk_counts_each_thread_once():
         _seed_thread("d1")
         r = post_s(sess, "/api/mail/bulk", {"op": "claim", "ids": ["d1", "d1", "d1"]})
         eq(r.json()["changed"], 1, "the same id three times is one decision")
-        eq(len([a for a in copilot._load_mail()["threads"]["d1"]["activity"]
+        eq(len([a for a in mail._load_mail()["threads"]["d1"]["activity"]
                 if a["action"] == "claimed"]), 1, "and one line in the history")
     with_mail(go)
 
@@ -10813,15 +10815,15 @@ def t_mail_reconciler_backs_off_a_thread_that_will_never_sync():
         try:
             post_s(sess, "/api/mail/bulk", {"op": "claim",
                                             "ids": ["s0", "s1", "s2", "s3"]})
-            copilot._load_mail()["synced_at"] = ""
+            mail._load_mail()["synced_at"] = ""
             post("/api/mail/board", {"force": True})
             ok("s0" in tries, "the broken one is tried once")
             eq(sorted(set(tries)), ["s0", "s1", "s2", "s3"], "and everything else lands")
             tries.clear()
-            copilot._load_mail()["synced_at"] = ""
+            mail._load_mail()["synced_at"] = ""
             post("/api/mail/board", {"force": True})
             eq(tries, [], "the next sync retries nothing: the failure is backed off")
-            t0 = copilot._load_mail()["threads"]["s0"]
+            t0 = mail._load_mail()["threads"]["s0"]
             ok(float(t0.get("label_retry_at") or 0) > time.time(),
                "the broken thread carries its own retry time")
         finally:
@@ -10841,7 +10843,7 @@ def t_mail_sync_abandons_a_restore_that_lands_during_the_reconciler():
         async def listing(q, n):
             return {"threads": [], "complete": True}
         async def label(name, known):
-            copilot._mail_mem = None      # a restore lands mid-reconcile
+            mail._mail_mem = None      # a restore lands mid-reconcile
             known[name] = "L1"
             return "L1"
         async def modify(tid, add=None, remove=None):
@@ -10851,13 +10853,13 @@ def t_mail_sync_abandons_a_restore_that_lands_during_the_reconciler():
         try:
             # Stamp the DISK with a world the abandoned sync must not overwrite,
             # exactly as a restore would.
-            store = copilot._load_mail()
+            store = mail._load_mail()
             store["synced_at"] = ""
             store["threads"]["k1"]["subject"] = "RESTORED"
-            copilot._write_mail(store)
+            mail._write_mail(store)
             r = post("/api/mail/board", {"force": True})
             eq(r.status_code, 200, r.text)
-            disk = json.load(open(copilot.MAILBOX_PATH))["mailbox"]
+            disk = json.load(open(mail.MAILBOX_PATH))["mailbox"]
             eq(disk["threads"]["k1"]["subject"], "RESTORED",
                "the orphaned sync wrote nothing over the restored world")
             eq(disk["synced_at"], "", "and did not even stamp its own clock")
@@ -10872,8 +10874,8 @@ def t_mail_unread_backfills_for_threads_that_predate_the_field():
         _gm.save_connection("rt-test", MBOX)
         # A thread already in the store from an older build: no unread key.
         _seed_thread("old1")
-        copilot._load_mail()["threads"]["old1"].pop("unread", None)
-        copilot._load_mail()["threads"]["old1"]["history_id"] = "h1"
+        mail._load_mail()["threads"]["old1"].pop("unread", None)
+        mail._load_mail()["threads"]["old1"]["history_id"] = "h1"
         fetched = []
         async def listing(q, n):
             return {"threads": [{"id": "old1", "snippet": "s", "historyId": "h1"}],
@@ -10888,13 +10890,13 @@ def t_mail_unread_backfills_for_threads_that_predate_the_field():
         saved = (_gm.list_threads, _gm.get_thread)
         _gm.list_threads, _gm.get_thread = listing, get_thread
         try:
-            copilot._load_mail()["synced_at"] = ""
+            mail._load_mail()["synced_at"] = ""
             post("/api/mail/board", {"force": True})
             eq(fetched, ["old1"], "an unchanged thread is refetched ONCE to fill the gap")
-            ok(copilot._load_mail()["threads"]["old1"]["unread"],
+            ok(mail._load_mail()["threads"]["old1"]["unread"],
                "so old mail does not read as already-read forever")
             fetched.clear()
-            copilot._load_mail()["synced_at"] = ""
+            mail._load_mail()["synced_at"] = ""
             post("/api/mail/board", {"force": True})
             eq(fetched, [], "and never again after that")
         finally:
@@ -10911,8 +10913,8 @@ def t_mail_unread_comes_from_gmail_not_from_our_own_stale_copy():
         _gm.save_connection("rt-test", MBOX)
         _seed_thread("u1", subject="One")
         _seed_thread("u2", subject="Two")
-        copilot._load_mail()["threads"]["u1"]["history_id"] = "h1"
-        copilot._load_mail()["threads"]["u2"]["history_id"] = "h1"
+        mail._load_mail()["threads"]["u1"]["history_id"] = "h1"
+        mail._load_mail()["threads"]["u2"]["history_id"] = "h1"
         queries = []
         unread = {"ids": set()}
         async def listing(q, n):
@@ -10928,23 +10930,23 @@ def t_mail_unread_comes_from_gmail_not_from_our_own_stale_copy():
         saved = (_gm.list_threads, _gm.list_thread_ids)
         _gm.list_threads, _gm.list_thread_ids = listing, ids
         try:
-            copilot._load_mail()["synced_at"] = ""
+            mail._load_mail()["synced_at"] = ""
             post("/api/mail/board", {"force": True})
             ok(any("is:unread" in q for q in queries), "Gmail is asked outright")
-            eq(copilot._load_mail()["threads"]["u1"]["unread"], False)
+            eq(mail._load_mail()["threads"]["u1"]["unread"], False)
             # Now it is marked unread in Gmail. Nothing else about the thread
             # changes: same historyId, no new message.
             unread["ids"] = {"u2"}
-            copilot._load_mail()["synced_at"] = ""
+            mail._load_mail()["synced_at"] = ""
             post("/api/mail/board", {"force": True})
-            eq(copilot._load_mail()["threads"]["u2"]["unread"], True,
+            eq(mail._load_mail()["threads"]["u2"]["unread"], True,
                "the app notices without the thread having changed at all")
-            eq(copilot._load_mail()["threads"]["u1"]["unread"], False)
+            eq(mail._load_mail()["threads"]["u1"]["unread"], False)
             # And reading it in Gmail clears it again.
             unread["ids"] = set()
-            copilot._load_mail()["synced_at"] = ""
+            mail._load_mail()["synced_at"] = ""
             post("/api/mail/board", {"force": True})
-            eq(copilot._load_mail()["threads"]["u2"]["unread"], False)
+            eq(mail._load_mail()["threads"]["u2"]["unread"], False)
         finally:
             _gm.list_threads, _gm.list_thread_ids = saved
     with_mail(go)
@@ -10965,7 +10967,7 @@ def t_a_truncated_inbox_listing_does_not_hide_unread_mail():
         _gm.save_connection("rt-test", MBOX)
         _seed_thread("keep", subject="In the listing")
         _seed_thread("fell", subject="Fell off the end")
-        m = copilot._load_mail()["threads"]
+        m = mail._load_mail()["threads"]
         m["keep"]["history_id"] = "h1"; m["keep"]["unread"] = False
         m["fell"]["history_id"] = "h1"; m["fell"]["unread"] = False
         async def listing(q, n):
@@ -10979,9 +10981,9 @@ def t_a_truncated_inbox_listing_does_not_hide_unread_mail():
         saved = (_gm.list_threads, _gm.list_thread_ids)
         _gm.list_threads, _gm.list_thread_ids = listing, ids
         try:
-            copilot._load_mail()["synced_at"] = ""
+            mail._load_mail()["synced_at"] = ""
             post("/api/mail/board", {"force": True})
-            t = copilot._load_mail()["threads"]
+            t = mail._load_mail()["threads"]
             eq(t["keep"]["unread"], True, "the thread inside the listing is right")
             eq(t["fell"]["unread"], True,
                "and so is the one Gmail reported unread from outside it")
@@ -11000,7 +11002,7 @@ def t_a_thread_read_in_gmail_after_archiving_stops_showing_unread():
         ensure_auth()
         _gm.save_connection("rt-test", MBOX)
         _seed_thread("arch", subject="Archived then read")
-        m = copilot._load_mail()["threads"]
+        m = mail._load_mail()["threads"]
         m["arch"]["history_id"] = "h1"; m["arch"]["unread"] = True
         m["arch"]["in_inbox"] = False; m["arch"]["state"] = "done"
         async def listing(q, n):
@@ -11012,9 +11014,9 @@ def t_a_thread_read_in_gmail_after_archiving_stops_showing_unread():
         saved = (_gm.list_threads, _gm.list_thread_ids)
         _gm.list_threads, _gm.list_thread_ids = listing, ids
         try:
-            copilot._load_mail()["synced_at"] = ""
+            mail._load_mail()["synced_at"] = ""
             post("/api/mail/board", {"force": True})
-            eq(copilot._load_mail()["threads"]["arch"]["unread"], False,
+            eq(mail._load_mail()["threads"]["arch"]["unread"], False,
                "Gmail says nothing is unread, so the board must not still claim it is")
         finally:
             _gm.list_threads, _gm.list_thread_ids = saved
@@ -11030,7 +11032,7 @@ def t_a_thread_older_than_the_window_is_never_demoted_on_silence():
         ensure_auth()
         _gm.save_connection("rt-test", MBOX)
         _seed_thread("ancient", subject="Older than the window")
-        t = copilot._load_mail()["threads"]["ancient"]
+        t = mail._load_mail()["threads"]["ancient"]
         t["history_id"] = "h1"; t["unread"] = True; t["in_inbox"] = False
         t["last_at"] = "2019-01-01T00:00:00+00:00"      # far outside the window
         async def listing(q, n):
@@ -11042,9 +11044,9 @@ def t_a_thread_older_than_the_window_is_never_demoted_on_silence():
         saved = (_gm.list_threads, _gm.list_thread_ids)
         _gm.list_threads, _gm.list_thread_ids = listing, ids
         try:
-            copilot._load_mail()["synced_at"] = ""
+            mail._load_mail()["synced_at"] = ""
             post("/api/mail/board", {"force": True})
-            eq(copilot._load_mail()["threads"]["ancient"]["unread"], True,
+            eq(mail._load_mail()["threads"]["ancient"]["unread"], True,
                "silence from a query that did not cover it is not proof it was read")
         finally:
             _gm.list_threads, _gm.list_thread_ids = saved
@@ -11066,13 +11068,13 @@ def t_mail_bulk_can_be_undone():
         eq(r.status_code, 200, r.text)
         token = r.json()["undo"]
         ok(token, "an undo is offered")
-        eq(copilot._load_mail()["threads"]["u0"]["state"], "done")
+        eq(mail._load_mail()["threads"]["u0"]["state"], "done")
         eq(post_s(sess_b, "/api/mail/undo", {"token": token}).status_code, 403,
            "somebody else's mis-click is not theirs to undo")
         u = post_s(sess_a, "/api/mail/undo", {"token": token})
         eq(u.status_code, 200, u.text)
         eq(u.json()["restored"], 3)
-        th = copilot._load_mail()["threads"]
+        th = mail._load_mail()["threads"]
         eq(th["u0"]["state"], "waiting", "the exact state before, not a guess at it")
         eq(th["u0"]["owner"], uid_a)
         eq(th["u1"]["state"], "assigned", "and the ones she had just claimed are back to that")
@@ -11109,7 +11111,7 @@ def t_mail_attachment_save_lands_in_the_files_store():
         ensure_auth()
         def inner(fake):
             _seed_thread("t1")
-            copilot._load_mail()["threads"]["t1"]["files"] = [
+            mail._load_mail()["threads"]["t1"]["files"] = [
                 {"name": "logo.eps", "size": 12, "mime": "application/postscript",
                  "id": "att1", "msg": "m1"}]
             async def bytes_for(msg_id, att_id, cap=None):
@@ -11129,7 +11131,7 @@ def t_mail_attachment_save_lands_in_the_files_store():
                 # The folders were made on the way, so nobody has to first.
                 names = [f["name"] for f in d["folders"].values()]
                 ok("Artwork" in names and "#1201" in names, names)
-                t = copilot._load_mail()["threads"]["t1"]
+                t = mail._load_mail()["threads"]["t1"]
                 ok(any(x["name"] == "logo.eps" for x in t.get("saved_files") or []),
                    "the thread records that it was filed")
                 ok(any("logo.eps" in a["action"] for a in t["activity"]))
@@ -11273,8 +11275,8 @@ def t_mail_sync_only_closes_what_it_can_prove_was_archived():
         import datetime as _dtm
         fresh = _dtm.datetime.now(_dtm.timezone.utc).isoformat()
         for tid in ("keep1", "keep2"):
-            copilot._load_mail()["threads"][tid]["in_inbox"] = True
-            copilot._load_mail()["threads"][tid]["last_at"] = fresh
+            mail._load_mail()["threads"][tid]["in_inbox"] = True
+            mail._load_mail()["threads"][tid]["last_at"] = fresh
         state = {"complete": False}
         async def listing(q, n):
             # keep2 is missing, but the listing admits it is truncated.
@@ -11287,15 +11289,15 @@ def t_mail_sync_only_closes_what_it_can_prove_was_archived():
         saved = (_gm.list_threads, _gm.list_thread_ids)
         _gm.list_threads, _gm.list_thread_ids = listing, ids
         try:
-            copilot._load_mail()["synced_at"] = ""
+            mail._load_mail()["synced_at"] = ""
             post("/api/mail/board", {"force": True})
-            eq(copilot._load_mail()["threads"]["keep2"]["state"], "unassigned",
+            eq(mail._load_mail()["threads"]["keep2"]["state"], "unassigned",
                "a truncated listing never closes anything")
             # Now the listing is complete, so absence really does mean archived.
             state["complete"] = True
-            copilot._load_mail()["synced_at"] = ""
+            mail._load_mail()["synced_at"] = ""
             post("/api/mail/board", {"force": True})
-            t = copilot._load_mail()["threads"]["keep2"]
+            t = mail._load_mail()["threads"]["keep2"]
             eq(t["state"], "done", "a complete listing is proof")
             eq(t["closed_by"], "archive")
             # And it comes BACK when the thread returns, which is what Gmail's
@@ -11305,9 +11307,9 @@ def t_mail_sync_only_closes_what_it_can_prove_was_archived():
                                     {"id": "keep2", "snippet": "s", "historyId": "h1"}],
                         "complete": True}
             _gm.list_threads = listing2
-            copilot._load_mail()["synced_at"] = ""
+            mail._load_mail()["synced_at"] = ""
             post("/api/mail/board", {"force": True})
-            eq(copilot._load_mail()["threads"]["keep2"]["state"], "unassigned",
+            eq(mail._load_mail()["threads"]["keep2"]["state"], "unassigned",
                "a snoozed email is not closed forever")
         finally:
             _gm.list_threads, _gm.list_thread_ids = saved
@@ -11319,7 +11321,7 @@ def t_mail_attachment_supersedes_the_same_name():
         ensure_auth()
         def inner(fake):
             _seed_thread("t1")
-            copilot._load_mail()["threads"]["t1"]["files"] = [
+            mail._load_mail()["threads"]["t1"]["files"] = [
                 {"name": "proof.pdf", "size": 9, "id": "att1", "msg": "m1"}]
             async def bytes_for(msg_id, att_id, cap=None):
                 return b"%PDF-1.4 PDF-BYTES"
@@ -11354,7 +11356,7 @@ def t_mail_undo_never_restores_an_owner_who_cannot_hold_email():
         post("/api/team/user", {"op": "active", "id": uid_a, "active": False})
         u = post("/api/mail/undo", {"token": token})
         eq(u.status_code, 200, u.text)
-        t = copilot._load_mail()["threads"]["u1"]
+        t = mail._load_mail()["threads"]["u1"]
         eq(t["owner"], "", "the email is not buried on a switched-off account")
         eq(t["state"], "unassigned")
     with_mail(go)
@@ -11379,7 +11381,7 @@ def t_mail_read_state_is_bidirectional_with_gmail():
         _uid, sess, _ = ready_user("Ann", "ann")
         _gm.save_connection("rt-test", MBOX)
         _seed_thread("t1")
-        copilot._load_mail()["threads"]["t1"]["unread"] = True
+        mail._load_mail()["threads"]["t1"]["unread"] = True
         calls = []
         async def modify(tid, add=None, remove=None):
             calls.append({"id": tid, "add": add, "remove": remove})
@@ -11391,7 +11393,7 @@ def t_mail_read_state_is_bidirectional_with_gmail():
             eq(r.status_code, 200, r.text)
             eq(calls, [{"id": "t1", "add": None, "remove": ["UNREAD"]}],
                "Gmail is told, the same as opening it there")
-            eq(copilot._load_mail()["threads"]["t1"]["unread"], False)
+            eq(mail._load_mail()["threads"]["t1"]["unread"], False)
             # Opening it again does not nag Gmail a second time.
             calls.clear()
             post_s(sess, "/api/mail/thread", {"id": "t1"})
@@ -11400,7 +11402,7 @@ def t_mail_read_state_is_bidirectional_with_gmail():
             r2 = post_s(sess, "/api/mail/read", {"id": "t1", "unread": True})
             eq(r2.status_code, 200, r2.text)
             eq(calls, [{"id": "t1", "add": ["UNREAD"], "remove": None}])
-            ok(copilot._load_mail()["threads"]["t1"]["unread"])
+            ok(mail._load_mail()["threads"]["t1"]["unread"])
         finally:
             _gm.modify_thread = saved
     with_mail(go)
@@ -11413,7 +11415,7 @@ def t_mail_read_reports_when_gmail_refuses():
         ensure_auth()
         _gm.save_connection("rt-test", MBOX)
         _seed_thread("t1")
-        copilot._load_mail()["threads"]["t1"]["unread"] = True
+        mail._load_mail()["threads"]["t1"]["unread"] = True
         async def boom(tid, add=None, remove=None):
             raise _gm.GmailError("backend error")
         saved = _gm.modify_thread
@@ -11421,11 +11423,11 @@ def t_mail_read_reports_when_gmail_refuses():
         try:
             r = post("/api/mail/read", {"id": "t1", "unread": False})
             eq(r.status_code, 502, "a refusal is reported, not swallowed")
-            ok(copilot._load_mail()["threads"]["t1"]["unread"],
+            ok(mail._load_mail()["threads"]["t1"]["unread"],
                "and the board keeps the state Gmail still holds")
             # Bulk: some succeed, some do not, and the answer says so.
             _seed_thread("t2")
-            copilot._load_mail()["threads"]["t2"]["unread"] = True
+            mail._load_mail()["threads"]["t2"]["unread"] = True
             async def half(tid, add=None, remove=None):
                 if tid == "t1":
                     raise _gm.GmailError("nope")
@@ -11434,8 +11436,8 @@ def t_mail_read_reports_when_gmail_refuses():
             eq(r2.status_code, 200, r2.text)
             eq(r2.json()["changed"], 1)
             eq(r2.json()["failed"], 1)
-            ok(copilot._load_mail()["threads"]["t1"]["unread"], "the failed one is untouched")
-            ok(not copilot._load_mail()["threads"]["t2"]["unread"], "the other one moved")
+            ok(mail._load_mail()["threads"]["t1"]["unread"], "the failed one is untouched")
+            ok(not mail._load_mail()["threads"]["t2"]["unread"], "the other one moved")
         finally:
             _gm.modify_thread = saved
     with_mail(go)
@@ -11448,7 +11450,7 @@ def t_mail_unread_survives_being_marked_done():
         ensure_auth()
         _seed_thread("d1", subject="Cleared then reopened by the customer")
         post("/api/mail/bulk", {"op": "state", "state": "done", "ids": ["d1"]})
-        copilot._load_mail()["threads"]["d1"]["unread"] = True
+        mail._load_mail()["threads"]["d1"]["unread"] = True
         row = [t for t in post("/api/mail/board", {}).json()["threads"]
                if t["id"] == "d1"][0]
         eq(row["state"], "done")
@@ -11459,16 +11461,16 @@ def t_mail_unread_survives_being_marked_done():
 def t_mail_unread_rides_along_from_gmail():
     def go():
         ensure_auth()
-        store = copilot._load_mail()
+        store = mail._load_mail()
         msgs = [{"id": "m1", "from_name": "Jo", "from_email": "jo@customer.com",
                  "at": "2026-08-19T01:00:00+00:00", "snippet": "hi",
                  "labels": ["INBOX", "UNREAD"]}]
-        copilot._mail_apply_thread(store, {"id": "t1", "historyId": "h1",
+        mail._mail_apply_thread(store, {"id": "t1", "historyId": "h1",
                                            "subject": "New one", "messages": msgs}, MBOX)
         ok(store["threads"]["t1"]["unread"], "an unopened thread is marked unread")
         ok(post("/api/mail/board", {}).json()["threads"][0]["unread"], "and reaches the list")
         msgs[0]["labels"] = ["INBOX"]
-        copilot._mail_apply_thread(store, {"id": "t1", "historyId": "h2",
+        mail._mail_apply_thread(store, {"id": "t1", "historyId": "h2",
                                            "subject": "New one", "messages": msgs}, MBOX)
         ok(not store["threads"]["t1"]["unread"], "reading it in Gmail clears the bold")
     with_mail(go)
@@ -11496,11 +11498,11 @@ def t_mail_label_reconciler_catches_gmail_up_after_bulk():
         try:
             post_s(sess, "/api/mail/bulk", {"op": "claim", "ids": ["r0", "r1", "r2"]})
             eq(calls, [], "bulk never touches Gmail")
-            copilot._load_mail()["synced_at"] = ""
+            mail._load_mail()["synced_at"] = ""
             post("/api/mail/board", {"force": True})
             eq(sorted(calls), ["r0", "r1", "r2"], "the next sync catches Gmail up")
             calls.clear()
-            copilot._load_mail()["synced_at"] = ""
+            mail._load_mail()["synced_at"] = ""
             post("/api/mail/board", {"force": True})
             eq(calls, [], "and stops once there is no drift left")
         finally:
@@ -11540,13 +11542,13 @@ def t_mail_connect_ticket_expires():
         try:
             url = post("/api/mail/connect-link", {}).json()["url"]
             ticket = url.split("t=", 1)[1]
-            copilot._mail_connect_tickets[ticket] = time.time() - 1   # age it
+            mail._mail_connect_tickets[ticket] = time.time() - 1   # age it
             eq(client.get("/oauth/gmail/start", params={"t": ticket},
                           follow_redirects=False).status_code, 403,
                "a stale ticket is refused")
         finally:
             _gm.OAUTH_CLIENT_ID, _gm.OAUTH_CLIENT_SECRET = saved
-            copilot._mail_connect_tickets.clear()
+            mail._mail_connect_tickets.clear()
     with_mail(go)
 
 @test
@@ -11575,13 +11577,13 @@ def t_gmail_snippets_lose_their_html_entities_at_the_boundary_and_in_the_store()
         finally:
             _gm._call = saved
         # The migration: a store written by an earlier build heals on load.
-        copilot._mail_mem = None
-        os.makedirs(os.path.dirname(copilot.MAILBOX_PATH) or ".", exist_ok=True)
-        with open(copilot.MAILBOX_PATH, "w", encoding="utf-8") as fh:
+        mail._mail_mem = None
+        os.makedirs(os.path.dirname(mail.MAILBOX_PATH) or ".", exist_ok=True)
+        with open(mail.MAILBOX_PATH, "w", encoding="utf-8") as fh:
             json.dump({"mailbox": {"version": 1, "labels": {}, "rules": [], "seq": 0,
                        "threads": {"old1": {"id": "old1", "snippet": "Jo&#39;s gobos",
                                             "messages": [{"id": "m", "snippet": "it&#39;s fine"}]}}}}, fh)
-        store = copilot._load_mail()
+        store = mail._load_mail()
         eq(store["threads"]["old1"]["snippet"], "Jo's gobos")
         eq(store["threads"]["old1"]["messages"][0]["snippet"], "it's fine")
     with_mail(go)
@@ -11592,10 +11594,10 @@ def t_the_inbox_window_reaches_two_years_and_the_walk_can_get_there():
     the inbox is the shop's email HISTORY. The window, the done-keep and the
     cap must all agree, and the Gmail walk must actually be able to fetch a
     two-year listing - the old fixed six-page walk silently clipped at 3000."""
-    ok(copilot.MAIL_TRACK_DAYS >= 730, f"window is {copilot.MAIL_TRACK_DAYS} days")
-    ok(copilot.MAIL_DONE_KEEP_DAYS >= copilot.MAIL_TRACK_DAYS,
+    ok(mail.MAIL_TRACK_DAYS >= 730, f"window is {mail.MAIL_TRACK_DAYS} days")
+    ok(mail.MAIL_DONE_KEEP_DAYS >= mail.MAIL_TRACK_DAYS,
        "done threads survive as long as the window reaches")
-    ok(copilot.MAIL_THREADS_CAP > copilot.MAIL_LIST_MAX * 0.8,
+    ok(mail.MAIL_THREADS_CAP > mail.MAIL_LIST_MAX * 0.8,
        "the store cap does not quietly undo the listing size")
     pages = []
     async def fake_call(method, path, params=None, **kw):
@@ -11805,16 +11807,16 @@ def t_an_enquiry_email_cannot_edit_an_existing_contact():
         per = post("/api/crm/contact", {"op": "person_add", "name": "Real Customer",
                                         "emails": ["real@customer.com"],
                                         "phones": ["0191 111 1111"]}).json()["id"]
-        before = dict(copilot._load_crm()["persons"][per])
-        copilot._crm_file_enquiry({"id": "spam1", "from_email": "x@spam.com"},
+        before = dict(salesdesk._load_crm()["persons"][per])
+        salesdesk._crm_file_enquiry({"id": "spam1", "from_email": "x@spam.com"},
                                   {"email": "real@customer.com", "name": "Not Them",
                                    "phone": "07000 000000", "company": "Fake Ltd",
                                    "message": "please call this number"})
-        after = copilot._load_crm()["persons"][per]
+        after = salesdesk._load_crm()["persons"][per]
         eq(after["phones"], before["phones"], "the forged phone number is NOT added")
         ok(not after.get("edited_here"), "and the contact is not frozen against imports")
         eq(after.get("org_id", ""), before.get("org_id", ""), "nor re-orged")
-        deal = [d for d in copilot._load_crm()["deals"].values()
+        deal = [d for d in salesdesk._load_crm()["deals"].values()
                 if d.get("mail_thread_id") == "spam1"][0]
         note = " ".join(n["text"] for n in deal["notes"])
         ok("07000 000000" in note, "the claim is kept in the deal note for a human to judge")
@@ -11878,22 +11880,22 @@ def t_the_app_never_reports_success_for_a_write_that_did_not_happen():
         reset_prod()
     # 2. A failed mailbox write must not leave the mutation live in memory.
     def go():
-        copilot._load_mail()
-        with open(copilot.MAILBOX_PATH, "w", encoding="utf-8") as fh:
+        mail._load_mail()
+        with open(mail.MAILBOX_PATH, "w", encoding="utf-8") as fh:
             fh.write("{ not json either")
-        copilot._mail_mem = None
-        copilot._load_mail()               # poisons it the way production does
+        mail._mail_mem = None
+        mail._load_mail()               # poisons it the way production does
         try:
-            d = copilot._load_mail()
+            d = mail._load_mail()
             d["threads"]["ghost"] = {"id": "ghost", "state": "unassigned"}
             try:
-                copilot._write_mail(d)
+                mail._write_mail(d)
                 ok(False, "the write should have raised")
             except RuntimeError:
                 pass
         finally:
-            jsonstore._poisoned_stores.discard(copilot.MAILBOX_PATH)
-        ok("ghost" not in copilot._load_mail().get("threads", {}),
+            jsonstore._poisoned_stores.discard(mail.MAILBOX_PATH)
+        ok("ghost" not in mail._load_mail().get("threads", {}),
            "memory was dropped, so nothing serves an unsaved board")
     with_mail(go)
 
@@ -11970,13 +11972,13 @@ def t_deleting_a_contact_respects_open_leads_and_tombstones_the_import():
         eq(r.status_code, 400, "a live lead blocks the delete")
         ok("lead" in r.json()["error"].lower(), r.json()["error"])
         # A Pipedrive-imported person, deleted here, stays gone on re-import.
-        d = copilot._load_crm()
+        d = salesdesk._load_crm()
         pid = "p_pd500"
         d["persons"][pid] = {"id": pid, "name": "Imported Gone", "emails": [],
                              "pd_id": "500", "notes": []}
-        copilot._write_crm(d)
+        salesdesk._write_crm(d)
         post("/api/crm/contact", {"op": "person_delete", "id": pid})
-        ok("500" in copilot._load_crm().get("pd_deleted_persons", []), "tombstoned")
+        ok("500" in salesdesk._load_crm().get("pd_deleted_persons", []), "tombstoned")
         async def fake_export(progress=None):
             base = dict(PD_EXPORT)
             base["persons"] = [{"pd_id": "500", "name": "Imported Gone", "emails": [],
@@ -11989,7 +11991,7 @@ def t_deleting_a_contact_respects_open_leads_and_tombstones_the_import():
         pipedrive.export, pipedrive.API_TOKEN = fake_export, "t"
         try:
             post("/api/crm/import", {"go": True})
-            gone = [p for p in copilot._load_crm()["persons"].values() if p.get("pd_id") == "500"]
+            gone = [p for p in salesdesk._load_crm()["persons"].values() if p.get("pd_id") == "500"]
             eq(gone, [], "a deleted imported contact is NOT resurrected")
         finally:
             pipedrive.export, pipedrive.API_TOKEN = saved
@@ -12025,11 +12027,11 @@ def t_the_link_sweep_will_not_guess_when_two_customers_share_an_email():
         saved = shopify._tool_json
         shopify._tool_json = tools
         try:
-            rep = run_async(copilot._crm_shopify_link_sweep({}))
+            rep = run_async(salesdesk._crm_shopify_link_sweep({}))
         finally:
             shopify._tool_json = saved
         eq(rep["ambiguous"], 1, "an email two customers share is ambiguous, not a guess")
-        ok(not copilot._load_crm()["persons"][p].get("shopify_customer_id"), "left unlinked")
+        ok(not salesdesk._load_crm()["persons"][p].get("shopify_customer_id"), "left unlinked")
     with_accounts(go)
 
 @test
@@ -12060,7 +12062,7 @@ def t_bulk_delete_clears_sample_contacts_but_never_live_pipeline():
                                       "ids": [junk1, junk2, live]}).json()
         eq(r["deleted"], 2, r)
         eq(r["skipped"], ["Real Customer"], "the live contact is skipped BY NAME")
-        d = copilot._load_crm()
+        d = salesdesk._load_crm()
         ok(junk1 not in d["persons"] and junk2 not in d["persons"] and live in d["persons"])
         _uid, sess, _pw = ready_user("Norma", "norma2")
         eq(post_s(sess, "/api/crm/contact", {"op": "bulk_delete", "kind": "person",
@@ -12087,7 +12089,7 @@ def t_the_link_sweep_matches_contacts_to_shopify_customers_without_guessing():
         p4 = post("/api/crm/contact", {"op": "person_add", "name": "No Shop",
                                        "emails": ["nobody@nowhere.com"]}).json()["id"]
         before = {k: (v.get("updated_at"), v.get("edited_here"))
-                  for k, v in copilot._load_crm()["persons"].items()}
+                  for k, v in salesdesk._load_crm()["persons"].items()}
         async def tools(registry, name, args):
             if name == "shopify_list_customers":
                 return {"customers": [
@@ -12099,14 +12101,14 @@ def t_the_link_sweep_matches_contacts_to_shopify_customers_without_guessing():
         saved = shopify._tool_json
         shopify._tool_json = tools
         try:
-            rep = run_async(copilot._crm_shopify_link_sweep({}))
+            rep = run_async(salesdesk._crm_shopify_link_sweep({}))
         finally:
             shopify._tool_json = saved
         eq(rep["linked"], 1, rep)
         eq(rep["already"], 1, rep)
         eq(rep["ambiguous"], 1, rep)
         eq(rep["unmatched"], 1, rep)
-        d = copilot._load_crm()
+        d = salesdesk._load_crm()
         eq(d["persons"][p1]["shopify_customer_id"], 71, "matched case-insensitively")
         eq(d["persons"][p2]["shopify_customer_id"], 999, "a hand-made link outranks the sweep")
         ok(not d["persons"][p3].get("shopify_customer_id"), "two customers = no guess")
@@ -12117,9 +12119,9 @@ def t_the_link_sweep_matches_contacts_to_shopify_customers_without_guessing():
         _uid, sess, _pw = ready_user("Norm", "norm")
         eq(post_s(sess, "/api/crm/contact", {"op": "shopify_link_sweep"}).status_code, 403)
         # And an arriving order links its own customer on the spot.
-        copilot._crm_link_order_customer({"email": "nobody@nowhere.com",
+        salesdesk._crm_link_order_customer({"email": "nobody@nowhere.com",
                                           "customer": {"id": 88}})
-        eq(copilot._load_crm()["persons"][p4]["shopify_customer_id"], 88,
+        eq(salesdesk._load_crm()["persons"][p4]["shopify_customer_id"], 88,
            "a converting enquirer is linked the day they order")
     with_accounts(go)
 
@@ -12145,9 +12147,9 @@ def t_a_deal_carries_its_email_history_behind_the_inbox_gate():
            "every address matches, a stranger's thread does not")
         ok(det["threads"][0]["snippet"] is not None and det["threads"][0]["msg_count"] >= 1)
         # A website-enquiry deal keeps its birth thread even with no address match.
-        d = copilot._load_crm()
+        d = salesdesk._load_crm()
         d["deals"][deal]["mail_thread_id"] = "m3"
-        copilot._write_crm(d)
+        salesdesk._write_crm(d)
         det2 = post("/api/crm/deal", {"op": "detail", "id": deal}).json()
         ok(any(t["id"] == "m3" for t in det2["threads"]), "the birth thread rides along")
         # An account with the CRM but NOT the Inbox sees no correspondence.
@@ -12165,13 +12167,13 @@ def t_website_enquiries_are_flagged_and_parsed():
     tolerantly - a miss degrades to the sender, never to a lost enquiry."""
     def go():
         ensure_auth()
-        store = copilot._load_mail()
+        store = mail._load_mail()
         _seed_thread("q1", "New customer message on 24 Aug 2026 at 11:02 am",
                      frm=("Projected Image", "no-reply@shopifyemail.com"))
         ok(store["threads"]["q1"].get("enquiry") == "new", "flagged on arrival")
         _seed_thread("q2", "Re: your gobo order")
         ok(not store["threads"]["q2"].get("enquiry"), "an ordinary email is not")
-        p = copilot._mail_parse_enquiry(
+        p = mail._mail_parse_enquiry(
             "You received a new message from your online store's contact form.\n\n"
             "Name: Dana Voss\nEmail: dana@venue.co.uk\nPhone Number: 07700 900123\n"
             "Company: The Venue\nBody:\nWe need two B-size glass gobos\nfor the 12th.\n")
@@ -12182,7 +12184,7 @@ def t_website_enquiries_are_flagged_and_parsed():
         ok(p["message"].startswith("We need two B-size glass gobos"), p["message"])
         ok("for the 12th." in p["message"], "the message keeps its later lines")
         # A theme that renames every field still yields the address.
-        p2 = copilot._mail_parse_enquiry("someone wrote in: reach them at kim@a.com please")
+        p2 = mail._mail_parse_enquiry("someone wrote in: reach them at kim@a.com please")
         eq(p2["email"], "kim@a.com")
     with_mail(go)
 
@@ -12195,7 +12197,7 @@ def t_a_website_enquiry_becomes_a_contact_made_deal_once():
         org = post("/api/crm/contact", {"op": "org_add", "name": "Seed"}).json()["id"]
         stages = post("/api/crm/board", {}).json()["crm"]["stages"]
         ok(any(s["name"] == "Contact Made" for s in stages), "default pipeline carries it")
-        store = copilot._load_mail()
+        store = mail._load_mail()
         _seed_thread("wq1", "New customer message on 24 Aug 2026",
                      frm=("Projected Image", "no-reply@shopifyemail.com"))
         async def fake_read(tid, per_msg_chars=4000):
@@ -12207,8 +12209,8 @@ def t_a_website_enquiry_becomes_a_contact_made_deal_once():
         saved = copilot.google_mail.read_thread
         copilot.google_mail.read_thread = fake_read
         try:
-            run_async(copilot._mail_enquiries_file(store))
-            d = copilot._load_crm()
+            run_async(mail._mail_enquiries_file(store))
+            d = salesdesk._load_crm()
             deals = [x for x in d["deals"].values() if x.get("mail_thread_id") == "wq1"]
             eq(len(deals), 1, "one enquiry, one deal")
             deal = deals[0]
@@ -12224,14 +12226,14 @@ def t_a_website_enquiry_becomes_a_contact_made_deal_once():
             # Run it again: the flag is done AND the filing is thread-idempotent.
             store["threads"]["wq1"]["enquiry"] = "new"
             store["threads"]["wq1"].pop("crm_deal_id")
-            run_async(copilot._mail_enquiries_file(store))
-            eq(len([x for x in copilot._load_crm()["deals"].values()
+            run_async(mail._mail_enquiries_file(store))
+            eq(len([x for x in salesdesk._load_crm()["deals"].values()
                     if x.get("mail_thread_id") == "wq1"]), 1, "never filed twice")
             # A SECOND enquiry from a KNOWN address reuses the person.
             _seed_thread("wq2", "New customer message on 25 Aug 2026",
                          frm=("Projected Image", "no-reply@shopifyemail.com"))
-            run_async(copilot._mail_enquiries_file(store))
-            d2 = copilot._load_crm()
+            run_async(mail._mail_enquiries_file(store))
+            d2 = salesdesk._load_crm()
             eq(len([p for p in d2["persons"].values()
                     if "dana@venue.co.uk" in (p.get("emails") or [])]), 1,
                "a repeat enquirer is matched by email, not duplicated")
@@ -12644,16 +12646,16 @@ def t_the_snippet_migration_runs_once():
     self-triggering: a snippet whose real text contains &amp; lost a level of
     escaping on every process start until it was wrong for good."""
     def go():
-        os.makedirs(os.path.dirname(copilot.MAILBOX_PATH) or ".", exist_ok=True)
-        with open(copilot.MAILBOX_PATH, "w", encoding="utf-8") as fh:
+        os.makedirs(os.path.dirname(mail.MAILBOX_PATH) or ".", exist_ok=True)
+        with open(mail.MAILBOX_PATH, "w", encoding="utf-8") as fh:
             json.dump({"mailbox": {"version": 1, "labels": {}, "rules": [], "seq": 0,
                        "threads": {"t1": {"id": "t1", "snippet": "Tom &amp;amp; Jerry",
                                           "messages": []}}}}, fh)
-        eq(copilot._load_mail()["threads"]["t1"]["snippet"], "Tom &amp; Jerry",
+        eq(mail._load_mail()["threads"]["t1"]["snippet"], "Tom &amp; Jerry",
            "one pass fixes the legacy escaping")
-        copilot._write_mail(copilot._load_mail())
-        copilot._mail_mem = None
-        d = copilot._load_mail()
+        mail._write_mail(mail._load_mail())
+        mail._mail_mem = None
+        d = mail._load_mail()
         eq(d["threads"]["t1"]["snippet"], "Tom &amp; Jerry", "and a restart leaves it alone")
         ok(d.get("snippets_unescaped"), "because the pass is stamped, not re-derived")
     with_mail(go)
@@ -12777,9 +12779,9 @@ def t_a_long_print_run_answers_the_browser_and_paces_the_rest():
         r = post("/api/production-state", {"op": "printed", "ids": ids})
         eq(r.status_code, 200, r.text[:140])
         j = r.json()
-        eq(j["queued"], len(ids) - copilot.RELEASE_INLINE_MAX,
+        eq(j["queued"], len(ids) - mail.RELEASE_INLINE_MAX,
            "the tail is handed to a background pass")
-        ok(copilot.RELEASE_INLINE_MAX < 100, "and the inline part is bounded")
+        ok(mail.RELEASE_INLINE_MAX < 100, "and the inline part is bounded")
     with_accounts(go)
 
 
@@ -12789,7 +12791,7 @@ def t_a_deal_only_shows_its_own_correspondence():
     matching any sender in a thread put another customer's whole conversation
     into this deal's history."""
     def go():
-        store = copilot._load_mail()
+        store = mail._load_mail()
         store["threads"] = {
             "ours": {"id": "ours", "subject": "Your gobo order", "from_email": "sarah@venue.com",
                      "state": "done", "last_at": "2026-08-01T10:00:00+00:00", "messages": []},
@@ -12799,7 +12801,7 @@ def t_a_deal_only_shows_its_own_correspondence():
                                     {"id": "m2", "from_email": "sarah@venue.com"}]},
         }
         d = {"persons": {"p1": {"id": "p1", "emails": ["sarah@venue.com"]}}}
-        rows = copilot._crm_deal_threads(d, {"person_id": "p1"})
+        rows = salesdesk._crm_deal_threads(d, {"person_id": "p1"})
         eq([r["id"] for r in rows], ["ours"],
            "only the thread whose correspondent is this person")
     with_mail(go)
@@ -12811,7 +12813,7 @@ def t_the_mail_board_does_not_ship_two_years_of_finished_mail():
     store holds up to 6,000 threads."""
     def go():
         from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-        store = copilot._load_mail()
+        store = mail._load_mail()
         old = (_dt.now(_tz.utc) - _td(days=400)).isoformat()
         new = _dt.now(_tz.utc).isoformat()
         store["threads"] = {
@@ -12819,11 +12821,11 @@ def t_the_mail_board_does_not_ship_two_years_of_finished_mail():
             "new": {"id": "new", "state": "done", "done_at": new, "last_at": new, "messages": []},
             "live": {"id": "live", "state": "waiting", "last_at": old, "messages": []},
         }
-        ids = {r["id"] for r in copilot._mail_board_shape(store, window=True)}
+        ids = {r["id"] for r in mail._mail_board_shape(store, window=True)}
         ok("old" not in ids, "a thread closed 400 days ago is not on the board")
         ok("new" in ids and "live" in ids,
            "recent work and anything still open both stay: %s" % ids)
-        allids = {r["id"] for r in copilot._mail_board_shape(store)}
+        allids = {r["id"] for r in mail._mail_board_shape(store)}
         eq(allids, {"old", "new", "live"}, "search still sees everything")
     with_mail(go)
 
@@ -14542,12 +14544,12 @@ def t_a_strangers_email_or_pdf_cannot_hold_the_event_loop():
        and "await asyncio.to_thread(parse_doc_text," in open(os.path.join(HERE, "recon.py"), encoding="utf-8").read(),
        "a document's text is capped and read off the loop")
     gone = {"jo@x.com"}
-    head = copilot._mail_erased_rx(gone, header=True)
+    head = mail._mail_erased_rx(gone, header=True)
     ok(secs(head.sub, "[erased]", "a" * 20_000 + " <jo@x.com>") < 0.5, "a long header with an erased address")
     store = {"threads": {}, "redacted": ["jo@x.com"]}
     msg = {"id": "m1", "from_email": "ann@z.com", "to": "a" * 30_000 + " <jo@x.com>", "cc": "", "snippet": "hi",
            "at": "2026-09-29T10:00:00+00:00", "subject": "s"}
-    copilot._mail_apply_thread(store, {"id": "t1", "messages": [msg]}, "shop@example.com")
+    mail._mail_apply_thread(store, {"id": "t1", "messages": [msg]}, "shop@example.com")
     t = (store.get("threads") or {}).get("t1") or {}
     ok("jo@x.com" not in json.dumps(t), "an overlong header naming an erased address is erased whole")
 
@@ -14938,8 +14940,8 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
     raw = json.dumps({"shop_id": 1, "shop_domain": "test-store.myshopify.com"}).encode()
 
     def seed():
-        jsonstore._write_json_store(copilot.CRM_PATH, "crm", {"contacts": {"c1": {"name": "Kept"}}})
-        return os.path.isfile(copilot.CRM_PATH)
+        jsonstore._write_json_store(salesdesk.CRM_PATH, "crm", {"contacts": {"c1": {"name": "Kept"}}})
+        return os.path.isfile(salesdesk.CRM_PATH)
 
     def redact(delivery):
         return client.post("/webhooks/privacy", content=raw,
@@ -14965,7 +14967,7 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
         eq(copilot.SHOP_REDACT_DOWN_HOURS, 40, "most of the two days, with hours to spare")
         # Still installed: refused, said once, and nothing is owed.
         eq(redact("rc1-a").status_code, 200, "answered")
-        ok(os.path.isfile(copilot.CRM_PATH), "installed: nothing erased")
+        ok(os.path.isfile(salesdesk.CRM_PATH), "installed: nothing erased")
         eq(owed(), None, "and nothing owed")
         eq(len(mails()), 1, "the master is told")
         ok("refused" in mails()[0]["subject"] and "Change the app's secret" in " ".join(mails()[0]["lines"]), mails()[0])
@@ -14977,7 +14979,7 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
         # Cannot tell: owed, and tried again every hour.
         verdict["v"] = "unknown"
         eq(redact("rc1-b").status_code, 200)
-        ok(os.path.isfile(copilot.CRM_PATH), "cannot tell: nothing erased")
+        ok(os.path.isfile(salesdesk.CRM_PATH), "cannot tell: nothing erased")
         ok(isinstance(owed(), dict), "but it is owed, and kept where a restart cannot lose it")
         eq(run(copilot._shop_redact_retry(None)), "unknown", "the hourly attempt still cannot tell")
         eq(owed().get("tries"), 1, "and counts its tries")
@@ -14985,7 +14987,7 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
         verdict["v"] = "gone"
         eq(run(copilot._shop_redact_retry(down(None))), "recent", "no outage on record: not an uninstall")
         eq(run(copilot._shop_redact_retry(down(30))), "recent", "thirty hours: not yet")
-        ok(os.path.isfile(copilot.CRM_PATH), "the stores are all there")
+        ok(os.path.isfile(salesdesk.CRM_PATH), "the stores are all there")
         ok(any("holding" in a["subject"] for a in mails()), mails())
         # The app is reinstalled: whatever was owed is dropped.
         verdict["v"] = "installed"
@@ -15000,13 +15002,13 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
         copilot._build_backup_zip = no_disk
         spawned.clear()
         eq(redact("rc1-c").status_code, 200)
-        ok(os.path.isfile(copilot.CRM_PATH), "no archive, no erasure")
+        ok(os.path.isfile(salesdesk.CRM_PATH), "no archive, no erasure")
         ok(isinstance(owed(), dict), "still owed")
         ok(any("not erased" in a["subject"] for a in mails()), mails())
         copilot._build_backup_zip = saved[2]
         eq(run(copilot._shop_redact_retry(copilot._load_watch().get("shopify_down"))), "erased",
            "the next hour, with the disk back, it erases")
-        ok(not os.path.isfile(copilot.CRM_PATH), "a confirmed uninstall with an archive erases")
+        ok(not os.path.isfile(salesdesk.CRM_PATH), "a confirmed uninstall with an archive erases")
         eq(owed(), None, "and nothing is owed")
         ok(any(e.get("topic") == "shop/redact" and "erased" in e.get("detail", "")
                for e in copilot._load_privacy_log()["events"]), "and says so")
@@ -15016,11 +15018,11 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
         shopify._install_checker = None
         ok(seed(), "reseeded")
         eq(redact("rc1-d").status_code, 200)
-        ok(os.path.isfile(copilot.CRM_PATH) and isinstance(owed(), dict), "not erased, owed")
+        ok(os.path.isfile(salesdesk.CRM_PATH) and isinstance(owed(), dict), "not erased, owed")
         shopify._install_checker = checker
         copilot._save_watch(["not", "an", "object"])
         eq(redact("rc1-e").status_code, 200, "answered, not a crash")
-        ok(os.path.isfile(copilot.CRM_PATH), "and not erased")
+        ok(os.path.isfile(salesdesk.CRM_PATH), "and not erased")
         # The watchdog tries it every hour, against its own record of the outage.
         src = copilot_source()
         ok('await _shop_redact_retry(state.get("shopify_down"))' in src, "the hourly tick tries what is owed")
@@ -15047,10 +15049,10 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
         copilot._shop_owed_set(None)
         copilot._save_watch(saved_watch if isinstance(saved_watch, dict) else {})
         try:
-            os.remove(copilot.CRM_PATH)
+            os.remove(salesdesk.CRM_PATH)
         except FileNotFoundError:
             pass
-        jsonstore._forget_store(copilot.CRM_PATH)
+        jsonstore._forget_store(salesdesk.CRM_PATH)
 
 @test
 def t_the_install_check_calls_only_an_outright_refusal_gone():
@@ -15606,7 +15608,7 @@ def t_a_signed_customer_redact_waits_for_an_admin():
 
     def still_there(email):
         return any(email in [str(e).lower() for e in (p.get("emails") or [])]
-                   for p in copilot._load_crm()["persons"].values())
+                   for p in salesdesk._load_crm()["persons"].values())
 
     def mails():
         return [a for n, a in spawned if n == "_send_alert_email"]
@@ -15618,14 +15620,14 @@ def t_a_signed_customer_redact_waits_for_an_admin():
         jsonstore._write_json_store(copilot.ALERTS_PATH, None, [])
         _a, msess, _p = ready_user("Mo Member", "mo_priv", role="member")
         _b, asess, _q = ready_user("Ada Admin", "ada_priv", role="admin")
-        d = copilot._load_crm()
+        d = salesdesk._load_crm()
         d["persons"]["pz0"] = {"id": "pz0", "name": "Fay Forged", "emails": ["forged@example.com"]}
         d["persons"]["pz1"] = {"id": "pz1", "name": "Rae Real", "emails": ["real@example.com", "rae@old.example.com"],
                                "phones": ["07700 900123"]}
         d["persons"]["pz2"] = {"id": "pz2", "name": "Rae Real", "emails": ["rae.real@work.example.com"],
                                "phones": ["07700 900123"]}
         d["persons"]["pz3"] = {"id": "pz3", "name": "Val Two", "emails": ["val.old@example.com", "val@example.com"]}
-        copilot._write_crm(d)
+        salesdesk._write_crm(d)
         # Signed, and held: nothing erased, the master told without a name.
         eq(ask("forged@example.com", 991, "cr-1").status_code, 200)
         ok(still_there("forged@example.com"), "nothing is erased on the signature alone")
@@ -15678,9 +15680,9 @@ def t_a_signed_customer_redact_waits_for_an_admin():
         eq({k: h["scope"][k] for k in ("contacts", "likely_duplicates", "other_addresses")},
            {"contacts": 2, "likely_duplicates": 1, "other_addresses": 2},
            "two contacts, one only as a likely duplicate, holding two other addresses")
-        d = copilot._load_crm()
+        d = salesdesk._load_crm()
         d["persons"]["pz4"] = {"id": "pz4", "name": "Rae Real", "emails": ["rae3@example.com"], "phones": ["07700 900123"]}
-        copilot._write_crm(d)
+        salesdesk._write_crm(d)
         r = post_s(asess, "/api/privacy", {"op": "erase", "id": h["id"], "reach": h["scope"]["key"]})
         eq(r.status_code, 409, "the CRM changed since it was shown: look again")
         eq(post_s(asess, "/api/privacy", {"op": "erase", "id": h["id"]}).status_code, 409,
@@ -15731,13 +15733,13 @@ def t_a_signed_customer_redact_waits_for_an_admin():
         post_s(asess, "/api/privacy", {"op": "stop", "id": held()[0]["id"]})
         # The CRM unreadable: its reach is not known, so it is not erased.
         ask("crmdown@example.com", 995, "cr-5")
-        jsonstore._poisoned_stores.add(copilot.CRM_PATH)
+        jsonstore._poisoned_stores.add(salesdesk.CRM_PATH)
         try:
             h = post_s(asess, "/api/privacy", {}).json()["held"][0]
             ok(h["scope"].get("unreadable"), h)
             eq(post_s(asess, "/api/privacy", {"op": "erase", "id": h["id"], "reach": ""}).status_code, 503)
         finally:
-            jsonstore._poisoned_stores.discard(copilot.CRM_PATH)
+            jsonstore._poisoned_stores.discard(salesdesk.CRM_PATH)
         post_s(asess, "/api/privacy", {"op": "stop", "id": held()[0]["id"]})
         # A request that cannot be recorded is sent back, and the master told.
         good = open(copilot.PRIVACY_LOG_PATH, "rb").read()
@@ -16678,7 +16680,7 @@ def t_connecting_the_accounts_mailbox_needs_no_secret_in_a_url():
         again = client.get(url, headers=h, follow_redirects=False)
         eq(again.status_code, 403, "and cannot be replayed")
         # A ticket for the sales mailbox must not open the accounts one.
-        copilot._mail_connect_tickets["borrowed"] = time.time() + 300
+        mail._mail_connect_tickets["borrowed"] = time.time() + 300
         cross = client.get("/oauth/gmail-finance/start?t=borrowed", headers=h,
                            follow_redirects=False)
         eq(cross.status_code, 403, "the two mailboxes do not share tickets")
@@ -17986,10 +17988,12 @@ def t_the_collection_tests_hold_in_the_hour_after_midnight():
     saved = copilot.datetime
     # Every module that reads a clock: copilot.py, the desk and its routes, the
     # error log, the AI client, the team and its routes, the activity log, the
-    # order book, production and the Size list.
+    # order book, production, the Size list, the CRM and the inbox and its routes.
     copilot.datetime = desk.datetime = routes_dispatch.datetime = errors.datetime = claude.datetime = _Frozen
     team.datetime = routes_team.datetime = activity.datetime = _Frozen
     orderbook.datetime = production.datetime = size_list.datetime = _Frozen
+    from gizmo.routes import mail as routes_mail
+    salesdesk.datetime = mail.datetime = routes_mail.datetime = _Frozen
     try:
         eq(copilot._london_today().isoformat(), "2026-07-15", "the code's day is London's, a day ahead of UTC in this hour")
         t_a_collection_is_read_from_the_couriers_own_reference()
@@ -17998,6 +18002,7 @@ def t_the_collection_tests_hold_in_the_hour_after_midnight():
         copilot.datetime = desk.datetime = routes_dispatch.datetime = errors.datetime = claude.datetime = saved
         team.datetime = routes_team.datetime = activity.datetime = saved
         orderbook.datetime = production.datetime = size_list.datetime = saved
+        salesdesk.datetime = mail.datetime = routes_mail.datetime = saved
 
 @test
 def t_a_booked_collection_is_written_down_before_anything_can_fail():
@@ -18237,25 +18242,25 @@ def t_an_inbox_click_writes_the_mailbox_once_not_twice():
     most of the time is nothing at all. The durable-write-before-Gmail ordering
     is unchanged: the first write still happens first."""
     writes = []
-    saved = copilot._write_mail
+    saved = mail._write_mail
 
     def counting(d):
         writes.append(1)
         return saved(d)
-    copilot._write_mail = counting
+    mail._write_mail = counting
     try:
         # Gmail not connected: the label trip has nothing to record.
         t = {"id": "t1", "state": "assigned", "owner": "u1"}
-        changed = run_async(copilot._mail_sync_labels(t, "Ruth"))
+        changed = run_async(mail._mail_sync_labels(t, "Ruth"))
         eq(changed, False, "a disconnected mailbox changes nothing")
         eq(writes, [], "and asks for no write of its own")
 
         # Nothing to do, because the label already says what it should.
         t2 = {"id": "t2", "state": "done", "gmail_label": "Copilot/Done"}
-        eq(run_async(copilot._mail_sync_labels(t2, "Ruth")), False,
+        eq(run_async(mail._mail_sync_labels(t2, "Ruth")), False,
            "a label already correct is not rewritten")
     finally:
-        copilot._write_mail = saved
+        mail._write_mail = saved
     # Since 2026-10-12 the label trip runs after the answer, in one place
     # (_mail_labels_later), and that is where the follow-up write is guarded.
     src = copilot_source()
@@ -19229,7 +19234,7 @@ def t_a_real_send_appends_the_signoff_and_the_footer():
             # Read the durable stamp while it is still on the thread: it is
             # written before this call and cleared after it.
             captured["pending"] = dict(
-                copilot._load_mail()["threads"]["t1"].get("send_pending") or {})
+                mail._load_mail()["threads"]["t1"].get("send_pending") or {})
             return {"id": "sent-1", "thread_id": thread_id}
         saved = (_gm.read_thread, _gm.send_message)
         _gm.read_thread, _gm.send_message = _one_from_customer(), fake_send
@@ -19262,7 +19267,7 @@ def t_a_new_conversation_gets_the_signoff_and_footer_too():
         async def fake_send(thread_id, to_addr, subject, body_text, **kw):
             captured["text"] = body_text
             captured["stamps"] = [dict(p) for p in
-                                  (copilot._load_mail().get("outbound_pending") or [])]
+                                  (mail._load_mail().get("outbound_pending") or [])]
             return {"id": "sent-1", "thread_id": "T-NEW"}
         async def fake_get_thread(tid):
             return {"id": tid, "historyId": "h", "subject": "Your quote", "messages": []}
@@ -19304,7 +19309,7 @@ def t_the_dry_run_is_untouched_and_still_only_names_the_recipient():
                           "bcc_count": 0, "attachment_count": 0, "kind": "reply"},
                "the dry run reply names the recipient and counts, and nothing else")
             eq(sent, [], "and nothing was sent")
-            eq(copilot._load_mail()["threads"]["t1"].get("send_pending"), None,
+            eq(mail._load_mail()["threads"]["t1"].get("send_pending"), None,
                "and nothing was stamped")
         finally:
             _gm.read_thread, _gm.send_message = saved
@@ -19336,7 +19341,7 @@ def t_a_saved_draft_carries_the_signoff_and_footer_into_gmail():
             ok(captured["text"].startswith("They ship Friday.\n\nCameron\n\nProjected Image Ltd"),
                captured["text"])
             ok("> Any news on my gobos?" in captured["text"], "the original is quoted too")
-            eq(copilot._load_mail()["threads"]["t1"]["draft_text"], captured["text"],
+            eq(mail._load_mail()["threads"]["t1"]["draft_text"], captured["text"],
                "and the board records what is actually in Gmail")
         finally:
             _gm.read_thread, _gm.create_draft = saved
@@ -19350,7 +19355,7 @@ def t_claude_is_told_not_to_sign_off_because_the_send_does_it():
     # The prompt itself, not a slice of the file between two landmarks. That
     # slice only held while the constant sat directly above the route; it is a
     # module constant now, so the test can read the value it is about.
-    prompt = copilot.MAIL_DRAFT_SYSTEM
+    prompt = mail.MAIL_DRAFT_SYSTEM
     ok("appended automatically" in prompt, "the prompt says the send adds them")
     ok("no sign-off, name or signature" in prompt, prompt[-900:])
     ok("Sign off with the staff member's first name" not in prompt,
@@ -19583,11 +19588,11 @@ def t_the_old_footer_moves_into_the_legal_slot_and_leads_edit_the_slots():
     def go():
         ensure_auth()
         _gm.save_connection("rt-test", MBOX)
-        st = copilot._load_mail(); st["email"] = {"footer": "Reg 01234567", "saved_replies": []}
-        copilot._write_mail(st)
+        st = mail._load_mail(); st["email"] = {"footer": "Reg 01234567", "saved_replies": []}
+        mail._write_mail(st)
         j = post("/api/mail/board", {}).json()
         eq(j["email"]["footer_slots"]["legal"], "Reg 01234567", "the free-text footer is not lost")
-        ok("footer" not in copilot._load_mail()["email"], "and the old key is gone")
+        ok("footer" not in mail._load_mail()["email"], "and the old key is gone")
         r = post("/api/mail/settings", {"op": "footer_slots", "slots": {"company": "PI Ltd", "website": "projectedimage.co.uk", "phone": "x" * 300}})
         eq(r.status_code, 400, "a slot over 200 chars is refused, not truncated silently")
         r = post("/api/mail/settings", {"op": "footer_slots", "slots": {"company": "PI Ltd", "website": "projectedimage.co.uk"}})
@@ -19613,7 +19618,7 @@ def t_the_logo_lands_in_its_own_prefix_and_only_as_an_image():
         ok(key.startswith("mail/footer/logo-") and key.endswith(".png"))
         s3.objects[key] = b"\x89PNG\r\n\x1a\n" + b"x" * 39992
         eq(post("/api/mail/settings", {"op": "logo_done", "key": key}).status_code, 200)
-        eq(copilot._load_mail()["email"]["footer_slots"]["logo_key"], key)
+        eq(mail._load_mail()["email"]["footer_slots"]["logo_key"], key)
         eq(post("/api/mail/settings", {"op": "logo_done", "key": "files/other.png"}).status_code, 400, "keys outside the footer prefix are refused")
     s3 = FakeS3(); s3.bucket_exists = True
     with_files(lambda _s: with_mail(go), s3=s3)
@@ -19651,20 +19656,20 @@ def t_fetching_parts_refuses_the_whole_set_when_one_is_missing_or_too_big():
         hx = "0123456789abcdef"
         k1, k2 = f"mail/{uid}/{hx}-a.pdf", f"mail/{uid}/{hx[::-1]}-b.png"
         s3.objects[k1] = b"%PDF"; s3.objects[k2] = b"\x89PNG"
-        files, inline, total = _run(copilot._mail_fetch_parts([{"key": k1}], uid, inline_keys=[{"key": k2, "cid": "img1"}]))
+        files, inline, total = _run(mail._mail_fetch_parts([{"key": k1}], uid, inline_keys=[{"key": k2, "cid": "img1"}]))
         eq([f["name"] for f in files], ["a.pdf"]); eq(inline[0]["cid"], "img1"); eq(total, 8)
         try:
-            _run(copilot._mail_fetch_parts([{"key": k1}, {"key": f"mail/{uid}/{hx}-gone.pdf"}], uid))
+            _run(mail._mail_fetch_parts([{"key": k1}, {"key": f"mail/{uid}/{hx}-gone.pdf"}], uid))
             ok(False, "a missing part must refuse the set")
         except ValueError as e:
             ok("gone.pdf" in str(e))
-        s3.objects[f"mail/{uid}/{hx}-huge.bin"] = b"x" * (copilot.MAIL_ATTACH_MAX + 1)
+        s3.objects[f"mail/{uid}/{hx}-huge.bin"] = b"x" * (mail.MAIL_ATTACH_MAX + 1)
         try:
-            _run(copilot._mail_fetch_parts([{"key": f"mail/{uid}/{hx}-huge.bin"}], uid)); ok(False)
+            _run(mail._mail_fetch_parts([{"key": f"mail/{uid}/{hx}-huge.bin"}], uid)); ok(False)
         except ValueError as e:
             ok("25MB" in str(e))
         try:
-            _run(copilot._mail_fetch_parts([{"key": "files/other/x.pdf"}], uid)); ok(False)
+            _run(mail._mail_fetch_parts([{"key": "files/other/x.pdf"}], uid)); ok(False)
         except ValueError as e:
             ok("not one of your" in str(e).lower() or "allowed" in str(e).lower())
     s3 = FakeS3(); s3.bucket_exists = True
@@ -19707,7 +19712,7 @@ def t_a_rich_reply_goes_out_sanitised_with_its_twin_footer_and_quote():
             text = next(p for p in m.walk() if p.get_content_type() == "text/plain").get_content()
             ok("Hi Jo" in text and "Ann\nSales desk" in text and "PI Ltd" in text and "> Can you rush it?" in text)
             eq([p.get_filename() for p in m.walk() if p.get_content_disposition() == "attachment"], ["quote.pdf"])
-            t = copilot._load_mail()["threads"]["t1"]
+            t = mail._load_mail()["threads"]["t1"]
             eq(t["sent_attachments"], [{"name": "quote.pdf", "size": 8}])
             r = post_s(sess, "/api/mail/send", dict(body, attachments=[{"key": f"mail/{uid}/fedcba9876543210-gone.pdf"}]))
             eq(r.status_code, 400); ok("gone.pdf is missing" in r.json()["error"], r.json()["error"]); eq(t.get("send_pending"), None)
@@ -19755,12 +19760,12 @@ def t_a_new_rich_message_and_a_draft_share_the_same_assembly():
 def t_reply_all_offers_everyone_but_us_and_the_person_we_answer():
     def go():
         ensure_auth(); _gm.save_connection("rt-test", MBOX); _seed_thread("t1", subject="x")
-        st = copilot._load_mail()
+        st = mail._load_mail()
         st["threads"]["t1"]["messages"] = [
             {"id": "m0", "from_email": MBOX, "to": "jo@c.test", "cc": "", "text": "hi"},
             {"id": "m1", "from_name": "Jo", "from_email": "jo@c.test", "reply_to": "",
              "to": f"{MBOX}, pat@c.test", "cc": "Sam <sam@c.test>, jo@c.test", "text": "hi"}]
-        copilot._write_mail(st)
+        mail._write_mail(st)
         j = post("/api/mail/thread", {"id": "t1"}).json()
         eq(j["reply_all_cc"], "pat@c.test, sam@c.test")
     with_mail(go)
@@ -19891,9 +19896,9 @@ def t_sends_are_capped_per_person_and_per_shop():
             return {"id": "m", "thread_id": "t9"}
         async def fake_get(tid, acct=None):
             return {"id": tid, "messages": []}
-        saved = (_gm.send_message, _gm.get_thread, copilot.MAIL_SEND_MAX_PER_HOUR)
-        _gm.send_message, _gm.get_thread, copilot.MAIL_SEND_MAX_PER_HOUR = fake_send, fake_get, 2
-        copilot._send_hits_user.clear(); copilot._send_hits_shop.clear()
+        saved = (_gm.send_message, _gm.get_thread, mail.MAIL_SEND_MAX_PER_HOUR)
+        _gm.send_message, _gm.get_thread, mail.MAIL_SEND_MAX_PER_HOUR = fake_send, fake_get, 2
+        mail._send_hits_user.clear(); mail._send_hits_shop.clear()
         try:
             body = {"to": "jo@c.test", "subject": "x", "html": "<p>hi</p>"}
             eq(post("/api/mail/send", body).status_code, 200)
@@ -19902,8 +19907,8 @@ def t_sends_are_capped_per_person_and_per_shop():
             eq(r.status_code, 429, r.text); ok("last hour" in r.json()["error"])
             eq(post("/api/mail/send", dict(body, dry=True)).status_code, 200, "a dry run is not a send")
         finally:
-            _gm.send_message, _gm.get_thread, copilot.MAIL_SEND_MAX_PER_HOUR = saved
-            copilot._send_hits_user.clear(); copilot._send_hits_shop.clear()
+            _gm.send_message, _gm.get_thread, mail.MAIL_SEND_MAX_PER_HOUR = saved
+            mail._send_hits_user.clear(); mail._send_hits_shop.clear()
     with_mail(go)
 
 
@@ -20811,11 +20816,11 @@ def t_the_name_an_attachment_is_SENT_under_gets_the_same_gate_as_the_upload():
     accepted as notes.txt could leave as invoice.hta - from the shop's own
     address, with its SPF and DKIM behind it."""
     import inspect
-    src = inspect.getsource(copilot._mail_fetch_parts)
+    src = inspect.getsource(mail._mail_fetch_parts)
     ok("_DANGEROUS_EXT" in src,
        "the outgoing name is checked, not only the uploaded one")
     ok("_file_ext(nm)" in src, "by its extension")
-    ok("asyncio.to_thread(_files_head, key)" in src
+    ok("asyncio.to_thread(core._files_head, key)" in src
        and src.index("_files_head") < src.index('"get_object"'),
        "and the object is measured before it is read (off the event loop since 2026-10-12)")
 
@@ -20827,7 +20832,7 @@ def t_an_oversized_attachment_is_refused_before_its_bytes_are_read():
     too big - on a single worker, which takes dispatch, labels and the CRM down
     with the inbox. Source ORDER is not the property; not fetching is."""
     calls = {"head": 0, "get": 0}
-    real = (copilot._files_head, copilot._mail_attachment_ok, copilot._files_s3)
+    real = (copilot._files_head, mail._mail_attachment_ok, copilot._files_s3)
 
     def fake_head(key):
         calls["head"] += 1
@@ -20839,12 +20844,12 @@ def t_an_oversized_attachment_is_refused_before_its_bytes_are_read():
             raise AssertionError("the bytes must never be fetched")
 
     copilot._files_head = fake_head
-    copilot._mail_attachment_ok = lambda k, u: True
+    mail._mail_attachment_ok = lambda k, u: True
     copilot._files_s3 = lambda: _S3()
     try:
         raised = ""
         try:
-            _run(copilot._mail_fetch_parts([{"key": "mail/u1/0123456789abcdef-big.pdf",
+            _run(mail._mail_fetch_parts([{"key": "mail/u1/0123456789abcdef-big.pdf",
                                              "name": "big.pdf"}], "u1"))
         except ValueError as e:
             raised = str(e)
@@ -20852,7 +20857,7 @@ def t_an_oversized_attachment_is_refused_before_its_bytes_are_read():
         eq(calls["get"], 0, "and refused WITHOUT pulling it into memory")
         ok(calls["head"] >= 1, "having been measured first")
     finally:
-        copilot._files_head, copilot._mail_attachment_ok, copilot._files_s3 = real
+        copilot._files_head, mail._mail_attachment_ok, copilot._files_s3 = real
 
 
 @test
@@ -20863,10 +20868,10 @@ def t_a_mime_type_from_the_browser_cannot_carry_a_newline():
     customer, forever, with nothing to clear it but checking Gmail by hand."""
     keep = ["image/png", "application/pdf", "application/vnd.ms-excel"]
     for good in keep:
-        eq(copilot._mail_part_type(good, "application/octet-stream"), good)
+        eq(mail._mail_part_type(good, "application/octet-stream"), good)
     for bad in ["image/png\r\nBcc: evil@x.com", "image/png\nX: 1", "", None,
                 "../etc", "text/plain; charset=utf8", "image", "a" * 200 + "/b"]:
-        eq(copilot._mail_part_type(bad, "application/octet-stream"),
+        eq(mail._mail_part_type(bad, "application/octet-stream"),
            "application/octet-stream", repr(bad) + " must not reach a header")
 
 
@@ -21290,17 +21295,17 @@ def t_an_erasure_survives_the_next_pipedrive_import():
         pipedrive.export, pipedrive.API_TOKEN = fake_export, "t"
         try:
             eq(post("/api/crm/import", {"go": True}).status_code, 200)
-            d = copilot._load_crm()
+            d = salesdesk._load_crm()
             person = [p for p in d["persons"].values() if p["pd_id"] == "20"][0]
             ok("sarah@lumen.co.uk" in person["emails"], "the imported person is there")
             raw = json.dumps({"customer": {"id": 901, "email": "Sarah@Lumen.co.uk"},
                               "shop_domain": "test-store.myshopify.com"}).encode()
             redact_through_the_hold(raw, "res1")
-            gone = copilot._load_crm()
+            gone = salesdesk._load_crm()
             eq(any(p.get("pd_id") == "20" for p in gone["persons"].values()), False, "erased")
             ok("20" in (gone.get("pd_deleted_persons") or []), "and tombstoned as it went")
             eq(post("/api/crm/import", {"go": True}).status_code, 200, "the next import runs")
-            after = copilot._load_crm()
+            after = salesdesk._load_crm()
             eq(any(p.get("pd_id") == "20" for p in after["persons"].values()), False,
                "and does NOT put the erased person back")
         finally:
@@ -21315,32 +21320,32 @@ def t_an_erased_persons_email_is_not_re_imported_by_the_next_sync():
     def go():
         ensure_auth()
         orderbook._webhook_seen.clear()
-        store = copilot._load_mail()
+        store = mail._load_mail()
         store.setdefault("threads", {})["tgone"] = {
             "id": "tgone", "from_email": "erase.me@example.com",
             "subject": "Please delete me", "state": "open"}
-        copilot._write_mail(store)
+        mail._write_mail(store)
         raw = json.dumps({"customer": {"id": 902, "email": "erase.me@example.com"},
                           "shop_domain": "test-store.myshopify.com"}).encode()
         redact_through_the_hold(raw, "res2")
-        store = copilot._load_mail()
+        store = mail._load_mail()
         eq("tgone" in store["threads"], False, "gone")
         ok("erase.me@example.com" in (store.get("redacted") or []), "and remembered as erased")
         # Exactly what the next sync does with what Gmail hands back.
-        copilot._mail_apply_thread(store, {
+        mail._mail_apply_thread(store, {
             "id": "tgone", "messages": [{"id": "m1", "from_email": "erase.me@example.com",
                                          "from_name": "Erase Me", "subject": "Please delete me",
                                          "date": "2026-09-07T09:00:00Z", "snippet": "hello"}]},
             "sales@example.com")
         eq("tgone" in store["threads"], False, "the sync does not bring them back")
-        copilot._mail_apply_thread(store, {
+        mail._mail_apply_thread(store, {
             "id": "tstay", "messages": [{"id": "m2", "from_email": "other@example.com",
                                          "from_name": "Other", "subject": "Unrelated",
                                          "date": "2026-09-07T09:00:00Z", "snippet": "hi"}]},
             "sales@example.com")
         eq("tstay" in store["threads"], True, "and nobody else is affected")
         store["redacted"] = []
-        copilot._write_mail(store)
+        mail._write_mail(store)
     with_accounts(go)
 
 
@@ -21826,15 +21831,15 @@ def t_add_routes_holds_routes_and_nothing_it_could_have_shared():
     eq(liftable, set(), "these need nothing from add_routes, so they belong at module level")
 
     # The ones that stay say why: each closes over the registry add_routes is
-    # handed, or over a value built from it. (The sixth, _finish_cancel, moved
-    # with the dispatch desk's routes into their register(mcp, registry).)
-    eq({h.name for h in helpers},
-       {"_mail_orders_for", "dispatch_for", "_fin_search", "_fin_thread", "_fin_bytes"},
-       "a nested helper appeared that is not one of the registry-bound five")
-    reg = next(n for n in tree.body if getattr(n, "name", "") == "register")
-    eq({h.name for h in reg.body if isinstance(h, (_ast.FunctionDef, _ast.AsyncFunctionDef))
+    # handed, or over a value built from it. Two moved with their routes into
+    # an area's register(mcp, registry): the desk's _finish_cancel and the
+    # inbox's _mail_orders_for.
+    eq({h.name for h in helpers}, {"dispatch_for", "_fin_search", "_fin_thread", "_fin_bytes"},
+       "a nested helper appeared that is not one of the registry-bound four")
+    regs = [n for n in tree.body if getattr(n, "name", "") == "register"]
+    eq({h.name for r in regs for h in r.body if isinstance(h, (_ast.FunctionDef, _ast.AsyncFunctionDef))
         and not any("route" in _ast.unparse(d) for d in h.decorator_list)},
-       {"_finish_cancel"}, "the desk's routes hold one registry-bound helper")
+       {"_finish_cancel", "_mail_orders_for"}, "the areas' routes hold the other two")
 
     # And it is a route table, not a module in disguise.
     ok(len(helpers) < 10, "add_routes is holding helpers again")
@@ -22067,14 +22072,14 @@ def t_a_failed_write_forgets_the_cached_store():
        "the unsaved change is gone: the next read came from the disk that never had it")
     # The CRM's per-read normalisation now runs once per file version.
     crm_wipe()
-    jsonstore._forget_store(copilot.CRM_PATH)
-    d = copilot._load_crm()
+    jsonstore._forget_store(salesdesk.CRM_PATH)
+    d = salesdesk._load_crm()
     d["persons"]["p1"] = {"id": "p1", "name": "Cached"}
-    copilot._write_crm(d)
-    ok(copilot._load_crm() is d, "the CRM is one object across reads once written")
+    salesdesk._write_crm(d)
+    ok(salesdesk._load_crm() is d, "the CRM is one object across reads once written")
     crm_wipe()
-    jsonstore._forget_store(copilot.CRM_PATH)
-    eq(copilot._load_crm()["persons"], {}, "and a wiped store is empty again")
+    jsonstore._forget_store(salesdesk.CRM_PATH)
+    eq(salesdesk._load_crm()["persons"], {}, "and a wiped store is empty again")
 
 
 # ---------------------------------------------------------------------------
@@ -22202,25 +22207,25 @@ def t_the_mail_loop_says_when_the_inbox_has_stopped():
     except branch never ran and a dead Gmail grant stopped the inbox, the
     filters and the enquiries without a word to anyone."""
     emails = []
-    async def mail(subject, lines):
+    async def alert(subject, lines):
         emails.append((subject, " ".join(lines)))
         return True
-    saved = (copilot._send_alert_email, copilot._mail_fail_ticks)
-    copilot._send_alert_email = mail
+    saved = (copilot._send_alert_email, mail._mail_fail_ticks)
+    copilot._send_alert_email = alert
     w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
-    copilot._mail_fail_ticks = 0
+    mail._mail_fail_ticks = 0
     try:
-        for _ in range(copilot.MAIL_ALERT_AFTER_TICKS - 1):
-            eq(run_async(copilot._mail_loop_health("invalid_grant")), False)
+        for _ in range(mail.MAIL_ALERT_AFTER_TICKS - 1):
+            eq(run_async(mail._mail_loop_health("invalid_grant")), False)
         eq(emails, [], "a blip is not an outage")
-        eq(run_async(copilot._mail_loop_health("invalid_grant")), True, "half an hour of failures is")
+        eq(run_async(mail._mail_loop_health("invalid_grant")), True, "half an hour of failures is")
         ok("stopped syncing" in emails[0][0] and "invalid_grant" in emails[0][1], emails)
-        eq(run_async(copilot._mail_loop_health("invalid_grant")), False, "once a day, not once a minute")
-        eq(run_async(copilot._mail_loop_health("")), False)
-        eq(copilot._mail_fail_ticks, 0, "a good sync starts the count again")
+        eq(run_async(mail._mail_loop_health("invalid_grant")), False, "once a day, not once a minute")
+        eq(run_async(mail._mail_loop_health("")), False)
+        eq(mail._mail_fail_ticks, 0, "a good sync starts the count again")
     finally:
-        copilot._send_alert_email, copilot._mail_fail_ticks = saved
-        copilot._mail_alert_sent = 0.0
+        copilot._send_alert_email, mail._mail_fail_ticks = saved
+        mail._mail_alert_sent = 0.0
         w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
 
 
@@ -22228,10 +22233,10 @@ def t_the_mail_loop_says_when_the_inbox_has_stopped():
 def t_a_files_attachment_is_named_whole():
     """B40. The prefix split came off at any dash, so a file from Files called
     gobo-layout-final.pdf was "layout-final.pdf" in every refusal."""
-    eq(copilot._mail_part_name("f12/gobo-layout-final.pdf"), "gobo-layout-final.pdf")
-    eq(copilot._mail_part_name("mail/u1/0123456789abcdef-proof-v2.pdf"), "proof-v2.pdf",
+    eq(mail._mail_part_name("f12/gobo-layout-final.pdf"), "gobo-layout-final.pdf")
+    eq(mail._mail_part_name("mail/u1/0123456789abcdef-proof-v2.pdf"), "proof-v2.pdf",
        "an upload's own prefix still comes off")
-    eq(copilot._mail_part_name("mail/u1/not-hex-prefix.pdf"), "not-hex-prefix.pdf")
+    eq(mail._mail_part_name("mail/u1/not-hex-prefix.pdf"), "not-hex-prefix.pdf")
 
 
 @test
@@ -22337,33 +22342,33 @@ def t_the_mail_loop_itself_raises_the_alarm_and_never_floods():
     sync_error, and with watch.json unwritable: the stamp there was the only
     brake, so a store that could not be written sent an email every minute."""
     emails = []
-    async def mail(subject, lines):
+    async def alert(subject, lines):
         emails.append(subject)
         return True
     async def failing_sync(force=False):
-        st = copilot._load_mail()
+        st = mail._load_mail()
         st["sync_error"] = "invalid_grant"
-        copilot._write_mail(st)
+        mail._write_mail(st)
         return "invalid_grant"
-    saved = (copilot._send_alert_email, copilot._mail_fail_ticks, copilot._mail_alert_sent,
-             copilot._mail_sync_now, _gm.connected)
-    copilot._send_alert_email, copilot._mail_sync_now = mail, failing_sync
+    saved = (copilot._send_alert_email, mail._mail_fail_ticks, mail._mail_alert_sent,
+             mail._mail_sync_now, _gm.connected)
+    copilot._send_alert_email, mail._mail_sync_now = alert, failing_sync
     _gm.connected = lambda *a, **k: True
-    copilot._mail_fail_ticks, copilot._mail_alert_sent = 0, 0.0
+    mail._mail_fail_ticks, mail._mail_alert_sent = 0, 0.0
     w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
     def go():
         jsonstore._poisoned_stores.add(copilot.WATCH_PATH)      # watch.json cannot be written
-        for _ in range(copilot.MAIL_ALERT_AFTER_TICKS + 10):
-            run_async(copilot._mail_loop_tick())
+        for _ in range(mail.MAIL_ALERT_AFTER_TICKS + 10):
+            run_async(mail._mail_loop_tick())
         eq(emails, ["Reactor: the shared inbox has stopped syncing"],
            "one email from the real loop, and one only, though nothing could be stamped on disk")
     try:
         with_mail(go)
     finally:
         jsonstore._poisoned_stores.discard(copilot.WATCH_PATH)
-        (copilot._send_alert_email, copilot._mail_fail_ticks, copilot._mail_alert_sent,
-         copilot._mail_sync_now, _gm.connected) = saved
-        copilot._mail_alert_sent = 0.0
+        (copilot._send_alert_email, mail._mail_fail_ticks, mail._mail_alert_sent,
+         mail._mail_sync_now, _gm.connected) = saved
+        mail._mail_alert_sent = 0.0
         w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
 
 
@@ -22568,14 +22573,14 @@ def t_a_conversation_started_in_gmail_is_not_triaged_as_an_arrival():
     ours = {"id": "g1", "historyId": "1", "subject": "Contact form follow-up",
             "messages": [dict(_mk_msg("g1-m1", "Sales", MBOX, "2026-09-20T09:00:00+00:00"),
                               to="jo@customer.com", labels=["SENT"])]}
-    copilot._mail_apply_thread(store, ours, MBOX)
+    mail._mail_apply_thread(store, ours, MBOX)
     t = store["threads"]["g1"]
     eq((t.get("rule"), t.get("folder"), t.get("enquiry")), (None, None, None),
        "no rule and no enquiry on our own message")
     eq(store["rules"][0]["hits"], 0)
     notice = {"id": "g2", "historyId": "1", "subject": "New customer message",
               "messages": [dict(_mk_msg("g2-m1", "Store", MBOX, "2026-09-20T09:00:00+00:00"), labels=["INBOX"])]}
-    copilot._mail_apply_thread(store, notice, MBOX)
+    mail._mail_apply_thread(store, notice, MBOX)
     eq(store["threads"]["g2"].get("enquiry"), "new", "the storefront notification is still an enquiry")
     # Who started it is read before the store keeps only the latest messages:
     # a customer's long thread whose kept window happens to open on one of
@@ -22585,7 +22590,7 @@ def t_a_conversation_started_in_gmail_is_not_triaged_as_an_arrival():
             "assign": "", "pool": [], "done": False, "folder": "Customers", "archive": False,
             "hits": 0, "last_hit_at": "", "_next": 0}
     store2 = {"threads": {}, "rules": [rule]}
-    n = copilot.MAIL_MSGS_PER_THREAD
+    n = mail.MAIL_MSGS_PER_THREAD
     msgs = [dict(_mk_msg("g3-m0", "Jo", "jo@customer.com", "2026-09-01T09:00:00+00:00"), labels=["INBOX"])]
     for i in range(1, n + 1):
         ours_turn = i % 2 == 1
@@ -22593,7 +22598,7 @@ def t_a_conversation_started_in_gmail_is_not_triaged_as_an_arrival():
                                  MBOX if ours_turn else "jo@customer.com",
                                  "2026-09-%02dT09:%02d:00+00:00" % (2 + i // 60, i % 60)),
                          labels=["SENT"] if ours_turn else ["INBOX"]))
-    copilot._mail_apply_thread(store2, {"id": "g3", "historyId": "1", "subject": "Long job", "messages": msgs}, MBOX)
+    mail._mail_apply_thread(store2, {"id": "g3", "historyId": "1", "subject": "Long job", "messages": msgs}, MBOX)
     eq(store2["threads"]["g3"].get("folder"), "Customers",
        "a customer's thread is triaged however the kept window happens to begin")
 
@@ -22645,7 +22650,7 @@ def t_the_watchdog_clears_the_outage_flag_when_shopify_is_back():
     up = {"v": False}
     async def probe(registry, name, args):
         return {"name": "Shop"} if up["v"] else {"error": "boom"}
-    async def mail(subject, lines):
+    async def alert(subject, lines):
         # The same tick also checks the team register, which this test does
         # not seed; only the connection emails are the point here.
         if "Shopify" in subject:
@@ -22658,7 +22663,7 @@ def t_the_watchdog_clears_the_outage_flag_when_shopify_is_back():
     saved = (shopify._tool_json, copilot._send_alert_email, copilot._zeta_drain,
              copilot._zeta_configured, copilot._files_tick, copilot.run_label_coverage,
              shopify._webhook_ensurer, copilot._watch_last_tick)
-    shopify._tool_json, copilot._send_alert_email = probe, mail
+    shopify._tool_json, copilot._send_alert_email = probe, alert
     copilot._zeta_drain, copilot._zeta_configured = noop, (lambda: False)
     copilot._files_tick, copilot.run_label_coverage, shopify._webhook_ensurer = (lambda: None), skip, None
     def clean():
@@ -22697,20 +22702,20 @@ def t_shop_redact_erases_what_memory_holds_too():
     mailbox back on disk inside a minute, Files likewise on its next tick."""
     def go():
         _gm.save_connection("rt-test", MBOX)
-        m = copilot._load_mail()
+        m = mail._load_mail()
         m["threads"]["t1"] = {"from_email": "someone@example.com", "subject": "private"}
-        copilot._write_mail(m)
+        mail._write_mail(m)
         f = copilot._load_files()
         f["files"]["f1"] = {"name": "secret.pdf", "status": "active"}
         copilot._write_files(f)
         r = copilot._redact_shop()
         ok(r["wiped"] >= 2, r)
-        eq(copilot._load_mail()["threads"], {}, "the erased threads are not served from memory")
+        eq(mail._load_mail()["threads"], {}, "the erased threads are not served from memory")
         eq(copilot._load_files()["files"], {}, "nor the erased files")
         ok(not _gm.connected(), "and the mailbox grant is gone, so the sync cannot rebuild the store from Gmail")
-        copilot._write_mail(copilot._load_mail())       # what the mail loop does every minute
+        mail._write_mail(mail._load_mail())       # what the mail loop does every minute
         copilot._write_files(copilot._load_files())
-        eq(json.load(open(copilot.MAILBOX_PATH))["mailbox"]["threads"], {},
+        eq(json.load(open(mail.MAILBOX_PATH))["mailbox"]["threads"], {},
            "and a write cannot bring them back")
         eq(json.load(open(copilot.FILES_PATH))["files_store"]["files"], {})
     with_files(lambda fake: with_mail(go))
@@ -22814,7 +22819,7 @@ def t_a_pipedrive_preview_leaves_the_live_crm_alone():
             eq(post("/api/crm/import", {"go": True}).status_code, 200)
             def links():
                 return {k: (v.get("person_id"), v.get("org_id"), v.get("stage_id"))
-                        for k, v in copilot._load_crm()["deals"].items()}
+                        for k, v in salesdesk._load_crm()["deals"].items()}
             before = links()
             ok(all(p for p, _o, _s in before.values()), "the imported deals have their people")
             pipedrive.export = partial
@@ -22823,7 +22828,7 @@ def t_a_pipedrive_preview_leaves_the_live_crm_alone():
             ok(r.json()["dry_run"])
             eq(links(), before, "a preview changes nothing the board reads")
             post("/api/crm/contact", {"op": "org_add", "name": "Unrelated write"})
-            disk = json.load(open(copilot.CRM_PATH))["crm"]["deals"]
+            disk = json.load(open(salesdesk.CRM_PATH))["crm"]["deals"]
             eq({k: (v.get("person_id"), v.get("org_id"), v.get("stage_id")) for k, v in disk.items()},
                before, "and the write that followed carried the real links, not the preview's")
         finally:
@@ -22929,18 +22934,18 @@ def t_a_send_whose_answer_is_lost_keeps_its_stamp():
             r = post("/api/mail/send", {"id": "t1", "text": "Hello Jo."})
             eq(r.status_code, 502, r.text)
             ok("MAY have been sent" in r.json()["error"], r.text)
-            t = copilot._load_mail()["threads"]["t1"]
+            t = mail._load_mail()["threads"]["t1"]
             eq(t.get("sent_at"), None, "not claimed as sent either")
             ok(t.get("send_pending"), "the stamp stays: we do not know")
-            disk = json.load(open(copilot.MAILBOX_PATH))["mailbox"]
+            disk = json.load(open(mail.MAILBOX_PATH))["mailbox"]
             ok(disk["threads"]["t1"].get("send_pending"), "on disk too")
             ok(any("may not have completed" in a["action"] for a in t["activity"]), str(t["activity"]))
             # The sync then finds our message in Gmail, dated after the stamp:
             # that settles it, without anyone pressing anything.
-            store = copilot._load_mail()
-            copilot._mail_apply_thread(store, {"id": "t1", "historyId": "h9", "subject": "Gobo order",
+            store = mail._load_mail()
+            mail._mail_apply_thread(store, {"id": "t1", "historyId": "h9", "subject": "Gobo order",
                 "messages": [_mk_msg("t1-m1", "Jo Bloggs", "jo@customer.com", "2026-08-19T01:00:00+00:00"),
-                             _mk_msg("t1-m2", "Sales", MBOX, copilot._mail_now())]}, MBOX)
+                             _mk_msg("t1-m2", "Sales", MBOX, mail._mail_now())]}, MBOX)
             t = store["threads"]["t1"]
             eq(t.get("send_pending"), None, "Gmail has the reply, so the stamp is settled")
             ok(t.get("sent_at"), "and it is recorded as sent")
@@ -22953,14 +22958,14 @@ def t_a_send_whose_answer_is_lost_keeps_its_stamp():
             r3 = post("/api/mail/send", {"id": "t1", "text": "Hello?"})
             eq(r3.status_code, 502, r3.text)
             ok("nothing was sent" in r3.json()["error"], r3.text)
-            eq(copilot._load_mail()["threads"]["t1"].get("send_pending"), None, "no connection, no stamp")
+            eq(mail._load_mail()["threads"]["t1"].get("send_pending"), None, "no connection, no stamp")
             async def misfiled(thread_id, to_addr, subject, body_text, **kw):
                 return {"id": "m9", "thread_id": "other", "misfiled": True}
             _gm.send_message = misfiled
             r2 = post("/api/mail/send", {"id": "t1", "text": "Hello again."})
             eq(r2.status_code, 200, r2.text)
             ok("filed it as a new conversation" in r2.json().get("warning", ""), r2.text)
-            t = copilot._load_mail()["threads"]["t1"]
+            t = mail._load_mail()["threads"]["t1"]
             ok(t.get("sent_at"), "recorded as sent")
             eq(t.get("send_pending"), None)
         finally:
@@ -23224,8 +23229,8 @@ def t_reply_all_knows_who_else_was_on_the_message():
     m = full["messages"][0]
     eq((m["to"], m["cc"]), (MBOX + ", pat@c.test", "Sam <sam@c.test>"), "stored with the message")
     store = {"threads": {}}
-    copilot._mail_apply_thread(store, full, MBOX)
-    eq(copilot._mail_reply_all_cc(store["threads"]["t1"], MBOX), "pat@c.test, sam@c.test",
+    mail._mail_apply_thread(store, full, MBOX)
+    eq(mail._mail_reply_all_cc(store["threads"]["t1"], MBOX), "pat@c.test, sam@c.test",
        "everyone on it except us and the sender")
     # The stored To header now reaches the sender fallback for a thread every
     # message of which is ours: it is parsed, not split on the comma, and a
@@ -23235,13 +23240,13 @@ def t_reply_all_knows_who_else_was_on_the_message():
                           "to": "Projected Image <info@test-store.co.uk>, Jo <jo@c.test>",
                           "cc": "", "reply_to": "", "files": [], "at": "2026-08-19T01:00:00+00:00",
                           "labels": [], "snippet": "hi"}]}
-    copilot._mail_apply_thread(store, ours, MBOX)
+    mail._mail_apply_thread(store, ours, MBOX)
     t2 = store["threads"]["t2"]
     eq((t2["from_name"], t2["from_email"]), ("Projected Image", "info@test-store.co.uk"),
        "the first address on the To line, as an address")
     notice = dict(ours, id="t3", subject="New customer message",
                   messages=[dict(ours["messages"][0], id="m3")])
-    copilot._mail_apply_thread(store, notice, MBOX)
+    mail._mail_apply_thread(store, notice, MBOX)
     eq(store["threads"]["t3"].get("enquiry"), "new",
        "a storefront notification sent as the store is still an enquiry")
 
@@ -23255,12 +23260,12 @@ def t_a_conversation_the_shop_starts_is_not_triaged_as_an_arrival():
     def go():
         ensure_auth()
         _gm.save_connection("rt-test", MBOX)
-        store = copilot._load_mail()
+        store = mail._load_mail()
         store["rules"].append({"id": "f1", "name": "Internal mail", "enabled": True, "mode": "all",
                                "conditions": [{"field": "domain", "op": "is", "value": "test-store.co.uk"}],
                                "assign": "", "pool": [], "done": True, "folder": "Internal", "archive": True,
                                "hits": 0, "last_hit_at": "", "_next": 0})
-        copilot._write_mail(store)
+        mail._write_mail(store)
         async def send_new(thread_id, to_addr, subject, body_text, **kw):
             return {"id": "m-new", "thread_id": "tn1"}
         async def no_thread(tid, acct=None):
@@ -23271,11 +23276,11 @@ def t_a_conversation_the_shop_starts_is_not_triaged_as_an_arrival():
             r = post("/api/mail/send", {"to": "jo@customer.com", "subject": "Contact form follow-up",
                                         "text": "Thanks for getting in touch."})
             eq(r.status_code, 200, r.text)
-            t = copilot._load_mail()["threads"]["tn1"]
+            t = mail._load_mail()["threads"]["tn1"]
             eq(t.get("rule"), None, "no rule ran on our own message")
             eq((t.get("folder"), t.get("folder_archive")), (None, None))
             eq(t.get("enquiry"), None, "and our own words are not a website enquiry")
-            eq(copilot._load_mail()["rules"][0]["hits"], 0)
+            eq(mail._load_mail()["rules"][0]["hits"], 0)
             eq((t["state"], t.get("started_to")), ("waiting", "jo@customer.com"))
         finally:
             _gm.send_message, _gm.get_thread = saved
@@ -23463,15 +23468,15 @@ def t_a_purged_deals_tasks_stay_gone_through_the_next_import():
         pipedrive.export, pipedrive.API_TOKEN = full, "t"
         try:
             eq(post("/api/crm/import", {"go": True}).status_code, 200)
-            d = copilot._load_crm()
+            d = salesdesk._load_crm()
             gid = next(k for k, v in d["deals"].items() if v.get("pd_id") == "31")
             d["deals"][gid]["deleted"], d["deals"][gid]["deleted_at"] = True, "2026-01-01T00:00:00+00:00"
-            copilot._crm_purge(d)
-            copilot._write_crm(d)
-            ok(gid not in copilot._load_crm()["deals"], "the bin emptied")
-            ok("41" in (copilot._load_crm().get("pd_deleted_activities") or []), "its task has a tombstone too")
+            salesdesk._crm_purge(d)
+            salesdesk._write_crm(d)
+            ok(gid not in salesdesk._load_crm()["deals"], "the bin emptied")
+            ok("41" in (salesdesk._load_crm().get("pd_deleted_activities") or []), "its task has a tombstone too")
             eq(post("/api/crm/import", {"go": True}).status_code, 200)
-            d2 = copilot._load_crm()
+            d2 = salesdesk._load_crm()
             eq([a for a in d2["activities"].values() if a.get("pd_id") == "41"], [],
                "and it does not come back attached to nothing")
         finally:
@@ -23551,34 +23556,34 @@ def t_a_broken_mailbox_file_still_raises_the_inbox_alarm():
     its error failed, the loop re-read an empty default, and the failure count
     started again every minute: no alarm, ever. Driven through the real sync."""
     emails = []
-    async def mail(subject, lines):
+    async def alert(subject, lines):
         emails.append(subject)
         return True
     async def gmail_down(*a, **k):
         raise RuntimeError("invalid_grant")
-    saved = (copilot._send_alert_email, copilot._mail_fail_ticks, copilot._mail_alert_sent,
+    saved = (copilot._send_alert_email, mail._mail_fail_ticks, mail._mail_alert_sent,
              _gm.connected, _gm.list_threads, _gm.address)
     def go():
-        copilot._send_alert_email = mail
+        copilot._send_alert_email = alert
         _gm.connected = lambda *a, **k: True
         _gm.list_threads = gmail_down
         _gm.address = lambda *a, **k: MBOX
-        copilot._mail_fail_ticks, copilot._mail_alert_sent = 0, 0.0
+        mail._mail_fail_ticks, mail._mail_alert_sent = 0, 0.0
         w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
-        with open(copilot.MAILBOX_PATH, "w") as fh:
+        with open(mail.MAILBOX_PATH, "w") as fh:
             fh.write("{ truncated")
-        copilot._mail_mem = None
-        for _ in range(copilot.MAIL_ALERT_AFTER_TICKS + 2):
-            run_async(copilot._mail_loop_tick())
+        mail._mail_mem = None
+        for _ in range(mail.MAIL_ALERT_AFTER_TICKS + 2):
+            run_async(mail._mail_loop_tick())
         eq(emails, ["Reactor: the shared inbox has stopped syncing"],
            "the alarm is raised although the mailbox file could not hold the error")
     try:
         with_mail(go)
     finally:
-        (copilot._send_alert_email, copilot._mail_fail_ticks, copilot._mail_alert_sent,
+        (copilot._send_alert_email, mail._mail_fail_ticks, mail._mail_alert_sent,
          _gm.connected, _gm.list_threads, _gm.address) = saved
-        copilot._mail_alert_sent = 0.0
-        jsonstore._poisoned_stores.discard(copilot.MAILBOX_PATH)
+        mail._mail_alert_sent = 0.0
+        jsonstore._poisoned_stores.discard(mail.MAILBOX_PATH)
         w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
 
 
@@ -24350,7 +24355,7 @@ def t_the_reading_message_and_the_product_plan_carry_what_they_need():
     finally:
         claude._xcreate = sx
         _ws_restore(saved)
-    src = open(copilot.__file__).read()
+    src = copilot_source()
     ok('_skills_to_system(" ".join(["product plan", str(p.get("title") or "")' in src, "a product plan picks skills by the product itself")
     ok('"\\n".join((m.get("text") or "")[:3900] for m in msgs[-2:])' in src, "a draft picks skills by what was written, not the labelled transcript")
     ok('plain = re.sub(r"\\A<skill[^>]*>\\n|\\n</skill>\\Z", "", content)' in src, "What Reactor read shows the skill's own text")
@@ -24452,8 +24457,8 @@ def t_a_reply_draft_follows_the_skills_that_fit_the_email():
         ok("Trade enquiry replies" in pb and "three working days" in pb, pb)
         ok("E size holders" not in pb, "a playbook that does not fit the email stays out")
         eq(copilot._skills_for_draft("Hello"), "", "and an email nothing fits gets none")
-        src = open(copilot.__file__).read()
-        ok("playbooks = _skills_for_draft(" in src and "use that wording" in src and "mention the playbooks, name them" in src,
+        src = copilot_source()
+        ok("playbooks = core._skills_for_draft(" in src and "use that wording" in src and "mention the playbooks, name them" in src,
            "the draft prompt carries them: their templates used, the playbooks themselves never mentioned")
     finally:
         _ws_restore(saved)
@@ -24610,9 +24615,9 @@ def t_an_erasure_takes_the_deals_leads_and_enquiry_email_too():
             dict(_mk_msg("e1-m1", "Store", MBOX, "2026-09-20T09:00:00+00:00",
                          snippet="Name: Jo Smith Email: jo.smith@example.com Phone: 07700 900123"),
                  labels=["INBOX"])]}
-        copilot._mail_apply_thread(store, enq, MBOX)
-        copilot._write_mail(store)
-        d = copilot._load_crm()
+        mail._mail_apply_thread(store, enq, MBOX)
+        mail._write_mail(store)
+        d = salesdesk._load_crm()
         d["persons"]["p1"] = {"id": "p1", "name": "Jo Smith", "emails": [addr], "created_at": "", "updated_at": ""}
         d["deals"]["d1"] = {"id": "d1", "title": "Jo Smith - website enquiry", "person_id": "p1",
                             "mail_thread_id": "e1", "stage_id": (d["stages"][0]["id"] if d["stages"] else ""),
@@ -24620,45 +24625,45 @@ def t_an_erasure_takes_the_deals_leads_and_enquiry_email_too():
                             "pd_id": "777"}
         d["leads"]["l1"] = {"id": "l1", "title": "Jo Smith lead", "person_id": "p1"}
         d["activities"]["a1"] = {"id": "a1", "subject": "Call Jo", "deal_id": "d1", "pd_id": "888"}
-        copilot._write_crm(d)
+        salesdesk._write_crm(d)
         out = copilot._redact_customer(addr, "555")
-        d = copilot._load_crm()
+        d = salesdesk._load_crm()
         eq((d["deals"].get("d1"), d["leads"].get("l1"), d["activities"].get("a1")), (None, None, None),
            "the deal, the lead and the deal's task are gone")
         ok("777" in (d.get("pd_deleted_deals") or []), "and an import cannot bring the deal back")
-        ok("e1" not in copilot._load_mail()["threads"], "the storefront enquiry is gone from the board")
-        st = copilot._load_mail()
-        copilot._mail_apply_thread(st, enq, MBOX)
+        ok("e1" not in mail._load_mail()["threads"], "the storefront enquiry is gone from the board")
+        st = mail._load_mail()
+        mail._mail_apply_thread(st, enq, MBOX)
         ok("e1" not in st["threads"], "and the sync cannot fetch it back")
         ok(out["erased"] >= 4, out)
         # Nobody else's record goes with them. Bob's thread mentions Jo; an
         # organisation's won deal had Jo as its contact; and erasing
         # sales@firm.co is not erasing sales@firm.co.uk.
-        st = copilot._load_mail()
+        st = mail._load_mail()
         bob = {"id": "b1", "historyId": "1", "subject": "Order", "messages": [
             _mk_msg("b1-m1", "Bob", "bob@venue.com", "2026-09-21T09:00:00+00:00",
                     snippet="please send the invoice to our finance lead jo.smith@example.com")]}
         uk = {"id": "k1", "historyId": "1", "subject": "Hello", "messages": [
             _mk_msg("k1-m1", "Sam", "sales@firm.co.uk", "2026-09-21T09:00:00+00:00", snippet="hi")]}
-        copilot._mail_apply_thread(st, bob, MBOX); copilot._mail_apply_thread(st, uk, MBOX)
-        copilot._write_mail(st)
-        d = copilot._load_crm()
+        mail._mail_apply_thread(st, bob, MBOX); mail._mail_apply_thread(st, uk, MBOX)
+        mail._write_mail(st)
+        d = salesdesk._load_crm()
         d["persons"]["p2"] = {"id": "p2", "name": "Ann Other", "emails": ["ann@other.com"], "phones": ["07700 900555"]}
         d["deals"]["d2"] = {"id": "d2", "title": "Northern Stage: Ann Other rig", "person_id": "p2",
                             "org_id": "o1", "status": "won", "value": 18000, "pd_id": "999",
                             "notes": [{"id": "n2", "text": "Ann Other on 07700 900555 signed it off"}]}
-        copilot._write_crm(d)
+        salesdesk._write_crm(d)
         copilot._redact_customer("jo.smith@example.com", "555")
         copilot._redact_customer("ann@other.com", "556")
         copilot._redact_customer("sales@firm.co", "557")
-        st = copilot._load_mail()
+        st = mail._load_mail()
         ok("b1" in st["threads"], "Bob's thread stays: he wrote it")
         ok("jo.smith@example.com" not in st["threads"]["b1"]["snippet"], "with Jo's address scrubbed from it")
-        copilot._mail_apply_thread(st, dict(bob, messages=bob["messages"] + [
+        mail._mail_apply_thread(st, dict(bob, messages=bob["messages"] + [
             _mk_msg("b1-m2", "Bob", "bob@venue.com", "2026-09-22T09:00:00+00:00", snippet="new order")]), MBOX)
         ok("b1" in st["threads"] and len(st["threads"]["b1"]["messages"]) == 2, "and Bob's next email still arrives")
         ok("k1" in st["threads"], "erasing sales@firm.co leaves sales@firm.co.uk alone")
-        d = copilot._load_crm()
+        d = salesdesk._load_crm()
         deal = d["deals"].get("d2") or {}
         ok(deal.get("status") == "won" and "999" not in (d.get("pd_deleted_deals") or []),
            "the organisation's won deal stays, and is not tombstoned")
@@ -24825,16 +24830,16 @@ def t_a_filter_that_assigns_and_archives_does_not_close_the_email():
         _gm.list_threads, _gm.get_thread, _gm.modify_thread, _gm.ensure_label, _gm.list_thread_ids = \
             listing, get_thread, modify, label, ids
         try:
-            run_async(copilot._mail_sync_now(force=True))
+            run_async(mail._mail_sync_now(force=True))
             ok("s1" not in in_inbox, "the filter took it out of the Gmail inbox")
-            run_async(copilot._mail_sync_now(force=True))
-            t = copilot._load_mail()["threads"]["s1"]
+            run_async(mail._mail_sync_now(force=True))
+            t = mail._load_mail()["threads"]["s1"]
             eq((t["state"], t["owner"]), ("assigned", ann), "and it is still Ann's, open")
             in_inbox.add("s1")                    # it comes back to the inbox
-            run_async(copilot._mail_sync_now(force=True))
+            run_async(mail._mail_sync_now(force=True))
             in_inbox.discard("s1")                # and then a person archives it in Gmail
-            run_async(copilot._mail_sync_now(force=True))
-            eq(copilot._load_mail()["threads"]["s1"].get("closed_by"), "archive",
+            run_async(mail._mail_sync_now(force=True))
+            eq(mail._load_mail()["threads"]["s1"].get("closed_by"), "archive",
                "a person's archive still closes it")
         finally:
             _gm.list_threads, _gm.get_thread, _gm.modify_thread, _gm.ensure_label, _gm.list_thread_ids = saved
@@ -24978,7 +24983,7 @@ def t_an_erasure_stays_erased_and_takes_only_theirs():
     def go():
         ensure_auth()
         crm_wipe()
-        d = copilot._load_crm()
+        d = salesdesk._load_crm()
         d["orgs"]["o1"] = {"id": "o1", "name": "Northern Stage", "pd_id": "501"}
         d["persons"]["p1"] = {"id": "p1", "name": "Sarah Whitfield", "emails": ["sarah@ns.co.uk"],
                               "phones": ["0191 111"], "org_id": "o1", "pd_id": "601"}
@@ -24999,17 +25004,17 @@ def t_an_erasure_stays_erased_and_takes_only_theirs():
         d["persons"]["p3"] = {"id": "p3", "name": "Will", "emails": ["will@ns.co.uk"], "org_id": "o1"}
         d["deals"]["d3"] = {"id": "d3", "title": "Northern Stage - Willow set", "person_id": "p3",
                             "org_id": "o1", "status": "open", "notes": [{"id": "n3", "text": "They will need 40 gobos"}]}
-        copilot._write_crm(d)
-        st = copilot._load_mail()
+        salesdesk._write_crm(d)
+        st = mail._load_mail()
         bob = {"id": "b1", "historyId": "1", "subject": "Order", "messages": [
             dict(_mk_msg("b1-m1", "Bob", "bob@venue.com", "2026-09-21T09:00:00+00:00",
                          snippet="copying in sarah@ns.co.uk from finance"),
                  cc="Sarah Whitfield <sarah@ns.co.uk>, Ann <ann@venue.com>")]}
-        copilot._mail_apply_thread(st, bob, MBOX)
-        copilot._write_mail(st)
+        mail._mail_apply_thread(st, bob, MBOX)
+        mail._write_mail(st)
         for a in ("sarah@ns.co.uk", "jo@photo.com", "will@ns.co.uk"):
             copilot._redact_customer(a, "1")
-        d = copilot._load_crm()
+        d = salesdesk._load_crm()
         deal, act = d["deals"]["d1"], d["activities"]["a1"]
         ok("Sarah" not in deal["title"] and "Sarah" not in act["subject"] and "0191" not in act["note"],
            "the kept deal and its task no longer name her: " + str((deal["title"], act)))
@@ -25023,11 +25028,11 @@ def t_an_erasure_stays_erased_and_takes_only_theirs():
            "an enquiry is the person's own, and the company typed into it goes with it")
         eq(d["deals"]["d3"]["title"], "Northern Stage - Willow set", "a one-word name is not cut out of words")
         eq(d["deals"]["d3"]["notes"][0]["text"], "They will need 40 gobos")
-        st = copilot._load_mail()
+        st = mail._load_mail()
         m = st["threads"]["b1"]["messages"][0]
         ok("sarah" not in m.get("cc", "").lower() and "ann@venue.com" in m.get("cc", ""),
            "her entry is gone from the Cc, and nobody else's: " + m.get("cc", ""))
-        copilot._mail_apply_thread(st, dict(bob, messages=bob["messages"] + [
+        mail._mail_apply_thread(st, dict(bob, messages=bob["messages"] + [
             _mk_msg("b1-m2", "Bob", "bob@venue.com", "2026-09-22T09:00:00+00:00", snippet="thanks")]), MBOX)
         ok("sarah@ns.co.uk" not in json.dumps(st["threads"]["b1"]), "and the next sync does not put her back")
     with_mail(go)
@@ -25064,7 +25069,7 @@ def t_an_erased_persons_organisation_deals_keep_updating_without_them():
         try:
             eq(post("/api/crm/import", {"go": True}).status_code, 200)
             copilot._redact_customer("sarah@lumen.co.uk", "901")
-            d = copilot._load_crm()
+            d = salesdesk._load_crm()
             raw = json.dumps(d).lower()
             for bit in ("whitfield", "sarah@lumen.co.uk", "s.whitfield@lumen.co.uk", "0191 111", "0191111"):
                 ok(bit not in raw, "the CRM file keeps nothing that names her, not even to scrub her: " + bit)
@@ -25087,7 +25092,7 @@ def t_an_erased_persons_organisation_deals_keep_updating_without_them():
             ok(pre["report"]["erased"]["people"] == 1 and pre["report"]["erased"]["scrubbed"] >= 3,
                "the preview counts her, without naming her: %r" % pre["report"].get("erased"))
             eq(post("/api/crm/import", {"go": True}).status_code, 200)
-            d = copilot._load_crm()
+            d = salesdesk._load_crm()
             g = [v for v in d["deals"].values() if v.get("pd_id") == "31"][0]
             eq((g["status"], g["value"]), ("won", 90.0), "Pipedrive's change arrived")
             eq(g["title"], "Glass sample for [erased] (reorder)")
@@ -25106,7 +25111,7 @@ def t_an_erased_persons_organisation_deals_keep_updating_without_them():
             v3["deals"][0]["person_pd_id"] = ""
             feed["x"] = v3
             eq(post("/api/crm/import", {"go": True}).status_code, 200)
-            d = copilot._load_crm()
+            d = salesdesk._load_crm()
             eq([v for v in d["deals"].values() if v.get("pd_id") == "30"][0]["title"], "[erased]: 12 steel gobos")
             ok("whitfield" not in json.dumps(d).lower().replace("s. whitfield", ""), "nowhere else either")
         finally:
@@ -25125,12 +25130,12 @@ def t_an_erased_address_keeps_its_person_out_of_every_import():
     def go():
         ensure_auth(); crm_wipe()
         copilot._redact_customer("nina@lumen.co.uk", "902")          # never in the CRM
-        st = copilot._load_mail()
+        st = mail._load_mail()
         st["redacted"] = list(st.get("redacted") or []) + ["olga@lumen.co.uk"]   # an erasure from before
-        copilot._write_mail(st)
-        d = copilot._load_crm()
+        mail._write_mail(st)
+        d = salesdesk._load_crm()
         d["pd_deleted_persons"] = list(d.get("pd_deleted_persons") or []) + ["24"]   # deleted by hand
-        copilot._write_crm(d)
+        salesdesk._write_crm(d)
         people = [dict(PD_EXPORT["persons"][0]),
                   {"pd_id": "22", "name": "Nina Patel", "org_pd_id": "10", "emails": ["Nina@Lumen.co.uk"],
                    "phones": ["07700 900222"], "created_at": "", "updated_at": ""},
@@ -25149,7 +25154,7 @@ def t_an_erased_address_keeps_its_person_out_of_every_import():
         try:
             r = post("/api/crm/import", {"go": True}).json()
             eq(r["report"]["erased"]["people"], 2, r["report"].get("erased"))
-            d = copilot._load_crm()
+            d = salesdesk._load_crm()
             names = {p.get("name") for p in d["persons"].values()}
             eq(names, {"Sarah Whitfield"}, "neither erased person is brought back, and the deleted one stays deleted")
             titles = {v["pd_id"]: v["title"] for v in d["deals"].values()}
@@ -25162,10 +25167,10 @@ def t_an_erased_address_keeps_its_person_out_of_every_import():
             # first import left her keyed hashes, so the second still knows it.
             people[:] = [p for p in people if p["pd_id"] != "23"]
             deals[1]["person_pd_id"] = ""
-            st = copilot._load_mail(); st["redacted"] = [a for a in st["redacted"] if a != "olga@lumen.co.uk"]
-            copilot._write_mail(st)
+            st = mail._load_mail(); st["redacted"] = [a for a in st["redacted"] if a != "olga@lumen.co.uk"]
+            mail._write_mail(st)
             post("/api/crm/import", {"go": True})
-            eq({v["pd_id"]: v["title"] for v in copilot._load_crm()["deals"].values()}["33"], "[erased] touring rig")
+            eq({v["pd_id"]: v["title"] for v in salesdesk._load_crm()["deals"].values()}["33"], "[erased] touring rig")
         finally:
             _pd.export, _pd.API_TOKEN = saved
     with_mail(go)
@@ -25326,7 +25331,7 @@ def t_a_colleague_who_shares_an_erased_persons_number_is_not_erased():
             for _ in range(2):
                 r = post("/api/crm/import", {"go": True}).json()
                 eq(r["report"]["erased"]["people"], 1, "only Sarah is recognised: %r" % r["report"]["erased"])
-            d = copilot._load_crm()
+            d = salesdesk._load_crm()
             people = {p["pd_id"]: p for p in d["persons"].values()}
             ok("24" in people and "20" not in people, "Tom stays, Sarah does not come back")
             ok("24" not in (d.get("pd_deleted_persons") or []), "and Tom is not tombstoned")
@@ -25352,7 +25357,7 @@ def t_an_import_erases_a_contact_it_recognises_that_the_crm_still_holds():
     import pipedrive as _pd
     def go():
         ensure_auth(); crm_wipe()
-        st = copilot._load_mail(); st["redacted"] = ["olga@lumen.co.uk"]; copilot._write_mail(st)
+        st = mail._load_mail(); st["redacted"] = ["olga@lumen.co.uk"]; mail._write_mail(st)
         olga = {"pd_id": "23", "name": "Olga Ivanova", "org_pd_id": "10", "emails": ["olga@lumen.co.uk"],
                 "phones": ["07700 900555"], "created_at": "", "updated_at": ""}
         base = dict(PD_EXPORT["deals"][0])
@@ -25365,7 +25370,7 @@ def t_an_import_erases_a_contact_it_recognises_that_the_crm_still_holds():
         try:
             # As if an older import had brought her back, and a duplicate of
             # her had been kept under another id (Pipedrive merged it away).
-            d = copilot._load_crm()
+            d = salesdesk._load_crm()
             d["persons"]["p_pd23"] = {"id": "p_pd23", "name": "Olga Ivanova", "emails": ["olga@lumen.co.uk"],
                                       "phones": ["07700 900555"], "pd_id": "23", "notes": []}
             d["persons"]["p_pd26"] = {"id": "p_pd26", "name": "Olga Ivanova", "emails": ["o.ivanova@gmail.com"],
@@ -25374,24 +25379,24 @@ def t_an_import_erases_a_contact_it_recognises_that_the_crm_still_holds():
                                       "phones": [], "pd_id": "27", "notes": []}
             d["deals"]["dx"] = {"id": "dx", "title": "Desk-typed: Olga Ivanova reorder", "person_id": "p_pd23",
                                 "org_id": "o_pd10", "status": "open", "notes": [], "edited_here": True}
-            copilot._write_crm(d)
+            salesdesk._write_crm(d)
             # The mailbox cannot be read: the list of erased addresses is not
             # known, so the import does not run.
-            with open(copilot.MAILBOX_PATH, "w") as fh:
+            with open(mail.MAILBOX_PATH, "w") as fh:
                 fh.write("{ broken")
-            copilot._mail_mem = None
-            jsonstore._json_cache.pop(copilot.MAILBOX_PATH, None)
+            mail._mail_mem = None
+            jsonstore._json_cache.pop(mail.MAILBOX_PATH, None)
             r = post("/api/crm/import", {"go": True})
             eq(r.status_code, 503, r.text)
             ok("mailbox" in r.json()["error"], r.text)
             pre = post("/api/crm/import", {}).json()
             ok(any("mailbox" in x for x in pre["report"]["problems"]), "the preview says so too")
-            jsonstore._poisoned_stores.discard(copilot.MAILBOX_PATH)
-            copilot._write_mail({"threads": {}, "redacted": ["olga@lumen.co.uk"]})
-            copilot._mail_mem = None
+            jsonstore._poisoned_stores.discard(mail.MAILBOX_PATH)
+            mail._write_mail({"threads": {}, "redacted": ["olga@lumen.co.uk"]})
+            mail._mail_mem = None
             r = post("/api/crm/import", {"go": True}).json()
             eq(r["report"]["erased"]["removed"], 2, r["report"]["erased"])
-            d = copilot._load_crm()
+            d = salesdesk._load_crm()
             names = sorted((p["pd_id"], p["name"]) for p in d["persons"].values())
             eq(names, [("27", "Olga Ivanova")], "her record and her duplicate go; a namesake elsewhere stays")
             dx = d["deals"]["dx"]
@@ -25400,7 +25405,7 @@ def t_an_import_erases_a_contact_it_recognises_that_the_crm_still_holds():
             ok("900555" not in raw and "o.ivanova" not in raw and "olga@lumen" not in raw, "nothing of hers in the clear")
         finally:
             _pd.export, _pd.API_TOKEN = saved
-            jsonstore._poisoned_stores.discard(copilot.MAILBOX_PATH)
+            jsonstore._poisoned_stores.discard(mail.MAILBOX_PATH)
     with_mail(go)
 
 
@@ -25444,18 +25449,18 @@ def t_the_second_review_of_the_erasure_scrub_holds():
             snaps.append(1)
         _pd.export, _pd.API_TOKEN, copilot._weekly_snapshot = fake_export, "t", snap
         def titles():
-            return {v["pd_id"]: v["title"] for v in copilot._load_crm()["deals"].values()}
+            return {v["pd_id"]: v["title"] for v in salesdesk._load_crm()["deals"].values()}
         try:
             post("/api/crm/import", {"go": True})
             copilot._redact_customer("sarah@lumen.co.uk", "907")
-            lumen = [o for o in copilot._load_crm()["orgs"].values() if o.get("pd_id") == "10"][0]
+            lumen = [o for o in salesdesk._load_crm()["orgs"].values() if o.get("pd_id") == "10"][0]
             eq(lumen["custom"], {"Key contact": "[erased]"}, "her organisation is cleaned at once, whatever the namesake")
             # Tom leaves, here and in Pipedrive. Nobody live lists the
             # switchboard now; it was shared when she was erased, so it is
             # still the firm's. A new duplicate of her turns up in Pipedrive.
-            d = copilot._load_crm()
-            copilot._crm_tombstone_contact(d, "persons", [p for p in d["persons"].values() if p.get("pd_id") == "24"][0])
-            copilot._write_crm(d)
+            d = salesdesk._load_crm()
+            salesdesk._crm_tombstone_contact(d, "persons", [p for p in d["persons"].values() if p.get("pd_id") == "24"][0])
+            salesdesk._write_crm(d)
             x = _copy.deepcopy(feed["x"])
             x["persons"] = [p for p in x["persons"] if p["pd_id"] != "24"] + [
                 {"pd_id": "28", "name": "Sarah Whitfield", "org_pd_id": "10", "emails": ["sarah.whitfield@hotmail.com"],
@@ -25465,7 +25470,7 @@ def t_the_second_review_of_the_erasure_scrub_holds():
             feed["x"] = x
             for _ in range(2):
                 r = post("/api/crm/import", {"go": True}).json()
-            d = copilot._load_crm()
+            d = salesdesk._load_crm()
             eq(titles()["36"], "Lumen Events panto rig, ring 0191 496 0000",
                "the firm's name and switchboard stay, with nobody live listing the number any more")
             notes36 = {n["pd_id"]: n["text"] for n in [v for v in d["deals"].values() if v["pd_id"] == "36"][0]["notes"]}
@@ -25489,18 +25494,18 @@ def t_the_second_review_of_the_erasure_scrub_holds():
             copilot._redact_customer("boxoffice@lumen.co.uk", "908")
             post("/api/crm/import", {"go": True})
             eq(titles()["36"], "Lumen Events panto rig, ring 0191 496 0000", "the firm keeps its name")
-            ok(not any(p.get("pd_id") == "27" for p in copilot._load_crm()["persons"].values()), "the contact itself goes")
+            ok(not any(p.get("pd_id") == "27" for p in salesdesk._load_crm()["persons"].values()), "the contact itself goes")
             # A refused import takes no snapshot.
-            with open(copilot.MAILBOX_PATH, "w") as fh:
+            with open(mail.MAILBOX_PATH, "w") as fh:
                 fh.write("{ broken")
-            copilot._mail_mem = None
-            jsonstore._json_cache.pop(copilot.MAILBOX_PATH, None)
+            mail._mail_mem = None
+            jsonstore._json_cache.pop(mail.MAILBOX_PATH, None)
             before = len(snaps)
             eq(post("/api/crm/import", {"go": True}).status_code, 503)
             eq(len(snaps), before, "no snapshot for an import that does not run")
         finally:
             _pd.export, _pd.API_TOKEN, copilot._weekly_snapshot = saved
-            jsonstore._poisoned_stores.discard(copilot.MAILBOX_PATH)
+            jsonstore._poisoned_stores.discard(mail.MAILBOX_PATH)
     with_mail(go)
 
 @test
@@ -25527,14 +25532,14 @@ def t_an_erasure_and_every_import_clean_every_field_that_can_name_them():
         _pd.export, _pd.API_TOKEN = fake_export, "t"
         try:
             post("/api/crm/import", {"go": True})
-            d = copilot._load_crm()
+            d = salesdesk._load_crm()
             won = [k for k, v in d["deals"].items() if v["pd_id"] == "30"][0]
             d["deals"][won]["lost_comment"] = "Ring Sarah Whitfield on 07700 900123 in the spring"
             d["deals"][won]["edited_here"] = True
-            copilot._write_crm(d)
+            salesdesk._write_crm(d)
             copilot._redact_customer("sarah@lumen.co.uk", "906")
             for label in ("after the erasure", "after an import"):
-                d = copilot._load_crm()
+                d = salesdesk._load_crm()
                 o = [v for v in d["orgs"].values() if v.get("pd_id") == "10"][0]
                 t = [v for v in d["persons"].values() if v.get("pd_id") == "21"][0]
                 eq(o["address"], "c/o [erased], 1 High St, Newcastle", label)
@@ -25611,13 +25616,13 @@ def t_a_redact_a_store_refused_is_said_and_retried():
     never tried again; an unreadable CRM was logged as "erased 0"."""
     def go():
         ensure_auth(); crm_wipe()
-        d = copilot._load_crm()
+        d = salesdesk._load_crm()
         d["persons"]["p1"] = {"id": "p1", "name": "Kim Lee", "emails": ["kim@x.com"]}
-        copilot._write_crm(d)
-        good = open(copilot.CRM_PATH).read()
-        with open(copilot.CRM_PATH, "w") as fh:
+        salesdesk._write_crm(d)
+        good = open(salesdesk.CRM_PATH).read()
+        with open(salesdesk.CRM_PATH, "w") as fh:
             fh.write("{ broken")
-        jsonstore._json_cache.pop(copilot.CRM_PATH, None)
+        jsonstore._json_cache.pop(salesdesk.CRM_PATH, None)
         reset_dispatch()
         desk._record_dispatch(4242, {"email": "kim@x.com", "tracking_number": "T-42"})
         try:
@@ -25630,10 +25635,10 @@ def t_a_redact_a_store_refused_is_said_and_retried():
             ok(any(p["email"] == "kim@x.com" for p in copilot._load_privacy_log().get("pending") or []),
                "and it is owed")
         finally:
-            jsonstore._poisoned_stores.discard(copilot.CRM_PATH)
-            with open(copilot.CRM_PATH, "w") as fh:
+            jsonstore._poisoned_stores.discard(salesdesk.CRM_PATH)
+            with open(salesdesk.CRM_PATH, "w") as fh:
                 fh.write(good)
-            jsonstore._json_cache.pop(copilot.CRM_PATH, None)
+            jsonstore._json_cache.pop(salesdesk.CRM_PATH, None)
         # The hourly tick is what runs it (the round-4 review found the test
         # called the retry directly, so dropping it from the tick passed).
         ran = []
@@ -25660,7 +25665,7 @@ def t_a_redact_a_store_refused_is_said_and_retried():
         eq(desk._load_dispatch()["4242"].get("redacted_request_at"), asked,
            "and the retry leaves that time alone")
         reset_dispatch()
-        ok(not any(p.get("id") == "p1" for p in copilot._load_crm()["persons"].values()), "and she is gone")
+        ok(not any(p.get("id") == "p1" for p in salesdesk._load_crm()["persons"].values()), "and she is gone")
         eq(copilot._load_privacy_log().get("pending"), [], "nothing is owed any more")
     with_mail(go)
 
@@ -25674,10 +25679,10 @@ def t_a_redact_that_stops_part_way_through_the_crm_leaves_nothing_half_made_in_m
     def go():
         ensure_auth(); crm_wipe()
         addr = "kim@x.com"
-        d = copilot._load_crm()
+        d = salesdesk._load_crm()
         d["persons"]["p1"] = {"id": "p1", "name": "Kim Lee", "emails": [addr]}
         d["leads"]["l1"] = {"id": "l1", "title": "Kim Lee lead", "person_id": "p1"}
-        copilot._write_crm(d)
+        salesdesk._write_crm(d)
         def stops(*a, **k):
             raise RuntimeError("the erasure stopped part way")
         saved = copilot._erase_remember          # the last step before the write
@@ -25687,15 +25692,15 @@ def t_a_redact_that_stops_part_way_through_the_crm_leaves_nothing_half_made_in_m
         finally:
             copilot._erase_remember = saved
         eq(out["failed"], ["the CRM"], "the CRM is said to have failed")
-        d = copilot._load_crm()
+        d = salesdesk._load_crm()
         ok("p1" in d["persons"] and "l1" in d["leads"],
            "the CRM read next is the one on disk: " + str(sorted(d["persons"])) + str(sorted(d["leads"])))
         eq(post("/api/crm/contact", {"op": "org_add", "name": "Typed by hand"}).status_code, 200)
-        on_disk = json.load(open(copilot.CRM_PATH))["crm"]
+        on_disk = json.load(open(salesdesk.CRM_PATH))["crm"]
         ok("p1" in on_disk["persons"] and "l1" in on_disk["leads"],
            "and the next save does not write half an erasure")
         eq(copilot._redact_customer(addr, "9", retry=True)["failed"], [], "the hourly retry finishes it")
-        d = copilot._load_crm()
+        d = salesdesk._load_crm()
         ok("p1" not in d["persons"] and "l1" not in d["leads"], "and she is gone")
     with_mail(go)
 
@@ -25710,19 +25715,19 @@ def t_a_redact_that_stops_part_way_through_the_mailbox_leaves_nothing_half_made_
         addr = "kim@x.com"
         _seed_thread("k1", frm=("Kim Lee", addr))
         _seed_thread("b1", frm=("Bob", "bob@venue.com"))
-        copilot._write_mail(copilot._load_mail())
+        mail._write_mail(mail._load_mail())
         def stops(*a, **k):
             raise RuntimeError("the scrub stopped part way")
-        saved = copilot._mail_erased_rx          # runs after their threads are taken off
-        copilot._mail_erased_rx = stops
+        saved = mail._mail_erased_rx          # runs after their threads are taken off
+        mail._mail_erased_rx = stops
         try:
             out = copilot._redact_customer(addr, "9")
         finally:
-            copilot._mail_erased_rx = saved
+            mail._mail_erased_rx = saved
         eq(out["failed"], ["the mailbox"], "the mailbox is said to have failed")
-        ok("k1" in copilot._load_mail()["threads"], "the board read next is the one on disk")
+        ok("k1" in mail._load_mail()["threads"], "the board read next is the one on disk")
         eq(copilot._redact_customer(addr, "9", retry=True)["failed"], [], "the hourly retry finishes it")
-        ok("k1" not in copilot._load_mail()["threads"], "and her thread is gone")
+        ok("k1" not in mail._load_mail()["threads"], "and her thread is gone")
     with_mail(go)
 
 
@@ -25919,14 +25924,14 @@ def t_the_erased_address_patterns_are_built_once_each():
     """Found by the round-4 review: the one-entry cache made the header and
     body patterns evict each other, so every synced thread rebuilt both."""
     gone = {"jo@x.com", "kim@y.org"}
-    copilot._erased_rx_cache.clear()
-    body, head = copilot._mail_erased_rx(gone), copilot._mail_erased_rx(gone, header=True)
+    mail._erased_rx_cache.clear()
+    body, head = mail._mail_erased_rx(gone), mail._mail_erased_rx(gone, header=True)
     # Counted, not compared by identity: re keeps its own cache of compiled
     # patterns, so a rebuilt one can be the very same object.
-    eq(sorted(k[1] for k in copilot._erased_rx_cache), [False, True], "each form is kept")
+    eq(sorted(k[1] for k in mail._erased_rx_cache), [False, True], "each form is kept")
     eq(head.sub("[erased]", "Jo Smith <jo@x.com>, ann@z.com"), "[erased], ann@z.com")
     eq(body.sub("[erased]", "write to jo@x.com today"), "write to [erased] today")
-    ok(copilot._mail_erased_rx(gone | {"new@x.com"}) is not body, "and a longer list is a new pattern")
+    ok(mail._mail_erased_rx(gone | {"new@x.com"}) is not body, "and a longer list is a new pattern")
 
 
 @test
@@ -26188,7 +26193,7 @@ def t_a_malformed_number_setting_falls_back_instead_of_stopping_the_app():
     import subprocess
     eq(copilot._env_num(int, "60s", "60", "MAIL_LOOP_SECS"), 60)
     eq(copilot._env_num(float, "", "24", "SESSION_HOURS"), 24.0)
-    r = subprocess.run([sys.executable, "-c", "import copilot; from gizmo import team; print(team.SESSION_HOURS, copilot.MAIL_LOOP_SECS)"],
+    r = subprocess.run([sys.executable, "-c", "import copilot; from gizmo import mail, team; print(team.SESSION_HOURS, mail.MAIL_LOOP_SECS)"],
                        env={**os.environ, "SESSION_HOURS": "", "MAIL_LOOP_SECS": "60s"},
                        cwd=HERE, capture_output=True, text=True)
     eq(r.returncode, 0, r.stderr[-400:])
@@ -26449,12 +26454,12 @@ def t_a_handover_that_failed_once_moves_the_gmail_label_whole():
         _gm.list_labels, _gm.modify_thread = list_labels, modify
         try:
             _seed_thread("t1")
-            st = copilot._load_mail(); t = st["threads"]["t1"]
+            st = mail._load_mail(); t = st["threads"]["t1"]
             t["owner"], t["state"] = ann, "assigned"
-            run_async(copilot._mail_sync_labels(t, "Ann"))
+            run_async(mail._mail_sync_labels(t, "Ann"))
             t["owner"] = bob; fail["n"] = 1
-            run_async(copilot._mail_sync_labels(t, "Bob"))
-            run_async(copilot._mail_sync_labels(t, "Bob"))
+            run_async(mail._mail_sync_labels(t, "Bob"))
+            run_async(mail._mail_sync_labels(t, "Bob"))
             eq(sorted(labels["t1"]), ["L2"], "only Bob's label is on it in Gmail")
         finally:
             _gm.list_labels, _gm.modify_thread = saved
@@ -26466,8 +26471,8 @@ def t_an_ai_draft_waits_its_turn_in_the_ai_window():
     """A29. Drafting a reply with Claude neither took nor respected a slot in
     the global AI window."""
     src = copilot_source()
-    seg = src.split("async def mail_draft_route(")[1].split("resp = await _xcreate(_anthropic(), model=MODEL_DEEP")[0]
-    ok("_window_ok(_rl_global, RATE_MAX_GLOBAL" in seg, "the compose checks the AI window before the call")
+    seg = src.split("async def mail_draft_route(")[1].split("resp = await claude._xcreate(claude._anthropic(), model=claude.MODEL_DEEP")[0]
+    ok("gate._window_ok(gate._rl_global, gate.RATE_MAX_GLOBAL" in seg, "the compose checks the AI window before the call")
 
 
 @test
@@ -26583,7 +26588,7 @@ def t_a_long_thread_lists_its_newest_attachments():
              "snippet": "proof", "files": [{"name": "proof-v%d-%d.pdf" % (i, k), "size": 1, "mime": "application/pdf",
                                              "id": "a%d%d" % (i, k), "msg": "m%d" % i} for k in range(1, 5)]}
             for i in range(1, 7)]
-    copilot._mail_apply_thread(store, {"id": "t2", "historyId": "1", "subject": "Artwork", "messages": msgs}, MBOX)
+    mail._mail_apply_thread(store, {"id": "t2", "historyId": "1", "subject": "Artwork", "messages": msgs}, MBOX)
     names = [f["name"] for f in store["threads"]["t2"]["files"]]
     eq(len(names), 20)
     ok("proof-v6-4.pdf" in names and "proof-v1-1.pdf" not in names, names[-3:])
@@ -27608,20 +27613,20 @@ def t_an_attachment_is_measured_off_the_event_loop():
         seen.setdefault("client", threading.get_ident())
         return _S3()
 
-    saved = (copilot._files_head, copilot._files_s3, copilot._mail_attachment_ok)
+    saved = (copilot._files_head, copilot._files_s3, mail._mail_attachment_ok)
     copilot._files_head, copilot._files_s3 = head, s3
-    copilot._mail_attachment_ok = lambda key, uid: True
+    mail._mail_attachment_ok = lambda key, uid: True
     try:
         async def go():
             seen["loop"] = threading.get_ident()
-            return await copilot._mail_fetch_parts([{"key": "files/u1/quote.pdf", "name": "quote.pdf",
+            return await mail._mail_fetch_parts([{"key": "files/u1/quote.pdf", "name": "quote.pdf",
                                                      "type": "application/pdf"}], "u1")
         files, _inline, _total = run_async(go())
         eq(files[0]["data"], b"%PDF-1.4 a quote")
         for k in ("head", "client", "get", "read"):
             ok(seen[k] != seen["loop"], "the %s call ran off the event loop" % k)
     finally:
-        copilot._files_head, copilot._files_s3, copilot._mail_attachment_ok = saved
+        copilot._files_head, copilot._files_s3, mail._mail_attachment_ok = saved
 
 
 def _capture_spawn():
@@ -27652,16 +27657,16 @@ def t_the_inbox_answers_from_memory_and_syncs_behind():
         ensure_auth()
         _gm.save_connection("rt-test", MBOX)
         _seed_thread("t1")
-        copilot._load_mail()["synced_at"] = "2026-01-01T00:00:00+00:00"
+        mail._load_mail()["synced_at"] = "2026-01-01T00:00:00+00:00"
         inline = []
 
         async def fake_sync(force=False):
             inline.append(force)
             return ""
-        saved_sync = copilot._mail_sync_now
-        copilot._mail_sync_now = fake_sync
-        copilot._mail_bg_sync["t"] = 0.0
-        copilot._mail_last_force["t"] = 0.0
+        saved_sync = mail._mail_sync_now
+        mail._mail_sync_now = fake_sync
+        mail._mail_bg_sync["t"] = 0.0
+        mail._mail_last_force["t"] = 0.0
         got, restore = _capture_spawn()
         try:
             r = post("/api/mail/board", {})
@@ -27676,7 +27681,7 @@ def t_the_inbox_answers_from_memory_and_syncs_behind():
             eq(inline, [True], "Refresh still syncs while the person waits")
         finally:
             restore()
-            copilot._mail_sync_now = saved_sync
+            mail._mail_sync_now = saved_sync
     with_mail(go)
 
 
@@ -27694,7 +27699,7 @@ def t_opening_and_claiming_email_do_not_wait_for_gmail():
         _uid, sess, _ = ready_user("Ann", "ann")
         _gm.save_connection("rt-test", MBOX)
         _seed_thread("t1")
-        copilot._load_mail()["threads"]["t1"]["unread"] = True
+        mail._load_mail()["threads"]["t1"]["unread"] = True
         calls = []
 
         async def modify(tid, add=None, remove=None):
@@ -27704,7 +27709,7 @@ def t_opening_and_claiming_email_do_not_wait_for_gmail():
             calls.append(("ensure", name))
             known[name] = "L-" + name
             return known[name]
-        saved = (_gm.modify_thread, _gm.ensure_label, copilot._mail_lock)
+        saved = (_gm.modify_thread, _gm.ensure_label, mail._mail_lock)
         _gm.modify_thread, _gm.ensure_label = modify, ensure
         got, restore = _capture_spawn()
         try:
@@ -27714,36 +27719,36 @@ def t_opening_and_claiming_email_do_not_wait_for_gmail():
             eq(len(got), 1, "marking it read was started behind")
             run_async(got.pop())
             eq(calls, [("modify", "t1", (), ("UNREAD",))], "Gmail is told it was read")
-            ok(not copilot._load_mail()["threads"]["t1"]["unread"], "and the board follows")
-            with open(copilot.MAILBOX_PATH, encoding="utf-8") as fh:
+            ok(not mail._load_mail()["threads"]["t1"]["unread"], "and the board follows")
+            with open(mail.MAILBOX_PATH, encoding="utf-8") as fh:
                 ok(not json.load(fh)["mailbox"]["threads"]["t1"]["unread"], "on disk too")
             calls.clear()
             r = post_s(sess, "/api/mail/claim", {"id": "t1"})
             eq(r.status_code, 200, r.text[:200])
             eq(calls, [], "the claim answered before Gmail was asked")
-            with open(copilot.MAILBOX_PATH, encoding="utf-8") as fh:
+            with open(mail.MAILBOX_PATH, encoding="utf-8") as fh:
                 ok(json.load(fh)["mailbox"]["threads"]["t1"].get("owner"), "and was on disk first")
             eq(len(got), 1, "the relabel was started behind")
-            copilot._mail_lock = asyncio.Lock()     # a fresh lock for this test's own loop
+            mail._mail_lock = asyncio.Lock()     # a fresh lock for this test's own loop
 
             async def held():
-                await copilot._mail_lock.acquire()
+                await mail._mail_lock.acquire()
                 job = asyncio.ensure_future(got.pop())
                 await asyncio.sleep(0.05)
                 waited = not calls
-                copilot._mail_lock.release()
+                mail._mail_lock.release()
                 await job
                 return waited
             ok(run_async(held()), "the relabel waits for a sync that is running")
             ok(("ensure", "Copilot/Ann") in calls, "and then labels the thread: %r" % calls)
-            t = copilot._load_mail()["threads"]["t1"]
+            t = mail._load_mail()["threads"]["t1"]
             eq(t.get("gmail_label"), "Copilot/Ann")
-            with open(copilot.MAILBOX_PATH, encoding="utf-8") as fh:
+            with open(mail.MAILBOX_PATH, encoding="utf-8") as fh:
                 eq(json.load(fh)["mailbox"]["threads"]["t1"].get("gmail_label"), "Copilot/Ann",
                    "and the label reached the disk")
         finally:
             restore()
-            _gm.modify_thread, _gm.ensure_label, copilot._mail_lock = saved
+            _gm.modify_thread, _gm.ensure_label, mail._mail_lock = saved
     with_mail(go)
 
 
@@ -27862,32 +27867,32 @@ def t_a_relabel_steps_aside_for_a_running_sync():
         async def ensure(name, known):
             known[name] = "L-" + name
             return known[name]
-        saved = (_gm.modify_thread, _gm.ensure_label, copilot._mail_lock, copilot.MAIL_LABEL_LOCK_WAIT)
+        saved = (_gm.modify_thread, _gm.ensure_label, mail._mail_lock, mail.MAIL_LABEL_LOCK_WAIT)
         _gm.modify_thread, _gm.ensure_label = modify, ensure
-        copilot.MAIL_LABEL_LOCK_WAIT = 0.05
+        mail.MAIL_LABEL_LOCK_WAIT = 0.05
         got, restore = _capture_spawn()
         try:
             eq(post_s(sess, "/api/mail/claim", {"id": "t1"}).status_code, 200)
-            copilot._mail_lock = asyncio.Lock()
+            mail._mail_lock = asyncio.Lock()
 
             async def busy_sync():
-                await copilot._mail_lock.acquire()
+                await mail._mail_lock.acquire()
                 try:
                     await got.pop()          # the relabel, while a sync holds the lock
                 finally:
-                    copilot._mail_lock.release()
-            t = copilot._load_mail()["threads"]["t1"]
+                    mail._mail_lock.release()
+            t = mail._load_mail()["threads"]["t1"]
             t["label_retry_at"] = time.time() + 400     # an earlier failure's back-off
             t["label_tried_at"] = time.time()
             run_async(busy_sync())
             eq(calls, [], "it did not wait out the sync")
-            ok(copilot._mail_want_label(t) != (t.get("gmail_label") or ""),
+            ok(mail._mail_want_label(t) != (t.get("gmail_label") or ""),
                "so the sync's catch-up sees the label is owed: %r" % t.get("gmail_label"))
             ok("label_retry_at" not in t and t.get("label_tried_at") == 0,
                "and takes it first, back-off or not: %r" % {k: t.get(k) for k in ("label_retry_at", "label_tried_at")})
         finally:
             restore()
-            _gm.modify_thread, _gm.ensure_label, copilot._mail_lock, copilot.MAIL_LABEL_LOCK_WAIT = saved
+            _gm.modify_thread, _gm.ensure_label, mail._mail_lock, mail.MAIL_LABEL_LOCK_WAIT = saved
     with_mail(go)
 
 
@@ -27902,7 +27907,7 @@ def t_an_opened_email_reads_as_read_at_once_unless_gmail_refuses():
         _uid, sess, _ = ready_user("Ann", "ann")
         _gm.save_connection("rt-test", MBOX)
         _seed_thread("t1")
-        copilot._load_mail()["threads"]["t1"]["unread"] = True
+        mail._load_mail()["threads"]["t1"]["unread"] = True
 
         async def refuse(tid, add=None, remove=None):
             raise _gm.GmailError("backend error")
@@ -27914,7 +27919,7 @@ def t_an_opened_email_reads_as_read_at_once_unless_gmail_refuses():
             rows = {t["id"]: t for t in post_s(sess, "/api/mail/board", {}).json()["threads"]}
             eq(rows["t1"]["unread"], False, "read as soon as it is opened")
             run_async(got.pop(0))
-            eq(copilot._load_mail()["threads"]["t1"]["unread"], True, "and unread again when Gmail refuses")
+            eq(mail._load_mail()["threads"]["t1"]["unread"], True, "and unread again when Gmail refuses")
         finally:
             restore()
             _gm.modify_thread = saved
@@ -27934,37 +27939,37 @@ def t_a_read_on_open_never_outlives_what_gmail_says():
         _uid, sess, _ = ready_user("Ann", "ann")
         _gm.save_connection("rt-test", MBOX)
         _seed_thread("t1")
-        copilot._load_mail()["threads"]["t1"]["unread"] = True
+        mail._load_mail()["threads"]["t1"]["unread"] = True
         calls = []
 
         async def modify(tid, add=None, remove=None):
             calls.append((tuple(add or ()), tuple(remove or ())))
-        saved = (_gm.modify_thread, copilot._mail_set_unread)
+        saved = (_gm.modify_thread, mail._mail_set_unread)
         got, restore = _capture_spawn()
         try:
             # Gmail never answers: put back, and saved even though another
             # writer saved the optimistic read in between.
             async def silent(store, ids, unread):
                 return {"changed": 0, "failed": 0}
-            copilot._mail_set_unread = silent
+            mail._mail_set_unread = silent
             eq(post_s(sess, "/api/mail/thread", {"id": "t1"}).status_code, 200)
-            copilot._write_mail(copilot._load_mail())          # another writer, mid-flight
+            mail._write_mail(mail._load_mail())          # another writer, mid-flight
             run_async(got.pop(0))
-            eq(copilot._load_mail()["threads"]["t1"]["unread"], True, "unanswered is not confirmed")
-            with open(copilot.MAILBOX_PATH, encoding="utf-8") as fh:
+            eq(mail._load_mail()["threads"]["t1"]["unread"], True, "unanswered is not confirmed")
+            with open(mail.MAILBOX_PATH, encoding="utf-8") as fh:
                 eq(json.load(fh)["mailbox"]["threads"]["t1"]["unread"], True, "and the disk says so too")
             # Mark unread pressed while the mark-read is still to run: it wins.
-            copilot._mail_set_unread = saved[1]
+            mail._mail_set_unread = saved[1]
             _gm.modify_thread = modify
             eq(post_s(sess, "/api/mail/thread", {"id": "t1"}).status_code, 200)
             eq(post_s(sess, "/api/mail/read", {"id": "t1", "unread": True}).status_code, 200)
             calls.clear()
             run_async(got.pop(0))
             eq(calls, [], "the late mark-read stands down")
-            eq(copilot._load_mail()["threads"]["t1"]["unread"], True, "and the email stays unread, as asked")
+            eq(mail._load_mail()["threads"]["t1"]["unread"], True, "and the email stays unread, as asked")
         finally:
             restore()
-            _gm.modify_thread, copilot._mail_set_unread = saved
+            _gm.modify_thread, mail._mail_set_unread = saved
     with_mail(go)
 
 
@@ -28653,14 +28658,14 @@ def t_the_crm_board_is_built_once_per_version_of_what_it_shows():
     again, so nobody is shown a board older than what it is built from."""
     def go():
         post("/api/crm/contact", {"op": "person_add", "name": "Board Probe", "emails": ["bp@example.com"]})
-        built, real = [], copilot._crm_shape
+        built, real = [], salesdesk._crm_shape
 
         def spy(d):
             built.append(1)
             return real(d)
-        saved_today = copilot._crm_today
-        copilot._crm_shape = spy
-        copilot._crm_board_cache["key"] = None       # a cold start, as after a deploy
+        saved_today = salesdesk._crm_today
+        salesdesk._crm_shape = spy
+        salesdesk._crm_board_cache["key"] = None       # a cold start, as after a deploy
         try:
             a = post("/api/crm/board", {}).json()
             b = post("/api/crm/board", {}).json()
@@ -28680,12 +28685,12 @@ def t_the_crm_board_is_built_once_per_version_of_what_it_shows():
             eq(len(built), 1, "a change to the team builds it again")
             ok(any(r["name"] == "Board Teammate" for r in d["crm"]["team"]), "and the new name is on it")
             built.clear()
-            copilot._crm_today = lambda: saved_today() + timedelta(days=1)
+            salesdesk._crm_today = lambda: saved_today() + timedelta(days=1)
             e = post("/api/crm/board", {}).json()
             eq(len(built), 1, "a new day builds it again")
             eq(e["crm"]["today"], (saved_today() + timedelta(days=1)).isoformat())
         finally:
-            copilot._crm_shape, copilot._crm_today = real, saved_today
+            salesdesk._crm_shape, salesdesk._crm_today = real, saved_today
     with_accounts(go)
 
 
@@ -28720,12 +28725,12 @@ def t_forgetting_the_crm_forgets_its_board():
     all of it, or the unsaved change could be served from the board."""
     def go():
         post("/api/crm/contact", {"op": "person_add", "name": "Forget Probe", "emails": ["fp@example.com"]})
-        copilot._crm_board()
-        ok(copilot._crm_board_cache["key"] is not None, "the board is kept")
-        jsonstore._forget_store(copilot.CRM_PATH)
-        eq(copilot._crm_board_cache["key"], None, "and forgotten with the store")
-        ok(all(not v for v in copilot._crm_board_cache.values()),
-           "all of it, not only its key: %r" % sorted(k for k, v in copilot._crm_board_cache.items() if v))
+        salesdesk._crm_board()
+        ok(salesdesk._crm_board_cache["key"] is not None, "the board is kept")
+        jsonstore._forget_store(salesdesk.CRM_PATH)
+        eq(salesdesk._crm_board_cache["key"], None, "and forgotten with the store")
+        ok(all(not v for v in salesdesk._crm_board_cache.values()),
+           "all of it, not only its key: %r" % sorted(k for k, v in salesdesk._crm_board_cache.items() if v))
     with_accounts(go)
 
 
@@ -28740,15 +28745,15 @@ def t_a_crm_write_never_leaves_the_board_from_before_it():
     def go():
         post("/api/crm/contact", {"op": "person_add", "name": "Tick Probe", "emails": ["tick@example.com"]})
         real_stat = jsonstore._stat_key
-        jsonstore._stat_key = lambda p: ("same", 1, 1) if p == copilot.CRM_PATH else real_stat(p)
+        jsonstore._stat_key = lambda p: ("same", 1, 1) if p == salesdesk.CRM_PATH else real_stat(p)
         try:
-            copilot._crm_board_cache["key"] = None
+            salesdesk._crm_board_cache["key"] = None
             post("/api/crm/board", {})
-            d = copilot._load_crm()
+            d = salesdesk._load_crm()
             for p in d["persons"].values():
                 if p.get("name") == "Tick Probe":
                     p["name"] = "Tock Probe"          # the same size on disk
-            copilot._write_crm(d)
+            salesdesk._write_crm(d)
             after = post("/api/crm/board", {}).json()
         finally:
             jsonstore._stat_key = real_stat
@@ -28768,12 +28773,12 @@ def t_a_crm_read_that_failed_is_not_kept_as_the_board():
         real = jsonstore._load_json_store
 
         def once(path, key, default):
-            if path == copilot.CRM_PATH:
+            if path == salesdesk.CRM_PATH:
                 jsonstore._load_json_store = real
                 jsonstore._poisoned_stores.add(path)
                 return default
             return real(path, key, default)
-        jsonstore._forget_store(copilot.CRM_PATH)       # the next read comes from disk
+        jsonstore._forget_store(salesdesk.CRM_PATH)       # the next read comes from disk
         jsonstore._load_json_store = once
         try:
             bad = post("/api/crm/board", {}).json()
@@ -28794,25 +28799,25 @@ def t_a_crm_write_keeps_its_board_under_the_day_it_was_built_for():
     hour or the day kept a board built for the old one under the new one, and
     it was served all through the new hour."""
     def go():
-        saved, real = copilot._crm_today, copilot._crm_shape
+        saved, real = salesdesk._crm_today, salesdesk._crm_shape
         turned = []
 
         def shape(d):
             out = real(d)
             if not turned:
                 turned.append(1)
-                copilot._crm_today = lambda: saved() + timedelta(days=1)   # midnight, while it is built
+                salesdesk._crm_today = lambda: saved() + timedelta(days=1)   # midnight, while it is built
             return out
-        copilot._crm_shape = shape
+        salesdesk._crm_shape = shape
         try:
             w = post("/api/crm/contact", {"op": "person_add", "name": "Midnight Probe", "emails": ["mp@example.com"]})
             eq(w.status_code, 200, w.text[:200])
-            copilot._crm_shape = real
+            salesdesk._crm_shape = real
             b = post("/api/crm/board", {}).json()
             eq(b["crm"]["today"], (saved() + timedelta(days=1)).isoformat(),
                "the read after midnight is built for the new day")
         finally:
-            copilot._crm_shape, copilot._crm_today = real, saved
+            salesdesk._crm_shape, salesdesk._crm_today = real, saved
     with_accounts(go)
 
 
@@ -28836,13 +28841,13 @@ def t_the_crm_revision_is_the_board_itself():
         ok(jsonstore._stat_key(team.USERS_PATH) != before, "both written to the team's file")
         eq(post("/api/crm/board", {"rev": rev}).json(), {"same": True, "rev": rev},
            "and the board, which neither changed, is not sent again")
-        real = copilot._crm_shape
-        copilot._crm_shape = lambda d: {**real(d), "shaped_by": "the next version"}
-        copilot._crm_board_cache["key"] = None        # a restart into the next version
+        real = salesdesk._crm_shape
+        salesdesk._crm_shape = lambda d: {**real(d), "shaped_by": "the next version"}
+        salesdesk._crm_board_cache["key"] = None        # a restart into the next version
         try:
             moved = post("/api/crm/board", {"rev": rev}).json()
         finally:
-            copilot._crm_shape = real
+            salesdesk._crm_shape = real
         ok("crm" in moved and moved["rev"] != rev and moved["crm"].get("shaped_by"),
            "a board shaped another way from the same files is sent: %r" % {k: moved[k] for k in moved if k != "crm"})
     with_accounts(go)
@@ -29275,15 +29280,15 @@ def t_an_unchanged_inbox_board_is_not_sent_again():
         _seed_thread("t1")
         b = post("/api/mail/board", {}).json()
         ok(b.get("rev") and isinstance(b.get("threads"), list), "the board comes with its revision")
-        copilot._load_mail()["synced_at"] = "2026-10-12T09:00:00+00:00"     # the minute's sync
+        mail._load_mail()["synced_at"] = "2026-10-12T09:00:00+00:00"     # the minute's sync
         eq(post("/api/mail/board", {"rev": b["rev"]}).json(),
            {"same": True, "rev": b["rev"], "synced_at": "2026-10-12T09:00:00+00:00"},
            "only the time of the sync moved: that is all that is sent")
         ok("threads" in post("/api/mail/board", {}).json(), "an older page still gets the board")
-        copilot._load_mail()["sync_error"] = "Gmail is having a moment"
+        mail._load_mail()["sync_error"] = "Gmail is having a moment"
         e = post("/api/mail/board", {"rev": b["rev"]}).json()
         ok("threads" in e and e["sync_error"], "a sync error is part of the board, so it is sent")
-        copilot._load_mail()["sync_error"] = ""
+        mail._load_mail()["sync_error"] = ""
         post("/api/mail/note", {"id": "t1", "text": "chasing the courier"})
         m = post("/api/mail/board", {"rev": b["rev"]}).json()
         ok("threads" in m and m["rev"] != b["rev"], "a board that moved is sent, with its new revision")
@@ -29875,6 +29880,9 @@ SHARED_COPIES = {
     ("copilot", "httpx", "gizmo.orderbook"):
         "the order book uses httpx only to name an error it catches (HTTPStatusError); "
         "the connector settings test reads no order",
+    ("copilot", "httpx", "gizmo.routes.mail"):
+        "the inbox's routes use httpx only to name an error they catch (ConnectError); "
+        "the connector settings test sends no mail",
 }
 
 @test
@@ -29944,6 +29952,11 @@ def t_nothing_reads_copilot_py_by_name():
             # inspect.getsource(copilot): the module's file, read by another road
             if (isinstance(x, _ast.Call) and _ast.unparse(x.func).endswith("getsource") and x.args
                     and isinstance(x.args[0], _ast.Name) and x.args[0].id in ("copilot", "_c", "_cp")):
+                found.append(f"{rel}:{x.lineno}")
+            # open(copilot.__file__): the same file opened by its path (its folder is fine)
+            if (isinstance(x, _ast.Call) and _ast.unparse(x.func).endswith("open") and x.args
+                    and isinstance(x.args[0], _ast.Attribute) and x.args[0].attr == "__file__"
+                    and isinstance(x.args[0].value, _ast.Name) and x.args[0].value.id in ("copilot", "_c", "_cp")):
                 found.append(f"{rel}:{x.lineno}")
     eq(found, [], "reads " + name + " by name; use tools/sources.py")
 
@@ -30028,7 +30041,8 @@ def t_either_module_imports_first():
                         ("gizmo.gate", "copilot"), ("gizmo.activity", "copilot"),
                         ("gizmo.routes.team", "copilot"), ("gizmo.orderbook", "copilot"),
                         ("gizmo.production", "copilot"), ("gizmo.size_list", "copilot"),
-                        ("gizmo.shopify", "copilot")):
+                        ("gizmo.shopify", "copilot"), ("gizmo.crm", "copilot"), ("gizmo.mail", "copilot"),
+                        ("gizmo.routes.crm", "copilot"), ("gizmo.routes.mail", "copilot")):
         r = _sp.run([sys.executable, "-c", f"import {first}, {then}; import gizmo.dispatch as d, copilot as c; "
                      "assert c.desk is d and d.core is c; print('ok')"],
                     cwd=root, env=dict(os.environ), capture_output=True, text=True, timeout=120)
@@ -30194,17 +30208,17 @@ def t_forgetting_the_crm_store_drops_its_board():
     kept board when the path is the CRM's, read when called: a path set after
     start-up still counts."""
     from gizmo import store as _store
-    saved = copilot.CRM_PATH
+    saved = salesdesk.CRM_PATH
     try:
-        copilot.CRM_PATH = os.path.join(SCRATCH, "crm-elsewhere.json")
-        copilot._crm_board_cache.update(key="k", raw=b"x", rev="r")
+        salesdesk.CRM_PATH = os.path.join(SCRATCH, "crm-elsewhere.json")
+        salesdesk._crm_board_cache.update(key="k", raw=b"x", rev="r")
         _store._forget_store(os.path.join(SCRATCH, "not-the-crm.json"))
-        eq(copilot._crm_board_cache["raw"], b"x", "another store forgotten keeps the board")
-        _store._forget_store(copilot.CRM_PATH)
-        eq(copilot._crm_board_cache["raw"], None, "the CRM's store forgotten drops it")
+        eq(salesdesk._crm_board_cache["raw"], b"x", "another store forgotten keeps the board")
+        _store._forget_store(salesdesk.CRM_PATH)
+        eq(salesdesk._crm_board_cache["raw"], None, "the CRM's store forgotten drops it")
     finally:
-        copilot.CRM_PATH = saved
-        copilot._crm_board_forget()
+        salesdesk.CRM_PATH = saved
+        salesdesk._crm_board_forget()
 
 @test
 def t_a_banners_closing_rule_opens_no_section():
@@ -30274,6 +30288,22 @@ def t_the_size_lists_seed_files_are_the_repos():
     eq(r.stdout.split(), [os.path.join(root, "data", f) for f in ("gobo-sizes.csv", "gobo-aliases.csv", "gobo-overrides.csv")],
        "the seeds are the repository's")
     ok(all(os.path.exists(p) for p in r.stdout.split()), "and they exist")
+
+@test
+def t_the_crm_and_mail_routes_are_gathered():
+    """The CRM's and the inbox's routes, scattered through add_routes, are each
+    registered by one call where the area's first route stood. No request
+    changes hands: only /dav{sub_path:path} has a pattern, and no two routes
+    share a path (make move-proof checks the order)."""
+    import inspect
+    from gizmo.routes import crm as routes_crm, mail as routes_mail
+    src = inspect.getsource(copilot.add_routes)
+    eq((src.count("routes_crm.register(mcp, registry)"), src.count("routes_mail.register(mcp, registry)")), (1, 1),
+       "one call each")
+    for path in ('"/api/crm/', '"/api/mail/', '"/oauth/gmail/'):
+        ok(path not in src, path + " is registered by the area's own routes")
+    eq((inspect.getsource(routes_crm).count("@mcp.custom_route("), inspect.getsource(routes_mail).count("@mcp.custom_route(")),
+       (8, 26), "8 CRM routes; 24 mail routes and the Gmail connect pair")
 
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The

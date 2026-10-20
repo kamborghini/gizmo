@@ -296,7 +296,7 @@ for _i, (_t, _who, _val, _won, _reason) in enumerate((
     _crm("/api/crm/deal", {"op": "won", "id": _id} if _won else
          {"op": "lost", "id": _id, "reason": _reason, "comment": "Seeded history"}, "close " + _t)
     _HIST.append((_id, _won, (3, 24, 38, 52, 70, 33, 61, 88, 105)[_i]))
-_d = copilot._load_crm()
+_d = salesdesk._load_crm()
 for _id, _won, _ago in _HIST:
     _deal = _d["deals"][_id]
     _closed = _at(_ago, hour=15)
@@ -309,7 +309,7 @@ for _t, _id in OPS_DEALS.items():   # open deals were made over the last few wee
     _made = _at(5 + (len(_t) * 7) % 40, hour=10)
     for _k in ("created_at", "stage_entered_at"):
         _d["deals"][_id][_k] = _made.isoformat()
-copilot._write_crm(_d)
+salesdesk._write_crm(_d)
 # Activities (a): POST /api/crm/activity op add (t_the_card_icon_follows_the_next_activity...).
 for _t, _type, _subject, _due, _done, _who in (
         ("Hartwell: 40 branded gobos for autumn tour", "call", "Confirm artwork sign-off", _day(-2), False, "priya"),
@@ -521,7 +521,7 @@ def _ops_gmail(request):
 _gmail.httpx = _RoutedHttpx(_ops_gmail)
 _gmail._pool_drop()
 _gmail.save_connection("rt-ops-seed", OPS_MAILBOX)
-copilot._mail_mem = None
+mail._mail_mem = None
 # The real sync (a), through the board route's Refresh, exactly as
 # t_mail_sync_pipeline_and_history_short_circuit drives it.
 _board = _ok200(post("/api/mail/board", {"force": True}), "mail sync")

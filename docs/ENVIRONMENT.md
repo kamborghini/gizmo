@@ -20,15 +20,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `TOKEN_REFRESH_BUFFER` | `"1800"` | server |  |
 | `WEBHOOK_ALLOWED_HOSTS` | `""` | server | comma-separated host names or addresses (a staging copy of Reactor) whose webhooks the hourly repair keeps |
 
-## copilot.py - CRM: the sales desk, modelled on Pipedrive
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `CRM_ACTIVITIES_MAX` | `"200000"` | copilot |  |
-| `CRM_DEALS_MAX` | `"60000"` | copilot |  |
-| `CRM_ENQUIRY_DAILY_CAP` | `"50"` | copilot |  |
-| `CRM_PATH` | `"/data/crm.json"` | copilot |  |
-
 ## copilot.py - Chase desk: the weekly session of asking credit customers fo
 
 | Variable | Default | Read by | Notes |
@@ -165,20 +156,8 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 |---|---|---|---|
 | `ALERT_EMAIL_FROM` | `"Reactor <onboarding@resend.dev>"` | copilot |  |
 | `ALERT_EMAIL_TO` | `""` | copilot |  |
-| `MAIL_ALERT_AFTER_TICKS` | `"30"` | copilot |  |
-| `MAIL_LOOP_SECS` | `"60"` | copilot |  |
 | `RESEND_API_KEY` | `""` | copilot |  |
 | `WATCH_PATH` | `"/data/watch.json"` | copilot |  |
-
-## copilot.py - Shared inbox: who owns which email. The mailbox itself stays
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `MAILBOX_PATH` | `"/data/mailbox.json"` | copilot |  |
-| `MAIL_DONE_KEEP_DAYS` | `"730"` | copilot |  |
-| `MAIL_THREADS_CAP` | `"6000"` | copilot |  |
-| `MAIL_TRACK_DAYS` | `"730"` | copilot |  |
-| `RELEASE_INLINE_MAX` | `"12"` | copilot |  |
 
 ## copilot.py - Shopify -> Xero connector: a separate, audited Node service 
 
@@ -203,14 +182,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
 | `REDACT_ARCHIVE_DAYS` | `"30"` | copilot |  |
-
-## copilot.py - Website enquiries -> the CRM. The storefront contact form ha
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `ENQUIRY_SENDERS` | `"shopifyemail.com,shopify.com,[shop domain]"` | copilot |  |
-| `MAIL_BOARD_DONE_DAYS` | `"90"` | copilot |  |
-| `MAIL_BOARD_MAX` | `"1500"` | copilot |  |
 
 ## copilot.py - What's new: the release notes that ship WITH the release, an
 
@@ -239,6 +210,15 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `DAILY_COST_CAP` | `"25"` | gizmo.ai | hard $/day AI ceiling (0 disables) |
 | `USAGE_MAX` | `"5000"` | gizmo.ai | max usage events retained |
 | `USAGE_PATH` | `"/data/usage.json"` | gizmo.ai | AI token-usage + cost log (measurement) |
+
+## gizmo/crm.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `CRM_ACTIVITIES_MAX` | `"200000"` | gizmo.crm |  |
+| `CRM_DEALS_MAX` | `"60000"` | gizmo.crm |  |
+| `CRM_ENQUIRY_DAILY_CAP` | `"50"` | gizmo.crm |  |
+| `CRM_PATH` | `"/data/crm.json"` | gizmo.crm |  |
 
 ## gizmo/dispatch.py - Custom address dispatch
 
@@ -285,6 +265,26 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `RATE_LIMIT_GLOBAL` | `"150"` | gizmo.gate | AI requests/window (cost ceiling) |
 | `RATE_LIMIT_PER_CLIENT` | `"120"` | gizmo.gate | requests/window/client |
 | `RATE_LIMIT_WINDOW` | `"60"` | gizmo.gate | seconds |
+
+## gizmo/mail.py - Attachments on the way OUT. They live in the bucket under ma
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `ENQUIRY_SENDERS` | `"shopifyemail.com,shopify.com,[shop domain]"` | gizmo.mail |  |
+| `MAIL_BOARD_DONE_DAYS` | `"90"` | gizmo.mail |  |
+| `MAIL_BOARD_MAX` | `"1500"` | gizmo.mail |  |
+
+## gizmo/mail.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `MAILBOX_PATH` | `"/data/mailbox.json"` | gizmo.mail |  |
+| `MAIL_ALERT_AFTER_TICKS` | `"30"` | gizmo.mail |  |
+| `MAIL_DONE_KEEP_DAYS` | `"730"` | gizmo.mail |  |
+| `MAIL_LOOP_SECS` | `"60"` | gizmo.mail |  |
+| `MAIL_THREADS_CAP` | `"6000"` | gizmo.mail |  |
+| `MAIL_TRACK_DAYS` | `"730"` | gizmo.mail |  |
+| `RELEASE_INLINE_MAX` | `"12"` | gizmo.mail |  |
 
 ## gizmo/orderbook.py - Order sweep snapshot
 

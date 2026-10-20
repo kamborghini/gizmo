@@ -346,7 +346,8 @@ def prove(base, head, stats=None, declared=()):
         for k, _, p, *_ in bu:
             where_b[k].add(p)
         stats.update(statements=len(bu), moved=sum(1 for k, _, p, *_ in hu if p not in where_b.get(k, {p})),
-                     routes=len(horder), declared=[(n, a, b) for n, (a, b) in shown.items()])
+                     routes=len(horder), routes_moved=border != horder,
+                     declared=[(n, a, b) for n, (a, b) in shown.items()])
     return problems
 
 
@@ -388,7 +389,9 @@ def main(argv=None):
         print(f"{len(problems)} differences from {args.base} beyond the move")
         return 1
     print(f"nothing but the move: {stats['statements']} statements found again, {stats['moved']} of them "
-          f"in another file, {stats['routes']} routes in the same order ({args.base})"
+          f"in another file, {stats['routes']} routes "
+          + ("gathered where no request could change hands" if stats["routes_moved"] else "in the same order")
+          + f" ({args.base})"
           + (f", and {len(stats['declared'])} intended changes shown above" if stats["declared"] else ""))
     return 0
 

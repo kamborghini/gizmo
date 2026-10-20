@@ -58,14 +58,14 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/crm/activity` | POST | crm | `_crm_guard` |  |  | `copilot.crm_activity_route` |  |
-| `/api/crm/board` | POST | crm | `_crm_guard` |  |  | `copilot.crm_board_route` |  |
-| `/api/crm/contact` | POST | crm | `_crm_guard` |  | `_team_role`, `_user_tabs` | `copilot.crm_contact_route` |  |
-| `/api/crm/deal` | POST | crm | `_crm_guard` |  | `_user_tabs` | `copilot.crm_deal_route` |  |
-| `/api/crm/import` | POST | crm | `_mail_guard` |  | `_team_role` | `copilot.crm_import_route` | Copy Pipedrive into gizmo's CRM. |
-| `/api/crm/lead` | POST | crm | `_crm_guard` |  |  | `copilot.crm_lead_route` |  |
-| `/api/crm/pipedrive` | POST | crm | `_mail_guard` |  | `_team_role` | `copilot.crm_pipedrive_route` | Look at the Pipedrive account, read-only. |
-| `/api/crm/stages` | POST | crm | `_crm_guard` |  | `_team_level` | `copilot.crm_stages_route` |  |
+| `/api/crm/activity` | POST | crm | `_crm_guard` |  |  | `gizmo.routes.crm.crm_activity_route` |  |
+| `/api/crm/board` | POST | crm | `_crm_guard` |  |  | `gizmo.routes.crm.crm_board_route` |  |
+| `/api/crm/contact` | POST | crm | `_crm_guard` |  | `_team_role`, `_user_tabs` | `gizmo.routes.crm.crm_contact_route` |  |
+| `/api/crm/deal` | POST | crm | `_crm_guard` |  | `_user_tabs` | `gizmo.routes.crm.crm_deal_route` |  |
+| `/api/crm/import` | POST | crm | `_mail_guard` |  | `_team_role` | `gizmo.routes.crm.crm_import_route` | Copy Pipedrive into gizmo's CRM. |
+| `/api/crm/lead` | POST | crm | `_crm_guard` |  |  | `gizmo.routes.crm.crm_lead_route` |  |
+| `/api/crm/pipedrive` | POST | crm | `_mail_guard` |  | `_team_role` | `gizmo.routes.crm.crm_pipedrive_route` | Look at the Pipedrive account, read-only. |
+| `/api/crm/stages` | POST | crm | `_crm_guard` |  | `_team_level` | `gizmo.routes.crm.crm_stages_route` |  |
 
 ## `/api/custom`
 
@@ -191,30 +191,30 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/mail/addresses` | POST | mail | `_mail_guard` |  |  | `copilot.mail_addresses_route` | The To field's address book: everyone in the inbox and the CRM. |
-| `/api/mail/assign` | POST | mail | `_mail_guard` |  |  | `copilot.mail_assign_route` |  |
-| `/api/mail/attach-done` | POST | mail | `_mail_guard` |  |  | `copilot.mail_attach_done_route` | What actually landed. |
-| `/api/mail/attach-url` | POST | mail | `_mail_guard` |  |  | `copilot.mail_attach_url_route` | A presigned PUT for a file about to be attached to an email. |
-| `/api/mail/attachment` | POST | mail | `_mail_guard` |  | `_user_tabs` | `copilot.mail_attachment_route` | Bring an attachment out of Gmail and into the files store. |
-| `/api/mail/board` | POST | mail | `_mail_guard` |  | `_team_role` | `copilot.mail_board_route` |  |
-| `/api/mail/body` | POST | mail | `_mail_guard` |  |  | `copilot.mail_body_route` | The actual text of the conversation, read on demand. |
-| `/api/mail/bulk` | POST | mail | `_mail_guard` |  |  | `copilot.mail_bulk_route` | Many threads, one decision. |
-| `/api/mail/claim` | POST | mail | `_mail_guard` |  |  | `copilot.mail_claim_route` |  |
-| `/api/mail/connect-link` | POST | mail | `_mail_guard` |  | `_team_role` | `copilot.mail_connect_link_route` | Master-only: mint a single-use ticket for the consent walk, so nobody has to copy a server secret into a URL by hand. |
-| `/api/mail/disconnect` | POST | mail | `_mail_guard` |  | `_team_role` | `copilot.mail_disconnect_route` |  |
-| `/api/mail/draft` | POST | mail | `_mail_guard` |  | `_user_tabs` | `copilot.mail_draft_route` | Draft a reply with Claude, then (on a second, explicit call) put it in Gmail as a DRAFT for the person to review and send themselves. |
-| `/api/mail/note` | POST | mail | `_mail_guard` |  |  | `copilot.mail_note_route` |  |
-| `/api/mail/orders` | POST | mail | `_mail_guard` |  | `_user_tabs` | `copilot.mail_orders_route` | What this app knows about the person who sent the email. |
-| `/api/mail/presence` | POST | mail | `_mail_guard` |  |  | `copilot.mail_presence_route` |  |
-| `/api/mail/read` | POST | mail | `_mail_guard` |  |  | `copilot.mail_read_route` | Mark threads read or unread, in Gmail and here at once. |
-| `/api/mail/rules` | POST | mail | `_mail_guard` |  |  | `copilot.mail_rules_route` | Standing decisions about arriving mail. |
-| `/api/mail/search` | POST | mail | `_mail_guard` |  |  | `copilot.mail_search_route` | Search the WHOLE mailbox, by handing the query to Google. |
-| `/api/mail/send` | POST | mail | `_mail_guard` |  |  | `copilot.mail_send_route` | Send an email FROM gizmo: a reply on a conversation, or a new one. |
-| `/api/mail/settings` | POST | mail | `_mail_guard` |  |  | `copilot.mail_settings_route` | The footer, the saved replies and your own sign-off. |
-| `/api/mail/state` | POST | mail | `_mail_guard` |  |  | `copilot.mail_state_route` |  |
-| `/api/mail/thread` | POST | mail | `_mail_guard` |  | `_user_tabs` | `copilot.mail_thread_route` |  |
-| `/api/mail/undo` | POST | mail | `_mail_guard` |  |  | `copilot.mail_undo_route` |  |
-| `/api/mail/viewing` | POST | mail | `_mail_guard` |  |  | `copilot.mail_viewing_route` |  |
+| `/api/mail/addresses` | POST | mail | `_mail_guard` |  |  | `gizmo.routes.mail.mail_addresses_route` | The To field's address book: everyone in the inbox and the CRM. |
+| `/api/mail/assign` | POST | mail | `_mail_guard` |  |  | `gizmo.routes.mail.mail_assign_route` |  |
+| `/api/mail/attach-done` | POST | mail | `_mail_guard` |  |  | `gizmo.routes.mail.mail_attach_done_route` | What actually landed. |
+| `/api/mail/attach-url` | POST | mail | `_mail_guard` |  |  | `gizmo.routes.mail.mail_attach_url_route` | A presigned PUT for a file about to be attached to an email. |
+| `/api/mail/attachment` | POST | mail | `_mail_guard` |  | `_user_tabs` | `gizmo.routes.mail.mail_attachment_route` | Bring an attachment out of Gmail and into the files store. |
+| `/api/mail/board` | POST | mail | `_mail_guard` |  | `_team_role` | `gizmo.routes.mail.mail_board_route` |  |
+| `/api/mail/body` | POST | mail | `_mail_guard` |  |  | `gizmo.routes.mail.mail_body_route` | The actual text of the conversation, read on demand. |
+| `/api/mail/bulk` | POST | mail | `_mail_guard` |  |  | `gizmo.routes.mail.mail_bulk_route` | Many threads, one decision. |
+| `/api/mail/claim` | POST | mail | `_mail_guard` |  |  | `gizmo.routes.mail.mail_claim_route` |  |
+| `/api/mail/connect-link` | POST | mail | `_mail_guard` |  | `_team_role` | `gizmo.routes.mail.mail_connect_link_route` | Master-only: mint a single-use ticket for the consent walk, so nobody has to copy a server secret into a URL by hand. |
+| `/api/mail/disconnect` | POST | mail | `_mail_guard` |  | `_team_role` | `gizmo.routes.mail.mail_disconnect_route` |  |
+| `/api/mail/draft` | POST | mail | `_mail_guard` |  | `_user_tabs` | `gizmo.routes.mail.mail_draft_route` | Draft a reply with Claude, then (on a second, explicit call) put it in Gmail as a DRAFT for the person to review and send themselves. |
+| `/api/mail/note` | POST | mail | `_mail_guard` |  |  | `gizmo.routes.mail.mail_note_route` |  |
+| `/api/mail/orders` | POST | mail | `_mail_guard` |  | `_user_tabs` | `gizmo.routes.mail.mail_orders_route` | What this app knows about the person who sent the email. |
+| `/api/mail/presence` | POST | mail | `_mail_guard` |  |  | `gizmo.routes.mail.mail_presence_route` |  |
+| `/api/mail/read` | POST | mail | `_mail_guard` |  |  | `gizmo.routes.mail.mail_read_route` | Mark threads read or unread, in Gmail and here at once. |
+| `/api/mail/rules` | POST | mail | `_mail_guard` |  |  | `gizmo.routes.mail.mail_rules_route` | Standing decisions about arriving mail. |
+| `/api/mail/search` | POST | mail | `_mail_guard` |  |  | `gizmo.routes.mail.mail_search_route` | Search the WHOLE mailbox, by handing the query to Google. |
+| `/api/mail/send` | POST | mail | `_mail_guard` |  |  | `gizmo.routes.mail.mail_send_route` | Send an email FROM gizmo: a reply on a conversation, or a new one. |
+| `/api/mail/settings` | POST | mail | `_mail_guard` |  |  | `gizmo.routes.mail.mail_settings_route` | The footer, the saved replies and your own sign-off. |
+| `/api/mail/state` | POST | mail | `_mail_guard` |  |  | `gizmo.routes.mail.mail_state_route` |  |
+| `/api/mail/thread` | POST | mail | `_mail_guard` |  | `_user_tabs` | `gizmo.routes.mail.mail_thread_route` |  |
+| `/api/mail/undo` | POST | mail | `_mail_guard` |  |  | `gizmo.routes.mail.mail_undo_route` |  |
+| `/api/mail/viewing` | POST | mail | `_mail_guard` |  |  | `gizmo.routes.mail.mail_viewing_route` |  |
 
 ## `/api/margin`
 
@@ -420,8 +420,8 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 |---|---|---|---|---|---|---|---|
 | `/oauth/gmail-finance/callback` | GET | outside the tab map | own check |  |  | `copilot.gmail_finance_callback` |  |
 | `/oauth/gmail-finance/start` | GET | outside the tab map | own check |  | `_secret_ok` | `copilot.gmail_finance_start` |  |
-| `/oauth/gmail/callback` | GET | outside the tab map | own check |  |  | `copilot.gmail_callback` |  |
-| `/oauth/gmail/start` | GET | outside the tab map | own check |  |  | `copilot.gmail_start` |  |
+| `/oauth/gmail/callback` | GET | outside the tab map | own check |  |  | `gizmo.routes.mail.gmail_callback` |  |
+| `/oauth/gmail/start` | GET | outside the tab map | own check |  |  | `gizmo.routes.mail.gmail_start` |  |
 | `/oauth/google/callback` | GET | outside the tab map | own check |  |  | `copilot.google_callback` |  |
 | `/oauth/google/start` | GET | outside the tab map | own check |  |  | `copilot.google_start` |  |
 | `/oauth/xero/callback` | GET | outside the tab map | own check |  |  | `copilot.xero_callback` |  |
