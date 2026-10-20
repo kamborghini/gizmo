@@ -30111,6 +30111,7 @@ def t_move_proof_is_wired():
     ok(any("__file__" in g for g in mp.prove(here, here_head)),
        "a moved statement that finds a path from its module's own file is named")
     eq(mp.prove(here, here_head, declared=("b",)), [], "unless it is declared, and so shown")
+    eq(mp.prove(here_head, here_head), [], "a statement already in its package module did not move: not named")
     glob_base = {first: base[first].replace("def add_routes(mcp, registry):\n",
                                             "def add_routes(mcp, registry):\n    global w\n    w = mcp\n")}
     glob_head = dict(head, **{first: head[first].replace("def add_routes(mcp, registry):\n",
@@ -30121,7 +30122,11 @@ def t_move_proof_is_wired():
     eq(mp.prove(glob_base, glob_head, declared=("global",)), [], "and declared as global, shown")
     order = dict(head, **{first: head[first].replace("    routes_dispatch.register(mcp, registry)\n\n", "")
                           .replace("        return 3\n", "        return 3\n\n    routes_dispatch.register(mcp, registry)\n")})
-    ok(any("order" in g for g in mp.prove(base, order)), "routes registered in another order are named")
+    eq(mp.prove(base, order), [], "a literal route gathered past another literal route: no request changes hands")
+    pat = lambda files: {k: v.replace("'/three'", "'/t{rest:path}'") for k, v in files.items()}
+    eq(mp.prove(pat(base), pat(head)), [], "a pattern route left where it stood: still nothing but the move")
+    ok(any("order" in g for g in mp.prove(pat(base), pat(order))),
+       "but /two moved behind /t{rest:path}, which would answer it, is named")
 
 # ---- The floor (stage 4, piece 2) -----------------------------------------
 # The store, the error log and the AI client sit beneath every area: they
