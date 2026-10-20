@@ -21728,7 +21728,8 @@ def t_every_json_store_reaches_disk_through_the_one_writer():
     def owners(needle):
         out = set()
         for n in _ast.walk(tree):
-            if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and n.name != "add_routes":
+            # add_routes and each area's register() only hold the routes
+            if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and n.name not in ("add_routes", "register"):
                 if needle in _ast.get_source_segment(src, n):
                     out.add(n.name)
         return out
@@ -30058,7 +30059,8 @@ def t_either_module_imports_first():
                         ("gizmo.files", "copilot"), ("gizmo.webdav", "copilot"), ("gizmo.routes.files", "copilot"),
                         ("gizmo.privacy", "copilot"), ("gizmo.loans", "copilot"), ("gizmo.work", "copilot"),
                         ("gizmo.routes.privacy", "copilot"), ("gizmo.routes.loans", "copilot"),
-                        ("gizmo.routes.work", "copilot")):
+                        ("gizmo.routes.work", "copilot"), ("gizmo.routes.production", "copilot"),
+                        ("gizmo.routes.size_list", "copilot"), ("gizmo.routes.orderbook", "copilot")):
         r = _sp.run([sys.executable, "-c", f"import {first}, {then}; import gizmo.dispatch as d, copilot as c; "
                      "assert c.desk is d and d.core is c; print('ok')"],
                     cwd=root, env=dict(os.environ), capture_output=True, text=True, timeout=120)
@@ -30071,9 +30073,9 @@ def t_dispatch_routes_register_in_place():
     import inspect
     from gizmo.routes import dispatch as routes_dispatch
     src = inspect.getsource(copilot.add_routes)
-    i = src.index("routes_dispatch.register(mcp, registry)")
-    ok(src.rindex('@mcp.custom_route("/api/production-labels/queue"', 0, i) < i
-       < src.index('@mcp.custom_route("/api/production-labels/missing"', i), "between the routes that stood either side")
+    # Where it stands is make move-proof's to check (its neighbours have since
+    # moved out too); here, that it is there once.
+    eq(src.count("routes_dispatch.register(mcp, registry)"), 1, "one call")
     for path in ("/api/dispatch/", "/api/shipping/", "/api/custom/", "/api/eori/", '"/api/margin'):
         ok(path not in src, path + " is registered by the desk's own routes")
     own = inspect.getsource(routes_dispatch)
@@ -30518,6 +30520,24 @@ def t_the_privacy_loans_and_work_routes_are_gathered():
         ok(path not in src, path + " is registered by its area's routes")
     eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_privacy, routes_loans, routes_work)],
        [2, 1, 5], "2 privacy routes, 1 loans route, 5 work routes")
+
+@test
+def t_the_moved_areas_routes_follow_them():
+    """Production's, the Size list's and the order book's routes follow their
+    areas into gizmo/routes/, each group registered by one call. The two
+    printed-label routes stay in add_routes: their bytes are pinned."""
+    import inspect
+    from gizmo.routes import orderbook as routes_orderbook, production as routes_production, size_list as routes_size_list
+    src = inspect.getsource(copilot.add_routes)
+    for call in ("routes_production.register(mcp, registry)", "routes_size_list.register(mcp, registry)",
+                 "routes_orderbook.register(mcp, registry)"):
+        eq(src.count(call), 1, call)
+    for path in ('"/api/production-labels', '"/api/production-state', '"/api/gobo-sizes', '"/api/order/', '"/webhooks/orders'):
+        ok(path not in src, path + " follows its area")
+    ok('@mcp.custom_route("/print/production-labels", methods=["GET", "OPTIONS"])' in src
+       and '"/print/production-labels/sign"' in src, "the printed-label routes stay where they are")
+    eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_production, routes_size_list, routes_orderbook)],
+       [5, 6, 2], "5 production routes, 6 Size list routes, 2 order routes")
 
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The

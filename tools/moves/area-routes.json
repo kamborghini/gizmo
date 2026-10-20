@@ -1,0 +1,21 @@
+{
+  "note": "the routes of production, the Size list and the order book, following their areas",
+  "areas": [],
+  "routes": [
+    {"name": "routes_production", "file": "gizmo/routes/production.py", "area": "production",
+     "paths": ["/api/production-labels", "/api/production-state"], "helpers": [],
+     "doc": "Production's routes: the label list, the queue, missing production, label coverage, and the production state. Moved from add_routes (stage 4 of the 14 October audit) where the first stood; their paths are literal, so no request changes hands. The printed-label routes stay in add_routes, their bytes pinned.",
+     "register_doc": "Add production's routes to the app.",
+     "comment": "Production's routes (gizmo/routes/production.py), gathered where the first stood."},
+    {"name": "routes_size_list", "file": "gizmo/routes/size_list.py", "area": "size_list",
+     "paths": ["/api/gobo-sizes"], "helpers": [],
+     "doc": "The Size list's routes, moved from add_routes (stage 4 of the 14 October audit) where the first stood; their paths are literal, so no request changes hands.",
+     "register_doc": "Add the Size list's routes to the app.",
+     "comment": "The Size list's routes (gizmo/routes/size_list.py), gathered where the first stood."},
+    {"name": "routes_orderbook", "file": "gizmo/routes/orderbook.py", "area": "orderbook",
+     "paths": ["/api/order/", "/webhooks/orders"], "helpers": [],
+     "doc": "The order book's routes: an order's edit and Shopify's orders webhook. Moved from add_routes (stage 4 of the 14 October audit) where the first stood; their paths are literal, so no request changes hands.",
+     "register_doc": "Add the order book's routes to the app.",
+     "comment": "The order book's routes (gizmo/routes/orderbook.py), gathered where the first stood."}
+  ]
+}
