@@ -501,7 +501,7 @@ _GOOGLE_FAKES = {"gsc_configured": lambda: True, "ga4_configured": lambda: True,
 
 
 # =============================================================================
-# SHARED 3/4: fake AI (c). copilot._xcreate answers present_response with an
+# SHARED 3/4: fake AI (c). claude._xcreate answers present_response with an
 # invented report for the kind of run (copilot._ai_kind); put back afterwards.
 # =============================================================================
 _REPORTS = {
@@ -607,7 +607,7 @@ class _DResp:
 
 
 async def _dash_xcreate(client, **kw):
-    kind = copilot._ai_kind.get()
+    kind = claude._ai_kind.get()
     msg = str(((kw.get("messages") or [{}])[0]).get("content") or "")
     m = _dre.search(r"for the '([^']+)' customer sector", msg)
     if kind == "customers" and m:
@@ -687,7 +687,7 @@ def seed_reports():
                  "Sessions (GA4, 28d)": 0.93, "Search clicks (28d)": 0.9, "New customers (7d)": 1.5}
         snap["metrics"] = {k: round(v * nudge.get(k, 1.0), 2) for k, v in snap["metrics"].items()}
         snap["at"] = (_NOW - _dtd(days=7)).isoformat()
-        copilot._write_json_store(copilot.ANALYSIS_CACHE_PATH, None, cache)
+        jsonstore._write_json_store(copilot.ANALYSIS_CACHE_PATH, None, cache)
         ov = _ok(post("/api/overview", {"fresh": True}), "overview run 2")
         DASH["r_overview"] = ov
         DASH["r_seo"] = _ok(post("/api/seo", {}), "seo")

@@ -269,7 +269,8 @@ def prove(base, head, stats=None, declared=()):
     for side, units in ((0, bu), (1, hu)):
         for u in units:
             if u[3] in declared:
-                shown.setdefault(u[3], [None, None])[side] = u[4]
+                pair = shown.setdefault(u[3], [None, None])
+                pair[side] = u[4] if pair[side] is None else pair[side] + "\n" + u[4]
     bu = [u for u in bu if u[3] not in declared]
     hu = [u for u in hu if u[3] not in declared]
     b, h = collections.Counter(u[0] for u in bu), collections.Counter(u[0] for u in hu)

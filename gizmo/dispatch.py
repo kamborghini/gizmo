@@ -27,6 +27,9 @@ except Exception:                     # keep the app booting if the connector is
 import tokenvault
 
 from gizmo.config import _env_num
+from gizmo import ai as claude
+from gizmo import errors
+from gizmo import store as jsonstore
 from gizmo.store import StoreUnwritable
 
 # The same logger as copilot.py's, so the desk's log lines read as before.
@@ -146,7 +149,7 @@ def _sane_base(b) -> str:
 
 
 def _load_shipping() -> dict:
-    data = core._load_json_store(SHIPPING_PATH, None, {})
+    data = jsonstore._load_json_store(SHIPPING_PATH, None, {})
     out = {k: v for k, v in _SHIPPING_DEFAULT.items()}
     if isinstance(data, dict):
         for k in _SHIPPING_DEFAULT:
@@ -159,10 +162,10 @@ def _load_shipping() -> dict:
 
 
 def _save_shipping(cfg: dict) -> dict:
-    if not core._store_writable(SHIPPING_PATH):
+    if not jsonstore._store_writable(SHIPPING_PATH):
         return cfg
     keep = {k: cfg.get(k, _SHIPPING_DEFAULT[k]) for k in _SHIPPING_DEFAULT}
-    core._write_json_store(SHIPPING_PATH, None, keep)
+    jsonstore._write_json_store(SHIPPING_PATH, None, keep)
     return keep
 
 
@@ -173,7 +176,7 @@ def _wo_env_creds() -> dict:
 def _load_wo_creds() -> dict:
     """The World Options SOAP credentials. Env vars always win over the disk copy,
     per credential."""
-    disk = core._load_json_store(WO_SECRET_PATH, None, {})
+    disk = jsonstore._load_json_store(WO_SECRET_PATH, None, {})
     disk = disk if isinstance(disk, dict) else {}
     env = _wo_env_creds()
 
@@ -197,9 +200,9 @@ def _wo_creds_from_env() -> bool:
 def _save_wo_creds(meter=None, key=None, password=None) -> bool:
     """Persist any provided credential (None = leave as-is). Never shadows an
     env-provided value."""
-    if not core._store_writable(WO_SECRET_PATH):
+    if not jsonstore._store_writable(WO_SECRET_PATH):
         return False
-    disk = core._load_json_store(WO_SECRET_PATH, None, {})
+    disk = jsonstore._load_json_store(WO_SECRET_PATH, None, {})
     disk = disk if isinstance(disk, dict) else {}
     env = _wo_env_creds()
     for name, val in (("meter", meter), ("key", key), ("password", password)):
@@ -223,7 +226,7 @@ def _wo_boot() -> None:
         return
     try:
         c = _load_wo_creds()
-        stored = core._load_json_store(SHIPPING_PATH, None, {})
+        stored = jsonstore._load_json_store(SHIPPING_PATH, None, {})
         cfg = _load_shipping()   # base already sanitized here
         worldoptions.set_credentials(meter=c["meter"], key=c["key"], password=c["password"],
                                      plugin=cfg.get("plugin_code") or "Web_Service")
@@ -337,7 +340,7 @@ def _save_dispatch_labels(order_id, labels: list) -> None:
     try:
         os.makedirs(DISPATCH_LABELS_DIR, exist_ok=True)
         path = _label_path(order_id)
-        core._write_json_store(path, "labels", labels or [])
+        jsonstore._write_json_store(path, "labels", labels or [])
         # With print images a label file is ~1MB, and nothing ever pruned this
         # directory. Oldest go first; a months-old label is in the courier's past
         # anyway and its tracking number stays in the dispatch record.
@@ -394,20 +397,20 @@ def _record_wo_failure(tech: dict) -> None:
     """Keep the last few rejected bookings on disk. Closing the window should not
     destroy the only copy of why a dispatch would not go through."""
     try:
-        rows = core._load_json_store(WO_FAILURES_PATH, "failures", [])
+        rows = jsonstore._load_json_store(WO_FAILURES_PATH, "failures", [])
         rows = ([tech] + list(rows))[:WO_FAILURES_MAX]
-        if core._store_writable(WO_FAILURES_PATH):
-            core._write_json_store(WO_FAILURES_PATH, "failures", rows)
+        if jsonstore._store_writable(WO_FAILURES_PATH):
+            jsonstore._write_json_store(WO_FAILURES_PATH, "failures", rows)
     except Exception:
         logger.exception("could not record the World Options failure")
 
 
 def _load_wo_failures() -> list:
-    return core._load_json_store(WO_FAILURES_PATH, "failures", [])
+    return jsonstore._load_json_store(WO_FAILURES_PATH, "failures", [])
 
 
 def _load_dispatch() -> dict:
-    return core._load_json_cached(DISPATCH_STATE_PATH, "orders", {})
+    return jsonstore._load_json_cached(DISPATCH_STATE_PATH, "orders", {})
 
 
 class DispatchStoreUnwritable(StoreUnwritable):
@@ -430,8 +433,8 @@ def _archive_dispatch_rows(rows: list) -> bool:
 
 
 def _write_dispatch(orders: dict) -> dict:
-    if not core._store_writable(DISPATCH_STATE_PATH):
-        core._forget_store(DISPATCH_STATE_PATH)
+    if not jsonstore._store_writable(DISPATCH_STATE_PATH):
+        jsonstore._forget_store(DISPATCH_STATE_PATH)
         raise DispatchStoreUnwritable(DISPATCH_STATE_PATH)
     if len(orders) > DISPATCH_STATE_MAX:
         keep = sorted(orders.items(), key=lambda kv: str(kv[1].get("dispatched_at") or ""))
@@ -444,7 +447,7 @@ def _write_dispatch(orders: dict) -> dict:
         else:
             logger.error("dispatch: %d rows are past the cap but could not be archived; "
                          "keeping them in the live store", len(evicted))
-    core._write_json_store(DISPATCH_STATE_PATH, "orders", orders)
+    jsonstore._write_json_store(DISPATCH_STATE_PATH, "orders", orders)
     return orders
 
 
@@ -467,12 +470,12 @@ COLLECTIONS_PATH = os.environ.get("COLLECTIONS_PATH", "/data/collections.json")
 
 
 def _load_collections() -> dict:
-    d = core._load_json_store(COLLECTIONS_PATH, "collections", {})
+    d = jsonstore._load_json_store(COLLECTIONS_PATH, "collections", {})
     return d if isinstance(d, dict) else {}
 
 
 def _write_collections(d: dict) -> None:
-    core._write_private_json(COLLECTIONS_PATH, "collections", d)
+    jsonstore._write_private_json(COLLECTIONS_PATH, "collections", d)
 
 
 def _collections_from_dispatch(day: str) -> dict:
@@ -842,10 +845,10 @@ ADDRESS_SYSTEM = (
 async def _ai_address(text: str) -> dict:
     """Claude's reading of a pasted block, for the ones the local pass could not
     place. Plain structured output, no tools that touch the store."""
-    core._ai_kind.set("address")
-    client = core._anthropic()
-    resp = await core._xcreate(
-        client, model=core.MODEL_FAST, max_tokens=4096, system=ADDRESS_SYSTEM,
+    claude._ai_kind.set("address")
+    client = claude._anthropic()
+    resp = await claude._xcreate(
+        client, model=claude.MODEL_FAST, max_tokens=4096, system=ADDRESS_SYSTEM,
         tools=[ADDRESS_TOOL], tool_choice={"type": "tool", "name": ADDRESS_TOOL["name"]},
         output_config={"effort": "low"},
         messages=[{"role": "user", "content": "Pasted text:\n\n" + str(text or "")[:4000]}],
@@ -987,7 +990,7 @@ async def _variant_costs(registry: dict, variant_ids: list) -> dict:
     want = sorted({int(v) for v in variant_ids if v})
     if not want:
         return {}
-    cache = core._load_json_store(COST_CACHE_PATH, "variants", {}) or {}
+    cache = jsonstore._load_json_store(COST_CACHE_PATH, "variants", {}) or {}
     fresh_after = datetime.now(timezone.utc) - timedelta(days=COST_CACHE_DAYS)
     out, stale = {}, []
     for vid in want:
@@ -1042,8 +1045,8 @@ async def _variant_costs(registry: dict, variant_ids: list) -> dict:
             if len(cache) > COST_CACHE_MAX:
                 keep = sorted(cache.items(), key=lambda kv: str(kv[1].get("at") or ""))
                 cache = dict(keep[-COST_CACHE_MAX:])
-            if core._store_writable(COST_CACHE_PATH):
-                core._write_json_store(COST_CACHE_PATH, "variants", cache)
+            if jsonstore._store_writable(COST_CACHE_PATH):
+                jsonstore._write_json_store(COST_CACHE_PATH, "variants", cache)
         except Exception:
             logger.exception("could not save the cost cache")
     return out
@@ -1063,7 +1066,7 @@ def _customs_key(li: dict, title: str) -> str:
 
 
 def _load_customs_memory() -> dict:
-    return core._load_json_store(CUSTOMS_MEMORY_PATH, "items", {}) or {}
+    return jsonstore._load_json_store(CUSTOMS_MEMORY_PATH, "items", {}) or {}
 
 
 def _remember_customs(lines: list) -> None:
@@ -1096,8 +1099,8 @@ def _remember_customs(lines: list) -> None:
         if len(mem) > CUSTOMS_MEMORY_MAX:
             keep = sorted(mem.items(), key=lambda kv: str(kv[1].get("at") or ""))
             mem = dict(keep[-CUSTOMS_MEMORY_MAX:])
-        if core._store_writable(CUSTOMS_MEMORY_PATH):
-            core._write_json_store(CUSTOMS_MEMORY_PATH, "items", mem)
+        if jsonstore._store_writable(CUSTOMS_MEMORY_PATH):
+            jsonstore._write_json_store(CUSTOMS_MEMORY_PATH, "items", mem)
     except Exception:
         logger.exception("could not remember the customs values")
 
@@ -1530,7 +1533,7 @@ async def _quote_options(origin: dict, dest: dict, boxes: list, currency: str,
         return [], currency, str(e), e
     except Exception as e:
         logger.exception("dispatch quote failed")
-        core._record_error("getting courier quotes", e)
+        errors._record_error("getting courier quotes", e)
         return [], currency, "Couldn't get courier quotes. Check the server logs.", e
     if isinstance(nosig, Exception):
         logger.info("no-signature quote unavailable: %s", nosig)
@@ -1805,7 +1808,7 @@ async def _custom_book_locked(registry: dict, key: str, option: dict, dest: dict
                               declared: float, customs_body: Optional[dict],
                               signature: str, by: str) -> dict:
     book_store = _load_dispatch()
-    if DISPATCH_STATE_PATH in core._poisoned_stores:
+    if DISPATCH_STATE_PATH in jsonstore._poisoned_stores:
         return {"error": "The dispatch record is unreadable, so the app cannot tell whether this "
                          "shipment already has a label. Fix that before booking, or you risk "
                          "paying for a second one."}
@@ -2283,7 +2286,7 @@ def _shops_for(cfg: dict, option: dict) -> tuple:
 
 
 def _intents() -> dict:
-    d = core._load_json_store(BOOKING_INTENT_PATH, "intents", {})
+    d = jsonstore._load_json_store(BOOKING_INTENT_PATH, "intents", {})
     return d if isinstance(d, dict) else {}
 
 
@@ -2291,8 +2294,8 @@ def _intent_set(key, by: str) -> None:
     try:
         d = _intents()
         d[str(key)] = {"at": datetime.now(timezone.utc).isoformat(), "by": str(by or "")[:40]}
-        if core._store_writable(BOOKING_INTENT_PATH):
-            core._write_json_store(BOOKING_INTENT_PATH, "intents", d)
+        if jsonstore._store_writable(BOOKING_INTENT_PATH):
+            jsonstore._write_json_store(BOOKING_INTENT_PATH, "intents", d)
     except Exception:
         logger.exception("booking intent could not be written for %s", key)
 
@@ -2300,8 +2303,8 @@ def _intent_set(key, by: str) -> None:
 def _intent_clear(key) -> None:
     try:
         d = _intents()
-        if d.pop(str(key), None) is not None and core._store_writable(BOOKING_INTENT_PATH):
-            core._write_json_store(BOOKING_INTENT_PATH, "intents", d)
+        if d.pop(str(key), None) is not None and jsonstore._store_writable(BOOKING_INTENT_PATH):
+            jsonstore._write_json_store(BOOKING_INTENT_PATH, "intents", d)
     except Exception:
         logger.exception("booking intent could not be cleared for %s", key)
 
@@ -2394,7 +2397,7 @@ async def _book_and_record(*, key, order_label: str, log_label: str, option: dic
         return out
     except Exception as e:
         logger.exception("%s booking failed", log_label)
-        core._record_error("booking a courier", e)
+        errors._record_error("booking a courier", e)
         tech = {"reply": repr(e)[:2000], "when": datetime.now(timezone.utc).isoformat(),
                 "order": order_label}
         _record_wo_failure(tech)
@@ -2492,7 +2495,7 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
                                 customs_body: Optional[dict], by: str = "",
                                 collection_option: str = "") -> dict:
     book_store = _load_dispatch()
-    if DISPATCH_STATE_PATH in core._poisoned_stores:
+    if DISPATCH_STATE_PATH in jsonstore._poisoned_stores:
         return {"error": "The dispatch record cannot be read, so there is no way to tell "
                          "whether this order already has a label. Nothing was booked. "
                          "Check World Options directly and ask your developer to repair "

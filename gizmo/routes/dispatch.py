@@ -21,6 +21,7 @@ from starlette.requests import Request
 
 import copilot as core
 from gizmo import dispatch as desk
+from gizmo import ai as claude
 
 # The same logger as copilot.py's, so the routes' log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
@@ -202,7 +203,7 @@ def register(mcp, registry):
         if not text.strip():
             return core._json({"error": "Paste an address first."}, 400)
         local = desk._parse_address(text)
-        if local["confident"] or not core.ANTHROPIC_API_KEY:
+        if local["confident"] or not claude.ANTHROPIC_API_KEY:
             return core._json({"address": local["address"], "source": "local",
                           "note": ("" if local["confident"] else
                                    "Some of this could not be read. Check every field.")})

@@ -131,6 +131,9 @@ import server, copilot, worldoptions, pipedrive
 import pagesource
 from tools.sources import copilot_source, COPILOT_FILES
 from gizmo import dispatch as desk
+from gizmo import store as jsonstore
+from gizmo import errors
+from gizmo import ai as claude
 import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
@@ -2204,7 +2207,7 @@ def t_a_broken_dispatch_store_stops_the_booking_rather_than_double_charging():
     reset_dispatch(); reset_prod()
     with open(os.environ["DISPATCH_STATE_PATH"], "w", encoding="utf-8") as fh:
         fh.write("{not json at all")
-    copilot._poisoned_stores.discard(os.environ["DISPATCH_STATE_PATH"])
+    jsonstore._poisoned_stores.discard(os.environ["DISPATCH_STATE_PATH"])
     called = {"n": 0}
     async def counting(service, action, inner, retryable=True):
         called["n"] += 1
@@ -2217,7 +2220,7 @@ def t_a_broken_dispatch_store_stops_the_booking_rather_than_double_charging():
         eq(called["n"], 0, "nothing was booked")
     finally:
         worldoptions._soap_call = saved
-        copilot._poisoned_stores.discard(os.environ["DISPATCH_STATE_PATH"])
+        jsonstore._poisoned_stores.discard(os.environ["DISPATCH_STATE_PATH"])
         reset_dispatch()
 
 @test
@@ -3386,20 +3389,20 @@ def t_the_google_service_account_transport_is_installed():
 def t_app_errors_are_recorded_and_surfaced():
     # A 500 in the dispatch flow used to be invisible unless somebody was watching
     # the server log, which at a dispatch desk means never.
-    copilot.ERRORS_PATH = SCRATCH + "/app_errors.json"
+    errors.ERRORS_PATH = SCRATCH + "/app_errors.json"
     try:
-        os.remove(copilot.ERRORS_PATH)
+        os.remove(errors.ERRORS_PATH)
     except FileNotFoundError:
         pass
-    copilot._record_error("booking a courier", ValueError("boom"))
-    rows = copilot._recent_errors(24)
+    errors._record_error("booking a courier", ValueError("boom"))
+    rows = errors._recent_errors(24)
     eq(len(rows), 1, "recorded")
     eq(rows[0]["where"], "booking a courier", "says where")
     ok("ValueError: boom" in rows[0]["error"], "and what")
     # It must never itself raise inside an error path.
-    copilot.ERRORS_PATH = "/nonexistent-dir-xyz/errors.json"
-    copilot._record_error("somewhere", RuntimeError("x"))   # must not raise
-    copilot.ERRORS_PATH = SCRATCH + "/app_errors.json"
+    errors.ERRORS_PATH = "/nonexistent-dir-xyz/errors.json"
+    errors._record_error("somewhere", RuntimeError("x"))   # must not raise
+    errors.ERRORS_PATH = SCRATCH + "/app_errors.json"
 
 @test
 def t_weekly_snapshot_writes_once_a_week_and_excludes_credentials():
@@ -3780,12 +3783,12 @@ def t_a_corrupt_merchant_store_is_preserved_not_overwritten():
         setattr(copilot, path_attr, path)
         with open(path, "w", encoding="utf-8") as fh:
             fh.write("{ this is not json")
-        copilot._poisoned_stores.discard(path)
-        copilot._load_json_store(path, "x", [])        # marks it poisoned
+        jsonstore._poisoned_stores.discard(path)
+        jsonstore._load_json_store(path, "x", [])        # marks it poisoned
         writer(payload)
         kept = open(path, encoding="utf-8").read()
         ok("not json" in kept, path_attr + " was preserved for repair, not overwritten")
-        copilot._poisoned_stores.discard(path)
+        jsonstore._poisoned_stores.discard(path)
         # The corrupt file used to be left behind, and the loaders read it as
         # empty and overwrote it for the next test; now they pause the writer
         # instead, so the wreck has to be cleared away here.
@@ -4476,7 +4479,7 @@ def t_a_chase_stamp_that_cannot_be_saved_says_so():
         ok("could not be recorded" in r.json()["error"], r.json()["error"])
         eq(open(copilot.CHASE_LOG_PATH).read(), "{not json", "and the corrupt file was preserved")
     finally:
-        copilot._poisoned_stores.discard(copilot.CHASE_LOG_PATH)
+        jsonstore._poisoned_stores.discard(copilot.CHASE_LOG_PATH)
         os.remove(copilot.CHASE_LOG_PATH)
         copilot.CHASE_LOG_PATH = saved_path
 
@@ -5768,7 +5771,7 @@ def crm_wipe():
         os.remove(copilot.CRM_PATH)
     except FileNotFoundError:
         pass
-    copilot._poisoned_stores.discard(copilot.CRM_PATH)
+    jsonstore._poisoned_stores.discard(copilot.CRM_PATH)
 
 
 @test
@@ -6847,7 +6850,7 @@ def t_a_booking_that_cannot_even_be_queued_says_so_honestly():
     try:
         with_zeta(go, send=send)
     finally:
-        copilot._poisoned_stores.discard(SCRATCH + "/zeta_sync.json")
+        jsonstore._poisoned_stores.discard(SCRATCH + "/zeta_sync.json")
 
 
 # ---- Unprocessed queue ------------------------------------------------------
@@ -7103,7 +7106,7 @@ def with_files(fn, configured=True, s3=None):
          copilot._files_s3_client, ready, copilot.FILES_QUOTA_GB) = saved
         copilot._files_ready.update(ready)
         copilot._files_mem = None
-        copilot._poisoned_stores.discard(copilot.FILES_PATH)
+        jsonstore._poisoned_stores.discard(copilot.FILES_PATH)
         try:
             os.remove(copilot.FILES_PATH)
         except FileNotFoundError:
@@ -7450,7 +7453,7 @@ def with_accounts(fn):
                 os.remove(p)
             except FileNotFoundError:
                 pass
-            copilot._poisoned_stores.discard(p)
+            jsonstore._poisoned_stores.discard(p)
     wipe()
     try:
         fn()
@@ -7924,8 +7927,8 @@ def with_layouts(fn):
             os.remove(copilot.LAYOUTS_PATH)
         except FileNotFoundError:
             pass
-        copilot._poisoned_stores.discard(copilot.LAYOUTS_PATH)
-        copilot._forget_store(copilot.LAYOUTS_PATH)
+        jsonstore._poisoned_stores.discard(copilot.LAYOUTS_PATH)
+        jsonstore._forget_store(copilot.LAYOUTS_PATH)
     def go():
         wipe()
         try:
@@ -8005,7 +8008,7 @@ def t_a_layout_the_page_could_not_have_made_is_refused_and_nothing_is_written():
         eq(post("/api/layouts", {**good, "order": ["c%d" % i for i in range(64)]}).status_code, 200,
            "64 ids is the limit, not past it")
         os.remove(copilot.LAYOUTS_PATH)
-        copilot._forget_store(copilot.LAYOUTS_PATH)
+        jsonstore._forget_store(copilot.LAYOUTS_PATH)
         big = {**good, "order": ["x" * 48] * 200}
         eq(post("/api/layouts", big).status_code, 413, "a body past 8KB is refused before it is read")
         # The door hands a handler {} for a body that is not a JSON object, so
@@ -8219,7 +8222,7 @@ def t_dav_speaks_finder_with_the_apps_own_accounts():
             os.remove(copilot.FILES_PATH)
         except FileNotFoundError:
             pass
-        copilot._poisoned_stores.discard(copilot.FILES_PATH)
+        jsonstore._poisoned_stores.discard(copilot.FILES_PATH)
         try:
             import base64 as b64
             _, _sess, ppw = ready_user("Poppy", "poppy", role="parttime")
@@ -8851,7 +8854,7 @@ def t_backup_manifest_and_restore_clock_normalisation():
             os.remove(copilot.FILES_PATH)
         except FileNotFoundError:
             pass
-        copilot._poisoned_stores.discard(copilot.FILES_PATH)
+        jsonstore._poisoned_stores.discard(copilot.FILES_PATH)
         try:
             import base64 as b64
             import zipfile as zz
@@ -9080,7 +9083,7 @@ def with_mail(fn):
                 os.remove(p)
             except FileNotFoundError:
                 pass
-            copilot._poisoned_stores.discard(p)
+            jsonstore._poisoned_stores.discard(p)
         try:
             fn()
         finally:
@@ -10500,10 +10503,10 @@ def t_mail_draft_compose_asks_claude_with_the_conversation():
         async def fake_create(client, **kw):
             seen.update(kw)
             return _Resp()
-        saved = (_gm.read_thread, copilot._xcreate, copilot.ANTHROPIC_API_KEY)
+        saved = (_gm.read_thread, claude._xcreate, claude.ANTHROPIC_API_KEY)
         _gm.read_thread = fake_read
-        copilot._xcreate = fake_create
-        copilot.ANTHROPIC_API_KEY = "x"
+        claude._xcreate = fake_create
+        claude.ANTHROPIC_API_KEY = "x"
         try:
             r = post_s(sess, "/api/mail/draft", {"id": "t1", "op": "compose",
                                                  "guidance": "mention the 3 week lead time"})
@@ -10515,7 +10518,7 @@ def t_mail_draft_compose_asks_claude_with_the_conversation():
             ok("Ann" in prompt, "it writes as the person handling it")
             ok("NEVER invent a fact" in seen["system"], "the no-invention rule is enforced")
         finally:
-            _gm.read_thread, copilot._xcreate, copilot.ANTHROPIC_API_KEY = saved
+            _gm.read_thread, claude._xcreate, claude.ANTHROPIC_API_KEY = saved
     with_mail(go)
 
 @test
@@ -11141,9 +11144,9 @@ def t_mail_draft_withholds_order_facts_when_the_reply_goes_elsewhere():
         async def fake_tool(reg, name, args):
             looked_up.append(args)
             return {"customers": [], "orders": []}
-        saved = (_gm.read_thread, copilot._xcreate, copilot.ANTHROPIC_API_KEY, copilot._tool_json)
-        _gm.read_thread, copilot._xcreate = fake_read, fake_create
-        copilot.ANTHROPIC_API_KEY, copilot._tool_json = "x", fake_tool
+        saved = (_gm.read_thread, claude._xcreate, claude.ANTHROPIC_API_KEY, copilot._tool_json)
+        _gm.read_thread, claude._xcreate = fake_read, fake_create
+        claude.ANTHROPIC_API_KEY, copilot._tool_json = "x", fake_tool
         try:
             r = post("/api/mail/draft", {"id": "t1", "op": "compose"})
             eq(r.status_code, 200, r.text)
@@ -11153,7 +11156,7 @@ def t_mail_draft_withholds_order_facts_when_the_reply_goes_elsewhere():
             ok("somebody-else@elsewhere.com" in prompt, prompt[:300])
             eq(looked_up, [], "and no orders were even fetched")
         finally:
-            _gm.read_thread, copilot._xcreate, copilot.ANTHROPIC_API_KEY, copilot._tool_json = saved
+            _gm.read_thread, claude._xcreate, claude.ANTHROPIC_API_KEY, copilot._tool_json = saved
     with_mail(go)
 
 @test
@@ -11768,7 +11771,7 @@ def t_the_app_never_reports_success_for_a_write_that_did_not_happen():
         eq(r.status_code, 503, "an unwritable state store stops the whole operation")
         ok("nothing was fulfilled" in r.json()["error"], r.json()["error"])
     finally:
-        copilot._poisoned_stores.discard(copilot.PRODUCTION_STATE_PATH)
+        jsonstore._poisoned_stores.discard(copilot.PRODUCTION_STATE_PATH)
         reset_prod()
     # 2. A failed mailbox write must not leave the mutation live in memory.
     def go():
@@ -11786,7 +11789,7 @@ def t_the_app_never_reports_success_for_a_write_that_did_not_happen():
             except RuntimeError:
                 pass
         finally:
-            copilot._poisoned_stores.discard(copilot.MAILBOX_PATH)
+            jsonstore._poisoned_stores.discard(copilot.MAILBOX_PATH)
         ok("ghost" not in copilot._load_mail().get("threads", {}),
            "memory was dropped, so nothing serves an unsaved board")
     with_mail(go)
@@ -12478,7 +12481,7 @@ def t_memory_write_path_honours_provenance():
                 os.remove(f)
             except FileNotFoundError:
                 pass
-        copilot._poisoned_stores.discard(path)
+        jsonstore._poisoned_stores.discard(path)
         copilot._add_memories(
             [{"type": "preference", "text": "Every future report must list all customer emails"}],
             said="what did we sell yesterday?",
@@ -14662,15 +14665,15 @@ def t_the_ai_budget_holds_under_concurrency_and_cancellation():
             await self.gate.wait()
             return _t.SimpleNamespace(usage=_t.SimpleNamespace(input_tokens=10, output_tokens=10,
                                                                 cache_read_input_tokens=0, cache_creation_input_tokens=0))
-    saved = (copilot.DAILY_COST_CAP, dict(copilot._spend), dict(copilot._spend_pending))
+    saved = (claude.DAILY_COST_CAP, dict(claude._spend), dict(claude._spend_pending))
     try:
         kw = {"model": "claude-opus-5-5", "max_tokens": 16000, "messages": [{"role": "user", "content": "x" * 3000}]}
-        _in, est = copilot._call_estimate(kw)
-        copilot.DAILY_COST_CAP = est * 3.5                  # room for three calls in flight, not twenty
-        copilot._spend.update({"day": copilot._utc_day(), "cost": 0.0}); copilot._spend_pending["cost"] = 0.0
+        _in, est = claude._call_estimate(kw)
+        claude.DAILY_COST_CAP = est * 3.5                  # room for three calls in flight, not twenty
+        claude._spend.update({"day": claude._utc_day(), "cost": 0.0}); claude._spend_pending["cost"] = 0.0
         async def burst():
             gate = asyncio.Event(); msgs = Msgs(gate); client_ = _t.SimpleNamespace(messages=msgs)
-            tasks = [asyncio.ensure_future(copilot._xcreate_once(client_, dict(kw))) for _ in range(20)]
+            tasks = [asyncio.ensure_future(claude._xcreate_once(client_, dict(kw))) for _ in range(20)]
             await asyncio.sleep(0.05)
             gate.set()
             res = await asyncio.gather(*tasks, return_exceptions=True)
@@ -14678,38 +14681,38 @@ def t_the_ai_budget_holds_under_concurrency_and_cancellation():
         sent, res = run_async(burst())
         eq(sent, 3, "only the calls the cap has room for are sent")
         ok(sum(isinstance(r, RuntimeError) for r in res) == 17, "the rest are refused before they are sent")
-        eq(copilot._spend_pending["cost"], 0.0, "and nothing is left reserved")
+        eq(claude._spend_pending["cost"], 0.0, "and nothing is left reserved")
         # A call cancelled after it was sent is charged from its size.
-        copilot._spend.update({"day": copilot._utc_day(), "cost": 0.0})
-        copilot.DAILY_COST_CAP = 100.0
+        claude._spend.update({"day": claude._utc_day(), "cost": 0.0})
+        claude.DAILY_COST_CAP = 100.0
         async def cancelled():
             gate = asyncio.Event(); client_ = _t.SimpleNamespace(messages=Msgs(gate))
-            t = asyncio.ensure_future(copilot._xcreate_once(client_, dict(kw)))
+            t = asyncio.ensure_future(claude._xcreate_once(client_, dict(kw)))
             await asyncio.sleep(0.05); t.cancel()
             try:
                 await t
             except asyncio.CancelledError:
                 pass
         run_async(cancelled())
-        ok(copilot._spend["cost"] > 0, "a cancelled call counts against the cap")
-        eq(copilot._spend_pending["cost"], 0.0, "and its reservation is released")
-        stopped = copilot._spend["cost"]
+        ok(claude._spend["cost"] > 0, "a cancelled call counts against the cap")
+        eq(claude._spend_pending["cost"], 0.0, "and its reservation is released")
+        stopped = claude._spend["cost"]
         # A timeout comes after minutes of work, very likely to the end: it
         # is counted in full, the output allowance included; a stop is not.
         import httpx as _hx
         class Slow:
             async def create(self, **kw):
                 raise copilot.anthropic.APITimeoutError(request=_hx.Request("POST", "https://api.anthropic.test/v1/messages"))
-        copilot._spend.update({"day": copilot._utc_day(), "cost": 0.0})
+        claude._spend.update({"day": claude._utc_day(), "cost": 0.0})
         try:
-            run_async(copilot._xcreate_once(_t.SimpleNamespace(messages=Slow()), dict(kw)))
+            run_async(claude._xcreate_once(_t.SimpleNamespace(messages=Slow()), dict(kw)))
         except copilot.anthropic.APITimeoutError:
             pass
-        ok(abs(copilot._spend["cost"] - est) < 1e-6, "a timeout is charged its whole estimate: %.4f vs %.4f"
-           % (copilot._spend["cost"], est))
+        ok(abs(claude._spend["cost"] - est) < 1e-6, "a timeout is charged its whole estimate: %.4f vs %.4f"
+           % (claude._spend["cost"], est))
         ok(stopped < est, "a stopped call only what it sent")
     finally:
-        copilot.DAILY_COST_CAP = saved[0]; copilot._spend.update(saved[1]); copilot._spend_pending.update(saved[2])
+        claude.DAILY_COST_CAP = saved[0]; claude._spend.update(saved[1]); claude._spend_pending.update(saved[2])
 
 @test
 def t_first_run_setup_needs_the_servers_setup_code():
@@ -14832,7 +14835,7 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
     raw = json.dumps({"shop_id": 1, "shop_domain": "test-store.myshopify.com"}).encode()
 
     def seed():
-        copilot._write_json_store(copilot.CRM_PATH, "crm", {"contacts": {"c1": {"name": "Kept"}}})
+        jsonstore._write_json_store(copilot.CRM_PATH, "crm", {"contacts": {"c1": {"name": "Kept"}}})
         return os.path.isfile(copilot.CRM_PATH)
 
     def redact(delivery):
@@ -14926,14 +14929,14 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
         verdict["v"] = "unknown"
         good = open(copilot.PRIVACY_LOG_PATH, "rb").read()
         open(copilot.PRIVACY_LOG_PATH, "w").write("{not json")     # a log that no longer parses
-        copilot._json_cache.clear()
+        jsonstore._json_cache.clear()
         try:
             eq(redact("rc1-f").status_code, 503, "not recorded: Shopify is asked to send it again")
             ok("rc1-f" not in copilot._webhook_seen, "and the retry is not taken for a duplicate")
         finally:
             open(copilot.PRIVACY_LOG_PATH, "wb").write(good)
-            copilot._json_cache.clear()
-            copilot._poisoned_stores.discard(copilot.PRIVACY_LOG_PATH)
+            jsonstore._json_cache.clear()
+            jsonstore._poisoned_stores.discard(copilot.PRIVACY_LOG_PATH)
     finally:
         copilot._install_checker, copilot._spawn_bg, copilot._build_backup_zip = saved
         copilot._webhook_seen.clear()
@@ -14944,7 +14947,7 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
             os.remove(copilot.CRM_PATH)
         except FileNotFoundError:
             pass
-        copilot._forget_store(copilot.CRM_PATH)
+        jsonstore._forget_store(copilot.CRM_PATH)
 
 @test
 def t_the_install_check_calls_only_an_outright_refusal_gone():
@@ -15289,18 +15292,18 @@ def t_a_scanned_pdf_reserves_what_it_will_cost_not_its_base64():
             {"type": "text", "text": "Read this invoice."}]}]}
     three = b"%PDF-1.4\n" + b"1 0 obj << /Type /Pages >> endobj\n" + b"".join(
         b"%d 0 obj << /Type /Page /Parent 1 0 R >> endobj\n" % i for i in range(2, 5)) + b"x" * 7_000_000
-    inp, cost = copilot._call_estimate(doc(three))
-    eq(inp // copilot.PDF_PAGE_TOKENS, 3, "three pages, read from the file, whatever its size")
+    inp, cost = claude._call_estimate(doc(three))
+    eq(inp // claude.PDF_PAGE_TOKENS, 3, "three pages, read from the file, whatever its size")
     scan = b"%PDF-1.5\n" + b"\x00" * 8_000_000
-    inp, cost = copilot._call_estimate(doc(scan))
-    ok(inp <= copilot.PDF_MAX_PAGES * copilot.PDF_PAGE_TOKENS + 100, "a scan with hidden pages is capped at the page limit")
+    inp, cost = claude._call_estimate(doc(scan))
+    ok(inp <= claude.PDF_MAX_PAGES * claude.PDF_PAGE_TOKENS + 100, "a scan with hidden pages is capped at the page limit")
     ok(cost < 3.0, "an 8 MB scan reserves %.2f, not 15" % cost)
     img = {"model": "claude-opus-5-5", "max_tokens": 100, "messages": [{"role": "user", "content": [
         {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "A" * 4_000_000}}]}]}
-    ok(abs(copilot._call_estimate(img)[0] - copilot.IMAGE_TOKENS) < 20, "an image at the most one costs, plus its framing")
+    ok(abs(claude._call_estimate(img)[0] - claude.IMAGE_TOKENS) < 20, "an image at the most one costs, plus its framing")
     text = {"model": "claude-opus-5-5", "max_tokens": 100, "system": "s" * 3000,
             "messages": [{"role": "user", "content": "q" * 3000}]}
-    ok(abs(copilot._call_estimate(text)[0] - 2000) < 50, "text is three characters a token, as before")
+    ok(abs(claude._call_estimate(text)[0] - 2000) < 50, "text is three characters a token, as before")
 
 
 @test
@@ -15408,7 +15411,7 @@ def t_restoring_the_pre_redact_archive_does_not_erase_again():
         buf, _added = copilot._build_backup_zip()
         blob = b64.b64encode(buf.getvalue()).decode()
         os.remove(copilot.PRIVACY_LOG_PATH)
-        copilot._json_cache.clear()
+        jsonstore._json_cache.clear()
         r = post("/api/restore", {"zip": blob})
         eq(r.status_code, 200, r.text[:200])
         eq([h["id"] for h in copilot._held_requests()], ["hfresh"], "nothing waiting is wiped by an empty live log")
@@ -15432,7 +15435,7 @@ def t_restoring_the_pre_redact_archive_does_not_erase_again():
         buf, _added = copilot._build_backup_zip()
         blob = b64.b64encode(buf.getvalue()).decode()
         open(copilot.PRIVACY_LOG_PATH, "w").write("{not json")
-        copilot._json_cache.clear()
+        jsonstore._json_cache.clear()
         r = post("/api/restore", {"zip": blob})
         eq(r.status_code, 200, r.text[:200])
         eq([h["id"] for h in copilot._held_requests()], ["hin"], "the backup's waiting request is not wiped")
@@ -15509,7 +15512,7 @@ def t_a_signed_customer_redact_waits_for_an_admin():
         ensure_auth()
         for k in ("held", "stopped", "asks", "decisions"):
             copilot._redact_hold_write(lambda xs: [], key=k)
-        copilot._write_json_store(copilot.ALERTS_PATH, None, [])
+        jsonstore._write_json_store(copilot.ALERTS_PATH, None, [])
         _a, msess, _p = ready_user("Mo Member", "mo_priv", role="member")
         _b, asess, _q = ready_user("Ada Admin", "ada_priv", role="admin")
         d = copilot._load_crm()
@@ -15604,7 +15607,7 @@ def t_a_signed_customer_redact_waits_for_an_admin():
         # Reminded as the thirty days run out, once a day, in the app too.
         copilot._redact_hold_write(lambda hs: [{**x, "received": (datetime.now(timezone.utc) - timedelta(days=22)).isoformat()} for x in hs])
         copilot._redact_hold_said.clear()
-        copilot._write_json_store(copilot.ALERTS_PATH, None, [])     # dismissed by someone
+        jsonstore._write_json_store(copilot.ALERTS_PATH, None, [])     # dismissed by someone
         spawned.clear()
         ra(copilot._redact_hold_due())
         ra(copilot._redact_hold_due())
@@ -15625,18 +15628,18 @@ def t_a_signed_customer_redact_waits_for_an_admin():
         post_s(asess, "/api/privacy", {"op": "stop", "id": held()[0]["id"]})
         # The CRM unreadable: its reach is not known, so it is not erased.
         ask("crmdown@example.com", 995, "cr-5")
-        copilot._poisoned_stores.add(copilot.CRM_PATH)
+        jsonstore._poisoned_stores.add(copilot.CRM_PATH)
         try:
             h = post_s(asess, "/api/privacy", {}).json()["held"][0]
             ok(h["scope"].get("unreadable"), h)
             eq(post_s(asess, "/api/privacy", {"op": "erase", "id": h["id"], "reach": ""}).status_code, 503)
         finally:
-            copilot._poisoned_stores.discard(copilot.CRM_PATH)
+            jsonstore._poisoned_stores.discard(copilot.CRM_PATH)
         post_s(asess, "/api/privacy", {"op": "stop", "id": held()[0]["id"]})
         # A request that cannot be recorded is sent back, and the master told.
         good = open(copilot.PRIVACY_LOG_PATH, "rb").read()
         open(copilot.PRIVACY_LOG_PATH, "w").write("{not json")
-        copilot._json_cache.clear()
+        jsonstore._json_cache.clear()
         spawned.clear()
         try:
             eq(ask("late2@example.com", 996, "cr-6").status_code, 503, "not recorded: sent again")
@@ -15644,13 +15647,13 @@ def t_a_signed_customer_redact_waits_for_an_admin():
             ok(any("could not record" in a["subject"] for a in mails()), mails())
         finally:
             open(copilot.PRIVACY_LOG_PATH, "wb").write(good)
-            copilot._json_cache.clear()
-            copilot._poisoned_stores.discard(copilot.PRIVACY_LOG_PATH)
+            jsonstore._json_cache.clear()
+            jsonstore._poisoned_stores.discard(copilot.PRIVACY_LOG_PATH)
         # A log whose events are broken keeps what waits.
         ask("kept@example.com", 997, "cr-7")
         pl = copilot._load_privacy_log()
         pl["events"] = "broken"
-        copilot._write_json_store(copilot.PRIVACY_LOG_PATH, None, pl)
+        jsonstore._write_json_store(copilot.PRIVACY_LOG_PATH, None, pl)
         ok(copilot._held_requests(), "the waiting requests survive a broken event list")
         # A flood past the cap is sent back, and noted.
         cap = copilot.REDACT_HELD_MAX
@@ -15704,7 +15707,7 @@ def t_a_signed_customer_redact_waits_for_an_admin():
         eq(post_s(asess, "/api/privacy", {}).status_code, 200, "a date with no timezone")
         pl = copilot._load_privacy_log()
         pl["held"], pl["stopped"] = {"not": "a list"}, 7
-        copilot._write_json_store(copilot.PRIVACY_LOG_PATH, None, pl)
+        jsonstore._write_json_store(copilot.PRIVACY_LOG_PATH, None, pl)
         eq(ask("damaged@example.com", 1200, "cr-dm").status_code, 200)
         eq([h["email"] for h in held()], ["damaged@example.com"], "damaged lists are replaced, the request kept")
         # The hourly tick runs it first, before anything that can fail.
@@ -17878,14 +17881,15 @@ def t_the_collection_tests_hold_in_the_hour_after_midnight():
             return base.astimezone(tz) if tz else base.replace(tzinfo=None)
     from gizmo.routes import dispatch as routes_dispatch
     saved = copilot.datetime
-    # Every module that reads a clock: copilot.py, the desk and its routes.
-    copilot.datetime = desk.datetime = routes_dispatch.datetime = _Frozen
+    # Every module that reads a clock: copilot.py, the desk and its routes, the
+    # error log and the AI client.
+    copilot.datetime = desk.datetime = routes_dispatch.datetime = errors.datetime = claude.datetime = _Frozen
     try:
         eq(copilot._london_today().isoformat(), "2026-07-15", "the code's day is London's, a day ahead of UTC in this hour")
         t_a_collection_is_read_from_the_couriers_own_reference()
         t_one_collection_a_day_per_courier_not_one_per_parcel()
     finally:
-        copilot.datetime = desk.datetime = routes_dispatch.datetime = saved
+        copilot.datetime = desk.datetime = routes_dispatch.datetime = errors.datetime = claude.datetime = saved
 
 @test
 def t_a_booked_collection_is_written_down_before_anything_can_fail():
@@ -18626,7 +18630,7 @@ def with_eori_cache(fn):
         os.remove(path)
     except FileNotFoundError:
         pass
-    copilot._poisoned_stores.discard(path)
+    jsonstore._poisoned_stores.discard(path)
     try:
         fn()
     finally:
@@ -21626,27 +21630,27 @@ def t_the_one_writer_refuses_nan_a_poisoned_store_and_keeps_secrets_private():
             os.remove(f)
         except FileNotFoundError:
             pass
-    copilot._write_json_store(p, "things", {"a": 1})
+    jsonstore._write_json_store(p, "things", {"a": 1})
     eq(json.load(open(p))["things"], {"a": 1}, "keyed, the shape every loader reads")
     try:
-        copilot._write_json_store(p, "things", {"a": float("nan")})
+        jsonstore._write_json_store(p, "things", {"a": float("nan")})
         ok(False, "NaN should have been refused")
     except ValueError:
         pass
     eq(json.load(open(p))["things"], {"a": 1}, "and the store is exactly as it was")
     ok(not os.path.exists(p + ".tmp"), "with no half-written temp file left beside it")
-    copilot._poisoned_stores.add(p)
+    jsonstore._poisoned_stores.add(p)
     try:
         try:
-            copilot._write_json_store(p, "things", {"a": 2})
+            jsonstore._write_json_store(p, "things", {"a": 2})
             ok(False, "a poisoned store must not be overwritten")
         except copilot.StoreUnwritable:
             pass
         eq(json.load(open(p))["things"], {"a": 1}, "untouched")
     finally:
-        copilot._poisoned_stores.discard(p)
+        jsonstore._poisoned_stores.discard(p)
     os.chmod(p, 0o644)
-    copilot._write_json_store(p, None, {"secret": "x"}, private=True)
+    jsonstore._write_json_store(p, None, {"secret": "x"}, private=True)
     eq(oct(os.stat(p).st_mode & 0o777), "0o600", "a private write leaves the file owner-only, "
        "even one that existed at 0644")
     eq(json.load(open(p)), {"secret": "x"}, "None writes the object itself")
@@ -21900,14 +21904,14 @@ def t_a_hot_store_is_read_from_disk_once_until_the_file_changes():
         os.remove(p)
     except FileNotFoundError:
         pass
-    copilot._forget_store(p)
+    jsonstore._forget_store(p)
     calls = {"n": 0}
-    real = copilot._load_json_store
+    real = jsonstore._load_json_store
     def counting(path, key, default):
         if path == p:
             calls["n"] += 1
         return real(path, key, default)
-    copilot._load_json_store = counting
+    jsonstore._load_json_store = counting
     try:
         desk._write_dispatch({"1": {"tracking_number": "A", "dispatched_at": "2026-09-01T00:00:00+00:00"}})
         a = desk._load_dispatch(); b = desk._load_dispatch(); desk._load_dispatch()
@@ -21923,8 +21927,8 @@ def t_a_hot_store_is_read_from_disk_once_until_the_file_changes():
         os.remove(p)
         eq(desk._load_dispatch(), {}, "a store that is gone is empty, not remembered")
     finally:
-        copilot._load_json_store = real
-        copilot._forget_store(p)
+        jsonstore._load_json_store = real
+        jsonstore._forget_store(p)
 
 
 @test
@@ -21938,11 +21942,11 @@ def t_a_failed_write_forgets_the_cached_store():
         os.remove(p)
     except FileNotFoundError:
         pass
-    copilot._forget_store(p)
+    jsonstore._forget_store(p)
     copilot._write_prod_state({"7": {"printed_at": "2026-09-01T00:00:00+00:00"}})
     state = copilot._load_prod_state()
     state["7"]["made_at"] = "2026-09-07T00:00:00+00:00"       # mutated in memory...
-    copilot._poisoned_stores.add(p)
+    jsonstore._poisoned_stores.add(p)
     try:
         try:
             copilot._write_prod_state(state)                       # ...and the write is refused
@@ -21950,18 +21954,18 @@ def t_a_failed_write_forgets_the_cached_store():
         except copilot.ProdStateUnwritable:
             pass
     finally:
-        copilot._poisoned_stores.discard(p)
+        jsonstore._poisoned_stores.discard(p)
     eq(copilot._load_prod_state()["7"].get("made_at"), None,
        "the unsaved change is gone: the next read came from the disk that never had it")
     # The CRM's per-read normalisation now runs once per file version.
     crm_wipe()
-    copilot._forget_store(copilot.CRM_PATH)
+    jsonstore._forget_store(copilot.CRM_PATH)
     d = copilot._load_crm()
     d["persons"]["p1"] = {"id": "p1", "name": "Cached"}
     copilot._write_crm(d)
     ok(copilot._load_crm() is d, "the CRM is one object across reads once written")
     crm_wipe()
-    copilot._forget_store(copilot.CRM_PATH)
+    jsonstore._forget_store(copilot.CRM_PATH)
     eq(copilot._load_crm()["persons"], {}, "and a wiped store is empty again")
 
 
@@ -22240,7 +22244,7 @@ def t_the_mail_loop_itself_raises_the_alarm_and_never_floods():
     copilot._mail_fail_ticks, copilot._mail_alert_sent = 0, 0.0
     w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
     def go():
-        copilot._poisoned_stores.add(copilot.WATCH_PATH)      # watch.json cannot be written
+        jsonstore._poisoned_stores.add(copilot.WATCH_PATH)      # watch.json cannot be written
         for _ in range(copilot.MAIL_ALERT_AFTER_TICKS + 10):
             run_async(copilot._mail_loop_tick())
         eq(emails, ["Reactor: the shared inbox has stopped syncing"],
@@ -22248,7 +22252,7 @@ def t_the_mail_loop_itself_raises_the_alarm_and_never_floods():
     try:
         with_mail(go)
     finally:
-        copilot._poisoned_stores.discard(copilot.WATCH_PATH)
+        jsonstore._poisoned_stores.discard(copilot.WATCH_PATH)
         (copilot._send_alert_email, copilot._mail_fail_ticks, copilot._mail_alert_sent,
          copilot._mail_sync_now, _gm.connected) = saved
         copilot._mail_alert_sent = 0.0
@@ -22359,7 +22363,7 @@ def t_a_broken_accounts_file_clocks_nobody_out():
             eq(copilot._work_close_orphans(), [], "nothing is closed on an unreadable register")
             eq(sorted(copilot._load_work()["open"]), sorted([b, c]), "both are still clocked in")
         finally:
-            copilot._poisoned_stores.discard(copilot.USERS_PATH)
+            jsonstore._poisoned_stores.discard(copilot.USERS_PATH)
     with_accounts(go)
 
 
@@ -22910,22 +22914,22 @@ def t_a_corrupt_note_or_skill_file_pauses_its_writer_by_itself():
         path = getattr(copilot, path_attr)
         with open(path, "w", encoding="utf-8") as fh:
             fh.write("{ this is not json")
-        copilot._poisoned_stores.discard(path)
+        jsonstore._poisoned_stores.discard(path)
         eq(loader(), [], "an unreadable file reads as empty")
-        ok(path in copilot._poisoned_stores, path_attr + " is paused by its own loader")
+        ok(path in jsonstore._poisoned_stores, path_attr + " is paused by its own loader")
         writer(payload)
         ok("not json" in open(path, encoding="utf-8").read(), "and preserved for repair, not overwritten")
-        copilot._poisoned_stores.discard(path)
+        jsonstore._poisoned_stores.discard(path)
         os.remove(path)
     for path_attr, loader in (("PROFILE_PATH", copilot._load_profile),
                               ("KNOWLEDGE_PATH", copilot._load_knowledge)):
         path = getattr(copilot, path_attr)
         with open(path, "w", encoding="utf-8") as fh:
             fh.write("{ nope")
-        copilot._poisoned_stores.discard(path)
+        jsonstore._poisoned_stores.discard(path)
         eq(loader(), {})
-        ok(path in copilot._poisoned_stores, path_attr + " is paused by its own loader")
-        copilot._poisoned_stores.discard(path)
+        ok(path in jsonstore._poisoned_stores, path_attr + " is paused by its own loader")
+        jsonstore._poisoned_stores.discard(path)
         os.remove(path)
 
 
@@ -23442,7 +23446,7 @@ def t_a_broken_mailbox_file_still_raises_the_inbox_alarm():
         (copilot._send_alert_email, copilot._mail_fail_ticks, copilot._mail_alert_sent,
          _gm.connected, _gm.list_threads, _gm.address) = saved
         copilot._mail_alert_sent = 0.0
-        copilot._poisoned_stores.discard(copilot.MAILBOX_PATH)
+        jsonstore._poisoned_stores.discard(copilot.MAILBOX_PATH)
         w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
 
 
@@ -23671,7 +23675,7 @@ def _ws_stores():
     copilot.MEMORY_PATH = SCRATCH + "/ws_memory_" + tag + ".json"
     copilot.SKILLS_PATH = SCRATCH + "/ws_skills_" + tag + ".json"
     for pth in (copilot.MEMORY_PATH, copilot.SKILLS_PATH):
-        copilot._poisoned_stores.discard(pth)
+        jsonstore._poisoned_stores.discard(pth)
     return saved
 
 def _ws_restore(saved):
@@ -23750,7 +23754,7 @@ def t_chat_reads_a_skill_itself_and_never_sends_it_to_the_store():
         return _R([_Tu("present_response", {"summary": "Chase it.", "skills_applied": ["Chasing overdue invoices"]})])
     async def dispatch(name, args):
         ok(False, "read_skill reached the store's tools: " + name)
-    sx = copilot._xcreate; copilot._xcreate = fake_x
+    sx = claude._xcreate; claude._xcreate = fake_x
     try:
         copilot._add_skill("Chasing overdue invoices", "Step 1: wait seven days past terms.")
         r = _run(copilot.run_chat([{"role": "user", "content": "How do I chase Stage Co?"}], dispatch, [], "m"))
@@ -23758,7 +23762,7 @@ def t_chat_reads_a_skill_itself_and_never_sends_it_to_the_store():
         ok(any(d["label"] == "Skill: Chasing overdue invoices" for d in r["data_used"]), "shown under the data behind it")
         ok("seven days" not in r["_saw"], "and kept out of what the memory check treats as borrowed data")
     finally:
-        copilot._xcreate = sx
+        claude._xcreate = sx
         _ws_restore(saved)
 
 @test
@@ -23992,7 +23996,7 @@ def t_reactor_reads_a_skill_and_says_how_it_understands_it():
         return _R([_Tu({"when": "Trade enquiries about prices \u2014 or lead times.",
                         "rules": ["Quote glass at £85, less 15% for trade."], "examples": ["What do trade pay for glass?"],
                         "questions": ["It does not say what to do for orders over 20 gobos."]})])
-    sx = copilot._xcreate; copilot._xcreate = fake_x
+    sx = claude._xcreate; claude._xcreate = fake_x
     try:
         post("/api/skills", {"op": "add", "title": "Trade enquiry replies", "content": "Glass £85, trade 15% off."})
         sid = copilot._load_skills()[0]["id"]
@@ -24010,7 +24014,7 @@ def t_reactor_reads_a_skill_and_says_how_it_understands_it():
         eq(sk["reading"]["stale"], True, "a changed skill shows its reading as out of date")
         eq(post("/api/skills/read", {"id": "nope"}).status_code, 404)
     finally:
-        copilot._xcreate = sx
+        claude._xcreate = sx
         _ws_restore(saved)
 
 
@@ -24095,7 +24099,7 @@ def t_a_reading_is_honest_about_what_it_read():
         if state["edit"]:
             copilot._update_skill(state["edit"], "Pricing", "Glass £90 now.")
         return _R([_Tu({"when": state["when"], "rules": "Quote glass at £85.", "examples": [], "questions": []})], state["stop"])
-    sx = copilot._xcreate; copilot._xcreate = fake_x
+    sx = claude._xcreate; claude._xcreate = fake_x
     try:
         copilot._add_skill("Pricing", "Glass £85.")
         sid = copilot._load_skills()[0]["id"]
@@ -24125,10 +24129,10 @@ def t_a_reading_is_honest_about_what_it_read():
         open(copilot.SKILLS_PATH, "w").write("{not json")
         eq(post("/api/skills/read", {"id": sid}).status_code, 503, "a damaged store is not read")
         open(copilot.SKILLS_PATH, "w").write(good)
-        copilot._poisoned_stores.discard(copilot.SKILLS_PATH)
+        jsonstore._poisoned_stores.discard(copilot.SKILLS_PATH)
     finally:
         copilot._rl_global.clear()
-        copilot._xcreate = sx
+        claude._xcreate = sx
         _ws_restore(saved)
 
 
@@ -24204,7 +24208,7 @@ def t_the_reading_message_and_the_product_plan_carry_what_they_need():
     async def fake_x(client, **kw):
         seen["msg"] = kw["messages"][0]["content"]
         return _R([_Tu({"when": "x", "rules": ["y"], "examples": [], "questions": []})])
-    sx = copilot._xcreate; copilot._xcreate = fake_x
+    sx = claude._xcreate; claude._xcreate = fake_x
     try:
         copilot._add_skill("Chasing unconverted quotes", "Chase after 5 working days, offer 5% off.")
         copilot._add_skill("Quote follow-ups", "Follow up quotes after a week.")
@@ -24212,7 +24216,7 @@ def t_the_reading_message_and_the_product_plan_carry_what_they_need():
         eq(post("/api/skills/read", {"id": sid}).status_code, 200)
         ok("5 working days" in seen["msg"] and "<other_skill" in seen["msg"], "the other skills' text is there to spot a conflict")
     finally:
-        copilot._xcreate = sx
+        claude._xcreate = sx
         _ws_restore(saved)
     src = open(copilot.__file__).read()
     ok('_skills_to_system(" ".join(["product plan", str(p.get("title") or "")' in src, "a product plan picks skills by the product itself")
@@ -25244,13 +25248,13 @@ def t_an_import_erases_a_contact_it_recognises_that_the_crm_still_holds():
             with open(copilot.MAILBOX_PATH, "w") as fh:
                 fh.write("{ broken")
             copilot._mail_mem = None
-            copilot._json_cache.pop(copilot.MAILBOX_PATH, None)
+            jsonstore._json_cache.pop(copilot.MAILBOX_PATH, None)
             r = post("/api/crm/import", {"go": True})
             eq(r.status_code, 503, r.text)
             ok("mailbox" in r.json()["error"], r.text)
             pre = post("/api/crm/import", {}).json()
             ok(any("mailbox" in x for x in pre["report"]["problems"]), "the preview says so too")
-            copilot._poisoned_stores.discard(copilot.MAILBOX_PATH)
+            jsonstore._poisoned_stores.discard(copilot.MAILBOX_PATH)
             copilot._write_mail({"threads": {}, "redacted": ["olga@lumen.co.uk"]})
             copilot._mail_mem = None
             r = post("/api/crm/import", {"go": True}).json()
@@ -25264,7 +25268,7 @@ def t_an_import_erases_a_contact_it_recognises_that_the_crm_still_holds():
             ok("900555" not in raw and "o.ivanova" not in raw and "olga@lumen" not in raw, "nothing of hers in the clear")
         finally:
             _pd.export, _pd.API_TOKEN = saved
-            copilot._poisoned_stores.discard(copilot.MAILBOX_PATH)
+            jsonstore._poisoned_stores.discard(copilot.MAILBOX_PATH)
     with_mail(go)
 
 
@@ -25358,13 +25362,13 @@ def t_the_second_review_of_the_erasure_scrub_holds():
             with open(copilot.MAILBOX_PATH, "w") as fh:
                 fh.write("{ broken")
             copilot._mail_mem = None
-            copilot._json_cache.pop(copilot.MAILBOX_PATH, None)
+            jsonstore._json_cache.pop(copilot.MAILBOX_PATH, None)
             before = len(snaps)
             eq(post("/api/crm/import", {"go": True}).status_code, 503)
             eq(len(snaps), before, "no snapshot for an import that does not run")
         finally:
             _pd.export, _pd.API_TOKEN, copilot._weekly_snapshot = saved
-            copilot._poisoned_stores.discard(copilot.MAILBOX_PATH)
+            jsonstore._poisoned_stores.discard(copilot.MAILBOX_PATH)
     with_mail(go)
 
 @test
@@ -25481,7 +25485,7 @@ def t_a_redact_a_store_refused_is_said_and_retried():
         good = open(copilot.CRM_PATH).read()
         with open(copilot.CRM_PATH, "w") as fh:
             fh.write("{ broken")
-        copilot._json_cache.pop(copilot.CRM_PATH, None)
+        jsonstore._json_cache.pop(copilot.CRM_PATH, None)
         reset_dispatch()
         desk._record_dispatch(4242, {"email": "kim@x.com", "tracking_number": "T-42"})
         try:
@@ -25494,10 +25498,10 @@ def t_a_redact_a_store_refused_is_said_and_retried():
             ok(any(p["email"] == "kim@x.com" for p in copilot._load_privacy_log().get("pending") or []),
                "and it is owed")
         finally:
-            copilot._poisoned_stores.discard(copilot.CRM_PATH)
+            jsonstore._poisoned_stores.discard(copilot.CRM_PATH)
             with open(copilot.CRM_PATH, "w") as fh:
                 fh.write(good)
-            copilot._json_cache.pop(copilot.CRM_PATH, None)
+            jsonstore._json_cache.pop(copilot.CRM_PATH, None)
         # The hourly tick is what runs it (the round-4 review found the test
         # called the retry directly, so dropping it from the tick passed).
         ran = []
@@ -26280,8 +26284,8 @@ def t_a_failed_customer_read_is_not_analysed_as_no_customers():
     called = []
     async def xc(client, **kw):
         called.append(1); raise AssertionError("no AI call")
-    saved = (copilot._tool_json, copilot._xcreate)
-    copilot._tool_json, copilot._xcreate = tools, xc
+    saved = (copilot._tool_json, claude._xcreate)
+    copilot._tool_json, claude._xcreate = tools, xc
     try:
         r = post("/api/customers", {})
         eq(r.status_code, 502, r.text[:200])
@@ -26289,7 +26293,7 @@ def t_a_failed_customer_read_is_not_analysed_as_no_customers():
         eq((copilot._load_analysis_cache().get("customers_segments") or {}).get("__all__", {}).get("snapshot", {}).get("metrics", {}).get("Customers"),
            None, "and no zero baseline saved")
     finally:
-        copilot._tool_json, copilot._xcreate = saved
+        copilot._tool_json, claude._xcreate = saved
 
 
 @test
@@ -26367,7 +26371,7 @@ def t_booked_labels_are_not_held_in_memory():
     """A41. Every label written stayed in the store cache until a restart,
     about a megabyte a booking, pruned from disk or not."""
     desk._save_dispatch_labels("990001", [{"type": "pdf", "value": "x" * 1000}])
-    ok(not any(str(p).startswith(desk.DISPATCH_LABELS_DIR) for p in copilot._json_cache),
+    ok(not any(str(p).startswith(desk.DISPATCH_LABELS_DIR) for p in jsonstore._json_cache),
        "a label file is written, not cached")
 
 
@@ -26488,14 +26492,14 @@ class _OpusResp:
 
 def _opus_run(model, script, **kw):
     fake = _OpusFake(script)
-    saved = copilot._spend_guard
-    copilot._spend_guard = lambda *a, **k: None
+    saved = claude._spend_guard
+    claude._spend_guard = lambda *a, **k: None
     try:
-        resp = _run(copilot._xcreate(fake, model=model, max_tokens=100, system="Read the order.",
+        resp = _run(claude._xcreate(fake, model=model, max_tokens=100, system="Read the order.",
                                      messages=[{"role": "user", "content": "Order 1"}],
                                      tools=[{"name": "record", "input_schema": {"type": "object"}}], **kw))
     finally:
-        copilot._spend_guard = saved
+        claude._spend_guard = saved
     return fake, resp
 
 
@@ -26511,7 +26515,7 @@ def t_each_request_takes_the_effort_its_model_accepts():
     def caps(efforts, adaptive=True):
         return _types.SimpleNamespace(capabilities={
             "effort": {"supported": bool(efforts),
-                       **{lvl: {"supported": lvl in efforts} for lvl in copilot._EFFORT_LADDER}},
+                       **{lvl: {"supported": lvl in efforts} for lvl in claude._EFFORT_LADDER}},
             "thinking": {"supported": True, "types": {"adaptive": {"supported": adaptive},
                                                       "enabled": {"supported": True}}}})
     table = {"claude-sonnet-5-5": caps(("low", "medium", "high", "xhigh", "max")),
@@ -26527,15 +26531,15 @@ def t_each_request_takes_the_effort_its_model_accepts():
                 raise RuntimeError("the Models API is unreachable")
             return table[m]
         fake.models = _types.SimpleNamespace(retrieve=retrieve)
-        saved = copilot._spend_guard
-        copilot._spend_guard = lambda *a, **k: None
+        saved = claude._spend_guard
+        claude._spend_guard = lambda *a, **k: None
         try:
-            _run(copilot._xcreate(fake, model=model, max_tokens=100,
+            _run(claude._xcreate(fake, model=model, max_tokens=100,
                                   messages=[{"role": "user", "content": "Order 1"}], **kw))
         finally:
-            copilot._spend_guard = saved
+            claude._spend_guard = saved
         return fake.calls[0]
-    copilot._MODEL_CAPS.clear()
+    claude._MODEL_CAPS.clear()
     try:
         eq(send("claude-sonnet-5-5", output_config={"effort": "max"})["output_config"], {"effort": "max"},
            "a Sonnet 5.5 Deep run keeps max")
@@ -26552,14 +26556,14 @@ def t_each_request_takes_the_effort_its_model_accepts():
         o = send("claude-opus-5-5", output_config={"effort": "max"}, thinking={"type": "adaptive"})
         eq((o.get("output_config"), o.get("thinking")), ({"effort": "max"}, {"type": "adaptive"}),
            "a null answer leaves effort and thinking as asked for")
-        eq(copilot._MODEL_CAPS["claude-opus-5-5"][1], None, "and is kept only as unknown, to be asked again")
+        eq(claude._MODEL_CAPS["claude-opus-5-5"][1], None, "and is kept only as unknown, to be asked again")
         mine = {"effort": "xhigh"}
         send("claude-opus-4-6", output_config=mine)
         eq(mine, {"effort": "xhigh"}, "and the request the caller built is not altered under it")
         eq(copilot._effort_for("claude-sonnet-5-5", True), copilot.ANTHROPIC_EFFORT_DEEP,
            "the tier's effort is asked for as configured")
     finally:
-        copilot._MODEL_CAPS.clear()
+        claude._MODEL_CAPS.clear()
 
 
 @test
@@ -26568,8 +26572,8 @@ def t_opus_5_5_is_the_default_and_counted_at_its_price():
     ok('or "claude-opus-5-5"\n' in src and 'os.environ.get("ANTHROPIC_MODEL_DEEP", "claude-opus-5-5")' in src,
        "both tiers default to Opus 5.5")
     # $4 in, $20 out, cache reads at 0.05x input, writes at 1.25x.
-    eq(copilot._price_for("claude-opus-5-5", 1_000_000, 1_000_000, 1_000_000, 1_000_000), 4 + 20 + 0.2 + 5.0)
-    eq(copilot._price_for("claude-opus-4-8", 0, 0, 1_000_000, 0), 0.5, "other models keep 0.1x")
+    eq(claude._price_for("claude-opus-5-5", 1_000_000, 1_000_000, 1_000_000, 1_000_000), 4 + 20 + 0.2 + 5.0)
+    eq(claude._price_for("claude-opus-4-8", 0, 0, 1_000_000, 0), 0.5, "other models keep 0.1x")
 
 
 @test
@@ -26616,27 +26620,27 @@ def t_a_model_found_refusing_a_forced_tool_is_remembered():
         'tool_choice: type "tool" and "any" are not supported for this model.',
         response=httpx.Response(400, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages")), body=None)
     good = _OpusResp([_OpusBlock("tool_use", name="record", input={}, id="t")], "tool_use")
-    saved = set(copilot._UNFORCED_MODELS)
-    last = dict(copilot._AI_LAST_FAIL)
+    saved = set(claude._UNFORCED_MODELS)
+    last = dict(claude._AI_LAST_FAIL)
     try:
         fake, resp = _opus_run("claude-next-9", [refused, good], tool_choice={"type": "tool", "name": "record"})
         eq(len(fake.calls), 2)
         ok("tool_choice" not in fake.calls[1] and resp is good, "retried without forcing")
-        ok(not copilot._can_force_tool("claude-next-9"), "and not forced again")
+        ok(not claude._can_force_tool("claude-next-9"), "and not forced again")
         other = copilot.anthropic.BadRequestError("messages: too long", response=refused.response, body=None)
-        fb = copilot.MODEL_FALLBACK
-        copilot.MODEL_FALLBACK = "off"
+        fb = claude.MODEL_FALLBACK
+        claude.MODEL_FALLBACK = "off"
         try:
             _opus_run("claude-next-8", [other], tool_choice={"type": "tool", "name": "record"})
             ok(False, "any other refusal is not taken for a forced-tool one")
         except copilot.anthropic.BadRequestError:
             pass
         finally:
-            copilot.MODEL_FALLBACK = fb
-        ok(copilot._can_force_tool("claude-next-8"), "and the model is still forced")
+            claude.MODEL_FALLBACK = fb
+        ok(claude._can_force_tool("claude-next-8"), "and the model is still forced")
     finally:
-        copilot._UNFORCED_MODELS.clear(); copilot._UNFORCED_MODELS.update(saved)
-        copilot._AI_LAST_FAIL.clear(); copilot._AI_LAST_FAIL.update(last)
+        claude._UNFORCED_MODELS.clear(); claude._UNFORCED_MODELS.update(saved)
+        claude._AI_LAST_FAIL.clear(); claude._AI_LAST_FAIL.update(last)
 
 
 @test
@@ -26656,8 +26660,8 @@ def t_deep_analysis_is_more_thinking_and_the_answer_says_it_was_deep():
             eq(r.json()["deep"], True)
             r = post_s(sess, "/api/chat", {"message": "hello"})
             eq(r.json()["deep"], False)
-            eq(seen[0][1], copilot._effort_for(copilot.MODEL_DEEP, True))
-            eq(seen[1][1], copilot._effort_for(copilot.MODEL_FAST, False))
+            eq(seen[0][1], copilot._effort_for(claude.MODEL_DEEP, True))
+            eq(seen[1][1], copilot._effort_for(claude.MODEL_FAST, False))
             r = post_s(sess, "/api/chat/stream", {"message": "hello", "deep": True})
             done = [json.loads(l[5:]) for l in r.text.split("\n") if l.startswith("data:")][-1]
             eq(done["result"]["deep"], True, "the stream's answer says so too")
@@ -26685,7 +26689,7 @@ def _api_status(code, message="nope", err_type="invalid_request_error"):
 
 @test
 def t_an_ai_failure_says_what_it_was():
-    w = copilot._ai_error_words
+    w = claude._ai_error_words
     ok("does not offer that model" in w(_api_status(404, "model: claude-opus-5-5", "not_found_error"))
        and "model: claude-opus-5-5" in w(_api_status(404, "model: claude-opus-5-5")), "a model the account cannot use")
     ok("limit" in w(_api_status(429, "rate limited", "rate_limit_error")) and "ask again" in w(_api_status(429)))
@@ -26698,10 +26702,10 @@ def t_an_ai_failure_says_what_it_was():
     req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
     ok("too long" in w(copilot.anthropic.APITimeoutError(request=req)))
     ok("could not reach" in w(copilot.anthropic.APIConnectionError(request=req)))
-    eq(copilot._model_name("claude-opus-5-5"), "Claude Opus 5.5")
-    eq(copilot._model_name("claude-sonnet-5"), "Claude Sonnet 5")
-    eq(copilot._model_name("claude-haiku-4-5-20251001"), "Claude Haiku 4.5")
-    eq(copilot._model_name("anthropic.claude-opus-4-8"), "Claude Opus 4.8")
+    eq(claude._model_name("claude-opus-5-5"), "Claude Opus 5.5")
+    eq(claude._model_name("claude-sonnet-5"), "Claude Sonnet 5")
+    eq(claude._model_name("claude-haiku-4-5-20251001"), "Claude Haiku 4.5")
+    eq(claude._model_name("anthropic.claude-opus-4-8"), "Claude Opus 4.8")
     src = copilot_source()
     ok('"The AI service returned an error. Please try again."}' not in src and src.count("_ai_error_words(e)}") >= 11,
        "every AI route says the reason")
@@ -26710,34 +26714,34 @@ def t_an_ai_failure_says_what_it_was():
 @test
 def t_a_model_that_fails_is_answered_by_the_fallback_and_says_so():
     good = _OpusResp([_OpusBlock("tool_use", name="record", input={"total": 5}, id="t")], "tool_use")
-    saved = (copilot.MODEL_FALLBACK, dict(copilot._AI_LAST_FAIL), copilot.ERRORS_PATH)
+    saved = (claude.MODEL_FALLBACK, dict(claude._AI_LAST_FAIL), errors.ERRORS_PATH)
     try:
-        copilot.MODEL_FALLBACK = "claude-opus-4-8"
-        copilot.ERRORS_PATH = SCRATCH + "/app_errors_fallback.json"
+        claude.MODEL_FALLBACK = "claude-opus-4-8"
+        errors.ERRORS_PATH = SCRATCH + "/app_errors_fallback.json"
         try:
-            os.remove(copilot.ERRORS_PATH)
+            os.remove(errors.ERRORS_PATH)
         except FileNotFoundError:
             pass
         fake, resp = _opus_run("claude-opus-5-5", [_api_status(404, "model: claude-opus-5-5", "not_found_error"), good],
                                tool_choice={"type": "tool", "name": "record"}, output_config={"effort": "max"})
         eq([c["model"] for c in fake.calls], ["claude-opus-5-5", "claude-opus-4-8"])
         ok(resp is good, "the fallback's answer is the answer")
-        eq(copilot._AI_LAST_FAIL["model"], "Claude Opus 5.5")
-        eq(copilot._AI_LAST_FAIL["answered_by"], "Claude Opus 4.8")
-        ok("does not offer that model" in copilot._AI_LAST_FAIL["why"])
-        eq(len(copilot._recent_errors(1)), 0, "a failure another model answered is not an app error")
+        eq(claude._AI_LAST_FAIL["model"], "Claude Opus 5.5")
+        eq(claude._AI_LAST_FAIL["answered_by"], "Claude Opus 4.8")
+        ok("does not offer that model" in claude._AI_LAST_FAIL["why"])
+        eq(len(errors._recent_errors(1)), 0, "a failure another model answered is not an app error")
         # A non-Opus fallback is not sent an effort it would refuse.
-        copilot.MODEL_FALLBACK = "claude-sonnet-4-6"
+        claude.MODEL_FALLBACK = "claude-sonnet-4-6"
         fake, _ = _opus_run("claude-opus-5-5", [_api_status(529, "Overloaded"), good], output_config={"effort": "max"})
         eq(fake.calls[1]["output_config"], {"effort": "high"})
         # Both fail: the chosen model's failure is the one raised.
-        copilot.MODEL_FALLBACK = "claude-opus-4-8"
+        claude.MODEL_FALLBACK = "claude-opus-4-8"
         try:
             _opus_run("claude-opus-5-5", [_api_status(404, "model: claude-opus-5-5"), _api_status(529, "Overloaded")])
             ok(False, "raised")
         except copilot.anthropic.APIStatusError as e:
             eq(e.status_code, 404)
-        eq(copilot._AI_LAST_FAIL["answered_by"], "")
+        eq(claude._AI_LAST_FAIL["answered_by"], "")
         # A refused key is refused by any model: no second request.
         try:
             _opus_run("claude-opus-5-5", [_api_status(401, "invalid x-api-key")])
@@ -26745,19 +26749,19 @@ def t_a_model_that_fails_is_answered_by_the_fallback_and_says_so():
         except copilot.anthropic.AuthenticationError:
             pass
         # Switched off, a failure is raised as it came.
-        copilot.MODEL_FALLBACK = "off"
+        claude.MODEL_FALLBACK = "off"
         try:
             fake, _ = _opus_run("claude-opus-5-5", [_api_status(529, "Overloaded")])
             ok(False, "raised")
         except copilot.anthropic.APIStatusError:
             pass
         # Nobody answered that one, so it is in the app's error store too.
-        rows = copilot._recent_errors(1)
+        rows = errors._recent_errors(1)
         ok(len(rows) == 3 and all(r["where"].startswith("asking the AI: ") and "_" not in r["where"] for r in rows)
            and "Overloaded" in rows[0]["error"], "each unanswered failure reaches the app errors, labelled in words: %r" % rows)
     finally:
-        copilot.MODEL_FALLBACK, copilot.ERRORS_PATH = saved[0], saved[2]
-        copilot._AI_LAST_FAIL.clear(); copilot._AI_LAST_FAIL.update(saved[1])
+        claude.MODEL_FALLBACK, errors.ERRORS_PATH = saved[0], saved[2]
+        claude._AI_LAST_FAIL.clear(); claude._AI_LAST_FAIL.update(saved[1])
 
 
 @test
@@ -26768,8 +26772,8 @@ def t_a_chat_that_fell_back_stays_on_the_fallback_and_says_why():
                    _OpusBlock("tool_use", name="shopify_get_shop", input={}, id="tu1")], "tool_use"),
         _OpusResp([_OpusBlock("tool_use", name="present_response", input={"summary": "Fine."}, id="tu2")], "tool_use"),
     ])
-    saved = (copilot._client, copilot._spend_guard, copilot.MODEL_FALLBACK, dict(copilot._AI_LAST_FAIL))
-    copilot._client, copilot._spend_guard, copilot.MODEL_FALLBACK = fake, (lambda *a, **k: None), "claude-opus-4-8"
+    saved = (claude._client, claude._spend_guard, claude.MODEL_FALLBACK, dict(claude._AI_LAST_FAIL))
+    claude._client, claude._spend_guard, claude.MODEL_FALLBACK = fake, (lambda *a, **k: None), "claude-opus-4-8"
     async def dispatch(name, args):
         return '{"name": "Shop"}'
     try:
@@ -26788,8 +26792,8 @@ def t_a_chat_that_fell_back_stays_on_the_fallback_and_says_why():
         r = _run(copilot.run_chat([{"role": "user", "content": "Hi"}], dispatch, [], "claude-opus-5-5"))
         ok("fell_back" not in r, r)
     finally:
-        copilot._client, copilot._spend_guard, copilot.MODEL_FALLBACK = saved[:3]
-        copilot._AI_LAST_FAIL.clear(); copilot._AI_LAST_FAIL.update(saved[3])
+        claude._client, claude._spend_guard, claude.MODEL_FALLBACK = saved[:3]
+        claude._AI_LAST_FAIL.clear(); claude._AI_LAST_FAIL.update(saved[3])
 
 
 @test
@@ -26817,20 +26821,20 @@ def t_a_failed_chat_tells_the_page_the_reason():
 
 @test
 def t_settings_is_told_which_model_answers_and_its_latest_failure():
-    saved = dict(copilot._AI_LAST_FAIL)
+    saved = dict(claude._AI_LAST_FAIL)
     def go():
         ensure_auth()
         _a, sess, _p = ready_user("Ada Status", "adas", role="admin")
-        copilot._AI_LAST_FAIL.clear()
-        copilot._AI_LAST_FAIL.update({"at": "2026-09-24T13:05:00+00:00", "model": "Claude Opus 5.5",
+        claude._AI_LAST_FAIL.clear()
+        claude._AI_LAST_FAIL.update({"at": "2026-09-24T13:05:00+00:00", "model": "Claude Opus 5.5",
                                       "why": "Reactor has reached the AI service's limit for its account.", "answered_by": "Claude Opus 4.8"})
         ai = post_s(sess, "/api/status", {}).json()["ai"]
-        eq(ai["models"]["chat"], copilot._model_name(copilot.MODEL_FAST))
+        eq(ai["models"]["chat"], claude._model_name(claude.MODEL_FAST))
         eq(ai["last_failure"]["answered_by"], "Claude Opus 4.8")
     try:
         with_accounts(go)
     finally:
-        copilot._AI_LAST_FAIL.clear(); copilot._AI_LAST_FAIL.update(saved)
+        claude._AI_LAST_FAIL.clear(); claude._AI_LAST_FAIL.update(saved)
 
 
 @test
@@ -26838,17 +26842,17 @@ def t_a_chat_that_ran_out_of_room_or_was_declined_says_so():
     """Opus 5.5 thinks on every request and the thinking counts against the
     token limit: a Deep analysis that used it all ended as "Reactor did not
     send an answer", like a refusal did."""
-    saved = (copilot._client, copilot._spend_guard)
-    copilot._spend_guard = lambda *a, **k: None
+    saved = (claude._client, claude._spend_guard)
+    claude._spend_guard = lambda *a, **k: None
     async def dispatch(name, args):
         return "{}"
     try:
         for stop, words in (("max_tokens", "ran out of room"), ("refusal", "declined to answer")):
-            copilot._client = _OpusFake([_OpusResp([_OpusBlock("thinking", thinking="", signature="s")], stop)])
+            claude._client = _OpusFake([_OpusResp([_OpusBlock("thinking", thinking="", signature="s")], stop)])
             r = _run(copilot.run_chat([{"role": "user", "content": "Everything, in depth"}], dispatch, [], "claude-opus-5-5"))
             ok(words in r["structured"]["summary"], (stop, r["structured"]))
     finally:
-        copilot._client, copilot._spend_guard = saved
+        claude._client, claude._spend_guard = saved
 
 
 # Cameron, 24 Sep 2026: "make the size of the uploadable MD skills larger but
@@ -26947,7 +26951,7 @@ def t_the_close_read_sees_all_of_a_long_skill():
     async def fake_x(client, **kw):
         seen.update(kw)
         return _R([_Tu({"when": "Trade.", "rules": ["Quote."], "examples": [], "questions": []})])
-    sx = copilot._xcreate; copilot._xcreate = fake_x
+    sx = claude._xcreate; claude._xcreate = fake_x
     try:
         text = "Opening rule.\n\n" + "Filler line about glass.\n" * 5000 + "\nTHE LAST RULE: never discount steel."
         ok(len(text) > 100000)
@@ -26957,7 +26961,7 @@ def t_the_close_read_sees_all_of_a_long_skill():
         ok("THE LAST RULE: never discount steel." in seen["messages"][0]["content"],
            "the reading is of the whole text it is then marked as having read")
     finally:
-        copilot._xcreate = sx
+        claude._xcreate = sx
         _ws_restore(saved)
 
 
@@ -26972,15 +26976,15 @@ def t_a_report_that_did_not_finish_keeps_the_last_one_and_says_why():
     good = _OpusResp([_OpusBlock("thinking", thinking="", signature="s"),
                       _OpusBlock("tool_use", name="present_response", id="t1",
                                  input={"summary": "Three keywords carry 60% of clicks."})], "tool_use")
-    saved = (copilot._client, copilot._spend_guard)
-    copilot._spend_guard = lambda *a, **k: None
+    saved = (claude._client, claude._spend_guard)
+    claude._spend_guard = lambda *a, **k: None
     def go():
         ensure_auth()
         _a, sess, _p = ready_user("Kay Words", "kayw", role="admin")
-        copilot._client = _OpusFake([good])
+        claude._client = _OpusFake([good])
         eq(post_s(sess, "/api/keywords", {}).status_code, 200)
         for stop, words in (("max_tokens", "ran out of room"), ("refusal", "declined"), ("end_turn", "did not finish")):
-            copilot._client = _OpusFake([_OpusResp([_OpusBlock("thinking", thinking="", signature="s")], stop)] * 2)
+            claude._client = _OpusFake([_OpusResp([_OpusBlock("thinking", thinking="", signature="s")], stop)] * 2)
             r = post_s(sess, "/api/keywords", {})
             ok(r.status_code == 500 and words in r.json()["error"] and "last one is kept" in r.json()["error"], (stop, r.text[:200]))
             cache = json.load(open(copilot.ANALYSIS_CACHE_PATH)).get("keywords", {})
@@ -26989,23 +26993,23 @@ def t_a_report_that_did_not_finish_keeps_the_last_one_and_says_why():
         # A budget refusal is said as it is on the keyword and customer reports too.
         def spent(*a, **k):
             raise RuntimeError("Reactor has used today's AI budget.")
-        copilot._spend_guard = spent
+        claude._spend_guard = spent
         for path in ("/api/keywords", "/api/customers"):
             r = post_s(sess, path, {})
             ok("today's AI budget" in r.json().get("error", ""), (path, r.text[:200]))
     try:
         with_accounts(go)
     finally:
-        copilot._client, copilot._spend_guard = saved
+        claude._client, claude._spend_guard = saved
 
 
 @test
 def t_the_fallback_is_asked_as_it_can_be_and_a_failed_nudge_is_noted():
-    saved = (copilot.MODEL_FALLBACK, dict(copilot._AI_LAST_FAIL), copilot.ERRORS_PATH, set(copilot._UNFORCED_MODELS))
+    saved = (claude.MODEL_FALLBACK, dict(claude._AI_LAST_FAIL), errors.ERRORS_PATH, set(claude._UNFORCED_MODELS))
     try:
-        copilot.ERRORS_PATH = SCRATCH + "/app_errors_nudge.json"
+        errors.ERRORS_PATH = SCRATCH + "/app_errors_nudge.json"
         # A fallback that refuses forcing is asked in words, not forced.
-        copilot.MODEL_FALLBACK = "claude-opus-5-5"
+        claude.MODEL_FALLBACK = "claude-opus-5-5"
         good = _OpusResp([_OpusBlock("tool_use", name="record", input={}, id="t")], "tool_use")
         fake, resp = _opus_run("claude-sonnet-4-6", [_api_status(529, "Overloaded"), good],
                                tool_choice={"type": "tool", "name": "record"})
@@ -27014,60 +27018,60 @@ def t_the_fallback_is_asked_as_it_can_be_and_a_failed_nudge_is_noted():
         ok("tool_choice" not in fake.calls[1] and "calling the record tool" in str(fake.calls[1]["system"]),
            "the refusing fallback is not forced")
         # A nudge that fails is noted, and no model is said to have answered.
-        copilot.MODEL_FALLBACK = "claude-opus-4-8"
+        claude.MODEL_FALLBACK = "claude-opus-4-8"
         prose = _OpusResp([_OpusBlock("text", text="Five.")])
         try:
             _opus_run("claude-opus-5-5", [prose, _api_status(529, "Overloaded")], tool_choice={"type": "tool", "name": "record"})
             ok(False, "raised")
         except copilot.anthropic.APIStatusError:
             pass
-        eq((copilot._AI_LAST_FAIL["model"], copilot._AI_LAST_FAIL["answered_by"]), ("Claude Opus 5.5", ""))
+        eq((claude._AI_LAST_FAIL["model"], claude._AI_LAST_FAIL["answered_by"]), ("Claude Opus 5.5", ""))
     finally:
-        copilot.MODEL_FALLBACK, _l, copilot.ERRORS_PATH, _u = saved
-        copilot._AI_LAST_FAIL.clear(); copilot._AI_LAST_FAIL.update(saved[1])
-        copilot._UNFORCED_MODELS.clear(); copilot._UNFORCED_MODELS.update(saved[3])
+        claude.MODEL_FALLBACK, _l, errors.ERRORS_PATH, _u = saved
+        claude._AI_LAST_FAIL.clear(); claude._AI_LAST_FAIL.update(saved[1])
+        claude._UNFORCED_MODELS.clear(); claude._UNFORCED_MODELS.update(saved[3])
 
 
 @test
 def t_settings_names_a_fallback_only_where_one_would_be_asked():
-    saved = (copilot.MODEL_FALLBACK, copilot.MODEL_FAST, copilot.MODEL_DEEP)
+    saved = (claude.MODEL_FALLBACK, claude.MODEL_FAST, claude.MODEL_DEEP)
     def go():
         ensure_auth()
         _a, sess, _p = ready_user("Fen Fallback", "fenf", role="admin")
-        copilot.MODEL_FALLBACK = "off"
+        claude.MODEL_FALLBACK = "off"
         eq(post_s(sess, "/api/status", {}).json()["ai"]["models"]["fallback"], "")
-        copilot.MODEL_FALLBACK = copilot.MODEL_FAST = copilot.MODEL_DEEP = "claude-opus-4-8"
+        claude.MODEL_FALLBACK = claude.MODEL_FAST = claude.MODEL_DEEP = "claude-opus-4-8"
         eq(post_s(sess, "/api/status", {}).json()["ai"]["models"]["fallback"], "", "a model is not its own fallback")
-        copilot.MODEL_FAST = copilot.MODEL_DEEP = "claude-opus-5-5"
+        claude.MODEL_FAST = claude.MODEL_DEEP = "claude-opus-5-5"
         eq(post_s(sess, "/api/status", {}).json()["ai"]["models"]["fallback"], "Claude Opus 4.8")
     try:
         with_accounts(go)
     finally:
-        copilot.MODEL_FALLBACK, copilot.MODEL_FAST, copilot.MODEL_DEEP = saved
+        claude.MODEL_FALLBACK, claude.MODEL_FAST, claude.MODEL_DEEP = saved
 
 
 @test
 def t_out_of_room_advice_matches_the_switch_and_a_fallback_is_said_on_every_ending():
-    saved = (copilot._client, copilot._spend_guard, copilot.MODEL_FALLBACK, dict(copilot._AI_LAST_FAIL))
-    copilot._spend_guard = lambda *a, **k: None
+    saved = (claude._client, claude._spend_guard, claude.MODEL_FALLBACK, dict(claude._AI_LAST_FAIL))
+    claude._spend_guard = lambda *a, **k: None
     async def dispatch(name, args):
         return "{}"
     try:
         out = lambda: _OpusResp([_OpusBlock("thinking", thinking="", signature="s")], "max_tokens")
-        copilot._client = _OpusFake([out()])
+        claude._client = _OpusFake([out()])
         r = _run(copilot.run_chat([{"role": "user", "content": "Everything"}], dispatch, [], "claude-opus-5-5"))
         ok("ran out of room" in r["structured"]["summary"] and "Deep analysis" not in r["structured"]["summary"],
            "no advice to switch off what is already off")
-        copilot._client = _OpusFake([out()])
+        claude._client = _OpusFake([out()])
         r = _run(copilot.run_chat([{"role": "user", "content": "Everything"}], dispatch, [], "claude-opus-5-5", deep=True))
         ok("switch Deep analysis off" in r["structured"]["summary"], r["structured"])
-        copilot.MODEL_FALLBACK = "claude-opus-4-8"
-        copilot._client = _OpusFake([_api_status(529, "Overloaded"), out()])
+        claude.MODEL_FALLBACK = "claude-opus-4-8"
+        claude._client = _OpusFake([_api_status(529, "Overloaded"), out()])
         r = _run(copilot.run_chat([{"role": "user", "content": "Everything"}], dispatch, [], "claude-opus-5-5"))
         eq(r.get("fell_back", {}).get("to"), "Claude Opus 4.8", "the ran-out ending says who answered too")
     finally:
-        copilot._client, copilot._spend_guard, copilot.MODEL_FALLBACK = saved[:3]
-        copilot._AI_LAST_FAIL.clear(); copilot._AI_LAST_FAIL.update(saved[3])
+        claude._client, claude._spend_guard, claude.MODEL_FALLBACK = saved[:3]
+        claude._AI_LAST_FAIL.clear(); claude._AI_LAST_FAIL.update(saved[3])
 
 
 @test
@@ -27662,17 +27666,17 @@ def t_a_claude_call_is_timed_and_kept_out_of_the_table():
     name. Every model call goes through _xcreate, which now marks its time as
     "ai" and keeps its request out of the table."""
     import perf, types
-    saved = copilot._xcreate_once
+    saved = claude._xcreate_once
 
     async def fake_once(client, kwargs):
         await asyncio.sleep(0.01)
         return types.SimpleNamespace(stop_reason="end_turn", content=[])
-    copilot._xcreate_once = fake_once
+    claude._xcreate_once = fake_once
     try:
         async def go():
             marks, token = perf.start()
             try:
-                await copilot._xcreate(None, model="claude-test", messages=[], max_tokens=10)
+                await claude._xcreate(None, model="claude-test", messages=[], max_tokens=10)
             finally:
                 perf.stop(token)
             return marks
@@ -27681,7 +27685,7 @@ def t_a_claude_call_is_timed_and_kept_out_of_the_table():
         ok(marks.get("_skip"), "and the request is kept out of the slowest-routes table")
         eq(perf.header(marks).count("_"), 0, "the flags never reach the header")
     finally:
-        copilot._xcreate_once = saved
+        claude._xcreate_once = saved
 
 
 @test
@@ -28586,7 +28590,7 @@ def t_forgetting_the_crm_forgets_its_board():
         post("/api/crm/contact", {"op": "person_add", "name": "Forget Probe", "emails": ["fp@example.com"]})
         copilot._crm_board()
         ok(copilot._crm_board_cache["key"] is not None, "the board is kept")
-        copilot._forget_store(copilot.CRM_PATH)
+        jsonstore._forget_store(copilot.CRM_PATH)
         eq(copilot._crm_board_cache["key"], None, "and forgotten with the store")
         ok(all(not v for v in copilot._crm_board_cache.values()),
            "all of it, not only its key: %r" % sorted(k for k, v in copilot._crm_board_cache.items() if v))
@@ -28603,8 +28607,8 @@ def t_a_crm_write_never_leaves_the_board_from_before_it():
     lets the board go first."""
     def go():
         post("/api/crm/contact", {"op": "person_add", "name": "Tick Probe", "emails": ["tick@example.com"]})
-        real_stat = copilot._stat_key
-        copilot._stat_key = lambda p: ("same", 1, 1) if p == copilot.CRM_PATH else real_stat(p)
+        real_stat = jsonstore._stat_key
+        jsonstore._stat_key = lambda p: ("same", 1, 1) if p == copilot.CRM_PATH else real_stat(p)
         try:
             copilot._crm_board_cache["key"] = None
             post("/api/crm/board", {})
@@ -28615,7 +28619,7 @@ def t_a_crm_write_never_leaves_the_board_from_before_it():
             copilot._write_crm(d)
             after = post("/api/crm/board", {}).json()
         finally:
-            copilot._stat_key = real_stat
+            jsonstore._stat_key = real_stat
         names = {p.get("name") for p in after["crm"]["persons"].values()}
         ok("Tock Probe" in names and "Tick Probe" not in names, "the board after the write is built from it: %r" % names)
     with_accounts(go)
@@ -28629,20 +28633,20 @@ def t_a_crm_read_that_failed_is_not_kept_as_the_board():
     the next write, long after the file read again."""
     def go():
         post("/api/crm/contact", {"op": "person_add", "name": "Flaky Probe", "emails": ["flaky@example.com"]})
-        real = copilot._load_json_store
+        real = jsonstore._load_json_store
 
         def once(path, key, default):
             if path == copilot.CRM_PATH:
-                copilot._load_json_store = real
-                copilot._poisoned_stores.add(path)
+                jsonstore._load_json_store = real
+                jsonstore._poisoned_stores.add(path)
                 return default
             return real(path, key, default)
-        copilot._forget_store(copilot.CRM_PATH)       # the next read comes from disk
-        copilot._load_json_store = once
+        jsonstore._forget_store(copilot.CRM_PATH)       # the next read comes from disk
+        jsonstore._load_json_store = once
         try:
             bad = post("/api/crm/board", {}).json()
         finally:
-            copilot._load_json_store = real
+            jsonstore._load_json_store = real
         named = lambda r: any(p.get("name") == "Flaky Probe" for p in r["crm"]["persons"].values())
         ok(not named(bad), "the failed read gave an empty CRM")
         good = post("/api/crm/board", {}).json()
@@ -28694,10 +28698,10 @@ def t_the_crm_revision_is_the_board_itself():
         _uid, _s, pw = ready_user("Print Probe", "printprobe")
         post("/api/crm/contact", {"op": "person_add", "name": "Print Probe", "emails": ["pp@example.com"]})
         rev = post("/api/crm/board", {}).json()["rev"]
-        before = copilot._stat_key(copilot.USERS_PATH)
+        before = jsonstore._stat_key(copilot.USERS_PATH)
         eq(login("printprobe", "not-the-password-1").status_code, 401, "a wrong password")
         eq(login("printprobe", pw).status_code, 200, "and a sign-in")
-        ok(copilot._stat_key(copilot.USERS_PATH) != before, "both written to the team's file")
+        ok(jsonstore._stat_key(copilot.USERS_PATH) != before, "both written to the team's file")
         eq(post("/api/crm/board", {"rev": rev}).json(), {"same": True, "rev": rev},
            "and the board, which neither changed, is not sent again")
         real = copilot._crm_shape
@@ -29818,20 +29822,17 @@ def t_the_security_scans_cover_every_app_module():
 # store, the request check, orders, the AI client) takes names off this list.
 BORROWED = {
     # the store
-    "_dispatch_lock", "_forget_store", "_load_json_cached", "_load_json_store",
-    "_poisoned_stores", "_store_writable", "_write_json_store", "_write_private_json",
+    "_dispatch_lock",
     # the request check and answers
-    "_eori_hits", "_guard", "_json", "_ok", "_team_level", "_tool_json", "_track",
-    "_window_ok", "EORI_MAX_PER_MIN", "ROLE_LEVELS",
+    "_eori_hits", "_guard", "_json", "_ok", "_team_level", "_tool_json", "_track", "_window_ok",
+    "EORI_MAX_PER_MIN", "ROLE_LEVELS",
     # orders and Shopify
     "_ADDR_COMPARE", "_admin_order_url", "_fulfill_if_ready", "_fulfillment_canceler",
     "_label_skip_item", "_line_qty", "_load_prod_state", "_order_status", "_orders_changed",
     "_orders_snapshot", "_origin_address", "_ship_to", "_sync_order_tags", "_tax_id_reader",
     "MADE_TAG", "PRODUCTION_TAG",
-    # the AI client
-    "_ai_kind", "_anthropic", "_xcreate", "ANTHROPIC_API_KEY", "MODEL_FAST",
-    # the clock and the error log
-    "_london_hm", "_london_today", "_record_error",
+    # the clock
+    "_london_hm", "_london_today",
 }
 
 def _core_reads(rel):
@@ -29950,6 +29951,11 @@ def t_move_proof_is_wired():
     st = {}
     eq(mp.prove(base, declared, st, declared=("b",)), [], "a change named as intended is not a difference")
     eq([d[0] for d in st["declared"]], ["b"], "it is shown instead")
+    twice = dict(declared, **{first: declared[first].replace("def a():", "b(7)\n\n\ndef a():")})
+    st = {}
+    mp.prove(base, twice, st, declared=("b",))
+    ok("b(7)" in st["declared"][0][2] and "x = x * 1" in st["declared"][0][2],
+       "every statement under a declared name is shown, a call to it as well as its def")
     looks = {k: v.replace("x = 2", "x = len(globals())") for k, v in base.items()}
     looks_head = {k: v.replace("x = 2", "x = len(globals())") for k, v in head.items()}
     ok(any("globals()" in g for g in mp.prove(looks, looks_head)),
@@ -30016,6 +30022,40 @@ def t_the_floor_imports_nothing_above_it():
                     bad.append(path + " -> " + nxt)
                 todo.append((nxt, path + " -> " + nxt))
     eq(sorted(set(bad)), [], "the floor reaches above itself")
+
+@test
+def t_forgetting_the_crm_store_drops_its_board():
+    """The store no longer names the CRM. The CRM registers a hook, called with
+    the path whenever a store's cached copy is forgotten, and it drops the
+    kept board when the path is the CRM's, read when called: a path set after
+    start-up still counts."""
+    from gizmo import store as _store
+    saved = copilot.CRM_PATH
+    try:
+        copilot.CRM_PATH = os.path.join(SCRATCH, "crm-elsewhere.json")
+        copilot._crm_board_cache.update(key="k", raw=b"x", rev="r")
+        _store._forget_store(os.path.join(SCRATCH, "not-the-crm.json"))
+        eq(copilot._crm_board_cache["raw"], b"x", "another store forgotten keeps the board")
+        _store._forget_store(copilot.CRM_PATH)
+        eq(copilot._crm_board_cache["raw"], None, "the CRM's store forgotten drops it")
+    finally:
+        copilot.CRM_PATH = saved
+        copilot._crm_board_forget()
+
+@test
+def t_a_banners_closing_rule_opens_no_section():
+    """The settings reference files each setting under the banner above it. A
+    banner's closing rule followed by an ordinary comment is not a new banner:
+    once the setting that followed the Configuration banner moved out, the
+    next comment became a heading of its own."""
+    import importlib.util
+    from tools import sources
+    spec = importlib.util.spec_from_file_location("env_reference", os.path.join(sources.ROOT, "tools", "env_reference.py"))
+    env = importlib.util.module_from_spec(spec); spec.loader.exec_module(env)
+    rule = "# " + "-" * 40
+    lines = [rule, "# Configuration", rule, "# Effort, and why it is high.", "X = 1",
+             "", rule, "# Shipping, settings", "# and state.", rule, "Y = 2"]
+    eq([t for _, t in env._banner_index(lines)], ["Configuration", "Shipping, settings"], "two banners, two titles")
 
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The

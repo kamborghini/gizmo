@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-20",
+   "title": "The app's foundations on their own",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "How the app keeps its records, notes its errors and talks to the AI now each live on their own, beneath everything else, so later changes cannot disturb them. Nothing looks different."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-20",
    "title": "The dispatch desk on its own",
    "items": [
     {

@@ -72,6 +72,9 @@ import totp
 # and its routes. Read as desk.NAME; they read this file as core.NAME.
 from gizmo.config import _env_num
 from gizmo.store import StoreUnwritable
+from gizmo import store as jsonstore
+from gizmo import errors
+from gizmo import ai as claude
 from gizmo import dispatch as desk
 # The printed labels' route is frozen byte for byte (t_the_printed_sheets_do_not_change),
 # so it reads these two by their own names. A copy is safe only for a name no
@@ -84,15 +87,6 @@ logger = logging.getLogger("shopify_mcp.copilot")
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
-# Model tiers. Claude Opus 5.5 everywhere by default; the env vars let a
-# cheaper tier (e.g. claude-sonnet-5-5) take everyday chat without a code change.
-MODEL_FAST = os.environ.get("ANTHROPIC_MODEL_FAST") or os.environ.get("ANTHROPIC_MODEL") or "claude-opus-5-5"
-MODEL_DEEP = os.environ.get("ANTHROPIC_MODEL_DEEP", "claude-opus-5-5")
-# Asked once, with the same request, when the model above fails at Anthropic
-# (unavailable to the account, overloaded, limited, or refusing the request),
-# so a question is answered and says so rather than failing. "off" disables.
-MODEL_FALLBACK = os.environ.get("ANTHROPIC_MODEL_FALLBACK", "claude-opus-4-8")
 # Effort (low|medium|high|xhigh|max). Opus 5.5 thinks on every request and
 # effort is how much: "high" spends what a task needs and is every call's
 # level; "max" has no limit and is what Deep analysis in chat asks for. Every
@@ -149,7 +143,6 @@ MAX_MESSAGES     = _env_num(int, os.environ.get("MAX_MESSAGES", "100"), "100", "
 MAX_CHAT_CHARS   = _env_num(int, os.environ.get("MAX_CHAT_CHARS", "100000"), "100000", "MAX_CHAT_CHARS")     # total chars in a chat request
 
 MAX_TOOL_ROUNDS    = _env_num(int, os.environ.get("COPILOT_MAX_TOOL_ROUNDS", "12"), "12", "COPILOT_MAX_TOOL_ROUNDS")
-MAX_TOKENS         = _env_num(int, os.environ.get("COPILOT_MAX_TOKENS", "16000"), "16000", "COPILOT_MAX_TOKENS")  # headroom for rich output at high effort (non-streaming-safe)
 TOOL_RESULT_CAP    = _env_num(int, os.environ.get("COPILOT_TOOL_RESULT_CAP", "50000"), "50000", "COPILOT_TOOL_RESULT_CAP")
 STORE_CONTEXT_CAP  = _env_num(int, os.environ.get("STORE_CONTEXT_CAP", "4000"), "4000", "STORE_CONTEXT_CAP")
 # Server-side store profile. Default path lives under /data so a Railway volume
@@ -199,9 +192,6 @@ CHANGELOG_PATH     = os.environ.get("CHANGELOG_PATH",
                                     os.path.join(os.path.dirname(__file__), "data", "changelog.json"))
 ALERTS_MAX         = _env_num(int, os.environ.get("ALERTS_MAX", "60"), "60", "ALERTS_MAX")
 SCHEDULE_CHECK_SECS = _env_num(int, os.environ.get("SCHEDULE_CHECK_SECS", "900"), "900", "SCHEDULE_CHECK_SECS")       # how often the scheduler wakes to check
-USAGE_PATH         = os.environ.get("USAGE_PATH", "/data/usage.json")          # AI token-usage + cost log (measurement)
-USAGE_MAX          = _env_num(int, os.environ.get("USAGE_MAX", "5000"), "5000", "USAGE_MAX")                  # max usage events retained
-DAILY_COST_CAP     = _env_num(float, os.environ.get("DAILY_COST_CAP", "25"), "25", "DAILY_COST_CAP")             # hard $/day AI ceiling (0 disables)
 PRODUCTION_TAG     = os.environ.get("PRODUCTION_LABEL_TAG", "IP")              # order tag that means "in production"
 PRODUCTION_DAYS    = _env_num(int, os.environ.get("PRODUCTION_LABEL_DAYS", "180"), "180", "PRODUCTION_LABEL_DAYS")       # how far back to look for tagged orders
 # The Shopify product type of a catalogue (stock) gobo. A stock gobo is its own
@@ -210,18 +200,6 @@ PRODUCTION_DAYS    = _env_num(int, os.environ.get("PRODUCTION_LABEL_DAYS", "180"
 STOCK_GOBO_TYPE    = "gobo"
 GOBO_SIZES_PATH    = os.environ.get("GOBO_SIZES_PATH",
                                     os.path.join(os.path.dirname(__file__), "data", "gobo-sizes.csv"))
-# Anthropic list prices, $ per 1M tokens (input, output). Cache write 1.25x input;
-# cache read 0.1x input unless _CACHE_READ_RATE says otherwise.
-_MODEL_PRICE = {
-    "claude-opus-5-5": (4.0, 20.0),
-    "claude-opus-5": (5.0, 25.0),
-    "claude-opus-4-8": (5.0, 25.0),
-    "claude-sonnet-5-5": (2.0, 10.0),
-    "claude-sonnet-5": (2.0, 10.0),
-    "claude-sonnet-4-6": (3.0, 15.0),
-    "claude-haiku-4-5": (1.0, 5.0),
-}
-_CACHE_READ_RATE = {"claude-opus-5-5": 0.05}
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")   # composer.js; the page itself is joined by pagesource.py from static/src
 _page_cache: Optional[str] = None   # the shell: the page with its CSS and JS lifted out
@@ -403,12 +381,6 @@ PRESENT_RESPONSE_TOOL = {
     },
 }
 
-def _pick_model(deep: bool) -> str:
-    """The Deep-analysis toggle is authoritative: on → deep model, off → fast
-    model. Both are Opus 5.5 unless a setting says otherwise, and then the
-    toggle is the effort (see _effort_for)."""
-    return MODEL_DEEP if deep else MODEL_FAST
-
 
 def _effort_for(model: str, deep: bool = False) -> str:
     """The everyday effort, or Deep analysis's, as configured. What the model
@@ -416,104 +388,12 @@ def _effort_for(model: str, deep: bool = False) -> str:
     return ANTHROPIC_EFFORT_DEEP if deep else ANTHROPIC_EFFORT
 
 
-def _cap_effort(model: str, eff: str) -> str:
-    """The cautious rule, for when the Models API cannot be asked: xhigh and
-    max only on a model named Opus."""
-    if "opus" not in (model or "").lower() and eff in ("max", "xhigh"):
-        return "high"
-    return eff
-
-
-# What each model accepts, from Anthropic's Models API, read once per model.
-# A hand-kept list of which model takes which effort went stale: it capped
-# every non-Opus model at high, so a Sonnet 5.5 Deep run was cut short, while
-# letting xhigh through to Opus 4.6, which has max but not xhigh, and sending
-# Haiku 4.5 an effort and adaptive thinking, neither of which it takes.
-_EFFORT_LADDER = ("low", "medium", "high", "xhigh", "max")
-_MODEL_CAPS: dict = {}            # model -> (asked_at, caps or None)
-_MODEL_CAPS_RETRY = 600.0         # a failed read is asked again after this
-
-
-async def _model_caps(client, model: str):
-    """{"efforts": (levels it takes, low to max), "adaptive": bool}, or None
-    when the Models API could not be asked (then the cautious rule applies)."""
-    now = time.monotonic()
-    hit = _MODEL_CAPS.get(model)
-    if hit and (hit[1] is not None or now - hit[0] < _MODEL_CAPS_RETRY):
-        return hit[1]
-    caps = None
-    try:
-        info = await client.models.retrieve(model)
-        c = info.capabilities
-        c = c.model_dump() if hasattr(c, "model_dump") else dict(c or {})
-        # The API may answer with no capabilities at all (the field is
-        # nullable). That says nothing about the model, so it is unknown,
-        # asked again later, never "takes nothing": that reading would strip
-        # effort and thinking from every request on it until a restart.
-        if not isinstance(c.get("effort"), dict) or not isinstance(c.get("thinking"), dict):
-            raise ValueError("the answer named no effort or thinking capabilities")
-        eff = c["effort"]
-        caps = {"efforts": tuple(lvl for lvl in _EFFORT_LADDER
-                                 if eff.get("supported") and (eff.get(lvl) or {}).get("supported")),
-                "adaptive": bool(((c["thinking"].get("types") or {})
-                                  .get("adaptive") or {}).get("supported"))}
-    except Exception as e:
-        logger.info("model capabilities for %s unavailable (%s); using the cautious effort rule",
-                    model, type(e).__name__)
-    _MODEL_CAPS[model] = (now, caps)
-    return caps
-
-
-def _fit_effort(caps, model: str, eff: str):
-    """The effort to send: as asked if the model takes it, else the nearest
-    level below that it does, or none at all for a model that takes none."""
-    if caps is None:
-        return _cap_effort(model, eff)
-    have = caps["efforts"]
-    if not have:
-        return None
-    if eff in have:
-        return eff
-    want = _EFFORT_LADDER.index(eff) if eff in _EFFORT_LADDER else _EFFORT_LADDER.index("high")
-    below = [lvl for lvl in have if _EFFORT_LADDER.index(lvl) <= want]
-    return below[-1] if below else have[0]
-
-
-async def _fit_to_model(client, kwargs: dict) -> dict:
-    """kwargs as its model will accept them: the effort fitted, and adaptive
-    thinking dropped for a model without it. A new dict only when something
-    changes, so the caller's own request is never altered under it."""
-    oc = kwargs.get("output_config")
-    effort = oc.get("effort") if isinstance(oc, dict) else None
-    adaptive = (kwargs.get("thinking") or {}).get("type") == "adaptive"
-    if not effort and not adaptive:
-        return kwargs
-    model = str(kwargs.get("model") or "")
-    caps = await _model_caps(client, model)
-    out = kwargs
-    if effort:
-        fitted = _fit_effort(caps, model, effort)
-        if fitted != effort:
-            rest = {k: v for k, v in oc.items() if k != "effort"}
-            out = dict(kwargs)
-            if fitted:
-                out["output_config"] = {**rest, "effort": fitted}
-            elif rest:
-                out["output_config"] = rest
-            else:
-                out.pop("output_config")
-    if adaptive and caps is not None and not caps["adaptive"]:
-        out = dict(out) if out is kwargs else out
-        out.pop("thinking")
-    return out
-
-
 
 
 def _load_profile() -> dict:
     # Through the one loader, so an unreadable file pauses the writer: read
     # by hand, a corrupt profile loaded as empty and the next save replaced it.
-    d = _load_json_store(PROFILE_PATH, None, {})
+    d = jsonstore._load_json_store(PROFILE_PATH, None, {})
     return d if isinstance(d, dict) else {}
 
 
@@ -532,9 +412,9 @@ def _save_profile(data: dict) -> dict:
             "flag_anomalies": bool(prefs.get("flag_anomalies", True)),
         },
     }
-    if not _store_writable(PROFILE_PATH):
+    if not jsonstore._store_writable(PROFILE_PATH):
         return clean
-    _write_json_store(PROFILE_PATH, None, clean)
+    jsonstore._write_json_store(PROFILE_PATH, None, clean)
     return clean
 
 
@@ -577,16 +457,16 @@ def _load_memory() -> list[dict]:
     # list, _store_writable saw nothing wrong, and the next note written
     # replaced every note the merchant had - the opposite of what the writer's
     # own comment promises.
-    d = _load_json_store(MEMORY_PATH, "memories", [])
+    d = jsonstore._load_json_store(MEMORY_PATH, "memories", [])
     return d if isinstance(d, list) else []
 
 
 def _write_memory(memories: list[dict]) -> list[dict]:
-    if not _store_writable(MEMORY_PATH):
+    if not jsonstore._store_writable(MEMORY_PATH):
         # Hand-written merchant work: preserve the broken file for repair rather
         # than replacing it with whatever loaded as the default.
         return memories
-    _write_json_store(MEMORY_PATH, "memories", memories)
+    jsonstore._write_json_store(MEMORY_PATH, "memories", memories)
     return memories
 
 
@@ -812,16 +692,16 @@ def _delete_memory(mid: str) -> list[dict]:
 
 def _load_skills() -> list[dict]:
     # Through the one loader, for the reason given on _load_memory.
-    d = _load_json_store(SKILLS_PATH, "skills", [])
+    d = jsonstore._load_json_store(SKILLS_PATH, "skills", [])
     return d if isinstance(d, list) else []
 
 
 def _write_skills(skills: list[dict]) -> list[dict]:
-    if not _store_writable(SKILLS_PATH):
+    if not jsonstore._store_writable(SKILLS_PATH):
         # Hand-written merchant work: preserve the broken file for repair rather
         # than replacing it with whatever loaded as the default.
         return skills
-    _write_json_store(SKILLS_PATH, "skills", skills)
+    jsonstore._write_json_store(SKILLS_PATH, "skills", skills)
     return skills
 
 
@@ -1563,7 +1443,7 @@ async def run_skill_reading(skill: dict, others: list[dict]) -> dict:
     """One close read of a skill by the model, reported back in the merchant's
     terms: when it applies, the rules it will follow, where it would use it and
     what is unclear. An AI run, started only by a button."""
-    _ai_kind.set("skill_read")
+    claude._ai_kind.set("skill_read")
     content = str(skill.get("content") or "")
     parts, used = [], 0
     for o in others:
@@ -1586,11 +1466,11 @@ async def run_skill_reading(skill: dict, others: list[dict]) -> dict:
            + (" (the merchant says it applies: " + said + ")" if said else "")
            + (". It is long, so up to 25 rules may be needed." if len(content) > 8000 else "")
            + ":\n<skill>\n" + _skill_safe(content[:SKILL_UPLOAD_CAP]) + "\n</skill>\n\nReport how you understand it now.")
-    client = _anthropic()
-    resp = await _xcreate(client,
-        model=MODEL_DEEP, max_tokens=MAX_TOKENS, system=SKILL_READING_SYSTEM,
+    client = claude._anthropic()
+    resp = await claude._xcreate(client,
+        model=claude.MODEL_DEEP, max_tokens=claude.MAX_TOKENS, system=SKILL_READING_SYSTEM,
         tools=[SKILL_READING_TOOL], tool_choice={"type": "tool", "name": SKILL_READING_TOOL["name"]},
-        messages=[{"role": "user", "content": msg}], output_config={"effort": _effort_for(MODEL_DEEP)},
+        messages=[{"role": "user", "content": msg}], output_config={"effort": _effort_for(claude.MODEL_DEEP)},
     )
     if getattr(resp, "stop_reason", "") == "max_tokens":
         raise RuntimeError("Reactor ran out of room writing up this skill. Try again, or split the skill.")
@@ -1605,7 +1485,7 @@ async def run_skill_reading(skill: dict, others: list[dict]) -> dict:
         if not isinstance(xs, list):
             return []
         return [str(x).strip()[:k] for x in xs if isinstance(x, (str, int, float)) and str(x).strip()][:n]
-    return _strip_dashes({"when": _cut_words(str(got.get("when") or ""), SKILL_WHEN_CAP),
+    return claude._strip_dashes({"when": _cut_words(str(got.get("when") or ""), SKILL_WHEN_CAP),
                           "rules": clean(got.get("rules"), 25, 500),
                           "examples": clean(got.get("examples"), 4, 200),
                           "questions": clean(got.get("questions"), 6, 400)})
@@ -1680,7 +1560,7 @@ _ANALYSIS_KINDS = ("overview", "seo", "keywords", "customers")
 
 
 def _load_analysis_cache() -> dict:
-    data = _load_json_store(ANALYSIS_CACHE_PATH, None, {})
+    data = jsonstore._load_json_store(ANALYSIS_CACHE_PATH, None, {})
     return data if isinstance(data, dict) else {}
 
 
@@ -1750,9 +1630,9 @@ def _save_analysis(kind: str, result: dict) -> dict:
             logger.warning("analysis cache: %s result too large (%d bytes); not caching", kind, len(blob))
             return result
         cache[kind] = {"result": json.loads(blob), "at": datetime.now(timezone.utc).isoformat(), "snapshot": snap}
-        if not _store_writable(ANALYSIS_CACHE_PATH):
+        if not jsonstore._store_writable(ANALYSIS_CACHE_PATH):
             return result
-        _write_json_store(ANALYSIS_CACHE_PATH, None, cache)
+        jsonstore._write_json_store(ANALYSIS_CACHE_PATH, None, cache)
     except Exception:
         logger.exception("analysis cache: failed to save %s", kind)
     return result
@@ -1780,9 +1660,9 @@ def _save_customer_segment(seg_key: str, result: dict) -> dict:
         if len(segs) > 24:  # keep the most recently refreshed sectors
             segs = dict(sorted(segs.items(), key=lambda kv: kv[1].get("at", ""), reverse=True)[:24])
         cache["customers_segments"] = segs
-        if not _store_writable(ANALYSIS_CACHE_PATH):
+        if not jsonstore._store_writable(ANALYSIS_CACHE_PATH):
             return result
-        _write_json_store(ANALYSIS_CACHE_PATH, None, cache)
+        jsonstore._write_json_store(ANALYSIS_CACHE_PATH, None, cache)
     except Exception:
         logger.exception("analysis cache: failed to save customer segment %s", seg_key)
     return result
@@ -1827,40 +1707,6 @@ PRODUCTION_STATE_PATH = os.environ.get("PRODUCTION_STATE_PATH", "/data/productio
 PRODUCTION_STATE_MAX = _env_num(int, os.environ.get("PRODUCTION_STATE_MAX", "1000"), "1000", "PRODUCTION_STATE_MAX")
 
 
-# A store that fails to PARSE (as opposed to not existing) must never be
-# overwritten: loaders would hand back an empty default and the next write
-# would persist the wipe. Unreadable stores pause their writers instead,
-# and /api/status lists them so the problem is visible in Settings.
-_poisoned_stores: set = set()
-
-
-@perf.timed("store")      # Server-Timing: reading a store from disk
-def _load_json_store(path: str, key, default):
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        _poisoned_stores.discard(path)
-        if key is None:
-            return data if isinstance(data, (dict, list)) else default
-        return data.get(key, default) if isinstance(data, dict) else default
-    except FileNotFoundError:
-        _poisoned_stores.discard(path)
-        return default
-    except Exception:
-        if path not in _poisoned_stores:
-            logger.exception("store unreadable: %s. Writes to it are paused so the "
-                             "broken file is preserved for repair.", path)
-        _poisoned_stores.add(path)
-        return default
-
-
-def _store_writable(path: str) -> bool:
-    if path in _poisoned_stores:
-        logger.error("refusing to overwrite unreadable store %s", path)
-        return False
-    return True
-
-
 STORE_REPORT_PARSE_MIN = 1024 * 1024     # measure the parse of anything this big
 
 
@@ -1899,53 +1745,6 @@ def _store_report(parse: bool = True) -> list:
     return out[:12]
 
 
-# path -> (stat key, the object the loader returned). The three busiest stores
-# were parsed from disk on every request that needed them - the CRM at up to
-# tens of megabytes, on the event loop, twenty times a request cycle. The
-# cache is keyed on the FILE (mtime, size, inode), so anything that replaces
-# the file - a restore, a test writing it directly, a repair by hand - is a
-# miss, and nobody has to remember to invalidate. Two rules keep it honest:
-# the writer refreshes the entry after a successful write and forgets it on a
-# failed one ("memory never outlives a failed write"), and a caller that
-# mutated the object and then could not write must forget it too.
-_json_cache: dict = {}
-_cached_paths: set = set()   # the stores read through _load_json_cached
-
-
-def _stat_key(path: str):
-    try:
-        st = os.stat(path)
-        return (st.st_mtime_ns, st.st_size, st.st_ino)
-    except OSError:
-        return None
-
-
-def _load_json_cached(path: str, key, default, prepare=None):
-    """_load_json_store with a cache keyed on the file. `prepare` runs once
-    per file version, on the miss, and its result is what is cached - for a
-    store whose loader normalises what it read."""
-    _cached_paths.add(path)
-    sk = _stat_key(path)
-    hit = _json_cache.get(path)
-    if hit is not None and sk is not None and hit[0] == sk:
-        return hit[1]
-    obj = _load_json_store(path, key, default)
-    if prepare is not None:
-        obj = prepare(obj)
-    if sk is not None and path not in _poisoned_stores:
-        _json_cache[path] = (sk, obj)
-    return obj
-
-
-def _forget_store(path: str) -> None:
-    """Drop the cached copy: the next read comes from disk."""
-    _json_cache.pop(path, None)
-    if path == CRM_PATH:
-        # The kept board may have been built from the store in memory after a
-        # change that was then never saved, so it goes with it.
-        _crm_board_forget()
-
-
 def _memory_stores() -> dict:
     """Every store the app keeps a whole-object copy of in memory, beside the
     path it mirrors. The one list: restore and shop/redact replace or remove
@@ -1965,91 +1764,8 @@ def _drop_memory_stores(paths=None) -> None:
     for path, name in _memory_stores().items():
         if paths is None or path in paths:
             g[name] = None
-            _forget_store(path)
-
-
-@perf.timed("store")      # Server-Timing: writing a store to disk
-def _write_json_store(path: str, key: Optional[str], data, *, private: bool = False) -> None:
-    """The one way a store reaches disk.
-
-    Thirty-five hand-written copies of this loop had four safety properties
-    between them - the poison guard, allow_nan=False, an atomic replace, and
-    owner-only permissions for credential-bearing files - applied to different
-    subsets: NaN was refused on four stores, 0600 on three. A store could only
-    get every property by every writer remembering every line. Now it gets
-    them by calling this.
-
-    `key` wraps the data as {key: data}, the shape the loaders expect; None
-    writes the object itself. allow_nan is always False: Python will happily
-    WRITE NaN, which is not JSON, and the next read would poison the store."""
-    if not _store_writable(path):
-        _forget_store(path)
-        raise StoreUnwritable(path)
-    try:
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        payload = json.dumps({key: data} if key is not None else data, allow_nan=False)
-        tmp = path + ".tmp"
-        if private:
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            fh = os.fdopen(fd, "w", encoding="utf-8")
-        else:
-            fh = open(tmp, "w", encoding="utf-8")
-        with fh:
-            fh.write(payload)
-        os.replace(tmp, path)
-    except Exception:
-        _forget_store(path)      # memory never outlives a failed write
-        raise
-    if private:
-        try:
-            os.chmod(path, 0o600)   # a file written before it was private keeps its mode otherwise
-        except OSError:
-            pass
-    # What was just written IS the store now; a re-parse would only produce
-    # an equal object more slowly. Only for the stores read through the cache:
-    # kept for every path, each booked label (a file per shipment, about a
-    # megabyte with its print images) stayed in memory until the next
-    # restart, pruned from disk or not.
-    if path in _cached_paths:
-        _json_cache[path] = (_stat_key(path), data)
-    else:
-        _json_cache.pop(path, None)
-
-
-ERRORS_PATH = os.environ.get("ERRORS_PATH", "/data/app_errors.json")
-ERRORS_MAX = 50
+            jsonstore._forget_store(path)
 _last_error_alert = 0.0
-
-
-def _record_error(where: str, exc: BaseException) -> None:
-    """Keep the last few unhandled failures. Until this existed a 500 in the
-    dispatch flow was invisible unless somebody happened to be watching the
-    server log, which at a dispatch desk means never."""
-    try:
-        rows = _load_json_store(ERRORS_PATH, "errors", [])
-        rows = [{"at": datetime.now(timezone.utc).isoformat(),
-                 "where": str(where)[:120],
-                 "error": (type(exc).__name__ + ": " + str(exc))[:400]}] + list(rows)
-        rows = rows[:ERRORS_MAX]
-        if _store_writable(ERRORS_PATH):
-            _write_json_store(ERRORS_PATH, "errors", rows)
-    except Exception:
-        logger.exception("could not record an app error")
-
-
-def _recent_errors(hours: int = 24) -> list:
-    cut = datetime.now(timezone.utc) - timedelta(hours=hours)
-    out = []
-    for r in _load_json_store(ERRORS_PATH, "errors", []):
-        try:
-            when = datetime.fromisoformat(str(r.get("at") or ""))
-            if when.tzinfo is None:
-                when = when.replace(tzinfo=timezone.utc)
-        except ValueError:
-            continue
-        if when >= cut:
-            out.append(r)
-    return out
 
 
 BACKUP_STATE_PATH = os.environ.get("BACKUP_STATE_PATH", "/data/backup_state.json")
@@ -2143,10 +1859,10 @@ def _build_backup_zip():
 
 def _note_backup(kind: str) -> None:
     try:
-        st = _load_json_store(BACKUP_STATE_PATH, "backup", {}) or {}
+        st = jsonstore._load_json_store(BACKUP_STATE_PATH, "backup", {}) or {}
         st[kind + "_at"] = datetime.now(timezone.utc).isoformat()
-        if _store_writable(BACKUP_STATE_PATH):
-            _write_json_store(BACKUP_STATE_PATH, "backup", st)
+        if jsonstore._store_writable(BACKUP_STATE_PATH):
+            jsonstore._write_json_store(BACKUP_STATE_PATH, "backup", st)
     except Exception:
         logger.exception("could not record the backup time")
 
@@ -2159,7 +1875,7 @@ def _weekly_snapshot(force: bool = False) -> bool:
     force=True takes one regardless of when the last was: used immediately
     before something irreversible, like replacing the CRM with an import."""
     try:
-        st = _load_json_store(BACKUP_STATE_PATH, "backup", {}) or {}
+        st = jsonstore._load_json_store(BACKUP_STATE_PATH, "backup", {}) or {}
         last = str(st.get("snapshot_at") or "")
         if last and not force:
             try:
@@ -2251,7 +1967,7 @@ def _london_hm(iso) -> str:
 
 
 def _load_prod_state() -> dict:
-    return _load_json_cached(PRODUCTION_STATE_PATH, "orders", {})
+    return jsonstore._load_json_cached(PRODUCTION_STATE_PATH, "orders", {})
 
 
 PRODUCTION_ARCHIVE_PATH = os.environ.get(
@@ -2267,8 +1983,8 @@ class ProdStateUnwritable(StoreUnwritable):
 
 
 def _write_prod_state(orders: dict) -> dict:
-    if not _store_writable(PRODUCTION_STATE_PATH):
-        _forget_store(PRODUCTION_STATE_PATH)
+    if not jsonstore._store_writable(PRODUCTION_STATE_PATH):
+        jsonstore._forget_store(PRODUCTION_STATE_PATH)
         raise ProdStateUnwritable("the production state store is not writable")
     if len(orders) > PRODUCTION_STATE_MAX:
         # Evict the least-recently-touched entries. Sort by the NEWEST stamp so an
@@ -2291,7 +2007,7 @@ def _write_prod_state(orders: dict) -> dict:
             except Exception:
                 logger.exception("production archive append failed")
         orders = dict(keep[-PRODUCTION_STATE_MAX:])
-    _write_json_store(PRODUCTION_STATE_PATH, "orders", orders)
+    jsonstore._write_json_store(PRODUCTION_STATE_PATH, "orders", orders)
     return orders
 
 
@@ -2324,7 +2040,7 @@ def _mark_printed(order_ids: list) -> bool:
     stamp actually persisted so callers can say so."""
     try:
         state = _load_prod_state()
-        if not _store_writable(PRODUCTION_STATE_PATH):
+        if not jsonstore._store_writable(PRODUCTION_STATE_PATH):
             return False
         now = datetime.now(timezone.utc).isoformat()
         for oid in order_ids:
@@ -2352,13 +2068,13 @@ def _mark_made(order_id, on: bool) -> dict:
 
 
 def _load_impact() -> list[dict]:
-    return _load_json_store(IMPACT_PATH, "items", [])
+    return jsonstore._load_json_store(IMPACT_PATH, "items", [])
 
 
 def _write_impact(items: list[dict]) -> list[dict]:
-    if not _store_writable(IMPACT_PATH):
+    if not jsonstore._store_writable(IMPACT_PATH):
         return items[:IMPACT_MAX]
-    _write_json_store(IMPACT_PATH, "items", items[:IMPACT_MAX])
+    jsonstore._write_json_store(IMPACT_PATH, "items", items[:IMPACT_MAX])
     return items[:IMPACT_MAX]
 
 
@@ -2485,16 +2201,16 @@ outlive the page it came from."""
 
 def _load_knowledge() -> dict:
     # Through the one loader, for the reason given on _load_memory.
-    d = _load_json_store(KNOWLEDGE_PATH, None, {})
+    d = jsonstore._load_json_store(KNOWLEDGE_PATH, None, {})
     return d if isinstance(d, dict) else {}
 
 
 def _save_knowledge(text: str, sources: list[str]) -> dict:
     data = {"knowledge": text[:KNOWLEDGE_CAP], "sources": sources[:50],
             "learned_at": datetime.now(timezone.utc).isoformat()}
-    if not _store_writable(KNOWLEDGE_PATH):
+    if not jsonstore._store_writable(KNOWLEDGE_PATH):
         return data
-    _write_json_store(KNOWLEDGE_PATH, None, data)
+    jsonstore._write_json_store(KNOWLEDGE_PATH, None, data)
     return data
 
 
@@ -2537,7 +2253,7 @@ async def _discover_content_urls(primary: str, hosts: set, limit: int) -> list[s
 
 
 async def run_learn(registry: dict) -> dict:
-    _ai_kind.set("learn")
+    claude._ai_kind.set("learn")
     primary, hosts = await _resolve_domains(registry)
     if not primary:
         raise RuntimeError("Could not resolve the store's domain to learn from.")
@@ -2559,14 +2275,14 @@ async def run_learn(registry: dict) -> dict:
         raise RuntimeError("Couldn't read any public pages from the storefront to learn from.")
     corpus = json.dumps({"shop": {"name": shop.get("name"), "domain": primary}, "pages": pages},
                         default=str)[:30000]
-    client = _anthropic()
-    resp = await _xcreate(client,
-        model=MODEL_DEEP, max_tokens=MAX_TOKENS, system=LEARN_SYSTEM,
+    client = claude._anthropic()
+    resp = await claude._xcreate(client,
+        model=claude.MODEL_DEEP, max_tokens=claude.MAX_TOKENS, system=LEARN_SYSTEM,
         messages=[{"role": "user", "content": "Store website content:\n" + corpus
                    + "\n\nWrite the store knowledge profile now."}],
-        output_config={"effort": _effort_for(MODEL_DEEP)},
+        output_config={"effort": _effort_for(claude.MODEL_DEEP)},
     )
-    text = _strip_dashes("".join(b.text for b in resp.content if b.type == "text").strip())
+    text = claude._strip_dashes("".join(b.text for b in resp.content if b.type == "text").strip())
     if not text:
         raise RuntimeError("Reactor could not write up what it learned. Please try again.")
     return _save_knowledge(text, [p["url"] for p in pages])
@@ -2636,404 +2352,17 @@ def _build_dispatch(registry: dict, uid_of: Optional[Callable] = None) -> Callab
 
 
 # ---------------------------------------------------------------------------
-# Claude tool-use loop
-# ---------------------------------------------------------------------------
-_client: Optional[anthropic.AsyncAnthropic] = None
-
-
-def _anthropic() -> anthropic.AsyncAnthropic:
-    global _client
-    if not ANTHROPIC_API_KEY:
-        # The setting's name is for the log; the page gets plain words.
-        logger.error("ANTHROPIC_API_KEY is not set")
-        raise RuntimeError(
-            "Reactor's AI is not set up yet: the server has no Anthropic key. An admin needs to add it."
-        )
-    if _client is None:
-        _client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
-    return _client
-
-
-# ---------------------------------------------------------------------------
 # AI usage + cost logging (measurement, to inform pricing). Every model call
 # goes through _xcreate, which records real token counts + estimated cost,
 # tagged with the audit type via the _ai_kind context var.
 # ---------------------------------------------------------------------------
-_ai_kind: "contextvars.ContextVar[str]" = contextvars.ContextVar("ai_kind", default="ai")
-
-
-def _price_for(model: str, inp: int, out: int, cache_read: int = 0, cache_write: int = 0) -> float:
-    pi, po = _MODEL_PRICE.get(model, (5.0, 25.0))
-    cr = _CACHE_READ_RATE.get(model, 0.10)
-    return round((inp * pi + cache_write * pi * 1.25 + cache_read * pi * cr + out * po) / 1_000_000, 6)
-
-
-def _log_usage(kind: str, model: str, usage, estimated: bool = False) -> None:
-    """Append one model call's token usage + estimated cost. Best-effort; never raises.
-    `estimated` marks a call that was sent and never answered, charged from
-    its size (see _xcreate_once)."""
-    if usage is None:
-        return
-    try:
-        inp = int(getattr(usage, "input_tokens", 0) or 0)
-        out = int(getattr(usage, "output_tokens", 0) or 0)
-        cr = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
-        cw = int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
-        rec = {"at": datetime.now(timezone.utc).isoformat(), "kind": kind, "model": model,
-               "in": inp, "out": out, "cache_read": cr, "cache_write": cw,
-               "cost": _price_for(model, inp, out, cr, cw)}
-        if estimated:
-            rec["estimated"] = True
-        _spend_today()                      # ensure the day bucket is current
-        _spend["cost"] += rec["cost"]       # keep the daily cap in sync without re-reading
-        events = _load_json_store(USAGE_PATH, "events", [])
-        if not _store_writable(USAGE_PATH):
-            return
-        events.append(rec)
-        events = events[-USAGE_MAX:]
-        _write_json_store(USAGE_PATH, "events", events)
-        # Monthly rollup survives the event log trimming itself: the pricing
-        # dataset must not evaporate at USAGE_MAX.
-        rollup_path = os.path.join(os.path.dirname(USAGE_PATH) or ".", "usage_rollup.json")
-        roll = _load_json_store(rollup_path, None, {})
-        if not isinstance(roll, dict):
-            roll = {}
-        if not _store_writable(rollup_path):
-            return
-        mk = rec["at"][:7]
-        m = roll.setdefault(mk, {"runs": 0, "in": 0, "out": 0, "cost": 0.0, "by_kind": {}})
-        m["runs"] += 1
-        m["in"] += inp
-        m["out"] += out
-        m["cost"] = round(m["cost"] + rec["cost"], 6)
-        k = m["by_kind"].setdefault(kind, {"runs": 0, "cost": 0.0})
-        k["runs"] += 1
-        k["cost"] = round(k["cost"] + rec["cost"], 6)
-        _write_json_store(rollup_path, None, roll)
-    except Exception:
-        logger.exception("usage log failed")
-
-
-_spend = {"day": "", "cost": 0.0}
-
-
-def _utc_day() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-
-def _spend_today() -> float:
-    """Today's AI spend. Recomputed from the usage log when the day rolls over or the
-    process restarts, so a redeploy cannot silently reset the cap."""
-    day = _utc_day()
-    if _spend["day"] != day:
-        total = 0.0
-        try:
-            with open(USAGE_PATH, "r", encoding="utf-8") as fh:
-                for e in json.load(fh).get("events", []):
-                    if (e.get("at") or "").startswith(day):
-                        total += float(e.get("cost") or 0)
-        except Exception:
-            total = 0.0
-        _spend["day"], _spend["cost"] = day, total
-    return _spend["cost"]
-
-
-# What the calls sent and not yet answered may cost, held against the cap
-# while they run (audit R-005, chain R-C3). The cap was read before a call
-# and charged after it, so twenty calls sent together all passed at $24.99,
-# and a call cancelled on the way (the browser closing a chat stream) was
-# never charged at all.
-_spend_pending = {"cost": 0.0}
-
-
-# A document or image is billed by what it shows, not by the size of its
-# base64: a PDF page is its text plus a picture of the page, and an image is
-# scaled down before it is read. Counting a scan's base64 as text reserved
-# $15 for one 8 MB invoice and turned everyone's chat away while it was read.
-PDF_PAGE_TOKENS = 3000       # generous: a dense page's text and its image
-PDF_BYTES_PER_PAGE = 60_000  # when the page count cannot be read from the file
-PDF_MAX_PAGES = 100          # the most pages one request may carry
-IMAGE_TOKENS = 1600          # the most an image costs once scaled to fit
-_PDF_PAGE_OBJ = re.compile(rb"/Type\s*/Page(?![A-Za-z])")
-
-
-def _media_tokens(block: dict) -> int:
-    """Input tokens for one image or document block, estimated from what it is."""
-    if block.get("type") == "image":
-        return IMAGE_TOKENS
-    src = block.get("source") if isinstance(block.get("source"), dict) else {}
-    data = src.get("data")
-    if src.get("type") == "text" and isinstance(data, str):
-        return len(data) // 3
-    if src.get("type") == "base64" and isinstance(data, str):
-        try:
-            raw = base64.b64decode(data, validate=False)
-        except (ValueError, TypeError):
-            raw = b""
-        # A scan's pages sit in compressed object streams, where they cannot
-        # be counted; its size stands in, generously.
-        pages = len(_PDF_PAGE_OBJ.findall(raw)) or -(-len(raw) // PDF_BYTES_PER_PAGE)
-        return max(1, min(PDF_MAX_PAGES, pages)) * PDF_PAGE_TOKENS
-    return 20 * PDF_PAGE_TOKENS   # a file by reference: size unknown
-
-
-def _estimate_chars(v, media: list) -> int:
-    """Characters of everything sent, with each image and document counted
-    into `media` as tokens instead of by its encoded bytes."""
-    if isinstance(v, dict):
-        if v.get("type") in ("image", "document") and isinstance(v.get("source"), dict):
-            media.append(_media_tokens(v))
-            return 0
-        return sum(len(str(k)) + _estimate_chars(x, media) for k, x in v.items())
-    if isinstance(v, (list, tuple)):
-        return sum(_estimate_chars(x, media) for x in v)
-    if isinstance(v, str):
-        return len(v)
-    return len(str(v)) if v is not None else 0
-
-
-def _call_estimate(kwargs: dict) -> tuple:
-    """(input tokens, cost) as an upper estimate for one call: three
-    characters to a token over the text sent, documents and images by what
-    they show, and the whole output allowance."""
-    media: list = []
-    chars = sum(_estimate_chars(kwargs.get(k), media) for k in ("system", "messages", "tools"))
-    inp = chars // 3 + sum(media)
-    out = int(kwargs.get("max_tokens") or MAX_TOKENS)
-    return inp, _price_for(kwargs.get("model", ""), inp, out)
-
-
-def _spend_guard(reserve: float = 0.0) -> None:
-    if DAILY_COST_CAP > 0 and _spend_today() + _spend_pending["cost"] + reserve > DAILY_COST_CAP:
-        logger.warning("DAILY_COST_CAP of %.2f reached", DAILY_COST_CAP)
-        raise RuntimeError(
-            "Reactor has used today's AI budget, so it will answer again tomorrow. "
-            "This is a safety limit, and an admin can raise it."
-        )
-
-
-# Models that refuse a forced tool call (tool_choice "tool" or "any") with a
-# 400: Opus 5.5 thinks on every request and chooses its own tools. A model
-# found refusing at run time joins the set, so one pinned by a setting that
-# this list does not know costs one refused request (not billed), not every one.
-_UNFORCED_MODELS: set = {"claude-opus-5-5"}
-
-
-def _can_force_tool(model: str) -> bool:
-    m = (model or "").lower()
-    return not any(x in m for x in _UNFORCED_MODELS)
-
-
-def _forces_tool(kwargs: dict) -> bool:
-    c = kwargs.get("tool_choice")
-    return isinstance(c, dict) and c.get("type") in ("tool", "any")
-
-
-def _unforce(kwargs: dict) -> str:
-    """Turn a forced tool call into one the model accepts: tool_choice goes
-    back to auto and the instructions say which tool carries the answer.
-    Returns the tool's name ("" when any tool would do)."""
-    choice = kwargs.pop("tool_choice", None) or {}
-    name = str(choice.get("name") or "") if choice.get("type") == "tool" else ""
-    ask = (f"Give your answer by calling the {name} tool, once. Do not answer in plain text."
-           if name else "Give your answer by calling one of your tools. Do not answer in plain text.")
-    system = kwargs.get("system")
-    if isinstance(system, list):
-        kwargs["system"] = system + [{"type": "text", "text": ask}]
-    else:
-        kwargs["system"] = ((system or "") + "\n\n" + ask).strip()
-    return name
-
-
-def _model_name(model: str) -> str:
-    """claude-opus-5-5 as the page writes it: Claude Opus 5.5."""
-    m = re.fullmatch(r"(?:anthropic\.)?claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:[-@]\d{8})?", (model or "").strip().lower())
-    if not m:
-        return model or "the AI model"
-    return "Claude " + m.group(1).title() + " " + m.group(2) + ("." + m.group(3) if m.group(3) else "")
-
-
-def _ai_said(e: Exception) -> str:
-    """Anthropic's own message for a failed call, on one line and short."""
-    body = getattr(e, "body", None)
-    err = body.get("error") if isinstance(body, dict) else None
-    msg = err.get("message", "") if isinstance(err, dict) else ""
-    msg = re.sub(r"\s+", " ", str(msg or getattr(e, "message", "") or e)).strip()
-    return _strip_dashes(msg[:240])
-
-
-def _ai_error_words(e: Exception, advice: bool = True) -> str:
-    """What the page says when an AI call failed: which kind of failure it
-    was, with Anthropic's own words where they tell it apart, and what to do
-    (left off where another model answered, and there is nothing to do).
-    Every failure used to read "The AI service returned an error", so a
-    refused request, a model the account cannot use and a busy service
-    looked the same."""
-    def say(why, then=""):
-        return why + (" " + then if advice and then else "")
-    if isinstance(e, anthropic.APITimeoutError):
-        return say("The AI service took too long to answer.", "Please try again.")
-    if isinstance(e, anthropic.APIConnectionError):
-        return say("Reactor could not reach the AI service.", "Please try again.")
-    status = getattr(e, "status_code", 0) or 0
-    said = _ai_said(e)
-    if status == 401:
-        return say("The AI service did not accept Reactor's key.", "An admin needs to check it.")
-    if status == 413:
-        return say("That was too much to send in one go.", "Start a new chat, or ask about less at once.")
-    if status == 429:
-        return say("Reactor had reached the AI service's limit for its account.", "Wait a minute and ask again.")
-    if status == 529 or status >= 500:
-        return say("The AI service was busy or down.", "Please try again shortly.")
-    if status == 404:
-        return "The AI service does not offer that model to Reactor's account. Anthropic said: " + said
-    if said:
-        return "The AI service refused the request. Anthropic said: " + said
-    return say("The AI service returned an error.", "Please try again.")
-
-
-# The latest AI failure, for Settings' Claude AI row: the page tells the
-# person who asked, once; this keeps it for whoever looks next.
-_AI_LAST_FAIL: dict = {}
-# Set by _xcreate when the fallback model answered, for run_chat to say so.
-_ai_fell_back: "contextvars.ContextVar[Optional[dict]]" = contextvars.ContextVar("ai_fell_back", default=None)
-
-
-# What each kind of AI call is, in the words Settings shows.
-_AI_KIND_WORDS = {"chat": "answering in Chat", "skill_read": "reading a skill", "learn": "learning the store",
-                  "overview": "the overview", "seo": "the SEO audit", "keywords": "the keyword analysis",
-                  "keyword_scan": "the keyword scan", "customers": "the customer analysis",
-                  "product": "a product plan", "recon": "checking the accounts", "address": "reading an address",
-                  "draft": "drafting an email reply"}
-
-
-def _note_ai_failure(model: str, e: Exception, answered_by: str = "") -> None:
-    """Kept for Settings' Claude AI row, and, when no model answered, in the
-    app's error store with Anthropic's full reply for the developer."""
-    _AI_LAST_FAIL.clear()
-    _AI_LAST_FAIL.update({"at": datetime.now(timezone.utc).isoformat(), "model": _model_name(model),
-                          "why": _ai_error_words(e, advice=False), "answered_by": _model_name(answered_by) if answered_by else "",
-                          "kind": _ai_kind.get("ai")})
-    if not answered_by:
-        _record_error("asking the AI: " + _AI_KIND_WORDS.get(_ai_kind.get("ai"), "an AI task"), e)
-
-
-def _fallback_for(model: str, e: Exception) -> str:
-    """The model to ask instead, or "" when asking another cannot help: a key
-    the service refused, or a request too big for any model."""
-    fb = (MODEL_FALLBACK or "").strip()
-    if not fb or fb.lower() in ("off", "none", "0") or fb.lower() == (model or "").lower():
-        return ""
-    if (getattr(e, "status_code", 0) or 0) in (401, 413):
-        return ""
-    return fb
-
-
-@perf.timed("ai")           # Server-Timing: how long this request waited on Claude
-async def _xcreate(client, **kwargs):
-    """Every model call. A forced tool call is asked for in words on a model
-    that refuses to be forced, and asked for once more if the answer came
-    back as prose, so each caller still finds its tool block. A call the
-    model fails at Anthropic is asked of the fallback model once, and the
-    failure is kept for the usage panel either way."""
-    perf.no_record()        # long by design: out of the slowest-routes table
-    must = None
-    if _forces_tool(kwargs) and not _can_force_tool(kwargs.get("model", "")):
-        must = _unforce(kwargs)
-    try:
-        try:
-            resp = await _xcreate_once(client, kwargs)
-        except anthropic.BadRequestError as e:
-            model = str(kwargs.get("model") or "").lower()
-            if not (_forces_tool(kwargs) and model and "tool_choice" in str(e)):
-                raise
-            logger.warning("model %s refuses a forced tool; asking for it instead", model)
-            _UNFORCED_MODELS.add(model)
-            must = _unforce(kwargs)
-            resp = await _xcreate_once(client, kwargs)
-    except anthropic.APIStatusError as e:
-        model = str(kwargs.get("model") or "")
-        fb = _fallback_for(model, e)
-        logger.warning("model %s failed (%s): %s%s", model, getattr(e, "status_code", ""), _ai_said(e),
-                       "; asking " + fb if fb else "")
-        if not fb:
-            _note_ai_failure(model, e)
-            raise
-        alt = dict(kwargs)
-        alt["model"] = fb
-        if _forces_tool(alt) and not _can_force_tool(fb):
-            must = _unforce(alt)
-        try:
-            resp = await _xcreate_once(client, alt)
-        except anthropic.APIError as e2:
-            logger.warning("fallback %s failed too: %s", fb, _ai_said(e2))
-            _note_ai_failure(model, e)
-            raise e
-        _note_ai_failure(model, e, fb)
-        _ai_fell_back.set({"from": model, "to": fb, "why": _ai_error_words(e, advice=False)})
-        kwargs = alt
-    except anthropic.APIError as e:
-        _note_ai_failure(str(kwargs.get("model") or ""), e)
-        raise
-    if must is not None and getattr(resp, "stop_reason", "") == "end_turn" and not any(
-            getattr(b, "type", "") == "tool_use" and (not must or getattr(b, "name", "") == must)
-            for b in (getattr(resp, "content", None) or [])):
-        # Its own reply goes back as it came, thinking included: the model
-        # rejects an edited or dropped thinking block.
-        more = dict(kwargs)
-        more["messages"] = list(kwargs.get("messages") or []) + [
-            {"role": "assistant", "content": resp.content},
-            {"role": "user", "content": (f"Send that answer now by calling the {must} tool." if must
-                                         else "Send that answer now by calling one of your tools.")}]
-        try:
-            resp = await _xcreate_once(client, more)
-        except anthropic.APIError as e3:
-            _note_ai_failure(str(kwargs.get("model") or ""), e3)
-            raise
-    return resp
-
-
-async def _xcreate_once(client, kwargs: dict):
-    """Wrapper around messages.create that enforces the daily spend cap, logs
-    token usage + cost per call, and turns on prompt caching for every call:
-    the big system prompt (profile + memory + skills + store knowledge) and the
-    tool schemas are identical across the many rounds of a chat loop, so caching
-    them stops the same tokens being bought again on every round."""
-    kwargs = await _fit_to_model(client, kwargs)
-    est_in, est = _call_estimate(kwargs)
-    _spend_guard(est)
-    system = kwargs.get("system")
-    if isinstance(system, str) and len(system) > 2048:
-        kwargs["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
-    tools = kwargs.get("tools")
-    if isinstance(tools, list) and tools and isinstance(tools[-1], dict) and "cache_control" not in tools[-1]:
-        kwargs["tools"] = tools[:-1] + [{**tools[-1], "cache_control": {"type": "ephemeral"}}]
-    kind, model = _ai_kind.get("ai"), kwargs.get("model", "")
-    _spend_pending["cost"] += est
-    try:
-        resp = await getattr(client.messages, "create")(**kwargs)
-    except (asyncio.CancelledError, anthropic.APIConnectionError, anthropic.APITimeoutError) as e:
-        # Sent and not answered: it may still have been run and billed, so
-        # the cap counts what was sent. A timeout is counted in full, output
-        # allowance and all: it comes after the service has worked for
-        # minutes, very likely to the end. A stop or a dropped line counts
-        # its input only, or pressing Stop would spend the day's allowance.
-        # A refusal the service answered with (an APIStatusError) is not
-        # billed, and is not counted.
-        out = int(kwargs.get("max_tokens") or MAX_TOKENS) if isinstance(e, anthropic.APITimeoutError) else 0
-        _log_usage(kind, model, types.SimpleNamespace(input_tokens=est_in, output_tokens=out), estimated=True)
-        raise
-    finally:
-        _spend_pending["cost"] = max(0.0, _spend_pending["cost"] - est)
-    _log_usage(kind, model, getattr(resp, "usage", None))
-    return resp
 
 
 def _usage_summary(days: int = 30) -> dict:
     """Aggregate the usage log: totals, per-kind breakdown, and what the same token
     volume would cost on Sonnet / Haiku (to inform the model strategy)."""
     try:
-        with open(USAGE_PATH, "r", encoding="utf-8") as fh:
+        with open(claude.USAGE_PATH, "r", encoding="utf-8") as fh:
             events = json.load(fh).get("events", [])
     except Exception:
         events = []
@@ -3048,8 +2377,8 @@ def _usage_summary(days: int = 30) -> dict:
         i_, o_, cr, cw = e.get("in", 0), e.get("out", 0), e.get("cache_read", 0), e.get("cache_write", 0)
         b["runs"] += 1; b["in"] += i_; b["out"] += o_; b["cost"] += e.get("cost", 0)
         tot_cost += e.get("cost", 0); tot_in += i_; tot_out += o_
-        cost_sonnet += _price_for("claude-sonnet-5-5", i_, o_, cr, cw)
-        cost_haiku += _price_for("claude-haiku-4-5", i_, o_, cr, cw)
+        cost_sonnet += claude._price_for("claude-sonnet-5-5", i_, o_, cr, cw)
+        cost_haiku += claude._price_for("claude-haiku-4-5", i_, o_, cr, cw)
     for b in by_kind.values():
         b["cost"] = round(b["cost"], 4)
         b["avg_cost"] = round(b["cost"] / b["runs"], 4) if b["runs"] else 0
@@ -3057,21 +2386,6 @@ def _usage_summary(days: int = 30) -> dict:
             "in": int(tot_in), "out": int(tot_out),
             "cost_if_sonnet": round(cost_sonnet, 4), "cost_if_haiku": round(cost_haiku, 4),
             "by_kind": sorted(by_kind.values(), key=lambda x: -x["cost"])}
-
-
-def _strip_dashes(obj: Any) -> Any:
-    """Remove em/en dashes from any model-generated text before it reaches the UI.
-    The prompts already instruct against them; this is the guarantee. En dash to
-    hyphen (ranges), em dash to a comma."""
-    if isinstance(obj, str):
-        s = obj.replace("–", "-")
-        s = re.sub(r"\s*—\s*", ", ", s)
-        return s
-    if isinstance(obj, dict):
-        return {k: _strip_dashes(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_strip_dashes(v) for v in obj]
-    return obj
 
 
 def _coerce_structured(data: Any) -> dict:
@@ -3082,7 +2396,7 @@ def _coerce_structured(data: Any) -> dict:
     if not isinstance(data.get("summary"), str) or not data["summary"].strip():
         data["summary"] = "Here's what I found."
     _note_skills_applied(data)
-    return _strip_dashes(data)
+    return claude._strip_dashes(data)
 
 
 _TOOL_LABELS = {
@@ -3180,7 +2494,7 @@ def _data_preview(content, limit: int = 900) -> str:
     try:
         obj = json.loads(raw)
     except Exception:
-        return _strip_dashes(raw).strip()[:limit]
+        return claude._strip_dashes(raw).strip()[:limit]
     rows = None
     if isinstance(obj, list):
         rows = obj
@@ -3203,10 +2517,10 @@ def _data_preview(content, limit: int = 900) -> str:
             if len(lines) == 12:
                 break
         if not lines:
-            return _strip_dashes(raw).strip()[:limit]
+            return claude._strip_dashes(raw).strip()[:limit]
     else:
         lines = [str(obj)]
-    return _strip_dashes("\n".join(lines))[:limit]
+    return claude._strip_dashes("\n".join(lines))[:limit]
 
 
 def _chat_question(history: list) -> str:
@@ -3310,10 +2624,10 @@ def _report_answer(resp, what: str) -> dict:
 
 def _fell_back_words() -> dict:
     """For a chat answer the fallback model gave: who answered and why."""
-    fell = _ai_fell_back.get()
+    fell = claude._ai_fell_back.get()
     if not fell:
         return {}
-    return {"fell_back": {"from": _model_name(fell["from"]), "to": _model_name(fell["to"]), "why": fell["why"]}}
+    return {"fell_back": {"from": claude._model_name(fell["from"]), "to": claude._model_name(fell["to"]), "why": fell["why"]}}
 
 
 async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dict],
@@ -3322,9 +2636,9 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
     """Run a multi-step tool-use conversation. The final answer is delivered via
     the present_response tool and returned as a structured dict. If `emit` is given,
     it is awaited with progress events ({"type":"step","label":...}) for live streaming."""
-    _ai_kind.set("chat")
-    _ai_fell_back.set(None)
-    client = _anthropic()
+    claude._ai_kind.set("chat")
+    claude._ai_fell_back.set(None)
+    client = claude._anthropic()
     messages = list(history)
     tools_used: list[str] = []
     data_used: list[dict] = []   # for the UI "show the data behind this" drill-down
@@ -3340,14 +2654,14 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
 
     for _ in range(MAX_TOOL_ROUNDS):
         kwargs = {
-            "model": model, "max_tokens": MAX_TOKENS, "system": system,
+            "model": model, "max_tokens": claude.MAX_TOKENS, "system": system,
             "tools": all_tools, "messages": messages,
             "output_config": {"effort": effort or _effort_for(model)},
         }
         if THINKING_MODE:  # adaptive thinking: deeper reasoning, model self-paces
             kwargs["thinking"] = {"type": THINKING_MODE}
-        resp = await _xcreate(client,**kwargs)
-        fell = _ai_fell_back.get()
+        resp = await claude._xcreate(client,**kwargs)
+        fell = claude._ai_fell_back.get()
         if fell:
             # The rest of this answer stays with the model that answered:
             # asking the failed one again each round only fails again.
@@ -3405,7 +2719,7 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
                     data_used.append({"tool": tu.name, "label": ("Skill: " + str(ti.get("title", ""))[:80]
                                       + (", " + str(ti.get("section"))[:60] if ti.get("section") else "")
                                       + (", part " + str(ti.get("part"))[:4] if str(ti.get("part") or "1") != "1" else "")),
-                                      "preview": _strip_dashes(plain)[:900]})
+                                      "preview": claude._strip_dashes(plain)[:900]})
                 continue
             content = await dispatch(tu.name, tu.input)
             tool_results.append({"type": "tool_result", "tool_use_id": tu.id, "content": content})
@@ -3655,18 +2969,18 @@ async def _sector_sales(registry: dict, days: int = 28) -> list:
 
 
 async def run_overview(registry: dict, extra_system: str = "", track_inventory: bool = True) -> dict:
-    _ai_kind.set("overview")
+    claude._ai_kind.set("overview")
     metrics, context = await _compute_metrics(registry, track_inventory)
-    client = _anthropic()
+    client = claude._anthropic()
     msg = ("Current store KPIs (computed live):\n" + json.dumps(context, indent=2, default=str)
            + "\n\nGive the executive overview now by calling present_response.")
     # Fetch the chart data + sector sales WHILE the model writes the analysis (free wall-clock).
     resp, trends, sector_sales = await asyncio.gather(
-        _xcreate(client,
-            model=MODEL_DEEP, max_tokens=MAX_TOKENS, system=OVERVIEW_SYSTEM + extra_system,
+        claude._xcreate(client,
+            model=claude.MODEL_DEEP, max_tokens=claude.MAX_TOKENS, system=OVERVIEW_SYSTEM + extra_system,
             tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
             messages=[{"role": "user", "content": msg}],
-            output_config={"effort": _effort_for(MODEL_DEEP)},
+            output_config={"effort": _effort_for(claude.MODEL_DEEP)},
         ),
         _overview_trends(registry),
         _sector_sales(registry),
@@ -4290,7 +3604,7 @@ def _build_google_tools() -> dict:
 
 
 async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
-    _ai_kind.set("seo")
+    claude._ai_kind.set("seo")
     primary, hosts = await _resolve_domains(registry)
     if not primary:
         raise RuntimeError("Could not resolve the store's domain to audit.")
@@ -4354,7 +3668,7 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
         "top_products_28d": [{"title": t, "units": q} for t, q in units.most_common(8)],
     }
 
-    client = _anthropic()
+    client = claude._anthropic()
     msg = ("Optimization intelligence for this Shopify store (collected live, fusing technical SEO, "
            "Google Search Console, Google Analytics, and Shopify commerce):\n"
            + json.dumps(context, indent=2, default=str)
@@ -4365,12 +3679,12 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
              "gates before optimizations. Be specific and quantify in money or percent wherever you can.")
     # Fetch the search trend series WHILE the model writes the report.
     resp, gts = await asyncio.gather(
-        _xcreate(client,
-            model=MODEL_DEEP, max_tokens=MAX_TOKENS,
+        claude._xcreate(client,
+            model=claude.MODEL_DEEP, max_tokens=claude.MAX_TOKENS,
             system=OVERVIEW_SYSTEM + "\n\n" + SEO_KNOWLEDGE + extra_system,
             tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
             messages=[{"role": "user", "content": msg}],
-            output_config={"effort": _effort_for(MODEL_DEEP)},
+            output_config={"effort": _effort_for(claude.MODEL_DEEP)},
         ),
         google_data.gsc_timeseries(480) if gsc_on else _ret({}),
     )
@@ -4399,7 +3713,7 @@ async def run_keywords(registry: dict, extra_system: str = "") -> dict:
     """Fuse Search Console keywords with Google Ads (via GA4) into a money-ranked
     keyword + CPC plan. Returns the AI analysis plus the raw keyword list and ad data
     for the UI tables. Degrades gracefully when Google is not connected."""
-    _ai_kind.set("keywords")
+    claude._ai_kind.set("keywords")
     days = 90
     gsc_ok = google_data.gsc_configured()
     ga4_ok = google_data.ga4_configured()
@@ -4431,7 +3745,7 @@ async def run_keywords(registry: dict, extra_system: str = "") -> dict:
     context = {"currency": currency, "range_days": days,
                "search_console_overview": overview, "top_queries": queries,
                "google_ads_via_ga4": ads}
-    client = _anthropic()
+    client = claude._anthropic()
     msg = ("Keyword and paid-search data for this store (collected live):\n"
            + json.dumps(context, indent=2, default=str)
            + "\n\nProduce a money-ranked keyword and cost-per-click optimization plan via present_response. "
@@ -4439,12 +3753,12 @@ async def run_keywords(registry: dict, extra_system: str = "") -> dict:
              "expected impact). Use `insights` for the key findings across organic search and paid. Use "
              "`sections` for supporting detail. If paid data is absent, focus on organic and say what to "
              "connect. Be specific and quantify in money or percent.")
-    resp = await _xcreate(client,
-        model=MODEL_DEEP, max_tokens=MAX_TOKENS,
+    resp = await claude._xcreate(client,
+        model=claude.MODEL_DEEP, max_tokens=claude.MAX_TOKENS,
         system=OVERVIEW_SYSTEM + "\n\n" + KEYWORD_SYSTEM + extra_system,
         tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
         messages=[{"role": "user", "content": msg}],
-        output_config={"effort": _effort_for(MODEL_DEEP)},
+        output_config={"effort": _effort_for(claude.MODEL_DEEP)},
     )
     structured = _coerce_structured(_report_answer(resp, "the keyword analysis"))
     structured.pop("metrics", None)
@@ -4456,7 +3770,7 @@ async def run_keywords(registry: dict, extra_system: str = "") -> dict:
 async def run_keyword_scan(registry: dict, url: str, extra_system: str = "") -> dict:
     """Scrape an external URL (SSRF-guarded), extract its on-page keyword targeting,
     and have Claude analyze what it targets and how the merchant can compete."""
-    _ai_kind.set("keyword_scan")
+    claude._ai_kind.set("keyword_scan")
     status, final_url, html_text = await _fetch_external(url)
     if not html_text:
         raise RuntimeError("Could not read that page (it returned no readable HTML).")
@@ -4464,19 +3778,19 @@ async def run_keyword_scan(registry: dict, url: str, extra_system: str = "") -> 
     ours = await google_data.gsc_top_queries(90, limit=40) if google_data.gsc_configured() else {}
     context = {"scanned_url": final_url, "http_status": status, "page": extracted,
                "your_top_queries": (ours.get("queries") if isinstance(ours, dict) else [])}
-    client = _anthropic()
+    client = claude._anthropic()
     msg = ("On-page keyword extraction from an external URL (treat it as a competitor or reference page):\n"
            + json.dumps(context, indent=2, default=str)
            + "\n\nAnalyze it via present_response. In `summary`, state the page's primary topic and the "
              "keywords it targets. Use `insights` for what it does well and where it is weak. Use `actions` "
              "for specific keywords, topics or pages the merchant should create or optimize to compete, "
              "cross-referencing the merchant's own queries when provided. Be concrete and prioritized.")
-    resp = await _xcreate(client,
-        model=MODEL_DEEP, max_tokens=MAX_TOKENS,
+    resp = await claude._xcreate(client,
+        model=claude.MODEL_DEEP, max_tokens=claude.MAX_TOKENS,
         system=OVERVIEW_SYSTEM + "\n\n" + KEYWORD_SYSTEM + extra_system,
         tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
         messages=[{"role": "user", "content": msg}],
-        output_config={"effort": _effort_for(MODEL_DEEP)},
+        output_config={"effort": _effort_for(claude.MODEL_DEEP)},
     )
     structured = _coerce_structured(_report_answer(resp, "the scan"))
     structured.pop("metrics", None)
@@ -7169,7 +6483,7 @@ CHASE_LOG_MAX = 300
 
 
 def _load_chase_log() -> dict:
-    return _load_json_store(CHASE_LOG_PATH, "accounts", {}) or {}
+    return jsonstore._load_json_store(CHASE_LOG_PATH, "accounts", {}) or {}
 
 
 def _mark_chased(key: str, by: str = "") -> dict:
@@ -7181,9 +6495,9 @@ def _mark_chased(key: str, by: str = "") -> dict:
     if len(accounts) > CHASE_LOG_MAX:
         drop = sorted(accounts.items(), key=lambda kv: str(kv[1].get("at") or ""))
         accounts = dict(drop[-CHASE_LOG_MAX:])
-    if not _store_writable(CHASE_LOG_PATH):
+    if not jsonstore._store_writable(CHASE_LOG_PATH):
         raise RuntimeError("chase log is not writable")
-    _write_json_store(CHASE_LOG_PATH, "accounts", accounts)
+    jsonstore._write_json_store(CHASE_LOG_PATH, "accounts", accounts)
     return accounts[str(key)]
 
 
@@ -7434,7 +6748,7 @@ def _zeta_configured() -> bool:
 
 
 def _load_zeta_pending() -> dict:
-    return _load_json_store(ZETA_SYNC_PATH, "pending", {}) or {}
+    return jsonstore._load_json_store(ZETA_SYNC_PATH, "pending", {}) or {}
 
 
 _zeta_locks: dict = {}
@@ -7459,9 +6773,9 @@ def _write_zeta_pending(p: dict) -> bool:
     on it: promising "the app will keep retrying" over a write that silently
     failed would turn a lost booking into a reassuring toast."""
     try:
-        if not _store_writable(ZETA_SYNC_PATH):
+        if not jsonstore._store_writable(ZETA_SYNC_PATH):
             return False
-        _write_json_store(ZETA_SYNC_PATH, "pending", p)
+        jsonstore._write_json_store(ZETA_SYNC_PATH, "pending", p)
         return True
     except Exception:
         logger.exception("stock bridge: could not save the pending queue")
@@ -7543,7 +6857,7 @@ async def _zeta_push_locked(registry: dict, order_id, op: str) -> str:
                        op, order_id, type(e).__name__,
                        "queued for retry" if parked else "AND THE QUEUE COULD NOT BE SAVED")
         if not parked:
-            _record_error("booking made glass at the stock app", e)
+            errors._record_error("booking made glass at the stock app", e)
             return ("The stock app was not updated AND the retry could not be saved. "
                     "Adjust this order's stock by hand, or press Mark made again later.")
         return "The stock app could not be updated just now; the app will keep retrying."
@@ -8054,7 +7368,7 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
     segments, churn risk, top customers, and a new-customers trend, with an AI plan.
     With `segment` (a customer tag) the figures are filtered to that sector; otherwise the
     analysis covers all customers and compares the sectors."""
-    _ai_kind.set("customers")
+    claude._ai_kind.set("customers")
     months = _month_axis(12)
     cmeta: dict = {}
     ometa: dict = {}
@@ -8188,12 +7502,12 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
                  "lifetime value, where the biggest revenue opportunity sits, and give per-sector actions. Use "
                  "`insights` for the key cross-sector findings and `actions` for prioritized moves, each with "
                  "expected impact in money or percent.")
-    client = _anthropic()
-    resp = await _xcreate(client,
-        model=MODEL_DEEP, max_tokens=MAX_TOKENS, system=OVERVIEW_SYSTEM + extra_system,
+    client = claude._anthropic()
+    resp = await claude._xcreate(client,
+        model=claude.MODEL_DEEP, max_tokens=claude.MAX_TOKENS, system=OVERVIEW_SYSTEM + extra_system,
         tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
         messages=[{"role": "user", "content": msg}],
-        output_config={"effort": _effort_for(MODEL_DEEP)},
+        output_config={"effort": _effort_for(claude.MODEL_DEEP)},
     )
     structured = _coerce_structured(_report_answer(resp, "the customer analysis"))
     structured.pop("metrics", None)
@@ -8203,7 +7517,7 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
 
 
 async def run_product_audit(registry: dict, product_id: int, extra_system: str = "") -> dict:
-    _ai_kind.set("product")
+    claude._ai_kind.set("product")
     p = await _tool_json(registry, "shopify_get_product", {"product_id": product_id})
     if not p or not p.get("id"):
         raise RuntimeError("Product not found.")
@@ -8247,19 +7561,19 @@ async def run_product_audit(registry: dict, product_id: int, extra_system: str =
         "analytics": ga,
         "sales_28d": {"units": units, "revenue": round(rev, 2), "currency": currency},
     }
-    client = _anthropic()
+    client = claude._anthropic()
     msg = ("Per-product optimization data for one product (collected live):\n"
            + json.dumps(context, indent=2, default=str)
            + "\n\nProduce a focused, money-ranked optimization plan for THIS product via present_response. "
              "Lead with the highest-impact opportunities in `actions` (with the supporting numbers and the "
              "expected impact). Use `insights` for the key findings across search, traffic, sales and on-page "
              "SEO. Be specific to this product and quantify wherever you can.")
-    resp = await _xcreate(client,
-        model=MODEL_DEEP, max_tokens=MAX_TOKENS,
+    resp = await claude._xcreate(client,
+        model=claude.MODEL_DEEP, max_tokens=claude.MAX_TOKENS,
         system=OVERVIEW_SYSTEM + "\n\n" + SEO_KNOWLEDGE + extra_system,
         tools=[PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": PRESENT_RESPONSE_TOOL["name"]},
         messages=[{"role": "user", "content": msg}],
-        output_config={"effort": _effort_for(MODEL_DEEP)},
+        output_config={"effort": _effort_for(claude.MODEL_DEEP)},
     )
     structured = _coerce_structured(_report_answer(resp, "the optimisation plan"))
     structured.pop("metrics", None)
@@ -8776,54 +8090,44 @@ def _secret_ok(given: str, expected: str) -> bool:
 
 
 def _load_recon() -> dict:
-    d = _load_json_store(RECON_PATH, "recon", None)
+    d = jsonstore._load_json_store(RECON_PATH, "recon", None)
     return d if isinstance(d, dict) else {"exceptions": {}, "watermarks": {}}
 
 
-def _write_private_json(path: str, key: str, d: dict) -> None:
-    """Owner-only, and silent when the poison guard refuses. These stores hold
-    accounting records, the contents of bank statements and remittances, and
-    the exception list built from both: data taken out of Xero and the accounts
-    mailbox deserves the same file mode as the tokens that fetched it."""
-    if not _store_writable(path):
-        return
-    _write_json_store(path, key, d, private=True)
-
-
 def _write_recon(d: dict) -> None:
-    _write_private_json(RECON_PATH, "recon", d)
+    jsonstore._write_private_json(RECON_PATH, "recon", d)
 
 
 def _load_recon_cache() -> dict:
-    d = _load_json_store(RECON_CACHE_PATH, "cache", None)
+    d = jsonstore._load_json_store(RECON_CACHE_PATH, "cache", None)
     return d if isinstance(d, dict) else {}
 
 
 def _write_recon_cache(d: dict) -> None:
-    _write_private_json(RECON_CACHE_PATH, "cache", d)
+    jsonstore._write_private_json(RECON_CACHE_PATH, "cache", d)
 
 
 def _load_recon_docs() -> dict:
-    d = _load_json_store(RECON_DOCS_PATH, "docs", None)
+    d = jsonstore._load_json_store(RECON_DOCS_PATH, "docs", None)
     return d if isinstance(d, dict) else {}
 
 
 def _write_recon_docs(d: dict) -> None:
-    _write_private_json(RECON_DOCS_PATH, "docs", d)
+    jsonstore._write_private_json(RECON_DOCS_PATH, "docs", d)
 
 
 # The auditor's model: env-pinnable, otherwise the deep model, so upgrading is
 # one variable and never a code change.
-MODEL_RECON = os.environ.get("ANTHROPIC_MODEL_RECON") or MODEL_DEEP
+MODEL_RECON = os.environ.get("ANTHROPIC_MODEL_RECON") or claude.MODEL_DEEP
 
 
 async def _recon_ai_call(system: str, messages: list, tools: list, tool_choice: dict):
     """The one AI entry point the engine gets: read, reason, answer through a
     forced tool. No registry, no writes, no memory - an auditor with a
     document in one hand and nothing in the other."""
-    _ai_kind.set("recon")
-    client = _anthropic()
-    return await _xcreate(client, model=MODEL_RECON, max_tokens=MAX_TOKENS,
+    claude._ai_kind.set("recon")
+    client = claude._anthropic()
+    return await claude._xcreate(client, model=MODEL_RECON, max_tokens=claude.MAX_TOKENS,
                           system=system, messages=messages, tools=tools,
                           tool_choice=tool_choice,
                           output_config={"effort": _effort_for(MODEL_RECON)})
@@ -9101,7 +8405,7 @@ _SCHEDULE_DEFAULT = {"enabled": False, "every_hours": 168, "threshold_pct": 15, 
 
 
 def _load_schedule() -> dict:
-    data = _load_json_store(SCHEDULE_PATH, None, {})
+    data = jsonstore._load_json_store(SCHEDULE_PATH, None, {})
     return {**_SCHEDULE_DEFAULT, **(data if isinstance(data, dict) else {})}
 
 
@@ -9128,14 +8432,14 @@ def _save_schedule(cfg: dict, _internal: bool = False) -> dict:
     # to make every tick look "due", which would run paid audits every check interval.
     if _internal and "last_run" in cfg:
         cur["last_run"] = cfg["last_run"]
-    if not _store_writable(SCHEDULE_PATH):
+    if not jsonstore._store_writable(SCHEDULE_PATH):
         return cur
-    _write_json_store(SCHEDULE_PATH, None, cur)
+    jsonstore._write_json_store(SCHEDULE_PATH, None, cur)
     return cur
 
 
 def _load_alerts() -> list:
-    alerts = _load_json_store(ALERTS_PATH, "alerts", [])
+    alerts = jsonstore._load_json_store(ALERTS_PATH, "alerts", [])
     # Records written before the banner's fields were settled carried kind,
     # title and detail, none of which the banner reads, so they rendered as a
     # dot and a tilde. Read them as what they meant rather than shredding them.
@@ -9151,9 +8455,9 @@ def _load_alerts() -> list:
 
 
 def _write_alerts(alerts: list) -> list:
-    if not _store_writable(ALERTS_PATH):
+    if not jsonstore._store_writable(ALERTS_PATH):
         return alerts[:ALERTS_MAX]
-    _write_json_store(ALERTS_PATH, "alerts", alerts[:ALERTS_MAX])
+    jsonstore._write_json_store(ALERTS_PATH, "alerts", alerts[:ALERTS_MAX])
     return alerts[:ALERTS_MAX]
 
 
@@ -9191,14 +8495,14 @@ async def _send_alert_email(subject: str, lines: list) -> bool:
 
 
 def _load_watch() -> dict:
-    return _load_json_store(WATCH_PATH, None, {}) or {}
+    return jsonstore._load_json_store(WATCH_PATH, None, {}) or {}
 
 
 def _save_watch(state: dict) -> None:
-    if not _store_writable(WATCH_PATH):
+    if not jsonstore._store_writable(WATCH_PATH):
         return
     try:
-        _write_json_store(WATCH_PATH, None, state)
+        jsonstore._write_json_store(WATCH_PATH, None, state)
     except Exception:
         logger.exception("watch state write failed")
 
@@ -9558,7 +8862,7 @@ async def _scheduler_loop(registry: dict) -> None:
             cfg = _load_schedule()
             if not shopify_up:
                 logger.warning("scheduler: Shopify unreachable; skipping paid audits this tick")
-            elif cfg.get("enabled") and ANTHROPIC_API_KEY:
+            elif cfg.get("enabled") and claude.ANTHROPIC_API_KEY:
                 last = cfg.get("last_run")
                 due = True
                 if last:
@@ -9776,7 +9080,7 @@ def _crm_default() -> dict:
 
 
 def _load_crm() -> dict:
-    return _load_json_cached(CRM_PATH, "crm", None, prepare=_crm_prepare)
+    return jsonstore._load_json_cached(CRM_PATH, "crm", None, prepare=_crm_prepare)
 
 
 def _crm_prepare(d) -> dict:
@@ -9809,13 +9113,13 @@ def _write_crm(d: dict) -> None:
     """Atomic write with the house poison guard. Raises when the store cannot
     be written: the CRM is the only record these deals exist, so a silent
     no-op would lose real pipeline."""
-    if not _store_writable(CRM_PATH):
-        _forget_store(CRM_PATH)
+    if not jsonstore._store_writable(CRM_PATH):
+        jsonstore._forget_store(CRM_PATH)
         raise RuntimeError("CRM store is not writable")
     # The board is found again by the file's key, and a file rewritten inside
     # one tick of the clock at the same size can come back with the same key.
     _crm_board_forget()
-    _write_json_store(CRM_PATH, "crm", d)
+    jsonstore._write_json_store(CRM_PATH, "crm", d)
 
 
 def _crm_value(x) -> float:
@@ -10047,8 +9351,19 @@ def _crm_board_forget() -> None:
     _crm_board_cache.update(key=None, raw=None, rev="")
 
 
+def _crm_store_forgotten(path: str) -> None:
+    """The store forgot a cached copy. If it was the CRM's, the kept board may
+    have been built from the store in memory after a change that was then
+    never saved, so it goes with it."""
+    if path == CRM_PATH:
+        _crm_board_forget()
+
+
+jsonstore.when_forgotten(_crm_store_forgotten)
+
+
 def _crm_board_key():
-    return (_stat_key(CRM_PATH), _stat_key(USERS_PATH), _crm_today().isoformat(),
+    return (jsonstore._stat_key(CRM_PATH), jsonstore._stat_key(USERS_PATH), _crm_today().isoformat(),
             datetime.now(timezone.utc).strftime("%Y-%m-%dT%H"))
 
 
@@ -10060,8 +9375,8 @@ def _crm_board_build(d: dict, key) -> tuple:
     not changed, and a kept empty board would be served until the next write."""
     raw = _json_dumps_like_starlette(_crm_shape(d))
     rev = hashlib.blake2b(raw, digest_size=8).hexdigest()
-    hit = _json_cache.get(CRM_PATH)
-    if (key[0] is not None and CRM_PATH not in _poisoned_stores
+    hit = jsonstore._json_cache.get(CRM_PATH)
+    if (key[0] is not None and CRM_PATH not in jsonstore._poisoned_stores
             and hit is not None and hit[0] == key[0] and hit[1] is d):
         _crm_board_cache.update(key=key, raw=raw, rev=rev)
     return raw, rev
@@ -10276,7 +9591,7 @@ def _load_files() -> dict:
     global _files_mem
     if _files_mem is not None:
         return _files_mem
-    d = _load_json_store(FILES_PATH, "files_store", None)
+    d = jsonstore._load_json_store(FILES_PATH, "files_store", None)
     if not isinstance(d, dict) or "files" not in d:
         d = _files_default()
     for k, v in _files_default().items():
@@ -10331,9 +9646,9 @@ def rescue_misfiled_junk() -> dict:
 def _write_files(d: dict) -> None:
     global _files_mem
     try:
-        if not _store_writable(FILES_PATH):
+        if not jsonstore._store_writable(FILES_PATH):
             raise RuntimeError("files store is not writable")
-        _write_json_store(FILES_PATH, "files_store", d)
+        jsonstore._write_json_store(FILES_PATH, "files_store", d)
         _files_mem = d
     except Exception:
         _files_mem = None    # memory never outlives a failed write
@@ -10932,7 +10247,7 @@ def _mail_rules_run(store: dict, t: dict) -> None:
 def _load_mail() -> dict:
     global _mail_mem
     if _mail_mem is None:
-        d = _load_json_store(MAILBOX_PATH, "mailbox", None)
+        d = jsonstore._load_json_store(MAILBOX_PATH, "mailbox", None)
         _mail_mem = d if isinstance(d, dict) and "threads" in d else _mail_default()
         for k, v in _mail_default().items():
             _mail_mem.setdefault(k, v)
@@ -10967,7 +10282,7 @@ def _write_mail(d: dict) -> None:
     refused it left the board showing changes that were never saved, and every
     later reader trusted that copy until the process restarted."""
     global _mail_mem
-    if not _store_writable(MAILBOX_PATH):
+    if not jsonstore._store_writable(MAILBOX_PATH):
         # Callers mutate the object _load_mail handed them, which IS the shared
         # cache - so by the time a refusal happens the in-memory board already
         # carries the change. Drop it, or every later reader serves an edit
@@ -10975,7 +10290,7 @@ def _write_mail(d: dict) -> None:
         _mail_mem = None
         raise RuntimeError("mailbox store is not writable")
     try:
-        _write_json_store(MAILBOX_PATH, "mailbox", d)
+        jsonstore._write_json_store(MAILBOX_PATH, "mailbox", d)
     except Exception:
         _mail_mem = None      # force a re-read; never serve an unsaved board
         raise
@@ -12708,7 +12023,7 @@ def _erase_stale_marks(d: dict) -> int:
 def _erase_import_blocker(d: dict) -> str:
     """Why a Pipedrive import must not run now, or "". Both reasons are the
     same risk: people erased on request coming back."""
-    if MAILBOX_PATH in _poisoned_stores:
+    if MAILBOX_PATH in jsonstore._poisoned_stores:
         return ("The mailbox file could not be read, and it holds the list of people erased on "
                 "request. Nothing is imported until it is repaired, so nobody who asked to be "
                 "erased comes back.")
@@ -13255,7 +12570,7 @@ async def _crm_shopify_link_nightly(registry: dict) -> None:
         logger.info("crm: shopify link sweep %s", rep)
     except Exception:
         logger.exception("crm: shopify link sweep failed")
-        _forget_store(CRM_PATH)   # a half-made change must not be served
+        jsonstore._forget_store(CRM_PATH)   # a half-made change must not be served
 
 
 def _crm_link_order_customer(order: dict) -> None:
@@ -13280,7 +12595,7 @@ def _crm_link_order_customer(order: dict) -> None:
             _write_crm(d)
     except Exception:
         logger.exception("crm: order-customer link failed")
-        _forget_store(CRM_PATH)   # a half-made change must not be served
+        jsonstore._forget_store(CRM_PATH)   # a half-made change must not be served
 
 
 _crm_bg_tasks: set = set()
@@ -13302,7 +12617,7 @@ async def _crm_link_order_later(body_txt: str) -> None:
         _crm_link_order_customer(json.loads(body_txt))
     except Exception:
         logger.exception("crm: order-customer link failed")
-        _forget_store(CRM_PATH)   # a half-made change must not be served
+        jsonstore._forget_store(CRM_PATH)   # a half-made change must not be served
 
 
 def _spawn_bg(coro) -> bool:
@@ -13421,16 +12736,16 @@ def _app_version() -> dict:
 
 
 def _load_feedback() -> dict:
-    d = _load_json_store(FEEDBACK_PATH, "feedback", None)
+    d = jsonstore._load_json_store(FEEDBACK_PATH, "feedback", None)
     if not isinstance(d, dict) or "items" not in d:
         d = {"seq": 0, "items": []}
     return d
 
 
 def _write_feedback(d: dict) -> None:
-    if not _store_writable(FEEDBACK_PATH):
+    if not jsonstore._store_writable(FEEDBACK_PATH):
         raise RuntimeError("feedback store is not writable")
-    _write_json_store(FEEDBACK_PATH, "feedback", d)
+    jsonstore._write_json_store(FEEDBACK_PATH, "feedback", d)
 
 
 FEEDBACK_STATES = ("open", "planned", "shipped", "declined")
@@ -13446,7 +12761,7 @@ def _load_privacy_log() -> dict:
     Kept because the two halves of a redaction leave different evidence: the
     erased half leaves none by definition, and the retained half is retained on
     purpose. Without this there is no way to show a request was honoured."""
-    d = _load_json_store(PRIVACY_LOG_PATH, None, {"events": []})
+    d = jsonstore._load_json_store(PRIVACY_LOG_PATH, None, {"events": []})
     if not isinstance(d, dict):
         return {"events": []}
     if not isinstance(d.get("events"), list):
@@ -13464,8 +12779,8 @@ def _privacy_note(topic: str, email: str, customer_id, detail: str) -> None:
                             "topic": topic, "email": (email or "").lower(),
                             "customer_id": str(customer_id or ""), "detail": detail})
         d["events"] = d["events"][-2000:]
-        if _store_writable(PRIVACY_LOG_PATH):
-            _write_json_store(PRIVACY_LOG_PATH, None, d)
+        if jsonstore._store_writable(PRIVACY_LOG_PATH):
+            jsonstore._write_json_store(PRIVACY_LOG_PATH, None, d)
     except Exception:
         logger.exception("privacy log write failed")
 
@@ -13525,7 +12840,7 @@ def _redact_shop() -> dict:
     # tick, so the erasure the privacy log recorded had not happened.
     _drop_memory_stores(set(stores))
     for path in stores:
-        _forget_store(path)
+        jsonstore._forget_store(path)
     for acct in (google_mail.SALES, google_mail.FINANCE):
         try:
             google_mail.disconnect(acct)
@@ -13562,9 +12877,9 @@ def _shop_owed_set(value: Optional[dict]) -> bool:
             d.pop("shop_owed", None)
         else:
             d["shop_owed"] = value
-        if not _store_writable(PRIVACY_LOG_PATH):
+        if not jsonstore._store_writable(PRIVACY_LOG_PATH):
             return False
-        _write_json_store(PRIVACY_LOG_PATH, None, d)
+        jsonstore._write_json_store(PRIVACY_LOG_PATH, None, d)
         return True
     except Exception:
         logger.exception("shop/redact: the owed record could not be written")
@@ -13676,7 +12991,7 @@ async def _shop_redact_checked(delivery: str) -> Response:
     recorded = False
     try:
         d = _load_privacy_log()
-        recorded = isinstance(d.get("shop_owed"), dict) and PRIVACY_LOG_PATH not in _poisoned_stores
+        recorded = isinstance(d.get("shop_owed"), dict) and PRIVACY_LOG_PATH not in jsonstore._poisoned_stores
         if not recorded:
             recorded = _shop_owed_set({"since": datetime.now(timezone.utc).isoformat(), "tries": 0,
                                        "delivery": str(delivery or "")[:80]})
@@ -13711,8 +13026,8 @@ async def _shop_redact_retry(down_since) -> Optional[str]:
         if isinstance(d.get("shop_owed"), dict):
             d["shop_owed"] = {**d["shop_owed"], "tries": int(d["shop_owed"].get("tries") or 0) + 1,
                               "last": outcome, "last_at": datetime.now(timezone.utc).isoformat()}
-            if _store_writable(PRIVACY_LOG_PATH):
-                _write_json_store(PRIVACY_LOG_PATH, None, d)
+            if jsonstore._store_writable(PRIVACY_LOG_PATH):
+                jsonstore._write_json_store(PRIVACY_LOG_PATH, None, d)
     _shop_redact_settle(outcome)
     return outcome
 
@@ -13800,7 +13115,7 @@ def _redact_customer(email: str, customer_id="", retry: bool = False,
     # --- erased: the CRM -----------------------------------------------------
     before = erased
     try:
-        if CRM_PATH in _poisoned_stores:
+        if CRM_PATH in jsonstore._poisoned_stores:
             raise RuntimeError("the CRM file could not be read")
         d = _load_crm()
         pids = set()
@@ -13854,14 +13169,14 @@ def _redact_customer(email: str, customer_id="", retry: bool = False,
         _write_crm(d)
     except Exception:
         logger.exception("redact: CRM")
-        _forget_store(CRM_PATH)   # a half-made change must not be served
+        jsonstore._forget_store(CRM_PATH)   # a half-made change must not be served
         erased = before
         failed.append("the CRM")
 
     # --- erased: the mailbox -------------------------------------------------
     before = erased
     try:
-        if MAILBOX_PATH in _poisoned_stores:
+        if MAILBOX_PATH in jsonstore._poisoned_stores:
             raise RuntimeError("the mailbox file could not be read")
         store = _load_mail()
         threads = store.get("threads") or {}
@@ -13924,7 +13239,7 @@ def _redact_customer(email: str, customer_id="", retry: bool = False,
         desk._write_dispatch(orders)
     except Exception:
         logger.exception("redact: dispatch")
-        _forget_store(desk.DISPATCH_STATE_PATH)   # a half-made change must not be served
+        jsonstore._forget_store(desk.DISPATCH_STATE_PATH)   # a half-made change must not be served
 
     # A retry that fails again adds nothing to the record: the first attempt
     # already said what is owed, and an hourly line would bury the log.
@@ -13951,8 +13266,8 @@ def _redact_pending_set(addr: str, customer_id, failed: list) -> None:
                          "stores": failed, "at": datetime.now(timezone.utc).isoformat()})
         if pend != (d.get("pending") or []):
             d["pending"] = pend[-500:]
-            if _store_writable(PRIVACY_LOG_PATH):
-                _write_json_store(PRIVACY_LOG_PATH, None, d)
+            if jsonstore._store_writable(PRIVACY_LOG_PATH):
+                jsonstore._write_json_store(PRIVACY_LOG_PATH, None, d)
     except Exception:
         logger.exception("privacy log: could not record a pending erasure")
 
@@ -14004,11 +13319,11 @@ def _redact_hold_write(change, key: str = "held") -> bool:
     False when it cannot be written (an unreadable log, a full disk)."""
     try:
         d = _load_privacy_log()
-        if PRIVACY_LOG_PATH in _poisoned_stores or not _store_writable(PRIVACY_LOG_PATH):
+        if PRIVACY_LOG_PATH in jsonstore._poisoned_stores or not jsonstore._store_writable(PRIVACY_LOG_PATH):
             return False
         cur = _held_requests(d) if key == "held" else _plist(d, key)
         d[key] = change(cur)
-        _write_json_store(PRIVACY_LOG_PATH, None, d)
+        jsonstore._write_json_store(PRIVACY_LOG_PATH, None, d)
         return True
     except Exception:
         logger.exception("privacy requests: the privacy log could not be written")
@@ -14062,10 +13377,10 @@ def _redact_scope(addr: str, d: Optional[dict] = None, index: Optional[dict] = N
     read). A caller listing many passes the CRM and its index in once."""
     try:
         if d is None:
-            if CRM_PATH in _poisoned_stores:
+            if CRM_PATH in jsonstore._poisoned_stores:
                 return {"unreadable": True}
             d = _load_crm()
-        if CRM_PATH in _poisoned_stores:
+        if CRM_PATH in jsonstore._poisoned_stores:
             return {"unreadable": True}
         mine, dupes = _redact_people(d, addr, index)
         addrs = []
@@ -14120,7 +13435,7 @@ def _ask_hold(email: str, customer_id="") -> bool:
     then the newest is refused, never an older one dropped)."""
     addr = str(email or "").strip().lower()[:254]
     d = _load_privacy_log()
-    if PRIVACY_LOG_PATH in _poisoned_stores:
+    if PRIVACY_LOG_PATH in jsonstore._poisoned_stores:
         return False
     opened = _open_asks(d)
     if addr and any(a.get("email") == addr for a in opened):
@@ -14305,7 +13620,7 @@ async def _redact_hold_due(check: bool = True) -> int:
     erases. How many requests wait."""
     now = datetime.now(timezone.utc)
     _load_privacy_log()
-    if PRIVACY_LOG_PATH in _poisoned_stores:
+    if PRIVACY_LOG_PATH in jsonstore._poisoned_stores:
         # Nothing waiting can be seen while the log cannot be read: said
         # once a day rather than shown as "Nothing waiting".
         last = _redact_hold_said.get("unreadable")
@@ -14317,8 +13632,8 @@ async def _redact_hold_due(check: bool = True) -> int:
                  "read just now, so none of them can be shown or reminded about. Check the server's",
                  "storage, or restore the latest backup."]))
         return 0
-    crm = None if CRM_PATH in _poisoned_stores else _load_crm()
-    index = _redact_index(crm) if crm is not None and CRM_PATH not in _poisoned_stores else None
+    crm = None if CRM_PATH in jsonstore._poisoned_stores else _load_crm()
+    index = _redact_index(crm) if crm is not None and CRM_PATH not in jsonstore._poisoned_stores else None
     if check:
         order = sorted(_held_requests(), key=lambda h: str(h.get("tried_at") or ""))
         for h in order[:REDACT_CHECKS_PER_TICK]:
@@ -14422,8 +13737,8 @@ def _keep_live_privacy(live: dict, built_at: str = "") -> None:
             pend[x["email"]] = {"email": x["email"], "customer_id": str(x.get("customer_id") or ""),
                                 "stores": ["the records a restore brought back"], "at": str(x.get("at") or "")}
     pl["pending"] = list(pend.values())[-500:]
-    if _store_writable(PRIVACY_LOG_PATH):
-        _write_json_store(PRIVACY_LOG_PATH, None, pl)
+    if jsonstore._store_writable(PRIVACY_LOG_PATH):
+        jsonstore._write_json_store(PRIVACY_LOG_PATH, None, pl)
 
 
 def _redact_retry_pending() -> int:
@@ -14599,7 +13914,7 @@ def token_vault_state() -> dict:
         present += 1
         (sealed if tokenvault.is_sealed(v) else plain).append(name)
     try:
-        users = (_load_json_store(USERS_PATH, "users_store", None) or {}).get("users") or {}
+        users = (jsonstore._load_json_store(USERS_PATH, "users_store", None) or {}).get("users") or {}
         for rec in users.values():
             if not isinstance(rec, dict):
                 continue
@@ -14616,7 +13931,7 @@ def token_vault_state() -> dict:
 def _load_users() -> dict:
     global _users_mem
     if _users_mem is None:
-        d = _load_json_store(USERS_PATH, "users_store", None)
+        d = jsonstore._load_json_store(USERS_PATH, "users_store", None)
         if isinstance(d, dict) and d.get("version") == 2 and "users" in d:
             _users_mem = d
         else:
@@ -14636,13 +13951,13 @@ def _write_users(d: dict) -> None:
     """Raises when the register cannot be made durable, so an account change
     is never reported as done while only the memory copy holds it."""
     global _users_mem
-    if not _store_writable(USERS_PATH):
+    if not jsonstore._store_writable(USERS_PATH):
         _users_mem = None      # the caller already mutated the shared object
         raise RuntimeError("users register is not writable")
     try:
         # Owner-only, like the token files beside it: this register holds the
         # password hashes, the second-factor secrets and the recovery codes.
-        _write_json_store(USERS_PATH, "users_store", d, private=True)
+        jsonstore._write_json_store(USERS_PATH, "users_store", d, private=True)
     except Exception:
         _users_mem = None
         raise
@@ -14652,7 +13967,7 @@ def _write_users(d: dict) -> None:
 def _load_sessions() -> dict:
     global _sessions_mem
     if _sessions_mem is None:
-        d = _load_json_store(SESSIONS_PATH, "sessions", None)
+        d = jsonstore._load_json_store(SESSIONS_PATH, "sessions", None)
         _sessions_mem = d if isinstance(d, dict) else {}
     return _sessions_mem
 
@@ -14660,11 +13975,11 @@ def _load_sessions() -> dict:
 def _write_sessions(d: dict) -> None:
     global _sessions_mem
     _sessions_mem = d
-    if not _store_writable(SESSIONS_PATH):
+    if not jsonstore._store_writable(SESSIONS_PATH):
         return    # sessions are re-creatable; losing them only forces a login
     # A session row is a live credential's hash and who it belongs to; it gets
     # the same mode as the register it authenticates against.
-    _write_json_store(SESSIONS_PATH, "sessions", d, private=True)
+    jsonstore._write_json_store(SESSIONS_PATH, "sessions", d, private=True)
 
 
 SESSIONS_PER_USER = _env_num(int, os.environ.get("SESSIONS_PER_USER", "12"), "12", "SESSIONS_PER_USER")
@@ -14784,7 +14099,7 @@ def _terms_flag(order_id, ok: bool, note: str = "") -> None:
             state.pop(str(order_id), None)
         else:
             state[str(order_id)] = entry
-        if _store_writable(PRODUCTION_STATE_PATH):
+        if jsonstore._store_writable(PRODUCTION_STATE_PATH):
             _write_prod_state(state)
     except Exception:
         logger.exception("could not record the payment-terms outcome for order %s", order_id)
@@ -15156,7 +14471,7 @@ def _load_layouts() -> dict:
     """{uid: {view: {"order": [...], "hidden": [...]}}}, read fresh each time.
     Not the cached loader: _save_layout changes what it is handed, and a
     fresh object means a failed write leaves nothing changed in memory."""
-    d = _load_json_store(LAYOUTS_PATH, "layouts", {})
+    d = jsonstore._load_json_store(LAYOUTS_PATH, "layouts", {})
     return d if isinstance(d, dict) else {}
 
 
@@ -15211,7 +14526,7 @@ def _save_layout(uid: str, view: str, layout) -> dict:
         d[uid] = mine
     else:
         d.pop(uid, None)             # nothing saved leaves no empty entry behind
-    _write_json_store(LAYOUTS_PATH, "layouts", d, private=True)
+    jsonstore._write_json_store(LAYOUTS_PATH, "layouts", d, private=True)
     return mine
 
 
@@ -15243,7 +14558,7 @@ def _loans_default() -> dict:
 def _load_loans() -> dict:
     global _loans_mem
     if _loans_mem is None:
-        d = _load_json_store(LOANS_PATH, "loans_store", None)
+        d = jsonstore._load_json_store(LOANS_PATH, "loans_store", None)
         base = _loans_default()
         if isinstance(d, dict):
             base.update({k: d[k] for k in ("units", "loans", "seq") if k in d})
@@ -15256,11 +14571,11 @@ def _load_loans() -> dict:
 def _write_loans(d: dict) -> None:
     """Owner-only: it carries customers' names and phone numbers."""
     global _loans_mem
-    if not _store_writable(LOANS_PATH):
+    if not jsonstore._store_writable(LOANS_PATH):
         _loans_mem = None
         raise RuntimeError("the loan register is not writable")
     try:
-        _write_private_json(LOANS_PATH, "loans_store", d)
+        jsonstore._write_private_json(LOANS_PATH, "loans_store", d)
     except Exception:
         _loans_mem = None
         raise
@@ -15445,7 +14760,7 @@ _work_mem: Optional[dict] = None
 def _load_work() -> dict:
     global _work_mem
     if _work_mem is None:
-        d = _load_json_store(WORK_PATH, "work_store", None)
+        d = jsonstore._load_json_store(WORK_PATH, "work_store", None)
         _work_mem = d if isinstance(d, dict) and "sessions" in d else {"seq": 0, "open": {}, "sessions": []}
     return _work_mem
 
@@ -15493,12 +14808,12 @@ def _write_work(d: dict) -> None:
     holds the change - it has to be dropped, or a shift that was never saved
     keeps being served until the process restarts."""
     global _work_mem
-    if not _store_writable(WORK_PATH):
+    if not jsonstore._store_writable(WORK_PATH):
         _work_mem = None
         raise RuntimeError("work log is not writable")
     _work_trim(d)
     try:
-        _write_json_store(WORK_PATH, "work_store", d)
+        jsonstore._write_json_store(WORK_PATH, "work_store", d)
     except Exception:
         _work_mem = None
         raise
@@ -15552,7 +14867,7 @@ def _work_close_orphans() -> list:
     for good, so the hourly team check sweeps them up."""
     # An unreadable or empty register reads as nobody, and nobody would mean
     # every shift on the board: the watchdog alerts on that, this does nothing.
-    if USERS_PATH in _poisoned_stores or _team_setup_needed():
+    if USERS_PATH in jsonstore._poisoned_stores or _team_setup_needed():
         return []
     users = (_load_users() or {}).get("users") or {}
     closed = []
@@ -15651,7 +14966,7 @@ _events_flush_pending = False
 def _load_events() -> list:
     global _events_mem
     if _events_mem is None:
-        d = _load_json_store(ACTIVITY_PATH, "events", [])
+        d = jsonstore._load_json_store(ACTIVITY_PATH, "events", [])
         _events_mem = d if isinstance(d, list) else []
     return _events_mem
 
@@ -15666,8 +14981,8 @@ def _events_flush() -> None:
         return
     try:
         rows = _load_events()
-        if _store_writable(ACTIVITY_PATH):
-            _write_json_store(ACTIVITY_PATH, "events", rows)
+        if jsonstore._store_writable(ACTIVITY_PATH):
+            jsonstore._write_json_store(ACTIVITY_PATH, "events", rows)
         _events_dirty = False
     except Exception:
         logger.exception("activity ledger write failed")
@@ -16036,11 +15351,11 @@ def _files_tick() -> None:
     before = (len(d["files"]), len(d.get("doomed") or []))
     _files_purge(d)
     if (len(d["files"]), len(d["doomed"])) != before:
-        if not _store_writable(FILES_PATH):
+        if not jsonstore._store_writable(FILES_PATH):
             return                          # nothing deleted unless the pop is durable
         _write_files(d)
     if _files_configured() and d.get("doomed"):
-        if _files_reap(d, _files_s3()) and _store_writable(FILES_PATH):
+        if _files_reap(d, _files_s3()) and jsonstore._store_writable(FILES_PATH):
             _write_files(d)
     # Once a day, on the same tick: outgoing attachments are bucket-only, so
     # they have no record here to expire and need their own sweep.
@@ -16241,7 +15556,7 @@ async def _webhook_body(request: Request):
 
 # ---- Forecast: the nightly forecasting service and the tab that reads it ----
 def _forecast_state() -> dict:
-    d = _load_json_store(FORECAST_PATH, "forecast", None)
+    d = jsonstore._load_json_store(FORECAST_PATH, "forecast", None)
     return d if isinstance(d, dict) else {}
 
 def _forecast_token_ok(request: Request) -> bool:
@@ -16404,7 +15719,7 @@ def _mail_store_sick():
     """Refuse a mutation BEFORE it happens when the store cannot be
     persisted: a claim the whole team can see until a restart silently
     reverts it is worse than a clean refusal."""
-    if _store_writable(MAILBOX_PATH):
+    if jsonstore._store_writable(MAILBOX_PATH):
         return None
     return _json({"error": "The inbox store cannot be written right now. "
                            "Check Settings, Connections."}, 503)
@@ -17318,9 +16633,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         the first turn's tool calls ran."""
         return _build_dispatch(chat_registry, lambda: str(uid or ""))
 
-    logger.info(f"Copilot enabled — embedded-only; models: fast={MODEL_FAST}, deep={MODEL_DEEP}; "
-                f"effort={ANTHROPIC_EFFORT}, deep effort={ANTHROPIC_EFFORT_DEEP}; max_tokens={MAX_TOKENS}; tools: {len(tools)}")
-    if not ANTHROPIC_API_KEY:
+    logger.info(f"Copilot enabled — embedded-only; models: fast={claude.MODEL_FAST}, deep={claude.MODEL_DEEP}; "
+                f"effort={ANTHROPIC_EFFORT}, deep effort={ANTHROPIC_EFFORT_DEEP}; max_tokens={claude.MAX_TOKENS}; tools: {len(tools)}")
+    if not claude.ANTHROPIC_API_KEY:
         logger.warning("Copilot: ANTHROPIC_API_KEY not set. Chat will return an error until it is.")
     if not SHOPIFY_API_SECRET:
         logger.warning("Copilot: SHOPIFY_API_SECRET/CLIENT_SECRET not set. All API routes are locked "
@@ -17483,7 +16798,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # than in the service, because the service is stateless by design
             # and this is the one thing that has to outlive a run.
             state["ledger"] = _forecast_ledger(state, body)
-        _write_json_store(FORECAST_PATH, "forecast", state)
+        jsonstore._write_json_store(FORECAST_PATH, "forecast", state)
         return _json({"ok": True})
 
     @mcp.custom_route("/hooks/forecast/workbook", methods=["GET"])
@@ -17595,7 +16910,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         meta = {"name": name, "size": len(raw), "uploaded_at": datetime.now(timezone.utc).isoformat(),
                 "by": _team_name(who) or ""}
         state["workbook"] = {**meta, "data_b64": base64.b64encode(raw).decode("ascii")}
-        _write_json_store(FORECAST_PATH, "forecast", state)
+        jsonstore._write_json_store(FORECAST_PATH, "forecast", state)
         return _json({"ok": True, "workbook": meta})
 
     @mcp.custom_route("/webhooks/privacy", methods=["POST"])
@@ -17671,7 +16986,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         notice = ""
         name = _team_name(who) or "an admin"
         _load_privacy_log()
-        if PRIVACY_LOG_PATH in _poisoned_stores:
+        if PRIVACY_LOG_PATH in jsonstore._poisoned_stores:
             return _json({"error": "The privacy requests cannot be read just now, so none can be shown. "
                                    "Check the server's storage, or restore the latest backup."}, 503)
         if op == "stop_all":
@@ -17765,8 +17080,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # The oldest first (the nearest deadline), and only so many worked out
         # at once: a flood of two thousand froze the app for minutes.
         waiting = sorted(_held_requests(d), key=lambda h: str(h.get("received") or ""))
-        crm = None if CRM_PATH in _poisoned_stores else _load_crm()
-        index = _redact_index(crm) if crm is not None and CRM_PATH not in _poisoned_stores else None
+        crm = None if CRM_PATH in jsonstore._poisoned_stores else _load_crm()
+        index = _redact_index(crm) if crm is not None and CRM_PATH not in jsonstore._poisoned_stores else None
         held = []
         for h in waiting[:REDACT_LIST_MAX]:
             du, late = due(str(h.get("received") or ""))
@@ -17806,7 +17121,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Message too large."}, 413)
 
         deep = bool(body.get("deep"))
-        model = _pick_model(deep)
+        model = claude._pick_model(deep)
         extra = (_profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
                  + _skills_to_system(_chat_question(history), _picked_skills(body), can_read=True))
         if _is_seo(history):
@@ -17819,7 +17134,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": str(e)}, 500)
         except anthropic.APIError as e:
             logger.exception("Anthropic API error")
-            return _json({"error": _ai_error_words(e)}, 502)
+            return _json({"error": claude._ai_error_words(e)}, 502)
         _chat_after(result, history, held=_team_level(_who) < ROLE_LEVELS["admin"], by=_team_name(_who))
         result["deep"] = deep
         return _json(result)
@@ -17846,7 +17161,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Message too large."}, 413)
 
         deep = bool(body.get("deep"))
-        model = _pick_model(deep)
+        model = claude._pick_model(deep)
         extra = (_profile_to_system(_load_profile()) + _memory_to_system() + _knowledge_to_system()
                  + _skills_to_system(_chat_question(history), _picked_skills(body), can_read=True))
         if _is_seo(history):
@@ -17865,7 +17180,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 await q.put({"type": "done", "result": result})
             except anthropic.APIError as e:
                 logger.exception("Anthropic API error (stream)")
-                await q.put({"type": "error", "error": _ai_error_words(e)})
+                await q.put({"type": "error", "error": claude._ai_error_words(e)})
             except RuntimeError as e:
                 await q.put({"type": "error", "error": str(e)})
             except Exception:
@@ -17907,7 +17222,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": str(e)}, 500)
         except anthropic.APIError as e:
             logger.exception("Anthropic API error (overview)")
-            return _json({"error": _ai_error_words(e)}, 502)
+            return _json({"error": claude._ai_error_words(e)}, 502)
         except Exception:
             logger.exception("Overview failed")
             return _json({"error": "Couldn't build the overview. Check the server logs."}, 500)
@@ -17991,7 +17306,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": str(e)}, 500)
         except anthropic.APIError as e:
             logger.exception("Anthropic API error (seo)")
-            return _json({"error": _ai_error_words(e)}, 502)
+            return _json({"error": claude._ai_error_words(e)}, 502)
         except Exception:
             logger.exception("SEO audit failed")
             return _json({"error": "Couldn't run the SEO audit. Check the server logs."}, 500)
@@ -18010,7 +17325,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json(res)
         except anthropic.APIError as e:
             logger.exception("Anthropic API error (keywords)")
-            return _json({"error": _ai_error_words(e)}, 502)
+            return _json({"error": claude._ai_error_words(e)}, 502)
         except RuntimeError as e:
             # The day's AI budget, a missing key, or a report that did not finish: said as it is.
             return _json({"error": str(e)}, 500)
@@ -18037,7 +17352,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": str(e)}, 400)
         except anthropic.APIError as e:
             logger.exception("Anthropic API error (keyword-scan)")
-            return _json({"error": _ai_error_words(e)}, 502)
+            return _json({"error": claude._ai_error_words(e)}, 502)
         except Exception:
             logger.exception("Keyword scan failed")
             return _json({"error": "Couldn't scan that URL. Check that it is a public web page."}, 500)
@@ -18052,7 +17367,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # held back to protect it: answering as usual showed 'No notes yet'
         # and let an add look saved when it was not. Say so instead.
         _load_memory()
-        if MEMORY_PATH in _poisoned_stores:
+        if MEMORY_PATH in jsonstore._poisoned_stores:
             return _json({"error": "Your saved notes could not be read, so nothing can be shown or changed "
                                    "until they are repaired. Tell Cameron."}, 503)
         out: dict = {}
@@ -18118,7 +17433,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Only the master account can upload skills from files. Write the skill here instead, "
                                    "or ask the master account to upload it."}, 403)
         _load_skills()
-        if SKILLS_PATH in _poisoned_stores:
+        if SKILLS_PATH in jsonstore._poisoned_stores:
             return _json({"error": "Your saved skills could not be read, so nothing can be shown or changed "
                                    "until they are repaired. Tell Cameron."}, 503)
         try:
@@ -18152,7 +17467,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if err:
             return err
         skills = _load_skills()
-        if SKILLS_PATH in _poisoned_stores:
+        if SKILLS_PATH in jsonstore._poisoned_stores:
             return _json({"error": "Your saved skills could not be read. Tell Cameron."}, 503)
         hit = next((x for x in skills if x.get("id") == str(body.get("id") or "")), None)
         if not hit:
@@ -18166,7 +17481,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": str(e)}, 400 if isinstance(e, ValueError) else 500)
         except anthropic.APIError as e:
             logger.exception("Anthropic API error (skill read)")
-            return _json({"error": _ai_error_words(e)}, 502)
+            return _json({"error": claude._ai_error_words(e)}, 502)
         except Exception:
             logger.exception("Skill read failed")
             return _json({"error": "Reactor could not read this skill just now. Try again."}, 500)
@@ -18445,7 +17760,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": str(e)}, 500)
         except anthropic.APIError as e:
             logger.exception("Anthropic API error (learn)")
-            return _json({"error": _ai_error_words(e)}, 502)
+            return _json({"error": claude._ai_error_words(e)}, 502)
         except Exception:
             logger.exception("Learn failed")
             return _json({"error": "Reactor could not learn the store this time. Try again, or tell "
@@ -18483,8 +17798,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 data["edited_at"] = data["learned_at"]
                 data["learned_at"] = held.get("learned_at") or data["learned_at"]
                 data["edited_by"] = _team_name(_who) or ""
-                if _store_writable(KNOWLEDGE_PATH):
-                    _write_json_store(KNOWLEDGE_PATH, None, data)
+                if jsonstore._store_writable(KNOWLEDGE_PATH):
+                    jsonstore._write_json_store(KNOWLEDGE_PATH, None, data)
                 _track(_who, "memory", "edited the store knowledge")
                 return _json({"knowledge": dict(data, cap=KNOWLEDGE_CAP)})
             except Exception:
@@ -19150,7 +18465,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                           "kept_previous": kept})
 
         # ----- compose -----
-        if not ANTHROPIC_API_KEY:
+        if not claude.ANTHROPIC_API_KEY:
             return _json({"error": "No AI key is configured on the server."}, 400)
         guidance = str(body.get("guidance") or "").strip()[:600]
         try:
@@ -19270,15 +18585,15 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not _window_ok(_rl_global, RATE_MAX_GLOBAL, time.monotonic()):
             return _json({"error": "The assistant is busy right now. Please try again shortly."}, 429)
         try:
-            _ai_kind.set("draft")
-            resp = await _xcreate(_anthropic(), model=MODEL_DEEP, max_tokens=8000,
-                                  system=MAIL_DRAFT_SYSTEM, output_config={"effort": _effort_for(MODEL_DEEP)},
+            claude._ai_kind.set("draft")
+            resp = await claude._xcreate(claude._anthropic(), model=claude.MODEL_DEEP, max_tokens=8000,
+                                  system=MAIL_DRAFT_SYSTEM, output_config={"effort": _effort_for(claude.MODEL_DEEP)},
                                   messages=[{"role": "user", "content": prompt}])
         except RuntimeError as e:
             return _json({"error": str(e), "hard": True}, 429)
         except anthropic.APIError as e:
             logger.exception("mail draft AI error")
-            return _json({"error": _ai_error_words(e)}, 502)
+            return _json({"error": claude._ai_error_words(e)}, 502)
         draft = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
         if not draft:
             return _json({"error": "The AI returned nothing. Try again."}, 502)
@@ -20677,13 +19992,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             _drop_memory_stores()
             _events_dirty = False
             _dav_auth_cache.clear()
-            _json_cache.clear()
+            jsonstore._json_cache.clear()
         async with _files_lock:
             # Read here, with nothing left to await before the writes, so a
             # privacy request that arrives while the restore waits for the
             # lock is not lost.
             _pl = _load_privacy_log()
-            if PRIVACY_LOG_PATH not in _poisoned_stores:
+            if PRIVACY_LOG_PATH not in jsonstore._poisoned_stores:
                 live_priv.update(_pl)
             try:
                 for info, base, target in todo:
@@ -20693,7 +20008,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                     with open(tmp, "wb") as fh:
                         fh.write(payload)
                     os.replace(tmp, os.path.join(target, base))
-                    _poisoned_stores.discard(os.path.join(target, base))
+                    jsonstore._poisoned_stores.discard(os.path.join(target, base))
                     restored_names.append(base)
             except Exception:
                 # NOT just OSError: zf.read() decompresses, so a truncated or
@@ -21029,7 +20344,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "Unknown op."}, 400)
         except Exception:
             logger.exception("Production state update failed")
-            _forget_store(PRODUCTION_STATE_PATH)   # a half-made change must not be served
+            jsonstore._forget_store(PRODUCTION_STATE_PATH)   # a half-made change must not be served
             return _json({"error": "Couldn't update production state."}, 500)
 
     @mcp.custom_route("/api/liability", methods=["POST"])
@@ -21082,7 +20397,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not pipedrive.configured():
             return _json({"error": "No Pipedrive token is set on the server."}, 400)
         go = bool(body.get("go"))
-        if go and not _store_writable(CRM_PATH):
+        if go and not jsonstore._store_writable(CRM_PATH):
             return _json({"error": "The CRM store is not writable, so nothing was "
                                    "changed. Check Settings, Connections."}, 503)
         try:
@@ -21324,7 +20639,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                    "unwritable; check Settings, Connections."}, 500)
         except Exception:
             logger.exception("CRM deal op failed")
-            _forget_store(CRM_PATH)   # a half-made change must not be served
+            jsonstore._forget_store(CRM_PATH)   # a half-made change must not be served
             return _json({"error": "That change could not be made. Check the server logs."}, 500)
 
     @mcp.custom_route("/api/crm/activity", methods=["POST"])
@@ -21434,7 +20749,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                    "unwritable; check Settings, Connections."}, 500)
         except Exception:
             logger.exception("CRM activity op failed")
-            _forget_store(CRM_PATH)   # a half-made change must not be served
+            jsonstore._forget_store(CRM_PATH)   # a half-made change must not be served
             return _json({"error": "That change could not be made. Check the server logs."}, 500)
 
     @mcp.custom_route("/api/crm/contact", methods=["POST"])
@@ -21712,7 +21027,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                    "unwritable; check Settings, Connections."}, 500)
         except Exception:
             logger.exception("CRM contact op failed")
-            _forget_store(CRM_PATH)   # a half-made change must not be served
+            jsonstore._forget_store(CRM_PATH)   # a half-made change must not be served
             return _json({"error": "That change could not be made. Check the server logs."}, 500)
 
     @mcp.custom_route("/api/crm/lead", methods=["POST"])
@@ -21801,7 +21116,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                    "unwritable; check Settings, Connections."}, 500)
         except Exception:
             logger.exception("CRM lead op failed")
-            _forget_store(CRM_PATH)   # a half-made change must not be served
+            jsonstore._forget_store(CRM_PATH)   # a half-made change must not be served
             return _json({"error": "That change could not be made. Check the server logs."}, 500)
 
     @mcp.custom_route("/api/crm/stages", methods=["POST"])
@@ -21913,7 +21228,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                                    "unwritable; check Settings, Connections."}, 500)
         except Exception:
             logger.exception("CRM stages op failed")
-            _forget_store(CRM_PATH)   # a half-made change must not be served
+            jsonstore._forget_store(CRM_PATH)   # a half-made change must not be served
             return _json({"error": "That change could not be made. Check the server logs."}, 500)
 
 
@@ -21933,7 +21248,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         if not u:
             return _json({"error": "Your account could not be found."}, 404)
         if op in ("create", "remove"):
-            if USERS_PATH in _poisoned_stores:
+            if USERS_PATH in jsonstore._poisoned_stores:
                 return _json({"error": "The accounts could not be read, so nothing can change until they are repaired."}, 503)
             pw = ""
             if op == "create":
@@ -23781,7 +23096,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             if not res.get("error"):
                 # The day's send record rides along, so the page can say
                 # "already sent" instead of letting a double-send surprise.
-                sheets = _load_json_store(USAGE_SHEETS_PATH, "sheets", {})
+                sheets = jsonstore._load_json_store(USAGE_SHEETS_PATH, "sheets", {})
                 if isinstance(sheets, dict) and res.get("date") in sheets:
                     rec = dict(sheets[res["date"]])
                     rec.pop("result", None)
@@ -23860,12 +23175,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         rec = {"sent_at": datetime.now(timezone.utc).isoformat(), "by": who,
                "lines": lines, "result": result, "replaced": bool(result.get("replaced"))}
         try:
-            sheets = _load_json_store(USAGE_SHEETS_PATH, "sheets", {})
+            sheets = jsonstore._load_json_store(USAGE_SHEETS_PATH, "sheets", {})
             if not isinstance(sheets, dict):
                 sheets = {}
             sheets[usage["date"]] = rec
-            if _store_writable(USAGE_SHEETS_PATH):
-                _write_json_store(USAGE_SHEETS_PATH, "sheets", sheets)
+            if jsonstore._store_writable(USAGE_SHEETS_PATH):
+                jsonstore._write_json_store(USAGE_SHEETS_PATH, "sheets", sheets)
         except Exception:
             logger.exception("usage sheet record failed (the stock app HAS the sheet)")
         _track(who, "production", "sent a stock sheet",
@@ -24376,7 +23691,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json(res)
         except anthropic.APIError as e:
             logger.exception("Anthropic API error (customers)")
-            return _json({"error": _ai_error_words(e)}, 502)
+            return _json({"error": claude._ai_error_words(e)}, 502)
         except RuntimeError as e:
             # The day's AI budget, a missing key, or a report that did not finish: said as it is.
             return _json({"error": str(e)}, 500)
@@ -24418,7 +23733,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": str(e)}, 400)
         except anthropic.APIError as e:
             logger.exception("Anthropic API error (product)")
-            return _json({"error": _ai_error_words(e)}, 502)
+            return _json({"error": claude._ai_error_words(e)}, 502)
         except Exception:
             logger.exception("Product audit failed")
             return _json({"error": "Couldn't analyze this product. Check the server logs."}, 500)
@@ -25219,19 +24534,19 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                         # performs but the install cannot is invisible until
                         # the moment it matters, which is the wrong moment.
                         "scopes": scope_state},
-            "ai": {"ok": bool(ANTHROPIC_API_KEY),
-                   "models": {"chat": _model_name(MODEL_FAST), "deep": _model_name(MODEL_DEEP),
-                              "fallback": _model_name(_fallback_for(MODEL_DEEP, Exception())
-                                                      or _fallback_for(MODEL_FAST, Exception())) if (
-                                  _fallback_for(MODEL_DEEP, Exception()) or _fallback_for(MODEL_FAST, Exception())) else ""},
-                   "last_failure": dict(_AI_LAST_FAIL) or None},
+            "ai": {"ok": bool(claude.ANTHROPIC_API_KEY),
+                   "models": {"chat": claude._model_name(claude.MODEL_FAST), "deep": claude._model_name(claude.MODEL_DEEP),
+                              "fallback": claude._model_name(claude._fallback_for(claude.MODEL_DEEP, Exception())
+                                                      or claude._fallback_for(claude.MODEL_FAST, Exception())) if (
+                                  claude._fallback_for(claude.MODEL_DEEP, Exception()) or claude._fallback_for(claude.MODEL_FAST, Exception())) else ""},
+                   "last_failure": dict(claude._AI_LAST_FAIL) or None},
             "google": google_data.status(),
             "gmail": google_mail.status(),
             "shipping": {"ok": bool(worldoptions and worldoptions.configured()),
                          "available": bool(worldoptions),
                          "fulfillment": bool(_fulfillment_writer is not None)},
             "volume": {"ok": vol_ok, "detail": vol_detail,
-                       "poisoned": sorted(os.path.basename(p) for p in _poisoned_stores),
+                       "poisoned": sorted(os.path.basename(p) for p in jsonstore._poisoned_stores),
                        # Sizes, and the parse cost of anything over a megabyte:
                        # the stores are read from disk per request, so this is
                        # what a slow CRM save would show up as, before it does.
@@ -25262,10 +24577,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                              "error": _zeta_last["error"]},
             "backup": (lambda b: {"snapshot_at": b.get("snapshot_at"),
                                   "download_at": b.get("download_at")})(
-                _load_json_store(BACKUP_STATE_PATH, "backup", {}) or {}),
+                jsonstore._load_json_store(BACKUP_STATE_PATH, "backup", {}) or {}),
             # Visible whether or not email is configured, which it is not yet.
-            "errors": {"last_24h": len(_recent_errors(24)),
-                       "recent": _recent_errors(24)[:5]},
+            "errors": {"last_24h": len(errors._recent_errors(24)),
+                       "recent": errors._recent_errors(24)[:5]},
             "size_list": health,
             "coverage": {"at": watch.get("coverage_at"), "pct": watch.get("coverage_pct")},
             "storage": {"warning": _data_volume_warning()},
