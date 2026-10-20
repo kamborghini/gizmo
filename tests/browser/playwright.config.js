@@ -28,7 +28,10 @@ module.exports = defineConfig({
     { name: 'wide', use: { viewport: { width: 1920, height: 1080 } } },
   ],
   webServer: {
-    command: `${PY} tests/browser/serve.py`,
+    // exec: Playwright runs this through /bin/sh, and Linux's sh stays as the
+    // server's parent, so the process it stops and waits for (below) would be
+    // the shell, gone at once while the server was still tidying up.
+    command: `exec ${PY} tests/browser/serve.py`,
     cwd: ROOT,
     url: `http://127.0.0.1:${PORT}/`,
     timeout: 180000,
@@ -36,5 +39,10 @@ module.exports = defineConfig({
     env: { PORT: String(PORT), BROWSER_RUN: RUN },
     stdout: 'ignore',
     stderr: 'pipe',
+    // Without this Playwright ends the server with SIGKILL, which nothing
+    // survives to tidy up: every run left its world's scratch folder in the
+    // temp dir. On SIGTERM uvicorn shuts down and the world's exit handler
+    // removes the folder (about a second); after 10 s Playwright kills it anyway.
+    gracefulShutdown: { signal: 'SIGTERM', timeout: 10000 },
   },
 });

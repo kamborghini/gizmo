@@ -93,6 +93,59 @@ def t_nothing_in_the_world_reached_the_network():
     ok(not reached, "the seed reached the network: %s" % reached[:5])
 
 
+@test
+def t_the_server_playwright_stops_leaves_no_scratch_folder():
+    """Playwright ends its web server with SIGKILL unless the config names a
+    signal to stop it with, and nothing survives SIGKILL to tidy up, so every
+    browser run left its world's gizmo-dispatch-tests-* folder in the temp dir
+    (191 of the 893 there on 20 October 2026). The server is started here with
+    the config's own command, in a process group as Playwright starts it, and
+    stopped with the config's own signal inside its own grace period, in a
+    temp dir of its own that must be empty once the server has gone."""
+    import shutil, signal, socket, subprocess, tempfile, threading
+    base = tempfile.mkdtemp(prefix="browser-serve-test-")
+    tmp, run = os.path.join(base, "tmp"), os.path.join(base, "run")
+    os.makedirs(tmp)
+    p = None
+    try:
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        cfg = subprocess.run(["node", "-e", "process.stdout.write(JSON.stringify(require(process.argv[1]).webServer))",
+                              os.path.join(HERE, "playwright.config.js")],
+                             env=dict(os.environ, PY=sys.executable, BROWSER_PORT=str(port), BROWSER_RUN=run),
+                             capture_output=True, text=True, timeout=60)
+        ok(cfg.returncode == 0, "the config would not load: " + cfg.stderr[-400:])
+        web = json.loads(cfg.stdout)
+        stop = web.get("gracefulShutdown")
+        ok(stop, "webServer names no gracefulShutdown, so Playwright stops the server with SIGKILL "
+                 "and its scratch folder is never removed")
+        p = subprocess.Popen(web["command"], shell=True, cwd=web["cwd"], start_new_session=True,
+                             env=dict(os.environ, TMPDIR=tmp, **web["env"]),
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        lines, ready = [], threading.Event()
+        def read():
+            for line in p.stdout:
+                lines.append(line)
+                if "browser world ready" in line:
+                    ready.set()
+        threading.Thread(target=read, daemon=True).start()
+        ok(ready.wait(web.get("timeout", 180000) / 1000), "the server never came up: " + "".join(lines)[-800:])
+        os.killpg(p.pid, getattr(signal, stop["signal"]))
+        grace = (stop.get("timeout") or 60000) / 1000
+        try:
+            p.wait(grace)
+        except subprocess.TimeoutExpired:
+            raise AssertionError("the server was still up %ss after %s, when Playwright gives up and sends SIGKILL"
+                                 % (grace, stop["signal"]))
+        ok(os.listdir(tmp) == [], "the stopped server left %r in its temp dir (exit %s)" % (os.listdir(tmp), p.returncode))
+    finally:
+        if p is not None and p.poll() is None:
+            os.killpg(p.pid, signal.SIGKILL)
+            p.wait()
+        shutil.rmtree(base, ignore_errors=True)
+
+
 if __name__ == "__main__":
     passed = failed = 0
     for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
