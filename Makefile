@@ -18,7 +18,7 @@
 
 PY ?= .venv/bin/python
 
-.PHONY: help install run test test-frontend test-forecast test-browser css-proof sweep sast env-doc api-doc check lock ext-check shopify-deploy shopify-release
+.PHONY: help install run test test-frontend test-forecast test-browser css-proof move-proof sweep sast env-doc api-doc check lock ext-check shopify-deploy shopify-release
 
 help:
 	@sed -n '4,18p' Makefile
@@ -102,6 +102,12 @@ ext-check:
 BASE ?= origin/main
 css-proof:
 	$(PY) tests/browser/css_proof.py --base $(BASE) $(if $(ONLY),--only '$(ONLY)')
+
+# The proof that a move out of copilot.py into gizmo/ moved code and changed
+# nothing: every statement found again, prefixes only on module globals, the
+# routes in the same order (tools/move_proof.py), against BASE.
+move-proof:
+	$(PY) tools/move_proof.py --base $(BASE)
 
 check: test-frontend test-forecast sweep sast ext-check test-browser
 	$(PY) tools/env_reference.py --check

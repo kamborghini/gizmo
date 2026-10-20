@@ -29901,6 +29901,55 @@ def t_dispatch_routes_register_in_place():
     own = inspect.getsource(routes_dispatch)
     eq(own.count("@mcp.custom_route("), 15, "the desk's 15 routes")
 
+@test
+def t_the_desks_store_error_is_a_store_error():
+    """One StoreUnwritable, in gizmo/store.py: copilot.py's `except
+    StoreUnwritable` must still catch the desk's own store error."""
+    from gizmo import store
+    ok(copilot.StoreUnwritable is store.StoreUnwritable, "copilot.py has no class of its own")
+    ok(issubclass(desk.DispatchStoreUnwritable, copilot.StoreUnwritable), "the desk's is one of them")
+
+@test
+def t_move_proof_is_wired():
+    """make move-proof BASE=<ref> proves a move out of copilot.py moved and
+    changed nothing: every statement found again with the same syntax tree
+    once module prefixes are read as plain names, a prefix only where the name
+    was a module global, and the routes in the same order."""
+    import importlib.util
+    from tools import sources
+    make = open(os.path.join(sources.ROOT, "Makefile"), encoding="utf-8").read()
+    ok(re.search(r"^move-proof:", make, re.M) and "BASE ?= origin/main" in make, "the Makefile has move-proof")
+    spec = importlib.util.spec_from_file_location("move_proof", os.path.join(sources.ROOT, "tools", "move_proof.py"))
+    mp = importlib.util.module_from_spec(spec); spec.loader.exec_module(mp)
+    first = sources.COPILOT_FILES[0]
+    base = {first: ("import os\n\n\ndef a():\n    return b() + 1\n\n\ndef b():\n    x = 2\n    return x\n\n\n"
+                    "def add_routes(mcp, registry):\n"
+                    "    @mcp.custom_route('/one')\n    async def one(request):\n        return a()\n\n"
+                    "    @mcp.custom_route('/two')\n    async def two(request):\n        return b()\n\n"
+                    "    @mcp.custom_route('/three')\n    async def three(request):\n        return 3\n")}
+    head = {first: ("import os\nfrom gizmo import dispatch as desk\nfrom gizmo.routes import dispatch as routes_dispatch\n\n\n"
+                    "def a():\n    return desk.b() + 1\n\n\n"
+                    "def add_routes(mcp, registry):\n"
+                    "    @mcp.custom_route('/one')\n    async def one(request):\n        return a()\n\n"
+                    "    routes_dispatch.register(mcp, registry)\n\n"
+                    "    @mcp.custom_route('/three')\n    async def three(request):\n        return 3\n"),
+            "gizmo/dispatch.py": '"""The desk."""\nimport copilot as core\n\n\ndef b():\n    x = 2\n    return x\n',
+            "gizmo/routes/dispatch.py": ('"""Its routes."""\nimport copilot as core\nfrom gizmo import dispatch as desk\n\n\n'
+                                         'def register(mcp, registry):\n    """Add them."""\n'
+                                         "    @mcp.custom_route('/two')\n    async def two(request):\n        return desk.b()\n")}
+    eq(mp.prove(base, head), [], "a function moved, read through a prefix: nothing but the move")
+    optional = "try:\n    import worldoptions\nexcept Exception:\n    worldoptions = None\n"
+    both = dict(head, **{"gizmo/dispatch.py": head["gizmo/dispatch.py"] + optional})
+    eq(mp.prove(base, both), [], "an optional import is an import: it may come with the move")
+    changed = dict(head, **{"gizmo/dispatch.py": head["gizmo/dispatch.py"].replace("x = 2", "x = 3")})
+    got = mp.prove(base, changed)
+    ok(any("def b" in g for g in got), "a moved function with one changed value is named: %s" % got)
+    local = dict(head, **{"gizmo/dispatch.py": head["gizmo/dispatch.py"].replace("return x", "return core.x")})
+    ok(any("core.x" in g for g in mp.prove(base, local)), "a local read through a prefix is named")
+    order = dict(head, **{first: head[first].replace("    routes_dispatch.register(mcp, registry)\n\n", "")
+                          .replace("        return 3\n", "        return 3\n\n    routes_dispatch.register(mcp, registry)\n")})
+    ok(any("order" in g for g in mp.prove(base, order)), "routes registered in another order are named")
+
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a

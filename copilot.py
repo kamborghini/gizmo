@@ -1899,12 +1899,6 @@ def _store_report(parse: bool = True) -> list:
     return out[:12]
 
 
-class StoreUnwritable(RuntimeError):
-    """A store the poison guard has paused. The one writer raises this; a
-    caller that would rather stay silent checks _store_writable first and
-    says why, which is what every writer already did."""
-
-
 # path -> (stat key, the object the loader returned). The three busiest stores
 # were parsed from disk on every request that needed them - the CRM at up to
 # tens of megabytes, on the event loop, twenty times a request cycle. The

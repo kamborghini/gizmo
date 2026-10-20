@@ -103,6 +103,22 @@ snapshots, memory, missing production, liability and `_print_cors`.
   now lives on its own, so a change elsewhere in the app can no longer upset
   booking, labels or collections. Nothing looks different."
 
+### As built
+
+- `copilot.py` reads the desk as `desk.NAME` (`from gizmo import dispatch as
+  desk`), not `dispatch.NAME`: `run_chat` and the frozen
+  `run_production_labels` take a parameter called `dispatch`.
+- `StoreUnwritable` moved to `gizmo/store.py`: the desk's own store error
+  subclasses it as it loads. `make move-proof` caught the first cut leaving a
+  second class of that name in `copilot.py`, so its `except StoreUnwritable`
+  missed the desk's error; `t_the_desks_store_error_is_a_store_error` pins it.
+- The printed labels' route keeps its bytes: `copilot.py` takes
+  `LABEL_STOCK_MM` and `_load_dispatch` from the desk by name, and the desk
+  imports `copilot` last.
+- 140 statements and 16 route functions moved; the desk borrows 42 names;
+  `copilot.py` went from 28,623 to 25,272 lines. The source guard also
+  catches `inspect.getsource(copilot)`, which two checks used.
+
 ## Guards
 
 - No test patches a name its module does not read, and no module keeps a copy
