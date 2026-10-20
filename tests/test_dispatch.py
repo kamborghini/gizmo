@@ -29679,8 +29679,7 @@ def _test_patches():
     mods = _app_module_files()
     here = os.path.dirname(os.path.abspath(__file__))
     out = []
-    for path in sorted(_glob.glob(os.path.join(here, "**", "*.py"), recursive=True)):
-        tree = _ast.parse(open(path, encoding="utf-8").read())
+    def aliases(tree):
         alias = {}
         for x in _ast.walk(tree):
             if isinstance(x, _ast.Import):
@@ -29692,6 +29691,15 @@ def _test_patches():
                     full = x.module + "." + a.name
                     if full in mods:
                         alias[a.asname or a.name] = full
+        return alias
+    # The browser seeds are run inside this suite's prelude, so they see the
+    # modules it imports without importing them.
+    prelude = aliases(_ast.parse(open(os.path.join(here, "test_dispatch.py"), encoding="utf-8").read()))
+    for path in sorted(_glob.glob(os.path.join(here, "**", "*.py"), recursive=True)):
+        tree = _ast.parse(open(path, encoding="utf-8").read())
+        alias = aliases(tree)
+        if os.sep + "seed" + os.sep in path:
+            alias = {**prelude, **alias}
         rel = os.path.relpath(path, os.path.dirname(here))
         def visit(node, top):
             for c in _ast.iter_child_nodes(node):
@@ -29709,6 +29717,12 @@ def _test_patches():
                         and len(c.args) >= 2 and isinstance(c.args[0], _ast.Name) and c.args[0].id in alias
                         and isinstance(c.args[1], _ast.Constant) and isinstance(c.args[1].value, str)):
                     out.append((alias[c.args[0].id], c.args[1].value, rel, c.lineno, t))
+                # a helper handed a module and a dict of stand-ins: _swap(copilot, {"_xcreate": fake})
+                if (isinstance(c, _ast.Call) and len(c.args) >= 2 and isinstance(c.args[0], _ast.Name)
+                        and c.args[0].id in alias and isinstance(c.args[1], _ast.Dict)):
+                    for k in c.args[1].keys:
+                        if isinstance(k, _ast.Constant) and isinstance(k.value, str):
+                            out.append((alias[c.args[0].id], k.value, rel, c.lineno, t))
                 visit(c, t)
         visit(tree, None)
     return out
@@ -29906,8 +29920,7 @@ def t_dispatch_routes_register_in_place():
 def t_the_desks_store_error_is_a_store_error():
     """One StoreUnwritable, in gizmo/store.py: copilot.py's `except
     StoreUnwritable` must still catch the desk's own store error."""
-    from gizmo import store
-    ok(copilot.StoreUnwritable is store.StoreUnwritable, "copilot.py has no class of its own")
+    ok(copilot.StoreUnwritable is jsonstore.StoreUnwritable, "copilot.py has no class of its own")
     ok(issubclass(desk.DispatchStoreUnwritable, copilot.StoreUnwritable), "the desk's is one of them")
 
 @test

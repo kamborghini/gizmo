@@ -24,6 +24,8 @@ from gizmo.config import _env_num
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
 # Model tiers. Claude Opus 5.5 everywhere by default; the env vars let a
 # cheaper tier (e.g. claude-sonnet-5-5) take everyday chat without a code change.

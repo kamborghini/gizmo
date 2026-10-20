@@ -502,7 +502,7 @@ _GOOGLE_FAKES = {"gsc_configured": lambda: True, "ga4_configured": lambda: True,
 
 # =============================================================================
 # SHARED 3/4: fake AI (c). claude._xcreate answers present_response with an
-# invented report for the kind of run (copilot._ai_kind); put back afterwards.
+# invented report for the kind of run (claude._ai_kind); put back afterwards.
 # =============================================================================
 _REPORTS = {
     "overview": {
@@ -675,7 +675,8 @@ def _ok(r, what):
 def seed_reports():
     ensure_auth()
     g_saved = _swap(_dgoogle, _GOOGLE_FAKES)
-    c_saved = _swap(copilot, {"_xcreate": _dash_xcreate, "_http_get": _dash_http_get})
+    c_saved = _swap(copilot, {"_http_get": _dash_http_get})
+    ai_saved = _swap(claude, {"_xcreate": _dash_xcreate})
     copilot._domains_cache.clear()
     try:
         # Overview twice: the first run's snapshot is moved back a week and nudged,
@@ -697,6 +698,7 @@ def seed_reports():
     finally:
         _swap(_dgoogle, g_saved)
         _swap(copilot, c_saved)
+        _swap(claude, ai_saved)
         copilot._domains_cache.clear()
 
 
