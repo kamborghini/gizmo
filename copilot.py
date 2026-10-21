@@ -718,7 +718,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     # The chat's tools, from the registry this app was handed, kept on the chat
     # module as the write capabilities are kept on shopify: the chat routes read
     # them there, and assistant.dispatch_for binds each turn's asker.
-    assistant._chat_registry, assistant._chat_tools = chat_registry, tools
+    assistant._chat_registry = chat_registry
+    assistant._chat_tools = tools
 
     logger.info(f"Copilot enabled — embedded-only; models: fast={claude.MODEL_FAST}, deep={claude.MODEL_DEEP}; "
                 f"effort={claude.ANTHROPIC_EFFORT}, deep effort={claude.ANTHROPIC_EFFORT_DEEP}; max_tokens={claude.MAX_TOKENS}; tools: {len(tools)}")
