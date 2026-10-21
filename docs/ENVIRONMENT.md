@@ -51,7 +51,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `ACTIVITY_MAX` | `"8000"` | gizmo.activity |  |
 | `ACTIVITY_PATH` | `"/data/activity.json"` | gizmo.activity |  |
 
-## gizmo/ai.py - Claude tool-use loop
+## gizmo/ai.py - The effort every call asks for, and the chat's thinking mode
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
@@ -89,7 +89,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `BACKUP_SNAPSHOT_DIR` | `"/data/snapshots"` | gizmo.backup |  |
 | `BACKUP_STATE_PATH` | `"/data/backup_state.json"` | gizmo.backup |  |
 
-## gizmo/chat.py - AI usage + cost logging (measurement, to inform pricing). Ev
+## gizmo/chat.py - The chat's limits: how long a conversation, and how large a 
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|

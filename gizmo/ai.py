@@ -553,6 +553,9 @@ def _strip_dashes(obj: Any) -> Any:
     return obj
 
 
+# ---------------------------------------------------------------------------
+# The effort every call asks for, and the chat's thinking mode.
+# ---------------------------------------------------------------------------
 # Effort (low|medium|high|xhigh|max). Opus 5.5 thinks on every request and
 # effort is how much: "high" spends what a task needs and is every call's
 # level; "max" has no limit and is what Deep analysis in chat asks for. Every

@@ -21,8 +21,8 @@ PRODUCT_TREND_MONTHS = _env_num(int, os.environ.get("PRODUCT_TREND_MONTHS", "12"
 
 
 # ---------------------------------------------------------------------------
-# Every product in the catalogue, paged: the overview, the SEO audit, the
-# Products tab and the loan-unit picker read it.
+# Every product in the catalogue, paged (the overview, the SEO audit and the
+# loan-unit picker read it too), and the Products tab's list.
 # ---------------------------------------------------------------------------
 
 

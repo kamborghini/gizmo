@@ -86,8 +86,9 @@ restore (`gizmo/backup.py`), Liability and the chase desk
 read as `xerosync`), the forecast's hooks (`gizmo/forecasting.py`), the page
 and its assets (`gizmo/rendering.py`), the store profile (`gizmo/profile.py`,
 read as `store_profile`), layouts (`gizmo/layouts.py`), the sign-in walks
-(`gizmo/oauth.py`) and the status page (`gizmo/status.py`, read as
-`appstatus`), each with its routes in
+(`gizmo/oauth.py`), the status page (`gizmo/status.py`, read as
+`appstatus`) and the Products tab (`gizmo/products.py`, read as `catalog`),
+each with its routes in
 `gizmo/routes/` (production's, the Size list's and the order book's too; the
 printed-label routes stay in `add_routes`, their bytes pinned, and so do the
 chat's two, which read the tool list `add_routes` builds from the registry
@@ -96,6 +97,14 @@ module's name and `copilot.py` as `core.NAME`, and import `copilot` last.
 `copilot.py` reads them the same way, except names it takes by their own:
 the ones the frozen print route reads, and `_guard` and `_json`, the door
 every route here opens with and the answer it gives.
+
+What `copilot.py` still holds, on purpose: the shop settings (tests patch
+`SHOPIFY_STORE` through it, and the frozen print routes read the secret and
+the base address), the stock bridge (the stock merge project's), the frozen
+print routes with their font, logo and CORS helpers and `_spawn_bg` (which one
+of them reads), the chat and usage routes (they read the tool list
+`add_routes` builds from the registry it is handed), and `add_routes` itself,
+which registers every area's routes.
 
 Acyclic otherwise, and it stays that way. An integration never imports the app: it
 takes what it needs as arguments and returns plain data. `server.py` hands
@@ -256,7 +265,8 @@ can leave a test testing nothing. The guards below make that a failure, and
    only routes, for an area that moved earlier; an area marked `existing`
    adds to a module that moved earlier (what an earlier piece left behind):
    the statements go in before its last imports, and its own name and its
-   own `core.NAME` reads of them are dropped. What it does: cut statements whole, keeping their text and order,
+   own `core.NAME` reads of them are dropped; a route group marked `existing`
+   adds its routes to a route module that moved earlier. What it does: cut statements whole, keeping their text and order,
    into `gizmo/<area>.py`, and the routes into `gizmo/routes/<area>.py`
    inside `register(mcp, registry)`, which `add_routes` calls where the
    area's first route stood. A group's paths are prefixes; `"=/"` names one path

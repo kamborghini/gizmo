@@ -497,6 +497,9 @@ def _coerce_structured(data: Any) -> dict:
     return claude._strip_dashes(data)
 
 
+# ---------------------------------------------------------------------------
+# The chat's limits: how long a conversation, and how large a request, may be.
+# ---------------------------------------------------------------------------
 MAX_MESSAGES     = _env_num(int, os.environ.get("MAX_MESSAGES", "100"), "100", "MAX_MESSAGES")          # chat history length
 MAX_CHAT_CHARS   = _env_num(int, os.environ.get("MAX_CHAT_CHARS", "100000"), "100000", "MAX_CHAT_CHARS")     # total chars in a chat request
 
