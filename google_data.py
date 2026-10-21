@@ -410,7 +410,7 @@ async def ga4_timeseries(days: int = 760) -> dict:
                             "value": int(float((r.get("metricValues") or [{}])[0].get("value", 0)))}
                            for r in ch.get("rows", [])]
     except Exception:
-        pass
+        pass  # the channel split is extra: the summary above stands without it
     return out
 
 
@@ -498,7 +498,7 @@ async def ga4_ads(days: int = 90) -> dict:
                 rows.append(row)
         out["campaigns"] = rows
     except Exception:
-        pass
+        pass  # the campaign rows are extra: the totals above stand without them
     return out
 
 

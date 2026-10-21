@@ -366,8 +366,9 @@ def register(mcp, registry):
             t["draft_text"] = text_body[:20000]
             try:
                 mail._write_mail(mail._load_mail())
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("the draft's record on its thread could not be written, so the next "
+                               "save may make a new draft (%s)", type(e).__name__)
             activity._track(who, "mail", "saved a draft reply", (t.get("subject") or "")[:60])
             return gate._json({"ok": True, "draft_id": out.get("id"), "to": to_addr,
                           "kept_previous": kept})
@@ -1126,8 +1127,8 @@ def register(mcp, registry):
         t.setdefault("saved_files", []).append({"name": name, "at": mail._mail_now(), "where": where})
         try:
             mail._write_mail(mail._load_mail())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("the saved attachment's note on its thread could not be written (%s)", type(e).__name__)
         activity._track(who, "files", "saved an attachment from email", name + " to " + where)
         return gate._json({"ok": True, "name": name, "where": where, "size": len(raw)})
 
@@ -1406,8 +1407,8 @@ def register(mcp, registry):
             if fileserver._sniff_kind(head) not in fileserver._IMAGE_EXT.values():
                 try:
                     await asyncio.to_thread(fileserver._r2_call, "delete_object", Key=key)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("a refused logo upload could not be removed from storage (%s)", type(e).__name__)
                 return gate._json({"error": "That file is not a PNG, JPG, GIF or WebP image."}, 400)
             em.setdefault("footer_slots", {})["logo_key"] = key
             try:

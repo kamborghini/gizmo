@@ -522,7 +522,7 @@ def _skill_open(s: dict, extra: str = "") -> str:
         d = datetime.fromisoformat(str(s.get("updated") or s.get("created") or ""))
         changed = f"{d.day} {d:%b %Y}"
     except Exception:
-        pass
+        pass  # an unreadable date leaves out when the skill changed
     return ('<skill title="' + _skill_attr(s["title"].strip()) + '"'
             + (' applies="' + _skill_attr(when) + '"' if when else "")
             + (' changed="' + changed + '"' if changed else "")

@@ -151,7 +151,7 @@ def _track(sub: Optional[str], area: str, action: str, detail: str = "") -> None
         try:
             logdrain.audit(e)
         except Exception:
-            pass
+            pass  # never raises: an audit trail must not be able to fail a booking (above)
         if len(rows) > ACTIVITY_MAX:
             del rows[:len(rows) - ACTIVITY_MAX]
         _events_dirty = True

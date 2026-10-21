@@ -31205,6 +31205,20 @@ def t_the_chat_routes_and_shop_settings_have_moved():
     eq(inspect.getsource(routes_chat).count("@mcp.custom_route("), 3, "the chat, its stream and the usage panel")
 
 @test
+def t_no_error_is_swallowed_without_a_reason():
+    """A broad handler that lets an error go without a word (a pass, a
+    continue or break, a bare return) says why in a comment on its own lines:
+    silence is sometimes right, but only for a reason a reader can check.
+    tools/broad_excepts.py finds them across the app (stage 5, A4)."""
+    import importlib.util
+    spec_ = importlib.util.spec_from_file_location("broad_excepts", os.path.join(HERE, "tools", "broad_excepts.py"))
+    be = importlib.util.module_from_spec(spec_); spec_.loader.exec_module(be)
+    found = be.scan()
+    ok(len(found) > 300, "the scan finds the app's broad handlers (%d)" % len(found))
+    quiet = [f"{h['file']}:{h['line']} {h['kind']}" for h in found if h["kind"] in be.SILENT and not h["reason"]]
+    eq(quiet, [], "silent handlers that do not say why")
+
+@test
 def t_the_moved_areas_routes_follow_them():
     """Production's, the Size list's and the order book's routes follow their
     areas into gizmo/routes/, each group registered by one call. The two

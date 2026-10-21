@@ -45,22 +45,22 @@ async def _impact_snapshot(registry: dict) -> dict:
         if not m28.get("failed"):      # a failed read is absent, never a zero
             snap["revenue_28d"] = round(sum(orderbook._order_revenue(o) for o in orders), 2)
             snap["orders_28d"] = len(orders)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("impact snapshot: the orders figures were left out (%s)", type(e).__name__)
     try:
         if google_data.ga4_configured():
             ga = await google_data.ga4_summary(28)
             if ga and not ga.get("error") and ga.get("sessions") is not None:
                 snap["sessions_28d"] = ga["sessions"]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("impact snapshot: the sessions figure was left out (%s)", type(e).__name__)
     try:
         if google_data.gsc_configured():
             g = await google_data.gsc_overview(28)
             if g and not g.get("error") and g.get("clicks") is not None:
                 snap["clicks_28d"] = g["clicks"]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("impact snapshot: the clicks figure was left out (%s)", type(e).__name__)
     return snap
 
 

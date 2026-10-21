@@ -94,7 +94,7 @@ def token_vault_state() -> dict:
                 present += 1
                 (sealed if tokenvault.is_sealed(v) else plain).append("A sign-in code secret")
     except Exception:
-        pass
+        pass  # an unreadable accounts file leaves the count as far as it got
     return {"enabled": tokenvault.enabled(), "stored": present,
             "sealed": len(sealed), "plaintext": sorted(set(plain))}
 

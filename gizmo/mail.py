@@ -1257,7 +1257,7 @@ async def _mail_sync_now(force: bool = False) -> str:
                 try:
                     _write_mail(store)
                 except Exception:
-                    pass
+                    pass  # the sync failure is logged above and its reason still returned
             return why
 
 
@@ -1789,7 +1789,7 @@ def _mail_crm_match(email: str) -> Optional[dict]:
                 return {"person_id": pid, "name": p.get("name") or "",
                         "org": org.get("name") or ""}
     except Exception:
-        pass
+        pass  # a CRM that cannot be read matches nobody; the inbox works without it
     return None
 _mail_last_force = {"t": 0.0}
 MAIL_DRAFT_SYSTEM = (

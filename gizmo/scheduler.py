@@ -534,7 +534,7 @@ async def _scheduler_loop(registry: dict) -> None:
                                             ["The automatic refresh loop errored; it will keep retrying.",
                                              "If alerts go quiet for days, check the server logs."])
             except Exception:
-                pass
+                pass  # the loop's error is logged above; a failure email that cannot go must never stop the loop
         await asyncio.sleep(SCHEDULE_CHECK_SECS)
 
 

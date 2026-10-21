@@ -321,7 +321,7 @@ async def exchange_code(code: str, redirect_uri: str) -> bool:
             claims = json.loads(base64.urlsafe_b64decode(payload))
             auth_event = str(claims.get("authentication_event_id") or "")
         except Exception:
-            pass
+            pass  # a token without the claim falls back to the newest organisation below
         hit = next((x for x in rows if auth_event
                     and str(x.get("authEventId") or "") == auth_event), None)
         if hit is None and rows:

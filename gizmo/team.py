@@ -360,7 +360,7 @@ def _session_uid(raw: Optional[str]) -> Optional[str]:
             row["exp"] = (now + timedelta(hours=SESSION_HOURS)).isoformat()
             _write_sessions(s)
     except Exception:
-        pass
+        pass  # the bump is a nicety: the session stands until its old expiry
     return str(row.get("uid") or "") or None
 
 

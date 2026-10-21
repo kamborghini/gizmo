@@ -348,7 +348,7 @@ async def export(progress=None) -> dict:
             try:
                 progress(msg)
             except Exception:
-                pass
+                pass  # a progress line that cannot be shown must never stop the import
 
     me = await whoami()
     say("reading the pipeline and stages")

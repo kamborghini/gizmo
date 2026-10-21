@@ -144,7 +144,7 @@ def _parse_seo(html: str) -> dict:
         try:
             data = json.loads(s.string or "")
         except Exception:
-            continue
+            continue  # a script that is not JSON adds no types
         for it in (data if isinstance(data, list) else [data]):
             t = it.get("@type") if isinstance(it, dict) else None
             types.extend(t if isinstance(t, list) else [t] if t else [])
