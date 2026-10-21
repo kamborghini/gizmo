@@ -437,10 +437,10 @@ async def _connector_watch() -> None:
 
     Never raises: the scheduler has other work after this.
     """
-    if not core._connector_url():
+    if not xerosync._connector_url():
         return
     try:
-        code, data = await core._connector_call("GET", "/api/health")
+        code, data = await xerosync._connector_call("GET", "/api/health")
     except Exception:
         # The service being unreachable is its own alert, but a noisy one
         # during a redeploy. The tab says it plainly; this stays quiet.
@@ -571,3 +571,4 @@ from gizmo import skills as skillbook  # noqa: E402
 from gizmo import team  # noqa: E402
 from gizmo import work  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import xero_sync as xerosync  # noqa: E402

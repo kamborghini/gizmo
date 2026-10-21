@@ -176,6 +176,10 @@ from gizmo import scheduler
 from gizmo import updates
 from gizmo import impact
 from gizmo import backup
+from gizmo import liability
+from gizmo import reconciliation
+from gizmo import xero_sync as xerosync
+from gizmo import forecasting
 import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
@@ -4604,7 +4608,7 @@ def with_liability(orders_list, fn):
         return {}
     saved = shopify._tool_json; shopify._tool_json = tools
     try:
-        os.remove(copilot.CHASE_LOG_PATH)
+        os.remove(liability.CHASE_LOG_PATH)
     except FileNotFoundError:
         pass
     try:
@@ -4615,7 +4619,7 @@ def with_liability(orders_list, fn):
 @test
 def t_the_chase_email_says_what_is_owed_and_by_which_orders():
     def go():
-        res = run(copilot.run_liability({}))
+        res = run(liability.run_liability({}))
         c = res["customers"][0]
         ok(c["chase"], "an email is composed for the account")
         body = c["chase"]["body"]
@@ -4648,7 +4652,7 @@ def t_the_liability_route_answers_with_the_report():
 def t_the_tone_steps_with_how_late_the_oldest_debt_is():
     def tone_for(days_ago):
         def go():
-            res = run(copilot.run_liability({}))
+            res = run(liability.run_liability({}))
             return res["customers"][0]["chase"]["tone"]
         return with_liability([lia_order(104310, days_ago, 200)], go)
     eq(tone_for(20), "statement", "inside Net 30 nothing is overdue, so it is a statement")
@@ -4657,7 +4661,7 @@ def t_the_tone_steps_with_how_late_the_oldest_debt_is():
     eq(tone_for(75), "final", "six weeks over is a final reminder")
     # And the wording never threatens: even final offers a way through.
     def go2():
-        res = run(copilot.run_liability({}))
+        res = run(liability.run_liability({}))
         body = res["customers"][0]["chase"]["body"]
         ok("talk to me" in body or "way through" in body, "final stays human")
         for word in ("legal", "solicitor", "court", "debt collect"):
@@ -4667,13 +4671,13 @@ def t_the_tone_steps_with_how_late_the_oldest_debt_is():
 @test
 def t_marking_an_account_chased_is_remembered_and_shown():
     def go():
-        res = run(copilot.run_liability({}))
+        res = run(liability.run_liability({}))
         c = res["customers"][0]
         eq(c["last_chased"], None, "never chased yet")
         r = post("/api/liability/chase", {"key": c["key"]})
         eq(r.status_code, 200, r.text)
         ok(r.json()["chased"]["at"], "the stamp has a time")
-        res2 = run(copilot.run_liability({}))
+        res2 = run(liability.run_liability({}))
         ok(res2["customers"][0]["last_chased"], "and the next load shows it")
     with_liability([lia_order(104320, 60, 300)], go)
 
@@ -4682,19 +4686,19 @@ def t_a_chase_stamp_that_cannot_be_saved_says_so():
     # A silently lost stamp re-creates the double-chasing this exists to stop.
     # A corrupt log is the realistic failure: the loader refuses to overwrite a
     # store it could not parse, so the stamp must fail loudly, not quietly.
-    saved_path = copilot.CHASE_LOG_PATH
-    copilot.CHASE_LOG_PATH = SCRATCH + "/chase_corrupt.json"
-    with open(copilot.CHASE_LOG_PATH, "w") as fh:
+    saved_path = liability.CHASE_LOG_PATH
+    liability.CHASE_LOG_PATH = SCRATCH + "/chase_corrupt.json"
+    with open(liability.CHASE_LOG_PATH, "w") as fh:
         fh.write("{not json")
     try:
         r = post("/api/liability/chase", {"key": "55"})
         eq(r.status_code, 500, r.text)
         ok("could not be recorded" in r.json()["error"], r.json()["error"])
-        eq(open(copilot.CHASE_LOG_PATH).read(), "{not json", "and the corrupt file was preserved")
+        eq(open(liability.CHASE_LOG_PATH).read(), "{not json", "and the corrupt file was preserved")
     finally:
-        jsonstore._poisoned_stores.discard(copilot.CHASE_LOG_PATH)
-        os.remove(copilot.CHASE_LOG_PATH)
-        copilot.CHASE_LOG_PATH = saved_path
+        jsonstore._poisoned_stores.discard(liability.CHASE_LOG_PATH)
+        os.remove(liability.CHASE_LOG_PATH)
+        liability.CHASE_LOG_PATH = saved_path
 
 
 @test
@@ -4703,7 +4707,7 @@ def t_a_mixed_account_is_never_told_its_fresh_orders_are_overdue():
     # terms. Calling the whole balance overdue is the dispute a chasing email
     # must not start: every "overdue" claim covers exactly the overdue subset.
     def go():
-        res = run(copilot.run_liability({}))
+        res = run(liability.run_liability({}))
         c = res["customers"][0]
         subj, body = c["chase"]["subject"], c["chase"]["body"]
         ok("£50.00 overdue" in subj, "the subject claims only the overdue amount: " + subj)
@@ -13894,7 +13898,7 @@ def t_the_system_learns_which_source_is_right_from_closed_months():
        "the closest source each month is recorded")
     ok("if month in scored or month not in predicted:" in led,
        "a month is marked once, and only if something was predicted for it")
-    ok('state["ledger"] = _forecast_ledger(state, body)' in src, "the hook keeps it")
+    ok('state["ledger"] = forecasting._forecast_ledger(state, body)' in src, "the hook keeps it")
     ok('"/hooks/forecast/ledger"' in src, "and the service can read it back")
 
     ok("def track_record(" in simple and "MIN_LIVE_MONTHS = 3" in simple,
@@ -14250,7 +14254,7 @@ def t_the_record_keeps_what_the_forecast_in_use_said():
     scored before this was kept, so its source in use (rebuilt from the
     forecast's own code) is filled in from the source's own first figure and
     marked as worked out afterwards."""
-    L = copilot._forecast_ledger
+    L = forecasting._forecast_ledger
     state = {}
     sep9 = {"as_of": "2026-09-09", "seen_through": "2026-08",
             "predictions": {"2026-09": {"Last year, adjusted for this year": 24677.35, "Trend": 39197.55},
@@ -14329,12 +14333,12 @@ def t_the_forecast_hook_takes_only_its_token_and_the_tab_reads_the_run():
     failure rather than shown as a forecast."""
     import io, zipfile
     ensure_auth()
-    saved = copilot.FORECAST_INGEST_TOKEN
+    saved = forecasting.FORECAST_INGEST_TOKEN
     try:
-        copilot.FORECAST_INGEST_TOKEN = ""
+        forecasting.FORECAST_INGEST_TOKEN = ""
         r = client.post("/hooks/forecast/results", json={"as_of": "2026-09-08", "monthly": [], "scenarios": []})
         eq(r.status_code, 503, "no secret configured: the hook is off")
-        copilot.FORECAST_INGEST_TOKEN = "forecast-secret-for-tests"
+        forecasting.FORECAST_INGEST_TOKEN = "forecast-secret-for-tests"
         h = {"X-Forecast-Token": "wrong"}
         r = client.post("/hooks/forecast/results", json={"as_of": "2026-09-08", "monthly": [], "scenarios": []}, headers=h)
         eq(r.status_code, 401, "a wrong token is refused")
@@ -14383,7 +14387,7 @@ def t_the_forecast_hook_takes_only_its_token_and_the_tab_reads_the_run():
         ok("forecast" in team.TAB_KEYS and "forecast" in team.OPT_IN_TABS, "the tab is a grant nobody inherits")
         ok(any(p == "/api/forecast" and t == "forecast" for p, t in gate._TAB_ROUTES), "its routes are claimed by it")
     finally:
-        copilot.FORECAST_INGEST_TOKEN = saved
+        forecasting.FORECAST_INGEST_TOKEN = saved
 
 
 @test
@@ -14395,9 +14399,9 @@ def t_the_forecast_hook_keeps_only_a_date_and_a_figure_from_each_run():
     so this is an insider or a compromised service, and still not a reason
     for the disk to be the limit."""
     ensure_auth()
-    saved = copilot.FORECAST_INGEST_TOKEN
+    saved = forecasting.FORECAST_INGEST_TOKEN
     try:
-        copilot.FORECAST_INGEST_TOKEN = "forecast-secret-for-tests"
+        forecasting.FORECAST_INGEST_TOKEN = "forecast-secret-for-tests"
         h = {"X-Forecast-Token": "forecast-secret-for-tests"}
         run = {"monthly": [], "scenarios": []}
         for bad in ("x" * 200000, "yesterday", 20260908, None, ["2026-09-08"]):
@@ -14411,14 +14415,14 @@ def t_the_forecast_hook_keeps_only_a_date_and_a_figure_from_each_run():
         r = client.post("/hooks/forecast/results",
                         json={**run, "as_of": "2026-09-10", "year": {"p50": "9" * 100000}}, headers=h)
         eq(r.status_code, 200, r.text[:120])
-        last = copilot._forecast_state()["runs"][-1]
+        last = forecasting._forecast_state()["runs"][-1]
         eq(last["as_of"], "2026-09-10", "the run is kept")
         eq(last["year_p50"], None, "but a year figure that is not a number is not")
         r = client.post("/hooks/forecast/results",
                         json={**run, "as_of": "2026-09-11", "year": {"p50": 301060.123}}, headers=h)
-        eq(copilot._forecast_state()["runs"][-1]["year_p50"], 301060.12, "a real one is kept, to the penny")
+        eq(forecasting._forecast_state()["runs"][-1]["year_p50"], 301060.12, "a real one is kept, to the penny")
     finally:
-        copilot.FORECAST_INGEST_TOKEN = saved
+        forecasting.FORECAST_INGEST_TOKEN = saved
 
 @test
 def t_an_m_size_holder_takes_an_m_size_gobo():
@@ -15281,7 +15285,7 @@ def t_the_forecast_job_reads_the_store_through_four_fixed_reads():
     a date, a bulk operation id and a page cursor, each checked first."""
     import ast
     ensure_auth()
-    saved = (copilot.FORECAST_INGEST_TOKEN, server._request)
+    saved = (forecasting.FORECAST_INGEST_TOKEN, server._request)
     sent = []
     reply = {"v": None}
 
@@ -15289,10 +15293,10 @@ def t_the_forecast_job_reads_the_store_through_four_fixed_reads():
         sent.append({"path": path, "body": body, "idempotent": idempotent})
         return reply["v"]
     try:
-        copilot.FORECAST_INGEST_TOKEN = ""
+        forecasting.FORECAST_INGEST_TOKEN = ""
         eq(client.post("/hooks/forecast/shopify", json={"op": "products"}).status_code, 503,
            "no secret configured: off")
-        copilot.FORECAST_INGEST_TOKEN = "forecast-secret-for-tests"
+        forecasting.FORECAST_INGEST_TOKEN = "forecast-secret-for-tests"
         eq(client.post("/hooks/forecast/shopify", json={"op": "products"},
                        headers={"X-Forecast-Token": "wrong"}).status_code, 401, "a wrong token is refused")
         server._request = fake_request
@@ -15348,7 +15352,7 @@ def t_the_forecast_job_reads_the_store_through_four_fixed_reads():
         for field in ("email", "phone", "address", "firstName", "lastName"):
             ok(field not in server.FORECAST_BULK_ORDERS_QUERY, "no customer's %s leaves the store" % field)
     finally:
-        copilot.FORECAST_INGEST_TOKEN, server._request = saved
+        forecasting.FORECAST_INGEST_TOKEN, server._request = saved
 
 
 @test
@@ -16099,7 +16103,7 @@ def t_recon_reports_money_at_stake_by_severity():
     agree; the count used to be a snapshot from the last sweep."""
     import copilot as _cp
     ensure_auth()
-    keep = json.loads(json.dumps(_cp._load_recon()))
+    keep = json.loads(json.dumps(reconciliation._load_recon()))
     try:
         d = {"exceptions": {}, "watermarks": {}}
         n = [0]
@@ -16111,14 +16115,14 @@ def t_recon_reports_money_at_stake_by_severity():
         put("critical", 100000); put("critical", -25000); put("high", 5000, status="investigating")
         put("high", 9900, status="explained"); put("medium", 700, stale=True); put("low", 1234)
         put("low", None)
-        _cp._write_recon(d)
+        reconciliation._write_recon(d)
         j = post("/api/recon/status", {}).json()
         eq(j["open_amounts"], {"critical": 125000, "high": 5000, "medium": 0, "low": 1234},
            "the money at stake: open, live, and the size of each difference whatever its sign")
         eq(j["open_counts"], {"critical": 2, "high": 1, "medium": 0, "low": 2},
            "counted by the same rule, so a counter's figure and its money agree")
     finally:
-        _cp._write_recon(keep)
+        reconciliation._write_recon(keep)
 
 
 @test
@@ -16129,18 +16133,18 @@ def t_the_ai_counts_open_discrepancies_as_the_page_does():
     while the page said 2."""
     import asyncio
     import copilot as _cp
-    keep = json.loads(json.dumps(_cp._load_recon()))
+    keep = json.loads(json.dumps(reconciliation._load_recon()))
     try:
         d = {"exceptions": {}, "watermarks": {}, "open_counts": {"critical": 3, "high": 0, "medium": 0, "low": 0}}
         for i, status in enumerate(("new", "investigating", "explained")):
             e = _rc.make_exc("shopify_sale_missing", "critical", "ai " + str(i), ["ai" + str(i)], amount=1000)
             e["status"] = status
             d["exceptions"][e["id"]] = e
-        _cp._write_recon(d)
-        got = json.loads(asyncio.run(_cp.recon_summary(_cp.ReconEmptyInput())))
+        reconciliation._write_recon(d)
+        got = json.loads(asyncio.run(reconciliation.recon_summary(reconciliation.ReconEmptyInput())))
         eq(got["open_counts"], {"critical": 2, "high": 0, "medium": 0, "low": 0}, "the AI's count is the page's, not the sweep's snapshot")
     finally:
-        _cp._write_recon(keep)
+        reconciliation._write_recon(keep)
 
 
 @test
@@ -16173,9 +16177,9 @@ def t_a_discrepancy_names_its_record_and_who_it_is_with():
             E("xero", "bank_transaction", "Bank txn e21a", {"contact": "", "date": "2026-09-03"}, 1)]), ("Bank line", "")),
     ]
     for e, want in cases:
-        pub = _cp._recon_exc_public(e)
+        pub = reconciliation._recon_exc_public(e)
         eq((pub.get("record"), pub.get("counterparty")), want, e["kind"])
-    bare = _cp._recon_exc_public(mk("xero_sale_without_shopify", "low", "x", ["i"]))
+    bare = reconciliation._recon_exc_public(mk("xero_sale_without_shopify", "low", "x", ["i"]))
     eq((bare.get("record"), bare.get("counterparty")), ("", ""), "no evidence, nothing invented")
 
 
@@ -16190,11 +16194,11 @@ def t_recon_routes_enforce_their_rules():
         # Ignoring without a reason is refused: an unexplained ignore is how a
         # real discrepancy disappears.
         import copilot as _cp
-        d = _cp._load_recon()
+        d = reconciliation._load_recon()
         e = _rc.make_exc("shopify_sale_missing", "high", "A test discrepancy", ["t1"],
                          amount=1000)
         d.setdefault("exceptions", {})[e["id"]] = e
-        _cp._write_recon(d)
+        reconciliation._write_recon(d)
         r2 = post("/api/recon/exception", {"id": e["id"], "op": "status",
                                            "status": "ignored"})
         eq(r2.status_code, 400, "ignore needs a reason: " + r2.text[:100])
@@ -17037,7 +17041,7 @@ def t_disconnecting_xero_revokes_rather_than_forgets():
                                    "tenant_name": "Projected Image"})
             # The cache holds a copy of the books; it must not outlive the consent.
             import copilot as _cp
-            _cp._write_recon_cache({"xero": {"invoices": {"a": {"id": "a"}}},
+            reconciliation._write_recon_cache({"xero": {"invoices": {"a": {"id": "a"}}},
                                     "shopify": {"orders": {}}})
             r = post("/api/recon/disconnect", {"what": "xero"})
             eq(r.status_code, 200, r.text[:160])
@@ -17046,9 +17050,9 @@ def t_disconnecting_xero_revokes_rather_than_forgets():
             eq(called.get("token"), "rt-live", "with the live refresh token")
             ok(called.get("auth"), "authenticated with the client credentials")
             ok(not xero_api.connected(), "and the local copy is gone")
-            eq(_cp._load_recon_cache().get("xero"), None,
+            eq(reconciliation._load_recon_cache().get("xero"), None,
                "the cached accounting records went with it")
-            ok("shopify" in _cp._load_recon_cache(),
+            ok("shopify" in reconciliation._load_recon_cache(),
                "while the rest of the cache is untouched")
         finally:
             xero_api.CLIENT_ID, xero_api.CLIENT_SECRET, xero_api.httpx.AsyncClient = saved
@@ -17092,12 +17096,12 @@ def t_token_files_are_not_world_readable():
     # The records those tokens fetched are not less sensitive than the tokens:
     # the cache is the books, and the docs store is the contents of bank
     # statements and remittance advices.
-    copilot._write_recon_cache({"xero": {"invoices": {}}})
-    copilot._write_recon_docs({"t1": {"kind": "remittance"}})
-    copilot._write_recon({"exceptions": {}})
-    for path, what in ((copilot.RECON_CACHE_PATH, "the accounting cache"),
-                       (copilot.RECON_DOCS_PATH, "the extracted documents"),
-                       (copilot.RECON_PATH, "the exception list")):
+    reconciliation._write_recon_cache({"xero": {"invoices": {}}})
+    reconciliation._write_recon_docs({"t1": {"kind": "remittance"}})
+    reconciliation._write_recon({"exceptions": {}})
+    for path, what in ((reconciliation.RECON_CACHE_PATH, "the accounting cache"),
+                       (reconciliation.RECON_DOCS_PATH, "the extracted documents"),
+                       (reconciliation.RECON_PATH, "the exception list")):
         m = stat.S_IMODE(os.stat(path).st_mode)
         eq(m & 0o077, 0, "%s is owner-only: %o" % (what, m))
 
@@ -17298,18 +17302,18 @@ def t_a_failed_revocation_keeps_the_token_rather_than_stranding_it():
         xero_api.httpx.AsyncClient = lambda *a, **k: _C()
         try:
             xero_api._write_token({"refresh_token": "rt-live", "tenant_id": "t1"})
-            copilot._write_recon_cache({"xero": {"invoices": {"a": {"id": "a"}}}})
+            reconciliation._write_recon_cache({"xero": {"invoices": {"a": {"id": "a"}}}})
             r = post("/api/recon/disconnect", {"what": "xero"})
             eq(r.status_code, 502, r.text[:200])
             ok(r.json().get("can_force"), "the merchant is offered the way out")
             ok(xero_api.connected(), "the token is still here, so revoking can be retried")
-            ok(copilot._load_recon_cache().get("xero"),
+            ok(reconciliation._load_recon_cache().get("xero"),
                "and the books were not deleted for a disconnect that did not happen")
             # Insisting forgets it anyway.
             r2 = post("/api/recon/disconnect", {"what": "xero", "force": 1})
             eq(r2.status_code, 200, r2.text[:200])
             ok(not xero_api.connected(), "forced, it is gone")
-            eq(copilot._load_recon_cache().get("xero"), None, "and so are the books")
+            eq(reconciliation._load_recon_cache().get("xero"), None, "and so are the books")
         finally:
             xero_api.CLIENT_ID, xero_api.CLIENT_SECRET, xero_api.httpx.AsyncClient = saved
             xero_api.disconnect()
@@ -17731,11 +17735,11 @@ def t_the_connector_tab_is_a_guarded_proxy():
 
     # Unconfigured: says so, calls nothing.
     called = []
-    real = _c._connector_call
+    real = xerosync._connector_call
     async def fake(method, path, params=None):
         called.append((method, path, dict(params or {})))
         return 200, {"ok": True, "running": False}
-    _c._connector_call = fake
+    xerosync._connector_call = fake
     old_url = os.environ.pop("CONNECTOR_URL", None)
     try:
         r = post("/api/connector", {"op": "status"}).json()
@@ -17774,7 +17778,7 @@ def t_the_connector_tab_is_a_guarded_proxy():
         raw = post("/api/connector", {"op": "status"}).text
         ok("super-secret-token" not in raw, "the token never leaves the server")
     finally:
-        _c._connector_call = real
+        xerosync._connector_call = real
         os.environ.pop("CONNECTOR_TOKEN", None)
         if old_url is None:
             os.environ.pop("CONNECTOR_URL", None)
@@ -17788,11 +17792,11 @@ def t_only_an_admin_can_write_to_xero():
     A member with the tab may look and review; writing is a different act."""
     import copilot as _c
     called = []
-    real = _c._connector_call
+    real = xerosync._connector_call
     async def fake(method, path, params=None):
         called.append((method, path))
         return 200, {"ok": True}
-    _c._connector_call = fake
+    xerosync._connector_call = fake
     os.environ["CONNECTOR_URL"] = "http://connector.internal:8899"
     try:
         # A member account holding the connector tab.
@@ -17825,7 +17829,7 @@ def t_only_an_admin_can_write_to_xero():
            "without the tab, the door is shut")
         post("/api/team/user", {"op": "delete", "id": uid})
     finally:
-        _c._connector_call = real
+        xerosync._connector_call = real
         os.environ.pop("CONNECTOR_URL", None)
 
 
@@ -20175,8 +20179,8 @@ def t_one_order_can_be_checked_by_anyone_and_sent_only_by_an_admin():
         return 200, {"order": "#104300", "found": True,
                      "dryRun": bool((params or {}).get("dryRun")),
                      "docs": [{"kind": "invoice", "key": "#104300", "action": "created"}]}
-    saved, old_url = copilot._connector_call, os.environ.get("CONNECTOR_URL", "")
-    copilot._connector_call = fake
+    saved, old_url = xerosync._connector_call, os.environ.get("CONNECTOR_URL", "")
+    xerosync._connector_call = fake
     os.environ["CONNECTOR_URL"] = "http://connector.test:8899"
     try:
         ensure_auth()
@@ -20197,7 +20201,7 @@ def t_one_order_can_be_checked_by_anyone_and_sent_only_by_an_admin():
            "an order name that is only spaces is refused here, not at the connector")
         eq(len(calls), before + 1, "and that refusal reached nothing either")
     finally:
-        copilot._connector_call = saved
+        xerosync._connector_call = saved
         os.environ["CONNECTOR_URL"] = old_url
 
 
@@ -20352,12 +20356,12 @@ def t_a_connector_url_with_no_hostname_is_named_as_the_config_fault_it_is():
     "http://:8899". httpx calls that UnsupportedProtocol, which names the
     symptom and buries the cause; it is a configuration fault and says so."""
     ensure_auth()
-    real = copilot._connector_call
+    real = xerosync._connector_call
     called = []
     async def fake(method, path, params=None):
         called.append(path)
         return 200, {"ok": True}
-    copilot._connector_call = fake
+    xerosync._connector_call = fake
     old_url = os.environ.get("CONNECTOR_URL")
     try:
         for bad in ("http://:8899", "http://", "https://:443"):
@@ -20373,7 +20377,7 @@ def t_a_connector_url_with_no_hostname_is_named_as_the_config_fault_it_is():
         eq(post("/api/connector", {"op": "status"}).json().get("available"), True)
         ok(called, "a well-formed URL is actually called")
     finally:
-        copilot._connector_call = real
+        xerosync._connector_call = real
         if old_url is None:
             os.environ.pop("CONNECTOR_URL", None)
         else:
@@ -20388,7 +20392,7 @@ def t_an_unreachable_connector_says_which_of_the_three_faults_it_is():
     the tab cannot see. It names the host it tried and what went wrong."""
     import httpx as _hx
     ensure_auth()
-    real = copilot._connector_call
+    real = xerosync._connector_call
     old_url = os.environ.get("CONNECTOR_URL")
     os.environ["CONNECTOR_URL"] = "http://xero-conn.railway.internal:8899"
     cases = [
@@ -20403,7 +20407,7 @@ def t_an_unreachable_connector_says_which_of_the_three_faults_it_is():
         for err, wants in cases:
             async def fake(method, path, params=None, _e=err):
                 raise _e
-            copilot._connector_call = fake
+            xerosync._connector_call = fake
             r = post("/api/connector", {"op": "status"})
             eq(r.status_code, 502, r.text)
             msg = r.json()["error"]
@@ -20416,11 +20420,11 @@ def t_an_unreachable_connector_says_which_of_the_three_faults_it_is():
         for err, _w in cases:
             async def fake(method, path, params=None, _e=err):
                 raise _e
-            copilot._connector_call = fake
+            xerosync._connector_call = fake
             outs.append(post("/api/connector", {"op": "status"}).json()["error"])
         eq(len(set(outs)), 3, "each fault reads differently")
     finally:
-        copilot._connector_call = real
+        xerosync._connector_call = real
         if old_url is None:
             os.environ.pop("CONNECTOR_URL", None)
         else:
@@ -20437,11 +20441,11 @@ def t_payout_notes_are_looked_at_by_anyone_and_written_by_an_admin():
     eq(post("/api/team/user", {"op": "tabs", "id": uid,
                                "tabs": ["connector"]}).status_code, 200)
     seen = []
-    real = copilot._connector_call
+    real = xerosync._connector_call
     async def fake(method, path, params=None):
         seen.append((method, path, dict(params or {})))
         return 200, {"annotated": 0, "dryRun": True, "notes": []}
-    copilot._connector_call = fake
+    xerosync._connector_call = fake
     old_url = os.environ.get("CONNECTOR_URL")
     os.environ["CONNECTOR_URL"] = "http://conn.railway.internal:8899"
     try:
@@ -20464,7 +20468,7 @@ def t_payout_notes_are_looked_at_by_anyone_and_written_by_an_admin():
         bad = post("/api/connector", {"op": "payouts", "since": "last August"})
         eq(bad.status_code, 400, "a date that is not a date is refused here")
     finally:
-        copilot._connector_call = real
+        xerosync._connector_call = real
         if old_url is None:
             os.environ.pop("CONNECTOR_URL", None)
         else:
@@ -20479,11 +20483,11 @@ def t_auto_run_is_off_by_default_and_only_an_admin_moves_it():
     uid, sess, _ = ready_user("Ada", "ada-autorun")
     eq(post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["connector"]}).status_code, 200)
     seen = []
-    real = copilot._connector_call
+    real = xerosync._connector_call
     async def fake(method, path, params=None):
         seen.append((method, path, dict(params or {})))
         return 200, {"enabled": False, "intervalMinutes": 10, "ticks": 0}
-    copilot._connector_call = fake
+    xerosync._connector_call = fake
     old_url = os.environ.get("CONNECTOR_URL")
     os.environ["CONNECTOR_URL"] = "http://conn.railway.internal:8899"
     try:
@@ -20499,7 +20503,7 @@ def t_auto_run_is_off_by_default_and_only_an_admin_moves_it():
         eq(post("/api/connector", {"op": "autorun_set", "enabled": False}).status_code, 200)
         eq(seen[-1][2].get("enabled"), "false", "and off again")
     finally:
-        copilot._connector_call = real
+        xerosync._connector_call = real
         if old_url is None:
             os.environ.pop("CONNECTOR_URL", None)
         else:
@@ -20513,11 +20517,11 @@ def t_only_operational_settings_can_be_changed_from_the_page():
     the shop, the Xero organisation and every credential are not."""
     ensure_auth()
     seen = []
-    real = copilot._connector_call
+    real = xerosync._connector_call
     async def fake(method, path, params=None, json_body=None):
         seen.append((method, path, dict(json_body or params or {})))
         return 200, {"ok": True}
-    copilot._connector_call = fake
+    xerosync._connector_call = fake
     old_url = os.environ.get("CONNECTOR_URL")
     os.environ["CONNECTOR_URL"] = "http://conn.railway.internal:8899"
     try:
@@ -20535,7 +20539,7 @@ def t_only_operational_settings_can_be_changed_from_the_page():
                                    "fields": {"DASHBOARD_TOKEN": "x"}}).status_code, 400,
            "a save of nothing settable is refused rather than sent as empty")
     finally:
-        copilot._connector_call = real
+        xerosync._connector_call = real
         if old_url is None:
             os.environ.pop("CONNECTOR_URL", None)
         else:
@@ -20575,8 +20579,8 @@ def t_a_settings_save_reaches_the_connector_as_a_body_of_only_what_changed():
                 else:   # stored in its rule's form, as the connector does: 0.50 is kept as 0.5
                     saved[k] = str(float(v)) if k == "RECONCILE_TOLERANCE" else v
         return _httpx.Response(200, json={"ok": True})
-    real_httpx = copilot.httpx
-    copilot.httpx = _RoutedHttpx(connector)
+    real_httpx = xerosync.httpx
+    xerosync.httpx = _RoutedHttpx(connector)
     old_url = os.environ.get("CONNECTOR_URL")
     os.environ["CONNECTOR_URL"] = "http://conn.railway.internal:8899"
     save = lambda fields: post("/api/connector", {"op": "settings_save", "fields": fields})
@@ -20605,7 +20609,7 @@ def t_a_settings_save_reaches_the_connector_as_a_body_of_only_what_changed():
         r = save({"RECONCILE_MODE": ""})
         eq(r.json().get("unapplied"), ["RECONCILE_MODE"], "and a clear that left the choice in place is named too")
     finally:
-        copilot.httpx = real_httpx
+        xerosync.httpx = real_httpx
         if old_url is None:
             os.environ.pop("CONNECTOR_URL", None)
         else:
@@ -20620,7 +20624,7 @@ def t_a_run_that_needs_attention_is_reported_once_and_only_once():
     run every scheduler tick would teach them to filter it."""
     ensure_auth()
     sent = []
-    real_call, real_mail = copilot._connector_call, scheduler._send_alert_email
+    real_call, real_mail = xerosync._connector_call, scheduler._send_alert_email
     async def fake_mail(subject, lines):
         sent.append((subject, list(lines)))
         return True
@@ -20629,7 +20633,7 @@ def t_a_run_that_needs_attention_is_reported_once_and_only_once():
               "problems": ["1 invoice quarantined"], "autoRun": {"enabled": True}}
     async def fake(method, path, params=None):
         return 200, health
-    copilot._connector_call = fake
+    xerosync._connector_call = fake
     scheduler._send_alert_email = fake_mail
     old_url = os.environ.get("CONNECTOR_URL")
     os.environ["CONNECTOR_URL"] = "http://conn.railway.internal:8899"
@@ -20659,7 +20663,7 @@ def t_a_run_that_needs_attention_is_reported_once_and_only_once():
             ok(a.get(field), "the alert carries " + field + ", or the banner is blank")
         ok("quarantined" in a["metric"], "and the metric says what is actually wrong")
     finally:
-        copilot._connector_call = real_call
+        xerosync._connector_call = real_call
         scheduler._send_alert_email = real_mail
         scheduler._save_watch(st)
         if old_url is None:
@@ -21648,11 +21652,11 @@ def t_the_connector_token_only_travels_somewhere_it_is_safe():
                              ("https://connector.example.com", True),
                              ("http://gizmo-connector.railway.internal:8080", True),
                              ("http://localhost:8080", True)):
-            eq(copilot._connector_url_safe(url), allowed, url)
+            eq(xerosync._connector_url_safe(url), allowed, url)
         os.environ["CONNECTOR_URL"] = "http://connector.example.com"
         try:
             asyncio.new_event_loop().run_until_complete(
-                copilot._connector_call("GET", "/status"))
+                xerosync._connector_call("GET", "/status"))
             ok(False, "a plain http host should have been refused")
         except RuntimeError as e:
             ok("will not be sent" in str(e), str(e))
@@ -27525,10 +27529,10 @@ def t_the_connector_settings_list_holds_only_what_the_connector_keeps():
     """Live fault, 2026-10-07: SHOP_TIMEZONE was on the list the Xero sync page
     may change, but the connector neither accepts nor returns it, so a save of
     it was dropped there while the page said "Saved"."""
-    ok("SHOP_TIMEZONE" not in copilot._CONNECTOR_SETTABLE, "not offered, so never 'saved'")
-    ok({"RECONCILE_MODE", "ORDERS_SINCE", "MAX_DOCS_PER_RUN"} <= copilot._CONNECTOR_SETTABLE, "the real knobs stay")
-    ok("AUTO_RUN_INTERVAL_MINUTES" in copilot._CONNECTOR_SETTABLE, "Auto Run's interval is one of them (connector 2026-10-21)")
-    ok("AUTO_RUN_INTERVAL_MINUTES" in copilot._CONNECTOR_NUMERIC, "kept as a number there, so 010 reads back as 10")
+    ok("SHOP_TIMEZONE" not in xerosync._CONNECTOR_SETTABLE, "not offered, so never 'saved'")
+    ok({"RECONCILE_MODE", "ORDERS_SINCE", "MAX_DOCS_PER_RUN"} <= xerosync._CONNECTOR_SETTABLE, "the real knobs stay")
+    ok("AUTO_RUN_INTERVAL_MINUTES" in xerosync._CONNECTOR_SETTABLE, "Auto Run's interval is one of them (connector 2026-10-21)")
+    ok("AUTO_RUN_INTERVAL_MINUTES" in xerosync._CONNECTOR_NUMERIC, "kept as a number there, so 010 reads back as 10")
 
 
 @test
@@ -27538,10 +27542,10 @@ def t_a_settings_save_the_connector_refuses_is_an_error_not_a_save():
     read that reply, error tucked under data, as "Saved", and anything else
     changed in the same save was silently dropped."""
     ensure_auth()
-    real_call = copilot._connector_call
+    real_call = xerosync._connector_call
     async def fake(method, path, params=None, json_body=None):
         return 400, {"error": 'AUTO_RUN_INTERVAL_MINUTES must be a whole number from 5 to 1440 (got "2")'}
-    copilot._connector_call = fake
+    xerosync._connector_call = fake
     old_url = os.environ.get("CONNECTOR_URL")
     os.environ["CONNECTOR_URL"] = "http://conn.railway.internal:8899"
     try:
@@ -27551,11 +27555,11 @@ def t_a_settings_save_the_connector_refuses_is_an_error_not_a_save():
            "the reason is the error itself, which the page shows")
         async def silent(method, path, params=None, json_body=None):
             return 502, None
-        copilot._connector_call = silent
+        xerosync._connector_call = silent
         r2 = post("/api/connector", {"op": "settings_save", "fields": {"RECONCILE_MODE": "strict"}})
         eq(r2.json().get("error"), "Connector error 502", "and a refusal with no reason still says it failed")
     finally:
-        copilot._connector_call = real_call
+        xerosync._connector_call = real_call
         if old_url is None:
             os.environ.pop("CONNECTOR_URL", None)
         else:
@@ -27567,10 +27571,10 @@ def t_turning_auto_run_on_records_the_interval_the_connector_uses():
     """The interval is a connector setting, AUTO_RUN_INTERVAL_MINUTES (5 to
     1440), so 'every 10 minutes' in the activity log was only true by default."""
     ensure_auth()
-    real_call = copilot._connector_call
+    real_call = xerosync._connector_call
     async def fake(method, path, params=None):
         return 200, {"enabled": True, "intervalMinutes": 30, "ticks": 0}
-    copilot._connector_call = fake
+    xerosync._connector_call = fake
     old_url = os.environ.get("CONNECTOR_URL")
     os.environ["CONNECTOR_URL"] = "http://conn.railway.internal:8899"
     try:
@@ -27579,7 +27583,7 @@ def t_turning_auto_run_on_records_the_interval_the_connector_uses():
         new = [e for e in activity._load_events()[before:] if e.get("area") == "connector"]
         eq([(e["action"], e["detail"]) for e in new], [("turned Auto Run on", "every 30 minutes")])
     finally:
-        copilot._connector_call = real_call
+        xerosync._connector_call = real_call
         if old_url is None:
             os.environ.pop("CONNECTOR_URL", None)
         else:
@@ -30174,22 +30178,29 @@ SHARED_COPIES = {
         "frame rule, which those tests never reach",
     ("copilot", "SHOPIFY_STORE", "server"):
         "the frame-ancestors test reads copilot._frame_headers alone",
-    ("copilot", "httpx", "server"):
-        "the connector settings test routes copilot's calls to the connector; "
-        "server's client talks to Shopify, which that test never reaches",
-    ("copilot", "httpx", "gizmo.orderbook"):
+    # The connector settings test routes the connector call's client
+    # (gizmo.xero_sync's httpx) to a fake connector; every other module's own
+    # client is one that test never reaches.
+    ("gizmo.xero_sync", "httpx", "server"):
+        "server's client talks to Shopify, which the connector settings test never reaches",
+    ("gizmo.xero_sync", "httpx", "copilot"):
+        "copilot.py's own client is the stock bridge's, which the connector settings test never reaches",
+    ("gizmo.xero_sync", "httpx", "gizmo.routes.xero_sync"):
+        "the connector route uses httpx only to name the errors it catches (HTTPError, the timeouts, "
+        "ConnectError); the routed client raises the real ones",
+    ("gizmo.xero_sync", "httpx", "gizmo.orderbook"):
         "the order book uses httpx only to name an error it catches (HTTPStatusError); "
         "the connector settings test reads no order",
-    ("copilot", "httpx", "gizmo.routes.mail"):
+    ("gizmo.xero_sync", "httpx", "gizmo.routes.mail"):
         "the inbox's routes use httpx only to name an error they catch (ConnectError); "
         "the connector settings test sends no mail",
-    ("copilot", "httpx", "gizmo.routes.files"):
+    ("gizmo.xero_sync", "httpx", "gizmo.routes.files"):
         "the Finder drive streams downloads from the bucket with its own client; "
         "the connector settings test reaches no file route",
-    ("copilot", "httpx", "gizmo.seo"):
+    ("gizmo.xero_sync", "httpx", "gizmo.seo"):
         "SEO reads the store's site and outside pages with its own client; "
         "the connector settings test reads no page",
-    ("copilot", "httpx", "gizmo.scheduler"):
+    ("gizmo.xero_sync", "httpx", "gizmo.scheduler"):
         "the scheduler sends alert email and watches the connector with its own client; "
         "the connector settings test runs no tick",
 }
@@ -30364,7 +30375,11 @@ def t_either_module_imports_first():
                         ("gizmo.routes.seo", "copilot"), ("gizmo.routes.analytics", "copilot"),
                         ("gizmo.scheduler", "copilot"), ("gizmo.updates", "copilot"), ("gizmo.impact", "copilot"),
                         ("gizmo.backup", "copilot"), ("gizmo.routes.scheduler", "copilot"), ("gizmo.routes.updates", "copilot"),
-                        ("gizmo.routes.impact", "copilot"), ("gizmo.routes.backup", "copilot")):
+                        ("gizmo.routes.impact", "copilot"), ("gizmo.routes.backup", "copilot"),
+                        ("gizmo.liability", "copilot"), ("gizmo.reconciliation", "copilot"), ("gizmo.xero_sync", "copilot"),
+                        ("gizmo.forecasting", "copilot"), ("gizmo.routes.liability", "copilot"),
+                        ("gizmo.routes.reconciliation", "copilot"), ("gizmo.routes.xero_sync", "copilot"),
+                        ("gizmo.routes.forecasting", "copilot")):
         r = _sp.run([sys.executable, "-c", f"import {first}, {then}; import gizmo.dispatch as d, copilot as c; "
                      "assert c.desk is d and d.core is c; print('ok')"],
                     cwd=root, env=dict(os.environ), capture_output=True, text=True, timeout=120)
@@ -30908,6 +30923,24 @@ def t_the_scheduler_updates_and_backup_routes_are_gathered():
         ok(path not in src, path + " is registered by its area's routes")
     eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_scheduler, routes_updates, routes_impact, routes_backup)],
        [2, 1, 1, 2], "2 schedule and alert routes, the updates route, the impact route, backup and restore")
+
+@test
+def t_the_finance_routes_are_gathered():
+    """Liability's, reconciliation's (with the Xero connect pair), the Xero sync
+    settings' and the forecast hooks' routes, each group registered by one
+    call in add_routes."""
+    import inspect
+    from gizmo.routes import forecasting as routes_forecasting, liability as routes_liability
+    from gizmo.routes import reconciliation as routes_reconciliation, xero_sync as routes_xero_sync
+    src = inspect.getsource(copilot.add_routes)
+    for call in ("routes_liability.register(mcp, registry)", "routes_reconciliation.register(mcp, registry)",
+                 "routes_xero_sync.register(mcp, registry)", "routes_forecasting.register(mcp, registry)"):
+        eq(src.count(call), 1, call)
+    for path in ('"/api/liability', '"/api/recon/', '"/oauth/xero/', '"/api/connector"', '"/hooks/forecast/', '"/api/forecast'):
+        ok(path not in src, path + " is registered by its area's routes")
+    eq([inspect.getsource(m).count("@mcp.custom_route(")
+        for m in (routes_liability, routes_reconciliation, routes_xero_sync, routes_forecasting)], [2, 9, 1, 6],
+       "2 liability routes, 7 reconciliation routes and the Xero connect pair, the connector route, 6 forecast routes")
 
 @test
 def t_the_moved_areas_routes_follow_them():

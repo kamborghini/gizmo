@@ -934,7 +934,7 @@ def seed_forecast():
     from forecast.cashflow import CashFlowModel
     from zoneinfo import ZoneInfo
     import base64 as _b64
-    tok_ = copilot.FORECAST_INGEST_TOKEN
+    tok_ = forecasting.FORECAST_INGEST_TOKEN
     if not tok_:
         raise RuntimeError("FORECAST_INGEST_TOKEN must be set before the prelude (launch.py sets it)")
     hook = {"X-Forecast-Token": tok_}
