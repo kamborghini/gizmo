@@ -381,7 +381,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `SESSION_MAX_DAYS` | `"30"` | gizmo.team |  |
 | `USERS_PATH` | `"/data/users.json"` | gizmo.team |  |
 
-## gizmo/updates.py - top
+## gizmo/updates.py - What's new: the release notes that ship WITH the release, an
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|

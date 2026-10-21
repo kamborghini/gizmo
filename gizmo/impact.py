@@ -18,6 +18,12 @@ IMPACT_PATH        = os.environ.get("IMPACT_PATH", "/data/impact.json")  # track
 IMPACT_MAX         = _env_num(int, os.environ.get("IMPACT_MAX", "100"), "100", "IMPACT_MAX")
 
 
+# ---------------------------------------------------------------------------
+# Impact tracking — "close the loop": snapshot headline metrics when a change is
+# made, then measure how they moved since. Proves whether advice worked.
+# ---------------------------------------------------------------------------
+
+
 def _load_impact() -> list[dict]:
     return jsonstore._load_json_store(IMPACT_PATH, "items", [])
 

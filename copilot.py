@@ -296,8 +296,8 @@ def _page_context_to_system(ctx) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Impact tracking — "close the loop": snapshot headline metrics when a change is
-# made, then measure how they moved since. Proves whether advice worked.
+# The store report, the last error alert, and today's date and time in London,
+# which the whole app reads.
 # ---------------------------------------------------------------------------
 
 
@@ -2016,10 +2016,8 @@ def _spawn_bg(coro) -> bool:
     t.add_done_callback(salesdesk._crm_bg_tasks.discard)
     return True
 # ---------------------------------------------------------------------------
-# What's new: the release notes that ship WITH the release, and the desk's own
-# feature requests. The changelog is a repo file, so the running build always
-# carries exactly the notes for the code that is running - a changelog kept on
-# the volume would drift from the deploy the moment either changed alone.
+# Shop redaction owed after an uninstall, privacy requests held for an admin,
+# the token vault at rest, and who may edit the Size list or send mail.
 # ---------------------------------------------------------------------------
 
 

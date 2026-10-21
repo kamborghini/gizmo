@@ -18,6 +18,14 @@ logger = logging.getLogger("shopify_mcp.copilot")
 _REPO = os.path.dirname(os.path.dirname(__file__))
 
 
+# ---------------------------------------------------------------------------
+# What's new: the release notes that ship WITH the release, and the desk's own
+# feature requests. The changelog is a repo file, so the running build always
+# carries exactly the notes for the code that is running - a changelog kept on
+# the volume would drift from the deploy the moment either changed alone.
+# ---------------------------------------------------------------------------
+
+
 FEEDBACK_PATH      = os.environ.get("FEEDBACK_PATH", "/data/feedback.json")  # feature requests from the desk
 CHANGELOG_PATH     = os.environ.get("CHANGELOG_PATH",
                                     os.path.join(_REPO, "data", "changelog.json"))

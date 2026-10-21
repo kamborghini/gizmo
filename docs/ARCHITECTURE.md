@@ -76,9 +76,11 @@ shared inbox (`gizmo/mail.py`), Files (`gizmo/files.py`, read as
 (`gizmo/privacy.py`), the loan register (`gizmo/loans.py`), work sessions
 (`gizmo/work.py`), skills (`gizmo/skills.py`, read as `skillbook`), memory
 (`gizmo/memory.py`), store knowledge (`gizmo/knowledge.py`) and the chat loop
-(`gizmo/chat.py`, read as `assistant`), SEO and keywords (`gizmo/seo.py`)
-and the overview and customer reports (`gizmo/analytics.py`), each with its
-routes in
+(`gizmo/chat.py`, read as `assistant`), SEO and keywords (`gizmo/seo.py`),
+the overview and customer reports (`gizmo/analytics.py`), the scheduler and
+its alerts (`gizmo/scheduler.py`), release notes and requests
+(`gizmo/updates.py`), impact tracking (`gizmo/impact.py`) and backup and
+restore (`gizmo/backup.py`), each with its routes in
 `gizmo/routes/` (production's, the Size list's and the order book's too; the
 printed-label routes stay in `add_routes`, their bytes pinned, and so do the
 chat's two, which read the tool list `add_routes` builds from the registry
@@ -259,8 +261,10 @@ can leave a test testing nothing. The guards below make that a failure, and
    reads the new module's names (`t_no_module_looks_itself_up_by_name`).
    A path built from `__file__` points one folder down once moved into
    `gizmo/`: rewrite it from the repository (`_REPO`) as a declared change,
-   and test the default with the setting cleared, since the suite sets every
-   path (`t_the_size_lists_seed_files_are_the_repos`). An area imports
+   and pin what it reaches before the move, since a missing file or folder
+   often fails without a word (`t_the_size_lists_seed_files_are_the_repos`,
+   `t_the_release_notes_are_the_repos_own`,
+   `t_the_backup_carries_the_repos_data`). An area imports
    another area, and `copilot`, last; only the floor goes at the top, and
    an area a statement reads as the module loads (its settings are defined
    before its own last imports run, so any module may still go first).
