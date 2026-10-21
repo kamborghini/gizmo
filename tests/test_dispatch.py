@@ -4631,6 +4631,20 @@ def t_the_chase_email_says_what_is_owed_and_by_which_orders():
     with_liability([lia_order(104300, 75, 450), lia_order(104301, 40, 120)], go)
 
 @test
+def t_the_liability_route_answers_with_the_report():
+    """The Liability tab reads /api/liability, the report run_liability builds.
+    Every other test built the report directly; pinned through its route
+    before the route moved out of add_routes."""
+    def go():
+        ensure_auth()
+        r = post("/api/liability", {})
+        eq(r.status_code, 200, r.text)
+        body = r.json()["customers"][0]["chase"]["body"]
+        ok("#104300" in body and "#104301" in body and "Total outstanding: £570.00" in body,
+           "the account's chase email, through the route: " + body[:200])
+    with_liability([lia_order(104300, 75, 450), lia_order(104301, 40, 120)], go)
+
+@test
 def t_the_tone_steps_with_how_late_the_oldest_debt_is():
     def tone_for(days_ago):
         def go():
