@@ -47,7 +47,8 @@ The browser suite needs its node modules and Chromium once:
 
 `tests/test_dispatch.py` builds the app exactly as it is served
 (`server.build_app()`, real middleware) and drives it with a test client
-against scratch stores; nothing touches `/data` or the network.
+against scratch stores; nothing touches `/data` or the network. It prints one
+line per test, and a failing test's log lines under it (`VERBOSE=1` for all).
 `tests/test_frontend.py` reads the page (joined by `pagesource.py`) and asserts the rules the
 page has to keep — every one of them a regression that once reached the
 merchant. `tests/browser/` opens every screen in Chromium inside an invented

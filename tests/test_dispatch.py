@@ -1,4 +1,4 @@
-import os, sys, json, time, asyncio, glob, re, tempfile, base64, secrets
+import os, sys, json, time, asyncio, glob, re, tempfile, base64, secrets, logging
 import atexit, shutil, signal
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import xml.etree.ElementTree as ET
@@ -150,6 +150,18 @@ def _no_connect_ex(self, address):
 _socket.socket.connect, _socket.socket.connect_ex = _no_connect, _no_connect_ex
 
 import jwt
+# Each test's log lines are held, and shown only under its FAIL line: the app
+# logs a great deal on the paths the tests take on purpose, and printed, it
+# buried the one failure that mattered (audit A6). VERBOSE=1 streams them, as
+# the suite always did. Set before server.py is imported, so its basicConfig
+# finds a handler already on the root and adds none; INFO, as it would have.
+import io as _io
+_TEST_LOG = _io.StringIO()
+if not os.environ.get("VERBOSE"):
+    _held_log = logging.StreamHandler(_TEST_LOG)
+    _held_log.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logging.getLogger().addHandler(_held_log)
+    logging.getLogger().setLevel(logging.INFO)
 import server, copilot, worldoptions, pipedrive
 import pagesource
 from tools.sources import copilot_source, COPILOT_FILES
@@ -31482,6 +31494,42 @@ def t_the_moved_areas_routes_follow_them():
     eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_production, routes_size_list, routes_orderbook)],
        [5, 6, 3], "5 production routes, 6 Size list routes, 2 order routes and customer history (piece 14)")
 
+@test
+def t_a_passing_test_prints_its_name_and_nothing_else():
+    """The suite printed about 7,000 lines, nearly all of them what the app
+    logs on the paths the tests take on purpose, so a real failure was hard to
+    find in CI's output (audit A6). Each test's log lines are held, and printed
+    only under its FAIL line; VERBOSE=1 streams them as they come, as before.
+    Two toy tests, there only when SUITE_SELFTEST is set, are run in a child."""
+    import subprocess
+    here = os.path.abspath(__file__)
+    env = {k: v for k, v in os.environ.items() if k not in ("VERBOSE", "KEEP_SCRATCH", "ONLY")}
+
+    def child(**extra):
+        tmp = tempfile.mkdtemp(dir=SCRATCH)
+        return subprocess.run([sys.executable, here], capture_output=True, text=True, timeout=300,
+                              env=dict(env, TMPDIR=tmp, ONLY="t_suite_selftest_", SUITE_SELFTEST="1", **extra))
+
+    p = child()
+    eq(p.returncode, 1, "a failing test still fails the run")
+    ok("PASS  t_suite_selftest_logs_and_passes" in p.stdout and "FAIL  t_suite_selftest_logs_and_fails" in p.stdout
+       and "1 passed, 1 failed" in p.stdout, p.stdout[-800:] + p.stderr[-800:])
+    ok("a passing test's line" not in p.stdout + p.stderr, "a passing test's log lines are not printed")
+    after = p.stdout.split("FAIL  t_suite_selftest_logs_and_fails", 1)[1]
+    ok("a failing test's line" in after, "a failing test's are, under its FAIL line: " + after[:400])
+    v = child(VERBOSE="1")
+    ok("a passing test's line" in v.stdout + v.stderr, "VERBOSE=1 streams them as they come")
+
+if os.environ.get("SUITE_SELFTEST"):
+    @test
+    def t_suite_selftest_logs_and_passes():
+        logging.getLogger("shopify_mcp.copilot").warning("selftest: a passing test's line")
+
+    @test
+    def t_suite_selftest_logs_and_fails():
+        logging.getLogger("shopify_mcp.copilot").warning("selftest: a failing test's line")
+        raise AssertionError("selftest: this one fails on purpose")
+
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The
     # suite makes hundreds of sign-ins from one address; a browser makes a
@@ -31491,6 +31539,7 @@ for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A missed-orders answer is kept until an order changes, and one test's
     # stubbed shop is not the next test's: nothing changes between them.
     production._missing_cache.clear()
+    _TEST_LOG.seek(0); _TEST_LOG.truncate(0)
     reached = len(NET_REACHED)
     try:
         fn()
@@ -31499,5 +31548,10 @@ for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
         passed += 1; print(f"  PASS  {fn.__name__}")
     except Exception as e:
         failed += 1; print(f"  FAIL  {fn.__name__}: {e}")
+        held = _TEST_LOG.getvalue().rstrip().split("\n") if _TEST_LOG.getvalue().strip() else []
+        if held:
+            print("        what it logged" + (f" (the last 80 of {len(held)} lines)" if len(held) > 80 else "") + ":")
+            for line in held[-80:]:
+                print("        | " + line)
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

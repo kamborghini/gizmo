@@ -13751,9 +13751,9 @@ def t_every_row_family_sits_on_the_sections_text_edge():
     ok(l in ("0", "0px") and r in ("0", "0px"), ".lbl-qrow has no side padding (left %s, right %s)" % (l, r))
     ok("calc(-1 * var(--sp-2)) 0 0 var(--action-selected), var(--sp-2) 0 0 var(--action-selected)" in CSS.split('\n        .lbl-qrow:is(.on, [aria-selected="true"]) {')[1].split("}")[0],
        "and the open order's wash is a bleed of 8, not padding")
-    inline = ["\.card-bleed > \.insights > \.insight, \.card-bleed \.block > \.insights > \.insight \\{",
-              "\.card-bleed\.crm-act-list > \.crm-sub \\{",
-              "\.scan-card \.card-bleed > \.summary, \.scan-card \.card-bleed \.block > \.section-title \\{"]
+    inline = [r"\.card-bleed > \.insights > \.insight, \.card-bleed \.block > \.insights > \.insight \{",
+              r"\.card-bleed\.crm-act-list > \.crm-sub \{",
+              r"\.scan-card \.card-bleed > \.summary, \.scan-card \.card-bleed \.block > \.section-title \{"]
     for pat in inline:
         mm = re.search(pat + r"([^}]*)\}", CSS)
         ok(mm is not None, pat.replace("\\", "") + " is still a rule")
