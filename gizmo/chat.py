@@ -478,7 +478,7 @@ def _usage_summary(days: int = 30) -> dict:
     try:
         with open(claude.USAGE_PATH, "r", encoding="utf-8") as fh:
             events = json.load(fh).get("events", [])
-    except Exception:
+    except Exception:  # no usage log yet, or one that will not read, shows no usage
         events = []
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     ev = [e for e in events if (e.get("at") or "") >= cutoff]

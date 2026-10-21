@@ -65,7 +65,7 @@ def register(mcp, registry):
                 ws["end"] = now.isoformat()
                 try:
                     ws["secs"] = max(0, int((now - datetime.fromisoformat(ws["start"])).total_seconds()))
-                except Exception:
+                except Exception:  # an unreadable start counts no time
                     ws["secs"] = 0
                 # A shift shorter than a minute is a mis-tap, not work. It is
                 # dropped rather than appended, because the log is a fixed-size
@@ -121,7 +121,7 @@ def register(mcp, registry):
             for uid, ws in d["open"].items():
                 try:
                     secs = max(0, int((now - datetime.fromisoformat(ws["start"])).total_seconds()))
-                except Exception:
+                except Exception:  # an unreadable start counts no time
                     secs = 0
                 open_rows.append({**ws, "secs": secs})
             events = activity._load_events()
@@ -164,7 +164,7 @@ def register(mcp, registry):
             ws["end"] = now.isoformat()
             try:
                 ws["secs"] = max(0, int((now - datetime.fromisoformat(ws["start"])).total_seconds()))
-            except Exception:
+            except Exception:  # an unreadable start counts no time
                 ws["secs"] = 0
             ws["corrected"] = True
             ws["corrected_by"] = who

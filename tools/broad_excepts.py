@@ -1,11 +1,12 @@
 """Every broad error handler in the app, and what it does with the error.
 
 `except Exception:` (or a bare `except:`) catches whatever went wrong. Most
-handlers log it, answer the request, raise it on, or fall back to a value. A
-few let it go without a word: a `pass`, a `continue` or `break`, a bare
-`return`. Silence is sometimes right (a best-effort clean-up, a value that
-may be missing), but only with a reason, so a silent handler says why in a
-comment on its own lines; tests/test_dispatch.py fails on one that does not.
+handlers log it, answer the request or raise it on. The rest let it go without
+a word: a `pass`, a `continue` or `break`, a bare `return`, or a fallback
+value put in its place. Silence is often right (a best-effort clean-up, a
+value that may be missing, an error body that is not JSON), but only with a
+reason, so a silent handler says why in a comment on its own lines;
+tests/test_dispatch.py fails on one that does not.
 
     python tools/broad_excepts.py      the counts, and every silent handler
 
@@ -21,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import sources  # noqa: E402  (every module of the app)
 
-SILENT = ("pass", "skips", "returns")
+SILENT = ("pass", "skips", "returns", "falls back", "other")
 _LOGS = re.compile(r"\b(logger|logging|log|errors)\.")
 
 

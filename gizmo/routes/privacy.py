@@ -61,7 +61,9 @@ def register(mcp, registry):
             return PlainTextResponse("ok", status_code=200)   # a redelivery
         try:
             body = json.loads(raw.decode("utf-8", "replace")) or {}
-        except Exception:
+        except Exception as e:
+            logger.warning("privacy webhook %s: its body could not be read (%s)", topic or "with no topic",
+                           type(e).__name__)
             body = {}
         cust = body.get("customer") or {}
         email = str(cust.get("email") or "")

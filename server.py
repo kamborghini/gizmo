@@ -691,7 +691,7 @@ def _error(e: Exception) -> str:
         status = e.response.status_code
         try:
             detail = e.response.json()
-        except Exception:
+        except Exception:  # not JSON: Shopify's own text is the detail
             detail = e.response.text[:500]
         messages = {
             401: "Authentication failed — check your SHOPIFY_ACCESS_TOKEN (should start with shpat_).",
@@ -1473,7 +1473,7 @@ async def shopify_install_state(timeout: float = 4.0) -> str:
         if resp.status_code == 200:
             try:
                 shop = ((resp.json().get("data") or {}).get("shop") or {}).get("id")
-            except Exception:
+            except Exception:  # an answer that is not JSON names no shop, so it reads as no answer (0)
                 shop = None
             return 200 if shop else 0
         return resp.status_code

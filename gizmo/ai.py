@@ -241,7 +241,11 @@ def _spend_today() -> float:
                 for e in json.load(fh).get("events", []):
                     if (e.get("at") or "").startswith(day):
                         total += float(e.get("cost") or 0)
-        except Exception:
+        except FileNotFoundError:
+            total = 0.0     # no usage log yet: nothing spent
+        except Exception as e:
+            logger.warning("the spend cap counts from nothing today: the usage log could not be read (%s)",
+                           type(e).__name__)
             total = 0.0
         _spend["day"], _spend["cost"] = day, total
     return _spend["cost"]

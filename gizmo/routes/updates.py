@@ -71,7 +71,7 @@ def register(mcp, registry):
                         "Reactor: " + (team._team_name(who) or "someone") + " asked for a feature",
                         [title, detail or "(no detail given)"]
                         + (["Asked from the " + item["where"] + " page."] if item["where"] else [])))
-                except Exception:
+                except Exception:  # the page is told the email did not go (emailed)
                     emailed = False
                 return gate._json({"ok": True, "item": item, "emailed": emailed})
             if op == "state":

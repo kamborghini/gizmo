@@ -1167,7 +1167,7 @@ async def _shop_record(registry: dict) -> dict:
         return hit
     try:
         shop = await shopify._tool_json(registry, "shopify_get_shop", {})
-    except Exception:
+    except Exception:  # an unreadable shop answers empty and is not cached, so the next call asks again
         shop = {}
     shop = shop if isinstance(shop, dict) and shopify._ok(shop) else {}
     if shop:

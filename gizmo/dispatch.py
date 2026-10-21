@@ -265,7 +265,7 @@ def _pdf_print_images(b64pdf: str) -> list:
             # bomb. Scale down so no page exceeds a sane pixel budget.
             try:
                 w, h = page.get_size()
-            except Exception:
+            except Exception:  # a page that will not say its size renders at the default scale
                 w = h = 0
             scale = 3.0
             if w > 0 and h > 0:

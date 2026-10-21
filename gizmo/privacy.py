@@ -224,7 +224,9 @@ def _erase_pepper() -> tuple:
     forced; nothing, and the id "none", when there is not."""
     try:
         k = tokenvault._key()
-    except Exception:
+    except Exception as e:
+        logger.warning("erasure marks are made without the token vault's pepper: its key could not be read (%s)",
+                       type(e).__name__)
         k = None
     if not k:
         return b"", "none"

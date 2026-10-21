@@ -59,7 +59,7 @@ async def _connector_call(method: str, path: str, params: Optional[dict] = None,
                              headers=headers)
     try:
         body = r.json()
-    except Exception:
+    except Exception:  # the error says the connector's answer was not JSON, with its status
         body = {"error": ("The connector answered with something that is not JSON "
                           "(status " + str(r.status_code) + ").")}
     return r.status_code, body

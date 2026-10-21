@@ -285,7 +285,7 @@ async def _token_request(data: dict) -> dict:
         # tell "the token is dead" from "the client id is wrong".
         try:
             body = resp.json()
-        except Exception:
+        except Exception:  # not JSON: no reason to carry back; the status and text are logged below
             body = {}
         logger.error("xero token endpoint answered %s: %s", resp.status_code, resp.text[:200])
         return {"error": str(body.get("error") or resp.status_code),
