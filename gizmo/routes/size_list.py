@@ -110,7 +110,7 @@ def register(mcp, registry):
         try:
             return gate._json({"overrides": size_list._gobo_rule_rows("override"),
                           "aliases": size_list._gobo_rule_rows("alias"),
-                          "can_edit": core._may_edit_sizes(who)})
+                          "can_edit": team._may_edit_sizes(who)})
         except Exception:
             logger.exception("gobo rules read failed")
             return gate._json({"error": "Couldn't read the size rules."}, 500)
@@ -184,7 +184,7 @@ def register(mcp, registry):
         err, _body, who = await gate._guard(request, body=False)
         if err:
             return err
-        if not core._may_edit_sizes(who):
+        if not team._may_edit_sizes(who):
             return gate._json({"error": "You do not have access to edit the size list. "
                           "An admin can grant it on the Team tab."}, 403)
         body = await gate._read_json_capped(request)

@@ -21,6 +21,9 @@ import tokenvault
 from gizmo.config import _env_num
 from gizmo import store as jsonstore
 from gizmo import shopify
+import base64
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse, Response
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
@@ -1413,6 +1416,320 @@ def _redact_archive_reap(now: Optional[float] = None) -> int:
     return gone
 
 
+# How long Reactor's own reads of the store must already have been refused
+# before a shop/redact may erase. A genuine one comes 48 hours after the
+# uninstall, by which time the watchdog (three failed hourly probes) has
+# recorded the outage for at least 45; a secret being rotated, or an app made
+# to uninstall itself by whoever holds the secret, has no such history yet,
+# and the outage email has said "reinstall it" for most of those hours.
+SHOP_REDACT_DOWN_HOURS = 40
+# A request that could not be acted on yet is owed, kept in the privacy log
+# and tried again every hour, so a Shopify outage at the wrong moment cannot
+# lose it; the webhook answers 200 once it is recorded.
+SHOP_REDACT_MAIL_HOURS = 6
+_shop_redact_said: dict = {}   # outcome -> monotonic time it was last emailed / logged
+
+
+def _shop_owed_set(value: Optional[dict]) -> bool:
+    """Record, or clear, the one shop/redact still owed (in the privacy log,
+    which survives a restart). False when it could not be written: an
+    unreadable log, or a full disk."""
+    try:
+        d = _load_privacy_log()
+        if value is None:
+            d.pop("shop_owed", None)
+        else:
+            d["shop_owed"] = value
+        if not jsonstore._store_writable(PRIVACY_LOG_PATH):
+            return False
+        jsonstore._write_json_store(PRIVACY_LOG_PATH, None, d)
+        return True
+    except Exception:
+        logger.exception("shop/redact: the owed record could not be written")
+        return False
+
+
+async def _shop_redact_attempt(down_since) -> str:
+    """One try at an owed shop/redact: 'installed', 'unknown', 'recent',
+    'archive' or 'erased'. Erases only when Shopify refuses the app's
+    credential AND the app's own reads have been refused for
+    SHOP_REDACT_DOWN_HOURS AND the archive was written first."""
+    state = "unknown"
+    if shopify._install_checker is not None:
+        try:
+            state = await shopify._install_checker()
+        except Exception:
+            logger.exception("shop/redact: the install check failed")
+    if state == "installed":
+        return "installed"
+    if state != "gone":
+        return "unknown"
+    try:
+        since = datetime.fromisoformat(str(down_since or ""))
+        if datetime.now(timezone.utc) - since < timedelta(hours=SHOP_REDACT_DOWN_HOURS):
+            return "recent"
+    except (ValueError, TypeError):
+        return "recent"
+    return "archive" if _redact_shop().get("refused") else "erased"
+
+
+_SHOP_REDACT_WORDS = {
+    "installed": ("refused: the app is still installed, so this did not follow an uninstall; nothing was erased",
+                  "Reactor: refused a request to erase the shop's data",
+                  ["A signed request asked Reactor to erase the shop's data, but Shopify says the app",
+                   "is still installed, so it did not come from an uninstall. Nothing was erased.",
+                   "", "Only someone holding the app's secret can sign one. Change the app's secret,",
+                   "and give Reactor the new one straight away."]),
+    "recent": ("waiting: Shopify refuses the app's access, but not yet for long enough to be an uninstall "
+               "two days old; nothing erased, tried again every hour",
+               "Reactor: holding a request to erase the shop's data",
+               ["Shopify asked Reactor to erase the shop's data, which it does two days after the app",
+                "is uninstalled. Shopify is refusing Reactor's access to the store, but not for long",
+                "enough yet, so nothing is erased. Reactor checks every hour, and erases only once the",
+                "store has been out of its reach for most of two days.",
+                "", "If the app should still be installed, reinstall it now. If its secret was just",
+                "changed, give Reactor the new one."]),
+    "unknown": ("waiting: Shopify could not be asked whether the app is still installed; nothing erased, "
+                "tried again every hour",
+                "Reactor: holding a request to erase the shop's data",
+                ["Shopify asked Reactor to erase the shop's data, but Reactor could not ask Shopify",
+                 "whether the app is still installed, so nothing is erased yet. It asks again every hour."]),
+    "unrecorded": ("not recorded: the privacy log could not be written; nothing erased, Shopify asked to send it again",
+                   "Reactor: could not record a request to erase the shop's data",
+                   ["Shopify asked Reactor to erase the shop's data, but Reactor could not record the",
+                    "request, so nothing was erased and Shopify was asked to send it again. Check the",
+                    "server's storage: until it can be written, the request is not kept."]),
+    "archive": ("waiting: the archive taken first could not be written; nothing erased, tried again every hour",
+                "Reactor: the shop's data was not erased yet",
+                ["Shopify asked for the shop's data to be erased after the app was uninstalled, but the",
+                 "archive taken first could not be written, so nothing was erased. Reactor tries again",
+                 "every hour; check the server's storage."]),
+}
+
+
+def _shop_redact_settle(outcome: str) -> None:
+    """Clear what was owed, or keep it, and say so: in the privacy log and by
+    email, each at most once per outcome every SHOP_REDACT_MAIL_HOURS, so a
+    stream of signed forgeries can neither flood the log nor spend the email
+    allowance the real warnings need."""
+    if outcome in ("installed", "erased"):
+        _shop_owed_set(None)
+    if outcome == "erased":
+        return      # _redact_shop wrote its own record
+    words = _SHOP_REDACT_WORDS.get(outcome) or _SHOP_REDACT_WORDS["unknown"]
+    now = time.monotonic()
+    last = _shop_redact_said.get(outcome)
+    if last is not None and now - last < SHOP_REDACT_MAIL_HOURS * 3600:
+        logger.warning("shop/redact: %s (said already)", outcome)
+        return
+    _shop_redact_said[outcome] = now
+    logger.warning("shop/redact: %s", outcome)
+    _privacy_note("shop/redact", "", "", words[0])
+    core._spawn_bg(scheduler._send_alert_email(words[1], words[2]))
+
+
+async def _shop_redact_checked(delivery: str) -> Response:
+    """shop/redact, erased only once Shopify has confirmed the uninstall.
+
+    The webhook is signed with the app's secret, and so is every forgery by
+    anyone holding it: before this, one forged post erased nine stores and
+    disconnected both mailboxes. A genuine one arrives 48 hours after an
+    uninstall, when Shopify has long stopped honouring the app's credential,
+    so the app records the request as owed, then asks Shopify:
+
+      still installed  refused, and the master is emailed: a signed request
+                       that did not follow an uninstall means the secret is
+                       out; nothing is owed
+      not installed    archived, then erased, but only when the app's own
+                       reads have been refused for SHOP_REDACT_DOWN_HOURS
+                       and the archive was written
+      anything else    owed, said, and tried again every hour by the
+                       watchdog (_shop_redact_retry), which a Shopify outage,
+                       a restart or a full disk cannot lose
+
+    Answered 200 once the request is recorded: the record, not Shopify's few
+    retries, is what makes sure it is honoured. When it cannot be recorded
+    (an unreadable privacy log, a full disk) and was not settled at once, it
+    is answered 503 with the delivery forgotten, so Shopify sends it again."""
+    recorded = False
+    try:
+        d = _load_privacy_log()
+        recorded = isinstance(d.get("shop_owed"), dict) and PRIVACY_LOG_PATH not in jsonstore._poisoned_stores
+        if not recorded:
+            recorded = _shop_owed_set({"since": datetime.now(timezone.utc).isoformat(), "tries": 0,
+                                       "delivery": str(delivery or "")[:80]})
+        w = scheduler._load_watch()
+        outcome = await _shop_redact_attempt((w if isinstance(w, dict) else {}).get("shopify_down"))
+    except Exception:
+        logger.exception("shop/redact: the check failed")
+        outcome = "unknown"
+    if not recorded and outcome not in ("installed", "erased"):
+        if delivery:
+            orderbook._webhook_seen.pop(delivery, None)
+        _shop_redact_settle("unrecorded")
+        return PlainTextResponse("retry", status_code=503)
+    _shop_redact_settle(outcome)
+    return PlainTextResponse("ok", status_code=200)
+
+
+async def _shop_redact_retry(down_since) -> Optional[str]:
+    """The hourly second attempt at an owed shop/redact; its outcome, or None
+    when nothing is owed."""
+    d = _load_privacy_log()
+    owed = d.get("shop_owed")
+    if not isinstance(owed, dict):
+        return None
+    try:
+        outcome = await _shop_redact_attempt(down_since)
+    except Exception:
+        logger.exception("shop/redact retry failed")
+        outcome = "unknown"
+    if outcome not in ("installed", "erased"):
+        d = _load_privacy_log()
+        if isinstance(d.get("shop_owed"), dict):
+            d["shop_owed"] = {**d["shop_owed"], "tries": int(d["shop_owed"].get("tries") or 0) + 1,
+                              "last": outcome, "last_at": datetime.now(timezone.utc).isoformat()}
+            if jsonstore._store_writable(PRIVACY_LOG_PATH):
+                jsonstore._write_json_store(PRIVACY_LOG_PATH, None, d)
+    _shop_redact_settle(outcome)
+    return outcome
+
+
+def _ask_hold(email: str, customer_id="") -> bool:
+    """A data request, kept until someone marks it answered: in its own list,
+    so neither the event log's limit nor a restore can drop it. False when it
+    could not be kept (the log unwritable, or more than REDACT_ASKS_MAX open:
+    then the newest is refused, never an older one dropped)."""
+    addr = str(email or "").strip().lower()[:254]
+    d = _load_privacy_log()
+    if PRIVACY_LOG_PATH in jsonstore._poisoned_stores:
+        return False
+    opened = _open_asks(d)
+    if addr and any(a.get("email") == addr for a in opened):
+        return True                      # the same person asking again: one entry
+    if len(opened) >= REDACT_ASKS_MAX:
+        return False
+    entry = {"id": secrets.token_hex(5), "email": addr, "customer_id": str(customer_id or "")[:40],
+             "received": datetime.now(timezone.utc).isoformat(), "answered": "", "mailed": False}
+
+    def change(asks):
+        answered = [a for a in asks if a.get("answered")]
+        still = [a for a in asks if not a.get("answered")]
+        # Answered ones go first when the list is long; open ones never do.
+        return answered[-max(0, REDACT_ASKS_MAX - len(still) - 1):] + still + [entry]
+    if not _redact_hold_write(change, key="asks"):
+        return False
+    _privacy_alert(force=True)
+    return True
+
+
+def _keep_live_privacy(live: dict, built_at: str = "") -> None:
+    """After a restore, merge what is owed, waiting and decided now with the
+    backup's. A restore replaced the whole privacy log with an older one, so
+    requests that came in since were lost, settled ones came back, and the
+    record of what was erased went; and onto a fresh volume, with no live log
+    at all, taking the live lists as they were wiped the backup's.
+
+      waiting requests  the live ones, and the backup's not settled since
+      data requests     the live ones, and the backup's the live list lacks
+      stops, answers,   both, without repeats
+      decisions, owed
+      events            the backup's, and the live ones since it was built
+      shop erasure owed as live
+
+    An erasure confirmed since the backup was built is owed again, as the
+    restore has just brought that person's records back. Called only when the
+    live log could be read: an unreadable one is what a restore repairs."""
+    pl = _load_privacy_log()
+    old_events = _plist(pl, "events")
+    cut = str(built_at or "") or max((str(e.get("at") or "") for e in old_events), default="")
+    seen_ev = {(e.get("at"), e.get("topic"), e.get("email"), e.get("detail")) for e in old_events}
+    since = [e for e in _plist(live, "events") if str(e.get("at") or "") > cut
+             and (e.get("at"), e.get("topic"), e.get("email"), e.get("detail")) not in seen_ev]
+    pl["events"] = (old_events + since)[-2000:]
+    decisions, seen = [], set()
+    for x in _plist(pl, "decisions") + _plist(live, "decisions"):
+        key = (x.get("at"), x.get("email"), x.get("action"))
+        if key not in seen:
+            seen.add(key)
+            decisions.append(x)
+    pl["decisions"] = decisions[-5000:]
+
+    def settled_since(h: dict) -> bool:
+        return any(x.get("email") == h.get("email") and str(x.get("at") or "") >= str(h.get("received") or "")
+                   and x.get("action") in ("erased", "stopped") for x in decisions)
+    live_held = _held_requests(live)
+    ids = {h["id"] for h in live_held}
+    emails = {h["email"] for h in live_held}
+    pl["held"] = live_held + [h for h in _held_requests(pl) if h["id"] not in ids
+                              and h["email"] not in emails and not settled_since(h)]
+    live_asks = _plist(live, "asks")
+    ask_ids = {a.get("id") for a in live_asks}
+    pl["asks"] = live_asks + [a for a in _plist(pl, "asks") if a.get("id") not in ask_ids]
+    for k, ident in (("stopped", ("email", "at")), ("answered", ("at",))):
+        merged, keys = [], set()
+        for x in _plist(pl, k) + _plist(live, k):
+            key = tuple(x.get(f) for f in ident)
+            if key not in keys:
+                keys.add(key)
+                merged.append(x)
+        pl[k] = merged[-1000:]
+    if isinstance(live.get("shop_owed"), dict):
+        pl["shop_owed"] = live["shop_owed"]
+    else:
+        pl.pop("shop_owed", None)
+    pend = {p.get("email"): p for p in _plist(pl, "pending") + _plist(live, "pending") if p.get("email")}
+    for x in decisions:
+        if x.get("action") == "erased" and str(x.get("at") or "") > cut and x.get("email") not in pend:
+            pend[x["email"]] = {"email": x["email"], "customer_id": str(x.get("customer_id") or ""),
+                                "stores": ["the records a restore brought back"], "at": str(x.get("at") or "")}
+    pl["pending"] = list(pend.values())[-500:]
+    if jsonstore._store_writable(PRIVACY_LOG_PATH):
+        jsonstore._write_json_store(PRIVACY_LOG_PATH, None, pl)
+
+
+# ---- helpers add_routes kept to itself -------------------------------------
+# Forty-two functions were defined inside add_routes, so nothing outside that
+# one 8,700-line call could reach them: no test could exercise them directly,
+# no other part of the file could reuse them, and reading any of them meant
+# scrolling through the route table to find where it was hidden. None of them
+# closes over anything add_routes builds - they were nested by habit, not by
+# need - so they are plain module functions, checkable as copilot.<name>.
+# The six that genuinely do close over the injected tool registry stayed put.
+
+
+async def _webhook_body(request: Request):
+    """(raw_bytes, error_response). The whole authentication for any Shopify
+    webhook, in one place rather than copied per topic - the checks here are
+    the only thing standing between a POST and a redaction.
+
+    Streamed with a hard cap rather than request.body(): the signature can
+    only be checked after the body is read, so this read happens for anyone,
+    and a chunked upload with no Content-Length would otherwise buffer
+    without limit on an endpoint that deliberately has no rate limiter."""
+    if not core.SHOPIFY_API_SECRET:
+        return None, PlainTextResponse("Unauthorized", status_code=401)
+    total, chunks = 0, []
+    try:
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > orderbook.WEBHOOK_MAX_BYTES:
+                return None, PlainTextResponse("Too large", status_code=413)
+            chunks.append(chunk)
+    except Exception:
+        return None, PlainTextResponse("Bad request", status_code=400)
+    raw = b"".join(chunks)
+    sent = request.headers.get("x-shopify-hmac-sha256", "")
+    want = base64.b64encode(hmac.new(core.SHOPIFY_API_SECRET.encode("utf-8"),
+                                     raw, hashlib.sha256).digest()).decode("ascii")
+    if not sent or not hmac.compare_digest(want, sent):
+        return None, PlainTextResponse("Unauthorized", status_code=401)
+    shop = str(request.headers.get("x-shopify-shop-domain") or "")
+    if core.SHOPIFY_STORE and not shop.lower().startswith(core.SHOPIFY_STORE.split(".")[0].lower() + "."):
+        return None, PlainTextResponse("Unauthorized", status_code=401)
+    return raw, None
+
+
 # Last, so this module is whole before copilot.py or a sibling runs: copilot.py
 # takes names from these modules as it loads, and any of them may be imported
 # first. Read as core.NAME and sibling.NAME, never a copied name.
@@ -1425,3 +1742,4 @@ import copilot as core  # noqa: E402
 from gizmo import liability  # noqa: E402
 from gizmo import backup  # noqa: E402
 from gizmo import scheduler  # noqa: E402
+from gizmo import orderbook  # noqa: E402

@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 import jwt
 from gizmo.config import _env_num
 from gizmo import store as jsonstore
+import re
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
@@ -543,8 +544,165 @@ def _team_counts(events: list, days: int = 30) -> dict:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Team colours: the colour each account is given, so a row shows whose it is.
+# ---------------------------------------------------------------------------
+# Who owns what, at a glance. The same names the CRM already uses, minus the two
+# greys: as a row tint on an app that is already grey they would read as no
+# colour at all.
+TEAM_COLOUR_NAMES = ("blue", "green", "purple", "orange", "pink", "red",
+                     "brown", "yellow")
+
+
+def _next_team_colour(users: dict) -> str:
+    """The first colour nobody is using. Two people sharing one defeats the
+    point of glancing at a row and knowing whose it is, so it only repeats once
+    the palette is genuinely exhausted - and then it repeats in a stable order
+    rather than at random."""
+    taken = {u.get("colour") for u in (users or {}).values() if not u.get("deleted")}
+    for c in TEAM_COLOUR_NAMES:
+        if c not in taken:
+            return c
+    return TEAM_COLOUR_NAMES[len(taken) % len(TEAM_COLOUR_NAMES)]
+
+
+def _may_edit_sizes(uid: Optional[str]) -> bool:
+    """Who may change what the bench actually cuts.
+
+    Seeing the Labels tab is not enough. A size rule decides the glass a real
+    order is made from, so it is a grant an admin makes deliberately per person,
+    the same way a tab is - not something inherited by having an account. Admins
+    hold it by rank; everyone else only if it was handed to them."""
+    u = _team_user(uid)
+    if not u:
+        return False
+    if ROLE_LEVELS.get(u.get("role"), 0) >= ROLE_LEVELS["admin"]:
+        return True
+    return bool(u.get("can_sizes"))
+
+
+def _may_send_mail(uid: Optional[str]) -> bool:
+    """Who may send email OUT of the shared mailbox, as the shop.
+
+    The twin of _may_edit_sizes, and for the same reason. A draft is inert and
+    a state change is undoable; an email that has gone is neither, and it goes
+    over the shop's own address, so it is a grant an admin makes deliberately
+    per person rather than something inherited by having an Inbox tab. Admins
+    hold it by rank; everyone else only if it was handed to them."""
+    u = _team_user(uid)
+    if not u:
+        return False
+    if ROLE_LEVELS.get(u.get("role"), 0) >= ROLE_LEVELS["admin"]:
+        return True
+    return bool(u.get("can_send"))
+
+
+def _team_setup_needed() -> bool:
+    return not any(not u.get("deleted") for u in _load_users()["users"].values())
+
+
+# First-run setup makes the master account, and it opens whenever the accounts
+# register holds no live account: a new environment, a volume that is missing
+# or replaced, a restore of an unrecognised register. It asked for nothing but
+# a Shopify staff session, so whichever staff member opened the app first in
+# that window became master: the backup, every role, the mailboxes (audit
+# chain R-C5). It now also needs this code, set on the server by whoever runs
+# it and removed after setup. Unset, setup stays locked.
+SETUP_CODE = os.environ.get("SETUP_CODE", "").strip()  # set only while first-run setup is needed, then remove; unset locks setup
+
+
+def _user_public(uid: str, u: dict) -> dict:
+    """Everything about an account EXCEPT anything derived from its password."""
+    return {"id": uid, "name": u.get("name") or "", "username": u.get("username") or "",
+            "role": u.get("role") or "member", "active": u.get("active", True),
+            "deleted": bool(u.get("deleted")), "must_change": bool(u.get("must_change")),
+            "created_at": u.get("created_at") or "", "last_login_at": u.get("last_login_at") or "",
+            "mfa": bool(u.get("mfa_secret")),
+            "tabs": (None if u.get("role") == "master" or not isinstance(u.get("tabs"), list)
+                     else u.get("tabs")),
+            # Reported separately from the raw flag: an admin holds it by rank,
+            # so the UI must not show a switch that looks revocable when it is not.
+            "colour": u.get("colour") or "",
+            "can_sizes": bool(u.get("can_sizes")),
+            "sizes_by_rank": ROLE_LEVELS.get(u.get("role") or "member", 0) >= ROLE_LEVELS["admin"],
+            # Sending email out as the shop reads the same way: the raw grant
+            # and the by-rank one are reported apart, so the Team screen never
+            # shows an admin a switch that would not actually revoke anything.
+            "can_send": bool(u.get("can_send")),
+            "send_by_rank": ROLE_LEVELS.get(u.get("role") or "member", 0) >= ROLE_LEVELS["admin"],
+            # The current value travels with the list so an admin editing it
+            # sees what they are overwriting rather than setting it blind.
+            "sign_off": str(u.get("sign_off") or "")}
+
+# ---- What the sign-in and Team routes share (gizmo/routes/team.py) ----------
+# The app's own front door. Every one of those routes still demands the
+# Shopify embed token first (the perimeter: requests must come from inside
+# the shop's admin), and then deals in the app's own accounts and sessions.
+def _shop_gate(request: Request) -> bool:
+    auth = request.headers.get("authorization", "")
+    if not (auth.startswith("Bearer ") and core.SHOPIFY_API_SECRET):
+        return False
+    try:
+        _verify_session_token(auth[7:])
+        return True
+    except Exception:
+        return False
+
+async def _auth_guard(request: Request):
+    pre = gate._pre_checks(request)
+    if pre:
+        return pre, None
+    if not _shop_gate(request):
+        return gate._json({"error": "Unauthorized"}, 401), None
+    body = await gate._read_json_capped(request)
+    if body is None:
+        return gate._json({"error": "Request too large."}, 413), None
+    return None, body
+
+def _clean_username(v) -> str:
+    return re.sub(r"[^a-z0-9@._-]", "", str(v or "").strip().lower())[:80]
+
+def _find_username(d: dict, username: str) -> Optional[str]:
+    for uid, u in d["users"].items():
+        if not u.get("deleted") and u.get("username") == username:
+            return uid
+    return None
+
+def _starter_password() -> str:
+    return secrets.token_urlsafe(9)
+
+def _auth_me(uid: str, u: dict) -> dict:
+    """The account as the BROWSER needs it the moment somebody is in: who
+    they are, what they may open, and the grants the UI must not draw a
+    button for without. One shape, written once - three hand-copied
+    versions of it is exactly how the login reply and the state reply come
+    to disagree about what a person is allowed to do."""
+    return {"id": uid, "name": u.get("name"), "role": u.get("role"),
+            "must_change": bool(u.get("must_change")),
+            "tabs": _user_tabs(uid),
+            # Sending email out as the shop is a per-person grant, and an
+            # admin holds it by rank. Both, separately, because the page
+            # must not offer a switch that would revoke nothing.
+            "can_send": bool(u.get("can_send")),
+            "send_by_rank": (ROLE_LEVELS.get(u.get("role") or "member", 0)
+                             >= ROLE_LEVELS["admin"])}
+
+# ---- Team management --------------------------------------------------
+async def _team_guard(request: Request, min_level: int):
+    err, body, who = await gate._guard(request, min_level=min_level)
+    if err:
+        return err, None
+    return None, (who, body)
+
+def _team_public_list(d: dict) -> list:
+    users = [_user_public(uid, u) for uid, u in d["users"].items() if not u.get("deleted")]
+    users.sort(key=lambda u: (-ROLE_LEVELS.get(u["role"], 0), u["name"] or "~"))
+    return users
+
+
 # Last, so this module is whole before copilot.py or a sibling runs: copilot.py
 # takes names from these modules as it loads, and any of them may be imported
 # first. Read as core.NAME and sibling.NAME, never a copied name.
 from gizmo import activity  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import gate  # noqa: E402

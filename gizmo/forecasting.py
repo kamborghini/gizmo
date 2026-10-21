@@ -36,7 +36,7 @@ def _forecast_state() -> dict:
     return d if isinstance(d, dict) else {}
 
 def _forecast_token_ok(request: Request) -> bool:
-    return core._secret_ok(str(request.headers.get("x-forecast-token") or ""), FORECAST_INGEST_TOKEN)
+    return gate._secret_ok(str(request.headers.get("x-forecast-token") or ""), FORECAST_INGEST_TOKEN)
 
 # The run date the service posts: date.isoformat(), or a datetime's.
 _FORECAST_AS_OF_RE = re.compile(r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})?)?")
@@ -186,3 +186,4 @@ def _forecast_ledger(state: dict, body: dict) -> dict:
 # takes names from these modules as it loads, and any of them may be imported
 # first. Read as core.NAME and sibling.NAME, never a copied name.
 import copilot as core  # noqa: E402
+from gizmo import gate  # noqa: E402

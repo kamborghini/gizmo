@@ -45,7 +45,7 @@ def register(mcp, registry):
         # secret into a browser bar never was either.
         ticket = request.query_params.get("t", "")
         tx = reconciliation._xero_connect_tickets.pop(ticket, None) if ticket else None
-        by_secret = core._secret_ok(request.query_params.get("key", ""), google_data.CONNECT_SECRET)
+        by_secret = gate._secret_ok(request.query_params.get("key", ""), google_data.CONNECT_SECRET)
         if not ((tx is not None and tx > time.time()) or by_secret):
             return PlainTextResponse("Forbidden", status_code=403, headers=gate._API_HEADERS)
         now = time.time()

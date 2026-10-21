@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-21",
+   "title": "The last of the leftovers home",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "Code that earlier moves left behind now lives with the rest of its area, so a change elsewhere cannot upset it. Nothing looks different."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-21",
    "title": "The page, profile, sign-ins and status on their own",
    "items": [
     {

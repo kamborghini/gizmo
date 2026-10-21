@@ -75,7 +75,7 @@ def register(mcp, registry):
             setup = {}
             if team._team_role(who) == "master" and not google_mail.connected():
                 setup = {"project": google_mail.project_number(),
-                         "redirect_uri": core._gmail_redirect_uri(request)}
+                         "redirect_uri": mail._gmail_redirect_uri(request)}
             rows = mail._mail_board_shape(store, window=True)
             out = {"connected": google_mail.connected(),
                           "client": google_mail.client_configured(),
@@ -86,7 +86,7 @@ def register(mcp, registry):
                           "rules": len(store.get("rules") or []),
                           "team": mail._mail_team_shape(),
                           "me": who, "lead": mail._mail_lead(who),
-                          "can_send": core._may_send_mail(who),
+                          "can_send": team._may_send_mail(who),
                           # The compose box needs all three to show the person
                           # what their email will actually look like when it
                           # goes, rather than just the half they typed.
@@ -519,7 +519,7 @@ def register(mcp, registry):
         err, _body, who = await mail._mail_guard(request)
         if err:
             return err
-        if not core._may_send_mail(who):
+        if not team._may_send_mail(who):
             return gate._json({"error": "You are not set up to send email from here. "
                                    "Ask a lead to switch it on in Team."}, 403)
         try:
@@ -540,7 +540,7 @@ def register(mcp, registry):
         err, body, who = await mail._mail_guard(request)
         if err:
             return err
-        if not core._may_send_mail(who):
+        if not team._may_send_mail(who):
             return gate._json({"error": mail._MAIL_NO_SEND}, 403)
         if not fileserver._files_configured():
             return gate._json({"error": "File storage is not set up, so nothing can be "
@@ -579,7 +579,7 @@ def register(mcp, registry):
         err, body, who = await mail._mail_guard(request)
         if err:
             return err
-        if not core._may_send_mail(who):
+        if not team._may_send_mail(who):
             return gate._json({"error": mail._MAIL_NO_SEND}, 403)
         key = str(body.get("key") or "")
         if not key.startswith(f"mail/{who}/") or ".." in key \
@@ -641,7 +641,7 @@ def register(mcp, registry):
         err, body, who = await mail._mail_guard(request)
         if err:
             return err
-        if not core._may_send_mail(who):
+        if not team._may_send_mail(who):
             return gate._json({"error": "You are not set up to send email from here. "
                                    "Ask a lead to switch it on in Team."}, 403)
         if not google_mail.connected():
@@ -1825,7 +1825,7 @@ def register(mcp, registry):
         # Namespaced state: a Gmail consent walk can never finish the GSC flow.
         oauth._oauth_states["gm:" + state] = now + 900
         from starlette.responses import RedirectResponse
-        return RedirectResponse(google_mail.consent_url(core._gmail_redirect_uri(request), state), status_code=302)
+        return RedirectResponse(google_mail.consent_url(mail._gmail_redirect_uri(request), state), status_code=302)
 
     @mcp.custom_route("/oauth/gmail/callback", methods=["GET"])
     async def gmail_callback(request: Request):
@@ -1840,7 +1840,7 @@ def register(mcp, registry):
         if not code:
             return oauth._oauth_page("Connection failed", "No authorization code returned.")
         try:
-            ok = await google_mail.exchange_code(code, core._gmail_redirect_uri(request))
+            ok = await google_mail.exchange_code(code, mail._gmail_redirect_uri(request))
         except Exception:
             logger.exception("Gmail OAuth exchange error")
             ok = False

@@ -189,7 +189,7 @@ def register(mcp, registry):
             try:
                 if live_priv:
                     try:
-                        core._keep_live_privacy(live_priv, built_full)
+                        privacy._keep_live_privacy(live_priv, built_full)
                     except Exception:
                         logger.exception("restore: merging the live privacy requests failed")
                 w = scheduler._load_watch()

@@ -538,7 +538,7 @@ def _gobo_sheet_listing(who: Optional[str] = None) -> dict:
             "shorthand": {"makers": _GOBO_MAKER_SHORT, "words": _GOBO_WORD_GROUPS},
             "rulings": len(sets) + len(excl) + sum(len(v) for v in domains.values()),
             "sheet": {"live": path == GOBO_SIZES_LIVE, "updated": updated},
-            "can_edit": core._may_edit_sizes(who)}
+            "can_edit": team._may_edit_sizes(who)}
 
 
 def _order_email_domain(o: dict) -> str:
@@ -680,3 +680,4 @@ def _gobo_check(q: str) -> dict:
 # takes names from these modules as it loads, and any of them may be imported
 # first. Read as core.NAME and sibling.NAME, never a copied name.
 import copilot as core  # noqa: E402
+from gizmo import team  # noqa: E402

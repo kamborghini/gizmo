@@ -38,7 +38,7 @@ def register(mcp, registry):
         indistinguishable from one that never ran. A shop/redact the app
         cannot act on yet is recorded as owed and tried again every hour
         (see _shop_redact_checked)."""
-        raw, err = await core._webhook_body(request)
+        raw, err = await privacy._webhook_body(request)
         if err is not None:
             return err
         # The hourly retry of an owed erasure lives in the scheduler, and an
@@ -72,7 +72,7 @@ def register(mcp, registry):
                 # app's job is to receive the request and not lose it.
                 privacy._privacy_note(topic, email, cid,
                               "customer asked for their data; supply it within 30 days")
-                if not core._ask_hold(email, cid):
+                if not privacy._ask_hold(email, cid):
                     # Not kept: sent back for Shopify to retry, as an erasure is.
                     if delivery:
                         orderbook._webhook_seen.pop(delivery, None)
@@ -80,7 +80,7 @@ def register(mcp, registry):
                     return PlainTextResponse("retry", status_code=503)
                 privacy._privacy_mail()
             elif topic == "shop/redact":
-                return await core._shop_redact_checked(delivery)
+                return await privacy._shop_redact_checked(delivery)
             else:
                 privacy._privacy_note(topic or "(none)", email, cid, "unrecognised privacy topic")
         except Exception:

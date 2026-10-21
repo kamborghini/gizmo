@@ -30,25 +30,25 @@ def register(mcp, registry):
     """Add the sign-in and team routes to the app."""
     @mcp.custom_route("/api/auth/state", methods=["POST"])
     async def auth_state_route(request: Request):
-        err, _body = await core._auth_guard(request)
+        err, _body = await team._auth_guard(request)
         if err:
             return err
-        if core._team_setup_needed():
+        if team._team_setup_needed():
             return gate._json({"setup": True, "logged_in": False})
         uid = team._session_uid(request.headers.get("x-app-session"))
         u = team._team_user(uid)
         if not u or not u.get("active", True):
             return gate._json({"setup": False, "logged_in": False})
-        return gate._json({"setup": False, "logged_in": True, "me": core._auth_me(uid, u)})
+        return gate._json({"setup": False, "logged_in": True, "me": team._auth_me(uid, u)})
 
     @mcp.custom_route("/api/auth/setup", methods=["POST"])
     async def auth_setup_route(request: Request):
         # First run only: create the master account. The moment one account
         # exists this door is bricked shut.
-        err, body = await core._auth_guard(request)
+        err, body = await team._auth_guard(request)
         if err:
             return err
-        if not core._team_setup_needed():
+        if not team._team_setup_needed():
             return gate._json({"error": "The app is already set up."}, 400)
         # The sign-in form's own ceiling applies: the code is a password.
         if len(team._login_hits) > 5000:
@@ -56,15 +56,15 @@ def register(mcp, registry):
         if not gate._window_ok(team._login_hits.setdefault(gate._client_key(request), []),
                           team.LOGIN_MAX_PER_MIN, time.monotonic()):
             return gate._json({"error": "Too many attempts from here. Wait a minute and try again."}, 429)
-        if not core.SETUP_CODE:
+        if not team.SETUP_CODE:
             return gate._json({"error": "First-time setup is locked. Whoever runs the server sets a one-time setup "
                                    "code first, then you type it here.", "reason": "setup_locked"}, 403)
         if not hmac.compare_digest(str(body.get("setup_code") or "").strip().encode("utf-8"),
-                                   core.SETUP_CODE.encode("utf-8")):
+                                   team.SETUP_CODE.encode("utf-8")):
             logger.warning("first-run setup refused: wrong setup code")
             return gate._json({"error": "That setup code is not right."}, 403)
         name = str(body.get("name") or "").strip()[:60]
-        username = core._clean_username(body.get("username"))
+        username = team._clean_username(body.get("username"))
         pw = str(body.get("password") or "")
         if not name or not username:
             return gate._json({"error": "A name and a username are both needed."}, 400)
@@ -88,14 +88,14 @@ def register(mcp, registry):
                 logger.exception("could not record that setup happened")
             token = team._new_session(uid)
             activity._track(uid, "team", "set up the app", f"{name} is the master admin")
-            return gate._json({"ok": True, "session": token, "me": core._auth_me(uid, d["users"][uid])})
+            return gate._json({"ok": True, "session": token, "me": team._auth_me(uid, d["users"][uid])})
         except RuntimeError:
             return gate._json({"error": "The account could not be saved. The data volume may be "
                                    "unwritable; check the server's storage."}, 500)
 
     @mcp.custom_route("/api/auth/login", methods=["POST"])
     async def auth_login_route(request: Request):
-        err, body = await core._auth_guard(request)
+        err, body = await team._auth_guard(request)
         if err:
             return err
         # The login form's OWN ceiling. _pre_checks allows 120 requests a
@@ -108,10 +108,10 @@ def register(mcp, registry):
                           team.LOGIN_MAX_PER_MIN, time.monotonic()):
             return gate._json({"error": "Too many sign-in attempts from here. Wait a "
                                    "minute and try again."}, 429)
-        username = core._clean_username(body.get("username"))
+        username = team._clean_username(body.get("username"))
         pw = str(body.get("password") or "")
         d = team._load_users()
-        uid = core._find_username(d, username)
+        uid = team._find_username(d, username)
         u = d["users"].get(uid) if uid else None
         now = datetime.now(timezone.utc)
         # One vague answer for every failure: which part was wrong is nobody's
@@ -167,7 +167,7 @@ def register(mcp, registry):
             return gate._json({"ok": True, "mfa": True, "ticket": ticket})
         token = team._new_session(uid)
         activity._track(uid, "auth", "logged in")
-        return gate._json({"ok": True, "session": token, "me": core._auth_me(uid, u)})
+        return gate._json({"ok": True, "session": token, "me": team._auth_me(uid, u)})
 
     @mcp.custom_route("/api/auth/mfa", methods=["POST"])
     async def auth_mfa_route(request: Request):
@@ -237,7 +237,7 @@ def register(mcp, registry):
         """Finish a login. Anonymous by necessity - there is no session yet -
         so it goes through the same door guard as login, and the ticket is what
         proves the password step already happened."""
-        err, body = await core._auth_guard(request)
+        err, body = await team._auth_guard(request)
         if err:
             return err
         uid = team._mfa_ticket_uid(str(body.get("ticket") or ""))
@@ -304,11 +304,11 @@ def register(mcp, registry):
         team._mfa_ticket_spend(str(body.get("ticket") or ""))
         token = team._new_session(uid)
         activity._track(uid, "auth", "logged in")
-        return gate._json({"ok": True, "session": token, "me": core._auth_me(uid, u)})
+        return gate._json({"ok": True, "session": token, "me": team._auth_me(uid, u)})
 
     @mcp.custom_route("/api/auth/logout", methods=["POST"])
     async def auth_logout_route(request: Request):
-        err, _body = await core._auth_guard(request)
+        err, _body = await team._auth_guard(request)
         if err:
             return err
         raw = request.headers.get("x-app-session")
@@ -322,7 +322,7 @@ def register(mcp, registry):
     async def auth_password_route(request: Request):
         # Change your OWN password: the current one is always required, so a
         # borrowed open session cannot quietly take over the account.
-        err, body = await core._auth_guard(request)
+        err, body = await team._auth_guard(request)
         if err:
             return err
         uid = team._session_uid(request.headers.get("x-app-session"))
@@ -383,14 +383,14 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/team/board", methods=["POST"])
     async def team_board_route(request: Request):
-        err, packed = await core._team_guard(request, team.ROLE_LEVELS["admin"])
+        err, packed = await team._team_guard(request, team.ROLE_LEVELS["admin"])
         if err:
             return err
         who, _body = packed
         try:
             d = team._load_users()
             events = activity._load_events()
-            users = [core._user_public(uid, u) for uid, u in d["users"].items() if not u.get("deleted")]
+            users = [team._user_public(uid, u) for uid, u in d["users"].items() if not u.get("deleted")]
             users.sort(key=lambda u: (-team.ROLE_LEVELS.get(u["role"], 0), u["name"] or "~"))
             return gate._json({"users": users, "events": events[-600:][::-1],
                           "counts": team._team_counts(events), "names": team._team_names(),
@@ -401,7 +401,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/team/user", methods=["POST"])
     async def team_user_route(request: Request):
-        err, packed = await core._team_guard(request, team.ROLE_LEVELS["admin"])
+        err, packed = await team._team_guard(request, team.ROLE_LEVELS["admin"])
         if err:
             return err
         who, body = packed
@@ -412,7 +412,7 @@ def register(mcp, registry):
             if op == "create":
                 # Admins mint members; only the master mints admins.
                 name = str(body.get("name") or "").strip()[:60]
-                username = core._clean_username(body.get("username"))
+                username = team._clean_username(body.get("username"))
                 role = str(body.get("role") or "member")
                 if role not in ("admin", "member", "parttime"):
                     return gate._json({"error": "New accounts are admin, member or part-time."}, 400)
@@ -420,13 +420,13 @@ def register(mcp, registry):
                     return gate._json({"error": "Only the master admin can create admins."}, 403)
                 if not name or not username:
                     return gate._json({"error": "A name and a username are both needed."}, 400)
-                if core._find_username(d, username):
+                if team._find_username(d, username):
                     return gate._json({"error": "That username is already taken."}, 400)
-                starter = core._starter_password()
+                starter = team._starter_password()
                 d["seq"] = int(d.get("seq") or 0) + 1
                 uid = f"u{d['seq']}"
                 d["users"][uid] = {"name": name, "username": username,
-                                   "colour": core._next_team_colour(d["users"]),
+                                   "colour": team._next_team_colour(d["users"]),
                                    "pw": team._hash_pw(starter), "role": role, "active": True,
                                    "deleted": False, "must_change": True, "fails": 0,
                                    "lock_until": "",
@@ -437,7 +437,7 @@ def register(mcp, registry):
                 # The one and only showing of the starter password, to the
                 # admin who asked for it. It is already marked must-change.
                 return gate._json({"ok": True, "id": uid, "starter_password": starter,
-                              "users": core._team_public_list(d)})
+                              "users": team._team_public_list(d)})
             target = str(body.get("id") or body.get("sub") or "")
             u = d["users"].get(target)
             if not u or u.get("deleted"):
@@ -464,10 +464,10 @@ def register(mcp, registry):
             elif op == "username":
                 if target != who and not may_manage():
                     return gate._json({"error": "You cannot manage that account."}, 403)
-                username = core._clean_username(body.get("username"))
+                username = team._clean_username(body.get("username"))
                 if not username:
                     return gate._json({"error": "The username cannot be empty."}, 400)
-                other = core._find_username(d, username)
+                other = team._find_username(d, username)
                 if other and other != target:
                     return gate._json({"error": "That username is already taken."}, 400)
                 u["username"] = username
@@ -523,7 +523,7 @@ def register(mcp, registry):
                 # A NAME from the palette, never a colour value. The CRM learned
                 # this when a Pipedrive label coloured url(//evil.co/a) reached
                 # style.background and beaconed every render of the board.
-                if colour not in core.TEAM_COLOUR_NAMES:
+                if colour not in team.TEAM_COLOUR_NAMES:
                     return gate._json({"error": "Pick one of the team colours."}, 400)
                 u["colour"] = colour
                 team._write_users(d)
@@ -602,7 +602,7 @@ def register(mcp, registry):
             elif op == "reset_password":
                 if not may_manage():
                     return gate._json({"error": "You cannot manage that account."}, 403)
-                starter = core._starter_password()
+                starter = team._starter_password()
                 u["pw"] = team._hash_pw(starter)
                 u["must_change"] = True
                 u["fails"], u["lock_until"], u["locks"] = 0, "", 0
@@ -617,7 +617,7 @@ def register(mcp, registry):
                 webdav._dav_drop_cache(target)
                 activity._track(who, "team", "reset a password", label)
                 return gate._json({"ok": True, "starter_password": starter,
-                              "users": core._team_public_list(d)})
+                              "users": team._team_public_list(d)})
             elif op == "reset_mfa":
                 # The phone is gone. Same rank rule as a password reset: the
                 # person loses the second factor, keeps the password, and is
@@ -631,7 +631,7 @@ def register(mcp, registry):
                     u.pop(k, None)
                 team._write_users(d)
                 activity._track(who, "team", "reset a second factor", label)
-                return gate._json({"ok": True, "users": core._team_public_list(d)})
+                return gate._json({"ok": True, "users": team._team_public_list(d)})
             elif op == "delete":
                 if my_level < team.ROLE_LEVELS["master"]:
                     return gate._json({"error": "Only the master admin can delete accounts."}, 403)
@@ -650,7 +650,7 @@ def register(mcp, registry):
                 activity._track(who, "team", "deleted an account", label)
             else:
                 return gate._json({"error": "Unknown team action."}, 400)
-            return gate._json({"ok": True, "users": core._team_public_list(d)})
+            return gate._json({"ok": True, "users": team._team_public_list(d)})
         except RuntimeError:
             team._users_mem = None   # memory diverged from disk; the next read takes disk truth
             return gate._json({"error": "The change could not be saved. The data volume may be "

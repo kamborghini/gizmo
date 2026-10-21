@@ -635,7 +635,7 @@ async def _crm_shopify_link_sweep(registry: dict, max_pages: int = 40) -> dict:
         # returns {"_failed": True} for a throttle, a 5xx or a timeout, and
         # without this a 429 on page three ended the crawl, reported success,
         # and counted every remaining contact as having no Shopify customer.
-        if not core._ok(res):
+        if not shopify._ok(res):
             report["complete"] = False
             report["problem"] = ("Shopify stopped answering partway through, so this is "
                                  "only part of your customers. Run it again in a moment.")

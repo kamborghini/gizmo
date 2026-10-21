@@ -41,9 +41,9 @@ async def _impact_snapshot(registry: dict) -> dict:
     snap: dict = {"at": datetime.now(timezone.utc).isoformat()}
     try:
         m28: dict = {}
-        orders = [o for o in await core._orders_28d(registry, meta=m28) if core._order_counts(o)]
+        orders = [o for o in await orderbook._orders_28d(registry, meta=m28) if orderbook._order_counts(o)]
         if not m28.get("failed"):      # a failed read is absent, never a zero
-            snap["revenue_28d"] = round(sum(core._order_revenue(o) for o in orders), 2)
+            snap["revenue_28d"] = round(sum(orderbook._order_revenue(o) for o in orders), 2)
             snap["orders_28d"] = len(orders)
     except Exception:
         pass
@@ -110,3 +110,4 @@ def _impact_learning_text(it: dict, current: dict) -> str:
 # takes names from these modules as it loads, and any of them may be imported
 # first. Read as core.NAME and sibling.NAME, never a copied name.
 import copilot as core  # noqa: E402
+from gizmo import orderbook  # noqa: E402
