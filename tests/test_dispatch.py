@@ -30806,6 +30806,17 @@ def t_move_area_moves_a_toy_area():
                      cwd=early, capture_output=True, text=True)
         eq(rr.returncode, 0, f"{first} first: " + rr.stderr[-400:])
 
+    # "=/" names the page's own route alone: every path starts with "/"
+    page = _TOY_COPILOT.replace("def add_routes(mcp, registry):\n",
+                                "def add_routes(mcp, registry):\n    @mcp.custom_route(\"/\", methods=[\"GET\"])\n"
+                                "    async def index(request):\n        return _x_load()\n\n")
+    exact = _toy_repo("toy-exact", page, dict(_TOY_SPEC, routes=[dict(_TOY_SPEC["routes"][0], paths=["=/", "/api/x/"])]))
+    r = _run_move(exact)
+    eq(r.returncode, 0, r.stdout[-600:] + r.stderr[-600:])
+    routes, cop = (open(os.path.join(exact, f)).read() for f in ("gizmo/routes/x.py", _TOY_MAIN))
+    eq(routes.count("@mcp.custom_route("), 3, "the page's own route and the area's two: " + routes[-400:])
+    ok('"/api/y"' in cop and '"/"' not in cop, "the rest stay where they are")
+
 @test
 def t_the_files_routes_are_gathered():
     """The Files routes and the Finder drive's, scattered through add_routes,
