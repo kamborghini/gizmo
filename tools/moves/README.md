@@ -24,6 +24,10 @@
 
 - **areas**: every top-level statement whose names all match one area's
   `prefix` (a regex) or `extra`, and none of its `exclude`, moves there.
+  `existing: true` adds to a module moved in an earlier piece (its `file`,
+  bound in `copilot.py` as `alias`): the statements go in before its last
+  imports, its own name is dropped inside them, and its own `core.NAME` reads
+  of them become bare.
   `alias` is how every other module reads it; check it is no local name
   where it would be read (the tool refuses if it is). `floor` areas may not
   borrow from `copilot.py`. `allow_file` lets a statement build a path from

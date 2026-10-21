@@ -30879,6 +30879,48 @@ def t_move_area_moves_routes_after_their_area():
     ok(not os.path.exists(os.path.join(root2, "gizmo/routes/old.py")), "and nothing is written")
 
 @test
+def t_move_area_adds_to_an_area_moved_earlier():
+    """An area that moved in an earlier piece takes the names left behind for
+    it: they go in before its last imports, read their new module's names
+    bare, and the module's own core.NAME reads of them become bare too. A
+    floor module takes a helper the same way and still imports nothing above
+    it."""
+    import importlib.util, subprocess as _sp
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    spec_ = importlib.util.spec_from_file_location("move_proof", os.path.join(here, "tools", "move_proof.py"))
+    mp = importlib.util.module_from_spec(spec_); spec_.loader.exec_module(mp)
+    old = ('"""An area moved in an earlier piece."""\nimport logging\n\nlogger = logging.getLogger("toy")\n\n\n'
+           'def f():\n    return 1\n\n\ndef g():\n    return core._x_helper() + 1\n\n\n'
+           '# Last, so this module is whole before copilot.py runs.\nimport copilot as core  # noqa: E402\n')
+    floor = '"""Stands in for the floor."""\n\n\ndef base() -> int:\n    return 0\n'
+    cop = _TOY_COPILOT.replace("from gizmo import floor_stub\n", "from gizmo import floor_stub\nfrom gizmo import old\n", 1) + (
+        "\n\ndef _x_helper() -> int:\n    return old.f() + KEEP\n\n\n"
+        "def _x_ok(d) -> bool:\n    return isinstance(d, dict)\n\n\n"
+        "def uses() -> int:\n    return _x_helper() + int(_x_ok({}))\n")
+    spec = {"note": "the leftovers home", "routes": [], "areas": [
+        {"name": "old", "file": "gizmo/old.py", "alias": "old", "existing": True, "prefix": "^$",
+         "extra": ["_x_helper"], "exclude": [], "floor": False, "doc": ""},
+        {"name": "floor_stub", "file": "gizmo/floor_stub.py", "alias": "floor_stub", "existing": True, "prefix": "^$",
+         "extra": ["_x_ok"], "exclude": [], "floor": True, "doc": ""}]}
+    root = _toy_repo("toy-existing", cop, spec, {"gizmo/old.py": old, "gizmo/floor_stub.py": floor})
+    r = _run_move(root)
+    eq(r.returncode, 0, r.stdout[-800:] + r.stderr[-800:])
+    read = lambda rel: open(os.path.join(root, rel)).read()
+    o, fl, c = read("gizmo/old.py"), read("gizmo/floor_stub.py"), read(_TOY_MAIN)
+    ok("def _x_helper() -> int:\n    return f() + core.KEEP" in o, "the helper reads its new module bare, copilot.py through core: " + o[-500:])
+    ok(o.index("def _x_helper(") < o.index("import copilot as core"), "before the module's last imports")
+    ok("return _x_helper() + 1" in o and "core._x_helper" not in o, "the module's own reads of it are bare")
+    ok("def _x_ok(d) -> bool:" in fl and "import copilot" not in fl, "the floor takes its helper and imports nothing above it")
+    ok("return old._x_helper() + int(floor_stub._x_ok({}))" in c, "copilot.py reads both through their modules: " + c[-300:])
+    eq((c.count("from gizmo import old\n"), c.count("from gizmo import floor_stub\n")), (1, 1), "and binds each module once")
+    base = {_TOY_MAIN: cop, "gizmo/__init__.py": "", "gizmo/floor_stub.py": floor, "gizmo/old.py": old, "gizmo/routes/__init__.py": ""}
+    head = dict(base, **{_TOY_MAIN: c, "gizmo/floor_stub.py": fl, "gizmo/old.py": o})
+    eq(mp.prove(base, head), [], "prove(): nothing but the move")
+    for first in ("gizmo.old", "copilot", "gizmo.floor_stub"):
+        rr = _sp.run([sys.executable, "-c", f"import {first}, copilot; assert copilot.uses() == 3"], cwd=root, capture_output=True, text=True)
+        eq(rr.returncode, 0, f"{first} first: " + rr.stderr[-400:])
+
+@test
 def t_the_privacy_loans_and_work_routes_are_gathered():
     """The privacy route and Shopify's privacy webhook, the loan register's and
     the work sessions' routes, each registered by one call in add_routes."""
