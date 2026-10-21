@@ -169,6 +169,9 @@ from gizmo import skills as skillbook
 from gizmo import memory
 from gizmo import knowledge
 from gizmo import chat as assistant
+from gizmo import prompts
+from gizmo import seo
+from gizmo import analytics
 import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
@@ -425,7 +428,7 @@ def t_every_seo_kpi_carries_the_list_behind_its_number():
     pages = [{"url": "https://shop.test/", "noindex": False, "meta_description": "x", "jsonld_types": ["Organization"]},
              {"url": "https://shop.test/products/gobo", "noindex": True, "meta_robots": "noindex, follow",
               "meta_description": "", "jsonld_types": ["Product"]}]
-    score, metrics = copilot._seo_scorecard(signals, 200, 200, pages, domain="shop.test", sitemap_locs=3)
+    score, metrics = seo._seo_scorecard(signals, 200, 200, pages, domain="shop.test", sitemap_locs=3)
     by = {m["label"]: m for m in metrics}
     ok(all(isinstance(m.get("detail"), dict) and "items" in m["detail"] for m in metrics),
        "every KPI carries a detail with items")
@@ -445,7 +448,7 @@ def t_every_seo_kpi_carries_the_list_behind_its_number():
     ok(by["Meta descriptions"]["detail"]["items"][0]["url"] == "https://shop.test/products/gobo",
        "meta descriptions list the pages without one")
     ok(any(i["note"] == "-25" for i in by["SEO score"]["detail"]["items"]), "the score explains its deductions")
-    _, m2 = copilot._seo_scorecard({"alt_coverage_pct": 100}, 200, 200,
+    _, m2 = seo._seo_scorecard({"alt_coverage_pct": 100}, 200, 200,
                                    [{"url": "u", "meta_description": "x", "jsonld_types": ["Product"]}])
     by2 = {m["label"]: m for m in m2}
     ok(by2["Indexable"]["detail"]["items"] == [] and by2["Indexable"]["detail"]["empty"].startswith("All 1 sampled"),
@@ -17645,7 +17648,7 @@ def t_a_google_connection_says_which_permission_was_left_unticked():
         page = client.get("/oauth/google/callback?state=st-ga4-only&code=c").text
         ok("without Search Console" in page and "left unticked" in page, page[-500:])
         # And the chat says the same, rather than that Google is not connected.
-        said = json.loads(copilot._google_not_ready("gsc"))["error"]
+        said = json.loads(seo._google_not_ready("gsc"))["error"]
         ok("without permission to read Search Console" in said, said)
         # A failure that is not about the boxes (a used code, a wrong secret)
         # says the connection failed, not that both were unticked.
@@ -17655,7 +17658,7 @@ def t_a_google_connection_says_which_permission_was_left_unticked():
         copilot._oauth_states["st-bad-code"] = time.time() + 60
         page = client.get("/oauth/google/callback?state=st-bad-code&code=c").text
         ok("Connection failed" in page and "unticked" not in page, page[-500:])
-        eq(json.loads(copilot._google_not_ready("gsc"))["error"],
+        eq(json.loads(seo._google_not_ready("gsc"))["error"],
            "Google isn't connected yet. Connect it in Settings.", "with no connection, it says so")
     finally:
         gd.OAUTH_TOKEN_PATH, gd.httpx, gd.GSC_SITE_URL, gd.GA4_PROPERTY_ID = real
@@ -22502,9 +22505,9 @@ def t_every_product_reader_reads_the_whole_catalogue_or_says_it_could_not():
         eq((len(prods), okd, cut), (260, True, False))
         shopify._tool_json, _c = catalogue(600, fail_after=1)
         eq(run_async(copilot._all_products({}, "id"))[1], False, "a failed page is a failed read")
-        sig = run_async(copilot._seo_product_signals({}))
+        sig = run_async(seo._seo_product_signals({}))
         ok(sig.get("unavailable"), "the SEO audit knows its read failed")
-        _score, kpis = copilot._seo_scorecard(sig, 200, 200, [], "shop.test")
+        _score, kpis = seo._seo_scorecard(sig, 200, 200, [], "shop.test")
         thin = next(k for k in kpis if k["label"] == "Thin descriptions")
         eq(thin["value"], "n/a", "and says so rather than reporting none")
         ok("did not answer" in thin["detail"]["empty"], thin["detail"])
@@ -22519,7 +22522,7 @@ def t_every_product_reader_reads_the_whole_catalogue_or_says_it_could_not():
         labels = [i["label"] for i in head["detail"]["items"]]
         ok(any(l.startswith("page checks not run: the storefront could not be crawled") for l in labels), labels)
         ok(any(l.startswith("product checks not run: Shopify did not answer") for l in labels), labels)
-        eq(copilot._metric_snapshot({"score": _score, "metrics": kpis})["metrics"].get("SEO score"),
+        eq(analytics._metric_snapshot({"score": _score, "metrics": kpis})["metrics"].get("SEO score"),
            None, "so nothing is saved for the alert to compare")
         loans._loan_products.update({"at": 0.0, "rows": []})
         raised = False
@@ -23510,11 +23513,11 @@ def t_the_overview_counts_only_sales_that_happened():
         return {}
     saved = shopify._tool_json; shopify._tool_json = tools
     try:
-        metrics, _extra = run_async(copilot._compute_metrics({}, track_inventory=False))
+        metrics, _extra = run_async(analytics._compute_metrics({}, track_inventory=False))
     finally:
         shopify._tool_json = saved
     by = {m["label"]: m["value"] for m in metrics}
-    eq(by.get("Revenue (7d)"), copilot._money(100.0, "GBP"), by)
+    eq(by.get("Revenue (7d)"), analytics._money(100.0, "GBP"), by)
     eq(by.get("Orders (7d)"), "1", by)
     # The Products page's monthly buckets follow the same rule.
     month = "2026-09"
@@ -23525,14 +23528,56 @@ def t_the_overview_counts_only_sales_that_happened():
 
 
 @test
+def t_the_reports_ask_with_their_instructions():
+    """Each report sends the model its own instructions, the house writing
+    style and the context it was handed. Pinned before the reports and the
+    instructions moved out of copilot.py: a report reaching for a prompt that
+    moved, or sending none, fails here."""
+    seen = []
+
+    class Answer:
+        type, name, input = "tool_use", "present_response", {"summary": "Fine."}
+
+    class Reply:
+        content, stop_reason = [Answer()], "tool_use"
+
+    async def fake_call(client, **kw):
+        seen.append(kw.get("system") or "")
+        return Reply()
+
+    async def tools(registry, name, args):
+        if name == "shopify_get_shop":
+            return dict(SHOP)
+        if name == "shopify_list_orders":
+            return {"orders": []}
+        if name == "shopify_list_customers":
+            return {"customers": []}
+        if name == "shopify_count_products":
+            return {"count": 0}
+        return {}
+    saved = (claude._xcreate, claude._anthropic, shopify._tool_json)
+    claude._xcreate, claude._anthropic, shopify._tool_json = fake_call, (lambda: object()), tools
+    try:
+        run_async(analytics.run_overview({}, "\n\nCONTEXT FOR THE OVERVIEW", track_inventory=False))
+        run_async(seo.run_keywords({}, "\n\nCONTEXT FOR THE KEYWORDS"))
+    finally:
+        claude._xcreate, claude._anthropic, shopify._tool_json = saved
+    eq(len(seen), 2, "one model call each")
+    overview, keywords = seen
+    ok("executive overview" in overview and "Never use em dashes" in overview
+       and overview.endswith("CONTEXT FOR THE OVERVIEW"), "the overview's instructions: " + overview[-300:])
+    ok("money-ranked plan" in keywords and "executive overview" in keywords and "Never use em dashes" in keywords
+       and keywords.endswith("CONTEXT FOR THE KEYWORDS"), "the keywords' instructions: " + keywords[-300:])
+
+@test
 def t_the_scan_refuses_what_answered_from_the_inside():
     """B26. The guard resolved the name once and let the client resolve it
     again to connect; a name whose records alternate answered the second
     lookup with a private address, and the inside answered. The address
     actually connected to is now checked before a byte of the body is read."""
-    eq(copilot._ip_is_public("8.8.8.8"), True)
+    eq(seo._ip_is_public("8.8.8.8"), True)
     for bad in ("10.0.0.5", "127.0.0.1", "169.254.169.254", "::1", "fe80::1%en0", "0.0.0.0"):
-        eq(copilot._ip_is_public(bad), False, bad)
+        eq(seo._ip_is_public(bad), False, bad)
     import http.server, threading
     class Inside(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -23545,16 +23590,16 @@ def t_the_scan_refuses_what_answered_from_the_inside():
             pass
     srv = http.server.HTTPServer(("127.0.0.1", 0), Inside)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    saved = copilot._host_is_public
-    copilot._host_is_public = lambda h: True      # the name check passed, as a rebinding name would
+    saved = seo._host_is_public
+    seo._host_is_public = lambda h: True      # the name check passed, as a rebinding name would
     try:
         try:
-            run_async(copilot._fetch_external(f"http://127.0.0.1:{srv.server_port}/"))
+            run_async(seo._fetch_external(f"http://127.0.0.1:{srv.server_port}/"))
             ok(False, "a fetch that connected to a private address must be refused")
         except RuntimeError as e:
             ok("not allowed" in str(e), str(e))
     finally:
-        copilot._host_is_public = saved
+        seo._host_is_public = saved
         srv.shutdown(); srv.server_close()
 
 
@@ -24086,9 +24131,9 @@ def t_the_scheduled_audits_carry_memory_knowledge_and_skills():
     saved = _ws_stores()
     saved_k = knowledge.KNOWLEDGE_PATH
     knowledge.KNOWLEDGE_PATH = SCRATCH + "/ws_knowledge_" + secrets.token_hex(3) + ".json"
-    names = ("_impact_snapshot", "run_overview", "run_seo_audit", "run_keywords", "run_customers",
-             "_save_analysis", "_save_customer_segment")
-    real = {n: getattr(copilot, n) for n in names}
+    names = ((copilot, "_impact_snapshot"), (analytics, "run_overview"), (seo, "run_seo_audit"), (seo, "run_keywords"),
+             (analytics, "run_customers"), (analytics, "_save_analysis"), (analytics, "_save_customer_segment"))
+    real = {(m, n): getattr(m, n) for m, n in names}
     seen = {}
 
     async def no_snap(registry):
@@ -24101,10 +24146,10 @@ def t_the_scheduled_audits_carry_memory_knowledge_and_skills():
         return run
     try:
         copilot._impact_snapshot = no_snap
-        copilot.run_overview, copilot.run_seo_audit = faked("overview"), faked("seo")
-        copilot.run_keywords, copilot.run_customers = faked("keywords"), faked("customers")
-        copilot._save_analysis = lambda kind, res: res
-        copilot._save_customer_segment = lambda segment, res: res
+        analytics.run_overview, seo.run_seo_audit = faked("overview"), faked("seo")
+        seo.run_keywords, analytics.run_customers = faked("keywords"), faked("customers")
+        analytics._save_analysis = lambda kind, res: res
+        analytics._save_customer_segment = lambda segment, res: res
         assistant._chat_after({"structured": {"summary": "Noted.", "remember": [
             {"type": "fact", "text": "Trade orders ship on Tuesdays."}]}},
             [{"role": "user", "content": "remember that trade orders ship on Tuesdays"}])
@@ -24117,8 +24162,8 @@ def t_the_scheduled_audits_carry_memory_knowledge_and_skills():
             ok("Glass gobos are etched in the Leeds workshop." in extra, kind + " reads the store knowledge")
             ok("Lead every overview report with trade revenue." in extra, kind + " reads the skill that fits")
     finally:
-        for n, f in real.items():
-            setattr(copilot, n, f)
+        for (m, n), f in real.items():
+            setattr(m, n, f)
         knowledge.KNOWLEDGE_PATH = saved_k
         _ws_restore(saved)
 
@@ -26575,7 +26620,7 @@ def t_a_failed_customer_read_is_not_analysed_as_no_customers():
         r = post("/api/customers", {})
         eq(r.status_code, 502, r.text[:200])
         eq(called, [], "no AI credits spent")
-        eq((copilot._load_analysis_cache().get("customers_segments") or {}).get("__all__", {}).get("snapshot", {}).get("metrics", {}).get("Customers"),
+        eq((analytics._load_analysis_cache().get("customers_segments") or {}).get("__all__", {}).get("snapshot", {}).get("metrics", {}).get("Customers"),
            None, "and no zero baseline saved")
     finally:
         shopify._tool_json, claude._xcreate = saved
@@ -26641,14 +26686,14 @@ def t_the_keyword_scan_reads_no_more_than_it_keeps():
         def __init__(self, *a, **k):
             k["transport"] = _hx.MockTransport(lambda rq: _hx.Response(200, headers={"content-type": "text/html"}, stream=Body()))
             super().__init__(*a, **k)
-    saved = (copilot.httpx.AsyncClient, copilot._host_is_public)
-    copilot.httpx.AsyncClient, copilot._host_is_public = Client, (lambda h: True)
+    saved = (copilot.httpx.AsyncClient, seo._host_is_public)
+    copilot.httpx.AsyncClient, seo._host_is_public = Client, (lambda h: True)
     try:
-        st, _u, text = run_async(copilot._fetch_external("https://competitor.example/catalogue"))
-        eq(len(text), copilot.EXTERNAL_FETCH_MAX)
+        st, _u, text = run_async(seo._fetch_external("https://competitor.example/catalogue"))
+        eq(len(text), seo.EXTERNAL_FETCH_MAX)
         ok(read["n"] <= 2 * 1024 * 1024, "stopped reading near the cap, not after 80 MB: %d" % read["n"])
     finally:
-        copilot.httpx.AsyncClient, copilot._host_is_public = saved
+        copilot.httpx.AsyncClient, seo._host_is_public = saved
 
 
 @test
@@ -27272,7 +27317,7 @@ def t_a_report_that_did_not_finish_keeps_the_last_one_and_says_why():
             claude._client = _OpusFake([_OpusResp([_OpusBlock("thinking", thinking="", signature="s")], stop)] * 2)
             r = post_s(sess, "/api/keywords", {})
             ok(r.status_code == 500 and words in r.json()["error"] and "last one is kept" in r.json()["error"], (stop, r.text[:200]))
-            cache = json.load(open(copilot.ANALYSIS_CACHE_PATH)).get("keywords", {})
+            cache = json.load(open(analytics.ANALYSIS_CACHE_PATH)).get("keywords", {})
             eq(cache.get("result", {}).get("structured", {}).get("summary"), "Three keywords carry 60% of clicks.",
                "the last good report is kept")
         # A budget refusal is said as it is on the keyword and customer reports too.
@@ -30034,6 +30079,9 @@ SHARED_COPIES = {
     ("copilot", "httpx", "gizmo.routes.files"):
         "the Finder drive streams downloads from the bucket with its own client; "
         "the connector settings test reaches no file route",
+    ("copilot", "httpx", "gizmo.seo"):
+        "SEO reads the store's site and outside pages with its own client; "
+        "the connector settings test reads no page",
 }
 
 @test
@@ -30201,7 +30249,9 @@ def t_either_module_imports_first():
                         ("gizmo.routes.size_list", "copilot"), ("gizmo.routes.orderbook", "copilot"),
                         ("gizmo.skills", "copilot"), ("gizmo.memory", "copilot"), ("gizmo.knowledge", "copilot"),
                         ("gizmo.chat", "copilot"), ("gizmo.routes.skills", "copilot"),
-                        ("gizmo.routes.memory", "copilot"), ("gizmo.routes.knowledge", "copilot")):
+                        ("gizmo.routes.memory", "copilot"), ("gizmo.routes.knowledge", "copilot"),
+                        ("gizmo.prompts", "copilot"), ("gizmo.seo", "copilot"), ("gizmo.analytics", "copilot"),
+                        ("gizmo.routes.seo", "copilot"), ("gizmo.routes.analytics", "copilot")):
         r = _sp.run([sys.executable, "-c", f"import {first}, {then}; import gizmo.dispatch as d, copilot as c; "
                      "assert c.desk is d and d.core is c; print('ok')"],
                     cwd=root, env=dict(os.environ), capture_output=True, text=True, timeout=120)
@@ -30305,7 +30355,7 @@ def t_move_proof_is_wired():
 # The store, the error log and the AI client sit beneath every area: they
 # import nothing from copilot.py, so an area can import them directly.
 
-FLOOR = ["gizmo/config.py", "gizmo/store.py", "gizmo/errors.py", "gizmo/ai.py", "gizmo/shopify.py"]
+FLOOR = ["gizmo/config.py", "gizmo/store.py", "gizmo/errors.py", "gizmo/ai.py", "gizmo/shopify.py", "gizmo/prompts.py"]
 
 @test
 def t_no_module_looks_itself_up_by_name():
@@ -30613,6 +30663,20 @@ def t_move_area_moves_a_toy_area():
     ok(any(l.startswith("note: _shared stays") for l in named), "a helper left behind for the area is named: " + r.stdout[-500:])
     ok(any(l.startswith("note: _deeper stays") for l in named), "and one only that helper reads: " + r.stdout[-500:])
     ok(not any(l.startswith("note: keep stays") for l in named), "a name staying code reads is not: " + r.stdout[-500:])
+    # a moving statement that reads an earlier area as the module loads (a
+    # default value): that area is imported at the top, and any module may go first
+    old = '"""An earlier area."""\n\nLIMIT = 3\n\n\nimport copilot as core  # noqa: E402\n'
+    early = _toy_repo("toy-early", _TOY_COPILOT.replace("from gizmo import floor_stub\n", "from gizmo import floor_stub\nfrom gizmo import old\n", 1)
+                      + "\n\ndef _x_cap(n: int = old.LIMIT) -> int:\n    return n\n", extra={"gizmo/old.py": old})
+    r = _run_move(early)
+    eq(r.returncode, 0, r.stdout[-600:] + r.stderr[-600:])
+    area = open(os.path.join(early, "gizmo/x.py")).read()
+    ok(area.index("from gizmo import old") < area.index("def _x_cap("),
+       "the earlier area is imported above the statement that reads it as the module loads: " + area[-300:])
+    for first in ("gizmo.x", "copilot", "gizmo.old"):
+        rr = _sp.run([sys.executable, "-c", f"import {first}, copilot, gizmo.x as m; assert m._x_cap() == 3"],
+                     cwd=early, capture_output=True, text=True)
+        eq(rr.returncode, 0, f"{first} first: " + rr.stderr[-400:])
 
 @test
 def t_the_files_routes_are_gathered():
@@ -30698,6 +30762,23 @@ def t_the_workspace_routes_are_gathered():
        [2, 1, 2], "2 skills routes, 1 memory route, 2 learn routes")
     ok('@mcp.custom_route("/api/chat", methods=["POST"])' in src and '"/api/chat/stream"' in src,
        "the chat routes stay with the tool list they read")
+
+@test
+def t_the_report_routes_are_gathered():
+    """The SEO and keyword routes, and the overview's and customer reports',
+    each group registered by one call in add_routes. The product page's route
+    stays: gathered by path prefix, it would take /api/products with it."""
+    import inspect
+    from gizmo.routes import analytics as routes_analytics, seo as routes_seo
+    src = inspect.getsource(copilot.add_routes)
+    for call in ("routes_seo.register(mcp, registry)", "routes_analytics.register(mcp, registry)"):
+        eq(src.count(call), 1, call)
+    for path in ('"/api/seo"', '"/api/keyword', '"/api/overview"', '"/api/cache"', '"/api/reorder-radar"',
+                 '"/api/customers"', '"/api/customer-tags"'):
+        ok(path not in src, path + " is registered by its area's routes")
+    eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_seo, routes_analytics)], [3, 5],
+       "3 SEO and keyword routes, 5 report routes")
+    ok('"/api/product"' in src and '"/api/products"' in src, "the product page's routes stay")
 
 @test
 def t_the_moved_areas_routes_follow_them():

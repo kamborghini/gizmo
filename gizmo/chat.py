@@ -254,8 +254,8 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
     saw: list[str] = []
     # read_skill is answered here from the skills store: it reads the
     # merchant's own text, never the store's data, and writes nothing.
-    all_tools = data_tools + ([skillbook.READ_SKILL_TOOL] if skillbook._load_skills() else []) + [core.PRESENT_RESPONSE_TOOL]
-    system = core.SYSTEM_PROMPT + extra_system
+    all_tools = data_tools + ([skillbook.READ_SKILL_TOOL] if skillbook._load_skills() else []) + [prompts.PRESENT_RESPONSE_TOOL]
+    system = prompts.SYSTEM_PROMPT + extra_system
     if emit:
         await emit({"type": "step", "label": "Analysing your question"})
 
@@ -281,7 +281,7 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
             if block.type == "text":
                 text_parts.append(block.text)
             elif block.type == "tool_use":
-                if block.name == core.PRESENT_RESPONSE_TOOL["name"]:
+                if block.name == prompts.PRESENT_RESPONSE_TOOL["name"]:
                     present = block.input
                 else:
                     data_uses.append(block)
@@ -350,3 +350,4 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
 from gizmo import memory  # noqa: E402
 from gizmo import skills as skillbook  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import prompts  # noqa: E402

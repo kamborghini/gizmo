@@ -83,13 +83,13 @@ async def _discover_content_urls(primary: str, hosts: set, limit: int) -> list[s
     """Find homepage + About/other pages + blog posts via the sitemap (SSRF-guarded)."""
     def _is_content(u: str) -> bool:
         return ("/pages/" in u) or ("/blogs/" in u)
-    _, sm = await core._http_get(f"https://{primary}/sitemap.xml", allowed_hosts=hosts)
+    _, sm = await seo._http_get(f"https://{primary}/sitemap.xml", allowed_hosts=hosts)
     locs = re.findall(r"<loc>\s*(.*?)\s*</loc>", sm or "")
     page_urls = [l for l in locs if _is_content(l)]
     # Shopify's root sitemap is an index; follow the pages/blogs child sitemaps.
     for child in [l for l in locs if l.endswith(".xml") and ("page" in l or "blog" in l)][:4]:
         if urlparse(child).netloc.lower() in hosts:
-            _, c = await core._http_get(child, allowed_hosts=hosts)
+            _, c = await seo._http_get(child, allowed_hosts=hosts)
             page_urls += [l for l in re.findall(r"<loc>\s*(.*?)\s*</loc>", c or "") if _is_content(l)]
     out, seen = [], set()
     for u in [f"https://{primary}/"] + page_urls:
@@ -103,14 +103,14 @@ async def _discover_content_urls(primary: str, hosts: set, limit: int) -> list[s
 
 async def run_learn(registry: dict) -> dict:
     claude._ai_kind.set("learn")
-    primary, hosts = await core._resolve_domains(registry)
+    primary, hosts = await seo._resolve_domains(registry)
     if not primary:
         raise RuntimeError("Could not resolve the store's domain to learn from.")
     shop = await shopify._tool_json(registry, "shopify_get_shop", {})
     urls = await _discover_content_urls(primary, hosts, LEARN_MAX_PAGES)
     pages = []
     for u in urls:
-        st, html = await core._http_get(u, allowed_hosts=hosts)
+        st, html = await seo._http_get(u, allowed_hosts=hosts)
         if not (st and html):
             continue
         soup = BeautifulSoup(html, "html.parser")
@@ -141,3 +141,4 @@ async def run_learn(registry: dict) -> dict:
 # takes names from these modules as it loads, and any of them may be imported
 # first. Read as core.NAME and sibling.NAME, never a copied name.
 import copilot as core  # noqa: E402
+from gizmo import seo  # noqa: E402

@@ -1,6 +1,17 @@
 {
  "releases": [
   {
+   "date": "2026-10-21",
+   "title": "Reports on their own",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "The overview, customer, SEO and keyword reports, and the instructions the assistant works from, now each live on their own, so a change elsewhere cannot upset them. Nothing looks different."
+    }
+   ]
+  },
+  {
    "date": "2026-10-20",
    "title": "Skills, memory and chat on their own",
    "items": [

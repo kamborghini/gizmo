@@ -40,8 +40,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 |---|---|---|---|
 | `ALERTS_MAX` | `"60"` | copilot |  |
 | `ALERTS_PATH` | `"/data/alerts.json"` | copilot | change alerts from scheduled runs |
-| `ANALYSIS_CACHE_MAX_BYTES` | `"800000"` | copilot | per-entry size guard |
-| `ANALYSIS_CACHE_PATH` | `"/data/analysis_cache.json"` | copilot | last result per AI tab |
 | `ANTHROPIC_EFFORT` | `"high"` | copilot |  |
 | `ANTHROPIC_EFFORT_DEEP` | `"max"` | copilot |  |
 | `ANTHROPIC_THINKING` | `"adaptive"` | copilot |  |
@@ -72,7 +70,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `SHOPIFY_CLIENT_SECRET` | `""` | copilot, server |  |
 | `SHOPIFY_STORE` | `""` | copilot, server | used to pin session tokens to this shop |
 | `STORE_CONTEXT_CAP` | `"4000"` | copilot |  |
-| `TREND_MONTHS` | `"24"` | copilot |  |
 
 ## copilot.py - Impact tracking — "close the loop": snapshot headline metric
 
@@ -81,12 +78,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `BACKUP_FILE_MAX` | `str(60 * 1024 * 1024)` | copilot |  |
 | `BACKUP_SNAPSHOT_DIR` | `"/data/snapshots"` | copilot |  |
 | `BACKUP_STATE_PATH` | `"/data/backup_state.json"` | copilot |  |
-
-## copilot.py - Keyword scraper for arbitrary external URLs (SSRF-guarded) +
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `EXTERNAL_FETCH_MAX` | `str(600 * 1024)` | copilot | bytes of text kept |
 
 ## copilot.py - Page rendering
 
@@ -100,12 +91,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
 | `ANTHROPIC_MODEL_RECON` | `None` | copilot |  |
-
-## copilot.py - SEO — knowledge layer + live technical audit
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `SEO_SAMPLE_PAGES` | `"5"` | copilot |  |
 
 ## copilot.py - Scheduled refresh + change alerts. Off by default (automatic
 
@@ -162,6 +147,14 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `DAILY_COST_CAP` | `"25"` | gizmo.ai | hard $/day AI ceiling (0 disables) |
 | `USAGE_MAX` | `"5000"` | gizmo.ai | max usage events retained |
 | `USAGE_PATH` | `"/data/usage.json"` | gizmo.ai | AI token-usage + cost log (measurement) |
+
+## gizmo/analytics.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `ANALYSIS_CACHE_MAX_BYTES` | `"800000"` | gizmo.analytics | per-entry size guard |
+| `ANALYSIS_CACHE_PATH` | `"/data/analysis_cache.json"` | gizmo.analytics | last result per AI tab |
+| `TREND_MONTHS` | `"24"` | gizmo.analytics |  |
 
 ## gizmo/chat.py - top
 
@@ -333,6 +326,13 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
 | `DAV_TRACE` | `None` | gizmo.routes.files |  |
+
+## gizmo/seo.py - SEO — knowledge layer + live technical audit
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `EXTERNAL_FETCH_MAX` | `str(600 * 1024)` | gizmo.seo | bytes of text kept |
+| `SEO_SAMPLE_PAGES` | `"5"` | gizmo.seo |  |
 
 ## gizmo/size_list.py - top
 
