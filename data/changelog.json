@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-21",
+   "title": "Requests checked at the door",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": null,
+     "text": "Every change the app is asked to make is now checked field by field before it is made, so a request with a field of the wrong kind is refused with a reason instead of failing or being saved as nonsense. Nothing looks different."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-21",
    "title": "The chat's routes and the shop settings on their own",
    "items": [
     {

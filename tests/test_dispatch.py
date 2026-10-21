@@ -31415,6 +31415,55 @@ def t_a_wrong_type_is_refused_before_anything_is_kept():
     after = _scratch_files()
     eq(sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k)), [], "nothing was written")
 
+# The write routes that read fields from their body with no model checking
+# them yet (gizmo/bodies.py). The list may only shrink: a new write route comes
+# with its model, and a route that gains one leaves the list.
+UNCHECKED_BODIES = [
+    "/api/alerts", "/api/auth/login", "/api/auth/mfa", "/api/auth/mfa-verify", "/api/auth/password",
+    "/api/auth/setup", "/api/chat", "/api/chat/stream", "/api/connector", "/api/crm/deal",
+    "/api/crm/import", "/api/crm/lead", "/api/crm/stages", "/api/custom/book", "/api/custom/list",
+    "/api/custom/quote", "/api/custom/visibility", "/api/customer-history", "/api/customers",
+    "/api/dispatch/book", "/api/dispatch/cancel", "/api/dispatch/collections", "/api/dispatch/diagnose",
+    "/api/dispatch/parse-address", "/api/dispatch/quote", "/api/eori/check", "/api/files/complete",
+    "/api/files/download-url", "/api/files/file", "/api/files/upload-url", "/api/forecast/workbook",
+    "/api/gobo-sizes/check", "/api/gobo-sizes/models", "/api/gobo-sizes/upload", "/api/keyword-scan",
+    "/api/mail/assign", "/api/mail/attach-done", "/api/mail/attach-url", "/api/mail/attachment",
+    "/api/mail/board", "/api/mail/body", "/api/mail/bulk", "/api/mail/draft", "/api/mail/note",
+    "/api/mail/presence", "/api/mail/read", "/api/mail/rules", "/api/mail/search", "/api/mail/send",
+    "/api/mail/state", "/api/mail/thread", "/api/mail/undo", "/api/mail/viewing", "/api/order/edit",
+    "/api/product", "/api/production-labels", "/api/production-labels/coverage",
+    "/api/production-labels/queue", "/api/products", "/api/profile", "/api/recon/disconnect",
+    "/api/recon/exception", "/api/restore", "/api/schedule", "/api/skills/read", "/api/stock-usage",
+    "/api/stock-usage/send", "/api/team/user", "/api/usage", "/api/work/report", "/api/work/resolve",
+    "/hooks/forecast/results", "/print/production-labels/sign", "/webhooks/privacy"]
+
+@test
+def t_write_routes_check_their_bodies():
+    """Every route that takes a POST and reads fields from its body names them
+    in a model, or is on UNCHECKED_BODIES; docs/API.md's Body column names the
+    model, or says the fields are unchecked (stage 5)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("route_reference", os.path.join(HERE, "tools", "route_reference.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    rows = mod.collect(HERE)
+    by = {r["path"]: r for r in rows}
+    eq(by["/api/memory"]["body"], "MemoryBody", "a model handed to the door is named")
+    eq(by["/api/crm/activity"]["body"], "CrmActivityBody", "and one handed through an area's door")
+    eq(by["/api/gobo-sizes/rule"]["body"], "SizeRuleBody", "and one a route checks after reading its own body")
+    ok({"subject", "deal_id", "done"} <= set(by["/api/crm/activity"]["fields"]), "the fields a route reads are listed")
+    eq(by["/api/alerts"]["body"], "", "a route with no model has none")
+    eq(sorted(r["path"] for r in rows if r["body"]),
+       ["/api/crm/activity", "/api/crm/contact", "/api/files/folder", "/api/gobo-sizes/rule", "/api/impact",
+        "/api/learn", "/api/liability/chase", "/api/loans", "/api/mail/settings", "/api/memory", "/api/privacy",
+        "/api/production-state", "/api/recon/exceptions", "/api/shipping/config", "/api/skills", "/api/updates"],
+       "the sixteen routes with a model")
+    unchecked = sorted(r["path"] for r in rows if "POST" in r["methods"] and r["fields"] and not r["body"])
+    eq([p for p in unchecked if p not in UNCHECKED_BODIES], [],
+       "a new write route reads fields with no model: give it one (gizmo/bodies.py)")
+    eq([p for p in UNCHECKED_BODIES if p not in unchecked], [],
+       "these now have a model: take them off UNCHECKED_BODIES")
+
 @test
 def t_the_moved_areas_routes_follow_them():
     """Production's, the Size list's and the order book's routes follow their
