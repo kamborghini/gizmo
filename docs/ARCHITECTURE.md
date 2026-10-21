@@ -46,7 +46,7 @@ each other through the module's name, never a copied name: the dispatch desk
 Neither reads the other as it loads, so either can be imported first.
 
 Beneath every area is the floor, modules that import nothing above them
-(`t_the_floor_imports_nothing_above_it`): `gizmo/config.py` (settings),
+(`t_the_floor_imports_nothing_above_it`): `gizmo/config.py` (settings, the shop's own among them),
 `gizmo/store.py` (every JSON store, the one writer, the cache, the poison
 guard), `gizmo/errors.py` (the error log), `gizmo/ai.py` (the AI client:
 models, the call and its fallbacks, usage, the spend cap) and
@@ -98,13 +98,15 @@ module's name and `copilot.py` as `core.NAME`, and import `copilot` last.
 the ones the frozen print route reads, and `_guard` and `_json`, the door
 every route here opens with and the answer it gives.
 
-What `copilot.py` still holds, on purpose: the shop settings (tests patch
-`SHOPIFY_STORE` through it, and the frozen print routes read the secret and
-the base address), the stock bridge (the stock merge project's), the frozen
-print routes with their font, logo and CORS helpers and `_spawn_bg` (which one
-of them reads), the chat and usage routes (they read the tool list
-`add_routes` builds from the registry it is handed), and `add_routes` itself,
-which registers every area's routes.
+What `copilot.py` still holds, on purpose (stage 4 ended here, 21 Oct 2026,
+from 28,623 lines to about 1,330): the stock bridge (the stock merge
+project's), the frozen print routes with their font, logo and CORS helpers and
+`_spawn_bg` (which one of them reads), and `add_routes`, which hands the
+capabilities `server.py` passes in to the modules that use them (the Shopify
+writers to `gizmo/shopify.py`, the chat's tools to `gizmo/chat.py`), sets up
+reconciliation, and registers every area's routes. It keeps the shop secret
+and the public base address only as copies of `gizmo/config.py`'s, for the
+frozen print routes.
 
 Acyclic otherwise, and it stays that way. An integration never imports the app: it
 takes what it needs as arguments and returns plain data. `server.py` hands
