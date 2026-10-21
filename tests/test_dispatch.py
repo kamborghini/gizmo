@@ -31569,6 +31569,46 @@ def t_the_shipping_routes_refuse_a_wrong_kind():
     r = post("/api/dispatch/quote", {"order_id": 1001, "boxes": [{"width": 10}, "big"]})
     eq((r.status_code, r.json().get("error")), (400, "The boxes sent must be a list of sets of fields."))
 
+@test
+def t_the_routes_the_first_count_missed_refuse_a_wrong_kind():
+    """The count of unchecked routes saw only body.get("x") with the key
+    written out; a review found twelve more that read fields through a helper,
+    a computed key or (body or {}).get(...): the CRM board's and Files tree's
+    poll, a label's download, the day's manifest, the margin report, the
+    overview's and liability's refresh, claiming a conversation and its
+    orders, the accounts mailbox link, card layouts and the forecast's store
+    reads. Each now names its fields, and the count sees them all."""
+    from gizmo.routes import crm as r_crm, files as r_files, dispatch as r_disp, liability as r_liab
+    from gizmo.routes import analytics as r_an, mail as r_mail, reconciliation as r_rec, layouts as r_lay
+    from gizmo.routes import forecasting as r_fc
+    n = _wrong_kinds_refused([
+        ("/api/crm/board", None, r_crm.CrmBoardBody),
+        ("/api/files/tree", None, r_files.FilesTreeBody),
+        ("/api/dispatch/label", None, r_disp.DispatchLabelBody),
+        ("/api/dispatch/manifest", None, r_disp.DispatchManifestBody),
+        ("/api/margin", None, r_disp.MarginBody),
+        ("/api/liability", None, r_liab.LiabilityBody),
+        ("/api/overview", None, r_an.OverviewBody),
+        ("/api/mail/claim", None, r_mail.MailClaimBody),
+        ("/api/mail/orders", None, r_mail.MailOrdersBody),
+        ("/api/recon/connect-link", None, r_rec.ReconConnectLinkBody),
+        ("/api/layouts", None, r_lay.LayoutBody)])
+    ok(n > 20, "every field each model names was tried (%d refusals)" % n)
+    gate._rl_hits.clear(); gate._rl_global.clear()
+    r = client.post("/api/margin", content=b'{"days": Infinity}',
+                    headers={"Authorization": "Bearer " + tok(), "X-App-Session": ensure_auth(),
+                             "Content-Type": "application/json"})
+    eq((r.status_code, r.json().get("error")), (400, "The days sent must be a whole number."),
+       "an infinite number of days was a server error inside the route")
+    saved = forecasting.FORECAST_INGEST_TOKEN
+    try:
+        forecasting.FORECAST_INGEST_TOKEN = "forecast-secret-for-tests"
+        hook = lambda path, body: client.post(path, json=body, headers={"X-Forecast-Token": "forecast-secret-for-tests"})
+        ok(_wrong_kinds_refused([("/hooks/forecast/shopify", "products", r_fc.ForecastShopifyBody)], send=hook) >= 3,
+           "the forecast's store reads, behind their token")
+    finally:
+        forecasting.FORECAST_INGEST_TOKEN = saved
+
 # The write routes that read fields from their body with no model checking
 # them (gizmo/bodies.py), each left so on purpose. Every other one has a model
 # (stage 5, pieces 1 to 4). A new write route comes with its model.
@@ -31593,6 +31633,8 @@ def t_write_routes_check_their_bodies():
     eq(by["/api/crm/activity"]["body"], "CrmActivityBody", "and one handed through an area's door")
     eq(by["/api/gobo-sizes/rule"]["body"], "SizeRuleBody", "and one a route checks after reading its own body")
     ok({"subject", "deal_id", "done"} <= set(by["/api/crm/activity"]["fields"]), "the fields a route reads are listed")
+    eq(by["/api/margin"]["fields"], ["days"], "and one read as (body or {}).get(...)")
+    ok("*" in by["/api/mail/claim"]["fields"], "a body handed to a helper counts as read, as *: " + repr(by["/api/mail/claim"]["fields"]))
     eq(by["/webhooks/privacy"]["body"], "", "a route with no model has none")
     first = ["/api/crm/activity", "/api/crm/contact", "/api/files/folder", "/api/gobo-sizes/rule", "/api/impact",
         "/api/learn", "/api/liability/chase", "/api/loans", "/api/mail/settings", "/api/memory", "/api/privacy",

@@ -120,6 +120,12 @@ class CrmStagesBody(bodies.Body):
     followup_popup: bodies.Flag = None
 
 
+
+class CrmBoardBody(bodies.Body):
+    """What /api/crm/board reads (gizmo/bodies.py): the board the page already holds."""
+    rev: bodies.Text = None
+
+
 def register(mcp, registry):
     """Add the CRM's routes to the app."""
 
@@ -223,7 +229,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/crm/board", methods=["POST"])
     async def crm_board_route(request: Request):
-        err, body, _who = await salesdesk._crm_guard(request)
+        err, body, _who = await salesdesk._crm_guard(request, model=CrmBoardBody)
         if err:
             return err
         try:

@@ -7,7 +7,7 @@
     {
      "kind": "fixed",
      "tab": null,
-     "text": "Courier quotes, bookings and cancellations, custom shipments, collections, the EORI check, the Size list and the production labels now check every field they are sent before acting on it, so a field of the wrong kind is refused with a reason before anything is quoted, booked or queued. Nothing looks different."
+     "text": "Courier quotes, bookings, labels and cancellations, the day's manifest, custom shipments, collections, the EORI check, the Size list and the production labels now check every field they are sent before acting on it, as do the last few that did not (the margin report, card layouts, the overview and liability refreshes, claiming a conversation), so a field of the wrong kind is refused with a reason before anything is quoted, booked or queued. Nothing looks different."
     }
    ]
   },

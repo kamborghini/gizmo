@@ -53,6 +53,12 @@ class ReconDisconnectBody(bodies.Body):
     force: bodies.Flag = None
 
 
+
+class ReconConnectLinkBody(bodies.Body):
+    """What /api/recon/connect-link reads (gizmo/bodies.py): the mailbox to link."""
+    address: bodies.Text = None
+
+
 def register(mcp, registry):
     """Add the reconciliation routes and the Xero connect pair to the app."""
 
@@ -187,6 +193,9 @@ def register(mcp, registry):
         body = await gate._read_json_capped(request)
         if body is None:
             return gate._json({"error": "Request too large."}, 413)
+        refused = gate._body_refusal(ReconConnectLinkBody, body)
+        if refused:
+            return refused
         if not google_mail.client_configured():
             return gate._json({"error": "The server has no Google client configured yet. "
                                    "Add Google's client ID and secret in the app's hosting settings."}, 400)

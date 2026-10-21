@@ -44,6 +44,16 @@ do not yet pass a model on learn to: `team._auth_guard` (it reads the body
 itself, before any session exists) and `team._team_guard`. The forecast's
 results hook checks after its own token check, as the Size list rule does.
 
+The final review found the count blind to fields read through a helper, a
+computed key or `(body or {}).get(...)`: twelve more routes read fields that
+way (the CRM board's and Files tree's poll, a label's download, the day's
+manifest, the margin report, the overview's and liability's refresh, claiming
+a conversation and its orders, the accounts mailbox link, card layouts and the
+forecast's store reads). `tools/route_reference.py` now counts them (a helper's
+or a computed key's read shows as `*`), and they get models in the third pull
+request, which also ends a server error: `/api/margin` answered `{"days":
+Infinity}` with one.
+
 `UNCHECKED_BODIES` shrinks to the four routes deliberately left alone, each
 with its reason in the test: the signed print route (frozen), Shopify's privacy
 webhook (Shopify shapes that body, and refusing it would break the compliance

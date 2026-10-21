@@ -59,7 +59,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
 | `/api/crm/activity` | POST | crm | `_crm_guard` |  | `CrmActivityBody` |  | `gizmo.routes.crm.crm_activity_route` |  |
-| `/api/crm/board` | POST | crm | `_crm_guard` |  |  |  | `gizmo.routes.crm.crm_board_route` |  |
+| `/api/crm/board` | POST | crm | `_crm_guard` |  | `CrmBoardBody` |  | `gizmo.routes.crm.crm_board_route` |  |
 | `/api/crm/contact` | POST | crm | `_crm_guard` |  | `CrmContactBody` | `_team_role`, `_user_tabs` | `gizmo.routes.crm.crm_contact_route` |  |
 | `/api/crm/deal` | POST | crm | `_crm_guard` |  | `CrmDealBody` | `_user_tabs` | `gizmo.routes.crm.crm_deal_route` |  |
 | `/api/crm/import` | POST | crm | `_mail_guard` |  | `CrmImportBody` | `_team_role` | `gizmo.routes.crm.crm_import_route` | Copy Pipedrive into gizmo's CRM. |
@@ -102,8 +102,8 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 | `/api/dispatch/cancel` | POST | labels | `_guard` |  | `DispatchCancelBody` | `_team_level` | `gizmo.routes.dispatch.dispatch_cancel_route` | Cancel a booked shipment at World Options (best-effort). |
 | `/api/dispatch/collections` | POST | labels | `_guard` |  | `DispatchCollectionsBody` | `_team_level` | `gizmo.routes.dispatch.dispatch_collections_route` | What is coming, and from whom, on a given day. |
 | `/api/dispatch/diagnose` | POST | labels | `_guard` |  | `DispatchDiagnoseBody` |  | `gizmo.routes.dispatch.dispatch_diagnose_route` | Why is a courier service missing? |
-| `/api/dispatch/label` | POST | labels | `_guard` |  |  | `_team_level` | `gizmo.routes.dispatch.dispatch_label_route` | Return the stored label(s) for an already-dispatched order (reprint). |
-| `/api/dispatch/manifest` | POST | labels | `_guard` |  |  | `_team_level` | `gizmo.routes.dispatch.dispatch_manifest_route` | Everything booked on one day (Europe/London): the driver handover list and the sheet to check the World Options invoice against. |
+| `/api/dispatch/label` | POST | labels | `_guard` |  | `DispatchLabelBody` | `_team_level` | `gizmo.routes.dispatch.dispatch_label_route` | Return the stored label(s) for an already-dispatched order (reprint). |
+| `/api/dispatch/manifest` | POST | labels | `_guard` |  | `DispatchManifestBody` | `_team_level` | `gizmo.routes.dispatch.dispatch_manifest_route` | Everything booked on one day (Europe/London): the driver handover list and the sheet to check the World Options invoice against. |
 | `/api/dispatch/parse-address` | POST | labels | `_guard` |  | `ParseAddressBody` |  | `gizmo.routes.dispatch.parse_address_route` | Turn a pasted block of text into address fields. |
 | `/api/dispatch/quote` | POST | labels | `_guard` |  | `DispatchQuoteBody` |  | `gizmo.routes.dispatch.dispatch_quote_route` | Price couriers for one order. |
 
@@ -122,7 +122,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 | `/api/files/drive` | POST | files | `_files_guard` |  |  |  | `gizmo.routes.files.files_drive_route` | The Finder drive's own password: made, replaced and removed here, after a full sign-in (codes included), shown once, kept as a SHA-256. |
 | `/api/files/file` | POST | files | `_files_guard` |  | `FileBody` | `_team_level` | `gizmo.routes.files.files_file_route` |  |
 | `/api/files/folder` | POST | files | `_files_guard` |  | `FolderBody` |  | `gizmo.routes.files.files_folder_route` |  |
-| `/api/files/tree` | POST | files | `_files_guard` |  |  |  | `gizmo.routes.files.files_tree_route` |  |
+| `/api/files/tree` | POST | files | `_files_guard` |  | `FilesTreeBody` |  | `gizmo.routes.files.files_tree_route` |  |
 | `/api/files/upload-url` | POST | files | `_files_guard` |  | `FileUploadBody` |  | `gizmo.routes.files.files_upload_route` |  |
 
 ## `/api/forecast`
@@ -165,7 +165,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/layouts` | POST | any account | `_guard` | max body LAYOUT_MAX_BODY, cap LAYOUT_MAX_BODY |  |  | `gizmo.routes.layouts.layouts_route` | The caller's own card layouts: {} reads them all, a view with an order and a hidden list saves that screen's, a view with reset true removes it. |
+| `/api/layouts` | POST | any account | `_guard` | max body LAYOUT_MAX_BODY, cap LAYOUT_MAX_BODY | `LayoutBody` |  | `gizmo.routes.layouts.layouts_route` | The caller's own card layouts: {} reads them all, a view with an order and a hidden list saves that screen's, a view with reset true removes it. |
 
 ## `/api/learn`
 
@@ -178,7 +178,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/liability` | POST | liability | `_guard` |  |  |  | `gizmo.routes.liability.liability_route` |  |
+| `/api/liability` | POST | liability | `_guard` |  | `LiabilityBody` |  | `gizmo.routes.liability.liability_route` |  |
 | `/api/liability/chase` | POST | liability | `_guard` |  | `ChaseBody` |  | `gizmo.routes.liability.liability_chase_route` | Stamp an account as chased today. |
 
 ## `/api/loans`
@@ -199,12 +199,12 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 | `/api/mail/board` | POST | mail | `_mail_guard` |  | `MailBoardBody` | `_team_role` | `gizmo.routes.mail.mail_board_route` |  |
 | `/api/mail/body` | POST | mail | `_mail_guard` |  | `MailMessageBody` |  | `gizmo.routes.mail.mail_body_route` | The actual text of the conversation, read on demand. |
 | `/api/mail/bulk` | POST | mail | `_mail_guard` |  | `MailBulkBody` |  | `gizmo.routes.mail.mail_bulk_route` | Many threads, one decision. |
-| `/api/mail/claim` | POST | mail | `_mail_guard` |  |  |  | `gizmo.routes.mail.mail_claim_route` |  |
+| `/api/mail/claim` | POST | mail | `_mail_guard` |  | `MailClaimBody` |  | `gizmo.routes.mail.mail_claim_route` |  |
 | `/api/mail/connect-link` | POST | mail | `_mail_guard` |  |  | `_team_role` | `gizmo.routes.mail.mail_connect_link_route` | Master-only: mint a single-use ticket for the consent walk, so nobody has to copy a server secret into a URL by hand. |
 | `/api/mail/disconnect` | POST | mail | `_mail_guard` |  |  | `_team_role` | `gizmo.routes.mail.mail_disconnect_route` |  |
 | `/api/mail/draft` | POST | mail | `_mail_guard` |  | `MailDraftBody` | `_user_tabs` | `gizmo.routes.mail.mail_draft_route` | Draft a reply with Claude, then (on a second, explicit call) put it in Gmail as a DRAFT for the person to review and send themselves. |
 | `/api/mail/note` | POST | mail | `_mail_guard` |  | `MailNoteBody` |  | `gizmo.routes.mail.mail_note_route` |  |
-| `/api/mail/orders` | POST | mail | `_mail_guard` |  |  | `_user_tabs` | `gizmo.routes.mail.mail_orders_route` | What this app knows about the person who sent the email. |
+| `/api/mail/orders` | POST | mail | `_mail_guard` |  | `MailOrdersBody` | `_user_tabs` | `gizmo.routes.mail.mail_orders_route` | What this app knows about the person who sent the email. |
 | `/api/mail/presence` | POST | mail | `_mail_guard` |  | `MailPresenceBody` |  | `gizmo.routes.mail.mail_presence_route` |  |
 | `/api/mail/read` | POST | mail | `_mail_guard` |  | `MailReadBody` |  | `gizmo.routes.mail.mail_read_route` | Mark threads read or unread, in Gmail and here at once. |
 | `/api/mail/rules` | POST | mail | `_mail_guard` |  | `MailRulesBody` |  | `gizmo.routes.mail.mail_rules_route` | Standing decisions about arriving mail. |
@@ -220,7 +220,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/margin` | POST | labels | `_guard` |  |  |  | `gizmo.routes.dispatch.margin_route` | What dispatched orders actually made. |
+| `/api/margin` | POST | labels | `_guard` |  | `MarginBody` |  | `gizmo.routes.dispatch.margin_route` | What dispatched orders actually made. |
 
 ## `/api/memory`
 
@@ -238,7 +238,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/overview` | POST | overview | `_guard` | AI slot |  |  | `gizmo.routes.analytics.overview` |  |
+| `/api/overview` | POST | overview | `_guard` | AI slot | `OverviewBody` |  | `gizmo.routes.analytics.overview` |  |
 
 ## `/api/privacy`
 
@@ -283,7 +283,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/recon/connect-link` | POST | recon | `_guard` | reads its own body |  | `_team_role` | `gizmo.routes.reconciliation.recon_connect_link_route` | Master-only: mint a single-use ticket for the accounts-mailbox consent walk, so nobody has to paste a server secret into a URL. |
+| `/api/recon/connect-link` | POST | recon | `_guard` | reads its own body | `ReconConnectLinkBody` | `_team_role` | `gizmo.routes.reconciliation.recon_connect_link_route` | Master-only: mint a single-use ticket for the accounts-mailbox consent walk, so nobody has to paste a server secret into a URL. |
 | `/api/recon/disconnect` | POST | recon | `_guard` | reads its own body | `ReconDisconnectBody` | `_team_role` | `gizmo.routes.reconciliation.recon_disconnect_route` | Disconnect Xero or the accounts mailbox, and mean it. |
 | `/api/recon/exception` | POST | recon | `_guard` |  | `ReconExceptionBody` |  | `gizmo.routes.reconciliation.recon_exception_route` |  |
 | `/api/recon/exceptions` | POST | recon | `_guard` |  | `ReconFilterBody` |  | `gizmo.routes.reconciliation.recon_exceptions_route` |  |
@@ -411,7 +411,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 |---|---|---|---|---|---|---|---|---|
 | `/hooks/forecast/ledger` | GET | outside the tab map | own check |  |  | `_forecast_token_ok` | `gizmo.routes.forecasting.forecast_ledger_hook` | The service reads back who has actually been right, so a run can weigh its sources on their record rather than only on a backtest it computed itself a moment... |
 | `/hooks/forecast/results` | POST | outside the tab map | own check |  | `ForecastResultsBody` | `_forecast_token_ok` | `gizmo.routes.forecasting.forecast_results_hook` | The nightly forecasting service (a second Railway service on this repo, `python -m forecast nightly`) posts each run here. |
-| `/hooks/forecast/shopify` | POST | outside the tab map | own check |  |  | `_forecast_token_ok` | `gizmo.routes.forecasting.forecast_shopify_hook` | The service's reads of the store, made here with the app's own credential, so the service holds no Shopify credential at all. |
+| `/hooks/forecast/shopify` | POST | outside the tab map | own check |  | `ForecastShopifyBody` | `_forecast_token_ok` | `gizmo.routes.forecasting.forecast_shopify_hook` | The service's reads of the store, made here with the app's own credential, so the service holds no Shopify credential at all. |
 | `/hooks/forecast/workbook` | GET | outside the tab map | own check |  |  | `_forecast_token_ok` | `gizmo.routes.forecasting.forecast_workbook_hook` | The service fetches the workbook an admin uploaded in the tab, so the plan lives in one place and a revised sheet reaches the next run. |
 
 ## `/oauth`

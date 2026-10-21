@@ -70,6 +70,12 @@ class FileUploadBody(bodies.Body):
     delta: bodies.Flag = None
 
 
+
+class FilesTreeBody(bodies.Body):
+    """What /api/files/tree reads (gizmo/bodies.py): the tree the page already holds."""
+    rev: bodies.Text = None
+
+
 def register(mcp, registry):
     """Add the Files routes and the Finder drive's to the app."""
 
@@ -114,7 +120,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/files/tree", methods=["POST"])
     async def files_tree_route(request: Request):
-        err, body, _who = await fileserver._files_guard(request)
+        err, body, _who = await fileserver._files_guard(request, model=FilesTreeBody)
         if err:
             return err
         try:

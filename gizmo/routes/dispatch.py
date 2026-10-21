@@ -166,6 +166,25 @@ class EoriCheckBody(bodies.Body):
     number: bodies.Text = None
 
 
+
+class DispatchLabelBody(bodies.Body):
+    """What /api/dispatch/label reads (gizmo/bodies.py): the shipment, or the order whose label it is."""
+    id: bodies.Id = None
+    order_id: bodies.Whole = None
+
+
+
+class DispatchManifestBody(bodies.Body):
+    """What /api/dispatch/manifest reads (gizmo/bodies.py): the day."""
+    date: bodies.Text = None
+
+
+
+class MarginBody(bodies.Body):
+    """What /api/margin reads (gizmo/bodies.py): how many days."""
+    days: bodies.Whole = None
+
+
 def register(mcp, registry):
     """Add the desk's 16 routes to the app."""
     @mcp.custom_route("/api/shipping/config", methods=["POST"])
@@ -627,7 +646,7 @@ def register(mcp, registry):
         """Return the stored label(s) for an already-dispatched order (reprint).
         Read-only; the SOAP API has no fetch-by-tracking service, so labels are
         kept from the booking."""
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=DispatchLabelBody)
         if err:
             return err
         # Either a Shopify order or a pasted-address shipment: both keep their
@@ -687,7 +706,7 @@ def register(mcp, registry):
     async def dispatch_manifest_route(request: Request):
         """Everything booked on one day (Europe/London): the driver handover list
         and the sheet to check the World Options invoice against. Read-only."""
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=DispatchManifestBody)
         if err:
             return err
         want = str((body or {}).get("date") or "").strip()
@@ -767,7 +786,7 @@ def register(mcp, registry):
     @mcp.custom_route("/api/margin", methods=["POST"])
     async def margin_route(request: Request):
         """What dispatched orders actually made. Read-only, no AI."""
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=MarginBody)
         if err:
             return err
         try:

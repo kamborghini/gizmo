@@ -22,13 +22,19 @@ class ChaseBody(bodies.Body):
     key: bodies.Text = None
 
 
+
+class LiabilityBody(bodies.Body):
+    """What /api/liability reads (gizmo/bodies.py): whether to read afresh."""
+    fresh: bodies.Flag = None
+
+
 def register(mcp, registry):
     """Add the Liability routes to the app."""
 
     @mcp.custom_route("/api/liability", methods=["POST"])
     async def liability_route(request: Request):
         # Accounts receivable overview. Shopify read, no AI.
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=LiabilityBody)
         if err:
             return err
         try:

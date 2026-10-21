@@ -8,9 +8,19 @@ import copilot as core
 from gizmo import layouts
 from gizmo import gate
 from gizmo import team
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class LayoutBody(bodies.Body):
+    """What /api/layouts reads (gizmo/bodies.py): the screen, its cards' order and hidden ones, or a reset."""
+    view: bodies.Text = None
+    reset: bodies.Flag = None
+    order: bodies.Items = None
+    hidden: bodies.Items = None
 
 
 def register(mcp, registry):
@@ -25,7 +35,7 @@ def register(mcp, registry):
         account is only ever the session the door returns, never a name in
         the body, so nobody can read or change another person's layout. Not
         tracked: arranging cards is not an event the team needs in its log."""
-        err, body, who = await gate._guard(request, max_body=layouts.LAYOUT_MAX_BODY, cap=layouts.LAYOUT_MAX_BODY)
+        err, body, who = await gate._guard(request, max_body=layouts.LAYOUT_MAX_BODY, cap=layouts.LAYOUT_MAX_BODY, model=LayoutBody)
         if err:
             return err
         if not who:

@@ -202,6 +202,18 @@ class MailViewingBody(bodies.Body):
     id: bodies.Id = None
 
 
+
+class MailClaimBody(bodies.Body):
+    """What /api/mail/claim reads (gizmo/bodies.py): the conversation to take."""
+    id: bodies.Id = None
+
+
+
+class MailOrdersBody(bodies.Body):
+    """What /api/mail/orders reads (gizmo/bodies.py): the conversation whose customer's orders to show."""
+    id: bodies.Id = None
+
+
 def register(mcp, registry):
     """Add the shared inbox's routes to the app."""
 
@@ -341,7 +353,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/mail/claim", methods=["POST"])
     async def mail_claim_route(request: Request):
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailClaimBody)
         if err:
             return err
         t, missing = mail._mail_thread_or_404(body)
@@ -1398,7 +1410,7 @@ def register(mcp, registry):
     @mcp.custom_route("/api/mail/orders", methods=["POST"])
     async def mail_orders_route(request: Request):
         """What this app knows about the person who sent the email."""
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailOrdersBody)
         if err:
             return err
         t, missing = mail._mail_thread_or_404(body)
