@@ -98,7 +98,7 @@ async def _resolve_domains(registry: dict) -> tuple[str, set]:
     if _domains_cache.get("primary"):
         return _domains_cache["primary"], _domains_cache["hosts"]
     shop = await shopify._tool_json(registry, "shopify_get_shop", {})
-    myshop = shop.get("myshopify_domain") or (f"{core.SHOPIFY_STORE}.myshopify.com" if core.SHOPIFY_STORE else "")
+    myshop = shop.get("myshopify_domain") or (f"{config.SHOPIFY_STORE}.myshopify.com" if config.SHOPIFY_STORE else "")
     primary = shop.get("domain") or myshop
     hosts = {h.lower() for h in (primary, myshop) if h}
     if primary:
@@ -822,5 +822,6 @@ from gizmo import orderbook  # noqa: E402
 from gizmo import skills as skillbook  # noqa: E402
 from gizmo import prompts  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import config  # noqa: E402
 from gizmo import products as catalog  # noqa: E402
 from gizmo import chat as assistant  # noqa: E402

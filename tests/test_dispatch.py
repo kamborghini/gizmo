@@ -187,6 +187,7 @@ from gizmo import oauth
 from gizmo import status as appstatus
 from gizmo import clock
 from gizmo import products as catalog
+from gizmo import config
 import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
@@ -17660,22 +17661,22 @@ def t_only_the_configured_store_can_frame_the_app():
             url = type("U", (), {"path": "/"})()
         csp = rendering._frame_headers(_Req())["Content-Security-Policy"]
         return [d for d in csp.split(";") if d.strip().startswith("frame-ancestors")][0].split()[1:]
-    saved = _c.SHOPIFY_STORE
+    saved = config.SHOPIFY_STORE
     try:
         for store in ("test-store", "test-store.myshopify.com"):
-            _c.SHOPIFY_STORE = store
+            config.SHOPIFY_STORE = store
             for shop in ("evil-dev.myshopify.com", "test-store.myshopify.com", "not a shop", None):
                 eq(ancestors(shop), ["https://test-store.myshopify.com", "https://admin.shopify.com"],
                    "store %r, ?shop=%r: only the store and the admin" % (store, shop))
         # Unconfigured (a local run): the old behaviour, so a developer's
         # own dev store can still embed it.
-        _c.SHOPIFY_STORE = ""
+        config.SHOPIFY_STORE = ""
         eq(ancestors("dev-one.myshopify.com"), ["https://dev-one.myshopify.com", "https://admin.shopify.com"],
            "no store configured: a well-formed ?shop= is used")
         eq(ancestors(None), ["https://admin.shopify.com", "https://*.myshopify.com"],
            "and without one, the admin and any store")
     finally:
-        _c.SHOPIFY_STORE = saved
+        config.SHOPIFY_STORE = saved
 
 
 @test
@@ -30209,12 +30210,11 @@ def _test_patches():
 # where the other copy is not part of what the test means to change. Each is
 # (patched module, name, the module with its own copy): the reason.
 SHARED_COPIES = {
-    ("server", "SHOPIFY_STORE", "copilot"):
-        "the Shopify client tests drive server._request, which builds the shop's "
-        "address from server's own; copilot's copy pins session tokens and the "
-        "frame rule, which those tests never reach",
-    ("copilot", "SHOPIFY_STORE", "server"):
-        "the frame-ancestors test reads copilot._frame_headers alone",
+    # The shop's setting lives in gizmo/config.py (piece 15); server.py keeps its
+    # own to build the Shopify client's address.
+    ("gizmo.config", "SHOPIFY_STORE", "server"):
+        "the frame-ancestors test reads rendering._frame_headers alone, which reads config's; "
+        "server's own builds the Shopify client's address, which that test never reaches",
     # The connector settings test routes the connector call's client
     # (gizmo.xero_sync's httpx) to a fake connector; every other module's own
     # client is one that test never reaches.
@@ -31034,8 +31034,7 @@ def t_the_workspace_routes_are_gathered():
         ok(path not in src, path + " is registered by its area's routes")
     eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_skills, routes_memory, routes_knowledge)],
        [2, 1, 2], "2 skills routes, 1 memory route, 2 learn routes")
-    ok('@mcp.custom_route("/api/chat", methods=["POST"])' in src and '"/api/chat/stream"' in src,
-       "the chat routes stay with the tool list they read")
+    ok('"/api/chat' not in src, "the chat routes went too, once add_routes handed the chat module its tools (piece 15)")
 
 @test
 def t_the_report_routes_are_gathered():
@@ -31191,13 +31190,13 @@ def t_the_chat_routes_and_shop_settings_have_moved():
     copilot.py keeps the secret and the base address only as copies of
     config's, for the frozen print routes. The chat's, the stream's and the
     usage panel's routes live in gizmo/routes/chat.py (piece 15)."""
-    import inspect
-    from gizmo import config
+    import importlib, inspect
     from gizmo.routes import chat as routes_chat
+    settings, here = vars(importlib.import_module("gizmo.config")), vars(copilot)
     for n in ("SHOPIFY_API_KEY", "SHOPIFY_API_SECRET", "SHOPIFY_STORE", "APP_BASE_URL"):
-        ok(n in vars(config), n + " lives in gizmo/config.py")
-    ok("SHOPIFY_API_KEY" not in vars(copilot) and "SHOPIFY_STORE" not in vars(copilot), "copilot.py binds neither")
-    ok(copilot.SHOPIFY_API_SECRET is config.SHOPIFY_API_SECRET and copilot.APP_BASE_URL is config.APP_BASE_URL,
+        ok(n in settings, n + " lives in gizmo/config.py")
+    ok("SHOPIFY_API_KEY" not in here and "SHOPIFY_STORE" not in here, "copilot.py binds neither")
+    ok(here["SHOPIFY_API_SECRET"] is settings["SHOPIFY_API_SECRET"] and here["APP_BASE_URL"] is settings["APP_BASE_URL"],
        "and keeps the secret and the base address as copies of config's, for the frozen print routes")
     src = inspect.getsource(copilot.add_routes)
     eq(src.count("routes_chat.register(mcp, registry)"), 1, "the chat's routes, one call")

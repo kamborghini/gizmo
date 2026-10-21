@@ -27,8 +27,8 @@ _fin_expect: dict = {}               # state nonce -> the address that was asked
 def _redirect_uri(request: Request) -> str:
     # Prefer a configured public base URL (must match the URI registered in
     # Google Cloud) over the attacker-controllable Host header.
-    if core.APP_BASE_URL:
-        return core.APP_BASE_URL.rstrip("/") + "/oauth/google/callback"
+    if config.APP_BASE_URL:
+        return config.APP_BASE_URL.rstrip("/") + "/oauth/google/callback"
     host = request.headers.get("host", "")
     return f"https://{host}/oauth/google/callback"
 
@@ -53,8 +53,8 @@ def _oauth_page(title: str, msg: str) -> HTMLResponse:
 # its own consent walk, its own state namespace. The two can never
 # complete each other's flow, and neither can reach the other's mail.
 def _gmail_fin_redirect_uri(request: Request) -> str:
-    if core.APP_BASE_URL:
-        return core.APP_BASE_URL.rstrip("/") + "/oauth/gmail-finance/callback"
+    if config.APP_BASE_URL:
+        return config.APP_BASE_URL.rstrip("/") + "/oauth/gmail-finance/callback"
     host = request.headers.get("host", "")
     return f"https://{host}/oauth/gmail-finance/callback"
 
@@ -64,3 +64,4 @@ def _gmail_fin_redirect_uri(request: Request) -> str:
 # first. Read as core.NAME and sibling.NAME, never a copied name.
 from gizmo import gate  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import config  # noqa: E402

@@ -448,7 +448,7 @@ def _orders_product_monthly(orders: list, months: list) -> dict:
 def _admin_order_url(order_id) -> str:
     """The Shopify admin page for an order. An order number on screen should
     always be a door, not a label."""
-    store = (core.SHOPIFY_STORE or "").split(".")[0]
+    store = (config.SHOPIFY_STORE or "").split(".")[0]
     return (f"https://admin.shopify.com/store/{store}/orders/{order_id}"
             if store and str(order_id or "").isdigit() else "")
 
@@ -1261,4 +1261,5 @@ from gizmo import shopify  # noqa: E402
 from gizmo import size_list  # noqa: E402
 from gizmo import dispatch as desk  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import config  # noqa: E402
 from gizmo import clock  # noqa: E402

@@ -24,12 +24,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
-| `APP_BASE_URL` | `""` | copilot |  |
-| `SHOPIFY_API_KEY` | `None` | copilot |  |
-| `SHOPIFY_API_SECRET` | `None` | copilot |  |
-| `SHOPIFY_CLIENT_ID` | `""` | copilot, server |  |
-| `SHOPIFY_CLIENT_SECRET` | `""` | copilot, server |  |
-| `SHOPIFY_STORE` | `""` | copilot, server | used to pin session tokens to this shop |
 | `STORE_CONTEXT_CAP` | `"4000"` | copilot |  |
 
 ## copilot.py - Stock bridge: the glass a Mark made consumes flows into the 
@@ -103,6 +97,17 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `CHAT_CONTEXT_CAP` | `"12000"` | gizmo.chat | max chars of page-report context injected into chat |
 | `COPILOT_MAX_TOOL_ROUNDS` | `"12"` | gizmo.chat |  |
 | `COPILOT_TOOL_RESULT_CAP` | `"50000"` | gizmo.chat |  |
+
+## gizmo/config.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `APP_BASE_URL` | `""` | gizmo.config |  |
+| `SHOPIFY_API_KEY` | `None` | gizmo.config |  |
+| `SHOPIFY_API_SECRET` | `None` | gizmo.config |  |
+| `SHOPIFY_CLIENT_ID` | `""` | gizmo.config, server |  |
+| `SHOPIFY_CLIENT_SECRET` | `""` | gizmo.config, server |  |
+| `SHOPIFY_STORE` | `""` | gizmo.config, server | used to pin session tokens to this shop |
 
 ## gizmo/crm.py - CRM: the sales desk, modelled on Pipedrive
 

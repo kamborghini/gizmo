@@ -214,7 +214,7 @@ async def run_liability(registry: dict) -> dict:
         # A throttled or errored page must never read as money not owed.
         return {"error": "Couldn't read all your orders from Shopify just now (it may be busy). "
                 "The figures would be incomplete, so nothing is shown. Try again in a moment."}
-    store = (core.SHOPIFY_STORE or "").split(".")[0]
+    store = (config.SHOPIFY_STORE or "").split(".")[0]
     rows, stale, currency = [], [], ""
     for o in orders:
         matched = [t for t in LIABILITY_TAGS if orderbook._has_tag(o, t)]
@@ -330,4 +330,5 @@ async def run_liability(registry: dict) -> dict:
 from gizmo import orderbook  # noqa: E402
 from gizmo import production  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import config  # noqa: E402
 from gizmo import analytics  # noqa: E402

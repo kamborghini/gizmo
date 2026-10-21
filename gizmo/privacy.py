@@ -1711,7 +1711,7 @@ async def _webhook_body(request: Request):
     only be checked after the body is read, so this read happens for anyone,
     and a chunked upload with no Content-Length would otherwise buffer
     without limit on an endpoint that deliberately has no rate limiter."""
-    if not core.SHOPIFY_API_SECRET:
+    if not config.SHOPIFY_API_SECRET:
         return None, PlainTextResponse("Unauthorized", status_code=401)
     total, chunks = 0, []
     try:
@@ -1724,12 +1724,12 @@ async def _webhook_body(request: Request):
         return None, PlainTextResponse("Bad request", status_code=400)
     raw = b"".join(chunks)
     sent = request.headers.get("x-shopify-hmac-sha256", "")
-    want = base64.b64encode(hmac.new(core.SHOPIFY_API_SECRET.encode("utf-8"),
+    want = base64.b64encode(hmac.new(config.SHOPIFY_API_SECRET.encode("utf-8"),
                                      raw, hashlib.sha256).digest()).decode("ascii")
     if not sent or not hmac.compare_digest(want, sent):
         return None, PlainTextResponse("Unauthorized", status_code=401)
     shop = str(request.headers.get("x-shopify-shop-domain") or "")
-    if core.SHOPIFY_STORE and not shop.lower().startswith(core.SHOPIFY_STORE.split(".")[0].lower() + "."):
+    if config.SHOPIFY_STORE and not shop.lower().startswith(config.SHOPIFY_STORE.split(".")[0].lower() + "."):
         return None, PlainTextResponse("Unauthorized", status_code=401)
     return raw, None
 
@@ -1743,6 +1743,7 @@ from gizmo import mail  # noqa: E402
 from gizmo import production  # noqa: E402
 from gizmo import crm as salesdesk  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import config  # noqa: E402
 from gizmo import liability  # noqa: E402
 from gizmo import backup  # noqa: E402
 from gizmo import scheduler  # noqa: E402

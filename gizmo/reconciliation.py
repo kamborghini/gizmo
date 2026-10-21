@@ -222,8 +222,8 @@ _xero_oauth_states: dict = {}
 
 # ----- Xero connect: the accounts side of the reconciliation engine -----
 def _xero_redirect_uri(request: Request) -> str:
-    if core.APP_BASE_URL:
-        return core.APP_BASE_URL.rstrip("/") + "/oauth/xero/callback"
+    if config.APP_BASE_URL:
+        return config.APP_BASE_URL.rstrip("/") + "/oauth/xero/callback"
     host = request.headers.get("host", "")
     return f"https://{host}/oauth/xero/callback"
 
@@ -232,3 +232,4 @@ def _xero_redirect_uri(request: Request) -> str:
 # takes names from these modules as it loads, and any of them may be imported
 # first. Read as core.NAME and sibling.NAME, never a copied name.
 import copilot as core  # noqa: E402
+from gizmo import config  # noqa: E402

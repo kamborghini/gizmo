@@ -826,7 +826,7 @@ async def _missing_scan(registry: dict, tag: str) -> dict:
             truncated = True
             break
     data = {"orders": open_orders}
-    store = (core.SHOPIFY_STORE or "").split(".")[0]
+    store = (config.SHOPIFY_STORE or "").split(".")[0]
     missing = []
     for o in (data.get("orders") or []):
         # Skip anything anywhere in the workflow: in production (IP), made (PC),
@@ -978,4 +978,5 @@ from gizmo import shopify  # noqa: E402
 from gizmo import size_list  # noqa: E402
 from gizmo import dispatch as desk  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import config  # noqa: E402
 from gizmo import clock  # noqa: E402
