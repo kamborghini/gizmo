@@ -53,6 +53,155 @@ class MailSettingsBody(bodies.Body):
     type: bodies.Text = None
 
 
+
+class MailAssignBody(bodies.Body):
+    """What /api/mail/assign reads (gizmo/bodies.py): a conversation, who it goes to, and a note."""
+    id: bodies.Id = None
+    uid: bodies.Id = None
+    note: bodies.Text = None
+
+
+
+class MailAttachDoneBody(bodies.Body):
+    """What /api/mail/attach-done reads (gizmo/bodies.py): the upload that landed."""
+    key: bodies.Text = None
+    type: bodies.Text = None
+    inline: bodies.Flag = None
+
+
+
+class MailAttachUrlBody(bodies.Body):
+    """What /api/mail/attach-url reads (gizmo/bodies.py): the file about to be uploaded."""
+    name: bodies.Text = None
+    size: bodies.Whole = None
+    type: bodies.Text = None
+    inline: bodies.Flag = None
+
+
+
+class MailAttachmentBody(bodies.Body):
+    """What /api/mail/attachment reads (gizmo/bodies.py): the attachment, and where in Files to keep it."""
+    id: bodies.Id = None
+    msg: bodies.Id = None
+    att: bodies.Id = None
+    name: bodies.Text = None
+    folder: bodies.Text = None
+
+
+
+class MailBoardBody(bodies.Body):
+    """What /api/mail/board reads (gizmo/bodies.py): whether to read afresh, and the board the page holds."""
+    force: bodies.Flag = None
+    rev: bodies.Text = None
+
+
+
+class MailMessageBody(bodies.Body):
+    """What /api/mail/body reads (gizmo/bodies.py): the conversation, and whether to read the archived copy."""
+    id: bodies.Id = None
+    archive: bodies.Flag = None
+
+
+
+class MailBulkBody(bodies.Body):
+    """What /api/mail/bulk reads (gizmo/bodies.py): the conversations, and who or what state they go to."""
+    ids: bodies.Items = None
+    uid: bodies.Id = None
+    state: bodies.Text = None
+
+
+
+class MailDraftBody(bodies.Body):
+    """What /api/mail/draft reads (gizmo/bodies.py): a reply's words, copies, attachments, and what to draft it from."""
+    id: bodies.Id = None
+    text: bodies.Text = None
+    html: bodies.Text = None
+    cc: bodies.Text = None
+    bcc: bodies.Text = None
+    attachments: bodies.Records = None
+    inline: bodies.Records = None
+    quote: bodies.Flag = None
+    guidance: bodies.Text = None
+    previous: bodies.Text = None
+
+
+
+class MailNoteBody(bodies.Body):
+    """What /api/mail/note reads (gizmo/bodies.py): the conversation and the note."""
+    id: bodies.Id = None
+    text: bodies.Text = None
+
+
+
+class MailPresenceBody(bodies.Body):
+    """What /api/mail/presence reads (gizmo/bodies.py): whether this person is in."""
+    presence: bodies.Text = None
+
+
+
+class MailReadBody(bodies.Body):
+    """What /api/mail/read reads (gizmo/bodies.py): the conversations, and read or unread."""
+    ids: bodies.Items = None
+    id: bodies.Id = None
+    unread: bodies.Flag = None
+
+
+
+class MailRulesBody(bodies.Body):
+    """What /api/mail/rules reads (gizmo/bodies.py): a filter, which one, and which way it moves."""
+    rule: bodies.Fields = None
+    id: bodies.Id = None
+    down: bodies.Flag = None
+
+
+
+class MailSearchBody(bodies.Body):
+    """What /api/mail/search reads (gizmo/bodies.py): what to search the mailbox for."""
+    q: bodies.Text = None
+
+
+
+class MailSendBody(bodies.Body):
+    """What /api/mail/send reads (gizmo/bodies.py): the email: who, what, copies and attachments, and whether this is the dry run."""
+    id: bodies.Id = None
+    to: bodies.Text = None
+    subject: bodies.Text = None
+    text: bodies.Text = None
+    html: bodies.Text = None
+    dry: bodies.Flag = None
+    cc: bodies.Text = None
+    bcc: bodies.Text = None
+    attachments: bodies.Records = None
+    inline: bodies.Records = None
+    quote: bodies.Flag = None
+
+
+
+class MailStateBody(bodies.Body):
+    """What /api/mail/state reads (gizmo/bodies.py): the conversation and its new state."""
+    id: bodies.Id = None
+    state: bodies.Text = None
+
+
+
+class MailThreadBody(bodies.Body):
+    """What /api/mail/thread reads (gizmo/bodies.py): the conversation, and whether only to look."""
+    id: bodies.Id = None
+    peek: bodies.Flag = None
+
+
+
+class MailUndoBody(bodies.Body):
+    """What /api/mail/undo reads (gizmo/bodies.py): what to undo."""
+    token: bodies.Text = None
+
+
+
+class MailViewingBody(bodies.Body):
+    """What /api/mail/viewing reads (gizmo/bodies.py): the conversation this person has open."""
+    id: bodies.Id = None
+
+
 def register(mcp, registry):
     """Add the shared inbox's routes to the app."""
 
@@ -66,7 +215,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/mail/board", methods=["POST"])
     async def mail_board_route(request: Request):
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailBoardBody)
         if err:
             return err
         try:
@@ -128,7 +277,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/mail/thread", methods=["POST"])
     async def mail_thread_route(request: Request):
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailThreadBody)
         if err:
             return err
         t, missing = mail._mail_thread_or_404(body)
@@ -171,7 +320,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/mail/viewing", methods=["POST"])
     async def mail_viewing_route(request: Request):
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailViewingBody)
         if err:
             return err
         tid = str(body.get("id") or "")
@@ -218,7 +367,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/mail/assign", methods=["POST"])
     async def mail_assign_route(request: Request):
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailAssignBody)
         if err:
             return err
         t, missing = mail._mail_thread_or_404(body)
@@ -266,7 +415,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/mail/state", methods=["POST"])
     async def mail_state_route(request: Request):
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailStateBody)
         if err:
             return err
         t, missing = mail._mail_thread_or_404(body)
@@ -299,7 +448,7 @@ def register(mcp, registry):
     async def mail_draft_route(request: Request):
         """Draft a reply with Claude, then (on a second, explicit call) put it
         in Gmail as a DRAFT for the person to review and send themselves."""
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailDraftBody)
         if err:
             return err
         t, missing = mail._mail_thread_or_404(body)
@@ -553,7 +702,7 @@ def register(mcp, registry):
         Behind the SEND grant, and into this person's OWN prefix: the key is
         built here, never taken from the browser, so an upload cannot be aimed
         at somebody else's folder or at the shop's Files."""
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailAttachUrlBody)
         if err:
             return err
         if not team._may_send_mail(who):
@@ -592,7 +741,7 @@ def register(mcp, registry):
         """What actually landed. The browser's claimed size opened the door;
         this is the size the message will be built from, and a file that never
         arrived is refused here rather than discovered at send time."""
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailAttachDoneBody)
         if err:
             return err
         if not team._may_send_mail(who):
@@ -654,7 +803,7 @@ def register(mcp, registry):
         may have gone out, which somebody can settle by looking at the
         mailbox - rather than silence, or a thread that claims a reply the
         customer never got."""
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailSendBody)
         if err:
             return err
         if not team._may_send_mail(who):
@@ -1057,7 +1206,7 @@ def register(mcp, registry):
         WebDAV, so artwork saved here appears on the production machine, in
         the right folder, one click after it arrived. No download, rename,
         drag."""
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailAttachmentBody)
         if err:
             return err
         t, missing = mail._mail_thread_or_404(body)
@@ -1156,7 +1305,7 @@ def register(mcp, registry):
         the honest thing is to ask it rather than build a worse index here.
         Gmail's own operators come along free: from:, has:attachment,
         filename:, older_than:, quoted phrases."""
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailSearchBody)
         if err:
             return err
         q = str(body.get("q") or "").strip()[:200]
@@ -1224,7 +1373,7 @@ def register(mcp, registry):
         Not stored: bodies are customer correspondence, and the board has no
         need to hold them. Fetched when somebody asks to read, discarded
         after."""
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailMessageBody)
         if err:
             return err
         tid = str(body.get("id") or "")
@@ -1270,7 +1419,7 @@ def register(mcp, registry):
 
         Anyone with the Inbox tab may do this: read state is the mailbox's,
         not the owner's. It is also how somebody undoes an accidental open."""
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailReadBody)
         if err:
             return err
         sick = mail._mail_store_sick()
@@ -1497,7 +1646,7 @@ def register(mcp, registry):
     async def mail_rules_route(request: Request):
         """Standing decisions about arriving mail. Leads only: a rule is a
         policy for the whole room, not a personal preference."""
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailRulesBody)
         if err:
             return err
         store = mail._load_mail()
@@ -1634,7 +1783,7 @@ def register(mcp, registry):
         Gmail labels are NOT pushed here on purpose (see the reconciler):
         clearing three hundred threads must not become three hundred
         blocking API calls. The board moves now; Gmail catches up."""
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailBulkBody)
         if err:
             return err
         sick = mail._mail_store_sick()
@@ -1741,7 +1890,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/mail/undo", methods=["POST"])
     async def mail_undo_route(request: Request):
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailUndoBody)
         if err:
             return err
         sick = mail._mail_store_sick()
@@ -1779,7 +1928,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/mail/note", methods=["POST"])
     async def mail_note_route(request: Request):
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailNoteBody)
         if err:
             return err
         t, missing = mail._mail_thread_or_404(body)
@@ -1801,7 +1950,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/mail/presence", methods=["POST"])
     async def mail_presence_route(request: Request):
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailPresenceBody)
         if err:
             return err
         p = str(body.get("presence") or "")

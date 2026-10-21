@@ -70,6 +70,56 @@ class CrmContactBody(bodies.Body):
     note_id: bodies.Id = None
 
 
+
+class CrmDealBody(bodies.Body):
+    """What /api/crm/deal reads (gizmo/bodies.py): a deal's details, its stage, owner and value, why it was lost, and its notes."""
+    id: bodies.Id = None
+    title: bodies.Text = None
+    person_id: bodies.Id = None
+    org_id: bodies.Id = None
+    stage_id: bodies.Id = None
+    label: bodies.Text = None
+    expected_close: bodies.Text = None
+    source: bodies.Text = None
+    owner: bodies.Id = None
+    value: bodies.Number = None
+    probability: bodies.Number = None
+    custom: bodies.Fields = None
+    reason: bodies.Text = None
+    comment: bodies.Text = None
+    text: bodies.Text = None
+    note_id: bodies.Id = None
+
+
+
+class CrmImportBody(bodies.Body):
+    """What /api/crm/import reads (gizmo/bodies.py): whether to go ahead."""
+    go: bodies.Flag = None
+
+
+
+class CrmLeadBody(bodies.Body):
+    """What /api/crm/lead reads (gizmo/bodies.py): a lead's details, its notes, and the stage it becomes a deal in."""
+    id: bodies.Id = None
+    person_id: bodies.Id = None
+    org_id: bodies.Id = None
+    title: bodies.Text = None
+    label: bodies.Text = None
+    source: bodies.Text = None
+    value: bodies.Number = None
+    text: bodies.Text = None
+    stage_id: bodies.Id = None
+
+
+
+class CrmStagesBody(bodies.Body):
+    """What /api/crm/stages reads (gizmo/bodies.py): the pipeline's stages, its labels, the reasons a deal is lost, and the follow-up prompt."""
+    stages: bodies.Records = None
+    labels: bodies.Records = None
+    lost_reasons: bodies.Items = None
+    followup_popup: bodies.Flag = None
+
+
 def register(mcp, registry):
     """Add the CRM's routes to the app."""
 
@@ -82,7 +132,7 @@ def register(mcp, registry):
 
         Read-only against Pipedrive in both modes: this only ever writes into
         gizmo's own store, and only when {"go": true} is sent."""
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=CrmImportBody)
         if err:
             return err
         if team._team_role(who) != "master":
@@ -191,7 +241,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/crm/deal", methods=["POST"])
     async def crm_deal_route(request: Request):
-        err, body, actor = await salesdesk._crm_guard(request)
+        err, body, actor = await salesdesk._crm_guard(request, model=CrmDealBody)
         if err:
             return err
         op = str(body.get("op") or "")
@@ -725,7 +775,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/crm/lead", methods=["POST"])
     async def crm_lead_route(request: Request):
-        err, body, actor = await salesdesk._crm_guard(request)
+        err, body, actor = await salesdesk._crm_guard(request, model=CrmLeadBody)
         if err:
             return err
         op = str(body.get("op") or "")
@@ -814,7 +864,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/crm/stages", methods=["POST"])
     async def crm_stages_route(request: Request):
-        err, body, actor = await salesdesk._crm_guard(request)
+        err, body, actor = await salesdesk._crm_guard(request, model=CrmStagesBody)
         if err:
             return err
         # The shared pipeline, the label vocabulary and the lost reasons are
