@@ -30523,7 +30523,7 @@ def t_move_proof_is_wired():
 # The store, the error log and the AI client sit beneath every area: they
 # import nothing from copilot.py, so an area can import them directly.
 
-FLOOR = ["gizmo/config.py", "gizmo/store.py", "gizmo/errors.py", "gizmo/ai.py", "gizmo/shopify.py", "gizmo/prompts.py", "gizmo/clock.py"]
+FLOOR = ["gizmo/config.py", "gizmo/store.py", "gizmo/errors.py", "gizmo/ai.py", "gizmo/shopify.py", "gizmo/prompts.py", "gizmo/clock.py", "gizmo/bodies.py"]
 
 @test
 def t_no_module_looks_itself_up_by_name():
@@ -31203,6 +31203,266 @@ def t_the_chat_routes_and_shop_settings_have_moved():
     for path in ('"/api/chat', '"/api/usage"'):
         ok(path not in src, path + " is registered by the chat's routes")
     eq(inspect.getsource(routes_chat).count("@mcp.custom_route("), 3, "the chat, its stream and the usage panel")
+
+@test
+def t_no_error_is_swallowed_without_a_reason():
+    """A broad handler that lets an error go without a word (a pass, a
+    continue or break, a bare return) says why in a comment on its own lines:
+    silence is sometimes right, but only for a reason a reader can check.
+    tools/broad_excepts.py finds them across the app (stage 5, A4)."""
+    import importlib.util
+    spec_ = importlib.util.spec_from_file_location("broad_excepts", os.path.join(HERE, "tools", "broad_excepts.py"))
+    be = importlib.util.module_from_spec(spec_); spec_.loader.exec_module(be)
+    found = be.scan()
+    ok(len(found) > 300, "the scan finds the app's broad handlers (%d)" % len(found))
+    quiet = [f"{h['file']}:{h['line']} {h['kind']}" for h in found if h["kind"] in be.SILENT and not h["reason"]]
+    eq(quiet, [], "silent handlers that do not say why")
+
+@test
+def t_a_body_model_checks_only_what_it_names():
+    """gizmo/bodies.py: a model names the fields it checks and the kind each
+    must be; every other field passes, and the route reads the body as before.
+    The kinds take what the page sends (text, numbers as the page sends them,
+    yes or no, a list, a set of fields) and refuse an object or a list where a
+    scalar belongs; the refusal names the field in plain words (stage 5)."""
+    from gizmo import bodies as bd
+
+    class M(bd.Body):
+        title: bd.Text = None
+        id: bd.Id = None
+        count: bd.Whole = None
+        amount: bd.Number = None
+        on: bd.Flag = None
+        ids: bd.Items = None
+        origin: bd.Fields = None
+        min_pence: bd.Whole = None
+
+    good = {"title": "A note", "id": 6123456789, "count": 3, "amount": 12.5, "on": True,
+            "ids": [1, "2"], "origin": {"city": "Leeds"}, "min_pence": "", "other": {"any": ["thing"]}}
+    before = json.dumps(good, sort_keys=True)
+    eq(bd.refusal(M, good), None, "what the page sends is taken")
+    eq(json.dumps(good, sort_keys=True), before, "and the body is left exactly as it came")
+    eq(bd.refusal(M, {}), None, "a field left out is the route's to decide")
+    eq(bd.refusal(M, {k: None for k in good}), None, "and so is a null")
+    for k, v in (("id", "a1b2"), ("count", "12"), ("count", 4.0), ("amount", "12.50"), ("amount", 3),
+                 ("on", False), ("on", 1), ("ids", []), ("origin", {})):
+        eq(bd.refusal(M, {k: v}), None, "%s may be %r" % (k, v))
+    words = {"title": "text", "id": "text or a number", "count": "a whole number", "amount": "a number",
+             "on": "yes or no", "ids": "a list", "origin": "a set of fields"}
+    for k, w in words.items():
+        for junk in ({"wrong": ["type"]}, ["wrong"]):
+            if (k, type(junk)) in (("ids", list), ("origin", dict)):
+                continue
+            eq(bd.refusal(M, {k: junk}), "The %s sent must be %s." % (k, w), "%s refuses %r" % (k, junk))
+    for k, v in (("title", 5), ("count", "12.5"), ("count", " "), ("count", True), ("count", float("inf")),
+                 ("amount", "lots"), ("amount", float("nan")), ("on", "no"), ("id", True)):
+        ok(bd.refusal(M, {k: v}), "%s refuses %r" % (k, v))
+    eq(bd.refusal(M, {"min_pence": []}), "The min pence sent must be a whole number.",
+       "a field's name is read as words")
+    eq(bd.refusal(M, {"title": {}, "count": {}}), "The title sent must be text.", "one refusal, the first field")
+
+    per_op = {"add": M}
+    eq(bd.refusal(per_op, {"op": "add", "title": {}}), "The title sent must be text.", "an op's own model")
+    for b in ({"op": "list", "title": {}}, {"title": {}}, {"op": {"add": 1}, "title": {}}, {"op": ["add"]}):
+        eq(bd.refusal(per_op, b), None, "an op the models do not name reaches the route as before: %r" % (b,))
+
+@test
+def t_the_door_refuses_a_wrong_type_last():
+    """gate._guard(model=...) checks the body after everything else the door
+    checks: no session is still a 401, a rank too low still a 403, and only a
+    caller the door lets in hears that a field is of the wrong kind (a 400
+    naming it). A body that passes reaches the route as it was sent."""
+    from gizmo import bodies as bd
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+
+    class M(bd.Body):
+        title: bd.Text = None
+
+    seen = []
+
+    async def _route(request):
+        err, body, who = await gate._guard(request, min_level=int(request.query_params.get("level") or 0), model=M)
+        if err:
+            return err
+        seen.append(body)
+        return gate._json({"ok": True})
+
+    c = TestClient(Starlette(routes=[Route("/door-check", _route, methods=["POST"])]))
+
+    def send(body, session=None, level=0):
+        gate._rl_hits.clear(); gate._rl_global.clear()
+        h = {"Authorization": "Bearer " + tok()}
+        if session:
+            h["X-App-Session"] = session
+        return c.post("/door-check" + ("?level=%d" % level if level else ""), json=body, headers=h)
+
+    eq(send({"title": {"wrong": 1}}).status_code, 401, "no session: a 401, whatever the body")
+    _uid, member, _pw = ready_user("Door Check", "doorcheck")
+    eq(send({"title": {"wrong": 1}}, member, level=team.ROLE_LEVELS["admin"]).status_code, 403,
+       "a rank too low: a 403, whatever the body")
+    r = send({"title": {"wrong": 1}}, member)
+    eq(r.status_code, 400, r.text)
+    eq(r.json().get("error"), "The title sent must be text.")
+    eq(seen, [], "the route never saw it")
+    r = send({"title": "Fine", "extra": [1, {"a": 2}]}, member)
+    eq(r.status_code, 200, r.text)
+    eq(seen, [{"title": "Fine", "extra": [1, {"a": 2}]}], "a body that passes reaches the route as sent")
+
+def _wrong_kinds_refused(cases):
+    """Each (path, op, model): every field the model names, sent as an object
+    and as a list, is a 400 in the model's own words wherever the model refuses
+    that value. Returns how many requests were refused."""
+    from gizmo import bodies as bd
+    n = 0
+    for path, op, model in cases:
+        m = bd.model_for(model, {"op": op})
+        ok(m is not None and m.model_fields, "%s %s has a model naming its fields" % (path, op))
+        for field in m.model_fields:
+            for junk in ({"wrong": ["type"]}, ["wrong"]):
+                body = {field: junk, **({"op": op} if op else {})}
+                want = bd.refusal(model, body)
+                if want is None:
+                    continue          # the kind takes it (a list where a list belongs)
+                r = post(path, body)
+                eq((r.status_code, r.json().get("error")), (400, want), "%s %s %s=%r" % (path, op, field, junk))
+                n += 1
+    return n
+
+@test
+def t_a_wrong_type_is_refused_by_name_not_a_server_error():
+    """The seven routes a stray script could break with a field of the wrong
+    kind (an object where an id or a number belongs) refuse it at the door
+    with a 400 naming the field, before the route reads it (stage 5)."""
+    from gizmo.routes import memory as r_memory, reconciliation as r_recon, dispatch as r_dispatch
+    from gizmo.routes import impact as r_impact, production as r_production, skills as r_skills
+    from gizmo.routes import updates as r_updates
+    for path, body, words in (
+            ("/api/memory", {"op": "delete", "id": {"wrong": 1}}, "The id sent must be text or a number."),
+            ("/api/memory", {"op": "set_status", "id": {"wrong": 1}}, "The id sent must be text or a number."),
+            ("/api/recon/exceptions", {"limit": {"wrong": 1}}, "The limit sent must be a whole number."),
+            ("/api/recon/exceptions", {"min_pence": {"wrong": 1}}, "The min pence sent must be a whole number."),
+            ("/api/shipping/config", {"op": "set", "boxes": {"wrong": 1}}, "The boxes sent must be a list."),
+            ("/api/impact", {"op": "add", "text": {"wrong": 1}}, "The text sent must be text."),
+            ("/api/production-state", {"op": "made", "id": {"wrong": 1}}, "The id sent must be a whole number."),
+            ("/api/skills", {"op": "delete", "id": {"wrong": 1}}, "The id sent must be text or a number."),
+            ("/api/updates", {"op": "seen", "releases": {"wrong": 1}}, "The releases sent must be a whole number.")):
+        r = post(path, body)
+        eq((r.status_code, r.json().get("error")), (400, words), "%s %r" % (path, body))
+    n = _wrong_kinds_refused([
+        ("/api/memory", "delete", r_memory.MemoryBody),
+        ("/api/recon/exceptions", None, r_recon.ReconFilterBody),
+        ("/api/shipping/config", "set", r_dispatch.ShippingBody),
+        ("/api/impact", "add", r_impact.ImpactBody),
+        ("/api/production-state", "made", r_production.ProductionStateBody),
+        ("/api/production-state", "printed", r_production.ProductionStateBody),
+        ("/api/skills", "update", r_skills.SkillBody),
+        ("/api/updates", "request", r_updates.UpdatesBody)])
+    ok(n > 60, "every field each model names was tried (%d refusals)" % n)
+
+def _scratch_files():
+    """Every file the suite's stores keep, by path, with its bytes' digest."""
+    import hashlib
+    out = {}
+    for dirpath, _dirs, names in os.walk(SCRATCH):
+        for nm in names:
+            p = os.path.join(dirpath, nm)
+            try:
+                with open(p, "rb") as fh:
+                    out[os.path.relpath(p, SCRATCH)] = hashlib.sha256(fh.read()).hexdigest()
+            except OSError:
+                pass
+    return out
+
+@test
+def t_a_wrong_type_is_refused_before_anything_is_kept():
+    """The ten routes that took a field of the wrong kind and kept it as text
+    (the CRM, the Files tree, the live size overrides, the store knowledge, the
+    chase log, the loan register, the accounts file, the privacy log and the
+    feature requests) refuse it at the door, and nothing is written (stage 5)."""
+    from gizmo.routes import crm as r_crm, files as r_files, size_list as r_sizes, knowledge as r_know
+    from gizmo.routes import liability as r_liab, loans as r_loans, mail as r_mail, privacy as r_priv
+    from gizmo.routes import updates as r_updates
+    ensure_auth()
+    before = _scratch_files()
+    for path, body, words in (
+            ("/api/crm/activity", {"op": "add", "subject": {"wrong": 1}}, "The subject sent must be text."),
+            ("/api/crm/contact", {"op": "org_add", "name": {"wrong": 1}}, "The name sent must be text."),
+            ("/api/crm/contact", {"op": "person_add", "name": {"wrong": 1}}, "The name sent must be text."),
+            ("/api/files/folder", {"op": "add", "name": {"wrong": 1}}, "The name sent must be text."),
+            ("/api/gobo-sizes/rule", {"op": "exclude", "model": {"wrong": 1}}, "The model sent must be text."),
+            ("/api/learn", {"op": "save", "knowledge": {"wrong": 1}}, "The knowledge sent must be text."),
+            ("/api/liability/chase", {"key": {"wrong": 1}}, "The key sent must be text."),
+            ("/api/loans", {"op": "unit_save", "name": {"wrong": 1}}, "The name sent must be text."),
+            ("/api/mail/settings", {"op": "sign_off", "text": {"wrong": 1}}, "The text sent must be text."),
+            ("/api/privacy", {"op": "answered", "at": "2026-10-21T09:00:00", "email": {"wrong": 1}},
+             "The email sent must be text."),
+            ("/api/updates", {"op": "request", "title": {"wrong": 1}}, "The title sent must be text.")):
+        r = post(path, body)
+        eq((r.status_code, r.json().get("error")), (400, words), "%s %r" % (path, body))
+    n = _wrong_kinds_refused([
+        ("/api/crm/activity", "add", r_crm.CrmActivityBody),
+        ("/api/crm/contact", "person_update", r_crm.CrmContactBody),
+        ("/api/files/folder", "add", r_files.FolderBody),
+        ("/api/gobo-sizes/rule", "set", r_sizes.SizeRuleBody),
+        ("/api/learn", "save", r_know.KnowledgeBody),
+        ("/api/liability/chase", None, r_liab.ChaseBody),
+        ("/api/loans", "unit_save", r_loans.LoansBody),
+        ("/api/mail/settings", "sign_off", r_mail.MailSettingsBody),
+        ("/api/privacy", "answered", r_priv.PrivacyBody),
+        ("/api/updates", "request", r_updates.UpdatesBody)])
+    ok(n > 100, "every field each model names was tried (%d refusals)" % n)
+    after = _scratch_files()
+    eq(sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k)), [], "nothing was written")
+
+# The write routes that read fields from their body with no model checking
+# them yet (gizmo/bodies.py). The list may only shrink: a new write route comes
+# with its model, and a route that gains one leaves the list.
+UNCHECKED_BODIES = [
+    "/api/alerts", "/api/auth/login", "/api/auth/mfa", "/api/auth/mfa-verify", "/api/auth/password",
+    "/api/auth/setup", "/api/chat", "/api/chat/stream", "/api/connector", "/api/crm/deal",
+    "/api/crm/import", "/api/crm/lead", "/api/crm/stages", "/api/custom/book", "/api/custom/list",
+    "/api/custom/quote", "/api/custom/visibility", "/api/customer-history", "/api/customers",
+    "/api/dispatch/book", "/api/dispatch/cancel", "/api/dispatch/collections", "/api/dispatch/diagnose",
+    "/api/dispatch/parse-address", "/api/dispatch/quote", "/api/eori/check", "/api/files/complete",
+    "/api/files/download-url", "/api/files/file", "/api/files/upload-url", "/api/forecast/workbook",
+    "/api/gobo-sizes/check", "/api/gobo-sizes/models", "/api/gobo-sizes/upload", "/api/keyword-scan",
+    "/api/mail/assign", "/api/mail/attach-done", "/api/mail/attach-url", "/api/mail/attachment",
+    "/api/mail/board", "/api/mail/body", "/api/mail/bulk", "/api/mail/draft", "/api/mail/note",
+    "/api/mail/presence", "/api/mail/read", "/api/mail/rules", "/api/mail/search", "/api/mail/send",
+    "/api/mail/state", "/api/mail/thread", "/api/mail/undo", "/api/mail/viewing", "/api/order/edit",
+    "/api/product", "/api/production-labels", "/api/production-labels/coverage",
+    "/api/production-labels/queue", "/api/products", "/api/profile", "/api/recon/disconnect",
+    "/api/recon/exception", "/api/restore", "/api/schedule", "/api/skills/read", "/api/stock-usage",
+    "/api/stock-usage/send", "/api/team/user", "/api/usage", "/api/work/report", "/api/work/resolve",
+    "/hooks/forecast/results", "/print/production-labels/sign", "/webhooks/privacy"]
+
+@test
+def t_write_routes_check_their_bodies():
+    """Every route that takes a POST and reads fields from its body names them
+    in a model, or is on UNCHECKED_BODIES; docs/API.md's Body column names the
+    model, or says the fields are unchecked (stage 5)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("route_reference", os.path.join(HERE, "tools", "route_reference.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    rows = mod.collect(HERE)
+    by = {r["path"]: r for r in rows}
+    eq(by["/api/memory"]["body"], "MemoryBody", "a model handed to the door is named")
+    eq(by["/api/crm/activity"]["body"], "CrmActivityBody", "and one handed through an area's door")
+    eq(by["/api/gobo-sizes/rule"]["body"], "SizeRuleBody", "and one a route checks after reading its own body")
+    ok({"subject", "deal_id", "done"} <= set(by["/api/crm/activity"]["fields"]), "the fields a route reads are listed")
+    eq(by["/api/alerts"]["body"], "", "a route with no model has none")
+    eq(sorted(r["path"] for r in rows if r["body"]),
+       ["/api/crm/activity", "/api/crm/contact", "/api/files/folder", "/api/gobo-sizes/rule", "/api/impact",
+        "/api/learn", "/api/liability/chase", "/api/loans", "/api/mail/settings", "/api/memory", "/api/privacy",
+        "/api/production-state", "/api/recon/exceptions", "/api/shipping/config", "/api/skills", "/api/updates"],
+       "the sixteen routes with a model")
+    unchecked = sorted(r["path"] for r in rows if "POST" in r["methods"] and r["fields"] and not r["body"])
+    eq([p for p in unchecked if p not in UNCHECKED_BODIES], [],
+       "a new write route reads fields with no model: give it one (gizmo/bodies.py)")
+    eq([p for p in UNCHECKED_BODIES if p not in unchecked], [],
+       "these now have a model: take them off UNCHECKED_BODIES")
 
 @test
 def t_the_moved_areas_routes_follow_them():

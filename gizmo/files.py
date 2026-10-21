@@ -621,8 +621,8 @@ _FILES_STORE_FAIL = ("The change could not be saved. The data volume may be "
 # ---- The Files door and what its routes share (gizmo/routes/files.py) --
 # The office file server, minus the office. These routes only ever handle
 # names and signed URLs; the bytes go browser-to-bucket directly.
-async def _files_guard(request: Request):
-    return await gate._guard(request)
+async def _files_guard(request: Request, model=None):
+    return await gate._guard(request, model=model)
 
 def _files_ok(d: dict, extra: Optional[dict] = None, action: str = "",
               detail: str = "", who: str = "", delta: Optional[dict] = None) -> Response:

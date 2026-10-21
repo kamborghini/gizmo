@@ -501,7 +501,7 @@ async def run_reorder_radar(registry: dict) -> dict:
                 d = datetime.fromisoformat(str(o.get("created_at")).replace("Z", "+00:00"))
                 dates.append(d if d.tzinfo else d.replace(tzinfo=timezone.utc))
             except Exception:
-                pass
+                pass  # an order with no readable date is left out of the gaps
         if len(dates) < 2:
             continue
         gaps = sorted(max(1, (b - a).days) for a, b in zip(dates, dates[1:]))
@@ -614,7 +614,7 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
         try:
             dt = datetime.fromisoformat((o.get("created_at") or "").replace("Z", "+00:00"))
         except Exception:
-            continue
+            continue  # an order with no readable date is left out of the last-order map
         if cid not in last_order or dt > last_order[cid]:
             last_order[cid] = dt
 

@@ -1954,7 +1954,7 @@ async def create_order_fulfillment(
             if live:
                 fid, status = live[-1].get("id"), live[-1].get("status") or ""
         except Exception:
-            pass
+            pass  # the fulfillment landed; its id is a nicety, and a failed read-back must not turn that into an error
         return {"ok": True, "fulfillment_id": fid, "status": status,
                 "note": "Shopify did not answer, but the fulfillment is there."}
 

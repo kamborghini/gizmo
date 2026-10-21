@@ -13,9 +13,16 @@ from gizmo import knowledge
 from gizmo import activity
 from gizmo import gate
 from gizmo import team
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class KnowledgeBody(bodies.Body):
+    """What /api/learn reads (gizmo/bodies.py): the store knowledge, corrected."""
+    knowledge: bodies.Text = None
 
 
 def register(mcp, registry):
@@ -46,7 +53,7 @@ def register(mcp, registry):
         # slot. The plain read took one on every boot, visit and chat answer,
         # and when the window was full the page showed the store as unlearned
         # and offered a paid re-learn over knowledge that was there all along.
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=KnowledgeBody)
         if err:
             return err
         op = body.get("op")

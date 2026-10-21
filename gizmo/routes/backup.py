@@ -80,7 +80,7 @@ def register(mcp, registry):
                     built_full = str(json.loads(zf.read(info)).get("built_at") or "")
                     built_at = built_full[:19]
                 except Exception:
-                    pass
+                    pass  # an unreadable manifest leaves the backup's date blank; the restore goes on
                 continue
             if info.filename.startswith("volume/"):
                 target = data_dir

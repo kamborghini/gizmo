@@ -236,7 +236,7 @@ async def exchange_code(code: str, redirect_uri: str, acct: Account = SALES) -> 
             if p.status_code == 200:
                 addr = str(p.json().get("emailAddress") or "")
         except Exception:
-            pass
+            pass  # an address that cannot be read is handled just below: no address, no connection
     if not addr:
         # Without the mailbox's own address the sync cannot tell the shop's
         # replies from the customer's, which silently breaks the waiting and

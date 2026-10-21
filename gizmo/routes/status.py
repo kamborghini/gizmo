@@ -65,7 +65,7 @@ def register(mcp, registry):
             if shop and shop.get("name"):
                 shop_ok, shop_name, currency = True, shop.get("name"), shop.get("currency")
         except Exception:
-            pass
+            pass  # an unreachable shop shows as not connected (shop_ok stays False)
         # Volume sentinel: prove the data disk is writable, or nothing persists.
         vol_ok, vol_detail = True, ""
         try:

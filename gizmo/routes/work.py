@@ -85,7 +85,7 @@ def register(mcp, registry):
                 secs = max(0, int((datetime.now(timezone.utc)
                                    - datetime.fromisoformat(ws["start"])).total_seconds()))
             except Exception:
-                pass
+                pass  # an unreadable start reads as no time yet, never an error on the clock
         return gate._json({"monitored": True, "clocked_in": bool(ws),
                       "session": ({**ws, "secs": secs} if ws else None)})
 

@@ -14,7 +14,8 @@ browser ──► server.build_app()
             copilot.add_routes(app, tool registry, write capabilities)
               │
               │  _guard(request)     the one door: rate window, tab gate, session,
-              │                      rank, the AI slot, the body - in that order
+              │                      rank, the AI slot, the body, the body's
+              │                      fields (model=) - in that order
               ▼
             a domain function       decides; never parses a request, never talks HTTP
               │
@@ -54,9 +55,12 @@ models, the call and its fallbacks, usage, the spend cap) and
 the write capabilities `server.py` hands in, which `add_routes` stores
 there), `gizmo/prompts.py` (the AI's instructions: the writing style, the
 chat's and the reports' prompts, and the `present_response` tool every answer
-comes back through) and `gizmo/clock.py` (today's date and time in London).
+comes back through), `gizmo/clock.py` (today's date and time in London) and
+`gizmo/bodies.py` (the kinds a request's fields are checked against at the
+door: a model names the fields a route reads, and a field of the wrong kind is
+a 400 naming it).
 Everything reads them through the module's name: `jsonstore.NAME`,
-`errors.NAME`, `claude.NAME`, `shopify.NAME`, `prompts.NAME`, `clock.NAME`. An area imports the floor directly; what it still reads from
+`errors.NAME`, `claude.NAME`, `shopify.NAME`, `prompts.NAME`, `clock.NAME`, `bodies.NAME`. An area imports the floor directly; what it still reads from
 `copilot.py` through `core.` shrinks as the request check, accounts, orders
 and production move out in turn. The store names no area: an area that keeps
 something built from a store registers `jsonstore.when_forgotten(fn)`, and
@@ -202,10 +206,17 @@ one goes down without the record being lowered to match.
 
 **A route.** Register it inside `add_routes` under the prefix's section, add
 the prefix to `_TAB_ROUTES` (unmapped `/api/` routes are refused by design),
-open with `err, body, who = await _guard(request)`, call a domain function,
-return `_json`. Write the test first; `post()` and `post_s()` in the suite
-are the two ways to call it. Then `make api-doc`: CI fails while
-`docs/API.md` does not list it.
+open with `err, body, who = await _guard(request, model=ItsBody)`, where
+`ItsBody` is a `bodies.Body` beside the route naming every field it reads
+(`t_write_routes_check_their_bodies` fails on a new write route without one),
+call a domain function, return `_json`. Write the test first; `post()` and
+`post_s()` in the suite are the two ways to call it. Then `make api-doc`: CI
+fails while `docs/API.md` does not list it.
+
+**An error you let go.** A broad `except` that passes, skips or returns
+without a word says why in a comment on its own lines, or logs;
+`t_no_error_is_swallowed_without_a_reason` (with `tools/broad_excepts.py`)
+fails on one that does neither.
 
 **A page section.** A file in `static/src/js` or `static/src/css`, whole
 lines ending in a newline, and its line in `static/src/manifest.json` where it

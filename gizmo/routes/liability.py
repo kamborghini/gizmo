@@ -10,9 +10,16 @@ from gizmo import liability
 from gizmo import activity
 from gizmo import gate
 from gizmo import orderbook
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class ChaseBody(bodies.Body):
+    """What /api/liability/chase reads (gizmo/bodies.py): the account chased."""
+    key: bodies.Text = None
 
 
 def register(mcp, registry):
@@ -36,7 +43,7 @@ def register(mcp, registry):
     async def liability_chase_route(request: Request):
         """Stamp an account as chased today. Local state only: the merchant's
         own mail client sends the email, so this records the fact, not the act."""
-        err, body, who = await gate._guard(request)
+        err, body, who = await gate._guard(request, model=ChaseBody)
         if err:
             return err
         key = str(body.get("key") or "").strip()[:120]

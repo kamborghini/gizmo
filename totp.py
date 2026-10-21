@@ -124,5 +124,5 @@ def check_recovery(given: str, hashes: list) -> int:
             if hmac.compare_digest(dk, base64.b64decode(dk_b64)):
                 return i
         except Exception:
-            continue
+            continue  # a stored code that cannot be read matches nothing; the rest are still tried
     return -1

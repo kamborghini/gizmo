@@ -14,6 +14,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.requests import Request
 from typing import Optional
 from gizmo.config import _env_num
+from gizmo import bodies
 import secrets
 
 # The same logger as copilot.py's, so these log lines read as before.
@@ -136,7 +137,7 @@ def _ai_slot() -> Optional[JSONResponse]:
 @perf.timed("auth")       # Server-Timing: the door, reading the body included
 async def _guard(request: Request, *, ai: bool = False, min_level: int = 0,
                  max_body: Optional[int] = None, cap: Optional[int] = None,
-                 body: bool = True):
+                 body: bool = True, model: Optional[bodies.Model] = None):
     """(error_response, body, uid): the one door every signed-in route uses.
 
     Seventy routes carried their own copy of the same nine lines - rate
@@ -145,7 +146,9 @@ async def _guard(request: Request, *, ai: bool = False, min_level: int = 0,
     had checked the session. The order here is the order: anonymous checks,
     then who is asking, then what rank they hold, then the paid window, then
     the body. `body=False` is for a route that reads its own body later, after
-    a check the caller wants to make first."""
+    a check the caller wants to make first. `model` (gizmo/bodies.py) checks
+    the fields the route reads, last of all: a field of the wrong kind is a
+    400 naming it, heard only by a caller the door has let in."""
     pre = _pre_checks(request, max_body=max_body)
     if pre:
         return pre, None, ""
@@ -167,6 +170,10 @@ async def _guard(request: Request, *, ai: bool = False, min_level: int = 0,
     parsed = await _read_json_capped(request, cap=cap)
     if parsed is None:
         return _json({"error": "Request too large."}, 413), None, ""
+    if model is not None:
+        why = bodies.refusal(model, parsed)
+        if why:
+            return _json({"error": why}, 400), None, ""
     return None, parsed, uid
 
 

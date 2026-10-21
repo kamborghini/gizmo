@@ -187,7 +187,7 @@ def _work_secs(uid: str, day_from: str) -> int:
         try:
             total += max(0, int((now - datetime.fromisoformat(o["start"])).total_seconds()))
         except Exception:
-            pass
+            pass  # an unreadable start adds no time, never an error in the total
     return total
 
 

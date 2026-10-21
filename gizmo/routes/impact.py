@@ -11,9 +11,19 @@ from gizmo import impact
 from gizmo import gate
 from gizmo import memory
 from gizmo import team
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class ImpactBody(bodies.Body):
+    """What /api/impact reads (gizmo/bodies.py): the change to track, or one
+    tracked change's id."""
+    text: bodies.Text = None
+    source: bodies.Text = None
+    id: bodies.Id = None
 
 
 def register(mcp, registry):
@@ -21,7 +31,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/impact", methods=["POST"])
     async def impact_route(request: Request):
-        err, body, who = await gate._guard(request)
+        err, body, who = await gate._guard(request, model=ImpactBody)
         if err:
             return err
         op = body.get("op") or "list"

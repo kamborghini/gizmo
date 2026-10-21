@@ -5,8 +5,9 @@ Every route the page and the outside world can reach is an `@mcp.custom_route`
 in copilot.py or server.py, and nothing listed them: the page and the server
 agreed because each side's tests happened to. This walks each module's syntax
 tree for those decorators and writes, per route, its methods, its handler, the
-tab that opens it, the door it opens with and that door's terms, the checks
-the handler makes for itself, and the first sentence of its docstring.
+tab that opens it, the door it opens with and that door's terms, the model
+that checks its body (gizmo/bodies.py), the checks the handler makes for
+itself, and the first sentence of its docstring.
 
     python tools/route_reference.py --write   # regenerate docs/API.md
     python tools/route_reference.py --check   # exit 1 when the file is stale (CI)
@@ -126,6 +127,50 @@ def _door(fn):
     return "own check", ""
 
 
+def _model_names(node) -> str:
+    if isinstance(node, ast.Dict):
+        return ", ".join(_model_names(v) for v in node.values)
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return node.id if isinstance(node, ast.Name) else ast.unparse(node)
+
+
+def _body_model(fn) -> str:
+    """The model that checks the route's body (gizmo/bodies.py): handed to the
+    door, or checked by the handler once it has read its own body."""
+    for node in ast.walk(fn):
+        if not isinstance(node, ast.Call):
+            continue
+        if _called(node) in DOORS:
+            for k in node.keywords:
+                if k.arg == "model":
+                    return _model_names(k.value)
+        f = node.func
+        if (isinstance(f, ast.Attribute) and f.attr == "refusal" and isinstance(f.value, ast.Name)
+                and f.value.id == "bodies" and node.args):
+            return _model_names(node.args[0])
+    return ""
+
+
+def _fields(fn) -> list:
+    """The fields the handler reads from its body: body.get("x"), body["x"]
+    and "x" in body, where the body is named `body`, as every door hands it."""
+    out = set()
+    for node in ast.walk(fn):
+        key = None
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get"
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == "body" and node.args):
+            key = node.args[0]
+        elif isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == "body":
+            key = node.slice
+        elif (isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], ast.In)
+              and isinstance(node.comparators[0], ast.Name) and node.comparators[0].id == "body"):
+            key = node.left
+        if isinstance(key, ast.Constant) and isinstance(key.value, str):
+            out.add(key.value)
+    return sorted(out - {"op"})
+
+
 def _checks(fn):
     names = set()
     for node in ast.walk(fn):
@@ -170,9 +215,16 @@ def collect(root):
                 door, terms = _door(fn)
                 rows.append({"path": route, "methods": methods, "handler": fn.name, "module": mod,
                              "tab": _tab(route, tab_routes, open_api), "door": door, "terms": terms,
+                             "body": _body_model(fn), "fields": _fields(fn),
                              "checks": _checks(fn), "about": _about(fn)})
     rows.sort(key=lambda r: (r["path"], r["methods"]))
     return rows
+
+
+def _body_cell(r) -> str:
+    if r["body"]:
+        return f"`{r['body']}`"
+    return "unchecked" if r["fields"] and "POST" in r["methods"] else ""
 
 
 def render(root):
@@ -184,18 +236,21 @@ def render(root):
            "an `/api/` route no tab claims is refused unless it is on `_OPEN_API`. **Door** is the "
            "guard the handler opens with (`_guard` is the one door: rate window, tab, session, rank, "
            "AI slot, body); `own check` means the route authenticates itself (a hook, a webhook, "
-           "OAuth, print, assets). **Checks** are the permission helpers the handler calls itself.", ""]
+           "OAuth, print, assets). **Body** is the model that checks the fields the route reads "
+           "(`gizmo/bodies.py`); `unchecked` means it reads fields no model checks yet. **Checks** are "
+           "the permission helpers the handler calls itself.", ""]
     groups = {}
     for r in rows:
         parts = r["path"].split("/")
         key = "/".join(parts[:3]) if r["path"].startswith("/api/") else "/" + parts[1]
         groups.setdefault(key, []).append(r)
     for key in sorted(groups):
-        out += [f"## `{key}`", "", "| Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |",
-                "|---|---|---|---|---|---|---|---|"]
+        out += [f"## `{key}`", "", "| Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |",
+                "|---|---|---|---|---|---|---|---|---|"]
         for r in groups[key]:
             cells = [f"`{r['path']}`", ", ".join(r["methods"]), r["tab"], f"`{r['door']}`" if r["door"] != "own check" else "own check",
-                     r["terms"], ", ".join(f"`{c}`" for c in r["checks"]), f"`{r['module']}.{r['handler']}`", r["about"]]
+                     r["terms"], _body_cell(r), ", ".join(f"`{c}`" for c in r["checks"]),
+                     f"`{r['module']}.{r['handler']}`", r["about"]]
             out.append("| " + " | ".join(c.replace("|", "\\|") for c in cells) + " |")
         out.append("")
     return "\n".join(out).rstrip() + "\n"

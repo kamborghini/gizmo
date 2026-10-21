@@ -13,9 +13,22 @@ from gizmo import activity
 from gizmo import gate
 from gizmo import team
 from gizmo import skills as skillbook
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class SkillBody(bodies.Body):
+    """What /api/skills reads (gizmo/bodies.py): a skill's words, when it
+    applies, the file it came from, whether it always applies, and its id."""
+    id: bodies.Id = None
+    title: bodies.Text = None
+    content: bodies.Text = None
+    when: bodies.Text = None
+    file: bodies.Text = None
+    always: bodies.Flag = None
 
 
 def register(mcp, registry):
@@ -26,7 +39,8 @@ def register(mcp, registry):
         # Room for a skill at the master's limit from anyone: someone else
         # editing a long skill the master saved sends all of it back. What
         # may be SAVED is decided by the character limits below.
-        err, body, who = await gate._guard(request, max_body=skillbook.SKILLS_BODY_MAX, cap=skillbook.SKILLS_BODY_MAX)
+        err, body, who = await gate._guard(request, max_body=skillbook.SKILLS_BODY_MAX, cap=skillbook.SKILLS_BODY_MAX,
+                                           model=SkillBody)
         if err:
             return err
         master = team._team_role(who) == "master"

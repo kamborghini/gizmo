@@ -1257,7 +1257,7 @@ async def _mail_sync_now(force: bool = False) -> str:
                 try:
                     _write_mail(store)
                 except Exception:
-                    pass
+                    pass  # the sync failure is logged above and its reason still returned
             return why
 
 
@@ -1789,7 +1789,7 @@ def _mail_crm_match(email: str) -> Optional[dict]:
                 return {"person_id": pid, "name": p.get("name") or "",
                         "org": org.get("name") or ""}
     except Exception:
-        pass
+        pass  # a CRM that cannot be read matches nobody; the inbox works without it
     return None
 _mail_last_force = {"t": 0.0}
 MAIL_DRAFT_SYSTEM = (
@@ -1833,9 +1833,9 @@ _MAIL_NO_SEND = ("You are not set up to send email from here. "
                  "Ask a lead to switch it on in Team.")
 
 # ----- The inbox's door and what its routes share (gizmo/routes/mail.py) -
-async def _mail_guard(request: Request):
+async def _mail_guard(request: Request, model=None):
     """(error_response, body, actor_uid): the one door, for the inbox."""
-    return await gate._guard(request)
+    return await gate._guard(request, model=model)
 
 def _mail_thread_or_404(body: dict):
     t = _load_mail().get("threads", {}).get(str(body.get("id") or ""))
