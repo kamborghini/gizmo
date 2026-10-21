@@ -406,7 +406,8 @@
         /* The settings by the names the Settings card gives them; any other
            setting by its name in words. */
         const CX_SETTING_WORDS = { MAX_DOCS_PER_RUN: 'Most documents in one run', RUNAWAY_ABORT_ABOVE: 'Stop entirely above',
-            ORDERS_SINCE: 'Only orders since', RECONCILE_MODE: 'When a total disagrees', RECONCILE_TOLERANCE: 'Tolerance' };
+            ORDERS_SINCE: 'Only orders since', RECONCILE_MODE: 'When a total disagrees', RECONCILE_TOLERANCE: 'Tolerance',
+            AUTO_RUN_INTERVAL_MINUTES: 'Auto Run every' };
         function cxSettingName(k) {
             return CX_SETTING_WORDS[k] || k.split('_').map((w, i) => ({ XERO: 'Xero', SHOPIFY: 'Shopify', ID: 'ID', URL: 'URL', API: 'API' }[w]
                 || (i ? w.toLowerCase() : w.charAt(0) + w.slice(1).toLowerCase()))).join(' ');

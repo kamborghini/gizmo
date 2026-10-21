@@ -1009,6 +1009,7 @@ def _connector_state():
                 "ORDERS_SINCE": (_NOW - _dtd(days=60)).date().replace(day=1).isoformat(), "XERO_SALES_ACCOUNT_CODE": "200",
                 "XERO_TAX_TYPE_STANDARD": "OUTPUT2", "XERO_TAX_TYPE_ZERO": "ZERORATEDOUTPUT",
                 "CUSTOMER_REF_METAFIELD_NAMESPACE": "custom", "CUSTOMER_REF_METAFIELD_KEY": "po_reference",
+                "AUTO_RUN_INTERVAL_MINUTES": "10",
                 "hasShopifyToken": True, "hasXeroClientId": True, "hasXeroClientSecret": True}
     recent = [o for o in DASH["orders"] if not o.get("cancelled_at")][-12:]
     ledger = [{"kind": "invoice", "key": o["name"], "status": "synced", "xeroId": f"XI-{o['order_number']}",

@@ -5144,14 +5144,17 @@ _CONNECTOR_READS = {
 # SHOP_TIMEZONE is not here: the connector neither accepts nor returns it (it
 # is not in its SETTING_FIELDS), so offering it made Save say "Saved" over
 # nothing. It is set on the connector service itself.
+# AUTO_RUN_INTERVAL_MINUTES is how often Auto Run looks, 5 to 1440 minutes:
+# operational like the rest, and the connector applies a change at once.
 _CONNECTOR_SETTABLE = {
     "RECONCILE_MODE", "RECONCILE_TOLERANCE", "MAX_DOCS_PER_RUN", "RUNAWAY_ABORT_ABOVE",
     "ORDERS_SINCE", "XERO_SALES_ACCOUNT_CODE",
     "XERO_TAX_TYPE_STANDARD", "XERO_TAX_TYPE_ZERO",
     "CUSTOMER_REF_METAFIELD_NAMESPACE", "CUSTOMER_REF_METAFIELD_KEY",
+    "AUTO_RUN_INTERVAL_MINUTES",
 }
 # Kept as numbers by the connector, so 0.50 comes back as 0.5.
-_CONNECTOR_NUMERIC = {"RECONCILE_TOLERANCE", "MAX_DOCS_PER_RUN", "RUNAWAY_ABORT_ABOVE"}
+_CONNECTOR_NUMERIC = {"RECONCILE_TOLERANCE", "MAX_DOCS_PER_RUN", "RUNAWAY_ABORT_ABOVE", "AUTO_RUN_INTERVAL_MINUTES"}
 
 
 def _connector_settings_unapplied(sent: dict, now: dict) -> list:
@@ -7341,9 +7344,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 code, data = await _connector_call("POST", "/api/autorun",
                                                    {"enabled": "true" if on else "false"})
                 if code < 400:
+                    # The interval the connector says it is using: it is a
+                    # setting there (AUTO_RUN_INTERVAL_MINUTES), not ten.
+                    mins = data.get("intervalMinutes") if isinstance(data, dict) else None
                     _track(who, "connector",
                            "turned Auto Run " + ("on" if on else "off"),
-                           "every 10 minutes" if on else "")
+                           ("every " + str(mins or 10) + " minutes") if on else "")
                 return _json({"available": True, "data": data}, code if code >= 400 else 200)
 
             if op == "settings_save":
@@ -7366,7 +7372,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # the connector's own tab.
                 code, data = await _connector_call("POST", "/api/settings", json_body=clean)
                 if code >= 400:
-                    return _json({"available": True, "data": data}, code)
+                    # The connector refused the save (a value out of range,
+                    # say) and kept nothing: said as an error, which the page
+                    # shows, rather than tucked under data, where the page
+                    # read "Saved" over a save that stored nothing at all.
+                    why = (data or {}).get("error") if isinstance(data, dict) else None
+                    return _json({"available": True, "error": why or ("Connector error " + str(code)), "data": data}, code)
                 unapplied = []
                 try:
                     code2, now = await _connector_call("GET", "/api/settings")
