@@ -7,6 +7,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, PlainTextResponse, Response
 
 import copilot as core
+from gizmo import config
 from gizmo import gate
 from gizmo import scheduler
 from gizmo import rendering
@@ -24,7 +25,7 @@ def register(mcp, registry):
         # admin (which always appends shop/host/embedded). A direct browser
         # visit has none of those — return nothing so the app is invisible
         # outside the admin. (Real auth is still enforced on /api/chat.)
-        if core.SHOPIFY_API_KEY:
+        if config.SHOPIFY_API_KEY:
             qp = request.query_params
             if not (qp.get("shop") or qp.get("host") or qp.get("embedded") or qp.get("id_token")):
                 return PlainTextResponse("Not Found", status_code=404, headers=gate._API_HEADERS)

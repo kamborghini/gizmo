@@ -2045,8 +2045,8 @@ def _mail_folder_path(d: dict, segs: list, who: str) -> str:
 # walk and its own token file. The connect URL is gated by the same
 # server secret; whoever opens it signs in AS the shared mailbox.
 def _gmail_redirect_uri(request: Request) -> str:
-    if core.APP_BASE_URL:
-        return core.APP_BASE_URL.rstrip("/") + "/oauth/gmail/callback"
+    if config.APP_BASE_URL:
+        return config.APP_BASE_URL.rstrip("/") + "/oauth/gmail/callback"
     host = request.headers.get("host", "")
     return f"https://{host}/oauth/gmail/callback"
 
@@ -2060,5 +2060,6 @@ from gizmo import dispatch as desk  # noqa: E402
 from gizmo import gate  # noqa: E402
 from gizmo import team  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import config  # noqa: E402
 from gizmo import scheduler  # noqa: E402
 from gizmo import files as fileserver  # noqa: E402

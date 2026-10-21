@@ -45,8 +45,8 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/chat` | POST | chat | `_guard` | AI slot | `_team_level` | `copilot.chat` |  |
-| `/api/chat/stream` | POST | chat | `_guard` | AI slot | `_team_level` | `copilot.chat_stream` | Server-sent-events variant of /api/chat: emits real tool-step progress as the model works, then a final structured result. |
+| `/api/chat` | POST | chat | `_guard` | AI slot | `_team_level` | `gizmo.routes.chat.chat` |  |
+| `/api/chat/stream` | POST | chat | `_guard` | AI slot | `_team_level` | `gizmo.routes.chat.chat_stream` | Server-sent-events variant of /api/chat: emits real tool-step progress as the model works, then a final structured result. |
 
 ## `/api/connector`
 
@@ -360,7 +360,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/usage` | POST | any account | `_guard` | reads its own body |  | `copilot.usage_route` |  |
+| `/api/usage` | POST | any account | `_guard` | reads its own body |  | `gizmo.routes.chat.usage_route` |  |
 
 ## `/api/work`
 

@@ -1,0 +1,16 @@
+{
+  "note": "the chat's, the stream's and the usage panel's routes",
+  "areas": [
+    {"name": "config", "file": "gizmo/config.py", "alias": "config", "existing": true, "prefix": "^$",
+     "extra": ["SHOPIFY_API_KEY", "SHOPIFY_API_SECRET", "SHOPIFY_STORE", "APP_BASE_URL"],
+     "exclude": [], "floor": true, "doc": ""}
+  ],
+  "routes": [
+    {"name": "routes_chat", "file": "gizmo/routes/chat.py", "area": "assistant",
+     "paths": ["/api/chat", "/api/usage"], "helpers": [],
+     "doc": "The chat's routes: a chat turn, the same turn streamed step by step, and the usage panel's figures. Gathered from add_routes (stage 4 of the 14 October audit) where the first stood, once add_routes handed the chat module its tools; their paths are literal, so no request changes hands.",
+     "register_doc": "Add the chat's routes to the app.",
+     "comment": "The chat's routes (gizmo/routes/chat.py), gathered where the first stood."}
+  ],
+  "copies": ["SHOPIFY_API_SECRET", "APP_BASE_URL"]
+}

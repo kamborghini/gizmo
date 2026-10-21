@@ -27,7 +27,9 @@
   `existing: true` adds to a module moved in an earlier piece (its `file`,
   bound in `copilot.py` as `alias`): the statements go in before its last
   imports, its own name is dropped inside them, and its own `core.NAME` reads
-  of them become bare.
+  of them become bare. If `copilot.py` takes names from that module but does
+  not bind it by `alias` yet (`from gizmo.config import _env_num`), the move
+  binds it there and in the suite.
   `alias` is how every other module reads it; check it is no local name
   where it would be read (the tool refuses if it is). `floor` areas may not
   borrow from `copilot.py`. `allow_file` lets a statement build a path from

@@ -34,20 +34,20 @@ logger = logging.getLogger("shopify_mcp.copilot")
 # ---------------------------------------------------------------------------
 
 def _verify_session_token(token: str) -> dict:
-    if not core.SHOPIFY_API_SECRET:
+    if not config.SHOPIFY_API_SECRET:
         raise RuntimeError("SHOPIFY_API_SECRET not configured")
     claims = jwt.decode(
         token,
-        core.SHOPIFY_API_SECRET,
+        config.SHOPIFY_API_SECRET,
         algorithms=["HS256"],
-        audience=core.SHOPIFY_API_KEY or None,
+        audience=config.SHOPIFY_API_KEY or None,
         leeway=5,
-        options={"require": ["exp", "nbf"], "verify_aud": bool(core.SHOPIFY_API_KEY)},
+        options={"require": ["exp", "nbf"], "verify_aud": bool(config.SHOPIFY_API_KEY)},
     )
     dest = claims.get("dest") or ""
     # Defense in depth: only accept tokens minted for this store.
-    if core.SHOPIFY_STORE:
-        expected = f"https://{core.SHOPIFY_STORE}.myshopify.com"
+    if config.SHOPIFY_STORE:
+        expected = f"https://{config.SHOPIFY_STORE}.myshopify.com"
         if dest != expected:
             raise jwt.InvalidTokenError("session token dest mismatch")
     # Shopify guidance: the issuer and destination must reference the same shop host.
@@ -80,7 +80,7 @@ def _authorize(request: Request) -> tuple[bool, Optional[str], str]:
     them off. `reason` names the refusal (a key of AUTH_REFUSALS) so the page
     can answer it correctly instead of treating every 401 as a dead session."""
     auth = request.headers.get("authorization", "")
-    if auth.startswith("Bearer ") and core.SHOPIFY_API_SECRET:
+    if auth.startswith("Bearer ") and config.SHOPIFY_API_SECRET:
         try:
             _verify_session_token(auth[7:])
         except Exception as e:
@@ -641,7 +641,7 @@ def _user_public(uid: str, u: dict) -> dict:
 # the shop's admin), and then deals in the app's own accounts and sessions.
 def _shop_gate(request: Request) -> bool:
     auth = request.headers.get("authorization", "")
-    if not (auth.startswith("Bearer ") and core.SHOPIFY_API_SECRET):
+    if not (auth.startswith("Bearer ") and config.SHOPIFY_API_SECRET):
         return False
     try:
         _verify_session_token(auth[7:])
@@ -706,4 +706,5 @@ def _team_public_list(d: dict) -> list:
 # first. Read as core.NAME and sibling.NAME, never a copied name.
 from gizmo import activity  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import config  # noqa: E402
 from gizmo import gate  # noqa: E402

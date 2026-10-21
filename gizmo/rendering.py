@@ -123,9 +123,9 @@ def _render_page() -> str:
     shell, _assets = _page_parts()
     # Embedded-only: always load App Bridge (which provides the session token).
     head = (
-        f'<meta name="shopify-api-key" content="{core.SHOPIFY_API_KEY}" />\n'
+        f'<meta name="shopify-api-key" content="{config.SHOPIFY_API_KEY}" />\n'
         '    <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>'
-    ) if core.SHOPIFY_API_KEY else ""
+    ) if config.SHOPIFY_API_KEY else ""
     return shell.replace("<!--APPBRIDGE-->", head)
 
 
@@ -240,8 +240,8 @@ def _frame_headers(request: Request) -> dict:
     # (a local run), a well-formed ?shop= or the wildcard, as before, so a
     # crafted value still cannot inject extra frame hosts.
     shop = request.query_params.get("shop", "")
-    if core.SHOPIFY_STORE:
-        ancestors = f"https://{core.SHOPIFY_STORE.split('.')[0]}.myshopify.com https://admin.shopify.com"
+    if config.SHOPIFY_STORE:
+        ancestors = f"https://{config.SHOPIFY_STORE.split('.')[0]}.myshopify.com https://admin.shopify.com"
     elif _SHOP_RE.match(shop):
         ancestors = f"https://{shop} https://admin.shopify.com"
     else:
@@ -339,3 +339,4 @@ from gizmo import files as fileserver  # noqa: E402
 from gizmo import gate  # noqa: E402
 from gizmo import orderbook  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import config  # noqa: E402

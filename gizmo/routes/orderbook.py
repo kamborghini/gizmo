@@ -12,6 +12,7 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
 import copilot as core
+from gizmo import config
 from gizmo import activity
 from gizmo import gate
 from gizmo import orderbook
@@ -33,7 +34,7 @@ def register(mcp, registry):
         from Shopify. No session token (Shopify has none) and no rate limiter
         (a burst of genuine orders must never be answered 429, because repeated
         failures make Shopify silently delete the subscription)."""
-        if not core.SHOPIFY_API_SECRET:
+        if not config.SHOPIFY_API_SECRET:
             return PlainTextResponse("Unauthorized", status_code=401)
         # Streamed with a hard cap, NOT request.body(): the signature can only be
         # checked after the body is read, so this read happens for anyone, and a
@@ -50,13 +51,13 @@ def register(mcp, registry):
             return PlainTextResponse("Bad request", status_code=400)
         raw = b"".join(chunks)
         sent = request.headers.get("x-shopify-hmac-sha256", "")
-        want = base64.b64encode(hmac.new(core.SHOPIFY_API_SECRET.encode("utf-8"),
+        want = base64.b64encode(hmac.new(config.SHOPIFY_API_SECRET.encode("utf-8"),
                                          raw, hashlib.sha256).digest()).decode("ascii")
         if not sent or not hmac.compare_digest(want, sent):
             return PlainTextResponse("Unauthorized", status_code=401)
         # Signed, but for the wrong store: refuse rather than act on it.
         shop = str(request.headers.get("x-shopify-shop-domain") or "")
-        if core.SHOPIFY_STORE and not shop.lower().startswith(core.SHOPIFY_STORE.split(".")[0].lower() + "."):
+        if config.SHOPIFY_STORE and not shop.lower().startswith(config.SHOPIFY_STORE.split(".")[0].lower() + "."):
             return PlainTextResponse("Unauthorized", status_code=401)
         # Signed by us, for us, but this door is the ORDERS door. A privacy or
         # app topic delivered here would be acknowledged 200 and dropped, which

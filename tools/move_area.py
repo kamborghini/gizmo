@@ -282,12 +282,16 @@ def run(spec_path, root, write):
     # an area marked existing moved in an earlier piece: what moves here is
     # added to its file, which copilot.py already binds by the same name
     EXISTING = {d for d, a in areas.items() if a.get("existing")}
+    BIND = set()                      # existing areas copilot.py does not bind by name yet
     for d in sorted(EXISTING):
         mod = areas[d]["file"][:-3].replace("/", ".")
         if not os.path.exists(P(areas[d]["file"])):
             problems.append(f"existing area {d}: no file {areas[d]['file']}")
         elif mod_alias.get(AL[d]) != mod:
-            problems.append(f"existing area {d}: copilot.py binds no {AL[d]} for {mod}")
+            if AL[d] in IMPORTS or AL[d] in {b for n in tree.body for b in _binds(n)}:
+                problems.append(f"existing area {d}: copilot.py binds {AL[d]} to something else")
+            else:
+                BIND.add(d)           # bound by this move, in copilot.py and the suite
         if mod in floor_mods:
             areas[d]["floor"] = True
     imports = set(IMPORTS)
@@ -490,8 +494,10 @@ def run(spec_path, root, write):
                 ed[a0.lineno].append((_col(lines, a0.lineno, a0.col_offset), _col(lines, a0.lineno, a0.end_col_offset),
                                       AL[DEST[x.args[1].value]]))
                 used.add(DEST[x.args[1].value])
+            # a copy too: copilot.py keeps reading it bare, every other file
+            # reads it from its new home (a copy is only of a name nobody patches)
             if (isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and x.value.id in owners
-                    and x.attr in moved and x.attr not in keep_copies):
+                    and x.attr in moved):
                 if own is not None and DEST[x.attr] == own:
                     # the module's own core.NAME read of a name moving into it: bare
                     ed[x.lineno].append((_col(lines, x.lineno, x.col_offset), _col(lines, x.lineno, x.end_col_offset), x.attr))
@@ -665,7 +671,7 @@ def run(spec_path, root, write):
     at = anchor_node.end_lineno if anchor_node else 0
     add = [f"# Moved out of this file (stage 4): {spec.get('note', '')}.\n"]
     for d, a in areas.items():
-        if d not in EXISTING:         # copilot.py binds an existing area already
+        if d not in EXISTING or d in BIND:   # copilot.py binds an existing area already, unless it does not yet
             add.append(sib_line(d) + "\n")
     for g, gd in groups.items():
         if gd.get("existing"):
@@ -733,7 +739,7 @@ def run(spec_path, root, write):
         out[at:at] = ["".join(h + "\n" for h in head if h)]
         return "".join(out)
 
-    new_imports = "".join(sib_line(d) + "\n" for d in areas if d not in EXISTING)
+    new_imports = "".join(sib_line(d) + "\n" for d in areas if d not in EXISTING or d in BIND)
     group_of = {gd["file"]: g for g, gd in groups.items() if gd.get("existing")}
     for rel in [areas[d]["file"] for d in EXISTING] + list(group_of):
         if rel not in others:

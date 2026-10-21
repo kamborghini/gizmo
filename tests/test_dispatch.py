@@ -187,6 +187,7 @@ from gizmo import oauth
 from gizmo import status as appstatus
 from gizmo import clock
 from gizmo import products as catalog
+from gizmo import config
 import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
@@ -12709,14 +12710,43 @@ def t_an_account_that_does_not_exist_opens_no_tab():
 
 
 @test
+def t_a_chat_turn_runs_the_askers_tools_only():
+    """Each chat turn binds its own asker to the tool gate. Pinned through the
+    chat route before the chat's tools moved onto the chat module: a member
+    without the Customers tab is refused the customer tools inside their own
+    turn, and the turn is handed the chat's tools."""
+    seen = []
+
+    async def fake_run(history, dispatch, tools, model, extra, **kw):
+        seen.append((await dispatch("shopify_get_customer", {"customer_id": 1}), len(tools)))
+        return {"structured": {"summary": "Done."}}
+
+    def go():
+        uid, msess, _pw = ready_user("Nora Nocust", "nora_nocust", role="member")
+        eq(post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["chat", "labels"]}).status_code, 200)
+        saved = assistant.run_chat
+        assistant.run_chat = fake_run
+        try:
+            r = post_s(msess, "/api/chat", {"message": "who bought the most last month?"})
+            eq(r.status_code, 200, r.text)
+        finally:
+            assistant.run_chat = saved
+        out, n_tools = seen[-1]
+        ok("Refused" in out and "customers" in out, "the member's own turn refused the tool: " + out[:160])
+        ok(n_tools > 0, "and the turn was handed the chat's tools")
+    with_accounts(go)
+
+@test
 def t_the_chat_tool_gate_is_bound_per_run():
     """A shared "current asker" slot is only safe while nothing awaits between
     writing and reading it. A chat turn is minutes of awaits, so a second
     person starting a chat would re-point it before the first turn's tools
     ran - and that person's permissions would be the ones enforced."""
     src = copilot_source()
-    eq(src.count("run_chat(history, dispatch_for(_who)"), 2,
+    eq(src.count("run_chat(history, assistant.dispatch_for(_who)"), 2,
        "both /api/chat and /api/chat/stream bind the asker to their own run")
+    ok('return _build_dispatch(_chat_registry, lambda: str(uid or ""))' in src,
+       "a fresh dispatcher for each turn, the asker bound inside it; only the registry is shared, set once at boot")
     ok("_chat_actor" not in src, "and no module-level asker slot survives")
 
 
@@ -17631,22 +17661,22 @@ def t_only_the_configured_store_can_frame_the_app():
             url = type("U", (), {"path": "/"})()
         csp = rendering._frame_headers(_Req())["Content-Security-Policy"]
         return [d for d in csp.split(";") if d.strip().startswith("frame-ancestors")][0].split()[1:]
-    saved = _c.SHOPIFY_STORE
+    saved = config.SHOPIFY_STORE
     try:
         for store in ("test-store", "test-store.myshopify.com"):
-            _c.SHOPIFY_STORE = store
+            config.SHOPIFY_STORE = store
             for shop in ("evil-dev.myshopify.com", "test-store.myshopify.com", "not a shop", None):
                 eq(ancestors(shop), ["https://test-store.myshopify.com", "https://admin.shopify.com"],
                    "store %r, ?shop=%r: only the store and the admin" % (store, shop))
         # Unconfigured (a local run): the old behaviour, so a developer's
         # own dev store can still embed it.
-        _c.SHOPIFY_STORE = ""
+        config.SHOPIFY_STORE = ""
         eq(ancestors("dev-one.myshopify.com"), ["https://dev-one.myshopify.com", "https://admin.shopify.com"],
            "no store configured: a well-formed ?shop= is used")
         eq(ancestors(None), ["https://admin.shopify.com", "https://*.myshopify.com"],
            "and without one, the admin and any store")
     finally:
-        _c.SHOPIFY_STORE = saved
+        config.SHOPIFY_STORE = saved
 
 
 @test
@@ -21999,9 +22029,10 @@ def t_add_routes_holds_routes_and_nothing_it_could_have_shared():
     # The ones that stay say why: each closes over the registry add_routes is
     # handed, or over a value built from it. Two moved with their routes into
     # an area's register(mcp, registry): the desk's _finish_cancel and the
-    # inbox's _mail_orders_for.
-    eq({h.name for h in helpers}, {"dispatch_for", "_fin_search", "_fin_thread", "_fin_bytes"},
-       "a nested helper appeared that is not one of the registry-bound four")
+    # inbox's _mail_orders_for; dispatch_for became the chat module's own, the
+    # registry handed to it once (piece 15).
+    eq({h.name for h in helpers}, {"_fin_search", "_fin_thread", "_fin_bytes"},
+       "a nested helper appeared that is not one of the registry-bound three")
     regs = [n for n in tree.body if getattr(n, "name", "") == "register"]
     eq({h.name for r in regs for h in r.body if isinstance(h, (_ast.FunctionDef, _ast.AsyncFunctionDef))
         and not any("route" in _ast.unparse(d) for d in h.decorator_list)},
@@ -30179,12 +30210,11 @@ def _test_patches():
 # where the other copy is not part of what the test means to change. Each is
 # (patched module, name, the module with its own copy): the reason.
 SHARED_COPIES = {
-    ("server", "SHOPIFY_STORE", "copilot"):
-        "the Shopify client tests drive server._request, which builds the shop's "
-        "address from server's own; copilot's copy pins session tokens and the "
-        "frame rule, which those tests never reach",
-    ("copilot", "SHOPIFY_STORE", "server"):
-        "the frame-ancestors test reads copilot._frame_headers alone",
+    # The shop's setting lives in gizmo/config.py (piece 15); server.py keeps its
+    # own to build the Shopify client's address.
+    ("gizmo.config", "SHOPIFY_STORE", "server"):
+        "the frame-ancestors test reads rendering._frame_headers alone, which reads config's; "
+        "server's own builds the Shopify client's address, which that test never reaches",
     # The connector settings test routes the connector call's client
     # (gizmo.xero_sync's httpx) to a fake connector; every other module's own
     # client is one that test never reaches.
@@ -30388,7 +30418,8 @@ def t_either_module_imports_first():
                         ("gizmo.oauth", "copilot"), ("gizmo.status", "copilot"), ("gizmo.routes.rendering", "copilot"),
                         ("gizmo.routes.profile", "copilot"), ("gizmo.routes.layouts", "copilot"),
                         ("gizmo.routes.oauth", "copilot"), ("gizmo.routes.status", "copilot"),
-                        ("gizmo.clock", "copilot"), ("gizmo.products", "copilot"), ("gizmo.routes.products", "copilot")):
+                        ("gizmo.clock", "copilot"), ("gizmo.products", "copilot"), ("gizmo.routes.products", "copilot"),
+                        ("gizmo.routes.chat", "copilot")):
         r = _sp.run([sys.executable, "-c", f"import {first}, {then}; import gizmo.dispatch as d, copilot as c; "
                      "assert c.desk is d and d.core is c; print('ok')"],
                     cwd=root, env=dict(os.environ), capture_output=True, text=True, timeout=120)
@@ -30940,6 +30971,38 @@ def t_move_area_adds_to_an_area_moved_earlier():
     for first in ("gizmo.old", "copilot", "gizmo.floor_stub"):
         rr = _sp.run([sys.executable, "-c", f"import {first}, copilot; assert copilot.uses() == 3"], cwd=root, capture_output=True, text=True)
         eq(rr.returncode, 0, f"{first} first: " + rr.stderr[-400:])
+    # a floor module copilot.py takes a name from but does not bind by its own
+    # name: taking a setting into it binds it, in copilot.py and the suite
+    cfg = '"""Stands in for the settings."""\n\n\ndef helper() -> int:\n    return 1\n'
+    cop3 = _TOY_COPILOT.replace("from gizmo import floor_stub\n", "from gizmo import floor_stub\nfrom gizmo.cfg import helper\n", 1) + (
+        "\n\nSETTING = 3\n\n\ndef reads() -> int:\n    return SETTING + helper()\n")
+    spec3 = {"note": "a setting to the floor", "routes": [], "areas": [
+        {"name": "cfg", "file": "gizmo/cfg.py", "alias": "cfg", "existing": True, "prefix": "^$",
+         "extra": ["SETTING"], "exclude": [], "floor": True, "doc": ""}]}
+    root3 = _toy_repo("toy-bind", cop3, spec3, {"gizmo/cfg.py": cfg,
+                      "tests/test_dispatch.py": _TOY_TEST + "\n\ndef t_setting():\n    assert copilot.SETTING == 3\n"})
+    r = _run_move(root3)
+    eq(r.returncode, 0, r.stdout[-800:] + r.stderr[-800:])
+    c3, cf3, t3 = (open(os.path.join(root3, f)).read() for f in (_TOY_MAIN, "gizmo/cfg.py", "tests/test_dispatch.py"))
+    ok("from gizmo import cfg\n" in c3 and "return cfg.SETTING + helper()" in c3, "copilot.py binds the module and reads it: " + c3[-300:])
+    ok("SETTING = 3" in cf3 and "import copilot" not in cf3, "the floor holds the setting and imports nothing above it")
+    ok("from gizmo import cfg" in t3 and "assert cfg.SETTING == 3" in t3, "and the suite, which reads it, binds it too")
+    rr = _sp.run([sys.executable, "-c", "import gizmo.cfg, copilot; assert copilot.reads() == 4"], cwd=root3, capture_output=True, text=True)
+    eq(rr.returncode, 0, rr.stderr[-400:])
+    # a name copilot.py keeps as a copy (a frozen function reads it bare): it
+    # stays bare there, and every other module reads it from its new home
+    cop4 = cop3 + "\n\nOTHER = 5\n\n\ndef keeps() -> int:\n    return OTHER\n"
+    user = '"""Reads the other setting."""\n\n\ndef f():\n    return core.OTHER\n\n\nimport copilot as core  # noqa: E402\n'
+    spec4 = dict(spec3, areas=[dict(spec3["areas"][0], extra=["SETTING", "OTHER"])], copies=["OTHER"])
+    root4 = _toy_repo("toy-copy", cop4, spec4, {"gizmo/cfg.py": cfg, "gizmo/user.py": user})
+    r = _run_move(root4)
+    eq(r.returncode, 0, r.stdout[-800:] + r.stderr[-800:])
+    c4, u4 = (open(os.path.join(root4, f)).read() for f in (_TOY_MAIN, "gizmo/user.py"))
+    ok("from gizmo.cfg import OTHER" in c4 and "    return OTHER\n" in c4, "copilot.py keeps reading the copy bare: " + c4[-300:])
+    ok("return cfg.OTHER" in u4 and "from gizmo import cfg" in u4, "another module reads it from its home: " + u4)
+    rr = _sp.run([sys.executable, "-c", "import gizmo.user, copilot; assert copilot.keeps() == 5 and gizmo.user.f() == 5"],
+                 cwd=root4, capture_output=True, text=True)
+    eq(rr.returncode, 0, rr.stderr[-400:])
 
 @test
 def t_the_privacy_loans_and_work_routes_are_gathered():
@@ -30971,8 +31034,7 @@ def t_the_workspace_routes_are_gathered():
         ok(path not in src, path + " is registered by its area's routes")
     eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_skills, routes_memory, routes_knowledge)],
        [2, 1, 2], "2 skills routes, 1 memory route, 2 learn routes")
-    ok('@mcp.custom_route("/api/chat", methods=["POST"])' in src and '"/api/chat/stream"' in src,
-       "the chat routes stay with the tool list they read")
+    ok('"/api/chat' not in src, "the chat routes went too, once add_routes handed the chat module its tools (piece 15)")
 
 @test
 def t_the_report_routes_are_gathered():
@@ -31121,6 +31183,26 @@ def t_the_ai_settings_products_and_history_have_moved():
         ok(path not in src, path + " is registered by its area's routes")
     eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_products, routes_orderbook)], [2, 3],
        "the Products tab's two routes; the order book's two and customer history")
+
+@test
+def t_the_chat_routes_and_shop_settings_have_moved():
+    """The shop's own settings live with the rest of the settings on the floor;
+    copilot.py keeps the secret and the base address only as copies of
+    config's, for the frozen print routes. The chat's, the stream's and the
+    usage panel's routes live in gizmo/routes/chat.py (piece 15)."""
+    import importlib, inspect
+    from gizmo.routes import chat as routes_chat
+    settings, here = vars(importlib.import_module("gizmo.config")), vars(copilot)
+    for n in ("SHOPIFY_API_KEY", "SHOPIFY_API_SECRET", "SHOPIFY_STORE", "APP_BASE_URL"):
+        ok(n in settings, n + " lives in gizmo/config.py")
+    ok("SHOPIFY_API_KEY" not in here and "SHOPIFY_STORE" not in here, "copilot.py binds neither")
+    ok(here["SHOPIFY_API_SECRET"] is settings["SHOPIFY_API_SECRET"] and here["APP_BASE_URL"] is settings["APP_BASE_URL"],
+       "and keeps the secret and the base address as copies of config's, for the frozen print routes")
+    src = inspect.getsource(copilot.add_routes)
+    eq(src.count("routes_chat.register(mcp, registry)"), 1, "the chat's routes, one call")
+    for path in ('"/api/chat', '"/api/usage"'):
+        ok(path not in src, path + " is registered by the chat's routes")
+    eq(inspect.getsource(routes_chat).count("@mcp.custom_route("), 3, "the chat, its stream and the usage panel")
 
 @test
 def t_the_moved_areas_routes_follow_them():

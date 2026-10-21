@@ -164,20 +164,16 @@ from gizmo import clock
 # Moved out of this file (stage 4): the Products tab.
 from gizmo import products as catalog
 from gizmo.routes import products as routes_products
+# Moved out of this file (stage 4): the chat's, the stream's and the usage panel's routes.
+from gizmo import config
+from gizmo.routes import chat as routes_chat
+from gizmo.config import APP_BASE_URL, SHOPIFY_API_SECRET
 logger = logging.getLogger("shopify_mcp.copilot")
 
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-# App Bridge identity = the app's Client ID + secret. Accept either the
-# SHOPIFY_API_KEY/SECRET names or the SHOPIFY_CLIENT_ID/SECRET names (same values).
-SHOPIFY_API_KEY    = os.environ.get("SHOPIFY_API_KEY") or os.environ.get("SHOPIFY_CLIENT_ID", "")
-SHOPIFY_API_SECRET = os.environ.get("SHOPIFY_API_SECRET") or os.environ.get("SHOPIFY_CLIENT_SECRET", "")
-SHOPIFY_STORE      = os.environ.get("SHOPIFY_STORE", "")        # used to pin session tokens to this shop
-# Public base URL (e.g. https://your-app.up.railway.app). When set, the Google
-# OAuth redirect URI is derived from it rather than the request Host header.
-APP_BASE_URL       = os.environ.get("APP_BASE_URL", "").strip()
 STORE_CONTEXT_CAP  = _env_num(int, os.environ.get("STORE_CONTEXT_CAP", "4000"), "4000", "STORE_CONTEXT_CAP")
 
 
@@ -650,7 +646,7 @@ def _print_cors(request: Request) -> dict:
     base = {"Access-Control-Allow-Headers": "Authorization, Content-Type",
             "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
             "Access-Control-Max-Age": "600"}
-    own_shop = f"https://{SHOPIFY_STORE}.myshopify.com" if SHOPIFY_STORE else ""
+    own_shop = f"https://{config.SHOPIFY_STORE}.myshopify.com" if config.SHOPIFY_STORE else ""
     if origin in _PRINT_ORIGINS or (own_shop and origin == own_shop):
         return {**base, "Access-Control-Allow-Origin": origin,
                 "Access-Control-Allow-Credentials": "true", "Vary": "Origin"}
@@ -719,14 +715,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         load_cache=reconciliation._load_recon_cache, write_cache=reconciliation._write_recon_cache,
         load_docs=reconciliation._load_recon_docs, write_docs=reconciliation._write_recon_docs)
     tools = assistant._build_tools(chat_registry)
-    def dispatch_for(uid: str) -> Callable:
-        """The tool dispatcher for ONE chat turn, carrying who is asking so the
-        tool gate can refuse what their tabs do not cover. Bound per run, never
-        module-wide: a shared "current asker" is only safe while nothing awaits
-        between writing and reading it, and a chat turn is minutes of awaits -
-        a second person starting a chat would have re-pointed it long before
-        the first turn's tool calls ran."""
-        return assistant._build_dispatch(chat_registry, lambda: str(uid or ""))
+    # The chat's tools, from the registry this app was handed, kept on the chat
+    # module as the write capabilities are kept on shopify: the chat routes read
+    # them there, and assistant.dispatch_for binds each turn's asker.
+    assistant._chat_registry = chat_registry
+    assistant._chat_tools = tools
 
     logger.info(f"Copilot enabled — embedded-only; models: fast={claude.MODEL_FAST}, deep={claude.MODEL_DEEP}; "
                 f"effort={claude.ANTHROPIC_EFFORT}, deep effort={claude.ANTHROPIC_EFFORT_DEEP}; max_tokens={claude.MAX_TOKENS}; tools: {len(tools)}")
@@ -735,10 +728,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     if not SHOPIFY_API_SECRET:
         logger.warning("Copilot: SHOPIFY_API_SECRET/CLIENT_SECRET not set. All API routes are locked "
                        "(session tokens can't be verified).")
-    if not SHOPIFY_API_KEY:
+    if not config.SHOPIFY_API_KEY:
         logger.warning("Copilot: SHOPIFY_API_KEY/CLIENT_ID not set. Session-token audience (aud) will "
                        "NOT be verified. Set it so tokens are validated against this app.")
-    if not SHOPIFY_STORE:
+    if not config.SHOPIFY_STORE:
         logger.warning("Copilot: SHOPIFY_STORE not set. Session tokens will NOT be pinned to a specific "
                        "shop (dest is unverified). Set SHOPIFY_STORE to lock the app to your store.")
 
@@ -757,108 +750,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     # The status page and the health check (gizmo/routes/status.py), gathered where the first stood.
     routes_status.register(mcp, registry)
 
-    @mcp.custom_route("/api/chat", methods=["POST"])
-    async def chat(request: Request):
-        err, body, _who = await _guard(request, ai=True)
-        if err:
-            return err
-
-        history = body.get("messages")
-        if not history and body.get("message"):
-            history = [{"role": "user", "content": body["message"]}]
-        if not history:
-            return _json({"error": "Provide 'messages' or 'message'"}, 400)
-        if not isinstance(history, list) or len(history) > assistant.MAX_MESSAGES:
-            return _json({"error": "Conversation too long. Start a new chat."}, 400)
-        if len(json.dumps(history)) > assistant.MAX_CHAT_CHARS:
-            return _json({"error": "Message too large."}, 413)
-
-        deep = bool(body.get("deep"))
-        model = claude._pick_model(deep)
-        extra = (store_profile._profile_to_system(store_profile._load_profile()) + memory._memory_to_system() + knowledge._knowledge_to_system()
-                 + skillbook._skills_to_system(assistant._chat_question(history), assistant._picked_skills(body), can_read=True))
-        if seo._is_seo(history):
-            extra += "\n\n" + seo.SEO_KNOWLEDGE
-        extra += assistant._page_context_to_system(body.get("context"))
-        try:
-            result = await assistant.run_chat(history, dispatch_for(_who), tools, model, extra,
-                                    effort=claude._effort_for(model, deep), deep=deep)
-        except RuntimeError as e:
-            return _json({"error": str(e)}, 500)
-        except anthropic.APIError as e:
-            logger.exception("Anthropic API error")
-            return _json({"error": claude._ai_error_words(e)}, 502)
-        assistant._chat_after(result, history, held=team._team_level(_who) < team.ROLE_LEVELS["admin"], by=team._team_name(_who))
-        result["deep"] = deep
-        return _json(result)
-
-    @mcp.custom_route("/api/chat/stream", methods=["POST"])
-    async def chat_stream(request: Request):
-        """Server-sent-events variant of /api/chat: emits real tool-step progress as
-        the model works, then a final structured result. The client falls back to
-        /api/chat if streaming is unavailable."""
-        # Authorised BEFORE the AI window is touched: the global AI ceiling is
-        # the app's most expensive shared resource, and a caller with no
-        # session was spending a slot from it on the way to a 401.
-        err, body, _who = await _guard(request, ai=True)
-        if err:
-            return err
-        history = body.get("messages")
-        if not history and body.get("message"):
-            history = [{"role": "user", "content": body["message"]}]
-        if not history:
-            return _json({"error": "Provide 'messages' or 'message'"}, 400)
-        if not isinstance(history, list) or len(history) > assistant.MAX_MESSAGES:
-            return _json({"error": "Conversation too long. Start a new chat."}, 400)
-        if len(json.dumps(history)) > assistant.MAX_CHAT_CHARS:
-            return _json({"error": "Message too large."}, 413)
-
-        deep = bool(body.get("deep"))
-        model = claude._pick_model(deep)
-        extra = (store_profile._profile_to_system(store_profile._load_profile()) + memory._memory_to_system() + knowledge._knowledge_to_system()
-                 + skillbook._skills_to_system(assistant._chat_question(history), assistant._picked_skills(body), can_read=True))
-        if seo._is_seo(history):
-            extra += "\n\n" + seo.SEO_KNOWLEDGE
-        extra += assistant._page_context_to_system(body.get("context"))
-
-        q: asyncio.Queue = asyncio.Queue()
-
-        async def runner():
-            try:
-                result = await assistant.run_chat(history, dispatch_for(_who), tools, model, extra,
-                                        emit=q.put, effort=claude._effort_for(model, deep), deep=deep)
-                assistant._chat_after(result, history, held=team._team_level(_who) < team.ROLE_LEVELS["admin"],
-                            by=team._team_name(_who))
-                result["deep"] = deep
-                await q.put({"type": "done", "result": result})
-            except anthropic.APIError as e:
-                logger.exception("Anthropic API error (stream)")
-                await q.put({"type": "error", "error": claude._ai_error_words(e)})
-            except RuntimeError as e:
-                await q.put({"type": "error", "error": str(e)})
-            except Exception:
-                logger.exception("Chat stream failed")
-                await q.put({"type": "error", "error": "Something went wrong. Please try again."})
-
-        async def gen():
-            task = asyncio.create_task(runner())
-            try:
-                # Said at once: the run is under way and being paid for. A page
-                # that heard nothing may ask /api/chat instead, and before this
-                # an answer with no tool steps was silent until it was done, so
-                # one cut off mid-answer was run and billed a second time.
-                yield 'data: {"type": "start"}\n\n'
-                while True:
-                    ev = await q.get()
-                    yield "data: " + json.dumps(ev) + "\n\n"
-                    if ev.get("type") in ("done", "error"):
-                        break
-            finally:
-                if not task.done():
-                    task.cancel()
-
-        headers = {**_API_HEADERS, "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"}
-        return StreamingResponse(gen(), media_type="text/event-stream", headers=headers)
+    # The chat's routes (gizmo/routes/chat.py), gathered where the first stood.
+    routes_chat.register(mcp, registry)
 
     # The report routes (gizmo/routes/analytics.py), gathered where the first stood.
     routes_analytics.register(mcp, registry)
@@ -883,21 +776,6 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     # The schedule and alert routes (gizmo/routes/scheduler.py), gathered where the first stood.
     routes_scheduler.register(mcp, registry)
-
-    @mcp.custom_route("/api/usage", methods=["POST"])
-    async def usage_route(request: Request):
-        # AI token usage + estimated cost (measurement, no AI).
-        err, _body, _who = await _guard(request, body=False)
-        if err:
-            return err
-        body = await gate._read_json_capped(request)
-        days = 30
-        if isinstance(body, dict):
-            try:
-                days = max(1, min(365, int(body.get("days", 30))))
-            except (TypeError, ValueError):
-                days = 30
-        return _json({"usage": assistant._usage_summary(days)})
 
     # The impact route (gizmo/routes/impact.py).
     routes_impact.register(mcp, registry)
