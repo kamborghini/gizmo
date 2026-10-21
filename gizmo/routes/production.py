@@ -33,13 +33,35 @@ class ProductionStateBody(bodies.Body):
     ack_address: bodies.Flag = None
 
 
+
+class ProductionLabelsBody(bodies.Body):
+    """What /api/production-labels reads (gizmo/bodies.py): the queue's tag, how far back, one order, and whether to read afresh."""
+    tag: bodies.Text = None
+    days: bodies.Whole = None
+    order_id: bodies.Whole = None
+    fresh: bodies.Flag = None
+
+
+
+class LabelCoverageBody(bodies.Body):
+    """What /api/production-labels/coverage reads (gizmo/bodies.py): how many orders to look at."""
+    orders: bodies.Whole = None
+
+
+
+class LabelQueueBody(bodies.Body):
+    """What /api/production-labels/queue reads (gizmo/bodies.py): the order, and its number for the activity line."""
+    order_id: bodies.Whole = None
+    name: bodies.Text = None
+
+
 def register(mcp, registry):
     """Add production's routes to the app."""
 
     @mcp.custom_route("/api/production-labels", methods=["POST"])
     async def production_labels_route(request: Request):
         # Orders carrying the production tag, shaped for printing. Shopify read, no AI.
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=ProductionLabelsBody)
         if err:
             return err
         tag = str(body.get("tag") or "").strip()[:60] or None
@@ -249,7 +271,7 @@ def register(mcp, registry):
     async def labels_queue_route(request: Request):
         # One-click intake from the missed-orders strip: tag the order into
         # production through the same guarded writer the print path uses.
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=LabelQueueBody)
         if err:
             return err
         try:
@@ -310,7 +332,7 @@ def register(mcp, registry):
     @mcp.custom_route("/api/production-labels/coverage", methods=["POST"])
     async def labels_coverage_route(request: Request):
         # Size-list coverage over recent orders. Shopify read, no AI.
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=LabelCoverageBody)
         if err:
             return err
         try:

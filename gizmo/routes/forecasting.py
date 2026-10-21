@@ -43,6 +43,14 @@ class ForecastResultsBody(bodies.Body):
     actuals: bodies.Fields = None
 
 
+
+class ForecastShopifyBody(bodies.Body):
+    """What /hooks/forecast/shopify reads (gizmo/bodies.py): the start date, the page cursor and the bulk query's id."""
+    since: bodies.Text = None
+    after: bodies.Text = None
+    id: bodies.Text = None
+
+
 def register(mcp, registry):
     """Add the forecast's routes to the app."""
 
@@ -150,6 +158,9 @@ def register(mcp, registry):
             return gate._json({"error": "Request too large."}, 413)
         if not isinstance(body, dict):
             return gate._json({"error": "A JSON object is required."}, 400)
+        refused = gate._body_refusal(ForecastShopifyBody, body)
+        if refused:
+            return refused
         if shopify._forecast_reader is None:
             return gate._json({"error": "The store is not connected."}, 503)
         out = await shopify._forecast_reader(str(body.get("op") or ""), body)

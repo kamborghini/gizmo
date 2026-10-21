@@ -1,0 +1,1997 @@
+[
+ {
+  "path": "/api/alerts",
+  "body": {
+   "op": "dismiss",
+   "id": "9f3c2a1b7e"
+  },
+  "source": "static/src/js/alerts.js:67"
+ },
+ {
+  "path": "/api/alerts",
+  "body": {
+   "op": "clear"
+  },
+  "source": "static/src/js/alerts.js:34"
+ },
+ {
+  "path": "/api/schedule",
+  "body": {
+   "config": {
+    "enabled": true,
+    "every_hours": 24
+   }
+  },
+  "source": "static/src/js/settings.js:734"
+ },
+ {
+  "path": "/api/schedule",
+  "body": {
+   "config": {
+    "every_hours": 168
+   }
+  },
+  "source": "static/src/js/settings.js:743"
+ },
+ {
+  "path": "/api/auth/login",
+  "body": {
+   "username": "cameron",
+   "password": "correct horse battery"
+  },
+  "source": "static/src/js/team-and-sign-in.js:233"
+ },
+ {
+  "path": "/api/auth/mfa",
+  "body": {
+   "op": "off",
+   "current": "correct horse battery"
+  },
+  "source": "static/src/js/settings.js:389"
+ },
+ {
+  "path": "/api/auth/mfa",
+  "body": {
+   "op": "confirm",
+   "code": "482913"
+  },
+  "source": "static/src/js/settings.js:449"
+ },
+ {
+  "path": "/api/auth/mfa-verify",
+  "body": {
+   "ticket": "kQ3vX9mT2pLw8rNc0sYbHd4uFj6eAiZo1gKxWq7tVy5",
+   "code": "482913"
+  },
+  "source": "static/src/js/team-and-sign-in.js:141"
+ },
+ {
+  "path": "/api/auth/setup",
+  "body": {
+   "setup_code": "7H2K-9QPX",
+   "name": "Cameron",
+   "username": "cameron",
+   "password": "correct horse battery"
+  },
+  "source": "static/src/js/team-and-sign-in.js:189"
+ },
+ {
+  "path": "/api/auth/password",
+  "body": {
+   "current": "Starter-9xQ2",
+   "new": "correct horse battery"
+  },
+  "source": "static/src/js/team-and-sign-in.js:206"
+ },
+ {
+  "path": "/api/team/user",
+  "body": {
+   "op": "tabs",
+   "id": "u4",
+   "tabs": [
+    "overview",
+    "labels",
+    "mail",
+    "crm"
+   ]
+  },
+  "source": "static/src/js/team-and-sign-in.js:497"
+ },
+ {
+  "path": "/api/team/user",
+  "body": {
+   "op": "sizes",
+   "id": "u4",
+   "can_sizes": true
+  },
+  "source": "static/src/js/team-and-sign-in.js:501"
+ },
+ {
+  "path": "/api/team/user",
+  "body": {
+   "op": "create",
+   "name": "Sam Hall",
+   "username": "sam",
+   "role": "parttime"
+  },
+  "source": "static/src/js/team-and-sign-in.js:558"
+ },
+ {
+  "path": "/api/team/user",
+  "body": {
+   "op": "active",
+   "id": "u4",
+   "active": false
+  },
+  "source": "static/src/js/team-and-sign-in.js:656"
+ },
+ {
+  "path": "/api/chat/stream",
+  "body": {
+   "messages": [
+    {
+     "role": "user",
+     "content": "How did September compare with August?"
+    },
+    {
+     "role": "assistant",
+     "content": "September sales were £41,220.\nSuggested questions: Which products drove it?"
+    },
+    {
+     "role": "user",
+     "content": "Which products drove it?"
+    }
+   ],
+   "deep": false,
+   "skills": [
+    "a1b2c3d4e5"
+   ]
+  },
+  "source": "static/src/js/chat.js:275"
+ },
+ {
+  "path": "/api/usage",
+  "body": {
+   "days": 30
+  },
+  "source": "static/src/js/settings.js:683"
+ },
+ {
+  "path": "/api/connector",
+  "body": {
+   "op": "payouts",
+   "dryRun": true,
+   "since": "2026-09-01"
+  },
+  "source": "static/src/js/loans.js:1171"
+ },
+ {
+  "path": "/api/connector",
+  "body": {
+   "op": "settings_save",
+   "fields": {
+    "SALES_ACCOUNT_CODE": "200",
+    "AUTO_RUN_INTERVAL_MINUTES": "15"
+   }
+  },
+  "source": "static/src/js/loans.js:515"
+ },
+ {
+  "path": "/api/connector",
+  "body": {
+   "op": "autorun_set",
+   "enabled": false
+  },
+  "source": "static/src/js/loans.js:685"
+ },
+ {
+  "path": "/api/connector",
+  "body": {
+   "op": "reimport",
+   "order": "#104300",
+   "dryRun": true
+  },
+  "source": "static/src/js/loans.js:946"
+ },
+ {
+  "path": "/api/customer-history",
+  "body": {
+   "customer_id": 7234567890123
+  },
+  "source": "static/src/js/production-manager.js:365"
+ },
+ {
+  "path": "/api/customer-history",
+  "body": {
+   "customer_id": 7234567890456
+  },
+  "source": "static/src/js/crm.js:1256"
+ },
+ {
+  "path": "/api/order/edit",
+  "body": {
+   "order_id": 6123456789012,
+   "op": "read"
+  },
+  "source": "static/src/js/dispatch.js:413"
+ },
+ {
+  "path": "/api/order/edit",
+  "body": {
+   "order_id": 6123456789012,
+   "ship_to": {
+    "name": "Aoife Byrne",
+    "company": "",
+    "address1": "12 Harbour Road",
+    "address2": "",
+    "city": "Howth",
+    "province": "Dublin",
+    "zip": "D13 X2Y4",
+    "country_code": "IE",
+    "phone": "+353 1 555 0100"
+   },
+   "email": "aoife@example.ie",
+   "note": "Proposal: https://example.com/p/104300\nGobo 2 of 2",
+   "confirm_booked": true
+  },
+  "source": "static/src/js/dispatch.js:516"
+ },
+ {
+  "path": "/api/customers",
+  "body": {
+   "segment": "trade",
+   "fresh": false
+  },
+  "source": "static/src/js/customers.js:182"
+ },
+ {
+  "path": "/api/keyword-scan",
+  "body": {
+   "url": "https://www.The Shop.com/products/led-gobo-projector"
+  },
+  "source": "static/src/js/keywords.js:137"
+ },
+ {
+  "path": "/api/products",
+  "body": {
+   "months": 24,
+   "fresh": true
+  },
+  "source": "static/src/js/products.js:67"
+ },
+ {
+  "path": "/api/product",
+  "body": {
+   "product_id": 8123456789012
+  },
+  "source": "static/src/js/products.js:350"
+ },
+ {
+  "path": "/api/profile",
+  "body": {
+   "prefs": {
+    "compact": true,
+    "theme": "system",
+    "week_start": "monday"
+   }
+  },
+  "source": "static/src/js/settings.js:646"
+ },
+ {
+  "path": "/api/profile",
+  "body": {
+   "profile": {
+    "store_name": "The Shop",
+    "about": "LED gobo projectors",
+    "prefs": {
+     "compact": true
+    }
+   }
+  },
+  "source": "static/src/js/settings.js:666"
+ },
+ {
+  "path": "/api/recon/disconnect",
+  "body": {
+   "what": "xero",
+   "force": 1
+  },
+  "source": "static/src/js/reconciliation.js:179"
+ },
+ {
+  "path": "/api/recon/exception",
+  "body": {
+   "id": "e7f3a9c21b",
+   "op": "status",
+   "status": "ignored",
+   "note": ""
+  },
+  "source": "static/src/js/reconciliation.js:901"
+ },
+ {
+  "path": "/api/restore",
+  "body": {
+   "zip": "UEsDBBQAAAAIAAAAIQAAAAAAAAAAAAAAAAAKAAAAY3JtLmpzb24="
+  },
+  "source": "static/src/js/settings.js:286"
+ },
+ {
+  "path": "/api/skills/read",
+  "body": {
+   "id": "a1b2c3d4e5"
+  },
+  "source": "static/src/js/skills.js:565"
+ },
+ {
+  "path": "/api/work/report",
+  "body": {
+   "from": "",
+   "to": "2026-10-20"
+  },
+  "source": "static/src/js/team-and-sign-in.js:758"
+ },
+ {
+  "path": "/api/work/resolve",
+  "body": {
+   "uid": "u4"
+  },
+  "source": "static/src/js/team-and-sign-in.js:730"
+ },
+ {
+  "path": "/api/forecast/workbook",
+  "body": {
+   "name": "Cash Flow.xlsx",
+   "data_b64": "UEsDBBQABgAIAAAAIQBi7p1oXgEAAJAEAAATAAgCW0NvbnRlbnRfVHlwZXNdLnhtbCCiBAIooAAC"
+  },
+  "source": "static/src/js/forecast.js:52"
+ },
+ {
+  "path": "/hooks/forecast/results",
+  "body": {
+   "as_of": "2026-10-20",
+   "error": "RuntimeError: Shopify read failed: 502 Bad Gateway"
+  },
+  "source": "forecast/nightly.py:397"
+ },
+ {
+  "path": "/hooks/forecast/results",
+  "body": {
+   "as_of": "2026-10-20",
+   "generated_at": "2026-10-21T02:14:07.512331+00:00",
+   "scenarios": [
+    "Algorithm 1",
+    "Algorithm 2"
+   ],
+   "scenario_feature": null,
+   "basis": "order totals, as cash in: the same units the plan and Shopify use",
+   "forecast_by": [
+    {
+     "name": "seasonal",
+     "note": null,
+     "mape": 11.4,
+     "bias": -2.1
+    }
+   ],
+   "summary": {
+    "headline": "October is tracking 6% under plan."
+   },
+   "monthly": [
+    {
+     "month": "2026-10",
+     "method": "actual+forecast",
+     "actual_to_date": 24110.5,
+     "p10": 35200.0,
+     "p50": 39120.4,
+     "p90": 43000.0,
+     "targets": {
+      "Algorithm 1": 41500.0,
+      "Algorithm 2": 40000.0
+     },
+     "gap": {
+      "Algorithm 1": -2379.6,
+      "Algorithm 2": -879.6
+     },
+     "gap_pct": {
+      "Algorithm 1": -5.73,
+      "Algorithm 2": -2.2
+     },
+     "verdict": {
+      "Algorithm 1": "behind",
+      "Algorithm 2": "on track"
+     },
+     "risk": {
+      "Algorithm 1": "medium",
+      "Algorithm 2": "low"
+     }
+    }
+   ],
+   "year": {
+    "p50": 452310.77,
+    "targets": {
+     "Algorithm 1": 470000.0,
+     "Algorithm 2": 455000.0
+    }
+   },
+   "cash": {
+    "Algorithm 1": [
+     {
+      "month": "2026-10",
+      "gross_sales": 39120.4,
+      "repayment": 2500.0,
+      "net_cash": 6120.4,
+      "working_capital": 18200.0,
+      "loan_end": 41000.0,
+      "below_buffer": false,
+      "negative": false
+     }
+    ]
+   },
+   "alerts": [
+    {
+     "month": "2026-10",
+     "text": "Expected £39,120 against a plan of £41,500, 5.7% short"
+    }
+   ],
+   "sanity": {
+    "history": [
+     {
+      "month": "2026-09",
+      "value": 41220.0
+     }
+    ],
+    "models": []
+   },
+   "months": [
+    {
+     "month": "2026-09",
+     "basis": "actual",
+     "actual": 41220.0,
+     "p50": null,
+     "p10": null,
+     "p90": null
+    },
+    {
+     "month": "2026-11",
+     "basis": "forecast",
+     "actual": null,
+     "p50": 38800.0,
+     "p10": 33000.0,
+     "p90": 44100.0
+    }
+   ],
+   "daily": {
+    "history": [
+     {
+      "date": "2026-10-20",
+      "actual": 1310.25
+     }
+    ],
+    "forecast": [
+     {
+      "date": "2026-10-21",
+      "p10": 900.0,
+      "p50": 1250.0,
+      "p90": 1700.0
+     }
+    ]
+   },
+   "predictions": {
+    "2026-11": {
+     "seasonal": 38800.0,
+     "trend": 40150.5
+    }
+   },
+   "actuals": {
+    "2026-09": 41220.0
+   },
+   "seen_through": "2026-09",
+   "in_use": {
+    "source": "seasonal",
+    "months": {
+     "2026-11": {
+      "value": 38800.0,
+      "p10": 33000.0,
+      "p90": 44100.0,
+      "shown": 38800.0
+     }
+    }
+   }
+  },
+  "source": "forecast/nightly.py:391"
+ },
+ {
+  "path": "/api/crm/deal",
+  "body": {
+   "op": "update",
+   "id": "d41",
+   "title": "Byrne Lighting deal",
+   "value": "12.5",
+   "expected_close": "2026-11-14",
+   "label": "Hot",
+   "person_id": "p118",
+   "org_id": "o57",
+   "probability": "40",
+   "owner": "u2"
+  },
+  "source": "static/src/js/crm.js:1030"
+ },
+ {
+  "path": "/api/crm/deal",
+  "body": {
+   "op": "add",
+   "title": "Harbour Events deal",
+   "value": "",
+   "expected_close": "",
+   "label": "",
+   "person_id": "",
+   "org_id": "o57",
+   "stage_id": "s1",
+   "probability": ""
+  },
+  "source": "static/src/js/crm.js:1036"
+ },
+ {
+  "path": "/api/crm/deal",
+  "body": {
+   "op": "update",
+   "id": "d41",
+   "custom": {
+    "Venue size": "1,200 seats"
+   }
+  },
+  "source": "static/src/js/crm.js:1211"
+ },
+ {
+  "path": "/api/crm/deal",
+  "body": {
+   "op": "lost",
+   "id": "d41",
+   "reason": "Price",
+   "comment": ""
+  },
+  "source": "static/src/js/crm.js:1061"
+ },
+ {
+  "path": "/api/crm/deal",
+  "body": {
+   "op": "note_pin",
+   "id": "d41",
+   "note_id": "n12"
+  },
+  "source": "static/src/js/crm.js:1320"
+ },
+ {
+  "path": "/api/crm/lead",
+  "body": {
+   "op": "add",
+   "title": "Harbour Events lead",
+   "value": "2400",
+   "label": "",
+   "person_id": "p118",
+   "org_id": ""
+  },
+  "source": "static/src/js/crm.js:2252"
+ },
+ {
+  "path": "/api/crm/stages",
+  "body": {
+   "stages": [
+    {
+     "id": "s1",
+     "name": "Qualified",
+     "probability": 100,
+     "rot_days": 0,
+     "rot_on": false
+    },
+    {
+     "name": "Site visit",
+     "probability": 100,
+     "rot_days": 0
+    }
+   ]
+  },
+  "source": "static/src/js/crm.js:2378"
+ },
+ {
+  "path": "/api/crm/stages",
+  "body": {
+   "labels": [
+    {
+     "name": "Hot",
+     "color": "red"
+    },
+    {
+     "name": "Trade",
+     "color": "gray"
+    }
+   ]
+  },
+  "source": "static/src/js/crm.js:2419"
+ },
+ {
+  "path": "/api/crm/stages",
+  "body": {
+   "lost_reasons": [
+    "Price",
+    "Went with a competitor",
+    "No response"
+   ]
+  },
+  "source": "static/src/js/crm.js:2438"
+ },
+ {
+  "path": "/api/crm/stages",
+  "body": {
+   "followup_popup": true
+  },
+  "source": "static/src/js/crm.js:2453"
+ },
+ {
+  "path": "/api/crm/import",
+  "body": {
+   "go": true
+  },
+  "source": "static/src/js/crm.js:383"
+ },
+ {
+  "path": "/api/crm/import",
+  "body": {},
+  "source": "static/src/js/crm.js:383"
+ },
+ {
+  "path": "/api/mail/board",
+  "body": {
+   "rev": "0a1b2c3d4e5f6071"
+  },
+  "source": "static/src/js/inbox.js:120"
+ },
+ {
+  "path": "/api/mail/board",
+  "body": {
+   "force": true
+  },
+  "source": "static/src/js/inbox.js:120"
+ },
+ {
+  "path": "/api/mail/presence",
+  "body": {
+   "presence": "away"
+  },
+  "source": "static/src/js/inbox.js:319"
+ },
+ {
+  "path": "/api/mail/search",
+  "body": {
+   "q": "invoice 104300"
+  },
+  "source": "static/src/js/inbox.js:415"
+ },
+ {
+  "path": "/api/mail/read",
+  "body": {
+   "ids": [
+    "18c2f0a1b2c3d4e5",
+    "18c2f0a1b2c3d4f7"
+   ],
+   "unread": false
+  },
+  "source": "static/src/js/inbox.js:488"
+ },
+ {
+  "path": "/api/mail/read",
+  "body": {
+   "id": "18c2f0a1b2c3d4e5",
+   "unread": true
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:1160"
+ },
+ {
+  "path": "/api/mail/bulk",
+  "body": {
+   "ids": [
+    "18c2f0a1b2c3d4e5",
+    "18c2f0a1b2c3d4f7"
+   ],
+   "op": "state",
+   "state": "done"
+  },
+  "source": "static/src/js/inbox.js:510"
+ },
+ {
+  "path": "/api/mail/bulk",
+  "body": {
+   "op": "assign",
+   "uid": "u2",
+   "ids": [
+    "18c2f0a1b2c3d4e5"
+   ]
+  },
+  "source": "static/src/js/inbox.js:559"
+ },
+ {
+  "path": "/api/mail/undo",
+  "body": {
+   "token": "Xk3_9vQpL2mA"
+  },
+  "source": "static/src/js/inbox.js:664"
+ },
+ {
+  "path": "/api/mail/rules",
+  "body": {
+   "op": "save",
+   "rule": {
+    "id": "a3f9c2e1b0d4",
+    "name": "Invoices to accounts",
+    "mode": "any",
+    "conditions": [
+     {
+      "field": "subject",
+      "op": "contains",
+      "value": "invoice"
+     }
+    ],
+    "assign": "u2",
+    "pool": [],
+    "folder": "Accounts",
+    "archive": true,
+    "done": false,
+    "enabled": true,
+    "hits": 14
+   }
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:402"
+ },
+ {
+  "path": "/api/mail/rules",
+  "body": {
+   "op": "move",
+   "id": "a3f9c2e1b0d4",
+   "down": true
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:69"
+ },
+ {
+  "path": "/api/mail/send",
+  "body": {
+   "dry": true,
+   "to": "aoife@example.ie, events@example.org",
+   "cc": "",
+   "bcc": "",
+   "subject": "Your gobo proof",
+   "html": "<p>Hi Aoife,</p><p>The proof is attached.</p><img src=\"cid:img1\">",
+   "attachments": [
+    {
+     "key": "mail/att/2026/10/9f3c-proof.pdf",
+     "name": "proof.pdf",
+     "type": "application/pdf"
+    }
+   ],
+   "inline": [
+    {
+     "key": "mail/att/2026/10/1a2b-logo.png",
+     "cid": "img1",
+     "type": "image/png"
+    }
+   ]
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:443"
+ },
+ {
+  "path": "/api/mail/send",
+  "body": {
+   "id": "18c2f0a1b2c3d4e5",
+   "cc": "",
+   "bcc": "",
+   "quote": true,
+   "html": "<p>Thanks, that is booked for Friday.</p>",
+   "attachments": [],
+   "inline": []
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:466"
+ },
+ {
+  "path": "/api/mail/draft",
+  "body": {
+   "id": "18c2f0a1b2c3d4e5",
+   "op": "compose",
+   "guidance": "Shorter, and mention the 30-day terms",
+   "previous": "Hi Aoife,\nThanks for your order."
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:775"
+ },
+ {
+  "path": "/api/mail/draft",
+  "body": {
+   "op": "save",
+   "id": "18c2f0a1b2c3d4e5",
+   "cc": "accounts@example.org",
+   "bcc": "",
+   "quote": false,
+   "html": "<p>Hi Aoife,</p>",
+   "attachments": [
+    {
+     "key": "mail/att/2026/10/9f3c-proof.pdf",
+     "name": "proof.pdf"
+    }
+   ],
+   "inline": []
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:857"
+ },
+ {
+  "path": "/api/mail/attach-url",
+  "body": {
+   "name": "proof.pdf",
+   "size": 284113,
+   "type": "application/pdf",
+   "inline": false
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:565"
+ },
+ {
+  "path": "/api/mail/attach-done",
+  "body": {
+   "key": "mail/att/2026/10/9f3c-proof.pdf"
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:576"
+ },
+ {
+  "path": "/api/mail/body",
+  "body": {
+   "id": "18c2f0a1b2c3d4e5",
+   "archive": false
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:1315"
+ },
+ {
+  "path": "/api/mail/thread",
+  "body": {
+   "id": "18c2f0a1b2c3d4e5"
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:1039"
+ },
+ {
+  "path": "/api/mail/viewing",
+  "body": {
+   "id": "18c2f0a1b2c3d4e5"
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:1062"
+ },
+ {
+  "path": "/api/mail/attachment",
+  "body": {
+   "id": "18c2f0a1b2c3d4e5",
+   "msg": "18c2f0a1b2c3d4e9",
+   "att": "ANGjdJ8wXk2v-Lq3Zp9sT0yBcR7uHf1mE4aWn6oQ",
+   "name": "artwork.ai",
+   "folder": "Artwork/Harbour"
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:1191"
+ },
+ {
+  "path": "/api/mail/state",
+  "body": {
+   "id": "18c2f0a1b2c3d4e5",
+   "state": "progress"
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:1245"
+ },
+ {
+  "path": "/api/mail/assign",
+  "body": {
+   "id": "18c2f0a1b2c3d4e5",
+   "uid": "u2",
+   "note": "Customer wants it by Friday"
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:1289"
+ },
+ {
+  "path": "/api/mail/note",
+  "body": {
+   "id": "18c2f0a1b2c3d4e5",
+   "text": "Called back, proof approved by phone."
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:1359"
+ },
+ {
+  "path": "/api/files/upload-url",
+  "body": {
+   "name": "Harbour gobo.pdf",
+   "size": 1048576,
+   "type": "application/pdf",
+   "folder_id": "",
+   "delta": 1
+  },
+  "source": "static/src/js/files.js:1008"
+ },
+ {
+  "path": "/api/files/upload-url",
+  "body": {
+   "name": "notes.txt",
+   "size": 0,
+   "type": "application/octet-stream",
+   "folder_id": "d3",
+   "delta": 1
+  },
+  "source": "static/src/js/files.js:1008"
+ },
+ {
+  "path": "/api/files/complete",
+  "body": {
+   "id": "f17",
+   "delta": 1
+  },
+  "source": "static/src/js/files.js:1024"
+ },
+ {
+  "path": "/api/files/download-url",
+  "body": {
+   "id": "f17",
+   "preview": true
+  },
+  "source": "static/src/js/files.js:415"
+ },
+ {
+  "path": "/api/files/file",
+  "body": {
+   "op": "move",
+   "ids": [
+    "f17",
+    "f18"
+   ],
+   "folder_id": "d3"
+  },
+  "source": "static/src/js/files.js:437"
+ },
+ {
+  "path": "/api/files/file",
+  "body": {
+   "op": "rename",
+   "id": "f17",
+   "name": "Harbour gobo v2.pdf"
+  },
+  "source": "static/src/js/files.js:696"
+ },
+ {
+  "path": "/api/eori/check",
+  "body": {
+   "number": "GB123456789000"
+  },
+  "source": "static/src/js/dispatch.js:2033"
+ },
+ {
+  "path": "/api/dispatch/parse-address",
+  "body": {
+   "text": "Aoife Byrne\n12 Harbour Road\nHowth, Dublin D13 X2Y4\nIreland"
+  },
+  "source": "static/src/js/dispatch.js:1545"
+ },
+ {
+  "path": "/api/custom/quote",
+  "body": {
+   "address": {
+    "name": "Aoife Byrne",
+    "company": "",
+    "street": "12 Harbour Road",
+    "street2": "",
+    "city": "Howth",
+    "county": "Dublin",
+    "postcode": "D13 X2Y4",
+    "country": "IE",
+    "phone": "+353 1 555 0100",
+    "email": "aoife@example.ie"
+   },
+   "boxes": [
+    {
+     "width": 30,
+     "length": 20.5,
+     "depth": 10,
+     "weight": 1.25
+    },
+    {
+     "width": 40,
+     "length": 30,
+     "depth": 25.5,
+     "weight": 3.4
+    }
+   ],
+   "insurance": 0,
+   "declared": 349.5
+  },
+  "source": "static/src/js/dispatch.js:1679"
+ },
+ {
+  "path": "/api/custom/book",
+  "body": {
+   "confirm_unknown": false,
+   "id": "csmgz3k1q7a9b2c",
+   "option": {
+    "service_code": "DHL_EXPRESS_WW",
+    "service_name": "Express Worldwide",
+    "carrier_name": "DHL",
+    "amount": 18.42,
+    "amount_ex_vat": 15.35,
+    "vat": 3.07,
+    "currency": "GBP",
+    "signature_type": "",
+    "delivery_dropoff": false,
+    "delivery_shops": []
+   },
+   "address": {
+    "name": "Aoife Byrne",
+    "company": "",
+    "street": "12 Harbour Road",
+    "street2": "",
+    "city": "Howth",
+    "county": "Dublin",
+    "postcode": "NE1 4XF",
+    "country": "GB",
+    "phone": "+353 1 555 0100",
+    "email": "aoife@example.ie"
+   },
+   "boxes": [
+    {
+     "width": 30,
+     "length": 20.5,
+     "depth": 10,
+     "weight": 1.25
+    }
+   ],
+   "insurance": 0,
+   "declared": 120,
+   "reference": "Trade show stock",
+   "contents": "Gobos",
+   "signature": "",
+   "customs": null,
+   "admin_only": false
+  },
+  "source": "static/src/js/dispatch.js:1864"
+ },
+ {
+  "path": "/api/custom/book",
+  "body": {
+   "confirm_unknown": true,
+   "id": "csmgz3k1q7a9b2c",
+   "option": {
+    "service_code": "DHL_EXPRESS_WW",
+    "service_name": "Express Worldwide",
+    "carrier_name": "DHL",
+    "amount": 18.42,
+    "amount_ex_vat": 15.35,
+    "vat": 3.07,
+    "currency": "GBP",
+    "signature_type": "DHL_No_Signature_Required",
+    "delivery_dropoff": false,
+    "delivery_shops": []
+   },
+   "address": {
+    "name": "Aoife Byrne",
+    "company": "",
+    "street": "12 Harbour Road",
+    "street2": "",
+    "city": "Howth",
+    "county": "Dublin",
+    "postcode": "D13 X2Y4",
+    "country": "IE",
+    "phone": "+353 1 555 0100",
+    "email": "aoife@example.ie"
+   },
+   "boxes": [
+    {
+     "width": 40,
+     "length": 30,
+     "depth": 25.5,
+     "weight": 3.4
+    }
+   ],
+   "insurance": 350,
+   "declared": 349,
+   "reference": "",
+   "contents": "LED projector",
+   "signature": "DHL_No_Signature_Required",
+   "customs": {
+    "lines": [
+     {
+      "description": "LED gobo projector",
+      "quantity": 1,
+      "unit_price": 349.0,
+      "hs": "8528690000",
+      "country": "GB"
+     }
+    ],
+    "receiver_tax_id": "IE1234567T",
+    "receiver_company_number": ""
+   },
+   "admin_only": true
+  },
+  "source": "static/src/js/dispatch.js:1864"
+ },
+ {
+  "path": "/api/custom/list",
+  "body": {},
+  "source": "static/src/js/dispatch.js:1958"
+ },
+ {
+  "path": "/api/custom/list",
+  "body": {
+   "limit": 200
+  },
+  "source": "static/src/js/production-manager.js:592"
+ },
+ {
+  "path": "/api/custom/visibility",
+  "body": {
+   "id": "csmgz3k1q7a9b2c",
+   "admin_only": true
+  },
+  "source": "static/src/js/production-manager.js:572"
+ },
+ {
+  "path": "/api/dispatch/quote",
+  "body": {
+   "order_id": 6123456789012,
+   "boxes": [
+    {
+     "width": 30,
+     "length": 20.5,
+     "depth": 10,
+     "weight": 1.25
+    }
+   ],
+   "insurance": 0
+  },
+  "source": "static/src/js/production-manager.js:431"
+ },
+ {
+  "path": "/api/dispatch/diagnose",
+  "body": {
+   "order_id": 6123456789012,
+   "boxes": [
+    {
+     "width": 30,
+     "length": 20.5,
+     "depth": 10,
+     "weight": 1.25
+    },
+    {
+     "width": 40,
+     "length": 30,
+     "depth": 25.5,
+     "weight": 3.4
+    }
+   ]
+  },
+  "source": "static/src/js/dispatch.js:1010"
+ },
+ {
+  "path": "/api/dispatch/book",
+  "body": {
+   "order_id": 6123456789012,
+   "name": "#104300",
+   "option": {
+    "service_code": "DHL_EXPRESS_WW",
+    "service_name": "Express Worldwide",
+    "carrier_name": "DHL",
+    "amount": 18.42,
+    "amount_ex_vat": 15.35,
+    "vat": 3.07,
+    "currency": "GBP",
+    "signature_type": "",
+    "delivery_dropoff": false,
+    "delivery_shops": []
+   },
+   "boxes": [
+    {
+     "width": 30,
+     "length": 20.5,
+     "depth": 10,
+     "weight": 1.25
+    }
+   ],
+   "notify": true,
+   "force": false,
+   "confirm_unknown": false,
+   "insurance": 0,
+   "signature": "",
+   "customs": null,
+   "collection_option": ""
+  },
+  "source": "static/src/js/dispatch.js:1130"
+ },
+ {
+  "path": "/api/dispatch/cancel",
+  "body": {
+   "order_id": 6123456789012,
+   "tracking_number": "1234567890"
+  },
+  "source": "static/src/js/dispatch.js:1322"
+ },
+ {
+  "path": "/api/dispatch/collections",
+  "body": {},
+  "source": "static/src/js/dispatch.js:1417"
+ },
+ {
+  "path": "/api/dispatch/collections",
+  "body": {
+   "op": "clear",
+   "carrier": "DHL"
+  },
+  "source": "static/src/js/dispatch.js:1453"
+ },
+ {
+  "path": "/api/gobo-sizes/check",
+  "body": {
+   "q": "Martin MAC Encore"
+  },
+  "source": "static/src/js/size-list.js:336"
+ },
+ {
+  "path": "/api/gobo-sizes/models",
+  "body": {
+   "q": "encore"
+  },
+  "source": "static/src/js/production-manager.js:1245"
+ },
+ {
+  "path": "/api/gobo-sizes/upload",
+  "body": {
+   "csv": "Manufacturer,Model,Gobo size,Image size\nMartin,MAC Encore,E,37.5\n"
+  },
+  "source": "static/src/js/production-manager.js:785"
+ },
+ {
+  "path": "/api/production-labels",
+  "body": {
+   "tag": "IP",
+   "fresh": false
+  },
+  "source": "static/src/js/production-manager.js:26"
+ },
+ {
+  "path": "/api/production-labels",
+  "body": {
+   "order_id": 6123456789012
+  },
+  "source": "static/src/js/dispatch.js:2420"
+ },
+ {
+  "path": "/api/production-labels/queue",
+  "body": {
+   "order_id": 6123456789012,
+   "name": "#104300"
+  },
+  "source": "static/src/js/production-manager.js:158"
+ },
+ {
+  "path": "/api/production-labels/coverage",
+  "body": {
+   "orders": 200
+  },
+  "source": "static/src/js/production-manager.js:1063"
+ },
+ {
+  "path": "/api/chat",
+  "body": {
+   "messages": [
+    {
+     "role": "user",
+     "content": "Why did orders dip?"
+    },
+    {
+     "role": "assistant",
+     "content": "Two reasons."
+    }
+   ],
+   "deep": false,
+   "context": {
+    "page": "overview",
+    "report": {
+     "kpis": []
+    }
+   }
+  },
+  "source": "static/src/js/report-tools.js:152"
+ },
+ {
+  "path": "/api/crm/activity",
+  "body": {
+   "op": "add",
+   "type": "call",
+   "subject": "Call back",
+   "due_date": "2026-10-22",
+   "due_time": "10:00",
+   "priority": "high",
+   "deal_id": "d3",
+   "note": "Quote for two units",
+   "person_id": "",
+   "assignee": "u2",
+   "done": false
+  },
+  "source": "static/src/js/crm.js:1478"
+ },
+ {
+  "path": "/api/crm/activity",
+  "body": {
+   "op": "update",
+   "id": "a12",
+   "type": "meeting",
+   "subject": "Site visit",
+   "due_date": "2026-10-23",
+   "due_time": "",
+   "priority": "",
+   "deal_id": "",
+   "note": "",
+   "person_id": "p4"
+  },
+  "source": "static/src/js/crm.js:1477"
+ },
+ {
+  "path": "/api/crm/activity",
+  "body": {
+   "op": "done",
+   "id": "a12"
+  },
+  "source": "static/src/js/crm.js:1345"
+ },
+ {
+  "path": "/api/crm/board",
+  "body": {
+   "rev": "4f2a9c0e1b7d3a56"
+  },
+  "source": "static/src/js/crm.js:112"
+ },
+ {
+  "path": "/api/crm/board",
+  "body": {},
+  "source": "static/src/js/crm.js:84"
+ },
+ {
+  "path": "/api/crm/contact",
+  "body": {
+   "op": "org_add",
+   "name": "Harbour Events"
+  },
+  "source": "static/src/js/crm.js:1017"
+ },
+ {
+  "path": "/api/crm/contact",
+  "body": {
+   "op": "person_add",
+   "name": "Aoife Byrne",
+   "org_id": "o3",
+   "job_title": "Buyer",
+   "label": "",
+   "emails": [
+    "aoife@example.ie"
+   ],
+   "phones": [
+    "+353 1 555 0101"
+   ],
+   "contacts_full": true,
+   "shopify_customer_id": 6123456789012
+  },
+  "source": "static/src/js/crm.js:2144"
+ },
+ {
+  "path": "/api/crm/contact",
+  "body": {
+   "op": "person_update",
+   "id": "p4",
+   "name": "Aoife Byrne",
+   "org_id": "",
+   "job_title": "",
+   "label": "hot",
+   "emails": [
+    "aoife@example.ie",
+    "a.byrne@example.ie"
+   ],
+   "phones": [],
+   "contacts_full": true,
+   "email_labels": [
+    "work",
+    ""
+   ],
+   "phone_labels": []
+  },
+  "source": "static/src/js/crm.js:2140"
+ },
+ {
+  "path": "/api/crm/contact",
+  "body": {
+   "op": "link_shopify",
+   "id": "p4",
+   "shopify_customer_id": null
+  },
+  "source": "static/src/js/crm.js:2142"
+ },
+ {
+  "path": "/api/crm/contact",
+  "body": {
+   "op": "bulk_delete",
+   "kind": "person",
+   "ids": [
+    "p1",
+    "p2"
+   ]
+  },
+  "source": "static/src/js/crm.js:1727"
+ },
+ {
+  "path": "/api/crm/contact",
+  "body": {
+   "op": "person_merge",
+   "id": "p1",
+   "into": "p2"
+  },
+  "source": "static/src/js/crm.js:2035"
+ },
+ {
+  "path": "/api/crm/contact",
+  "body": {
+   "op": "note_pin",
+   "kind": "org",
+   "id": "o3",
+   "note_id": "n2"
+  },
+  "source": "static/src/js/crm.js:1983"
+ },
+ {
+  "path": "/api/crm/contact",
+  "body": {
+   "op": "shopify_search",
+   "q": "aoife"
+  },
+  "source": "static/src/js/crm.js:2097"
+ },
+ {
+  "path": "/api/crm/deal",
+  "body": {
+   "op": "update",
+   "id": "d3",
+   "custom": {
+    "Venue": "Dublin"
+   }
+  },
+  "source": "static/src/js/crm.js:1211"
+ },
+ {
+  "path": "/api/dispatch/label",
+  "body": {
+   "order_id": 6123456789012
+  },
+  "source": "static/src/js/dispatch.js:1303"
+ },
+ {
+  "path": "/api/dispatch/label",
+  "body": {
+   "id": "adhoc:7f3a2c"
+  },
+  "source": "static/src/js/dispatch.js:1981"
+ },
+ {
+  "path": "/api/dispatch/manifest",
+  "body": {
+   "date": "2026-10-21"
+  },
+  "source": "static/src/js/production-manager.js:1538"
+ },
+ {
+  "path": "/api/files/folder",
+  "body": {
+   "op": "add",
+   "name": "Artwork",
+   "parent_id": "f2",
+   "delta": 1
+  },
+  "source": "static/src/js/files.js:835"
+ },
+ {
+  "path": "/api/files/folder",
+  "body": {
+   "op": "add",
+   "name": "Proofs",
+   "parent_id": null,
+   "delta": 1
+  },
+  "source": "static/src/js/files.js:955"
+ },
+ {
+  "path": "/api/files/folder",
+  "body": {
+   "op": "rename",
+   "id": "f2",
+   "name": "Art"
+  },
+  "source": "static/src/js/files.js:633"
+ },
+ {
+  "path": "/api/files/tree",
+  "body": {
+   "rev": "9b1e"
+  },
+  "source": "static/src/js/files.js:122"
+ },
+ {
+  "path": "/api/gobo-sizes/rule",
+  "body": {
+   "op": "set",
+   "manufacturer": "Acme",
+   "model": "LED 200",
+   "size": "37.5"
+  },
+  "source": "static/src/js/size-list.js:519"
+ },
+ {
+  "path": "/api/gobo-sizes/rule",
+  "body": {
+   "op": "remove",
+   "kind": "override",
+   "manufacturer": "Acme",
+   "model": "LED 200",
+   "domain": ""
+  },
+  "source": "static/src/js/production-manager.js:1166"
+ },
+ {
+  "path": "/api/gobo-sizes/rule",
+  "body": {
+   "op": "alias",
+   "manufacturer": "Acme",
+   "model": "LED-200",
+   "list_model": "LED 200"
+  },
+  "source": "static/src/js/production-manager.js:1295"
+ },
+ {
+  "path": "/api/impact",
+  "body": {
+   "op": "add",
+   "text": "Free delivery over 100",
+   "source": "copilot"
+  },
+  "source": "static/src/js/table-card.js:257"
+ },
+ {
+  "path": "/api/impact",
+  "body": {
+   "op": "conclude",
+   "id": "a1b2c3d4e5"
+  },
+  "source": "static/src/js/memory.js:231"
+ },
+ {
+  "path": "/api/layouts",
+  "body": {
+   "view": "overview",
+   "order": [
+    "revenue",
+    "orders"
+   ],
+   "hidden": [
+    "sessions"
+   ]
+  },
+  "source": "static/src/js/widget-grid.js:753"
+ },
+ {
+  "path": "/api/layouts",
+  "body": {
+   "view": "overview",
+   "reset": true
+  },
+  "source": "static/src/js/widget-grid.js:713"
+ },
+ {
+  "path": "/api/learn",
+  "body": {
+   "op": "save",
+   "knowledge": "We ship worldwide."
+  },
+  "source": "static/src/js/memory.js:368"
+ },
+ {
+  "path": "/api/liability",
+  "body": {
+   "fresh": false
+  },
+  "source": "static/src/js/liability.js:34"
+ },
+ {
+  "path": "/api/liability/chase",
+  "body": {
+   "key": "6123456789"
+  },
+  "source": "static/src/js/liability.js:521"
+ },
+ {
+  "path": "/api/loans",
+  "body": {
+   "op": "out",
+   "unit_id": "u3",
+   "who_name": "Harbour Events",
+   "phone": "0123",
+   "due_at": "2026-11-01",
+   "note": "",
+   "crm_person_id": null,
+   "crm_org_id": "o3"
+  },
+  "source": "static/src/js/loans.js:74"
+ },
+ {
+  "path": "/api/loans",
+  "body": {
+   "op": "unit_save",
+   "unit_id": "",
+   "name": "Demo unit 1",
+   "model": "LED 200",
+   "serial": "S123",
+   "notes": "",
+   "product_id": "8123456789",
+   "variant_id": "45123456789",
+   "sku": "LED200"
+  },
+  "source": "static/src/js/loans.js:153"
+ },
+ {
+  "path": "/api/loans",
+  "body": {
+   "op": "settings",
+   "chase_days": 14
+  },
+  "source": "static/src/js/loans.js:329"
+ },
+ {
+  "path": "/api/loans",
+  "body": {
+   "op": "settings",
+   "chase_days": null
+  },
+  "source": "static/src/js/loans.js:329 (Number of an empty box is NaN, sent as null)"
+ },
+ {
+  "path": "/api/loans",
+  "body": {
+   "op": "unit_retire",
+   "unit_id": "u3",
+   "unretire": 1
+  },
+  "source": "static/src/js/loans.js:444"
+ },
+ {
+  "path": "/api/mail/claim",
+  "body": {
+   "id": "18c2f0a1b2"
+  },
+  "source": "static/src/js/inbox.js:805"
+ },
+ {
+  "path": "/api/mail/orders",
+  "body": {
+   "id": "18c2f0a1b2"
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:910"
+ },
+ {
+  "path": "/api/mail/settings",
+  "body": {
+   "op": "logo_url",
+   "name": "logo.png",
+   "size": 20480,
+   "type": "image/png"
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:169"
+ },
+ {
+  "path": "/api/mail/settings",
+  "body": {
+   "op": "footer_slots",
+   "slots": {
+    "address": "1 Main St",
+    "phone": ""
+   }
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:197"
+ },
+ {
+  "path": "/api/mail/settings",
+  "body": {
+   "op": "reply_save",
+   "title": "Thanks",
+   "text": "Thanks for your order."
+  },
+  "source": "static/src/js/inbox-filters-and-sending.js:265"
+ },
+ {
+  "path": "/api/mail/settings",
+  "body": {
+   "op": "sign_off",
+   "text": "Best,\nJo"
+  },
+  "source": "static/src/js/settings.js:415"
+ },
+ {
+  "path": "/api/margin",
+  "body": {
+   "days": 30
+  },
+  "source": "static/src/js/production-manager.js:1462"
+ },
+ {
+  "path": "/api/margin",
+  "body": {
+   "days": null
+  },
+  "source": "static/src/js/production-manager.js:1462 (parseInt of an empty select is NaN, sent as null)"
+ },
+ {
+  "path": "/api/memory",
+  "body": {
+   "op": "add",
+   "items": [
+    {
+     "type": "fact",
+     "text": "We close on Fridays at 3."
+    }
+   ]
+  },
+  "source": "static/src/js/memory.js:602"
+ },
+ {
+  "path": "/api/memory",
+  "body": {
+   "op": "update",
+   "id": "m7",
+   "text": "We close at 4.",
+   "type": "fact"
+  },
+  "source": "static/src/js/memory.js:601"
+ },
+ {
+  "path": "/api/memory",
+  "body": {
+   "op": "set_status",
+   "id": "m7",
+   "status": "done"
+  },
+  "source": "static/src/js/memory.js:545"
+ },
+ {
+  "path": "/api/overview",
+  "body": {
+   "fresh": true
+  },
+  "source": "static/src/js/overview.js:48"
+ },
+ {
+  "path": "/api/privacy",
+  "body": {
+   "op": "answered",
+   "id": "q1",
+   "email": "aoife@example.ie"
+  },
+  "source": "static/src/js/settings.js:596"
+ },
+ {
+  "path": "/api/privacy",
+  "body": {
+   "op": "answered",
+   "at": "2026-10-01T09:00:00+00:00",
+   "email": null
+  },
+  "source": "static/src/js/settings.js:596"
+ },
+ {
+  "path": "/api/privacy",
+  "body": {
+   "op": "erase",
+   "id": "h1",
+   "reach": "k9"
+  },
+  "source": "static/src/js/settings.js:576"
+ },
+ {
+  "path": "/api/production-state",
+  "body": {
+   "op": "printed",
+   "ids": [
+    6123456789012,
+    6123456789013
+   ]
+  },
+  "source": "static/src/js/production-manager.js:60"
+ },
+ {
+  "path": "/api/production-state",
+  "body": {
+   "op": "made",
+   "id": 6123456789012,
+   "on": true,
+   "name": "#104300",
+   "ack_address": true
+  },
+  "source": "static/src/js/production-manager.js:212"
+ },
+ {
+  "path": "/api/recon/connect-link",
+  "body": {
+   "address": "accounts@example.org"
+  },
+  "source": "static/src/js/reconciliation.js:400"
+ },
+ {
+  "path": "/api/recon/exceptions",
+  "body": {
+   "severity": "",
+   "status": "",
+   "q": ""
+  },
+  "source": "static/src/js/reconciliation.js:19"
+ },
+ {
+  "path": "/api/recon/exceptions",
+  "body": {
+   "severity": "high",
+   "status": "open",
+   "q": "stripe",
+   "limit": 5000
+  },
+  "source": "static/src/js/reconciliation.js:746"
+ },
+ {
+  "path": "/api/shipping/config",
+  "body": {
+   "op": "get"
+  },
+  "source": "static/src/js/production-queues.js:34"
+ },
+ {
+  "path": "/api/shipping/config",
+  "body": {
+   "op": "set",
+   "origin": {
+    "name": "Jo",
+    "company": "The Shop",
+    "street": "1 Main St",
+    "postcode": "D01 1AA",
+    "city": "Dublin",
+    "country": "IE",
+    "phone": "",
+    "email": ""
+   },
+   "notify_customer": true,
+   "plugin_code": "Web_Service",
+   "ready_time": "14:00",
+   "close_time": "17:00",
+   "collection_option": "",
+   "collection_by_carrier": {
+    "DHL": ""
+   },
+   "eori": "",
+   "vat_number": "",
+   "default_hs_code": "",
+   "trade_term": "DAP",
+   "export_reason": "",
+   "duties_payor": "",
+   "label_size_production": "4x6",
+   "label_size_shipping": "4x6",
+   "boxes": [
+    {
+     "id": "box1_1729500000000",
+     "name": "New box",
+     "width": 20,
+     "length": 15,
+     "depth": 10,
+     "weight": 0.5
+    }
+   ],
+   "default_box_id": "",
+   "key": "k",
+   "password": "p"
+  },
+  "source": "static/src/js/dispatch.js:2370"
+ },
+ {
+  "path": "/api/skills",
+  "body": {
+   "op": "add",
+   "title": "Tone",
+   "content": "Write plainly.",
+   "when": "",
+   "always": false
+  },
+  "source": "static/src/js/skills.js:857"
+ },
+ {
+  "path": "/api/skills",
+  "body": {
+   "op": "add",
+   "title": "From a file",
+   "content": "...",
+   "when": "",
+   "file": "tone.md"
+  },
+  "source": "static/src/js/skills.js:509"
+ },
+ {
+  "path": "/api/skills",
+  "body": {
+   "op": "update",
+   "id": "s3",
+   "title": "Tone",
+   "content": "Write plainly.",
+   "when": "",
+   "always": true
+  },
+  "source": "static/src/js/skills.js:856"
+ },
+ {
+  "path": "/api/updates",
+  "body": {
+   "op": "request",
+   "title": "Dark mode",
+   "detail": "",
+   "where": "overview"
+  },
+  "source": "static/src/js/design-page.js:538"
+ },
+ {
+  "path": "/api/updates",
+  "body": {
+   "op": "state",
+   "id": "r4",
+   "state": "open",
+   "note": "Thanks"
+  },
+  "source": "static/src/js/design-page.js:469"
+ },
+ {
+  "path": "/api/updates",
+  "body": {
+   "op": "seen",
+   "releases": 42
+  },
+  "source": "static/src/js/guide.js:230"
+ },
+ {
+  "path": "/api/updates",
+  "body": {
+   "op": "seen",
+   "requests": true
+  },
+  "source": "static/src/js/guide.js:230"
+ },
+ {
+  "path": "/hooks/forecast/shopify",
+  "body": {
+   "op": "bulk_start",
+   "since": "2024-01-01"
+  },
+  "source": "forecast/ingest.py:281"
+ },
+ {
+  "path": "/hooks/forecast/shopify",
+  "body": {
+   "op": "bulk_status",
+   "id": "gid://shopify/BulkOperation/123"
+  },
+  "source": "forecast/ingest.py:284"
+ },
+ {
+  "path": "/hooks/forecast/shopify",
+  "body": {
+   "op": "refunds",
+   "since": "2024-01-01",
+   "after": null
+  },
+  "source": "forecast/ingest.py:287"
+ },
+ {
+  "path": "/hooks/forecast/shopify",
+  "body": {
+   "op": "products",
+   "after": "eyJsYXN0X2lkIjoxfQ=="
+  },
+  "source": "forecast/ingest.py:290"
+ }
+]

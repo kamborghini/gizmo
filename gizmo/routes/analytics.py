@@ -30,12 +30,18 @@ class CustomersBody(bodies.Body):
     fresh: bodies.Flag = None
 
 
+
+class OverviewBody(bodies.Body):
+    """What /api/overview reads (gizmo/bodies.py): whether to read afresh."""
+    fresh: bodies.Flag = None
+
+
 def register(mcp, registry):
     """Add the report routes to the app."""
 
     @mcp.custom_route("/api/overview", methods=["POST"])
     async def overview(request: Request):
-        err, body, _who = await gate._guard(request, ai=True)
+        err, body, _who = await gate._guard(request, ai=True, model=OverviewBody)
         if err:
             return err
         profile = store_profile._load_profile()

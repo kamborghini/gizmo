@@ -154,22 +154,44 @@ def _body_model(fn) -> str:
     return ""
 
 
+def _is_body(node) -> bool:
+    """`body`, or `(body or {})`: the body as every door hands it."""
+    if isinstance(node, ast.BoolOp) and node.values:
+        node = node.values[0]
+    return isinstance(node, ast.Name) and node.id == "body"
+
+
+# Calls that look at the body without reading a field from it: the check
+# itself, and asking what it is.
+_NOT_A_READ = {"isinstance", "len", "bool", "type", "refusal", "_body_refusal", "_json"}
+
+
 def _fields(fn) -> list:
-    """The fields the handler reads from its body: body.get("x"), body["x"]
-    and "x" in body, where the body is named `body`, as every door hands it."""
+    """The fields the handler reads from its body: body.get("x"), body["x"],
+    "x" in body, and the same through `(body or {})`, where the body is named
+    `body`, as every door hands it. A key the handler computes, or a body
+    handed to a helper that reads it, is listed as "*": fields are read, and
+    which ones this cannot say."""
     out = set()
     for node in ast.walk(fn):
         key = None
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get"
-                and isinstance(node.func.value, ast.Name) and node.func.value.id == "body" and node.args):
+                and _is_body(node.func.value) and node.args):
             key = node.args[0]
-        elif isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == "body":
+        elif isinstance(node, ast.Subscript) and _is_body(node.value):
             key = node.slice
         elif (isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], ast.In)
-              and isinstance(node.comparators[0], ast.Name) and node.comparators[0].id == "body"):
+              and _is_body(node.comparators[0])):
             key = node.left
+        elif isinstance(node, ast.Call):
+            name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+            if name not in _NOT_A_READ and any(_is_body(a) for a in list(node.args) + [k.value for k in node.keywords]):
+                out.add("*")
+            continue
         if isinstance(key, ast.Constant) and isinstance(key.value, str):
             out.add(key.value)
+        elif key is not None:
+            out.add("*")
     return sorted(out - {"op"})
 
 

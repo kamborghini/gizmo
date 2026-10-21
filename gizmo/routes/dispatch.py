@@ -63,6 +63,128 @@ class ShippingBody(bodies.Body):
     password: bodies.Text = None
 
 
+
+class CustomQuoteBody(bodies.Body):
+    """What /api/custom/quote reads (gizmo/bodies.py): where it goes, the boxes, the cover and the declared value."""
+    address: bodies.Fields = None
+    boxes: bodies.Records = None
+    box: bodies.Fields = None
+    insurance: bodies.Number = None
+    declared: bodies.Number = None
+
+
+
+class CustomBookBody(bodies.Body):
+    """What /api/custom/book reads (gizmo/bodies.py): the quote chosen, where it goes, the boxes, cover, contents, customs and signature, and who may see it."""
+    option: bodies.Fields = None
+    id: bodies.Id = None
+    address: bodies.Fields = None
+    boxes: bodies.Records = None
+    box: bodies.Fields = None
+    declared: bodies.Number = None
+    insurance: bodies.Number = None
+    confirm_unknown: bodies.Flag = None
+    reference: bodies.Text = None
+    contents: bodies.Text = None
+    customs: bodies.Fields = None
+    signature: bodies.Text = None
+    admin_only: bodies.Flag = None
+
+
+
+class CustomListBody(bodies.Body):
+    """What /api/custom/list reads (gizmo/bodies.py): how many, and what to look for."""
+    limit: bodies.Whole = None
+    q: bodies.Text = None
+
+
+
+class CustomVisibilityBody(bodies.Body):
+    """What /api/custom/visibility reads (gizmo/bodies.py): the shipment, and whether only admins see it."""
+    id: bodies.Id = None
+    admin_only: bodies.Flag = None
+
+
+
+class DispatchQuoteBody(bodies.Body):
+    """What /api/dispatch/quote reads (gizmo/bodies.py): the order, its boxes and the cover."""
+    order_id: bodies.Whole = None
+    boxes: bodies.Records = None
+    box: bodies.Fields = None
+    insurance: bodies.Number = None
+
+
+
+class DispatchBookBody(bodies.Body):
+    """What /api/dispatch/book reads (gizmo/bodies.py): the order, the quote chosen, the boxes, cover, customs, signature and collection, and the confirmations."""
+    order_id: bodies.Whole = None
+    name: bodies.Text = None
+    option: bodies.Fields = None
+    boxes: bodies.Records = None
+    box: bodies.Fields = None
+    notify: bodies.Flag = None
+    force: bodies.Flag = None
+    confirm_unknown: bodies.Flag = None
+    insurance: bodies.Number = None
+    signature: bodies.Text = None
+    customs: bodies.Fields = None
+    collection_option: bodies.Text = None
+
+
+
+class DispatchCancelBody(bodies.Body):
+    """What /api/dispatch/cancel reads (gizmo/bodies.py): the label's tracking number, and its order or shipment."""
+    tracking_number: bodies.Text = None
+    order_id: bodies.Whole = None
+    id: bodies.Id = None
+
+
+
+class DispatchCollectionsBody(bodies.Body):
+    """What /api/dispatch/collections reads (gizmo/bodies.py): the day, and the courier to clear."""
+    date: bodies.Text = None
+    carrier: bodies.Text = None
+
+
+
+class DispatchDiagnoseBody(bodies.Body):
+    """What /api/dispatch/diagnose reads (gizmo/bodies.py): the order and its boxes."""
+    order_id: bodies.Whole = None
+    boxes: bodies.Records = None
+    box: bodies.Fields = None
+
+
+
+class ParseAddressBody(bodies.Body):
+    """What /api/dispatch/parse-address reads (gizmo/bodies.py): the address as pasted."""
+    text: bodies.Text = None
+
+
+
+class EoriCheckBody(bodies.Body):
+    """What /api/eori/check reads (gizmo/bodies.py): the number to check."""
+    number: bodies.Text = None
+
+
+
+class DispatchLabelBody(bodies.Body):
+    """What /api/dispatch/label reads (gizmo/bodies.py): the shipment, or the order whose label it is."""
+    id: bodies.Id = None
+    order_id: bodies.Whole = None
+
+
+
+class DispatchManifestBody(bodies.Body):
+    """What /api/dispatch/manifest reads (gizmo/bodies.py): the day."""
+    date: bodies.Text = None
+
+
+
+class MarginBody(bodies.Body):
+    """What /api/margin reads (gizmo/bodies.py): how many days."""
+    days: bodies.Whole = None
+
+
 def register(mcp, registry):
     """Add the desk's 16 routes to the app."""
     @mcp.custom_route("/api/shipping/config", methods=["POST"])
@@ -198,7 +320,7 @@ def register(mcp, registry):
         the customs paperwork right before a parcel leaves. The answer is only
         ever advisory - see eori.py for why an unreachable service must read as
         "unknown" here and never as "invalid"."""
-        err, body, who = await gate._guard(request)
+        err, body, who = await gate._guard(request, model=EoriCheckBody)
         if err:
             return err
         raw = body.get("number")
@@ -232,7 +354,7 @@ def register(mcp, registry):
     async def parse_address_route(request: Request):
         """Turn a pasted block of text into address fields. Free, and local unless
         the local pass cannot place something."""
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=ParseAddressBody)
         if err:
             return err
         text = str(body.get("text") or "")[:4000]
@@ -261,7 +383,7 @@ def register(mcp, registry):
     @mcp.custom_route("/api/custom/quote", methods=["POST"])
     async def custom_quote_route(request: Request):
         """Price couriers to a pasted address. Free / read-only, no charge."""
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=CustomQuoteBody)
         if err:
             return err
         dest = desk._clean_address(body.get("address") or {})
@@ -283,7 +405,7 @@ def register(mcp, registry):
     @mcp.custom_route("/api/custom/book", methods=["POST"])
     async def custom_book_route(request: Request):
         """Book a courier to a pasted address. THIS SPENDS MONEY."""
-        err, body, who = await gate._guard(request)
+        err, body, who = await gate._guard(request, model=CustomBookBody)
         if err:
             return err
         option = body.get("option")
@@ -331,7 +453,7 @@ def register(mcp, registry):
         reachable from inside the booking window: a person looking for last
         month's label had to press a button that reads like "spend money
         again". They get their own queue on the desk instead."""
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=CustomListBody)
         if err:
             return err
         try:
@@ -361,7 +483,7 @@ def register(mcp, registry):
         Admin-rank only, both to set and to clear: a member who could clear it
         could read everything it was hidden for, and a member who could set it
         could hide a shipment from the people who have to send it."""
-        err, body, who = await gate._guard(request, min_level=team.ROLE_LEVELS["admin"])
+        err, body, who = await gate._guard(request, min_level=team.ROLE_LEVELS["admin"], model=CustomVisibilityBody)
         if err:
             return err
         key = str(body.get("id") or "")
@@ -383,7 +505,7 @@ def register(mcp, registry):
         there is nothing to query. This is gizmo's own record of the collections
         IT booked, which is why the panel says so rather than implying it read
         the courier's diary."""
-        err, body, who = await gate._guard(request)
+        err, body, who = await gate._guard(request, model=DispatchCollectionsBody)
         if err:
             return err
         day = str(body.get("date") or "")[:10] or desk._dispatch_today()
@@ -436,7 +558,7 @@ def register(mcp, registry):
     @mcp.custom_route("/api/dispatch/quote", methods=["POST"])
     async def dispatch_quote_route(request: Request):
         """Price couriers for one order. Free / read-only, no charge."""
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=DispatchQuoteBody)
         if err:
             return err
         try:
@@ -459,7 +581,7 @@ def register(mcp, registry):
     async def dispatch_diagnose_route(request: Request):
         """Why is a courier service missing? Quotes the same parcel several ways
         and reports what each returns. Free and read-only."""
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=DispatchDiagnoseBody)
         if err:
             return err
         try:
@@ -481,7 +603,7 @@ def register(mcp, registry):
     @mcp.custom_route("/api/dispatch/book", methods=["POST"])
     async def dispatch_book_route(request: Request):
         """Book the chosen courier (CHARGES the WO account), fulfill + tag."""
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=DispatchBookBody)
         if err:
             return err
         try:
@@ -524,7 +646,7 @@ def register(mcp, registry):
         """Return the stored label(s) for an already-dispatched order (reprint).
         Read-only; the SOAP API has no fetch-by-tracking service, so labels are
         kept from the booking."""
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=DispatchLabelBody)
         if err:
             return err
         # Either a Shopify order or a pasted-address shipment: both keep their
@@ -584,7 +706,7 @@ def register(mcp, registry):
     async def dispatch_manifest_route(request: Request):
         """Everything booked on one day (Europe/London): the driver handover list
         and the sheet to check the World Options invoice against. Read-only."""
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=DispatchManifestBody)
         if err:
             return err
         want = str((body or {}).get("date") or "").strip()
@@ -664,7 +786,7 @@ def register(mcp, registry):
     @mcp.custom_route("/api/margin", methods=["POST"])
     async def margin_route(request: Request):
         """What dispatched orders actually made. Read-only, no AI."""
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=MarginBody)
         if err:
             return err
         try:
@@ -680,7 +802,7 @@ def register(mcp, registry):
     @mcp.custom_route("/api/dispatch/cancel", methods=["POST"])
     async def dispatch_cancel_route(request: Request):
         """Cancel a booked shipment at World Options (best-effort)."""
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=DispatchCancelBody)
         if err:
             return err
         if not worldoptions or not worldoptions.configured():
