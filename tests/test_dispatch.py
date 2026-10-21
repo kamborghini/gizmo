@@ -31309,6 +31309,57 @@ def t_the_door_refuses_a_wrong_type_last():
     eq(r.status_code, 200, r.text)
     eq(seen, [{"title": "Fine", "extra": [1, {"a": 2}]}], "a body that passes reaches the route as sent")
 
+def _wrong_kinds_refused(cases):
+    """Each (path, op, model): every field the model names, sent as an object
+    and as a list, is a 400 in the model's own words wherever the model refuses
+    that value. Returns how many requests were refused."""
+    from gizmo import bodies as bd
+    n = 0
+    for path, op, model in cases:
+        m = bd.model_for(model, {"op": op})
+        ok(m is not None and m.model_fields, "%s %s has a model naming its fields" % (path, op))
+        for field in m.model_fields:
+            for junk in ({"wrong": ["type"]}, ["wrong"]):
+                body = {field: junk, **({"op": op} if op else {})}
+                want = bd.refusal(model, body)
+                if want is None:
+                    continue          # the kind takes it (a list where a list belongs)
+                r = post(path, body)
+                eq((r.status_code, r.json().get("error")), (400, want), "%s %s %s=%r" % (path, op, field, junk))
+                n += 1
+    return n
+
+@test
+def t_a_wrong_type_is_refused_by_name_not_a_server_error():
+    """The seven routes a stray script could break with a field of the wrong
+    kind (an object where an id or a number belongs) refuse it at the door
+    with a 400 naming the field, before the route reads it (stage 5)."""
+    from gizmo.routes import memory as r_memory, reconciliation as r_recon, dispatch as r_dispatch
+    from gizmo.routes import impact as r_impact, production as r_production, skills as r_skills
+    from gizmo.routes import updates as r_updates
+    for path, body, words in (
+            ("/api/memory", {"op": "delete", "id": {"wrong": 1}}, "The id sent must be text or a number."),
+            ("/api/memory", {"op": "set_status", "id": {"wrong": 1}}, "The id sent must be text or a number."),
+            ("/api/recon/exceptions", {"limit": {"wrong": 1}}, "The limit sent must be a whole number."),
+            ("/api/recon/exceptions", {"min_pence": {"wrong": 1}}, "The min pence sent must be a whole number."),
+            ("/api/shipping/config", {"op": "set", "boxes": {"wrong": 1}}, "The boxes sent must be a list."),
+            ("/api/impact", {"op": "add", "text": {"wrong": 1}}, "The text sent must be text."),
+            ("/api/production-state", {"op": "made", "id": {"wrong": 1}}, "The id sent must be a whole number."),
+            ("/api/skills", {"op": "delete", "id": {"wrong": 1}}, "The id sent must be text or a number."),
+            ("/api/updates", {"op": "seen", "releases": {"wrong": 1}}, "The releases sent must be a whole number.")):
+        r = post(path, body)
+        eq((r.status_code, r.json().get("error")), (400, words), "%s %r" % (path, body))
+    n = _wrong_kinds_refused([
+        ("/api/memory", "delete", r_memory.MemoryBody),
+        ("/api/recon/exceptions", None, r_recon.ReconFilterBody),
+        ("/api/shipping/config", "set", r_dispatch.ShippingBody),
+        ("/api/impact", "add", r_impact.ImpactBody),
+        ("/api/production-state", "made", r_production.ProductionStateBody),
+        ("/api/production-state", "printed", r_production.ProductionStateBody),
+        ("/api/skills", "update", r_skills.SkillBody),
+        ("/api/updates", "request", r_updates.UpdatesBody)])
+    ok(n > 60, "every field each model names was tried (%d refusals)" % n)
+
 @test
 def t_the_moved_areas_routes_follow_them():
     """Production's, the Size list's and the order book's routes follow their

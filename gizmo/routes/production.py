@@ -16,9 +16,21 @@ from gizmo import gate
 from gizmo import mail
 from gizmo import orderbook
 from gizmo import production
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class ProductionStateBody(bodies.Body):
+    """What /api/production-state reads (gizmo/bodies.py): the orders printed
+    or unprinted, or one order made, with its number for the activity line."""
+    ids: bodies.Items = None
+    id: bodies.Whole = None
+    on: bodies.Flag = None
+    name: bodies.Text = None
+    ack_address: bodies.Flag = None
 
 
 def register(mcp, registry):
@@ -52,7 +64,7 @@ def register(mcp, registry):
     @mcp.custom_route("/api/production-state", methods=["POST"])
     async def production_state_route(request: Request):
         # Printed and made stamps per order. Local JSON on the volume, no AI.
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=ProductionStateBody)
         if err:
             return err
         op = str(body.get("op") or "")

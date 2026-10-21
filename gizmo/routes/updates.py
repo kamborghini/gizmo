@@ -12,9 +12,24 @@ from gizmo import gate
 from gizmo import team
 from gizmo import scheduler
 from gizmo import updates
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class UpdatesBody(bodies.Body):
+    """What /api/updates reads (gizmo/bodies.py): a feature request, a
+    request's triage, and what this person has read."""
+    title: bodies.Text = None
+    detail: bodies.Text = None
+    where: bodies.Text = None
+    id: bodies.Id = None
+    state: bodies.Text = None
+    note: bodies.Text = None
+    releases: bodies.Whole = None
+    requests: bodies.Flag = None
 
 
 def register(mcp, registry):
@@ -26,7 +41,7 @@ def register(mcp, registry):
         signed-in account and NOT tab-gated: release notes are how a part-time
         member learns what changed under them, and the request box is worth
         most from the people who never get asked."""
-        err, body, who = await gate._guard(request)
+        err, body, who = await gate._guard(request, model=UpdatesBody)
         if err:
             return err
         op = str(body.get("op") or "")

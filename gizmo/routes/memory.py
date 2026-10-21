@@ -10,9 +10,21 @@ from gizmo import memory
 from gizmo import activity
 from gizmo import gate
 from gizmo import team
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class MemoryBody(bodies.Body):
+    """What /api/memory reads (gizmo/bodies.py): the notes to add, or one
+    note's id with its new status or words."""
+    items: bodies.Items = None
+    id: bodies.Id = None
+    status: bodies.Text = None
+    text: bodies.Text = None
+    type: bodies.Text = None
 
 
 def register(mcp, registry):
@@ -20,7 +32,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/memory", methods=["POST"])
     async def memory_route(request: Request):
-        err, body, who = await gate._guard(request)
+        err, body, who = await gate._guard(request, model=MemoryBody)
         if err:
             return err
         op = body.get("op")

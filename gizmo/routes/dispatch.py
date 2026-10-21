@@ -28,9 +28,39 @@ from gizmo import activity
 from gizmo import gate
 from gizmo import team
 from gizmo import ai as claude
+from gizmo import bodies
 
 # The same logger as copilot.py's, so the routes' log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class ShippingBody(bodies.Body):
+    """What /api/shipping/config reads (gizmo/bodies.py): the shipping
+    settings, every one of them text but the sender's address, the box
+    presets, the per-courier collections and the customer email switch."""
+    origin: bodies.Fields = None
+    boxes: bodies.Items = None
+    default_box_id: bodies.Id = None
+    notify_customer: bodies.Flag = None
+    ready_time: bodies.Text = None
+    close_time: bodies.Text = None
+    collection_option: bodies.Text = None
+    collection_by_carrier: bodies.Fields = None
+    label_size_production: bodies.Text = None
+    label_size_shipping: bodies.Text = None
+    eori: bodies.Text = None
+    vat_number: bodies.Text = None
+    default_hs_code: bodies.Text = None
+    trade_term: bodies.Text = None
+    export_reason: bodies.Text = None
+    duties_payor: bodies.Text = None
+    currency: bodies.Text = None
+    plugin_code: bodies.Text = None
+    base_url: bodies.Text = None
+    meter_number: bodies.Text = None
+    key: bodies.Text = None
+    password: bodies.Text = None
 
 
 def register(mcp, registry):
@@ -39,7 +69,7 @@ def register(mcp, registry):
     async def shipping_config_route(request: Request):
         """Get or set shipping settings. The API key is write-only: it is saved
         server-side and never returned; the UI only ever sees connected + last4."""
-        err, body, who = await gate._guard(request)
+        err, body, who = await gate._guard(request, model=ShippingBody)
         if err:
             return err
         op = str(body.get("op") or "get").lower()

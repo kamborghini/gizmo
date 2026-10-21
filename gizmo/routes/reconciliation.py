@@ -21,9 +21,21 @@ from gizmo import mail
 from gizmo import orderbook
 from gizmo import team
 from gizmo import reconciliation
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class ReconFilterBody(bodies.Body):
+    """What /api/recon/exceptions reads (gizmo/bodies.py): the list's filter."""
+    severity: bodies.Text = None
+    status: bodies.Text = None
+    q: bodies.Text = None
+    min_pence: bodies.Whole = None
+    include_stale: bodies.Flag = None
+    limit: bodies.Whole = None
 
 
 def register(mcp, registry):
@@ -274,7 +286,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/recon/exceptions", methods=["POST"])
     async def recon_exceptions_route(request: Request):
-        err, body, who = await gate._guard(request)
+        err, body, who = await gate._guard(request, model=ReconFilterBody)
         if err:
             return err
         d = reconciliation._load_recon()
