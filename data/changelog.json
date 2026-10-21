@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-21",
+   "title": "The AI settings and the Products tab on their own",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "The assistant's effort settings, the Products tab and a label's order history now each live with the rest of their area, so a change elsewhere cannot upset them. Nothing looks different."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-21",
    "title": "The last of the leftovers home",
    "items": [
     {

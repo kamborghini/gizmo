@@ -89,7 +89,7 @@ async def _loan_product_rows(registry) -> list:
     # The whole catalogue, not its first page: a unit made from a product
     # past the 250th could not be picked. A failed read is not cached, so
     # the next open tries again instead of serving an empty list for ten minutes.
-    products, ok, _cut = await core._all_products(registry, "id,title,status,vendor,product_type,variants")
+    products, ok, _cut = await catalog._all_products(registry, "id,title,status,vendor,product_type,variants")
     if not ok and not products:
         raise RuntimeError("the product read failed")   # the route says so, not "no matches"
     rows = []
@@ -239,4 +239,5 @@ def _loan_history(d: dict, unit_id: str) -> list:
 # first. Read as core.NAME and sibling.NAME, never a copied name.
 from gizmo import team  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import products as catalog  # noqa: E402
 from gizmo import clock  # noqa: E402

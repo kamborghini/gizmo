@@ -1,0 +1,25 @@
+{
+  "note": "the Products tab",
+  "areas": [
+    {"name": "ai", "file": "gizmo/ai.py", "alias": "claude", "existing": true, "prefix": "^$",
+     "extra": ["ANTHROPIC_EFFORT", "ANTHROPIC_EFFORT_DEEP", "THINKING_MODE", "_effort_for"],
+     "exclude": [], "floor": true, "doc": ""},
+    {"name": "chat", "file": "gizmo/chat.py", "alias": "assistant", "existing": true, "prefix": "^$",
+     "extra": ["MAX_MESSAGES", "MAX_CHAT_CHARS"], "exclude": [], "floor": false, "doc": ""},
+    {"name": "analytics", "file": "gizmo/analytics.py", "alias": "analytics", "existing": true, "prefix": "^$",
+     "extra": ["_CURRENCY_SIGNS"], "exclude": [], "floor": false, "doc": ""},
+    {"name": "products", "file": "gizmo/products.py", "alias": "catalog", "prefix": "^$",
+     "extra": ["run_products_list", "_all_products", "LOW_STOCK_THRESHOLD", "PRODUCT_TREND_MONTHS"],
+     "exclude": [], "floor": false,
+     "doc": "The Products tab: the whole catalogue read page by page, and the product list with its units and revenue by month, stock and facets. Moved out of copilot.py (stage 4 of the 14 October audit), where it sat in the stock bridge's section without reading anything of the bridge's; its routes, the list and a product's page, are in gizmo/routes/products.py. Read as `catalog.NAME` (`products` is a local name in several functions)."}
+  ],
+  "routes": [
+    {"name": "routes_products", "file": "gizmo/routes/products.py", "area": "products",
+     "paths": ["=/api/products", "=/api/product"], "helpers": [],
+     "doc": "The Products tab's routes: the product list and a product's page. Gathered from add_routes (stage 4 of the 14 October audit) where the first stood; their paths are literal, so no request changes hands.",
+     "register_doc": "Add the Products tab's routes to the app.",
+     "comment": "The Products tab's routes (gizmo/routes/products.py), gathered where the first stood."},
+    {"name": "routes_orderbook", "file": "gizmo/routes/orderbook.py", "area": "orderbook", "existing": true,
+     "paths": ["/api/customer-history"], "helpers": []}
+  ]
+}

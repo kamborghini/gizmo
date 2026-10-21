@@ -275,7 +275,7 @@ def _extract_page_keywords(html_text: str) -> dict:
 
 
 async def _seo_product_signals(registry: dict) -> dict:
-    products, ok, _truncated = await core._all_products(registry, "id,title,handle,body_html,images")
+    products, ok, _truncated = await catalog._all_products(registry, "id,title,handle,body_html,images")
     if not ok:
         # A read that failed is not a catalogue with nothing wrong in it: the
         # audit said "0 thin descriptions" and took nothing off the score.
@@ -614,7 +614,7 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
             system=prompts.OVERVIEW_SYSTEM + "\n\n" + SEO_KNOWLEDGE + extra_system,
             tools=[prompts.PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": prompts.PRESENT_RESPONSE_TOOL["name"]},
             messages=[{"role": "user", "content": msg}],
-            output_config={"effort": core._effort_for(claude.MODEL_DEEP)},
+            output_config={"effort": claude._effort_for(claude.MODEL_DEEP)},
         ),
         google_data.gsc_timeseries(480) if gsc_on else analytics._ret({}),
     )
@@ -688,7 +688,7 @@ async def run_keywords(registry: dict, extra_system: str = "") -> dict:
         system=prompts.OVERVIEW_SYSTEM + "\n\n" + prompts.KEYWORD_SYSTEM + extra_system,
         tools=[prompts.PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": prompts.PRESENT_RESPONSE_TOOL["name"]},
         messages=[{"role": "user", "content": msg}],
-        output_config={"effort": core._effort_for(claude.MODEL_DEEP)},
+        output_config={"effort": claude._effort_for(claude.MODEL_DEEP)},
     )
     structured = assistant._coerce_structured(prompts._report_answer(resp, "the keyword analysis"))
     structured.pop("metrics", None)
@@ -720,7 +720,7 @@ async def run_keyword_scan(registry: dict, url: str, extra_system: str = "") -> 
         system=prompts.OVERVIEW_SYSTEM + "\n\n" + prompts.KEYWORD_SYSTEM + extra_system,
         tools=[prompts.PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": prompts.PRESENT_RESPONSE_TOOL["name"]},
         messages=[{"role": "user", "content": msg}],
-        output_config={"effort": core._effort_for(claude.MODEL_DEEP)},
+        output_config={"effort": claude._effort_for(claude.MODEL_DEEP)},
     )
     structured = assistant._coerce_structured(prompts._report_answer(resp, "the scan"))
     structured.pop("metrics", None)
@@ -784,7 +784,7 @@ async def run_product_audit(registry: dict, product_id: int, extra_system: str =
         system=prompts.OVERVIEW_SYSTEM + "\n\n" + SEO_KNOWLEDGE + extra_system,
         tools=[prompts.PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": prompts.PRESENT_RESPONSE_TOOL["name"]},
         messages=[{"role": "user", "content": msg}],
-        output_config={"effort": core._effort_for(claude.MODEL_DEEP)},
+        output_config={"effort": claude._effort_for(claude.MODEL_DEEP)},
     )
     structured = assistant._coerce_structured(prompts._report_answer(resp, "the optimisation plan"))
     structured.pop("metrics", None)
@@ -803,7 +803,7 @@ async def run_product_audit(registry: dict, product_id: int, extra_system: str =
 
     trend = {"units": [], "revenue": []}
     try:
-        months = orderbook._month_axis(core.PRODUCT_TREND_MONTHS)
+        months = orderbook._month_axis(catalog.PRODUCT_TREND_MONTHS)
         p_orders = await orderbook._orders_snapshot(registry, days=len(months) * 31)
         b = orderbook._orders_product_monthly(p_orders, months).get(product_id, {"units": {}, "revenue": {}})
         trend = {"units": [{"label": mk, "value": b["units"].get(mk, 0)} for mk in months],
@@ -822,4 +822,5 @@ from gizmo import orderbook  # noqa: E402
 from gizmo import skills as skillbook  # noqa: E402
 from gizmo import prompts  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import products as catalog  # noqa: E402
 from gizmo import chat as assistant  # noqa: E402

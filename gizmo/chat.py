@@ -265,10 +265,10 @@ async def run_chat(history: list[dict], dispatch: Callable, data_tools: list[dic
         kwargs = {
             "model": model, "max_tokens": claude.MAX_TOKENS, "system": system,
             "tools": all_tools, "messages": messages,
-            "output_config": {"effort": effort or core._effort_for(model)},
+            "output_config": {"effort": effort or claude._effort_for(model)},
         }
-        if core.THINKING_MODE:  # adaptive thinking: deeper reasoning, model self-paces
-            kwargs["thinking"] = {"type": core.THINKING_MODE}
+        if claude.THINKING_MODE:  # adaptive thinking: deeper reasoning, model self-paces
+            kwargs["thinking"] = {"type": claude.THINKING_MODE}
         resp = await claude._xcreate(client,**kwargs)
         fell = claude._ai_fell_back.get()
         if fell:
@@ -495,6 +495,13 @@ def _coerce_structured(data: Any) -> dict:
         data["summary"] = "Here's what I found."
     skillbook._note_skills_applied(data)
     return claude._strip_dashes(data)
+
+
+# ---------------------------------------------------------------------------
+# The chat's limits: how long a conversation, and how large a request, may be.
+# ---------------------------------------------------------------------------
+MAX_MESSAGES     = _env_num(int, os.environ.get("MAX_MESSAGES", "100"), "100", "MAX_MESSAGES")          # chat history length
+MAX_CHAT_CHARS   = _env_num(int, os.environ.get("MAX_CHAT_CHARS", "100000"), "100000", "MAX_CHAT_CHARS")     # total chars in a chat request
 
 
 # Last, so this module is whole before copilot.py or a sibling runs: copilot.py

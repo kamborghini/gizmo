@@ -495,7 +495,7 @@ def register(mcp, registry):
         try:
             claude._ai_kind.set("draft")
             resp = await claude._xcreate(claude._anthropic(), model=claude.MODEL_DEEP, max_tokens=8000,
-                                  system=mail.MAIL_DRAFT_SYSTEM, output_config={"effort": core._effort_for(claude.MODEL_DEEP)},
+                                  system=mail.MAIL_DRAFT_SYSTEM, output_config={"effort": claude._effort_for(claude.MODEL_DEEP)},
                                   messages=[{"role": "user", "content": prompt}])
         except RuntimeError as e:
             return gate._json({"error": str(e), "hard": True}, 429)

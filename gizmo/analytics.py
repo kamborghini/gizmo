@@ -163,7 +163,7 @@ def _money(amount: float, currency: str) -> str:
     screen printed the same currency two ways."""
     try:
         sign = "-" if amount < 0 else ""
-        sym = core._CURRENCY_SIGNS.get((currency or "").upper())
+        sym = _CURRENCY_SIGNS.get((currency or "").upper())
         body = f"{abs(amount):,.0f}"
         return f"{sign}{sym}{body}" if sym else f"{sign}{body} {currency}".strip()
     except Exception:
@@ -200,7 +200,7 @@ async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tupl
                                 "financial_status,fulfillment_status,line_items"),
         shopify._tool_json(registry, "shopify_list_customers", {"created_at_min": d7, "limit": 250}),
         shopify._tool_json(registry, "shopify_count_products", {}),
-        core._all_products(registry, "id,title,variants") if track_inventory else _ret(([], True, False)),
+        catalog._all_products(registry, "id,title,variants") if track_inventory else _ret(([], True, False)),
         google_data.ga4_summary(28) if ga4_on else _ret({}),
         google_data.gsc_overview(28) if gsc_on else _ret({}),
     )
@@ -256,9 +256,9 @@ async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tupl
         low = [
             {"product": p.get("title"), "variant": v.get("title"), "qty": v.get("inventory_quantity")}
             for p in products for v in p.get("variants", [])
-            if isinstance(v.get("inventory_quantity"), int) and v["inventory_quantity"] <= core.LOW_STOCK_THRESHOLD
+            if isinstance(v.get("inventory_quantity"), int) and v["inventory_quantity"] <= catalog.LOW_STOCK_THRESHOLD
         ]
-        metrics.append({"label": f"Low stock (≤{core.LOW_STOCK_THRESHOLD})", "value": str(len(low)),
+        metrics.append({"label": f"Low stock (≤{catalog.LOW_STOCK_THRESHOLD})", "value": str(len(low)),
                         "tone": "warn" if low else None})
 
     from collections import Counter
@@ -365,7 +365,7 @@ async def run_overview(registry: dict, extra_system: str = "", track_inventory: 
             model=claude.MODEL_DEEP, max_tokens=claude.MAX_TOKENS, system=prompts.OVERVIEW_SYSTEM + extra_system,
             tools=[prompts.PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": prompts.PRESENT_RESPONSE_TOOL["name"]},
             messages=[{"role": "user", "content": msg}],
-            output_config={"effort": core._effort_for(claude.MODEL_DEEP)},
+            output_config={"effort": claude._effort_for(claude.MODEL_DEEP)},
         ),
         _overview_trends(registry),
         _sector_sales(registry),
@@ -718,7 +718,7 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
         model=claude.MODEL_DEEP, max_tokens=claude.MAX_TOKENS, system=prompts.OVERVIEW_SYSTEM + extra_system,
         tools=[prompts.PRESENT_RESPONSE_TOOL], tool_choice={"type": "tool", "name": prompts.PRESENT_RESPONSE_TOOL["name"]},
         messages=[{"role": "user", "content": msg}],
-        output_config={"effort": core._effort_for(claude.MODEL_DEEP)},
+        output_config={"effort": claude._effort_for(claude.MODEL_DEEP)},
     )
     structured = assistant._coerce_structured(prompts._report_answer(resp, "the customer analysis"))
     structured.pop("metrics", None)
@@ -727,10 +727,20 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
             "segment": seg_norm or None, "sector_comparison": sector_comparison, "sector_tags": sector_tags}
 
 
+# ---------------------------------------------------------------------------
+# The signs money is written with (the overview's figures and the chase email
+# read them).
+# ---------------------------------------------------------------------------
+
+
+_CURRENCY_SIGNS = {"GBP": "£", "USD": "$", "EUR": "€"}
+
+
 # Last, so this module is whole before copilot.py or a sibling runs: copilot.py
 # takes names from these modules as it loads, and any of them may be imported
 # first. Read as core.NAME and sibling.NAME, never a copied name.
 from gizmo import production  # noqa: E402
 from gizmo import prompts  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import products as catalog  # noqa: E402
 from gizmo import chat as assistant  # noqa: E402

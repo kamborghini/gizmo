@@ -551,3 +551,27 @@ def _strip_dashes(obj: Any) -> Any:
     if isinstance(obj, list):
         return [_strip_dashes(v) for v in obj]
     return obj
+
+
+# ---------------------------------------------------------------------------
+# The effort every call asks for, and the chat's thinking mode.
+# ---------------------------------------------------------------------------
+# Effort (low|medium|high|xhigh|max). Opus 5.5 thinks on every request and
+# effort is how much: "high" spends what a task needs and is every call's
+# level; "max" has no limit and is what Deep analysis in chat asks for. Every
+# call stops at MAX_TOKENS with its thinking counted, which "max" can reach
+# on a long report, so the reports stay at the everyday level.
+ANTHROPIC_EFFORT = os.environ.get("ANTHROPIC_EFFORT", "high")
+ANTHROPIC_EFFORT_DEEP = os.environ.get("ANTHROPIC_EFFORT_DEEP", "max")
+# Extended thinking for the interactive chat loop. "adaptive" lets the model
+# decide when and how deeply to reason (fast on simple questions, deep on hard
+# ones). Set ANTHROPIC_THINKING=off to disable if ever needed.
+THINKING_MODE = os.environ.get("ANTHROPIC_THINKING", "adaptive").strip().lower()
+if THINKING_MODE in ("off", "none", "disabled", "0", ""):
+    THINKING_MODE = ""
+
+
+def _effort_for(model: str, deep: bool = False) -> str:
+    """The everyday effort, or Deep analysis's, as configured. What the model
+    behind it accepts is settled where every request goes out (_fit_to_model)."""
+    return ANTHROPIC_EFFORT_DEEP if deep else ANTHROPIC_EFFORT

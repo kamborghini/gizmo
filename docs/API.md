@@ -80,7 +80,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/customer-history` | POST | customers or crm | `_guard` |  |  | `copilot.customer_history_route` |  |
+| `/api/customer-history` | POST | customers or crm | `_guard` |  |  | `gizmo.routes.orderbook.customer_history_route` |  |
 
 ## `/api/customer-tags`
 
@@ -250,7 +250,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/product` | POST | products | `_guard` | AI slot |  | `copilot.product_route` |  |
+| `/api/product` | POST | products | `_guard` | AI slot |  | `gizmo.routes.products.product_route` |  |
 
 ## `/api/production-labels`
 
@@ -271,7 +271,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/products` | POST | products | `_guard` |  |  | `copilot.products_route` |  |
+| `/api/products` | POST | products | `_guard` |  |  | `gizmo.routes.products.products_route` |  |
 
 ## `/api/profile`
 

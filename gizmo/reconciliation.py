@@ -70,7 +70,7 @@ async def _recon_ai_call(system: str, messages: list, tools: list, tool_choice: 
     return await claude._xcreate(client, model=MODEL_RECON, max_tokens=claude.MAX_TOKENS,
                           system=system, messages=messages, tools=tools,
                           tool_choice=tool_choice,
-                          output_config={"effort": core._effort_for(MODEL_RECON)})
+                          output_config={"effort": claude._effort_for(MODEL_RECON)})
 
 
 def _recon_open_summary(d: dict) -> tuple:

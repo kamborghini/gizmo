@@ -129,7 +129,7 @@ async def run_learn(registry: dict) -> dict:
         model=claude.MODEL_DEEP, max_tokens=claude.MAX_TOKENS, system=LEARN_SYSTEM,
         messages=[{"role": "user", "content": "Store website content:\n" + corpus
                    + "\n\nWrite the store knowledge profile now."}],
-        output_config={"effort": core._effort_for(claude.MODEL_DEEP)},
+        output_config={"effort": claude._effort_for(claude.MODEL_DEEP)},
     )
     text = claude._strip_dashes("".join(b.text for b in resp.content if b.type == "text").strip())
     if not text:

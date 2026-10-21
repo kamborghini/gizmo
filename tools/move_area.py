@@ -295,6 +295,9 @@ def run(spec_path, root, write):
         # a group's area is one of this move's, or one moved earlier that copilot.py binds
         if gd["area"] not in areas and gd["area"] not in mod_alias:
             problems.append(f"route group {g}: no area {gd['area']} in this move or bound in copilot.py")
+        # an existing group adds to a route module moved earlier, which copilot.py binds as g
+        if gd.get("existing") and mod_alias.get(g) != gd["file"][:-3].replace("/", "."):
+            problems.append(f"existing route group {g}: copilot.py binds no {g} for {gd['file']}")
 
     # what moves where
     DEST = {}
@@ -515,7 +518,7 @@ def run(spec_path, root, write):
     others = {}
     own_of = {areas[d]["file"]: d for d in EXISTING}
     for rel in split_files:
-        if rel in {a["file"] for a in spec["areas"] if not a.get("existing")} | {g["file"] for g in spec.get("routes", [])}:
+        if rel in {a["file"] for a in spec["areas"] if not a.get("existing")} | {g["file"] for g in spec.get("routes", []) if not g.get("existing")}:
             continue
         others[rel] = attr_edits(rel, {"core"}, own=own_of.get(rel))
     if os.path.exists(P("server.py")):
@@ -635,6 +638,8 @@ def run(spec_path, root, write):
         open(P(a["file"]), "w", encoding="utf-8").write(head + logger_line + "".join(moved_text[d]).rstrip("\n") + "\n" + tail)
 
     for g, gd in groups.items():
+        if gd.get("existing"):
+            continue                  # added to its own register(), with the other files, below
         body = "".join("".join(apply(l) for l in range(a_, b_ + 1)) for a_, b_, _ in group_spans[g])
         text = (doc(gd["doc"]) + "import logging\n" + import_block(imports_used[g]) + "\n\nimport copilot as core\n"
                 + "".join(sib_line(x) + "\n" for x in sorted(sibs[g])) + logger_line
@@ -646,7 +651,7 @@ def run(spec_path, root, write):
     for l in range(1, len(LINES) + 1):
         g = route_line.get(l)
         if g:
-            if l == first[g]:
+            if l == first[g] and not groups[g].get("existing"):
                 out.append(f"\n    # {groups[g]['comment'] if 'comment' in groups[g] else 'Gathered where the first stood; their paths are literal, so no request changes hands.'}\n"
                            f"    {g}.register(mcp, registry)\n")
             continue
@@ -663,6 +668,8 @@ def run(spec_path, root, write):
         if d not in EXISTING:         # copilot.py binds an existing area already
             add.append(sib_line(d) + "\n")
     for g, gd in groups.items():
+        if gd.get("existing"):
+            continue                  # copilot.py binds it, and add_routes calls it, already
         leaf = gd["file"][:-3].replace("/", ".").rpartition(".")
         add.append(f"from {leaf[0]} import {leaf[2]} as {g}\n")
     for d, a in areas.items():
@@ -708,14 +715,32 @@ def run(spec_path, root, write):
         out[at:at] = ["".join(h + "\n" for h in head if h)]
         return "".join(out)
 
+    def add_routes_to_existing(g, text):
+        """An existing route module with what moves into it: the routes at the
+        end of register(), after those it holds, and the imports they need."""
+        body = ast.parse(text).body
+        bound = bound_in(text)
+        reg = next(x for x in body if isinstance(x, ast.FunctionDef) and x.name == "register")
+        lines = text.splitlines(keepends=True)
+        moved = "".join("".join(apply(l) for l in range(a_, b_ + 1)) for a_, b_, _ in group_spans[g]).strip("\n")
+        out = lines[:reg.end_lineno] + ["\n" + moved + "\n"] + lines[reg.end_lineno:]
+        head = [import_block(sorted(n for n in imports_used[g] if n not in bound))] if imports_used[g] - bound else []
+        head += [sib_line(x) for x in sorted(sibs[g]) if alias_of(x) not in bound]
+        if "core" not in bound:
+            head.append("import copilot as core")
+        tops = [x for x in body if isinstance(x, (ast.Import, ast.ImportFrom)) and x.lineno < reg.lineno]
+        at = tops[-1].end_lineno if tops else 0
+        out[at:at] = ["".join(h + "\n" for h in head if h)]
+        return "".join(out)
+
     new_imports = "".join(sib_line(d) + "\n" for d in areas if d not in EXISTING)
-    for d in EXISTING:
-        rel = areas[d]["file"]
+    group_of = {gd["file"]: g for g, gd in groups.items() if gd.get("existing")}
+    for rel in [areas[d]["file"] for d in EXISTING] + list(group_of):
         if rel not in others:
             others[rel] = (open(P(rel), encoding="utf-8").read(), set(), 0)
     for rel, (text, used, n) in others.items():
         own = own_of.get(rel)
-        if not n and own is None:
+        if not n and own is None and rel not in group_of:
             continue
         if rel.startswith("gizmo/"):
             m = re.search(r"^import copilot as core.*\n", text, re.M)
@@ -726,6 +751,8 @@ def run(spec_path, root, write):
                 text = text[:m.end()] + add + text[m.end():] if m else add + text
             if own is not None:
                 text = add_to_existing(own, text)
+            if rel in group_of:
+                text = add_routes_to_existing(group_of[rel], text)
         elif rel == "server.py":
             pass                      # it reads the moved names through copilot (above)
         elif rel.endswith("test_dispatch.py") and "seed" not in rel:

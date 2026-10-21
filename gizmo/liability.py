@@ -106,7 +106,7 @@ def _mark_chased(key: str, by: str = "") -> dict:
 
 
 def _chase_money(amount: float, currency: str) -> str:
-    sym = core._CURRENCY_SIGNS.get((currency or "").upper())
+    sym = analytics._CURRENCY_SIGNS.get((currency or "").upper())
     return (f"{sym}{amount:,.2f}" if sym else f"{amount:,.2f} {currency}".strip())
 
 
@@ -330,3 +330,4 @@ async def run_liability(registry: dict) -> dict:
 from gizmo import orderbook  # noqa: E402
 from gizmo import production  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import analytics  # noqa: E402

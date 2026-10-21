@@ -35,7 +35,9 @@
 - **routes**: the routes whose path starts with one of `paths` (or is it
   exactly, written `"=/"`: every path starts with `/`), and the
   nested `helpers` only they use, gathered into `register(mcp, registry)`
-  where the first stood.
+  where the first stood. A group marked `existing` adds its routes to a route
+  module moved earlier (bound in `copilot.py` as the group's `name`), at the
+  end of its `register()`.
 - **copies**: moved names `copilot.py` keeps reading bare, for a frozen
   function that must keep its bytes; the guard allows a copy only of a name
   no test patches and nothing rebinds.

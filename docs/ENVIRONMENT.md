@@ -24,14 +24,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
-| `ANTHROPIC_EFFORT` | `"high"` | copilot |  |
-| `ANTHROPIC_EFFORT_DEEP` | `"max"` | copilot |  |
-| `ANTHROPIC_THINKING` | `"adaptive"` | copilot |  |
 | `APP_BASE_URL` | `""` | copilot |  |
-| `LOW_STOCK_THRESHOLD` | `"5"` | copilot |  |
-| `MAX_CHAT_CHARS` | `"100000"` | copilot | total chars in a chat request |
-| `MAX_MESSAGES` | `"100"` | copilot | chat history length |
-| `PRODUCT_TREND_MONTHS` | `"12"` | copilot |  |
 | `SHOPIFY_API_KEY` | `None` | copilot |  |
 | `SHOPIFY_API_SECRET` | `None` | copilot |  |
 | `SHOPIFY_CLIENT_ID` | `""` | copilot, server |  |
@@ -57,6 +50,14 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 |---|---|---|---|
 | `ACTIVITY_MAX` | `"8000"` | gizmo.activity |  |
 | `ACTIVITY_PATH` | `"/data/activity.json"` | gizmo.activity |  |
+
+## gizmo/ai.py - The effort every call asks for, and the chat's thinking mode
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `ANTHROPIC_EFFORT` | `"high"` | gizmo.ai |  |
+| `ANTHROPIC_EFFORT_DEEP` | `"max"` | gizmo.ai |  |
+| `ANTHROPIC_THINKING` | `"adaptive"` | gizmo.ai |  |
 
 ## gizmo/ai.py - top
 
@@ -87,6 +88,13 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `BACKUP_FILE_MAX` | `str(60 * 1024 * 1024)` | gizmo.backup |  |
 | `BACKUP_SNAPSHOT_DIR` | `"/data/snapshots"` | gizmo.backup |  |
 | `BACKUP_STATE_PATH` | `"/data/backup_state.json"` | gizmo.backup |  |
+
+## gizmo/chat.py - The chat's limits: how long a conversation, and how large a 
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `MAX_CHAT_CHARS` | `"100000"` | gizmo.chat | total chars in a chat request |
+| `MAX_MESSAGES` | `"100"` | gizmo.chat | chat history length |
 
 ## gizmo/chat.py - top
 
@@ -288,6 +296,13 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `PRODUCTION_LABEL_TAG` | `"IP"` | gizmo.production | order tag that means "in production" |
 | `PRODUCTION_STATE_MAX` | `"1000"` | gizmo.production |  |
 | `PRODUCTION_STATE_PATH` | `"/data/production_state.json"` | gizmo.production |  |
+
+## gizmo/products.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `LOW_STOCK_THRESHOLD` | `"5"` | gizmo.products |  |
+| `PRODUCT_TREND_MONTHS` | `"12"` | gizmo.products |  |
 
 ## gizmo/profile.py - top
 
