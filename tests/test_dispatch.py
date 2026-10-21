@@ -31609,6 +31609,38 @@ def t_the_routes_the_first_count_missed_refuse_a_wrong_kind():
     finally:
         forecasting.FORECAST_INGEST_TOKEN = saved
 
+@test
+def t_what_callers_send_passes_every_model():
+    """The sweeps above prove each model is wired to its door; this proves each
+    one fits. tests/caller_payloads.json holds what the callers send today:
+    bodies rebuilt from the page's code, the forecast worker's and the admin
+    extensions', each with its file and line, at least one for every route
+    with a model (stage 5's final review built most of them). Every one passes
+    its model, so a model stricter than its callers fails here first. Add a
+    caller's body here when a route gains a model or a caller changes."""
+    import importlib, importlib.util
+    from gizmo import bodies as bd
+    spec = importlib.util.spec_from_file_location("route_reference", os.path.join(HERE, "tools", "route_reference.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    rows = {r["path"]: r for r in mod.collect(HERE)}
+    payloads = json.load(open(os.path.join(HERE, "tests", "caller_payloads.json"), encoding="utf-8"))
+    modelled = {p for p, r in rows.items() if r["body"]}
+    eq(sorted(modelled - {p["path"] for p in payloads}), [], "every route with a model has what its callers send")
+    refused = []
+    for p in payloads:
+        r = rows[p["path"]]
+        model = getattr(importlib.import_module(r["module"]), r["body"])
+        why = bd.refusal(model, json.loads(json.dumps(p["body"])))
+        if why:
+            refused.append("%s from %s: %s" % (p["path"], p["source"], why))
+    eq(refused, [], "what a caller sends today is refused")
+
+    class TooStrict(bd.Body):
+        id: bd.Text = None
+    ok(bd.refusal(TooStrict, next(p["body"] for p in payloads if p["path"] == "/api/production-state" and "id" in p["body"])),
+       "a model stricter than its callers is caught (Shopify's order ids arrive as numbers)")
+
 # The write routes that read fields from their body with no model checking
 # them (gizmo/bodies.py), each left so on purpose. Every other one has a model
 # (stage 5, pieces 1 to 4). A new write route comes with its model.
