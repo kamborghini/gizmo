@@ -358,6 +358,7 @@
         .fb-rl { position: absolute; font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-secondary);
             white-space: nowrap; font-variant-numeric: tabular-nums; }
         .fb-rl.t { top: 0; left: calc(var(--at-plan) + var(--sp-2)); color: var(--text-primary); }
+        .fb-rl.t.end { left: auto; right: calc(100% - var(--at-plan) + var(--sp-2)); }
         .fb-rl.b { bottom: 0; left: var(--at); transform: translateX(-50%); }
         .fb-rl.mid { color: var(--text-tertiary); }
         .fb-side + .fb-side { margin-top: var(--sp-4); padding-top: var(--sp-4); box-shadow: var(--rule-t-band); }
