@@ -37,6 +37,39 @@ class FolderBody(bodies.Body):
     delta: bodies.Flag = None
 
 
+
+class FileCompleteBody(bodies.Body):
+    """What /api/files/complete reads (gizmo/bodies.py): the upload that finished, and whether the page wants only what changed."""
+    id: bodies.Id = None
+    delta: bodies.Flag = None
+
+
+
+class FileDownloadBody(bodies.Body):
+    """What /api/files/download-url reads (gizmo/bodies.py): the file, and whether to preview it."""
+    id: bodies.Id = None
+    preview: bodies.Flag = None
+
+
+
+class FileBody(bodies.Body):
+    """What /api/files/file reads (gizmo/bodies.py): the file or files, where they go, and a new name."""
+    id: bodies.Id = None
+    ids: bodies.Items = None
+    folder_id: bodies.Id = None
+    name: bodies.Text = None
+
+
+
+class FileUploadBody(bodies.Body):
+    """What /api/files/upload-url reads (gizmo/bodies.py): the file about to be uploaded and where it goes."""
+    name: bodies.Text = None
+    size: bodies.Whole = None
+    type: bodies.Text = None
+    folder_id: bodies.Id = None
+    delta: bodies.Flag = None
+
+
 def register(mcp, registry):
     """Add the Files routes and the Finder drive's to the app."""
 
@@ -168,7 +201,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/files/upload-url", methods=["POST"])
     async def files_upload_route(request: Request):
-        err, body, who = await fileserver._files_guard(request)
+        err, body, who = await fileserver._files_guard(request, model=FileUploadBody)
         if err:
             return err
         if not fileserver._files_configured():
@@ -235,7 +268,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/files/complete", methods=["POST"])
     async def files_complete_route(request: Request):
-        err, body, _who = await fileserver._files_guard(request)
+        err, body, _who = await fileserver._files_guard(request, model=FileCompleteBody)
         if err:
             return err
         fid = str(body.get("id") or "")
@@ -320,7 +353,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/files/download-url", methods=["POST"])
     async def files_download_route(request: Request):
-        err, body, _who = await fileserver._files_guard(request)
+        err, body, _who = await fileserver._files_guard(request, model=FileDownloadBody)
         if err:
             return err
         fid = str(body.get("id") or "")
@@ -344,7 +377,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/files/file", methods=["POST"])
     async def files_file_route(request: Request):
-        err, body, _who = await fileserver._files_guard(request)
+        err, body, _who = await fileserver._files_guard(request, model=FileBody)
         if err:
             return err
         op = str(body.get("op") or "")

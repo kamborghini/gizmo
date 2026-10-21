@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-21",
+   "title": "More requests checked at the door: the CRM, the Inbox and Files",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": null,
+     "text": "Deals, leads, the pipeline's stages, every action in the Inbox and every change in Files now check every field they are sent before acting on it, so a field of the wrong kind is refused with a reason instead of failing or being saved as nonsense. Nothing looks different."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-21",
    "title": "More requests checked at the door: accounts and the workspace",
    "items": [
     {

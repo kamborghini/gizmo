@@ -61,11 +61,11 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 | `/api/crm/activity` | POST | crm | `_crm_guard` |  | `CrmActivityBody` |  | `gizmo.routes.crm.crm_activity_route` |  |
 | `/api/crm/board` | POST | crm | `_crm_guard` |  |  |  | `gizmo.routes.crm.crm_board_route` |  |
 | `/api/crm/contact` | POST | crm | `_crm_guard` |  | `CrmContactBody` | `_team_role`, `_user_tabs` | `gizmo.routes.crm.crm_contact_route` |  |
-| `/api/crm/deal` | POST | crm | `_crm_guard` |  | unchecked | `_user_tabs` | `gizmo.routes.crm.crm_deal_route` |  |
-| `/api/crm/import` | POST | crm | `_mail_guard` |  | unchecked | `_team_role` | `gizmo.routes.crm.crm_import_route` | Copy Pipedrive into gizmo's CRM. |
-| `/api/crm/lead` | POST | crm | `_crm_guard` |  | unchecked |  | `gizmo.routes.crm.crm_lead_route` |  |
+| `/api/crm/deal` | POST | crm | `_crm_guard` |  | `CrmDealBody` | `_user_tabs` | `gizmo.routes.crm.crm_deal_route` |  |
+| `/api/crm/import` | POST | crm | `_mail_guard` |  | `CrmImportBody` | `_team_role` | `gizmo.routes.crm.crm_import_route` | Copy Pipedrive into gizmo's CRM. |
+| `/api/crm/lead` | POST | crm | `_crm_guard` |  | `CrmLeadBody` |  | `gizmo.routes.crm.crm_lead_route` |  |
 | `/api/crm/pipedrive` | POST | crm | `_mail_guard` |  |  | `_team_role` | `gizmo.routes.crm.crm_pipedrive_route` | Look at the Pipedrive account, read-only. |
-| `/api/crm/stages` | POST | crm | `_crm_guard` |  | unchecked | `_team_level` | `gizmo.routes.crm.crm_stages_route` |  |
+| `/api/crm/stages` | POST | crm | `_crm_guard` |  | `CrmStagesBody` | `_team_level` | `gizmo.routes.crm.crm_stages_route` |  |
 
 ## `/api/custom`
 
@@ -117,13 +117,13 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/files/complete` | POST | files | `_files_guard` |  | unchecked |  | `gizmo.routes.files.files_complete_route` |  |
-| `/api/files/download-url` | POST | files | `_files_guard` |  | unchecked |  | `gizmo.routes.files.files_download_route` |  |
+| `/api/files/complete` | POST | files | `_files_guard` |  | `FileCompleteBody` |  | `gizmo.routes.files.files_complete_route` |  |
+| `/api/files/download-url` | POST | files | `_files_guard` |  | `FileDownloadBody` |  | `gizmo.routes.files.files_download_route` |  |
 | `/api/files/drive` | POST | files | `_files_guard` |  |  |  | `gizmo.routes.files.files_drive_route` | The Finder drive's own password: made, replaced and removed here, after a full sign-in (codes included), shown once, kept as a SHA-256. |
-| `/api/files/file` | POST | files | `_files_guard` |  | unchecked | `_team_level` | `gizmo.routes.files.files_file_route` |  |
+| `/api/files/file` | POST | files | `_files_guard` |  | `FileBody` | `_team_level` | `gizmo.routes.files.files_file_route` |  |
 | `/api/files/folder` | POST | files | `_files_guard` |  | `FolderBody` |  | `gizmo.routes.files.files_folder_route` |  |
 | `/api/files/tree` | POST | files | `_files_guard` |  |  |  | `gizmo.routes.files.files_tree_route` |  |
-| `/api/files/upload-url` | POST | files | `_files_guard` |  | unchecked |  | `gizmo.routes.files.files_upload_route` |  |
+| `/api/files/upload-url` | POST | files | `_files_guard` |  | `FileUploadBody` |  | `gizmo.routes.files.files_upload_route` |  |
 
 ## `/api/forecast`
 
@@ -192,29 +192,29 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
 | `/api/mail/addresses` | POST | mail | `_mail_guard` |  |  |  | `gizmo.routes.mail.mail_addresses_route` | The To field's address book: everyone in the inbox and the CRM. |
-| `/api/mail/assign` | POST | mail | `_mail_guard` |  | unchecked |  | `gizmo.routes.mail.mail_assign_route` |  |
-| `/api/mail/attach-done` | POST | mail | `_mail_guard` |  | unchecked |  | `gizmo.routes.mail.mail_attach_done_route` | What actually landed. |
-| `/api/mail/attach-url` | POST | mail | `_mail_guard` |  | unchecked |  | `gizmo.routes.mail.mail_attach_url_route` | A presigned PUT for a file about to be attached to an email. |
-| `/api/mail/attachment` | POST | mail | `_mail_guard` |  | unchecked | `_user_tabs` | `gizmo.routes.mail.mail_attachment_route` | Bring an attachment out of Gmail and into the files store. |
-| `/api/mail/board` | POST | mail | `_mail_guard` |  | unchecked | `_team_role` | `gizmo.routes.mail.mail_board_route` |  |
-| `/api/mail/body` | POST | mail | `_mail_guard` |  | unchecked |  | `gizmo.routes.mail.mail_body_route` | The actual text of the conversation, read on demand. |
-| `/api/mail/bulk` | POST | mail | `_mail_guard` |  | unchecked |  | `gizmo.routes.mail.mail_bulk_route` | Many threads, one decision. |
+| `/api/mail/assign` | POST | mail | `_mail_guard` |  | `MailAssignBody` |  | `gizmo.routes.mail.mail_assign_route` |  |
+| `/api/mail/attach-done` | POST | mail | `_mail_guard` |  | `MailAttachDoneBody` |  | `gizmo.routes.mail.mail_attach_done_route` | What actually landed. |
+| `/api/mail/attach-url` | POST | mail | `_mail_guard` |  | `MailAttachUrlBody` |  | `gizmo.routes.mail.mail_attach_url_route` | A presigned PUT for a file about to be attached to an email. |
+| `/api/mail/attachment` | POST | mail | `_mail_guard` |  | `MailAttachmentBody` | `_user_tabs` | `gizmo.routes.mail.mail_attachment_route` | Bring an attachment out of Gmail and into the files store. |
+| `/api/mail/board` | POST | mail | `_mail_guard` |  | `MailBoardBody` | `_team_role` | `gizmo.routes.mail.mail_board_route` |  |
+| `/api/mail/body` | POST | mail | `_mail_guard` |  | `MailMessageBody` |  | `gizmo.routes.mail.mail_body_route` | The actual text of the conversation, read on demand. |
+| `/api/mail/bulk` | POST | mail | `_mail_guard` |  | `MailBulkBody` |  | `gizmo.routes.mail.mail_bulk_route` | Many threads, one decision. |
 | `/api/mail/claim` | POST | mail | `_mail_guard` |  |  |  | `gizmo.routes.mail.mail_claim_route` |  |
 | `/api/mail/connect-link` | POST | mail | `_mail_guard` |  |  | `_team_role` | `gizmo.routes.mail.mail_connect_link_route` | Master-only: mint a single-use ticket for the consent walk, so nobody has to copy a server secret into a URL by hand. |
 | `/api/mail/disconnect` | POST | mail | `_mail_guard` |  |  | `_team_role` | `gizmo.routes.mail.mail_disconnect_route` |  |
-| `/api/mail/draft` | POST | mail | `_mail_guard` |  | unchecked | `_user_tabs` | `gizmo.routes.mail.mail_draft_route` | Draft a reply with Claude, then (on a second, explicit call) put it in Gmail as a DRAFT for the person to review and send themselves. |
-| `/api/mail/note` | POST | mail | `_mail_guard` |  | unchecked |  | `gizmo.routes.mail.mail_note_route` |  |
+| `/api/mail/draft` | POST | mail | `_mail_guard` |  | `MailDraftBody` | `_user_tabs` | `gizmo.routes.mail.mail_draft_route` | Draft a reply with Claude, then (on a second, explicit call) put it in Gmail as a DRAFT for the person to review and send themselves. |
+| `/api/mail/note` | POST | mail | `_mail_guard` |  | `MailNoteBody` |  | `gizmo.routes.mail.mail_note_route` |  |
 | `/api/mail/orders` | POST | mail | `_mail_guard` |  |  | `_user_tabs` | `gizmo.routes.mail.mail_orders_route` | What this app knows about the person who sent the email. |
-| `/api/mail/presence` | POST | mail | `_mail_guard` |  | unchecked |  | `gizmo.routes.mail.mail_presence_route` |  |
-| `/api/mail/read` | POST | mail | `_mail_guard` |  | unchecked |  | `gizmo.routes.mail.mail_read_route` | Mark threads read or unread, in Gmail and here at once. |
-| `/api/mail/rules` | POST | mail | `_mail_guard` |  | unchecked |  | `gizmo.routes.mail.mail_rules_route` | Standing decisions about arriving mail. |
-| `/api/mail/search` | POST | mail | `_mail_guard` |  | unchecked |  | `gizmo.routes.mail.mail_search_route` | Search the WHOLE mailbox, by handing the query to Google. |
-| `/api/mail/send` | POST | mail | `_mail_guard` |  | unchecked |  | `gizmo.routes.mail.mail_send_route` | Send an email FROM gizmo: a reply on a conversation, or a new one. |
+| `/api/mail/presence` | POST | mail | `_mail_guard` |  | `MailPresenceBody` |  | `gizmo.routes.mail.mail_presence_route` |  |
+| `/api/mail/read` | POST | mail | `_mail_guard` |  | `MailReadBody` |  | `gizmo.routes.mail.mail_read_route` | Mark threads read or unread, in Gmail and here at once. |
+| `/api/mail/rules` | POST | mail | `_mail_guard` |  | `MailRulesBody` |  | `gizmo.routes.mail.mail_rules_route` | Standing decisions about arriving mail. |
+| `/api/mail/search` | POST | mail | `_mail_guard` |  | `MailSearchBody` |  | `gizmo.routes.mail.mail_search_route` | Search the WHOLE mailbox, by handing the query to Google. |
+| `/api/mail/send` | POST | mail | `_mail_guard` |  | `MailSendBody` |  | `gizmo.routes.mail.mail_send_route` | Send an email FROM gizmo: a reply on a conversation, or a new one. |
 | `/api/mail/settings` | POST | mail | `_mail_guard` |  | `MailSettingsBody` |  | `gizmo.routes.mail.mail_settings_route` | The footer, the saved replies and your own sign-off. |
-| `/api/mail/state` | POST | mail | `_mail_guard` |  | unchecked |  | `gizmo.routes.mail.mail_state_route` |  |
-| `/api/mail/thread` | POST | mail | `_mail_guard` |  | unchecked | `_user_tabs` | `gizmo.routes.mail.mail_thread_route` |  |
-| `/api/mail/undo` | POST | mail | `_mail_guard` |  | unchecked |  | `gizmo.routes.mail.mail_undo_route` |  |
-| `/api/mail/viewing` | POST | mail | `_mail_guard` |  | unchecked |  | `gizmo.routes.mail.mail_viewing_route` |  |
+| `/api/mail/state` | POST | mail | `_mail_guard` |  | `MailStateBody` |  | `gizmo.routes.mail.mail_state_route` |  |
+| `/api/mail/thread` | POST | mail | `_mail_guard` |  | `MailThreadBody` | `_user_tabs` | `gizmo.routes.mail.mail_thread_route` |  |
+| `/api/mail/undo` | POST | mail | `_mail_guard` |  | `MailUndoBody` |  | `gizmo.routes.mail.mail_undo_route` |  |
+| `/api/mail/viewing` | POST | mail | `_mail_guard` |  | `MailViewingBody` |  | `gizmo.routes.mail.mail_viewing_route` |  |
 
 ## `/api/margin`
 

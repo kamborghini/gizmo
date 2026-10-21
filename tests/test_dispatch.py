@@ -5872,12 +5872,19 @@ def t_a_contact_on_open_deals_cannot_be_deleted():
 @test
 def t_a_nonfinite_value_can_never_brick_the_crm_store():
     # Python's json module happily WRITES NaN, which is not JSON, so the next
-    # read would poison the store and refuse every write forever. The cast
-    # rejects it and the writer refuses non-finite as a backstop.
+    # read would poison the store and refuse every write forever. The door
+    # refuses it now (stage 5: a value is a number, and these are not finite);
+    # the cast behind it still rejects it, and the writer refuses non-finite
+    # as a backstop.
     _org, _per, deal = crm_seed()
     for bad in ("NaN", "Infinity", "-Infinity"):
         r = post("/api/crm/deal", {"op": "update", "id": deal, "value": bad})
-        eq(r.status_code, 200, r.text)   # the bad value is ignored, not stored
+        eq((r.status_code, r.json().get("error")), (400, "The value sent must be a number."), r.text)
+        try:
+            salesdesk._crm_value(bad)
+            ok(False, "the cast takes " + bad)
+        except ValueError:
+            pass
     board = post("/api/crm/board", {})
     eq(board.status_code, 200, "the store still reads")
     eq(board.json()["crm"]["deals"][deal]["value"], 450.0, "and the value is untouched")
@@ -31492,22 +31499,55 @@ def t_the_accounts_routes_refuse_a_wrong_kind():
     finally:
         forecasting.FORECAST_INGEST_TOKEN = saved
 
+@test
+def t_the_desks_routes_refuse_a_wrong_kind():
+    """Stage 5, piece 3: the CRM's deals, leads, stages and import, every
+    Inbox route and Files name the fields they read. Every one, sent as an
+    object and as a list, is a 400 in the model's words before the route reads
+    it. Each op chosen is one that changes nothing when it is let through."""
+    from gizmo.routes import crm as r_crm, mail as r_mail, files as r_files
+    n = _wrong_kinds_refused([
+        ("/api/crm/deal", "detail", r_crm.CrmDealBody),
+        ("/api/crm/import", None, r_crm.CrmImportBody),
+        ("/api/crm/lead", "seen", r_crm.CrmLeadBody),
+        ("/api/crm/stages", None, r_crm.CrmStagesBody),
+        ("/api/mail/assign", None, r_mail.MailAssignBody),
+        ("/api/mail/attach-done", None, r_mail.MailAttachDoneBody),
+        ("/api/mail/attach-url", None, r_mail.MailAttachUrlBody),
+        ("/api/mail/attachment", None, r_mail.MailAttachmentBody),
+        ("/api/mail/board", None, r_mail.MailBoardBody),
+        ("/api/mail/body", None, r_mail.MailMessageBody),
+        ("/api/mail/bulk", "state", r_mail.MailBulkBody),
+        ("/api/mail/draft", "save", r_mail.MailDraftBody),
+        ("/api/mail/note", None, r_mail.MailNoteBody),
+        ("/api/mail/presence", None, r_mail.MailPresenceBody),
+        ("/api/mail/read", None, r_mail.MailReadBody),
+        ("/api/mail/rules", "list", r_mail.MailRulesBody),
+        ("/api/mail/search", None, r_mail.MailSearchBody),
+        ("/api/mail/send", None, r_mail.MailSendBody),
+        ("/api/mail/state", None, r_mail.MailStateBody),
+        ("/api/mail/thread", None, r_mail.MailThreadBody),
+        ("/api/mail/undo", None, r_mail.MailUndoBody),
+        ("/api/mail/viewing", None, r_mail.MailViewingBody),
+        ("/api/files/complete", None, r_files.FileCompleteBody),
+        ("/api/files/download-url", None, r_files.FileDownloadBody),
+        ("/api/files/file", "rename", r_files.FileBody),
+        ("/api/files/upload-url", None, r_files.FileUploadBody)])
+    ok(n > 100, "every field each model names was tried (%d refusals)" % n)
+    for items in (["a"], [{"name": "Hot"}, "Cold"]):
+        r = post("/api/crm/stages", {"labels": items})
+        eq((r.status_code, r.json().get("error")), (400, "The labels sent must be a list of sets of fields."), repr(items))
+
 # The write routes that read fields from their body with no model checking
 # them yet (gizmo/bodies.py). The list may only shrink: a new write route comes
 # with its model, and a route that gains one leaves the list.
 UNCHECKED_BODIES = [
-    "/api/crm/deal", "/api/crm/import", "/api/crm/lead", "/api/crm/stages", "/api/custom/book",
-    "/api/custom/list", "/api/custom/quote", "/api/custom/visibility", "/api/dispatch/book",
-    "/api/dispatch/cancel", "/api/dispatch/collections", "/api/dispatch/diagnose",
-    "/api/dispatch/parse-address", "/api/dispatch/quote", "/api/eori/check", "/api/files/complete",
-    "/api/files/download-url", "/api/files/file", "/api/files/upload-url", "/api/gobo-sizes/check",
-    "/api/gobo-sizes/models", "/api/gobo-sizes/upload", "/api/mail/assign", "/api/mail/attach-done",
-    "/api/mail/attach-url", "/api/mail/attachment", "/api/mail/board", "/api/mail/body", "/api/mail/bulk",
-    "/api/mail/draft", "/api/mail/note", "/api/mail/presence", "/api/mail/read", "/api/mail/rules",
-    "/api/mail/search", "/api/mail/send", "/api/mail/state", "/api/mail/thread", "/api/mail/undo",
-    "/api/mail/viewing", "/api/production-labels", "/api/production-labels/coverage",
-    "/api/production-labels/queue", "/api/stock-usage", "/api/stock-usage/send",
-    "/print/production-labels/sign", "/webhooks/privacy"]
+    "/api/custom/book", "/api/custom/list", "/api/custom/quote", "/api/custom/visibility",
+    "/api/dispatch/book", "/api/dispatch/cancel", "/api/dispatch/collections", "/api/dispatch/diagnose",
+    "/api/dispatch/parse-address", "/api/dispatch/quote", "/api/eori/check", "/api/gobo-sizes/check",
+    "/api/gobo-sizes/models", "/api/gobo-sizes/upload", "/api/production-labels",
+    "/api/production-labels/coverage", "/api/production-labels/queue", "/api/stock-usage",
+    "/api/stock-usage/send", "/print/production-labels/sign", "/webhooks/privacy"]
 
 @test
 def t_write_routes_check_their_bodies():
