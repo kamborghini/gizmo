@@ -202,8 +202,8 @@ def _effort_for(model: str, deep: bool = False) -> str:
 
 
 # ---------------------------------------------------------------------------
-# A Shopify read that came back with data, and the signs money is written
-# with.
+# The signs money is written with (the overview's figures and the chase email
+# read them).
 # ---------------------------------------------------------------------------
 
 
@@ -767,18 +767,6 @@ def _spawn_bg(coro) -> bool:
     salesdesk._crm_bg_tasks.add(t)
     t.add_done_callback(salesdesk._crm_bg_tasks.discard)
     return True
-# ---------------------------------------------------------------------------
-# Shop redaction owed after an uninstall, privacy requests held for an admin,
-# the token vault at rest, and who may edit the Size list or send mail.
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Accounts: a work session's length in words, first-run setup and its code, the
-# data volume check, and an account as the Team screen sees it.
-# ---------------------------------------------------------------------------
-
-
 # ---------------------------------------------------------------------------
 # Route registration (mounted onto the existing MCP server app)
 # ---------------------------------------------------------------------------

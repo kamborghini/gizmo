@@ -1200,7 +1200,8 @@ async def _origin_address(registry: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Per-product optimization plans
+# Order totals for the reports: the last 28 days through the shared snapshot,
+# what counts as a sale, its revenue, and the month axis.
 # ---------------------------------------------------------------------------
 
 async def _orders_28d(registry: dict, meta: Optional[dict] = None) -> list:

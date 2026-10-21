@@ -1416,6 +1416,10 @@ def _redact_archive_reap(now: Optional[float] = None) -> int:
     return gone
 
 
+# ---------------------------------------------------------------------------
+# Shop redaction owed after an uninstall, the requests held for an admin, the
+# live privacy records a restore keeps, and the webhook signature check.
+# ---------------------------------------------------------------------------
 # How long Reactor's own reads of the store must already have been refused
 # before a shop/redact may erase. A genuine one comes 48 hours after the
 # uninstall, by which time the watchdog (three failed hourly probes) has

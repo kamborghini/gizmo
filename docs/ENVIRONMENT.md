@@ -376,7 +376,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `RAILWAY_ENVIRONMENT` | `None` | gizmo.status | set by Railway; the volume check runs only there |
 | `RAILWAY_PROJECT_ID` | `None` | gizmo.status | set by Railway; the volume check runs only there |
 
-## gizmo/team.py - Team colours: the colour each account is given, so a row sho
+## gizmo/team.py - Team colours, who may edit the Size list or send mail, first
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|

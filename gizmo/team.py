@@ -545,7 +545,8 @@ def _team_counts(events: list, days: int = 30) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Team colours: the colour each account is given, so a row shows whose it is.
+# Team colours, who may edit the Size list or send mail, first-run setup and
+# its code, the account as the Team screen shows it, and the sign-in helpers.
 # ---------------------------------------------------------------------------
 # Who owns what, at a glance. The same names the CRM already uses, minus the two
 # greys: as a row tint on an app that is already grey they would read as no
