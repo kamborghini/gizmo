@@ -143,7 +143,7 @@ def _work_close_open(uid: str, by: str, note: str, action: str) -> Optional[dict
     ws["end"] = nowu.isoformat()
     try:
         ws["secs"] = max(0, int((nowu - datetime.fromisoformat(ws["start"])).total_seconds()))
-    except Exception:
+    except Exception:  # an unreadable start counts no time
         ws["secs"] = 0
     ws.update({"corrected": True, "corrected_by": by, "corrected_at": nowu.isoformat(), "note": note})
     w["sessions"].append(ws)

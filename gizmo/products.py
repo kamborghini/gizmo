@@ -79,7 +79,7 @@ async def run_products_list(registry: dict, months_window: Optional[int] = None)
     for o in orders:
         try:
             created = datetime.fromisoformat((o.get("created_at") or "").replace("Z", "+00:00"))
-        except Exception:
+        except Exception:  # an order with no readable date is left out of the last 28 days
             created = None
         if not (created and created >= cutoff28):
             continue

@@ -562,7 +562,7 @@ def register(mcp, registry):
                 for l in still[:3]:
                     try:
                         reports.append(await worldoptions.label_link_report(l.get("value")))
-                    except Exception as e:
+                    except Exception as e:  # the failure is the report: logged with the others just below
                         reports.append({"url": str(l.get("value"))[:300], "problem": repr(e)[:200]})
                 tech = {"reply": json.dumps(reports, indent=1)[:2000],
                         "when": datetime.now(timezone.utc).isoformat(), "order": str(oid)}

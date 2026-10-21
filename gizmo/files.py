@@ -130,7 +130,7 @@ def _files_ensure_bucket_locked(page_origin: str) -> None:
         if not _files_ready["bucket"]:
             try:
                 s3.head_bucket(Bucket=R2_BUCKET)
-            except Exception:
+            except Exception:  # no bucket, or no answer about it: make it; a failed make raises below
                 s3.create_bucket(Bucket=R2_BUCKET)
             _files_ready["bucket"] = True
         if not _files_ready["cors"] and page_origin:
@@ -576,7 +576,7 @@ def _files_head(key: str):
     wobble must never be reported as 'your upload vanished'."""
     try:
         return int(_files_s3().head_object(Bucket=R2_BUCKET, Key=key)["ContentLength"])
-    except Exception as e:
+    except Exception as e:  # a missing object is None; anything else is raised below
         resp = getattr(e, "response", None)
         code = str(((resp or {}).get("Error") or {}).get("Code") or "") if isinstance(resp, dict) else ""
         if code in ("404", "NoSuchKey", "NotFound") or "404" in str(e):

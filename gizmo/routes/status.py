@@ -73,7 +73,7 @@ def register(mcp, registry):
             with open(probe, "w", encoding="utf-8") as fh:
                 fh.write("ok")
             os.remove(probe)
-        except Exception as e:
+        except Exception as e:  # the status page shows the volume as not writable, with why
             vol_ok, vol_detail = False, str(e)[:200]
         watch = scheduler._load_watch()
         health = size_list._gobo_sizes().get("health") or {}
@@ -84,7 +84,7 @@ def register(mcp, registry):
                 scope_state = {"checked": not got.get("error"),
                                "missing": got.get("missing") or {},
                                "error": got.get("error") or ""}
-            except Exception as e:
+            except Exception as e:  # the status page shows the scope check's error
                 scope_state["error"] = str(e)[:200]
         return gate._json({
             "shopify": {"ok": shop_ok, "name": shop_name, "currency": currency,

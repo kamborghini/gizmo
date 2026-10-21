@@ -78,7 +78,7 @@ def register(mcp, registry):
             if not _event_order:
                 raise ValueError("no order id")
             orderbook._orders_changed([_event_order])
-        except Exception:
+        except Exception:  # an event that names no order retires every snapshot (above)
             orderbook._bust_orders()
         orderbook._webhook_state["last_at"] = time.time()
         orderbook._webhook_state["last_topic"] = str(request.headers.get("x-shopify-topic") or "")

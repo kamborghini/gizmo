@@ -89,7 +89,7 @@ async def _get(path: str, params: dict = None, version: str = "v2") -> dict:
     if r.status_code >= 400:
         try:
             detail = r.json().get("error") or r.text[:300]
-        except Exception:
+        except Exception:  # not JSON: Pipedrive's own text is the detail
             detail = r.text[:300]
         raise PipedriveError(f"Pipedrive said: {str(detail)[:300]}")
     ctype = (r.headers.get("content-type") or "").lower()

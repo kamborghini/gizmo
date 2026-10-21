@@ -273,7 +273,7 @@ async def _token(acct: Account = SALES) -> str:
         try:
             err = r.json().get("error", "")
             desc = r.json().get("error_description", "")
-        except Exception:
+        except Exception:  # a refusal that is not JSON has no Google code; the status says it below
             err, desc = "", ""
         if err == "invalid_grant":
             raise GmailError("Gmail token refresh failed. Reconnect the mailbox.")
@@ -350,7 +350,7 @@ async def _call(method: str, path: str, *, params: dict = None, body: dict = Non
     if r.status_code >= 400:
         try:
             detail = r.json().get("error", {}).get("message", "") or r.text[:300]
-        except Exception:
+        except Exception:  # not JSON: Google's own text is the detail, logged below
             detail = r.text[:300]
         logger.warning(f"Gmail API {r.status_code} on {path} ({acct.label}): {detail}")
         raise GmailError(str(detail).strip()[:400] or f"HTTP {r.status_code}")
@@ -364,7 +364,7 @@ async def _upload_post(url: str, headers: dict, body: bytes):
         r = await c.post(url, headers=headers, content=body)
     try:
         data = r.json()
-    except Exception:
+    except Exception:  # not JSON: Google's own text is the error
         data = {"error": {"message": r.text[:300]}}
     return r.status_code, data
 

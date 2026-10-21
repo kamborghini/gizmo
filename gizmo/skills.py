@@ -868,7 +868,7 @@ def _note_skills_applied(data: dict) -> None:
         return
     try:
         skills = _load_skills()
-    except Exception:
+    except Exception:  # skills that cannot be read cannot be matched; the answer goes without the list
         data.pop("skills_applied", None)
         return
     by = {(s.get("title") or "").strip().lower(): s for s in skills}

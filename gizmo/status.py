@@ -50,7 +50,7 @@ def _store_report(parse: bool = True) -> list:
                 with open(p, encoding="utf-8") as fh:
                     json.load(fh)
                 row["parse_ms"] = round((time.perf_counter() - t0) * 1000, 1)
-            except Exception:
+            except Exception:  # a store that will not parse shows no parse time
                 row["parse_ms"] = None
         out.append(row)
     out.sort(key=lambda r: -r["bytes"])
