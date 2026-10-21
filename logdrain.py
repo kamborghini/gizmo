@@ -170,7 +170,7 @@ def _run():
             sender = _state["sender"]
             if sender:
                 sender(batch)
-        except Exception:
+        except Exception:  # a sink that fails is counted in dropped(); a log line here could feed the drain it reports on
             with _lock:
                 _state["dropped"] += len(batch)
 

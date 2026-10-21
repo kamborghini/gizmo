@@ -82,7 +82,7 @@ def granted() -> dict:
     try:
         with open(OAUTH_TOKEN_PATH, "r", encoding="utf-8") as fh:
             scopes = json.load(fh).get("scopes")
-    except Exception:
+    except Exception:  # no token file, or one that will not read, is unknown, which counts as granted (above)
         scopes = None
     if not isinstance(scopes, list):
         return {k: None for k in GRANTS}
@@ -259,7 +259,7 @@ async def _post(url: str, body: dict) -> dict:
             # or "User does not have sufficient permission for site '…'").
             try:
                 detail = r.json().get("error", {}).get("message", "") or r.text[:300]
-            except Exception:
+            except Exception:  # not JSON: Google's own text is the detail, logged below
                 detail = r.text[:300]
             logger.warning(f"Google API {r.status_code}: {detail}")
             raise GoogleAPIError(detail.strip()[:400] or f"HTTP {r.status_code}")

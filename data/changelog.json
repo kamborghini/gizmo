@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-21",
+   "title": "Fewer quiet failures",
+   "items": [
+    {
+     "kind": "improved",
+     "tab": null,
+     "text": "Three things that could go wrong without a trace now leave a note for whoever looks after the app: the day's AI spend not being readable, the key behind erasure records not being readable, and a privacy request from Shopify that could not be read. Nothing looks different."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-21",
    "title": "Requests checked at the door",
    "items": [
     {

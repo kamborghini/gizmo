@@ -565,7 +565,7 @@ async def _mail_fetch_parts(files: list, uid: str, inline_keys: list = None):
         # which takes dispatch, labels and the inbox down with the inbox.
         try:
             size = await asyncio.to_thread(fileserver._files_head, key)
-        except Exception:
+        except Exception:  # a size that cannot be read is measured after the read instead (below)
             size = None
         if size is not None and size > budget:
             raise ValueError(f"{_mail_part_name(key)} does not fit: attachments come to "

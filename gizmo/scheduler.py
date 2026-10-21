@@ -166,7 +166,7 @@ async def _run_scheduled_audits(registry: dict) -> list:
         if prev_at:
             try:
                 fresh = (datetime.now(timezone.utc) - datetime.fromisoformat(prev_at)).days < 14
-            except Exception:
+            except Exception:  # an unreadable stamp is not fresh: a new snapshot is taken
                 fresh = False
 
         def _close(a, b):
@@ -250,7 +250,7 @@ async def _watchdog_tick(registry: dict) -> bool:
             if shopify._install_checker is not None:
                 try:
                     refused = (await shopify._install_checker()) == "gone"
-                except Exception:
+                except Exception:  # a check that cannot answer is not an uninstall; the outage alert above stands
                     refused = False
             if refused:
                 # Shopify turning the app's own credential away is what an
@@ -297,7 +297,7 @@ async def _watchdog_tick(registry: dict) -> bool:
         if last_cov:
             try:
                 due = (datetime.now(timezone.utc) - datetime.fromisoformat(last_cov)).days >= 7
-            except Exception:
+            except Exception:  # an unreadable stamp means the check is due
                 due = True
         if up and due:
             cov = await core.run_label_coverage(registry, 200)
@@ -525,7 +525,7 @@ async def _scheduler_loop(registry: dict) -> None:
                 if last:
                     try:
                         stale = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() > 86400
-                    except Exception:
+                    except Exception:  # an unreadable stamp means the email is due
                         stale = True
                 if stale:   # at most one failure email a day, not one per tick
                     state["error_email_at"] = datetime.now(timezone.utc).isoformat()
