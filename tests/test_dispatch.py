@@ -30970,6 +30970,24 @@ def t_move_area_adds_to_an_area_moved_earlier():
     for first in ("gizmo.old", "copilot", "gizmo.floor_stub"):
         rr = _sp.run([sys.executable, "-c", f"import {first}, copilot; assert copilot.uses() == 3"], cwd=root, capture_output=True, text=True)
         eq(rr.returncode, 0, f"{first} first: " + rr.stderr[-400:])
+    # a floor module copilot.py takes a name from but does not bind by its own
+    # name: taking a setting into it binds it, in copilot.py and the suite
+    cfg = '"""Stands in for the settings."""\n\n\ndef helper() -> int:\n    return 1\n'
+    cop3 = _TOY_COPILOT.replace("from gizmo import floor_stub\n", "from gizmo import floor_stub\nfrom gizmo.cfg import helper\n", 1) + (
+        "\n\nSETTING = 3\n\n\ndef reads() -> int:\n    return SETTING + helper()\n")
+    spec3 = {"note": "a setting to the floor", "routes": [], "areas": [
+        {"name": "cfg", "file": "gizmo/cfg.py", "alias": "cfg", "existing": True, "prefix": "^$",
+         "extra": ["SETTING"], "exclude": [], "floor": True, "doc": ""}]}
+    root3 = _toy_repo("toy-bind", cop3, spec3, {"gizmo/cfg.py": cfg,
+                      "tests/test_dispatch.py": _TOY_TEST + "\n\ndef t_setting():\n    assert copilot.SETTING == 3\n"})
+    r = _run_move(root3)
+    eq(r.returncode, 0, r.stdout[-800:] + r.stderr[-800:])
+    c3, cf3, t3 = (open(os.path.join(root3, f)).read() for f in (_TOY_MAIN, "gizmo/cfg.py", "tests/test_dispatch.py"))
+    ok("from gizmo import cfg\n" in c3 and "return cfg.SETTING + helper()" in c3, "copilot.py binds the module and reads it: " + c3[-300:])
+    ok("SETTING = 3" in cf3 and "import copilot" not in cf3, "the floor holds the setting and imports nothing above it")
+    ok("from gizmo import cfg" in t3 and "assert cfg.SETTING == 3" in t3, "and the suite, which reads it, binds it too")
+    rr = _sp.run([sys.executable, "-c", "import gizmo.cfg, copilot; assert copilot.reads() == 4"], cwd=root3, capture_output=True, text=True)
+    eq(rr.returncode, 0, rr.stderr[-400:])
 
 @test
 def t_the_privacy_loans_and_work_routes_are_gathered():
