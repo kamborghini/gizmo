@@ -184,6 +184,9 @@ and what each turns off. Everything else defaults to "that feature is off".
 - **Tests** are `@test` functions in `tests/test_dispatch.py`, run in file
   order by the runner at the bottom. A test that needs accounts wraps itself
   in `with_accounts(go)`; one that needs the file store in `with_files(go)`.
+  A run prints one line per test; what the app logged during a test is shown
+  under its FAIL line only. `VERBOSE=1` streams every log line as it comes,
+  and `ONLY=part_of_a_name` runs the tests whose names contain it.
   Static guards on the page live in `tests/test_frontend.py`.
 
 ## Tests
