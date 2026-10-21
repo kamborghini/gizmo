@@ -238,8 +238,7 @@ def _page_context_to_system(ctx) -> str:
 
 
 # ---------------------------------------------------------------------------
-# The store report, the last error alert, and today's date and time in London,
-# which the whole app reads.
+# Today's date and time in London, which the whole app reads.
 # ---------------------------------------------------------------------------
 
 
@@ -994,7 +993,7 @@ async def run_products_list(registry: dict, months_window: Optional[int] = None)
 
 
 # ---------------------------------------------------------------------------
-# Abuse / cost controls — in-memory rate limiting + request-size guards
+# Rate limits kept in memory: the EORI checks'.
 # ---------------------------------------------------------------------------
 # EORI checks, app-wide rather than per-client: the limit being respected is
 # the EU service's, and it counts requests from this deployment, not from

@@ -17,8 +17,8 @@ _oauth_states: dict[str, float] = {}
 
 
 # ---------------------------------------------------------------------------
-# The accounts mailbox's connect walk: the tickets and states its consent walk
-# is waiting on, held in memory.
+# The sign-in walks: the accounts mailbox's tickets and states, held in memory,
+# the redirect address and the page every walk answers with.
 # ---------------------------------------------------------------------------
 _fin_connect_tickets: dict = {}      # ticket -> its expiry and the address asked for (the ACCOUNTS mailbox)
 _fin_expect: dict = {}               # state nonce -> the address that was asked for
