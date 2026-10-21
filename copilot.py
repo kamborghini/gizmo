@@ -130,6 +130,15 @@ from gizmo import seo
 from gizmo import analytics
 from gizmo.routes import seo as routes_seo
 from gizmo.routes import analytics as routes_analytics
+# Moved out of this file (stage 4): the scheduler and alerts, release notes and requests, impact tracking and backup, with their routes.
+from gizmo import scheduler
+from gizmo import updates
+from gizmo import impact
+from gizmo import backup
+from gizmo.routes import scheduler as routes_scheduler
+from gizmo.routes import updates as routes_updates
+from gizmo.routes import impact as routes_impact
+from gizmo.routes import backup as routes_backup
 logger = logging.getLogger("shopify_mcp.copilot")
 
 
@@ -167,12 +176,7 @@ STORE_CONTEXT_CAP  = _env_num(int, os.environ.get("STORE_CONTEXT_CAP", "4000"), 
 # mounted there makes it durable across redeploys.
 PROFILE_PATH       = os.environ.get("PROFILE_PATH", "/data/store_profile.json")
 PROFILE_FIELD_CAP  = _env_num(int, os.environ.get("PROFILE_FIELD_CAP", "6000"), "6000", "PROFILE_FIELD_CAP")
-IMPACT_PATH        = os.environ.get("IMPACT_PATH", "/data/impact.json")  # tracked-action impact log
-IMPACT_MAX         = _env_num(int, os.environ.get("IMPACT_MAX", "100"), "100", "IMPACT_MAX")
 CHAT_CONTEXT_CAP   = _env_num(int, os.environ.get("CHAT_CONTEXT_CAP", "12000"), "12000", "CHAT_CONTEXT_CAP")  # max chars of page-report context injected into chat
-SCHEDULE_PATH      = os.environ.get("SCHEDULE_PATH", "/data/schedule.json")  # auto-refresh config (off by default)
-ALERTS_PATH        = os.environ.get("ALERTS_PATH", "/data/alerts.json")      # change alerts from scheduled runs
-FEEDBACK_PATH      = os.environ.get("FEEDBACK_PATH", "/data/feedback.json")  # feature requests from the desk
 LAYOUTS_PATH       = os.environ.get("LAYOUTS_PATH", "/data/layouts.json")    # each person's arrangement of the cards on a screen
 # Reconciliation engine: exceptions + audit trail, system snapshots, extracted documents.
 RECON_PATH         = os.environ.get("RECON_PATH", "/data/recon.json")
@@ -181,10 +185,6 @@ FORECAST_INGEST_TOKEN = os.environ.get("FORECAST_INGEST_TOKEN", "").strip()  # s
 FORECAST_MAX_BYTES = 8 * 1024 * 1024
 RECON_CACHE_PATH   = os.environ.get("RECON_CACHE_PATH", "/data/recon_cache.json")
 RECON_DOCS_PATH    = os.environ.get("RECON_DOCS_PATH", "/data/recon_docs.json")
-CHANGELOG_PATH     = os.environ.get("CHANGELOG_PATH",
-                                    os.path.join(os.path.dirname(__file__), "data", "changelog.json"))
-ALERTS_MAX         = _env_num(int, os.environ.get("ALERTS_MAX", "60"), "60", "ALERTS_MAX")
-SCHEDULE_CHECK_SECS = _env_num(int, os.environ.get("SCHEDULE_CHECK_SECS", "900"), "900", "SCHEDULE_CHECK_SECS")       # how often the scheduler wakes to check
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")   # composer.js; the page itself is joined by pagesource.py from static/src
 _page_cache: Optional[str] = None   # the shell: the page with its CSS and JS lifted out
@@ -296,8 +296,8 @@ def _page_context_to_system(ctx) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Impact tracking — "close the loop": snapshot headline metrics when a change is
-# made, then measure how they moved since. Proves whether advice worked.
+# The store report, the last error alert, and today's date and time in London,
+# which the whole app reads.
 # ---------------------------------------------------------------------------
 
 
@@ -311,7 +311,7 @@ def _store_report(parse: bool = True) -> list:
     dozen or more call sites and no cache. Whether that matters is a number,
     not an opinion: this is the number, at boot and in Settings, so the day
     a save on the CRM is slow it is visible before somebody feels it."""
-    data_dir = os.path.dirname(SCHEDULE_PATH) or "/data"
+    data_dir = os.path.dirname(scheduler.SCHEDULE_PATH) or "/data"
     out = []
     try:
         names = os.listdir(data_dir)
@@ -340,171 +340,6 @@ def _store_report(parse: bool = True) -> list:
 
 
 _last_error_alert = 0.0
-
-
-BACKUP_STATE_PATH = os.environ.get("BACKUP_STATE_PATH", "/data/backup_state.json")
-BACKUP_SNAPSHOT_DIR = os.environ.get("BACKUP_SNAPSHOT_DIR", "/data/snapshots")
-BACKUP_KEEP = 4
-# Per-file ceiling inside a backup. It exists so one runaway store cannot make
-# the whole archive un-downloadable, NOT as a retention rule: a CRM holding an
-# imported sales history will pass 10MB, and the backup meant to protect it
-# must not be the thing that quietly stops including it.
-BACKUP_FILE_MAX = _env_num(int, os.environ.get("BACKUP_FILE_MAX", str(60 * 1024 * 1024)), str(60 * 1024 * 1024), "BACKUP_FILE_MAX")
-
-
-def _build_backup_zip():
-    """(BytesIO, files_added). Everything restorable, credentials excluded."""
-    import io, zipfile
-    data_dir = os.path.dirname(SCHEDULE_PATH) or "/data"
-    repo_data = os.path.join(os.path.dirname(__file__), "data")
-    # Never export credentials, and give the two roots distinct prefixes so the
-    # repo-seed sheet cannot shadow the live uploaded one on restore.
-    secrets_excluded = {
-        os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json")),
-        os.path.basename(getattr(google_mail, "TOKEN_PATH", "gmail_oauth.json")),
-        os.path.basename(getattr(xero_api, "TOKEN_PATH", "xero_oauth.json")),
-        os.path.basename(getattr(google_mail, "FINANCE_TOKEN_PATH", "gmail_finance_oauth.json")),
-        os.path.basename(desk.WO_SECRET_PATH),
-        # Sessions are transient bearer state: never in a backup. The accounts
-        # register IS included, because restoring it is exactly what brings the
-        # team back after a lost volume. It holds scrypt hashes and each
-        # account's two-step secret, sealed with tokenvault (plain only while
-        # the vault key is unset, as every sealed store is). The cash flow
-        # workbook rides in forecast.json and is included too, decided
-        # 14 Oct 2026: only the master downloads a backup, which already holds
-        # the CRM and the inbox, and a restore without it would leave the
-        # forecast without its cash flow until somebody uploaded it again.
-        os.path.basename(team.SESSIONS_PATH),
-    }
-    buf = io.BytesIO()
-    added = 0
-    included, skipped = [], []
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        # Stored dispatch labels live in their own folder; without them a
-        # restored app could not reprint anything dispatched before the move.
-        # Newest 60 only: labels are ~1MB each and an uncapped archive could
-        # build a backup too large for its own restore.
-        label_keep = set()
-        if os.path.isdir(desk.DISPATCH_LABELS_DIR):
-            try:
-                by_age = sorted(os.listdir(desk.DISPATCH_LABELS_DIR),
-                                key=lambda n: os.path.getmtime(os.path.join(desk.DISPATCH_LABELS_DIR, n)),
-                                reverse=True)
-                label_keep = set(by_age[:60])
-                for n in by_age[60:]:
-                    skipped.append({"name": n, "reason": "older label; newest 60 kept"})
-            except OSError:
-                pass
-        roots = ((data_dir, "volume"), (repo_data, "repo-data"),
-                 (desk.DISPATCH_LABELS_DIR, "volume-labels"))
-        for root, prefix in roots:
-            if not os.path.isdir(root):
-                continue
-            try:
-                names = sorted(os.listdir(root))
-            except OSError:
-                continue
-            for n in names:
-                if n in secrets_excluded:
-                    continue
-                if prefix == "volume-labels" and n not in label_keep:
-                    continue
-                p = os.path.join(root, n)
-                if not os.path.isfile(p) or not n.lower().endswith((".json", ".jsonl", ".csv", ".bak")):
-                    continue
-                try:
-                    size = os.path.getsize(p)
-                    if size > BACKUP_FILE_MAX:
-                        # Named, never silent: a store that outgrew the backup
-                        # is exactly what the merchant must hear about.
-                        skipped.append({"name": n, "reason": f"too large ({size // (1024 * 1024)}MB)"})
-                        logger.warning("backup skipped %s: %d bytes", n, size)
-                        continue
-                    z.write(p, prefix + "/" + n)
-                    included.append({"name": prefix + "/" + n, "size": size})
-                    added += 1
-                except OSError:
-                    continue
-        z.writestr("manifest.json", json.dumps({
-            "built_at": datetime.now(timezone.utc).isoformat(),
-            "included": included, "skipped": skipped}))
-    return buf, added
-
-
-def _note_backup(kind: str) -> None:
-    try:
-        st = jsonstore._load_json_store(BACKUP_STATE_PATH, "backup", {}) or {}
-        st[kind + "_at"] = datetime.now(timezone.utc).isoformat()
-        if jsonstore._store_writable(BACKUP_STATE_PATH):
-            jsonstore._write_json_store(BACKUP_STATE_PATH, "backup", st)
-    except Exception:
-        logger.exception("could not record the backup time")
-
-
-def _weekly_snapshot(force: bool = False) -> bool:
-    """A dated snapshot kept in the volume, newest few retained. This survives a
-    bad write or a corrupted store; it does NOT survive losing the volume, which
-    is why the app also nags for a real download.
-
-    force=True takes one regardless of when the last was: used immediately
-    before something irreversible, like replacing the CRM with an import."""
-    try:
-        st = jsonstore._load_json_store(BACKUP_STATE_PATH, "backup", {}) or {}
-        last = str(st.get("snapshot_at") or "")
-        if last and not force:
-            try:
-                when = datetime.fromisoformat(last)
-                if when.tzinfo is None:
-                    when = when.replace(tzinfo=timezone.utc)
-                if (datetime.now(timezone.utc) - when).days < 7:
-                    return False
-            except ValueError:
-                pass
-        buf, added = _build_backup_zip()
-        if not added:
-            return False
-        os.makedirs(BACKUP_SNAPSHOT_DIR, exist_ok=True)
-        # A forced snapshot is the restore point from before something
-        # irreversible, so it is named to the second and never replaces
-        # anything: named by the day, a second import that day overwrote the
-        # only copy of the CRM from before the first. It keeps its own count,
-        # so imports cannot push the weekly snapshots out, and it leaves the
-        # weekly schedule alone.
-        prefix = "pre-import" if force else "snapshot"
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ" if force else "%Y-%m-%d")
-        path = os.path.join(BACKUP_SNAPSHOT_DIR, f"{prefix}-{stamp}.zip")
-        n = 2
-        while force and os.path.exists(path):
-            path = os.path.join(BACKUP_SNAPSHOT_DIR, f"{prefix}-{stamp}-{n}.zip")
-            n += 1
-        tmp = path + ".tmp"
-        with open(tmp, "wb") as fh:
-            fh.write(buf.getvalue())
-        os.replace(tmp, path)
-        old = sorted(glob.glob(os.path.join(BACKUP_SNAPSHOT_DIR, f"{prefix}-*.zip")),
-                     key=os.path.getmtime)
-        keep = set(old[-BACKUP_KEEP:])
-        if force:
-            # And the FIRST of each day for a month: kept by count alone, a
-            # fifth run of an import deleted the only snapshot from before the
-            # first, which is the one a bad import needs.
-            since = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y%m%d")
-            first_of_day: dict = {}
-            for f in old:
-                day = os.path.basename(f)[len(prefix) + 1:len(prefix) + 9]
-                first_of_day.setdefault(day, f)
-            keep |= {f for day, f in first_of_day.items() if day >= since}
-        for stale in [f for f in old if f not in keep]:
-            try:
-                os.remove(stale)
-            except OSError:
-                pass
-        _note_backup("pre_import" if force else "snapshot")
-        logger.info("weekly snapshot written: %s (%s files)", path, added)
-        return True
-    except Exception:
-        logger.exception("weekly snapshot failed")
-        return False
 
 
 def _london_today():
@@ -538,88 +373,6 @@ def _london_hm(iso) -> str:
         return when.astimezone(ZoneInfo("Europe/London")).strftime("%H:%M on %d %b")
     except ValueError:
         return str(iso or "")
-
-
-def _load_impact() -> list[dict]:
-    return jsonstore._load_json_store(IMPACT_PATH, "items", [])
-
-
-def _write_impact(items: list[dict]) -> list[dict]:
-    if not jsonstore._store_writable(IMPACT_PATH):
-        return items[:IMPACT_MAX]
-    jsonstore._write_json_store(IMPACT_PATH, "items", items[:IMPACT_MAX])
-    return items[:IMPACT_MAX]
-
-
-async def _impact_snapshot(registry: dict) -> dict:
-    """A light 28-day headline-metric snapshot (revenue, orders, sessions, search
-    clicks). Each source degrades to absent on error, so this never raises."""
-    snap: dict = {"at": datetime.now(timezone.utc).isoformat()}
-    try:
-        m28: dict = {}
-        orders = [o for o in await _orders_28d(registry, meta=m28) if _order_counts(o)]
-        if not m28.get("failed"):      # a failed read is absent, never a zero
-            snap["revenue_28d"] = round(sum(_order_revenue(o) for o in orders), 2)
-            snap["orders_28d"] = len(orders)
-    except Exception:
-        pass
-    try:
-        if google_data.ga4_configured():
-            ga = await google_data.ga4_summary(28)
-            if ga and not ga.get("error") and ga.get("sessions") is not None:
-                snap["sessions_28d"] = ga["sessions"]
-    except Exception:
-        pass
-    try:
-        if google_data.gsc_configured():
-            g = await google_data.gsc_overview(28)
-            if g and not g.get("error") and g.get("clicks") is not None:
-                snap["clicks_28d"] = g["clicks"]
-    except Exception:
-        pass
-    return snap
-
-
-_impact_snap_cache: dict = {}
-
-_IMPACT_METRICS = [("revenue_28d", "Revenue", True), ("orders_28d", "Orders", False),
-                   ("sessions_28d", "Sessions", False), ("clicks_28d", "Search clicks", False)]
-
-
-def _impact_with_deltas(items: list[dict], current: dict) -> list[dict]:
-    out = []
-    for it in items:
-        base = it.get("baseline") or {}
-        # A concluded change is measured to the day it was concluded: against
-        # today its figures went on moving for ever under 'Concluded'.
-        end = it.get("final") if it.get("status") == "concluded" and isinstance(it.get("final"), dict) else current
-        deltas = []
-        for key, label, _money_flag in _IMPACT_METRICS:
-            b, c = base.get(key), end.get(key)
-            if isinstance(b, (int, float)) and isinstance(c, (int, float)):
-                pct = round((c - b) / b * 100) if b else None
-                deltas.append({"key": key, "label": label, "from": b, "to": c, "pct": pct})
-        out.append({**it, "deltas": deltas})
-    return out
-
-
-def _impact_learning_text(it: dict, current: dict) -> str:
-    """The learning a concluded change leaves in Memory, in the app's own
-    formats: '2 Sep 2026' and '£6,420', not an ISO date and a bare number."""
-    base = it.get("baseline") or {}
-    b, c = base.get("revenue_28d"), current.get("revenue_28d")
-    raw = (it.get("started_at") or "")[:10]
-    try:
-        d = datetime.strptime(raw, "%Y-%m-%d")
-        when = f"{d.day} {d:%b %Y}"
-    except ValueError:
-        when = raw
-    if isinstance(b, (int, float)) and isinstance(c, (int, float)) and b:
-        pct = round((c - b) / b * 100)
-        direction = "up" if pct > 0 else "down" if pct < 0 else "flat"
-        return (f"After '{it.get('text', '')}' (tracked from {when}), 28-day revenue was {direction} "
-                f"{abs(pct)}%, from £{b:,.0f} to £{c:,.0f}.")
-    return f"Tracked the change '{it.get('text', '')}' from {when}."
 
 
 # ---------------------------------------------------------------------------
@@ -2214,528 +1967,6 @@ async def recon_exception(params: ReconExceptionInput) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Scheduled refresh + change alerts. Off by default (automatic token spend is
-# opt-in). When enabled, a background loop periodically re-runs the audits
-# server-side and records notable metric moves as in-app alerts.
-# ---------------------------------------------------------------------------
-
-_SCHEDULE_DEFAULT = {"enabled": False, "every_hours": 168, "threshold_pct": 15, "last_run": None}
-
-
-def _load_schedule() -> dict:
-    data = jsonstore._load_json_store(SCHEDULE_PATH, None, {})
-    return {**_SCHEDULE_DEFAULT, **(data if isinstance(data, dict) else {})}
-
-
-def _save_schedule(cfg: dict, _internal: bool = False) -> dict:
-    cur = _load_schedule()
-    if "enabled" in cfg:
-        was = bool(cur.get("enabled"))
-        cur["enabled"] = bool(cfg["enabled"])
-        # Turning it on should not fire a full paid run within the next tick; start the
-        # clock now so the first automatic run lands one interval later.
-        if cur["enabled"] and not was and not cur.get("last_run"):
-            cur["last_run"] = datetime.now(timezone.utc).isoformat()
-    if "every_hours" in cfg:
-        try:
-            cur["every_hours"] = max(1, min(744, int(cfg["every_hours"])))
-        except (TypeError, ValueError):
-            pass
-    if "threshold_pct" in cfg:
-        try:
-            cur["threshold_pct"] = max(1, min(100, int(cfg["threshold_pct"])))
-        except (TypeError, ValueError):
-            pass
-    # last_run is server-owned. Accepting it from a client allowed an unparseable value
-    # to make every tick look "due", which would run paid audits every check interval.
-    if _internal and "last_run" in cfg:
-        cur["last_run"] = cfg["last_run"]
-    if not jsonstore._store_writable(SCHEDULE_PATH):
-        return cur
-    jsonstore._write_json_store(SCHEDULE_PATH, None, cur)
-    return cur
-
-
-def _load_alerts() -> list:
-    alerts = jsonstore._load_json_store(ALERTS_PATH, "alerts", [])
-    # Records written before the banner's fields were settled carried kind,
-    # title and detail, none of which the banner reads, so they rendered as a
-    # dot and a tilde. Read them as what they meant rather than shredding them.
-    for a in alerts:
-        kind = a.get("tab") or a.get("kind") or ""
-        if not a.get("tab"):
-            a["tab"] = kind
-        if not a.get("tab_label"):
-            a["tab_label"] = {"connector": "Xero sync"}.get(kind, kind.replace("_", " ").title())
-        if not a.get("metric"):
-            a["metric"] = a.get("title") or a.get("detail") or "The last run needs attention"
-    return alerts
-
-
-def _write_alerts(alerts: list) -> list:
-    if not jsonstore._store_writable(ALERTS_PATH):
-        return alerts[:ALERTS_MAX]
-    jsonstore._write_json_store(ALERTS_PATH, "alerts", alerts[:ALERTS_MAX])
-    return alerts[:ALERTS_MAX]
-
-
-def _add_alerts(items: list) -> list:
-    alerts = _load_alerts()
-    now = datetime.now(timezone.utc).isoformat()
-    for it in (items or []):
-        alerts.insert(0, {"id": secrets.token_hex(5), "at": now, "status": "new", **it})
-    return _write_alerts(alerts)
-
-
-RESEND_API_KEY   = os.environ.get("RESEND_API_KEY", "")
-ALERT_EMAIL_TO   = os.environ.get("ALERT_EMAIL_TO", "")
-ALERT_EMAIL_FROM = os.environ.get("ALERT_EMAIL_FROM", "Reactor <onboarding@resend.dev>")
-WATCH_PATH       = os.environ.get("WATCH_PATH", "/data/watch.json")
-
-
-async def _send_alert_email(subject: str, lines: list) -> bool:
-    """Alerts that only render inside the app are invisible until someone opens it;
-    with a Resend key set, they also reach an inbox. Best-effort, never raises."""
-    if not (RESEND_API_KEY and ALERT_EMAIL_TO):
-        return False
-    try:
-        async with httpx.AsyncClient(timeout=15) as cx:
-            r = await cx.post("https://api.resend.com/emails",
-                              headers={"Authorization": "Bearer " + RESEND_API_KEY},
-                              json={"from": ALERT_EMAIL_FROM, "to": [ALERT_EMAIL_TO],
-                                    "subject": subject, "text": "\n".join(lines)})
-        if r.status_code >= 300:
-            logger.warning("alert email rejected: %s %s", r.status_code, r.text[:200])
-        return r.status_code < 300
-    except Exception:
-        logger.exception("alert email failed")
-        return False
-
-
-def _load_watch() -> dict:
-    return jsonstore._load_json_store(WATCH_PATH, None, {}) or {}
-
-
-def _save_watch(state: dict) -> None:
-    if not jsonstore._store_writable(WATCH_PATH):
-        return
-    try:
-        jsonstore._write_json_store(WATCH_PATH, None, state)
-    except Exception:
-        logger.exception("watch state write failed")
-
-
-def _update_alert(aid: str, status: str) -> list:
-    alerts = _load_alerts()
-    if status == "delete":
-        return _write_alerts([a for a in alerts if a.get("id") != aid])
-    for a in alerts:
-        if a.get("id") == aid:
-            a["status"] = status
-    return _write_alerts(alerts)
-
-
-async def _run_scheduled_audits(registry: dict) -> list:
-    """Re-run the audits server-side (no session needed) and record notable metric
-    moves as alerts. Returns the new alerts. Never raises."""
-    # Gate: when the store's headline numbers have not moved since the last
-    # scheduled run, skip the paid rewrite of four identical reports. A real run
-    # still happens at least every 14 days regardless.
-    try:
-        snap = await _impact_snapshot(registry)
-        state = _load_watch()
-        prev, prev_at = state.get("sched_snapshot") or {}, state.get("sched_snapshot_at")
-        fresh = False
-        if prev_at:
-            try:
-                fresh = (datetime.now(timezone.utc) - datetime.fromisoformat(prev_at)).days < 14
-            except Exception:
-                fresh = False
-
-        def _close(a, b):
-            try:
-                a, b = float(a), float(b)
-            except (TypeError, ValueError):
-                return a == b
-            return abs(a - b) / max(abs(a), abs(b), 1.0) < 0.01
-
-        if snap and prev and fresh and all(_close(snap.get(k), prev.get(k)) for k in set(prev) | set(snap)):
-            cfg = _load_schedule()
-            cfg["last_run"] = datetime.now(timezone.utc).isoformat()
-            _save_schedule(cfg, _internal=True)
-            logger.info("scheduler: headline metrics unchanged; skipped paid audits")
-            return []
-        if snap:
-            state["sched_snapshot"] = snap
-            state["sched_snapshot_at"] = datetime.now(timezone.utc).isoformat()
-            _save_watch(state)
-    except Exception:
-        logger.exception("scheduler gate failed; running audits anyway")
-    extra = (_profile_to_system(_load_profile()) + memory._memory_to_system()
-             + knowledge._knowledge_to_system() + skillbook._skills_to_system("overview SEO search keywords customers report"))
-    threshold = _load_schedule().get("threshold_pct", 15)
-    track = (_load_profile().get("prefs") or {}).get("track_inventory", True)
-    jobs = [
-        ("Overview", "overview", lambda: analytics.run_overview(registry, extra, bool(track))),
-        ("SEO", "seo", lambda: seo.run_seo_audit(registry, extra)),
-        ("Keywords", "keywords", lambda: seo.run_keywords(registry, extra)),
-        ("Customers", "customers", lambda: analytics.run_customers(registry, extra)),
-    ]
-    found = []
-    for label, kind, run in jobs:
-        try:
-            res = await run()
-            res = analytics._save_customer_segment("__all__", res) if kind == "customers" else analytics._save_analysis(kind, res)
-            for ch in (res.get("changes") or []):
-                if ch.get("pct") is not None and abs(ch["pct"]) >= threshold:
-                    found.append({"tab": kind, "tab_label": label, "metric": ch["label"],
-                                  "pct": ch["pct"], "prev": ch["prev"], "cur": ch["cur"]})
-        except Exception:
-            logger.exception("scheduled audit failed: %s", kind)
-    cfg = _load_schedule()
-    cfg["last_run"] = datetime.now(timezone.utc).isoformat()
-    _save_schedule(cfg, _internal=True)
-    if found:
-        _add_alerts(found)
-        await _send_alert_email(
-            "Reactor: " + str(len(found)) + (" change alert" if len(found) == 1 else " change alerts"),
-            [f"{a['tab_label']}: {a['metric']} moved {a['pct']}% ({a['prev']} -> {a['cur']})" for a in found]
-            + ["", "Open the app for details."])
-    logger.info("scheduler: ran audits, %d alert(s)", len(found))
-    return found
-
-
-_scheduler_started = False
-_watch_last_tick = 0.0
-
-
-async def _watchdog_tick(registry: dict) -> bool:
-    """Hourly, independent of the paid schedule: probe the Shopify connection and
-    keep the size-list coverage fresh. Returns True when Shopify is reachable.
-    Never raises."""
-    global _watch_last_tick
-    now = time.time()
-    if now - _watch_last_tick < 3600:
-        return not _load_watch().get("shopify_down")
-    _watch_last_tick = now
-    state = _load_watch()
-    try:
-        shop = await shopify._tool_json(registry, "shopify_get_shop", {})
-        up = _ok(shop) and bool(shop.get("name"))
-        fails = 0 if up else int(state.get("probe_fails") or 0) + 1
-        state["probe_fails"] = fails
-        if not up and fails == 3 and not state.get("shopify_down"):
-            # Three consecutive hourly failures: this is an outage, not a blip.
-            state["shopify_down"] = datetime.now(timezone.utc).isoformat()
-            _add_alerts([{"tab": "settings", "tab_label": "Connections",
-                          "metric": "Shopify connection is failing; data may be stale", "pct": None}])
-            refused = False
-            if shopify._install_checker is not None:
-                try:
-                    refused = (await shopify._install_checker()) == "gone"
-                except Exception:
-                    refused = False
-            if refused:
-                # Shopify turning the app's own credential away is what an
-                # uninstall looks like, and two days after one Shopify has
-                # Reactor erase the shop's data: say so while there is time.
-                await _send_alert_email("Reactor: Shopify is refusing the app's access to your store",
-                                        ["For 3 hours Shopify has refused Reactor's access to your store.",
-                                         "If the app was uninstalled, reinstall it now: two days after an",
-                                         "uninstall, Shopify has Reactor erase the shop's data from the app.",
-                                         "If nobody here uninstalled it, someone holding the app's secret may",
-                                         "have: reinstall it and change the secret. If the secret or token was",
-                                         "just changed on purpose, give Reactor the new one."])
-            else:
-                await _send_alert_email("Reactor: Shopify connection is failing",
-                                        ["The app has not been able to read your store for 3 hours.",
-                                         "Data and labels may be stale, and scheduled audits are paused",
-                                         "until the connection recovers (this usually means the access",
-                                         "token was rotated or Shopify had an outage)."])
-        if up and state.get("shopify_down"):
-            state.pop("shopify_down", None)
-            await _send_alert_email("Reactor: Shopify connection recovered",
-                                    ["Reads are working again; scheduled audits resume."])
-        # The privacy duties first, each on its own: anything later in this
-        # tick that raises (the size-list check did, every hour) skipped them.
-        # A shop/redact still owed is tried against this tick's own record of
-        # how long the store has been out of reach.
-        try:
-            await _shop_redact_retry(state.get("shopify_down"))
-        except Exception:
-            logger.exception("shop/redact retry failed")
-        try:
-            # Shopify is not asked about customers while it cannot be reached.
-            await privacy._redact_hold_due(check=up)
-        except Exception:
-            logger.exception("held customer erasures failed")
-        try:
-            privacy._redact_retry_pending()      # an admin's erasure a store refused, tried again
-        except Exception:
-            logger.exception("the retry of an unfinished erasure failed")
-        # Weekly size-list coverage: catch a new model going unmatched before a
-        # CHECK label surprises the workbench.
-        last_cov = state.get("coverage_at")
-        due = True
-        if last_cov:
-            try:
-                due = (datetime.now(timezone.utc) - datetime.fromisoformat(last_cov)).days >= 7
-            except Exception:
-                due = True
-        if up and due:
-            cov = await run_label_coverage(registry, 200)
-            if not cov.get("error"):
-                keys = sorted(f"{f['manufacturer']}|{f['model']}|{f['reason']}" for f in cov.get("flagged", []))
-                prev = set(state.get("coverage_flagged") or [])
-                fresh = [k for k in keys if k not in prev]
-                state["coverage_at"] = datetime.now(timezone.utc).isoformat()
-                state["coverage_flagged"] = keys
-                state["coverage_pct"] = cov.get("pct")
-                if fresh and prev:   # first-ever run just sets the baseline quietly
-                    _add_alerts([{"tab": "labels", "tab_label": "Labels",
-                                  "metric": "New model not matching the size list: " + k.split("|")[1], "pct": None}
-                                 for k in fresh[:5]])
-                    await _send_alert_email("Reactor: new models missing from the size list",
-                                            [k.replace("|", " / ") for k in fresh]
-                                            + ["", "Open Production Manager and run Size check: each "
-                                               "model there can be given a size, pointed at a model "
-                                               "already on the list, or ruled out, without editing "
-                                               "any file."])
-        # Webhook subscriptions are a standing repair, not an install step:
-        # Shopify silently deletes one after sustained delivery failure (an
-        # outage on our side), so re-assert them every tick.
-        if up and shopify._webhook_ensurer is not None:
-            try:
-                orderbook._webhook_state["ensured"] = await shopify._webhook_ensurer()
-                gone = (orderbook._webhook_state["ensured"] or {}).get("foreign_removed") or []
-                if gone:
-                    # A subscription made with this app's credentials and
-                    # pointing at another host copies orders out of the
-                    # business: removed by the repair, and said loudly.
-                    _track(None, "settings", "removed order webhooks pointing outside Reactor", "; ".join(gone))
-                    await _send_alert_email("Reactor: removed store notifications that pointed outside the app",
-                                            gone + ["", "Each was made with Reactor's own Shopify credentials. "
-                                                    "If one was a second copy of Reactor, such as a staging copy, "
-                                                    "allow its host name (for example staging.example.com) in the "
-                                                    "server's settings. If nobody here made it, treat those "
-                                                    "credentials as leaked: change the desktop AI token and the "
-                                                    "app secret."])
-            except Exception:
-                logger.exception("webhook registration failed")
-        # Stock-bridge retries: bookings that failed to reach the stock app.
-        # Not gated on Shopify being up: reversals need no Shopify read, and a
-        # book retry just fails and stays parked if Shopify is still down.
-        await _zeta_drain(registry)
-        # And the catalogue, so the stock app's mapping view stays complete as
-        # the size sheet evolves. Cheap, idempotent, best-effort.
-        if _zeta_configured():
-            try:
-                await _zeta_send_catalog()
-            except Exception:
-                logger.warning("stock bridge: catalogue push failed; next tick retries")
-        # The accounts vanishing after setup means the register was LOST
-        # (corrupt file, missing volume): the app will demand first-run setup
-        # again. Nobody is silently let in, but the merchant must hear about
-        # it, because their team is locked out until setup happens.
-        try:
-            if state.get("team_established") and _team_setup_needed():
-                last = str(state.get("team_lost_alert_at") or "")
-                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                if last != today:
-                    state["team_lost_alert_at"] = today
-                    logger.error("the accounts register is empty after setup; the app will re-run first-run setup")
-                    _add_alerts([{"tab": "settings", "tab_label": "Team",
-                                  "metric": "The user accounts were lost: the app is asking to be "
-                                            "set up again", "pct": None}])
-                    await _send_alert_email("Reactor: the user accounts were lost",
-                                            ["The list of accounts is empty even though it was set up "
-                                             "before (a corrupt file or a missing data volume).",
-                                             "The app will show its first-run setup screen; recreate the "
-                                             "master account, then the team's accounts."])
-            team._sessions_sweep()
-            work._work_close_orphans()
-            activity._events_flush()   # belt for the debounced ledger writes
-        except Exception:
-            logger.exception("team register check failed")
-
-        # Files trash past its 30-day window, and uploads that never finished.
-        # Not gated on Shopify: the bucket is a different service entirely.
-        # Under the store lock: the purge is a read-modify-write like any route.
-        try:
-            async with fileserver._files_lock:
-                await asyncio.to_thread(fileserver._files_tick)
-        except Exception:
-            logger.exception("files purge failed")
-        # MERGE rather than write the snapshot taken minutes ago: this tick has
-        # been awaiting Shopify, emails, coverage and the bucket the whole time,
-        # and anything written meanwhile (team_established, for one) would be
-        # erased by writing our stale copy back wholesale.
-        fresh = _load_watch()
-        fresh.update(state)
-        # A merge keeps what the snapshot no longer has. The outage flag is
-        # the one key this tick DELETES, and merging it back meant a recovered
-        # connection stayed "down" on disk: a recovered email every hour, the
-        # early-return path answering down, and the paid audits skipped on
-        # three ticks in four, for as long as the volume lasted.
-        if "shopify_down" not in state:
-            fresh.pop("shopify_down", None)
-        _save_watch(fresh)
-        return up or fails < 3
-    except Exception:
-        logger.exception("watchdog tick failed")
-        return True
-
-
-_recon_nightly_stamp = {"day": ""}
-
-
-async def _recon_nightly() -> None:
-    """One sweep a day, self-stamped like the CRM's. Never raises: a failed
-    sweep is a note in the store, not a dead scheduler."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    if _recon_nightly_stamp["day"] == today:
-        return
-    if not xero_api.connected():
-        return                       # nothing to reconcile against yet
-    _recon_nightly_stamp["day"] = today
-    try:
-        r = await recon_engine.sweep()
-        logger.info("recon nightly: %s", json.dumps(r.get("open_counts") or {}))
-    except Exception:
-        logger.exception("recon nightly sweep failed")
-
-
-async def _connector_watch() -> None:
-    """Tell someone when the Xero connector needs attention.
-
-    A quarantined order is silent: it is not an error anywhere, it simply never
-    arrives in the accounts, and nobody finds out until they happen to open the
-    tab. With Auto Run on, nobody has a reason to open the tab at all - so the
-    automation is exactly what makes this necessary rather than nice.
-
-    Polled, not pushed. gizmo already holds the connector's token and calls
-    into it; a webhook the other way would mean that service authenticating
-    INTO this one, which is a second credential and a new direction of trust
-    for the sake of a few minutes on a message about an accounting run.
-
-    Never raises: the scheduler has other work after this.
-    """
-    if not _connector_url():
-        return
-    try:
-        code, data = await _connector_call("GET", "/api/health")
-    except Exception:
-        # The service being unreachable is its own alert, but a noisy one
-        # during a redeploy. The tab says it plainly; this stays quiet.
-        return
-    if code >= 400 or not isinstance(data, dict):
-        return
-    if not data.get("needsAttention"):
-        return
-    run_id = str(data.get("lastRunId") or "")
-    if not run_id:
-        return
-    state = _load_watch()
-    if state.get("connector_run") == run_id:
-        return                      # already told them about this one
-    problems = [str(p) for p in (data.get("problems") or [])][:12]
-    auto = (data.get("autoRun") or {}).get("enabled")
-    lines = ["The Xero connector finished a run that needs looking at.", "",
-             str(data.get("line") or ""), ""]
-    lines += ["- " + p for p in problems]
-    lines += ["", "Auto Run is " + ("ON, so this will be retried on the next pass."
-                                    if auto else "off; nothing further will happen until someone runs it."),
-              "Open Reactor, Finance, Xero sync."]
-    # The banner draws tab_label, metric and pct. I gave it kind/title/detail,
-    # none of which it reads, so the alert rendered as a bare dot and a tilde -
-    # a row that told the reader something was wrong and refused to say what.
-    _add_alerts([{"tab": "connector", "tab_label": "Xero sync",
-                  "metric": (problems[0] if problems
-                             else str(data.get("line") or "the last run needs attention")),
-                  "pct": None}])
-    await _send_alert_email("Xero connector: " + str(data.get("line") or "run needs attention"), lines)
-    # RELOAD after the await. The snapshot above was taken before an SMTP round
-    # trip; writing it back wholesale erases anything else the watch store
-    # gained meanwhile - team_established among them, and the watchdog's
-    # "the accounts were lost" alarm keys off that flag. The single-writer rule
-    # this codebase runs on, broken in code I added this morning.
-    fresh = _load_watch()
-    fresh["connector_run"] = run_id
-    _save_watch(fresh)
-
-
-async def _scheduler_loop(registry: dict) -> None:
-    await asyncio.sleep(60)  # let the app settle after boot
-    while True:
-        try:
-            shopify_up = await _watchdog_tick(registry)
-            await asyncio.to_thread(_weekly_snapshot)   # no-op until a week is up
-            if shopify_up:
-                await salesdesk._crm_shopify_link_nightly(registry)   # once a day, self-stamped
-            # Xero refresh tokens die after 60 unused days, and the books
-            # drift silently between sweeps: both are the scheduler's problem.
-            await xero_api.keepalive()
-            await _recon_nightly()
-            await _connector_watch()
-            cfg = _load_schedule()
-            if not shopify_up:
-                logger.warning("scheduler: Shopify unreachable; skipping paid audits this tick")
-            elif cfg.get("enabled") and claude.ANTHROPIC_API_KEY:
-                last = cfg.get("last_run")
-                due = True
-                if last:
-                    try:
-                        prev = datetime.fromisoformat(last)
-                        if prev.tzinfo is None:                      # tolerate a naive stamp
-                            prev = prev.replace(tzinfo=timezone.utc)
-                        elapsed = (datetime.now(timezone.utc) - prev).total_seconds()
-                        due = elapsed >= max(1, cfg.get("every_hours", 168)) * 3600
-                    except Exception:
-                        # Fail CLOSED: an unreadable timestamp must not make every tick
-                        # "due" and spend money in a loop. Re-stamp and wait a full cycle.
-                        logger.warning("scheduler: unreadable last_run %r; re-stamping", last)
-                        cfg["last_run"] = datetime.now(timezone.utc).isoformat()
-                        _save_schedule(cfg, _internal=True)
-                        due = False
-                if due:
-                    await _run_scheduled_audits(registry)
-        except Exception:
-            logger.exception("scheduler loop error")
-            try:
-                state = _load_watch()
-                last = state.get("error_email_at")
-                stale = True
-                if last:
-                    try:
-                        stale = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() > 86400
-                    except Exception:
-                        stale = True
-                if stale:   # at most one failure email a day, not one per tick
-                    state["error_email_at"] = datetime.now(timezone.utc).isoformat()
-                    _save_watch(state)
-                    await _send_alert_email("Reactor: background scheduler hit an error",
-                                            ["The automatic refresh loop errored; it will keep retrying.",
-                                             "If alerts go quiet for days, check the server logs."])
-            except Exception:
-                pass
-        await asyncio.sleep(SCHEDULE_CHECK_SECS)
-
-
-def _ensure_scheduler(registry: dict) -> None:
-    """Start the background scheduler once, lazily, when an event loop is running."""
-    global _scheduler_started
-    if _scheduler_started:
-        return
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return
-    _scheduler_started = True
-    loop.create_task(_scheduler_loop(registry))
-    loop.create_task(mail._mail_loop())
-
-
-# ---------------------------------------------------------------------------
 # Team colours: the colour each account is given, so a row shows whose it is.
 # ---------------------------------------------------------------------------
 # Who owns what, at a glance. The same names the CRM already uses, minus the two
@@ -2785,78 +2016,9 @@ def _spawn_bg(coro) -> bool:
     t.add_done_callback(salesdesk._crm_bg_tasks.discard)
     return True
 # ---------------------------------------------------------------------------
-# What's new: the release notes that ship WITH the release, and the desk's own
-# feature requests. The changelog is a repo file, so the running build always
-# carries exactly the notes for the code that is running - a changelog kept on
-# the volume would drift from the deploy the moment either changed alone.
+# Shop redaction owed after an uninstall, privacy requests held for an admin,
+# the token vault at rest, and who may edit the Size list or send mail.
 # ---------------------------------------------------------------------------
-# Keyed on (path, mtime), not mtime alone: keyed on time only, a cache built
-# from one file can be served for another that happens to share a timestamp.
-_changelog_cache: dict = {"mtime": None, "releases": []}
-
-
-def _load_changelog() -> list:
-    """Releases newest first. A malformed or missing file costs the What's new
-    panel, never the app: it is notes, not data."""
-    try:
-        key = (CHANGELOG_PATH, os.path.getmtime(CHANGELOG_PATH))
-    except OSError:
-        return []
-    if _changelog_cache["mtime"] == key:
-        return _changelog_cache["releases"]
-    rows = []
-    try:
-        with open(CHANGELOG_PATH, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        for r in (data.get("releases") if isinstance(data, dict) else data) or []:
-            if not isinstance(r, dict) or not r.get("date"):
-                continue
-            items = [{"kind": str(i.get("kind") or "improved")[:12],
-                      # Whole notes: twelve of them ran past 400 characters
-                      # and were cut mid-word on the Guide with no ellipsis.
-                      "text": str(i.get("text") or "")[:4000],
-                      "tab": str(i.get("tab") or "")[:20]}
-                     for i in (r.get("items") or []) if isinstance(i, dict) and i.get("text")]
-            if items:
-                rows.append({"date": str(r["date"])[:10],
-                             "title": str(r.get("title") or "")[:120], "items": items})
-        rows.sort(key=lambda r: r["date"], reverse=True)
-    except Exception:
-        logger.exception("changelog: could not read %s", CHANGELOG_PATH)
-        # Last good notes for THIS file, or nothing - never another file's.
-        return (_changelog_cache["releases"]
-                if (_changelog_cache["mtime"] or ("", 0))[0] == CHANGELOG_PATH else [])
-    _changelog_cache["mtime"], _changelog_cache["releases"] = key, rows
-    return rows
-
-
-_boot_at = datetime.now(timezone.utc).isoformat()
-
-
-def _app_version() -> dict:
-    """What the running build IS: the deployed commit, when this instance
-    started, and the newest release the notes describe."""
-    rel = _load_changelog()
-    return {"sha": (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:12],
-            "started_at": _boot_at,
-            "latest": (rel[0]["date"] if rel else ""),
-            "releases": len(rel)}
-
-
-def _load_feedback() -> dict:
-    d = jsonstore._load_json_store(FEEDBACK_PATH, "feedback", None)
-    if not isinstance(d, dict) or "items" not in d:
-        d = {"seq": 0, "items": []}
-    return d
-
-
-def _write_feedback(d: dict) -> None:
-    if not jsonstore._store_writable(FEEDBACK_PATH):
-        raise RuntimeError("feedback store is not writable")
-    jsonstore._write_json_store(FEEDBACK_PATH, "feedback", d)
-
-
-FEEDBACK_STATES = ("open", "planned", "shipped", "declined")
 
 
 # How long Reactor's own reads of the store must already have been refused
@@ -2968,7 +2130,7 @@ def _shop_redact_settle(outcome: str) -> None:
     _shop_redact_said[outcome] = now
     logger.warning("shop/redact: %s", outcome)
     privacy._privacy_note("shop/redact", "", "", words[0])
-    _spawn_bg(_send_alert_email(words[1], words[2]))
+    _spawn_bg(scheduler._send_alert_email(words[1], words[2]))
 
 
 async def _shop_redact_checked(delivery: str) -> Response:
@@ -3001,7 +2163,7 @@ async def _shop_redact_checked(delivery: str) -> Response:
         if not recorded:
             recorded = _shop_owed_set({"since": datetime.now(timezone.utc).isoformat(), "tries": 0,
                                        "delivery": str(delivery or "")[:80]})
-        w = _load_watch()
+        w = scheduler._load_watch()
         outcome = await _shop_redact_attempt((w if isinstance(w, dict) else {}).get("shopify_down"))
     except Exception:
         logger.exception("shop/redact: the check failed")
@@ -3946,7 +3108,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             qp = request.query_params
             if not (qp.get("shop") or qp.get("host") or qp.get("embedded") or qp.get("id_token")):
                 return PlainTextResponse("Not Found", status_code=404, headers=_API_HEADERS)
-        _ensure_scheduler(registry)  # start the background auto-refresh loop on first load (no-op until enabled)
+        scheduler._ensure_scheduler(registry)  # start the background auto-refresh loop on first load (no-op until enabled)
         headers = _frame_headers(request)
         headers["ETag"] = etag = _page_etag()
         if _etag_matches(request.headers.get("if-none-match"), etag):
@@ -4145,7 +3307,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     async def healthz(request: Request):
         # Also the scheduler's boot hook: the platform polls this, so auto-refresh
         # resumes after a redeploy without waiting for someone to open the app.
-        _ensure_scheduler(registry)
+        scheduler._ensure_scheduler(registry)
         # The running build's commit, so "is the deploy live" is an exact check
         # against a hash rather than an inference from a 200. Railway sets the env.
         sha = (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:12]
@@ -4331,147 +3493,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     # The skills' routes (gizmo/routes/skills.py), gathered where the first stood.
     routes_skills.register(mcp, registry)
 
-    @mcp.custom_route("/api/updates", methods=["POST"])
-    async def updates_route(request: Request):
-        """What's new + the desk's feature requests. Deliberately open to every
-        signed-in account and NOT tab-gated: release notes are how a part-time
-        member learns what changed under them, and the request box is worth
-        most from the people who never get asked."""
-        err, body, who = await _guard(request)
-        if err:
-            return err
-        op = str(body.get("op") or "")
-        try:
-            d = _load_feedback()
-            if op == "request":
-                title = str(body.get("title") or "").strip()[:140]
-                detail = str(body.get("detail") or "").strip()[:4000]
-                if not title:
-                    return _json({"error": "Give the request a one-line title."}, 400)
-                d["seq"] = int(d.get("seq") or 0) + 1
-                item = {"id": "r" + str(d["seq"]), "title": title, "detail": detail,
-                        "by": who, "state": "open", "note": "",
-                        "where": str(body.get("where") or "")[:20],
-                        "at": datetime.now(timezone.utc).isoformat()}
-                d.setdefault("items", []).insert(0, item)
-                d["items"] = d["items"][:500]
-                _write_feedback(d)
-                _track(who, "updates", "asked for a feature", title[:60])
-                # Best-effort: a request nobody reads is a suggestion box with
-                # no lid. Never blocks the save, and the page is told whether it
-                # went: it promised an email to Cameron that was never sent when
-                # alert email is not set up.
-                emailed = False
-                try:
-                    emailed = bool(await _send_alert_email(
-                        "Reactor: " + (team._team_name(who) or "someone") + " asked for a feature",
-                        [title, detail or "(no detail given)"]
-                        + (["Asked from the " + item["where"] + " page."] if item["where"] else [])))
-                except Exception:
-                    emailed = False
-                return _json({"ok": True, "item": item, "emailed": emailed})
-            if op == "state":
-                # Triage. Admin+, because it speaks for the whole desk.
-                if team._team_level(who) < team.ROLE_LEVELS["admin"]:
-                    return _json({"error": "Only an admin can triage requests."}, 403)
-                rid = str(body.get("id") or "")
-                state = str(body.get("state") or "")
-                if state not in FEEDBACK_STATES:
-                    return _json({"error": "Unknown state."}, 400)
-                hit = next((x for x in d.get("items", []) if x.get("id") == rid), None)
-                if not hit:
-                    return _json({"error": "That request no longer exists."}, 404)
-                hit["state"] = state
-                if "note" in body:
-                    hit["note"] = str(body.get("note") or "").strip()[:400]
-                    hit["note_by"] = who if hit["note"] else ""
-                hit["state_at"] = datetime.now(timezone.utc).isoformat()
-                _write_feedback(d)
-                _track(who, "updates", "marked a request " + state, (hit.get("title") or "")[:60])
-                return _json({"ok": True, "item": hit})
-            if op == "delete":
-                if team._team_level(who) < team.ROLE_LEVELS["admin"]:
-                    return _json({"error": "Only an admin can remove requests."}, 403)
-                rid = str(body.get("id") or "")
-                d["items"] = [x for x in d.get("items", []) if x.get("id") != rid]
-                _write_feedback(d)
-                return _json({"ok": True})
-            # What this person has read, kept on their account: it was a date
-            # in one browser, so on the shared bench computer the first person
-            # to open What's new cleared the dot for everyone, and a second
-            # release on a day already read never lit it at all.
-            seen = d.setdefault("seen", {}).get(who) or {}
-            if op == "seen":
-                now = datetime.now(timezone.utc).isoformat()
-                if body.get("releases") is not None:
-                    seen["releases"] = int(body.get("releases") or 0)
-                if body.get("requests"):
-                    seen["requests"] = now
-                d["seen"][who] = seen
-                _write_feedback(d)
-                return _json({"ok": True, "seen": seen})
-            mine_answered = sum(1 for x in d.get("items", []) if x.get("by") == who
-                                and (x.get("state_at") or "") > (seen.get("requests") or ""))
-            new_for_triage = sum(1 for x in d.get("items", []) if x.get("state") == "open"
-                                 and (x.get("at") or "") > (seen.get("requests") or ""))
-            can_triage = team._team_level(who) >= team.ROLE_LEVELS["admin"]
-            unread = {"releases": max(0, len(_load_changelog()) - int(seen.get("releases") or 0)),
-                      "requests": mine_answered + (new_for_triage if can_triage else 0)}
-            if op == "version":
-                # The dot's own read: the counts alone, not every note and request.
-                return _json({"ok": True, "version": _app_version(), "unread": unread, "seen": seen})
-            return _json({"ok": True, "releases": _load_changelog(),
-                          "version": _app_version(), "unread": unread, "seen": seen,
-                          "requests": d.get("items", [])[:200],
-                          "names": team._team_names(), "me": who,
-                          "can_triage": can_triage})
-        except (RuntimeError, OSError):
-            # A read-only or full volume is a SAVE failure with a cause the
-            # merchant can act on, not a "check the logs".
-            return _json({"error": "That could not be saved: the app's storage would not take it. "
-                                   "Try again, or tell Cameron if it keeps happening."}, 500)
-        except Exception:
-            logger.exception("updates route failed")
-            return _json({"error": "That could not be done. Try again, or tell Cameron if it keeps happening."}, 500)
+    # The What's new route (gizmo/routes/updates.py).
+    routes_updates.register(mcp, registry)
 
-    @mcp.custom_route("/api/schedule", methods=["POST"])
-    async def schedule_route(request: Request):
-        # Get or set the automatic-refresh config (off by default).
-        err, body, _who = await _guard(request)
-        if err:
-            return err
-        try:
-            if isinstance(body.get("config"), dict):
-                if team._team_level(_who) < team.ROLE_LEVELS["admin"]:
-                    return _json({"error": "Only an admin can change the schedule."}, 403)
-                cfg = _save_schedule(body["config"])
-                _track(_who, "settings", "changed the audit schedule")
-                if cfg.get("enabled"):
-                    _ensure_scheduler(registry)
-            else:
-                cfg = _load_schedule()
-        except Exception:
-            logger.exception("schedule op failed")
-            return _json({"error": "The schedule could not be saved. Try again, or tell Cameron if it keeps happening."}, 500)
-        return _json({"schedule": cfg})
-
-    @mcp.custom_route("/api/alerts", methods=["POST"])
-    async def alerts_route(request: Request):
-        err, body, _who = await _guard(request)
-        if err:
-            return err
-        op = body.get("op")
-        try:
-            if op == "dismiss" and body.get("id"):
-                _update_alert(body["id"], "seen")
-            elif op == "delete" and body.get("id"):
-                _update_alert(body["id"], "delete")
-            elif op == "clear":
-                _write_alerts([])
-        except Exception:
-            logger.exception("alerts op failed")
-            return _json({"error": "Couldn't update alerts."}, 500)
-        return _json({"alerts": _load_alerts()})
+    # The schedule and alert routes (gizmo/routes/scheduler.py), gathered where the first stood.
+    routes_scheduler.register(mcp, registry)
 
     @mcp.custom_route("/api/usage", methods=["POST"])
     async def usage_route(request: Request):
@@ -4488,88 +3514,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 days = 30
         return _json({"usage": _usage_summary(days)})
 
-    @mcp.custom_route("/api/impact", methods=["POST"])
-    async def impact_route(request: Request):
-        err, body, who = await _guard(request)
-        if err:
-            return err
-        op = body.get("op") or "list"
-        try:
-            # Snapshots take seconds; take them BEFORE loading the list so the
-            # load-mutate-write has no await inside it to lose concurrent changes.
-            snap = cur = None
-            out_held = False
-            if op == "add":
-                if not (body.get("text") or "").strip():
-                    return _json({"error": "Nothing to track."}, 400)
-                # Pressed twice, or from an answer drawn again: the change
-                # already being tracked is the answer, not a second copy.
-                want = (body.get("text") or "").strip()[:300]
-                twin = next((x for x in _load_impact() if x.get("text") == want and x.get("status") != "concluded"), None)
-                if twin:
-                    return _json({"item": twin, "already": True})
-                snap = await _impact_snapshot(registry)
-            elif op == "conclude" and body.get("id"):
-                cur = await _impact_snapshot(registry)
-            items = _load_impact()
-            if op == "add":
-                text = (body.get("text") or "").strip()[:300]
-                if not text:
-                    return _json({"error": "Nothing to track."}, 400)
-                added = {"id": secrets.token_hex(5), "text": text,
-                         "source": str(body.get("source") or "copilot")[:24],
-                         "baseline": snap, "started_at": snap["at"], "status": "tracking",
-                         "by_uid": str(who or ""), "by": team._team_name(who) if who else ""}
-                items.insert(0, added)
-                items = _write_impact(items)
-                return _json({"item": added, "impact": _impact_with_deltas(items, snap), "current": snap})
-            elif op in ("delete", "conclude") and body.get("id"):
-                # Yours, or an admin's to settle: a member could otherwise
-                # drop an admin's change, or conclude it into a note that
-                # waits, where the admin's own Conclude could no longer reach.
-                mine = next((x for x in items if x.get("id") == body["id"]), None)
-                if mine is not None and team._team_level(who) < team.ROLE_LEVELS["admin"] \
-                        and not (mine.get("by_uid") and mine.get("by_uid") == str(who or "")):
-                    return _json({"error": "Only an admin or the person who tracked it can change that."}, 403)
-            if op == "delete" and body.get("id"):
-                items = _write_impact([x for x in items if x.get("id") != body["id"]])
-            elif op == "conclude" and body.get("id"):
-                for x in items:
-                    if x.get("id") == body["id"] and x.get("status") != "concluded":
-                        x["status"] = "concluded"
-                        x["concluded_at"] = cur["at"]
-                        x["final"] = cur
-                        try:
-                            # The learning quotes the change's own words, so
-                            # it waits for an admin when a member wrote them
-                            # or concluded it; a change from before anyone
-                            # was recorded waits too (R-003).
-                            tracker = str(x.get("by_uid") or "")
-                            held = (team._team_level(who) < team.ROLE_LEVELS["admin"]
-                                    or not tracker or team._team_level(tracker) < team.ROLE_LEVELS["admin"])
-                            memory._add_memories([{"type": "insight", "text": _impact_learning_text(x, cur)}],
-                                          source="tracked change", held=held,
-                                          by=(x.get("by") or team._team_name(who) or "a tracked change") if held else "")
-                            if held:
-                                out_held = True
-                        except Exception:
-                            logger.exception("impact learning capture failed")
-                items = _write_impact(items)
-        except Exception:
-            logger.exception("Impact op failed")
-            return _json({"error": "Tracked changes could not be updated. Try again, or tell Cameron if it keeps happening."}, 500)
-        # Nothing tracked needs no figures: the list read took a fresh 28-day
-        # Shopify (and Google) snapshot on every Memory visit and after every
-        # chat answer. Figures read in the last five minutes are reused.
-        if not items:
-            return _json({"impact": [], "current": {}, "held": out_held})
-        now = time.monotonic()
-        if op == "list" and _impact_snap_cache.get("snap") and now - _impact_snap_cache.get("t", 0) < 300:
-            current = _impact_snap_cache["snap"]
-        else:
-            current = cur or snap or await _impact_snapshot(registry)
-            _impact_snap_cache.update({"t": now, "snap": current})
-        return _json({"impact": _impact_with_deltas(items, current), "current": current, "held": out_held})
+    # The impact route (gizmo/routes/impact.py).
+    routes_impact.register(mcp, registry)
 
     # The store knowledge's routes (gizmo/routes/knowledge.py), gathered where the first stood.
     routes_knowledge.register(mcp, registry)
@@ -4610,223 +3556,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     # stood; their paths are literal, so no request changes hands.
     routes_mail.register(mcp, registry)
 
-    @mcp.custom_route("/api/restore", methods=["POST"])
-    async def restore_route(request: Request):
-        """Master-only: put a downloaded backup zip back onto the volume. This
-        is how the shop survives a lost volume or moves the service between
-        regions: fresh volume, first-run setup, restore, sign back in. Only
-        the volume's own JSON/CSV files are accepted, by basename, so a
-        crafted zip cannot write anywhere else."""
-        perf.no_record()        # long by design: out of the slowest-routes table
-        big = 120 * 1024 * 1024
-        err, _body, who = await _guard(request, max_body=big, body=False)
-        if err:
-            return err
-        if team._team_role(who) != "master":
-            return _json({"error": "Only the master admin can restore a backup."}, 403)
-        body = await gate._read_json_capped(request, cap=big)
-        if body is None:
-            return _json({"error": "That file is too large (120 MB cap)."}, 413)
-        import io as _io
-        import zipfile as _zip
-        try:
-            blob = base64.b64decode(str(body.get("zip") or ""), validate=True)
-            zf = _zip.ZipFile(_io.BytesIO(blob))
-        except Exception:
-            return _json({"error": "That is not a readable backup zip."}, 400)
-        data_dir = os.path.dirname(SCHEDULE_PATH) or "/data"
-        # Only what the backup itself writes, and never live credentials or
-        # sessions: the same exclusions the backup applies, applied again.
-        blocked = {os.path.basename(desk.WO_SECRET_PATH), os.path.basename(team.SESSIONS_PATH),
-                   os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json")),
-                   os.path.basename(getattr(google_mail, "TOKEN_PATH", "gmail_oauth.json")),
-                   os.path.basename(getattr(xero_api, "TOKEN_PATH", "xero_oauth.json")),
-                   os.path.basename(getattr(google_mail, "FINANCE_TOKEN_PATH",
-                                            "gmail_finance_oauth.json"))}
-        # (name, target_dir) for every restorable entry; everything else named
-        # in the manifest as skipped, so nothing ever vanishes silently.
-        todo, skipped = [], []
-        built_at = built_full = ""    # to the second for people; in full to order events by
-        for info in zf.infolist():
-            if info.is_dir():
-                continue
-            base = os.path.basename(info.filename)
-            if info.filename == "manifest.json":
-                try:
-                    built_full = str(json.loads(zf.read(info)).get("built_at") or "")
-                    built_at = built_full[:19]
-                except Exception:
-                    pass
-                continue
-            if info.filename.startswith("volume/"):
-                target = data_dir
-            elif info.filename.startswith("volume-labels/"):
-                target = desk.DISPATCH_LABELS_DIR
-            elif info.filename.startswith("repo-data/"):
-                skipped.append(base + " (ships with the app's code)")
-                continue
-            else:
-                skipped.append(info.filename + " (not part of a backup)")
-                continue
-            if not base or base in blocked or not base.lower().endswith((".json", ".jsonl", ".csv", ".bak")):
-                skipped.append(base + " (never restored)")
-                continue
-            # The SAME ceiling the backup packs to. A smaller one here meant the
-            # backup dutifully carried the CRM and the mailbox and the restore
-            # dropped them - the two stores the backup exists for - and called
-            # the result a success. A store too big to restore fails the WHOLE
-            # restore: a partial restore of the desk is not a restore.
-            if info.file_size > BACKUP_FILE_MAX:
-                return _json({"error": base + " is larger than this app will restore ("
-                                       + str(info.file_size // (1024 * 1024)) + "MB). Nothing "
-                                       "has been changed. Raise the backup file size limit in the "
-                                       "app's hosting settings and try again."}, 400)
-            todo.append((info, base, target))
-        if not todo:
-            return _json({"error": "Nothing in that zip looked like this app's backup."}, 400)
-        if body.get("check"):
-            # Dry run: the exact manifest, nothing written.
-            return _json({"ok": True, "check": True, "backup_built_at": built_at,
-                          "would_restore": sorted(b for _, b, _t in todo),
-                          "skipped": sorted(skipped)})
-        # Doors first, then writes: sessions drop BEFORE anything is written,
-        # so no new request can race the restore (this request already holds
-        # its authorisation), and the files lock is held through the writes so
-        # an upload in flight commits before us, never after us.
-        team._write_sessions({})
-        webdav._dav_auth_cache.clear()
-        restored_names = []
-        # Live state, not data: an erasure owed now and how long the store
-        # has been out of reach now. Restoring the pre-redact archive brought
-        # back the owed record it was taken under, and the old outage stamp,
-        # and the next hour erased the restored data again.
-        live_priv: dict = {}
-        live_watch = _load_watch()
-        live_watch = live_watch if isinstance(live_watch, dict) else {}
-        def _drop_all_caches():
-            # Every memory copy, from the one list: the loan register was
-            # missing from the hand-kept one here, so a restored loans.json
-            # was overwritten by the pre-restore register on the next loan.
-            jsonstore._drop_memory_stores()
-            activity._events_dirty = False
-            webdav._dav_auth_cache.clear()
-            jsonstore._json_cache.clear()
-        async with fileserver._files_lock:
-            # Read here, with nothing left to await before the writes, so a
-            # privacy request that arrives while the restore waits for the
-            # lock is not lost.
-            _pl = privacy._load_privacy_log()
-            if privacy.PRIVACY_LOG_PATH not in jsonstore._poisoned_stores:
-                live_priv.update(_pl)
-            try:
-                for info, base, target in todo:
-                    payload = zf.read(info)
-                    os.makedirs(target, exist_ok=True)
-                    tmp = os.path.join(target, base + ".tmp")
-                    with open(tmp, "wb") as fh:
-                        fh.write(payload)
-                    os.replace(tmp, os.path.join(target, base))
-                    jsonstore._poisoned_stores.discard(os.path.join(target, base))
-                    restored_names.append(base)
-            except Exception:
-                # NOT just OSError: zf.read() decompresses, so a truncated or
-                # corrupted member raises BadZipFile / zlib.error / RuntimeError,
-                # none of which are OSError - and those escaped this handler,
-                # leaving a half-restored volume with the pre-restore world
-                # still live in memory and no cache drop.
-                logger.exception("restore failed mid-write")
-                # Disk is part-new: memory must never serve (or later flush)
-                # the pre-restore world over it.
-                _drop_all_caches()
-                return _json({"error": "The backup could not be read all the way through, so "
-                                       "the restore stopped part-way. The data volume now holds "
-                                       "a mix: restore again from a known-good backup before "
-                                       "using the app."}, 500)
-            # A backup is a photograph of an earlier clock. Ages must not be
-            # trusted: an upload that was mid-flight at backup time would read
-            # as days-stale and the sweep would DELETE its bytes, and old
-            # trash would purge instantly. Everything time-sensitive restarts
-            # its clock now, and the doomed list is cleared: an orphaned
-            # object in the bucket costs pennies, a wrong deletion is forever.
-            try:
-                _drop_all_caches()   # memory must re-read the RESTORED disk here
-                fd = fileserver._load_files()
-                nown = datetime.now(timezone.utc).isoformat()
-                for v in fd["files"].values():
-                    if v.get("status") == "pending":
-                        v["status"] = "trashed"
-                        v["trashed_at"] = nown
-                    elif v.get("trashed_at"):
-                        v["trashed_at"] = nown
-                fd["doomed"] = []
-                fileserver._write_files(fd)
-            except Exception:
-                logger.exception("restore: files-clock normalisation failed")
-            try:
-                if live_priv:
-                    try:
-                        _keep_live_privacy(live_priv, built_full)
-                    except Exception:
-                        logger.exception("restore: merging the live privacy requests failed")
-                w = _load_watch()
-                w = w if isinstance(w, dict) else {}
-                for k in ("shopify_down", "probe_fails"):
-                    if k in live_watch:
-                        w[k] = live_watch[k]
-                    else:
-                        w.pop(k, None)
-                _save_watch(w)
-            except Exception:
-                logger.exception("restore: keeping the live erasure and outage records failed")
-        restored = len(restored_names)
-        # Every memory copy now lies; drop them all and start from disk truth.
-        _drop_all_caches()
-        team._write_sessions({})          # already empty; re-assert against the restored disk
-        # Written AFTER the caches are dropped, so it lands in the RESTORED
-        # ledger: the history now on the volume is the backup's, and this is
-        # the line that says where it came from and who did it. Without it the
-        # jump backwards in the audit trail has no explanation in the trail.
-        _track(who, "settings", "restored a backup",
-               f"{restored} files; the history before this line is from the backup"
-               + (f" built {built_at}" if built_at else ""))
-        activity._events_flush()
-        logger.warning("backup restored by %s: %d files; all sessions dropped", who, restored)
-        return _json({"ok": True, "restored": restored, "backup_built_at": built_at,
-                      "files": sorted(restored_names), "skipped": sorted(skipped),
-                      "note": "Everyone signs in again now, with the accounts from the "
-                              "backup. Two things never travel in a backup and need "
-                              "re-entering once: the World Options courier credentials "
-                              "in Settings, and the Google connection if you use it."})
-
-    @mcp.custom_route("/api/backup", methods=["POST"])
-    async def backup_route(request: Request):
-        """Everything the app has learned lives as files on one volume; this hands
-        the merchant a zip of it. JSON and CSV only, fonts and code excluded."""
-        perf.no_record()        # long by design: out of the slowest-routes table
-        err, _body, who = await _guard(request, body=False)
-        if err:
-            return err
-        # Master only, matching /api/restore. The zip deliberately carries the
-        # accounts register, so an admin could take home every password hash
-        # (including the master's) and grind it offline - while not being
-        # trusted to restore. Export and restore now need the same standing.
-        if team._team_role(who) != "master":
-            return _json({"error": "Only the master account can download a backup, because "
-                                   "it contains the accounts register."}, 403)
-        body = await gate._read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
-        # Off the event loop, as the pre-import snapshot is: deflating the
-        # whole volume inline stopped every request and webhook for seconds.
-        buf, added = await asyncio.to_thread(_build_backup_zip)
-        if not added:
-            return _json({"error": "Nothing to back up yet."}, 404)
-        _note_backup("download")
-        _track(who, "settings", "downloaded a backup")
-        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        return Response(buf.getvalue(), media_type="application/zip",
-                        headers={**_API_HEADERS,
-                                 "Content-Disposition": f"attachment; filename=reactor-backup-{stamp}.zip"})
+    # The backup and restore routes (gizmo/routes/backup.py), gathered where the first stood.
+    routes_backup.register(mcp, registry)
 
     @mcp.custom_route("/api/liability", methods=["POST"])
     async def liability_route(request: Request):
@@ -6103,13 +4834,13 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         # Volume sentinel: prove the data disk is writable, or nothing persists.
         vol_ok, vol_detail = True, ""
         try:
-            probe = os.path.join(os.path.dirname(SCHEDULE_PATH) or ".", ".probe")
+            probe = os.path.join(os.path.dirname(scheduler.SCHEDULE_PATH) or ".", ".probe")
             with open(probe, "w", encoding="utf-8") as fh:
                 fh.write("ok")
             os.remove(probe)
         except Exception as e:
             vol_ok, vol_detail = False, str(e)[:200]
-        watch = _load_watch()
+        watch = scheduler._load_watch()
         health = size_list._gobo_sizes().get("health") or {}
         scope_state = {"checked": False, "missing": {}, "error": ""}
         if shopify._scope_reader is not None and shop_ok:
@@ -6150,7 +4881,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             # started (perf.summary), slowest first: the live numbers the
             # 2026-10-12 speed audit could only model.
             "timing": perf.summary(),
-            "email_alerts": {"ok": bool(RESEND_API_KEY and ALERT_EMAIL_TO)},
+            "email_alerts": {"ok": bool(scheduler.RESEND_API_KEY and scheduler.ALERT_EMAIL_TO)},
             # Whether the long-lived credentials on the volume are encrypted.
             # Read from the FILES, not from the environment: a key that is set
             # while a token still sits in plaintext looks fine from the
@@ -6172,7 +4903,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                              "error": _zeta_last["error"]},
             "backup": (lambda b: {"snapshot_at": b.get("snapshot_at"),
                                   "download_at": b.get("download_at")})(
-                jsonstore._load_json_store(BACKUP_STATE_PATH, "backup", {}) or {}),
+                jsonstore._load_json_store(backup.BACKUP_STATE_PATH, "backup", {}) or {}),
             # Visible whether or not email is configured, which it is not yet.
             "errors": {"last_24h": len(errors._recent_errors(24)),
                        "recent": errors._recent_errors(24)[:5]},

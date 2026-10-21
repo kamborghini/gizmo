@@ -1059,7 +1059,7 @@ def seed_connector():
 # it off: marked as started, it never starts.
 # =============================================================================
 def seed_scheduler_off():
-    copilot._scheduler_started = True
+    scheduler._scheduler_started = True
 
 
 def seed_dashboards():

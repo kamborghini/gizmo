@@ -748,9 +748,9 @@ def _redact_shop() -> dict:
     again, and each delivery tries the archive again."""
     kept = ""
     try:
-        buf, added = core._build_backup_zip()
+        buf, added = backup._build_backup_zip()
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-        data_dir = os.path.dirname(core.SCHEDULE_PATH) or "/data"
+        data_dir = os.path.dirname(scheduler.SCHEDULE_PATH) or "/data"
         kept = os.path.join(data_dir, f"pre-redact-backup-{stamp}.zip")
         os.makedirs(data_dir, exist_ok=True)
         with open(kept, "wb") as fh:
@@ -787,7 +787,7 @@ def _redact_shop() -> dict:
     _privacy_note("shop/redact", "", "",
                   f"erased {wiped} store(s); archive at {kept or '(none - see logs)'}; "
                   f"the archive is deleted after {REDACT_ARCHIVE_DAYS} days, and weekly "
-                  f"snapshots are kept for {core.BACKUP_KEEP} weeks")
+                  f"snapshots are kept for {backup.BACKUP_KEEP} weeks")
     return {"wiped": wiped, "archive": kept}
 
 
@@ -1145,14 +1145,14 @@ def _privacy_alert(force: bool = False) -> None:
         if not (_held_requests() or _open_asks()):
             return
         live = any(isinstance(a, dict) and a.get("metric") == _PRIVACY_ALERT and a.get("status") == "new"
-                   for a in core._load_alerts())
+                   for a in scheduler._load_alerts())
         if live:
             return
         last = _redact_hold_said.get("alert")
         if not force and last is not None and time.monotonic() - last < 24 * 3600:
             return
         _redact_hold_said["alert"] = time.monotonic()
-        core._add_alerts([{"tab": "settings", "tab_label": "Privacy", "metric": _PRIVACY_ALERT, "pct": None}])
+        scheduler._add_alerts([{"tab": "settings", "tab_label": "Privacy", "metric": _PRIVACY_ALERT, "pct": None}])
     except Exception:
         logger.exception("privacy requests: the alert could not be added")
 
@@ -1165,7 +1165,7 @@ def _redact_unrecorded() -> None:
     if last is not None and now - last < 3600:
         return
     _redact_hold_said["unrecorded"] = now
-    core._spawn_bg(core._send_alert_email(
+    core._spawn_bg(scheduler._send_alert_email(
         "Reactor: could not record a customer erasure request",
         ["Shopify asked Reactor to erase a customer's records, but Reactor could not record the",
          "request, so it was sent back for Shopify to try again (it does, for a few hours). Check",
@@ -1261,7 +1261,7 @@ def _privacy_mail(reminder: bool = False) -> None:
 
 async def _privacy_mail_send(subject: str, lines: list, held_ids: set, ask_ids: set) -> None:
     try:
-        sent = await core._send_alert_email(subject, lines)
+        sent = await scheduler._send_alert_email(subject, lines)
     except Exception:
         logger.exception("privacy requests: the email could not be sent")
         sent = False
@@ -1308,7 +1308,7 @@ async def _redact_hold_due(check: bool = True) -> int:
         last = _redact_hold_said.get("unreadable")
         if last is None or time.monotonic() - last >= 24 * 3600:
             _redact_hold_said["unreadable"] = time.monotonic()
-            core._spawn_bg(core._send_alert_email(
+            core._spawn_bg(scheduler._send_alert_email(
                 "Reactor: the privacy requests cannot be read",
                 ["Reactor keeps the customer erasure and data requests Shopify sends in a file it cannot",
                  "read just now, so none of them can be shown or reminded about. Check the server's",
@@ -1389,7 +1389,7 @@ def _redact_archive_reap(now: Optional[float] = None) -> int:
     erasure obligation was met by moving the data into a zip and keeping it
     forever. Thirty days is long enough to notice a misfire."""
     now = now if now is not None else time.time()
-    data_dir = os.path.dirname(core.SCHEDULE_PATH) or "/data"
+    data_dir = os.path.dirname(scheduler.SCHEDULE_PATH) or "/data"
     gone = 0
     try:
         names = os.listdir(data_dir)
@@ -1422,3 +1422,5 @@ from gizmo import mail  # noqa: E402
 from gizmo import production  # noqa: E402
 from gizmo import crm as salesdesk  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import backup  # noqa: E402
+from gizmo import scheduler  # noqa: E402

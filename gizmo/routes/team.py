@@ -14,6 +14,7 @@ import tokenvault
 import totp
 
 import copilot as core
+from gizmo import scheduler
 from gizmo import work
 from gizmo import webdav
 from gizmo import mail
@@ -80,9 +81,9 @@ def register(mcp, registry):
                                "last_login_at": datetime.now(timezone.utc).isoformat()}
             team._write_users(d)
             try:
-                state = core._load_watch()
+                state = scheduler._load_watch()
                 state["team_established"] = True
-                core._save_watch(state)
+                scheduler._save_watch(state)
             except Exception:
                 logger.exception("could not record that setup happened")
             token = team._new_session(uid)

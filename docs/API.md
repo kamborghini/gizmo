@@ -15,7 +15,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/alerts` | POST | any account | `_guard` |  |  | `copilot.alerts_route` |  |
+| `/api/alerts` | POST | any account | `_guard` |  |  | `gizmo.routes.scheduler.alerts_route` |  |
 
 ## `/api/auth`
 
@@ -33,7 +33,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/backup` | POST | any account | `_guard` | reads its own body | `_team_role` | `copilot.backup_route` | Everything the app has learned lives as files on one volume; this hands the merchant a zip of it. |
+| `/api/backup` | POST | any account | `_guard` | reads its own body | `_team_role` | `gizmo.routes.backup.backup_route` | Everything the app has learned lives as files on one volume; this hands the merchant a zip of it. |
 
 ## `/api/cache`
 
@@ -147,7 +147,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/impact` | POST | memory | `_guard` |  | `_team_level` | `copilot.impact_route` |  |
+| `/api/impact` | POST | memory | `_guard` |  | `_team_level` | `gizmo.routes.impact.impact_route` |  |
 
 ## `/api/keyword-scan`
 
@@ -301,13 +301,13 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/restore` | POST | any account | `_guard` | max body big, reads its own body | `_team_role` | `copilot.restore_route` | Master-only: put a downloaded backup zip back onto the volume. |
+| `/api/restore` | POST | any account | `_guard` | max body big, reads its own body | `_team_role` | `gizmo.routes.backup.restore_route` | Master-only: put a downloaded backup zip back onto the volume. |
 
 ## `/api/schedule`
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/schedule` | POST | any account | `_guard` |  | `_team_level` | `copilot.schedule_route` |  |
+| `/api/schedule` | POST | any account | `_guard` |  | `_team_level` | `gizmo.routes.scheduler.schedule_route` |  |
 
 ## `/api/seo`
 
@@ -354,7 +354,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/updates` | POST | any account | `_guard` |  | `_team_level` | `copilot.updates_route` | What's new + the desk's feature requests. |
+| `/api/updates` | POST | any account | `_guard` |  | `_team_level` | `gizmo.routes.updates.updates_route` | What's new + the desk's feature requests. |
 
 ## `/api/usage`
 

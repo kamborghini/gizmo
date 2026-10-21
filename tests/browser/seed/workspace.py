@@ -213,10 +213,10 @@ assert post("/api/learn", {"op": "save", "knowledge": _KNOW}).status_code == 200
 # status, by_uid, by}; a concluded one adds concluded_at and final). The open ones are
 # measured against the live 28-day snapshot the read takes from the (fake) Shopify, so
 # their baselines are set from that snapshot when it has figures.
-copilot._impact_snap_cache.clear()
-copilot._write_impact([{"id": "probe", "text": "probe", "status": "tracking", "baseline": {}}])
+impact._impact_snap_cache.clear()
+impact._write_impact([{"id": "probe", "text": "probe", "status": "tracking", "baseline": {}}])
 _cur = post("/api/impact", {}).json().get("current") or {}
-copilot._impact_snap_cache.clear()
+impact._impact_snap_cache.clear()
 _rev, _ord = _cur.get("revenue_28d") or 0, _cur.get("orders_28d") or 0
 def _base(days_ago, pct_rev, pct_ord):
     if _rev and _ord:
@@ -224,7 +224,7 @@ def _base(days_ago, pct_rev, pct_ord):
                 "orders_28d": max(1, round(_ord / (1 + pct_ord / 100)))}
     return {"at": _iso(_NOW - _td(days=days_ago)), "revenue_28d": 6420.0, "orders_28d": 48}
 _b1, _b2 = _base(21, 9, 6), _base(9, -3, 2)
-copilot._write_impact([
+impact._write_impact([
     {"id": _sec.token_hex(5), "text": "Add a spare-gobo bundle to every projector page", "source": "copilot",
      "baseline": _b1, "started_at": _b1["at"], "status": "tracking", "by_uid": _WS_MASTER, "by": "Cameron"},
     {"id": _sec.token_hex(5), "text": "Send a reorder reminder to trade accounts after 90 days", "source": "copilot",
@@ -294,15 +294,15 @@ for sess, title, detail, where, state in _REQ:
         assert post("/api/updates", {"op": "state", "id": _r.json()["item"]["id"], "state": state[0],
                                      "note": state[1]}).status_code == 200
 # Spread the asked dates (b): the feedback store, through its writer.
-_fb = copilot._load_feedback()
+_fb = updates._load_feedback()
 for k, it in enumerate(reversed(_fb["items"])):
     it["at"] = _iso(_NOW - _td(days=20 - 3 * k, hours=2))
     if it.get("state_at"): it["state_at"] = _iso(_NOW - _td(days=18 - 3 * k))
-copilot._write_feedback(_fb)
+updates._write_feedback(_fb)
 
 # The master has read all but the two newest release notes (op=seen, what markSeen sends):
 # What's new marks those two New and the Guide carries its dot.
-_rel = len(copilot._load_changelog())
+_rel = len(updates._load_changelog())
 assert post("/api/updates", {"op": "seen", "releases": max(0, _rel - 2)}).status_code == 200
 
 # ---------------------------------------------------------------- Chat (c), then the browser's own storage
