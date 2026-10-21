@@ -1,0 +1,38 @@
+{
+  "note": "the AI's instructions, SEO and keywords, and the overview and customer reports, with their routes",
+  "areas": [
+    {"name": "prompts", "file": "gizmo/prompts.py", "alias": "prompts",
+     "prefix": "^$",
+     "extra": ["WRITING_STYLE", "SYSTEM_PROMPT", "OVERVIEW_SYSTEM", "KEYWORD_SYSTEM", "PRESENT_RESPONSE_TOOL", "_report_answer"],
+     "exclude": [], "floor": true,
+     "doc": "The AI's instructions: the house writing style, the chat's system prompt, the reports' prompt, the keyword prompt, and the present_response tool every answer comes back through, with the reader that takes a report out of it. Plain text and one small function, on the floor: it imports nothing above it. Moved out of copilot.py (stage 4 of the 14 October audit), where three of these were built from the writing style as it loaded. Read as `prompts.NAME`."},
+    {"name": "seo", "file": "gizmo/seo.py", "alias": "seo",
+     "prefix": "^(SEO_|_SEO|_seo|Seo)",
+     "extra": ["_is_seo", "_domains_cache", "_resolve_domains", "_http_get", "_parse_seo", "EXTERNAL_FETCH_MAX", "_STOPWORDS",
+               "_ip_is_public", "_host_is_public", "_fetch_external", "_extract_page_keywords", "_build_seo_tools",
+               "run_seo_audit", "run_keywords", "run_keyword_scan", "DaysInput", "_google_not_ready", "_build_google_tools",
+               "run_product_audit"],
+     "exclude": [], "floor": false,
+     "doc": "SEO and keywords: the SEO knowledge, reading the store's own site (store knowledge reads it too), fetching an outside page behind the guard and the keywords it targets, the SEO and Google data tools the chat is given, the SEO audit, keywords, the keyword scan and the product audit. Moved out of copilot.py (stage 4 of the 14 October audit); its routes are in gizmo/routes/seo.py, but for the product page's, which stays in add_routes. Read as `seo.NAME`."},
+    {"name": "analytics", "file": "gizmo/analytics.py", "alias": "analytics",
+     "prefix": "^$",
+     "extra": ["ANALYSIS_CACHE_PATH", "ANALYSIS_CACHE_MAX_BYTES", "TREND_MONTHS", "_ANALYSIS_KINDS", "_load_analysis_cache",
+               "_parse_num", "_metric_snapshot", "_compute_changes", "_with_changes", "_save_analysis", "_save_customer_segment",
+               "_money", "_delta", "_ret", "_compute_metrics", "_sector_sales", "run_overview", "_overview_trends",
+               "_paginate_customers", "run_reorder_radar", "_customer_tags", "_detect_sector_tags", "run_customers"],
+     "exclude": [], "floor": false,
+     "doc": "The overview and customer reports: the analysis cache (each report's last result and what changed since), the overview's figures, trends and sector sales, customers and retention, the reorder radar and sector tags, and the money and gather helpers they share with SEO. Moved out of copilot.py (stage 4 of the 14 October audit); its routes are in gizmo/routes/analytics.py. Read as `analytics.NAME` (`reports` is a local name in a dispatch route)."}
+  ],
+  "routes": [
+    {"name": "routes_seo", "file": "gizmo/routes/seo.py", "area": "seo",
+     "paths": ["/api/seo", "/api/keyword"], "helpers": [],
+     "doc": "The SEO and keyword routes: the SEO audit, keywords, and the keyword scan of an outside page. Gathered from add_routes (stage 4 of the 14 October audit) where the first stood; their paths are literal, so no request changes hands.",
+     "register_doc": "Add the SEO and keyword routes to the app.",
+     "comment": "The SEO and keyword routes (gizmo/routes/seo.py), gathered where the first stood."},
+    {"name": "routes_analytics", "file": "gizmo/routes/analytics.py", "area": "analytics",
+     "paths": ["/api/overview", "/api/cache", "/api/reorder-radar", "/api/customers", "/api/customer-tags"], "helpers": [],
+     "doc": "The report routes: the overview, the analysis cache, the reorder radar, customers and customer tags. Gathered from add_routes (stage 4 of the 14 October audit) where the first stood; their paths are literal, so no request changes hands.",
+     "register_doc": "Add the report routes to the app.",
+     "comment": "The report routes (gizmo/routes/analytics.py), gathered where the first stood."}
+  ]
+}

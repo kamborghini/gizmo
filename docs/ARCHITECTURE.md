@@ -52,8 +52,11 @@ guard), `gizmo/errors.py` (the error log), `gizmo/ai.py` (the AI client:
 models, the call and its fallbacks, usage, the spend cap) and
 `gizmo/shopify.py` (the way to Shopify: reads through the tool registry, and
 the write capabilities `server.py` hands in, which `add_routes` stores
-there). Everything reads them through the module's name: `jsonstore.NAME`,
-`errors.NAME`, `claude.NAME`, `shopify.NAME`. An area imports the floor directly; what it still reads from
+there) and `gizmo/prompts.py` (the AI's instructions: the writing style, the
+chat's and the reports' prompts, and the `present_response` tool every answer
+comes back through). Everything reads them through the module's name:
+`jsonstore.NAME`, `errors.NAME`, `claude.NAME`, `shopify.NAME`,
+`prompts.NAME`. An area imports the floor directly; what it still reads from
 `copilot.py` through `core.` shrinks as the request check, accounts, orders
 and production move out in turn. The store names no area: an area that keeps
 something built from a store registers `jsonstore.when_forgotten(fn)`, and
@@ -73,7 +76,9 @@ shared inbox (`gizmo/mail.py`), Files (`gizmo/files.py`, read as
 (`gizmo/privacy.py`), the loan register (`gizmo/loans.py`), work sessions
 (`gizmo/work.py`), skills (`gizmo/skills.py`, read as `skillbook`), memory
 (`gizmo/memory.py`), store knowledge (`gizmo/knowledge.py`) and the chat loop
-(`gizmo/chat.py`, read as `assistant`), each with its routes in
+(`gizmo/chat.py`, read as `assistant`), SEO and keywords (`gizmo/seo.py`)
+and the overview and customer reports (`gizmo/analytics.py`), each with its
+routes in
 `gizmo/routes/` (production's, the Size list's and the order book's too; the
 printed-label routes stay in `add_routes`, their bytes pinned, and so do the
 chat's two, which read the tool list `add_routes` builds from the registry
@@ -227,10 +232,12 @@ can leave a test testing nothing. The guards below make that a failure, and
    its route groups; see `tools/moves/README.md`), run the tool without
    `--write` and settle in the description whatever it reports (a name the
    prefix missed shows in what the area borrows; an alias that is a local
-   somewhere stops it), then `--write`. The dry run does not list a function
-   of the area that the prefix missed and that only calls into the area: it
-   stays in `copilot.py` without a word (`_add_skill` did), so look for the
-   area's names in what stays too. A route that reads a value `add_routes`
+   somewhere stops it), then `--write`. The dry run also notes every name
+   that stays though only what moves reads it, directly or through another
+   such name (`_add_skill` once stayed without a word): move it, or know why
+   it stays. A statement that reads another area as the module loads (a
+   default value, a decorator, a class body) gets that area imported at the
+   top of the new module, and the dry run notes it. A route that reads a value `add_routes`
    binds as it runs cannot move, and the tool refuses it. A heading whose
    whole section moves goes with it; one left over code that is not the
    area's is rewritten to say what is under it, and its text, when it
@@ -254,7 +261,9 @@ can leave a test testing nothing. The guards below make that a failure, and
    `gizmo/`: rewrite it from the repository (`_REPO`) as a declared change,
    and test the default with the setting cleared, since the suite sets every
    path (`t_the_size_lists_seed_files_are_the_repos`). An area imports
-   another area, and `copilot`, last; only the floor goes at the top.
+   another area, and `copilot`, last; only the floor goes at the top, and
+   an area a statement reads as the module loads (its settings are defined
+   before its own last imports run, so any module may still go first).
    None is left. A function that resets another module's state with a
    `global` statement writes through the module instead (`team._users_mem =
    None`), and a module that keeps a store in memory lets go of its own

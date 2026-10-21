@@ -36,5 +36,7 @@
   no test patches and nothing rebinds.
 
 Run it without `--write` first: it lists what moves, what each area borrows
-from `copilot.py`, and anything that stops the move. Then the guards, the
+from `copilot.py`, every name that stays though only what moves reads it
+(directly or through another such name: add it to the area, or say why it
+stays), and anything that stops the move. Then the guards, the
 suites and `make move-proof`, as in `docs/ARCHITECTURE.md`.

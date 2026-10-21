@@ -117,7 +117,12 @@ class _Resolver(ast.NodeVisitor):
     def visit_Name(self, node):
         k = self._kind(node.id)
         if k == "global":
-            self.on_global(node, self.stack[-1])
+            # read as the module loads: at the top level, in a top-level class
+            # body, or a comprehension there (a default value counts: it is
+            # visited in the enclosing scope)
+            loading = all(s is self.st or s.get_type() == "class"
+                          or s.get_name() in ("listcomp", "setcomp", "dictcomp", "genexpr") for s in self.stack)
+            self.on_global(node, self.stack[-1], loading)
         elif k == "free":
             self.on_free(node)
 
@@ -127,7 +132,7 @@ class _Resolver(ast.NodeVisitor):
     def _ann(self, a):
         for x in ast.walk(a):
             if isinstance(x, ast.Name):
-                self.on_global(x, None)
+                self.on_global(x, None, False)
 
     def _func(self, node, name):
         for d in getattr(node, "decorator_list", []):
@@ -338,8 +343,13 @@ def run(spec_path, root, write):
         return groups[w]["area"] if w in groups else w
 
     edits = collections.defaultdict(list)
+    # who reads each staying name: what stays, or what moves (to list a name
+    # left behind though only what moves reads it, as _add_skill once was)
+    stay_binds = {ln: _binds(n) for n, a, b, k in stmts if k == "stay" for ln in range(a, b + 1)}
+    stay_readers = collections.defaultdict(set)
     imports_used = collections.defaultdict(set)
     sibs = collections.defaultdict(set)
+    early = collections.defaultdict(set)   # what an area reads as it loads: imported at its top
     borrowed = collections.defaultdict(set)
     drop_lines, crossing = set(), set()
 
@@ -348,9 +358,11 @@ def run(spec_path, root, write):
             problems.append(f"a name over two lines at {node.lineno}")
         edits[node.lineno].append((_col(LINES, node.lineno, node.col_offset), _col(LINES, node.lineno, node.end_col_offset), text))
 
-    def on_global(node, table):
+    def on_global(node, table, loading=False):
         w, name = where(node.lineno), node.id
         if w == "stay":
+            if name in staying and name not in stay_binds.get(node.lineno, ()):
+                stay_readers[name] |= {"stay:" + b for b in stay_binds.get(node.lineno, ())} or {"stay:"}
             if name in moved and name not in keep_copies:
                 edit(node, AL[DEST[name]] + "." + name)
                 if not isinstance(node.ctx, ast.Load) and (node.lineno, name) not in crossing and name not in {n for _, n in crossing}:
@@ -368,20 +380,28 @@ def run(spec_path, root, write):
             d = DEST[name]
             if d != w:
                 edit(node, AL[d] + "." + name); sibs[w].add(d)
+                if loading and w in areas:
+                    early[w].add(d)
                 if not isinstance(node.ctx, ast.Load):
                     problems.append(f"{node.lineno}: {w} assigns {d}'s {name}")
             return
         if name in copy_owner:
-            edit(node, copy_owner[name] + "." + name); sibs[w].add("mod:" + copy_owner[name]); return
+            edit(node, copy_owner[name] + "." + name); sibs[w].add("mod:" + copy_owner[name])
+            if loading and w in areas:
+                early[w].add("mod:" + copy_owner[name])
+            return
         if name in area_aliases:
-            sibs[w].add("mod:" + name); return
+            sibs[w].add("mod:" + name)
+            if loading and w in areas:
+                early[w].add("mod:" + name)
+            return
         if name in imports:
             imports_used[w].add(name); return
         if name in staying:
             if areas.get(owner_area(w), {}).get("floor"):
                 problems.append(f"{node.lineno}: floor area {w} would read copilot.py's {name}")
-            edit(node, "core." + name); borrowed[w].add(name)
-            if table is st and w not in groups:
+            edit(node, "core." + name); borrowed[w].add(name); stay_readers[name].add(w)
+            if loading and w not in groups:
                 problems.append(f"{node.lineno}: {w} reads core.{name} as it loads")
             if not isinstance(node.ctx, ast.Load):
                 problems.append(f"{node.lineno}: {w} assigns copilot.py's {name}")
@@ -473,9 +493,27 @@ def run(spec_path, root, write):
 
     for d in areas:
         report.append(f"{d}: {sum(1 for s in stmts if s[3] == d)} statements; borrows {sorted(borrowed[d])}")
+        for x in sorted(early[d]):
+            if not (x.startswith("mod:") and mod_alias[x[4:]] in floor_mods):
+                notes.append(f"{d} reads {x.removeprefix('mod:')} as it loads, so imports it at the top")
     for g in groups:
         report.append(f"{g}: {sum(1 for _, _, n in group_spans[g] if _route_path(n))} routes in {len(group_spans[g])} statements")
     report.append("other files: " + str({r: n for r, (_, _, n) in others.items() if n}))
+    # a staying name only what moves reads, and no other module or server.py
+    elsewhere = "".join(open(P(r), encoding="utf-8").read() for r in list(split_files) + ["server.py"]
+                        if os.path.exists(P(r)) and r not in {a["file"] for a in spec["areas"]})
+    # ... or only such names: a helper of a helper left behind
+    left = set()
+    while True:
+        more = {name for name in stay_readers if name not in left
+                and all(not r.startswith("stay:") or r[5:] in left for r in stay_readers[name])
+                and not re.search(r"\b(core|copilot|_c|_cp)\." + re.escape(name) + r"\b", elsewhere)}
+        if not more:
+            break
+        left |= more
+    for name in sorted(left):
+        notes.append(f"{name} stays, though only what moves reads it "
+                     f"({', '.join(sorted(r[5:] if r.startswith('stay:') else r for r in stay_readers[name]))})")
     report += ["note: " + x for x in notes] + ["PROBLEM: " + x for x in problems]
     if problems or not write:
         return (1 if problems else 0), report
@@ -547,7 +585,7 @@ def run(spec_path, root, write):
                  "# takes names from these modules as it loads, and any of them may be imported\n"
                  "# first. Read as core.NAME and sibling.NAME, never a copied name.\n")
     for d, a in areas.items():
-        top = [x for x in sibs[d] if x.startswith("mod:") and mod_alias[x[4:]] in floor_mods]
+        top = [x for x in sibs[d] if x.startswith("mod:") and mod_alias[x[4:]] in floor_mods or x in early[d]]
         bottom = sorted(set(sibs[d]) - set(top) - {d})
         head = doc(a["doc"]) + "import logging\n" + import_block(imports_used[d]) + "\n" + "".join(sib_line(x) + "\n" for x in sorted(top))
         if a.get("floor"):

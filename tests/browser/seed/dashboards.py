@@ -675,20 +675,20 @@ def _ok(r, what):
 def seed_reports():
     ensure_auth()
     g_saved = _swap(_dgoogle, _GOOGLE_FAKES)
-    c_saved = _swap(copilot, {"_http_get": _dash_http_get})
+    c_saved = _swap(seo, {"_http_get": _dash_http_get})
     ai_saved = _swap(claude, {"_xcreate": _dash_xcreate})
-    copilot._domains_cache.clear()
+    seo._domains_cache.clear()
     try:
         # Overview twice: the first run's snapshot is moved back a week and nudged,
         # so the second run carries a "What changed since" strip, as a real week would.
         _ok(post("/api/overview", {"fresh": True}), "overview run 1")
-        cache = copilot._load_analysis_cache()
+        cache = analytics._load_analysis_cache()
         snap = cache["overview"]["snapshot"]
         nudge = {"Revenue (7d)": 0.82, "Orders (7d)": 0.88, "Average order value (7d)": 0.95,
                  "Sessions (GA4, 28d)": 0.93, "Search clicks (28d)": 0.9, "New customers (7d)": 1.5}
         snap["metrics"] = {k: round(v * nudge.get(k, 1.0), 2) for k, v in snap["metrics"].items()}
         snap["at"] = (_NOW - _dtd(days=7)).isoformat()
-        jsonstore._write_json_store(copilot.ANALYSIS_CACHE_PATH, None, cache)
+        jsonstore._write_json_store(analytics.ANALYSIS_CACHE_PATH, None, cache)
         ov = _ok(post("/api/overview", {"fresh": True}), "overview run 2")
         DASH["r_overview"] = ov
         DASH["r_seo"] = _ok(post("/api/seo", {}), "seo")
@@ -697,9 +697,9 @@ def seed_reports():
         DASH["r_customers_events"] = _ok(post("/api/customers", {"segment": "Events"}), "customers Events")
     finally:
         _swap(_dgoogle, g_saved)
-        _swap(copilot, c_saved)
+        _swap(seo, c_saved)
         _swap(claude, ai_saved)
-        copilot._domains_cache.clear()
+        seo._domains_cache.clear()
 
 
 # =============================================================================

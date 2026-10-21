@@ -39,7 +39,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/cache` | POST | any account | `_guard` | reads its own body | `_user_tabs` | `copilot.cache_route` |  |
+| `/api/cache` | POST | any account | `_guard` | reads its own body | `_user_tabs` | `gizmo.routes.analytics.cache_route` |  |
 
 ## `/api/chat`
 
@@ -86,13 +86,13 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/customer-tags` | POST | customers | `_guard` | reads its own body |  | `copilot.customer_tags_route` |  |
+| `/api/customer-tags` | POST | customers | `_guard` | reads its own body |  | `gizmo.routes.analytics.customer_tags_route` |  |
 
 ## `/api/customers`
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/customers` | POST | customers | `_guard` | AI slot |  | `copilot.customers_route` |  |
+| `/api/customers` | POST | customers | `_guard` | AI slot |  | `gizmo.routes.analytics.customers_route` |  |
 
 ## `/api/dispatch`
 
@@ -153,13 +153,13 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/keyword-scan` | POST | keywords | `_guard` | AI slot |  | `copilot.keyword_scan_route` |  |
+| `/api/keyword-scan` | POST | keywords | `_guard` | AI slot |  | `gizmo.routes.seo.keyword_scan_route` |  |
 
 ## `/api/keywords`
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/keywords` | POST | keywords | `_guard` | AI slot |  | `copilot.keywords_route` |  |
+| `/api/keywords` | POST | keywords | `_guard` | AI slot |  | `gizmo.routes.seo.keywords_route` |  |
 
 ## `/api/layouts`
 
@@ -238,7 +238,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/overview` | POST | overview | `_guard` | AI slot |  | `copilot.overview` |  |
+| `/api/overview` | POST | overview | `_guard` | AI slot |  | `gizmo.routes.analytics.overview` |  |
 
 ## `/api/privacy`
 
@@ -295,7 +295,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/reorder-radar` | POST | customers | `_guard` |  |  | `copilot.reorder_radar_route` |  |
+| `/api/reorder-radar` | POST | customers | `_guard` |  |  | `gizmo.routes.analytics.reorder_radar_route` |  |
 
 ## `/api/restore`
 
@@ -313,7 +313,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/seo` | POST | seo | `_guard` | AI slot |  | `copilot.seo_route` |  |
+| `/api/seo` | POST | seo | `_guard` | AI slot |  | `gizmo.routes.seo.seo_route` |  |
 
 ## `/api/shipping`
 
