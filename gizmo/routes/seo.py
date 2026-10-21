@@ -9,6 +9,7 @@ from starlette.requests import Request
 from gizmo import ai as claude
 
 import copilot as core
+from gizmo import profile as store_profile
 from gizmo import analytics
 from gizmo import gate
 from gizmo import knowledge
@@ -28,7 +29,7 @@ def register(mcp, registry):
         err, body, _who = await gate._guard(request, ai=True)
         if err:
             return err
-        extra = core._profile_to_system(core._load_profile()) + memory._memory_to_system() + knowledge._knowledge_to_system() + skillbook._skills_to_system("SEO audit search pages meta titles descriptions product pages")
+        extra = store_profile._profile_to_system(store_profile._load_profile()) + memory._memory_to_system() + knowledge._knowledge_to_system() + skillbook._skills_to_system("SEO audit search pages meta titles descriptions product pages")
         try:
             result = await seo.run_seo_audit(registry, extra)
         except RuntimeError as e:
@@ -47,7 +48,7 @@ def register(mcp, registry):
         err, body, _who = await gate._guard(request, ai=True)
         if err:
             return err
-        extra = core._profile_to_system(core._load_profile()) + memory._memory_to_system() + knowledge._knowledge_to_system() + skillbook._skills_to_system("keywords search terms CPC Google Ads competitors")
+        extra = store_profile._profile_to_system(store_profile._load_profile()) + memory._memory_to_system() + knowledge._knowledge_to_system() + skillbook._skills_to_system("keywords search terms CPC Google Ads competitors")
         try:
             res = await seo.run_keywords(registry, extra)
             res = analytics._save_analysis("keywords", res)
@@ -74,7 +75,7 @@ def register(mcp, registry):
             url = "https://" + url
         if len(url) > 2048:
             return gate._json({"error": "That URL is too long."}, 400)
-        extra = core._profile_to_system(core._load_profile()) + memory._memory_to_system() + knowledge._knowledge_to_system() + skillbook._skills_to_system("keyword scan competitors ranking search")
+        extra = store_profile._profile_to_system(store_profile._load_profile()) + memory._memory_to_system() + knowledge._knowledge_to_system() + skillbook._skills_to_system("keyword scan competitors ranking search")
         try:
             return gate._json(await seo.run_keyword_scan(registry, url, extra))
         except RuntimeError as e:

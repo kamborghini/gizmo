@@ -46,7 +46,7 @@ MAX_BODY_BYTES   = _env_num(int, os.environ.get("MAX_BODY_BYTES", str(256 * 1024
 
 def _json(data: dict, status: int = 200) -> JSONResponse:
     return JSONResponse(data, status_code=status,
-                        headers={**_API_HEADERS, "X-App-Build": core._build_id()})
+                        headers={**_API_HEADERS, "X-App-Build": rendering._build_id()})
 
 
 def _json_dumps_like_starlette(data) -> bytes:
@@ -60,7 +60,7 @@ def _json_body(raw: bytes, status: int = 200) -> Response:
     """An answer made of bytes _json_dumps_like_starlette made, with the
     headers every _json answer carries."""
     return Response(raw, status_code=status, media_type="application/json",
-                    headers={**_API_HEADERS, "X-App-Build": core._build_id()})
+                    headers={**_API_HEADERS, "X-App-Build": rendering._build_id()})
 
 
 def _json_spliced(head: dict, field: str, raw: bytes) -> Response:
@@ -270,3 +270,4 @@ def _tab_denied(request: Request) -> Optional[JSONResponse]:
 from gizmo import activity  # noqa: E402
 from gizmo import team  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import rendering  # noqa: E402

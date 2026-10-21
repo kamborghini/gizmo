@@ -22,6 +22,7 @@ from gizmo import ai as claude
 from gizmo import shopify
 
 import copilot as core
+from gizmo import oauth
 from gizmo import skills as skillbook
 from gizmo import files as fileserver
 from gizmo import activity
@@ -1805,7 +1806,7 @@ def register(mcp, registry):
         if not gate._window_ok(gate._rl_hits.setdefault("oauth:" + gate._client_key(request), []), gate.RATE_MAX_CLIENT, time.monotonic()):
             return PlainTextResponse("Too many requests", status_code=429, headers=gate._API_HEADERS)
         if not google_mail.client_configured():
-            return core._oauth_page("Not configured", "Add Google's client ID and secret in the app's hosting settings first.")
+            return oauth._oauth_page("Not configured", "Add Google's client ID and secret in the app's hosting settings first.")
         # Two ways in: a single-use ticket minted for the master through the
         # app (the button), or the standing connect secret (the manual path,
         # kept so the mailbox is still recoverable when nobody can sign in).
@@ -1817,12 +1818,12 @@ def register(mcp, registry):
         if not ((exp is not None and exp > time.time()) or by_secret):
             return PlainTextResponse("Forbidden", status_code=403, headers=gate._API_HEADERS)
         now = time.time()
-        for s, exp in list(core._oauth_states.items()):
+        for s, exp in list(oauth._oauth_states.items()):
             if exp < now:
-                core._oauth_states.pop(s, None)
+                oauth._oauth_states.pop(s, None)
         state = secrets.token_urlsafe(24)
         # Namespaced state: a Gmail consent walk can never finish the GSC flow.
-        core._oauth_states["gm:" + state] = now + 900
+        oauth._oauth_states["gm:" + state] = now + 900
         from starlette.responses import RedirectResponse
         return RedirectResponse(google_mail.consent_url(core._gmail_redirect_uri(request), state), status_code=302)
 
@@ -1830,21 +1831,21 @@ def register(mcp, registry):
     async def gmail_callback(request: Request):
         qp = request.query_params
         if qp.get("error"):
-            return core._oauth_page("Connection cancelled", f"Google returned: {qp.get('error')}")
+            return oauth._oauth_page("Connection cancelled", f"Google returned: {qp.get('error')}")
         state = qp.get("state", "")
-        exp = core._oauth_states.pop("gm:" + state, None)   # single-use
+        exp = oauth._oauth_states.pop("gm:" + state, None)   # single-use
         if not state or exp is None or exp < time.time():
-            return core._oauth_page("Link expired", "That connect link expired or was already used. Start again.")
+            return oauth._oauth_page("Link expired", "That connect link expired or was already used. Start again.")
         code = qp.get("code", "")
         if not code:
-            return core._oauth_page("Connection failed", "No authorization code returned.")
+            return oauth._oauth_page("Connection failed", "No authorization code returned.")
         try:
             ok = await google_mail.exchange_code(code, core._gmail_redirect_uri(request))
         except Exception:
             logger.exception("Gmail OAuth exchange error")
             ok = False
         if not ok:
-            return core._oauth_page("Connection failed", "Couldn't complete the connection. Please try again.")
+            return oauth._oauth_page("Connection failed", "Couldn't complete the connection. Please try again.")
         addr = google_mail.address() or "the mailbox"
         fin_addr = google_mail.address(google_mail.FINANCE)
         if fin_addr and addr.strip().lower() == fin_addr.strip().lower():
@@ -1853,10 +1854,10 @@ def register(mcp, registry):
             # would put finance mail on the shared board and leave
             # reconciliation reading the inbox the team triages.
             google_mail.disconnect()
-            return core._oauth_page("That is the accounts mailbox",
+            return oauth._oauth_page("That is the accounts mailbox",
                                f"{addr} is already connected to Reconciliation. Sign in as "
                                "the shared sales mailbox for the Inbox tab instead.")
-        return core._oauth_page("✅ Mailbox connected", f"{addr} is now linked. The Inbox tab will "
+        return oauth._oauth_page("✅ Mailbox connected", f"{addr} is now linked. The Inbox tab will "
                            "fill on its next refresh. You can close this tab.")
 
     @mcp.custom_route("/api/mail/connect-link", methods=["POST"])

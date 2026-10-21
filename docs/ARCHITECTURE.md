@@ -83,8 +83,11 @@ its alerts (`gizmo/scheduler.py`), release notes and requests
 restore (`gizmo/backup.py`), Liability and the chase desk
 (`gizmo/liability.py`), reconciliation with the Xero connect walk
 (`gizmo/reconciliation.py`), the Xero sync settings (`gizmo/xero_sync.py`,
-read as `xerosync`) and the forecast's hooks (`gizmo/forecasting.py`), each
-with its routes in
+read as `xerosync`), the forecast's hooks (`gizmo/forecasting.py`), the page
+and its assets (`gizmo/rendering.py`), the store profile (`gizmo/profile.py`,
+read as `store_profile`), layouts (`gizmo/layouts.py`), the sign-in walks
+(`gizmo/oauth.py`) and the status page (`gizmo/status.py`, read as
+`appstatus`), each with its routes in
 `gizmo/routes/` (production's, the Size list's and the order book's too; the
 printed-label routes stay in `add_routes`, their bytes pinned, and so do the
 chat's two, which read the tool list `add_routes` builds from the registry
@@ -253,7 +256,8 @@ can leave a test testing nothing. The guards below make that a failure, and
    only routes, for an area that moved earlier. What it does: cut statements whole, keeping their text and order,
    into `gizmo/<area>.py`, and the routes into `gizmo/routes/<area>.py`
    inside `register(mcp, registry)`, which `add_routes` calls where the
-   area's first route stood. Routes scattered through the table may be
+   area's first route stood. A group's paths are prefixes; `"=/"` names one path
+   exactly, since every path starts with `/`. Routes scattered through the table may be
    gathered there: only `/dav{sub_path:path}` has a pattern and no two routes
    share a path, so no request changes hands, and `make move-proof` checks
    exactly that. Find each global read with

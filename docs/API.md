@@ -9,7 +9,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/` | GET | outside the tab map | own check |  |  | `copilot.index` |  |
+| `/` | GET | outside the tab map | own check |  |  | `gizmo.routes.rendering.index` |  |
 
 ## `/api/alerts`
 
@@ -165,7 +165,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/layouts` | POST | any account | `_guard` | max body LAYOUT_MAX_BODY, cap LAYOUT_MAX_BODY |  | `copilot.layouts_route` | The caller's own card layouts: {} reads them all, a view with an order and a hidden list saves that screen's, a view with reset true removes it. |
+| `/api/layouts` | POST | any account | `_guard` | max body LAYOUT_MAX_BODY, cap LAYOUT_MAX_BODY |  | `gizmo.routes.layouts.layouts_route` | The caller's own card layouts: {} reads them all, a view with an order and a hidden list saves that screen's, a view with reset true removes it. |
 
 ## `/api/learn`
 
@@ -277,7 +277,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/profile` | POST | any account | `_guard` |  | `_team_level` | `copilot.profile_route` |  |
+| `/api/profile` | POST | any account | `_guard` |  | `_team_level` | `gizmo.routes.profile.profile_route` |  |
 
 ## `/api/recon`
 
@@ -333,7 +333,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/status` | POST | any account | `_guard` | reads its own body | `_team_role` | `copilot.status_route` | Connection-health summary for the Settings panel: Shopify, AI, and Google. |
+| `/api/status` | POST | any account | `_guard` | reads its own body | `_team_role` | `gizmo.routes.status.status_route` | Connection-health summary for the Settings panel: Shopify, AI, and Google. |
 
 ## `/api/stock-usage`
 
@@ -376,9 +376,9 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/assets/app.css` | GET | outside the tab map | own check |  |  | `copilot.app_css` |  |
-| `/assets/app.js` | GET | outside the tab map | own check |  |  | `copilot.app_js` |  |
-| `/assets/composer.js` | GET | outside the tab map | own check |  |  | `copilot.composer_js` |  |
+| `/assets/app.css` | GET | outside the tab map | own check |  |  | `gizmo.routes.rendering.app_css` |  |
+| `/assets/app.js` | GET | outside the tab map | own check |  |  | `gizmo.routes.rendering.app_js` |  |
+| `/assets/composer.js` | GET | outside the tab map | own check |  |  | `gizmo.routes.rendering.composer_js` |  |
 
 ## `/brand`
 
@@ -403,7 +403,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/healthz` | GET | outside the tab map | own check |  |  | `copilot.healthz` |  |
+| `/healthz` | GET | outside the tab map | own check |  |  | `gizmo.routes.status.healthz` |  |
 
 ## `/hooks`
 
@@ -418,12 +418,12 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/oauth/gmail-finance/callback` | GET | outside the tab map | own check |  |  | `copilot.gmail_finance_callback` |  |
-| `/oauth/gmail-finance/start` | GET | outside the tab map | own check |  | `_secret_ok` | `copilot.gmail_finance_start` |  |
+| `/oauth/gmail-finance/callback` | GET | outside the tab map | own check |  |  | `gizmo.routes.oauth.gmail_finance_callback` |  |
+| `/oauth/gmail-finance/start` | GET | outside the tab map | own check |  | `_secret_ok` | `gizmo.routes.oauth.gmail_finance_start` |  |
 | `/oauth/gmail/callback` | GET | outside the tab map | own check |  |  | `gizmo.routes.mail.gmail_callback` |  |
 | `/oauth/gmail/start` | GET | outside the tab map | own check |  |  | `gizmo.routes.mail.gmail_start` |  |
-| `/oauth/google/callback` | GET | outside the tab map | own check |  |  | `copilot.google_callback` |  |
-| `/oauth/google/start` | GET | outside the tab map | own check |  |  | `copilot.google_start` |  |
+| `/oauth/google/callback` | GET | outside the tab map | own check |  |  | `gizmo.routes.oauth.google_callback` |  |
+| `/oauth/google/start` | GET | outside the tab map | own check |  |  | `gizmo.routes.oauth.google_start` |  |
 | `/oauth/xero/callback` | GET | outside the tab map | own check |  |  | `gizmo.routes.reconciliation.xero_callback` |  |
 | `/oauth/xero/start` | GET | outside the tab map | own check |  | `_secret_ok` | `gizmo.routes.reconciliation.xero_start` |  |
 

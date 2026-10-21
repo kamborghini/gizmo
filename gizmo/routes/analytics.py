@@ -9,6 +9,7 @@ from starlette.requests import Request
 from gizmo import ai as claude
 
 import copilot as core
+from gizmo import profile as store_profile
 from gizmo import analytics
 from gizmo import gate
 from gizmo import knowledge
@@ -29,8 +30,8 @@ def register(mcp, registry):
         err, body, _who = await gate._guard(request, ai=True)
         if err:
             return err
-        profile = core._load_profile()
-        extra = core._profile_to_system(profile) + memory._memory_to_system() + knowledge._knowledge_to_system() + skillbook._skills_to_system("overview report revenue orders customers products stock")
+        profile = store_profile._load_profile()
+        extra = store_profile._profile_to_system(profile) + memory._memory_to_system() + knowledge._knowledge_to_system() + skillbook._skills_to_system("overview report revenue orders customers products stock")
         track = (profile.get("prefs") or {}).get("track_inventory", True)
         try:
             orderbook._refresh_asked(body)
@@ -84,7 +85,7 @@ def register(mcp, registry):
         if err:
             return err
         segment = (body.get("segment") or "").strip()[:80]
-        extra = core._profile_to_system(core._load_profile()) + memory._memory_to_system() + knowledge._knowledge_to_system() + skillbook._skills_to_system("customers retention sectors trade repeat lifetime value")
+        extra = store_profile._profile_to_system(store_profile._load_profile()) + memory._memory_to_system() + knowledge._knowledge_to_system() + skillbook._skills_to_system("customers retention sectors trade repeat lifetime value")
         try:
             orderbook._refresh_asked(body)
             res = await analytics.run_customers(registry, extra, segment=segment or None)

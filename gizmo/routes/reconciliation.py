@@ -14,6 +14,7 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
 import copilot as core
+from gizmo import oauth
 from gizmo import activity
 from gizmo import gate
 from gizmo import mail
@@ -37,7 +38,7 @@ def register(mcp, registry):
         if not gate._window_ok(gate._rl_hits.setdefault("oauth:" + gate._client_key(request), []), gate.RATE_MAX_CLIENT, time.monotonic()):
             return PlainTextResponse("Too many requests", status_code=429, headers=gate._API_HEADERS)
         if not xero_api.client_configured():
-            return core._oauth_page("Not configured", "Add Xero's client ID and secret in the app's hosting settings first.")
+            return oauth._oauth_page("Not configured", "Add Xero's client ID and secret in the app's hosting settings first.")
         # A single-use ticket from the app's own button, or the standing secret
         # as the recovery path. Handing someone a link with a placeholder where
         # the secret goes is not a way in, and asking them to paste a server
@@ -61,22 +62,22 @@ def register(mcp, registry):
     async def xero_callback(request: Request):
         qp = request.query_params
         if qp.get("error"):
-            return core._oauth_page("Connection cancelled", f"Xero returned: {qp.get('error')}")
+            return oauth._oauth_page("Connection cancelled", f"Xero returned: {qp.get('error')}")
         state = qp.get("state", "")
         exp = reconciliation._xero_oauth_states.pop(state, None)
         if not state or exp is None or exp < time.time():
-            return core._oauth_page("Link expired", "That connect link expired or was already used. Start again.")
+            return oauth._oauth_page("Link expired", "That connect link expired or was already used. Start again.")
         code = qp.get("code", "")
         if not code:
-            return core._oauth_page("Connection failed", "No authorization code returned.")
+            return oauth._oauth_page("Connection failed", "No authorization code returned.")
         try:
             ok = await xero_api.exchange_code(code, reconciliation._xero_redirect_uri(request))
         except Exception:
             logger.exception("Xero OAuth exchange error")
             ok = False
         if not ok:
-            return core._oauth_page("Connection failed", "Couldn't complete the Xero connection. Please try again.")
-        return core._oauth_page("Connected to Xero",
+            return oauth._oauth_page("Connection failed", "Couldn't complete the Xero connection. Please try again.")
+        return oauth._oauth_page("Connected to Xero",
                            "The reconciliation engine can now read your accounts (read-only). "
                            "Close this tab and return to Reactor.")
 
@@ -110,7 +111,7 @@ def register(mcp, registry):
                                   "address": fin["address"],
                                   "client": fin["client"],
                                   "can_connect": team._team_role(who) == "master",
-                                  "redirect_uri": core._gmail_fin_redirect_uri(request),
+                                  "redirect_uri": oauth._gmail_fin_redirect_uri(request),
                                   # The Cloud project is the numeric prefix of the
                                   # client id, so the console link can go straight
                                   # to the right project instead of whichever one
@@ -166,9 +167,9 @@ def register(mcp, registry):
             return gate._json({"error": "The accounts mailbox is set to the same token file as the "
                                    "sales inbox. Give it its own token file in the app's hosting settings."}, 400)
         now = time.time()
-        for t, exp in list(core._fin_connect_tickets.items()):
+        for t, exp in list(oauth._fin_connect_tickets.items()):
             if exp < now:
-                core._fin_connect_tickets.pop(t, None)
+                oauth._fin_connect_tickets.pop(t, None)
         # The address they mean, so Google opens THAT account rather than
         # whichever one this browser is already signed into.
         want = str((body or {}).get("address") or "").strip()[:200]
@@ -182,7 +183,7 @@ def register(mcp, registry):
             return gate._json({"error": "That is the Inbox tab's mailbox. Reconciliation needs the "
                                    "ACCOUNTS mailbox, which is a different Google account."}, 400)
         ticket = secrets.token_urlsafe(24)
-        core._fin_connect_tickets[ticket] = {"exp": now + mail.MAIL_TICKET_SECONDS, "want": want}
+        oauth._fin_connect_tickets[ticket] = {"exp": now + mail.MAIL_TICKET_SECONDS, "want": want}
         activity._track(who, "recon", "started connecting the accounts mailbox", want)
         return gate._json({"url": f"/oauth/gmail-finance/start?t={ticket}",
                       "expires_in": mail.MAIL_TICKET_SECONDS})

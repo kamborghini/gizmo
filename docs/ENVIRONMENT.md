@@ -38,25 +38,16 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `APP_BASE_URL` | `""` | copilot |  |
 | `CHAT_CONTEXT_CAP` | `"12000"` | copilot | max chars of page-report context injected into chat |
 | `COPILOT_TOOL_RESULT_CAP` | `"50000"` | copilot |  |
-| `LAYOUTS_PATH` | `"/data/layouts.json"` | copilot | each person's arrangement of the cards on a screen |
 | `LOW_STOCK_THRESHOLD` | `"5"` | copilot |  |
 | `MAX_CHAT_CHARS` | `"100000"` | copilot | total chars in a chat request |
 | `MAX_MESSAGES` | `"100"` | copilot | chat history length |
 | `PRODUCT_TREND_MONTHS` | `"12"` | copilot |  |
-| `PROFILE_FIELD_CAP` | `"6000"` | copilot |  |
-| `PROFILE_PATH` | `"/data/store_profile.json"` | copilot |  |
 | `SHOPIFY_API_KEY` | `None` | copilot |  |
 | `SHOPIFY_API_SECRET` | `None` | copilot |  |
 | `SHOPIFY_CLIENT_ID` | `""` | copilot, server |  |
 | `SHOPIFY_CLIENT_SECRET` | `""` | copilot, server |  |
 | `SHOPIFY_STORE` | `""` | copilot, server | used to pin session tokens to this shop |
 | `STORE_CONTEXT_CAP` | `"4000"` | copilot |  |
-
-## copilot.py - Route registration (mounted onto the existing MCP server app
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `RAILWAY_GIT_COMMIT_SHA` | `None` | copilot, gizmo.updates, server |  |
 
 ## copilot.py - Stock bridge: the glass a Mark made consumes flows into the 
 
@@ -207,6 +198,12 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `LEARN_MAX_PAGES` | `"12"` | gizmo.knowledge | pages crawled when learning |
 | `LEARN_PAGE_CHARS` | `"3000"` | gizmo.knowledge | text kept per page |
 
+## gizmo/layouts.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `LAYOUTS_PATH` | `"/data/layouts.json"` | gizmo.layouts | each person's arrangement of the cards on a screen |
+
 ## gizmo/liability.py - Chase desk: the weekly session of asking credit customers fo
 
 | Variable | Default | Read by | Notes |
@@ -300,6 +297,13 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `PRODUCTION_STATE_MAX` | `"1000"` | gizmo.production |  |
 | `PRODUCTION_STATE_PATH` | `"/data/production_state.json"` | gizmo.production |  |
 
+## gizmo/profile.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `PROFILE_FIELD_CAP` | `"6000"` | gizmo.profile |  |
+| `PROFILE_PATH` | `"/data/store_profile.json"` | gizmo.profile |  |
+
 ## gizmo/reconciliation.py - Reconciliation stores + the read-only tools the chat is give
 
 | Variable | Default | Read by | Notes |
@@ -314,6 +318,12 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
 | `DAV_TRACE` | `None` | gizmo.routes.files |  |
+
+## gizmo/routes/status.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `RAILWAY_GIT_COMMIT_SHA` | `None` | gizmo.routes.status, gizmo.updates, server |  |
 
 ## gizmo/scheduler.py - Scheduled refresh + change alerts. Off by default (automatic
 

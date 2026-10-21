@@ -148,6 +148,17 @@ from gizmo.routes import liability as routes_liability
 from gizmo.routes import reconciliation as routes_reconciliation
 from gizmo.routes import xero_sync as routes_xero_sync
 from gizmo.routes import forecasting as routes_forecasting
+# Moved out of this file (stage 4): the page and its assets, the store profile and layouts, the Google and accounts-mailbox sign-in walks, and the status page, with their routes.
+from gizmo import rendering
+from gizmo import profile as store_profile
+from gizmo import layouts
+from gizmo import oauth
+from gizmo import status as appstatus
+from gizmo.routes import rendering as routes_rendering
+from gizmo.routes import profile as routes_profile
+from gizmo.routes import layouts as routes_layouts
+from gizmo.routes import oauth as routes_oauth
+from gizmo.routes import status as routes_status
 logger = logging.getLogger("shopify_mcp.copilot")
 
 
@@ -181,84 +192,13 @@ MAX_MESSAGES     = _env_num(int, os.environ.get("MAX_MESSAGES", "100"), "100", "
 MAX_CHAT_CHARS   = _env_num(int, os.environ.get("MAX_CHAT_CHARS", "100000"), "100000", "MAX_CHAT_CHARS")     # total chars in a chat request
 TOOL_RESULT_CAP    = _env_num(int, os.environ.get("COPILOT_TOOL_RESULT_CAP", "50000"), "50000", "COPILOT_TOOL_RESULT_CAP")
 STORE_CONTEXT_CAP  = _env_num(int, os.environ.get("STORE_CONTEXT_CAP", "4000"), "4000", "STORE_CONTEXT_CAP")
-# Server-side store profile. Default path lives under /data so a Railway volume
-# mounted there makes it durable across redeploys.
-PROFILE_PATH       = os.environ.get("PROFILE_PATH", "/data/store_profile.json")
-PROFILE_FIELD_CAP  = _env_num(int, os.environ.get("PROFILE_FIELD_CAP", "6000"), "6000", "PROFILE_FIELD_CAP")
 CHAT_CONTEXT_CAP   = _env_num(int, os.environ.get("CHAT_CONTEXT_CAP", "12000"), "12000", "CHAT_CONTEXT_CAP")  # max chars of page-report context injected into chat
-LAYOUTS_PATH       = os.environ.get("LAYOUTS_PATH", "/data/layouts.json")    # each person's arrangement of the cards on a screen
-
-_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")   # composer.js; the page itself is joined by pagesource.py from static/src
-_page_cache: Optional[str] = None   # the shell: the page with its CSS and JS lifted out
-_page_assets: dict = {}             # "css" / "js" -> (media type, bytes), served at hashed URLs
-_asset_hashes: dict = {}            # "css" / "js" -> the content hash in their URL
-_page_etag_val: str = ""
 
 
 def _effort_for(model: str, deep: bool = False) -> str:
     """The everyday effort, or Deep analysis's, as configured. What the model
     behind it accepts is settled where every request goes out (_fit_to_model)."""
     return ANTHROPIC_EFFORT_DEEP if deep else ANTHROPIC_EFFORT
-
-
-
-
-def _load_profile() -> dict:
-    # Through the one loader, so an unreadable file pauses the writer: read
-    # by hand, a corrupt profile loaded as empty and the next save replaced it.
-    d = jsonstore._load_json_store(PROFILE_PATH, None, {})
-    return d if isinstance(d, dict) else {}
-
-
-def _save_profile(data: dict) -> dict:
-    data = data or {}
-    prefs = data.get("prefs") or {}
-    clean = {
-        "brand_voice": str(data.get("brand_voice", ""))[:PROFILE_FIELD_CAP],
-        "business_goals": str(data.get("business_goals", ""))[:PROFILE_FIELD_CAP],
-        "strategy": str(data.get("strategy", ""))[:PROFILE_FIELD_CAP],
-        "notes": str(data.get("notes", ""))[:PROFILE_FIELD_CAP],
-        "prefs": {
-            "track_inventory": bool(prefs.get("track_inventory", True)),
-            "concise": bool(prefs.get("concise", False)),
-            "proactive": bool(prefs.get("proactive", True)),
-            "flag_anomalies": bool(prefs.get("flag_anomalies", True)),
-        },
-    }
-    if not jsonstore._store_writable(PROFILE_PATH):
-        return clean
-    jsonstore._write_json_store(PROFILE_PATH, None, clean)
-    return clean
-
-
-def _profile_to_system(p: dict) -> str:
-    """Compose the stored profile into an authoritative system addendum."""
-    if not p:
-        return ""
-    fields = []
-    for key, label in (("brand_voice", "Brand voice"), ("business_goals", "Business goals"),
-                       ("strategy", "Overall strategy"), ("notes", "Other notes")):
-        val = (p.get(key) or "").strip()
-        if val:
-            fields.append(f"- {label}: {val}")
-    prefs = p.get("prefs") or {}
-    rules = []
-    if prefs.get("track_inventory") is False:
-        rules.append("We carry unlimited stock — never give inventory, stock-level, or restock advice.")
-    if prefs.get("concise"):
-        rules.append("Keep answers concise and skimmable; favor short bullets over prose.")
-    if prefs.get("proactive", True):
-        rules.append("Always surface 1–3 concrete recommendations or opportunities, even when not asked.")
-    if prefs.get("flag_anomalies", True):
-        rules.append("Proactively flag anomalies, risks, or unusual changes you notice in the data.")
-    if not fields and not rules:
-        return ""
-    block = "\n\n## Store profile — set by the merchant (authoritative; follow in every answer)\n"
-    if fields:
-        block += "\n".join(fields) + "\n"
-    if rules:
-        block += "Preferences:\n" + "\n".join("- " + r for r in rules)
-    return block
 
 
 # ---------------------------------------------------------------------------
@@ -298,50 +238,8 @@ def _page_context_to_system(ctx) -> str:
 
 
 # ---------------------------------------------------------------------------
-# The store report, the last error alert, and today's date and time in London,
-# which the whole app reads.
+# Today's date and time in London, which the whole app reads.
 # ---------------------------------------------------------------------------
-
-
-STORE_REPORT_PARSE_MIN = 1024 * 1024     # measure the parse of anything this big
-
-
-def _store_report(parse: bool = True) -> list:
-    """The stores on the volume, largest first, with the cost of reading the
-    big ones. Most stores are re-read from disk on every request that needs
-    them; the CRM, the dispatch state and the production state each have a
-    dozen or more call sites and no cache. Whether that matters is a number,
-    not an opinion: this is the number, at boot and in Settings, so the day
-    a save on the CRM is slow it is visible before somebody feels it."""
-    data_dir = os.path.dirname(scheduler.SCHEDULE_PATH) or "/data"
-    out = []
-    try:
-        names = os.listdir(data_dir)
-    except OSError:
-        return out
-    for n in names:
-        if not n.endswith((".json", ".jsonl")):
-            continue
-        p = os.path.join(data_dir, n)
-        try:
-            size = os.path.getsize(p)
-        except OSError:
-            continue
-        row = {"name": n, "bytes": size}
-        if parse and n.endswith(".json") and size >= STORE_REPORT_PARSE_MIN:
-            t0 = time.perf_counter()
-            try:
-                with open(p, encoding="utf-8") as fh:
-                    json.load(fh)
-                row["parse_ms"] = round((time.perf_counter() - t0) * 1000, 1)
-            except Exception:
-                row["parse_ms"] = None
-        out.append(row)
-    out.sort(key=lambda r: -r["bytes"])
-    return out[:12]
-
-
-_last_error_alert = 0.0
 
 
 def _london_today():
@@ -1094,310 +992,9 @@ async def run_products_list(registry: dict, months_window: Optional[int] = None)
             "products": out, "truncated": truncated}
 
 
-
-
 # ---------------------------------------------------------------------------
-# Page rendering
+# Rate limits kept in memory: the EORI checks'.
 # ---------------------------------------------------------------------------
-
-def _split_page(html: str):
-    """Split the single-file app into (shell, css, js).
-
-    The app is authored as one file deliberately, so the split happens here at
-    serve time rather than in the source: the tests, the em dash check and every
-    edit still see one file. Returns (html, "", "") unchanged if the markers are
-    not where they are expected, so a future edit to the page can never take the
-    app down, only make it heavier."""
-    try:
-        s0 = html.index("    <style>") + len("    <style>")
-        s1 = html.index("    </style>", s0)
-        j0 = html.index("    <script>", s1) + len("    <script>")
-        j1 = html.index("    </script>", j0)
-    except ValueError:
-        logger.warning("page split: style/script markers not found, serving the page inline")
-        return html, "", ""
-    css, js = html[s0:s1], html[j0:j1]
-    if not css.strip() or not js.strip():
-        return html, "", ""
-    # Assigned, not setdefault: the hash in the URL has to track the content it
-    # is standing for, or a second split would serve new bytes under an old tag.
-    _asset_hashes["css"] = hashlib.sha256(css.encode("utf-8")).hexdigest()[:12]
-    _asset_hashes["js"] = hashlib.sha256(js.encode("utf-8")).hexdigest()[:12]
-    css_url = "/assets/app.css?v=" + _asset_hashes["css"]
-    js_url = "/assets/app.js?v=" + _asset_hashes["js"]
-    shell = (html[:s0 - len("    <style>")]
-             + f'<link rel="stylesheet" href="{css_url}" />\n'
-               f'    <link rel="preload" as="script" href="{js_url}" />\n'
-               f'    <meta name="app-build" content="{_build_marker(_asset_hashes["js"])}" />'
-             + html[s1 + len("    </style>"):j0 - len("    <script>")]
-             + f'<script src="{js_url}"></script>'
-             + html[j1 + len("    </script>"):])
-    return shell, css, js
-
-
-def _page_parts() -> tuple:
-    """(shell, assets) for the running build, computed once.
-
-    The whole page is ~460 KB and the CSS and JS are ~95% of it. Shopify admin
-    opens an embedded app with a freshly minted id_token every time, so the page
-    URL is never the same twice and caching the page itself would buy nothing.
-    Moving the weight into two content-hashed URLs does: those are stable across
-    opens, cacheable for a year, and a new build simply asks for a new URL."""
-    global _page_cache, _page_assets
-    if _page_cache is None:
-        # The page is joined from its sections (static/src), byte for byte the
-        # single file it was: the split below and its hashed URLs are unchanged.
-        raw = pagesource.join()
-        shell, css, js = _split_page(raw)
-        assets = {}
-        if css and js:
-            assets["css"] = ("text/css; charset=utf-8", css.encode("utf-8"))
-            assets["js"] = ("text/javascript; charset=utf-8", js.encode("utf-8"))
-            # The composer is the one script that lives outside the page: the
-            # editor is big enough to deserve its own file and its own cache
-            # line. Same hash-in-the-URL contract as app.js, loaded after it
-            # because the page's mail code calls into it, never the reverse.
-            try:
-                with open(os.path.join(_STATIC_DIR, "composer.js"), "r",
-                          encoding="utf-8") as fh:
-                    composer = fh.read()
-            except OSError:
-                composer = ""
-            if composer.strip():
-                _asset_hashes["composer"] = hashlib.sha256(composer.encode("utf-8")).hexdigest()[:12]
-                assets["composer"] = ("text/javascript; charset=utf-8", composer.encode("utf-8"))
-                app_tag = '<script src="/assets/app.js?v=' + _asset_hashes["js"] + '"></script>'
-                shell = shell.replace(app_tag, app_tag + '<script src="/assets/composer.js?v='
-                                      + _asset_hashes["composer"] + '"></script>', 1)
-            logger.info("page split: shell %d KB, css %d KB, js %d KB",
-                        len(shell) // 1024, len(css) // 1024, len(js) // 1024)
-        _page_cache, _page_assets = shell, assets
-    return _page_cache, _page_assets
-
-
-def _build_marker(js_hash: str) -> str:
-    """An id that changes exactly when the JavaScript changes, and that opens
-    nothing if it leaks. See _build_id for why it is not the hash itself."""
-    return hashlib.sha256(("gizmo-build|" + js_hash).encode("utf-8")).hexdigest()[:12]
-
-
-def _render_page() -> str:
-    shell, _assets = _page_parts()
-    # Embedded-only: always load App Bridge (which provides the session token).
-    head = (
-        f'<meta name="shopify-api-key" content="{SHOPIFY_API_KEY}" />\n'
-        '    <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>'
-    ) if SHOPIFY_API_KEY else ""
-    return shell.replace("<!--APPBRIDGE-->", head)
-
-
-def _page_etag() -> str:
-    """A quoted hash of exactly the bytes this build serves.
-
-    Hashing the rendered shell rather than the commit keeps it honest in every
-    environment: there is no commit sha outside Railway, and rotating
-    SHOPIFY_API_KEY changes the page without changing the commit."""
-    global _page_etag_val
-    if not _page_etag_val:
-        _page_etag_val = '"' + hashlib.sha256(_render_page().encode("utf-8")).hexdigest()[:16] + '"'
-    return _page_etag_val
-
-
-def _etag_matches(header: Optional[str], etag: str) -> bool:
-    """RFC-shaped If-None-Match check: a list, a weak tag or * all count."""
-    for part in (header or "").split(","):
-        p = part.strip()
-        if p == "*":
-            return True
-        if p.startswith("W/"):
-            p = p[2:].strip()
-        if p and p == etag:
-            return True
-    return False
-
-
-# (kind, content hash, encoding) -> the asset compressed at the strongest
-# level. Keyed on the hash of the bytes that were packed, never on whatever
-# _asset_hashes says at that moment, so a page swapped mid-pack (the tests
-# do it) can never put one build's bytes under another build's URL.
-_asset_packed: dict = {}
-_asset_packing: set = set()     # content hashes whose packing has started
-
-
-def _pack_assets() -> None:
-    """Compress the page's assets once per build, zstd and gzip at their
-    strongest levels. Runs in a thread (see _pack_assets_soon): zstd at level
-    19 is about half a second on app.js, which no request should wait for."""
-    _shell, assets = _page_parts()
-    live = set()
-    for kind, (_media, blob) in list(assets.items()):
-        h = hashlib.sha256(blob).hexdigest()[:12]
-        live.add(h)
-        for enc in ("zstd", "gzip"):
-            if (kind, h, enc) not in _asset_packed:
-                try:
-                    _asset_packed[(kind, h, enc)] = perf.compress(blob, enc, strong=True)
-                except ValueError:
-                    pass                # no zstd on this Python: gzip alone
-    for key in [k for k in _asset_packed if k[1] not in live]:
-        _asset_packed.pop(key, None)    # an earlier build's copies
-
-
-def _pack_assets_soon() -> None:
-    """Start _pack_assets in a thread, once per build. Until it lands, the
-    middleware compresses each request at its quick level, as before."""
-    h = _asset_hashes.get("js", "")
-    if not h or h in _asset_packing:
-        return
-    _asset_packing.add(h)
-
-    def run():
-        try:
-            _pack_assets()
-        except Exception:
-            logger.exception("assets: packing failed; serving them compressed per request")
-    threading.Thread(target=run, name="asset-pack", daemon=True).start()
-
-
-def _asset_response(kind: str, version: str = "", accept: str = ""):
-    """The app's own CSS or JS. Static bytes with no data and no auth, and the
-    URL carries a content hash, so a year of caching is safe: a new build asks
-    for a new URL and there is nothing to invalidate.
-
-    The hash must match. The page itself 404s outside the Shopify admin, and
-    without this check these two URLs would hand the app's whole client source
-    to anyone who guessed the path. The shell always sends the current hash,
-    and it is revalidated on every open, so it can never send a stale one.
-
-    Served from the build's packed copy when there is one in an encoding the
-    browser takes. Compressing app.js again on every uncached request cost
-    about 50 ms of the event loop per first open, bunched after each update
-    when everybody reloads (the 2026-10-12 audit, D3)."""
-    _shell, assets = _page_parts()
-    asset = assets.get(kind)
-    if not asset or version != _asset_hashes.get(kind, ""):
-        return PlainTextResponse("Not found", status_code=404, headers=_API_HEADERS)
-    media, blob = asset
-    headers = {**_API_HEADERS, "Cache-Control": "public, max-age=31536000, immutable"}
-    enc = perf.pick_encoding(accept)
-    packed = _asset_packed.get((kind, version, enc)) if enc else None
-    if packed is None:
-        _pack_assets_soon()
-        return Response(blob, media_type=media, headers=headers)
-    # The middleware leaves an answer that already has an encoding alone, and
-    # still adds Vary: Accept-Encoding to it.
-    return Response(packed, media_type=media, headers={**headers, "Content-Encoding": enc})
-
-
-_SHOP_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\.myshopify\.com$")
-
-
-def _frame_headers(request: Request) -> dict:
-    """Headers for the chat page: allow the admin iframe (must NOT send
-    X-Frame-Options) and block MIME sniffing / referrer leakage."""
-    # Who may frame the page. With the store configured, that store and the
-    # admin, whatever the URL says: trusting a well-formed ?shop= let any
-    # myshopify.com store, a free development one included, frame Reactor
-    # under decoy buttons and steer a signed-in person's clicks. Unconfigured
-    # (a local run), a well-formed ?shop= or the wildcard, as before, so a
-    # crafted value still cannot inject extra frame hosts.
-    shop = request.query_params.get("shop", "")
-    if SHOPIFY_STORE:
-        ancestors = f"https://{SHOPIFY_STORE.split('.')[0]}.myshopify.com https://admin.shopify.com"
-    elif _SHOP_RE.match(shop):
-        ancestors = f"https://{shop} https://admin.shopify.com"
-    else:
-        ancestors = "https://admin.shopify.com https://*.myshopify.com"
-    # Full CSP: lock down sources while allowing exactly what the page needs —
-    # App Bridge (cdn.shopify.com), Google Fonts, same-origin API calls, and the
-    # store/admin for the embed.
-    #
-    # script-src carries NO 'unsafe-inline'. It used to, from when the page was
-    # one file with its script inline; splitting the JS into /assets/app.js made
-    # that allowance dead weight, and dead weight in a CSP is the difference
-    # between an injected string being inert and being executed. Verified before
-    # removing it: the served shell has zero inline <script>, zero inline
-    # <style> and zero on*= attributes, and App Bridge itself never builds a
-    # script element, evals, or calls new Function. The session token lives in
-    # localStorage, so this is the layer that keeps a future HTML sink from
-    # becoming an account takeover.
-    #
-    # style-src keeps 'unsafe-inline': the page still sets element.style
-    # throughout and the shell carries style= attributes. Narrowing that needs
-    # its own pass and buys far less.
-    csp = (
-        "default-src 'self'; "
-        # PATH-scoped, and only the one script the shell actually loads.
-        # cdn.shopify.com is also where Shopify serves every store's uploaded
-        # Files, and Shopify Files accepts .js - so a bare host entry trusts
-        # JavaScript uploaded by anyone with a free development store, which
-        # is the whole of what this directive is here to prevent.
-        "script-src 'self' https://cdn.shopify.com/shopifycloud/; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-        "font-src 'self' https://fonts.gstatic.com data:; "
-        # Every image the page shows is a Shopify CDN product image, a data:
-        # barcode, or a signed link to this account's own bucket (appended
-        # below). "https:" additionally made every host on the internet a
-        # beacon for anything a compromised page wanted to send out.
-        "img-src 'self' data: https://cdn.shopify.com"
-        + (" " + fileserver._files_endpoint() if fileserver._files_configured() else "")   # image preview from the bucket
-        + "; "
-        # Files uploads/downloads go browser-to-bucket, so the page must be
-        # allowed to talk to this account's R2 endpoint and nothing broader.
-        # Without it the browser kills the PUT before it starts and the only
-        # symptom is "the transfer failed".
-        # No *.myshopify.com: the page never calls one, and a name under it
-        # costs a free trial signup - which made it an exfiltration host
-        # anybody could register. *.shopify.com stays for App Bridge; those
-        # names cannot be registered by an outsider.
-        "connect-src 'self' https://*.shopify.com"
-        + (" " + fileserver._files_endpoint() if fileserver._files_configured() else "")
-        + "; "
-        # The store's own quote domain is allowed so the Proof modal can embed
-        # proposal pages; nothing else may be framed.
-        f"frame-src https://*.shopify.com https://{orderbook.PROPOSAL_HOST}"
-        + (" " + fileserver._files_endpoint() if fileserver._files_configured() else "")   # in-app PDF preview
-        + "; "
-        "base-uri 'self'; form-action 'self'; object-src 'none'; "
-        f"frame-ancestors {ancestors};"
-    )
-    return {
-        **_API_HEADERS,
-        "Content-Security-Policy": csp,
-        # The shell must be revalidated on every open so a deploy is never
-        # missed; its ETag is the build's own content hash, so revalidating
-        # costs a 304 rather than the page. Never add a max-age here: the URL
-        # carries no build hash, so there would be no way to bust it. The bulk
-        # of the app lives in the hashed /assets URLs, which cache for a year.
-        "Cache-Control": "private, no-cache",
-    }
-
-
-def _build_id() -> str:
-    """Which build answered, in every API reply.
-
-    A browser tab left open across a deploy keeps running the old page - Shopify
-    admin holds an embedded app open for days - and from the desk that is
-    invisible: it looks exactly like a bug that was already fixed. The page
-    carries the same marker in a meta tag and compares the two.
-
-    Derived from the asset hash rather than being it. That hash is the token
-    /assets/app.js checks before serving, and an unauthenticated call gets a
-    reply (a 401 is a reply), so publishing it here would hand the app's whole
-    client source to anyone who asked. This changes when the JavaScript does and
-    opens nothing."""
-    try:
-        _page_parts()                       # fills _asset_hashes, then cached
-        h = _asset_hashes.get("js", "")
-        return _build_marker(h) if h else ""
-    except Exception:
-        return ""
-
-
-# ---------------------------------------------------------------------------
-# Abuse / cost controls — in-memory rate limiting + request-size guards
-# ---------------------------------------------------------------------------
-_oauth_states: dict[str, float] = {}
 # EORI checks, app-wide rather than per-client: the limit being respected is
 # the EU service's, and it counts requests from this deployment, not from
 # whichever member of staff happens to be typing.
@@ -1442,14 +1039,6 @@ def _next_team_colour(users: dict) -> str:
         if c not in taken:
             return c
     return TEAM_COLOUR_NAMES[len(taken) % len(TEAM_COLOUR_NAMES)]
-
-
-# ---------------------------------------------------------------------------
-# The accounts mailbox's connect walk: the tickets and states its consent walk
-# is waiting on, held in memory.
-# ---------------------------------------------------------------------------
-_fin_connect_tickets: dict = {}      # ticket -> its expiry and the address asked for (the ACCOUNTS mailbox)
-_fin_expect: dict = {}               # state nonce -> the address that was asked for
 
 
 # ---------------------------------------------------------------------------
@@ -1802,45 +1391,6 @@ def reseal_secrets_at_rest() -> dict:
     return out
 
 
-def token_vault_state() -> dict:
-    """Whether the secrets on the volume are encrypted, and whether any are not.
-
-    Reads the files rather than trusting that the key is set: a key present but
-    a re-seal that never ran would look identical from the environment alone,
-    and that is exactly the failure worth catching.
-    """
-    stores = [
-        ("Gmail, sales", google_mail.TOKEN_PATH, "refresh_token"),
-        ("Gmail, finance", google_mail.FINANCE_TOKEN_PATH, "refresh_token"),
-        ("Google data", google_data.OAUTH_TOKEN_PATH, "refresh_token"),
-        ("Xero", xero_api.TOKEN_PATH, "refresh_token"),
-    ]
-    sealed, plain, present = [], [], 0
-    for name, path, field in stores:
-        try:
-            with open(path, encoding="utf-8") as fh:
-                v = (json.load(fh) or {}).get(field)
-        except (OSError, ValueError):
-            continue
-        if not isinstance(v, str) or not v:
-            continue
-        present += 1
-        (sealed if tokenvault.is_sealed(v) else plain).append(name)
-    try:
-        users = (jsonstore._load_json_store(team.USERS_PATH, "users_store", None) or {}).get("users") or {}
-        for rec in users.values():
-            if not isinstance(rec, dict):
-                continue
-            v = rec.get("mfa_secret")
-            if isinstance(v, str) and v:
-                present += 1
-                (sealed if tokenvault.is_sealed(v) else plain).append("A sign-in code secret")
-    except Exception:
-        pass
-    return {"enabled": tokenvault.enabled(), "stored": present,
-            "sealed": len(sealed), "plaintext": sorted(set(plain))}
-
-
 def _may_edit_sizes(uid: Optional[str]) -> bool:
     """Who may change what the bench actually cuts.
 
@@ -1870,96 +1420,6 @@ def _may_send_mail(uid: Optional[str]) -> bool:
     if team.ROLE_LEVELS.get(u.get("role"), 0) >= team.ROLE_LEVELS["admin"]:
         return True
     return bool(u.get("can_send"))
-
-
-# ---------------------------------------------------------------------------
-# Page layouts: how each person has arranged the cards on a report screen.
-# A layout is an order and a hidden list of card ids, kept per account, so
-# rearranging your Overview never moves a colleague's cards and it follows you
-# to another machine. The server does not know which cards a screen renders
-# and does not try to: the page drops ids it did not render when it merges.
-# ---------------------------------------------------------------------------
-
-# Every view the page's setView shows except Chat, which is a log and a
-# composer with no cards to arrange.
-LAYOUT_VIEWS = ("overview", "seo", "keywords", "products", "customers", "liability",
-                "recon", "forecast", "connector", "crm", "loans", "mail", "files", "team",
-                "labels", "sizes", "memory", "skills", "guide")
-# The page's own card id pattern, matched with fullmatch: with re.match a `$`
-# would also accept an id that ends in a newline.
-_LAYOUT_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
-LAYOUT_MAX_IDS = 64
-# Two lists of 64 ids at 48 characters each is under 7KB of JSON, so a body
-# past 8KB is not something the page sends.
-LAYOUT_MAX_BODY = 8 * 1024
-# The load, change and write in _save_layout have no await between them, so
-# today two saves cannot interleave on the one event loop. The lock keeps that
-# true on the day someone adds one, instead of one person's Done silently
-# dropping another's layout.
-_layouts_lock = asyncio.Lock()
-
-
-def _load_layouts() -> dict:
-    """{uid: {view: {"order": [...], "hidden": [...]}}}, read fresh each time.
-    Not the cached loader: _save_layout changes what it is handed, and a
-    fresh object means a failed write leaves nothing changed in memory."""
-    d = jsonstore._load_json_store(LAYOUTS_PATH, "layouts", {})
-    return d if isinstance(d, dict) else {}
-
-
-def _layouts_for(uid: str) -> dict:
-    mine = _load_layouts().get(uid)
-    return mine if isinstance(mine, dict) else {}
-
-
-def _clean_layout_change(body: dict):
-    """(problem, view, layout) for a save or a reset. `problem` is the plain
-    sentence a 400 carries, empty when the change is sound; `layout` is None
-    for a reset. A card named twice keeps the first place it was given."""
-    view = body.get("view")
-    if not isinstance(view, str) or view not in LAYOUT_VIEWS:
-        return "That screen has no layout to save.", "", None
-    if "reset" in body:
-        if body["reset"] is not True:
-            return "Reset is either true or left out.", "", None
-        return "", view, None
-    layout = {}
-    for name in ("order", "hidden"):
-        ids = body.get(name)
-        if not isinstance(ids, list):
-            return "A layout needs an order list and a hidden list.", "", None
-        if len(ids) > LAYOUT_MAX_IDS:
-            return f"A layout holds at most {LAYOUT_MAX_IDS} cards.", "", None
-        clean = []
-        for i in ids:
-            if not isinstance(i, str) or not _LAYOUT_ID.fullmatch(i):
-                return ("A card id is up to 48 lower-case letters, digits and hyphens, "
-                        "starting with a letter or digit."), "", None
-            if i not in clean:
-                clean.append(i)
-        layout[name] = clean
-    return "", view, layout
-
-
-def _save_layout(uid: str, view: str, layout) -> dict:
-    """Set one person's layout for one view, or remove it when `layout` is
-    None, and return that person's whole map. The caller holds _layouts_lock.
-    Private: it is one file of everyone's entries, and nothing but the app
-    has a reason to read it."""
-    d = _load_layouts()
-    mine = d.get(uid) if isinstance(d.get(uid), dict) else {}
-    if layout is None:
-        if view not in mine:
-            return mine              # nothing saved for that screen, nothing to write
-        mine.pop(view)
-    else:
-        mine[view] = layout
-    if mine:
-        d[uid] = mine
-    else:
-        d.pop(uid, None)             # nothing saved leaves no empty entry behind
-    jsonstore._write_json_store(LAYOUTS_PATH, "layouts", d, private=True)
-    return mine
 
 
 # ---------------------------------------------------------------------------
@@ -2188,31 +1648,6 @@ def _print_cors(request: Request) -> dict:
     # credentialed print action until the cache expired.
     return {**base, "Access-Control-Allow-Origin": "*", "Vary": "Origin"}
 
-# ----- Google OAuth connect flow (one-time, secret-gated) -------------
-def _redirect_uri(request: Request) -> str:
-    # Prefer a configured public base URL (must match the URI registered in
-    # Google Cloud) over the attacker-controllable Host header.
-    if APP_BASE_URL:
-        return APP_BASE_URL.rstrip("/") + "/oauth/google/callback"
-    host = request.headers.get("host", "")
-    return f"https://{host}/oauth/google/callback"
-
-def _oauth_page(title: str, msg: str) -> HTMLResponse:
-    # Escape both inputs (any reflected query value is neutralized) and ship a
-    # locked-down CSP: no scripts at all, only inline styles. Defense in depth.
-    t, m = html.escape(str(title)), html.escape(str(msg))
-    body = (f"<!doctype html><meta charset=utf-8><title>{t}</title>"
-            "<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f7f7f8;"
-            "color:#16161a;display:grid;place-items:center;height:100vh;margin:0}"
-            ".c{background:#fff;border:1px solid #e7e7ea;border-radius:14px;padding:28px 32px;"
-            "max-width:420px;text-align:center;box-shadow:0 6px 24px -6px rgba(20,20,40,.1)}"
-            "h1{font-size:17px;margin:0 0 8px}p{color:#5c5f66;font-size:14px;margin:0}</style>"
-            f"<div class=c><h1>{t}</h1><p>{m}</p></div>")
-    headers = {"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
-               "base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-               **_API_HEADERS}
-    return HTMLResponse(body, headers=headers)
-
 # ----- Gmail connect: same shape as the Google one, its own token -----
 # The mailbox is a DIFFERENT Google account from the analytics one (the
 # shared address, not the merchant's own), so it gets its own consent
@@ -2223,16 +1658,6 @@ def _gmail_redirect_uri(request: Request) -> str:
         return APP_BASE_URL.rstrip("/") + "/oauth/gmail/callback"
     host = request.headers.get("host", "")
     return f"https://{host}/oauth/gmail/callback"
-
-# ----- the ACCOUNTS mailbox: a second Google account, for reconciliation -
-# Same OAuth client and scope as the sales inbox, its own refresh token,
-# its own consent walk, its own state namespace. The two can never
-# complete each other's flow, and neither can reach the other's mail.
-def _gmail_fin_redirect_uri(request: Request) -> str:
-    if APP_BASE_URL:
-        return APP_BASE_URL.rstrip("/") + "/oauth/gmail-finance/callback"
-    host = request.headers.get("host", "")
-    return f"https://{host}/oauth/gmail-finance/callback"
 
 
 def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=None,
@@ -2317,40 +1742,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         logger.warning("Copilot: SHOPIFY_STORE not set. Session tokens will NOT be pinned to a specific "
                        "shop (dest is unverified). Set SHOPIFY_STORE to lock the app to your store.")
 
-    @mcp.custom_route("/", methods=["GET"])
-    async def index(request: Request):
-        # When embedded, only serve the page when it's loaded from Shopify
-        # admin (which always appends shop/host/embedded). A direct browser
-        # visit has none of those — return nothing so the app is invisible
-        # outside the admin. (Real auth is still enforced on /api/chat.)
-        if SHOPIFY_API_KEY:
-            qp = request.query_params
-            if not (qp.get("shop") or qp.get("host") or qp.get("embedded") or qp.get("id_token")):
-                return PlainTextResponse("Not Found", status_code=404, headers=_API_HEADERS)
-        scheduler._ensure_scheduler(registry)  # start the background auto-refresh loop on first load (no-op until enabled)
-        headers = _frame_headers(request)
-        headers["ETag"] = etag = _page_etag()
-        if _etag_matches(request.headers.get("if-none-match"), etag):
-            # Same build: send the headers again (the CSP's frame-ancestors is
-            # computed per request, so a bare 304 would leave the browser using
-            # whichever one it stored) and skip the body.
-            return Response(status_code=304, headers=headers)
-        return HTMLResponse(_render_page(), headers=headers)
-
-    @mcp.custom_route("/assets/app.css", methods=["GET"])
-    async def app_css(request: Request):
-        return _asset_response("css", request.query_params.get("v", ""),
-                               request.headers.get("accept-encoding", ""))
-
-    @mcp.custom_route("/assets/app.js", methods=["GET"])
-    async def app_js(request: Request):
-        return _asset_response("js", request.query_params.get("v", ""),
-                               request.headers.get("accept-encoding", ""))
-
-    @mcp.custom_route("/assets/composer.js", methods=["GET"])
-    async def composer_js(request: Request):
-        return _asset_response("composer", request.query_params.get("v", ""),
-                               request.headers.get("accept-encoding", ""))
+    # The page and its assets (gizmo/routes/rendering.py), gathered where the first stood.
+    routes_rendering.register(mcp, registry)
 
     # The order book's routes (gizmo/routes/orderbook.py), gathered where the first stood.
     routes_orderbook.register(mcp, registry)
@@ -2361,15 +1754,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     # The privacy routes (gizmo/routes/privacy.py), gathered where the first stood.
     routes_privacy.register(mcp, registry)
 
-    @mcp.custom_route("/healthz", methods=["GET"])
-    async def healthz(request: Request):
-        # Also the scheduler's boot hook: the platform polls this, so auto-refresh
-        # resumes after a redeploy without waiting for someone to open the app.
-        scheduler._ensure_scheduler(registry)
-        # The running build's commit, so "is the deploy live" is an exact check
-        # against a hash rather than an inference from a 200. Railway sets the env.
-        sha = (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:12]
-        return PlainTextResponse("ok " + sha if sha else "ok")
+    # The status page and the health check (gizmo/routes/status.py), gathered where the first stood.
+    routes_status.register(mcp, registry)
 
     @mcp.custom_route("/api/chat", methods=["POST"])
     async def chat(request: Request):
@@ -2389,7 +1775,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
         deep = bool(body.get("deep"))
         model = claude._pick_model(deep)
-        extra = (_profile_to_system(_load_profile()) + memory._memory_to_system() + knowledge._knowledge_to_system()
+        extra = (store_profile._profile_to_system(store_profile._load_profile()) + memory._memory_to_system() + knowledge._knowledge_to_system()
                  + skillbook._skills_to_system(assistant._chat_question(history), assistant._picked_skills(body), can_read=True))
         if seo._is_seo(history):
             extra += "\n\n" + seo.SEO_KNOWLEDGE
@@ -2429,7 +1815,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
         deep = bool(body.get("deep"))
         model = claude._pick_model(deep)
-        extra = (_profile_to_system(_load_profile()) + memory._memory_to_system() + knowledge._knowledge_to_system()
+        extra = (store_profile._profile_to_system(store_profile._load_profile()) + memory._memory_to_system() + knowledge._knowledge_to_system()
                  + skillbook._skills_to_system(assistant._chat_question(history), assistant._picked_skills(body), can_read=True))
         if seo._is_seo(history):
             extra += "\n\n" + seo.SEO_KNOWLEDGE
@@ -2477,70 +1863,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     # The report routes (gizmo/routes/analytics.py), gathered where the first stood.
     routes_analytics.register(mcp, registry)
 
-    @mcp.custom_route("/api/profile", methods=["POST"])
-    async def profile_route(request: Request):
-        err, body, _who = await _guard(request)
-        if err:
-            return err
-        # The switches alone, merged into the profile as the server holds it.
-        # A switch used to post the page's copy of the whole profile, so one
-        # click from a tab whose read had failed, or that another admin had
-        # saved past, wrote its stale or empty text over the stored text.
-        if isinstance(body.get("prefs"), dict) and not isinstance(body.get("profile"), dict):
-            if team._team_level(_who) < team.ROLE_LEVELS["admin"]:
-                return _json({"error": "Only an admin can change the store profile."}, 403)
-            try:
-                held = _load_profile()
-                prefs = {**(held.get("prefs") if isinstance(held.get("prefs"), dict) else {}),
-                         **{k: v for k, v in body["prefs"].items()
-                            if k in ("track_inventory", "concise", "proactive", "flag_anomalies")}}
-                saved = _save_profile({**held, "prefs": prefs})
-                _track(_who, "settings", "changed a store preference")
-                return _json({"profile": saved})
-            except Exception:
-                logger.exception("Preference save failed")
-                return _json({"error": "The setting could not be saved. Try again, or tell Cameron if it keeps happening."}, 500)
-        # Save when a profile object is supplied; otherwise just load.
-        if isinstance(body.get("profile"), dict):
-            if team._team_level(_who) < team.ROLE_LEVELS["admin"]:
-                return _json({"error": "Only an admin can change the store profile."}, 403)
-            try:
-                saved = _save_profile(body["profile"])
-                _track(_who, "settings", "changed the store profile")
-                return _json({"profile": saved})
-            except Exception:
-                logger.exception("Profile save failed")
-                return _json({"error": "The profile could not be saved. Try again, or tell Cameron if it keeps happening."}, 500)
-        return _json({"profile": _load_profile()})
+    # The store profile's route (gizmo/routes/profile.py).
+    routes_profile.register(mcp, registry)
 
-    @mcp.custom_route("/api/layouts", methods=["POST"])
-    async def layouts_route(request: Request):
-        """The caller's own card layouts: {} reads them all, a view with an
-        order and a hidden list saves that screen's, a view with reset true
-        removes it. On no tab, like the profile: arranging the cards of a
-        screen you can already open is not a permission of its own. The
-        account is only ever the session the door returns, never a name in
-        the body, so nobody can read or change another person's layout. Not
-        tracked: arranging cards is not an event the team needs in its log."""
-        err, body, who = await _guard(request, max_body=LAYOUT_MAX_BODY, cap=LAYOUT_MAX_BODY)
-        if err:
-            return err
-        if not who:
-            return _json({"error": team.AUTH_REFUSALS["session"], "reason": "session"}, 401)
-        # Any of these keys makes it a change, so a save that forgot its view
-        # is told so instead of quietly answered with a read.
-        if not any(k in body for k in ("view", "order", "hidden", "reset")):
-            return _json({"layouts": _layouts_for(who)})
-        problem, view, layout = _clean_layout_change(body)
-        if problem:
-            return _json({"error": problem}, 400)
-        try:
-            async with _layouts_lock:
-                mine = _save_layout(who, view, layout)
-        except Exception:
-            logger.exception("Layout save failed")
-            return _json({"error": "The layout could not be saved. Try again, or tell Cameron if it keeps happening."}, 500)
-        return _json({"layouts": mine})
+    # The layouts route (gizmo/routes/layouts.py).
+    routes_layouts.register(mcp, registry)
 
     # The SEO and keyword routes (gizmo/routes/seo.py), gathered where the first stood.
     routes_seo.register(mcp, registry)
@@ -3166,7 +2493,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             return _json({"error": "A numeric product_id is required."}, 400)
         # The skills are chosen inside run_product_audit, once the product's
         # title, type and tags are known: 'product plan 8123456789' matched nothing.
-        extra = _profile_to_system(_load_profile()) + memory._memory_to_system() + knowledge._knowledge_to_system()
+        extra = store_profile._profile_to_system(store_profile._load_profile()) + memory._memory_to_system() + knowledge._knowledge_to_system()
         try:
             return _json(await seo.run_product_audit(registry, pid, extra))
         except RuntimeError as e:
@@ -3184,247 +2511,5 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     # The Xero sync settings route (gizmo/routes/xero_sync.py).
     routes_xero_sync.register(mcp, registry)
 
-    @mcp.custom_route("/oauth/google/start", methods=["GET"])
-    async def google_start(request: Request):
-        if not gate._window_ok(gate._rl_hits.setdefault("oauth:" + gate._client_key(request), []), gate.RATE_MAX_CLIENT, time.monotonic()):
-            return PlainTextResponse("Too many requests", status_code=429, headers=_API_HEADERS)
-        if not google_data.oauth_client_configured():
-            return _oauth_page("Not configured", "Add Google's client ID and secret in the app's hosting settings first.")
-        key = request.query_params.get("key", "")
-        if not (google_data.CONNECT_SECRET and key and
-                secrets.compare_digest(key, google_data.CONNECT_SECRET)):
-            return PlainTextResponse("Forbidden", status_code=403, headers=_API_HEADERS)
-        now = time.time()
-        for s, exp in list(_oauth_states.items()):  # prune expired
-            if exp < now:
-                _oauth_states.pop(s, None)
-        state = secrets.token_urlsafe(24)
-        _oauth_states[state] = now + 900  # 15-minute TTL
-        from starlette.responses import RedirectResponse
-        return RedirectResponse(google_data.consent_url(_redirect_uri(request), state), status_code=302)
-
-    @mcp.custom_route("/oauth/google/callback", methods=["GET"])
-    async def google_callback(request: Request):
-        qp = request.query_params
-        if qp.get("error"):
-            return _oauth_page("Connection cancelled", f"Google returned: {qp.get('error')}")
-        state = qp.get("state", "")
-        exp = _oauth_states.pop(state, None)  # single-use
-        if not state or exp is None or exp < time.time():
-            return _oauth_page("Link expired", "That connect link expired or was already used. Start again.")
-        code = qp.get("code", "")
-        if not code:
-            return _oauth_page("Connection failed", "No authorization code returned.")
-        try:
-            got = await google_data.exchange_code(code, _redirect_uri(request))
-        except Exception:
-            logger.exception("Google OAuth exchange error")
-            got = {"ok": False, "granted": {}}
-        granted = got.get("granted") or {}
-        names = {"gsc": "Search Console", "ga4": "Analytics"}
-        left = [names[k] for k in ("gsc", "ga4") if granted.get(k) is False]
-        if not got.get("ok"):
-            if granted and len(left) == len(names):
-                return _oauth_page("Nothing was linked",
-                                   "Search Console and Analytics were both left unticked on Google's "
-                                   "screen, so Reactor could read neither. Connect again and leave them ticked.")
-            return _oauth_page("Connection failed", "Couldn't complete the connection. Please try again.")
-        if left:
-            kept = [n for k, n in names.items() if granted.get(k)]
-            return _oauth_page("✅ Connected to Google, without " + left[0],
-                               kept[0] + " is linked. " + left[0] + " was left unticked on Google's screen, "
-                               "so Reactor can't read it: connect again and leave it ticked.")
-        return _oauth_page("✅ Connected to Google", "Search Console & Analytics are now linked. "
-                           "You can close this tab and return to Reactor.")
-
-
-    @mcp.custom_route("/oauth/gmail-finance/start", methods=["GET"])
-    async def gmail_finance_start(request: Request):
-        if not gate._window_ok(gate._rl_hits.setdefault("oauth:" + gate._client_key(request), []),
-                          gate.RATE_MAX_CLIENT, time.monotonic()):
-            return PlainTextResponse("Too many requests", status_code=429, headers=_API_HEADERS)
-        if not google_mail.client_configured():
-            return _oauth_page("Not configured", "Add Google's client ID and secret in the app's hosting settings first.")
-        if not google_mail.FINANCE.usable():
-            return _oauth_page("Not configured",
-                               "The accounts mailbox is set to the same token file as the "
-                               "sales inbox. Give it its own token file in the app's "
-                               "hosting settings, then try again.")
-        # Two ways in, the same as the sales mailbox: a single-use ticket minted
-        # for the master through the app (the button), or the standing connect
-        # secret, kept so the mailbox is recoverable when nobody can sign in.
-        ticket = request.query_params.get("t", "")
-        tx = _fin_connect_tickets.pop(ticket, None) if ticket else None
-        by_secret = _secret_ok(request.query_params.get("key", ""), google_data.CONNECT_SECRET)
-        live = isinstance(tx, dict) and tx.get("exp", 0) > time.time()
-        if not (live or by_secret):
-            return PlainTextResponse("Forbidden", status_code=403, headers=_API_HEADERS)
-        now = time.time()
-        for st, exp in list(_oauth_states.items()):
-            if exp < now:
-                _oauth_states.pop(st, None)
-        state = secrets.token_urlsafe(24)
-        _oauth_states["gmfin:" + state] = now + 900
-        want = (tx or {}).get("want", "") if live else ""
-        if want:
-            _fin_expect[state] = want
-        for st in [k for k, v in list(_fin_expect.items()) if ("gmfin:" + k) not in _oauth_states]:
-            _fin_expect.pop(st, None)          # never outlive their own state
-        from starlette.responses import RedirectResponse
-        return RedirectResponse(
-            google_mail.consent_url(_gmail_fin_redirect_uri(request), state, want),
-            status_code=302)
-
-    @mcp.custom_route("/oauth/gmail-finance/callback", methods=["GET"])
-    async def gmail_finance_callback(request: Request):
-        qp = request.query_params
-        if qp.get("error"):
-            return _oauth_page("Connection cancelled", f"Google returned: {qp.get('error')}")
-        state = qp.get("state", "")
-        exp = _oauth_states.pop("gmfin:" + state, None)
-        if not state or exp is None or exp < time.time():
-            return _oauth_page("Link expired", "That connect link expired or was already used. Start again.")
-        code = qp.get("code", "")
-        if not code:
-            return _oauth_page("Connection failed", "No authorization code returned.")
-        try:
-            ok = await google_mail.exchange_code(code, _gmail_fin_redirect_uri(request),
-                                                 google_mail.FINANCE)
-        except Exception:
-            logger.exception("Gmail (accounts) OAuth exchange error")
-            ok = False
-        if not ok:
-            # The vague version of this page sent people round the loop with
-            # nothing to act on. These are the two causes in practice, in the
-            # order they actually happen.
-            return _oauth_page(
-                "Connection failed",
-                "Google would not complete the sign-in. Two things cause this: the callback "
-                "URL " + _gmail_fin_redirect_uri(request) + " is not listed in the OAuth "
-                "client's authorised redirect URIs, or the sign-in was cancelled part-way. "
-                "Add that exact URL in the Google console, then press Connect again.")
-        addr = google_mail.address(google_mail.FINANCE) or "the mailbox"
-        want = _fin_expect.pop(state, "")
-        if want and addr.strip().lower() != want.strip().lower():
-            # They named the mailbox; Google connected a different one, which is
-            # what happens when the browser is already signed in elsewhere.
-            google_mail.disconnect(google_mail.FINANCE)
-            return _oauth_page("Wrong mailbox",
-                               f"You asked for {want} but the sign-in connected {addr}. "
-                               "Nothing was saved. Sign out of Google, or use a private "
-                               "window, and try again.")
-        sales = google_mail.address()
-        if sales and addr.strip().lower() == sales.strip().lower():
-            # Consenting as the sales mailbox again would leave reconciliation
-            # reading the wrong post. Refuse it rather than quietly agreeing.
-            google_mail.disconnect(google_mail.FINANCE)
-            return _oauth_page("That is the sales mailbox",
-                               f"{addr} is already connected as the Inbox tab's mailbox. "
-                               "Sign in as the ACCOUNTS mailbox instead, then try again.")
-        return _oauth_page("Accounts mailbox connected",
-                           f"{addr} is now linked to Reconciliation only. It does not appear in "
-                           "the Inbox tab, and the Inbox tab's mailbox is not read by "
-                           "reconciliation. You can close this tab.")
-
-    @mcp.custom_route("/api/status", methods=["POST"])
-    async def status_route(request: Request):
-        """Connection-health summary for the Settings panel: Shopify, AI, and Google.
-        Admin+ only: the health detail carries internal error strings (the R2
-        endpoint with the account id, the stock-app URL, the /data path), which
-        a restricted part-time member has no business reading."""
-        err, _body, who = await _guard(request, body=False)
-        if err:
-            return err
-        if team._team_role(who) not in ("master", "admin"):
-            return _json({"error": "Connection status is for admins."}, 403)
-        body = await gate._read_json_capped(request)
-        if body is None:
-            return _json({"error": "Request too large."}, 413)
-        api_version = shopify._api_version
-        shop_ok, shop_name, currency = False, None, None
-        try:
-            shop = await shopify._tool_json(registry, "shopify_get_shop", {})
-            if shop and shop.get("name"):
-                shop_ok, shop_name, currency = True, shop.get("name"), shop.get("currency")
-        except Exception:
-            pass
-        # Volume sentinel: prove the data disk is writable, or nothing persists.
-        vol_ok, vol_detail = True, ""
-        try:
-            probe = os.path.join(os.path.dirname(scheduler.SCHEDULE_PATH) or ".", ".probe")
-            with open(probe, "w", encoding="utf-8") as fh:
-                fh.write("ok")
-            os.remove(probe)
-        except Exception as e:
-            vol_ok, vol_detail = False, str(e)[:200]
-        watch = scheduler._load_watch()
-        health = size_list._gobo_sizes().get("health") or {}
-        scope_state = {"checked": False, "missing": {}, "error": ""}
-        if shopify._scope_reader is not None and shop_ok:
-            try:
-                got = await shopify._scope_reader()
-                scope_state = {"checked": not got.get("error"),
-                               "missing": got.get("missing") or {},
-                               "error": got.get("error") or ""}
-            except Exception as e:
-                scope_state["error"] = str(e)[:200]
-        return _json({
-            "shopify": {"ok": shop_ok, "name": shop_name, "currency": currency,
-                        "api_version": api_version,
-                        "down_since": watch.get("shopify_down"),
-                        # What the INSTALL may actually do, read from Shopify -
-                        # not what the config file asks for. A write the app
-                        # performs but the install cannot is invisible until
-                        # the moment it matters, which is the wrong moment.
-                        "scopes": scope_state},
-            "ai": {"ok": bool(claude.ANTHROPIC_API_KEY),
-                   "models": {"chat": claude._model_name(claude.MODEL_FAST), "deep": claude._model_name(claude.MODEL_DEEP),
-                              "fallback": claude._model_name(claude._fallback_for(claude.MODEL_DEEP, Exception())
-                                                      or claude._fallback_for(claude.MODEL_FAST, Exception())) if (
-                                  claude._fallback_for(claude.MODEL_DEEP, Exception()) or claude._fallback_for(claude.MODEL_FAST, Exception())) else ""},
-                   "last_failure": dict(claude._AI_LAST_FAIL) or None},
-            "google": google_data.status(),
-            "gmail": google_mail.status(),
-            "shipping": {"ok": bool(worldoptions and worldoptions.configured()),
-                         "available": bool(worldoptions),
-                         "fulfillment": bool(shopify._fulfillment_writer is not None)},
-            "volume": {"ok": vol_ok, "detail": vol_detail,
-                       "poisoned": sorted(os.path.basename(p) for p in jsonstore._poisoned_stores),
-                       # Sizes, and the parse cost of anything over a megabyte:
-                       # the stores are read from disk per request, so this is
-                       # what a slow CRM save would show up as, before it does.
-                       "stores": _store_report()},
-            # Each route's typical and slowest time since this process
-            # started (perf.summary), slowest first: the live numbers the
-            # 2026-10-12 speed audit could only model.
-            "timing": perf.summary(),
-            "email_alerts": {"ok": bool(scheduler.RESEND_API_KEY and scheduler.ALERT_EMAIL_TO)},
-            # Whether the long-lived credentials on the volume are encrypted.
-            # Read from the FILES, not from the environment: a key that is set
-            # while a token still sits in plaintext looks fine from the
-            # environment alone, and that is the failure worth catching.
-            "token_vault": token_vault_state(),
-            # Live updates: whether Shopify is pushing order events to the app,
-            # and when one last arrived. Without them the desk falls back to the
-            # short cache and the Refresh button, which still work.
-            "webhooks": {"ok": bool((orderbook._webhook_state.get("ensured") or {}).get("ok")),
-                         "detail": (orderbook._webhook_state.get("ensured") or {}).get("detail") or "",
-                         "last_event_at": (orderbook._webhook_state["last_at"] or None),
-                         "version": orderbook._webhook_state.get("version") or None,
-                         "events": orderbook._webhook_state["count"]},
-            # The stock bridge: glass booked at the stock app when orders are
-            # marked made. Pending = bookings still waiting on a retry.
-            "stock_bridge": {"configured": _zeta_configured(),
-                             "pending": len(_load_zeta_pending()),
-                             "last_ok_at": (_zeta_last["ok_at"] or None),
-                             "error": _zeta_last["error"]},
-            "backup": (lambda b: {"snapshot_at": b.get("snapshot_at"),
-                                  "download_at": b.get("download_at")})(
-                jsonstore._load_json_store(backup.BACKUP_STATE_PATH, "backup", {}) or {}),
-            # Visible whether or not email is configured, which it is not yet.
-            "errors": {"last_24h": len(errors._recent_errors(24)),
-                       "recent": errors._recent_errors(24)[:5]},
-            "size_list": health,
-            "coverage": {"at": watch.get("coverage_at"), "pct": watch.get("coverage_pct")},
-            "storage": {"warning": _data_volume_warning()},
-        })
+    # The Google and accounts-mailbox sign-in walks (gizmo/routes/oauth.py), gathered where the first stood.
+    routes_oauth.register(mcp, registry)

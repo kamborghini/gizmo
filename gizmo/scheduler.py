@@ -188,10 +188,10 @@ async def _run_scheduled_audits(registry: dict) -> list:
             _save_watch(state)
     except Exception:
         logger.exception("scheduler gate failed; running audits anyway")
-    extra = (core._profile_to_system(core._load_profile()) + memory._memory_to_system()
+    extra = (store_profile._profile_to_system(store_profile._load_profile()) + memory._memory_to_system()
              + knowledge._knowledge_to_system() + skillbook._skills_to_system("overview SEO search keywords customers report"))
     threshold = _load_schedule().get("threshold_pct", 15)
-    track = (core._load_profile().get("prefs") or {}).get("track_inventory", True)
+    track = (store_profile._load_profile().get("prefs") or {}).get("track_inventory", True)
     jobs = [
         ("Overview", "overview", lambda: analytics.run_overview(registry, extra, bool(track))),
         ("SEO", "seo", lambda: seo.run_seo_audit(registry, extra)),
@@ -571,4 +571,5 @@ from gizmo import skills as skillbook  # noqa: E402
 from gizmo import team  # noqa: E402
 from gizmo import work  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import profile as store_profile  # noqa: E402
 from gizmo import xero_sync as xerosync  # noqa: E402

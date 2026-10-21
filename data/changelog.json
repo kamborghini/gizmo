@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-21",
+   "title": "The page, profile, sign-ins and status on their own",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "How the page is served, the store profile and card layouts, the Google and accounts mailbox connections, and the status page now each live on their own, so a change elsewhere cannot upset them. Nothing looks different."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-21",
    "title": "The Finance tab's workings on their own",
    "items": [
     {

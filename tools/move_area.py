@@ -318,7 +318,9 @@ def run(spec_path, root, write):
             a_ = (prev_s.end_lineno + 1) if prev_s is not None else _start(s_)
             p_ = _route_path(s_)
             for g, gd in groups.items():
-                hit = p_ and any(p_.startswith(x) for x in gd["paths"])
+                # a path is a prefix, or with "=" before it that path alone
+                # (the page's own "/" is the prefix of every route)
+                hit = p_ and any(p_ == x[1:] if x.startswith("=") else p_.startswith(x) for x in gd["paths"])
                 helper = isinstance(s_, (ast.FunctionDef, ast.AsyncFunctionDef)) and s_.name in gd.get("helpers", [])
                 if hit or helper:
                     group_spans[g].append((a_, s_.end_lineno, s_))

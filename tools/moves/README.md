@@ -28,7 +28,8 @@
   where it would be read (the tool refuses if it is). `floor` areas may not
   borrow from `copilot.py`. `allow_file` lets a statement build a path from
   `__file__`, which the move then has to fix by hand (and declare).
-- **routes**: the routes whose path starts with one of `paths`, and the
+- **routes**: the routes whose path starts with one of `paths` (or is it
+  exactly, written `"=/"`: every path starts with `/`), and the
   nested `helpers` only they use, gathered into `register(mcp, registry)`
   where the first stood.
 - **copies**: moved names `copilot.py` keeps reading bare, for a frozen
