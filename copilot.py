@@ -260,9 +260,8 @@ def _profile_to_system(p: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Analysis cache: the last result of each AI tab (overview/seo/keywords/
-# customers), persisted so reopening the app shows it instantly without
-# spending tokens. The merchant clicks Refresh on a tab to recompute.
+# The report a chat was asked from: each report screen's name, and that
+# screen's report as context for the answer.
 # ---------------------------------------------------------------------------
 
 
@@ -735,7 +734,8 @@ def _coerce_structured(data: Any) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Overview — live KPIs (computed deterministically) + AI insight pass
+# A Shopify read that came back with data, and the signs money is written
+# with.
 # ---------------------------------------------------------------------------
 
 
@@ -748,7 +748,8 @@ _CURRENCY_SIGNS = {"GBP": "£", "USD": "$", "EUR": "€"}
 
 
 # ---------------------------------------------------------------------------
-# Keyword scraper for arbitrary external URLs (SSRF-guarded) + on-page keywords
+# Every product in the catalogue, paged: the overview, the SEO audit, the
+# Products tab and the loan-unit picker read it.
 # ---------------------------------------------------------------------------
 
 
@@ -1646,9 +1647,6 @@ async def run_products_list(registry: dict, months_window: Optional[int] = None)
             "products": out, "truncated": truncated}
 
 
-# ---------------------------------------------------------------------------
-# Customers & retention analytics (from Shopify customers + orders)
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------

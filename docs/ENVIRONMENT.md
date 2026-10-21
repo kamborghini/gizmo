@@ -327,11 +327,16 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 |---|---|---|---|
 | `DAV_TRACE` | `None` | gizmo.routes.files |  |
 
-## gizmo/seo.py - SEO — knowledge layer + live technical audit
+## gizmo/seo.py - Keyword scraper for arbitrary external URLs (SSRF-guarded) +
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
 | `EXTERNAL_FETCH_MAX` | `str(600 * 1024)` | gizmo.seo | bytes of text kept |
+
+## gizmo/seo.py - SEO — knowledge layer + live technical audit
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
 | `SEO_SAMPLE_PAGES` | `"5"` | gizmo.seo |  |
 
 ## gizmo/size_list.py - top

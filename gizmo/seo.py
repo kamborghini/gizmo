@@ -160,6 +160,12 @@ def _parse_seo(html: str) -> dict:
         "word_count": len(soup.get_text(" ", strip=True).split()),
     }
 
+
+# ---------------------------------------------------------------------------
+# Keyword scraper for arbitrary external URLs (SSRF-guarded) + on-page keywords
+# ---------------------------------------------------------------------------
+
+
 EXTERNAL_FETCH_MAX = _env_num(int, os.environ.get("EXTERNAL_FETCH_MAX", str(600 * 1024)), str(600 * 1024), "EXTERNAL_FETCH_MAX")  # bytes of text kept
 
 _STOPWORDS = set((

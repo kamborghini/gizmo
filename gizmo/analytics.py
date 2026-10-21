@@ -31,6 +31,14 @@ TREND_MONTHS = _env_num(int, os.environ.get("TREND_MONTHS", "24"), "24", "TREND_
 ANALYSIS_CACHE_PATH      = os.environ.get("ANALYSIS_CACHE_PATH", "/data/analysis_cache.json")  # last result per AI tab
 ANALYSIS_CACHE_MAX_BYTES = _env_num(int, os.environ.get("ANALYSIS_CACHE_MAX_BYTES", "800000"), "800000", "ANALYSIS_CACHE_MAX_BYTES")  # per-entry size guard
 
+
+# ---------------------------------------------------------------------------
+# Analysis cache: the last result of each AI tab (overview/seo/keywords/
+# customers), persisted so reopening the app shows it instantly without
+# spending tokens. The merchant clicks Refresh on a tab to recompute.
+# ---------------------------------------------------------------------------
+
+
 _ANALYSIS_KINDS = ("overview", "seo", "keywords", "customers")
 
 
@@ -141,6 +149,11 @@ def _save_customer_segment(seg_key: str, result: dict) -> dict:
     except Exception:
         logger.exception("analysis cache: failed to save customer segment %s", seg_key)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Overview — live KPIs (computed deterministically) + AI insight pass
+# ---------------------------------------------------------------------------
 
 
 def _money(amount: float, currency: str) -> str:
@@ -422,6 +435,12 @@ async def _overview_trends(registry: dict) -> dict:
     except Exception:
         logger.exception("overview gsc trends failed")
     return trends
+
+
+# ---------------------------------------------------------------------------
+# Customers & retention analytics (from Shopify customers + orders)
+# ---------------------------------------------------------------------------
+
 
 async def _paginate_customers(registry: dict, max_pages: int = orderbook.ORDER_PAGE_CAP,
                               meta: Optional[dict] = None) -> list:
