@@ -8955,6 +8955,38 @@ def t_updates_show_the_running_release_and_take_requests():
     with_accounts(go)
 
 @test
+def t_the_release_notes_are_the_repos_own():
+    """The release notes ship with the code: by default they are the
+    repository's data/changelog.json. A default built one folder down (as a
+    path from __file__ is once its code moves into gizmo/) finds no file, and
+    a missing changelog is shown as no notes at all, without a word."""
+    import json as _j
+    ok(os.environ.get("CHANGELOG_PATH") is None, "the default is what is read here")
+    repo = os.path.join(HERE, "data", "changelog.json")
+    ok(os.path.exists(copilot.CHANGELOG_PATH) and os.path.samefile(copilot.CHANGELOG_PATH, repo),
+       "the default is the repository's changelog: " + copilot.CHANGELOG_PATH)
+    copilot._changelog_cache["mtime"] = None
+    notes = copilot._load_changelog()
+    eq([r.get("title") for r in notes], [r.get("title") for r in _j.load(open(repo, encoding="utf-8"))["releases"]],
+       "and the notes loaded are its releases")
+
+@test
+def t_the_backup_carries_the_repos_data():
+    """The backup carries the repository's data folder (the size sheets, the
+    rulings, the changelog) under repo-data/, beside the volume. A folder
+    built one level down (as a path from __file__ is once its code moves into
+    gizmo/) does not exist, and the backup skips a missing folder without a
+    word."""
+    import io as _io, zipfile as _zf
+    repo = os.path.join(HERE, "data")
+    want = sorted("repo-data/" + n for n in os.listdir(repo)
+                  if os.path.isfile(os.path.join(repo, n)) and n.lower().endswith((".json", ".jsonl", ".csv", ".bak")))
+    ok(len(want) >= 4, "the repository has data files to carry: " + str(want))
+    buf, _added = copilot._build_backup_zip()
+    names = _zf.ZipFile(_io.BytesIO(buf.getvalue()) if hasattr(buf, "getvalue") else buf).namelist()
+    eq([n for n in want if n not in names], [], "every one of them is in the backup")
+
+@test
 def t_updates_survive_a_missing_or_broken_changelog():
     """Notes are notes: a missing or corrupt file costs the panel, never the app."""
     saved = copilot.CHANGELOG_PATH
