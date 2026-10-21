@@ -20,9 +20,26 @@ from gizmo import seo
 from gizmo import skills as skillbook
 from gizmo import profile as store_profile
 from gizmo import team
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class ChatBody(bodies.Body):
+    """What /api/chat and /api/chat/stream read (gizmo/bodies.py): the conversation so far (or one message), the Deep switch, the page's context and the skills picked."""
+    messages: bodies.Records = None
+    message: bodies.Text = None
+    deep: bodies.Flag = None
+    context: bodies.Fields = None
+    skills: bodies.Items = None
+
+
+
+class UsageBody(bodies.Body):
+    """What /api/usage reads (gizmo/bodies.py): how many days."""
+    days: bodies.Whole = None
 
 
 def register(mcp, registry):
@@ -30,7 +47,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/chat", methods=["POST"])
     async def chat(request: Request):
-        err, body, _who = await gate._guard(request, ai=True)
+        err, body, _who = await gate._guard(request, ai=True, model=ChatBody)
         if err:
             return err
 
@@ -71,7 +88,7 @@ def register(mcp, registry):
         # Authorised BEFORE the AI window is touched: the global AI ceiling is
         # the app's most expensive shared resource, and a caller with no
         # session was spending a slot from it on the way to a 401.
-        err, body, _who = await gate._guard(request, ai=True)
+        err, body, _who = await gate._guard(request, ai=True, model=ChatBody)
         if err:
             return err
         history = body.get("messages")
@@ -138,6 +155,9 @@ def register(mcp, registry):
         if err:
             return err
         body = await gate._read_json_capped(request)
+        refused = gate._body_refusal(UsageBody, body)
+        if refused:
+            return refused
         days = 30
         if isinstance(body, dict):
             try:

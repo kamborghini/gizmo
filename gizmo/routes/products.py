@@ -15,9 +15,23 @@ from gizmo import orderbook
 from gizmo import seo
 from gizmo import profile as store_profile
 from gizmo import products as catalog
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class ProductBody(bodies.Body):
+    """What /api/product reads (gizmo/bodies.py): the Shopify product."""
+    product_id: bodies.Whole = None
+
+
+
+class ProductsBody(bodies.Body):
+    """What /api/products reads (gizmo/bodies.py): how many months, and whether to read afresh."""
+    months: bodies.Whole = None
+    fresh: bodies.Flag = None
 
 
 def register(mcp, registry):
@@ -25,7 +39,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/products", methods=["POST"])
     async def products_route(request: Request):
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=ProductsBody)
         if err:
             return err
         try:
@@ -41,7 +55,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/product", methods=["POST"])
     async def product_route(request: Request):
-        err, body, _who = await gate._guard(request, ai=True)
+        err, body, _who = await gate._guard(request, ai=True, model=ProductBody)
         if err:
             return err
         try:

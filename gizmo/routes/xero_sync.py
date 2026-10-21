@@ -12,9 +12,25 @@ from gizmo import activity
 from gizmo import gate
 from gizmo import team
 from gizmo import xero_sync as xerosync
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class ConnectorBody(bodies.Body):
+    """What /api/connector reads (gizmo/bodies.py): the Xero sync's settings, a run's options, and what to look up."""
+    status: bodies.Text = None
+    kind: bodies.Text = None
+    enabled: bodies.Flag = None
+    fields: bodies.Fields = None
+    since: bodies.Text = None
+    dryRun: bodies.Flag = None
+    limit: bodies.Whole = None
+    order: bodies.Text = None
+    tag: bodies.Text = None
+    force: bodies.Flag = None
 
 
 def register(mcp, registry):
@@ -25,7 +41,7 @@ def register(mcp, registry):
     @mcp.custom_route("/api/connector", methods=["POST"])
     async def connector_route(request: Request):
         """The Xero connector tab's whole API. op says what; the service does it."""
-        err, body, who = await gate._guard(request)
+        err, body, who = await gate._guard(request, model=ConnectorBody)
         if err:
             return err
         op = str(body.get("op") or "status")

@@ -15,15 +15,17 @@ or one model per `op`, as {"add": AddBody, "delete": DeleteBody}, where an op
 the dict does not name reaches the route as before. Only the named fields are
 checked; every other field passes, a field left out or sent as null is the
 route's to decide, and the route reads the body exactly as it came. A field of
-the wrong kind is a 400 naming it: "The title sent must be text."
+the wrong kind is a 400 naming it: "The title sent must be text." A field
+sent under a name Python keeps for itself is declared with `named("from")`.
 
 On the floor: it imports nothing from the app.
 """
 import math
 import re
+import sys
 from typing import Annotated, Any, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, PlainValidator, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, PlainValidator, ValidationError
 from pydantic_core import PydanticCustomError
 
 
@@ -37,7 +39,14 @@ def _kind(words: str, fits):
 
 
 def _number(v) -> bool:
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    """A JSON number a route can do sums with. An integer is compared, never
+    converted: JSON may carry one with hundreds of digits, which float() and
+    math.isfinite() raise on, and a check must refuse, not fail."""
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, int):
+        return abs(v) <= sys.float_info.max
+    return isinstance(v, float) and math.isfinite(v)
 
 
 def _number_text(v) -> bool:
@@ -51,7 +60,7 @@ def _number_text(v) -> bool:
         return False
 
 
-_WHOLE_TEXT = re.compile(r"\s*[+-]?\d+\s*")
+_WHOLE_TEXT = re.compile(r"\s*[+-]?\d{1,30}\s*")      # int() refuses text past 4,300 digits
 
 # The kinds. Each takes what the page sends today: a number typed in a box
 # arrives as text, and an id may be text or a number (Shopify's are numbers).
@@ -61,12 +70,25 @@ Whole = _kind("a whole number", lambda v: _number(v) or v == "" or (isinstance(v
 Number = _kind("a number", lambda v: _number(v) or _number_text(v))
 Flag = _kind("yes or no", lambda v: isinstance(v, bool) or (isinstance(v, int) and v in (0, 1)))
 Items = _kind("a list", lambda v: isinstance(v, list))
+# A list whose every item is a set of fields: a chat's messages, say.
+Records = _kind("a list of sets of fields", lambda v: isinstance(v, list) and all(isinstance(x, dict) for x in v))
 Fields = _kind("a set of fields", lambda v: isinstance(v, dict))
 
 
 class Body(BaseModel):
     """A request body: the fields named below are checked, the rest pass."""
     model_config = ConfigDict(extra="allow")
+
+
+def named(sent: str):
+    """A field sent under a name Python keeps for itself ("from"):
+    `frm: bodies.Text = bodies.named("from")`."""
+    return Field(None, alias=sent)
+
+
+def sent_names(model: type) -> list:
+    """The field names a model checks, as a body sends them."""
+    return [info.alias or name for name, info in model.model_fields.items()]
 
 
 Model = Union[type, dict]

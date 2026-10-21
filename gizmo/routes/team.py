@@ -21,9 +21,63 @@ from gizmo import mail
 from gizmo import activity
 from gizmo import gate
 from gizmo import team
+from gizmo import bodies
 
 # The same logger as copilot.py's, so the routes' log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class LoginBody(bodies.Body):
+    """What /api/auth/login reads (gizmo/bodies.py): the username and password."""
+    username: bodies.Text = None
+    password: bodies.Text = None
+
+
+
+class MfaBody(bodies.Body):
+    """What /api/auth/mfa reads (gizmo/bodies.py): the current password to start or stop sign-in codes, and a code to confirm them."""
+    current: bodies.Text = None
+    code: bodies.Text = None
+
+
+
+class MfaVerifyBody(bodies.Body):
+    """What /api/auth/mfa-verify reads (gizmo/bodies.py): the sign-in's ticket and its code."""
+    ticket: bodies.Text = None
+    code: bodies.Text = None
+
+
+
+class PasswordBody(bodies.Body):
+    """What /api/auth/password reads (gizmo/bodies.py): the current password and the new one."""
+    current: bodies.Text = None
+    new: bodies.Text = None
+
+
+
+class SetupBody(bodies.Body):
+    """What /api/auth/setup reads (gizmo/bodies.py): the setup code and the first account's name, username and password."""
+    setup_code: bodies.Text = None
+    name: bodies.Text = None
+    username: bodies.Text = None
+    password: bodies.Text = None
+
+
+
+class TeamUserBody(bodies.Body):
+    """What /api/team/user reads (gizmo/bodies.py): an account, and what changes about it."""
+    id: bodies.Id = None
+    sub: bodies.Id = None
+    name: bodies.Text = None
+    username: bodies.Text = None
+    role: bodies.Text = None
+    active: bodies.Flag = None
+    colour: bodies.Text = None
+    text: bodies.Text = None
+    can_sizes: bodies.Flag = None
+    can_send: bodies.Flag = None
+    tabs: bodies.Items = None
 
 
 def register(mcp, registry):
@@ -45,7 +99,7 @@ def register(mcp, registry):
     async def auth_setup_route(request: Request):
         # First run only: create the master account. The moment one account
         # exists this door is bricked shut.
-        err, body = await team._auth_guard(request)
+        err, body = await team._auth_guard(request, model=SetupBody)
         if err:
             return err
         if not team._team_setup_needed():
@@ -95,7 +149,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/auth/login", methods=["POST"])
     async def auth_login_route(request: Request):
-        err, body = await team._auth_guard(request)
+        err, body = await team._auth_guard(request, model=LoginBody)
         if err:
             return err
         # The login form's OWN ceiling. _pre_checks allows 120 requests a
@@ -173,7 +227,7 @@ def register(mcp, registry):
     async def auth_mfa_route(request: Request):
         """Turn a second factor on, or ask whether it is on. Behind a session:
         you enrol as yourself, from inside."""
-        err, body, who = await gate._guard(request)
+        err, body, who = await gate._guard(request, model=MfaBody)
         if err:
             return err
         op = str(body.get("op") or "status")
@@ -237,7 +291,7 @@ def register(mcp, registry):
         """Finish a login. Anonymous by necessity - there is no session yet -
         so it goes through the same door guard as login, and the ticket is what
         proves the password step already happened."""
-        err, body = await team._auth_guard(request)
+        err, body = await team._auth_guard(request, model=MfaVerifyBody)
         if err:
             return err
         uid = team._mfa_ticket_uid(str(body.get("ticket") or ""))
@@ -322,7 +376,7 @@ def register(mcp, registry):
     async def auth_password_route(request: Request):
         # Change your OWN password: the current one is always required, so a
         # borrowed open session cannot quietly take over the account.
-        err, body = await team._auth_guard(request)
+        err, body = await team._auth_guard(request, model=PasswordBody)
         if err:
             return err
         uid = team._session_uid(request.headers.get("x-app-session"))
@@ -401,7 +455,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/team/user", methods=["POST"])
     async def team_user_route(request: Request):
-        err, packed = await team._team_guard(request, team.ROLE_LEVELS["admin"])
+        err, packed = await team._team_guard(request, team.ROLE_LEVELS["admin"], model=TeamUserBody)
         if err:
             return err
         who, body = packed

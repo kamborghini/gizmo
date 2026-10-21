@@ -15,18 +15,18 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/alerts` | POST | any account | `_guard` |  | unchecked |  | `gizmo.routes.scheduler.alerts_route` |  |
+| `/api/alerts` | POST | any account | `_guard` |  | `AlertBody` |  | `gizmo.routes.scheduler.alerts_route` |  |
 
 ## `/api/auth`
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/auth/login` | POST | any account | `_auth_guard` |  | unchecked |  | `gizmo.routes.team.auth_login_route` |  |
+| `/api/auth/login` | POST | any account | `_auth_guard` |  | `LoginBody` |  | `gizmo.routes.team.auth_login_route` |  |
 | `/api/auth/logout` | POST | any account | `_auth_guard` |  |  |  | `gizmo.routes.team.auth_logout_route` |  |
-| `/api/auth/mfa` | POST | any account | `_guard` |  | unchecked |  | `gizmo.routes.team.auth_mfa_route` | Turn a second factor on, or ask whether it is on. |
-| `/api/auth/mfa-verify` | POST | any account | `_auth_guard` |  | unchecked |  | `gizmo.routes.team.auth_mfa_verify_route` | Finish a login. |
-| `/api/auth/password` | POST | any account | `_auth_guard` |  | unchecked |  | `gizmo.routes.team.auth_password_route` |  |
-| `/api/auth/setup` | POST | any account | `_auth_guard` |  | unchecked |  | `gizmo.routes.team.auth_setup_route` |  |
+| `/api/auth/mfa` | POST | any account | `_guard` |  | `MfaBody` |  | `gizmo.routes.team.auth_mfa_route` | Turn a second factor on, or ask whether it is on. |
+| `/api/auth/mfa-verify` | POST | any account | `_auth_guard` |  | `MfaVerifyBody` |  | `gizmo.routes.team.auth_mfa_verify_route` | Finish a login. |
+| `/api/auth/password` | POST | any account | `_auth_guard` |  | `PasswordBody` |  | `gizmo.routes.team.auth_password_route` |  |
+| `/api/auth/setup` | POST | any account | `_auth_guard` |  | `SetupBody` |  | `gizmo.routes.team.auth_setup_route` |  |
 | `/api/auth/state` | POST | any account | `_auth_guard` |  |  |  | `gizmo.routes.team.auth_state_route` |  |
 
 ## `/api/backup`
@@ -45,14 +45,14 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/chat` | POST | chat | `_guard` | AI slot | unchecked | `_team_level` | `gizmo.routes.chat.chat` |  |
-| `/api/chat/stream` | POST | chat | `_guard` | AI slot | unchecked | `_team_level` | `gizmo.routes.chat.chat_stream` | Server-sent-events variant of /api/chat: emits real tool-step progress as the model works, then a final structured result. |
+| `/api/chat` | POST | chat | `_guard` | AI slot | `ChatBody` | `_team_level` | `gizmo.routes.chat.chat` |  |
+| `/api/chat/stream` | POST | chat | `_guard` | AI slot | `ChatBody` | `_team_level` | `gizmo.routes.chat.chat_stream` | Server-sent-events variant of /api/chat: emits real tool-step progress as the model works, then a final structured result. |
 
 ## `/api/connector`
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/connector` | POST | connector | `_guard` |  | unchecked | `_team_level` | `gizmo.routes.xero_sync.connector_route` | The Xero connector tab's whole API. |
+| `/api/connector` | POST | connector | `_guard` |  | `ConnectorBody` | `_team_level` | `gizmo.routes.xero_sync.connector_route` | The Xero connector tab's whole API. |
 
 ## `/api/crm`
 
@@ -80,7 +80,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/customer-history` | POST | customers or crm | `_guard` |  | unchecked |  | `gizmo.routes.orderbook.customer_history_route` |  |
+| `/api/customer-history` | POST | customers or crm | `_guard` |  | `CustomerHistoryBody` |  | `gizmo.routes.orderbook.customer_history_route` |  |
 
 ## `/api/customer-tags`
 
@@ -92,7 +92,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/customers` | POST | customers | `_guard` | AI slot | unchecked |  | `gizmo.routes.analytics.customers_route` |  |
+| `/api/customers` | POST | customers | `_guard` | AI slot | `CustomersBody` |  | `gizmo.routes.analytics.customers_route` |  |
 
 ## `/api/dispatch`
 
@@ -130,7 +130,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
 | `/api/forecast` | POST | forecast | `_guard` |  |  | `_team_level` | `gizmo.routes.forecasting.forecast_route` | What the tab shows: the latest run, the last failure if the latest attempt failed, the recent runs, the workbook on file and whether the hook is configured a... |
-| `/api/forecast/workbook` | POST | forecast | `_guard` | max body cap, reads its own body | unchecked | `_team_level` | `gizmo.routes.forecasting.forecast_workbook_upload_route` | An admin replaces the cash flow workbook. |
+| `/api/forecast/workbook` | POST | forecast | `_guard` | max body cap, reads its own body | `WorkbookBody` | `_team_level` | `gizmo.routes.forecasting.forecast_workbook_upload_route` | An admin replaces the cash flow workbook. |
 
 ## `/api/gobo-sizes`
 
@@ -153,7 +153,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/keyword-scan` | POST | keywords | `_guard` | AI slot | unchecked |  | `gizmo.routes.seo.keyword_scan_route` |  |
+| `/api/keyword-scan` | POST | keywords | `_guard` | AI slot | `KeywordScanBody` |  | `gizmo.routes.seo.keyword_scan_route` |  |
 
 ## `/api/keywords`
 
@@ -232,7 +232,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/order/edit` | POST | labels | `_guard` | reads its own body | unchecked | `_live_uid`, `_team_level` | `gizmo.routes.orderbook.order_edit_route` | Read or change the delivery address and contact details on a placed order. |
+| `/api/order/edit` | POST | labels | `_guard` | reads its own body | `OrderEditBody` | `_live_uid`, `_team_level` | `gizmo.routes.orderbook.order_edit_route` | Read or change the delivery address and contact details on a placed order. |
 
 ## `/api/overview`
 
@@ -250,7 +250,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/product` | POST | products | `_guard` | AI slot | unchecked |  | `gizmo.routes.products.product_route` |  |
+| `/api/product` | POST | products | `_guard` | AI slot | `ProductBody` |  | `gizmo.routes.products.product_route` |  |
 
 ## `/api/production-labels`
 
@@ -271,21 +271,21 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/products` | POST | products | `_guard` |  | unchecked |  | `gizmo.routes.products.products_route` |  |
+| `/api/products` | POST | products | `_guard` |  | `ProductsBody` |  | `gizmo.routes.products.products_route` |  |
 
 ## `/api/profile`
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/profile` | POST | any account | `_guard` |  | unchecked | `_team_level` | `gizmo.routes.profile.profile_route` |  |
+| `/api/profile` | POST | any account | `_guard` |  | `ProfileBody` | `_team_level` | `gizmo.routes.profile.profile_route` |  |
 
 ## `/api/recon`
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
 | `/api/recon/connect-link` | POST | recon | `_guard` | reads its own body |  | `_team_role` | `gizmo.routes.reconciliation.recon_connect_link_route` | Master-only: mint a single-use ticket for the accounts-mailbox consent walk, so nobody has to paste a server secret into a URL. |
-| `/api/recon/disconnect` | POST | recon | `_guard` | reads its own body | unchecked | `_team_role` | `gizmo.routes.reconciliation.recon_disconnect_route` | Disconnect Xero or the accounts mailbox, and mean it. |
-| `/api/recon/exception` | POST | recon | `_guard` |  | unchecked |  | `gizmo.routes.reconciliation.recon_exception_route` |  |
+| `/api/recon/disconnect` | POST | recon | `_guard` | reads its own body | `ReconDisconnectBody` | `_team_role` | `gizmo.routes.reconciliation.recon_disconnect_route` | Disconnect Xero or the accounts mailbox, and mean it. |
+| `/api/recon/exception` | POST | recon | `_guard` |  | `ReconExceptionBody` |  | `gizmo.routes.reconciliation.recon_exception_route` |  |
 | `/api/recon/exceptions` | POST | recon | `_guard` |  | `ReconFilterBody` |  | `gizmo.routes.reconciliation.recon_exceptions_route` |  |
 | `/api/recon/status` | POST | recon | `_guard` |  |  | `_team_role` | `gizmo.routes.reconciliation.recon_status_route` |  |
 | `/api/recon/sweep` | POST | recon | `_guard` | rank admin, AI slot |  |  | `gizmo.routes.reconciliation.recon_sweep_route` |  |
@@ -301,13 +301,13 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/restore` | POST | any account | `_guard` | max body big, reads its own body | unchecked | `_team_role` | `gizmo.routes.backup.restore_route` | Master-only: put a downloaded backup zip back onto the volume. |
+| `/api/restore` | POST | any account | `_guard` | max body big, reads its own body | `RestoreBody` | `_team_role` | `gizmo.routes.backup.restore_route` | Master-only: put a downloaded backup zip back onto the volume. |
 
 ## `/api/schedule`
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/schedule` | POST | any account | `_guard` |  | unchecked | `_team_level` | `gizmo.routes.scheduler.schedule_route` |  |
+| `/api/schedule` | POST | any account | `_guard` |  | `ScheduleBody` | `_team_level` | `gizmo.routes.scheduler.schedule_route` |  |
 
 ## `/api/seo`
 
@@ -327,7 +327,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
 | `/api/skills` | POST | skills | `_guard` | max body SKILLS_BODY_MAX, cap SKILLS_BODY_MAX | `SkillBody` | `_team_level`, `_team_role` | `gizmo.routes.skills.skills_route` |  |
-| `/api/skills/read` | POST | skills | `_guard` | rank admin, AI slot | unchecked |  | `gizmo.routes.skills.skills_read_route` |  |
+| `/api/skills/read` | POST | skills | `_guard` | rank admin, AI slot | `SkillReadBody` |  | `gizmo.routes.skills.skills_read_route` |  |
 
 ## `/api/status`
 
@@ -348,7 +348,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 |---|---|---|---|---|---|---|---|---|
 | `/api/team/board` | POST | any account | `_team_guard` | rank admin |  | `_team_role` | `gizmo.routes.team.team_board_route` |  |
 | `/api/team/me` | POST | any account | `_guard` | reads its own body |  | `_user_tabs` | `gizmo.routes.team.team_me_route` |  |
-| `/api/team/user` | POST | any account | `_team_guard` | rank admin | unchecked | `_team_level` | `gizmo.routes.team.team_user_route` |  |
+| `/api/team/user` | POST | any account | `_team_guard` | rank admin | `TeamUserBody` | `_team_level` | `gizmo.routes.team.team_user_route` |  |
 
 ## `/api/updates`
 
@@ -360,7 +360,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/usage` | POST | any account | `_guard` | reads its own body | unchecked |  | `gizmo.routes.chat.usage_route` |  |
+| `/api/usage` | POST | any account | `_guard` | reads its own body | `UsageBody` |  | `gizmo.routes.chat.usage_route` |  |
 
 ## `/api/work`
 
@@ -368,8 +368,8 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 |---|---|---|---|---|---|---|---|---|
 | `/api/work/board` | POST | any account | `_team_guard` | rank admin |  |  | `gizmo.routes.work.work_board_route` |  |
 | `/api/work/clock` | POST | any account | `_guard` |  |  |  | `gizmo.routes.work.work_clock_route` |  |
-| `/api/work/report` | POST | any account | `_team_guard` | rank admin | unchecked |  | `gizmo.routes.work.work_report_route` |  |
-| `/api/work/resolve` | POST | any account | `_team_guard` | rank admin | unchecked |  | `gizmo.routes.work.work_resolve_route` |  |
+| `/api/work/report` | POST | any account | `_team_guard` | rank admin | `WorkReportBody` |  | `gizmo.routes.work.work_report_route` |  |
+| `/api/work/resolve` | POST | any account | `_team_guard` | rank admin | `WorkResolveBody` |  | `gizmo.routes.work.work_resolve_route` |  |
 | `/api/work/status` | POST | any account | `_guard` | reads its own body |  |  | `gizmo.routes.work.work_status_route` |  |
 
 ## `/assets`
@@ -410,7 +410,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
 | `/hooks/forecast/ledger` | GET | outside the tab map | own check |  |  | `_forecast_token_ok` | `gizmo.routes.forecasting.forecast_ledger_hook` | The service reads back who has actually been right, so a run can weigh its sources on their record rather than only on a backtest it computed itself a moment... |
-| `/hooks/forecast/results` | POST | outside the tab map | own check |  | unchecked | `_forecast_token_ok` | `gizmo.routes.forecasting.forecast_results_hook` | The nightly forecasting service (a second Railway service on this repo, `python -m forecast nightly`) posts each run here. |
+| `/hooks/forecast/results` | POST | outside the tab map | own check |  | `ForecastResultsBody` | `_forecast_token_ok` | `gizmo.routes.forecasting.forecast_results_hook` | The nightly forecasting service (a second Railway service on this repo, `python -m forecast nightly`) posts each run here. |
 | `/hooks/forecast/shopify` | POST | outside the tab map | own check |  |  | `_forecast_token_ok` | `gizmo.routes.forecasting.forecast_shopify_hook` | The service's reads of the store, made here with the app's own credential, so the service holds no Shopify credential at all. |
 | `/hooks/forecast/workbook` | GET | outside the tab map | own check |  |  | `_forecast_token_ok` | `gizmo.routes.forecasting.forecast_workbook_hook` | The service fetches the workbook an admin uploaded in the tab, so the plan lives in one place and a revised sheet reaches the next run. |
 

@@ -145,6 +145,8 @@ def _body_model(fn) -> str:
             for k in node.keywords:
                 if k.arg == "model":
                     return _model_names(k.value)
+        if _called(node) == "_body_refusal" and node.args:
+            return _model_names(node.args[0])
         f = node.func
         if (isinstance(f, ast.Attribute) and f.attr == "refusal" and isinstance(f.value, ast.Name)
                 and f.value.id == "bodies" and node.args):

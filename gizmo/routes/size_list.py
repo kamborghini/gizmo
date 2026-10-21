@@ -204,9 +204,9 @@ def register(mcp, registry):
         body = await gate._read_json_capped(request)
         if body is None:
             return gate._json({"error": "Request too large."}, 413)
-        why = bodies.refusal(SizeRuleBody, body)
-        if why:
-            return gate._json({"error": why}, 400)
+        refused = gate._body_refusal(SizeRuleBody, body)
+        if refused:
+            return refused
         op = str(body.get("op") or "")
         mfr = str(body.get("manufacturer") or "").strip()[:80]
         model = str(body.get("model") or "").strip()[:120]

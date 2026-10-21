@@ -19,9 +19,27 @@ from gizmo import orderbook
 from gizmo import crm as salesdesk
 from gizmo import team
 from gizmo import shopify
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class CustomerHistoryBody(bodies.Body):
+    """What /api/customer-history reads (gizmo/bodies.py): the Shopify customer."""
+    customer_id: bodies.Whole = None
+
+
+
+class OrderEditBody(bodies.Body):
+    """What /api/order/edit reads (gizmo/bodies.py): the order, its delivery address and contact details, and the booked-label acknowledgement."""
+    order_id: bodies.Whole = None
+    ship_to: bodies.Fields = None
+    email: bodies.Text = None
+    phone: bodies.Text = None
+    note: bodies.Text = None
+    confirm_booked: bodies.Flag = None
 
 
 def register(mcp, registry):
@@ -127,6 +145,9 @@ def register(mcp, registry):
         body = await gate._read_json_capped(request)
         if body is None:
             return gate._json({"error": "Request too large."}, 413)
+        refused = gate._body_refusal(OrderEditBody, body)
+        if refused:
+            return refused
         oid = str(body.get("order_id") or "").strip()
         if not oid.isdigit():
             return gate._json({"error": "Which order?"}, 400)
@@ -150,7 +171,7 @@ def register(mcp, registry):
     @mcp.custom_route("/api/customer-history", methods=["POST"])
     async def customer_history_route(request: Request):
         # How many times this label's customer has ordered before. Read-only.
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=CustomerHistoryBody)
         if err:
             return err
         try:

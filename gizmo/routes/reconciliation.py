@@ -38,6 +38,21 @@ class ReconFilterBody(bodies.Body):
     limit: bodies.Whole = None
 
 
+
+class ReconExceptionBody(bodies.Body):
+    """What /api/recon/exception reads (gizmo/bodies.py): the discrepancy, its new status and the note on it."""
+    id: bodies.Id = None
+    status: bodies.Text = None
+    note: bodies.Text = None
+
+
+
+class ReconDisconnectBody(bodies.Body):
+    """What /api/recon/disconnect reads (gizmo/bodies.py): what to disconnect, and whether to force it."""
+    what: bodies.Text = None
+    force: bodies.Flag = None
+
+
 def register(mcp, registry):
     """Add the reconciliation routes and the Xero connect pair to the app."""
 
@@ -216,6 +231,9 @@ def register(mcp, registry):
         body = await gate._read_json_capped(request)
         if body is None:
             return gate._json({"error": "Request too large."}, 413)
+        refused = gate._body_refusal(ReconDisconnectBody, body)
+        if refused:
+            return refused
         what = str(body.get("what") or "")
         force = bool(body.get("force"))
         if recon_engine is not None and recon_engine._sweeping["on"]:
@@ -303,7 +321,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/recon/exception", methods=["POST"])
     async def recon_exception_route(request: Request):
-        err, body, who = await gate._guard(request)
+        err, body, who = await gate._guard(request, model=ReconExceptionBody)
         if err:
             return err
         d = reconciliation._load_recon()

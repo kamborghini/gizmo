@@ -15,9 +15,32 @@ import copilot as core
 from gizmo import forecasting
 from gizmo import gate
 from gizmo import team
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class WorkbookBody(bodies.Body):
+    """What /api/forecast/workbook reads (gizmo/bodies.py): the workbook's name and its bytes."""
+    name: bodies.Text = None
+    data_b64: bodies.Text = None
+
+
+
+class ForecastResultsBody(bodies.Body):
+    """What /hooks/forecast/results reads (gizmo/bodies.py): a nightly run's date and figures, or its error. The other keys the service posts are kept as they come."""
+    as_of: bodies.Text = None
+    error: bodies.Text = None
+    monthly: bodies.Items = None
+    scenarios: bodies.Items = None
+    year: bodies.Fields = None
+    alerts: bodies.Items = None
+    seen_through: bodies.Text = None
+    in_use: bodies.Fields = None
+    predictions: bodies.Fields = None
+    actuals: bodies.Fields = None
 
 
 def register(mcp, registry):
@@ -47,6 +70,9 @@ def register(mcp, registry):
             return gate._json({"error": "Request too large."}, 413)
         if not isinstance(body, dict):
             return gate._json({"error": "A JSON object is required."}, 400)
+        refused = gate._body_refusal(ForecastResultsBody, body)
+        if refused:
+            return refused
         # as_of is kept in the run history, deduped by its exact value, and in
         # the ledger: a date (or the datetime the service may send), never
         # whatever arrived, or sixty large ones would fill the volume.
@@ -165,6 +191,9 @@ def register(mcp, registry):
         body = await gate._read_json_capped(request, cap=cap)
         if body is None:
             return gate._json({"error": "That file is too large (8 MB cap)."}, 413)
+        refused = gate._body_refusal(WorkbookBody, body)
+        if refused:
+            return refused
         name = str(body.get("name") or "Cash Flow.xlsx")[:120]
         try:
             raw = base64.b64decode(str(body.get("data_b64") or ""), validate=True)
