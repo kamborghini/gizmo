@@ -181,7 +181,7 @@ def register(mcp, registry):
         # EU service publishes a request limit and answers a flood with nothing
         # at all, so the thing being protected here is not this app: it is our
         # ability to get an answer out of Brussels for the next hour.
-        if not gate._window_ok(core._eori_hits, core.EORI_MAX_PER_MIN, time.monotonic()):
+        if not gate._window_ok(desk._eori_hits, desk.EORI_MAX_PER_MIN, time.monotonic()):
             return gate._json({"error": "Slow down: too many checks in a minute."}, 429)
         try:
             res = await eori.check(raw)

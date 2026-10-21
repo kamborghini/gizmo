@@ -215,10 +215,10 @@ async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tupl
             return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
         except ValueError:
             return None
-    o7 = [o for o in o14 if core._order_counts(o) and (_placed(o) or now) >= week_start]
-    op = [o for o in o14 if core._order_counts(o) and _placed(o) is not None and _placed(o) < week_start]
-    rev7 = sum(core._order_revenue(o) for o in o7)
-    revp = sum(core._order_revenue(o) for o in op)
+    o7 = [o for o in o14 if orderbook._order_counts(o) and (_placed(o) or now) >= week_start]
+    op = [o for o in o14 if orderbook._order_counts(o) and _placed(o) is not None and _placed(o) < week_start]
+    rev7 = sum(orderbook._order_revenue(o) for o in o7)
+    revp = sum(orderbook._order_revenue(o) for o in op)
     n7, npv = len(o7), len(op)
     aov = rev7 / n7 if n7 else 0
     unfulfilled = sum(1 for o in o7 if o.get("fulfillment_status") in (None, "partial", "unfulfilled"))
@@ -238,13 +238,13 @@ async def _compute_metrics(registry: dict, track_inventory: bool = True) -> tupl
         stale.append("orders")
 
     new_cust = len(custr.get("customers", []))
-    if core._ok(custr):
+    if shopify._ok(custr):
         metrics.append({"label": "New customers (7d)", "value": str(new_cust)})
     else:
         stale.append("customers")
 
     total_products = cntr.get("count")
-    if core._ok(cntr) and total_products is not None:
+    if shopify._ok(cntr) and total_products is not None:
         metrics.append({"label": "Products", "value": str(total_products)})
 
     low = []
@@ -329,10 +329,10 @@ async def _sector_sales(registry: dict, days: int = 28) -> list:
         wanted = {t["tag"].lower(): t["tag"] for t in tags}
         agg = {t["tag"]: {"sector": t["tag"], "revenue": 0.0, "orders": 0} for t in tags}
         for o in orders:
-            if not core._order_counts(o):
+            if not orderbook._order_counts(o):
                 continue
             cid = (o.get("customer") or {}).get("id")
-            rev = core._order_revenue(o)
+            rev = orderbook._order_revenue(o)
             # Attribute each order to ONE sector (the highest-ranked matching tag), so a
             # customer tagged e.g. "Wholesale, VIP" cannot count their revenue twice and
             # the sector rows still sum to at most store revenue.
@@ -370,7 +370,7 @@ async def run_overview(registry: dict, extra_system: str = "", track_inventory: 
         _overview_trends(registry),
         _sector_sales(registry),
     )
-    structured = core._coerce_structured(prompts._report_answer(resp, "the overview"))
+    structured = assistant._coerce_structured(prompts._report_answer(resp, "the overview"))
     structured.pop("metrics", None)  # UI shows the computed metrics, not Claude's echo
     currency = (context.get("shop") or {}).get("currency", "")
     return {"metrics": metrics, "structured": structured, "trends": trends,
@@ -382,7 +382,7 @@ async def _overview_trends(registry: dict) -> dict:
     Google (single cheap calls, up to 24/16 months); falls back to Shopify orders
     for revenue when Google is not connected. Always degrades to {} gracefully."""
     trends: dict = {}
-    months = core._month_axis(min(TREND_MONTHS, 12))
+    months = orderbook._month_axis(min(TREND_MONTHS, 12))
     ga4_on, gsc_on = google_data.ga4_configured(), google_data.gsc_configured()
     # Fetch the Shopify order history and both Google timeseries at once.
     orders, ts, gts = await asyncio.gather(
@@ -398,11 +398,11 @@ async def _overview_trends(registry: dict) -> dict:
         rev = {mk: 0.0 for mk in months}
         cnt = {mk: 0 for mk in months}
         for o in orders:
-            if not core._order_counts(o):
+            if not orderbook._order_counts(o):
                 continue
-            mk = core._month_key(o.get("created_at"))
+            mk = orderbook._month_key(o.get("created_at"))
             if mk in rev:
-                rev[mk] += core._order_revenue(o)
+                rev[mk] += orderbook._order_revenue(o)
                 cnt[mk] += 1
         if any(rev[mk] for mk in months):
             trends["revenue"] = [{"label": mk, "value": round(rev[mk], 2)} for mk in months]
@@ -451,7 +451,7 @@ async def _paginate_customers(registry: dict, max_pages: int = orderbook.ORDER_P
     while pages < max_pages:
         res = await shopify._tool_json(registry, "shopify_list_customers",
                                {"limit": 250, "since_id": since_id, "fields": fields})
-        if not core._ok(res):
+        if not shopify._ok(res):
             failed = True
             break
         batch = res.get("customers", [])
@@ -580,7 +580,7 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
     With `segment` (a customer tag) the figures are filtered to that sector; otherwise the
     analysis covers all customers and compares the sectors."""
     claude._ai_kind.set("customers")
-    months = core._month_axis(12)
+    months = orderbook._month_axis(12)
     cmeta: dict = {}
     ometa: dict = {}
     shop, all_customers, orders = await asyncio.gather(
@@ -720,7 +720,7 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
         messages=[{"role": "user", "content": msg}],
         output_config={"effort": core._effort_for(claude.MODEL_DEEP)},
     )
-    structured = core._coerce_structured(prompts._report_answer(resp, "the customer analysis"))
+    structured = assistant._coerce_structured(prompts._report_answer(resp, "the customer analysis"))
     structured.pop("metrics", None)
     return {"metrics": metrics, "structured": structured, "currency": currency,
             "segments": segments, "top_customers": top[:25], "trends": trends, "totals": totals,
@@ -733,3 +733,4 @@ async def run_customers(registry: dict, extra_system: str = "", segment: Optiona
 from gizmo import production  # noqa: E402
 from gizmo import prompts  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import chat as assistant  # noqa: E402

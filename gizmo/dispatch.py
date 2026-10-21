@@ -554,7 +554,7 @@ def _dispatch_today() -> str:
     reckoned in Europe/London - the ready window, the next working day - and a
     collection ledger kept in UTC disagrees with all of them for the hour after
     midnight through the summer."""
-    return core._london_today().isoformat()
+    return clock._london_today().isoformat()
 
 
 def _dmy_to_iso(dmy: str) -> str:
@@ -1220,7 +1220,7 @@ async def run_margin_report(registry: dict, days: int = 30) -> dict:
     misses = 0
     for oid in older[:MARGIN_BACKFILL_MAX]:
         o = await shopify._tool_json(registry, "shopify_get_order", {"order_id": int(oid)})
-        if core._ok(o) and o.get("id"):
+        if shopify._ok(o) and o.get("id"):
             by_id[oid] = o
             misses = 0
         else:
@@ -1597,7 +1597,7 @@ async def run_dispatch_quote(registry: dict, order_id, boxes: list,
     o, origin = await asyncio.gather(
         shopify._tool_json(registry, "shopify_get_order", {"order_id": int(order_id)}),
         orderbook._origin_address(registry))
-    if not core._ok(o) or not o.get("id"):
+    if not shopify._ok(o) or not o.get("id"):
         return {"error": "Order not found."}
     if orderbook._order_status(o) == "cancelled":
         return {"error": "This order is cancelled; it should not be dispatched."}
@@ -2006,7 +2006,7 @@ async def run_dispatch_diagnose(registry: dict, order_id, boxes: list) -> dict:
     if not worldoptions or not worldoptions.configured():
         return {"error": "World Options is not connected. Add your credentials in Settings."}
     o = await shopify._tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
-    if not core._ok(o) or not o.get("id"):
+    if not shopify._ok(o) or not o.get("id"):
         return {"error": "Order not found."}
     dest = orderbook._ship_to(o)
     if _addr_ready(dest):
@@ -2386,7 +2386,7 @@ async def _book_and_record(*, key, order_label: str, log_label: str, option: dic
     a failure reported now would have the operator book a second label."""
     left = _intent_open(key)
     if left and not _book_confirmed.get():
-        when = core._london_hm(left.get("at"))
+        when = clock._london_hm(left.get("at"))
         return {"error": f"A booking for {order_label} was started at {when} and its outcome was "
                          "never recorded (the app stopped, or the answer was lost), so it may "
                          "already exist and be charged. Check your World Options portal for it "
@@ -2557,7 +2557,7 @@ async def _dispatch_book_locked(registry: dict, order_id, option: dict, boxes: l
                          + ". Cancel that shipment first if you need to rebook."}
 
     o = await shopify._tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
-    if not core._ok(o) or not o.get("id"):
+    if not shopify._ok(o) or not o.get("id"):
         return {"error": "Order not found."}
     if orderbook._order_status(o) == "cancelled":
         return {"error": "This order is cancelled; it should not be dispatched."}
@@ -2757,9 +2757,20 @@ def _clean_origin(raw) -> dict:
     return {k: str(raw.get(k) or "").strip()[:120] for k in keys}
 
 
+# ---------------------------------------------------------------------------
+# Rate limits kept in memory: the EORI checks'.
+# ---------------------------------------------------------------------------
+# EORI checks, app-wide rather than per-client: the limit being respected is
+# the EU service's, and it counts requests from this deployment, not from
+# whichever member of staff happens to be typing.
+_eori_hits: list[float] = []
+EORI_MAX_PER_MIN = 20
+
+
 # Last, so the whole desk is defined before copilot.py runs: copilot.py takes
 # two names from it as it loads, and either module may be imported first.
 import copilot as core  # noqa: E402
+from gizmo import clock  # noqa: E402
 from gizmo import orderbook  # noqa: E402
 from gizmo import production  # noqa: E402
 from gizmo import shopify  # noqa: E402

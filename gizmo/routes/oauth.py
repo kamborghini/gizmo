@@ -92,7 +92,7 @@ def register(mcp, registry):
         # secret, kept so the mailbox is recoverable when nobody can sign in.
         ticket = request.query_params.get("t", "")
         tx = oauth._fin_connect_tickets.pop(ticket, None) if ticket else None
-        by_secret = core._secret_ok(request.query_params.get("key", ""), google_data.CONNECT_SECRET)
+        by_secret = gate._secret_ok(request.query_params.get("key", ""), google_data.CONNECT_SECRET)
         live = isinstance(tx, dict) and tx.get("exp", 0) > time.time()
         if not (live or by_secret):
             return PlainTextResponse("Forbidden", status_code=403, headers=gate._API_HEADERS)

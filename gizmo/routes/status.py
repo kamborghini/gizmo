@@ -144,5 +144,5 @@ def register(mcp, registry):
                        "recent": errors._recent_errors(24)[:5]},
             "size_list": health,
             "coverage": {"at": watch.get("coverage_at"), "pct": watch.get("coverage_pct")},
-            "storage": {"warning": core._data_volume_warning()},
+            "storage": {"warning": appstatus._data_volume_warning()},
         })

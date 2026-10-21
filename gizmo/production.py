@@ -259,7 +259,7 @@ async def _product_meta_fetch(registry: dict, ids: list) -> dict:
 
     async def one(pid):
         d = await shopify._tool_json(registry, "shopify_get_product", {"product_id": pid})
-        if not core._ok(d):
+        if not shopify._ok(d):
             return pid, [], "", False
         return (pid, [str(o.get("name") or "").strip() for o in (d.get("options") or [])],
                 str(d.get("product_type") or "").strip(), True)
@@ -681,7 +681,7 @@ def _shape_label_order(o: dict, names: dict, cache: Optional[dict] = None,
         "status": orderbook._order_status(o),
         "due": (due.isoformat() if due else ""),
         "due_label": orderbook._fmt_due(due),
-        "due_soon": bool(due and (due - core._london_today()).days <= 2),
+        "due_soon": bool(due and (due - clock._london_today()).days <= 2),
         "proposal_url": proposal_url,
         "note": note_clean[:500],
         "customer_id": (o.get("customer") or {}).get("id"),
@@ -715,7 +715,7 @@ async def run_production_labels(registry: dict, tag: Optional[str] = None,
     # regardless of tag or age, so the merchant can print for exactly that order.
     if order_id:
         o = await shopify._tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
-        if not core._ok(o) or not o.get("id"):
+        if not shopify._ok(o) or not o.get("id"):
             return {"tag": PRODUCTION_TAG, "days": 0, "count": 0, "orders": [],
                     "error_note": "Order not found.", "missing": shopify._shopify_gone(o)}
         names, types = await _product_names_and_types(
@@ -814,7 +814,7 @@ async def _missing_scan(registry: dict, tag: str) -> dict:
     while True:
         res = await shopify._tool_json(registry, "shopify_list_orders",
                                {"status": "open", "limit": 250, "since_id": since_id, "fields": fields})
-        if not core._ok(res):
+        if not shopify._ok(res):
             return {"error": "Couldn't read your orders from Shopify. Try again in a moment."}
         batch = res.get("orders") or []
         open_orders += batch
@@ -917,7 +917,7 @@ async def _net30_on_release(registry: dict, order_id, order: Optional[dict] = No
     try:
         o = order if isinstance(order, dict) and order.get("id") \
             else await shopify._tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
-        if not core._ok(o):
+        if not shopify._ok(o):
             # A read that FAILED is not proof the order is not on account.
             return {"account": True, "ok": False,
                     "note": "Could not check whether this order needs 30-day payment terms."}
@@ -978,3 +978,4 @@ from gizmo import shopify  # noqa: E402
 from gizmo import size_list  # noqa: E402
 from gizmo import dispatch as desk  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import clock  # noqa: E402

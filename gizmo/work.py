@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from typing import Optional
 from gizmo.config import _env_num
 from gizmo import store as jsonstore
+from datetime import timedelta
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
@@ -158,7 +159,7 @@ def _work_close_orphans() -> list:
     for good, so the hourly team check sweeps them up."""
     # An unreadable or empty register reads as nobody, and nobody would mean
     # every shift on the board: the watchdog alerts on that, this does nothing.
-    if team.USERS_PATH in jsonstore._poisoned_stores or core._team_setup_needed():
+    if team.USERS_PATH in jsonstore._poisoned_stores or team._team_setup_needed():
         return []
     users = (team._load_users() or {}).get("users") or {}
     closed = []
@@ -218,11 +219,27 @@ def _work_csv(rows: list, names: dict, counts: dict) -> str:
         st, en = str(s.get("start") or ""), str(s.get("end") or "")
         lines.append(",".join([
             _csv_cell(names.get(s.get("uid")) or s.get("uid") or ""),
-            core._london_day(st), _hhmm(st), _hhmm(en) if en else "",
+            clock._london_day(st), _hhmm(st), _hhmm(en) if en else "",
             f"{int(s.get('secs') or 0) / 3600:.2f}",
             str(counts.get(s.get("id"), 0)),
             "yes" if s.get("corrected") else ""]))
     return "\n".join(lines)
+
+
+def _fmt_secs(secs: int) -> str:
+    h, m = int(secs) // 3600, (int(secs) % 3600) // 60
+    return (f"{h}h {m:02d}m" if h else f"{m}m")
+
+def _day_starts():
+    """When today, this week and this month began, as UTC stamps that compare
+    with the sessions' own: the boundaries are London midnights, because the
+    people clocking in are in London and a day that starts at 01:00 all summer
+    put a late shift in the wrong day, week and month."""
+    now = datetime.now(ZoneInfo("Europe/London"))
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week = today - timedelta(days=today.weekday())
+    month = today.replace(day=1)
+    return tuple(x.astimezone(timezone.utc).isoformat() for x in (today, week, month))
 
 
 # Last, so this module is whole before copilot.py or a sibling runs: copilot.py
@@ -231,3 +248,4 @@ def _work_csv(rows: list, names: dict, counts: dict) -> str:
 from gizmo import activity  # noqa: E402
 from gizmo import team  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import clock  # noqa: E402

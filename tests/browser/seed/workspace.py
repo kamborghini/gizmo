@@ -131,7 +131,7 @@ for s in _shifts:                                   # work done on the clock, st
         o = next(_orders)
         _e(a + _td(minutes=35 + 40 * k), who, area, action,
            f"#{o}" + (" · DPD Next Day" if area == "dispatch" else ""), ws=s["id"])
-    _e(_dt.fromisoformat(s["end"]), who, "work", "clocked out", copilot._fmt_secs(s["secs"]))
+    _e(_dt.fromisoformat(s["end"]), who, "work", "clocked out", work._fmt_secs(s["secs"]))
 _e(_dt.fromisoformat(_open["start"]), "jonah", "work", "clocked in", ws=_open["id"])
 _e(_dt.fromisoformat(_open["start"]) + _td(minutes=25), "jonah", "production", "marked made", "#2399", ws=_open["id"])
 for days_ago, hh, mm, who, area, action, detail in (

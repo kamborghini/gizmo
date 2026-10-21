@@ -99,9 +99,85 @@ def token_vault_state() -> dict:
             "sealed": len(sealed), "plaintext": sorted(set(plain))}
 
 
+def reseal_secrets_at_rest() -> dict:
+    """Encrypt the long-lived secrets already sitting on the volume.
+
+    Setting TOKEN_ENCRYPTION_KEY only changes what is written NEXT. A Xero
+    refresh token that is not due to rotate, or an MFA secret that never
+    rotates at all, would stay in plaintext indefinitely while the key made it
+    look solved - which is worse than knowing it is unencrypted, because
+    nobody goes back to check.
+
+    Runs on every boot and is a no-op without a key, or once everything is
+    already sealed. Never raises: a store that cannot be re-sealed is worth a
+    log line, not a deployment that will not start.
+    """
+    out = {"enabled": tokenvault.enabled(), "sealed": 0, "stores": {}}
+    if not tokenvault.enabled():
+        logger.warning("token vault: encryption at rest is OFF. The refresh tokens and "
+                       "MFA secrets on the volume are in plaintext. Set "
+                       "TOKEN_ENCRYPTION_KEY to encrypt them.")
+        return out
+    files = [
+        ("gmail_sales", google_mail.TOKEN_PATH, ("refresh_token",)),
+        ("gmail_finance", google_mail.FINANCE_TOKEN_PATH, ("refresh_token",)),
+        ("google_data", google_data.OAUTH_TOKEN_PATH, ("refresh_token",)),
+        ("xero", xero_api.TOKEN_PATH, ("refresh_token",)),
+        ("world_options", desk.WO_SECRET_PATH, ("meter", "key", "password")),
+    ]
+    for name, path, fields in files:
+        try:
+            n = tokenvault.reseal_file(path, fields)
+        except Exception:
+            logger.exception("token vault: could not re-seal %s", name)
+            continue
+        out["stores"][name] = n
+        out["sealed"] += n
+    try:
+        n = tokenvault.reseal_users(team.USERS_PATH, ("mfa_secret", "mfa_pending"))
+        out["stores"]["mfa"] = n
+        out["sealed"] += n
+        if n:
+            # The file on disk changed underneath the cache. Drop it, or the
+            # next write puts the plaintext straight back.
+            team._users_mem = None
+    except Exception:
+        logger.exception("token vault: could not re-seal the MFA secrets")
+    # Said on every boot, whether or not anything changed. Logging only when a
+    # secret was sealed leaves silence meaning two different things - "all
+    # already encrypted" and "no key set" - and the deploy log is where someone
+    # looks to find out which.
+    logger.info("token vault: encryption at rest is ON; %d secret(s) sealed this boot, "
+                "%s", out["sealed"],
+                "everything else was already sealed" if not out["sealed"] else "")
+    return out
+
+
+def _data_volume_warning() -> str:
+    """'' when the data folder sits on a mounted volume, or when the app is
+    not running on Railway at all; otherwise what is wrong, in words.
+
+    Nothing checked that the stores were on the durable volume. Without it
+    the app runs on the container's own disk, looks healthy, and loses every
+    account, dispatch record and note at the next deploy (audit R-018). A
+    folder on a volume has the mount point at or above it."""
+    if not (os.environ.get("RAILWAY_ENVIRONMENT")  # set by Railway; the volume check runs only there
+            or os.environ.get("RAILWAY_PROJECT_ID")):  # set by Railway; the volume check runs only there
+        return ""
+    d = os.path.realpath(os.path.dirname(team.USERS_PATH) or "/data")
+    p = d
+    while p and p != os.path.dirname(p):
+        if os.path.ismount(p):
+            return ""
+        p = os.path.dirname(p)
+    return ("The data folder is not on a mounted volume, so accounts, dispatch records and everything else "
+            "saved here are lost at the next deploy. Attach the volume to this service at " + d + ".")
+
+
 # Last, so this module is whole before copilot.py or a sibling runs: copilot.py
 # takes names from these modules as it loads, and any of them may be imported
 # first. Read as core.NAME and sibling.NAME, never a copied name.
 from gizmo import scheduler  # noqa: E402
 from gizmo import team  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import dispatch as desk  # noqa: E402

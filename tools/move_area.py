@@ -50,6 +50,11 @@ DUNDERS = {"__file__", "__name__", "__doc__", "__spec__"}
 OWN = {"logger"}
 
 
+def _is_doc(n):
+    """A docstring: a statement that is only a string."""
+    return isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant) and isinstance(n.value.value, str)
+
+
 def _start(n):
     return min([n.lineno] + [d.lineno for d in getattr(n, "decorator_list", [])])
 
@@ -274,6 +279,17 @@ def run(spec_path, root, write):
                 else:
                     copy_owner[al.asname or al.name] = owner
     area_aliases = {a for a, m in mod_alias.items() if m not in floor_mods}
+    # an area marked existing moved in an earlier piece: what moves here is
+    # added to its file, which copilot.py already binds by the same name
+    EXISTING = {d for d, a in areas.items() if a.get("existing")}
+    for d in sorted(EXISTING):
+        mod = areas[d]["file"][:-3].replace("/", ".")
+        if not os.path.exists(P(areas[d]["file"])):
+            problems.append(f"existing area {d}: no file {areas[d]['file']}")
+        elif mod_alias.get(AL[d]) != mod:
+            problems.append(f"existing area {d}: copilot.py binds no {AL[d]} for {mod}")
+        if mod in floor_mods:
+            areas[d]["floor"] = True
     imports = set(IMPORTS)
     for g, gd in groups.items():
         # a group's area is one of this move's, or one moved earlier that copilot.py binds
@@ -378,6 +394,15 @@ def run(spec_path, root, write):
             else:
                 problems.append(f"{node.lineno}: {w} builds a path from __file__, which points into gizmo/ once moved")
             return
+        if w in EXISTING and name == AL[w]:
+            # the module's own name, inside it: orderbook._orders_snapshot is
+            # _orders_snapshot once the code lives in orderbook
+            c0, c1 = _col(LINES, node.lineno, node.col_offset), _col(LINES, node.lineno, node.end_col_offset)
+            if LINES[node.lineno - 1][c1:c1 + 1] == ".":
+                edits[node.lineno].append((c0, c1 + 1, ""))
+            else:
+                problems.append(f"{node.lineno}: {w} uses its own module {name} as a value")
+            return
         if name in moved:
             d = DEST[name]
             if d != w:
@@ -387,6 +412,8 @@ def run(spec_path, root, write):
                 if not isinstance(node.ctx, ast.Load):
                     problems.append(f"{node.lineno}: {w} assigns {d}'s {name}")
             return
+        if name in copy_owner and w in EXISTING and copy_owner[name] == AL[w]:
+            return                    # a name copilot.py copied from the module it now lives in
         if name in copy_owner:
             edit(node, copy_owner[name] + "." + name); sibs[w].add("mod:" + copy_owner[name])
             if loading and w in areas:
@@ -443,7 +470,7 @@ def run(spec_path, root, write):
                 problems.append(f"{fn} at {ln} has a local `{alias}` and would read a moved name through it")
 
     # the other files: core.NAME / copilot.NAME for a moved name
-    def attr_edits(rel, owners, through=False):
+    def attr_edits(rel, owners, through=False, own=None):
         text = open(P(rel), encoding="utf-8").read()
         lines = text.splitlines(keepends=True)
         t = ast.parse(text)
@@ -453,12 +480,19 @@ def run(spec_path, root, write):
             if (isinstance(x, ast.Call) and isinstance(x.func, ast.Name) and x.func.id in ("getattr", "setattr", "hasattr")
                     and len(x.args) >= 2 and isinstance(x.args[0], ast.Name) and x.args[0].id in owners
                     and isinstance(x.args[1], ast.Constant) and x.args[1].value in moved and not through):
+                if own is not None and DEST[x.args[1].value] == own:
+                    problems.append(f"{rel}:{x.lineno} reaches {x.args[1].value} by its string through copilot, and it moves into this module")
+                    continue
                 a0 = x.args[0]
                 ed[a0.lineno].append((_col(lines, a0.lineno, a0.col_offset), _col(lines, a0.lineno, a0.end_col_offset),
                                       AL[DEST[x.args[1].value]]))
                 used.add(DEST[x.args[1].value])
             if (isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and x.value.id in owners
                     and x.attr in moved and x.attr not in keep_copies):
+                if own is not None and DEST[x.attr] == own:
+                    # the module's own core.NAME read of a name moving into it: bare
+                    ed[x.lineno].append((_col(lines, x.lineno, x.col_offset), _col(lines, x.lineno, x.end_col_offset), x.attr))
+                    continue
                 new = (x.value.id + "." if through else "") + AL[DEST[x.attr]] + "." + x.attr
                 ed[x.lineno].append((_col(lines, x.lineno, x.col_offset), _col(lines, x.lineno, x.end_col_offset), new))
                 used.add(DEST[x.attr])
@@ -479,10 +513,11 @@ def run(spec_path, root, write):
         return "".join(out), used, sum(len(v) for v in ed.values())
 
     others = {}
+    own_of = {areas[d]["file"]: d for d in EXISTING}
     for rel in split_files:
-        if rel in {a["file"] for a in spec["areas"]} | {g["file"] for g in spec.get("routes", [])}:
+        if rel in {a["file"] for a in spec["areas"] if not a.get("existing")} | {g["file"] for g in spec.get("routes", [])}:
             continue
-        others[rel] = attr_edits(rel, {"core"})
+        others[rel] = attr_edits(rel, {"core"}, own=own_of.get(rel))
     if os.path.exists(P("server.py")):
         # server.py imports copilot inside its functions (as _c): it reaches a
         # moved name through copilot.py's own name for the module.
@@ -503,7 +538,7 @@ def run(spec_path, root, write):
     report.append("other files: " + str({r: n for r, (_, _, n) in others.items() if n}))
     # a staying name only what moves reads, and no other module or server.py
     elsewhere = "".join(open(P(r), encoding="utf-8").read() for r in list(split_files) + ["server.py"]
-                        if os.path.exists(P(r)) and r not in {a["file"] for a in spec["areas"]})
+                        if os.path.exists(P(r)) and r not in {a["file"] for a in spec["areas"] if not a.get("existing")})
     # ... or only such names: a helper of a helper left behind
     left = set()
     while True:
@@ -587,6 +622,8 @@ def run(spec_path, root, write):
                  "# takes names from these modules as it loads, and any of them may be imported\n"
                  "# first. Read as core.NAME and sibling.NAME, never a copied name.\n")
     for d, a in areas.items():
+        if d in EXISTING:
+            continue                  # added to its own file with the other files, below
         top = [x for x in sibs[d] if x.startswith("mod:") and mod_alias[x[4:]] in floor_mods or x in early[d]]
         bottom = sorted(set(sibs[d]) - set(top) - {d})
         head = doc(a["doc"]) + "import logging\n" + import_block(imports_used[d]) + "\n" + "".join(sib_line(x) + "\n" for x in sorted(top))
@@ -623,7 +660,8 @@ def run(spec_path, root, write):
     at = anchor_node.end_lineno if anchor_node else 0
     add = [f"# Moved out of this file (stage 4): {spec.get('note', '')}.\n"]
     for d, a in areas.items():
-        add.append(sib_line(d) + "\n")
+        if d not in EXISTING:         # copilot.py binds an existing area already
+            add.append(sib_line(d) + "\n")
     for g, gd in groups.items():
         leaf = gd["file"][:-3].replace("/", ".").rpartition(".")
         add.append(f"from {leaf[0]} import {leaf[2]} as {g}\n")
@@ -634,15 +672,60 @@ def run(spec_path, root, write):
     lines_after[at:at] = add
     open(P(MAIN), "w", encoding="utf-8").write("".join(lines_after))
 
-    new_imports = "".join(sib_line(d) + "\n" for d in areas)
+    def bound_in(text):
+        """The names a module's top-level imports bind."""
+        return {(al.asname or al.name).split(".")[0] for x in ast.parse(text).body
+                if isinstance(x, (ast.Import, ast.ImportFrom)) for al in x.names}
+
+    def alias_of(x):
+        return x[4:] if x.startswith("mod:") else AL[x]
+
+    def add_to_existing(d, text):
+        """An existing area's file with what moves into it: the statements
+        before its last imports, the imports they need that it lacks."""
+        body = ast.parse(text).body
+        bound = bound_in(text)
+        lines = text.splitlines(keepends=True)
+        code = [x for x in body if not isinstance(x, (ast.Import, ast.ImportFrom))]
+        last_code = max((x.end_lineno for x in code), default=0)
+        moved = "".join(moved_text[d]).strip("\n")
+        out = lines[:last_code] + ["\n\n" + moved + "\n"] + lines[last_code:]
+        top = [x for x in sibs[d] if x.startswith("mod:") and mod_alias[x[4:]] in floor_mods or x in early[d]]
+        bottom = sorted(set(sibs[d]) - set(top) - {d})
+        noqa = "" if areas[d].get("floor") else "  # noqa: E402"
+        tail = [sib_line(x) + noqa + "\n" for x in bottom if alias_of(x) not in bound]
+        if borrowed[d] and "core" not in bound:
+            tail.append("import copilot as core" + noqa + "\n")
+        if tail:
+            if not out[-1].endswith("\n"):
+                out[-1] += "\n"
+            out += tail
+        head = [import_block(sorted(n for n in imports_used[d] if n not in bound))] if imports_used[d] - bound else []
+        head += [sib_line(x) for x in sorted(top) if alias_of(x) not in bound]
+        first = next((x for x in code if not _is_doc(x)), None)
+        tops = [x for x in body if isinstance(x, (ast.Import, ast.ImportFrom)) and (first is None or x.lineno < first.lineno)]
+        at = tops[-1].end_lineno if tops else (code[0].end_lineno if code and _is_doc(code[0]) else 0)
+        out[at:at] = ["".join(h + "\n" for h in head if h)]
+        return "".join(out)
+
+    new_imports = "".join(sib_line(d) + "\n" for d in areas if d not in EXISTING)
+    for d in EXISTING:
+        rel = areas[d]["file"]
+        if rel not in others:
+            others[rel] = (open(P(rel), encoding="utf-8").read(), set(), 0)
     for rel, (text, used, n) in others.items():
-        if not n:
+        own = own_of.get(rel)
+        if not n and own is None:
             continue
         if rel.startswith("gizmo/"):
             m = re.search(r"^import copilot as core.*\n", text, re.M)
             noqa = "  # noqa: E402" if m and "noqa" in m.group(0) else ""
-            add = "".join(sib_line(d) + noqa + "\n" for d in sorted(used))
-            text = text[:m.end()] + add + text[m.end():] if m else add + text
+            bound = bound_in(text)
+            add = "".join(sib_line(d) + noqa + "\n" for d in sorted(used) if d != own and AL[d] not in bound)
+            if add:
+                text = text[:m.end()] + add + text[m.end():] if m else add + text
+            if own is not None:
+                text = add_to_existing(own, text)
         elif rel == "server.py":
             pass                      # it reads the moved names through copilot (above)
         elif rel.endswith("test_dispatch.py") and "seed" not in rel:

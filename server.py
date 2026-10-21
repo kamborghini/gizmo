@@ -382,7 +382,7 @@ def _boot_report() -> None:
         gaps.append("SHOPIFY_API_SECRET: session tokens and webhook signatures cannot be verified, "
                     "so the embedded app and the webhooks are off")
     try:
-        vol = _c._data_volume_warning()
+        vol = _c.appstatus._data_volume_warning()
         if vol:
             gaps.append("storage: " + vol)
     except Exception:
@@ -417,7 +417,7 @@ def build_app():
     # Before the first request: anything long-lived already on the volume gets
     # encrypted now, rather than whenever it next happens to be rewritten.
     try:
-        copilot.reseal_secrets_at_rest()
+        copilot.appstatus.reseal_secrets_at_rest()
     except Exception:
         logger.exception("token vault: re-seal pass failed; continuing")
     # Before the reaper next ticks: rescue files that were marked as macOS junk

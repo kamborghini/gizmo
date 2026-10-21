@@ -238,7 +238,7 @@ async def _watchdog_tick(registry: dict) -> bool:
     state = _load_watch()
     try:
         shop = await shopify._tool_json(registry, "shopify_get_shop", {})
-        up = core._ok(shop) and bool(shop.get("name"))
+        up = shopify._ok(shop) and bool(shop.get("name"))
         fails = 0 if up else int(state.get("probe_fails") or 0) + 1
         state["probe_fails"] = fails
         if not up and fails == 3 and not state.get("shopify_down"):
@@ -278,7 +278,7 @@ async def _watchdog_tick(registry: dict) -> bool:
         # A shop/redact still owed is tried against this tick's own record of
         # how long the store has been out of reach.
         try:
-            await core._shop_redact_retry(state.get("shopify_down"))
+            await privacy._shop_redact_retry(state.get("shopify_down"))
         except Exception:
             logger.exception("shop/redact retry failed")
         try:
@@ -355,7 +355,7 @@ async def _watchdog_tick(registry: dict) -> bool:
         # again. Nobody is silently let in, but the merchant must hear about
         # it, because their team is locked out until setup happens.
         try:
-            if state.get("team_established") and core._team_setup_needed():
+            if state.get("team_established") and team._team_setup_needed():
                 last = str(state.get("team_lost_alert_at") or "")
                 today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 if last != today:

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from starlette.requests import Request
 
 import copilot as core
+from gizmo import clock
 from gizmo import activity
 from gizmo import gate
 from gizmo import team
@@ -63,7 +64,7 @@ def register(mcp, registry):
                                           "the work log."})
                 d["sessions"].append(ws)
                 work._write_work(d)      # which moves anything past the cap to the archive
-                activity._track(who, "work", "clocked out", core._fmt_secs(ws["secs"]))
+                activity._track(who, "work", "clocked out", work._fmt_secs(ws["secs"]))
                 return gate._json({"ok": True, "session": ws})
             return gate._json({"error": "Unknown clock action."}, 400)
         except RuntimeError:
@@ -91,14 +92,14 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/work/board", methods=["POST"])
     async def work_board_route(request: Request):
-        err, packed = await core._team_guard(request, team.ROLE_LEVELS["admin"])
+        err, packed = await team._team_guard(request, team.ROLE_LEVELS["admin"])
         if err:
             return err
         _who, _body = packed
         try:
             d = work._load_work()
             users = team._load_users()["users"]
-            today, week, month = core._day_starts()
+            today, week, month = work._day_starts()
             now = datetime.now(timezone.utc)
             open_rows = []
             for uid, ws in d["open"].items():
@@ -133,7 +134,7 @@ def register(mcp, registry):
     async def work_resolve_route(request: Request):
         # An admin closing a forgotten clock-out. The original start stands;
         # the correction wears its author and lands on the ledger.
-        err, packed = await core._team_guard(request, team.ROLE_LEVELS["admin"])
+        err, packed = await team._team_guard(request, team.ROLE_LEVELS["admin"])
         if err:
             return err
         who, body = packed
@@ -156,7 +157,7 @@ def register(mcp, registry):
             d["sessions"].append(ws)
             work._write_work(d)
             activity._track(who, "work", "resolved a work session",
-                   f"closed {(team._team_name(uid) or uid)}'s open session at {core._fmt_secs(ws['secs'])}")
+                   f"closed {(team._team_name(uid) or uid)}'s open session at {work._fmt_secs(ws['secs'])}")
             return gate._json({"ok": True, "session": ws})
         except RuntimeError:
             return gate._json({"error": "The correction could not be saved. The data volume may "
@@ -164,7 +165,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/work/report", methods=["POST"])
     async def work_report_route(request: Request):
-        err, packed = await core._team_guard(request, team.ROLE_LEVELS["admin"])
+        err, packed = await team._team_guard(request, team.ROLE_LEVELS["admin"])
         if err:
             return err
         _who, body = packed
@@ -185,8 +186,8 @@ def register(mcp, registry):
             # The from/to dates are London days, like the sheet's own Date column.
             rows = [s for s in every
                     if (not uid or s.get("uid") == uid)
-                    and (not frm or core._london_day(s.get("start")) >= frm)
-                    and (not to or core._london_day(s.get("start")) <= to)]
+                    and (not frm or clock._london_day(s.get("start")) >= frm)
+                    and (not to or clock._london_day(s.get("start")) <= to)]
             events = activity._load_events()
             counts = {}
             for e in events:

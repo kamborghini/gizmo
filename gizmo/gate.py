@@ -14,6 +14,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.requests import Request
 from typing import Optional
 from gizmo.config import _env_num
+import secrets
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
@@ -262,6 +263,23 @@ def _tab_denied(request: Request) -> Optional[JSONResponse]:
     activity._track_denied(uid, path)
     return _json({"error": "That part of the app is switched off for your account. "
                            "Ask an admin if you need it."}, 403)
+
+
+# ---------------------------------------------------------------------------
+# The server secret's check: compared in constant time, and a mistyped key is a
+# plain no, never an error.
+# ---------------------------------------------------------------------------
+
+def _secret_ok(given: str, expected: str) -> bool:
+    """Constant-time compare that cannot raise. compare_digest throws
+    TypeError on a non-ASCII str, so a mistyped key returned a 500 where a
+    plain 403 belongs - and a stack trace is a worse answer than "no"."""
+    if not expected or not given:
+        return False
+    try:
+        return secrets.compare_digest(given.encode("utf-8"), expected.encode("utf-8"))
+    except (AttributeError, TypeError):
+        return False
 
 
 # Last, so this module is whole before copilot.py or a sibling runs: copilot.py

@@ -2039,6 +2039,18 @@ def _mail_folder_path(d: dict, segs: list, who: str) -> str:
     return parent
 
 
+# ----- Gmail connect: same shape as the Google one, its own token -----
+# The mailbox is a DIFFERENT Google account from the analytics one (the
+# shared address, not the merchant's own), so it gets its own consent
+# walk and its own token file. The connect URL is gated by the same
+# server secret; whoever opens it signs in AS the shared mailbox.
+def _gmail_redirect_uri(request: Request) -> str:
+    if core.APP_BASE_URL:
+        return core.APP_BASE_URL.rstrip("/") + "/oauth/gmail/callback"
+    host = request.headers.get("host", "")
+    return f"https://{host}/oauth/gmail/callback"
+
+
 # Last, so this module is whole before copilot.py or a sibling runs: copilot.py
 # takes names from these modules as it loads, and any of them may be imported
 # first. Read as core.NAME and sibling.NAME, never a copied name.

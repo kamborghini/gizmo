@@ -52,3 +52,8 @@ _order_writer = None
 _fulfillment_writer = None
 _fulfillment_canceler = None
 _webhook_ensurer = None
+
+
+def _ok(d) -> bool:
+    """True when a _tool_json result is real data (not a swallowed failure)."""
+    return isinstance(d, dict) and not d.get("_failed")

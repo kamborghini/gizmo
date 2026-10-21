@@ -52,11 +52,11 @@ guard), `gizmo/errors.py` (the error log), `gizmo/ai.py` (the AI client:
 models, the call and its fallbacks, usage, the spend cap) and
 `gizmo/shopify.py` (the way to Shopify: reads through the tool registry, and
 the write capabilities `server.py` hands in, which `add_routes` stores
-there) and `gizmo/prompts.py` (the AI's instructions: the writing style, the
+there), `gizmo/prompts.py` (the AI's instructions: the writing style, the
 chat's and the reports' prompts, and the `present_response` tool every answer
-comes back through). Everything reads them through the module's name:
-`jsonstore.NAME`, `errors.NAME`, `claude.NAME`, `shopify.NAME`,
-`prompts.NAME`. An area imports the floor directly; what it still reads from
+comes back through) and `gizmo/clock.py` (today's date and time in London).
+Everything reads them through the module's name: `jsonstore.NAME`,
+`errors.NAME`, `claude.NAME`, `shopify.NAME`, `prompts.NAME`, `clock.NAME`. An area imports the floor directly; what it still reads from
 `copilot.py` through `core.` shrinks as the request check, accounts, orders
 and production move out in turn. The store names no area: an area that keeps
 something built from a store registers `jsonstore.when_forgotten(fn)`, and
@@ -253,7 +253,10 @@ can leave a test testing nothing. The guards below make that a failure, and
    explains the area, goes into the area's module. A heading with a rule
    above and none below loses its rule to the old file and arrives without
    one: look for a lone rule after a move. A description with no areas moves
-   only routes, for an area that moved earlier. What it does: cut statements whole, keeping their text and order,
+   only routes, for an area that moved earlier; an area marked `existing`
+   adds to a module that moved earlier (what an earlier piece left behind):
+   the statements go in before its last imports, and its own name and its
+   own `core.NAME` reads of them are dropped. What it does: cut statements whole, keeping their text and order,
    into `gizmo/<area>.py`, and the routes into `gizmo/routes/<area>.py`
    inside `register(mcp, registry)`, which `add_routes` calls where the
    area's first route stood. A group's paths are prefixes; `"=/"` names one path

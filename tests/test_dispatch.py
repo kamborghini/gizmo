@@ -185,6 +185,7 @@ from gizmo import profile as store_profile
 from gizmo import layouts
 from gizmo import oauth
 from gizmo import status as appstatus
+from gizmo import clock
 import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
@@ -4788,7 +4789,7 @@ def t_a_new_account_gets_a_colour_without_anyone_choosing_one():
         board = post("/api/team/board", {}).json()
         me = [u for u in board["users"] if u["id"] == uid][0]
         ok(me.get("colour"), "the account has a colour")
-        ok(me["colour"] in copilot.TEAM_COLOUR_NAMES,
+        ok(me["colour"] in team.TEAM_COLOUR_NAMES,
            f"and it is one of the known names, got {me.get('colour')!r}")
     with_accounts(go)
 
@@ -4800,7 +4801,7 @@ def t_colours_do_not_repeat_until_the_palette_runs_out():
     def go():
         ensure_auth()
         seen = []
-        for i in range(len(copilot.TEAM_COLOUR_NAMES)):
+        for i in range(len(team.TEAM_COLOUR_NAMES)):
             uid, _s, _p = ready_user(f"Person {i}", f"person{i}")
             board = post("/api/team/board", {}).json()
             seen.append([u for u in board["users"] if u["id"] == uid][0]["colour"])
@@ -4836,7 +4837,7 @@ def t_a_colour_that_is_not_on_the_palette_is_refused():
             eq(r.status_code, 400, f"{bad!r} must be refused, got {r.status_code}")
         board = post("/api/team/board", {}).json()
         ok([u for u in board["users"] if u["id"] == uid][0]["colour"]
-           in copilot.TEAM_COLOUR_NAMES, "and the colour it had is untouched")
+           in team.TEAM_COLOUR_NAMES, "and the colour it had is untouched")
     with_accounts(go)
 
 
@@ -10416,7 +10417,7 @@ def t_the_send_grant_is_handed_over_the_way_the_size_grant_is():
         uid, sess, _ = ready_user("Ann", "ann")
         uid_b, sess_b, _ = ready_user("Bob", "bob")
         adm, _s, _ = ready_user("Al", "al", role="admin")
-        eq(copilot._may_send_mail(uid), False, "nobody holds it by having an account")
+        eq(team._may_send_mail(uid), False, "nobody holds it by having an account")
         # A member cannot hand it to anyone, themselves included.
         eq(post_s(sess_b, "/api/team/user", {"op": "send", "id": uid, "can_send": True}
                   ).status_code, 403)
@@ -10440,10 +10441,10 @@ def t_the_send_grant_is_handed_over_the_way_the_size_grant_is():
         # And is therefore not a switch: pretending to revoke it would lie.
         r2 = post("/api/team/user", {"op": "send", "id": adm, "can_send": False})
         eq(r2.status_code, 400, r2.text)
-        ok(copilot._may_send_mail(adm), "still theirs, whatever the switch said")
+        ok(team._may_send_mail(adm), "still theirs, whatever the switch said")
         eq(post("/api/team/user", {"op": "send", "id": uid, "can_send": False}
                 ).status_code, 200)
-        eq(copilot._may_send_mail(uid), False, "and a member's really does come back off")
+        eq(team._may_send_mail(uid), False, "and a member's really does come back off")
     with_accounts(go)
 
 @test
@@ -12654,7 +12655,7 @@ def t_chat_cannot_read_customers_a_tab_denies():
     """The Chat tab was a read-through to every Shopify customer. An account
     with no Customers tab must be denied the customer TOOLS too, or the
     permission is decoration."""
-    eq(copilot._TOOL_TABS.get("shopify_get_customer"), "customers",
+    eq(assistant._TOOL_TABS.get("shopify_get_customer"), "customers",
        "the customer tools are mapped to the customers tab")
     calls = []
 
@@ -12664,7 +12665,7 @@ def t_chat_cannot_read_customers_a_tab_denies():
 
     who = {"uid": ""}
     # The registry holds (callable, argument model), exactly as the real one does.
-    dispatch = copilot._build_dispatch({"shopify_get_customer": (_reg, dict)},
+    dispatch = assistant._build_dispatch({"shopify_get_customer": (_reg, dict)},
                                        lambda: who["uid"])
 
     def go():
@@ -14898,18 +14899,18 @@ def t_the_order_tools_need_the_customers_page():
     """Audit R-004. The chat refused the four customer tools to someone
     without the Customers page, but an order carries the same name, email,
     phone and addresses, and list_orders takes any fields."""
-    eq(copilot._TOOL_TABS.get("shopify_list_orders"), "customers")
-    eq(copilot._TOOL_TABS.get("shopify_get_order"), "customers")
+    eq(assistant._TOOL_TABS.get("shopify_list_orders"), "customers")
+    eq(assistant._TOOL_TABS.get("shopify_get_order"), "customers")
     async def fake(_p):
         return "the order"
     reg = {"shopify_get_order": (fake, lambda **k: {})}
     saved = team._user_tabs
     try:
         team._user_tabs = lambda uid: {"labels", "chat"}
-        out = run_async(copilot._build_dispatch(reg, uid_of=lambda: "u1")("shopify_get_order", {"order_id": 1}))
+        out = run_async(assistant._build_dispatch(reg, uid_of=lambda: "u1")("shopify_get_order", {"order_id": 1}))
         ok(out.startswith("Refused") and "the order" not in out, out)
         team._user_tabs = lambda uid: {"customers", "chat"}
-        eq(run_async(copilot._build_dispatch(reg, uid_of=lambda: "u1")("shopify_get_order", {"order_id": 1})), "the order")
+        eq(run_async(assistant._build_dispatch(reg, uid_of=lambda: "u1")("shopify_get_order", {"order_id": 1})), "the order")
     finally:
         team._user_tabs = saved
 
@@ -14994,28 +14995,28 @@ def t_first_run_setup_needs_the_servers_setup_code():
         r = bare("/api/auth/setup", body)
         eq(r.status_code, 403, "no code, no master: " + r.text[:80])
         eq(bare("/api/auth/setup", dict(body, setup_code="guess")).status_code, 403, "a wrong code is refused")
-        saved = copilot.SETUP_CODE
+        saved = team.SETUP_CODE
         try:
-            copilot.SETUP_CODE = ""
+            team.SETUP_CODE = ""
             r = bare("/api/auth/setup", dict(body, setup_code=""))
             eq((r.status_code, r.json().get("reason")), (403, "setup_locked"), "with no code set, setup is locked")
         finally:
-            copilot.SETUP_CODE = saved
+            team.SETUP_CODE = saved
         ok(bare("/api/auth/state", {}).json()["setup"], "and nobody became master")
     with_accounts(go)
     page = pagesource.join(HERE)
     ok("setup_code: inCode.value" in page, "the setup screen asks for the code")
     saved_env = {k: os.environ.pop(k, None) for k in ("RAILWAY_ENVIRONMENT", "RAILWAY_PROJECT_ID")}
     try:
-        eq(copilot._data_volume_warning(), "", "off Railway, nothing to say")
+        eq(appstatus._data_volume_warning(), "", "off Railway, nothing to say")
         os.environ["RAILWAY_ENVIRONMENT"] = "production"
-        ok("not on a mounted volume" in copilot._data_volume_warning(), "on Railway, a scratch folder is not a volume")
+        ok("not on a mounted volume" in appstatus._data_volume_warning(), "on Railway, a scratch folder is not a volume")
         saved_p = team.USERS_PATH
         team.USERS_PATH = "/dev/users.json"
         try:
-            eq(copilot._data_volume_warning(), "", "a folder on a mount point is on a volume")
+            eq(appstatus._data_volume_warning(), "", "a folder on a mount point is on a volume")
             team.USERS_PATH = "/users.json"
-            ok(copilot._data_volume_warning(), "the container's own root disk is not")
+            ok(appstatus._data_volume_warning(), "the container's own root disk is not")
         finally:
             team.USERS_PATH = saved_p
     finally:
@@ -15094,7 +15095,7 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
     async def checker():
         return verdict["v"]
     shopify._install_checker, copilot._spawn_bg = checker, spawn
-    copilot._shop_redact_said.clear()
+    privacy._shop_redact_said.clear()
     saved_watch = scheduler._load_watch()
     raw = json.dumps({"shop_id": 1, "shop_domain": "test-store.myshopify.com"}).encode()
 
@@ -15121,9 +15122,9 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
     def mails():
         return [a for n, a in spawned if n == "_send_alert_email"]
     try:
-        copilot._shop_owed_set(None)
+        privacy._shop_owed_set(None)
         ok(seed(), "a store to lose")
-        eq(copilot.SHOP_REDACT_DOWN_HOURS, 40, "most of the two days, with hours to spare")
+        eq(privacy.SHOP_REDACT_DOWN_HOURS, 40, "most of the two days, with hours to spare")
         # Still installed: refused, said once, and nothing is owed.
         eq(redact("rc1-a").status_code, 200, "answered")
         ok(os.path.isfile(salesdesk.CRM_PATH), "installed: nothing erased")
@@ -15140,17 +15141,17 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
         eq(redact("rc1-b").status_code, 200)
         ok(os.path.isfile(salesdesk.CRM_PATH), "cannot tell: nothing erased")
         ok(isinstance(owed(), dict), "but it is owed, and kept where a restart cannot lose it")
-        eq(run(copilot._shop_redact_retry(None)), "unknown", "the hourly attempt still cannot tell")
+        eq(run(privacy._shop_redact_retry(None)), "unknown", "the hourly attempt still cannot tell")
         eq(owed().get("tries"), 1, "and counts its tries")
         # Refused, but not yet for long enough: still owed.
         verdict["v"] = "gone"
-        eq(run(copilot._shop_redact_retry(down(None))), "recent", "no outage on record: not an uninstall")
-        eq(run(copilot._shop_redact_retry(down(30))), "recent", "thirty hours: not yet")
+        eq(run(privacy._shop_redact_retry(down(None))), "recent", "no outage on record: not an uninstall")
+        eq(run(privacy._shop_redact_retry(down(30))), "recent", "thirty hours: not yet")
         ok(os.path.isfile(salesdesk.CRM_PATH), "the stores are all there")
         ok(any("holding" in a["subject"] for a in mails()), mails())
         # The app is reinstalled: whatever was owed is dropped.
         verdict["v"] = "installed"
-        eq(run(copilot._shop_redact_retry(None)), "installed")
+        eq(run(privacy._shop_redact_retry(None)), "installed")
         eq(owed(), None, "an app still installed owes nothing")
         # A genuine request, two days on: owed, then the archive fails, then it erases.
         verdict["v"] = "gone"
@@ -15165,13 +15166,13 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
         ok(isinstance(owed(), dict), "still owed")
         ok(any("not erased" in a["subject"] for a in mails()), mails())
         backup._build_backup_zip = saved[2]
-        eq(run(copilot._shop_redact_retry(scheduler._load_watch().get("shopify_down"))), "erased",
+        eq(run(privacy._shop_redact_retry(scheduler._load_watch().get("shopify_down"))), "erased",
            "the next hour, with the disk back, it erases")
         ok(not os.path.isfile(salesdesk.CRM_PATH), "a confirmed uninstall with an archive erases")
         eq(owed(), None, "and nothing is owed")
         ok(any(e.get("topic") == "shop/redact" and "erased" in e.get("detail", "")
                for e in privacy._load_privacy_log()["events"]), "and says so")
-        eq(run(copilot._shop_redact_retry(None)), None, "nothing owed, nothing tried")
+        eq(run(privacy._shop_redact_retry(None)), None, "nothing owed, nothing tried")
         # No way to ask Shopify is no confirmation; a broken watch record is
         # not an erasure either.
         shopify._install_checker = None
@@ -15184,11 +15185,11 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
         ok(os.path.isfile(salesdesk.CRM_PATH), "and not erased")
         # The watchdog tries it every hour, against its own record of the outage.
         src = copilot_source()
-        ok('await core._shop_redact_retry(state.get("shopify_down"))' in src, "the hourly tick tries what is owed")
+        ok('await privacy._shop_redact_retry(state.get("shopify_down"))' in src, "the hourly tick tries what is owed")
         ok("_ensure_scheduler(registry)" in src.split("async def privacy_webhook", 1)[1][:1500],
            "and a privacy request starts the scheduler, as an uninstalled app is never opened")
         # A request that cannot be recorded is sent back for Shopify to retry.
-        copilot._shop_owed_set(None)
+        privacy._shop_owed_set(None)
         scheduler._save_watch({})
         verdict["v"] = "unknown"
         good = open(privacy.PRIVACY_LOG_PATH, "rb").read()
@@ -15204,8 +15205,8 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
     finally:
         shopify._install_checker, copilot._spawn_bg, backup._build_backup_zip = saved
         orderbook._webhook_seen.clear()
-        copilot._shop_redact_said.clear()
-        copilot._shop_owed_set(None)
+        privacy._shop_redact_said.clear()
+        privacy._shop_owed_set(None)
         scheduler._save_watch(saved_watch if isinstance(saved_watch, dict) else {})
         try:
             os.remove(salesdesk.CRM_PATH)
@@ -15634,12 +15635,12 @@ def t_restoring_the_pre_redact_archive_does_not_erase_again():
     def go():
         ensure_auth()
         old = (datetime.now(timezone.utc) - timedelta(hours=46)).isoformat()
-        copilot._shop_owed_set({"since": old, "tries": 0})
+        privacy._shop_owed_set({"since": old, "tries": 0})
         w = scheduler._load_watch(); w["shopify_down"] = old; scheduler._save_watch(w)
         privacy._redact_hold_write(lambda hs: [{"id": "hbefore", "email": "before@example.com", "received": old}])
         buf, _added = backup._build_backup_zip()
         blob = b64.b64encode(buf.getvalue()).decode()
-        copilot._shop_owed_set(None)                     # settled since
+        privacy._shop_owed_set(None)                     # settled since
         w = scheduler._load_watch(); w.pop("shopify_down", None); scheduler._save_watch(w)
         # Since the backup: the waiting one was stopped (as any settlement is,
         # with a decision recorded), and a new one arrived.
@@ -15660,7 +15661,7 @@ def t_restoring_the_pre_redact_archive_does_not_erase_again():
         blob = b64.b64encode(buf.getvalue()).decode()
         privacy._privacy_note("customers/redact", "gone.since@example.com", "", "erased: confirmed by Ada")
         privacy._privacy_decision("gone.since@example.com", "", "erased", "Ada")
-        copilot._ask_hold("asked.since@example.com", "")
+        privacy._ask_hold("asked.since@example.com", "")
         r = post("/api/restore", {"zip": blob})
         eq(r.status_code, 200, r.text[:200])
         pl = privacy._load_privacy_log()
@@ -16233,7 +16234,7 @@ def t_recon_routes_enforce_their_rules():
 def t_recon_chat_tools_are_tab_gated_and_read_only():
     import copilot as _cp
     for name in ("recon_summary", "recon_exceptions", "recon_exception"):
-        eq(_cp._TOOL_TABS.get(name), "recon", name + " is gated on the recon tab")
+        eq(assistant._TOOL_TABS.get(name), "recon", name + " is gated on the recon tab")
     src = copilot_source()
     seg = src.split("async def recon_summary")[1].split("_oauth_states")[0] \
         if "_oauth_states" in src.split("async def recon_summary")[1][:9000] \
@@ -17548,7 +17549,7 @@ def t_clearing_a_collection_actually_clears_it():
     still on the dispatch record, so the very next read re-derived it. "The van
     has been, book another" did nothing at all."""
     from datetime import datetime as _dt, timezone as _tz
-    today = copilot._london_today().isoformat()   # the day the code reckons in (London), not the UTC date
+    today = clock._london_today().isoformat()   # the day the code reckons in (London), not the UTC date
     desk._write_dispatch({"9001": {"carrier_name": "DHL", "carrier_label": "DHL Express",
                                       "collection_date": "CN-1", "order_name": "#1",
                                       "ready_date": "", "dispatched_at": today + "T09:00:00+00:00"}})
@@ -17574,7 +17575,7 @@ def t_the_latest_booking_of_the_day_is_the_one_that_counts():
     booking of the day. After a clear and a re-book that is the stale one, and
     its reference is the one that would be read out to the courier."""
     from datetime import datetime as _dt, timezone as _tz
-    today = copilot._london_today().isoformat()   # the day the code reckons in (London), not the UTC date
+    today = clock._london_today().isoformat()   # the day the code reckons in (London), not the UTC date
     desk._write_dispatch({
         "1": {"carrier_name": "DHL", "collection_date": "OLD-1", "order_name": "#1",
               "dispatched_at": today + "T08:00:00+00:00"},
@@ -18032,7 +18033,7 @@ def t_a_collection_is_read_from_the_couriers_own_reference():
     van coming", so it is worth more than a ledger this app keeps beside it, and
     it covers shipments booked before the ledger existed."""
     from datetime import datetime as _dt, timezone as _tz
-    today = copilot._london_today().isoformat()   # the day the code reckons in (London), not the UTC date
+    today = clock._london_today().isoformat()   # the day the code reckons in (London), not the UTC date
     desk._write_dispatch({
         "9001": {"carrier_name": "DHL", "carrier_label": "DHL Express",
                  "collection_date": "CN-8842", "order_name": "#104294",
@@ -18090,8 +18091,8 @@ def t_one_collection_a_day_per_courier_not_one_per_parcel():
     second pickup. So "book a collection" becomes "already scheduled" for the
     rest of that day on its own, per courier, without anyone remembering."""
     from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-    today = copilot._london_today().isoformat()   # the day the code reckons in (London), not the UTC date
-    tomorrow = (copilot._london_today() + _td(days=1)).isoformat()
+    today = clock._london_today().isoformat()   # the day the code reckons in (London), not the UTC date
+    tomorrow = (clock._london_today() + _td(days=1)).isoformat()
     cfg = {"collection_by_carrier": {"DHL": "I_Need_To_Book_A_Collection",
                                      "UPS": "I_Have_Daily_Collection"},
            "collection_option": "I_Need_To_Book_A_Collection"}
@@ -18161,7 +18162,7 @@ def t_the_collection_tests_hold_in_the_hour_after_midnight():
             return base.astimezone(tz) if tz else base.replace(tzinfo=None)
     saved = _every_clock(_Frozen)
     try:
-        eq(copilot._london_today().isoformat(), "2026-07-15", "the code's day is London's, a day ahead of UTC in this hour")
+        eq(clock._london_today().isoformat(), "2026-07-15", "the code's day is London's, a day ahead of UTC in this hour")
         t_a_collection_is_read_from_the_couriers_own_reference()
         t_one_collection_a_day_per_courier_not_one_per_parcel()
     finally:
@@ -18787,7 +18788,7 @@ def t_only_a_granted_account_may_change_what_the_bench_cuts():
     """Seeing the Labels tab is not the same as deciding the glass an order is
     made from. Admins hold it by rank; everyone else needs the grant."""
     import inspect as _i
-    src = _i.getsource(copilot._may_edit_sizes)
+    src = _i.getsource(team._may_edit_sizes)
     assert 'u.get("can_sizes")' in src, "the per-person grant is what is checked"
     assert 'ROLE_LEVELS["admin"]' in src, "with admins holding it by rank"
     route = _copilot_src("gobo_rule_route")
@@ -19156,8 +19157,8 @@ def t_eori_route_stops_at_twenty_checks_a_minute():
     is a loop, and being cut off by Brussels helps nobody."""
     def go():
         ensure_auth()
-        saved = copilot._eori_hits[:]
-        copilot._eori_hits.clear()
+        saved = desk._eori_hits[:]
+        desk._eori_hits.clear()
         try:
             for i in range(20):
                 r = post("/api/eori/check", {"number": "GB12345678900%d" % (i % 10)})
@@ -19166,7 +19167,7 @@ def t_eori_route_stops_at_twenty_checks_a_minute():
             eq(r.status_code, 429, "the 21st in the same minute is refused")
             eq(r.json()["error"], "Slow down: too many checks in a minute.")
         finally:
-            copilot._eori_hits[:] = saved
+            desk._eori_hits[:] = saved
     with_accounts(go)
 
 
@@ -21358,7 +21359,7 @@ def t_payout_tools_belong_to_the_recon_tab():
     src = open(os.path.join(HERE, "server.py"), encoding="utf-8").read()
     for name in ("shopify_list_payouts", "shopify_payout_transactions", "shopify_list_disputes"):
         ok("def " + name in src, name + " is a tool")
-        eq(copilot._TOOL_TABS.get(name), "recon", name + " is the books, so it is gated on the recon tab")
+        eq(assistant._TOOL_TABS.get(name), "recon", name + " is the books, so it is gated on the recon tab")
 
 
 @test
@@ -22791,7 +22792,7 @@ def t_boot_reseal_reads_the_register_as_the_app_writes_it():
                        "mfa_secret": "PLAINSECRET"}}})
             eq(json.load(open(team.USERS_PATH))["users_store"]["users"]["u1"]["mfa_secret"],
                "PLAINSECRET", "enrolled before the key: plaintext on disk")
-            out = copilot.reseal_secrets_at_rest()
+            out = appstatus.reseal_secrets_at_rest()
             eq(out["stores"].get("mfa"), 1, out)
             on_disk = json.load(open(team.USERS_PATH))["users_store"]["users"]["u1"]["mfa_secret"]
             ok(_tv.is_sealed(on_disk), "sealed on disk")
@@ -23151,9 +23152,9 @@ def t_the_payroll_sheet_and_the_work_board_reckon_days_in_london():
     csv = work._work_csv(rows, {"u1": "Pat"}, {"w1": 2}).split("\n")
     eq(csv[1], "Pat,2026-07-01,09:30,13:00,3.50,2,")
     eq(csv[2], "Pat,2026-07-01,00:30,02:00,1.50,0,", "half past midnight in London, not the 30th")
-    eq(copilot._london_day("2026-06-30T23:30:00+00:00"), "2026-07-01")
-    eq(copilot._london_day("2026-01-31T23:30:00+00:00"), "2026-01-31", "and nothing moves in winter")
-    today, week, month = copilot._day_starts()
+    eq(clock._london_day("2026-06-30T23:30:00+00:00"), "2026-07-01")
+    eq(clock._london_day("2026-01-31T23:30:00+00:00"), "2026-01-31", "and nothing moves in winter")
+    today, week, month = work._day_starts()
     from datetime import datetime as _dt
     from zoneinfo import ZoneInfo as _Z
     eq(_dt.fromisoformat(today).astimezone(_Z("Europe/London")).strftime("%H:%M"), "00:00",
@@ -23168,8 +23169,8 @@ def t_a_label_reckons_required_by_where_the_bench_is():
     is yesterday's for the last hour of every summer day: a wedding three
     days off printed without its urgency box."""
     from datetime import date as _date
-    saved = copilot._london_today
-    copilot._london_today = lambda: _date(2026, 9, 19)
+    saved = clock._london_today
+    clock._london_today = lambda: _date(2026, 9, 19)
     try:
         o = dict(ORDER, line_items=[{"title": "Custom Gobo", "quantity": 1, "product_id": 1,
                                      "properties": [{"name": "Date Required", "value": "21/09/2026"}]}])
@@ -23181,7 +23182,7 @@ def t_a_label_reckons_required_by_where_the_bench_is():
         eq(loans._loan_state({"due_at": "2026-09-19"}, 14), "ok", "a loan due today is not late yet")
         eq(loans._loan_state({"due_at": "2026-09-18"}, 14), "late")
     finally:
-        copilot._london_today = saved
+        clock._london_today = saved
 
 
 @test
@@ -23549,13 +23550,13 @@ def t_the_overview_counts_only_sales_that_happened():
     £2,000 order sat in Revenue (7d) and Orders (7d), tripped the change
     alert, and fell out a week later as a drop; a test order and a voided
     one counted too, and a refund never came off."""
-    eq(copilot._order_counts({"total_price": "10"}), True)
+    eq(orderbook._order_counts({"total_price": "10"}), True)
     for bad in ({"cancelled_at": "2026-09-01T00:00:00Z"}, {"test": True},
                 {"financial_status": "voided"}, {"financial_status": "refunded"}):
-        eq(copilot._order_counts(bad), False, str(bad))
-    eq(copilot._order_revenue({"total_price": "100.00", "current_total_price": "60.00"}), 60.0,
+        eq(orderbook._order_counts(bad), False, str(bad))
+    eq(orderbook._order_revenue({"total_price": "100.00", "current_total_price": "60.00"}), 60.0,
        "what the order is worth after a partial refund")
-    eq(copilot._order_revenue({"total_price": "100.00"}), 100.0)
+    eq(orderbook._order_revenue({"total_price": "100.00"}), 100.0)
     orders = [{"id": 1, "total_price": "100.00", "financial_status": "paid"},
               {"id": 2, "total_price": "2000.00", "cancelled_at": "2026-09-18T00:00:00Z"},
               {"id": 3, "total_price": "50.00", "test": True},
@@ -24072,11 +24073,11 @@ def t_the_skills_an_answer_followed_are_named_and_counted():
     saved = _ws_stores()
     try:
         skillbook._add_skill("Discounting policy", "Never more than 10%.")
-        st = copilot._coerce_structured({"summary": "x", "skills_applied": ["discounting policy", "Made up"]})
+        st = assistant._coerce_structured({"summary": "x", "skills_applied": ["discounting policy", "Made up"]})
         eq(st["skills_applied"], ["Discounting policy"], "only a real skill, by its own title")
         sk = skillbook._load_skills()[0]
         eq(sk["used"], 1); ok(sk.get("used_at"), "and when")
-        st2 = copilot._coerce_structured({"summary": "y", "skills_applied": ["Nothing real"]})
+        st2 = assistant._coerce_structured({"summary": "y", "skills_applied": ["Nothing real"]})
         ok("skills_applied" not in st2, "an answer that followed none says none")
     finally:
         _ws_restore(saved)
@@ -26196,8 +26197,8 @@ def t_a_tool_read_keeps_what_shopify_said():
            "u": (lambda m: _aio_ret("Request timed out \u2014 try again."), lambda **k: None)}
     a = asyncio.run(REAL_TOOL_JSON(reg, "t", {}))
     b = asyncio.run(REAL_TOOL_JSON(reg, "u", {}))
-    ok(not copilot._ok(a) and shopify._shopify_gone(a), a)
-    ok(not copilot._ok(b) and not shopify._shopify_gone(b), b)
+    ok(not shopify._ok(a) and shopify._shopify_gone(a), a)
+    ok(not shopify._ok(b) and not shopify._shopify_gone(b), b)
 
 
 @test
@@ -30306,13 +30307,10 @@ def t_the_security_scans_cover_every_app_module():
 # module's name (dispatch.NAME, core.NAME), never a copied name.
 
 # What dispatch still reads from copilot.py. Each area that moves out (the
-# store, the request check, orders, the AI client) takes names off this list.
-BORROWED = {
-    # the answers and the EORI checker's rate window
-    "_ok", "_eori_hits", "EORI_MAX_PER_MIN",
-    # the clock
-    "_london_hm", "_london_today",
-}
+# store, the request check, orders, the AI client) took names off this list;
+# piece 13 took the last (the answers' check to the way to Shopify, the EORI
+# checker's rate window to the desk, the clock to gizmo/clock.py).
+BORROWED: set = set()
 
 def _core_reads(rel):
     """The names a module reads as core.NAME."""
@@ -30388,7 +30386,8 @@ def t_either_module_imports_first():
                         ("gizmo.rendering", "copilot"), ("gizmo.profile", "copilot"), ("gizmo.layouts", "copilot"),
                         ("gizmo.oauth", "copilot"), ("gizmo.status", "copilot"), ("gizmo.routes.rendering", "copilot"),
                         ("gizmo.routes.profile", "copilot"), ("gizmo.routes.layouts", "copilot"),
-                        ("gizmo.routes.oauth", "copilot"), ("gizmo.routes.status", "copilot")):
+                        ("gizmo.routes.oauth", "copilot"), ("gizmo.routes.status", "copilot"),
+                        ("gizmo.clock", "copilot")):
         r = _sp.run([sys.executable, "-c", f"import {first}, {then}; import gizmo.dispatch as d, copilot as c; "
                      "assert c.desk is d and d.core is c; print('ok')"],
                     cwd=root, env=dict(os.environ), capture_output=True, text=True, timeout=120)
@@ -30492,7 +30491,7 @@ def t_move_proof_is_wired():
 # The store, the error log and the AI client sit beneath every area: they
 # import nothing from copilot.py, so an area can import them directly.
 
-FLOOR = ["gizmo/config.py", "gizmo/store.py", "gizmo/errors.py", "gizmo/ai.py", "gizmo/shopify.py", "gizmo/prompts.py"]
+FLOOR = ["gizmo/config.py", "gizmo/store.py", "gizmo/errors.py", "gizmo/ai.py", "gizmo/shopify.py", "gizmo/prompts.py", "gizmo/clock.py"]
 
 @test
 def t_no_module_looks_itself_up_by_name():
@@ -30879,6 +30878,48 @@ def t_move_area_moves_routes_after_their_area():
     ok(not os.path.exists(os.path.join(root2, "gizmo/routes/old.py")), "and nothing is written")
 
 @test
+def t_move_area_adds_to_an_area_moved_earlier():
+    """An area that moved in an earlier piece takes the names left behind for
+    it: they go in before its last imports, read their new module's names
+    bare, and the module's own core.NAME reads of them become bare too. A
+    floor module takes a helper the same way and still imports nothing above
+    it."""
+    import importlib.util, subprocess as _sp
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    spec_ = importlib.util.spec_from_file_location("move_proof", os.path.join(here, "tools", "move_proof.py"))
+    mp = importlib.util.module_from_spec(spec_); spec_.loader.exec_module(mp)
+    old = ('"""An area moved in an earlier piece."""\nimport logging\n\nlogger = logging.getLogger("toy")\n\n\n'
+           'def f():\n    return 1\n\n\ndef g():\n    return core._x_helper() + 1\n\n\n'
+           '# Last, so this module is whole before copilot.py runs.\nimport copilot as core  # noqa: E402\n')
+    floor = '"""Stands in for the floor."""\n\n\ndef base() -> int:\n    return 0\n'
+    cop = _TOY_COPILOT.replace("from gizmo import floor_stub\n", "from gizmo import floor_stub\nfrom gizmo import old\n", 1) + (
+        "\n\ndef _x_helper() -> int:\n    return old.f() + KEEP\n\n\n"
+        "def _x_ok(d) -> bool:\n    return isinstance(d, dict)\n\n\n"
+        "def uses() -> int:\n    return _x_helper() + int(_x_ok({}))\n")
+    spec = {"note": "the leftovers home", "routes": [], "areas": [
+        {"name": "old", "file": "gizmo/old.py", "alias": "old", "existing": True, "prefix": "^$",
+         "extra": ["_x_helper"], "exclude": [], "floor": False, "doc": ""},
+        {"name": "floor_stub", "file": "gizmo/floor_stub.py", "alias": "floor_stub", "existing": True, "prefix": "^$",
+         "extra": ["_x_ok"], "exclude": [], "floor": True, "doc": ""}]}
+    root = _toy_repo("toy-existing", cop, spec, {"gizmo/old.py": old, "gizmo/floor_stub.py": floor})
+    r = _run_move(root)
+    eq(r.returncode, 0, r.stdout[-800:] + r.stderr[-800:])
+    read = lambda rel: open(os.path.join(root, rel)).read()
+    o, fl, c = read("gizmo/old.py"), read("gizmo/floor_stub.py"), read(_TOY_MAIN)
+    ok("def _x_helper() -> int:\n    return f() + core.KEEP" in o, "the helper reads its new module bare, copilot.py through core: " + o[-500:])
+    ok(o.index("def _x_helper(") < o.index("import copilot as core"), "before the module's last imports")
+    ok("return _x_helper() + 1" in o and "core._x_helper" not in o, "the module's own reads of it are bare")
+    ok("def _x_ok(d) -> bool:" in fl and "import copilot" not in fl, "the floor takes its helper and imports nothing above it")
+    ok("return old._x_helper() + int(floor_stub._x_ok({}))" in c, "copilot.py reads both through their modules: " + c[-300:])
+    eq((c.count("from gizmo import old\n"), c.count("from gizmo import floor_stub\n")), (1, 1), "and binds each module once")
+    base = {_TOY_MAIN: cop, "gizmo/__init__.py": "", "gizmo/floor_stub.py": floor, "gizmo/old.py": old, "gizmo/routes/__init__.py": ""}
+    head = dict(base, **{_TOY_MAIN: c, "gizmo/floor_stub.py": fl, "gizmo/old.py": o})
+    eq(mp.prove(base, head), [], "prove(): nothing but the move")
+    for first in ("gizmo.old", "copilot", "gizmo.floor_stub"):
+        rr = _sp.run([sys.executable, "-c", f"import {first}, copilot; assert copilot.uses() == 3"], cwd=root, capture_output=True, text=True)
+        eq(rr.returncode, 0, f"{first} first: " + rr.stderr[-400:])
+
+@test
 def t_the_privacy_loans_and_work_routes_are_gathered():
     """The privacy route and Shopify's privacy webhook, the loan register's and
     the work sessions' routes, each registered by one call in add_routes."""
@@ -30981,6 +31022,35 @@ def t_the_page_profile_oauth_and_status_routes_are_gathered():
     eq([inspect.getsource(m).count("@mcp.custom_route(")
         for m in (routes_rendering, routes_profile, routes_layouts, routes_oauth, routes_status)], [4, 1, 1, 4, 2],
        "the page and its 3 assets, the profile, the layouts, the 2 sign-in walks' 4 routes, status and healthz")
+
+@test
+def t_the_leftovers_are_home():
+    """What earlier pieces left in copilot.py lives with the rest of its area
+    (piece 13): copilot.py binds none of it, its module binds all of it."""
+    import importlib
+    homes = {
+        "gizmo.privacy": "SHOP_REDACT_DOWN_HOURS SHOP_REDACT_MAIL_HOURS _shop_redact_said _shop_owed_set _shop_redact_attempt "
+                         "_SHOP_REDACT_WORDS _shop_redact_settle _shop_redact_checked _shop_redact_retry _ask_hold "
+                         "_keep_live_privacy _webhook_body",
+        "gizmo.team": "TEAM_COLOUR_NAMES _next_team_colour _team_setup_needed SETUP_CODE _user_public _may_edit_sizes "
+                      "_may_send_mail _shop_gate _auth_guard _clean_username _find_username _starter_password _auth_me "
+                      "_team_guard _team_public_list",
+        "gizmo.work": "_fmt_secs _day_starts",
+        "gizmo.mail": "_gmail_redirect_uri",
+        "gizmo.dispatch": "_eori_hits EORI_MAX_PER_MIN",
+        "gizmo.orderbook": "_orders_28d _month_key _order_counts _order_revenue _month_axis",
+        "gizmo.chat": "_build_tools _TOOL_TABS _build_dispatch TOOL_RESULT_CAP _usage_summary _coerce_structured "
+                      "_page_context_to_system _PAGE_LABELS CHAT_CONTEXT_CAP",
+        "gizmo.shopify": "_ok",
+        "gizmo.clock": "_london_today _london_day _london_hm",
+        "gizmo.gate": "_secret_ok",
+        "gizmo.status": "_data_volume_warning reseal_secrets_at_rest",
+    }
+    for mod, names in homes.items():
+        m = importlib.import_module(mod)
+        for n in names.split():
+            ok(n not in vars(copilot), n + " is no longer in copilot.py")
+            ok(n in vars(m), n + " lives in " + mod)
 
 @test
 def t_the_moved_areas_routes_follow_them():

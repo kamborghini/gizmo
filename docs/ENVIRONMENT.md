@@ -20,14 +20,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `TOKEN_REFRESH_BUFFER` | `"1800"` | server |  |
 | `WEBHOOK_ALLOWED_HOSTS` | `""` | server | comma-separated host names or addresses (a staging copy of Reactor) whose webhooks the hourly repair keeps |
 
-## copilot.py - Accounts: a work session's length in words, first-run setup 
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `RAILWAY_ENVIRONMENT` | `None` | copilot | set by Railway; the volume check runs only there |
-| `RAILWAY_PROJECT_ID` | `None` | copilot | set by Railway; the volume check runs only there |
-| `SETUP_CODE` | `""` | copilot | set only while first-run setup is needed, then remove; unset locks setup |
-
 ## copilot.py - Configuration
 
 | Variable | Default | Read by | Notes |
@@ -36,8 +28,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `ANTHROPIC_EFFORT_DEEP` | `"max"` | copilot |  |
 | `ANTHROPIC_THINKING` | `"adaptive"` | copilot |  |
 | `APP_BASE_URL` | `""` | copilot |  |
-| `CHAT_CONTEXT_CAP` | `"12000"` | copilot | max chars of page-report context injected into chat |
-| `COPILOT_TOOL_RESULT_CAP` | `"50000"` | copilot |  |
 | `LOW_STOCK_THRESHOLD` | `"5"` | copilot |  |
 | `MAX_CHAT_CHARS` | `"100000"` | copilot | total chars in a chat request |
 | `MAX_MESSAGES` | `"100"` | copilot | chat history length |
@@ -102,7 +92,9 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
+| `CHAT_CONTEXT_CAP` | `"12000"` | gizmo.chat | max chars of page-report context injected into chat |
 | `COPILOT_MAX_TOOL_ROUNDS` | `"12"` | gizmo.chat |  |
+| `COPILOT_TOOL_RESULT_CAP` | `"50000"` | gizmo.chat |  |
 
 ## gizmo/crm.py - CRM: the sales desk, modelled on Pipedrive
 
@@ -376,6 +368,19 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `SKILL_BODY_CAP` | `"40000"` | gizmo.skills | chars per skill body |
 | `SKILL_TITLE_CAP` | `"120"` | gizmo.skills | chars per skill title |
 | `SKILL_UPLOAD_CAP` | `"200000"` | gizmo.skills |  |
+
+## gizmo/status.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `RAILWAY_ENVIRONMENT` | `None` | gizmo.status | set by Railway; the volume check runs only there |
+| `RAILWAY_PROJECT_ID` | `None` | gizmo.status | set by Railway; the volume check runs only there |
+
+## gizmo/team.py - Team colours, who may edit the Size list or send mail, first
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `SETUP_CODE` | `""` | gizmo.team | set only while first-run setup is needed, then remove; unset locks setup |
 
 ## gizmo/team.py - Team: the app's own accounts. Shopify has no authority here
 

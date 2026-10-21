@@ -259,7 +259,7 @@ async def _refresh_orders_read(registry: dict, key, entry: dict, ids: list) -> b
                             "fields": ",".join(names + ([] if "created_at" in names else ["created_at"]))})
     if _orders_full_epoch != full_epoch or _orders_cache.get(key) is not entry:
         return False                   # retired, or replaced, while this was reading
-    if not core._ok(res):
+    if not shopify._ok(res):
         _orders_cache.pop(key, None)   # never leave the old order standing in for the new
         return False
     # The same cut _paginate_orders makes with created_at_min, so an order the
@@ -405,7 +405,7 @@ async def _paginate_orders(registry: dict, days: int, max_pages: int = ORDER_PAG
         res = await shopify._tool_json(registry, "shopify_list_orders",
                                {"status": "any", "created_at_min": since, "limit": 250,
                                 "since_id": since_id, "fields": fields})
-        if not core._ok(res):
+        if not shopify._ok(res):
             failed = True
             break
         batch = res.get("orders", [])
@@ -430,9 +430,9 @@ def _orders_product_monthly(orders: list, months: list) -> dict:
     mset = set(months)
     out: dict = {}
     for o in orders:
-        if not core._order_counts(o):
+        if not _order_counts(o):
             continue
-        mk = core._month_key(o.get("created_at"))
+        mk = _month_key(o.get("created_at"))
         if mk not in mset:
             continue
         for li in o.get("line_items", []):
@@ -518,7 +518,7 @@ async def _sync_order_tags(registry: dict, order_id, add=(), remove=(), unless=(
     try:
         async with _tag_lock(order_id):
             o = await shopify._tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
-            if not core._ok(o) or not o.get("id"):
+            if not shopify._ok(o) or not o.get("id"):
                 return False, "Couldn't read the order to update its tags."
             if outcome is not None:
                 outcome["order"] = o      # read once: a release's terms check uses it too
@@ -638,7 +638,7 @@ async def _order_editable(registry: dict, order_id) -> tuple:
     to be decided on the order as it is now, not as it was when the queue loaded.
     """
     o = await shopify._tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
-    if not core._ok(o) or not o.get("id"):
+    if not shopify._ok(o) or not o.get("id"):
         return None, "Couldn't read that order from Shopify."
     booked = _live_booking(order_id)
     return {
@@ -754,7 +754,7 @@ async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
     try:
         async with _tag_lock(order_id):
             o = await shopify._tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
-            if not core._ok(o) or not o.get("id"):
+            if not shopify._ok(o) or not o.get("id"):
                 return False, "Couldn't read the order to edit it.", [], "", []
             name = str(o.get("name") or "")
             # A cancelled order is a closed record. Its sibling, the tag writer,
@@ -800,7 +800,7 @@ async def _edit_order(registry: dict, order_id, body: dict) -> tuple:
                 # had landed, and the retry then found nothing to do.
                 _orders_changed([order_id])
                 again = await shopify._tool_json(registry, "shopify_get_order", {"order_id": int(order_id)})
-                if core._ok(again) and again.get("id"):
+                if shopify._ok(again) and again.get("id"):
                     now_there = dict(_ship_to(again))
                     now_there["note"] = str(again.get("note") or "")
                     _f2, _w2, still, _warn2 = _clean_edit_fields(body, now_there)
@@ -873,7 +873,7 @@ async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = N
             and not entry.get("address_acked_at")):
         try:
             live = await shopify._tool_json(registry, "shopify_get_order", {"order_id": oid})
-            if core._ok(live) and live.get("id"):
+            if shopify._ok(live) and live.get("id"):
                 _flag_address_divergence(oid, _ship_to(live))
                 entry = dict(desk._load_dispatch().get(str(oid)) or {})
         except Exception:
@@ -937,7 +937,7 @@ async def _fulfill_if_ready(registry: dict, order_id, notify: Optional[bool] = N
         # customer already has their tracking. Read the order to find out; this
         # branch is rare, so the extra call costs nothing in the normal case.
         current = await shopify._tool_json(registry, "shopify_get_order", {"order_id": oid})
-        if core._ok(current) and _order_status(current) == "fulfilled":
+        if shopify._ok(current) and _order_status(current) == "fulfilled":
             logger.info("order %s was already fulfilled in Shopify; recording it", oid)
             fulfillment = {"ok": True, "reason": "already_fulfilled", "fulfillment_id": None,
                            "detail": "already fulfilled in Shopify; no fulfilment or email went from here"}
@@ -1067,7 +1067,7 @@ def _fmt_due(d) -> str:
     if not d:
         return ""
     out = f"{d.day} {d.strftime('%b')}"
-    return out if d.year == core._london_today().year else out + f" {d.year}"
+    return out if d.year == clock._london_today().year else out + f" {d.year}"
 
 
 def _order_status(o: dict) -> str:
@@ -1169,7 +1169,7 @@ async def _shop_record(registry: dict) -> dict:
         shop = await shopify._tool_json(registry, "shopify_get_shop", {})
     except Exception:
         shop = {}
-    shop = shop if isinstance(shop, dict) and core._ok(shop) else {}
+    shop = shop if isinstance(shop, dict) and shopify._ok(shop) else {}
     if shop:
         _shop_cache.update({"v": shop, "at": time.monotonic()})
     return shop
@@ -1199,6 +1199,60 @@ async def _origin_address(registry: dict) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Order totals for the reports: the last 28 days through the shared snapshot,
+# what counts as a sale, its revenue, and the month axis.
+# ---------------------------------------------------------------------------
+
+async def _orders_28d(registry: dict, meta: Optional[dict] = None) -> list:
+    """The last 28 days of orders, every page of them (one page of 250 cut a
+    busy month short), through the shared snapshot."""
+    return await _orders_snapshot(registry, days=28, meta=meta,
+                                  fields="id,created_at,total_price,current_total_price,line_items,"
+                                         "cancelled_at,test,financial_status,customer")
+
+
+def _month_key(iso: Optional[str]) -> str:
+    return (iso or "")[:7]            # "2025-01-15T..." -> "2025-01"
+
+
+def _order_counts(o: dict) -> bool:
+    """A sale that happened: not cancelled, not a test, not voided or fully
+    refunded. The KPIs summed every order the sweep returned, so a cancelled
+    order sat in Revenue (7d), tripped the change alert, and fell out a week
+    later as a drop."""
+    if not isinstance(o, dict) or o.get("cancelled_at") or o.get("test"):
+        return False
+    return str(o.get("financial_status") or "").lower() not in ("voided", "refunded")
+
+
+def _order_revenue(o: dict) -> float:
+    """What the order is worth now: current_total_price, which is the total
+    after refunds and edits, when Shopify sends it; the original total when
+    it does not."""
+    for k in ("current_total_price", "total_price"):
+        v = o.get(k)
+        if v in (None, ""):
+            continue
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
+def _month_axis(months: int) -> list:
+    """Ascending list of the last `months` month keys, ending this month."""
+    now = datetime.now(timezone.utc)
+    y, m, out = now.year, now.month, []
+    for _ in range(max(1, months)):
+        out.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            m, y = 12, y - 1
+    return list(reversed(out))
+
+
 # Last, so this module is whole before copilot.py or a sibling runs: copilot.py
 # takes names from these modules as it loads, and any of them may be imported
 # first. Read as core.NAME and sibling.NAME, never a copied name.
@@ -1207,3 +1261,4 @@ from gizmo import shopify  # noqa: E402
 from gizmo import size_list  # noqa: E402
 from gizmo import dispatch as desk  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import clock  # noqa: E402

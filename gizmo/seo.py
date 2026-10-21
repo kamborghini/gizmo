@@ -551,7 +551,7 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
         google_data.gsc_top_queries(28) if gsc_on else analytics._ret({}),
         google_data.ga4_summary(28) if ga4_on else analytics._ret({}),
         shopify._tool_json(registry, "shopify_get_shop", {}),
-        core._orders_28d(registry),
+        orderbook._orders_28d(registry),
     )
     rs, rtext = robots
     ss, stext = sitemap
@@ -586,14 +586,14 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
     o28 = list(o28r or [])
     from collections import Counter
     units: Counter = Counter()
-    o28 = [o for o in o28 if core._order_counts(o)]
+    o28 = [o for o in o28 if orderbook._order_counts(o)]
     for o in o28:
         for li in o.get("line_items", []):
             if li.get("title"):
                 units[li["title"]] += li.get("quantity") or 0
     context["commerce"] = {
         "currency": shop.get("currency"),
-        "revenue_28d": round(sum(core._order_revenue(o) for o in o28), 2),
+        "revenue_28d": round(sum(orderbook._order_revenue(o) for o in o28), 2),
         "orders_28d": len(o28),
         "top_products_28d": [{"title": t, "units": q} for t, q in units.most_common(8)],
     }
@@ -618,7 +618,7 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
         ),
         google_data.gsc_timeseries(480) if gsc_on else analytics._ret({}),
     )
-    structured = core._coerce_structured(prompts._report_answer(resp, "the SEO audit"))
+    structured = assistant._coerce_structured(prompts._report_answer(resp, "the SEO audit"))
     structured.pop("metrics", None)
     seo_trends: dict = {}
     try:
@@ -690,7 +690,7 @@ async def run_keywords(registry: dict, extra_system: str = "") -> dict:
         messages=[{"role": "user", "content": msg}],
         output_config={"effort": core._effort_for(claude.MODEL_DEEP)},
     )
-    structured = core._coerce_structured(prompts._report_answer(resp, "the keyword analysis"))
+    structured = assistant._coerce_structured(prompts._report_answer(resp, "the keyword analysis"))
     structured.pop("metrics", None)
     return {"metrics": metrics, "structured": structured, "currency": currency,
             "keywords": queries, "ads": ads if (ads and not ads.get("error")) else None,
@@ -722,7 +722,7 @@ async def run_keyword_scan(registry: dict, url: str, extra_system: str = "") -> 
         messages=[{"role": "user", "content": msg}],
         output_config={"effort": core._effort_for(claude.MODEL_DEEP)},
     )
-    structured = core._coerce_structured(prompts._report_answer(resp, "the scan"))
+    structured = assistant._coerce_structured(prompts._report_answer(resp, "the scan"))
     structured.pop("metrics", None)
     return {"url": final_url, "extracted": extracted, "structured": structured}
 
@@ -748,7 +748,7 @@ async def run_product_audit(registry: dict, product_id: int, extra_system: str =
     ga = await google_data.ga4_page(path) if google_data.ga4_configured() else {}
 
     units, rev = 0, 0.0
-    for o in await core._orders_28d(registry):
+    for o in await orderbook._orders_28d(registry):
         for li in o.get("line_items", []):
             if li.get("product_id") == product_id:
                 qty = li.get("quantity") or 0
@@ -786,7 +786,7 @@ async def run_product_audit(registry: dict, product_id: int, extra_system: str =
         messages=[{"role": "user", "content": msg}],
         output_config={"effort": core._effort_for(claude.MODEL_DEEP)},
     )
-    structured = core._coerce_structured(prompts._report_answer(resp, "the optimisation plan"))
+    structured = assistant._coerce_structured(prompts._report_answer(resp, "the optimisation plan"))
     structured.pop("metrics", None)
 
     metrics = []
@@ -803,7 +803,7 @@ async def run_product_audit(registry: dict, product_id: int, extra_system: str =
 
     trend = {"units": [], "revenue": []}
     try:
-        months = core._month_axis(core.PRODUCT_TREND_MONTHS)
+        months = orderbook._month_axis(core.PRODUCT_TREND_MONTHS)
         p_orders = await orderbook._orders_snapshot(registry, days=len(months) * 31)
         b = orderbook._orders_product_monthly(p_orders, months).get(product_id, {"units": {}, "revenue": {}})
         trend = {"units": [{"label": mk, "value": b["units"].get(mk, 0)} for mk in months],
@@ -822,3 +822,4 @@ from gizmo import orderbook  # noqa: E402
 from gizmo import skills as skillbook  # noqa: E402
 from gizmo import prompts  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import chat as assistant  # noqa: E402

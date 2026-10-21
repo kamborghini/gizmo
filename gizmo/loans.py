@@ -133,7 +133,7 @@ def _loan_state(loan: dict, chase_days: int) -> str:
     commitment the customer never made."""
     due = str(loan.get("due_at") or "").strip()
     if due:
-        return "late" if due < core._london_today().isoformat() else "ok"
+        return "late" if due < clock._london_today().isoformat() else "ok"
     return "due" if _loan_days_out(loan.get("out_at")) > int(chase_days or 0) else "ok"
 
 
@@ -239,3 +239,4 @@ def _loan_history(d: dict, unit_id: str) -> list:
 # first. Read as core.NAME and sibling.NAME, never a copied name.
 from gizmo import team  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import clock  # noqa: E402
