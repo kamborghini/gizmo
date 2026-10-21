@@ -161,27 +161,15 @@ from gizmo.routes import oauth as routes_oauth
 from gizmo.routes import status as routes_status
 # Moved out of this file (stage 4): the London clock, which the whole app reads.
 from gizmo import clock
+# Moved out of this file (stage 4): the Products tab.
+from gizmo import products as catalog
+from gizmo.routes import products as routes_products
 logger = logging.getLogger("shopify_mcp.copilot")
 
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-# Effort (low|medium|high|xhigh|max). Opus 5.5 thinks on every request and
-# effort is how much: "high" spends what a task needs and is every call's
-# level; "max" has no limit and is what Deep analysis in chat asks for. Every
-# call stops at MAX_TOKENS with its thinking counted, which "max" can reach
-# on a long report, so the reports stay at the everyday level.
-ANTHROPIC_EFFORT = os.environ.get("ANTHROPIC_EFFORT", "high")
-ANTHROPIC_EFFORT_DEEP = os.environ.get("ANTHROPIC_EFFORT_DEEP", "max")
-# Extended thinking for the interactive chat loop. "adaptive" lets the model
-# decide when and how deeply to reason (fast on simple questions, deep on hard
-# ones). Set ANTHROPIC_THINKING=off to disable if ever needed.
-THINKING_MODE = os.environ.get("ANTHROPIC_THINKING", "adaptive").strip().lower()
-if THINKING_MODE in ("off", "none", "disabled", "0", ""):
-    THINKING_MODE = ""
-LOW_STOCK_THRESHOLD = _env_num(int, os.environ.get("LOW_STOCK_THRESHOLD", "5"), "5", "LOW_STOCK_THRESHOLD")
-PRODUCT_TREND_MONTHS = _env_num(int, os.environ.get("PRODUCT_TREND_MONTHS", "12"), "12", "PRODUCT_TREND_MONTHS")
 # App Bridge identity = the app's Client ID + secret. Accept either the
 # SHOPIFY_API_KEY/SECRET names or the SHOPIFY_CLIENT_ID/SECRET names (same values).
 SHOPIFY_API_KEY    = os.environ.get("SHOPIFY_API_KEY") or os.environ.get("SHOPIFY_CLIENT_ID", "")
@@ -190,56 +178,7 @@ SHOPIFY_STORE      = os.environ.get("SHOPIFY_STORE", "")        # used to pin se
 # Public base URL (e.g. https://your-app.up.railway.app). When set, the Google
 # OAuth redirect URI is derived from it rather than the request Host header.
 APP_BASE_URL       = os.environ.get("APP_BASE_URL", "").strip()
-MAX_MESSAGES     = _env_num(int, os.environ.get("MAX_MESSAGES", "100"), "100", "MAX_MESSAGES")          # chat history length
-MAX_CHAT_CHARS   = _env_num(int, os.environ.get("MAX_CHAT_CHARS", "100000"), "100000", "MAX_CHAT_CHARS")     # total chars in a chat request
 STORE_CONTEXT_CAP  = _env_num(int, os.environ.get("STORE_CONTEXT_CAP", "4000"), "4000", "STORE_CONTEXT_CAP")
-
-
-def _effort_for(model: str, deep: bool = False) -> str:
-    """The everyday effort, or Deep analysis's, as configured. What the model
-    behind it accepts is settled where every request goes out (_fit_to_model)."""
-    return ANTHROPIC_EFFORT_DEEP if deep else ANTHROPIC_EFFORT
-
-
-# ---------------------------------------------------------------------------
-# The signs money is written with (the overview's figures and the chase email
-# read them).
-# ---------------------------------------------------------------------------
-
-
-_CURRENCY_SIGNS = {"GBP": "£", "USD": "$", "EUR": "€"}
-
-
-# ---------------------------------------------------------------------------
-# Every product in the catalogue, paged: the overview, the SEO audit, the
-# Products tab and the loan-unit picker read it.
-# ---------------------------------------------------------------------------
-
-
-async def _all_products(registry: dict, fields: str) -> tuple:
-    """Every product in the catalogue, paged by since_id: (products, ok, truncated).
-
-    ok is False when any page failed, and what came before it is returned
-    only so a caller can say how far it got. truncated is True only when the
-    page cap stopped the read AND a further product exists. Four callers read
-    a single page of 250 and no more: the Products tab, the SEO audit, the
-    Overview's low-stock count and the loan-unit picker."""
-    products, since_id, pages = [], 0, 0
-    while True:
-        data = await shopify._tool_json(registry, "shopify_list_products",
-                                {"limit": 250, "since_id": since_id, "fields": fields})
-        if not shopify._ok(data):
-            return products, False, False
-        batch = data.get("products", []) or []
-        products += batch
-        pages += 1
-        if len(batch) < 250:
-            return products, True, False
-        since_id = max(int(p.get("id") or 0) for p in batch)
-        if pages >= orderbook.ORDER_PAGE_CAP:
-            more = await shopify._tool_json(registry, "shopify_list_products",
-                                    {"limit": 1, "since_id": since_id, "fields": "id"})
-            return products, True, bool(shopify._ok(more) and more.get("products"))
 
 
 # ---------------------------------------------------------------------------
@@ -664,91 +603,6 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
             "flagged": rows}
 
 
-async def run_products_list(registry: dict, months_window: Optional[int] = None) -> dict:
-    """Rich product dataset for the Products tab: catalog fields + per-month units &
-    revenue buckets (so the UI can filter, sort and compare any period entirely
-    client-side) + facet lists. Order history is paginated up to `months_window`
-    (default PRODUCT_TREND_MONTHS, capped at 24) and bounded by ORDER_PAGE_CAP."""
-    months_window = min(max(int(months_window or PRODUCT_TREND_MONTHS), 1), 24)
-    months = orderbook._month_axis(months_window)
-    fields = ("id,title,handle,status,image,variants,product_type,vendor,tags,"
-              "created_at,updated_at,published_at")
-    # Paged, and a failure is said rather than shown as an empty catalogue:
-    # one unchecked page read a throttled answer as a store with no products,
-    # and a store past 250 lost the rest without a word.
-    products, ok, truncated = await _all_products(registry, fields)
-    if not ok:
-        return {"error": "Shopify did not answer the product list, so nothing is shown rather "
-                         "than an empty or partial catalogue. Try again in a moment."}
-    shop = await shopify._tool_json(registry, "shopify_get_shop", {})
-    currency = shop.get("currency", "")
-
-    orders = [o for o in await orderbook._orders_snapshot(registry, days=len(months) * 31) if orderbook._order_counts(o)]
-    bucket = orderbook._orders_product_monthly(orders, months)
-    cutoff28 = datetime.now(timezone.utc) - timedelta(days=28)
-    units28: dict = {}
-    rev28: dict = {}
-    for o in orders:
-        try:
-            created = datetime.fromisoformat((o.get("created_at") or "").replace("Z", "+00:00"))
-        except Exception:
-            created = None
-        if not (created and created >= cutoff28):
-            continue
-        for li in o.get("line_items", []):
-            pid = li.get("product_id")
-            if not pid:
-                continue
-            q = li.get("quantity") or 0
-            units28[pid] = units28.get(pid, 0) + q
-            rev28[pid] = rev28.get(pid, 0.0) + float(li.get("price") or 0) * q
-
-    vendors: set = set()
-    types: set = set()
-    out = []
-    for p in products:
-        pid = p.get("id")
-        img = p.get("image") or {}
-        variants = p.get("variants") or []
-        price = None
-        for v in variants:
-            try:
-                price = float(v.get("price"))
-                break
-            except (TypeError, ValueError):
-                continue
-        inv_vals = [v.get("inventory_quantity") for v in variants if isinstance(v.get("inventory_quantity"), int)]
-        inventory = sum(inv_vals) if inv_vals else None
-        stock = ("untracked" if inventory is None else
-                 "out" if inventory <= 0 else
-                 "low" if inventory <= LOW_STOCK_THRESHOLD else "in")
-        tags = p.get("tags")
-        tags = [t.strip() for t in tags.split(",") if t.strip()] if isinstance(tags, str) else (tags or [])
-        b = bucket.get(pid, {"units": {}, "revenue": {}})
-        monthly = {mk: {"units": b["units"].get(mk, 0), "revenue": round(b["revenue"].get(mk, 0.0), 2)}
-                   for mk in months if b["units"].get(mk) or b["revenue"].get(mk)}
-        if p.get("vendor"):
-            vendors.add(p["vendor"])
-        if p.get("product_type"):
-            types.add(p["product_type"])
-        out.append({
-            "id": pid, "title": p.get("title"), "handle": p.get("handle"), "status": p.get("status"),
-            "image": img.get("src") if isinstance(img, dict) else None,
-            "price": price, "vendor": p.get("vendor") or "", "product_type": p.get("product_type") or "",
-            "tags": tags, "created_at": p.get("created_at"), "updated_at": p.get("updated_at"),
-            "published_at": p.get("published_at"), "inventory": inventory, "stock_status": stock,
-            "units_28d": units28.get(pid, 0), "revenue_28d": round(rev28.get(pid, 0.0), 2),
-            "monthly": monthly,
-        })
-    out.sort(key=lambda x: (x["units_28d"], x["revenue_28d"]), reverse=True)  # best sellers first by default
-    # Every product read, not the best-selling 250: the page searches and
-    # filters on what it is sent, so a product past the 250th could not be
-    # found even by name. `truncated` says when the page cap stopped the read.
-    return {"currency": currency, "months": months,
-            "vendors": sorted(vendors), "product_types": sorted(types),
-            "products": out, "truncated": truncated}
-
-
 # ---------------------------------------------------------------------------
 # Work after a request: a coroutine run once the answer has gone, holding a
 # reference so it is not collected before it runs.
@@ -875,7 +729,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         return assistant._build_dispatch(chat_registry, lambda: str(uid or ""))
 
     logger.info(f"Copilot enabled — embedded-only; models: fast={claude.MODEL_FAST}, deep={claude.MODEL_DEEP}; "
-                f"effort={ANTHROPIC_EFFORT}, deep effort={ANTHROPIC_EFFORT_DEEP}; max_tokens={claude.MAX_TOKENS}; tools: {len(tools)}")
+                f"effort={claude.ANTHROPIC_EFFORT}, deep effort={claude.ANTHROPIC_EFFORT_DEEP}; max_tokens={claude.MAX_TOKENS}; tools: {len(tools)}")
     if not claude.ANTHROPIC_API_KEY:
         logger.warning("Copilot: ANTHROPIC_API_KEY not set. Chat will return an error until it is.")
     if not SHOPIFY_API_SECRET:
@@ -914,9 +768,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             history = [{"role": "user", "content": body["message"]}]
         if not history:
             return _json({"error": "Provide 'messages' or 'message'"}, 400)
-        if not isinstance(history, list) or len(history) > MAX_MESSAGES:
+        if not isinstance(history, list) or len(history) > assistant.MAX_MESSAGES:
             return _json({"error": "Conversation too long. Start a new chat."}, 400)
-        if len(json.dumps(history)) > MAX_CHAT_CHARS:
+        if len(json.dumps(history)) > assistant.MAX_CHAT_CHARS:
             return _json({"error": "Message too large."}, 413)
 
         deep = bool(body.get("deep"))
@@ -928,7 +782,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         extra += assistant._page_context_to_system(body.get("context"))
         try:
             result = await assistant.run_chat(history, dispatch_for(_who), tools, model, extra,
-                                    effort=_effort_for(model, deep), deep=deep)
+                                    effort=claude._effort_for(model, deep), deep=deep)
         except RuntimeError as e:
             return _json({"error": str(e)}, 500)
         except anthropic.APIError as e:
@@ -954,9 +808,9 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             history = [{"role": "user", "content": body["message"]}]
         if not history:
             return _json({"error": "Provide 'messages' or 'message'"}, 400)
-        if not isinstance(history, list) or len(history) > MAX_MESSAGES:
+        if not isinstance(history, list) or len(history) > assistant.MAX_MESSAGES:
             return _json({"error": "Conversation too long. Start a new chat."}, 400)
-        if len(json.dumps(history)) > MAX_CHAT_CHARS:
+        if len(json.dumps(history)) > assistant.MAX_CHAT_CHARS:
             return _json({"error": "Message too large."}, 413)
 
         deep = bool(body.get("deep"))
@@ -972,7 +826,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         async def runner():
             try:
                 result = await assistant.run_chat(history, dispatch_for(_who), tools, model, extra,
-                                        emit=q.put, effort=_effort_for(model, deep), deep=deep)
+                                        emit=q.put, effort=claude._effort_for(model, deep), deep=deep)
                 assistant._chat_after(result, history, held=team._team_level(_who) < team.ROLE_LEVELS["admin"],
                             by=team._team_name(_who))
                 result["deep"] = deep
@@ -1056,32 +910,6 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     # The Size list's routes (gizmo/routes/size_list.py), gathered where the first stood.
     routes_size_list.register(mcp, registry)
-
-    @mcp.custom_route("/api/customer-history", methods=["POST"])
-    async def customer_history_route(request: Request):
-        # How many times this label's customer has ordered before. Read-only.
-        err, body, _who = await _guard(request)
-        if err:
-            return err
-        try:
-            cid = int(body.get("customer_id") or 0)
-        except (TypeError, ValueError, OverflowError):
-            cid = 0
-        if not cid:
-            return _json({"error": "No customer id given."}, 400)
-        try:
-            data = await shopify._tool_json(registry, "shopify_get_customer_orders",
-                                    {"customer_id": cid, "limit": 50, "status": "any"})
-            if not shopify._ok(data):
-                return _json({"error": "Couldn't read that customer's orders."}, 502)
-            orders = sorted((data.get("orders") or []), key=lambda o: str(o.get("created_at") or ""), reverse=True)
-            return _json({"count": len(orders),
-                          "recent": [{"name": o.get("name"), "created_at": o.get("created_at"),
-                                      "admin_url": orderbook._admin_order_url(o.get("id"))}
-                                     for o in orders[:3]]})
-        except Exception:
-            logger.exception("Customer history failed")
-            return _json({"error": "Couldn't read customer history."}, 500)
 
     # The shared inbox's routes (gizmo/routes/mail.py), gathered where the first
     # stood; their paths are literal, so no request changes hands.
@@ -1612,44 +1440,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                + "</body></html>")
         return HTMLResponse(doc, headers=doc_headers)
 
-    @mcp.custom_route("/api/products", methods=["POST"])
-    async def products_route(request: Request):
-        err, body, _who = await _guard(request)
-        if err:
-            return err
-        try:
-            months = int(body.get("months") or 0) or None
-        except (TypeError, ValueError):
-            months = None
-        try:
-            orderbook._refresh_asked(body)
-            return _json(await run_products_list(registry, months))
-        except Exception:
-            logger.exception("Product list failed")
-            return _json({"error": "Couldn't load products."}, 500)
-
-    @mcp.custom_route("/api/product", methods=["POST"])
-    async def product_route(request: Request):
-        err, body, _who = await _guard(request, ai=True)
-        if err:
-            return err
-        try:
-            pid = int(body.get("product_id"))
-        except (TypeError, ValueError):
-            return _json({"error": "A numeric product_id is required."}, 400)
-        # The skills are chosen inside run_product_audit, once the product's
-        # title, type and tags are known: 'product plan 8123456789' matched nothing.
-        extra = store_profile._profile_to_system(store_profile._load_profile()) + memory._memory_to_system() + knowledge._knowledge_to_system()
-        try:
-            return _json(await seo.run_product_audit(registry, pid, extra))
-        except RuntimeError as e:
-            return _json({"error": str(e)}, 400)
-        except anthropic.APIError as e:
-            logger.exception("Anthropic API error (product)")
-            return _json({"error": claude._ai_error_words(e)}, 502)
-        except Exception:
-            logger.exception("Product audit failed")
-            return _json({"error": "Couldn't analyze this product. Check the server logs."}, 500)
+    # The Products tab's routes (gizmo/routes/products.py), gathered where the first stood.
+    routes_products.register(mcp, registry)
 
     # The reconciliation routes and the Xero connect pair (gizmo/routes/reconciliation.py), gathered where the first stood.
     routes_reconciliation.register(mcp, registry)

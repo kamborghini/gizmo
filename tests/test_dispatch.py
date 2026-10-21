@@ -186,6 +186,7 @@ from gizmo import layouts
 from gizmo import oauth
 from gizmo import status as appstatus
 from gizmo import clock
+from gizmo import products as catalog
 import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
@@ -22344,7 +22345,7 @@ def t_the_products_tab_says_so_when_shopify_does_not_answer():
     saved = shopify._tool_json
     shopify._tool_json = failed
     try:
-        res = run_async(copilot.run_products_list({}, 1))
+        res = run_async(catalog.run_products_list({}, 1))
     finally:
         shopify._tool_json = saved
     ok("did not answer" in res.get("error", ""), "an error, not an empty catalogue: " + json.dumps(res)[:160])
@@ -22360,7 +22361,7 @@ def t_the_products_tab_says_so_when_shopify_does_not_answer():
         return {}
     shopify._tool_json = paged
     try:
-        res = run_async(copilot.run_products_list({}, 1))
+        res = run_async(catalog.run_products_list({}, 1))
     finally:
         shopify._tool_json = saved
     eq(len(res["products"]), 503, "every product, not the first 250")
@@ -22561,10 +22562,10 @@ def t_every_product_reader_reads_the_whole_catalogue_or_says_it_could_not():
     saved = shopify._tool_json
     try:
         shopify._tool_json, calls = catalogue(260)
-        prods, okd, cut = run_async(copilot._all_products({}, "id"))
+        prods, okd, cut = run_async(catalog._all_products({}, "id"))
         eq((len(prods), okd, cut), (260, True, False))
         shopify._tool_json, _c = catalogue(600, fail_after=1)
-        eq(run_async(copilot._all_products({}, "id"))[1], False, "a failed page is a failed read")
+        eq(run_async(catalog._all_products({}, "id"))[1], False, "a failed page is a failed read")
         sig = run_async(seo._seo_product_signals({}))
         ok(sig.get("unavailable"), "the SEO audit knows its read failed")
         _score, kpis = seo._seo_scorecard(sig, 200, 200, [], "shop.test")
@@ -26950,7 +26951,7 @@ def t_each_request_takes_the_effort_its_model_accepts():
         mine = {"effort": "xhigh"}
         send("claude-opus-4-6", output_config=mine)
         eq(mine, {"effort": "xhigh"}, "and the request the caller built is not altered under it")
-        eq(copilot._effort_for("claude-sonnet-5-5", True), copilot.ANTHROPIC_EFFORT_DEEP,
+        eq(claude._effort_for("claude-sonnet-5-5", True), claude.ANTHROPIC_EFFORT_DEEP,
            "the tier's effort is asked for as configured")
     finally:
         claude._MODEL_CAPS.clear()
@@ -27050,8 +27051,8 @@ def t_deep_analysis_is_more_thinking_and_the_answer_says_it_was_deep():
             eq(r.json()["deep"], True)
             r = post_s(sess, "/api/chat", {"message": "hello"})
             eq(r.json()["deep"], False)
-            eq(seen[0][1], copilot._effort_for(claude.MODEL_DEEP, True))
-            eq(seen[1][1], copilot._effort_for(claude.MODEL_FAST, False))
+            eq(seen[0][1], claude._effort_for(claude.MODEL_DEEP, True))
+            eq(seen[1][1], claude._effort_for(claude.MODEL_FAST, False))
             r = post_s(sess, "/api/chat/stream", {"message": "hello", "deep": True})
             done = [json.loads(l[5:]) for l in r.text.split("\n") if l.startswith("data:")][-1]
             eq(done["result"]["deep"], True, "the stream's answer says so too")
@@ -27059,8 +27060,8 @@ def t_deep_analysis_is_more_thinking_and_the_answer_says_it_was_deep():
             assistant.run_chat = saved
     with_accounts(go)
     if not os.environ.get("ANTHROPIC_EFFORT_DEEP") and not os.environ.get("ANTHROPIC_EFFORT"):
-        eq(copilot._effort_for("claude-opus-5-5", True), "max")
-        eq(copilot._effort_for("claude-opus-5-5"), "high")
+        eq(claude._effort_for("claude-opus-5-5", True), "max")
+        eq(claude._effort_for("claude-opus-5-5"), "high")
 
 
 
@@ -30387,7 +30388,7 @@ def t_either_module_imports_first():
                         ("gizmo.oauth", "copilot"), ("gizmo.status", "copilot"), ("gizmo.routes.rendering", "copilot"),
                         ("gizmo.routes.profile", "copilot"), ("gizmo.routes.layouts", "copilot"),
                         ("gizmo.routes.oauth", "copilot"), ("gizmo.routes.status", "copilot"),
-                        ("gizmo.clock", "copilot")):
+                        ("gizmo.clock", "copilot"), ("gizmo.products", "copilot"), ("gizmo.routes.products", "copilot")):
         r = _sp.run([sys.executable, "-c", f"import {first}, {then}; import gizmo.dispatch as d, copilot as c; "
                      "assert c.desk is d and d.core is c; print('ok')"],
                     cwd=root, env=dict(os.environ), capture_output=True, text=True, timeout=120)
@@ -30988,7 +30989,8 @@ def t_the_report_routes_are_gathered():
         ok(path not in src, path + " is registered by its area's routes")
     eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_seo, routes_analytics)], [3, 5],
        "3 SEO and keyword routes, 5 report routes")
-    ok('"/api/product"' in src and '"/api/products"' in src, "the product page's routes stay")
+    ok('"/api/product"' not in src and '"/api/products"' not in src,
+       "the product page's routes went with the Products tab (piece 14), once routes could be named exactly")
 
 @test
 def t_the_scheduler_updates_and_backup_routes_are_gathered():
@@ -31074,6 +31076,53 @@ def t_the_leftovers_are_home():
             ok(n in vars(m), n + " lives in " + mod)
 
 @test
+def t_the_customer_history_route_counts_the_orders():
+    """A label's "ordered before": /api/customer-history counts the customer's
+    orders and links the newest three. It had no test of its own; pinned
+    through its route before it moved to the order book's routes."""
+    ensure_auth()
+    orders = [{"id": 7001 + i, "name": "#10%d" % i, "created_at": "2026-0%d-01T10:00:00Z" % (i + 1)} for i in range(5)]
+
+    async def tools(registry, name, args):
+        if name == "shopify_get_customer_orders" and args.get("customer_id") == 55:
+            return {"orders": list(orders)}
+        return {"_failed": True}
+    saved = shopify._tool_json; shopify._tool_json = tools
+    try:
+        r = post("/api/customer-history", {"customer_id": 55})
+        eq(r.status_code, 200, r.text)
+        eq(r.json()["count"], 5, "every order counted")
+        eq([o["name"] for o in r.json()["recent"]], ["#104", "#103", "#102"], "the newest three")
+        ok(r.json()["recent"][0]["admin_url"].endswith("/orders/7005"), "each a door to its order")
+        eq(post("/api/customer-history", {}).status_code, 400, "no customer id is said")
+        eq(post("/api/customer-history", {"customer_id": 9}).status_code, 502, "and an unreadable answer")
+    finally:
+        shopify._tool_json = saved
+
+@test
+def t_the_ai_settings_products_and_history_have_moved():
+    """The AI's effort settings live with the AI client, the chat's limits with
+    the chat, the Products tab in gizmo/products.py with its two routes, and a
+    label's order history with the order book's routes (piece 14)."""
+    import importlib, inspect
+    from gizmo.routes import orderbook as routes_orderbook, products as routes_products
+    homes = {"gizmo.ai": "ANTHROPIC_EFFORT ANTHROPIC_EFFORT_DEEP THINKING_MODE _effort_for",
+             "gizmo.chat": "MAX_MESSAGES MAX_CHAT_CHARS",
+             "gizmo.products": "run_products_list _all_products LOW_STOCK_THRESHOLD PRODUCT_TREND_MONTHS",
+             "gizmo.analytics": "_CURRENCY_SIGNS"}
+    for mod, names in homes.items():
+        m = importlib.import_module(mod)
+        for n in names.split():
+            ok(n not in vars(copilot), n + " is no longer in copilot.py")
+            ok(n in vars(m), n + " lives in " + mod)
+    src = inspect.getsource(copilot.add_routes)
+    eq(src.count("routes_products.register(mcp, registry)"), 1, "the products routes, one call")
+    for path in ('"/api/products"', '"/api/product"', '"/api/customer-history"'):
+        ok(path not in src, path + " is registered by its area's routes")
+    eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_products, routes_orderbook)], [2, 3],
+       "the Products tab's two routes; the order book's two and customer history")
+
+@test
 def t_the_moved_areas_routes_follow_them():
     """Production's, the Size list's and the order book's routes follow their
     areas into gizmo/routes/, each group registered by one call. The two
@@ -31089,7 +31138,7 @@ def t_the_moved_areas_routes_follow_them():
     ok('@mcp.custom_route("/print/production-labels", methods=["GET", "OPTIONS"])' in src
        and '"/print/production-labels/sign"' in src, "the printed-label routes stay where they are")
     eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_production, routes_size_list, routes_orderbook)],
-       [5, 6, 2], "5 production routes, 6 Size list routes, 2 order routes")
+       [5, 6, 3], "5 production routes, 6 Size list routes, 2 order routes and customer history (piece 14)")
 
 for fn in [t for t in TESTS if os.environ.get("ONLY", "") in t.__name__]:
     # A fresh client per test, for the per-client SIGN-IN ceiling only. The

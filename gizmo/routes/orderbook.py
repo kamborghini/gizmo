@@ -17,6 +17,7 @@ from gizmo import gate
 from gizmo import orderbook
 from gizmo import crm as salesdesk
 from gizmo import team
+from gizmo import shopify
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
@@ -144,3 +145,29 @@ def register(mcp, registry):
             # a write that landed on another.
             activity._track(_who, "orders", "edited order " + (name or oid), ", ".join(changed))
         return gate._json({"ok": True, "changed": changed, "warnings": warn})
+
+    @mcp.custom_route("/api/customer-history", methods=["POST"])
+    async def customer_history_route(request: Request):
+        # How many times this label's customer has ordered before. Read-only.
+        err, body, _who = await gate._guard(request)
+        if err:
+            return err
+        try:
+            cid = int(body.get("customer_id") or 0)
+        except (TypeError, ValueError, OverflowError):
+            cid = 0
+        if not cid:
+            return gate._json({"error": "No customer id given."}, 400)
+        try:
+            data = await shopify._tool_json(registry, "shopify_get_customer_orders",
+                                    {"customer_id": cid, "limit": 50, "status": "any"})
+            if not shopify._ok(data):
+                return gate._json({"error": "Couldn't read that customer's orders."}, 502)
+            orders = sorted((data.get("orders") or []), key=lambda o: str(o.get("created_at") or ""), reverse=True)
+            return gate._json({"count": len(orders),
+                          "recent": [{"name": o.get("name"), "created_at": o.get("created_at"),
+                                      "admin_url": orderbook._admin_order_url(o.get("id"))}
+                                     for o in orders[:3]]})
+        except Exception:
+            logger.exception("Customer history failed")
+            return gate._json({"error": "Couldn't read customer history."}, 500)

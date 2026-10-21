@@ -818,7 +818,7 @@ async def run_skill_reading(skill: dict, others: list[dict]) -> dict:
     resp = await claude._xcreate(client,
         model=claude.MODEL_DEEP, max_tokens=claude.MAX_TOKENS, system=SKILL_READING_SYSTEM,
         tools=[SKILL_READING_TOOL], tool_choice={"type": "tool", "name": SKILL_READING_TOOL["name"]},
-        messages=[{"role": "user", "content": msg}], output_config={"effort": core._effort_for(claude.MODEL_DEEP)},
+        messages=[{"role": "user", "content": msg}], output_config={"effort": claude._effort_for(claude.MODEL_DEEP)},
     )
     if getattr(resp, "stop_reason", "") == "max_tokens":
         raise RuntimeError("Reactor ran out of room writing up this skill. Try again, or split the skill.")
