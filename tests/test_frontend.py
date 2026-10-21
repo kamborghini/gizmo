@@ -13630,6 +13630,28 @@ def t_the_feature_band_draws_the_main_question():
 
 
 @test
+def t_the_plan_label_stays_on_its_bar():
+    """The plan's label sat to the right of its tick wherever the tick was, so
+    a plan near the top of the likely range ran its label past the bar (on a
+    phone, past the screen: the forecast scrolled sideways). Past the middle
+    of the bar it now ends at the tick instead."""
+    end = CSS.split("\n        .fb-rl.t.end {")[1].split("}")[0] if "\n        .fb-rl.t.end {" in CSS else ""
+    ok("left: auto" in end and "right: calc(100% - var(--at-plan) + var(--sp-2))" in end,
+       "past the middle, the label ends just short of the tick")
+    if not _node_ok():
+        print("       (node unavailable, harness skipped)")
+        return
+    js = "\n".join(("function el(tag, cls, text) { return { cls, text, kids: [], style: { setProperty() {} }, "
+                    "append(...c) { this.kids.push(...c); } }; }",
+                    SCRIPT[SCRIPT.index("        function bandDomain(vals) {"):SCRIPT.index("        function meter(m) {")],
+                    "const d = { min: 0, max: 100 };",
+                    "const side = p => rangeBar({ lo: 10, hi: 90, exp: 50, plan: p, d, planLabel: 'Plan' }).kids.find(k => k.text === 'Plan').cls;",
+                    "console.log(JSON.stringify([19, 50, 51, 97].map(side)));"))
+    eq(_run_node(js), ["fb-rl t", "fb-rl t", "fb-rl t end", "fb-rl t end"],
+       "to the right of its tick up to the middle, ending at it beyond")
+
+
+@test
 def t_lists_are_rows_split_by_hairlines():
     """Spec 3 and 6: lists are rows split by hairlines, no box. A table is a 32
     head in caption type and 44 rows, line framing it (top, under the head,
