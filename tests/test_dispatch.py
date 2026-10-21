@@ -31538,16 +31538,45 @@ def t_the_desks_routes_refuse_a_wrong_kind():
         r = post("/api/crm/stages", {"labels": items})
         eq((r.status_code, r.json().get("error")), (400, "The labels sent must be a list of sets of fields."), repr(items))
 
+@test
+def t_the_shipping_routes_refuse_a_wrong_kind():
+    """Stage 5, piece 4: the dispatch desk (quotes, bookings, cancellations,
+    collections, the diagnosis, address parsing), custom shipments, the EORI
+    check, the Size list's check, models and upload, and the production labels
+    feed name the fields they read. Every one, sent as an object and as a list,
+    is a 400 in the model's words before the route reads it: nothing is quoted,
+    booked, voided or queued on a field of the wrong kind."""
+    from gizmo.routes import dispatch as r_disp, size_list as r_sizes, production as r_prod
+    n = _wrong_kinds_refused([
+        ("/api/custom/quote", None, r_disp.CustomQuoteBody),
+        ("/api/custom/book", None, r_disp.CustomBookBody),
+        ("/api/custom/list", None, r_disp.CustomListBody),
+        ("/api/custom/visibility", None, r_disp.CustomVisibilityBody),
+        ("/api/dispatch/quote", None, r_disp.DispatchQuoteBody),
+        ("/api/dispatch/book", None, r_disp.DispatchBookBody),
+        ("/api/dispatch/cancel", None, r_disp.DispatchCancelBody),
+        ("/api/dispatch/collections", None, r_disp.DispatchCollectionsBody),
+        ("/api/dispatch/diagnose", None, r_disp.DispatchDiagnoseBody),
+        ("/api/dispatch/parse-address", None, r_disp.ParseAddressBody),
+        ("/api/eori/check", None, r_disp.EoriCheckBody),
+        ("/api/gobo-sizes/check", None, r_sizes.SizeCheckBody),
+        ("/api/gobo-sizes/models", None, r_sizes.SizeModelsBody),
+        ("/api/gobo-sizes/upload", None, r_sizes.SizeUploadBody),
+        ("/api/production-labels", None, r_prod.ProductionLabelsBody),
+        ("/api/production-labels/coverage", None, r_prod.LabelCoverageBody),
+        ("/api/production-labels/queue", None, r_prod.LabelQueueBody)])
+    ok(n > 60, "every field each model names was tried (%d refusals)" % n)
+    r = post("/api/dispatch/quote", {"order_id": 1001, "boxes": [{"width": 10}, "big"]})
+    eq((r.status_code, r.json().get("error")), (400, "The boxes sent must be a list of sets of fields."))
+
 # The write routes that read fields from their body with no model checking
-# them yet (gizmo/bodies.py). The list may only shrink: a new write route comes
-# with its model, and a route that gains one leaves the list.
+# them (gizmo/bodies.py), each left so on purpose. Every other one has a model
+# (stage 5, pieces 1 to 4). A new write route comes with its model.
 UNCHECKED_BODIES = [
-    "/api/custom/book", "/api/custom/list", "/api/custom/quote", "/api/custom/visibility",
-    "/api/dispatch/book", "/api/dispatch/cancel", "/api/dispatch/collections", "/api/dispatch/diagnose",
-    "/api/dispatch/parse-address", "/api/dispatch/quote", "/api/eori/check", "/api/gobo-sizes/check",
-    "/api/gobo-sizes/models", "/api/gobo-sizes/upload", "/api/production-labels",
-    "/api/production-labels/coverage", "/api/production-labels/queue", "/api/stock-usage",
-    "/api/stock-usage/send", "/print/production-labels/sign", "/webhooks/privacy"]
+    "/api/stock-usage", "/api/stock-usage/send",   # the stock bridge: hands off
+    "/print/production-labels/sign",                # the signed print route: frozen
+    "/webhooks/privacy",                            # Shopify shapes this body; refusing it would break the compliance path
+]
 
 @test
 def t_write_routes_check_their_bodies():

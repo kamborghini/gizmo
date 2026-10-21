@@ -31,6 +31,24 @@ class SizeRuleBody(bodies.Body):
     kind: bodies.Text = None
 
 
+
+class SizeCheckBody(bodies.Body):
+    """What /api/gobo-sizes/check reads (gizmo/bodies.py): the model to look up."""
+    q: bodies.Text = None
+
+
+
+class SizeModelsBody(bodies.Body):
+    """What /api/gobo-sizes/models reads (gizmo/bodies.py): what to look for."""
+    q: bodies.Text = None
+
+
+
+class SizeUploadBody(bodies.Body):
+    """What /api/gobo-sizes/upload reads (gizmo/bodies.py): the sheet, as CSV text."""
+    csv: bodies.Text = None
+
+
 def register(mcp, registry):
     """Add the Size list's routes to the app."""
 
@@ -48,6 +66,9 @@ def register(mcp, registry):
         body = await gate._read_json_capped(request, cap=big)
         if body is None:
             return gate._json({"error": "That file is too large (2 MB cap)."}, 413)
+        refused = gate._body_refusal(SizeUploadBody, body)
+        if refused:
+            return refused
         text = str(body.get("csv") or "")
         if not text.strip():
             return gate._json({"error": "No CSV content received."}, 400)
@@ -147,7 +168,7 @@ def register(mcp, registry):
     async def gobo_check_route(request: Request):
         """What a label prints for a fixture named in free text, for the Size
         list's search. Read only, and open to anyone who can see the tab."""
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=SizeCheckBody)
         if err:
             return err
         q = str(body.get("q") or "").strip()
@@ -164,7 +185,7 @@ def register(mcp, registry):
         """Models already on the sheet, for the picker behind 'this is another
         name for'. Searching the real sheet is what stops an alias being written
         onto a model that does not exist, which loads as a dead rule."""
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=SizeModelsBody)
         if err:
             return err
         q = str(body.get("q") or "").strip().lower()

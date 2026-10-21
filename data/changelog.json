@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-21",
+   "title": "More requests checked at the door: shipping and production",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": null,
+     "text": "Courier quotes, bookings and cancellations, custom shipments, collections, the EORI check, the Size list and the production labels now check every field they are sent before acting on it, so a field of the wrong kind is refused with a reason before anything is quoted, booked or queued. Nothing looks different."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-21",
    "title": "More requests checked at the door: the CRM, the Inbox and Files",
    "items": [
     {

@@ -71,10 +71,10 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/custom/book` | POST | labels | `_guard` |  | unchecked | `_team_level` | `gizmo.routes.dispatch.custom_book_route` | Book a courier to a pasted address. |
-| `/api/custom/list` | POST | labels | `_guard` |  | unchecked | `_team_level` | `gizmo.routes.dispatch.custom_list_route` | Pasted-address shipments already booked. |
-| `/api/custom/quote` | POST | labels | `_guard` |  | unchecked |  | `gizmo.routes.dispatch.custom_quote_route` | Price couriers to a pasted address. |
-| `/api/custom/visibility` | POST | labels | `_guard` | rank admin | unchecked |  | `gizmo.routes.dispatch.custom_visibility_route` | Keep one pasted-address shipment to admins, or let it back out. |
+| `/api/custom/book` | POST | labels | `_guard` |  | `CustomBookBody` | `_team_level` | `gizmo.routes.dispatch.custom_book_route` | Book a courier to a pasted address. |
+| `/api/custom/list` | POST | labels | `_guard` |  | `CustomListBody` | `_team_level` | `gizmo.routes.dispatch.custom_list_route` | Pasted-address shipments already booked. |
+| `/api/custom/quote` | POST | labels | `_guard` |  | `CustomQuoteBody` |  | `gizmo.routes.dispatch.custom_quote_route` | Price couriers to a pasted address. |
+| `/api/custom/visibility` | POST | labels | `_guard` | rank admin | `CustomVisibilityBody` |  | `gizmo.routes.dispatch.custom_visibility_route` | Keep one pasted-address shipment to admins, or let it back out. |
 
 ## `/api/customer-history`
 
@@ -98,20 +98,20 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/dispatch/book` | POST | labels | `_guard` |  | unchecked |  | `gizmo.routes.dispatch.dispatch_book_route` | Book the chosen courier (CHARGES the WO account), fulfill + tag. |
-| `/api/dispatch/cancel` | POST | labels | `_guard` |  | unchecked | `_team_level` | `gizmo.routes.dispatch.dispatch_cancel_route` | Cancel a booked shipment at World Options (best-effort). |
-| `/api/dispatch/collections` | POST | labels | `_guard` |  | unchecked | `_team_level` | `gizmo.routes.dispatch.dispatch_collections_route` | What is coming, and from whom, on a given day. |
-| `/api/dispatch/diagnose` | POST | labels | `_guard` |  | unchecked |  | `gizmo.routes.dispatch.dispatch_diagnose_route` | Why is a courier service missing? |
+| `/api/dispatch/book` | POST | labels | `_guard` |  | `DispatchBookBody` |  | `gizmo.routes.dispatch.dispatch_book_route` | Book the chosen courier (CHARGES the WO account), fulfill + tag. |
+| `/api/dispatch/cancel` | POST | labels | `_guard` |  | `DispatchCancelBody` | `_team_level` | `gizmo.routes.dispatch.dispatch_cancel_route` | Cancel a booked shipment at World Options (best-effort). |
+| `/api/dispatch/collections` | POST | labels | `_guard` |  | `DispatchCollectionsBody` | `_team_level` | `gizmo.routes.dispatch.dispatch_collections_route` | What is coming, and from whom, on a given day. |
+| `/api/dispatch/diagnose` | POST | labels | `_guard` |  | `DispatchDiagnoseBody` |  | `gizmo.routes.dispatch.dispatch_diagnose_route` | Why is a courier service missing? |
 | `/api/dispatch/label` | POST | labels | `_guard` |  |  | `_team_level` | `gizmo.routes.dispatch.dispatch_label_route` | Return the stored label(s) for an already-dispatched order (reprint). |
 | `/api/dispatch/manifest` | POST | labels | `_guard` |  |  | `_team_level` | `gizmo.routes.dispatch.dispatch_manifest_route` | Everything booked on one day (Europe/London): the driver handover list and the sheet to check the World Options invoice against. |
-| `/api/dispatch/parse-address` | POST | labels | `_guard` |  | unchecked |  | `gizmo.routes.dispatch.parse_address_route` | Turn a pasted block of text into address fields. |
-| `/api/dispatch/quote` | POST | labels | `_guard` |  | unchecked |  | `gizmo.routes.dispatch.dispatch_quote_route` | Price couriers for one order. |
+| `/api/dispatch/parse-address` | POST | labels | `_guard` |  | `ParseAddressBody` |  | `gizmo.routes.dispatch.parse_address_route` | Turn a pasted block of text into address fields. |
+| `/api/dispatch/quote` | POST | labels | `_guard` |  | `DispatchQuoteBody` |  | `gizmo.routes.dispatch.dispatch_quote_route` | Price couriers for one order. |
 
 ## `/api/eori`
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/eori/check` | POST | labels | `_guard` |  | unchecked |  | `gizmo.routes.dispatch.eori_check_route` | Check a customer's EORI number against the EU's validation service. |
+| `/api/eori/check` | POST | labels | `_guard` |  | `EoriCheckBody` |  | `gizmo.routes.dispatch.eori_check_route` | Check a customer's EORI number against the EU's validation service. |
 
 ## `/api/files`
 
@@ -136,12 +136,12 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/gobo-sizes/check` | POST | labels or sizes | `_guard` |  | unchecked |  | `gizmo.routes.size_list.gobo_check_route` | What a label prints for a fixture named in free text, for the Size list's search. |
+| `/api/gobo-sizes/check` | POST | labels or sizes | `_guard` |  | `SizeCheckBody` |  | `gizmo.routes.size_list.gobo_check_route` | What a label prints for a fixture named in free text, for the Size list's search. |
 | `/api/gobo-sizes/list` | POST | labels or sizes | `_guard` | reads its own body |  |  | `gizmo.routes.size_list.gobo_list_route` | The whole sheet with the rulings over it, for the Size list tab. |
-| `/api/gobo-sizes/models` | POST | labels or sizes | `_guard` |  | unchecked |  | `gizmo.routes.size_list.gobo_models_route` | Models already on the sheet, for the picker behind 'this is another name for'. |
+| `/api/gobo-sizes/models` | POST | labels or sizes | `_guard` |  | `SizeModelsBody` |  | `gizmo.routes.size_list.gobo_models_route` | Models already on the sheet, for the picker behind 'this is another name for'. |
 | `/api/gobo-sizes/rule` | POST | labels or sizes | `_guard` | reads its own body | `SizeRuleBody` |  | `gizmo.routes.size_list.gobo_rule_route` | Resolve one flagged model, from inside the app. |
 | `/api/gobo-sizes/rules` | POST | labels or sizes | `_guard` | reads its own body |  |  | `gizmo.routes.size_list.gobo_rules_route` | The merchant's standing rulings on models, and whether this person may change them. |
-| `/api/gobo-sizes/upload` | POST | labels or sizes | `_guard` | max body big, reads its own body | unchecked | `_team_level` | `gizmo.routes.size_list.gobo_sizes_upload_route` | Self-serve size sheet update: validate the CSV hard, keep a .bak of the previous sheet, and report the before/after so a bad file can't quietly wipe the size... |
+| `/api/gobo-sizes/upload` | POST | labels or sizes | `_guard` | max body big, reads its own body | `SizeUploadBody` | `_team_level` | `gizmo.routes.size_list.gobo_sizes_upload_route` | Self-serve size sheet update: validate the CSV hard, keep a .bak of the previous sheet, and report the before/after so a bad file can't quietly wipe the size... |
 
 ## `/api/impact`
 
@@ -256,10 +256,10 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/production-labels` | POST | labels | `_guard` |  | unchecked |  | `gizmo.routes.production.production_labels_route` |  |
-| `/api/production-labels/coverage` | POST | labels | `_guard` |  | unchecked |  | `gizmo.routes.production.labels_coverage_route` |  |
+| `/api/production-labels` | POST | labels | `_guard` |  | `ProductionLabelsBody` |  | `gizmo.routes.production.production_labels_route` |  |
+| `/api/production-labels/coverage` | POST | labels | `_guard` |  | `LabelCoverageBody` |  | `gizmo.routes.production.labels_coverage_route` |  |
 | `/api/production-labels/missing` | POST | labels | `_guard` |  |  |  | `gizmo.routes.production.labels_missing_route` |  |
-| `/api/production-labels/queue` | POST | labels | `_guard` |  | unchecked |  | `gizmo.routes.production.labels_queue_route` |  |
+| `/api/production-labels/queue` | POST | labels | `_guard` |  | `LabelQueueBody` |  | `gizmo.routes.production.labels_queue_route` |  |
 
 ## `/api/production-state`
 
