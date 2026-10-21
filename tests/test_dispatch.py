@@ -30602,6 +30602,17 @@ def t_move_area_moves_a_toy_area():
     both = _toy_repo("toy-two", _TOY_COPILOT.replace("KEEP = 1\nX_PATH =", "KEEP, X_PATH = 1, "), two)
     r = _run_move(both)
     ok(r.returncode != 0 and "across" in r.stdout, "a statement binding two areas' names stops the move: " + r.stdout[-300:])
+    # a name that stays though only what moves reads it: the dry run names it
+    left = _toy_repo("toy-left", _TOY_COPILOT.replace(
+        "def _x_note(d: Optional[dict]) -> int:\n    return KEEP + len(d or {})",
+        "def _deeper() -> int:\n    return 2\n\n\ndef _shared() -> int:\n    return _deeper()\n\n\n"
+        "def _x_note(d: Optional[dict]) -> int:\n    return KEEP + _shared() + len(d or {})"))
+    r = _run_move(left, write=False)
+    eq(r.returncode, 0, r.stdout[-500:] + r.stderr[-500:])
+    named = [l for l in r.stdout.splitlines() if "only what moves reads it" in l]
+    ok(any(l.startswith("note: _shared stays") for l in named), "a helper left behind for the area is named: " + r.stdout[-500:])
+    ok(any(l.startswith("note: _deeper stays") for l in named), "and one only that helper reads: " + r.stdout[-500:])
+    ok(not any(l.startswith("note: keep stays") for l in named), "a name staying code reads is not: " + r.stdout[-500:])
 
 @test
 def t_the_files_routes_are_gathered():

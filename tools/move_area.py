@@ -338,6 +338,10 @@ def run(spec_path, root, write):
         return groups[w]["area"] if w in groups else w
 
     edits = collections.defaultdict(list)
+    # who reads each staying name: what stays, or what moves (to list a name
+    # left behind though only what moves reads it, as _add_skill once was)
+    stay_binds = {ln: _binds(n) for n, a, b, k in stmts if k == "stay" for ln in range(a, b + 1)}
+    stay_readers = collections.defaultdict(set)
     imports_used = collections.defaultdict(set)
     sibs = collections.defaultdict(set)
     borrowed = collections.defaultdict(set)
@@ -351,6 +355,8 @@ def run(spec_path, root, write):
     def on_global(node, table):
         w, name = where(node.lineno), node.id
         if w == "stay":
+            if name in staying and name not in stay_binds.get(node.lineno, ()):
+                stay_readers[name] |= {"stay:" + b for b in stay_binds.get(node.lineno, ())} or {"stay:"}
             if name in moved and name not in keep_copies:
                 edit(node, AL[DEST[name]] + "." + name)
                 if not isinstance(node.ctx, ast.Load) and (node.lineno, name) not in crossing and name not in {n for _, n in crossing}:
@@ -380,7 +386,7 @@ def run(spec_path, root, write):
         if name in staying:
             if areas.get(owner_area(w), {}).get("floor"):
                 problems.append(f"{node.lineno}: floor area {w} would read copilot.py's {name}")
-            edit(node, "core." + name); borrowed[w].add(name)
+            edit(node, "core." + name); borrowed[w].add(name); stay_readers[name].add(w)
             if table is st and w not in groups:
                 problems.append(f"{node.lineno}: {w} reads core.{name} as it loads")
             if not isinstance(node.ctx, ast.Load):
@@ -476,6 +482,21 @@ def run(spec_path, root, write):
     for g in groups:
         report.append(f"{g}: {sum(1 for _, _, n in group_spans[g] if _route_path(n))} routes in {len(group_spans[g])} statements")
     report.append("other files: " + str({r: n for r, (_, _, n) in others.items() if n}))
+    # a staying name only what moves reads, and no other module or server.py
+    elsewhere = "".join(open(P(r), encoding="utf-8").read() for r in list(split_files) + ["server.py"]
+                        if os.path.exists(P(r)) and r not in {a["file"] for a in spec["areas"]})
+    # ... or only such names: a helper of a helper left behind
+    left = set()
+    while True:
+        more = {name for name in stay_readers if name not in left
+                and all(not r.startswith("stay:") or r[5:] in left for r in stay_readers[name])
+                and not re.search(r"\b(core|copilot|_c|_cp)\." + re.escape(name) + r"\b", elsewhere)}
+        if not more:
+            break
+        left |= more
+    for name in sorted(left):
+        notes.append(f"{name} stays, though only what moves reads it "
+                     f"({', '.join(sorted(r[5:] if r.startswith('stay:') else r for r in stay_readers[name]))})")
     report += ["note: " + x for x in notes] + ["PROBLEM: " + x for x in problems]
     if problems or not write:
         return (1 if problems else 0), report
