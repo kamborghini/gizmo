@@ -30868,6 +30868,27 @@ def t_move_area_moves_routes_after_their_area():
     eq(mp.prove(base, head), [], "prove(): nothing but the move")
     rr = _sp.run([sys.executable, "-c", "import gizmo.routes.old, copilot"], cwd=root, capture_output=True, text=True)
     eq(rr.returncode, 0, rr.stderr[-400:])
+    # a route module moved earlier takes a route left behind: added to its
+    # register(), after the routes it holds, and add_routes gains no call
+    held = ('"""The routes of the old area."""\nimport logging\n\nimport copilot as core\nfrom gizmo import old\n\n'
+            'logger = logging.getLogger("toy")\n\n\ndef register(mcp, registry):\n    """Add them."""\n\n'
+            '    @mcp.custom_route("/api/old/a", methods=["POST"])\n    async def old_a(request):\n        return old.f()\n')
+    cop2 = cop.replace("from gizmo import old\n", "from gizmo import old\nfrom gizmo.routes import old as routes_old\n", 1) \
+              .replace("def add_routes(mcp, registry):\n", "def add_routes(mcp, registry):\n    routes_old.register(mcp, registry)\n\n", 1)
+    spec2 = dict(spec, routes=[dict(spec["routes"][0], existing=True)])
+    root2 = _toy_repo("toy-routes-existing", cop2, spec2, {"gizmo/old.py": old, "gizmo/routes/old.py": held})
+    r = _run_move(root2)
+    eq(r.returncode, 0, r.stdout[-600:] + r.stderr[-600:])
+    routes2, cop2_after = (open(os.path.join(root2, f)).read() for f in ("gizmo/routes/old.py", _TOY_MAIN))
+    eq(routes2.count("@mcp.custom_route("), 2, "the module holds both routes: " + routes2[-400:])
+    ok(routes2.index('"/api/old/a"') < routes2.index('"/api/old/c"') and "return old.f() + core.KEEP" in routes2,
+       "the added one after the one it held, reaching the area by its name and copilot.py through core")
+    ok('"/api/old/c"' not in cop2_after and cop2_after.count("routes_old.register(mcp, registry)") == 1,
+       "gone from add_routes, which keeps its one call")
+    base2 = dict(base, **{_TOY_MAIN: cop2, "gizmo/routes/old.py": held})
+    eq(mp.prove(base2, dict(base2, **{_TOY_MAIN: cop2_after, "gizmo/routes/old.py": routes2})), [], "prove(): nothing but the move")
+    rr = _sp.run([sys.executable, "-c", "import gizmo.routes.old, copilot"], cwd=root2, capture_output=True, text=True)
+    eq(rr.returncode, 0, rr.stderr[-400:])
     # a route reading a value add_routes builds as it runs: moved, it would
     # fail only when a request came in, so nothing is written
     built = cop.replace("def add_routes(mcp, registry):\n", "def add_routes(mcp, registry):\n    built = dict(registry)\n") \
