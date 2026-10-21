@@ -180,6 +180,11 @@ from gizmo import liability
 from gizmo import reconciliation
 from gizmo import xero_sync as xerosync
 from gizmo import forecasting
+from gizmo import rendering
+from gizmo import profile as store_profile
+from gizmo import layouts
+from gizmo import oauth
+from gizmo import status as appstatus
 import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
@@ -7200,7 +7205,7 @@ def t_a_repeat_open_of_the_same_build_is_a_304_that_still_carries_the_csp():
 @test
 def t_a_page_that_cannot_be_split_is_still_served_whole():
     # A future edit to index.html must never be able to take the app down.
-    shell, css, js = copilot._split_page("<html><body>hello</body></html>")
+    shell, css, js = rendering._split_page("<html><body>hello</body></html>")
     eq(css, "", "no stylesheet was invented")
     eq(js, "", "no script was invented")
     eq(shell, "<html><body>hello</body></html>", "and the page is served exactly as authored")
@@ -8142,11 +8147,11 @@ def with_layouts(fn):
     way out so no later test inherits somebody's arrangement."""
     def wipe():
         try:
-            os.remove(copilot.LAYOUTS_PATH)
+            os.remove(layouts.LAYOUTS_PATH)
         except FileNotFoundError:
             pass
-        jsonstore._poisoned_stores.discard(copilot.LAYOUTS_PATH)
-        jsonstore._forget_store(copilot.LAYOUTS_PATH)
+        jsonstore._poisoned_stores.discard(layouts.LAYOUTS_PATH)
+        jsonstore._forget_store(layouts.LAYOUTS_PATH)
     def go():
         wipe()
         try:
@@ -8177,7 +8182,7 @@ def t_a_layout_belongs_to_the_account_that_saved_it():
         eq(post_s(sess, "/api/layouts", {}).json()["layouts"],
            {"overview": {"order": ["alerts"], "hidden": []}},
            "and Owen only Owen's, although the master's body named him")
-        on_disk = json.load(open(copilot.LAYOUTS_PATH))["layouts"]
+        on_disk = json.load(open(layouts.LAYOUTS_PATH))["layouts"]
         eq(sorted(on_disk), sorted([master, owen]), "one entry per account, keyed by the session's account")
     with_layouts(go)
 
@@ -8190,7 +8195,7 @@ def t_layouts_are_closed_without_a_session():
         eq(bare("/api/layouts", {}).status_code, 401, "no session, no read")
         r = bare("/api/layouts", {"view": "overview", "order": ["trend"], "hidden": []})
         eq(r.status_code, 401, "no session, no save")
-        ok(not os.path.exists(copilot.LAYOUTS_PATH), "and nothing reached the disk")
+        ok(not os.path.exists(layouts.LAYOUTS_PATH), "and nothing reached the disk")
     with_layouts(go)
 
 @test
@@ -8222,11 +8227,11 @@ def t_a_layout_the_page_could_not_have_made_is_refused_and_nothing_is_written():
             r = post("/api/layouts", body)
             eq(r.status_code, 400, why + ": " + r.text)
             ok(r.json().get("error"), why + " says what was wrong")
-        ok(not os.path.exists(copilot.LAYOUTS_PATH), "none of those wrote a thing")
+        ok(not os.path.exists(layouts.LAYOUTS_PATH), "none of those wrote a thing")
         eq(post("/api/layouts", {**good, "order": ["c%d" % i for i in range(64)]}).status_code, 200,
            "64 ids is the limit, not past it")
-        os.remove(copilot.LAYOUTS_PATH)
-        jsonstore._forget_store(copilot.LAYOUTS_PATH)
+        os.remove(layouts.LAYOUTS_PATH)
+        jsonstore._forget_store(layouts.LAYOUTS_PATH)
         big = {**good, "order": ["x" * 48] * 200}
         eq(post("/api/layouts", big).status_code, 413, "a body past 8KB is refused before it is read")
         # The door hands a handler {} for a body that is not a JSON object, so
@@ -8234,7 +8239,7 @@ def t_a_layout_the_page_could_not_have_made_is_refused_and_nothing_is_written():
         r = post("/api/layouts", ["overview", "trend"])
         eq(r.status_code, 200, r.text)
         eq(r.json()["layouts"], {}, "a body that is not an object reads, it does not save")
-        ok(not os.path.exists(copilot.LAYOUTS_PATH), "and neither of those wrote a thing")
+        ok(not os.path.exists(layouts.LAYOUTS_PATH), "and neither of those wrote a thing")
     with_layouts(go)
 
 @test
@@ -8258,7 +8263,7 @@ def t_resetting_a_screen_forgets_only_that_screen_for_that_person():
         eq(r.status_code, 200, "resetting a screen with nothing saved is not an error")
         eq(r.json()["layouts"], {"crm": {"order": ["board", "stats"], "hidden": []}})
         post("/api/layouts", {"view": "crm", "reset": True})
-        on_disk = json.load(open(copilot.LAYOUTS_PATH))["layouts"]
+        on_disk = json.load(open(layouts.LAYOUTS_PATH))["layouts"]
         ok(APP_AUTH["master"] not in on_disk, "an account with nothing saved leaves no empty entry")
     with_layouts(go)
 
@@ -8297,12 +8302,12 @@ def t_the_layouts_file_is_owner_only_and_keyed_by_account():
         master = APP_AUTH["master"]
         eq(post("/api/layouts", {"view": "overview", "order": ["trend", "alerts"],
                                  "hidden": ["drivers"]}).status_code, 200)
-        eq(os.stat(copilot.LAYOUTS_PATH).st_mode & 0o777, 0o600, "a new file is owner-only")
-        eq(json.load(open(copilot.LAYOUTS_PATH)),
+        eq(os.stat(layouts.LAYOUTS_PATH).st_mode & 0o777, 0o600, "a new file is owner-only")
+        eq(json.load(open(layouts.LAYOUTS_PATH)),
            {"layouts": {master: {"overview": {"order": ["trend", "alerts"], "hidden": ["drivers"]}}}})
-        os.chmod(copilot.LAYOUTS_PATH, 0o644)
+        os.chmod(layouts.LAYOUTS_PATH, 0o644)
         eq(post("/api/layouts", {"view": "mail", "order": ["inbox"], "hidden": []}).status_code, 200)
-        eq(os.stat(copilot.LAYOUTS_PATH).st_mode & 0o777, 0o600, "and a readable one is made owner-only again")
+        eq(os.stat(layouts.LAYOUTS_PATH).st_mode & 0o777, 0o600, "and a readable one is made owner-only again")
     with_layouts(go)
 
 @test
@@ -8312,12 +8317,12 @@ def t_a_layout_that_could_not_be_saved_is_never_answered_as_saved():
     is also never overwritten: everyone's layouts in it are kept for repair."""
     def go():
         ensure_auth()
-        with open(copilot.LAYOUTS_PATH, "w") as fh:
+        with open(layouts.LAYOUTS_PATH, "w") as fh:
             fh.write('{"layouts": {"broken')
         r = post("/api/layouts", {"view": "overview", "order": ["trend"], "hidden": []})
         eq(r.status_code, 500, r.text)
         ok("The layout could not be saved" in r.json()["error"], r.text)
-        eq(open(copilot.LAYOUTS_PATH).read(), '{"layouts": {"broken', "the unreadable file is left as it was")
+        eq(open(layouts.LAYOUTS_PATH).read(), '{"layouts": {"broken', "the unreadable file is left as it was")
     with_layouts(go)
 
 @test
@@ -16826,7 +16831,7 @@ def t_connecting_the_accounts_mailbox_needs_no_secret_in_a_url():
         ok("YOUR_CONNECT_SECRET" not in url and "key=" not in url,
            "no server secret travels in the URL")
         ticket = url.split("t=")[1]
-        ok(ticket in copilot._fin_connect_tickets, "the ticket is live")
+        ok(ticket in oauth._fin_connect_tickets, "the ticket is live")
         # It opens the walk once, and only once.
         h = {"Authorization": "Bearer " + tok()}
         first = client.get(url, headers=h, follow_redirects=False)
@@ -16947,7 +16952,7 @@ def t_xero_connects_by_button_too():
             again = client.get(url, headers=h, follow_redirects=False)
             eq(again.status_code, 403, "and cannot be replayed")
             # A Gmail ticket must not open the Xero walk.
-            copilot._fin_connect_tickets["borrowed"] = {"exp": time.time() + 300, "want": ""}
+            oauth._fin_connect_tickets["borrowed"] = {"exp": time.time() + 300, "want": ""}
             cross = client.get("/oauth/xero/start?t=borrowed", headers=h, follow_redirects=False)
             eq(cross.status_code, 403, "tickets are not interchangeable between connections")
         finally:
@@ -17593,7 +17598,7 @@ def t_the_page_csp_does_not_allow_inline_script():
         headers = {}
         query_params = {}
         url = type("U", (), {"path": "/"})()
-    csp = _c._frame_headers(_Req())["Content-Security-Policy"]
+    csp = rendering._frame_headers(_Req())["Content-Security-Policy"]
     script = [d for d in csp.split(";") if d.strip().startswith("script-src")][0]
     ok("'unsafe-inline'" not in script, "script-src forbids inline: " + script.strip())
     ok("'unsafe-eval'" not in script, "and eval")
@@ -17602,7 +17607,7 @@ def t_the_page_csp_does_not_allow_inline_script():
     style = [d for d in csp.split(";") if d.strip().startswith("style-src")][0]
     ok("'unsafe-inline'" in style, "style-src keeps it, deliberately")
     # And the served page must actually have nothing inline to run.
-    shell, _assets = _c._page_parts()
+    shell, _assets = rendering._page_parts()
     import re as _re
     inline = _re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", shell, _re.S)
     ok(not [b for b in inline if b.strip()], "the shell carries no inline script block")
@@ -17622,7 +17627,7 @@ def t_only_the_configured_store_can_frame_the_app():
             headers = {}
             query_params = {"shop": shop} if shop is not None else {}
             url = type("U", (), {"path": "/"})()
-        csp = _c._frame_headers(_Req())["Content-Security-Policy"]
+        csp = rendering._frame_headers(_Req())["Content-Security-Policy"]
         return [d for d in csp.split(";") if d.strip().startswith("frame-ancestors")][0].split()[1:]
     saved = _c.SHOPIFY_STORE
     try:
@@ -17693,12 +17698,12 @@ def t_a_google_connection_says_which_permission_was_left_unticked():
         answer.update(scope="openid")
         eq(run(gd.exchange_code("c", "https://app.test/cb"))["ok"], False)
         ok(not gd.oauth_connected(), "a connection that could read nothing is not kept")
-        copilot._oauth_states["st-neither"] = time.time() + 60
+        oauth._oauth_states["st-neither"] = time.time() + 60
         page = client.get("/oauth/google/callback?state=st-neither&code=c").text
         ok("Nothing was linked" in page and "both left unticked" in page, page[-500:])
         # The connect page names the side left unticked.
         answer.update(scope=gd.SCOPES[1])
-        copilot._oauth_states["st-ga4-only"] = time.time() + 60
+        oauth._oauth_states["st-ga4-only"] = time.time() + 60
         page = client.get("/oauth/google/callback?state=st-ga4-only&code=c").text
         ok("without Search Console" in page and "left unticked" in page, page[-500:])
         # And the chat says the same, rather than that Google is not connected.
@@ -17709,7 +17714,7 @@ def t_a_google_connection_says_which_permission_was_left_unticked():
         os.remove(gd.OAUTH_TOKEN_PATH)
         answer.clear(); answer.update(_status=400, error="invalid_grant")
         eq(run(gd.exchange_code("c", "https://app.test/cb")), {"ok": False, "granted": {}})
-        copilot._oauth_states["st-bad-code"] = time.time() + 60
+        oauth._oauth_states["st-bad-code"] = time.time() + 60
         page = client.get("/oauth/google/callback?state=st-bad-code&code=c").text
         ok("Connection failed" in page and "unticked" not in page, page[-500:])
         eq(json.loads(seo._google_not_ready("gsc"))["error"],
@@ -17848,21 +17853,21 @@ def t_every_reply_says_which_build_answered_it():
     # serves, and this header rides on unauthenticated replies too - publishing
     # it would hand the app's whole client source to anyone who called an
     # endpoint. Proved by asking for the source with the header's value.
-    ok(build != copilot._asset_hashes.get("js"),
+    ok(build != rendering._asset_hashes.get("js"),
        "the header is not the token that unlocks the client source")
     leak = client.get("/assets/app.js?v=" + build)
     eq(leak.status_code, 404, "and it does not open that door")
-    shell, _assets = copilot._page_parts()
+    shell, _assets = rendering._page_parts()
     ok('content="%s"' % build in shell, "the page carries the same marker to compare against")
-    ok('content="%s"' % copilot._asset_hashes.get("js") not in shell,
+    ok('content="%s"' % rendering._asset_hashes.get("js") not in shell,
        "and the page never prints the asset token as a build marker")
     # It follows the file: change the JS and the header changes with it.
     import copy as _copy
-    saved = (copilot._page_cache, copilot._page_assets, dict(copilot._asset_hashes))
+    saved = (rendering._page_cache, rendering._page_assets, dict(rendering._asset_hashes))
     try:
-        copilot._page_cache = None
-        copilot._page_assets = None
-        copilot._asset_hashes.clear()
+        rendering._page_cache = None
+        rendering._page_assets = None
+        rendering._asset_hashes.clear()
         # The page is joined by pagesource.join, which copilot looks up as it
         # calls it: standing in for it here changes the page the server reads.
         real = pagesource.join
@@ -17870,13 +17875,13 @@ def t_every_reply_says_which_build_answered_it():
         moved_page = page.replace("<script>\n    (function ()", "<script>\n    (function () /*moved*/", 1)
         ok(moved_page != page, "the stand-in page really differs")
         pagesource.join = lambda root=None: moved_page
-        moved = copilot._build_id()
+        moved = rendering._build_id()
         ok(moved and moved != build, "a changed page is a changed build id")
     finally:
         pagesource.join = real
-        copilot._page_cache, copilot._page_assets = saved[0], saved[1]
-        copilot._asset_hashes.clear(); copilot._asset_hashes.update(saved[2])
-    eq(copilot._build_id(), build, "and the real one is unchanged afterwards")
+        rendering._page_cache, rendering._page_assets = saved[0], saved[1]
+        rendering._asset_hashes.clear(); rendering._asset_hashes.update(saved[2])
+    eq(rendering._build_id(), build, "and the real one is unchanged afterwards")
 
 
 @test
@@ -19932,10 +19937,10 @@ def t_reply_all_offers_everyone_but_us_and_the_person_we_answer():
 @test
 def t_the_composer_script_is_served_by_hash_like_the_app_script():
     ensure_auth()
-    copilot._page_cache = None
-    shell, assets = copilot._page_parts()
+    rendering._page_cache = None
+    shell, assets = rendering._page_parts()
     ok("composer" in assets, "the composer is one of the hashed assets")
-    h = copilot._asset_hashes["composer"]
+    h = rendering._asset_hashes["composer"]
     ok(f'<script src="/assets/composer.js?v={h}"></script>' in shell, "and the shell loads it")
     ok(shell.index("/assets/app.js?v=") < shell.index("/assets/composer.js?v="), "after app.js")
     r = client.get(f"/assets/composer.js?v={h}")
@@ -20786,20 +20791,20 @@ def t_the_app_can_say_whether_its_secrets_are_encrypted():
 
         os.environ.pop("TOKEN_ENCRYPTION_KEY", None)
         _tv._key.cache_clear()
-        st = copilot.token_vault_state()
+        st = appstatus.token_vault_state()
         eq(st["enabled"], False)
         ok("Xero" in st["plaintext"], "it names what is exposed, not just a count")
 
         # A key set is NOT the same as the files being encrypted.
         os.environ["TOKEN_ENCRYPTION_KEY"] = "a-long-random-key-for-the-test"
         _tv._key.cache_clear()
-        st = copilot.token_vault_state()
+        st = appstatus.token_vault_state()
         eq(st["enabled"], True, "the key is set")
         ok("Xero" in st["plaintext"],
            "but the file is still plaintext, and saying otherwise would be the lie")
 
         eq(_tv.reseal_file(tok, ("refresh_token",)), 1)
-        st = copilot.token_vault_state()
+        st = appstatus.token_vault_state()
         # Scoped to the store this test owns: the suite's scratch volume holds
         # other stores from other tests, and asserting the whole list is empty
         # would be asserting something this test never arranged.
@@ -21748,7 +21753,7 @@ def t_the_csp_trusts_one_shopify_script_not_every_shopify_host():
         headers = {}
         query_params = {}
         url = type("U", (), {"path": "/"})()
-    csp = _c._frame_headers(_Req())["Content-Security-Policy"]
+    csp = rendering._frame_headers(_Req())["Content-Security-Policy"]
     part = lambda name: [d for d in csp.split(";") if d.strip().startswith(name)][0].strip()
     script = part("script-src")
     ok("https://cdn.shopify.com/shopifycloud/" in script, "App Bridge still loads: " + script)
@@ -22155,7 +22160,7 @@ def t_the_stores_are_measured_not_guessed():
     big = os.path.join(data_dir, "measured_big.json")
     open(big, "w", encoding="utf-8").write(json.dumps({"rows": [{"i": i, "pad": "x" * 40} for i in range(25000)]}))
     try:
-        rep = copilot._store_report()
+        rep = appstatus._store_report()
         row = next(r for r in rep if r["name"] == "measured_big.json")
         ok(row["bytes"] >= 1024 * 1024, "a store over a megabyte is listed with its size: %d" % row["bytes"])
         ok(isinstance(row.get("parse_ms"), float) and row["parse_ms"] >= 0, "and its read cost was measured")
@@ -22791,7 +22796,7 @@ def t_boot_reseal_reads_the_register_as_the_app_writes_it():
             on_disk = json.load(open(team.USERS_PATH))["users_store"]["users"]["u1"]["mfa_secret"]
             ok(_tv.is_sealed(on_disk), "sealed on disk")
             eq(_tv.unseal(on_disk), "PLAINSECRET", "and still opens, so nobody is locked out")
-            eq(copilot.token_vault_state()["plaintext"], [], "and the settings panel agrees")
+            eq(appstatus.token_vault_state()["plaintext"], [], "and the settings panel agrees")
         finally:
             if old_key is None:
                 os.environ.pop("TOKEN_ENCRYPTION_KEY", None)
@@ -23219,7 +23224,7 @@ def t_a_corrupt_note_or_skill_file_pauses_its_writer_by_itself():
         ok("not json" in open(path, encoding="utf-8").read(), "and preserved for repair, not overwritten")
         jsonstore._poisoned_stores.discard(path)
         os.remove(path)
-    for owner, path_attr, loader in ((copilot, "PROFILE_PATH", copilot._load_profile),
+    for owner, path_attr, loader in ((store_profile, "PROFILE_PATH", store_profile._load_profile),
                                      (knowledge, "KNOWLEDGE_PATH", knowledge._load_knowledge)):
         path = getattr(owner, path_attr)
         with open(path, "w", encoding="utf-8") as fh:
@@ -27847,25 +27852,25 @@ def t_the_page_assets_are_compressed_once_per_build():
     import perf
     from compression import zstd as _z
 
-    shell, assets = copilot._page_parts()
-    h = copilot._asset_hashes["js"]
+    shell, assets = rendering._page_parts()
+    h = rendering._asset_hashes["js"]
     blob = assets["js"][1]
     kicked, calls = [], []
-    real_soon, real = copilot._pack_assets_soon, perf.compress
+    real_soon, real = rendering._pack_assets_soon, perf.compress
 
     def spy(body, enc, *a, **k):
         calls.append(enc)
         return real(body, enc, *a, **k)
 
-    copilot._asset_packed.clear()
-    copilot._pack_assets_soon = lambda: kicked.append(1)
+    rendering._asset_packed.clear()
+    rendering._pack_assets_soon = lambda: kicked.append(1)
     perf.compress = spy
     try:
         r1 = client.get("/assets/app.js?v=" + h, headers={"Accept-Encoding": "gzip, zstd"})
         eq(r1.status_code, 200)
         ok(kicked, "the first request starts the packing")
         eq(r1.headers.get("content-encoding"), "zstd", "and is still served compressed meanwhile")
-        copilot._pack_assets()          # what the background thread runs
+        rendering._pack_assets()          # what the background thread runs
         calls.clear()
         r2 = client.get("/assets/app.js?v=" + h, headers={"Accept-Encoding": "gzip, zstd"})
         eq(r2.headers.get("content-encoding"), "zstd")
@@ -27887,7 +27892,7 @@ def t_the_page_assets_are_compressed_once_per_build():
                       headers={"Accept-Encoding": "zstd"}).status_code, 404,
            "the hash still has to match")
     finally:
-        copilot._pack_assets_soon, perf.compress = real_soon, real
+        rendering._pack_assets_soon, perf.compress = real_soon, real
 
 
 @test
@@ -30379,7 +30384,11 @@ def t_either_module_imports_first():
                         ("gizmo.liability", "copilot"), ("gizmo.reconciliation", "copilot"), ("gizmo.xero_sync", "copilot"),
                         ("gizmo.forecasting", "copilot"), ("gizmo.routes.liability", "copilot"),
                         ("gizmo.routes.reconciliation", "copilot"), ("gizmo.routes.xero_sync", "copilot"),
-                        ("gizmo.routes.forecasting", "copilot")):
+                        ("gizmo.routes.forecasting", "copilot"),
+                        ("gizmo.rendering", "copilot"), ("gizmo.profile", "copilot"), ("gizmo.layouts", "copilot"),
+                        ("gizmo.oauth", "copilot"), ("gizmo.status", "copilot"), ("gizmo.routes.rendering", "copilot"),
+                        ("gizmo.routes.profile", "copilot"), ("gizmo.routes.layouts", "copilot"),
+                        ("gizmo.routes.oauth", "copilot"), ("gizmo.routes.status", "copilot")):
         r = _sp.run([sys.executable, "-c", f"import {first}, {then}; import gizmo.dispatch as d, copilot as c; "
                      "assert c.desk is d and d.core is c; print('ok')"],
                     cwd=root, env=dict(os.environ), capture_output=True, text=True, timeout=120)
@@ -30952,6 +30961,26 @@ def t_the_finance_routes_are_gathered():
     eq([inspect.getsource(m).count("@mcp.custom_route(")
         for m in (routes_liability, routes_reconciliation, routes_xero_sync, routes_forecasting)], [2, 9, 1, 6],
        "2 liability routes, 7 reconciliation routes and the Xero connect pair, the connector route, 6 forecast routes")
+
+@test
+def t_the_page_profile_oauth_and_status_routes_are_gathered():
+    """The page's own route and its assets, the profile's, the layouts', the
+    Google and accounts-mailbox sign-in walks' and the status page's routes,
+    each group registered by one call in add_routes."""
+    import inspect
+    from gizmo.routes import layouts as routes_layouts, oauth as routes_oauth, profile as routes_profile
+    from gizmo.routes import rendering as routes_rendering, status as routes_status
+    src = inspect.getsource(copilot.add_routes)
+    for call in ("routes_rendering.register(mcp, registry)", "routes_profile.register(mcp, registry)",
+                 "routes_layouts.register(mcp, registry)", "routes_oauth.register(mcp, registry)",
+                 "routes_status.register(mcp, registry)"):
+        eq(src.count(call), 1, call)
+    for path in ('custom_route("/",', '"/assets/', '"/api/profile"', '"/api/layouts"', '"/oauth/google/',
+                 '"/oauth/gmail-finance/', '"/api/status"', '"/healthz"'):
+        ok(path not in src, path + " is registered by its area's routes")
+    eq([inspect.getsource(m).count("@mcp.custom_route(")
+        for m in (routes_rendering, routes_profile, routes_layouts, routes_oauth, routes_status)], [4, 1, 1, 4, 2],
+       "the page and its 3 assets, the profile, the layouts, the 2 sign-in walks' 4 routes, status and healthz")
 
 @test
 def t_the_moved_areas_routes_follow_them():

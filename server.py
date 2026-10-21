@@ -395,7 +395,7 @@ def _boot_report() -> None:
     # CRM that has quietly grown past what a per-request parse can carry is
     # a line in the boot log rather than a feeling at the desk.
     try:
-        big = [r for r in _c._store_report() if r["bytes"] >= _c.STORE_REPORT_PARSE_MIN]
+        big = [r for r in _c.appstatus._store_report() if r["bytes"] >= _c.appstatus.STORE_REPORT_PARSE_MIN]
         if big:
             logger.info("stores: " + ", ".join(
                 f"{r['name']} {r['bytes'] / 1048576:.1f} MB"
