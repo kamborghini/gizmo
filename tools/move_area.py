@@ -494,8 +494,10 @@ def run(spec_path, root, write):
                 ed[a0.lineno].append((_col(lines, a0.lineno, a0.col_offset), _col(lines, a0.lineno, a0.end_col_offset),
                                       AL[DEST[x.args[1].value]]))
                 used.add(DEST[x.args[1].value])
+            # a copy too: copilot.py keeps reading it bare, every other file
+            # reads it from its new home (a copy is only of a name nobody patches)
             if (isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and x.value.id in owners
-                    and x.attr in moved and x.attr not in keep_copies):
+                    and x.attr in moved):
                 if own is not None and DEST[x.attr] == own:
                     # the module's own core.NAME read of a name moving into it: bare
                     ed[x.lineno].append((_col(lines, x.lineno, x.col_offset), _col(lines, x.lineno, x.end_col_offset), x.attr))

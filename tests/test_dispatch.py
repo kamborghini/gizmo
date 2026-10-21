@@ -30418,7 +30418,8 @@ def t_either_module_imports_first():
                         ("gizmo.oauth", "copilot"), ("gizmo.status", "copilot"), ("gizmo.routes.rendering", "copilot"),
                         ("gizmo.routes.profile", "copilot"), ("gizmo.routes.layouts", "copilot"),
                         ("gizmo.routes.oauth", "copilot"), ("gizmo.routes.status", "copilot"),
-                        ("gizmo.clock", "copilot"), ("gizmo.products", "copilot"), ("gizmo.routes.products", "copilot")):
+                        ("gizmo.clock", "copilot"), ("gizmo.products", "copilot"), ("gizmo.routes.products", "copilot"),
+                        ("gizmo.routes.chat", "copilot")):
         r = _sp.run([sys.executable, "-c", f"import {first}, {then}; import gizmo.dispatch as d, copilot as c; "
                      "assert c.desk is d and d.core is c; print('ok')"],
                     cwd=root, env=dict(os.environ), capture_output=True, text=True, timeout=120)
@@ -30988,6 +30989,20 @@ def t_move_area_adds_to_an_area_moved_earlier():
     ok("from gizmo import cfg" in t3 and "assert cfg.SETTING == 3" in t3, "and the suite, which reads it, binds it too")
     rr = _sp.run([sys.executable, "-c", "import gizmo.cfg, copilot; assert copilot.reads() == 4"], cwd=root3, capture_output=True, text=True)
     eq(rr.returncode, 0, rr.stderr[-400:])
+    # a name copilot.py keeps as a copy (a frozen function reads it bare): it
+    # stays bare there, and every other module reads it from its new home
+    cop4 = cop3 + "\n\nOTHER = 5\n\n\ndef keeps() -> int:\n    return OTHER\n"
+    user = '"""Reads the other setting."""\n\n\ndef f():\n    return core.OTHER\n\n\nimport copilot as core  # noqa: E402\n'
+    spec4 = dict(spec3, areas=[dict(spec3["areas"][0], extra=["SETTING", "OTHER"])], copies=["OTHER"])
+    root4 = _toy_repo("toy-copy", cop4, spec4, {"gizmo/cfg.py": cfg, "gizmo/user.py": user})
+    r = _run_move(root4)
+    eq(r.returncode, 0, r.stdout[-800:] + r.stderr[-800:])
+    c4, u4 = (open(os.path.join(root4, f)).read() for f in (_TOY_MAIN, "gizmo/user.py"))
+    ok("from gizmo.cfg import OTHER" in c4 and "    return OTHER\n" in c4, "copilot.py keeps reading the copy bare: " + c4[-300:])
+    ok("return cfg.OTHER" in u4 and "from gizmo import cfg" in u4, "another module reads it from its home: " + u4)
+    rr = _sp.run([sys.executable, "-c", "import gizmo.user, copilot; assert copilot.keeps() == 5 and gizmo.user.f() == 5"],
+                 cwd=root4, capture_output=True, text=True)
+    eq(rr.returncode, 0, rr.stderr[-400:])
 
 @test
 def t_the_privacy_loans_and_work_routes_are_gathered():
@@ -31169,6 +31184,26 @@ def t_the_ai_settings_products_and_history_have_moved():
         ok(path not in src, path + " is registered by its area's routes")
     eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_products, routes_orderbook)], [2, 3],
        "the Products tab's two routes; the order book's two and customer history")
+
+@test
+def t_the_chat_routes_and_shop_settings_have_moved():
+    """The shop's own settings live with the rest of the settings on the floor;
+    copilot.py keeps the secret and the base address only as copies of
+    config's, for the frozen print routes. The chat's, the stream's and the
+    usage panel's routes live in gizmo/routes/chat.py (piece 15)."""
+    import inspect
+    from gizmo import config
+    from gizmo.routes import chat as routes_chat
+    for n in ("SHOPIFY_API_KEY", "SHOPIFY_API_SECRET", "SHOPIFY_STORE", "APP_BASE_URL"):
+        ok(n in vars(config), n + " lives in gizmo/config.py")
+    ok("SHOPIFY_API_KEY" not in vars(copilot) and "SHOPIFY_STORE" not in vars(copilot), "copilot.py binds neither")
+    ok(copilot.SHOPIFY_API_SECRET is config.SHOPIFY_API_SECRET and copilot.APP_BASE_URL is config.APP_BASE_URL,
+       "and keeps the secret and the base address as copies of config's, for the frozen print routes")
+    src = inspect.getsource(copilot.add_routes)
+    eq(src.count("routes_chat.register(mcp, registry)"), 1, "the chat's routes, one call")
+    for path in ('"/api/chat', '"/api/usage"'):
+        ok(path not in src, path + " is registered by the chat's routes")
+    eq(inspect.getsource(routes_chat).count("@mcp.custom_route("), 3, "the chat, its stream and the usage panel")
 
 @test
 def t_the_moved_areas_routes_follow_them():
