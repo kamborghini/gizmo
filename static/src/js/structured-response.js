@@ -106,7 +106,9 @@
             track.append(el('div', 'fb-fill'));
             if (r.plan != null) track.append(el('div', 'fb-plan'));
             track.append(el('div', 'fb-exp'));
-            if (r.plan != null && r.planLabel) w.append(el('span', 'fb-rl t', r.planLabel));
+            // Past the middle the label ends at its tick, so a plan near the top
+            // of the range keeps its label on the bar.
+            if (r.plan != null && r.planLabel) w.append(el('span', 'fb-rl t' + (parseFloat(bandPct(r.plan, r.d)) > 50 ? ' end' : ''), r.planLabel));
             w.append(track);
             [[r.lo, r.loLabel, ''], [r.exp, r.midLabel, ' mid'], [r.hi, r.hiLabel, '']].forEach(([v, t, c]) => {
                 if (!t) return;

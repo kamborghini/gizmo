@@ -1,6 +1,17 @@
 {
  "releases": [
   {
+   "date": "2026-10-21",
+   "title": "The plan stays on the forecast's bar",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": "forecast",
+     "text": "On a phone, the plan's label on the forecast's likely range could run off the edge when the plan sat near the top of the range, so the page scrolled sideways. Past the middle of the bar, the label now ends at its tick."
+    }
+   ]
+  },
+  {
    "date": "2026-10-20",
    "title": "Skills, memory and chat on their own",
    "items": [
