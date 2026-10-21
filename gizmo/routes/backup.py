@@ -26,9 +26,17 @@ from gizmo import privacy
 from gizmo import team
 from gizmo import webdav
 from gizmo import scheduler
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class RestoreBody(bodies.Body):
+    """What /api/restore reads (gizmo/bodies.py): the backup, and whether only to check it."""
+    zip: bodies.Text = None
+    check: bodies.Flag = None
 
 
 def register(mcp, registry):
@@ -51,6 +59,9 @@ def register(mcp, registry):
         body = await gate._read_json_capped(request, cap=big)
         if body is None:
             return gate._json({"error": "That file is too large (120 MB cap)."}, 413)
+        refused = gate._body_refusal(RestoreBody, body)
+        if refused:
+            return refused
         import io as _io
         import zipfile as _zip
         try:

@@ -10,9 +10,22 @@ from gizmo import activity
 from gizmo import gate
 from gizmo import team
 from gizmo import scheduler
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class AlertBody(bodies.Body):
+    """What /api/alerts reads (gizmo/bodies.py): the alert to dismiss or delete."""
+    id: bodies.Id = None
+
+
+
+class ScheduleBody(bodies.Body):
+    """What /api/schedule reads (gizmo/bodies.py): the schedule's settings."""
+    config: bodies.Fields = None
 
 
 def register(mcp, registry):
@@ -21,7 +34,7 @@ def register(mcp, registry):
     @mcp.custom_route("/api/schedule", methods=["POST"])
     async def schedule_route(request: Request):
         # Get or set the automatic-refresh config (off by default).
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=ScheduleBody)
         if err:
             return err
         try:
@@ -41,7 +54,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/alerts", methods=["POST"])
     async def alerts_route(request: Request):
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=AlertBody)
         if err:
             return err
         op = body.get("op")

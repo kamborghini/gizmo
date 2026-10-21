@@ -17,9 +17,17 @@ from gizmo import memory
 from gizmo import orderbook
 from gizmo import skills as skillbook
 from gizmo import team
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class CustomersBody(bodies.Body):
+    """What /api/customers reads (gizmo/bodies.py): the segment, and whether to read afresh."""
+    segment: bodies.Text = None
+    fresh: bodies.Flag = None
 
 
 def register(mcp, registry):
@@ -81,7 +89,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/customers", methods=["POST"])
     async def customers_route(request: Request):
-        err, body, _who = await gate._guard(request, ai=True)
+        err, body, _who = await gate._guard(request, ai=True, model=CustomersBody)
         if err:
             return err
         segment = (body.get("segment") or "").strip()[:80]

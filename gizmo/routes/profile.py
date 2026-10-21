@@ -9,9 +9,17 @@ from gizmo import activity
 from gizmo import gate
 from gizmo import team
 from gizmo import profile as store_profile
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class ProfileBody(bodies.Body):
+    """What /api/profile reads (gizmo/bodies.py): a person's preferences, or the store profile."""
+    prefs: bodies.Fields = None
+    profile: bodies.Fields = None
 
 
 def register(mcp, registry):
@@ -19,7 +27,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/profile", methods=["POST"])
     async def profile_route(request: Request):
-        err, body, _who = await gate._guard(request)
+        err, body, _who = await gate._guard(request, model=ProfileBody)
         if err:
             return err
         # The switches alone, merged into the profile as the server holds it.

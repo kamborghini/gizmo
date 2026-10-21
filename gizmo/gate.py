@@ -171,10 +171,19 @@ async def _guard(request: Request, *, ai: bool = False, min_level: int = 0,
     if parsed is None:
         return _json({"error": "Request too large."}, 413), None, ""
     if model is not None:
-        why = bodies.refusal(model, parsed)
-        if why:
-            return _json({"error": why}, 400), None, ""
+        refused = _body_refusal(model, parsed)
+        if refused:
+            return refused, None, ""
     return None, parsed, uid
+
+
+def _body_refusal(model, body) -> Optional[JSONResponse]:
+    """The door's field check (gizmo/bodies.py), for the door itself and for
+    a route that reads its own body after a check of its own (body=False):
+    None, or the 400 naming the first field of the wrong kind. A body that is
+    not a set of fields is the route's to answer, as it always was."""
+    why = bodies.refusal(model, body) if isinstance(body, dict) else None
+    return _json({"error": why}, 400) if why else None
 
 
 async def _read_json_capped(request: Request, cap: Optional[int] = None) -> Optional[dict]:

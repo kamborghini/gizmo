@@ -16,9 +16,16 @@ from gizmo import knowledge
 from gizmo import memory
 from gizmo import skills as skillbook
 from gizmo import seo
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class KeywordScanBody(bodies.Body):
+    """What /api/keyword-scan reads (gizmo/bodies.py): the page to scan."""
+    url: bodies.Text = None
 
 
 def register(mcp, registry):
@@ -65,7 +72,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/keyword-scan", methods=["POST"])
     async def keyword_scan_route(request: Request):
-        err, body, _who = await gate._guard(request, ai=True)
+        err, body, _who = await gate._guard(request, ai=True, model=KeywordScanBody)
         if err:
             return err
         url = (body.get("url") or "").strip()

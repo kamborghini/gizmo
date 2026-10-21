@@ -31261,6 +31261,21 @@ def t_a_body_model_checks_only_what_it_names():
        "a field's name is read as words")
     eq(bd.refusal(M, {"title": {}, "count": {}}), "The title sent must be text.", "one refusal, the first field")
 
+    for k in ("id", "count", "amount"):
+        eq(bd.refusal(M, {k: 10 ** 400}), "The %s sent must be %s." % (k, words[k]),
+           "a number past any float is refused, not raised as a server error")
+    eq(bd.refusal(M, {"amount": "1" * 400}), "The amount sent must be a number.", "and so is its text")
+
+    class R(bd.Body):
+        messages: bd.Records = None
+        frm: bd.Text = bd.named("from")
+    eq(bd.refusal(R, {"messages": [{"role": "user", "content": "hi"}], "from": "2026-10-01"}), None,
+       "a list of sets of fields, and a field named for a word Python keeps")
+    for junk in (["hi"], [{"a": 1}, 2], {"role": "user"}):
+        eq(bd.refusal(R, {"messages": junk}), "The messages sent must be a list of sets of fields.", repr(junk))
+    eq(bd.refusal(R, {"from": {"wrong": 1}}), "The from sent must be text.", "named as it is sent")
+    eq(bd.sent_names(R), ["messages", "from"], "the names a body uses")
+
     per_op = {"add": M}
     eq(bd.refusal(per_op, {"op": "add", "title": {}}), "The title sent must be text.", "an op's own model")
     for b in ({"op": "list", "title": {}}, {"title": {}}, {"op": {"add": 1}, "title": {}}, {"op": ["add"]}):
@@ -31309,22 +31324,23 @@ def t_the_door_refuses_a_wrong_type_last():
     eq(r.status_code, 200, r.text)
     eq(seen, [{"title": "Fine", "extra": [1, {"a": 2}]}], "a body that passes reaches the route as sent")
 
-def _wrong_kinds_refused(cases):
+def _wrong_kinds_refused(cases, send=None):
     """Each (path, op, model): every field the model names, sent as an object
     and as a list, is a 400 in the model's own words wherever the model refuses
-    that value. Returns how many requests were refused."""
+    that value. Returns how many requests were refused. `send(path, body)`
+    stands in for post() where a route has its own door."""
     from gizmo import bodies as bd
     n = 0
     for path, op, model in cases:
         m = bd.model_for(model, {"op": op})
         ok(m is not None and m.model_fields, "%s %s has a model naming its fields" % (path, op))
-        for field in m.model_fields:
+        for field in bd.sent_names(m):
             for junk in ({"wrong": ["type"]}, ["wrong"]):
                 body = {field: junk, **({"op": op} if op else {})}
                 want = bd.refusal(model, body)
                 if want is None:
                     continue          # the kind takes it (a list where a list belongs)
-                r = post(path, body)
+                r = (send or post)(path, body)
                 eq((r.status_code, r.json().get("error")), (400, want), "%s %s %s=%r" % (path, op, field, junk))
                 n += 1
     return n
@@ -31415,27 +31431,71 @@ def t_a_wrong_type_is_refused_before_anything_is_kept():
     after = _scratch_files()
     eq(sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k)), [], "nothing was written")
 
+@test
+def t_the_accounts_routes_refuse_a_wrong_kind():
+    """Stage 5, piece 2: the sign-in walks, the team register, the workspace's
+    own routes (alerts, the schedule, the profile, the chat and its usage, the
+    work clock's report), the reports' reads, reconciliation's, the Xero
+    connector's, restore, the forecast's workbook and results hook, and order
+    edits each name the fields they read. Every one, sent as an object and as a
+    list, is a 400 in the model's words before the route reads it."""
+    from gizmo.routes import scheduler as r_sched, team as r_team, chat as r_chat, xero_sync as r_xs
+    from gizmo.routes import orderbook as r_ob, analytics as r_an, seo as r_seo, products as r_prod
+    from gizmo.routes import profile as r_prof, reconciliation as r_rec, backup as r_bk, skills as r_sk
+    from gizmo.routes import work as r_work, forecasting as r_fc
+    n = _wrong_kinds_refused([
+        ("/api/alerts", "dismiss", r_sched.AlertBody),
+        ("/api/schedule", None, r_sched.ScheduleBody),
+        ("/api/auth/login", None, r_team.LoginBody),
+        ("/api/auth/mfa", "status", r_team.MfaBody),
+        ("/api/auth/mfa-verify", None, r_team.MfaVerifyBody),
+        ("/api/auth/password", None, r_team.PasswordBody),
+        ("/api/auth/setup", None, r_team.SetupBody),
+        ("/api/team/user", "rename", r_team.TeamUserBody),
+        ("/api/chat", None, r_chat.ChatBody),
+        ("/api/chat/stream", None, r_chat.ChatBody),
+        ("/api/usage", None, r_chat.UsageBody),
+        ("/api/connector", "status", r_xs.ConnectorBody),
+        ("/api/customer-history", None, r_ob.CustomerHistoryBody),
+        ("/api/order/edit", "read", r_ob.OrderEditBody),
+        ("/api/customers", None, r_an.CustomersBody),
+        ("/api/keyword-scan", None, r_seo.KeywordScanBody),
+        ("/api/product", None, r_prod.ProductBody),
+        ("/api/products", None, r_prod.ProductsBody),
+        ("/api/profile", None, r_prof.ProfileBody),
+        ("/api/recon/disconnect", None, r_rec.ReconDisconnectBody),
+        ("/api/recon/exception", None, r_rec.ReconExceptionBody),
+        ("/api/restore", None, r_bk.RestoreBody),
+        ("/api/skills/read", None, r_sk.SkillReadBody),
+        ("/api/work/report", None, r_work.WorkReportBody),
+        ("/api/work/resolve", None, r_work.WorkResolveBody),
+        ("/api/forecast/workbook", None, r_fc.WorkbookBody)])
+    ok(n > 100, "every field each model names was tried (%d refusals)" % n)
+    saved = forecasting.FORECAST_INGEST_TOKEN
+    try:
+        forecasting.FORECAST_INGEST_TOKEN = "forecast-secret-for-tests"
+        hook = lambda path, body: client.post(path, json=body, headers={"X-Forecast-Token": "forecast-secret-for-tests"})
+        ok(_wrong_kinds_refused([("/hooks/forecast/results", None, r_fc.ForecastResultsBody)], send=hook) > 10,
+           "the forecast's results hook, behind its own token")
+    finally:
+        forecasting.FORECAST_INGEST_TOKEN = saved
+
 # The write routes that read fields from their body with no model checking
 # them yet (gizmo/bodies.py). The list may only shrink: a new write route comes
 # with its model, and a route that gains one leaves the list.
 UNCHECKED_BODIES = [
-    "/api/alerts", "/api/auth/login", "/api/auth/mfa", "/api/auth/mfa-verify", "/api/auth/password",
-    "/api/auth/setup", "/api/chat", "/api/chat/stream", "/api/connector", "/api/crm/deal",
-    "/api/crm/import", "/api/crm/lead", "/api/crm/stages", "/api/custom/book", "/api/custom/list",
-    "/api/custom/quote", "/api/custom/visibility", "/api/customer-history", "/api/customers",
-    "/api/dispatch/book", "/api/dispatch/cancel", "/api/dispatch/collections", "/api/dispatch/diagnose",
+    "/api/crm/deal", "/api/crm/import", "/api/crm/lead", "/api/crm/stages", "/api/custom/book",
+    "/api/custom/list", "/api/custom/quote", "/api/custom/visibility", "/api/dispatch/book",
+    "/api/dispatch/cancel", "/api/dispatch/collections", "/api/dispatch/diagnose",
     "/api/dispatch/parse-address", "/api/dispatch/quote", "/api/eori/check", "/api/files/complete",
-    "/api/files/download-url", "/api/files/file", "/api/files/upload-url", "/api/forecast/workbook",
-    "/api/gobo-sizes/check", "/api/gobo-sizes/models", "/api/gobo-sizes/upload", "/api/keyword-scan",
-    "/api/mail/assign", "/api/mail/attach-done", "/api/mail/attach-url", "/api/mail/attachment",
-    "/api/mail/board", "/api/mail/body", "/api/mail/bulk", "/api/mail/draft", "/api/mail/note",
-    "/api/mail/presence", "/api/mail/read", "/api/mail/rules", "/api/mail/search", "/api/mail/send",
-    "/api/mail/state", "/api/mail/thread", "/api/mail/undo", "/api/mail/viewing", "/api/order/edit",
-    "/api/product", "/api/production-labels", "/api/production-labels/coverage",
-    "/api/production-labels/queue", "/api/products", "/api/profile", "/api/recon/disconnect",
-    "/api/recon/exception", "/api/restore", "/api/schedule", "/api/skills/read", "/api/stock-usage",
-    "/api/stock-usage/send", "/api/team/user", "/api/usage", "/api/work/report", "/api/work/resolve",
-    "/hooks/forecast/results", "/print/production-labels/sign", "/webhooks/privacy"]
+    "/api/files/download-url", "/api/files/file", "/api/files/upload-url", "/api/gobo-sizes/check",
+    "/api/gobo-sizes/models", "/api/gobo-sizes/upload", "/api/mail/assign", "/api/mail/attach-done",
+    "/api/mail/attach-url", "/api/mail/attachment", "/api/mail/board", "/api/mail/body", "/api/mail/bulk",
+    "/api/mail/draft", "/api/mail/note", "/api/mail/presence", "/api/mail/read", "/api/mail/rules",
+    "/api/mail/search", "/api/mail/send", "/api/mail/state", "/api/mail/thread", "/api/mail/undo",
+    "/api/mail/viewing", "/api/production-labels", "/api/production-labels/coverage",
+    "/api/production-labels/queue", "/api/stock-usage", "/api/stock-usage/send",
+    "/print/production-labels/sign", "/webhooks/privacy"]
 
 @test
 def t_write_routes_check_their_bodies():
@@ -31452,12 +31512,11 @@ def t_write_routes_check_their_bodies():
     eq(by["/api/crm/activity"]["body"], "CrmActivityBody", "and one handed through an area's door")
     eq(by["/api/gobo-sizes/rule"]["body"], "SizeRuleBody", "and one a route checks after reading its own body")
     ok({"subject", "deal_id", "done"} <= set(by["/api/crm/activity"]["fields"]), "the fields a route reads are listed")
-    eq(by["/api/alerts"]["body"], "", "a route with no model has none")
-    eq(sorted(r["path"] for r in rows if r["body"]),
-       ["/api/crm/activity", "/api/crm/contact", "/api/files/folder", "/api/gobo-sizes/rule", "/api/impact",
+    eq(by["/webhooks/privacy"]["body"], "", "a route with no model has none")
+    first = ["/api/crm/activity", "/api/crm/contact", "/api/files/folder", "/api/gobo-sizes/rule", "/api/impact",
         "/api/learn", "/api/liability/chase", "/api/loans", "/api/mail/settings", "/api/memory", "/api/privacy",
-        "/api/production-state", "/api/recon/exceptions", "/api/shipping/config", "/api/skills", "/api/updates"],
-       "the sixteen routes with a model")
+        "/api/production-state", "/api/recon/exceptions", "/api/shipping/config", "/api/skills", "/api/updates"]
+    eq([p for p in first if not by[p]["body"]], [], "the sixteen routes given a model first (piece 1) keep it")
     unchecked = sorted(r["path"] for r in rows if "POST" in r["methods"] and r["fields"] and not r["body"])
     eq([p for p in unchecked if p not in UNCHECKED_BODIES], [],
        "a new write route reads fields with no model: give it one (gizmo/bodies.py)")

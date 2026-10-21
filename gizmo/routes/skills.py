@@ -31,6 +31,12 @@ class SkillBody(bodies.Body):
     always: bodies.Flag = None
 
 
+
+class SkillReadBody(bodies.Body):
+    """What /api/skills/read reads (gizmo/bodies.py): the skill to read."""
+    id: bodies.Id = None
+
+
 def register(mcp, registry):
     """Add the skills' routes to the app."""
 
@@ -84,7 +90,7 @@ def register(mcp, registry):
         # AI run, so it has its own door and spends the AI window there.
         # An admin's to run: the reading's rules and when-note go into every
         # account's answers, like the skill itself (found verifying R-003).
-        err, body, who = await gate._guard(request, ai=True, min_level=team.ROLE_LEVELS["admin"])
+        err, body, who = await gate._guard(request, ai=True, min_level=team.ROLE_LEVELS["admin"], model=SkillReadBody)
         if err:
             return err
         skills = skillbook._load_skills()

@@ -12,9 +12,25 @@ from gizmo import activity
 from gizmo import gate
 from gizmo import team
 from gizmo import work
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class WorkReportBody(bodies.Body):
+    """What /api/work/report reads (gizmo/bodies.py): whose hours, from and to when."""
+    uid: bodies.Id = None
+    frm: bodies.Text = bodies.named("from")
+    to: bodies.Text = None
+
+
+
+class WorkResolveBody(bodies.Body):
+    """What /api/work/resolve reads (gizmo/bodies.py): whose open session to close, and why."""
+    uid: bodies.Id = None
+    note: bodies.Text = None
 
 
 def register(mcp, registry):
@@ -134,7 +150,7 @@ def register(mcp, registry):
     async def work_resolve_route(request: Request):
         # An admin closing a forgotten clock-out. The original start stands;
         # the correction wears its author and lands on the ledger.
-        err, packed = await team._team_guard(request, team.ROLE_LEVELS["admin"])
+        err, packed = await team._team_guard(request, team.ROLE_LEVELS["admin"], model=WorkResolveBody)
         if err:
             return err
         who, body = packed
@@ -165,7 +181,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/work/report", methods=["POST"])
     async def work_report_route(request: Request):
-        err, packed = await team._team_guard(request, team.ROLE_LEVELS["admin"])
+        err, packed = await team._team_guard(request, team.ROLE_LEVELS["admin"], model=WorkReportBody)
         if err:
             return err
         _who, body = packed

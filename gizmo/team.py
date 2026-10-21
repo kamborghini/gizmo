@@ -649,7 +649,7 @@ def _shop_gate(request: Request) -> bool:
     except Exception:
         return False
 
-async def _auth_guard(request: Request):
+async def _auth_guard(request: Request, model=None):
     pre = gate._pre_checks(request)
     if pre:
         return pre, None
@@ -658,6 +658,11 @@ async def _auth_guard(request: Request):
     body = await gate._read_json_capped(request)
     if body is None:
         return gate._json({"error": "Request too large."}, 413), None
+    # Before the sign-in ceiling and the password check: a field of the wrong
+    # kind is no guess at a password, so it spends neither (gizmo/bodies.py).
+    refused = gate._body_refusal(model, body) if model is not None else None
+    if refused:
+        return refused, None
     return None, body
 
 def _clean_username(v) -> str:
@@ -689,8 +694,8 @@ def _auth_me(uid: str, u: dict) -> dict:
                              >= ROLE_LEVELS["admin"])}
 
 # ---- Team management --------------------------------------------------
-async def _team_guard(request: Request, min_level: int):
-    err, body, who = await gate._guard(request, min_level=min_level)
+async def _team_guard(request: Request, min_level: int, model=None):
+    err, body, who = await gate._guard(request, min_level=min_level, model=model)
     if err:
         return err, None
     return None, (who, body)
