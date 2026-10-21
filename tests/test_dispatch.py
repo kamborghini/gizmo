@@ -30523,7 +30523,7 @@ def t_move_proof_is_wired():
 # The store, the error log and the AI client sit beneath every area: they
 # import nothing from copilot.py, so an area can import them directly.
 
-FLOOR = ["gizmo/config.py", "gizmo/store.py", "gizmo/errors.py", "gizmo/ai.py", "gizmo/shopify.py", "gizmo/prompts.py", "gizmo/clock.py"]
+FLOOR = ["gizmo/config.py", "gizmo/store.py", "gizmo/errors.py", "gizmo/ai.py", "gizmo/shopify.py", "gizmo/prompts.py", "gizmo/clock.py", "gizmo/bodies.py"]
 
 @test
 def t_no_module_looks_itself_up_by_name():
@@ -31217,6 +31217,97 @@ def t_no_error_is_swallowed_without_a_reason():
     ok(len(found) > 300, "the scan finds the app's broad handlers (%d)" % len(found))
     quiet = [f"{h['file']}:{h['line']} {h['kind']}" for h in found if h["kind"] in be.SILENT and not h["reason"]]
     eq(quiet, [], "silent handlers that do not say why")
+
+@test
+def t_a_body_model_checks_only_what_it_names():
+    """gizmo/bodies.py: a model names the fields it checks and the kind each
+    must be; every other field passes, and the route reads the body as before.
+    The kinds take what the page sends (text, numbers as the page sends them,
+    yes or no, a list, a set of fields) and refuse an object or a list where a
+    scalar belongs; the refusal names the field in plain words (stage 5)."""
+    from gizmo import bodies as bd
+
+    class M(bd.Body):
+        title: bd.Text = None
+        id: bd.Id = None
+        count: bd.Whole = None
+        amount: bd.Number = None
+        on: bd.Flag = None
+        ids: bd.Items = None
+        origin: bd.Fields = None
+        min_pence: bd.Whole = None
+
+    good = {"title": "A note", "id": 6123456789, "count": 3, "amount": 12.5, "on": True,
+            "ids": [1, "2"], "origin": {"city": "Leeds"}, "min_pence": "", "other": {"any": ["thing"]}}
+    before = json.dumps(good, sort_keys=True)
+    eq(bd.refusal(M, good), None, "what the page sends is taken")
+    eq(json.dumps(good, sort_keys=True), before, "and the body is left exactly as it came")
+    eq(bd.refusal(M, {}), None, "a field left out is the route's to decide")
+    eq(bd.refusal(M, {k: None for k in good}), None, "and so is a null")
+    for k, v in (("id", "a1b2"), ("count", "12"), ("count", 4.0), ("amount", "12.50"), ("amount", 3),
+                 ("on", False), ("on", 1), ("ids", []), ("origin", {})):
+        eq(bd.refusal(M, {k: v}), None, "%s may be %r" % (k, v))
+    words = {"title": "text", "id": "text or a number", "count": "a whole number", "amount": "a number",
+             "on": "yes or no", "ids": "a list", "origin": "a set of fields"}
+    for k, w in words.items():
+        for junk in ({"wrong": ["type"]}, ["wrong"]):
+            if (k, type(junk)) in (("ids", list), ("origin", dict)):
+                continue
+            eq(bd.refusal(M, {k: junk}), "The %s sent must be %s." % (k, w), "%s refuses %r" % (k, junk))
+    for k, v in (("title", 5), ("count", "12.5"), ("count", " "), ("count", True), ("count", float("inf")),
+                 ("amount", "lots"), ("amount", float("nan")), ("on", "no"), ("id", True)):
+        ok(bd.refusal(M, {k: v}), "%s refuses %r" % (k, v))
+    eq(bd.refusal(M, {"min_pence": []}), "The min pence sent must be a whole number.",
+       "a field's name is read as words")
+    eq(bd.refusal(M, {"title": {}, "count": {}}), "The title sent must be text.", "one refusal, the first field")
+
+    per_op = {"add": M}
+    eq(bd.refusal(per_op, {"op": "add", "title": {}}), "The title sent must be text.", "an op's own model")
+    for b in ({"op": "list", "title": {}}, {"title": {}}, {"op": {"add": 1}, "title": {}}, {"op": ["add"]}):
+        eq(bd.refusal(per_op, b), None, "an op the models do not name reaches the route as before: %r" % (b,))
+
+@test
+def t_the_door_refuses_a_wrong_type_last():
+    """gate._guard(model=...) checks the body after everything else the door
+    checks: no session is still a 401, a rank too low still a 403, and only a
+    caller the door lets in hears that a field is of the wrong kind (a 400
+    naming it). A body that passes reaches the route as it was sent."""
+    from gizmo import bodies as bd
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+
+    class M(bd.Body):
+        title: bd.Text = None
+
+    seen = []
+
+    async def _route(request):
+        err, body, who = await gate._guard(request, min_level=int(request.query_params.get("level") or 0), model=M)
+        if err:
+            return err
+        seen.append(body)
+        return gate._json({"ok": True})
+
+    c = TestClient(Starlette(routes=[Route("/door-check", _route, methods=["POST"])]))
+
+    def send(body, session=None, level=0):
+        gate._rl_hits.clear(); gate._rl_global.clear()
+        h = {"Authorization": "Bearer " + tok()}
+        if session:
+            h["X-App-Session"] = session
+        return c.post("/door-check" + ("?level=%d" % level if level else ""), json=body, headers=h)
+
+    eq(send({"title": {"wrong": 1}}).status_code, 401, "no session: a 401, whatever the body")
+    _uid, member, _pw = ready_user("Door Check", "doorcheck")
+    eq(send({"title": {"wrong": 1}}, member, level=team.ROLE_LEVELS["admin"]).status_code, 403,
+       "a rank too low: a 403, whatever the body")
+    r = send({"title": {"wrong": 1}}, member)
+    eq(r.status_code, 400, r.text)
+    eq(r.json().get("error"), "The title sent must be text.")
+    eq(seen, [], "the route never saw it")
+    r = send({"title": "Fine", "extra": [1, {"a": 2}]}, member)
+    eq(r.status_code, 200, r.text)
+    eq(seen, [{"title": "Fine", "extra": [1, {"a": 2}]}], "a body that passes reaches the route as sent")
 
 @test
 def t_the_moved_areas_routes_follow_them():
