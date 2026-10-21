@@ -7372,7 +7372,12 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                 # the connector's own tab.
                 code, data = await _connector_call("POST", "/api/settings", json_body=clean)
                 if code >= 400:
-                    return _json({"available": True, "data": data}, code)
+                    # The connector refused the save (a value out of range,
+                    # say) and kept nothing: said as an error, which the page
+                    # shows, rather than tucked under data, where the page
+                    # read "Saved" over a save that stored nothing at all.
+                    why = (data or {}).get("error") if isinstance(data, dict) else None
+                    return _json({"available": True, "error": why or ("Connector error " + str(code)), "data": data}, code)
                 unapplied = []
                 try:
                     code2, now = await _connector_call("GET", "/api/settings")

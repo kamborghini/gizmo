@@ -1310,10 +1310,12 @@
                     const dl = el('dl', 'conn-pairs cx-set');
                     [['RECONCILE_MODE', 'When a total disagrees'], ['RECONCILE_TOLERANCE', 'Tolerance'],
                      ['MAX_DOCS_PER_RUN', 'Most documents in one run'], ['RUNAWAY_ABORT_ABOVE', 'Stop entirely above'],
-                     ['ORDERS_SINCE', 'Only orders since'], ['AUTO_RUN_INTERVAL_MINUTES', 'Auto Run every'],
+                     ['ORDERS_SINCE', 'Only orders since'],
                      ['XERO_SALES_ACCOUNT_CODE', 'Sales account'], ['XERO_TAX_TYPE_STANDARD', 'Standard tax type'],
                      ['XERO_TAX_TYPE_ZERO', 'Zero-rated tax type'],
-                     ['CUSTOMER_REF_METAFIELD_NAMESPACE', 'Customer reference namespace'], ['CUSTOMER_REF_METAFIELD_KEY', 'Customer reference key']].forEach(([k, lab]) => {
+                     ['CUSTOMER_REF_METAFIELD_NAMESPACE', 'Customer reference namespace'], ['CUSTOMER_REF_METAFIELD_KEY', 'Customer reference key'],
+                     /* Last, so the ten before it keep the rows they had (21 Oct 2026). */
+                     ['AUTO_RUN_INTERVAL_MINUTES', 'Auto Run every']].forEach(([k, lab]) => {
                         if (connSettings[k] == null || connSettings[k] === '') return;
                         const v = k === 'RECONCILE_MODE' ? (CX_MODE[connSettings[k]] || connSettings[k])
                             : k === 'RECONCILE_TOLERANCE' ? money(Number(connSettings[k]) || 0, 'GBP', 2)
@@ -1392,14 +1394,19 @@
                         'More orders waiting than this and the run creates nothing at all, not even contacts: that is a widened window, not a backlog.');
                     add('ORDERS_SINCE', 'Only orders since',
                         'A date, written year-month-day. Shopify only gives the last 60 days of orders, so an older date finds nothing.');
-                    add('AUTO_RUN_INTERVAL_MINUTES', 'Auto Run every',
-                        'Minutes between rounds, from 5 to 1440. A round with nothing new costs Xero nothing, so a shorter wait sends new orders sooner. A change applies at once.');
                     add('XERO_SALES_ACCOUNT_CODE', 'Sales account code', '');
                     add('XERO_TAX_TYPE_STANDARD', 'Standard tax type', '');
                     add('XERO_TAX_TYPE_ZERO', 'Zero-rated tax type', '');
                     add('CUSTOMER_REF_METAFIELD_NAMESPACE', 'Customer reference namespace', '');
                     add('CUSTOMER_REF_METAFIELD_KEY', 'Customer reference key',
                         'Where the reference on the document view is read from.');
+                    /* Last, so the ten before it keep their rows; and only from a
+                       connector that has the setting, or the box would offer
+                       what the connector cannot keep (21 Oct 2026). */
+                    if (connSettings && 'AUTO_RUN_INTERVAL_MINUTES' in connSettings) {
+                        add('AUTO_RUN_INTERVAL_MINUTES', 'Auto Run every',
+                            'Minutes between rounds, from 5 to 1440. A round with nothing new costs Xero nothing, so a shorter wait sends new orders sooner. A change applies at once.');
+                    }
                     xCard.append(grid);
                     /* Plain: Send to Xero is the page's one teal action. */
                     const save = textButton('Save settings');
@@ -1411,7 +1418,7 @@
                             if (!(await connSaveSettings(shown, now, labels))) { save.disabled = false; return; }
                             connSettingsOpen = false; connSettingsEdits = {};
                             await refreshConnector();
-                        } catch (e) { save.disabled = false; toastError(e.message); }
+                        } catch (e) { save.disabled = false; toastError(cxPlain(e.message)); }
                     };
                     const sb = el('div', 'mail-statebar'); sb.append(save);
                     xCard.append(sb);

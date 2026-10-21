@@ -27437,6 +27437,37 @@ def t_the_connector_settings_list_holds_only_what_the_connector_keeps():
 
 
 @test
+def t_a_settings_save_the_connector_refuses_is_an_error_not_a_save():
+    """Review of 2026-10-21: the connector refuses a whole save for one value
+    out of range (an Auto Run interval of 2, say) and keeps nothing. The page
+    read that reply, error tucked under data, as "Saved", and anything else
+    changed in the same save was silently dropped."""
+    ensure_auth()
+    real_call = copilot._connector_call
+    async def fake(method, path, params=None, json_body=None):
+        return 400, {"error": 'AUTO_RUN_INTERVAL_MINUTES must be a whole number from 5 to 1440 (got "2")'}
+    copilot._connector_call = fake
+    old_url = os.environ.get("CONNECTOR_URL")
+    os.environ["CONNECTOR_URL"] = "http://conn.railway.internal:8899"
+    try:
+        r = post("/api/connector", {"op": "settings_save", "fields": {"AUTO_RUN_INTERVAL_MINUTES": "2", "RECONCILE_MODE": "strict"}})
+        eq(r.status_code, 400)
+        eq(r.json().get("error"), 'AUTO_RUN_INTERVAL_MINUTES must be a whole number from 5 to 1440 (got "2")',
+           "the reason is the error itself, which the page shows")
+        async def silent(method, path, params=None, json_body=None):
+            return 502, None
+        copilot._connector_call = silent
+        r2 = post("/api/connector", {"op": "settings_save", "fields": {"RECONCILE_MODE": "strict"}})
+        eq(r2.json().get("error"), "Connector error 502", "and a refusal with no reason still says it failed")
+    finally:
+        copilot._connector_call = real_call
+        if old_url is None:
+            os.environ.pop("CONNECTOR_URL", None)
+        else:
+            os.environ["CONNECTOR_URL"] = old_url
+
+
+@test
 def t_turning_auto_run_on_records_the_interval_the_connector_uses():
     """The interval is a connector setting, AUTO_RUN_INTERVAL_MINUTES (5 to
     1440), so 'every 10 minutes' in the activity log was only true by default."""

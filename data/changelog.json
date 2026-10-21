@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-21",
+   "title": "Auto Run's timing",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": "connector",
+     "text": "How often Auto Run looks for new orders can now be set on the Xero sync page, from every 5 minutes to once a day, and the page says the interval in use rather than always ten minutes. A setting the connector refuses is now said as an error, not shown as saved."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-21",
    "title": "The plan stays on the forecast's bar",
    "items": [
     {

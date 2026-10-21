@@ -6841,6 +6841,18 @@ def t_auto_run_says_and_offers_the_interval_the_connector_uses():
     ok("'Auto Run is on, every ' + mins + ' minutes.'" in r, "and so does the toast, from the connector's answer")
     ok("add('AUTO_RUN_INTERVAL_MINUTES', 'Auto Run every'" in r, "the Settings card offers it")
     ok("['AUTO_RUN_INTERVAL_MINUTES', 'Auto Run every']" in r, "and its summary shows it")
+    # Last in both, so the ten before it keep the rows they had.
+    ok(r.index("['AUTO_RUN_INTERVAL_MINUTES', 'Auto Run every']") > r.index("['CUSTOMER_REF_METAFIELD_KEY', 'Customer reference key']"),
+       "last in the summary")
+    ok(r.index("add('AUTO_RUN_INTERVAL_MINUTES'") > r.index("add('CUSTOMER_REF_METAFIELD_KEY'"), "and last in the form")
+    # Offered only by a connector that has it: an older one would answer ok
+    # and keep nothing.
+    i = r.index("add('AUTO_RUN_INTERVAL_MINUTES'")
+    ok("'AUTO_RUN_INTERVAL_MINUTES' in connSettings" in r[i - 400:i], "only when the connector has the setting")
+    ok("AUTO_RUN_INTERVAL_MINUTES: 'Auto Run every'" in fn_src("function cxSettingName(") or
+       "AUTO_RUN_INTERVAL_MINUTES: 'Auto Run every'" in SCRIPT, "a refusal names it as the card does")
+    ok("toastError(cxPlain(e.message))" in r[r.index("const save = textButton('Save settings');"):][:900],
+       "and a refused save says why in those words, not 'Saved'")
     ok("'AUTO_RUN_INTERVAL_MINUTES'].includes(key)" in fn_src("function cxSameSetting("),
        "compared by number, as the connector keeps it")
 
