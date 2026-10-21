@@ -6830,6 +6830,22 @@ def t_auto_run_shows_the_services_state_not_what_this_tab_last_clicked():
 
 
 @test
+def t_auto_run_says_and_offers_the_interval_the_connector_uses():
+    """Auto Run's interval became a connector setting on 2026-10-21
+    (AUTO_RUN_INTERVAL_MINUTES, 5 to 1440). The page offered it nowhere, and
+    its confirm and its toast said 'every 10 minutes' whatever it was."""
+    r = fn_src("function renderConnector(")
+    ok("Every 10 minutes" not in r and "every 10 minutes" not in r, "no interval written in")
+    ok("'Turn Auto Run on? Every ' + every + ' minutes" in r, "the confirm says the interval in use")
+    ok("connAuto.intervalMinutes" in r[r.find("const every ="):r.find("const every =") + 80], "read from the connector's own status")
+    ok("'Auto Run is on, every ' + mins + ' minutes.'" in r, "and so does the toast, from the connector's answer")
+    ok("add('AUTO_RUN_INTERVAL_MINUTES', 'Auto Run every'" in r, "the Settings card offers it")
+    ok("['AUTO_RUN_INTERVAL_MINUTES', 'Auto Run every']" in r, "and its summary shows it")
+    ok("'AUTO_RUN_INTERVAL_MINUTES'].includes(key)" in fn_src("function cxSameSetting("),
+       "compared by number, as the connector keeps it")
+
+
+@test
 def t_turning_auto_run_on_says_what_it_will_do_unattended():
     """It sends to Xero with nobody reviewing. Someone agreeing to that should
     be agreeing to the thing itself, not to the word "on"."""

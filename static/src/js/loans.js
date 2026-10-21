@@ -473,7 +473,7 @@
         }
         /* As the connector compares: numbers by value (0.020 is 0.02), the rest exactly. */
         function cxSameSetting(key, a, b) {
-            return a === b || (['RECONCILE_TOLERANCE', 'MAX_DOCS_PER_RUN', 'RUNAWAY_ABORT_ABOVE'].includes(key)
+            return a === b || (['RECONCILE_TOLERANCE', 'MAX_DOCS_PER_RUN', 'RUNAWAY_ABORT_ABOVE', 'AUTO_RUN_INTERVAL_MINUTES'].includes(key)
                 && a !== '' && b !== '' && !isNaN(a) && !isNaN(b) && Number(a) === Number(b));
         }
         /* Where a setting's value comes from, under its field: every field
@@ -672,16 +672,19 @@
                 if (connIsAdmin()) {
                     const t = textButton(on ? 'Turn Auto Run off' : 'Turn Auto Run on');
                     t.onclick = async () => {
+                        /* The interval is a connector setting (Settings, Auto Run every). */
+                        const every = (connAuto && connAuto.intervalMinutes) || 10;
                         if (!on && !await uiConfirm(
-                            'Turn Auto Run on? Every 10 minutes the connector will check for new '
+                            'Turn Auto Run on? Every ' + every + ' minutes the connector will check for new '
                             + 'orders and send them to Xero without anyone reviewing them first. '
                             + 'It keeps going until you turn it off. An order already sent is '
                             + 'never sent twice.',
                             { title: 'Turn Auto Run on', okText: 'Turn it on' })) return;
                         t.disabled = true;
                         try {
-                            await connOp({ op: 'autorun_set', enabled: !on });
-                            toastOk(on ? 'Auto Run is off.' : 'Auto Run is on, every 10 minutes.');
+                            const r = await connOp({ op: 'autorun_set', enabled: !on });
+                            const mins = (r && r.data && r.data.intervalMinutes) || every;
+                            toastOk(on ? 'Auto Run is off.' : 'Auto Run is on, every ' + mins + ' minutes.');
                             await refreshConnector();
                         } catch (e) { t.disabled = false; toastError(e.message); }
                     };
@@ -1307,14 +1310,15 @@
                     const dl = el('dl', 'conn-pairs cx-set');
                     [['RECONCILE_MODE', 'When a total disagrees'], ['RECONCILE_TOLERANCE', 'Tolerance'],
                      ['MAX_DOCS_PER_RUN', 'Most documents in one run'], ['RUNAWAY_ABORT_ABOVE', 'Stop entirely above'],
-                     ['ORDERS_SINCE', 'Only orders since'],
+                     ['ORDERS_SINCE', 'Only orders since'], ['AUTO_RUN_INTERVAL_MINUTES', 'Auto Run every'],
                      ['XERO_SALES_ACCOUNT_CODE', 'Sales account'], ['XERO_TAX_TYPE_STANDARD', 'Standard tax type'],
                      ['XERO_TAX_TYPE_ZERO', 'Zero-rated tax type'],
                      ['CUSTOMER_REF_METAFIELD_NAMESPACE', 'Customer reference namespace'], ['CUSTOMER_REF_METAFIELD_KEY', 'Customer reference key']].forEach(([k, lab]) => {
                         if (connSettings[k] == null || connSettings[k] === '') return;
                         const v = k === 'RECONCILE_MODE' ? (CX_MODE[connSettings[k]] || connSettings[k])
                             : k === 'RECONCILE_TOLERANCE' ? money(Number(connSettings[k]) || 0, 'GBP', 2)
-                            : k === 'ORDERS_SINCE' ? fmtDate(connSettings[k]) : String(connSettings[k]);
+                            : k === 'ORDERS_SINCE' ? fmtDate(connSettings[k])
+                            : k === 'AUTO_RUN_INTERVAL_MINUTES' ? connSettings[k] + ' minutes' : String(connSettings[k]);
                         dl.append(el('dt', null, lab), el('dd', null, v));
                     });
                     if (dl.childNodes.length) xCard.append(dl);
@@ -1388,6 +1392,8 @@
                         'More orders waiting than this and the run creates nothing at all, not even contacts: that is a widened window, not a backlog.');
                     add('ORDERS_SINCE', 'Only orders since',
                         'A date, written year-month-day. Shopify only gives the last 60 days of orders, so an older date finds nothing.');
+                    add('AUTO_RUN_INTERVAL_MINUTES', 'Auto Run every',
+                        'Minutes between rounds, from 5 to 1440. A round with nothing new costs Xero nothing, so a shorter wait sends new orders sooner. A change applies at once.');
                     add('XERO_SALES_ACCOUNT_CODE', 'Sales account code', '');
                     add('XERO_TAX_TYPE_STANDARD', 'Standard tax type', '');
                     add('XERO_TAX_TYPE_ZERO', 'Zero-rated tax type', '');
