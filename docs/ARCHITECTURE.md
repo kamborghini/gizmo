@@ -79,8 +79,12 @@ shared inbox (`gizmo/mail.py`), Files (`gizmo/files.py`, read as
 (`gizmo/chat.py`, read as `assistant`), SEO and keywords (`gizmo/seo.py`),
 the overview and customer reports (`gizmo/analytics.py`), the scheduler and
 its alerts (`gizmo/scheduler.py`), release notes and requests
-(`gizmo/updates.py`), impact tracking (`gizmo/impact.py`) and backup and
-restore (`gizmo/backup.py`), each with its routes in
+(`gizmo/updates.py`), impact tracking (`gizmo/impact.py`), backup and
+restore (`gizmo/backup.py`), Liability and the chase desk
+(`gizmo/liability.py`), reconciliation with the Xero connect walk
+(`gizmo/reconciliation.py`), the Xero sync settings (`gizmo/xero_sync.py`,
+read as `xerosync`) and the forecast's hooks (`gizmo/forecasting.py`), each
+with its routes in
 `gizmo/routes/` (production's, the Size list's and the order book's too; the
 printed-label routes stay in `add_routes`, their bytes pinned, and so do the
 chat's two, which read the tool list `add_routes` builds from the registry
@@ -243,7 +247,9 @@ can leave a test testing nothing. The guards below make that a failure, and
    binds as it runs cannot move, and the tool refuses it. A heading whose
    whole section moves goes with it; one left over code that is not the
    area's is rewritten to say what is under it, and its text, when it
-   explains the area, goes into the area's module. A description with no areas moves
+   explains the area, goes into the area's module. A heading with a rule
+   above and none below loses its rule to the old file and arrives without
+   one: look for a lone rule after a move. A description with no areas moves
    only routes, for an area that moved earlier. What it does: cut statements whole, keeping their text and order,
    into `gizmo/<area>.py`, and the routes into `gizmo/routes/<area>.py`
    inside `register(mcp, registry)`, which `add_routes` calls where the

@@ -52,7 +52,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/connector` | POST | connector | `_guard` |  | `_team_level` | `copilot.connector_route` | The Xero connector tab's whole API. |
+| `/api/connector` | POST | connector | `_guard` |  | `_team_level` | `gizmo.routes.xero_sync.connector_route` | The Xero connector tab's whole API. |
 
 ## `/api/crm`
 
@@ -129,8 +129,8 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/forecast` | POST | forecast | `_guard` |  | `_team_level` | `copilot.forecast_route` | What the tab shows: the latest run, the last failure if the latest attempt failed, the recent runs, the workbook on file and whether the hook is configured a... |
-| `/api/forecast/workbook` | POST | forecast | `_guard` | max body cap, reads its own body | `_team_level` | `copilot.forecast_workbook_upload_route` | An admin replaces the cash flow workbook. |
+| `/api/forecast` | POST | forecast | `_guard` |  | `_team_level` | `gizmo.routes.forecasting.forecast_route` | What the tab shows: the latest run, the last failure if the latest attempt failed, the recent runs, the workbook on file and whether the hook is configured a... |
+| `/api/forecast/workbook` | POST | forecast | `_guard` | max body cap, reads its own body | `_team_level` | `gizmo.routes.forecasting.forecast_workbook_upload_route` | An admin replaces the cash flow workbook. |
 
 ## `/api/gobo-sizes`
 
@@ -178,8 +178,8 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/liability` | POST | liability | `_guard` |  |  | `copilot.liability_route` |  |
-| `/api/liability/chase` | POST | liability | `_guard` |  |  | `copilot.liability_chase_route` | Stamp an account as chased today. |
+| `/api/liability` | POST | liability | `_guard` |  |  | `gizmo.routes.liability.liability_route` |  |
+| `/api/liability/chase` | POST | liability | `_guard` |  |  | `gizmo.routes.liability.liability_chase_route` | Stamp an account as chased today. |
 
 ## `/api/loans`
 
@@ -283,13 +283,13 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/api/recon/connect-link` | POST | recon | `_guard` | reads its own body | `_team_role` | `copilot.recon_connect_link_route` | Master-only: mint a single-use ticket for the accounts-mailbox consent walk, so nobody has to paste a server secret into a URL. |
-| `/api/recon/disconnect` | POST | recon | `_guard` | reads its own body | `_team_role` | `copilot.recon_disconnect_route` | Disconnect Xero or the accounts mailbox, and mean it. |
-| `/api/recon/exception` | POST | recon | `_guard` |  |  | `copilot.recon_exception_route` |  |
-| `/api/recon/exceptions` | POST | recon | `_guard` |  |  | `copilot.recon_exceptions_route` |  |
-| `/api/recon/status` | POST | recon | `_guard` |  | `_team_role` | `copilot.recon_status_route` |  |
-| `/api/recon/sweep` | POST | recon | `_guard` | rank admin, AI slot |  | `copilot.recon_sweep_route` |  |
-| `/api/recon/xero-link` | POST | recon | `_guard` | reads its own body | `_team_role` | `copilot.recon_xero_link_route` | Master-only: a single-use ticket for the Xero consent walk. |
+| `/api/recon/connect-link` | POST | recon | `_guard` | reads its own body | `_team_role` | `gizmo.routes.reconciliation.recon_connect_link_route` | Master-only: mint a single-use ticket for the accounts-mailbox consent walk, so nobody has to paste a server secret into a URL. |
+| `/api/recon/disconnect` | POST | recon | `_guard` | reads its own body | `_team_role` | `gizmo.routes.reconciliation.recon_disconnect_route` | Disconnect Xero or the accounts mailbox, and mean it. |
+| `/api/recon/exception` | POST | recon | `_guard` |  |  | `gizmo.routes.reconciliation.recon_exception_route` |  |
+| `/api/recon/exceptions` | POST | recon | `_guard` |  |  | `gizmo.routes.reconciliation.recon_exceptions_route` |  |
+| `/api/recon/status` | POST | recon | `_guard` |  | `_team_role` | `gizmo.routes.reconciliation.recon_status_route` |  |
+| `/api/recon/sweep` | POST | recon | `_guard` | rank admin, AI slot |  | `gizmo.routes.reconciliation.recon_sweep_route` |  |
+| `/api/recon/xero-link` | POST | recon | `_guard` | reads its own body | `_team_role` | `gizmo.routes.reconciliation.recon_xero_link_route` | Master-only: a single-use ticket for the Xero consent walk. |
 
 ## `/api/reorder-radar`
 
@@ -409,10 +409,10 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|
-| `/hooks/forecast/ledger` | GET | outside the tab map | own check |  | `_forecast_token_ok` | `copilot.forecast_ledger_hook` | The service reads back who has actually been right, so a run can weigh its sources on their record rather than only on a backtest it computed itself a moment... |
-| `/hooks/forecast/results` | POST | outside the tab map | own check |  | `_forecast_token_ok` | `copilot.forecast_results_hook` | The nightly forecasting service (a second Railway service on this repo, `python -m forecast nightly`) posts each run here. |
-| `/hooks/forecast/shopify` | POST | outside the tab map | own check |  | `_forecast_token_ok` | `copilot.forecast_shopify_hook` | The service's reads of the store, made here with the app's own credential, so the service holds no Shopify credential at all. |
-| `/hooks/forecast/workbook` | GET | outside the tab map | own check |  | `_forecast_token_ok` | `copilot.forecast_workbook_hook` | The service fetches the workbook an admin uploaded in the tab, so the plan lives in one place and a revised sheet reaches the next run. |
+| `/hooks/forecast/ledger` | GET | outside the tab map | own check |  | `_forecast_token_ok` | `gizmo.routes.forecasting.forecast_ledger_hook` | The service reads back who has actually been right, so a run can weigh its sources on their record rather than only on a backtest it computed itself a moment... |
+| `/hooks/forecast/results` | POST | outside the tab map | own check |  | `_forecast_token_ok` | `gizmo.routes.forecasting.forecast_results_hook` | The nightly forecasting service (a second Railway service on this repo, `python -m forecast nightly`) posts each run here. |
+| `/hooks/forecast/shopify` | POST | outside the tab map | own check |  | `_forecast_token_ok` | `gizmo.routes.forecasting.forecast_shopify_hook` | The service's reads of the store, made here with the app's own credential, so the service holds no Shopify credential at all. |
+| `/hooks/forecast/workbook` | GET | outside the tab map | own check |  | `_forecast_token_ok` | `gizmo.routes.forecasting.forecast_workbook_hook` | The service fetches the workbook an admin uploaded in the tab, so the plan lives in one place and a revised sheet reaches the next run. |
 
 ## `/oauth`
 
@@ -424,8 +424,8 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 | `/oauth/gmail/start` | GET | outside the tab map | own check |  |  | `gizmo.routes.mail.gmail_start` |  |
 | `/oauth/google/callback` | GET | outside the tab map | own check |  |  | `copilot.google_callback` |  |
 | `/oauth/google/start` | GET | outside the tab map | own check |  |  | `copilot.google_start` |  |
-| `/oauth/xero/callback` | GET | outside the tab map | own check |  |  | `copilot.xero_callback` |  |
-| `/oauth/xero/start` | GET | outside the tab map | own check |  | `_secret_ok` | `copilot.xero_start` |  |
+| `/oauth/xero/callback` | GET | outside the tab map | own check |  |  | `gizmo.routes.reconciliation.xero_callback` |  |
+| `/oauth/xero/start` | GET | outside the tab map | own check |  | `_secret_ok` | `gizmo.routes.reconciliation.xero_start` |  |
 
 ## `/print`
 

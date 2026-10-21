@@ -762,7 +762,7 @@ def _redact_shop() -> dict:
                       "not erased yet: the archive taken first could not be written")
         return {"wiped": 0, "archive": "", "refused": "archive"}
     wiped = 0
-    stores = (salesdesk.CRM_PATH, mail.MAILBOX_PATH, desk.DISPATCH_STATE_PATH, core.CHASE_LOG_PATH,
+    stores = (salesdesk.CRM_PATH, mail.MAILBOX_PATH, desk.DISPATCH_STATE_PATH, liability.CHASE_LOG_PATH,
               desk.COLLECTIONS_PATH, desk.CUSTOMS_MEMORY_PATH, production.PRODUCTION_STATE_PATH,
               production.PRODUCTION_ARCHIVE_PATH, fileserver.FILES_PATH)
     for path in stores:
@@ -1422,5 +1422,6 @@ from gizmo import mail  # noqa: E402
 from gizmo import production  # noqa: E402
 from gizmo import crm as salesdesk  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import liability  # noqa: E402
 from gizmo import backup  # noqa: E402
 from gizmo import scheduler  # noqa: E402

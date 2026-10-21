@@ -28,12 +28,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `RAILWAY_PROJECT_ID` | `None` | copilot | set by Railway; the volume check runs only there |
 | `SETUP_CODE` | `""` | copilot | set only while first-run setup is needed, then remove; unset locks setup |
 
-## copilot.py - Chase desk: the weekly session of asking credit customers fo
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `CHASE_LOG_PATH` | `"/data/chase_log.json"` | copilot |  |
-
 ## copilot.py - Configuration
 
 | Variable | Default | Read by | Notes |
@@ -44,8 +38,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `APP_BASE_URL` | `""` | copilot |  |
 | `CHAT_CONTEXT_CAP` | `"12000"` | copilot | max chars of page-report context injected into chat |
 | `COPILOT_TOOL_RESULT_CAP` | `"50000"` | copilot |  |
-| `FORECAST_INGEST_TOKEN` | `""` | copilot | shared secret the nightly forecasting service presents to /hooks/forecast/*; empty switches the hooks off |
-| `FORECAST_PATH` | `"/data/forecast.json"` | copilot | the nightly forecasting service's latest run, and the cash flow workbook an admin uploaded (base64), in one store |
 | `LAYOUTS_PATH` | `"/data/layouts.json"` | copilot | each person's arrangement of the cards on a screen |
 | `LOW_STOCK_THRESHOLD` | `"5"` | copilot |  |
 | `MAX_CHAT_CHARS` | `"100000"` | copilot | total chars in a chat request |
@@ -53,9 +45,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `PRODUCT_TREND_MONTHS` | `"12"` | copilot |  |
 | `PROFILE_FIELD_CAP` | `"6000"` | copilot |  |
 | `PROFILE_PATH` | `"/data/store_profile.json"` | copilot |  |
-| `RECON_CACHE_PATH` | `"/data/recon_cache.json"` | copilot |  |
-| `RECON_DOCS_PATH` | `"/data/recon_docs.json"` | copilot |  |
-| `RECON_PATH` | `"/data/recon.json"` | copilot |  |
 | `SHOPIFY_API_KEY` | `None` | copilot |  |
 | `SHOPIFY_API_SECRET` | `None` | copilot |  |
 | `SHOPIFY_CLIENT_ID` | `""` | copilot, server |  |
@@ -63,20 +52,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `SHOPIFY_STORE` | `""` | copilot, server | used to pin session tokens to this shop |
 | `STORE_CONTEXT_CAP` | `"4000"` | copilot |  |
 
-## copilot.py - Page rendering
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `CONNECTOR_TOKEN` | `None` | copilot |  |
-| `CONNECTOR_URL` | `None` | copilot |  |
-
-## copilot.py - Reconciliation stores + the read-only tools the chat is give
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `ANTHROPIC_MODEL_RECON` | `None` | copilot |  |
-
-## copilot.py - Shopify -> Xero connector: a separate, audited Node service 
+## copilot.py - Route registration (mounted onto the existing MCP server app
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
@@ -93,14 +69,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `ZETA_SYNC_PATH` | `"/data/zeta_sync.json"` | copilot |  |
 | `ZETA_SYNC_TOKEN` | `""` | copilot |  |
 | `ZETA_URL` | `""` | copilot |  |
-
-## copilot.py - Unpaid orders on credit terms: the tags that mark them, the 
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `LIABILITY_DEFAULT_TERMS` | `"30"` | copilot |  |
-| `LIABILITY_DUE_SOON_DAYS` | `"7"` | copilot |  |
-| `LIABILITY_TAGS` | `"Purchase order unpaid, Bank transfer unpaid, Procurement...` | copilot |  |
 
 ## gizmo/activity.py - top
 
@@ -207,6 +175,13 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `R2_SECRET_ACCESS_KEY` | `""` | gizmo.files |  |
 | `RAILWAY_PUBLIC_DOMAIN` | `None` | gizmo.files, server |  |
 
+## gizmo/forecasting.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `FORECAST_INGEST_TOKEN` | `""` | gizmo.forecasting | shared secret the nightly forecasting service presents to /hooks/forecast/*; empty switches the hooks off |
+| `FORECAST_PATH` | `"/data/forecast.json"` | gizmo.forecasting | the nightly forecasting service's latest run, and the cash flow workbook an admin uploaded (base64), in one store |
+
 ## gizmo/gate.py - top
 
 | Variable | Default | Read by | Notes |
@@ -231,6 +206,20 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `KNOWLEDGE_PATH` | `"/data/store_knowledge.json"` | gizmo.knowledge |  |
 | `LEARN_MAX_PAGES` | `"12"` | gizmo.knowledge | pages crawled when learning |
 | `LEARN_PAGE_CHARS` | `"3000"` | gizmo.knowledge | text kept per page |
+
+## gizmo/liability.py - Chase desk: the weekly session of asking credit customers fo
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `CHASE_LOG_PATH` | `"/data/chase_log.json"` | gizmo.liability |  |
+
+## gizmo/liability.py - Unpaid orders on credit terms: the tags that mark them, the 
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `LIABILITY_DEFAULT_TERMS` | `"30"` | gizmo.liability |  |
+| `LIABILITY_DUE_SOON_DAYS` | `"7"` | gizmo.liability |  |
+| `LIABILITY_TAGS` | `"Purchase order unpaid, Bank transfer unpaid, Procurement...` | gizmo.liability |  |
 
 ## gizmo/loans.py - Loan units: the projectors that go out to customers, and whe
 
@@ -310,6 +299,15 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `PRODUCTION_LABEL_TAG` | `"IP"` | gizmo.production | order tag that means "in production" |
 | `PRODUCTION_STATE_MAX` | `"1000"` | gizmo.production |  |
 | `PRODUCTION_STATE_PATH` | `"/data/production_state.json"` | gizmo.production |  |
+
+## gizmo/reconciliation.py - Reconciliation stores + the read-only tools the chat is give
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `ANTHROPIC_MODEL_RECON` | `None` | gizmo.reconciliation |  |
+| `RECON_CACHE_PATH` | `"/data/recon_cache.json"` | gizmo.reconciliation |  |
+| `RECON_DOCS_PATH` | `"/data/recon_docs.json"` | gizmo.reconciliation |  |
+| `RECON_PATH` | `"/data/recon.json"` | gizmo.reconciliation |  |
 
 ## gizmo/routes/files.py - top
 
@@ -396,6 +394,13 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `WORK_KEEP` | `"2000"` | gizmo.work |  |
 | `WORK_MIN_SECS` | `"60"` | gizmo.work |  |
 | `WORK_PATH` | `"/data/worklog.json"` | gizmo.work |  |
+
+## gizmo/xero_sync.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `CONNECTOR_TOKEN` | `None` | gizmo.xero_sync |  |
+| `CONNECTOR_URL` | `None` | gizmo.xero_sync |  |
 
 ## eori.py
 
