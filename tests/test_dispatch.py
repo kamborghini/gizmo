@@ -12709,6 +12709,33 @@ def t_an_account_that_does_not_exist_opens_no_tab():
 
 
 @test
+def t_a_chat_turn_runs_the_askers_tools_only():
+    """Each chat turn binds its own asker to the tool gate. Pinned through the
+    chat route before the chat's tools moved onto the chat module: a member
+    without the Customers tab is refused the customer tools inside their own
+    turn, and the turn is handed the chat's tools."""
+    seen = []
+
+    async def fake_run(history, dispatch, tools, model, extra, **kw):
+        seen.append((await dispatch("shopify_get_customer", {"customer_id": 1}), len(tools)))
+        return {"structured": {"summary": "Done."}}
+
+    def go():
+        uid, msess, _pw = ready_user("Nora Nocust", "nora_nocust", role="member")
+        eq(post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["chat", "labels"]}).status_code, 200)
+        saved = assistant.run_chat
+        assistant.run_chat = fake_run
+        try:
+            r = post_s(msess, "/api/chat", {"message": "who bought the most last month?"})
+            eq(r.status_code, 200, r.text)
+        finally:
+            assistant.run_chat = saved
+        out, n_tools = seen[-1]
+        ok("Refused" in out and "customers" in out, "the member's own turn refused the tool: " + out[:160])
+        ok(n_tools > 0, "and the turn was handed the chat's tools")
+    with_accounts(go)
+
+@test
 def t_the_chat_tool_gate_is_bound_per_run():
     """A shared "current asker" slot is only safe while nothing awaits between
     writing and reading it. A chat turn is minutes of awaits, so a second
