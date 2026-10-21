@@ -12742,8 +12742,10 @@ def t_the_chat_tool_gate_is_bound_per_run():
     person starting a chat would re-point it before the first turn's tools
     ran - and that person's permissions would be the ones enforced."""
     src = copilot_source()
-    eq(src.count("run_chat(history, dispatch_for(_who)"), 2,
+    eq(src.count("run_chat(history, assistant.dispatch_for(_who)"), 2,
        "both /api/chat and /api/chat/stream bind the asker to their own run")
+    ok('return _build_dispatch(_chat_registry, lambda: str(uid or ""))' in src,
+       "a fresh dispatcher for each turn, the asker bound inside it; only the registry is shared, set once at boot")
     ok("_chat_actor" not in src, "and no module-level asker slot survives")
 
 
@@ -22026,9 +22028,10 @@ def t_add_routes_holds_routes_and_nothing_it_could_have_shared():
     # The ones that stay say why: each closes over the registry add_routes is
     # handed, or over a value built from it. Two moved with their routes into
     # an area's register(mcp, registry): the desk's _finish_cancel and the
-    # inbox's _mail_orders_for.
-    eq({h.name for h in helpers}, {"dispatch_for", "_fin_search", "_fin_thread", "_fin_bytes"},
-       "a nested helper appeared that is not one of the registry-bound four")
+    # inbox's _mail_orders_for; dispatch_for became the chat module's own, the
+    # registry handed to it once (piece 15).
+    eq({h.name for h in helpers}, {"_fin_search", "_fin_thread", "_fin_bytes"},
+       "a nested helper appeared that is not one of the registry-bound three")
     regs = [n for n in tree.body if getattr(n, "name", "") == "register"]
     eq({h.name for r in regs for h in r.body if isinstance(h, (_ast.FunctionDef, _ast.AsyncFunctionDef))
         and not any("route" in _ast.unparse(d) for d in h.decorator_list)},

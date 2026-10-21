@@ -449,6 +449,22 @@ def _build_dispatch(registry: dict, uid_of: Optional[Callable] = None) -> Callab
     return dispatch
 
 
+
+# Set once by add_routes from the registry the app is handed (the Shopify
+# tools, the SEO, Google and reconciliation tools): what the chat may call.
+_chat_registry: dict = {}
+_chat_tools: list = []
+
+
+def dispatch_for(uid: str) -> Callable:
+    """The tool dispatcher for ONE chat turn, carrying who is asking so the
+    tool gate can refuse what their tabs do not cover. Bound per run, never
+    module-wide: a shared "current asker" is only safe while nothing awaits
+    between writing and reading it, and a chat turn is minutes of awaits -
+    a second person starting a chat would have re-pointed it long before
+    the first turn's tool calls ran."""
+    return _build_dispatch(_chat_registry, lambda: str(uid or ""))
+
 # ---------------------------------------------------------------------------
 # AI usage + cost logging (measurement, to inform pricing). Every model call
 # goes through _xcreate, which records real token counts + estimated cost,

@@ -719,14 +719,10 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
         load_cache=reconciliation._load_recon_cache, write_cache=reconciliation._write_recon_cache,
         load_docs=reconciliation._load_recon_docs, write_docs=reconciliation._write_recon_docs)
     tools = assistant._build_tools(chat_registry)
-    def dispatch_for(uid: str) -> Callable:
-        """The tool dispatcher for ONE chat turn, carrying who is asking so the
-        tool gate can refuse what their tabs do not cover. Bound per run, never
-        module-wide: a shared "current asker" is only safe while nothing awaits
-        between writing and reading it, and a chat turn is minutes of awaits -
-        a second person starting a chat would have re-pointed it long before
-        the first turn's tool calls ran."""
-        return assistant._build_dispatch(chat_registry, lambda: str(uid or ""))
+    # The chat's tools, from the registry this app was handed, kept on the chat
+    # module as the write capabilities are kept on shopify: the chat routes read
+    # them there, and assistant.dispatch_for binds each turn's asker.
+    assistant._chat_registry, assistant._chat_tools = chat_registry, tools
 
     logger.info(f"Copilot enabled — embedded-only; models: fast={claude.MODEL_FAST}, deep={claude.MODEL_DEEP}; "
                 f"effort={claude.ANTHROPIC_EFFORT}, deep effort={claude.ANTHROPIC_EFFORT_DEEP}; max_tokens={claude.MAX_TOKENS}; tools: {len(tools)}")
@@ -781,7 +777,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
             extra += "\n\n" + seo.SEO_KNOWLEDGE
         extra += assistant._page_context_to_system(body.get("context"))
         try:
-            result = await assistant.run_chat(history, dispatch_for(_who), tools, model, extra,
+            result = await assistant.run_chat(history, assistant.dispatch_for(_who), assistant._chat_tools, model, extra,
                                     effort=claude._effort_for(model, deep), deep=deep)
         except RuntimeError as e:
             return _json({"error": str(e)}, 500)
@@ -825,7 +821,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
         async def runner():
             try:
-                result = await assistant.run_chat(history, dispatch_for(_who), tools, model, extra,
+                result = await assistant.run_chat(history, assistant.dispatch_for(_who), assistant._chat_tools, model, extra,
                                         emit=q.put, effort=claude._effort_for(model, deep), deep=deep)
                 assistant._chat_after(result, history, held=team._team_level(_who) < team.ROLE_LEVELS["admin"],
                             by=team._team_name(_who))
