@@ -63,12 +63,16 @@ async def _connector_call(method: str, path: str, params: Optional[dict] = None,
         body = {"error": ("The connector answered with something that is not JSON "
                           "(status " + str(r.status_code) + ").")}
     return r.status_code, body
+
+
+# ---------------------------------------------------------------------------
 # Shopify -> Xero connector: a separate, audited Node service that turns
 # orders into Xero invoices (and refunds into credit notes). It writes to
 # the accounting ledger, so gizmo only ever PROXIES it: the browser talks
 # to this route, this route talks to the service on the private network,
 # and the service's token never leaves the server. Reviews are dry runs
 # (the service persists nothing on them); anything that writes is admin.
+# ---------------------------------------------------------------------------
 _CONNECTOR_READS = {
     "status": ("GET", "/api/status"),
     "runs": ("GET", "/api/runs"),

@@ -1406,7 +1406,8 @@ EORI_MAX_PER_MIN = 20
 
 
 # ---------------------------------------------------------------------------
-# Reconciliation stores + the read-only tools the chat is given
+# The server secret's check: compared in constant time, and a mistyped key is a
+# plain no, never an error.
 # ---------------------------------------------------------------------------
 
 def _secret_ok(given: str, expected: str) -> bool:
@@ -1444,8 +1445,8 @@ def _next_team_colour(users: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Connect walks for the accounts mailbox and Xero: the tickets and states each
-# consent walk is waiting on, held in memory.
+# The accounts mailbox's connect walk: the tickets and states its consent walk
+# is waiting on, held in memory.
 # ---------------------------------------------------------------------------
 _fin_connect_tickets: dict = {}      # ticket -> its expiry and the address asked for (the ACCOUNTS mailbox)
 _fin_expect: dict = {}               # state nonce -> the address that was asked for
@@ -2054,7 +2055,6 @@ def _brand_svg(name: str):
 
 
 _PRINT_ORIGINS = {"https://extensions.shopifycdn.com", "https://admin.shopify.com"}
-# ------------------------------------------------------------------
 
 
 # ---- helpers add_routes kept to itself -------------------------------------

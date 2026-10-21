@@ -19,6 +19,10 @@ from gizmo import ai as claude
 logger = logging.getLogger("shopify_mcp.copilot")
 
 
+# ---------------------------------------------------------------------------
+# Reconciliation stores + the read-only tools the chat is given
+# ---------------------------------------------------------------------------
+
 # Reconciliation engine: exceptions + audit trail, system snapshots, extracted documents.
 RECON_PATH         = os.environ.get("RECON_PATH", "/data/recon.json")
 RECON_CACHE_PATH   = os.environ.get("RECON_CACHE_PATH", "/data/recon_cache.json")

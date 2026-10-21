@@ -300,7 +300,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `PRODUCTION_STATE_MAX` | `"1000"` | gizmo.production |  |
 | `PRODUCTION_STATE_PATH` | `"/data/production_state.json"` | gizmo.production |  |
 
-## gizmo/reconciliation.py - top
+## gizmo/reconciliation.py - Reconciliation stores + the read-only tools the chat is give
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
