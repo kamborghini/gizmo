@@ -33,9 +33,24 @@ from gizmo import mail
 from gizmo import orderbook
 from gizmo import production
 from gizmo import team
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class MailSettingsBody(bodies.Body):
+    """What /api/mail/settings reads (gizmo/bodies.py): a sign-off, a saved
+    reply, the footer's slots, and the logo's upload."""
+    id: bodies.Id = None
+    title: bodies.Text = None
+    text: bodies.Text = None
+    slots: bodies.Fields = None
+    key: bodies.Text = None
+    name: bodies.Text = None
+    size: bodies.Whole = None
+    type: bodies.Text = None
 
 
 def register(mcp, registry):
@@ -1287,7 +1302,7 @@ def register(mcp, registry):
         sign-off is a person's own name, so they own it and need nobody's
         permission. An admin can still set someone else's through the team
         route, by rank, for the person who has left or never filled it in."""
-        err, body, who = await mail._mail_guard(request)
+        err, body, who = await mail._mail_guard(request, model=MailSettingsBody)
         if err:
             return err
         store = mail._load_mail()

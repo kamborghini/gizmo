@@ -12,9 +12,23 @@ from gizmo import activity
 from gizmo import gate
 from gizmo import size_list
 from gizmo import team
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class SizeRuleBody(bodies.Body):
+    """What /api/gobo-sizes/rule reads (gizmo/bodies.py): the model a rule is
+    for, its size or the model on the sheet it is another name for, and the
+    customer's domain."""
+    manufacturer: bodies.Text = None
+    model: bodies.Text = None
+    domain: bodies.Text = None
+    size: bodies.Text = None
+    list_model: bodies.Text = None
+    kind: bodies.Text = None
 
 
 def register(mcp, registry):
@@ -190,6 +204,9 @@ def register(mcp, registry):
         body = await gate._read_json_capped(request)
         if body is None:
             return gate._json({"error": "Request too large."}, 413)
+        why = bodies.refusal(SizeRuleBody, body)
+        if why:
+            return gate._json({"error": why}, 400)
         op = str(body.get("op") or "")
         mfr = str(body.get("manufacturer") or "").strip()[:80]
         model = str(body.get("model") or "").strip()[:120]

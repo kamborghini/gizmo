@@ -11,9 +11,35 @@ from gizmo import loans
 from gizmo import activity
 from gizmo import gate
 from gizmo import team
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class LoansBody(bodies.Body):
+    """What /api/loans reads (gizmo/bodies.py): a unit in the register, a loan
+    out or back, a product search, and the chase threshold."""
+    unit_id: bodies.Id = None
+    loan_id: bodies.Id = None
+    q: bodies.Text = None
+    name: bodies.Text = None
+    model: bodies.Text = None
+    serial: bodies.Text = None
+    notes: bodies.Text = None
+    product_id: bodies.Id = None
+    variant_id: bodies.Id = None
+    sku: bodies.Text = None
+    retired: bodies.Flag = None
+    unretire: bodies.Flag = None
+    who_name: bodies.Text = None
+    phone: bodies.Text = None
+    due_at: bodies.Text = None
+    note: bodies.Text = None
+    crm_person_id: bodies.Id = None
+    crm_org_id: bodies.Id = None
+    chase_days: bodies.Whole = None
 
 
 def register(mcp, registry):
@@ -24,7 +50,7 @@ def register(mcp, registry):
         """Loan projectors: the register of what the shop owns, and where each
         one is. Lending and receiving is the bench's daily job; the register
         itself is an admin's, because it is an asset list."""
-        err, body, who = await gate._guard(request)
+        err, body, who = await gate._guard(request, model=LoansBody)
         if err:
             return err
         op = str(body.get("op") or "board")

@@ -819,7 +819,7 @@ def _crm_erase_links(d: dict, pids: set, orgs_touched=()) -> tuple:
     return erased, threads
 
 # ---- The CRM's door: its routes are in gizmo/routes/crm.py -----------
-async def _crm_guard(request: Request):
+async def _crm_guard(request: Request, model=None):
     """(error_response, body, who). The CRM is buttons in the app's own UI,
     so it uses the same session auth as everything else; the AI never sees
     it. Shaped like _guard, which is what every other door here returns.
@@ -830,7 +830,7 @@ async def _crm_guard(request: Request):
     written, and by the end one route was reading it 101 lines later with
     nothing enforcing the rule. Returning it makes the guarantee
     structural: a handler can only use the caller it was handed."""
-    err, body, who = await gate._guard(request)
+    err, body, who = await gate._guard(request, model=model)
     if err:
         return err, None, ""
     return None, body, who

@@ -31360,6 +31360,61 @@ def t_a_wrong_type_is_refused_by_name_not_a_server_error():
         ("/api/updates", "request", r_updates.UpdatesBody)])
     ok(n > 60, "every field each model names was tried (%d refusals)" % n)
 
+def _scratch_files():
+    """Every file the suite's stores keep, by path, with its bytes' digest."""
+    import hashlib
+    out = {}
+    for dirpath, _dirs, names in os.walk(SCRATCH):
+        for nm in names:
+            p = os.path.join(dirpath, nm)
+            try:
+                with open(p, "rb") as fh:
+                    out[os.path.relpath(p, SCRATCH)] = hashlib.sha256(fh.read()).hexdigest()
+            except OSError:
+                pass
+    return out
+
+@test
+def t_a_wrong_type_is_refused_before_anything_is_kept():
+    """The ten routes that took a field of the wrong kind and kept it as text
+    (the CRM, the Files tree, the live size overrides, the store knowledge, the
+    chase log, the loan register, the accounts file, the privacy log and the
+    feature requests) refuse it at the door, and nothing is written (stage 5)."""
+    from gizmo.routes import crm as r_crm, files as r_files, size_list as r_sizes, knowledge as r_know
+    from gizmo.routes import liability as r_liab, loans as r_loans, mail as r_mail, privacy as r_priv
+    from gizmo.routes import updates as r_updates
+    ensure_auth()
+    before = _scratch_files()
+    for path, body, words in (
+            ("/api/crm/activity", {"op": "add", "subject": {"wrong": 1}}, "The subject sent must be text."),
+            ("/api/crm/contact", {"op": "org_add", "name": {"wrong": 1}}, "The name sent must be text."),
+            ("/api/crm/contact", {"op": "person_add", "name": {"wrong": 1}}, "The name sent must be text."),
+            ("/api/files/folder", {"op": "add", "name": {"wrong": 1}}, "The name sent must be text."),
+            ("/api/gobo-sizes/rule", {"op": "exclude", "model": {"wrong": 1}}, "The model sent must be text."),
+            ("/api/learn", {"op": "save", "knowledge": {"wrong": 1}}, "The knowledge sent must be text."),
+            ("/api/liability/chase", {"key": {"wrong": 1}}, "The key sent must be text."),
+            ("/api/loans", {"op": "unit_save", "name": {"wrong": 1}}, "The name sent must be text."),
+            ("/api/mail/settings", {"op": "sign_off", "text": {"wrong": 1}}, "The text sent must be text."),
+            ("/api/privacy", {"op": "answered", "at": "2026-10-21T09:00:00", "email": {"wrong": 1}},
+             "The email sent must be text."),
+            ("/api/updates", {"op": "request", "title": {"wrong": 1}}, "The title sent must be text.")):
+        r = post(path, body)
+        eq((r.status_code, r.json().get("error")), (400, words), "%s %r" % (path, body))
+    n = _wrong_kinds_refused([
+        ("/api/crm/activity", "add", r_crm.CrmActivityBody),
+        ("/api/crm/contact", "person_update", r_crm.CrmContactBody),
+        ("/api/files/folder", "add", r_files.FolderBody),
+        ("/api/gobo-sizes/rule", "set", r_sizes.SizeRuleBody),
+        ("/api/learn", "save", r_know.KnowledgeBody),
+        ("/api/liability/chase", None, r_liab.ChaseBody),
+        ("/api/loans", "unit_save", r_loans.LoansBody),
+        ("/api/mail/settings", "sign_off", r_mail.MailSettingsBody),
+        ("/api/privacy", "answered", r_priv.PrivacyBody),
+        ("/api/updates", "request", r_updates.UpdatesBody)])
+    ok(n > 100, "every field each model names was tried (%d refusals)" % n)
+    after = _scratch_files()
+    eq(sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k)), [], "nothing was written")
+
 @test
 def t_the_moved_areas_routes_follow_them():
     """Production's, the Size list's and the order book's routes follow their

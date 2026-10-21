@@ -1833,9 +1833,9 @@ _MAIL_NO_SEND = ("You are not set up to send email from here. "
                  "Ask a lead to switch it on in Team.")
 
 # ----- The inbox's door and what its routes share (gizmo/routes/mail.py) -
-async def _mail_guard(request: Request):
+async def _mail_guard(request: Request, model=None):
     """(error_response, body, actor_uid): the one door, for the inbox."""
-    return await gate._guard(request)
+    return await gate._guard(request, model=model)
 
 def _mail_thread_or_404(body: dict):
     t = _load_mail().get("threads", {}).get(str(body.get("id") or ""))

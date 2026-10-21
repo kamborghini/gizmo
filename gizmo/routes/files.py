@@ -21,9 +21,20 @@ from gizmo import activity
 from gizmo import gate
 from gizmo import team
 from gizmo import webdav
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class FolderBody(bodies.Body):
+    """What /api/files/folder reads (gizmo/bodies.py): a folder's name, where
+    it goes, and whether the page wants only what changed."""
+    id: bodies.Id = None
+    name: bodies.Text = None
+    parent_id: bodies.Id = None
+    delta: bodies.Flag = None
 
 
 def register(mcp, registry):
@@ -86,7 +97,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/files/folder", methods=["POST"])
     async def files_folder_route(request: Request):
-        err, body, _who = await fileserver._files_guard(request)
+        err, body, _who = await fileserver._files_guard(request, model=FolderBody)
         if err:
             return err
         op = str(body.get("op") or "")

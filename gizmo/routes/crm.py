@@ -18,9 +18,56 @@ from gizmo import crm as salesdesk
 from gizmo import gate
 from gizmo import mail
 from gizmo import team
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class CrmActivityBody(bodies.Body):
+    """What /api/crm/activity reads (gizmo/bodies.py): an activity's words,
+    when it is due, what it is linked to, who has it, and whether it is done."""
+    id: bodies.Id = None
+    type: bodies.Text = None
+    subject: bodies.Text = None
+    deal_id: bodies.Id = None
+    person_id: bodies.Id = None
+    org_id: bodies.Id = None
+    due_date: bodies.Text = None
+    due_time: bodies.Text = None
+    duration: bodies.Text = None
+    note: bodies.Text = None
+    priority: bodies.Text = None
+    location: bodies.Text = None
+    assignee: bodies.Text = None
+    done: bodies.Flag = None
+
+
+
+class CrmContactBody(bodies.Body):
+    """What /api/crm/contact reads (gizmo/bodies.py): a person's or an
+    organisation's details, their notes, a merge, a bulk delete, a search."""
+    id: bodies.Id = None
+    into: bodies.Id = None
+    ids: bodies.Items = None
+    kind: bodies.Text = None
+    q: bodies.Text = None
+    name: bodies.Text = None
+    label: bodies.Text = None
+    org_id: bodies.Id = None
+    job_title: bodies.Text = None
+    address: bodies.Text = None
+    website: bodies.Text = None
+    emails: bodies.Items = None
+    phones: bodies.Items = None
+    email_labels: bodies.Items = None
+    phone_labels: bodies.Items = None
+    contacts_full: bodies.Flag = None
+    shopify_customer_id: bodies.Id = None
+    custom: bodies.Fields = None
+    text: bodies.Text = None
+    note_id: bodies.Id = None
 
 
 def register(mcp, registry):
@@ -290,7 +337,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/crm/activity", methods=["POST"])
     async def crm_activity_route(request: Request):
-        err, body, actor = await salesdesk._crm_guard(request)
+        err, body, actor = await salesdesk._crm_guard(request, model=CrmActivityBody)
         if err:
             return err
         op = str(body.get("op") or "")
@@ -400,7 +447,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/crm/contact", methods=["POST"])
     async def crm_contact_route(request: Request):
-        err, body, actor = await salesdesk._crm_guard(request)
+        err, body, actor = await salesdesk._crm_guard(request, model=CrmContactBody)
         if err:
             return err
         op = str(body.get("op") or "")

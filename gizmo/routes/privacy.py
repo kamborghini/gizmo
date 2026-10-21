@@ -19,9 +19,20 @@ from gizmo import orderbook
 from gizmo import crm as salesdesk
 from gizmo import team
 from gizmo import privacy
+from gizmo import bodies
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
+
+
+
+class PrivacyBody(bodies.Body):
+    """What /api/privacy reads (gizmo/bodies.py): the request to settle, and
+    the confirmation an erasure's reach was read."""
+    id: bodies.Id = None
+    at: bodies.Text = None
+    email: bodies.Text = None
+    reach: bodies.Text = None
 
 
 def register(mcp, registry):
@@ -93,7 +104,7 @@ def register(mcp, registry):
         each waiting for an admin to erase or stop (see _redact_hold), and the
         data requests to answer. An admin's: erasing is for good, and stopping
         one keeps a customer's records against what Shopify asked."""
-        err, body, who = await gate._guard(request, min_level=team.ROLE_LEVELS["admin"])
+        err, body, who = await gate._guard(request, min_level=team.ROLE_LEVELS["admin"], model=PrivacyBody)
         if err:
             return err
         op = str(body.get("op") or "list")
