@@ -11,6 +11,7 @@ from gizmo import store as jsonstore
 from gizmo import shopify
 
 import copilot as core
+from gizmo import backup
 from gizmo import privacy
 from gizmo import activity
 from gizmo import crm as salesdesk
@@ -70,7 +71,7 @@ def register(mcp, registry):
                 # doing it inline stopped the process serving for as long as
                 # it took - including POST /webhooks/orders, which Shopify
                 # gives 5 seconds before it starts counting failures.
-                await asyncio.to_thread(core._weekly_snapshot, True)
+                await asyncio.to_thread(backup._weekly_snapshot, True)
             except Exception:
                 logger.exception("pre-import snapshot failed")
         d = salesdesk._load_crm()

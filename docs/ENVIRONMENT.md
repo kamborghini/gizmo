@@ -38,20 +38,14 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
-| `ALERTS_MAX` | `"60"` | copilot |  |
-| `ALERTS_PATH` | `"/data/alerts.json"` | copilot | change alerts from scheduled runs |
 | `ANTHROPIC_EFFORT` | `"high"` | copilot |  |
 | `ANTHROPIC_EFFORT_DEEP` | `"max"` | copilot |  |
 | `ANTHROPIC_THINKING` | `"adaptive"` | copilot |  |
 | `APP_BASE_URL` | `""` | copilot |  |
-| `CHANGELOG_PATH` | `os.path.join(os.path.dirname(__file__), "data", "changelo...` | copilot |  |
 | `CHAT_CONTEXT_CAP` | `"12000"` | copilot | max chars of page-report context injected into chat |
 | `COPILOT_TOOL_RESULT_CAP` | `"50000"` | copilot |  |
-| `FEEDBACK_PATH` | `"/data/feedback.json"` | copilot | feature requests from the desk |
 | `FORECAST_INGEST_TOKEN` | `""` | copilot | shared secret the nightly forecasting service presents to /hooks/forecast/*; empty switches the hooks off |
 | `FORECAST_PATH` | `"/data/forecast.json"` | copilot | the nightly forecasting service's latest run, and the cash flow workbook an admin uploaded (base64), in one store |
-| `IMPACT_MAX` | `"100"` | copilot |  |
-| `IMPACT_PATH` | `"/data/impact.json"` | copilot | tracked-action impact log |
 | `LAYOUTS_PATH` | `"/data/layouts.json"` | copilot | each person's arrangement of the cards on a screen |
 | `LOW_STOCK_THRESHOLD` | `"5"` | copilot |  |
 | `MAX_CHAT_CHARS` | `"100000"` | copilot | total chars in a chat request |
@@ -62,22 +56,12 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `RECON_CACHE_PATH` | `"/data/recon_cache.json"` | copilot |  |
 | `RECON_DOCS_PATH` | `"/data/recon_docs.json"` | copilot |  |
 | `RECON_PATH` | `"/data/recon.json"` | copilot |  |
-| `SCHEDULE_CHECK_SECS` | `"900"` | copilot | how often the scheduler wakes to check |
-| `SCHEDULE_PATH` | `"/data/schedule.json"` | copilot | auto-refresh config (off by default) |
 | `SHOPIFY_API_KEY` | `None` | copilot |  |
 | `SHOPIFY_API_SECRET` | `None` | copilot |  |
 | `SHOPIFY_CLIENT_ID` | `""` | copilot, server |  |
 | `SHOPIFY_CLIENT_SECRET` | `""` | copilot, server |  |
 | `SHOPIFY_STORE` | `""` | copilot, server | used to pin session tokens to this shop |
 | `STORE_CONTEXT_CAP` | `"4000"` | copilot |  |
-
-## copilot.py - Impact tracking — "close the loop": snapshot headline metric
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `BACKUP_FILE_MAX` | `str(60 * 1024 * 1024)` | copilot |  |
-| `BACKUP_SNAPSHOT_DIR` | `"/data/snapshots"` | copilot |  |
-| `BACKUP_STATE_PATH` | `"/data/backup_state.json"` | copilot |  |
 
 ## copilot.py - Page rendering
 
@@ -92,14 +76,11 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 |---|---|---|---|
 | `ANTHROPIC_MODEL_RECON` | `None` | copilot |  |
 
-## copilot.py - Scheduled refresh + change alerts. Off by default (automatic
+## copilot.py - Shopify -> Xero connector: a separate, audited Node service 
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
-| `ALERT_EMAIL_FROM` | `"Reactor <onboarding@resend.dev>"` | copilot |  |
-| `ALERT_EMAIL_TO` | `""` | copilot |  |
-| `RESEND_API_KEY` | `""` | copilot |  |
-| `WATCH_PATH` | `"/data/watch.json"` | copilot |  |
+| `RAILWAY_GIT_COMMIT_SHA` | `None` | copilot, gizmo.updates, server |  |
 
 ## copilot.py - Stock bridge: the glass a Mark made consumes flows into the 
 
@@ -120,12 +101,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `LIABILITY_DEFAULT_TERMS` | `"30"` | copilot |  |
 | `LIABILITY_DUE_SOON_DAYS` | `"7"` | copilot |  |
 | `LIABILITY_TAGS` | `"Purchase order unpaid, Bank transfer unpaid, Procurement...` | copilot |  |
-
-## copilot.py - What's new: the release notes that ship WITH the release, an
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `RAILWAY_GIT_COMMIT_SHA` | `None` | copilot, server |  |
 
 ## gizmo/activity.py - top
 
@@ -155,6 +130,14 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `ANALYSIS_CACHE_MAX_BYTES` | `"800000"` | gizmo.analytics | per-entry size guard |
 | `ANALYSIS_CACHE_PATH` | `"/data/analysis_cache.json"` | gizmo.analytics | last result per AI tab |
 | `TREND_MONTHS` | `"24"` | gizmo.analytics |  |
+
+## gizmo/backup.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `BACKUP_FILE_MAX` | `str(60 * 1024 * 1024)` | gizmo.backup |  |
+| `BACKUP_SNAPSHOT_DIR` | `"/data/snapshots"` | gizmo.backup |  |
+| `BACKUP_STATE_PATH` | `"/data/backup_state.json"` | gizmo.backup |  |
 
 ## gizmo/chat.py - top
 
@@ -232,6 +215,13 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `RATE_LIMIT_GLOBAL` | `"150"` | gizmo.gate | AI requests/window (cost ceiling) |
 | `RATE_LIMIT_PER_CLIENT` | `"120"` | gizmo.gate | requests/window/client |
 | `RATE_LIMIT_WINDOW` | `"60"` | gizmo.gate | seconds |
+
+## gizmo/impact.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `IMPACT_MAX` | `"100"` | gizmo.impact |  |
+| `IMPACT_PATH` | `"/data/impact.json"` | gizmo.impact | tracked-action impact log |
 
 ## gizmo/knowledge.py - top
 
@@ -327,6 +317,24 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 |---|---|---|---|
 | `DAV_TRACE` | `None` | gizmo.routes.files |  |
 
+## gizmo/scheduler.py - Scheduled refresh + change alerts. Off by default (automatic
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `ALERT_EMAIL_FROM` | `"Reactor <onboarding@resend.dev>"` | gizmo.scheduler |  |
+| `ALERT_EMAIL_TO` | `""` | gizmo.scheduler |  |
+| `RESEND_API_KEY` | `""` | gizmo.scheduler |  |
+| `WATCH_PATH` | `"/data/watch.json"` | gizmo.scheduler |  |
+
+## gizmo/scheduler.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `ALERTS_MAX` | `"60"` | gizmo.scheduler |  |
+| `ALERTS_PATH` | `"/data/alerts.json"` | gizmo.scheduler | change alerts from scheduled runs |
+| `SCHEDULE_CHECK_SECS` | `"900"` | gizmo.scheduler | how often the scheduler wakes to check |
+| `SCHEDULE_PATH` | `"/data/schedule.json"` | gizmo.scheduler | auto-refresh config (off by default) |
+
 ## gizmo/seo.py - Keyword scraper for arbitrary external URLs (SSRF-guarded) +
 
 | Variable | Default | Read by | Notes |
@@ -372,6 +380,13 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `SESSION_HOURS` | `"24"` | gizmo.team |  |
 | `SESSION_MAX_DAYS` | `"30"` | gizmo.team |  |
 | `USERS_PATH` | `"/data/users.json"` | gizmo.team |  |
+
+## gizmo/updates.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `CHANGELOG_PATH` | `os.path.join(_REPO, "data", "changelog.json")` | gizmo.updates |  |
+| `FEEDBACK_PATH` | `"/data/feedback.json"` | gizmo.updates | feature requests from the desk |
 
 ## gizmo/work.py - Work sessions: clocking in and out, for part-time accounts o
 

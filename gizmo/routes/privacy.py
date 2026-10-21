@@ -12,6 +12,7 @@ from starlette.responses import PlainTextResponse
 from gizmo import store as jsonstore
 
 import copilot as core
+from gizmo import scheduler
 from gizmo import activity
 from gizmo import gate
 from gizmo import orderbook
@@ -42,7 +43,7 @@ def register(mcp, registry):
             return err
         # The hourly retry of an owed erasure lives in the scheduler, and an
         # uninstalled app is not opened, so nothing else may have started it.
-        core._ensure_scheduler(registry)
+        scheduler._ensure_scheduler(registry)
         topic = str(request.headers.get("x-shopify-topic") or "")
         delivery = str(request.headers.get("x-shopify-webhook-id") or "")
         if delivery and not orderbook._webhook_note_delivery(delivery):
@@ -113,7 +114,7 @@ def register(mcp, registry):
                     n += 1
             activity._track(who, "privacy", "stopped every waiting erasure request", str(n))
             notice = ("Stopped " + str(n) + (" request." if n == 1 else " requests.")) + " Nothing was erased."
-            core._spawn_bg(core._send_alert_email(
+            core._spawn_bg(scheduler._send_alert_email(
                 "Reactor: every waiting erasure request was stopped",
                 [name + " stopped every waiting request to erase customers' records (" + str(n) + "), as",
                  "nobody asked for them. Change the app's secret, and give Reactor the new one."]))
@@ -148,7 +149,7 @@ def register(mcp, registry):
                 last = privacy._redact_hold_said.get("stopped")
                 if last is None or time.monotonic() - last >= 6 * 3600:
                     privacy._redact_hold_said["stopped"] = time.monotonic()
-                    core._spawn_bg(core._send_alert_email(
+                    core._spawn_bg(scheduler._send_alert_email(
                         "Reactor: an erasure request was stopped as not asked for",
                         [name + " stopped a request to erase a customer's records, as nobody asked for it.",
                          "Only someone holding the app's secret can send one that did not come from",

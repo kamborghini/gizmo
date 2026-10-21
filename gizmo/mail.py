@@ -98,7 +98,7 @@ async def _mail_loop_health(why: str) -> bool:
     # With the file alone, a failed write meant an email every minute.
     if time.time() - _mail_alert_sent < 86400:
         return False
-    state = core._load_watch()
+    state = scheduler._load_watch()
     last = state.get("mail_error_email_at")
     if last:
         try:
@@ -109,11 +109,11 @@ async def _mail_loop_health(why: str) -> bool:
     _mail_alert_sent = time.time()
     state["mail_error_email_at"] = datetime.now(timezone.utc).isoformat()
     try:
-        core._save_watch(state)
+        scheduler._save_watch(state)
     except Exception:
         logger.exception("mail loop: could not stamp the alert in watch.json; memory still holds it")
     minutes = _mail_fail_ticks * MAIL_LOOP_SECS // 60
-    await core._send_alert_email("Reactor: the shared inbox has stopped syncing",
+    await scheduler._send_alert_email("Reactor: the shared inbox has stopped syncing",
                             [f"Gmail has not synced for {minutes} minutes. New mail, the inbox "
                              "filters and website enquiries are on hold until it does.",
                              "The last error was: " + why[:200],
@@ -2048,4 +2048,5 @@ from gizmo import dispatch as desk  # noqa: E402
 from gizmo import gate  # noqa: E402
 from gizmo import team  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import scheduler  # noqa: E402
 from gizmo import files as fileserver  # noqa: E402

@@ -172,6 +172,10 @@ from gizmo import chat as assistant
 from gizmo import prompts
 from gizmo import seo
 from gizmo import analytics
+from gizmo import scheduler
+from gizmo import updates
+from gizmo import impact
+from gizmo import backup
 import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
@@ -3500,18 +3504,18 @@ def t_app_errors_are_recorded_and_surfaced():
 
 @test
 def t_weekly_snapshot_writes_once_a_week_and_excludes_credentials():
-    copilot.BACKUP_STATE_PATH = SCRATCH + "/backup_state.json"
-    copilot.BACKUP_SNAPSHOT_DIR = SCRATCH + "/snapshots"
-    for f in glob.glob(copilot.BACKUP_SNAPSHOT_DIR + "/*.zip"):
+    backup.BACKUP_STATE_PATH = SCRATCH + "/backup_state.json"
+    backup.BACKUP_SNAPSHOT_DIR = SCRATCH + "/snapshots"
+    for f in glob.glob(backup.BACKUP_SNAPSHOT_DIR + "/*.zip"):
         os.remove(f)
     try:
-        os.remove(copilot.BACKUP_STATE_PATH)
+        os.remove(backup.BACKUP_STATE_PATH)
     except FileNotFoundError:
         pass
-    ok(copilot._weekly_snapshot(), "writes the first time")
-    made = glob.glob(copilot.BACKUP_SNAPSHOT_DIR + "/*.zip")
+    ok(backup._weekly_snapshot(), "writes the first time")
+    made = glob.glob(backup.BACKUP_SNAPSHOT_DIR + "/*.zip")
     eq(len(made), 1, "one snapshot on disk")
-    eq(copilot._weekly_snapshot(), False, "and not again within the week")
+    eq(backup._weekly_snapshot(), False, "and not again within the week")
     import zipfile
     names = zipfile.ZipFile(made[0]).namelist()
     ok(names, "the zip has contents")
@@ -5547,15 +5551,15 @@ def t_shop_redact_takes_a_backup_before_it_erases_anything():
     from datetime import datetime, timedelta, timezone
     orderbook._webhook_seen.clear()
     calls = []
-    real, checker = copilot._build_backup_zip, shopify._install_checker
-    copilot._build_backup_zip = lambda *a, **k: (calls.append(1), real(*a, **k))[1]
+    real, checker = backup._build_backup_zip, shopify._install_checker
+    backup._build_backup_zip = lambda *a, **k: (calls.append(1), real(*a, **k))[1]
 
     async def gone():
         return "gone"
     shopify._install_checker = gone   # Shopify has confirmed the uninstall
-    w = copilot._load_watch()         # ...and the store has been unreadable for two days
+    w = scheduler._load_watch()         # ...and the store has been unreadable for two days
     w["shopify_down"] = (datetime.now(timezone.utc) - timedelta(hours=46)).isoformat()
-    copilot._save_watch(w)
+    scheduler._save_watch(w)
     raw = json.dumps({"shop_domain": "test-store.myshopify.com"}).encode()
     try:
         r = client.post("/webhooks/privacy", content=raw,
@@ -5563,10 +5567,10 @@ def t_shop_redact_takes_a_backup_before_it_erases_anything():
         eq(r.status_code, 200, r.text)
         ok(calls, "a backup was taken before anything was erased")
     finally:
-        copilot._build_backup_zip, shopify._install_checker = real, checker
-        w = copilot._load_watch()
+        backup._build_backup_zip, shopify._install_checker = real, checker
+        w = scheduler._load_watch()
         w.pop("shopify_down", None)
-        copilot._save_watch(w)
+        scheduler._save_watch(w)
 
 
 @test
@@ -8726,7 +8730,7 @@ def t_restore_is_master_only_and_round_trips_the_volume():
         owen, osess, opw = ready_user("Owen", "owen")
         activity._track(APP_AUTH["master"], "team", "marker", "#before-backup")
         activity._events_flush()
-        buf, added = copilot._build_backup_zip()
+        buf, added = backup._build_backup_zip()
         ok(added > 0, "the backup holds files")
         blob = b64.b64encode(buf.getvalue()).decode()
         eq(post_s(osess, "/api/restore", {"zip": blob}).status_code, 403,
@@ -8827,20 +8831,20 @@ def t_restore_never_silently_drops_the_store_it_exists_to_protect():
         ensure_auth()
         # Over the OLD ceiling, inside what the backup carries: must restore.
         big = '{"crm": {"deals": {}, "pad": "' + "x" * (11 * 1024 * 1024) + '"}}'
-        ok(len(big) > 10 * 1024 * 1024 and len(big) < copilot.BACKUP_FILE_MAX)
+        ok(len(big) > 10 * 1024 * 1024 and len(big) < backup.BACKUP_FILE_MAX)
         r = post("/api/restore", {"zip": zip_of(big)})
         eq(r.status_code, 200, r.text)
         eq(r.json()["restored"], 1, "the store the backup exists for comes BACK")
         eq(r.json().get("skipped") or [], [], "and nothing was quietly dropped")
         # Over the shared ceiling: the whole restore refuses, nothing written.
-        saved = copilot.BACKUP_FILE_MAX
-        copilot.BACKUP_FILE_MAX = 1024
+        saved = backup.BACKUP_FILE_MAX
+        backup.BACKUP_FILE_MAX = 1024
         try:
             r2 = post("/api/restore", {"zip": zip_of('{"crm": {"pad": "' + "y" * 5000 + '"}}')})
             eq(r2.status_code, 400, r2.text)
             ok("Nothing has been changed" in r2.json()["error"], r2.text)
         finally:
-            copilot.BACKUP_FILE_MAX = saved
+            backup.BACKUP_FILE_MAX = saved
 
 @test
 def t_the_order_webhook_never_writes_the_crm_from_a_thread():
@@ -8920,9 +8924,9 @@ def t_updates_show_the_running_release_and_take_requests():
                     {"kind": "fixed", "text": "Apostrophes read as apostrophes."}]},
                 {"date": "2026-08-01", "items": [{"kind": "improved", "text": "Faster board."}]},
                 {"date": "bad", "items": []}]}, fh)
-        saved = copilot.CHANGELOG_PATH
-        copilot.CHANGELOG_PATH = cl
-        copilot._changelog_cache["mtime"] = None
+        saved = updates.CHANGELOG_PATH
+        updates.CHANGELOG_PATH = cl
+        updates._changelog_cache["mtime"] = None
         try:
             r = post("/api/updates", {}).json()
             eq([x["date"] for x in r["releases"]], ["2026-08-24", "2026-08-01"],
@@ -8950,8 +8954,8 @@ def t_updates_show_the_running_release_and_take_requests():
             eq(after["state"], "planned")
             eq(after["note"], "next week")
         finally:
-            copilot.CHANGELOG_PATH = saved
-            copilot._changelog_cache["mtime"] = None
+            updates.CHANGELOG_PATH = saved
+            updates._changelog_cache["mtime"] = None
     with_accounts(go)
 
 @test
@@ -8963,10 +8967,10 @@ def t_the_release_notes_are_the_repos_own():
     import json as _j
     ok(os.environ.get("CHANGELOG_PATH") is None, "the default is what is read here")
     repo = os.path.join(HERE, "data", "changelog.json")
-    ok(os.path.exists(copilot.CHANGELOG_PATH) and os.path.samefile(copilot.CHANGELOG_PATH, repo),
-       "the default is the repository's changelog: " + copilot.CHANGELOG_PATH)
-    copilot._changelog_cache["mtime"] = None
-    notes = copilot._load_changelog()
+    ok(os.path.exists(updates.CHANGELOG_PATH) and os.path.samefile(updates.CHANGELOG_PATH, repo),
+       "the default is the repository's changelog: " + updates.CHANGELOG_PATH)
+    updates._changelog_cache["mtime"] = None
+    notes = updates._load_changelog()
     eq([r.get("title") for r in notes], [r.get("title") for r in _j.load(open(repo, encoding="utf-8"))["releases"]],
        "and the notes loaded are its releases")
 
@@ -8982,27 +8986,27 @@ def t_the_backup_carries_the_repos_data():
     want = sorted("repo-data/" + n for n in os.listdir(repo)
                   if os.path.isfile(os.path.join(repo, n)) and n.lower().endswith((".json", ".jsonl", ".csv", ".bak")))
     ok(len(want) >= 4, "the repository has data files to carry: " + str(want))
-    buf, _added = copilot._build_backup_zip()
+    buf, _added = backup._build_backup_zip()
     names = _zf.ZipFile(_io.BytesIO(buf.getvalue()) if hasattr(buf, "getvalue") else buf).namelist()
     eq([n for n in want if n not in names], [], "every one of them is in the backup")
 
 @test
 def t_updates_survive_a_missing_or_broken_changelog():
     """Notes are notes: a missing or corrupt file costs the panel, never the app."""
-    saved = copilot.CHANGELOG_PATH
-    copilot._changelog_cache["mtime"] = None
+    saved = updates.CHANGELOG_PATH
+    updates._changelog_cache["mtime"] = None
     try:
-        copilot.CHANGELOG_PATH = SCRATCH + "/no-such-changelog.json"
-        eq(copilot._load_changelog(), [])
+        updates.CHANGELOG_PATH = SCRATCH + "/no-such-changelog.json"
+        eq(updates._load_changelog(), [])
         bad = SCRATCH + "/broken-changelog.json"
         with open(bad, "w", encoding="utf-8") as fh:
             fh.write("{not json")
-        copilot.CHANGELOG_PATH = bad
-        copilot._changelog_cache["mtime"] = None
-        eq(copilot._load_changelog(), [], "a corrupt file is empty notes, not a 500")
+        updates.CHANGELOG_PATH = bad
+        updates._changelog_cache["mtime"] = None
+        eq(updates._load_changelog(), [], "a corrupt file is empty notes, not a 500")
     finally:
-        copilot.CHANGELOG_PATH = saved
-        copilot._changelog_cache["mtime"] = None
+        updates.CHANGELOG_PATH = saved
+        updates._changelog_cache["mtime"] = None
 
 @test
 def t_backup_is_exhaustive_by_construction():
@@ -9012,7 +9016,7 @@ def t_backup_is_exhaustive_by_construction():
     copilot.py and every module split out of it: walking copilot.py alone, a
     store stopped being checked the moment its area moved."""
     import importlib
-    data_dir = os.path.dirname(copilot.SCHEDULE_PATH)
+    data_dir = os.path.dirname(scheduler.SCHEDULE_PATH)
     excluded = {os.path.basename(desk.WO_SECRET_PATH),
                 os.path.basename(team.SESSIONS_PATH)}
     misses, checked, seen = [], set(), set()
@@ -9055,7 +9059,7 @@ def t_backup_carries_labels_and_restore_returns_them():
             import base64 as b64
             import zipfile as zz
             import io as iio
-            buf, added = copilot._build_backup_zip()
+            buf, added = backup._build_backup_zip()
             names = zz.ZipFile(iio.BytesIO(buf.getvalue())).namelist()
             ok("volume-labels/104239.json" in names, "dispatch labels ride in the backup")
             blob = b64.b64encode(buf.getvalue()).decode()
@@ -9110,7 +9114,7 @@ def t_backup_manifest_and_restore_clock_normalisation():
             d["files"][done["id"]]["trashed_at"] = "2026-07-01T00:00:00+00:00" # "expired" trash
             d["doomed"] = ["ghost/stale-key.pdf"]
             fileserver._write_files(d)
-            buf, _ = copilot._build_backup_zip()
+            buf, _ = backup._build_backup_zip()
             man = json.loads(zz.ZipFile(iio.BytesIO(buf.getvalue())).read("manifest.json"))
             ok(man.get("built_at", "").startswith("20"), "the backup names its build time")
             ok(any(i["name"] == "volume/files.json" for i in man["included"]),
@@ -9161,7 +9165,7 @@ def t_backup_caps_labels_to_the_newest_sixty():
                     fh.write("{}")
                 os.utime(p, (1700000000 + i, 1700000000 + i))
                 made.append(p)
-            buf, _ = copilot._build_backup_zip()
+            buf, _ = backup._build_backup_zip()
             z = zz.ZipFile(iio.BytesIO(buf.getvalue()))
             labels = [n for n in z.namelist() if n.startswith("volume-labels/")]
             eq(len(labels), 60, "newest sixty ride along")
@@ -9595,7 +9599,7 @@ def t_mail_backup_includes_the_board_but_never_the_token():
         mail._write_mail(mail._load_mail())
         _gm.save_connection("rt-secret", MBOX)
         import io, zipfile
-        buf, _n = copilot._build_backup_zip()
+        buf, _n = backup._build_backup_zip()
         names = [os.path.basename(n) for n in zipfile.ZipFile(buf).namelist()]
         ok("mailbox.json" in names, "who owns which email survives a move")
         ok("gmail_oauth.json" not in names, "the mailbox credential never leaves")
@@ -15055,7 +15059,7 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
     so forgeries cannot flood the privacy log or the email allowance."""
     from datetime import datetime, timedelta, timezone
     orderbook._webhook_seen.clear()
-    saved = (shopify._install_checker, copilot._spawn_bg, copilot._build_backup_zip)
+    saved = (shopify._install_checker, copilot._spawn_bg, backup._build_backup_zip)
     spawned = []
 
     def spawn(coro):
@@ -15068,7 +15072,7 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
         return verdict["v"]
     shopify._install_checker, copilot._spawn_bg = checker, spawn
     copilot._shop_redact_said.clear()
-    saved_watch = copilot._load_watch()
+    saved_watch = scheduler._load_watch()
     raw = json.dumps({"shop_id": 1, "shop_domain": "test-store.myshopify.com"}).encode()
 
     def seed():
@@ -15083,12 +15087,12 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
         return privacy._load_privacy_log().get("shop_owed")
 
     def down(hours):
-        w = copilot._load_watch()
+        w = scheduler._load_watch()
         if hours is None:
             w.pop("shopify_down", None)
         else:
             w["shopify_down"] = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-        copilot._save_watch(w)
+        scheduler._save_watch(w)
         return w.get("shopify_down")
 
     def mails():
@@ -15131,14 +15135,14 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
 
         def no_disk(*a, **k):
             raise OSError("volume full")
-        copilot._build_backup_zip = no_disk
+        backup._build_backup_zip = no_disk
         spawned.clear()
         eq(redact("rc1-c").status_code, 200)
         ok(os.path.isfile(salesdesk.CRM_PATH), "no archive, no erasure")
         ok(isinstance(owed(), dict), "still owed")
         ok(any("not erased" in a["subject"] for a in mails()), mails())
-        copilot._build_backup_zip = saved[2]
-        eq(run(copilot._shop_redact_retry(copilot._load_watch().get("shopify_down"))), "erased",
+        backup._build_backup_zip = saved[2]
+        eq(run(copilot._shop_redact_retry(scheduler._load_watch().get("shopify_down"))), "erased",
            "the next hour, with the disk back, it erases")
         ok(not os.path.isfile(salesdesk.CRM_PATH), "a confirmed uninstall with an archive erases")
         eq(owed(), None, "and nothing is owed")
@@ -15152,17 +15156,17 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
         eq(redact("rc1-d").status_code, 200)
         ok(os.path.isfile(salesdesk.CRM_PATH) and isinstance(owed(), dict), "not erased, owed")
         shopify._install_checker = checker
-        copilot._save_watch(["not", "an", "object"])
+        scheduler._save_watch(["not", "an", "object"])
         eq(redact("rc1-e").status_code, 200, "answered, not a crash")
         ok(os.path.isfile(salesdesk.CRM_PATH), "and not erased")
         # The watchdog tries it every hour, against its own record of the outage.
         src = copilot_source()
-        ok('await _shop_redact_retry(state.get("shopify_down"))' in src, "the hourly tick tries what is owed")
+        ok('await core._shop_redact_retry(state.get("shopify_down"))' in src, "the hourly tick tries what is owed")
         ok("_ensure_scheduler(registry)" in src.split("async def privacy_webhook", 1)[1][:1500],
            "and a privacy request starts the scheduler, as an uninstalled app is never opened")
         # A request that cannot be recorded is sent back for Shopify to retry.
         copilot._shop_owed_set(None)
-        copilot._save_watch({})
+        scheduler._save_watch({})
         verdict["v"] = "unknown"
         good = open(privacy.PRIVACY_LOG_PATH, "rb").read()
         open(privacy.PRIVACY_LOG_PATH, "w").write("{not json")     # a log that no longer parses
@@ -15175,11 +15179,11 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
             jsonstore._json_cache.clear()
             jsonstore._poisoned_stores.discard(privacy.PRIVACY_LOG_PATH)
     finally:
-        shopify._install_checker, copilot._spawn_bg, copilot._build_backup_zip = saved
+        shopify._install_checker, copilot._spawn_bg, backup._build_backup_zip = saved
         orderbook._webhook_seen.clear()
         copilot._shop_redact_said.clear()
         copilot._shop_owed_set(None)
-        copilot._save_watch(saved_watch if isinstance(saved_watch, dict) else {})
+        scheduler._save_watch(saved_watch if isinstance(saved_watch, dict) else {})
         try:
             os.remove(salesdesk.CRM_PATH)
         except FileNotFoundError:
@@ -15343,13 +15347,13 @@ def t_a_members_notes_wait_for_an_admin_before_any_answer_reads_them():
     waits, read by nobody, until an admin keeps it; a member may only tick
     off, reopen or dismiss a follow-up."""
     saved = _ws_stores()
-    saved_imp, real_snap = copilot.IMPACT_PATH, copilot._impact_snapshot
-    copilot.IMPACT_PATH = SCRATCH + "/impact_" + secrets.token_hex(3) + ".json"
+    saved_imp, real_snap = impact.IMPACT_PATH, impact._impact_snapshot
+    impact.IMPACT_PATH = SCRATCH + "/impact_" + secrets.token_hex(3) + ".json"
 
     async def fake_snap(reg):
         return {"at": "2026-09-24T10:00:00+00:00", "revenue_28d": 100.0}
-    copilot._impact_snapshot = fake_snap
-    copilot._impact_snap_cache.clear()
+    impact._impact_snapshot = fake_snap
+    impact._impact_snap_cache.clear()
 
     def go():
         ensure_auth()
@@ -15414,7 +15418,7 @@ def t_a_members_notes_wait_for_an_admin_before_any_answer_reads_them():
         item4 = post("/api/impact", {"op": "add", "text": "Raised the trade price list"}).json()["item"]
         for op in ("conclude", "delete"):
             eq(post_s(msess, "/api/impact", {"op": op, "id": item4["id"]}).status_code, 403, op)
-        ok(any(x["id"] == item4["id"] and x.get("status") != "concluded" for x in copilot._load_impact()),
+        ok(any(x["id"] == item4["id"] and x.get("status") != "concluded" for x in impact._load_impact()),
            "the admin's change is untouched")
         # A member cannot reopen a dismissed follow-up, nor one of their own
         # that an admin never kept.
@@ -15459,8 +15463,8 @@ def t_a_members_notes_wait_for_an_admin_before_any_answer_reads_them():
         with_accounts(go)
     finally:
         _ws_restore(saved)
-        copilot.IMPACT_PATH, copilot._impact_snapshot = saved_imp, real_snap
-        copilot._impact_snap_cache.clear()
+        impact.IMPACT_PATH, impact._impact_snapshot = saved_imp, real_snap
+        impact._impact_snap_cache.clear()
 
 
 @test
@@ -15608,12 +15612,12 @@ def t_restoring_the_pre_redact_archive_does_not_erase_again():
         ensure_auth()
         old = (datetime.now(timezone.utc) - timedelta(hours=46)).isoformat()
         copilot._shop_owed_set({"since": old, "tries": 0})
-        w = copilot._load_watch(); w["shopify_down"] = old; copilot._save_watch(w)
+        w = scheduler._load_watch(); w["shopify_down"] = old; scheduler._save_watch(w)
         privacy._redact_hold_write(lambda hs: [{"id": "hbefore", "email": "before@example.com", "received": old}])
-        buf, _added = copilot._build_backup_zip()
+        buf, _added = backup._build_backup_zip()
         blob = b64.b64encode(buf.getvalue()).decode()
         copilot._shop_owed_set(None)                     # settled since
-        w = copilot._load_watch(); w.pop("shopify_down", None); copilot._save_watch(w)
+        w = scheduler._load_watch(); w.pop("shopify_down", None); scheduler._save_watch(w)
         # Since the backup: the waiting one was stopped (as any settlement is,
         # with a decision recorded), and a new one arrived.
         privacy._privacy_decision("before@example.com", "", "stopped", "Ada")
@@ -15621,7 +15625,7 @@ def t_restoring_the_pre_redact_archive_does_not_erase_again():
         r = post("/api/restore", {"zip": blob})
         eq(r.status_code, 200, r.text[:200])
         eq(privacy._load_privacy_log().get("shop_owed"), None, "nothing owed comes back with the archive")
-        eq(copilot._load_watch().get("shopify_down"), None, "nor the old outage")
+        eq(scheduler._load_watch().get("shopify_down"), None, "nor the old outage")
         eq([h["id"] for h in privacy._held_requests()], ["hafter"],
            "the customer erasures waiting now stay, and a settled one does not come back")
         privacy._redact_hold_write(lambda hs: [])
@@ -15629,7 +15633,7 @@ def t_restoring_the_pre_redact_archive_does_not_erase_again():
         # and an erasure confirmed since it is owed again.
         li = login("cameron", MASTER_PW)
         APP_AUTH["session"], APP_AUTH["master"] = li.json()["session"], li.json()["me"]["id"]
-        buf, _added = copilot._build_backup_zip()
+        buf, _added = backup._build_backup_zip()
         blob = b64.b64encode(buf.getvalue()).decode()
         privacy._privacy_note("customers/redact", "gone.since@example.com", "", "erased: confirmed by Ada")
         privacy._privacy_decision("gone.since@example.com", "", "erased", "Ada")
@@ -15645,7 +15649,7 @@ def t_restoring_the_pre_redact_archive_does_not_erase_again():
         APP_AUTH["session"], APP_AUTH["master"] = li.json()["session"], li.json()["me"]["id"]
         # Onto a fresh volume (no live log at all), the backup's waiting requests stay.
         privacy._redact_hold_write(lambda hs: [{"id": "hfresh", "email": "fresh@example.com", "received": old}])
-        buf, _added = copilot._build_backup_zip()
+        buf, _added = backup._build_backup_zip()
         blob = b64.b64encode(buf.getvalue()).decode()
         os.remove(privacy.PRIVACY_LOG_PATH)
         jsonstore._json_cache.clear()
@@ -15658,7 +15662,7 @@ def t_restoring_the_pre_redact_archive_does_not_erase_again():
         for k in ("pending", "decisions"):
             privacy._redact_hold_write(lambda xs: [], key=k)
         privacy._privacy_decision("before.backup@example.com", "", "erased", "Ada")
-        buf, _added = copilot._build_backup_zip()
+        buf, _added = backup._build_backup_zip()
         blob = b64.b64encode(buf.getvalue()).decode()
         r = post("/api/restore", {"zip": blob})
         eq(r.status_code, 200, r.text[:200])
@@ -15669,7 +15673,7 @@ def t_restoring_the_pre_redact_archive_does_not_erase_again():
         privacy._redact_hold_write(lambda hs: [])
         # An unreadable live log is what the restore repairs: the backup's lists stay.
         privacy._redact_hold_write(lambda hs: [{"id": "hin", "email": "in.backup@example.com", "received": old}])
-        buf, _added = copilot._build_backup_zip()
+        buf, _added = backup._build_backup_zip()
         blob = b64.b64encode(buf.getvalue()).decode()
         open(privacy.PRIVACY_LOG_PATH, "w").write("{not json")
         jsonstore._json_cache.clear()
@@ -15700,7 +15704,7 @@ def t_a_signed_customer_redact_waits_for_an_admin():
     run out. Nothing is erased without an admin."""
     from datetime import datetime, timedelta, timezone
     orderbook._webhook_seen.clear()
-    saved = (shopify._customer_checker, copilot._spawn_bg, copilot._send_alert_email)
+    saved = (shopify._customer_checker, copilot._spawn_bg, scheduler._send_alert_email)
     spawned, sent_mail, queued = [], {"ok": True}, []
 
     def spawn(coro):
@@ -15726,7 +15730,7 @@ def t_a_signed_customer_redact_waits_for_an_admin():
 
     async def checker(cid, email):
         return "live" if email in live_for["addrs"] else ("unknown" if email == "unsure@example.com" else "gone")
-    copilot._spawn_bg, shopify._customer_checker, copilot._send_alert_email = spawn, checker, send
+    copilot._spawn_bg, shopify._customer_checker, scheduler._send_alert_email = spawn, checker, send
     privacy._redact_hold_said.clear()
 
     def held():
@@ -15749,7 +15753,7 @@ def t_a_signed_customer_redact_waits_for_an_admin():
         ensure_auth()
         for k in ("held", "stopped", "asks", "decisions"):
             privacy._redact_hold_write(lambda xs: [], key=k)
-        jsonstore._write_json_store(copilot.ALERTS_PATH, None, [])
+        jsonstore._write_json_store(scheduler.ALERTS_PATH, None, [])
         _a, msess, _p = ready_user("Mo Member", "mo_priv", role="member")
         _b, asess, _q = ready_user("Ada Admin", "ada_priv", role="admin")
         d = salesdesk._load_crm()
@@ -15765,7 +15769,7 @@ def t_a_signed_customer_redact_waits_for_an_admin():
         ok(still_there("forged@example.com"), "nothing is erased on the signature alone")
         eq([h["email"] for h in held()], ["forged@example.com"], "it waits for an admin")
         eq(sum(1 for n, _ in spawned if n == "_redact_hold_check"), 1, "Shopify is asked about the customer")
-        ok(any(a.get("metric") == privacy._PRIVACY_ALERT for a in copilot._load_alerts() if isinstance(a, dict)),
+        ok(any(a.get("metric") == privacy._PRIVACY_ALERT for a in scheduler._load_alerts() if isinstance(a, dict)),
            "the app says so")
         ra(privacy._redact_hold_check(held()[0]["id"]))
         eq(held()[0]["shopify"], "gone", "what Shopify said is kept for the admin")
@@ -15844,12 +15848,12 @@ def t_a_signed_customer_redact_waits_for_an_admin():
         # Reminded as the thirty days run out, once a day, in the app too.
         privacy._redact_hold_write(lambda hs: [{**x, "received": (datetime.now(timezone.utc) - timedelta(days=22)).isoformat()} for x in hs])
         privacy._redact_hold_said.clear()
-        jsonstore._write_json_store(copilot.ALERTS_PATH, None, [])     # dismissed by someone
+        jsonstore._write_json_store(scheduler.ALERTS_PATH, None, [])     # dismissed by someone
         spawned.clear()
         ra(privacy._redact_hold_due())
         ra(privacy._redact_hold_due())
         eq(sum(1 for a in mails() if "still waiting" in a["subject"]), 1, "a reminder, once a day")
-        ok(any(a.get("metric") == privacy._PRIVACY_ALERT for a in copilot._load_alerts() if isinstance(a, dict)),
+        ok(any(a.get("metric") == privacy._PRIVACY_ALERT for a in scheduler._load_alerts() if isinstance(a, dict)),
            "and the notice is back in the app")
         # An email that did not go is not counted as gone.
         post_s(asess, "/api/privacy", {"op": "stop", "id": held()[0]["id"]})
@@ -15958,7 +15962,7 @@ def t_a_signed_customer_redact_waits_for_an_admin():
     finally:
         for c in queued:
             c.close()
-        shopify._customer_checker, copilot._spawn_bg, copilot._send_alert_email = saved
+        shopify._customer_checker, copilot._spawn_bg, scheduler._send_alert_email = saved
         for k in ("held", "stopped", "asks"):
             privacy._redact_hold_write(lambda xs: [], key=k)
         privacy._redact_hold_said.clear()
@@ -20602,7 +20606,7 @@ def t_a_run_that_needs_attention_is_reported_once_and_only_once():
     run every scheduler tick would teach them to filter it."""
     ensure_auth()
     sent = []
-    real_call, real_mail = copilot._connector_call, copilot._send_alert_email
+    real_call, real_mail = copilot._connector_call, scheduler._send_alert_email
     async def fake_mail(subject, lines):
         sent.append((subject, list(lines)))
         return True
@@ -20612,38 +20616,38 @@ def t_a_run_that_needs_attention_is_reported_once_and_only_once():
     async def fake(method, path, params=None):
         return 200, health
     copilot._connector_call = fake
-    copilot._send_alert_email = fake_mail
+    scheduler._send_alert_email = fake_mail
     old_url = os.environ.get("CONNECTOR_URL")
     os.environ["CONNECTOR_URL"] = "http://conn.railway.internal:8899"
-    st = copilot._load_watch()
+    st = scheduler._load_watch()
     try:
-        _run(copilot._connector_watch())
+        _run(scheduler._connector_watch())
         eq(len(sent), 1, "the first tick reports it")
         ok("quarantined" in "\n".join(sent[0][1]), "and says what is wrong")
         ok("Auto Run is ON" in "\n".join(sent[0][1]),
            "and whether anything will retry it")
-        _run(copilot._connector_watch())
+        _run(scheduler._connector_watch())
         eq(len(sent), 1, "the same run is not reported again")
 
         health["lastRunId"] = "run-2"
-        _run(copilot._connector_watch())
+        _run(scheduler._connector_watch())
         eq(len(sent), 2, "but the NEXT bad run is")
 
         health["needsAttention"] = False
         health["lastRunId"] = "run-3"
-        _run(copilot._connector_watch())
+        _run(scheduler._connector_watch())
         eq(len(sent), 2, "and a clean run says nothing at all")
         # The banner draws tab_label, metric and pct and reads nothing else.
         # An alert built from other keys renders as a dot and a tilde: a row
         # saying something is wrong and refusing to say what.
-        a = copilot._load_alerts()[0]
+        a = scheduler._load_alerts()[0]
         for field in ("tab", "tab_label", "metric"):
             ok(a.get(field), "the alert carries " + field + ", or the banner is blank")
         ok("quarantined" in a["metric"], "and the metric says what is actually wrong")
     finally:
         copilot._connector_call = real_call
-        copilot._send_alert_email = real_mail
-        copilot._save_watch(st)
+        scheduler._send_alert_email = real_mail
+        scheduler._save_watch(st)
         if old_url is None:
             os.environ.pop("CONNECTOR_URL", None)
         else:
@@ -21187,14 +21191,14 @@ def t_a_legacy_alert_record_still_says_what_it_meant():
     records rendered as a dot and a tilde: a row saying something was wrong
     and refusing to say what. They are read as what they meant, at load, so
     every consumer sees the same record."""
-    copilot._write_alerts([
+    scheduler._write_alerts([
         {"id": "old1", "at": "2026-09-01T00:00:00+00:00", "status": "new",
          "kind": "connector", "title": "Reviewed 21 orders, wrote nothing", "detail": "run aborted"},
         {"id": "old2", "at": "2026-09-01T00:00:00+00:00", "status": "new", "kind": "labels", "detail": "only a detail"},
         {"id": "new1", "at": "2026-09-02T00:00:00+00:00", "status": "new",
          "tab": "seo", "tab_label": "SEO", "metric": "Clicks", "pct": 12},
     ])
-    a, b, c = copilot._load_alerts()
+    a, b, c = scheduler._load_alerts()
     eq(a["tab"], "connector", "a legacy record's kind becomes its tab")
     eq(a["tab_label"], "Xero sync", "with the label the banner shows for that tab")
     eq(a["metric"], "Reviewed 21 orders, wrote nothing", "and its title becomes the metric")
@@ -21589,7 +21593,7 @@ def t_the_pre_redact_archive_does_not_live_forever():
     an uninstall that was a mistake. Nothing deleted it, so the erasure was met
     by moving the data into a zip and keeping it indefinitely."""
     import time as _t
-    data_dir = os.path.dirname(copilot.SCHEDULE_PATH) or "/data"
+    data_dir = os.path.dirname(scheduler.SCHEDULE_PATH) or "/data"
     old = os.path.join(data_dir, "pre-redact-backup-20250101000000.zip")
     new = os.path.join(data_dir, "pre-redact-backup-20260907000000.zip")
     for p in (old, new):
@@ -22129,7 +22133,7 @@ def t_the_stores_are_measured_not_guessed():
     audit could not say whether that costs anything, because the volume is
     not visible from the code. Now the app says it: sizes at boot and in
     Settings, with the read cost of anything over a megabyte."""
-    data_dir = os.path.dirname(copilot.SCHEDULE_PATH)
+    data_dir = os.path.dirname(scheduler.SCHEDULE_PATH)
     big = os.path.join(data_dir, "measured_big.json")
     open(big, "w", encoding="utf-8").write(json.dumps({"rows": [{"i": i, "pad": "x" * 40} for i in range(25000)]}))
     try:
@@ -22349,9 +22353,9 @@ def t_the_mail_loop_says_when_the_inbox_has_stopped():
     async def alert(subject, lines):
         emails.append((subject, " ".join(lines)))
         return True
-    saved = (copilot._send_alert_email, mail._mail_fail_ticks)
-    copilot._send_alert_email = alert
-    w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
+    saved = (scheduler._send_alert_email, mail._mail_fail_ticks)
+    scheduler._send_alert_email = alert
+    w = scheduler._load_watch(); w.pop("mail_error_email_at", None); scheduler._save_watch(w)
     mail._mail_fail_ticks = 0
     try:
         for _ in range(mail.MAIL_ALERT_AFTER_TICKS - 1):
@@ -22363,9 +22367,9 @@ def t_the_mail_loop_says_when_the_inbox_has_stopped():
         eq(run_async(mail._mail_loop_health("")), False)
         eq(mail._mail_fail_ticks, 0, "a good sync starts the count again")
     finally:
-        copilot._send_alert_email, mail._mail_fail_ticks = saved
+        scheduler._send_alert_email, mail._mail_fail_ticks = saved
         mail._mail_alert_sent = 0.0
-        w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
+        w = scheduler._load_watch(); w.pop("mail_error_email_at", None); scheduler._save_watch(w)
 
 
 @test
@@ -22489,14 +22493,14 @@ def t_the_mail_loop_itself_raises_the_alarm_and_never_floods():
         st["sync_error"] = "invalid_grant"
         mail._write_mail(st)
         return "invalid_grant"
-    saved = (copilot._send_alert_email, mail._mail_fail_ticks, mail._mail_alert_sent,
+    saved = (scheduler._send_alert_email, mail._mail_fail_ticks, mail._mail_alert_sent,
              mail._mail_sync_now, _gm.connected)
-    copilot._send_alert_email, mail._mail_sync_now = alert, failing_sync
+    scheduler._send_alert_email, mail._mail_sync_now = alert, failing_sync
     _gm.connected = lambda *a, **k: True
     mail._mail_fail_ticks, mail._mail_alert_sent = 0, 0.0
-    w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
+    w = scheduler._load_watch(); w.pop("mail_error_email_at", None); scheduler._save_watch(w)
     def go():
-        jsonstore._poisoned_stores.add(copilot.WATCH_PATH)      # watch.json cannot be written
+        jsonstore._poisoned_stores.add(scheduler.WATCH_PATH)      # watch.json cannot be written
         for _ in range(mail.MAIL_ALERT_AFTER_TICKS + 10):
             run_async(mail._mail_loop_tick())
         eq(emails, ["Reactor: the shared inbox has stopped syncing"],
@@ -22504,11 +22508,11 @@ def t_the_mail_loop_itself_raises_the_alarm_and_never_floods():
     try:
         with_mail(go)
     finally:
-        jsonstore._poisoned_stores.discard(copilot.WATCH_PATH)
-        (copilot._send_alert_email, mail._mail_fail_ticks, mail._mail_alert_sent,
+        jsonstore._poisoned_stores.discard(scheduler.WATCH_PATH)
+        (scheduler._send_alert_email, mail._mail_fail_ticks, mail._mail_alert_sent,
          mail._mail_sync_now, _gm.connected) = saved
         mail._mail_alert_sent = 0.0
-        w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
+        w = scheduler._load_watch(); w.pop("mail_error_email_at", None); scheduler._save_watch(w)
 
 
 @test
@@ -22799,38 +22803,38 @@ def t_the_watchdog_clears_the_outage_flag_when_shopify_is_back():
         return None
     async def skip(*a, **k):
         return {"error": "skip"}
-    saved = (shopify._tool_json, copilot._send_alert_email, copilot._zeta_drain,
+    saved = (shopify._tool_json, scheduler._send_alert_email, copilot._zeta_drain,
              copilot._zeta_configured, fileserver._files_tick, copilot.run_label_coverage,
-             shopify._webhook_ensurer, copilot._watch_last_tick)
-    shopify._tool_json, copilot._send_alert_email = probe, alert
+             shopify._webhook_ensurer, scheduler._watch_last_tick)
+    shopify._tool_json, scheduler._send_alert_email = probe, alert
     copilot._zeta_drain, copilot._zeta_configured = noop, (lambda: False)
     fileserver._files_tick, copilot.run_label_coverage, shopify._webhook_ensurer = (lambda: None), skip, None
     def clean():
-        w = copilot._load_watch()
+        w = scheduler._load_watch()
         w.pop("shopify_down", None)
         w["probe_fails"] = 0
-        copilot._save_watch(w)
+        scheduler._save_watch(w)
     def tick():
-        copilot._watch_last_tick = 0.0
-        return run_async(copilot._watchdog_tick({}))
+        scheduler._watch_last_tick = 0.0
+        return run_async(scheduler._watchdog_tick({}))
     clean()
     try:
         for _ in range(3):
             tick()
-        ok(copilot._load_watch().get("shopify_down"), "three hourly failures flag the outage")
+        ok(scheduler._load_watch().get("shopify_down"), "three hourly failures flag the outage")
         eq(emails, ["Reactor: Shopify connection is failing"])
         up["v"] = True
         ok(tick(), "the probe succeeds")
-        eq(copilot._load_watch().get("shopify_down"), None, "and the flag is gone from disk")
+        eq(scheduler._load_watch().get("shopify_down"), None, "and the flag is gone from disk")
         eq(emails[-1], "Reactor: Shopify connection recovered")
         tick()
         eq(emails.count("Reactor: Shopify connection recovered"), 1, "said once, not every hour")
-        copilot._watch_last_tick = time.time()
-        ok(run_async(copilot._watchdog_tick({})), "the between-hours answer is up too")
+        scheduler._watch_last_tick = time.time()
+        ok(run_async(scheduler._watchdog_tick({})), "the between-hours answer is up too")
     finally:
-        (shopify._tool_json, copilot._send_alert_email, copilot._zeta_drain,
+        (shopify._tool_json, scheduler._send_alert_email, copilot._zeta_drain,
          copilot._zeta_configured, fileserver._files_tick, copilot.run_label_coverage,
-         shopify._webhook_ensurer, copilot._watch_last_tick) = saved
+         shopify._webhook_ensurer, scheduler._watch_last_tick) = saved
         clean()
 
 
@@ -22906,7 +22910,7 @@ def t_restore_reaches_the_loan_register():
         d = loans._load_loans()
         d["units"]["u1"] = {"name": "Loan 1", "created_at": "2026-09-01T00:00:00+00:00"}
         loans._write_loans(d)
-        buf, _added = copilot._build_backup_zip()
+        buf, _added = backup._build_backup_zip()
         blob = b64.b64encode(buf.getvalue()).decode()
         d = loans._load_loans()
         d["units"].pop("u1")
@@ -23742,15 +23746,15 @@ def t_a_broken_mailbox_file_still_raises_the_inbox_alarm():
         return True
     async def gmail_down(*a, **k):
         raise RuntimeError("invalid_grant")
-    saved = (copilot._send_alert_email, mail._mail_fail_ticks, mail._mail_alert_sent,
+    saved = (scheduler._send_alert_email, mail._mail_fail_ticks, mail._mail_alert_sent,
              _gm.connected, _gm.list_threads, _gm.address)
     def go():
-        copilot._send_alert_email = alert
+        scheduler._send_alert_email = alert
         _gm.connected = lambda *a, **k: True
         _gm.list_threads = gmail_down
         _gm.address = lambda *a, **k: MBOX
         mail._mail_fail_ticks, mail._mail_alert_sent = 0, 0.0
-        w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
+        w = scheduler._load_watch(); w.pop("mail_error_email_at", None); scheduler._save_watch(w)
         with open(mail.MAILBOX_PATH, "w") as fh:
             fh.write("{ truncated")
         mail._mail_mem = None
@@ -23761,11 +23765,11 @@ def t_a_broken_mailbox_file_still_raises_the_inbox_alarm():
     try:
         with_mail(go)
     finally:
-        (copilot._send_alert_email, mail._mail_fail_ticks, mail._mail_alert_sent,
+        (scheduler._send_alert_email, mail._mail_fail_ticks, mail._mail_alert_sent,
          _gm.connected, _gm.list_threads, _gm.address) = saved
         mail._mail_alert_sent = 0.0
         jsonstore._poisoned_stores.discard(mail.MAILBOX_PATH)
-        w = copilot._load_watch(); w.pop("mail_error_email_at", None); copilot._save_watch(w)
+        w = scheduler._load_watch(); w.pop("mail_error_email_at", None); scheduler._save_watch(w)
 
 
 @test
@@ -24163,7 +24167,7 @@ def t_the_scheduled_audits_carry_memory_knowledge_and_skills():
     saved = _ws_stores()
     saved_k = knowledge.KNOWLEDGE_PATH
     knowledge.KNOWLEDGE_PATH = SCRATCH + "/ws_knowledge_" + secrets.token_hex(3) + ".json"
-    names = ((copilot, "_impact_snapshot"), (analytics, "run_overview"), (seo, "run_seo_audit"), (seo, "run_keywords"),
+    names = ((impact, "_impact_snapshot"), (analytics, "run_overview"), (seo, "run_seo_audit"), (seo, "run_keywords"),
              (analytics, "run_customers"), (analytics, "_save_analysis"), (analytics, "_save_customer_segment"))
     real = {(m, n): getattr(m, n) for m, n in names}
     seen = {}
@@ -24177,7 +24181,7 @@ def t_the_scheduled_audits_carry_memory_knowledge_and_skills():
             return {"changes": []}
         return run
     try:
-        copilot._impact_snapshot = no_snap
+        impact._impact_snapshot = no_snap
         analytics.run_overview, seo.run_seo_audit = faked("overview"), faked("seo")
         seo.run_keywords, analytics.run_customers = faked("keywords"), faked("customers")
         analytics._save_analysis = lambda kind, res: res
@@ -24187,7 +24191,7 @@ def t_the_scheduled_audits_carry_memory_knowledge_and_skills():
             [{"role": "user", "content": "remember that trade orders ship on Tuesdays"}])
         knowledge._save_knowledge("Glass gobos are etched in the Leeds workshop.", ["https://example.com/about"])
         skillbook._add_skill("Overview report rules", "Lead every overview report with trade revenue.")
-        asyncio.run(copilot._run_scheduled_audits({}))
+        asyncio.run(scheduler._run_scheduled_audits({}))
         eq(sorted(seen), ["customers", "keywords", "overview", "seo"], "all four reports ran")
         for kind, extra in sorted(seen.items()):
             ok("Trade orders ship on Tuesdays." in extra, kind + " reads memory")
@@ -24232,9 +24236,9 @@ def t_a_concluded_change_keeps_its_final_figures():
     base = {"revenue_28d": 1000.0, "orders_28d": 10}
     items = [{"id": "a", "text": "Alt text", "status": "concluded", "baseline": base,
               "final": {"revenue_28d": 1200.0, "orders_28d": 12}, "started_at": "2026-09-02T09:00:00+00:00"}]
-    d = copilot._impact_with_deltas(items, {"revenue_28d": 5000.0, "orders_28d": 50})[0]["deltas"]
+    d = impact._impact_with_deltas(items, {"revenue_28d": 5000.0, "orders_28d": 50})[0]["deltas"]
     eq([x["pct"] for x in d], [20, 20], "measured to the day it was concluded, not to today")
-    txt = copilot._impact_learning_text(items[0], {"revenue_28d": 1200.0})
+    txt = impact._impact_learning_text(items[0], {"revenue_28d": 1200.0})
     eq(txt, "After 'Alt text' (tracked from 2 Sep 2026), 28-day revenue was up 20%, from £1,000 to £1,200.")
 
 
@@ -24624,15 +24628,15 @@ def t_a_change_tracked_twice_is_one_change():
     """Track pressed twice, or on an answer drawn again, made a second copy of
     the same change, measured twice. The one already being tracked is the
     answer, and no second snapshot is taken for it."""
-    saved_path = copilot.IMPACT_PATH
-    copilot.IMPACT_PATH = SCRATCH + "/impact_" + secrets.token_hex(3) + ".json"
+    saved_path = impact.IMPACT_PATH
+    impact.IMPACT_PATH = SCRATCH + "/impact_" + secrets.token_hex(3) + ".json"
     snaps = {"n": 0}
     async def fake_snap(reg):
         snaps["n"] += 1
         return {"at": "2026-09-24T10:00:00+00:00", "revenue_28d": 100.0}
-    real = copilot._impact_snapshot
-    copilot._impact_snapshot = fake_snap
-    copilot._impact_snap_cache.clear()
+    real = impact._impact_snapshot
+    impact._impact_snapshot = fake_snap
+    impact._impact_snap_cache.clear()
     try:
         r1 = post("/api/impact", {"op": "add", "text": "Email Stage Co 9"})
         eq(r1.status_code, 200, r1.text)
@@ -24640,12 +24644,12 @@ def t_a_change_tracked_twice_is_one_change():
         r2 = post("/api/impact", {"op": "add", "text": "Email Stage Co 9"})
         eq(r2.json().get("already"), True, r2.text)
         eq(r2.json()["item"]["id"], r1.json()["item"]["id"], "the same change")
-        eq(len(copilot._load_impact()), 1, "one copy stored")
+        eq(len(impact._load_impact()), 1, "one copy stored")
         eq(snaps["n"], 1, "and one snapshot taken")
     finally:
-        copilot._impact_snapshot = real
-        copilot.IMPACT_PATH = saved_path
-        copilot._impact_snap_cache.clear()
+        impact._impact_snapshot = real
+        impact.IMPACT_PATH = saved_path
+        impact._impact_snap_cache.clear()
 
 
 @test
@@ -24695,8 +24699,8 @@ def t_a_request_says_whether_it_was_emailed_and_the_asker_sees_the_answer():
     reply was never shown as one or reached the person who asked; and what
     someone had read was a date in one browser, so the first person at the
     bench cleared the dot for everyone."""
-    saved = copilot.FEEDBACK_PATH
-    copilot.FEEDBACK_PATH = SCRATCH + "/feedback_" + secrets.token_hex(3) + ".json"
+    saved = updates.FEEDBACK_PATH
+    updates.FEEDBACK_PATH = SCRATCH + "/feedback_" + secrets.token_hex(3) + ".json"
     try:
         r = post("/api/updates", {"op": "request", "title": "Print the day sheet by glass", "where": "labels"})
         eq(r.status_code, 200, r.text)
@@ -24714,7 +24718,7 @@ def t_a_request_says_whether_it_was_emailed_and_the_asker_sees_the_answer():
         ok("releases" not in v and "requests" not in v, "the dot's read carries the counts alone")
         eq(v["seen"]["releases"], total)
     finally:
-        copilot.FEEDBACK_PATH = saved
+        updates.FEEDBACK_PATH = saved
 
 
 @test
@@ -24902,9 +24906,9 @@ def t_a_second_import_on_the_same_day_keeps_the_first_restore_point():
     """A8. The pre-import snapshot was named by the day, so a second import that
     day replaced the only copy of the CRM from before the first."""
     import zipfile, pipedrive as _pd
-    saved = (copilot.BACKUP_STATE_PATH, copilot.BACKUP_SNAPSHOT_DIR)
-    copilot.BACKUP_STATE_PATH = SCRATCH + "/backup_state_a8.json"
-    copilot.BACKUP_SNAPSHOT_DIR = SCRATCH + "/snapshots_a8"
+    saved = (backup.BACKUP_STATE_PATH, backup.BACKUP_SNAPSHOT_DIR)
+    backup.BACKUP_STATE_PATH = SCRATCH + "/backup_state_a8.json"
+    backup.BACKUP_SNAPSHOT_DIR = SCRATCH + "/snapshots_a8"
     def go():
         ensure_auth()
         crm_wipe()
@@ -24918,11 +24922,11 @@ def t_a_second_import_on_the_same_day_keeps_the_first_restore_point():
             eq(post("/api/crm/import", {"go": True}).status_code, 200)
         finally:
             _pd.export, _pd.API_TOKEN = was
-        snaps = sorted(glob.glob(copilot.BACKUP_SNAPSHOT_DIR + "/*.zip"), key=os.path.getmtime)
+        snaps = sorted(glob.glob(backup.BACKUP_SNAPSHOT_DIR + "/*.zip"), key=os.path.getmtime)
         eq(len(snaps), 2, "two imports, two restore points: " + str(snaps))
         for _ in range(4):
-            copilot._weekly_snapshot(True)          # three, four, five and six runs that day
-        still = sorted(glob.glob(copilot.BACKUP_SNAPSHOT_DIR + "/*.zip"), key=os.path.getmtime)
+            backup._weekly_snapshot(True)          # three, four, five and six runs that day
+        still = sorted(glob.glob(backup.BACKUP_SNAPSHOT_DIR + "/*.zip"), key=os.path.getmtime)
         ok(snaps[0] in still, "however many runs that day, the one from before the first is kept")
         with zipfile.ZipFile(snaps[0]) as z:
             first = json.loads(z.read("volume/crm.json"))["crm"]
@@ -24931,7 +24935,7 @@ def t_a_second_import_on_the_same_day_keeps_the_first_restore_point():
     try:
         with_accounts(go)
     finally:
-        copilot.BACKUP_STATE_PATH, copilot.BACKUP_SNAPSHOT_DIR = saved
+        backup.BACKUP_STATE_PATH, backup.BACKUP_SNAPSHOT_DIR = saved
 
 
 @test
@@ -25668,11 +25672,11 @@ def t_the_second_review_of_the_erasure_scrub_holds():
                                      activities=[], notes=notes)}
         async def fake_export(progress=None):
             return _copy.deepcopy(feed["x"])
-        saved = (_pd.export, _pd.API_TOKEN, copilot._weekly_snapshot)
+        saved = (_pd.export, _pd.API_TOKEN, backup._weekly_snapshot)
         snaps = []
         def snap(*a, **k):
             snaps.append(1)
-        _pd.export, _pd.API_TOKEN, copilot._weekly_snapshot = fake_export, "t", snap
+        _pd.export, _pd.API_TOKEN, backup._weekly_snapshot = fake_export, "t", snap
         def titles():
             return {v["pd_id"]: v["title"] for v in salesdesk._load_crm()["deals"].values()}
         try:
@@ -25729,7 +25733,7 @@ def t_the_second_review_of_the_erasure_scrub_holds():
             eq(post("/api/crm/import", {"go": True}).status_code, 503)
             eq(len(snaps), before, "no snapshot for an import that does not run")
         finally:
-            _pd.export, _pd.API_TOKEN, copilot._weekly_snapshot = saved
+            _pd.export, _pd.API_TOKEN, backup._weekly_snapshot = saved
             jsonstore._poisoned_stores.discard(mail.MAILBOX_PATH)
     with_mail(go)
 
@@ -25873,19 +25877,19 @@ def t_a_redact_a_store_refused_is_said_and_retried():
             return None
         async def skip(*a, **k):
             return {"error": "skip"}
-        saved = (shopify._tool_json, copilot._send_alert_email, copilot._zeta_drain, copilot._zeta_configured,
+        saved = (shopify._tool_json, scheduler._send_alert_email, copilot._zeta_drain, copilot._zeta_configured,
                  fileserver._files_tick, copilot.run_label_coverage, shopify._webhook_ensurer,
-                 copilot._watch_last_tick, privacy._redact_retry_pending)
-        shopify._tool_json, copilot._send_alert_email, copilot._zeta_drain = probe, noop, noop
+                 scheduler._watch_last_tick, privacy._redact_retry_pending)
+        shopify._tool_json, scheduler._send_alert_email, copilot._zeta_drain = probe, noop, noop
         copilot._zeta_configured, fileserver._files_tick = (lambda: False), (lambda: None)
-        copilot.run_label_coverage, shopify._webhook_ensurer, copilot._watch_last_tick = skip, None, 0.0
+        copilot.run_label_coverage, shopify._webhook_ensurer, scheduler._watch_last_tick = skip, None, 0.0
         privacy._redact_retry_pending = lambda: ran.append(1) or saved[-1]()
         try:
-            run_async(copilot._watchdog_tick({}))
+            run_async(scheduler._watchdog_tick({}))
         finally:
-            (shopify._tool_json, copilot._send_alert_email, copilot._zeta_drain, copilot._zeta_configured,
+            (shopify._tool_json, scheduler._send_alert_email, copilot._zeta_drain, copilot._zeta_configured,
              fileserver._files_tick, copilot.run_label_coverage, shopify._webhook_ensurer,
-             copilot._watch_last_tick, privacy._redact_retry_pending) = saved
+             scheduler._watch_last_tick, privacy._redact_retry_pending) = saved
         eq(ran, [1], "the hourly tick runs the retry")
         eq(desk._load_dispatch()["4242"].get("redacted_request_at"), asked,
            "and the retry leaves that time alone")
@@ -26742,7 +26746,7 @@ def t_the_backup_download_is_built_off_the_event_loop():
     """A42. Deflating the whole volume inline stalled every request and webhook."""
     src = copilot_source()
     seg = src.split('@mcp.custom_route("/api/backup"')[1][:2500]
-    ok("await asyncio.to_thread(_build_backup_zip)" in seg, "off the loop, as the pre-import snapshot is")
+    ok("await asyncio.to_thread(backup._build_backup_zip)" in seg, "off the loop, as the pre-import snapshot is")
 
 
 @test
@@ -30171,6 +30175,9 @@ SHARED_COPIES = {
     ("copilot", "httpx", "gizmo.seo"):
         "SEO reads the store's site and outside pages with its own client; "
         "the connector settings test reads no page",
+    ("copilot", "httpx", "gizmo.scheduler"):
+        "the scheduler sends alert email and watches the connector with its own client; "
+        "the connector settings test runs no tick",
 }
 
 @test
@@ -30340,7 +30347,10 @@ def t_either_module_imports_first():
                         ("gizmo.chat", "copilot"), ("gizmo.routes.skills", "copilot"),
                         ("gizmo.routes.memory", "copilot"), ("gizmo.routes.knowledge", "copilot"),
                         ("gizmo.prompts", "copilot"), ("gizmo.seo", "copilot"), ("gizmo.analytics", "copilot"),
-                        ("gizmo.routes.seo", "copilot"), ("gizmo.routes.analytics", "copilot")):
+                        ("gizmo.routes.seo", "copilot"), ("gizmo.routes.analytics", "copilot"),
+                        ("gizmo.scheduler", "copilot"), ("gizmo.updates", "copilot"), ("gizmo.impact", "copilot"),
+                        ("gizmo.backup", "copilot"), ("gizmo.routes.scheduler", "copilot"), ("gizmo.routes.updates", "copilot"),
+                        ("gizmo.routes.impact", "copilot"), ("gizmo.routes.backup", "copilot")):
         r = _sp.run([sys.executable, "-c", f"import {first}, {then}; import gizmo.dispatch as d, copilot as c; "
                      "assert c.desk is d and d.core is c; print('ok')"],
                     cwd=root, env=dict(os.environ), capture_output=True, text=True, timeout=120)
@@ -30868,6 +30878,22 @@ def t_the_report_routes_are_gathered():
     eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_seo, routes_analytics)], [3, 5],
        "3 SEO and keyword routes, 5 report routes")
     ok('"/api/product"' in src and '"/api/products"' in src, "the product page's routes stay")
+
+@test
+def t_the_scheduler_updates_and_backup_routes_are_gathered():
+    """The scheduler's, the release notes', impact's and the backup's routes,
+    each group registered by one call in add_routes."""
+    import inspect
+    from gizmo.routes import backup as routes_backup, impact as routes_impact
+    from gizmo.routes import scheduler as routes_scheduler, updates as routes_updates
+    src = inspect.getsource(copilot.add_routes)
+    for call in ("routes_scheduler.register(mcp, registry)", "routes_updates.register(mcp, registry)",
+                 "routes_impact.register(mcp, registry)", "routes_backup.register(mcp, registry)"):
+        eq(src.count(call), 1, call)
+    for path in ('"/api/schedule"', '"/api/alerts"', '"/api/updates"', '"/api/impact"', '"/api/backup"', '"/api/restore"'):
+        ok(path not in src, path + " is registered by its area's routes")
+    eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_scheduler, routes_updates, routes_impact, routes_backup)],
+       [2, 1, 1, 2], "2 schedule and alert routes, the updates route, the impact route, backup and restore")
 
 @test
 def t_the_moved_areas_routes_follow_them():
