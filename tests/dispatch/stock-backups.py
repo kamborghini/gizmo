@@ -159,3 +159,51 @@ def t_stock_backups_are_owner_only():
     paths = glob.glob(SCRATCH + "/stock_backup_*")
     ok(paths, "a backup was written")
     eq({os.stat(p).st_mode & 0o777 for p in paths}, {0o600})
+
+def _stock_booked(order_id, take, line=3):
+    """A production booking as the link records it, and its glass taken."""
+    bridge = stock_store.load_bridge()
+    bridge["bookings"] = [b for b in bridge["bookings"] if b["order_id"] != order_id]
+    if take:
+        bridge["bookings"].append({"id": len(bridge["bookings"]) + 1, "order_id": order_id, "order_name": "#" + order_id,
+                                   "at": stock.now_iso(), "lines": [{"item_id": line, "item_key": "Glass|Blue|20|",
+                                                                     "qty": take, "current_delta": take, "used_delta": take}]})
+    stock_store.write_bridge(bridge)
+
+def _stock_figures_now(line="3"):
+    it = stock_store.load_items()["items"][line]
+    return it["current"], it["used"]
+
+@test
+def t_restoring_stock_counts_a_rebooked_order_once():
+    _stock_live(items=[_stock_item(3, "Glass|Blue|20|", current=10, used=0)])
+    _stock_booked("1001", 2)
+    doc = stock_store.load_items(); doc["items"]["3"].update(current=8, used=2); stock_store.write_items(doc)
+    bid = _stock_backup("make")[1]["id"]
+    _stock_booked("1001", 3)                                  # marked made again: 3, replacing the 2
+    doc = stock_store.load_items(); doc["items"]["3"].update(current=7, used=3); stock_store.write_items(doc)
+    eq(_stock_backup("restore", id=bid)[0].status_code, 200)
+    eq(_stock_figures_now(), (7, 3), "the order's glass counted once, at its latest")
+
+@test
+def t_restoring_stock_takes_back_an_order_unmade_since():
+    _stock_live(items=[_stock_item(3, "Glass|Blue|20|", current=10, used=0)])
+    _stock_booked("1002", 2)
+    doc = stock_store.load_items(); doc["items"]["3"].update(current=8, used=2); stock_store.write_items(doc)
+    bid = _stock_backup("make")[1]["id"]
+    _stock_booked("1002", 0)                                  # un-made since: its glass went back
+    doc = stock_store.load_items(); doc["items"]["3"].update(current=10, used=0); stock_store.write_items(doc)
+    eq(_stock_backup("restore", id=bid)[0].status_code, 200)
+    eq(_stock_figures_now(), (10, 0), "not counted as used")
+
+@test
+def t_a_refused_stock_restore_writes_nothing():
+    _stock_with_details()
+    bid = _stock_backup("make")[1]["id"]
+    post("/api/stock/sheet", {"op": "edit", "id": 3, "changes": {"size": "21"}})
+    post("/api/stock/sheet", {"op": "new", "fields": {"category": "Glass", "sub_category": "Blue", "size": "20"}})
+    backups, rows = len(stock_store.list_backups()), len(stock_store.read_history())
+    r, d = _stock_backup("restore", id=bid)
+    eq(r.status_code, 409, r.text)
+    eq((len(stock_store.list_backups()), len(stock_store.read_history())), (backups, rows),
+       "no safety backup, no history line: nothing")

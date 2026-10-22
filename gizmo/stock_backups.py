@@ -65,8 +65,13 @@ def make_backup(who: dict) -> dict:
             raise stock.Refused(409, "Stock has not moved into Reactor yet.")
         items = stock.items_in_order(st["items"])
         now = datetime.now(timezone.utc)
+        bridge = st["bridge"]
         content = {"items": items, "suppliers": st["suppliers"].get("suppliers") or [],
-                   "settings": {"meta": dict(st["settings"].get("meta") or {})}}
+                   "settings": {"meta": dict(st["settings"].get("meta") or {})},
+                   # The production bookings and day sheets these figures already
+                   # include, so a restore applies only what changed since.
+                   "bridge": {"bookings": {b["order_id"]: b.get("lines") or [] for b in bridge.get("bookings") or []},
+                              "sheets": {s["day"]: s.get("applied") or [] for s in bridge.get("sheets") or []}}}
         backup = dict(content, id=max((b["id"] for b in stock_store.list_backups()), default=0) + 1,
                       at=now.isoformat(), filename=f"stock-{now.strftime('%Y%m%d-%H%M%S')}.json", format="stock-1",
                       by=who["user"], person=who["person"], item_count=len(items),
@@ -108,9 +113,11 @@ def restore(uid: str, backup_id) -> dict:
     if b.get("format") != "stock-1":
         raise stock.Refused(400, "This older backup is kept as an archive and cannot be restored here.")
     who = stock.actor(uid)
+    _refuse_a_clash(stock.state(), b)          # before the safety backup, so a refused restore writes nothing
     safety = make_backup(who)
     with stock._lock:
         st = stock.state()
+        _refuse_a_clash(st, b)
         pre = stock.take_snapshot(st, "manual", who, "pre-restore safety snapshot")
         doc, history, fields = st["items"], [], 0
         lines = doc.setdefault("items", {})
@@ -125,9 +132,6 @@ def restore(uid: str, backup_id) -> dict:
             for f in RESTORED_FIELDS:
                 if f not in saved or it.get(f) == saved[f]:
                     continue
-                if f == "key" and any(o["key"] == saved["key"] and o["id"] != it["id"] for o in lines.values()):
-                    raise stock.Refused(409, f"The line {saved['key']} cannot be put back: another line now has that "
-                                             "name. Rename it first, then restore again.")
                 history.append(stock.history_row(who, "restore", item_key=saved.get("key") or it["key"], item_id=it["id"], field=f,
                                                  old=it.get(f), new=saved[f]))
                 it[f] = saved[f]
@@ -146,12 +150,72 @@ def restore(uid: str, backup_id) -> dict:
         history.append(stock.history_row(who, "restore", field="suppliers", detail="restored supplier contacts"))
         st["settings"]["meta"] = dict((b.get("settings") or {}).get("meta") or {})
         history.append(stock.history_row(who, "restore", field="settings", detail="restored settings"))
-        reapplied = _reapply_since(st, who, _instant(b["at"]), history)
+        if isinstance(b.get("bridge"), dict):
+            reapplied = _apply_difference(st, who, b["bridge"], history)
+        else:                                  # a backup made before it recorded the bookings it includes
+            reapplied = _reapply_since(st, who, _instant(b["at"]), history)
         history.append(stock.history_row(who, "restore", detail=f"restored backup #{b['id']} from {b['at']}"))
         after = stock.take_snapshot(st, "restore", who, f"restored backup #{b['id']}", prev=pre)
         stock.commit(st, changed={"items", "suppliers", "settings", "alerts"}, history=history, snapshots=[pre, after])
         return {"restored": len(b.get("items") or []), "fields": fields, "reapplied": reapplied,
                 "safety_backup_id": safety["id"]}
+
+
+def _refuse_a_clash(st: dict, b: dict) -> None:
+    lines = (st["items"].get("items") or {}).values()
+    for saved in b.get("items") or []:
+        if any(o["key"] == saved.get("key") and o["id"] != saved["id"] for o in lines):
+            name = " ".join(p for p in str(saved["key"]).split("|") if p)
+            raise stock.Refused(409, f"{name} cannot be put back: another line now has that name. Rename that "
+                                     "line first, then restore again.")
+
+
+def _apply_difference(st: dict, who: dict, then: dict, history: list) -> int:
+    """Bring the restored figures up to the production link as it now is:
+    a booking or day sheet made since is applied, one changed since is taken
+    back as it was and applied as it is, one gone since is taken back. The
+    shelf never goes below 0, nor usage."""
+    lines = st["items"]["items"]
+    by_key = {it["key"]: it for it in lines.values()}
+
+    def line_of(ln):
+        return lines.get(str(ln.get("item_id"))) or by_key.get(ln.get("item_key"))
+
+    def move(changes, sign, current_of, used_of, action, words):
+        for ch in changes or []:
+            it = line_of(ch)
+            if not it:
+                continue
+            old = it["current"]
+            it["current"] = max(0, min(stock.INT_MAX, it["current"] + sign * current_of(ch)))
+            it["used"] = max(0, min(stock.INT_MAX, it["used"] + sign * used_of(ch)))
+            history.append(stock.history_row(who, action, item_key=it["key"], item_id=it["id"], field="current",
+                                             old=old, new=it["current"], detail=words))
+
+    took = lambda ch: -int(ch.get("current_delta") or 0)            # a booking takes current_delta off the shelf
+    used = lambda ch: int(ch.get("used_delta", ch.get("qty")) or 0)
+    sheet_current = lambda ch: int(ch.get("current_change") or 0)
+    sheet_used = lambda ch: int(ch.get("used_change") or 0)
+    now_bookings = {b["order_id"]: (b.get("lines") or [], b.get("order_name") or "")
+                    for b in st["bridge"].get("bookings") or []}
+    now_sheets = {s["day"]: s.get("applied") or [] for s in st["bridge"].get("sheets") or []}
+    then_bookings, then_sheets = then.get("bookings") or {}, then.get("sheets") or {}
+    changed = 0
+    for order in sorted(set(then_bookings) | set(now_bookings)):
+        was, (now, name) = then_bookings.get(order), now_bookings.get(order, (None, order))
+        if was == now:
+            continue
+        changed += 1
+        move(was, -1, took, used, "use_undo", f"taken back after restore: {name or order} changed since")
+        move(now, 1, took, used, "use", f"re-applied after restore: made {name or order}")
+    for day in sorted(set(then_sheets) | set(now_sheets)):
+        was, now = then_sheets.get(day), now_sheets.get(day)
+        if was == now:
+            continue
+        changed += 1
+        move(was, -1, sheet_current, sheet_used, "sheet_undo", f"taken back after restore: usage sheet {day}")
+        move(now, 1, sheet_current, sheet_used, "sheet", f"re-applied after restore: usage sheet {day}")
+    return changed
 
 
 def _reapply_since(st: dict, who: dict, since, history: list) -> int:
