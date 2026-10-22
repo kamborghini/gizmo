@@ -185,12 +185,15 @@ def _check_pw(pw: str, stored: str) -> bool:
 
 
 def _note_wrong_password(d: dict, u: dict, uid: str, where: str = "",
-                         now: Optional[datetime] = None) -> None:
+                         now: Optional[datetime] = None, write: bool = True) -> None:
     """One wrong password, wherever it was typed: the login, the password
     change, or the second-factor settings. They share one counter and one
     escalating lock, because a guesser does not care which form accepts the
     guess. The password change used to keep its own flat fifteen minutes,
-    and the second-factor settings had no counter at all."""
+    and the second-factor settings had no counter at all.
+
+    write=False counts in the register every request reads and leaves the
+    disk to the caller (the login writes it once its answer has gone)."""
     now = now or datetime.now(timezone.utc)
     u["fails"] = int(u.get("fails") or 0) + 1
     if u["fails"] >= LOGIN_FAIL_LIMIT:
@@ -201,10 +204,21 @@ def _note_wrong_password(d: dict, u: dict, uid: str, where: str = "",
         u["lock_until"] = (now + timedelta(minutes=mins)).isoformat()
         activity._track(uid, "auth", "account paused",
                "too many wrong passwords%s; locked for %d minutes" % (where, mins))
+    if write:
+        _write_users_quietly(d)
+
+
+def _write_users_quietly(d: dict) -> None:
     try:
         _write_users(d)
     except RuntimeError:
         pass
+
+
+async def _write_users_later(d: dict) -> None:
+    """For a BackgroundTask: async so it runs on the loop that owns `d`, not
+    in a worker thread while a request changes it."""
+    _write_users_quietly(d)
 
 
 def _locked_now(u: dict) -> bool:

@@ -137,11 +137,14 @@ def register(mcp, registry):
 
         Read-only against Pipedrive in both modes: this only ever writes into
         gizmo's own store, and only when {"go": true} is sent."""
-        err, body, who = await mail._mail_guard(request, model=CrmImportBody)
+        err, body, who = await mail._mail_guard(request)
         if err:
             return err
         if team._team_role(who) != "master":
             return gate._json({"error": "Only the master account can import."}, 403)
+        refused = gate._body_refusal(CrmImportBody, body)
+        if refused:
+            return refused
         if not pipedrive.configured():
             return gate._json({"error": "No Pipedrive token is set on the server."}, 400)
         go = bool(body.get("go"))
@@ -880,7 +883,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/crm/stages", methods=["POST"])
     async def crm_stages_route(request: Request):
-        err, body, actor = await salesdesk._crm_guard(request, model=CrmStagesBody)
+        err, body, actor = await salesdesk._crm_guard(request)
         if err:
             return err
         # The shared pipeline, the label vocabulary and the lost reasons are
@@ -891,6 +894,11 @@ def register(mcp, registry):
         if team._team_level(actor) < team.ROLE_LEVELS["admin"]:
             return gate._json({"error": "Only an admin can change the pipeline, its labels "
                                    "or the lost reasons."}, 403)
+        # The body is checked once the rank has let the caller through: a
+        # member hears they may not, not which field was of the wrong kind.
+        refused = gate._body_refusal(CrmStagesBody, body)
+        if refused:
+            return refused
         try:
             d = salesdesk._load_crm()
             # The route is the CRM's settings desk: stages, labels, lost

@@ -32,6 +32,20 @@ class ConnectorBody(bodies.Body):
     force: bodies.Flag = None
 
 
+# The connector's acts that are an admin's, with what a member hears. True
+# where a dry run is anyone's: it writes nothing, by the service's documented
+# promise, so it is the same act as a review.
+_ADMIN_ACTS = {
+    "autorun_set": ("Only an admin can turn Auto Run on or off.", False),
+    "settings_save": ("Only an admin can change the connector's settings.", False),
+    "payouts": ("Only an admin can write notes onto Xero invoices.", True),
+    "reimport": ("Only an admin can send documents to Xero.", True),
+    "reimport_tag": ("Only an admin can send documents to Xero.", True),
+    "send": ("Only an admin can send documents to Xero.", False),
+    "retry": ("Only an admin can send documents to Xero.", False),
+}
+
+
 def register(mcp, registry):
     """Add the Xero sync settings route to the app."""
 
@@ -40,10 +54,20 @@ def register(mcp, registry):
     @mcp.custom_route("/api/connector", methods=["POST"])
     async def connector_route(request: Request):
         """The Xero connector tab's whole API. op says what; the service does it."""
-        err, body, who = await gate._guard(request, model=ConnectorBody)
+        err, body, who = await gate._guard(request)
         if err:
             return err
         op = str(body.get("op") or "status")
+        # The rank before the body: a member hears they may not, not which
+        # field was of the wrong kind.
+        act = _ADMIN_ACTS.get(op)
+        if act and team._team_level(who) < team.ROLE_LEVELS["admin"]:
+            message, dry_is_anyones = act
+            if not (dry_is_anyones and bool(body.get("dryRun"))):
+                return gate._json({"error": message}, 403)
+        refused = gate._body_refusal(ConnectorBody, body)
+        if refused:
+            return refused
         if not xerosync._connector_url():
             return gate._json({"available": False,
                           "note": "The connector service is not linked yet. Add its private "
@@ -77,11 +101,10 @@ def register(mcp, registry):
                 code, data = await xerosync._connector_call("POST", "/api/sync", {"dryRun": "1"})
                 return gate._json({"available": True, "data": data}, code if code >= 400 else 200)
             if op == "autorun_set":
-                # Turning the automation on or off. Admin only, and the state
-                # lives on the connector's volume rather than here, so gizmo
-                # cannot drift out of step with what is actually running.
-                if team._team_level(who) < team.ROLE_LEVELS["admin"]:
-                    return gate._json({"error": "Only an admin can turn Auto Run on or off."}, 403)
+                # Turning the automation on or off. Admin only (_ADMIN_ACTS),
+                # and the state lives on the connector's volume rather than
+                # here, so gizmo cannot drift out of step with what is
+                # actually running.
                 on = bool(body.get("enabled"))
                 code, data = await xerosync._connector_call("POST", "/api/autorun",
                                                    {"enabled": "true" if on else "false"})
@@ -95,8 +118,6 @@ def register(mcp, registry):
                 return gate._json({"available": True, "data": data}, code if code >= 400 else 200)
 
             if op == "settings_save":
-                if team._team_level(who) < team.ROLE_LEVELS["admin"]:
-                    return gate._json({"error": "Only an admin can change the connector's settings."}, 403)
                 fields = body.get("fields")
                 if not isinstance(fields, dict) or not fields:
                     return gate._json({"error": "Nothing to save."}, 400)
@@ -141,8 +162,6 @@ def register(mcp, registry):
                 if since and not re.match(r"^\d{4}-\d{2}-\d{2}$", since):
                     return gate._json({"error": "The date needs to be a date, for example 2026-08-01."}, 400)
                 dry = bool(body.get("dryRun"))
-                if not dry and team._team_level(who) < team.ROLE_LEVELS["admin"]:
-                    return gate._json({"error": "Only an admin can write notes onto Xero invoices."}, 403)
                 params = {}
                 if since:
                     params["since"] = since
@@ -168,8 +187,6 @@ def register(mcp, registry):
                 if not order:
                     return gate._json({"error": "Say which order to send (e.g. #104300)."}, 400)
                 dry = bool(body.get("dryRun"))
-                if not dry and team._team_level(who) < team.ROLE_LEVELS["admin"]:
-                    return gate._json({"error": "Only an admin can send documents to Xero."}, 403)
                 params = {"order": order}
                 if dry:
                     params["dryRun"] = "1"
@@ -188,8 +205,6 @@ def register(mcp, registry):
                 if not tag:
                     return gate._json({"error": "Say which tag to send (e.g. xero-price-check)."}, 400)
                 dry = bool(body.get("dryRun"))
-                if not dry and team._team_level(who) < team.ROLE_LEVELS["admin"]:
-                    return gate._json({"error": "Only an admin can send documents to Xero."}, 403)
                 params = {"tag": tag}
                 if dry:
                     params["dryRun"] = "1"
@@ -200,9 +215,7 @@ def register(mcp, registry):
                     activity._track(who, "connector", "sent tagged orders to Xero", tag)
                 return gate._json({"available": True, "data": data}, code if code >= 400 else 200)
             if op in ("send", "retry"):
-                # These write invoices and credit notes into Xero.
-                if team._team_level(who) < team.ROLE_LEVELS["admin"]:
-                    return gate._json({"error": "Only an admin can send documents to Xero."}, 403)
+                # These write invoices and credit notes into Xero (_ADMIN_ACTS).
                 if op == "send":
                     code, data = await xerosync._connector_call("POST", "/api/sync")
                 else:

@@ -47,3 +47,7 @@ catboost_info/
 # tools/ext_check.py's temporary type-check folders, removed after each run
 .ext-check-*/
 tests/browser/.run/
+
+# Logs from rigs and runs started at the repo root. rig.log was committed
+# that way once, holding nothing but a stale traceback.
+*.log

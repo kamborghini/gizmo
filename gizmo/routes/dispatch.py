@@ -504,9 +504,16 @@ def register(mcp, registry):
         there is nothing to query. This is gizmo's own record of the collections
         IT booked, which is why the panel says so rather than implying it read
         the courier's diary."""
-        err, body, who = await gate._guard(request, model=DispatchCollectionsBody)
+        err, body, who = await gate._guard(request)
         if err:
             return err
+        # The rank before the body: a member hears they may not, not which
+        # field was of the wrong kind.
+        if body.get("op") == "clear" and team._team_level(who) < team.ROLE_LEVELS["admin"]:
+            return gate._json({"error": "Only an admin can clear a collection."}, 403)
+        refused = gate._body_refusal(DispatchCollectionsBody, body)
+        if refused:
+            return refused
         day = str(body.get("date") or "")[:10] or desk._dispatch_today()
         cfg = desk._load_shipping()
         # The courier's own confirmations for the day, less anything cleared.
@@ -537,8 +544,6 @@ def register(mcp, registry):
             })
         if body.get("op") == "clear":
             code = str(body.get("carrier") or "").strip().upper()
-            if team._team_level(who) < team.ROLE_LEVELS["admin"]:
-                return gate._json({"error": "Only an admin can clear a collection."}, 403)
             if code:
                 # A marker, not a deletion: the booking that secured this
                 # collection is still on the dispatch record and would simply
