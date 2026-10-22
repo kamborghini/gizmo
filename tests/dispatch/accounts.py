@@ -553,3 +553,50 @@ def t_every_refused_sign_in_costs_exactly_one_password_check():
         wren = team._load_users()["users"][_w]
         eq(int(wren.get("fails") or 0), 1, "a wrong password on an open account still counts")
     with_accounts(go)
+
+@test
+def t_a_wrong_password_is_written_down_after_the_answer():
+    """A wrong password on a real account adds one to its count, and the
+    count is kept in the register on disk. That write ran before the 401 went
+    out, and it is the one thing at the door a made-up name never pays for:
+    a made-up name, a locked account and a switched-off one all answer from
+    memory. So a wrong password took one disk write longer than a made-up
+    name, and the clock said which usernames exist although both read the
+    same and both cost one password check. The count still reaches the disk,
+    only once the answer has gone. Ordered, not timed, so a loaded machine
+    cannot flake it."""
+    def go():
+        ensure_auth()
+        uid, _s, _pw = ready_user("Wren", "wren-wrong")
+        events, real_write = [], team._write_users
+        def write(d):
+            events.append("written")
+            real_write(d)
+        inner = client.app
+        async def watching(scope, receive, send):
+            async def sent(msg):
+                await send(msg)
+                if msg["type"] == "http.response.body" and not msg.get("more_body"):
+                    events.append("answered")
+            await inner(scope, receive, sent)
+        watcher = TestClient(watching)
+        def knock(username):
+            team._login_hits.clear(); gate._rl_hits.clear(); gate._rl_global.clear()
+            events.clear()
+            r = watcher.post("/api/auth/login",
+                             json={"username": username, "password": "a-guess-that-is-wrong"},
+                             headers={"Authorization": "Bearer " + tok()})
+            eq(r.status_code, 401, "%s is refused: %s" % (username, r.text))
+            return list(events)
+        team._write_users = write
+        try:
+            eq(knock("nobody-by-this-name"), ["answered"],
+               "a made-up name answers without touching the register")
+            eq(knock("wren-wrong"), ["answered", "written"],
+               "a wrong password is answered first and written down after")
+        finally:
+            team._write_users = real_write
+        team._users_mem = None
+        eq(int(team._load_users()["users"][uid].get("fails") or 0), 1,
+           "the wrong guess reached the register on disk")
+    with_accounts(go)

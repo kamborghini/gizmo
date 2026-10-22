@@ -6,6 +6,7 @@ add_routes calls register() where they stood, so the route table keeps its
 order. They read the team as team.NAME.
 """
 import logging
+from starlette.background import BackgroundTask
 from starlette.requests import Request
 import time
 import hmac
@@ -203,8 +204,12 @@ def register(mcp, registry):
             activity._track_login_refusal(uid, "the temporary password had expired")
             return vague
         if not pw_ok:
-            team._note_wrong_password(d, u, uid, now=now)
+            # Counted now, written down once the answer has gone. The write is
+            # the one thing at the door a made-up name never pays for, so on
+            # the reply's path the clock told the two apart.
+            team._note_wrong_password(d, u, uid, now=now, write=False)
             activity._track_login_refusal(uid, "wrong password")
+            vague.background = BackgroundTask(team._write_users_later, d)
             return vague
         u["fails"] = 0
         u["lock_until"] = ""
@@ -381,13 +386,18 @@ def register(mcp, registry):
     async def auth_password_route(request: Request):
         # Change your OWN password: the current one is always required, so a
         # borrowed open session cannot quietly take over the account.
-        err, body = await team._auth_guard(request, model=PasswordBody)
+        err, body = await team._auth_guard(request)
         if err:
             return err
         uid = team._session_uid(request.headers.get("x-app-session"))
         u = team._team_user(uid)
         if not u or not u.get("active", True):
             return gate._json({"error": "Unauthorized"}, 401)
+        # Checked once the session is known and before the lock or the
+        # password: a field of the wrong kind is no guess, so it spends neither.
+        refused = gate._body_refusal(PasswordBody, body)
+        if refused:
+            return refused
         # A borrowed session gets the same wall the front door has: the login
         # counts failures and locks; without the same rule here, an unattended
         # open session was an unlimited offline-speed guessing oracle for the

@@ -13,6 +13,22 @@
   },
   {
    "date": "2026-10-22",
+   "title": "A wrong password and a refused request say less",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": null,
+     "text": "A wrong password on a real account is now noted after the answer is sent, so how long the sign-in page takes to answer no longer hints at which usernames exist. Five wrong guesses still pause the account as before."
+    },
+    {
+     "kind": "fixed",
+     "tab": null,
+     "text": "Changing the pipeline, importing from Pipedrive, the Xero sync actions that write and clearing a collection now tell someone without the access that they may not, before looking at what was sent. Nothing changes for the people who use them."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-22",
    "title": "Behind the scenes",
    "items": [
     {
