@@ -297,16 +297,6 @@ def _who(row: dict, names: dict) -> str:
     return names.get(str(row.get("person"))) or row.get("user") or ""
 
 
-def _keys_of(it: dict) -> set:
-    """Every key a line has had: its own, and each it was renamed from."""
-    keys = {it["key"]}
-    renames = [r for r in stock.history_index().rows if r.get("field") == "key"]
-    for r in reversed(renames):
-        if r.get("new_value") in keys:
-            keys.add(r.get("old_value"))
-    return keys
-
-
 def _day(value):
     try:
         return datetime.strptime(str(value), "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -320,13 +310,13 @@ def history(q=None, action=None, person=None, item_id=None, start=None, end=None
         limit = max(1, min(int(limit or 100), HISTORY_PAGE_MAX))
     except (TypeError, ValueError):
         limit = 100
-    keys = None
+    line, find = None, None
     if item_id not in (None, ""):
         st = stock.state()
         it = (st["items"].get("items") or {}).get(str(item_id))
         if not it:
             raise stock.Refused(404, "That stock line was not found.")
-        keys = _keys_of(it)
+        line, find = it["id"], stock.line_finder(st["items"])
     lo, hi = _day(start), _day(end)
     hi = hi + timedelta(days=1) if hi else None
     needle = (q or "").strip().casefold()
@@ -339,7 +329,7 @@ def history(q=None, action=None, person=None, item_id=None, start=None, end=None
             continue
         if person and str(row.get("person")) != str(person):
             continue
-        if keys is not None and row.get("item_key") not in keys:
+        if find is not None and find(row) != line:
             continue
         at = _instant(row.get("at"))
         if (lo and (not at or at < lo)) or (hi and (not at or at >= hi)):

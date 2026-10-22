@@ -119,7 +119,7 @@ def restore(uid: str, backup_id) -> dict:
             if it is None:                       # a line the sheet no longer has comes back as it was
                 it = lines[str(saved["id"])] = dict(saved)
                 doc["next_id"] = max(doc.get("next_id") or 1, saved["id"] + 1)
-                history.append(stock.history_row(who, "create", item_key=saved["key"],
+                history.append(stock.history_row(who, "create", item_key=saved["key"], item_id=saved["id"],
                                                  detail=f"restore: {saved['category']} {saved['size']}".strip()))
                 continue
             for f in RESTORED_FIELDS:
@@ -128,7 +128,7 @@ def restore(uid: str, backup_id) -> dict:
                 if f == "key" and any(o["key"] == saved["key"] and o["id"] != it["id"] for o in lines.values()):
                     raise stock.Refused(409, f"The line {saved['key']} cannot be put back: another line now has that "
                                              "name. Rename it first, then restore again.")
-                history.append(stock.history_row(who, "restore", item_key=saved.get("key") or it["key"], field=f,
+                history.append(stock.history_row(who, "restore", item_key=saved.get("key") or it["key"], item_id=it["id"], field=f,
                                                  old=it.get(f), new=saved[f]))
                 it[f] = saved[f]
                 fields += 1
@@ -136,7 +136,7 @@ def restore(uid: str, backup_id) -> dict:
             awaited = sum(stock_orders.outstanding(l) for o in st["orders"].get("orders") or []
                           for l in o["lines"] if l["item_id"] == it["id"])
             if (it.get("on_order") or 0) != awaited:
-                history.append(stock.history_row(who, "restore", item_key=it["key"], field="on_order",
+                history.append(stock.history_row(who, "restore", item_key=it["key"], item_id=it["id"], field="on_order",
                                                  old=it.get("on_order"), new=awaited,
                                                  detail="on order follows the orders still open"))
                 it["on_order"] = awaited
@@ -175,7 +175,7 @@ def _reapply_since(st: dict, who: dict, since, history: list) -> int:
             old = it["current"]
             it["current"] = max(0, it["current"] - int(ln.get("current_delta") or 0))
             it["used"] = min(stock.INT_MAX, it["used"] + int(ln.get("used_delta", ln.get("qty")) or 0))
-            history.append(stock.history_row(who, "use", item_key=it["key"], field="current", old=old, new=it["current"],
+            history.append(stock.history_row(who, "use", item_key=it["key"], item_id=it["id"], field="current", old=old, new=it["current"],
                                              detail=f"re-applied after restore: made {booking.get('order_name') or ''}"))
         done += 1
     for sheet in st["bridge"].get("sheets") or []:
@@ -189,7 +189,7 @@ def _reapply_since(st: dict, who: dict, since, history: list) -> int:
             old = it["current"]
             it["current"] = max(0, min(stock.INT_MAX, it["current"] + int(ch.get("current_change") or 0)))
             it["used"] = max(0, min(stock.INT_MAX, it["used"] + int(ch.get("used_change") or 0)))
-            history.append(stock.history_row(who, "sheet", item_key=it["key"], field="current", old=old, new=it["current"],
+            history.append(stock.history_row(who, "sheet", item_key=it["key"], item_id=it["id"], field="current", old=old, new=it["current"],
                                              detail=f"re-applied after restore: usage sheet {sheet.get('day') or ''}"))
         done += 1
     return done

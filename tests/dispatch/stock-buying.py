@@ -230,3 +230,34 @@ def t_a_stock_rematch_never_records_a_move_that_did_not_happen():
     eq(r.status_code, 400, "which delivery?")
     eq(len(stock_store.read_history()), rows, "no history line for a move that did not happen")
     eq(_stock_order_lines(3), [("First", 2, [2])], "the receipt stays where it was")
+
+@test
+def t_a_renamed_stock_line_keeps_its_invoices_and_its_undo():
+    _stock_live()
+    stock_store.append_history([{"at": "2026-10-01T09:00:00", "user": "someone", "action": "receive",
+                                 "item_key": "Glass|Blue|20|", "field": "current", "old_value": "2", "new_value": "6",
+                                 "detail": "received 4 · inv OLD-1 · 2026-10-01", "person": None}])
+    eq(_stock_buy("receive", "one", id=3, qty=4, invoice_no="INV-7")[0].status_code, 200)
+    post("/api/stock/sheet", {"op": "edit", "id": 3, "changes": {"size": "21"}})        # renamed
+    eq(_stock_buy("receive", "one", id=3, qty=4, invoice_no="INV-7")[0].status_code, 409, "received here, renamed or not")
+    eq(_stock_buy("receive", "one", id=3, qty=4, invoice_no="old-1")[0].status_code, 409,
+       "received before the move under its old name")
+    post("/api/stock/sheet", {"op": "new", "fields": {"category": "Glass", "sub_category": "Blue", "size": "20",
+                                                      "current": 10}})                     # its old name, reused
+    r, d = _stock_buy("receive", "undo", invoice_no="INV-7")
+    eq(r.status_code, 200, r.text)
+    items = stock_store.load_items()["items"]
+    eq((items["3"]["current"], items["10"]["current"]), (6, 10), "the renamed line gives it back, not the new one")
+
+@test
+def t_a_reused_stock_name_does_not_take_another_lines_history():
+    _stock_live()
+    post("/api/stock/sheet", {"op": "edit", "id": 9, "changes": {"current": 11}})
+    post("/api/stock/sheet", {"op": "edit", "id": 9, "changes": {"size": "31"}})
+    post("/api/stock/sheet", {"op": "new", "fields": {"category": "Glass", "sub_category": "Red", "size": "30"}})
+    post("/api/stock/sheet", {"op": "edit", "id": 10, "changes": {"current": 3}})
+    d = post("/api/stock/history", {"op": "item", "id": 10}).json()
+    eq([(h["action"], h["field"]) for h in d["history"]], [("update", "current"), ("create", "")],
+       "only its own lines, though line 9 once had its name")
+    d = post("/api/stock/history", {"op": "item", "id": 9}).json()
+    eq([h["field"] for h in d["history"]], ["key", "size", "current"], "and line 9 keeps its own")

@@ -188,11 +188,59 @@ def actor(uid: str) -> dict:
 
 
 def history_row(who: dict, action: str, *, item_key: str = "", field: str = "", old="", new="",
-                detail: str = "") -> dict:
-    """A history line in the stock app's own shape, with the person beside it."""
-    return {"at": now_iso(), "user": who["user"], "action": action, "item_key": item_key, "field": field,
-            "old_value": str(old)[:300], "new_value": str(new)[:300], "detail": str(detail)[:500],
-            "person": who["person"]}
+                detail: str = "", item_id: int = None) -> dict:
+    """A history line in the stock app's own shape, with the person beside it
+    and, for a line of stock, that line's id: its name can change, its id
+    cannot, so the invoice check, undoing a delivery and a line's own history
+    find it by id."""
+    row = {"at": now_iso(), "user": who["user"], "action": action, "item_key": item_key, "field": field,
+           "old_value": str(old)[:300], "new_value": str(new)[:300], "detail": str(detail)[:500],
+           "person": who["person"]}
+    if item_id is not None:
+        row["item_id"] = item_id
+    return row
+
+
+def _instant(iso):
+    """A stored time as a moment; one written without a zone is UTC."""
+    try:
+        t = datetime.fromisoformat(str(iso))
+    except (TypeError, ValueError):
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def line_finder(items_doc: dict):
+    """A function from a history line to the id of the stock line it is
+    about, or None. A line written here carries its id. An older one names
+    the line as it was then: each name is read against the time it was the
+    line's own, through the renames recorded here, so a name reused by a
+    new line never takes an old line's history, and a renamed line keeps
+    its own."""
+    renames = {}
+    for r in history_index().rows:
+        if r.get("field") == "key" and r.get("item_id") is not None:
+            renames.setdefault(r["item_id"], []).append((_instant(r.get("at")), r.get("old_value"), r.get("new_value")))
+    windows = {}            # name -> [(from, until, line id)]; None is open-ended
+    for it in (items_doc.get("items") or {}).values():
+        start = None
+        for at, old, _new in sorted(renames.get(it["id"], []), key=lambda s: (s[0] is not None, s[0])):
+            windows.setdefault(old, []).append((start, at, it["id"]))
+            start = at
+        windows.setdefault(it["key"], []).append((start, None, it["id"]))
+
+    def find(row: dict):
+        if row.get("item_id") is not None:
+            return row["item_id"]
+        key = row.get("item_key")
+        if not key:
+            return None
+        at = _instant(row.get("at"))
+        for start, until, line in windows.get(key, []):
+            if (start is None or (at is not None and at >= start)) and (until is None or (at is not None and at < until)):
+                return line
+        return None
+    return find
 
 
 def commit(st: dict, *, changed: set, history=(), snapshot: dict = None, snapshots=()) -> list:

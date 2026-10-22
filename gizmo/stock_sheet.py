@@ -40,7 +40,7 @@ def _usage_row(who: dict, it: dict, drop: int) -> dict:
     the drop is usage, so the forecasts and warnings see it."""
     old = it["used"]
     it["used"] += drop
-    return stock.history_row(who, "update", item_key=it["key"], field="used", old=old, new=it["used"],
+    return stock.history_row(who, "update", item_key=it["key"], item_id=it["id"], field="used", old=old, new=it["used"],
                              detail=f"counted down {drop}, recorded as usage")
 
 
@@ -67,7 +67,7 @@ def edit(uid: str, item_id, changes: dict, seen: dict, as_count: bool) -> dict:
             if it[field] != value:
                 renamed = renamed or field in stock.IDENTITY
                 rows.append(stock.history_row(
-                    who, "update", item_key=it["key"], field=field, old=it[field], new=value,
+                    who, "update", item_key=it["key"], item_id=it["id"], field=field, old=it[field], new=value,
                     detail="counted" if (as_count and field == "current") else "manual edit"))
                 it[field] = value
         if as_count and "current" in wanted:
@@ -80,7 +80,7 @@ def edit(uid: str, item_id, changes: dict, seen: dict, as_count: bool) -> dict:
         if renamed and new_key != it["key"]:
             if any(o["key"] == new_key and o["id"] != it["id"] for o in st["items"]["items"].values()):
                 raise stock.Refused(409, "Another stock line already has that category, colour, size and notes.")
-            rows.append(stock.history_row(who, "update", item_key=new_key, field="key", old=it["key"],
+            rows.append(stock.history_row(who, "update", item_key=new_key, item_id=it["id"], field="key", old=it["key"],
                                           new=new_key, detail="renamed"))
             it["key"] = new_key
         if rows:
@@ -112,7 +112,7 @@ def counts(uid: str, counts: list, as_count: bool = True) -> dict:
             it["current"] = value
             it["updated_at"] = stock.now_iso()
             saved += 1
-            rows.append(stock.history_row(who, "update", item_key=it["key"], field="current", old=old, new=value,
+            rows.append(stock.history_row(who, "update", item_key=it["key"], item_id=it["id"], field="current", old=old, new=value,
                                           detail="counted" if as_count else "manual edit"))
             if as_count and value < old and it["used"] + (old - value) <= stock.INT_MAX:
                 rows.append(_usage_row(who, it, old - value))
@@ -145,7 +145,7 @@ def new_item(uid: str, fields: dict) -> dict:
         it = dict(_NEW_LINE, **wanted, id=doc.get("next_id") or 1, key=key, created_at=now, updated_at=now)
         doc["items"][str(it["id"])] = it
         doc["next_id"] = it["id"] + 1
-        row = stock.history_row(who, "create", item_key=key, detail=f"new item {category} {wanted.get('size', '')}")
+        row = stock.history_row(who, "create", item_key=key, item_id=it["id"], detail=f"new item {category} {wanted.get('size', '')}")
         snap = stock.take_snapshot(st, "edit", who, f"added {category} {wanted.get('size', '')}")
         stock.commit(st, changed={"items", "alerts"}, history=[row], snapshot=snap)
         return {"item": _view(it), "summary": stock_figures.compute_current(stock.items_in_order(doc))}
@@ -347,13 +347,13 @@ def import_apply(uid: str, text: str) -> dict:
             it = dict(_NEW_LINE, **fields, id=doc.get("next_id") or 1, key=key, created_at=now, updated_at=now)
             doc["items"][str(it["id"])] = it
             doc["next_id"] = it["id"] + 1
-            history.append(stock.history_row(who, "create", item_key=key,
+            history.append(stock.history_row(who, "create", item_key=key, item_id=it["id"],
                                              detail=f"import: {fields['category']} {fields['size']}".strip()))
         for it, field, old, new in changes:
             it[field] = new
             it["updated_at"] = now
             history.append(stock.history_row(who, "import", item_key=new if field == "key" else it["key"],
-                                             field=field, old=old, new=new,
+                                             item_id=it["id"], field=field, old=old, new=new,
                                              detail="renamed" if field == "key" else ""))
         snap = stock.take_snapshot(st, "import", who, f"{len(creates)} created, {len(changes)} fields updated")
         stock.commit(st, changed={"items", "alerts"}, history=history, snapshot=snap)

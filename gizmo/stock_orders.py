@@ -85,7 +85,7 @@ def place(uid: str, supplier, reference, currency, lines) -> dict:
                                    "unit_cost": prices.get(item_id), "unit_cost_gbp": it["unit_cost_gbp"],
                                    "received": 0, "cleared": 0, "receipts": []})
             history.append(stock.history_row(
-                who, "ordered", item_key=it["key"], field="on_order", old=old, new=it["on_order"],
+                who, "ordered", item_key=it["key"], item_id=it["id"], field="on_order", old=old, new=it["on_order"],
                 detail=f"ordered {q}" + (f" from {supplier}" if supplier else "") + (f" · ref {reference}" if reference else "")))
         orders.setdefault("orders", []).append(order)
         orders["next_id"] = order["id"] + 1
@@ -108,7 +108,7 @@ def clear(uid: str, item_id) -> dict:
             for line in order["lines"]:
                 if line["item_id"] == it["id"]:
                     line["cleared"] = line.get("cleared", 0) + outstanding(line)
-        row = stock.history_row(who, "ordered", item_key=it["key"], field="on_order", old=old, new=0,
+        row = stock.history_row(who, "ordered", item_key=it["key"], item_id=it["id"], field="on_order", old=old, new=0,
                                 detail="cleared outstanding order")
         stock.commit(st, changed={"items", "orders"}, history=[row])
         return {"item": stock_figures.item_view(it), "summary": _summary(st)}
@@ -162,7 +162,7 @@ def set_levels(uid: str, levels) -> dict:
             if (it["reorder_point"], it["reorder_qty"]) == (point, qty):
                 continue
             history.append(stock.history_row(
-                who, "update", item_key=it["key"], field="reorder_point", old=f"{it['reorder_point']}/{it['reorder_qty']}",
+                who, "update", item_key=it["key"], item_id=it["id"], field="reorder_point", old=f"{it['reorder_point']}/{it['reorder_qty']}",
                 new=f"{point}/{qty}", detail="reorder level set"))
             it["reorder_point"], it["reorder_qty"] = point, qty
             it["updated_at"] = stock.now_iso()
@@ -288,20 +288,21 @@ def delete_supplier(uid: str, supplier) -> dict:
 DELIVERY_MAX = 200
 
 
-def _received_before(st_key: str, invoice: str, keys=None) -> str:
-    """The line an invoice was already received for, or "": the stock app's
-    rule, read from the history (its own rows included), compared whole and
-    in any case, so INV-1 is never INV-10."""
+def _received_before(st: dict, line_ids: set, invoice: str):
+    """Which of these lines an invoice was already received for, or None:
+    the stock app's rule, read from the history (its own rows included),
+    compared whole and in any case (INV-1 is never INV-10), and by the line,
+    whatever it was called then."""
     want = (invoice or "").strip().casefold()
     if not want:
-        return ""
+        return None
     idx = stock.history_index()
+    find = stock.line_finder(st["items"])
     for n in idx.by_invoice.get(want, []):
         row = idx.rows[n]
-        if row.get("action") == "receive" and row.get("item_key") and (
-                row["item_key"] == st_key if keys is None else row["item_key"] in keys):
-            return row["item_key"]
-    return ""
+        if row.get("action") == "receive" and row.get("item_key") and find(row) in line_ids:
+            return find(row)
+    return None
 
 
 def _fill_orders(st: dict, item_id: int, qty: int, invoice: str, prefer=None) -> list:
@@ -332,7 +333,7 @@ def _take_in(st: dict, who: dict, it: dict, qty: int, invoice: str, date: str, s
     it["updated_at"] = stock.now_iso()
     fills = _fill_orders(st, it["id"], qty, invoice, prefer)
     detail = (f"received {qty}" + (f" · inv {invoice}" if invoice else "") + (f" · {date}" if date else "") + suffix)
-    return stock.history_row(who, "receive", item_key=it["key"], field="current", old=old, new=it["current"],
+    return stock.history_row(who, "receive", item_key=it["key"], item_id=it["id"], field="current", old=old, new=it["current"],
                              detail=detail[:480]), fills
 
 
@@ -350,7 +351,7 @@ def receive_one(uid: str, item_id, qty, invoice_no, date, order_id=None) -> dict
         it = _line(st, item_id)
         if it["current"] + qty > stock.INT_MAX or it["received"] + qty > stock.INT_MAX:
             raise stock.Refused(400, "That quantity is too large.")
-        if _received_before(it["key"], invoice):
+        if _received_before(st, {it["id"]}, invoice) is not None:
             raise stock.Refused(409, f"Invoice {invoice} has already been received for this line.")
         who = stock.actor(uid)
         row, fills = _take_in(st, who, it, qty, invoice, date, "", order_id)
@@ -381,9 +382,9 @@ def receive_delivery(uid: str, lines, invoice_no, date) -> dict:
                 except ValueError:
                     pass                     # a price that cannot be read leaves the cost as it was, as the stock app did
         items = st["items"]["items"]
-        seen = _received_before("", invoice, keys={items[str(i)]["key"] for i in wanted})
-        if seen:
-            name = stock_figures.item_name(next(it for it in items.values() if it["key"] == seen))
+        seen = _received_before(st, set(wanted), invoice)
+        if seen is not None:
+            name = stock_figures.item_name(items[str(seen)])
             raise stock.Refused(409, f"Invoice {invoice} has already been received for {name}.")
         if any(items[str(i)]["current"] + q > stock.INT_MAX or items[str(i)]["received"] + q > stock.INT_MAX
                for i, q in wanted.items()):
@@ -399,7 +400,7 @@ def receive_delivery(uid: str, lines, invoice_no, date) -> dict:
                 cur = (it["currency"] or "GBP").upper()
                 gbp = price if cur == "GBP" else round(price * fx.get(cur, 1.0), 4)
                 if it["unit_cost"] != price or it["unit_cost_gbp"] != gbp:
-                    history.append(stock.history_row(who, "update", item_key=it["key"], field="unit_cost",
+                    history.append(stock.history_row(who, "update", item_key=it["key"], item_id=it["id"], field="unit_cost",
                                                      old=it["unit_cost"], new=price,
                                                      detail=f"price from invoice{(' ' + invoice) if invoice else ''}"))
                     it["unit_cost"], it["unit_cost_gbp"] = price, gbp
@@ -457,7 +458,7 @@ def rematch(uid: str, invoice_no, item_id, order_id) -> dict:
         fills = _fill_orders(st, it["id"], moved, invoice, order["id"])
         # The line says where the delivery now counts, as it now does.
         where = ", ".join(f"order {f['order_id']} ({f['qty']})" for f in fills)
-        row = stock.history_row(stock.actor(uid), "ordered", item_key=it["key"], field="order",
+        row = stock.history_row(stock.actor(uid), "ordered", item_key=it["key"], item_id=it["id"], field="order",
                                 detail=f"delivery inv {invoice} now counted against {where}")
         stock.commit(st, changed={"orders"}, history=[row])
         return {"item": stock_figures.item_view(it), "orders": fills}
@@ -479,20 +480,23 @@ def undo_delivery(uid: str, invoice_no) -> dict:
         received = [r for r in rows if r.get("action") == "receive" and r.get("item_key")]
         if not received:
             raise stock.Refused(404, f"No delivery was found for invoice {invoice}.")
-        by_key = {}
+        find = stock.line_finder(st["items"])
+        by_key, gone = {}, []
         for r in received:
             try:
                 q = int(r["new_value"]) - int(r["old_value"])
             except (TypeError, ValueError):
                 continue
-            if q > 0:
-                by_key[r["item_key"]] = by_key.get(r["item_key"], 0) + q
+            line = find(r)
+            if line is None or str(line) not in st["items"]["items"]:
+                gone.append(r["item_key"])
+            elif q > 0:
+                by_key[line] = by_key.get(line, 0) + q
+        if gone:
+            raise stock.Refused(404, "A line from that delivery no longer exists: " + gone[0].replace("|", " ").strip())
         if not by_key:
             raise stock.Refused(400, "That delivery has no quantities that can be undone.")
-        items = {it["key"]: it for it in st["items"]["items"].values()}
-        missing = [k for k in by_key if k not in items]
-        if missing:
-            raise stock.Refused(404, "A line from that delivery no longer exists: " + missing[0].replace("|", " ").strip())
+        items = {i: st["items"]["items"][str(i)] for i in by_key}
         short = [k for k, q in by_key.items() if items[k]["current"] < q]
         if short:
             k = short[0]
@@ -501,20 +505,21 @@ def undo_delivery(uid: str, invoice_no) -> dict:
                                      "received. Correct that count first.")
         who = stock.actor(uid)
         history = []
-        for key, q in by_key.items():
-            it = items[key]
+        for line, q in by_key.items():
+            it = items[line]
+            key = it["key"]
             old = it["current"]
             it["current"] -= q
             it["received"] = max(0, it["received"] - q)
             it["updated_at"] = stock.now_iso()
-            history.append(stock.history_row(who, "receive_undo", item_key=key, field="current", old=old,
+            history.append(stock.history_row(who, "receive_undo", item_key=key, item_id=it["id"], field="current", old=old,
                                              new=it["current"], detail=f"undid delivery · inv {invoice} · -{q}"))
         for item_id, q in _unfill(st, invoice).items():
             it = st["items"]["items"].get(str(item_id))
             if it:
                 old = it["on_order"] or 0
                 it["on_order"] = old + q
-                history.append(stock.history_row(who, "ordered", item_key=it["key"], field="on_order", old=old,
+                history.append(stock.history_row(who, "ordered", item_key=it["key"], item_id=it["id"], field="on_order", old=old,
                                                  new=it["on_order"], detail=f"undid delivery · inv {invoice} · awaited again"))
         snap = stock.take_snapshot(st, "edit", who, f"undid delivery inv {invoice}")
         stock.commit(st, changed={"items", "orders", "alerts"}, history=history, snapshot=snap)
