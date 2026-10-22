@@ -15,13 +15,19 @@ What it writes ("stock-export-1"):
   Timestamps become ISO 8601 in UTC (a value without a zone is UTC), bytes
   become base64, text holding JSON stays the text it is. Passwords are left
   out: logins are not carried over.
+- `unknown_tables`: any other table in the database, with its count, so the
+  proof can say so rather than leave it behind unnoticed.
+- `sequences` (Postgres): the last id each table's sequence gave, which is
+  ahead of the highest id left where rows were deleted at the top; the
+  converter carries on after it.
 - `expected`: what the stock app's analytics say about this data, with its
   clock pinned to `now` and its reads of the stock lines pinned to id order
   (it reads them in no order, and the order breaks ties in its sorted lists
   and orders its sums). The figures are worked out on an in-memory copy at
   the stock app's current schema, filled the way the stock app's own upgrade
   fills a column an older database lacks, so an old copy and a current one
-  are treated alike.
+  are treated alike. Its columns accept NULL, as the ones the upgrade added
+  do in a long-running database.
 
 It only reads: SQLite is opened read-only, a Postgres session is set read
 only. The export holds real stock, prices and supplier contacts, so it is
@@ -88,12 +94,33 @@ def read_only_engine(url: str):
     return engine
 
 
+def sequences(conn, present) -> dict:
+    """The last id each Postgres sequence handed out (SQLite has none: it
+    numbers after the highest rowid, which the converter does anyway)."""
+    from sqlalchemy import text
+    if conn.dialect.name != "postgresql":
+        return {}
+    out = {}
+    for name in TABLES:
+        if name not in present or name == "meta":
+            continue
+        seq = conn.execute(text("SELECT pg_get_serial_sequence(:t, 'id')"), {"t": name}).scalar()
+        if seq:
+            last, called = conn.execute(text(f"SELECT last_value, is_called FROM {seq}")).one()
+            out[name] = int(last) if called else int(last) - 1
+    return out
+
+
 def dump_tables(engine):
-    """(the export's tables, the raw rows by table for the replica)."""
+    """(the export's tables, the raw rows by table for the replica, the
+    tables it does not know with their counts, the sequences)."""
     from sqlalchemy import MetaData, Table, func, inspect, select
     present = set(inspect(engine).get_table_names())
-    out, raw = {}, {}
+    out, raw, unknown = {}, {}, {}
     with engine.connect() as conn:
+        for name in sorted(present - set(TABLES)):
+            t = Table(name, MetaData(), autoload_with=conn)
+            unknown[name] = conn.execute(select(func.count()).select_from(t)).scalar_one()
         for name in TABLES:
             if name not in present:
                 out[name] = {"columns": [], "count": 0, "rows": [], "missing": True}
@@ -108,16 +135,24 @@ def dump_tables(engine):
                          "count": conn.execute(select(func.count()).select_from(t)).scalar_one(),
                          "rows": [{c: to_json_value(r[c]) for c in cols} for r in rows],
                          "missing": False}
-    return out, raw
+        seqs = sequences(conn, present)
+    return out, raw, unknown, seqs
 
 
 def figures(db, analytics, raw, now: datetime) -> dict:
     """The stock app's own analytics over an in-memory copy of the data."""
-    from sqlalchemy import create_engine, select
+    from sqlalchemy import MetaData, create_engine, select
     from sqlalchemy.orm import sessionmaker
     replica = create_engine("sqlite://")
-    db.Base.metadata.create_all(replica)
-    tables = db.Base.metadata.tables
+    # The stock app's tables, every column but the key accepting NULL: a
+    # column its upgrade added (ALTER TABLE ... ADD COLUMN) does, and rows
+    # may hold NULL there that its own NOT NULL schema would refuse.
+    layout = MetaData()
+    for t in db.Base.metadata.sorted_tables:
+        for c in t.to_metadata(layout).columns:
+            c.nullable = not c.primary_key
+    layout.create_all(replica)
+    tables = layout.tables
     with replica.begin() as conn:
         for name in FIGURE_TABLES:
             rows = raw.get(name)
@@ -182,9 +217,10 @@ def main(argv=None) -> int:
     import analytics
     head = subprocess.run(["git", "-C", args.stock_app, "rev-parse", "HEAD"],
                           capture_output=True, text=True).stdout.strip()
-    tables, raw = dump_tables(read_only_engine(args.database_url))
+    tables, raw, unknown, seqs = dump_tables(read_only_engine(args.database_url))
     export = {"format": "stock-export-1", "exported_at": datetime.now(timezone.utc).isoformat(),
               "now": now.isoformat(), "source_head": head, "tables": tables,
+              "unknown_tables": unknown, "sequences": seqs,
               "expected": figures(db, analytics, raw, now)}
     text = json.dumps(export, allow_nan=False, default=to_json_value)
     fd = os.open(args.out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -192,7 +228,7 @@ def main(argv=None) -> int:
         fh.write(text)
     counts = ", ".join("%s %d" % (n, t["count"]) for n, t in tables.items() if not t["missing"])
     missing = ", ".join(n for n, t in tables.items() if t["missing"]) or "none"
-    print(f"exported: {counts}; missing: {missing}")
+    print(f"exported: {counts}; missing: {missing}" + (f"; NOT KNOWN: {unknown}" if unknown else ""))
     return 0
 
 

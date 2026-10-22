@@ -13,6 +13,19 @@ that nothing was lost or changed on the way.
    every label code and barcode, and every figure to the penny. It exits 0
    only when the proof is empty.
 
+3. `selfcheck.py` runs both on an invented database laid out as the stock
+   app's upgrades leave a long-running one (columns added later accept
+   NULL), with closed quarters, tied snapshots, every kind of warning and a
+   table the move does not know. It is the check that Reactor's figures
+   still match the stock app's own, which the test suite cannot run (it has
+   neither the stock app's Python nor its code). Run it after any change to
+   either tool or to `gizmo/stock_figures.py`:
+
+   ```bash
+   <stock app>/.venv/bin/python tools/stock_move/selfcheck.py \
+       --stock-app <stock app> --reactor-python <Reactor's python>
+   ```
+
 ## The export holds real data
 
 Stock levels, prices, supplier contacts and who changed what. So:
