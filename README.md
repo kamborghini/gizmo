@@ -35,7 +35,7 @@ where Railway injects the variables — never has one.
 ## Test it
 
 ```bash
-make test            # the dispatch suite: a thousand tests through the real app, about two minutes
+make test            # the dispatch suite: a thousand tests through the real app, under three minutes
 make test-frontend   # the static guards on the single-page app, about two minutes
 make test-browser    # every screen in a real browser at three sizes, a few minutes
 make check           # everything CI runs that needs no network
@@ -60,22 +60,25 @@ accessibility, the keyboard. All of them run on every push.
 | Path | What it is |
 |---|---|
 | `server.py` | The entrypoint: Shopify client, the MCP tools, app assembly, and the write capabilities it hands to the app |
-| `copilot.py` | The app: every route, every domain, every store. Large; sectioned; the architecture note says where to look |
+| `gizmo/` | The app: the floor (settings, the stores, the AI client, the way to Shopify, the door's body checks) and the areas above it, each a module with its routes in `gizmo/routes/` |
+| `copilot.py` | `add_routes`, which assembles every area's routes, the frozen print routes, and the stock bridge |
 | `worldoptions.py` `xero.py` `google_mail.py` `google_data.py` `pipedrive.py` `eori.py` `recon.py` | One module per external system. None of them knows about the app |
 | `tokenvault.py` `totp.py` `logdrain.py` `mailmime.py` | Small libraries: secrets at rest, one-time codes, off-box logging, mail parsing |
 | `static/src/` `static/composer.js` | The single-page app: a shell and its stylesheet's and script's sections (`static/src/manifest.json`), joined by `pagesource.py` at start-up and split into hashed assets at serve time |
 | `data/` | Seed files that ship with the code: the size sheet, the rule files, the changelog, a font |
 | `extensions/` | The three Shopify admin actions (print label, print labels, dispatch) |
-| `tests/` `tools/` | The two suites; the credential sweep and the environment-reference generator |
-| `docs/` | The architecture note, the security registers, the audits, the courier API notes |
+| `tests/` | The dispatch, page, forecast and browser suites |
+| `tools/` | The generators for `docs/API.md` and `docs/ENVIRONMENT.md`, the tree sweep, the error-handler scan, and the move tool the backend was split with |
+| `docs/` | The architecture note and the other living references, then the dated audits, registers, specs and plans: `docs/README.md` says which is which |
 
 ## Deploy
 
 Railway builds the `Dockerfile` and deploys every push to `main`. There is no
-staging service, so a push is a deploy: run `make check` first, and keep the
-branch protected so a red build cannot reach the desk (this is the open item
-in the security register). The data volume mounts at `/data`; everything the
-app keeps lives there and is covered by the in-app backup.
+staging service, so a merge is a deploy. `main` is protected (the "Protect
+main" ruleset): a change reaches it through a pull request whose checks have
+passed, and it cannot be force-pushed or deleted. The data volume mounts at
+`/data`; everything the app keeps lives there and is covered by the in-app
+backup.
 
 The Shopify app configuration is `shopify.app.toml`, and the print and dispatch
 buttons Shopify shows are in `extensions/`. Neither reaches Shopify with a push:
