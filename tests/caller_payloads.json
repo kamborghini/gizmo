@@ -2289,5 +2289,35 @@
    "id": 9
   },
   "source": "tests/dispatch/stock-overview.py:140"
+ },
+ {
+  "path": "/api/stock/backups",
+  "body": {
+   "op": "make"
+  },
+  "source": "tests/dispatch/stock-backups.py:23"
+ },
+ {
+  "path": "/api/stock/backups",
+  "body": {
+   "op": "list"
+  },
+  "source": "tests/dispatch/stock-backups.py:31"
+ },
+ {
+  "path": "/api/stock/backups",
+  "body": {
+   "op": "restore",
+   "id": 1
+  },
+  "source": "tests/dispatch/stock-backups.py:40"
+ },
+ {
+  "path": "/api/stock/backups",
+  "body": {
+   "op": "download",
+   "id": 1
+  },
+  "source": "tests/dispatch/stock-backups.py:92"
  }
 ]

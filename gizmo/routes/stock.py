@@ -4,8 +4,9 @@ claimed by the "stock" tab in gate._TAB_ROUTES.
 """
 import logging
 from starlette.requests import Request
+from starlette.responses import Response
 
-from gizmo import stock, stock_orders, stock_quarters, stock_sheet
+from gizmo import stock, stock_backups, stock_orders, stock_quarters, stock_sheet
 from gizmo import gate
 from gizmo import bodies
 
@@ -93,6 +94,11 @@ class StockHistoryBody(bodies.Body):
     end: bodies.Text = None
     before: bodies.Whole = None
     limit: bodies.Whole = None
+
+
+class StockBackupsBody(bodies.Body):
+    """What /api/stock/backups reads: the backup to download or restore."""
+    id: bodies.Id = None
 
 
 _CONTACT_FIELDS = ("supplier", "email", "cc", "contact_name", "subject", "body", "lead_days", "min_order")
@@ -245,6 +251,33 @@ def register(mcp, registry):
                                                           body.get("limit")), "the history")
         if op == "item":
             return _answer(lambda: stock_quarters.item_sheet(body.get("id")), "a line's sheet")
+        return gate._json({"error": "Unknown op."}, 400)
+
+    @mcp.custom_route("/api/stock/backups", methods=["POST"])
+    async def stock_backups_route(request: Request):
+        """The stock sheet's own backups: made now or each night, listed,
+        downloaded, and restored by the master with a safety backup first."""
+        err, body, who = await gate._guard(request, model=StockBackupsBody)
+        if err:
+            return err
+        op = str(body.get("op") or "list")
+        if op == "list":
+            return _answer(stock_backups.backups, "the backups")
+        if op == "make":
+            return _answer(lambda: stock_backups.make_backup(stock.actor(who)), "a backup")
+        if op == "restore":
+            return _answer(lambda: stock_backups.restore(who, body.get("id")), "a restore")
+        if op == "download":
+            try:
+                data, name = stock_backups.download(body.get("id"))
+            except stock.Refused as e:
+                return gate._json({"error": e.words}, e.status)
+            except Exception:
+                logger.exception("stock: a backup download failed")
+                return gate._json({"error": "That backup could not be read."}, 500)
+            safe = "".join(c for c in name if c.isalnum() or c in "._-") or "stock-backup"
+            return Response(data, media_type="application/octet-stream",
+                            headers={**gate._API_HEADERS, "Content-Disposition": f'attachment; filename="{safe}"'})
         return gate._json({"error": "Unknown op."}, 400)
 
     @mcp.custom_route("/api/stock/suppliers", methods=["POST"])
