@@ -2,23 +2,27 @@
  "releases": [
   {
    "date": "2026-10-22",
-<<<<<<< HEAD
    "title": "Sign-in timing, and an import that stops partway",
-=======
-   "title": "Refused requests cost the assistant nothing",
->>>>>>> origin/main
    "items": [
     {
      "kind": "fixed",
      "tab": null,
-<<<<<<< HEAD
      "text": "A refused sign-in now takes the same time whatever the reason. An account that was paused after too many wrong passwords, switched off, or holding an expired temporary password was turned away faster than a username that does not exist, so once five wrong guesses had paused an account, the wait showed the username was real. The message is unchanged, and a paused account still cannot sign in with the right password."
     },
     {
      "kind": "fixed",
      "tab": "crm",
      "text": "A Pipedrive import that stops partway now leaves the CRM exactly as it was and says so. Until now the half of it already done stayed on the board and was saved by the next change anyone made."
-=======
+    }
+   ]
+  },
+  {
+   "date": "2026-10-22",
+   "title": "Refused requests cost the assistant nothing",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": null,
      "text": "A request refused for a field of the wrong kind no longer takes a turn of the assistant's shared capacity, so a stray script cannot keep it busy for everyone, and a whole number larger than a browser can send exactly is refused with a reason instead of reaching a report. Nothing looks different."
     }
    ]
@@ -31,7 +35,6 @@
      "kind": "changed",
      "tab": null,
      "text": "The library behind Claude's direct connection to the store and the file storage library are on their newest releases, and the forecast's image library has this month's security fixes, as the rest of the app already did. Nothing looks different."
->>>>>>> origin/main
     }
    ]
   },
