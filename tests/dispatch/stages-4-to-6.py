@@ -1514,3 +1514,41 @@ def t_a_body_the_door_refuses_spends_no_ai_slot():
     eq(len(gate._rl_global), 0, "no AI slot spent on a body the door refused")
     r = client.post("/api/skills/read", json={"id": {"wrong": 1}}, headers=h)
     eq((r.status_code, len(gate._rl_global)), (400, 0), "nor on reading a skill")
+
+@test
+def t_a_caller_without_the_rank_hears_so_before_the_body_is_checked():
+    """Five routes keep their rank check inside the handler, after the door:
+    the CRM's pipeline settings (admin), the Pipedrive import (master), the
+    connector's writing acts and clearing a collection (admin), and changing
+    your own password (a signed-in session). The door checked the body first,
+    so a member who sent a field of the wrong kind heard a 400 naming the
+    field where they should have heard they may not (stage 5's review). The
+    rank now answers first, and a caller who holds it still has the body
+    checked."""
+    def go():
+        boss = ensure_auth()
+        _m, member, _p = ready_user("Mina", "mina-member")
+        cases = [
+            ("/api/crm/stages", {"stages": "not a list"}),
+            ("/api/crm/import", {"go": "yes please"}),
+            ("/api/connector", {"op": "settings_save", "fields": "not a set of fields"}),
+            ("/api/connector", {"op": "autorun_set", "enabled": "on"}),
+            ("/api/connector", {"op": "payouts", "limit": "lots"}),
+            ("/api/connector", {"op": "reimport", "order": ["#104300"]}),
+            ("/api/connector", {"op": "reimport_tag", "tag": ["xero-price-check"]}),
+            ("/api/connector", {"op": "send", "limit": "lots"}),
+            ("/api/connector", {"op": "retry", "limit": "lots"}),
+            ("/api/dispatch/collections", {"op": "clear", "carrier": ["DHL"]}),
+        ]
+        for path, body in cases:
+            what = "%s %s" % (path, body.get("op", ""))
+            r = post_s(member, path, body)
+            eq(r.status_code, 403, "%s: a member hears they may not: %s" % (what, r.text))
+            r = post_s(boss, path, body)
+            eq(r.status_code, 400, "%s: the master still has the body checked: %s" % (what, r.text))
+        wrong = {"current": ["not", "text"], "new": 12345678}
+        r = bare("/api/auth/password", wrong)
+        eq(r.status_code, 401, "no session hears it is not signed in: %s" % r.text)
+        r = post_s(member, "/api/auth/password", wrong)
+        eq(r.status_code, 400, "a signed-in caller still has the body checked: %s" % r.text)
+    with_accounts(go)
