@@ -1993,5 +1993,110 @@
    "csv": "Quarter one\n\nCategory,Colour,Size\nGlass,Blue,20,,10,0,4,6\n"
   },
   "source": "tests/dispatch/stock-sheet.py:348"
+ },
+ {
+  "path": "/api/stock/orders",
+  "body": {
+   "op": "place",
+   "supplier": "Invented Glass Co",
+   "reference": "PO-1",
+   "currency": "GBP",
+   "lines": [
+    {
+     "id": 3,
+     "qty": 5,
+     "unit_cost": 1.2
+    },
+    {
+     "id": 9,
+     "qty": 2
+    }
+   ]
+  },
+  "source": "tests/dispatch/stock-buying.py:17"
+ },
+ {
+  "path": "/api/stock/orders",
+  "body": {
+   "op": "clear",
+   "id": 3
+  },
+  "source": "tests/dispatch/stock-buying.py:48"
+ },
+ {
+  "path": "/api/stock/orders",
+  "body": {
+   "op": "list",
+   "open_only": true
+  },
+  "source": "tests/dispatch/stock-buying.py:53"
+ },
+ {
+  "path": "/api/stock/orders",
+  "body": {
+   "op": "reorder"
+  },
+  "source": "tests/dispatch/stock-buying.py:62"
+ },
+ {
+  "path": "/api/stock/orders",
+  "body": {
+   "op": "suggest"
+  },
+  "source": "tests/dispatch/stock-buying.py:73"
+ },
+ {
+  "path": "/api/stock/orders",
+  "body": {
+   "op": "levels",
+   "levels": [
+    {
+     "id": 3,
+     "reorder_point": 12,
+     "reorder_qty": 30
+    }
+   ]
+  },
+  "source": "tests/dispatch/stock-buying.py:79"
+ },
+ {
+  "path": "/api/stock/suppliers",
+  "body": {
+   "op": "save",
+   "supplier": "Invented Glass Co",
+   "email": "orders@example.com",
+   "lead_days": 7,
+   "min_order": "100 per size"
+  },
+  "source": "tests/dispatch/stock-buying.py:91"
+ },
+ {
+  "path": "/api/stock/suppliers",
+  "body": {
+   "op": "save_all",
+   "contacts": [
+    {
+     "supplier": "Invented Glass Co",
+     "email": "sales@example.com",
+     "subject": "Our order"
+    }
+   ]
+  },
+  "source": "tests/dispatch/stock-buying.py:93"
+ },
+ {
+  "path": "/api/stock/suppliers",
+  "body": {
+   "op": "list"
+  },
+  "source": "tests/dispatch/stock-buying.py:98"
+ },
+ {
+  "path": "/api/stock/suppliers",
+  "body": {
+   "op": "delete",
+   "supplier": "Invented Glass Co"
+  },
+  "source": "tests/dispatch/stock-buying.py:102"
  }
 ]
