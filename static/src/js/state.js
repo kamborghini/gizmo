@@ -17,8 +17,6 @@
            other conversation could be asked in meanwhile, and opening another
            one lost the spinner for good. */
         const pending = {};
-        let overviewCache = null;
-        let ovRange = 12, seoRange = 12;   // months of history shown in trend charts (sliced client-side)
         /* Entrance motion belongs to an ARRIVAL. A tab fades its content in the
            first time that content lands; every later paint of the same tab - a
            refresh, a Customize toggle, a return from another tab - is the same
@@ -26,10 +24,8 @@
            already reading reads as a fault rather than as polish. */
         const _viewPainted = Object.create(null);
         function firstPaint(view) { if (_viewPainted[view]) return false; _viewPainted[view] = true; return true; }
-        const RANGE_OPTS = [{ label: '3M', value: 3 }, { label: '6M', value: 6 }, { label: '12M', value: 12 }, { label: '24M', value: 24 }];
         const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-        const monthLabel = (ym) => { const m = /^(\d{4})-(\d{2})$/.exec(ym || ''); return m ? (MONTH_ABBR[+m[2] - 1] + (m[2] === '01' ? " '" + m[1].slice(2) : '')) : (ym || ''); };
         const readConvos = () => { try { const v = JSON.parse(localStorage.getItem(LS) || '[]'); return Array.isArray(v) ? v.filter(c => c && c.id && Array.isArray(c.turns)) : []; } catch (e) { return []; } };
         convos = readConvos().filter(c => c.turns.length);
         convos.forEach(c => { if (!c.updated) c.updated = c.ts || 0; });
@@ -110,7 +106,9 @@
            to a Monday sign-in; claimLocalCache still drops them the moment
            somebody else signs in here. */
         function clearLocalCache(keepChats) {
-            [LS, LS_SET, LS_OWNER, OV_LAYOUT_KEY].forEach(k => {
+            /* sc_ov_layout_v1 is the old Overview's KPI order, which nothing
+               reads since that page went (22 Oct 2026): cleared like the rest. */
+            [LS, LS_SET, LS_OWNER, 'sc_ov_layout_v1'].forEach(k => {
                 if (keepChats && (k === LS || k === LS_OWNER)) return;
                 try { localStorage.removeItem(k); } catch (e) {}
             });
@@ -121,10 +119,6 @@
            the previous session's answers survives either. */
         function claimLocalCache(id) {
             if (!id) return;
-            /* The old Overview layout in this browser can be carried to an
-               account only once it is known whose browser cache this is: by
-               the time this runs, a different owner's has been cleared. */
-            wgOwnerKnown = true;
             /* The layouts are read here, the moment the app knows who is signed
                in, and not at start-up: a sign-in from the login screen does not
                reload the page, so a read made before it failed and left

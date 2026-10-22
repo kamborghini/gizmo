@@ -107,6 +107,30 @@
   "source": "static/src/js/team-and-sign-in.js:656"
  },
  {
+  "path": "/api/chat",
+  "body": {
+   "messages": [
+    {
+     "role": "user",
+     "content": "How did September compare with August?"
+    },
+    {
+     "role": "assistant",
+     "content": "September sales were £41,220.\nSuggested questions: Which products drove it?"
+    },
+    {
+     "role": "user",
+     "content": "Which products drove it?"
+    }
+   ],
+   "deep": false,
+   "skills": [
+    "a1b2c3d4e5"
+   ]
+  },
+  "source": "static/src/js/chat.js:392"
+ },
+ {
   "path": "/api/chat/stream",
   "body": {
    "messages": [
@@ -1202,29 +1226,6 @@
    "orders": 200
   },
   "source": "static/src/js/production-manager.js:1063"
- },
- {
-  "path": "/api/chat",
-  "body": {
-   "messages": [
-    {
-     "role": "user",
-     "content": "Why did orders dip?"
-    },
-    {
-     "role": "assistant",
-     "content": "Two reasons."
-    }
-   ],
-   "deep": false,
-   "context": {
-    "page": "overview",
-    "report": {
-     "kpis": []
-    }
-   }
-  },
-  "source": "static/src/js/report-tools.js:152"
  },
  {
   "path": "/api/crm/activity",

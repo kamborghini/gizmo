@@ -14,15 +14,9 @@
            wherever the app is running. */
         const GUIDE = [
             { id: 'first', h: 'Your first day', body: [
-                ['Overview', 'Your store at a glance: the headline figures, what is worth looking at, and the open follow-ups. It is an AI report: it runs when you press Run or Refresh.', { tab: 'overview' }],
-                ['SEO', 'How the shop does in search and what to change first, ranked by the money each change is worth. An AI report.', { tab: 'seo' }],
-                ['Keywords', 'The searches that bring people in, paid and unpaid, and where to win more. An AI report.', { tab: 'keywords' }],
-                ['Products', 'The catalogue with up to 24 months of sales, to filter, compare and export. It reads Shopify alone, so it costs nothing to run.', { tab: 'products' }],
-                ['Customers', 'Who the best customers are, who has gone quiet, and sales by sector. An AI report.', { tab: 'customers' }],
                 ['Liability', 'Who owes money on account, how late it is, and a chasing email for each account.', { tab: 'liability' }],
-                ['Reconciliation', 'A nightly cross-check of Shopify, Xero and the accounts mailbox, and anything that does not match. An admin gives this page to a person; nobody has it by default.', { tab: 'recon' }],
-                ['Forecast', 'Where the year is heading against the cash flow plan. Given by an admin, like Reconciliation.', { tab: 'forecast' }],
-                ['Xero sync', 'Checks Shopify orders against Xero and sends what is missing. Given by an admin, like Reconciliation.', { tab: 'connector' }],
+                ['Forecast', 'Where the year is heading against the cash flow plan. An admin gives this page to a person; nobody has it by default.', { tab: 'forecast' }],
+                ['Xero sync', 'Checks Shopify orders against Xero and sends what is missing. Given by an admin, like Forecast.', { tab: 'connector' }],
                 ['Production Manager', 'The bench: orders from Unprocessed to Complete, labels, dispatch and the day sheets.', { tab: 'labels' }],
                 ['Size list', 'Every gobo size the labels use, and the rulings made on top of the size sheet.', { tab: 'sizes' }],
                 ['CRM', 'The sales desk: deals, leads, activities and contacts, with a next step on every open deal.', { tab: 'crm' }],
@@ -51,7 +45,7 @@
                 ['A customs line shows 0', 'The store prices custom gobos through the option dropdowns, so the base product price is zero. Type the real value in: it is remembered against that product and filled in next time. Customs treats goods valued at zero as suspect and can hold the parcel.', { tab: 'labels' }],
                 ['An order is missing from a queue', 'Queues follow tags (see The five queues). Orders finished before a tag was renamed still carry Dispatched and still show. Check the order’s tags in Shopify. The search box takes an order number, a customer name or a tracking number. If you have just changed a tag in Shopify, press Refresh: switching queues reuses the last read of your orders so it stays instant.', { tab: 'labels' }],
                 ['The app turns your sign-in down', 'It says why. "Check this computer’s clock" means the clock is out and Shopify’s sign-in looks expired to the app; set the clock to update itself. A sign-in that has run out needs signing in again. An account that has been switched off needs an admin. A starter password must be changed before anything else opens. Opened outside the Shopify admin, it asks you to open Reactor from inside it.'],
-                ['Shopify or World Options is down', 'Ask an admin to look at Settings, Connections, which shows the live state of both and any errors from the last day. A Shopify outage lasting three hours raises an alert on the Overview.'],
+                ['Shopify or World Options is down', 'Ask an admin to look at Settings, Connections, which shows the live state of both and any errors from the last day. A Shopify outage lasting three hours raises an alert at the top of every page.'],
             ]},
             { id: 'dispatch', h: 'Dispatch, in detail', tab: 'labels', body: [
                 ['Parcels', 'Pick a box preset, or type sizes in cm and weight in kg. Weigh the packed box: couriers weigh again on collection and bill the difference. Add a box sends several parcels on one booking.'],
@@ -92,13 +86,12 @@
             { id: 'money', h: 'Money', body: [
                 ['Liability', 'Unpaid account orders from the last two years, by customer and by how late they are. The terms come from Shopify’s own terms on the order first, then a Net tag, then the house default.', { tab: 'liability' }],
                 ['Chasing', 'Open an account on Liability for its chasing email, written from the ledger: every unpaid order with its amount and days overdue. Change it, then send it.', { tab: 'liability' }],
-                ['The finance pages', 'Reconciliation, Forecast and Xero sync hold the company’s books, so nobody has them by default. An admin gives them to a person on the Team page.'],
+                ['The finance pages', 'Forecast and Xero sync hold the company’s books, so nobody has them by default. An admin gives them to a person on the Team page.'],
             ]},
-            { id: 'reports', h: 'Reports and AI credits', tab: 'overview', body: [
-                ['What costs money', 'The Overview, SEO, Keywords and Customers are AI reports. Opening one shows the last result at no cost; Run and Refresh ask the AI again and use credits. Refresh all, in those reports’ headers, runs all four at once.'],
-                ['Asking about a report', 'Each AI report has a question box at its foot for questions about that report alone.'],
+            { id: 'reports', h: 'AI credits and your pages', tab: 'chat', body: [
+                ['What costs money', 'Chat, Learn my store on Memory, reading a skill and the Inbox’s reply drafts ask the AI and use credits. Everything else reads Shopify and Reactor’s own records at no cost.'],
                 ['Customise', 'The button in a page header lets you drag its cards into the order you want and hide the ones you do not use. The arrangement is kept on your own account.'],
-                ['Printing a report', 'Download as PDF, in the top bar, prints the report you are looking at.'],
+                ['Printing a conversation', 'Download as PDF, in the top bar, prints the conversation you are looking at.'],
             ]},
             { id: 'assistant', h: 'Reactor, the assistant', tab: 'chat', body: [
                 ['Chat', 'Ask anything about the store. Reactor reads your live figures (it can never change anything) and answers with findings and next steps. What Reactor read, under an answer, lists what it looked at. You can ask in another conversation while one is working, and Stop one that is taking too long.'],
@@ -113,7 +106,7 @@
                 ['Tell the customer too early', 'Booking a label is preparation. Shopify is only told the order shipped once it is also marked made.'],
                 ['Lose your work to a misclick', 'A window holding work you have typed closes only by its X, never on a click outside it or on Escape. Yes and no questions answer to Escape, which always means cancel.'],
                 ['Delete on a stray Enter', 'A question that destroys something is red, opens with Cancel selected, and ignores Enter. It has to be clicked.'],
-                ['Let the assistant change anything', 'Chat and every AI report can only read your store. Tagging, fulfilling and booking are wired separately and cannot be reached by the assistant, whatever it is asked.'],
+                ['Let the assistant change anything', 'Chat can only read your store. Tagging, fulfilling and booking are wired separately and cannot be reached by the assistant, whatever it is asked.'],
             ]},
             { id: 'files', h: 'Files', tab: 'files', body: [
                 ['What it is', 'A shared file store for the whole team, reachable anywhere the app is. Uploads and downloads go straight between your browser and the storage, so big files move at full speed.'],
@@ -125,7 +118,7 @@
             { id: 'team', h: 'The team', body: [
                 ['Your own account', 'Reactor keeps its own accounts, a username and password each, separate from Shopify logins. Passwords are stored scrambled and shown to nobody, admins included.'],
                 ['The four roles', 'The master admin controls everything, including the other accounts, and can never be demoted, switched off or deleted. Admins manage members and the day-to-day setup. Members do the work. Part-timers do the work and clock in and out.'],
-                ['Who can open what', 'Each person has their own set of pages, chosen by an admin with Tabs on the Team page. Reconciliation, Forecast and Xero sync are given by choice, never by default.'],
+                ['Who can open what', 'Each person has their own set of pages, chosen by an admin with Tabs on the Team page. Forecast and Xero sync are given by choice, never by default. Customer details, ticked by default, decides who may read customers’ names, contacts and order histories.'],
                 ['Clocking in', 'Part-timers clock in and out from the account menu at the foot of the sidebar. The app keeps the times itself; a forgotten clock-out is corrected by an admin on Team, Work.'],
                 ['Adding a person', 'Team, then New account: their name, a username and the role. The app makes a starter password and shows it once; pass it on privately. They must choose their own password when they first sign in.', { admin: true }],
                 ['Forgotten passwords', 'Reset password on their row makes a new starter password, shown once. Their old password and open sign-ins stop working at once. Nobody can look up an existing password.', { admin: true }],

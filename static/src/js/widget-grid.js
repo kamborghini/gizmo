@@ -209,18 +209,6 @@
         }
         // The id pattern the server holds a saved layout to, so a card the page names can always be saved.
         const WG_ID = /^[a-z0-9][a-z0-9-]{0,47}$/;
-        /* An Overview KPI tile's id, from its label, since the tiles come from
-           whatever list the server sends and carry no id of their own. A
-           bracketed threshold goes first: "Low stock (≤5)" carries
-           LOW_STOCK_THRESHOLD, and a saved layout must not lose the tile the
-           day that setting changes. The rest is lower case with every run of
-           other characters one hyphen, cut to the 48 the pattern allows. */
-        function wgKpiId(label) {
-            const bare = String(label == null ? '' : label)
-                .replace(/\(\s*(?:≤|≥|<=|>=|<|>)\s*[\d.,]+\s*\)/g, ' ');
-            const slug = bare.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-            return ('kpi-' + slug).slice(0, 48).replace(/-+$/, '');
-        }
         /* ---------- widget layout end ---------- */
         /* ---------- widget grid (page layer) ---------- */
         /* The one place a view's cards are arranged and customized. A renderer
@@ -232,11 +220,10 @@
            reading order, tab order and screen reader order are the order you
            see, and print can overrule it. The arithmetic is the pure block
            above; the design is docs/superpowers/specs/2026-09-17-draggable-widget-grid-design.md. */
-        const APP_VIEWS = ['overview', 'seo', 'keywords', 'products', 'customers', 'liability', 'recon', 'forecast', 'connector', 'crm', 'loans', 'mail', 'files', 'team', 'labels', 'sizes', 'memory', 'skills', 'chat', 'guide'];
+        const APP_VIEWS = ['liability', 'forecast', 'connector', 'crm', 'loans', 'mail', 'files', 'team', 'labels', 'sizes', 'memory', 'skills', 'chat', 'guide'];
         // Chat is a log and a composer, not a page of cards, which is also why the server's LAYOUT_VIEWS leaves it out.
         const WG_VIEWS = APP_VIEWS.filter(v => v !== 'chat');
-        // Overview is the one content root not named after its view.
-        const wgRoot = (view) => $(view === 'overview' ? 'ov-content' : view + '-content');
+        const wgRoot = (view) => $(view + '-content');
         /* Marks a block as a card the layer may move: an id chosen by what the
            card is (trends, sectors, never card-3), a size (sm, wide, or full
            when left out) and, for a block with no card title of its own, the
@@ -326,9 +313,9 @@
                 wgArrange(view);
             });
             w.mo.observe(root, { childList: true });
-            /* A holder fills after the root has changed (paintRadar lands when
-               its request answers, Products redraws Top products on every
-               search), which the root's own childList never sees. So every
+            /* A holder fills after the root has changed (a card whose content
+               lands when its own request answers, or one a search redraws),
+               which the root's own childList never sees. So every
                card is watched here too, its own children and the attributes
                that can hide it, and the view is arranged again only when a
                card starts or stops being shown: a chart repainting inside its
@@ -729,34 +716,7 @@
             let d = null;
             try { d = await api('/api/layouts', {}); } catch (e) { d = null; }
             wgLayouts = d && d.layouts && typeof d.layouts === 'object' && !Array.isArray(d.layouts) ? d.layouts : false;
-            if (wgLayouts) await wgMigrateOverview();
             WG_VIEWS.forEach(v => { if (wgWatchers[v]) wgArrange(v); });
-        }
-        /* The Overview's KPI order used to live in this browser under
-           sc_ov_layout_v1, by label. Once, when the account has no Overview
-           layout of its own, it is carried over as kpi ids; the key goes only
-           after the server has the layout, so a failed save is tried again on
-           the next start rather than lost. */
-        const OV_LAYOUT_KEY = 'sc_ov_layout_v1';
-        // Set by claimLocalCache: until then the key may be the last person's, who signed in on this browser before.
-        let wgOwnerKnown = false, wgMigrating = false;
-        async function wgMigrateOverview() {
-            if (!wgLayouts || wgLayouts.overview || !wgOwnerKnown || wgMigrating) return;
-            let old = null;
-            try { old = JSON.parse(localStorage.getItem(OV_LAYOUT_KEY) || 'null'); } catch (e) { return; }
-            if (!old || typeof old !== 'object') return;
-            const ids = (list) => [...new Set((Array.isArray(list) ? list : []).map(wgKpiId))].filter(id => WG_ID.test(id)).slice(0, WG_MAX_IDS);
-            const layout = { order: ids(old.order), hidden: ids(old.hidden) };
-            if (layout.order.length || layout.hidden.length) {
-                wgMigrating = true;
-                let d = null;
-                try { d = await api('/api/layouts', Object.assign({ view: 'overview' }, layout)); } catch (e) { d = null; }
-                wgMigrating = false;
-                if (!d || !d.layouts || typeof d.layouts !== 'object') return;
-                wgLayouts = d.layouts;
-            }
-            try { localStorage.removeItem(OV_LAYOUT_KEY); } catch (e) {}
-            wgArrange('overview');
         }
         /* ----- dragging -----
            Pointer events, because HTML5 drag never fires from touch and draws
@@ -1001,21 +961,6 @@
             wgSay(wgName(card) + ' moved to ' + (now.findIndex(i => i.id === id) + 1) + ' of ' + now.length);
         }
         /* ---------- widget grid end ---------- */
-        /* One block, the reference's way: a card whose header carries the
-           title and one muted line, and whose body runs to the card edge so a
-           table or a chart meets the border instead of floating in a second
-           inset box. Everything that used to be a bare heading over loose
-           content becomes one of these. */
-        function cardSection(title, desc, body, action) {
-            const c = el('div', 'card');
-            const h = el('div', 'card-head');
-            h.append(el('h3', 'card-title', title));
-            if (desc) h.append(el('p', 'card-desc', desc));
-            if (action) { const a = el('div', 'card-act'); a.append(action); h.append(a); }
-            c.append(h);
-            if (body) { const b = el('div', 'card-bleed'); b.append(body); c.append(b); }
-            return c;
-        }
         /* Turn the app's bare headings into the reference's cards.
            
            The reference never puts a heading on the page with loose content

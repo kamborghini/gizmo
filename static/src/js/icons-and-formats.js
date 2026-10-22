@@ -271,14 +271,7 @@
             return b;
         }
         // static icon wiring
-        $('nav-overview').append(ico(I.grid), document.createTextNode('Overview'));
-        $('nav-seo').append(ico(I.globe), document.createTextNode('SEO'));
-        $('nav-keywords').append(ico(I.tag), document.createTextNode('Keywords'));
-        $('nav-products').append(ico(I.box), document.createTextNode('Products'));
-        $('nav-customers').append(ico(I.users), document.createTextNode('Customers'));
         $('nav-liability').append(ico(I.card), document.createTextNode('Liability'));
-        $('nav-recon').append(ico(I.scale), document.createTextNode('Reconciliation'),
-            el('span', 'beta-tag', 'Beta'));
         $('nav-forecast').append(ico(I.trendUp), document.createTextNode('Forecast'),
             el('span', 'beta-tag', 'Beta'));
         $('nav-connector').append(ico(I.arrowsLR), document.createTextNode('Xero sync'),
@@ -295,7 +288,7 @@
         $('nav-skills').append(ico(I.book), document.createTextNode('Skills'));
         $('nav-chat').append(ico(I.chat), document.createTextNode('Chat'));
         $('nav-guide').append(ico(I.helpCircle), document.createTextNode('Guide'));
-        $('brand-home').onclick = () => setView('overview');
+        $('brand-home').onclick = () => setView('labels');
         $('new-convo').innerHTML = I.plus;
         /* The top bar's button: the panel glyph beside a sidebar that can hide, the menu glyph while the sidebar is a drawer (900 and under). */
         $('menu-btn').innerHTML = I.panelLeft + I.menu;
@@ -345,21 +338,4 @@
             if (f) return f.format(v);
             return v.toLocaleString('en-GB', { minimumFractionDigits: dp, maximumFractionDigits: dp })
                 + (cur ? (' ' + cur) : '');
-        }
-        const fmtMoney = (n, cur) => money(n, cur, 0);
-        /* The compact form for a chart's headline: '£29k', from the same rule,
-           rather than fmtCompact with the code stuck on the end ('29k GBP'). */
-        const _moneyShortFmts = {};
-        function moneyShort(n, cur) {
-            const code = String(cur || '').trim().toUpperCase();
-            const v = Number(n) || 0;
-            if (Math.abs(v) < 1000 || !/^[A-Z]{3}$/.test(code)) return Math.abs(v) < 1000 ? money(v, cur, 0) : fmtCompact(v);
-            if (!(code in _moneyShortFmts)) {
-                try { _moneyShortFmts[code] = new Intl.NumberFormat('en-GB', { style: 'currency', currency: code,
-                        notation: 'compact', maximumFractionDigits: 1 }); }
-                catch (e) { _moneyShortFmts[code] = null; }
-            }
-            const f = _moneyShortFmts[code];
-            /* Lower-case k, as the axis under it writes thousands. */
-            return f ? f.format(v).replace('K', 'k') : fmtCompact(v);
         }

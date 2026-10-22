@@ -373,10 +373,7 @@ def t_every_refresh_button_asks_the_server_for_fresh_data():
     # The server now reuses a recent order sweep. A Refresh that only bypasses
     # the copy held in the page would silently return the same numbers.
     for call, why in [
-        (r"/api/overview'\s*,\s*\{[^}]*fresh", "Overview"),
         (r"/api/liability'\s*,\s*\{[^}]*fresh", "Liability"),
-        (r"/api/products'\s*,\s*\{[^}]*fresh", "Products"),
-        (r"/api/customers'\s*,\s*\{[^}]*fresh", "Customers"),
         (r"/api/production-labels'\s*,\s*\{[^}]*fresh", "Production Manager"),
     ]:
         ok(_re.search(call, HTML), why + " Refresh reaches Shopify")
@@ -1163,16 +1160,6 @@ def t_a_report_exported_to_pdf_carries_no_screen_furniture():
        "the print block no longer repaints a dark theme the app does not have")
 
 
-@test
-def t_losing_money_is_said_in_words_not_only_in_red():
-    """A campaign below break-even was flagged by colour alone, which survives
-    neither a black-and-white print nor a colour-blind reader."""
-    ok("roas-flag" in SCRIPT and "below cost" in SCRIPT,
-       "a sub-1 ROAS is labelled, not only tinted")
-    ok("roas.style.color = 'var(--error)'" not in SCRIPT,
-       "and the colour-only inline style is gone")
-
-
 def _token_raw(name):
     """A token's literal value, whatever kind it is. _token below follows var()
     chains down to a HEX and asserts colour-ness, which is right for a palette
@@ -1389,17 +1376,8 @@ def t_a_write_that_failed_is_never_shown_as_a_write_that_worked():
             continue
         bad.append(str(i) + ": " + line.strip()[:110])
     ok(not bad, "an error from a write is being discarded: " + "; ".join(bad))
-
-    # And the switch itself: the class follows the write, both ways.
-    fn = SCRIPT.split("$('sched-toggle').onclick", 1)[1].split("};", 1)[0]
-    ok("const was = this.classList.contains('on')" in fn and "paintSchedule(was" in fn,
-       "the schedule switch goes back when the server refuses")
-    ok("toastError" in fn, "and says so")
-    # A load-once cache must not cache a FAILURE, or one blip removes the
-    # feature for the whole session.
-    tags = SCRIPT.split("async function loadCustomerTags", 1)[1].split("\n        }", 1)[0]
-    ok("customerTags = null" in tags,
-       "a failed segment load stays null so the next call retries")
+    # (The schedule switch this was first written for went with the report
+    # tabs on 22 Oct 2026.)
 
 
 @test
@@ -1422,24 +1400,6 @@ def t_a_failed_load_is_not_reported_as_an_empty_list():
     ok("Your notes could not be loaded, so they cannot be shown yet." in SCRIPT
        and "Your skills could not be loaded, so they cannot be shown yet." in SCRIPT,
        "and the copy says the list could not be read rather than that it is empty")
-
-
-@test
-def t_a_failed_question_is_not_dressed_as_an_answer():
-    """pageAsk pushed the exception straight in as an assistant turn, so a
-    transport failure rendered in the same bubble as a real answer, under the
-    same model line - the copilot appeared to have replied 'Failed to fetch'.
-    Worse, that text then went back up as assistant history on the next turn."""
-    fn = re.search(r"async function pageAsk.*?\n        \}", SCRIPT, re.S).group(0)
-    ok("role: 'error'" in fn, "a failure is its own kind of turn, not an assistant turn")
-    ok("structured: { summary: e.message" not in fn,
-       "and it is no longer packed into the answer shape")
-    ok("filter(t => t.role !== 'error')" in fn,
-       "the failure is not replayed to the model as something it said")
-    render = re.search(r"function renderPageThread.*?\n        \}", SCRIPT, re.S).group(0)
-    ok("t.role === 'error'" in render, "and it renders through the error path")
-    ok("did not reach Reactor" in render, "which says what actually happened")
-    ok("Ask again" in render, "and offers the question back rather than making them retype it")
 
 
 @test
@@ -1590,12 +1550,12 @@ def t_the_inbox_list_can_be_worked_without_a_mouse():
 def t_a_tick_box_that_is_a_div_still_answers_the_keyboard():
     """The action lists build their tick as a bare div with a click handler on
     the row, so the only way to mark something done was a mouse."""
-    ok(SCRIPT.count("ck.setAttribute('role', 'button')") == 2,
-       "both action lists give the box a role")
+    ok(SCRIPT.count("ck.setAttribute('role', 'button')") == 1,
+       "the action list gives the box a role (the Overview's follow-ups list went on 22 Oct 2026)")
     ok("ck.setAttribute('aria-pressed', String(row.classList.toggle('done')))" in SCRIPT
        or "const on = row.classList.toggle('done'); ck.setAttribute('aria-pressed', String(on));" in SCRIPT,
        "and the pressed state follows the row, rather than going stale")
-    ok(SCRIPT.count("ck.tabIndex = 0") == 2, "both are reachable")
+    ok(SCRIPT.count("ck.tabIndex = 0") == 1, "and it is reachable")
 
 
 @test
@@ -1634,11 +1594,8 @@ def t_the_inbox_crm_chip_is_the_accent_not_a_lookalike():
 def t_a_heading_with_a_control_in_it_is_still_the_heading_component():
     """trendsHeader hand-rolled .section-title from an inline style string at an
     off-scale weight and with no hairline, so Overview's own trends heading did
-    not match the headings above and below it."""
-    fn = re.search(r"function trendsHeader.*?\n        \}", SCRIPT, re.S).group(0)
-    ok("el('div', 'section-title')" in fn, "it uses the real component")
-    ok("font-size:11px" not in fn and "font-weight" not in fn,
-       "and sets no type of its own")
+    not match the headings above and below it. (trendsHeader went with the
+    Overview on 22 Oct 2026; the rules for a control inside a heading stay.)"""
     ok(re.search(r"\.section-title > \.segmented \{[^}]*order: 1", HTML),
        "the range control is ordered past the ::after hairline, which is "
        "always the last flex item")
@@ -1695,19 +1652,6 @@ def t_the_custom_shipment_queue_speaks_its_own_tab_s_language():
     ok("tableSearch('Search reference, name or tracking'" in fn and "pageHead({ view: 'labels'" in fn
        and "prodQueues(" in fn, "the list sits on the same page as the order queues' own")
     ok("margin-left:auto" not in fn, "and the inline one-off layout is gone")
-
-
-@test
-def t_the_customers_switcher_is_the_house_control():
-    """Customers was the only tab whose sub-view switcher was loose pills, and
-    the only one that put the switcher above its own page title."""
-    ok(".secbar" not in HTML and ".secbtn" not in HTML,
-       "the one-off pill component is retired")
-    fn = re.search(r"function sectorBar.*?\n        \}", SCRIPT, re.S).group(0)
-    ok("segmented(segOptions()" in fn,
-       "it is built on the same segmented control as every other tab")
-    ok("box.append(hero, sectorBar())" in SCRIPT,
-       "and the hero comes first, like every other tab")
 
 
 _WGL_START = "        /* ---------- widget grid (page layer) ---------- */"
@@ -2147,43 +2091,6 @@ RECON_WHAT_LABELS = {
 
 
 @test
-def t_reconciliation_is_a_band_a_sweep_line_and_a_table():
-    """Cameron's Reconciliation screenshot (12 Oct 2026) and the approved
-    mockup: a connection card over four tiles with 291px of nothing in each,
-    and every discrepancy a sentence at the far left with its amount 1,022px
-    away. Now the counters, with the money at stake, share one band with the
-    sources; the sweep's line, with its time, is on the tab row with its notes
-    behind Notes (n); the discrepancies are a table with a short What and a
-    Record; and an opened one is two columns, closed by an X."""
-    fn = fn_src("function renderRecon() {")
-    ok("actions: heads" in fn and "heads.push(manage)" in fn and "heads.push(sw)" in fn,
-       "Manage and Sweep now are the header's actions")
-    ok("'connection'" not in fn and "widget(band, 'band', 'full', 'Open and sources')" in fn,
-       "one band, not a connection card over the severity tiles")
-    ok("el('div', 'band-src')" in fn and "'Documents read'" in fn and "'Needs reconnecting'" in fn,
-       "the sources sit beside the counters, a refused link in red")
-    ok("financeTabs('recon', '', [reconSweepLine(st, xs)])" in fn, "the sweep's line is on the tab row")
-    sl = fn_src("function reconSweepLine(") if "function reconSweepLine(" in SCRIPT else ""
-    ok("londonHM(st.last_sync)" in sl and "'Partial'" in sl and "'Xero skipped'" in sl, "with its time, and what was partial or skipped")
-    ok("dropPanel(" in sl and "'Notes from the last sweep'" in sl and "'Notes'" in sl, "its notes behind Notes (n), in a popover")
-    ok("dtable([{ head: 'Severity' }, { head: 'What' }, { head: 'Record' }, { head: 'Date' }, { head: 'Status' }, { head: 'Amount', cls: 'num' }" in fn,
-       "the discrepancies are a table under heads")
-    ok("'lbl-row'" not in fn and "'lbl-rows'" not in fn, "not list rows")
-    ok("RECON_WHAT[e.kind]" in fn and "e.record" in fn and "e.counterparty" in fn, "What is the short label, Record the record and who")
-    for kind, label in RECON_WHAT_LABELS.items():
-        ok(kind + ": '" + label + "'" in SCRIPT, "the short What for " + kind)
-    ok("cls: 'dt-recon'" in fn and ".dt-recon { --dt-cols:" in CSS, "the table has its own tracks")
-    ok("cls: RECON_OPEN[e.status] ? '' : 'settled'" in fn, "a settled row goes grey with a hollow dot")
-    ok("after: reconOpen && reconOpen.id === e.id ? reconDetailNode() : null" in fn, "an opened one opens under its row")
-    rd = fn_src("function paintReconDetail(")
-    ok("el('div', 'rd-cols')" in rd and ".rd-cols { display: grid;" in CSS, "the detail is two columns")
-    ok("iconButton(I.x, 'Close')" in rd, "closed by an X beside its sentence")
-    ok("const stbar = segmented(" in rd, "status is the house chooser")
-    ok("el('dl', 'rd-sum')" in rd, "the arithmetic is an aligned sum")
-    ok("el('div', 'rd-verdict')" in rd and "'rd-meter'" in rd, "the verdict is a tag and a confidence meter")
-
-
-@test
 def t_xero_sync_is_a_band_a_status_line_and_its_tables():
     """Cameron's Xero sync screenshot (12 Oct 2026) and the approved mockup:
     three figures 460px apart, a Connection card saying again what a green box
@@ -2576,9 +2483,7 @@ def t_a_phone_reads_every_table_as_two_line_rows():
     ok("th.kt-main" not in CSS, "a table marks its leading column on the head cell, not in CSS")
     ok(KT + " > :is(tbody, tfoot) > tr[hidden], " + KT + " > :is(tbody, tfoot) > tr > td[hidden] { display: none; }" in ph,
        "a hidden row stays hidden (Keywords' rows past 15 showed on a phone)")
-    ok(".kw-more { display: flex; flex-wrap: wrap;" in CSS, "and Keywords' count goes under Show all rather than off the screen")
     ok("cols.push(['Name', 'kt-main']);" in SCRIPT, "CRM contacts lead with the name, not the tick box")
-    ok("['Segment', 'kt-main']" in fn_src("function segTable("), "the segments lead with the segment, not its count")
     ok("const th = heads[i], span = td.colSpan || 1;" in tp, "a table names from its own column heads, so a selection bar across the head names no column")
 
 
@@ -2595,7 +2500,6 @@ def t_a_two_line_row_names_its_bare_numbers():
            and ".dt-%s > .dtable > .dt-row > .dt-c[data-h] { color: var(--text-secondary); }" % s in CSS, "and shows it when its rows are two lines (%s)" % s)
     ok("{ head: 'Orders', cls: 'num', cap: true }, { head: 'Oldest', cls: 'num', cap: true }" in SCRIPT, "Liability's orders and oldest")
     ok("{ head: 'Invoices', cls: 'num', cap: true }" in SCRIPT and "{ head: 'Contacts', cls: 'num', cap: true }" in SCRIPT, "the runs' three counts")
-    ok("{ head: 'Units', cls: 'num', cap: true }, { head: 'Revenue', cls: 'num', cap: true }" in SCRIPT, "Products' units and revenue")
     ok("{ head: 'Since', cap: true }, { head: 'So far', cap: true }" in SCRIPT, "and the clock's two times")
 
 
@@ -2719,9 +2623,6 @@ def t_a_phone_keeps_three_small_things_on_shared_lines():
     tick box opened the second line, away from the name it ticks; and
     Activity's "Everything (261)" was cut off in its select, its total being
     the heading's count already."""
-    ok("const xbtn = textButton(null, { cls: 'p-export' }); xbtn.append(ico(I.download), el('span', 'p-export-txt', 'Export CSV')); xbtn.setAttribute('aria-label', 'Export CSV');" in SCRIPT
-       and "@media (max-width: 640px) { .btn.p-export { width: var(--control-h); padding: 0; justify-content: center; } .p-export > .p-export-txt { display: none; } }" in CSS,
-       "Export CSV is its icon on a phone, beside the other two")
     ok("@media (max-width: 640px) { .ktable.crm-contact-table > tbody > tr > td.tick { order: -2; } .ktable.crm-contact-table > tbody > tr > td.kt-main { flex: 1 1 calc(100% - var(--sp-8) - var(--sp-3)); } }" in CSS,
        "a contact's tick box sits before its name")
     ok("const o = el('option', null, k ? it.label + ' (' + it.n + ')' : it.label);" in fn_src("function renderTeamFeed("), "Everyone and Everything without the total")
@@ -2785,18 +2686,6 @@ def t_a_table_beside_its_neighbour_keeps_its_natural_width():
 
 
 @test
-def t_the_seo_score_keeps_its_meter_off_its_words():
-    """Final visual review M1, 12 Oct 2026: on a phone a figure tile is three
-    rows of its group's subgrid (label, figure, note), and the score's meter
-    was a fourth child, drawn across "out of 100". The note and the meter are
-    one foot, so the tile is three rows at every width."""
-    rs = fn_src("function renderSEO(")
-    ok("const foot = el('div', 'seo-foot'); foot.append(el('p', 'stat-note', scored ? 'out of 100' : data.score_note));" in rs
-       and "foot.append(bar);" in rs and "sc.append(foot);" in rs, "the note and the meter share the tile's third row")
-    ok(".seo-foot { display: grid; row-gap: var(--sp-1); }" in CSS, "one under the other")
-
-
-@test
 def t_a_table_in_half_a_row_wraps_its_heads_rather_than_its_edge():
     """Final visual review M2, 12 Oct 2026: at 1440 Customers' Sector
     comparison read "Lifetime revenu" and "£143,11", and Top customers' last
@@ -2805,23 +2694,6 @@ def t_a_table_in_half_a_row_wraps_its_heads_rather_than_its_edge():
     a head may wrap, standing on its foot, so the table fits its half."""
     ok(":is(.wpair, .duo) .ktable > thead th { white-space: normal; vertical-align: bottom; padding-block: var(--sp-1); }" in CSS,
        "heads wrap in half a row")
-
-
-@test
-def t_a_figure_group_never_leaves_one_figure_alone():
-    """Final visual review M4 and M5, 12 Oct 2026 (R2): at 1440 SEO's eight
-    figures ran seven then one, Pages indexed alone with 1,000px beside it,
-    and Customers' four in half a row ran three then one, At risk alone. The
-    eight run four and four, and four in half a row two by two, when a line
-    cannot hold them."""
-    rs = fn_src("function renderSEO(")
-    ok("const host = el('div', 'fig-host'); host.append(strip); box.append(widget(host, 'score-checks', 'full', 'Score and checks'));" in rs,
-       "SEO's figures sit in a host that knows its width")
-    ok(".fig-host { container: fighost / inline-size; }" in CSS
-       and "@container fighost (min-width: 41rem) and (max-width: 72rem) { .fig-host > .metrics.metrics-strip:has(> :nth-child(8):last-child) { display: grid; grid-template-columns: repeat(4, max-content); } }" in CSS,
-       "eight run four and four when one line cannot hold them")
-    ok("@container wpair (min-width: 64rem) and (max-width: 74rem) { .wpair .metrics.metrics-strip:has(> :nth-child(4):last-child) { display: grid; grid-template-columns: repeat(2, max-content); } }" in CSS,
-       "and four in half a row two by two")
 
 
 @test
@@ -2948,68 +2820,19 @@ def t_a_report_pairs_its_short_blocks():
     so a three-line summary, four findings or a short table sat in the left
     third with the rest of the row empty (DF-02, DF-03, DF-04, DF-07, DF-09).
     A short block now sits beside the block it belongs with, as one widget the
-    grid moves as one, and the two stack when the pair is narrower than 64rem."""
+    grid moves as one, and the two stack when the pair is narrower than 64rem.
+    (The report pages that first used it went on 22 Oct 2026; the pairing,
+    the actions table and the charts' grid stay for the pages that remain.)"""
     fn = fn_src("function pairNodes(") if "function pairNodes(" in SCRIPT else ""
     ok("el('div', 'wpair-in')" in fn and "widget(pair, id + '-pair', 'full', label)" in fn,
        "a pair is one full-row widget holding the two, with an id of its own (final review I-1)")
+    ok("if (o.plain) return pair;" in fn, "a plain pair is not a widget")
     pin = CSS.split("\n        .wpair-in {")[1].split("}")[0] if "\n        .wpair-in {" in CSS else ""
     ok("grid-template-columns: minmax(0, 7fr) minmax(0, 5fr)" in pin and "align-items: start" in pin, "seven twelfths and five, each as tall as itself")
     ok(".wpair { container: wpair / inline-size; }" in CSS
-       and "@container wpair (max-width: 64rem) { .wpair > .wpair-in, .wpair.even > .wpair-in, .wpair.flip > .wpair-in, .wpair.fit > .wpair-in { grid-template-columns: minmax(0, 1fr);" in CSS,
-       "and one above the other when the pair is narrow, whatever its split: a plain .wpair-in rule lost to the 5:7 split, and Products' totals ran off a phone")
-    ok("pairNodes(sumW, cs, 'summary'" in (fn_src("function summaryAndChanges(") if "function summaryAndChanges(" in SCRIPT else ""),
-       "the summary sits beside What changed")
-    ov = fn_src("function renderOverview(")
-    for pair in ("summaryAndChanges(box, data.changes, data.changes_since", "pairNodes(secW, channelsCard(data.trends), 'sectors'",
-                 "pairNodes(wgChild(box, 'actions'), wgChild(box, 'notable'), 'actions'", "pairNodes(wgChild(box, 'details'), chat, 'details'"):
-        ok(pair in ov, "Overview pairs: " + pair)
-    seo = fn_src("function renderSEO(")
-    for pair in ("summaryAndChanges(box, data.changes, data.changes_since", "pairNodes(wgChild(box, 'opportunities'), wgChild(box, 'findings'), 'opportunities'",
-                 "pairNodes(wgChild(box, 'details'), chat, 'details'"):
-        ok(pair in seo, "SEO pairs: " + pair)
-    ok("strip.prepend(sc)" in seo and "'score'" not in seo, "SEO's score is the first figure of the checks, one group (DF-11)")
-    kw = fn_src("function renderKeywords(")
-    for pair in ("summaryAndChanges(box, data.changes, data.changes_since", "pairNodes(kpisW, wgChild(box, 'scan'), 'kpis'",
-                 "pairNodes(wgChild(box, 'opportunities'), wgChild(box, 'findings'), 'opportunities'",
-                 "pairNodes(wgChild(box, 'keywords'), paid, 'keywords'", "pairNodes(wgChild(box, 'details'), chat, 'details'"):
-        ok(pair in kw, "Keywords pairs: " + pair)
-    ok("!/^Ad spend/i.test(m.label)" in kw, "the ad spend is said once, under Paid search")
-    ok(".wpair .metrics.metrics-strip:has(> :nth-child(5):last-child) { display: grid; grid-template-columns: repeat(3, max-content); }" in CSS,
-       "five figures in half a row go three then two, so ROAS is not alone on a line")
-    cu = fn_src("function renderCustomers(")
-    for pair in ("summaryAndChanges(box, data.changes, data.changes_since", "pairNodes(kpisW, ncGroup, 'kpis'",
-                 "pairNodes(wgChild(box, 'opportunities'), wgChild(box, 'findings'), 'opportunities'",
-                 "pairNodes(wgChild(box, 'sectors'), wgChild(box, 'segments'), 'sectors'",
-                 "pairNodes(wgChild(box, 'details'), chat, 'details'"):
-        ok(pair in cu, "Customers pairs: " + pair)
-    ok("segTable(data.segments, cur)" in cu and "segCards(" not in SCRIPT, "the segments are a table, not five cards")
-    tc = fn_src("function customersTable(")
-    ok("rows.slice(0, 10)" in tc and "rows.slice(10, 20)" in tc and "el('div', 'duo')" in tc, "top customers are two tables of ten, side by side")
-    rc = fn_src("function radarCard(")
-    ok("el('div', 'radar-cols')" in rc and "'Account and last bought'" in rc and "'Customer and why flagged'" in rc,
-       "the radar's two lists sit side by side, the long text under each name")
-    ok("@container radar (max-width: 64rem) { .radar-cols { grid-template-columns: minmax(0, 1fr); } }" in CSS
-       and ".duo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));" in CSS, "and stack when narrow")
-    pd = fn_src("function renderProductDetail(")
-    ok("pairNodes(cardTitled(box, 'Top opportunities'), cardTitled(box, 'Findings'), null, null, { plain: true })" in pd,
-       "a product's plan sets its opportunities beside its findings, as a plain pair (that page is not arranged)")
-    ok("if (o.plain) return pair;" in fn_src("function pairNodes("), "a plain pair is not a widget")
-    pl = fn_src("function renderProductList(")
-    ok("pairNodes(totalsW, topHost, 'top-products'" in pl and "{ flip: true }" in pl, "the totals sit beside Top products by revenue")
-    ok("dtable(" in pl and "'prod-row'" not in pl and "'dt-products'" in pl, "the catalogue is a table, not rows of chips")
-    for head in ("'Product'", "'Type'", "'Price'", "'Stock'", "'Status'", "'Units'", "'Revenue'"):
-        ok(head in pl, "with a column " + head)
-    ok("head: 'Vendor'" not in pl, "and no Vendor column while every product says Projected Image")
-    ok("'Clear search'" in pl and "topHost.hidden = !rows.length" in pl, "a search that matches nothing is one line with Clear search, and the empty ranking goes")
-    ok(".pfilters.show { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }" in CSS, "the filters run six across")
+       and "@container wpair (max-width: 64rem) { .wpair > .wpair-in, .wpair.even > .wpair-in, .wpair.flip > .wpair-in, .wpair.fit > .wpair-in { grid-template-columns: minmax(0, 1fr); } }" in CSS,
+       "and one above the other when the pair is narrow, whatever its split")
     ok("r.onClick" in fn_src("function dtable("), "a table row can open what it lists")
-    kt = fn_src("function keywordTable(")
-    ok("i >= 15" in kt and "'Show all ' + n + ' keywords'" in kt, "fifteen keywords, then Show all")
-    ok("noChannels: true" in ov, "Traffic by channel leaves the chart grid to sit beside Sales by sector")
-    ok("textButton(null, { cls: 'pchat-send' })" in SCRIPT and "btn-primary pchat-send" not in SCRIPT,
-       "the page chat's send is plain: one teal per screen, and Ask is a side door")
-    ok("widget(metricsStrip(plain), 'kpi-counts', 'full', 'Counts')" in ov,
-       "the four counts with no trend are one figure group, not four tiles over holes")
     act = CSS.split("\n        .card.actions {")[1].split("}")[0] if "\n        .card.actions {" in CSS else ""
     ok("display: grid" in act and "minmax(0, 1fr)" in act, "Recommended actions is a table: the tick, the action, its priority and Track")
     ok(".card.actions > :is(.action, .action-head) { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid;" in CSS,
@@ -3033,15 +2856,8 @@ def t_an_empty_state_is_one_line_under_its_heading():
     ok("flex-direction: row" in es and "text-align: left" in es and "justify-content: flex-start" in es,
        "a row, on the left, under its heading: " + es[:120])
     ok("padding: var(--sp-10)" not in es and "min-height" not in es, "and not a tall band")
-    gate = CSS.split("\n        .run-gate {")[1].split("}")[0]
-    ok("text-align: left" in gate and "flex-direction: row" in gate, "the run gate is the same one line")
     fn = fn_src("function emptyState(")
     ok("o.sub" in fn and "'empty-sub'" in fn, "a grey line under it when there is more to say")
-    ok("sub: o.covers" in fn_src("function renderRunGate("), "the gate says what the report covers")
-    for covers in ("covers: 'Shopify orders, Google Analytics 4 and Search Console.'",
-                   "covers: 'Indexation, structured data, metadata and alt text.'",
-                   "covers: 'Search Console keywords and Google Ads.'"):
-        ok(covers in SCRIPT, "a gate says what it reads: " + covers)
     plain = CSS.split("\n        .empty {")[1].split("}")[0]
     ok("text-align: left" in plain and "margin-inline: auto" not in plain,
        "a list that matched nothing says so on the left, where its rows start")
@@ -3115,8 +2931,7 @@ def t_a_filter_figure_is_a_counter_not_a_circle():
     for need in ("el('button', 'fc", "fc-dot", "aria-pressed", "fc-l", "fc-v"):
         ok(need in fn, "a counter carries " + need)
     ok("statAct(I.check)" not in SCRIPT, "no filter figure carries the ring any more")
-    ok("counterTile(" in fn_src("function renderRecon(") and "counterTile(" in fn_src("function renderLiability("),
-       "Reconciliation's severities and Liability's buckets are counters")
+    ok("counterTile(" in fn_src("function renderLiability("), "Liability's buckets are counters")
     sel = '\n        .fc:is(.on, [aria-pressed="true"]) {'
     on = CSS.split(sel)[1].split("}")[0] if sel in CSS else ""
     ok("background: var(--action-primary)" in on, "the chosen counter is the teal fill")
@@ -3302,24 +3117,14 @@ def t_a_kpi_with_a_list_behind_it_opens_it():
     ok("name.target = '_blank'; name.rel = 'noopener'" in md, "an item with a url opens the page in a new tab, safely")
     ok("d.empty || 'Nothing to list.'" in md, "an empty list says so instead of showing nothing")
     ok("opener: opener" in md, "closing hands focus back to the card (the window part's opener)")
-    ok("statAct(I.check)" not in SCRIPT and SCRIPT.count("counterTile(") >= 3,
-       "both filter strips are counters now (12 Oct 2026), not figures with a ring at the edge")
+    ok("statAct(I.check)" not in SCRIPT and SCRIPT.count("counterTile(") >= 2,
+       "the filter strip is counters (12 Oct 2026), not figures with a ring at the edge")
     ok(".stat.stat-open { cursor: pointer; }" in CSS, "an opener shows a pointer")
     ok(".stat.stat-open:hover .label { color: var(--text-primary); }" in CSS,
        "and under the pointer its label darkens (the mix: a figure has no box to tint)")
     ok('.fc:is(.on, [aria-pressed="true"]) { background: var(--action-primary);' in CSS,
        "a set filter is the teal counter")
     ok(".chart-expand, .stat-act, .wg-hide, [data-wg-control]" in CSS, "the cue is screen furniture, hidden in print")
-
-@test
-def t_the_reconciliation_tab_exists_and_is_gated():
-    ok('id="view-recon"' in HTML, "the view exists")
-    ok('data-view="recon"' in HTML, "and its sidebar entry")
-    ok("'recon'" in re.search(r"const TAB_KEYS = \[[^\]]+\]", SCRIPT).group(0),
-       "the tab is in the permission list, so an admin can switch it off per account")
-    ok('class="ov-wrap" id="recon-content"' in HTML,
-       "and it uses the same page wrapper as every other tab")
-
 
 @test
 def t_the_forecast_tab_exists_and_is_gated():
@@ -3333,7 +3138,7 @@ def t_the_forecast_tab_exists_and_is_gated():
        "and nobody inherits it: it holds the cash flow plan")
     ok("tabAllowed('forecast') && tab('forecast', 'Forecast')" in SCRIPT, "it sits in the Finance tab strip")
     ok("if (v === 'forecast') showForecastView();" in SCRIPT, "and opening it loads the latest run")
-    fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
+    fn = SCRIPT.split("function renderForecast()")[1].split("\n        function showLabelsView")[0]
     ok("api('/api/forecast', {})" in SCRIPT.split("async function refreshForecast()")[1][:200], "it reads the posted run")
     ok("forecastSetupCard(c)" in fn and "No forecast yet" in SCRIPT, "with no run it explains the setup instead of showing nothing")
     ok("segmented(names.map(" in fn, "every scenario in the workbook can be chosen")
@@ -3402,7 +3207,7 @@ def t_the_size_list_tab_is_searchable_and_reads_the_same_sheet_as_the_label():
     ok("'sizes'" in keys and "'sizes'" not in re.search(r"const OPT_IN_TABS = \[[^\]]+\]", SCRIPT).group(0), "a default grant")
     ok("if (v === 'sizes') showSizesView();" in SCRIPT, "opening it loads the sheet")
     ok("api('/api/gobo-sizes/list', {})" in SCRIPT, "from the listing route")
-    fn = SCRIPT.split("function renderSizes()")[1].split("\n        async function showReconView")[0]
+    fn = SCRIPT.split("function renderSizes()")[1].split("\n        function showLabelsView")[0]
     ok("tableSearch('Search maker, model or size" in fn and "sizesSelect('Maker'" in fn and "sizesSelect('Produced size'" in fn
        and "sizesSelect('Status', SIZES_STATUS" in fn, "a search box and maker, size and status filters in the house table tools")
     ok("sizesSelect('Sort', SIZES_SORTS" in fn and "gbtn.textContent = 'Group by maker';" in fn, "a sort and a grouping toggle")
@@ -3446,7 +3251,7 @@ def t_a_list_search_takes_every_letter_typed():
        and "if (inp._t) { clearTimeout(inp._t); inp._t = null; oninput(inp.value.trim()); }" in tsearch,
        "a finished run leaves no timer, and a box no longer on the page runs nothing")
     ok("search.input.onchange = null;" in fn, "the Size list does not run its search again on leaving the box, so a quick tap is kept")
-    paint = SCRIPT.split("function paintSizesList()")[1].split("\n        async function showReconView")[0]
+    paint = SCRIPT.split("function paintSizesList()")[1].split("\n        function showLabelsView")[0]
     ok("while (tools.nextSibling) tools.nextSibling.remove();" in paint and "renderSizes()" in paint.split("const { box, card, tools } = P;")[0],
        "the list is what follows the toolbar, and a shell that has gone is painted whole")
     ok("renderSizes()" not in paint.split("const { box, card, tools } = P;")[1], "the list painter never repaints the shell")
@@ -3464,7 +3269,7 @@ def t_a_list_search_takes_every_letter_typed():
             continue
         seen += 1
         ok(builder + "(" not in cb.group(1), builder + "'s search repaints " + builder + ", its own search box with it")
-    ok(seen >= 9, "every list search with a handler was looked at (%d)" % seen)
+    ok(seen >= 8, "every list search with a handler was looked at (%d)" % seen)
 
 
 @test
@@ -3499,7 +3304,7 @@ def t_the_size_list_finds_a_fixture_however_it_is_written():
        and "const at = (words, k) => tk.parts.every(" in blk, "a decimal is its words in order ('2.0'), never '20' run together")
     ok("text: ' ' + sizesWords((r.notes || '') + ' ' + (r.review || '')).join(' ') + ' '," in blk
        and "(tk.parts ? [tk.parts.join(' ')] : tk.alts).forEach(w =>" in blk, "the notes are searched as words, so 'M-size' meets 'M-size'")
-    paint = SCRIPT.split("function paintSizesList()")[1].split("\n        async function showReconView")[0]
+    paint = SCRIPT.split("function paintSizesList()")[1].split("\n        function showLabelsView")[0]
     ok("'Nothing has ' + said + ', so these are the models with ' + meant + '.'" in paint, "and the list says it put it right")
     ok("const told = sizesLast.fixed.filter(f => !f[0].startsWith(f[1]));" in paint, "but not for a word still being typed ('clayp')")
     none = SCRIPT.split("function sizesNone(toks)")[1][:1600]
@@ -3549,7 +3354,7 @@ def t_a_size_list_row_opens_in_place_and_fits_a_phone():
     a button a keyboard reaches, with all the list knows about the model and
     Set size in it; a narrow card reads each model as a card with the size to
     cut large at its right."""
-    paint = SCRIPT.split("function paintSizesList()")[1].split("\n        async function showReconView")[0]
+    paint = SCRIPT.split("function paintSizesList()")[1].split("\n        function showLabelsView")[0]
     ok("const ob = el('button', 'sizes-open');" in paint and "ob.setAttribute('aria-expanded', open ? 'true' : 'false');" in paint
        and "ob.setAttribute('aria-controls', 'sizes-d-' + r._i);" in paint, "the model is the row's button")
     ok("if (now) tr.after(sizesDetail(r, cols.length, canEdit));" in paint and "if (open) kt.add(sizesDetail(r, cols.length, canEdit));" in paint,
@@ -3621,54 +3426,6 @@ def t_a_rejected_embed_token_is_retried_once_and_a_dead_session_never_loops():
     ok("const why = takeAuthReason();\n                if (why && why.text) err.textContent = why.text;" in SCRIPT, "which says why you were signed out")
 
 @test
-def t_ai_output_is_labelled_interpretation_never_fact():
-    """Section 9 of the brief, and the whole point: a model's conclusion is
-    displayed as interpretation with its confidence and citations, visually
-    apart from the arithmetic."""
-    fn = SCRIPT.split("function paintReconDetail")[1].split("\n        function ")[0]
-    ok("interpretation of the evidence above, not an accounting fact" in fn,
-       "the label is on the card")
-    ok("deterministic, not AI" in fn, "and the arithmetic says what it is")
-    ok("confidence" in fn and "cites" in fn, "confidence and citations are shown")
-
-
-@test
-def t_ignoring_a_discrepancy_demands_a_reason():
-    fn = SCRIPT.split("function paintReconDetail")[1].split("\n        function ")[0]
-    ok("prompt(" not in fn,
-       "no native prompt(): it does not exist inside a cross-origin iframe, "
-       "which is exactly where this app runs")
-    ok("if (!reasonIn.value.trim())" in fn,
-       "the inline field refuses an empty reason before the server even sees it")
-
-
-@test
-def t_a_xero_token_warning_reaches_the_screen():
-    """The one warning that has a clock on it: Xero honours the previous
-    refresh token for about thirty minutes after a failed save, and after that
-    the connection is simply gone. It cannot live only in the server log."""
-    fn = fn_src("function renderRecon() {")
-    ok("xs.warning" in fn, "the page reads the warning the server sends")
-    # 12 Oct 2026: said under the band, as the refused link is, in red with a
-    # dot (the mockup), not in an amber box.
-    ok("} else if (xs.warning) notice(xs.warning);" in fn and "el('p', 'band-notice')" in fn,
-       "and paints it as a warning, not as ordinary help text")
-    ok("color: var(--error)" in CSS.split(".band-notice {")[1].split("}")[0], "in the error colour")
-
-
-@test
-def t_a_refused_revocation_asks_before_forgetting():
-    """Forgetting a token Xero would not revoke leaves it live there with
-    nothing left to kill it, so that is the merchant's call to make."""
-    fn = SCRIPT.split("function renderRecon")[1].split("\n        function ")[0]
-    ok("e.canForce" in fn, "the refusal is told apart from an ordinary error")
-    ok("uiConfirm" in fn.split("e.canForce")[1][:600],
-       "and it asks rather than deciding for them")
-    ok("force: 1" in fn, "insisting sends the force flag")
-    ok("data.can_force" in SCRIPT, "which api() carries off the response")
-
-
-@test
 def t_the_files_search_is_debounced_and_paged():
     """Measured against 8,000 files: a broad term matching everything cost
     1,912 ms of blocked JS per keystroke, and with no debounce a five letter
@@ -3696,18 +3453,6 @@ def t_a_paid_for_courier_quote_is_kept():
     after = fn[i:i + 200]
     ok("if (run !== prefetchRun) return;" in after,
        "and the abandon check comes after the cache write, not before it")
-
-
-@test
-def t_independent_reads_are_not_run_one_after_the_other():
-    ok("Promise.all([\n                    api('/api/recon/status', {})" in SCRIPT
-       or "Promise.all([" in SCRIPT.split("async function refreshRecon")[1][:400],
-       "Reconciliation asks for its status and its list together")
-    ok("refreshReconList" in SCRIPT, "and a filter change asks only for the list")
-    ra = SCRIPT.split("async function refreshAll")[1][:1200]
-    ok("Promise.allSettled" in ra, "Refresh all runs its four audits together")
-    ok("of ' + steps.length" in ra,
-       "and counts finishes rather than naming one of four in flight")
 
 
 @test
@@ -3750,20 +3495,12 @@ def t_reconciliation_is_not_ticked_by_default():
 
 
 @test
-def t_recon_csv_export_carries_the_armour():
-    fn = SCRIPT.split("function reconCSV")[1].split("\n        function ")[0]
-    ok("replace(/\"/g" in fn.replace("'", '"') or 'replace(/"/g' in fn, "quotes are doubled")
-    ok('[",\\n\\r]' in fn, "commas, newlines AND carriage returns quote the field")
-    ok("^[=+\\-@" in fn, "formula injection is armoured")
-
-
-@test
 def t_the_beta_tabs_say_so_everywhere_they_are_named():
     """CRM and Reconciliation are the two newest, least-proven tabs. A person
     should know that from the sidebar, from the page heading, and from the
     topbar title that survives scrolling - not just from one of the three."""
-    ok("BETA_TABS = ['recon', 'forecast', 'crm', 'connector']" in SCRIPT, "the beta tabs are declared once")
-    for nav in ("$('nav-recon')", "$('nav-forecast')", "$('nav-crm')", "$('nav-connector')"):
+    ok("BETA_TABS = ['forecast', 'crm', 'connector']" in SCRIPT, "the beta tabs are declared once")
+    for nav in ("$('nav-forecast')", "$('nav-crm')", "$('nav-connector')"):
         block = SCRIPT.split(nav)[1][:180]
         ok("beta-tag" in block, nav + " carries the badge in the sidebar")
     # On the page: CRM's own heading carries it; the three Finance tabs carry
@@ -3805,41 +3542,15 @@ def t_the_sidebar_keeps_one_inset():
                      (r"\.side-foot \{[^}]*\}", "the footer")):
         block = re.search(sel, CSS).group(0)
         ok("var(--sp-3)" in block, why + " shares the sidebar's 12px inset: " + block[:90])
-    # Refresh all spends AI credits and runs four reports, so it sits in those
-    # reports' headers; the support card took a sixth of every sidebar, and its
-    # link lives in the account menu (Cameron's call, 24 Sep 2026).
-    ok('id="refresh-all"' not in HTML and "refreshAllBtn()" in SCRIPT, "Refresh all is on the reports, not the sidebar")
+    # Refresh all, which ran the four AI reports, never sat in the sidebar and
+    # went with those reports (22 Oct 2026); the support card took a sixth of
+    # every sidebar, and its link lives in the account menu (24 Sep 2026).
+    ok('id="refresh-all"' not in HTML, "nothing that refreshes reports sits in the sidebar")
     order = [m.group(1) for m in re.finditer(r'<(?:button|div) class="(nav-quick|nav|convos|side-support|side-user)[" ]', HTML)]
     ok(order == ["nav", "convos", "side-user"],
        "sections, conversations, then the account row: %s" % order)
     ok("function userMenu()" in SCRIPT and "$('side-user').onclick = userMenu" in SCRIPT,
        "and the account row opens the menu that holds Settings, the clock and Log out")
-
-@test
-def t_the_connect_tab_opens_inside_the_click():
-    """A window.open AFTER an await has lost the user gesture and is blocked,
-    which inside Shopify's iframe means the button appears to do nothing while
-    a cheerful toast claims a tab was opened."""
-    # Anchor on the BUTTON, not the card title that shares its words.
-    fn = SCRIPT.split("go.append(ico(I.mail), document.createTextNode('Connect the accounts mailbox'))")[1][:2800]
-    opened = fn.index("window.open('', '_blank')")
-    awaited = fn.index("await api('/api/recon/connect-link'")
-    ok(opened < awaited, "the tab is opened before the request, inside the click")
-    ok("tab.location = r.url" in fn, "and pointed at the URL once it arrives")
-    ok("reconConnectFallback" in fn,
-       "with a clickable link when the browser blocks it anyway")
-
-
-@test
-def t_connecting_reports_its_own_outcome():
-    """The old toast fired whatever happened, so a blocked tab or a failed
-    consent still read as success and the advice was to refresh forever."""
-    ok("function watchReconMailbox" in SCRIPT, "the card watches for the connection")
-    fn = SCRIPT.split("function watchReconMailbox")[1][:1400]
-    ok("st.mailbox && st.mailbox.connected" in fn, "it checks the real status")
-    ok("toastOk" in fn and "toastError" in fn, "and says so either way")
-    ok("callback URL missing" in fn, "naming the usual cause when it times out")
-
 
 @test
 def t_a_charged_booking_can_never_leave_a_blank_window():
@@ -4154,22 +3865,6 @@ def t_the_liability_filters_are_sorted_not_shortened():
 
 
 @test
-def t_a_filter_that_hides_everything_does_not_hide_itself():
-    """The reconciliation list returned before the filters were built, so a
-    filter matching nothing took the way to undo it off the screen with it."""
-    fn = SCRIPT.split("function renderRecon() {")[1]
-    fn = fn[:fn.index("\n        function ")]
-    # The status filter is the shared chip now, not a flat tab strip, so the
-    # name changed with it. The requirement did not: it is built, and on the
-    # page, before the list can return empty.
-    tools = fn.index("list.append(tableTools([searchWrap, statusChip]")
-    empty = fn.index("if (!ex.length) {")
-    ok(tools < empty, "the search and the status filter are built before the empty check")
-    # The list is a widget-grid card now, so it goes onto the page through widget().
-    ok(fn.index("box.append(widget(list, 'discrepancies'") < empty, "and the card is on the page before it returns")
-
-
-@test
 def t_a_panel_is_measured_after_it_is_filled():
     """It borrows the menu's positioning, which runs while the panel is still
     empty. A form taller than nothing would hang off the bottom of the window."""
@@ -4379,7 +4074,7 @@ def t_everything_that_says_it_is_a_button_works_like_one():
     Every role=button in the file now has a keyboard path."""
     import re as _re2
     sites = [m.start() for m in _re2.finditer(_re2.escape("setAttribute('role', 'button')"), SCRIPT)]
-    ok(len(sites) >= 6, "the role=button sites are all still here (%d; rows that held controls open from their own button since 19 Oct 2026)" % len(sites))
+    ok(len(sites) >= 5, "the role=button sites are all still here (%d; rows that held controls open from their own button since 19 Oct 2026, and the Overview's and Reconciliation's went on 22 Oct 2026)" % len(sites))
     for i, at in enumerate(sites):
         seg = SCRIPT[at:at + 400]
         ok("keydown" in seg, "role=button site %d has a keydown handler beside it" % (i + 1))
@@ -4434,16 +4129,14 @@ def t_the_sidebar_nav_is_a_navigation_landmark():
 @test
 def t_every_control_has_a_name_that_survives_typing():
     """A placeholder is only a name until someone types. The shared search
-    factory names its input now, the field factories became real labels (the
-    wrapper IS the label, so the caption focuses the control), and every bare
+    factory names its input now, and every bare
     select carries an aria-label. Verified as a sweep, not a sample: no select
     in the file may be created without a name arriving within a few lines."""
     import re as _re2
     ok("inp.setAttribute('aria-label', (placeholder || 'Search').replace(" in SCRIPT,
        "tableSearch names its input from its placeholder")
-    for factory in ("mkSel", "selField", "numField", "dateField"):
-        seg = SCRIPT.split("const " + factory + " = ")[1][:220]
-        ok("formField(label)" in seg, factory + " wraps in a real label (formField(), its caption a span, not a nested label)")
+    # (The Products filters' four field factories, mkSel, selField, numField
+    # and dateField, went with that page on 22 Oct 2026.)
     # The sweep: every select creation must be followed by a name source.
     nameless = []
     for m in _re2.finditer(r"(?:el\('select'|document\.createElement\('select'\))", SCRIPT):
@@ -4491,7 +4184,6 @@ def t_truncated_text_is_recoverable():
     carry title now, so hover recovers what the ellipsis ate."""
     ok("mfrom.title = t.from_name || t.from_email || ''" in SCRIPT, "mail sender")
     ok("subj.title = t.subject || ''" in SCRIPT, "mail subject")
-    ok("nm.title = p.title || ''" in SCRIPT, "product title")
     ok("name.title = f.name;" in SCRIPT, "file name")
 
 
@@ -4545,8 +4237,6 @@ def t_search_repaints_are_debounced_everywhere():
     # so the guard follows it there rather than pinning the retired timer.
     ok("tableSearch('Search deals" in SCRIPT,
        "and the deals search is built by the factory, which debounces it")
-    ok("tableSearch('Search products…', pState.q" in SCRIPT,
-       "and the products search, which is the house search box and debounces inside tableSearch")
     ok("find._t = setTimeout(paint, 150)" in SCRIPT, "and the booked-shipments search")
     ok("inp.onchange = () => {" in fn_src("function tableSearch("),
        "and a blur or Enter flushes the pending run, so chips cannot act on a stale query")
@@ -4629,7 +4319,7 @@ def t_send_requires_a_review_and_spends_it():
     dialog quotes that run's numbers, and a send consumes the review so the
     next one needs a fresh look."""
     fn = SCRIPT.split("function renderConnector() {")[1]
-    fn = fn[:fn.index("\n        async function showReconView")]
+    fn = fn[:fn.index("\n        function showLabelsView")]
     ok("send.disabled = running || !connReview || revAborted;" in fn, "no review, no Send, and a review that stopped arms nothing")
     ok("Based on the review:" in fn, "the confirm dialog quotes the reviewed numbers")
     ok("will be written into your accounts" in fn, "and says what it means")
@@ -4696,7 +4386,7 @@ def t_the_sidebar_groups_fold_and_remember_it():
     it hidden when folded, the choice remembered per group, and a page opened
     inside a folded group unfolds it so the highlighted item is never out of
     sight. A group with nothing an account may open is not shown at all."""
-    for name in ("dashboards", "finance", "operations", "workspace"):
+    for name in ("finance", "operations", "workspace"):
         ok('<button class="nav-group" type="button" data-group="%s" aria-expanded="true" aria-controls="nav-sect-%s">' % (name, name) in HTML,
            name + " is a toggle that says what it controls")
         ok('<div class="nav-sect" id="nav-sect-%s">' % name in HTML, "and its items sit in a section of their own")
@@ -5384,8 +5074,8 @@ def t_money_is_formatted_by_intl_and_survives_a_bad_currency_code():
     seg = SCRIPT.split("function moneyFmt(")[1][:700]
     ok("try {" in seg and "catch" in seg, "a malformed code is caught")
     ok("/^[A-Z]{3}$/" in seg, "and only a real 3-letter code asks for currency style")
-    ok("const fmtMoney = (n, cur) => money(n, cur, 0);" in SCRIPT,
-       "and both old formatters now share the one implementation")
+    ok("const fmtMoney" not in SCRIPT and "function moneyShort(" not in SCRIPT,
+       "and the two wrappers over it went with the report pages that used them (22 Oct 2026)")
     ok("{ GBP: '\\u00a3', USD: '$', EUR: '\\u20ac' }" not in SCRIPT,
        "the hand-written symbol map is gone")
 
@@ -6308,8 +5998,6 @@ def _js_literals(src):
 # else on the page may.
 _SETUP_STEPS = ("In Railway, open this app\\u2019s service and its Variables.",
                 "Set the connector service\\u2019s address on Railway\\u2019s private network. Its private domain ends ",
-                "Put the Client ID and Client Secret into the Railway variables ",
-                "XERO_CLIENT_ID and XERO_CLIENT_SECRET",
                 "Set FORECAST_INGEST_TOKEN on Reactor and, with the same value, on the forecasting "
                 "service; the service then posts here each night. The setup is in forecast/README.md.")
 
@@ -6992,7 +6680,7 @@ def t_every_control_family_declares_its_states():
     ok('.is-cancelled, [data-status="cancelled"] { color: var(--text-tertiary); text-decoration: line-through; }' in CSS,
        "and cancelled")
     ok("function setBusy(" in SCRIPT and "function markInvalid(" in SCRIPT, "the script owns the two ARIA entry points")
-    ok("setBusy(btn, true)" in SCRIPT and "markInvalid(reasonIn, true)" in SCRIPT, "and uses them")
+    ok("setBusy(btn, true)" in SCRIPT and "markInvalid(ta, true)" in SCRIPT, "and uses them")
     for sel, attr in ((".nav-item", 'aria-current="page"'), (".btn", "aria-pressed"), (".tab", "aria-current"),
                       (".tab", "aria-pressed"), (".toggle", "aria-checked"), (".mrow", "aria-selected"),
                       (".files-row", "aria-selected"), (".segmented > button", "aria-pressed"), (".fc", "aria-pressed")):
@@ -7175,19 +6863,20 @@ def t_an_icon_size_comes_from_the_scale_and_not_from_the_rule():
 
 @test
 def t_every_breakpoint_is_on_the_scale():
-    """Five stops, each with a job: 640 phone, 900 tablet and the sidebar becomes a drawer (760, then 820, until portrait iPads kept it docked), 900
-    tablet, 1100 the KPI row goes to four columns, 1500 wide, 1800 ultra-wide. There were nineteen distinct
+    """Four stops, each with a job: 640 phone, 900 tablet and the sidebar becomes a drawer (760, then 820, until portrait iPads kept it docked), 900
+    tablet, 1100 the KPI row goes to four columns, 1500 wide. There were nineteen distinct
     widths before; the near-misses (560, 600, 620, 700, 720, 960, 2100) folded
     onto their neighbours."""
     # 1200 was the production queue's own stop; since 2026-09-23 the queue is
     # laid out by the width of the list itself (@container queue), because a
     # viewport stop cannot see the label preview taking 476px beside it.
-    stops = {640, 641, 900, 901, 1100, 1101, 1500, 1800}
+    # 1800 went with the Customers report's segment cards, its last user (22 Oct 2026).
+    stops = {640, 641, 900, 901, 1100, 1101, 1500}
     widths = set()
     for pre in re.findall(r"@media([^{]+)\{", CSS):
         widths |= {int(w) for w in re.findall(r"(?:min|max)-width:\s*(\d+)px", pre)}
     ok(widths <= stops, "off-scale breakpoints: %s" % sorted(widths - stops))
-    ok({640, 900, 1100, 1500, 1800} <= widths, "and every stop on the scale is in use: %s" % sorted(widths))
+    ok({640, 900, 1100, 1500} <= widths, "and every stop on the scale is in use: %s" % sorted(widths))
 
 
 @test
@@ -7274,7 +6963,7 @@ const block = html.slice(a, b + END.length);
 // Evaluated inside a function, so the block's names stay out of this script's own scope.
 const NAMES = 'WG_SPANS, WG_ENTER, wgOverlaps, wgContains, wgSpanOf, wgLayout, '
   + 'wgMoveTo, wgSameOrder, wgChoose, wgCandidates, '
-  + 'wgMergeOrder, wgKeyMove, wgColumns, wgSlotFor, WG_ID, wgKpiId';
+  + 'wgMergeOrder, wgKeyMove, wgColumns, wgSlotFor, WG_ID';
 const lift = (src) => eval('(function () {\n' + src + '\nreturn { ' + NAMES + ' };\n})()');
 const W = lift(block);
 
@@ -7583,35 +7272,6 @@ check('slots', (count) => {
   }
 });
 
-// Overview KPI ids, from the labels copilot.py sends (_overview's metrics) and the rig fixtures carry.
-check('kpi', (count) => {
-  const want = [
-    ['Revenue (7d)', 'kpi-revenue-7d'], ['Orders (7d)', 'kpi-orders-7d'], ['Avg order value', 'kpi-avg-order-value'],
-    ['Unfulfilled (7d)', 'kpi-unfulfilled-7d'], ['New customers (7d)', 'kpi-new-customers-7d'], ['Products', 'kpi-products'],
-    ['Low stock (\u22645)', 'kpi-low-stock'], ['Sessions (GA4, 28d)', 'kpi-sessions-ga4-28d'],
-    ['Revenue (GA4, 28d)', 'kpi-revenue-ga4-28d'], ['Search clicks (28d)', 'kpi-search-clicks-28d'],
-    ['Search impressions (28d)', 'kpi-search-impressions-28d'], ['Avg Google position', 'kpi-avg-google-position'],
-  ];
-  for (const [label, id] of want) {
-    count();
-    const got = W.wgKpiId(label);
-    if (got !== id) fail('kpi', JSON.stringify(label) + ' gave ' + got + ', expected ' + id);
-    if (!W.WG_ID.test(got)) fail('kpi', got + ' does not match the id pattern');
-  }
-  const ids = want.map(([label]) => W.wgKpiId(label));
-  if (new Set(ids).size !== ids.length) fail('kpi', 'two Overview labels share an id: ' + ids.join(' '));
-  // The threshold is LOW_STOCK_THRESHOLD, so any number and either way of writing the sign is the same tile.
-  for (const label of ['Low stock (\u22643)', 'Low stock (<=10)', 'Low stock (< 25)', 'Low stock']) {
-    count();
-    if (W.wgKpiId(label) !== 'kpi-low-stock') fail('kpi', JSON.stringify(label) + ' gave ' + W.wgKpiId(label));
-  }
-  count();
-  const long = W.wgKpiId('A label far longer than any tile would ever carry, with words to spare at the end');
-  if (long.length > 48 || !W.WG_ID.test(long) || long.endsWith('-')) fail('kpi', 'a long label gave ' + long);
-  count();
-  if (!W.WG_ID.test(W.wgKpiId('')) || !W.WG_ID.test(W.wgKpiId('---'))) fail('kpi', 'an empty label gave an id outside the pattern');
-});
-
 console.log(JSON.stringify({ ran, fails, stats }));
 """
 
@@ -7722,21 +7382,19 @@ def t_a_saved_layout_keeps_every_rendered_widget_exactly_once():
 @test
 def t_a_saved_layout_naming_merged_widgets_still_loads():
     """Review Focus 5 of the blank-space build: a person's saved Customise
-    layout outlives the cards it names. Reconciliation's connection card and
-    severity tiles became one band with an id of its own, so a layout that
-    hid either old card loads with the band shown, at its default place."""
-    ids = re.findall(r"widget\(\w+, '([a-z0-9-]+)'", fn_src("function renderRecon() {"))
-    ok(ids and "connection" not in ids and "severity" not in ids, "the band has an id of its own: " + " ".join(ids))
-    # Xero sync's ledger figures and Connection card became one band the same way.
-    xids = re.findall(r"widget\(\w+, '([a-z0-9-]+)'", fn_src("function renderConnector() {"))
-    ok(xids and "connection" not in xids and "ledger" not in xids and "band" in xids,
-       "Xero sync's band has an id of its own: " + " ".join(xids))
+    layout outlives the cards it names. Xero sync's ledger figures and
+    Connection card became one band with an id of its own, so a layout that
+    hid either old card loads with the band shown, at its default place.
+    (Reconciliation's band, the first case, went on 22 Oct 2026.)"""
+    ids = re.findall(r"widget\(\w+, '([a-z0-9-]+)'", fn_src("function renderConnector() {"))
+    ok(ids and "connection" not in ids and "ledger" not in ids and "band" in ids,
+       "Xero sync's band has an id of its own: " + " ".join(ids))
     if not any(os.access(os.path.join(p, "node"), os.X_OK) for p in os.environ.get("PATH", "").split(os.pathsep)):
         print("       (node unavailable, skipped)")
         return
     js = (_WG_HARNESS.split("const ran = {}")[0]
           + "console.log(JSON.stringify(W.wgMergeOrder(JSON.parse(process.argv[3]), JSON.parse(process.argv[4]))));")
-    saved = {"order": ["discrepancies", "severity", "connection"], "hidden": ["severity", "connection"]}
+    saved = {"order": ["review", "ledger", "connection"], "hidden": ["ledger", "connection"]}
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
         fh.write(js)
         path = fh.name
@@ -7760,7 +7418,6 @@ def t_an_old_layout_never_hides_what_a_pair_brought_in():
     score with its checks, now has an id of its own: an old layout's id for a
     half is dropped, and the pair shows at its default place."""
     ok("return widget(pair, id + '-pair', 'full', label);" in fn_src("function pairNodes("), "a pair has an id of its own")
-    ok("widget(host, 'score-checks', 'full', 'Score and checks')" in SCRIPT and "widget(strip, 'checks'," not in SCRIPT, "and so do SEO's score and checks")
     if not any(os.access(os.path.join(p, "node"), os.X_OK) for p in os.environ.get("PATH", "").split(os.pathsep)):
         print("       (node unavailable, skipped)")
         return
@@ -7814,17 +7471,6 @@ def t_the_widget_layout_block_never_touches_the_page():
     block = _wg_block()
     for token in ("document", "window", "getBoundingClientRect", "querySelector", "$("):
         ok(token not in block, "the widget layout block mentions %r" % token)
-
-
-@test
-def t_a_kpi_tile_id_comes_from_its_label_and_not_its_threshold():
-    """An Overview KPI tile has no id of its own, so its widget id is a slug of
-    the label the server sends, and a saved layout names tiles by it. The low
-    stock label carries LOW_STOCK_THRESHOLD in brackets; if the number were in
-    the id, changing that setting would drop the tile from every saved layout.
-    Every real label maps to its expected id, no two collide, the threshold in
-    any form is ignored, and a long or empty label still gives a valid id."""
-    _wg_check("kpi", "wgKpiId gave the wrong id for an Overview label")
 
 
 def _wg_calls(src, name):
@@ -7930,11 +7576,11 @@ def t_the_widget_grid_watches_every_view_setview_shows():
     layer = _wg_layer()
     ok("const WG_VIEWS = APP_VIEWS.filter(v => v !== 'chat');" in layer, "the layer's roots derive from it")
     ok("WG_VIEWS.forEach(v => wgWatch(v));" in SCRIPT, "every one of them is watched from start-up")
-    ok("const wgRoot = (view) => $(view === 'overview' ? 'ov-content' : view + '-content');" in layer,
-       "Overview is the one root not named after its view")
+    ok("const wgRoot = (view) => $(view + '-content');" in layer,
+       "every root is named after its view (the Overview's ov-content went on 22 Oct 2026)")
     for v in app:
         if v == "chat": continue
-        ok(('id="%s"' % ("ov-content" if v == "overview" else v + "-content")) in HTML, "the root for %s exists" % v)
+        ok(('id="%s"' % (v + "-content")) in HTML, "the root for %s exists" % v)
     py = copilot_source()
     server = re.findall(r'"(\w+)"', py.split("LAYOUT_VIEWS = (")[1].split(")")[0])
     ok(sorted(server) == sorted(v for v in app if v != "chat"), "and the server accepts a layout for exactly those views")
@@ -7981,10 +7627,7 @@ def t_every_widget_id_is_well_formed_and_named_once_per_renderer():
     for m in re.finditer(r"ids: \{([^}]*)\}", SCRIPT):
         found += [(m.start(), v) for v in re.findall(r":\s*'([^']*)'", m.group(1))]
     found += [(-1, v) for v in re.findall(r'data-widget="([^"]*)"', HTML)]
-    # The id a group's caller passes in, like the Overview's and SEO's 'trends', is a literal too.
-    for m in re.finditer(r"render(?:TrendsBlock|SeoTrends)\([^\n]*?, '([^']*)'(?:, \{[^}]*\})?\);", SCRIPT):
-        found.append((m.start(), m.group(1)))
-    ok(len(found) >= 5, "found the Overview's ids (%d)" % len(found))
+    ok(len(found) >= 5, "found the page's ids (%d)" % len(found))
     for _, v in found:
         ok(pattern.match(v), "the widget id %r does not match the pattern" % v)
     by = {}
@@ -7992,36 +7635,9 @@ def t_every_widget_id_is_well_formed_and_named_once_per_renderer():
         key = owner(at) if at >= 0 else -1
         ok(v not in by.setdefault(key, set()), "the id %r is given twice by one renderer" % v)
         by[key].add(v)
-    ov = fn_src("function renderOverview(")
-    for v in ("followups", "sectors", "trends", "notable", "actions"):
-        ok("'%s'" % v in ov, "the Overview names its %s card" % v)
-    ok("widget(statCard(m, i), wgKpiId(m.label), 'sm', m.label)" in ov, "and each KPI tile by its label")
-
-
-@test
-def t_the_old_overview_customizing_is_gone_and_its_key_is_read_only_by_the_migration():
-    """The Overview's own reorder and hide lived in this browser only, with
-    HTML5 drag, arrow buttons and a heading of its own. The widget grid
-    replaces all of it; the one thing left is the migration that carries an
-    old order to the person's account, and it takes the key away only once
-    the server has the layout."""
-    for gone in ("metricsGridCustom", "reorderOv", "toggleHideOv", "ovEdit", "ovLayout", "saveOvLayout",
-                 "ovOrderedLabels", "Key numbers", "ov-customize", "ov-cust-hint", "stat-edit", "stat-hide",
-                 "stat-move", "--stat-tools-w", "Use the arrows to reorder"):
-        ok(gone not in HTML, "%s is gone" % gone)
-    ok(SCRIPT.count("'sc_ov_layout_v1'") == 1 and "const OV_LAYOUT_KEY = 'sc_ov_layout_v1';" in _wg_layer(),
-       "the key is named once, beside the migration")
-    mig = _wg_fn("async function wgMigrateOverview(")
-    reads = [m.start() for m in re.finditer(r"getItem\(OV_LAYOUT_KEY\)", SCRIPT)]
-    ok(len(reads) == 1 and "getItem(OV_LAYOUT_KEY)" in mig, "only the migration reads it")
-    ok("setItem(OV_LAYOUT_KEY" not in SCRIPT, "and nothing writes it any more")
-    ok(mig.index("await api('/api/layouts'") < mig.index("if (!d || !d.layouts || typeof d.layouts !== 'object') return;")
-       < mig.index("localStorage.removeItem(OV_LAYOUT_KEY)"), "the key goes only after the save succeeds; a failure returns first")
-    ok("if (!wgLayouts || wgLayouts.overview || !wgOwnerKnown || wgMigrating) return;" in mig,
-       "an account that already has an Overview layout keeps it, and nothing moves before the browser's owner is known")
-    ok("wgOwnerKnown = true;" in fn_src("function claimLocalCache("), "which claimLocalCache establishes")
-    ok("[LS, LS_SET, LS_OWNER, OV_LAYOUT_KEY]" in SCRIPT,
-       "signing in as someone else still clears it, so one person's old order never lands on another's account")
+    xs = fn_src("function renderConnector() {")
+    for v in ("band", "review", "runs", "settings"):
+        ok("'%s'" % v in xs, "Xero sync names its %s card" % v)
 
 
 @test
@@ -8124,30 +7740,22 @@ def t_a_card_heading_carries_its_widget_to_the_card_and_a_group_is_built_by_its_
     run, so the renderer marks the heading and the card takes the marks. The
     fold stops at a widget, or the Open follow-ups heading would sweep every
     KPI tile after it into its card. A heading over several blocks is a group
-    its renderer builds, because trendsSection repaints by swapping its own
-    nodes; and only the Overview asks renderStructured for ids."""
+    its renderer builds. (The trends group and the Overview's ids for
+    renderStructured went with the report pages on 22 Oct 2026.)"""
     fold = SCRIPT[SCRIPT.index("function cardifySections("):]
     fold = fold[:fold.index("\n        function ")]
     ok("['data-widget', 'data-size', 'data-widget-label'].forEach(function (a) {" in fold
        and "card.setAttribute(a, node.getAttribute(a));" in fold, "the card takes the heading's widget marks")
     ok("!(n.hasAttribute && n.hasAttribute('data-widget'))" in fold, "the fold stops at a widget")
-    trends = fn_src("function renderTrendsBlock(")
-    ok("const group = el('div', 'widget-group');" in trends and "if (id) widget(group, id, 'full', 'Performance over time');" in trends
-       and "trendsSection(group, " in trends and "cardifySections(group);" in trends,
-       "the trends heading and its charts are one group, with the id its caller passes")
-    ok(SCRIPT.count("renderTrendsBlock(") == 2 and "intro, 'trends', { noChannels: true });" in fn_src("function renderOverview("),
-       "the Overview is its one caller and names it")
     calls = [args for _, args in _wg_calls(SCRIPT, "renderStructured") if len(args) > 2 and "ids:" in args[2]]
-    ok(len(calls) == 1 and calls[0][0] == "box", "only the Overview passes ids to renderStructured")
+    ok(not calls, "nothing passes ids to renderStructured since the Overview, its one caller, went (22 Oct 2026)")
     ok(".widget-group { display: flex; flex-direction: column; min-width: 0; }" in CSS, "a group is one column")
 
 
 # Every report view the stage 1 inventory found with two or more blocks, by the
 # renderer that draws it. Named rather than discovered, so renaming one fails here.
 _WG_ADOPTED = {
-    "overview": "function renderOverview(", "seo": "function renderSEO(", "keywords": "function renderKeywords(",
-    "products": "function renderProductList(", "customers": "function renderCustomers(",
-    "liability": "function renderLiability(", "recon": "function renderRecon(", "forecast": "function renderForecast(",
+    "liability": "function renderLiability(", "forecast": "function renderForecast(",
     "connector": "function renderConnector(", "loans": "function renderLoans(", "mail": "function renderMail(",
     "labels": "function renderLabels(", "memory": "function renderMemory(", "skills": "function renderSkills(",
 }
@@ -8174,17 +7782,13 @@ def t_every_report_view_with_several_blocks_names_its_cards():
     at least two cards in its own renderer, and gives its page header the action
     slot Customize sits in, because a view that qualifies with no slot shows no
     button."""
-    ov_ids = _wg_literal_ids(fn_src(_WG_ADOPTED["overview"]))
     for view, name in _WG_ADOPTED.items():
         ok(name in SCRIPT, "the %s renderer is still %s" % (view, name.strip("( ")))
         src = fn_src(name)
         ids = _wg_literal_ids(src)
-        if view == "overview":
-            ids += ["kpi-*"] if "wgKpiId(m.label)" in src else []
         ok(len(set(ids)) >= 2, "%s names %d cards: %r" % (view, len(set(ids)), ids))
         ok("heroAct(" in src or "pageHead({" in src or (view == "mail" and "mailHero(box)" in src),
            "the %s header has the action slot Customize goes in (pageHead builds it since the mix)" % view)
-    ok(len(ov_ids) >= 5, "and the Overview still names its own")
 
 
 @test
@@ -8245,8 +7849,9 @@ def t_a_header_keeps_its_tabs_at_20_in_the_grid():
 
 @test
 def t_an_unfilled_card_waits_off_the_page_without_being_hidden():
-    """The trade radar fills when its request answers, and Top products empties
-    when fewer than two products earned. Such a card is not the person's choice
+    """A card can fill when its own request answers, or empty when it has
+    nothing to show (the trade radar and Top products did, until the report
+    pages went on 22 Oct 2026). Such a card is not the person's choice
     to hide, so it is left out of the arrangement and the Customize list, never
     added to their hidden list, and laid out again when it fills. Before, an
     empty holder took a grid row and a gap of its own."""
@@ -8264,8 +7869,6 @@ def t_an_unfilled_card_waits_off_the_page_without_being_hidden():
     ok("wgEdit.draft.hidden.push" not in arrange, "and it never joins the hidden list")
     ok("wgAbsent(r.target) !== w.absent.has(r.target)" in _wg_fn("function wgWatch("),
        "a card is laid out again only when it starts or stops being shown")
-    for name in ("function renderCustomers(", "function renderProductList("):
-        ok("widget(el('div'), " in fn_src(name), "%s gives its holder the id, not the card drawn into it" % name.strip("( "))
 
 
 @test
@@ -8470,18 +8073,6 @@ def t_box_presets_are_saved_whole_or_not_at_all():
 
 
 @test
-def t_the_products_page_searches_everything_and_draws_a_bounded_list():
-    """B38 and its review. The report now sends every product so search and
-    filters reach them all; the page draws the first P_ROWS_MAX of what
-    matches, and says so, rather than a button row per product in a large
-    catalogue on every filter change."""
-    ok("const P_ROWS_MAX = 300;" in SCRIPT, "a bound on rows drawn")
-    ok("rows.slice(0, P_ROWS_MAX).map(r => {" in SCRIPT, "the list draws within it")
-    ok("'Showing ' + P_ROWS_MAX + ' of ' + rows.length + '. Search or filter for more.'" in SCRIPT,
-       "and says when it stopped, in a line (the mix's copy plan, Products #6)")
-
-
-@test
 def t_a_held_enter_signs_in_once():
     """B43 in the 2026-09-19 bug audit. The Enter handlers call submit()
     directly, and key repeat fires keydown every few milliseconds, so a held
@@ -8498,72 +8089,6 @@ def t_a_held_enter_signs_in_once():
                  "[inCode, inName, inUser, inPw].forEach(i => i.onkeydown = e => { if (e.key === 'Enter' && !e.repeat) go.click(); });",
                  "[inCur, inNew].forEach(i => i.onkeydown = e => { if (e.key === 'Enter' && !e.repeat) go.click(); });"):
         ok(site in SCRIPT, "a held Enter is one press: " + site[:60])
-
-
-@test
-def t_the_recon_list_draws_only_the_latest_filter():
-    """B46 in the 2026-09-19 bug audit, and its review. Every chip click sent
-    a read and drew whatever came back, so the slower, earlier answer could
-    land last and list Critical rows under the High chip; and the full
-    refresh, whose status half is the slow one, painted the old filter's rows
-    over a chip clicked while it was in flight. Run for real, in node, with
-    the answers released in the order that went wrong."""
-    if not any(os.access(os.path.join(p, "node"), os.X_OK)
-               for p in os.environ.get("PATH", "").split(os.pathsep)):
-        print("       (node unavailable, skipped)")
-        return
-    harness = ("let reconListSeq = 0; let reconStatusSeq = 0; let reconCache = null; const reconFilter = { severity: '' };\n"
-               "const draws = []; const document = { querySelector: () => true };\n"
-               "function renderRecon() { draws.push(reconCache && reconCache.ex ? reconCache.ex.rows : 'error'); }\n"
-               "const pending = [];\n"
-               "function api(path, payload) { return new Promise(res => pending.push({ path, sev: payload && payload.severity, res })); }\n"
-               + fn_src("async function refreshRecon(") + "\n" + fn_src("async function refreshReconList(") + r"""
-const tick = () => new Promise(r => setTimeout(r, 0));
-const answer = (i) => { const p = pending[i]; p.res(p.path.endsWith('status') ? { xero: 'disconnected' } : { rows: p.sev || 'all' }); };
-(async () => {
-  const out = {};
-  // A full refresh (after Disconnect Xero) in flight, then the Critical chip.
-  reconCache = { st: { xero: 'connected' }, ex: { rows: 'old' } };
-  const full = refreshRecon(); await tick();
-  reconFilter.severity = 'critical'; const list = refreshReconList(); await tick();
-  answer(2); await list; await tick();          // the chip's list lands first
-  answer(0); answer(1); await full; await tick(); // then the slow refresh
-  out.afterRefresh = reconCache.ex.rows;
-  out.statusAfterRefresh = reconCache.st.xero;
-  // The other order: the refresh lands first, then the chip.
-  pending.length = 0;
-  reconCache = { st: { xero: 'connected' }, ex: { rows: 'old' } };
-  const full2 = refreshRecon(); await tick();
-  reconFilter.severity = 'high'; const list2 = refreshReconList(); await tick();
-  answer(0); answer(1); await full2; await tick();
-  answer(2); await list2; await tick();
-  out.statusRefreshFirst = reconCache.st.xero;
-  out.rowsRefreshFirst = reconCache.ex.rows;
-  // Two chips, the earlier answer last.
-  pending.length = 0;
-  reconFilter.severity = 'high'; const a = refreshReconList(); await tick();
-  reconFilter.severity = 'critical'; const b = refreshReconList(); await tick();
-  answer(1); await b; await tick(); answer(0); await a; await tick();
-  out.afterChips = reconCache.ex.rows;
-  console.log(JSON.stringify(out));
-})();
-""")
-    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
-        fh.write(harness)
-        path = fh.name
-    try:
-        r = subprocess.run(["node", path], capture_output=True, text=True)
-        ok(r.returncode == 0, "the recon harness failed: " + (r.stderr or "")[:300])
-        got = json.loads((r.stdout or "").strip())
-        eq_ = lambda a, b, m: ok(a == b, m + ": %r" % (a,))
-        eq_(got["afterRefresh"], "critical", "a slow full refresh does not paint over the chip clicked after it")
-        eq_(got["afterChips"], "critical", "and the earlier chip's late answer is dropped")
-        eq_(got["statusAfterRefresh"], "disconnected",
-            "an overtaken refresh still brings the newest status: the page does not say Xero is connected after a Disconnect")
-        eq_(got["statusRefreshFirst"], "disconnected", "whichever answer lands first")
-        eq_(got["rowsRefreshFirst"], "high", "and the chip's rows")
-    finally:
-        os.unlink(path)
 
 
 @test
@@ -9164,11 +8689,11 @@ def t_every_ordinary_button_is_built_by_the_part():
 
 @test
 def t_settings_switches_are_named_switches():
-    """Stage 3, piece 3: the five Settings switches were bare boxes with no
+    """Stage 3, piece 3: the Settings switches were bare boxes with no
     name a screen reader could read, made to work after drawing. They are
     switches in the markup now, named by the title beside them."""
     for key in ('data-pref="track_inventory"', 'data-pref="concise"', 'data-pref="proactive"',
-                'data-pref="flag_anomalies"', 'id="sched-toggle"'):
+                'data-pref="flag_anomalies"'):
         m = re.search(r'<button type="button" class="toggle" role="switch" aria-checked="(?:true|false)"[^>]*' + re.escape(key) + r'[^>]*>', HTML) \
             or re.search(r'<button type="button" class="toggle"[^>]*' + re.escape(key) + r'[^>]*role="switch"[^>]*>', HTML)
         ok(m, key + " is a switch button")
@@ -9176,13 +8701,6 @@ def t_settings_switches_are_named_switches():
         ok(lab, key + " names itself by its title")
         t = re.search(r'id="' + re.escape(lab.group(1)) + r'"[^>]*>([^<]+)<', HTML)
         ok(t and t.group(1).strip(), key + " points at a title that exists")
-    # The schedule's frequency list beside them. Its row is shown until
-    # Settings has read the schedule and hidden only if auto-refresh is off,
-    # so the browser suite's no-unnamed-control check saw it or not by
-    # timing, and with auto-refresh on a screen reader heard an unnamed list.
-    sel = re.search(r'<select id="sched-freq"[^>]*>', HTML)
-    ok(sel and 'aria-labelledby="sched-freq-title"' in sel.group(0), "the frequency list is named by its title")
-    ok(re.search(r'id="sched-freq-title"[^>]*>Frequency<', HTML), "and that title exists")
 
 
 @test
@@ -9399,24 +8917,6 @@ def t_the_panel_rule_is_the_stylesheets():
     for gone in ("function syncPanels(", "function panelTargets(", "const PANEL_SKIP", "const PANEL_HOLD", "stampPass", "classList.add('panel')"):
         ok(gone not in SCRIPT, "nothing stamps panels: " + gone)
     ok(SCRIPT.count("chat-recent panel") == 1, "the one block built as a panel outside a page is the chat's recent list")
-
-
-@test
-def t_the_ask_panel_sits_in_its_panel():
-    """Stage 3, piece 5: on every report page the "Ask about this ..." panel
-    showed its grey ask well as a box inside the panel, and its suggestions
-    started 16 further in than its title. The 13 Oct rule meant to put the
-    field in the panel itself aimed at the panel being the .pchat card, but
-    the panel is .page-chat and the card is inside it, so it never matched.
-    On a phone the prompt was cut mid-line."""
-    ok(".ov-wrap & > .pchat > .pchat-thread { padding: var(--sp-3) 0 0; }" in CSS,
-       "the suggestions and answers sit on the panel's own inset, under the title")
-    ok(".ov-wrap & > .pchat > .pchat-input { padding: var(--sp-4) 0 0; background: none; border-top: 0; }" in CSS,
-       "the field sits in the panel itself: no grey well, no rule above it")
-    ok("&.pchat > .pchat-input" not in CSS, "the rule that never matched is gone")
-    pc = fn_src("function pageChatPanel(")
-    ok("ta.placeholder = 'Ask a question\u2026';" in pc, "a prompt that fits a phone")
-    ok("ta.setAttribute('aria-label', 'Ask a question about this report');" in pc, "its name for a screen reader is unchanged")
 
 
 @test
@@ -10338,73 +9838,6 @@ def t_team_actions_wrap_onto_their_own_line_on_a_phone():
 
 
 @test
-def t_a_paid_report_run_is_one_run_and_stays_on_screen():
-    """A31 in the 2026-09-22 bug audit. Leaving a report's tab while its paid
-    run was going and coming back painted the Run gate over it, and Run or
-    Refresh then paid for a second run. Run for real, in node."""
-    ok("if (customersRuns.has(seg)) { customersBusy(seg); return; }" in fn_src("function renderCustomers(seg)"),
-       "Customers keeps a running sector's loading screen too")
-    ok(re.search(r"const reportRuns = \{\};", SCRIPT), "one record of the runs in flight")
-    if not _node_ok():
-        print("       (node unavailable, skipped)")
-        return
-    js = MINIDOM + r"""
-const byId = {}; const $ = (id) => byId[id] || (byId[id] = Object.assign(el('div'), { id }));
-const I = {}; function loader() { return el('span'); }
-function pageHead(o) { const h = el('div', 'ov-hero'); h.append(el('h2', null, o.title || '')); return h; }
-const RUN_COST = 'x';
-const reportRuns = {};
-let overviewCache = null, seoCache = null, keywordsCache = null;
-let calls = 0, release; const answer = new Promise(r => { release = r; });
-async function api(path) { calls += 1; await answer; return { structured: {} }; }
-const painted = [];
-function renderOverview(c) { painted.push('report'); $('ov-content').innerHTML = ''; $('ov-content').append(el('div', null, 'REPORT')); }
-function renderRunGate(id) { painted.push('gate'); $(id).innerHTML = ''; $(id).append(el('div', null, 'RUN GATE')); }
-""" + fn_src("function showOverviewView()") + "\n" + fn_src("async function loadOverview(force)") + "\n" + fn_src("async function runOverview(box, force)") + r"""
-(async () => {
-  showOverviewView();
-  const first = loadOverview(true);
-  showOverviewView();                          // away and back while it runs
-  const during = $('ov-content').textContent;
-  const second = loadOverview(true);           // Refresh or Run pressed again
-  release(); await first; await second;
-  showOverviewView();
-  console.log(JSON.stringify({ calls, during, painted, after: $('ov-content').textContent, idle: reportRuns.overview }));
-})();
-"""
-    got = _run_node(js)
-    ok(got["calls"] == 1, "one paid run, not two: %r" % got)
-    ok("RUN GATE" not in got["during"] and "Working out live metrics" in got["during"],
-       "coming back mid-run keeps the loading screen: %r" % got["during"])
-    ok(got["painted"] == ["gate", "report", "report"] and got["after"] == "REPORT", got)
-    ok(got["idle"] is None, "and the run is let go when it lands")
-    # Customers, one run per sector (found by the round-4 review): one slot for
-    # the tab let a second sector's run take it, and the first was run again.
-    js = MINIDOM + r"""
-const byId = {}; const $ = (id) => byId[id] || (byId[id] = Object.assign(el('div'), { id }));
-const I = {}; function loader() { return el('span'); } function sectorBar() { return el('div'); } function pageHead(o) { const h = el('div', 'ov-hero'); h.append(el('h2', null, o.title || '')); return h; }
-const SEG_ALL = '__all__'; const customersCache = {}; let customersSeg = SEG_ALL;
-const customersRuns = new Set();
-const painted = []; function renderCustomers(seg) { painted.push(seg); }
-const runs = []; const gates = [];
-async function api(path, body) { runs.push(body.segment || SEG_ALL); await new Promise(r => gates.push(r)); return {}; }
-""" + fn_src("function customersBusy(seg)") + "\n" + fn_src("async function loadCustomers(force, seg)") + r"""
-(async () => {
-  const a = loadCustomers(true, 'Theatre');
-  const b = loadCustomers(true, 'Education');
-  const c = loadCustomers(true, 'Theatre');          // back to Theatre while it runs, and Run
-  const busy = $('customers-content').textContent;
-  gates.forEach(g => g()); await Promise.all([a, b, c]);
-  console.log(JSON.stringify({ runs, busy, painted, left: customersRuns.size }));
-})();
-"""
-    got = _run_node(js)
-    ok(got["runs"] == ["Theatre", "Education"], "each sector is one paid run: %r" % got)
-    ok("Analysing the Theatre sector" in got["busy"], "and a running sector shows its loading screen: %r" % got["busy"])
-    ok(got["left"] == 0, "every run is let go when it lands")
-
-
-@test
 def t_a_dropped_connection_is_not_read_as_a_refusal():
     """A32 in the 2026-09-22 bug audit. "Failed to fetch" reached the person,
     and every caller read it as a refusal: the mail Send was offered again and
@@ -10459,79 +9892,6 @@ async function fetch() { return reply; }
        "no session to begin with: no reload, no 'expired' greeting: %r" % got)
     ok(got["expired"]["reloads"] == 1 and got["expired"]["saved"],
        "a real expired session still reloads once and says why: %r" % got)
-
-
-@test
-def t_a_late_product_plan_does_not_replace_the_one_on_screen():
-    """A33 in the 2026-09-22 bug audit. A plan takes up to a minute; opening
-    another product meanwhile let the earlier answer land last and replace
-    it. Run for real, in node."""
-    if not _node_ok():
-        print("       (node unavailable, skipped)")
-        return
-    # The list's painter drops whatever plan is coming, by any route to it:
-    # Back, and (found by the round-4 review) a tab switch, which painted the
-    # list through showProductsView and let the plan land over it.
-    head = fn_src("function renderProductList()").split("\n")[1].split("//")[0].strip()
-    ok(head.startswith("productSeq++; productPlanRun = false;"), head)
-    js = MINIDOM + button_part() + r"""
-const byId = {}; const $ = (id) => byId[id] || (byId[id] = Object.assign(el('div'), { id }));
-const I = {}; function loader() { return el('span'); } function ico() { return el('span'); } function pageHead(o) { const h = el('div', 'ov-hero'); h.append(el('h2', null, o.title || '')); return h; }
-function renderRunGate() { shown.push('gate'); }
-let productSeq = 0, productPlanRun = false, productList = [];
-function renderProductList() { """ + head + r""" shown.push('list'); }
-const shown = []; const gates = {};
-async function api(path, body) { await new Promise(r => { gates[body.product_id] = r; }); return { id: body.product_id }; }
-function renderProductDetail(d) { shown.push(d.id); }
-""" + fn_src("function showProductsView()") + "\n" + fn_src("function productBack()") + "\n" + fn_src("async function openProduct(id, title)") + r"""
-const tick = () => new Promise(r => setTimeout(r, 0));
-(async () => {
-  const a = openProduct('A', 'Gobo A'); const b = openProduct('B', 'Gobo B');
-  await tick(); gates.B(); await b; gates.A(); await a;
-  const c = openProduct('C', 'Gobo C'); await tick();
-  $('products-content').children[0].onclick();      // back to the list mid-run
-  gates.C(); await c;
-  const d = openProduct('D', 'Gobo D'); await tick();
-  showProductsView();                               // away to another tab and back mid-run
-  const during = shown.slice();
-  gates.D(); await d;
-  showProductsView();                               // and once it has landed, the list as before
-  console.log(JSON.stringify({ shown, during }));
-})();
-"""
-    got = _run_node(js)
-    ok(got["shown"] == ["B", "list", "D", "list"],
-       "only the plan last opened is drawn, never over the list, and a tab switch keeps a running plan: %r" % got)
-    ok(got["during"] == ["B", "list"], "coming back mid-run keeps the plan's loading screen: %r" % got)
-
-
-@test
-def t_a_follow_up_typed_while_an_answer_streams_is_kept():
-    """A34 in the 2026-09-22 bug audit. The box was cleared first and the
-    question then refused because an answer was still coming. Run for real,
-    in node."""
-    if not _node_ok():
-        print("       (node unavailable, skipped)")
-        return
-    js = MINIDOM + button_part() + r"""
-const I = {}; const PAGE_LABELS = {}; const pageBusy = {}; const asked = [], toasts = [];
-function threadKey(p) { return p; } function renderPageThread() {}
-function addToast(m) { toasts.push(m); }
-function pageAsk(page, text) { asked.push(text); pageBusy[page] = true; }
-""" + fn_src("function pageChatPanel(page, data)") + r"""
-const find = (n, tag) => { if (n.tagName === tag) return n; for (const c of n.children || []) { const f = find(c, tag); if (f) return f; } return null; };
-const wrap = pageChatPanel('overview', {});
-const ta = find(wrap, 'TEXTAREA'), btn = find(wrap, 'BUTTON');
-ta.value = 'What drove the dip?'; btn.onclick();
-ta.value = 'And in September?'; ta.focus(); pressKey('Enter');
-const kept = ta.value;
-pageBusy.overview = false; btn.onclick();
-console.log(JSON.stringify({ asked, kept, toasts, after: ta.value }));
-"""
-    got = _run_node(js)
-    ok(got["asked"] == ["What drove the dip?", "And in September?"], "the follow-up is sent once the answer is in: %r" % got)
-    ok(got["kept"] == "And in September?", "and it stays in the box while the answer is coming: %r" % got)
-    ok(got["toasts"] == ["Wait for the answer, then send this."], got["toasts"])
 
 
 @test
@@ -10597,10 +9957,10 @@ def t_a_failed_note_alert_or_knowledge_change_is_said():
         return
     js = MINIDOM + r"""
 const byId = {}; const $ = (id) => byId[id] || (byId[id] = Object.assign(el('div'), { id }));
-let memories = [], alerts = [], knowledge = { a: 1 }, overviewCache = null; const errors = [];
+let memories = [], alerts = [], knowledge = { a: 1 }; const errors = [];
 async function api() { throw new Error('The server is busy.'); }
 async function uiConfirm() { return true; }
-function toastError(m) { errors.push(m); } function renderMemory() {} function renderOverview() {} function paintMem() {} function paintNotes() {}
+function toastError(m) { errors.push(m); } function renderMemory() {} function renderAlerts() {} function paintMem() {} function paintNotes() {}
 """ + fn_src("async function memOp(") + "\n" + fn_src("async function alertOp(") + "\n" + fn_src("async function deleteKnowledge(") + r"""
 (async () => {
   await memOp({ op: 'delete', id: 'm1' }); await alertOp({ op: 'dismiss', id: 'a1' }); await deleteKnowledge();
@@ -11001,7 +10361,7 @@ def t_the_month_pill_is_worked_out_from_the_figures_beside_it():
     ov = fn_src("function fcBand(latest, sc) {")
     ok("(p50 - target) / target" in ov and "(cur.gap_pct || {})[sc]" not in ov,
        "the band works its percentage out from the money it prints")
-    fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
+    fn = SCRIPT.split("function renderForecast()")[1].split("\n        function showLabelsView")[0]
     ok("r.gap_pct" not in fn and "(r.p50 - t) / t" in fn, "and so does the month table")
     ok("FC_VERDICT_WORDS[v]" in fn and "FC_BASIS[r.method]" in fn,
        "whose verdicts and bases are words, not the run's codes")
@@ -11015,7 +10375,7 @@ def t_the_scenario_label_sits_with_its_control():
     control. And the scenarios are called what the workbook calls them."""
     rule = CSS.split(".fc-seg-lbl {")[1].split("}")[0]
     ok("order" not in rule and "margin-left: auto" not in rule, "the label keeps its place before the control")
-    fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
+    fn = SCRIPT.split("function renderForecast()")[1].split("\n        function showLabelsView")[0]
     ok("[el('span', 'fc-seg-lbl', 'Plan'),\n                segmented(" in fn,
        "and both ride in the tab row's end group, label first (the mix)")
     ok("'Algo '" not in SCRIPT, "Algorithm 1 is not abbreviated to Algo 1")
@@ -11042,24 +10402,6 @@ def t_the_forecast_explains_itself_once_and_in_plain_lines():
 
 
 @test
-def t_the_reconciliation_card_keeps_status_and_actions_apart():
-    """Cameron's screenshot, 2026-09-23: two chips, a bare count and three
-    buttons in one wrapping row, Disconnect weighted like Sweep now, and the
-    sweep's notes as form-help lines with a field's gap under each."""
-    fn = fn_src("function renderRecon()")
-    # 12 Oct 2026: the card went. The sources sit in the band beside the
-    # counters and the actions in the page header, the mockup's split.
-    ok("el('div', 'band-src')" in fn and "actions: heads" in fn, "status on one side, actions on the other")
-    ok("dropMenu(manage, [" in fn and "label: 'Disconnect Xero'" in fn,
-       "disconnecting is in a menu, not a button beside the sweep")
-    sl = fn_src("function reconSweepLine(")
-    ok("el('div', 'field-help', n)" not in sl and "ul.append(li);" in sl,
-       "the notes are one list")
-    ok("danger: true" in fn.split("const disconnect = async")[1][:1400], "and the confirm is marked destructive")
-    ok("text-wrap: pretty" in re.search(r"(?m)^\s*body \{([^}]*)\}", CSS).group(1), "no word stranded on a last line")
-
-
-@test
 def t_a_chart_prints_only_the_dates_it_has_room_for():
     """At phone width the forecast's day chart printed "25 Se30 Sep": six
     dates were drawn whatever the plot's width, and the last, anchored flush
@@ -11072,18 +10414,10 @@ def t_a_chart_prints_only_the_dates_it_has_room_for():
 def t_the_reviewers_last_findings_stay_closed():
     """The independent check of the design sweep found seventeen things not
     fixed and sixteen made worse. Each line here is one of them."""
-    # A product plan opened with an id Refresh can use: the payload has none.
-    op = fn_src("async function openProduct(")
-    ok("renderProductDetail(d, id, title);" in op, "the plan is drawn with the id it was opened by")
-    pd = fn_src("function renderProductDetail(")
-    ok("const pid = id || (d.product && d.product.id)" in pd, "so the plan has its Refresh")
     # Nobody owing: no toolbar over a list that cannot have a row.
     li = fn_src("function renderLiability(")
     i_empty = li.index("if (!(d.customers || []).length) {")
     ok(i_empty < li.index("lCard.append(tableTools(left, right));"), "the empty book skips the filters")
-    # The recon arithmetic heading is a heading; what it is sits under it.
-    rd = fn_src("function paintReconDetail(")
-    ok("h('The arithmetic');" in rd and "h('The arithmetic (" not in rd, "a plain heading")
     # The month table keeps a month and its basis to one line each.
     ok(".fc-months th, .fc-months td:nth-child(-n+2) { white-space: nowrap; }" in CSS
        and "mc.lastChild.classList.add('fc-months');" in SCRIPT, "the month table does not stack its months")
@@ -11489,9 +10823,9 @@ def t_the_xero_page_keeps_the_details_the_last_check_found():
 @test
 def t_settings_saves_one_way():
     """D10 of the 2026-09-23 sweep: the four preference switches waited for a
-    footer 'Save profile' while the Auto-refresh switch beside them saved at
-    once, so the footer's Cancel undid one and not the other, and a caption
-    had to explain it. Now every switch saves when changed and each block of
+    footer 'Save profile' while the Auto-refresh switch beside them (gone with
+    the reports since 22 Oct 2026) saved at once, so the footer's Cancel undid
+    one and not the other, and a caption had to explain it. Now every switch saves when changed and each block of
     text has its own Save under it; the window has no footer."""
     m = HTML[HTML.index('id="settings-modal"'):HTML.index('id="usage"')]
     ok('class="modal-foot"' not in HTML[HTML.index('id="settings-modal"'):HTML.index('<script>', HTML.index('id="settings-modal"'))],
@@ -11504,8 +10838,8 @@ def t_settings_saves_one_way():
     ok("api('/api/profile', { prefs: prefs })" in fn and "profile: " not in fn.split("api('/api/profile'")[1][:40],
        "a switch sends the switches alone, never this page's copy of the text (the server merges them)")
     close = fn_src("function closeSettings(")
-    ok("profileKey(profile) !== settingsAtOpen" in close and "if (!changed || !overviewCache) return;" in close and "loadOverview(true)" in close,
-       "the Overview is recomputed once on close, only if something really changed and only if it had been run")
+    ok("dialogHide($('settings-modal'))" in close and "loadOverview" not in close,
+       "closing hides the window and recomputes nothing (the Overview it re-ran went on 22 Oct 2026)")
     ap = fn_src("async function applySettings(")
     ok("const next = Object.assign({}, profile," in ap and "profile = (d && d.profile) ? d.profile : next;" in ap,
        "a failed Save profile leaves the saved profile as it was")
@@ -11521,32 +10855,16 @@ def t_a_page_is_called_what_the_sidebar_calls_it():
     heading gave one page two names ('Store overview' under 'Overview', and
     'Finance' under each of Liability, Reconciliation, Forecast and Xero
     sync)."""
-    titles = re.search(r"const titles = \{ overview: 'Overview'[^}]*liability[^}]*\}", SCRIPT).group(0)
-    for view, name in (("overview", "Overview"), ("seo", "SEO"), ("keywords", "Keywords"), ("memory", "Memory"),
-                       ("liability", "Liability"), ("recon", "Reconciliation"), ("forecast", "Forecast"), ("connector", "Xero sync")):
+    titles = re.search(r"const titles = \{ liability: 'Liability'[^}]*\}", SCRIPT).group(0)
+    for view, name in (("memory", "Memory"), ("liability", "Liability"), ("forecast", "Forecast"), ("connector", "Xero sync")):
         ok(view + ": '" + name + "'" in titles, "the topbar calls " + view + " " + name)
         ok("el('h2', null, '" + name + "')" in SCRIPT or "title: '" + name + "'" in SCRIPT,
            "and so does its page heading: " + name)
-    ok("comp ? 'Customers' : (seg + ' sector')" in SCRIPT, "Customers too")
     for old in ("'Store overview'", "'SEO and optimisation'", "'Keyword and CPC intelligence'",
                 "'Memory and knowledge'", "'Finance'"):
         ok(("el('h2', null, " + old + ")") not in SCRIPT, "no page is headed " + old)
         ok(("title: " + old) not in SCRIPT, "nor its Run gate " + old)
-    ok("const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers' };" in SCRIPT,
-       "and the printed report's header uses the same names")
     ok("comp ? 'Customers and retention'" not in SCRIPT, "nor 'Customers and retention'")
-
-
-@test
-def t_a_search_does_not_take_customise_away():
-    """B31: typing a product search that left fewer than two earners emptied
-    Top products, the page fell to one card, the grid stood down and
-    Customise vanished from the header, then came back as the search was
-    cleared."""
-    fn = fn_src("function renderProductList(")
-    ok("const narrowed = rows.length < all;" in fn and "if (top.length > 1 || narrowed) {" in fn,
-       "a narrowed list keeps the card")
-    ok("'Nothing to rank for this period.'" in fn, "and the card says why it has no bars")
 
 
 @test
@@ -11843,8 +11161,8 @@ console.log(JSON.stringify({ mSecs: member.map(s => s.id), aSecs: admin.map(s =>
     got = _run_node(js)
     ok("house" not in got["mSecs"] and "house" in got["aSecs"], "housekeeping is for admins")
     ok("Cloudflare" not in got["m"] and "Cloudflare" in got["a"], "and so is the storage setup")
-    ok("Liability" not in got["m"] and "reports" not in got["mSecs"], "a page someone cannot open is not explained to them")
-    for page in ("Inbox", "CRM", "Loan units", "Liability", "Reconciliation", "Forecast", "Xero sync", "Size list", "Memory", "Skills", "Customise", "Clocking in", "Two-step sign-in", "Deep analysis"):
+    ok("Liability" not in got["m"] and "sizes" not in got["mSecs"], "a page someone cannot open is not explained to them")
+    for page in ("Inbox", "CRM", "Loan units", "Liability", "Forecast", "Xero sync", "Size list", "Memory", "Skills", "Customise", "Clocking in", "Two-step sign-in", "Deep analysis"):
         ok(page in got["a"], "the guide covers " + page)
     body = re.search(r"const GUIDE = \[(.*?)\n        \];", SCRIPT, re.S).group(1)
     for word in ("Railway", "R2_", "RESEND", "gizmo", "up.railway.app"):
@@ -12066,11 +11384,11 @@ def t_deep_analysis_is_tagged_by_the_switch_not_the_model_name():
     """Every answer is Opus 5.5 now, so 'Deep analysis' drawn for any Opus
     model would tag them all. The server says whether an answer was deep;
     answers saved before it did keep the old reading."""
-    for name in ("function chatAnswer(", "function pageAssistant("):
+    for name in ("function chatAnswer(",):
         fn = fn_src(name)
         ok("deepTurn(t)" in fn and "/opus/i.test" not in fn, name + " asks deepTurn")
-    ok("model: data.model, deep: data.deep," in SCRIPT and "model: res.model, deep: res.deep," in SCRIPT,
-       "both chat and the page assistant keep what the server said")
+    ok("model: data.model, deep: data.deep," in SCRIPT,
+       "chat keeps what the server said (the page assistant went with the report pages on 22 Oct 2026)")
     ok("larger model" not in HTML, "the switch no longer promises a bigger model")
     if not any(os.access(os.path.join(p, "node"), os.X_OK)
                for p in os.environ.get("PATH", "").split(os.pathsep)):
@@ -12092,9 +11410,9 @@ def t_deep_analysis_is_tagged_by_the_switch_not_the_model_name():
 
 @test
 def t_an_answer_the_fallback_gave_says_so_and_settings_keeps_the_failure():
-    for name in ("function chatAnswer(", "function pageAssistant("):
+    for name in ("function chatAnswer(",):
         ok("fellBackNote(t)" in fn_src(name), name + " shows who answered when the chosen model failed")
-    ok("fell_back: data.fell_back" in SCRIPT and "fell_back: res.fell_back" in SCRIPT, "and both keep it with the answer")
+    ok("fell_back: data.fell_back" in SCRIPT, "and Chat keeps it with the answer")
     note = fn_src("function fellBackNote(")
     ok("' answered this, because '" in note and "could not. " in note, note)
     ok("ANTHROPIC_API_KEY" not in SCRIPT, "no setting name reaches the page")
@@ -12907,7 +12225,7 @@ def t_the_top_bar_says_where_you_are_and_finds_anything():
     (section, chevron, page) and search on the right (a 32 well, 232 wide, the
     shortcut in a key cap). On a phone or tablet it is the ink frame: the
     menu, the section, search; the sheet rises under it with 12 corners."""
-    ok('<div class="crumbs"><span id="view-crumb"></span><span class="crumb-chev" id="crumb-chev" aria-hidden="true"></span><h1 id="view-title">Overview</h1></div>' in HTML,
+    ok('<div class="crumbs"><span id="view-crumb"></span><span class="crumb-chev" id="crumb-chev" aria-hidden="true"></span><h1 id="view-title">Production Manager</h1></div>' in HTML,
        "the crumbs are the section, a chevron and the page")
     ok("topbar-sep" not in HTML, "the hairline after the trigger is gone")
     ok("function setViewCrumb(v) {" in SCRIPT, "the section is read from the sidebar's own groups")
@@ -13198,16 +12516,6 @@ def t_panels_side_by_side_stand_equal():
     ok("@media screen {\n            .crm-charts { gap: var(--panel-gap); align-items: stretch; }\n        }" in CSS
        and ":is(.crm-seg, .crm-charts) > & { margin-block: 0; }" in CSS and ".crm-seg > & + * { margin-top: var(--panel-gap); }" in CSS,
        "CRM Insights: a panel gap between its figures and charts, and charts in a row stand equal")
-
-
-@test
-def t_a_products_charts_and_their_heading_are_one_panel():
-    """Panels (13 Oct 2026): a product's page set "Performance over time" as a
-    heading of its own over a bare grid of charts, the one heading on any page
-    left outside the block it names. The two are one group, so one panel."""
-    pd = fn_src("function renderProductDetail(")
-    ok("const perf = el('div', 'widget-group'); perf.append(el('div', 'section-title', 'Performance over time'));" in pd
-       and "perf.append(grid); box.append(perf);" in pd, "the heading and its charts are one group")
 
 
 @test
@@ -13785,8 +13093,8 @@ def t_an_empty_space_is_a_tile_a_line_and_its_action():
     """Spec 6 and 7 (Cameron: "i hate the stupid projector thing"): an empty
     state is a 40 icon tile with the screen's own icon on the fill, one line of
     8 words or fewer in the head step, and its action, centred in its space.
-    No illustration, no box. A report's run gate is one: the page header with
-    its one line, then the tile, the cost and Run."""
+    No illustration, no box. (The report pages' run gates were the other
+    user; they went on 22 Oct 2026.)"""
     ok("function emptyState(o) {" in SCRIPT, "the builder exists")
     fn = fn_src("function emptyState(o) {")
     for part in ("el('div', 'empty-state'", "el('span', 'empty-ic')", "ico(o.icon", "el('p', 'empty-line', o.text)", "if (o.action) box.append(o.action);"):
@@ -13799,10 +13107,6 @@ def t_an_empty_space_is_a_tile_a_line_and_its_action():
     st = CSS.split("\n        .empty-state {")[1].split("}")[0]
     ok("align-items: center" in st and "text-align: left" in st and "border" not in st and "background" not in st,
        "one line on the left under its heading (12 Oct 2026, R8), no box")
-    gate = fn_src("function renderRunGate(boxId, o) {")
-    ok("pageHead({ view: o.view, title: o.title, line: o.desc," in gate and "emptyState({ icon: o.icon, text: o.note, sub: o.covers, action: btn, cls: 'run-gate' })" in gate,
-       "a run gate is the header (with its extra words behind an info button) and an empty state")
-    ok("rg-ic" not in gate and "illustration" not in gate, "no drawn tile of its own")
     e = CSS.split("\n        .empty {")[1].split("}")[0]
     ok("text-align: left" in e and "font-size: var(--text-body)" in e and "border: 0" in e,
        "a list that matched nothing says so quietly, on the left where its rows start")
@@ -14081,7 +13385,7 @@ def t_the_phone_and_chart_review_fixes_hold():
     ok(".ov-wrap.wg-editing > [data-widget] > .wg-hide::after { left: 0; bottom: 0; width: min(var(--control-h-lg), calc(100% + var(--sp-1))); }" in b,
        "the Customise hide button's square sits on its foot and runs up and right only, as far as the gutter lets it")
     ok(".wg-hide)::after" in b and ".wg-hide) { position: relative; }" not in b, "and the hide button stays absolutely positioned")
-    for sel in (".seg-card .seg-n {", ".card-head-stat .card-desc {"):
+    for sel in (".card-head-stat .card-desc {",):
         ok(sel in CSS, sel + " is a rule")
         r = CSS.split("\n        " + sel)[1].split("}")[0] if ("\n        " + sel) in CSS else ""
         ok("font-size: var(--fig-s)" in r and "letter-spacing: var(--tr-fig)" in r, sel + " is on the figure scale")
@@ -14113,7 +13417,7 @@ def t_the_forecast_header_is_the_mix_header():
     a window) and Upload workbook; the Finance tabs with the Plan chooser at
     the row's right. The intro paragraph and the How this forecast works
     section are gone from the page."""
-    fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
+    fn = SCRIPT.split("function renderForecast()")[1].split("\n        function showLabelsView")[0]
     ok("pageHead({ view: 'forecast', title: 'Forecast'," in fn and "'Run as of ' + fmtDate(latest.as_of)" in fn,
        "the header is the one builder, with its status line")
     ok("fcHowItWorks(c, latest, sc)" in fn and "financeTabs('forecast', '', plan)" in fn,
@@ -14144,7 +13448,7 @@ def t_forecast_leads_with_the_month_in_a_band():
                  "never a promise.", "rangeBar({", "midLabel: 'Likely range'", "'Day ' + fcDaysSoFar(latest) + ' of ' + fcDaysInMonth(latest)",
                  "'Plan ' + fcMoney(yt)", "fcSideMeter("):
         ok(part in fb, "fcBand: " + part)
-    fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
+    fn = SCRIPT.split("function renderForecast()")[1].split("\n        function showLabelsView")[0]
     ok("const band = fcBand(latest, sc);" in fn, "the page draws it first")
     ok(".fc-conf" not in CSS, "the old caveat line is gone")
 
@@ -14185,7 +13489,7 @@ def t_worth_looking_at_sits_beside_why():
     approved outlooks: Safely ahead, Likely ahead, Likely behind) beside Why
     \u00a353,691 (a split bar and three rows, the method in a caption under them and
     how it works behind an info button). A cash warning stays a sentence."""
-    fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
+    fn = SCRIPT.split("function renderForecast()")[1].split("\n        function showLabelsView")[0]
     ok("const pair = el('div', 'fc-pair');" in fn and "fcWorthCard(latest, sc, al)" in fn, "the two sit in one pair")
     ok("function fcAlertRow(" not in SCRIPT and "fc-alert" not in SCRIPT + CSS, "the old alert rows are gone")
     ol = fn_src("function fcOutlook(a) {")
@@ -14216,7 +13520,7 @@ def t_the_numbers_behind_it_are_four_rows_and_a_method_is_a_method():
     """Spec 8.1 item 6 and Cameron's words: the numbers behind the forecast are
     four list rows in two columns, each opening its table in a window, and the
     forecast calls each model a method, never a source."""
-    fn = SCRIPT.split("function renderForecast()")[1].split("\n        async function showReconView")[0]
+    fn = SCRIPT.split("function renderForecast()")[1].split("\n        function showLabelsView")[0]
     ok("listRows([" in fn and "{ cols: 2, label: 'The numbers behind it' }" in fn, "four list rows in two columns")
     labels = ["'Month by month against ' + sc", "'Cash under ' + sc", "'Every method, side by side'",
               "'What each method said, and what came in'"]
@@ -14570,38 +13874,6 @@ def t_the_production_manager_fix_round_one():
 
 
 @test
-def t_the_report_pages_wear_the_mix():
-    """Spec 8.3 (Report) and the copy plan (Overview, SEO, shared report parts):
-    the header is the one builder with its live line and Refresh all; the AI
-    summary is a Summary section of its own with the skills it followed as a
-    small row; a figure's and a chart's explanation is an info button; the run
-    gate says what the report is and what it costs in a few words."""
-    for fname, view in (("function renderOverview(cache) {", "overview"), ("function renderSEO(cache) {", "seo")):
-        ok(fname in SCRIPT, fname + " exists")
-        fn = fn_src(fname)
-        ok("pageHead({ view: '" + view + "'" in fn and "live: cache.at" in fn and ("summarySection(" in fn or "summaryAndChanges(" in fn),
-           view + ": the one header, and the Summary section")
-        ok("el('div', 'ov-hero')" not in fn and "'badge'" not in fn, view + ": no header built by hand")
-    ok("function summarySection(text, followed) {" in SCRIPT, "one Summary builder")
-    ok("labelEl.append(infoButton(m.label, { title: m.label, body: help }))" in fn_src("function statCard(m, i) {"),
-       "a figure's help is an info button")
-    ok("if (opts.help) ct.append(infoButton(" in fn_src("function chartHead(opts, series, kind) {"), "and so is a chart's")
-    ok("const POSITION_HELP = 'Lower is better. Position 1 is the top of search results.';" in SCRIPT
-       and SCRIPT.count("Lower is better. Position 1") == 1, "said once, for both position charts")
-    ok("has-help" not in SCRIPT + CSS, "no help is left that only a pointer can reach")
-    ok("\n        .followed > .ic { place-items: center; margin-right: var(--sp-0-5); }" in CSS
-       and ".followed > .ic { display: grid" not in CSS, "the book icon stays inline at the head of its row")
-    for gone in ("Here\u2019s how your store is doing.", "Ask anything about the numbers and recommendations on this page.",
-                 "Trends populate after you run", "notable change", "whatever the range above", "optimisation health score",
-                 "Followed your skill", "'Source: ' + opts.source", "Compute live KPIs", "Crawl your storefront and fuse"):
-        ok(gone not in SCRIPT, "cut: " + gone)
-    for new in ("'Live figures and an AI summary of the store.'", "'Crawl the store and rank fixes by revenue.'",
-                "more: 'Takes up to a minute.'", "'No trends yet. Connect Google to add traffic.'",
-                "'Connect Search Console to see search trends.'", "'Suggested questions'", "'Followed: '"):
-        ok(new in SCRIPT, "says: " + new)
-
-
-@test
 def t_a_single_series_wash_is_the_area_strength():
     """The mix's area tint is teal at 15% (--c-area). The wash under a single
     trend line starts at that strength, not the 36% it had, and Cash in has none."""
@@ -14631,68 +13903,25 @@ def t_the_boxed_report_panels_lose_their_box():
     ok("\n        .insights > .insight + .insight { border-top: var(--bw-hairline) solid var(--border-default); }" in CSS, "a hairline between neighbours")
     ok(".insight:hover { border-color" not in CSS, "and no hover edge")
     ok("border: 0;" in rule(".idelta") and "var(--surface-tertiary)" in rule(".idelta"), "an impact chip is a well with no edge")
-    sc, pf = rule(".seg-card"), rule(".pfilters")
-    ok("border: 0;" in sc and "background: none;" in sc and "box-shadow: none;" in sc and "padding: 0;" in sc,
-       "a customer segment is a figure in a grid with no box")
-    ok("border: 0;" in pf and "background: none;" in pf and "padding: 0;" in pf and "border-radius: 0;" in pf,
-       "the Products filters are a row of fields with no panel round them")
-
-
-@test
-def t_keywords_products_and_customers_wear_the_mix():
-    """Spec 8.3 (Report) and the copy plan (Keywords, Products, Customers): one
-    header builder on every state, the AI summary as a section, setup steps and
-    definitions behind info buttons, the Customers run gate the same empty state
-    every report's is, and the shorter lines."""
-    for fname in ("function renderKeywords(cache) {", "async function runKeywords(box) {", "function renderProductList() {",
-                  "async function loadProducts(force) {", "async function openProduct(id, title) {",
-                  "function renderProductDetail(d, id, title) {", "function customersBusy(seg) {", "function renderCustomers(seg) {"):
-        ok(fname in SCRIPT, fname + " exists")
-        fn = fn_src(fname)
-        ok("pageHead({" in fn or "customerGateHead(seg)" in fn, fname + ": the one header")
-        ok("el('div', 'ov-hero')" not in fn, fname + ": none built by hand")
-    ok("function customerGate(seg) {" in SCRIPT, "the Customers gate exists")
-    gate = fn_src("function customerGate(seg) {")
-    ok("emptyState({ icon: I.users, text: RUN_COST, sub: 'Your customers and 12 months of orders.', action: btn, cls: 'run-gate' })" in gate,
-       "the Customers gate is the run gate's empty state, its cost in the words every gate uses")
-    ok("'rg-ic'" not in SCRIPT and "'rg-note'" not in SCRIPT, "no run gate draws its own tile or note")
-    ok("infoButton('The two Google sources'" in SCRIPT and "infoButton('Linking Google Ads'" in SCRIPT, "the Google steps wait behind info buttons")
-    ok("function cardifySections(root) {" in SCRIPT, "cardifySections exists")
-    ok("c.nodeType === 1 && !c.classList.contains('info') && (c.classList.contains('segmented')" in fn_src("function cardifySections(root) {"),
-       "a heading folded into a card keeps its info button beside its words, not in the card's action slot")
-    ok("inp.placeholder = 'A competitor or blog post address'" in SCRIPT, "what to scan is the field's own hint")
-    # "Pulls live Shopify data. No AI credits used." is a cost note and stays (fix round 1): it is no longer in this list.
-    for gone in ("Pull the keywords you rank for", "Paste any public page", "Two Google sources fill", "No paid search data yet. Link",
-                 "Load your catalogue with up to", "Filter, sort and compare your catalogue",
-                 "The plan for this product.", "that earned most, ", "Analyse all customers", "From your orders and customer list",
-                 "Who your best customers are", "Nobody with a reorder rhythm"):
-        ok(gone not in SCRIPT, "cut: " + gone)
-    for new in ("'Your keywords and ad spend, with a ranked plan.'", "'Your catalogue with up to 24 months of sales.'",
-                "'Open a product for its optimisation plan.'", "'Nothing to rank for this period.'",
-                "'Customers and sectors by retention, value and revenue.'", "'No repeat accounts overdue.'",
-                "'Tag these in Shopify to count them as trade.'", "' Some products are missing: the catalogue is too large.'"):
-        ok(new in SCRIPT, "says: " + new)
+    # (A customer segment and the Products filters, the other two, went with
+    # their pages on 22 Oct 2026.)
 
 
 @test
 def t_liability_and_reconciliation_wear_the_mix():
-    """Spec 8.3 (Finance) and the copy plan (Liability, Reconciliation): the one
+    """Spec 8.3 (Finance) and the copy plan (Liability; Reconciliation went on 22 Oct 2026): the one
     header with a short line, the rule and the setup behind info buttons beside
     their titles, the address to copy and the Connect action kept on the card,
     "Read only" kept as the safety point, and the shorter empty lines."""
-    for fname in ("function renderLiability() {", "async function loadLiability(force, fresh) {", "function renderRecon() {"):
+    for fname in ("function renderLiability() {", "async function loadLiability(force, fresh) {"):
         ok(fname in SCRIPT, fname + " exists")
         fn = fn_src(fname)
         ok("pageHead({" in fn and "el('div', 'ov-hero')" not in fn, fname + ": the one header")
     ok("line: 'What customers owe on unpaid orders.'" in SCRIPT and "infoButton('About Liability'" in SCRIPT, "Liability's line and its rule")
-    rc = fn_src("function renderRecon() {")
-    ok("line: 'Checks Shopify, Xero and the inbox agree. Read only.'" in rc, "Reconciliation's line keeps Read only")
-    ok("infoButton('Connecting the accounts mailbox'" in rc and "infoButton('Setting up Xero'" in rc, "both setups wait behind info buttons")
-    ok("'Read only: Reactor cannot change your books.'" in rc and "ucp.append(ico(I.copy)" in rc, "the security line and the address to copy stay")
     for gone in ("Every unpaid order by how late it is", "Open one to see the orders behind the figure", "No orders currently carry an unpaid tag",
                  "Where Shopify, Xero and the inbox disagree", "That is the goal state."):
         ok(gone not in SCRIPT, "cut: " + gone)
-    ok(SCRIPT.count("'Nothing is owed.'") >= 2 and "'Nothing needs attention.'" in SCRIPT, "the empty lines are short")
+    ok(SCRIPT.count("'Nothing is owed.'") >= 2, "the empty lines are short")
 
 
 @test
@@ -14741,28 +13970,10 @@ def t_xero_sync_wears_the_mix():
 
 @test
 def t_fix_round_one_reports_and_the_phone_header():
-    """Fix round 1 for the report pages. (1) The changes strip is a fixed block with no id: after the
-    first card the grid can move it would take Customise down, so on every report it comes BEFORE the
-    Summary widget. (2) A cost note is never dropped: the Products gate and the Trade radar still say
-    no AI credits are used. (3) A status line's stamp keeps its own width, so Refresh sits beside it and its 40
-    target leans down, never over the title. (4) The SEO score and the Xero sync tiles have no box.
-    (5) The scan field has one aria-label."""
-    for fname in ("function renderOverview(cache) {", "function renderSEO(cache) {", "function renderKeywords(cache) {", "function renderCustomers(seg) {"):
-        ok(fname in SCRIPT, fname + " exists")
-        fn = fn_src(fname)
-        # Since 12 Oct 2026 a report builds both through summaryAndChanges, which pairs them as one
-        # widget, or leaves the strip in its fixed place before the first card when there is no summary.
-        if "summaryAndChanges(" in fn: fn = fn_src("function summaryAndChanges(")
-        ok("changesStrip(" in fn and "summarySection(" in fn, fname + ": it builds both")
-        ok(fn.index("changesStrip(") < fn.index("summarySection("), fname + ": the fixed strip comes before the first movable card")
-    ok("note: 'Pulls live Shopify data. No AI credits used.'" in SCRIPT, "the Products gate keeps its cost note")
-    ok("function radarCard(d) {" in SCRIPT, "radarCard exists")
-    rc = fn_src("function radarCard(d) {")
-    ok("head.append(el('h3', 'card-title', 'Trade radar'));" in rc and "el('p', 'card-desc', 'No AI credits used.')" in rc
-       and rc.index("'Trade radar'") < rc.index("'No AI credits used.'"), "the Trade radar keeps its cost note")
-    ok("function keywordScanCard() {" in SCRIPT, "keywordScanCard exists")
-    kc = fn_src("function keywordScanCard() {")
-    ok(kc.count("setAttribute('aria-label'") == 1 and "inp.setAttribute('aria-label', 'Page to scan');" in kc, "the scan field is named once")
+    """Fix round 1 for the report pages, what still applies since those pages
+    went (22 Oct 2026): a status line's stamp keeps its own width, so Refresh
+    sits beside it and its 40 target leans down, never over the title; and the
+    Xero sync tiles have no box."""
     ph = "\n            .ov-updated { margin-left: 0; padding-top: 0; flex-basis: 100%; white-space: normal; }\n"
     ok(ph in CSS and ".ph-sub > .ov-updated { flex: none; white-space: nowrap; }" in CSS.split(ph)[1][:600],
        "on a phone a status line's stamp is its own width, so Refresh sits beside it")
@@ -14774,32 +13985,9 @@ def t_fix_round_one_reports_and_the_phone_header():
         m = re.search(r"\n        " + re.escape(sel) + r" \{([^}]*)\}", CSS)
         ok(m is not None, sel + " is a rule at the stylesheet's own indent")
         return m.group(1) if m else ""
-    ss, tl = rule(".seo-score"), rule(".cx-tile")
-    ok("border: 0;" in ss and "background: none;" in ss and "box-shadow: none;" in ss and "padding: 0;" in ss, "the SEO score has no box")
+    tl = rule(".cx-tile")
     ok("border: 0;" in tl and "border-radius: 0;" in tl and "padding: 0;" in tl, "a Xero sync tile has no box")
     ok("gap: var(--sp-4) var(--sp-8)" in rule(".cx-grid"), "and the three forms sit 32 apart in their columns")
-
-
-@test
-def t_the_four_run_gates_word_their_cost_the_same():
-    """Ruling after the Tasks 35 to 38 review: Overview, SEO, Keywords and Customers each ask for a run that
-    uses AI credits, so each says so in the SAME words (one constant, in an empty-state line of 8 words or
-    fewer). What a gate used to add to its cost line (SEO's minute, what Keywords and Customers read) is not
-    dropped: it sits behind the title's info button, word for word."""
-    m = re.search(r"const RUN_COST = '([^']*)';", SCRIPT)
-    ok(m is not None, "one constant words the cost")
-    cost = m.group(1) if m else ""
-    ok("AI credits" in cost and "only when you run it" in cost, "it says AI credits, and only when you run it")
-    ok(len(cost.split()) <= 8, "and it is an empty state's line: 8 words or fewer")
-    for fname, needle in (("function showOverviewView() {", "note: RUN_COST"), ("function showSeoView() {", "note: RUN_COST"),
-                          ("function showKeywordsView() {", "note: RUN_COST"), ("function customerGate(seg) {", "text: RUN_COST")):
-        ok(fname in SCRIPT, fname + " exists")
-        ok(needle in fn_src(fname), fname + " says it through the constant")
-        ok("Uses AI credits" not in fn_src(fname), fname + " words no cost of its own")
-    for more in ("more: 'Takes up to a minute.'", "more: 'Reads Search Console and Analytics.'", "'Reads Shopify customers and orders.'"):
-        ok(more in SCRIPT, "kept behind the info button: " + more)
-    ok("info: o.more ? infoButton('About this run', { title: o.title, body: o.more }) : null" in fn_src("function renderRunGate(boxId, o) {"),
-       "a gate's extra words sit behind its title's info button")
 
 
 @test
@@ -15372,8 +14560,6 @@ def t_what_the_app_measure_found_stays_fixed():
        "a unit beside a figure has the body line, not the figure's 1")
     crm = CSS.split("\n        .crm-col-sum {")[1].split("}")[0]
     ok("line-height: var(--lh-control)" in crm and "line-height: var(--lh-none)" not in crm, "a pipeline column's sum is 13/20")
-    ok("li.append(el('code', 'setup-code', x))" in SCRIPT and "font-family" not in CSS.split("\n        .setup-scopes {")[1].split("}")[0],
-       "the permission scopes are code in a list, not a list set in monospace")
     e = CSS.split("\n        .empty {")[1].split("}")[0]
     ok("calc((100%" not in e and "margin-inline: auto" not in e and "text-align: left" in e and "padding: var(--sp-4) 0" in e,
        "an empty line sits on the left where the rows start (12 Oct 2026, R8), no fractional centring")
@@ -15838,100 +15024,6 @@ console.log(JSON.stringify(out));
 
 
 @test
-def t_reconciliation_evidence_reads_its_pence_as_pounds():
-    """Live fault, 2026-10-07: the sweep keeps every amount in integer pence
-    (recon.py: total, tax, remaining, pence and the _pence fields), but an
-    opened discrepancy printed total and tax as pounds, so order #104477 read a
-    total of £396,000.00 and VAT of £66,000.00 instead of £3,960.00 and
-    £660.00. Every money field in evidence is pence now. Run in node."""
-    if not _node_ok():
-        print("       (node unavailable, skipped)")
-        return
-    js = ("const _moneyFmts = {};\n" + fn_src("function moneyFmt(") + "\n" + fn_src("function money(") + "\n"
-          + "const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];\n"
-          + fn_src("function fmtDate(") + "\n" + fn_src("function reconValue(") + r"""
-const out = {};
-[['total', 396000], ['tax', 66000], ['remaining', 12000], ['pence', 231840], ['paid_pence', 330000],
- ['due_pence', 0], ['total_pence', 31800], ['credited_pence', 4850], ['fees_pence', null], ['id', 5551234],
- ['order_id', '820017'], ['due', '2026-10-01']].forEach(([k, v]) => { out[k] = reconValue(k, v); });
-out.refunds = reconValue('refunds', [{ id: 948211000001, created_at: '2026-09-18', pence: 42000 }]);
-console.log(JSON.stringify(out));
-""")
-    got = _run_node(js)
-    eq(got["total"], "£3,960.00", "an order's total is pence")
-    eq(got["tax"], "£660.00", "and so is its VAT")
-    eq(got["remaining"], "£120.00", "a credit note's remaining credit too")
-    eq(got["pence"], "£2,318.40", "the payout's own pence as before")
-    eq(got["paid_pence"], "£3,300.00", "and every _pence field")
-    eq(got["due_pence"], "£0.00", "zero is still money")
-    eq(got["total_pence"], "£318.00", "a mailbox document's total")
-    eq(got["credited_pence"], "£48.50", "credited")
-    eq(got["fees_pence"], "", "a field with no value prints nothing")
-    eq(got["id"], "5551234", "an id is not money")
-    eq(got["order_id"], "820017", "nor is an order id")
-    ok(got["refunds"].startswith("\u00a3420.00 on ") and "pence" not in got["refunds"],
-       "an order's refunds read as pounds and a date, not JSON with raw pence: %r" % got["refunds"])
-    ok(got["due"] and "2026" not in got["due"] or got["due"].endswith("2026"), "a due date is a date: %r" % got["due"])
-
-
-@test
-def t_reconciliation_tells_the_truth_about_its_links_filters_and_sweeps():
-    """Live faults, 2026-10-07, found by rebuilding the working page:
-    - an expired Xero link kept a green Xero tag and a teal Sweep now, and told
-      you to reconnect from this tab, which had no Reconnect;
-    - with filters hiding everything it said "Nothing needs attention." even
-      with 21 open;
-    - the search's clear button emptied the box but left the list filtered;
-    - a sweep started elsewhere showed "Sweeping..." for good, because the page
-      never asked again."""
-    fn = fn_src("function renderRecon(")
-    ok("xs.needs_reconnect" in fn and "xs.needs_reconnect ? 'Needs reconnecting'" in fn and "'Not connected', !!xs.needs_reconnect);" in fn,
-       "a refused link turns the Xero source red and says what it needs")
-    ok("'Reconnect Xero'" in fn and "api('/api/recon/xero-link', {})" in fn,
-       "and offers Reconnect through the same walk as Connect")
-    ok("'Ask the master account to reconnect Xero.'" in fn, "which only the master account may start, so others are told who")
-    ok("const swTeal = xs.connected && !xs.needs_reconnect" in fn and "textButton(null, { kind: swTeal ? 'primary' : '' })" in fn,
-       "Reconnect is then the one teal action and Sweep now steps down")
-    watch = fn_src("function watchReconXero(")
-    ok("st.xero.connected && !st.xero.needs_reconnect" in watch,
-       "the walk's watcher waits for the link to be good, not merely present")
-    ok("'Nothing matches these filters.'" in fn and "'Clear filters'" in fn,
-       "an empty filtered list says so, with the way back")
-    ok("searchWrap.input.value = '';\n                        reconFilter = { severity: '', status: '', q: '' }; refreshReconList();" in fn,
-       "Clear filters empties the box too, or a focused box would put the search straight back")
-    ok("reconFilter.severity || reconFilter.status || reconFilter.q" in fn,
-       "and only when a filter or search is in play")
-    ok("tableSearch('Search discrepancies', reconFilter.q, null)" not in fn
-       and "tableSearch('Search discrepancies', reconFilter.q, (v) =>" in fn,
-       "search filters as you type, so clearing it clears the list")
-    ok("typing.matches('.tbl-search input')" in fn,
-       "only the search box itself is carried across a redraw: Tab to its clear button had wiped the search")
-    keep = fn.split("if (reconSearchKeep) {", 1)
-    ok(len(keep) == 2 and "box.append(widget(list, 'discrepancies', 'full', 'Discrepancies'));" in keep[0]
-       and "setTimeout" not in keep[1].split("refreshReconList(); }", 1)[0] and "queueMicrotask(() => { if (inp.isConnected) { inp.focus();" in keep[1],
-       "and focus returns in a microtask: after the rows, so the page does not jump, before any key, so none is lost")
-    ok("if (e && e.isComposing) return; baseInput();" in fn and "isComposing" not in fn_src("function tableSearch("),
-       "a word being composed waits here, where the box is rebuilt, and nowhere else")
-    # 12 Oct 2026: the buttons are the page header's, whose action row wraps.
-    ok("            .ov-hero-act { max-width: 100%; flex-wrap: wrap; justify-content: flex-end; }" in CSS,
-       "the three buttons of a refused link wrap on a phone instead of running off the page")
-    ok("!(xs.needs_reconnect && /refused the refresh token/i.test(String(n)))" in fn_src("function reconSweepLine("),
-       "the refusal is said once: the sweep note saying the same is left out while the band shows")
-    ok("ico(I.logIn)" in fn and "reconConnectFallback(band, r.url, 'xero', true)" in fn,
-       "Reconnect has its own icon, and a blocked tab gets the shared fallback")
-    fb = fn_src("function reconConnectFallback(")
-    ok("card.querySelector('.recon-fallback')" in fb and "'Open the Xero sign-in here'" in fb and "watchReconXero(reconnect)" in fb,
-       "one fallback per card, named for the sign-in it opens and watching the right link (Connect Xero's said Google)")
-    ok("'Xero has not been reconnected yet. If Xero showed an error, press Reconnect Xero again.'" in watch,
-       "and a reconnect that does not land is not called 'still not connected'")
-    sweep = fn_src("function watchReconSweep(")
-    ok("'/api/recon/status'" in sweep and "5000" in sweep and "tries >= 120" in sweep,
-       "a running sweep is asked about every five seconds, for ten minutes at most")
-    ok("if (st.sweeping) watchReconSweep();" in fn, "whenever the page shows one running")
-    ok("sw.textContent = 'Sweeping" not in fn, "and the busy button keeps its icon")
-
-
-@test
 def t_a_document_that_does_not_match_shopify_is_never_shown_as_safe():
     """Live fault, 2026-10-07: in a tag check, #104530 came to £33.50 less than
     Shopify and would be sent as it stood, yet its row read a grey "Would
@@ -16244,16 +15336,63 @@ def t_nothing_opens_a_page_file_but_the_reader():
 
 @test
 def t_the_money_formatters_live_with_the_formats():
-    """money, moneyShort and fmtMoney were defined in the Products tab's file
-    and called by Forecast, Liability, Loans, Xero sync, Dispatch, Labels and
-    the charts. The Products tab goes (22 Oct 2026 trim), so they live in
-    icons-and-formats.js, with the other formats every page loads."""
+    """money was defined in the Products tab's file and called by Forecast,
+    Liability, Loans, Xero sync, Dispatch, Labels and the charts. The Products
+    tab went (22 Oct 2026 trim), so it lives in icons-and-formats.js, with the
+    other formats every page loads. (fmtMoney and moneyShort went with their
+    last callers, the report pages.)"""
     formats = open(os.path.join(ROOT, "static", "src", "js", "icons-and-formats.js"), encoding="utf-8").read()
-    for decl in ("function moneyFmt(", "function money(", "const fmtMoney", "function moneyShort("):
+    for decl in ("function moneyFmt(", "function money("):
         ok(decl in formats, decl + " is in icons-and-formats.js")
     prods = os.path.join(ROOT, "static", "src", "js", "products.js")
     if os.path.exists(prods):
         ok("function money(" not in open(prods, encoding="utf-8").read(), "products.js no longer defines money")
+
+
+@test
+def t_the_app_opens_on_the_production_manager():
+    """Overview was the page the app opened on and the logo's destination.
+    It went with the report tabs (22 Oct 2026); the Production Manager is the
+    page the team opens first, so the app starts there."""
+    ok("setView(bootLabels ? 'labels' : 'overview')" not in SCRIPT, "the boot no longer opens Overview")
+    ok("setView('labels');" in SCRIPT.split("renderSidebar(); renderChat(); authBoot();", 1)[1][:40],
+       "the boot opens the Production Manager")
+    ok("$('brand-home').onclick = () => setView('labels');" in SCRIPT, "and so does the logo")
+    ok(re.search(r'class="nav-item active" data-view="labels"', HTML), "its nav item starts active")
+    ok(re.search(r'<section class="view active" id="view-labels">', HTML), "and its section starts shown")
+    ok('<h1 id="view-title">Production Manager</h1>' in HTML, "under its own title")
+
+
+@test
+def t_alerts_have_a_home_on_every_page():
+    """The alerts banner (Shopify down, size list gaps, Xero sync runs that need
+    a look, privacy requests) was drawn only inside the Overview report. It now
+    has a host of its own at the top of the main column, outside every page."""
+    main = HTML.split('<main class="main"', 1)[1]
+    ok('id="alerts-host"' in main, "the main column has an alerts host")
+    ok(main.index('id="alerts-host"') < main.index('<section class="view'), "above every page, outside them all")
+    ok("function renderAlerts(" in SCRIPT, "and something that fills it")
+    body = fn_src("function renderAlerts(")
+    ok("$('alerts-host')" in body and "alertsBanner()" in body, "renderAlerts fills it from the banner")
+    ok("renderAlerts()" in fn_src("async function loadAlerts(") and "renderAlerts()" in fn_src("async function alertOp("),
+       "every read and change of the alerts repaints it")
+    ok("since the last refresh" not in SCRIPT, "the banner no longer speaks of report refreshes")
+
+
+@test
+def t_no_page_calls_a_removed_report():
+    """The report tabs and Reconciliation left the app on 22 Oct 2026. No kept
+    page may still call into their code: one left behind is a ReferenceError
+    the first time somebody opens that page."""
+    gone = ["showOverviewView", "showSeoView", "showKeywordsView", "showCustomersView", "showProductsView",
+            "showReconView", "loadOverview", "renderOverview", "pageChatPanel", "refreshAllBtn", "customersSeg",
+            "seoCache", "keywordsCache", "customersCache", "overviewCache", "productList", "paintRadar",
+            "renderScanResult", "renderRecon", "applyCachedAnalysis", "loadSchedule", "renderTrendsBlock",
+            "renderSeoTrends", "channelsCard", "summaryAndChanges", "changesStrip", "sectorSalesTable"]
+    left = [n for n in gone if re.search(r"(?<![A-Za-z0-9_$.])" + n + r"(?![A-Za-z0-9_$])", SCRIPT)]
+    ok(not left, "names of removed pages still in the app's script: %s" % left)
+    for view in ("overview", "seo", "keywords", "products", "customers", "recon"):
+        ok('id="view-' + view + '"' not in HTML and 'id="nav-' + view + '"' not in HTML, view + " has no page or nav item")
 
 
 if __name__ == "__main__":
