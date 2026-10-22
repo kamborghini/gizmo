@@ -22,6 +22,7 @@ stock_figures.
 """
 import json
 import logging
+import math
 import os
 import re
 import threading
@@ -44,12 +45,82 @@ _INVOICE = re.compile(r"·\s*inv\s+(.*?)(?:\s*·|$)")
 
 
 class Refused(Exception):
-    """A stock request that cannot be done, with the words to say why."""
+    """A stock request that cannot be done, with the words to say why and
+    anything the page needs to put it right (the line as it now is)."""
 
-    def __init__(self, status: int, words: str):
+    def __init__(self, status: int, words: str, extra: dict = None):
         super().__init__(words)
         self.status = status
         self.words = words
+        self.extra = extra or {}
+
+
+# ---- the fields of a line, and the checks on them (the stock app's own) -------
+
+INT_MAX = 2_147_483_647
+COST_MAX = 1e9
+INT_FIELDS = {"start", "received", "used", "current", "reorder_point", "reorder_qty"}
+FLOAT_FIELDS = {"unit_cost", "unit_cost_gbp"}
+TEXT_FIELDS = {"category": 80, "sub_category": 120, "size": 60, "notes": 100, "supplier": 120,
+               "currency": 8, "barcode": 64}
+BOOL_FIELDS = {"written_off"}
+EDITABLE = INT_FIELDS | FLOAT_FIELDS | set(TEXT_FIELDS) | BOOL_FIELDS
+IDENTITY = ("category", "sub_category", "size", "notes")
+FIELD_WORDS = {"start": "Start", "received": "Received", "used": "Used", "current": "Current",
+               "reorder_point": "Reorder level", "reorder_qty": "Order quantity", "unit_cost": "Unit cost",
+               "unit_cost_gbp": "Unit cost in pounds", "category": "Category", "sub_category": "Colour or type",
+               "size": "Size", "notes": "Notes", "supplier": "Supplier", "currency": "Currency",
+               "barcode": "Barcode", "written_off": "Written off"}
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def clean_text(value, cap: int = 120) -> str:
+    """Control characters out, trimmed, capped to the column's width."""
+    return _CONTROL.sub("", str("" if value is None else value)).strip()[:cap]
+
+
+def to_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("1", "true", "yes", "on", "y", "t")
+
+
+def coerce(field: str, value):
+    """A field's value as it is stored, or ValueError saying what is wrong.
+    An empty box is 0 (or no cost); anything that is not a plain number is
+    refused rather than read as 0, which once zeroed real stock."""
+    words = FIELD_WORDS.get(field, field)
+    if field in INT_FIELDS or field in FLOAT_FIELDS:
+        if value == "":
+            return 0 if field in INT_FIELDS else None
+        if value is None or isinstance(value, bool):
+            raise ValueError(f"{words} must be a number.")
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{words} must be a number.") from None
+        if not math.isfinite(v):
+            raise ValueError(f"{words} must be a number.")
+        if v < 0:
+            raise ValueError(f"{words} cannot be below 0.")
+        if field in INT_FIELDS:
+            n = int(round(v))
+            if n > INT_MAX:
+                raise ValueError(f"{words} is too large.")
+            return n
+        if abs(v) > COST_MAX:
+            raise ValueError(f"{words} is too large.")
+        return round(v, 4)
+    if field in BOOL_FIELDS:
+        return to_bool(value)
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError(f"{words} is not valid.")
+    return clean_text(value, TEXT_FIELDS.get(field, 120))
+
+
+def item_key(category: str, sub_category: str, size: str, notes: str) -> str:
+    """The line's name in the history: category|colour|size|notes."""
+    return "|".join((part or "").strip() for part in (category, sub_category, size, notes))
 
 
 def now_iso() -> str:

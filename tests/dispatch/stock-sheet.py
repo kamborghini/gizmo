@@ -187,3 +187,111 @@ def t_the_stock_history_index_reads_on_and_is_forgotten_on_restore():
     eq((len(again.rows), again.full_reads), (5, reads), "two more rows without reading the file again")
     jsonstore._drop_memory_stores()
     ok(stock.history_index() is not idx, "a restore makes it read the file afresh")
+
+# ---- the stock list: list, edit, counts, new lines -------------------------------
+
+def _stock(op, **body):
+    r = post("/api/stock/sheet", dict(body, op=op))
+    return r, (r.json() if r.headers.get("content-type", "").startswith("application/json") else {})
+
+@test
+def t_the_stock_list_comes_with_its_figures():
+    _stock_live()
+    r, d = _stock("list")
+    eq(r.status_code, 200, r.text)
+    eq([i["id"] for i in d["items"]], [3, 7, 9], "by category, then colour")
+    eq(d["summary"]["headline"]["active_stock_value_gbp"], 17.5)
+    ok(d["live"], "and whether the stock sheet has moved in")
+
+@test
+def t_stock_edit_writes_a_history_line_per_field():
+    _stock_live()
+    r, d = _stock("edit", id=3, changes={"current": 8, "reorder_point": 12}, seen={"current": 6, "reorder_point": 10})
+    eq(r.status_code, 200, r.text)
+    eq(d["applied"], 2)
+    rows = stock_store.read_history()
+    eq([(h["field"], h["old_value"], h["new_value"], h["detail"]) for h in rows],
+       [("current", "6", "8", "manual edit"), ("reorder_point", "10", "12", "manual edit")])
+    eq({h["person"] for h in rows}, {APP_AUTH["master"]}, "recorded under the Reactor account")
+    eq(len(stock_store.read_snapshots()), 1, "one snapshot for the change")
+
+@test
+def t_a_stock_edit_refuses_a_figure_someone_else_changed():
+    _stock_live()
+    r, d = _stock("edit", id=3, changes={"current": 9}, seen={"current": 5})
+    eq(r.status_code, 409, r.text)
+    eq(d["item"]["current"], 6, "the line as it now is, to look at again")
+    ok("Current" in d["error"], d["error"])
+    eq(stock_store.read_history(), [], "nothing written")
+
+@test
+def t_a_stock_count_down_is_recorded_as_usage():
+    _stock_live()
+    r, d = _stock("edit", id=3, changes={"current": 3}, as_count=True)
+    eq(r.status_code, 200, r.text)
+    eq((d["item"]["current"], d["item"]["used"]), (3, 7))
+    eq([(h["field"], h["detail"]) for h in stock_store.read_history()],
+       [("current", "counted"), ("used", "counted down 3, recorded as usage")])
+
+@test
+def t_a_stock_line_with_a_duplicate_key_can_be_edited():
+    _stock_live()
+    r, d = _stock("edit", id=7, changes={"current": 1})
+    eq(r.status_code, 200, r.text)
+    eq(d["item"]["key"], "Glass|Blue|20||#2", "the key is left as it is")
+
+@test
+def t_renaming_a_stock_line_writes_its_key_line():
+    _stock_live()
+    r, d = _stock("edit", id=9, changes={"size": "31"})
+    eq(r.status_code, 200, r.text)
+    eq(d["item"]["key"], "Glass|Red|31|")
+    key_rows = [h for h in stock_store.read_history() if h["field"] == "key"]
+    eq([(h["old_value"], h["new_value"], h["detail"]) for h in key_rows], [("Glass|Red|30|", "Glass|Red|31|", "renamed")])
+    r, d = _stock("edit", id=9, changes={"sub_category": "Blue", "size": "20"})
+    eq(r.status_code, 409, "another line holds that key")
+    eq(stock_store.load_items()["items"]["9"]["key"], "Glass|Red|31|")
+
+@test
+def t_stock_counts_save_in_one_go_with_one_snapshot():
+    _stock_live()
+    r, d = _stock("counts", counts=[{"id": 3, "current": 5}, {"id": "7", "current": 1}, {"id": 9, "current": 10}])
+    eq(r.status_code, 200, r.text)
+    eq(d["saved"], 3)
+    eq(len([h for h in stock_store.read_history() if h["field"] == "current"]), 3)
+    eq(len(stock_store.read_snapshots()), 1, "one snapshot for the whole count")
+    r, d = _stock("counts", counts=[{"id": 3, "current": 1}] * 501)
+    eq(r.status_code, 400, "more than 500 counts at once")
+    eq(stock_store.load_items()["items"]["3"]["current"], 5, "nothing of it written")
+
+@test
+def t_a_new_stock_line_takes_the_next_id():
+    _stock_live()
+    r, d = _stock("new", fields={"category": "Glass", "sub_category": "Amber", "size": "25", "current": 4,
+                                  "unit_cost_gbp": 1.5})
+    eq(r.status_code, 200, r.text)
+    eq(d["item"]["id"], 10)
+    eq(stock_store.load_items()["next_id"], 11)
+    eq([h["action"] for h in stock_store.read_history()], ["create"])
+    r, d = _stock("new", fields={"category": "Glass", "sub_category": "Amber", "size": "25"})
+    eq(r.status_code, 409, "the same line twice")
+    r, d = _stock("new", fields={"size": "25"})
+    eq(r.status_code, 400, "a line needs a category")
+
+@test
+def t_stock_refuses_bad_numbers():
+    _stock_live()
+    for bad in (None, -1, 1e10, True, "lots"):
+        r, d = _stock("edit", id=3, changes={"current": bad})
+        eq(r.status_code, 400, repr(bad))
+        ok("Current" in d.get("error", ""), d)
+    eq(stock_store.read_history(), [], "nothing written")
+
+@test
+def t_stock_is_closed_to_an_account_without_the_tab():
+    def go():
+        _stock_live()
+        _uid, session, _pw = ready_user("Stock Member", "stock.member")
+        r = post_s(session, "/api/stock/sheet", {"op": "list"})
+        eq(r.status_code, 403, r.text)
+    with_accounts(go)
