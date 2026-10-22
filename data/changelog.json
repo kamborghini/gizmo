@@ -13,6 +13,17 @@
   },
   {
    "date": "2026-10-22",
+   "title": "Libraries brought up to date",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "The library behind Claude's direct connection to the store and the file storage library are on their newest releases, and the forecast's image library has this month's security fixes, as the rest of the app already did. Nothing looks different."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-22",
    "title": "The last ties to the old core",
    "items": [
     {
