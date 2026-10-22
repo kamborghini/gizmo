@@ -2024,16 +2024,6 @@ def register(mcp, registry):
         if not ok:
             return oauth._oauth_page("Connection failed", "Couldn't complete the connection. Please try again.")
         addr = google_mail.address() or "the mailbox"
-        fin_addr = google_mail.address(google_mail.FINANCE)
-        if fin_addr and addr.strip().lower() == fin_addr.strip().lower():
-            # The mirror of the guard on the accounts walk. Whichever order the
-            # two are connected in, one address cannot be both mailboxes: that
-            # would put finance mail on the shared board and leave
-            # reconciliation reading the inbox the team triages.
-            google_mail.disconnect()
-            return oauth._oauth_page("That is the accounts mailbox",
-                               f"{addr} is already connected to Reconciliation. Sign in as "
-                               "the shared sales mailbox for the Inbox tab instead.")
         return oauth._oauth_page("✅ Mailbox connected", f"{addr} is now linked. The Inbox tab will "
                            "fill on its next refresh. You can close this tab.")
 

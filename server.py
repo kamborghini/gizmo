@@ -1135,8 +1135,8 @@ class PayoutTxnInput(BaseModel):
 async def _payments_get(path: str, params: Optional[dict] = None) -> dict:
     """Shopify Payments endpoints answer 403 when the scope is missing and 404
     when the store simply is not on Shopify Payments. Both are ordinary states
-    for this store, not errors: the reconciliation engine records that the
-    check COULD NOT run, which is a different fact from "no payouts exist"."""
+    for this store, not errors: a reader records that the check COULD NOT
+    run, which is a different fact from "no payouts exist"."""
     try:
         return await _request("GET", path, params=params)
     except httpx.HTTPStatusError as e:
@@ -1306,7 +1306,7 @@ REQUIRED_WRITE_SCOPES = {
 # writes, said everything was permitted. With the client id and secret the
 # connector signs in as this app, so what this install lacks, it lacks too.
 REQUIRED_READ_SCOPES = {
-    "read_shopify_payments_payouts": "Reconciliation's payout checks, and payout notes on Xero sync when it signs in as Reactor",
+    "read_shopify_payments_payouts": "Chat's payout reads, and payout notes on Xero sync when it signs in as Reactor",
     "read_shopify_payments_accounts": "payout notes on Xero sync when it signs in as Reactor",
 }
 _granted_scopes: dict = {"at": 0.0, "scopes": None, "error": ""}

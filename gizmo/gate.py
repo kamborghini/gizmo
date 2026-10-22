@@ -217,7 +217,6 @@ _OPEN_API = ("/api/auth/", "/api/team/", "/api/work/", "/api/alerts",
              "/api/backup", "/api/restore", "/api/privacy")
 
 _TAB_ROUTES = (
-    ("/api/recon", "recon"),
     ("/api/forecast", "forecast"),
     ("/api/eori/", "labels"),
     ("/api/connector", "connector"),

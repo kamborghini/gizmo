@@ -483,18 +483,17 @@ def _master_reset_check(d: dict) -> None:
 # order and customer reads and the CRM's and Inbox's Shopify lookups check.
 TAB_KEYS = ("customers", "liability",
             "crm", "loans", "mail", "files", "labels", "sizes", "memory", "skills", "chat",
-            "recon", "forecast", "connector")
+            "forecast", "connector")
 
 
-# Tabs nobody inherits merely by having an account. Reconciliation holds the
-# company's accounting records, its bank line and the finance mailbox, so a new
-# stock or dispatch login must not arrive already holding the books: an admin
-# hands it over deliberately, or not at all.
-# The connector WRITES to the accounting ledger, so like the books it is
-# handed over deliberately, never inherited with an account.
-# The forecast holds the cash flow plan and where the company stands against
-# it, which is the books' own kind of secret, so it is handed over the same way.
-OPT_IN_TABS = ("recon", "connector", "forecast")
+# Tabs nobody inherits merely by having an account, so a new stock or
+# dispatch login never arrives already holding the books: an admin hands them
+# over deliberately, or not at all. The connector WRITES to the accounting
+# ledger, and Chat's payout and dispute reads follow it. The forecast holds
+# the cash flow plan and where the company stands against it, which is the
+# books' own kind of secret. (Reconciliation was the first of these; it went
+# on 22 Oct 2026.)
+OPT_IN_TABS = ("connector", "forecast")
 DEFAULT_TABS = tuple(k for k in TAB_KEYS if k not in OPT_IN_TABS)
 
 

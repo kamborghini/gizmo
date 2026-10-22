@@ -242,24 +242,6 @@
   "source": "static/src/js/settings.js:666"
  },
  {
-  "path": "/api/recon/disconnect",
-  "body": {
-   "what": "xero",
-   "force": 1
-  },
-  "source": "static/src/js/reconciliation.js:179"
- },
- {
-  "path": "/api/recon/exception",
-  "body": {
-   "id": "e7f3a9c21b",
-   "op": "status",
-   "status": "ignored",
-   "note": ""
-  },
-  "source": "static/src/js/reconciliation.js:901"
- },
- {
   "path": "/api/restore",
   "body": {
    "zip": "UEsDBBQAAAAIAAAAIQAAAAAAAAAAAAAAAAAKAAAAY3JtLmpzb24="
@@ -1755,32 +1737,6 @@
    "ack_address": true
   },
   "source": "static/src/js/production-manager.js:212"
- },
- {
-  "path": "/api/recon/connect-link",
-  "body": {
-   "address": "accounts@example.org"
-  },
-  "source": "static/src/js/reconciliation.js:400"
- },
- {
-  "path": "/api/recon/exceptions",
-  "body": {
-   "severity": "",
-   "status": "",
-   "q": ""
-  },
-  "source": "static/src/js/reconciliation.js:19"
- },
- {
-  "path": "/api/recon/exceptions",
-  "body": {
-   "severity": "high",
-   "status": "open",
-   "q": "stripe",
-   "limit": 5000
-  },
-  "source": "static/src/js/reconciliation.js:746"
  },
  {
   "path": "/api/shipping/config",

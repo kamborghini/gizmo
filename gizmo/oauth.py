@@ -1,12 +1,10 @@
-"""The sign-in walks: the one-time states and the page
-every walk answers with (the inbox's and Xero's walks read them from here),
-and the accounts mailbox's tickets. Moved out of copilot.py (stage 4 of the
-14 October audit); the accounts-mailbox walk's routes are in
-gizmo/routes/oauth.py. Read as `oauth.NAME`.
+"""The sign-in walk's one-time states and the page it answers with (the
+Inbox's mailbox walk reads them from here). Moved out of copilot.py (stage 4
+of the 14 October audit); the Google data, accounts mailbox and Xero walks
+went on 22 Oct 2026. Read as `oauth.NAME`.
 """
 import logging
 import html
-from starlette.requests import Request
 from starlette.responses import HTMLResponse
 
 # The same logger as copilot.py's, so these log lines read as before.
@@ -17,11 +15,8 @@ _oauth_states: dict[str, float] = {}
 
 
 # ---------------------------------------------------------------------------
-# The sign-in walks: the accounts mailbox's tickets and states, held in memory,
-# and the page every walk answers with.
+# The page every walk answers with.
 # ---------------------------------------------------------------------------
-_fin_connect_tickets: dict = {}      # ticket -> its expiry and the address asked for (the ACCOUNTS mailbox)
-_fin_expect: dict = {}               # state nonce -> the address that was asked for
 
 def _oauth_page(title: str, msg: str) -> HTMLResponse:
     # Escape both inputs (any reflected query value is neutralized) and ship a
@@ -39,20 +34,7 @@ def _oauth_page(title: str, msg: str) -> HTMLResponse:
                **gate._API_HEADERS}
     return HTMLResponse(body, headers=headers)
 
-# ----- the ACCOUNTS mailbox: a second Google account, for reconciliation -
-# Same OAuth client and scope as the sales inbox, its own refresh token,
-# its own consent walk, its own state namespace. The two can never
-# complete each other's flow, and neither can reach the other's mail.
-def _gmail_fin_redirect_uri(request: Request) -> str:
-    if config.APP_BASE_URL:
-        return config.APP_BASE_URL.rstrip("/") + "/oauth/gmail-finance/callback"
-    host = request.headers.get("host", "")
-    return f"https://{host}/oauth/gmail-finance/callback"
-
-
 # Last, so this module is whole before copilot.py or a sibling runs: copilot.py
 # takes names from these modules as it loads, and any of them may be imported
 # first. Read as core.NAME and sibling.NAME, never a copied name.
 from gizmo import gate  # noqa: E402
-import copilot as core  # noqa: E402
-from gizmo import config  # noqa: E402

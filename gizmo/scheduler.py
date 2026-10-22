@@ -1,20 +1,17 @@
 """The scheduler and alerts: the alerts and the email that sends them, the
-watch, the hourly watchdog, the nightly reconciliation and connector watch,
-and the background loop that runs them. The paid report re-runs it once
-scheduled went with the report tabs (22 Oct 2026).
+watch, the hourly watchdog, the connector watch and the background loop that
+runs them. The paid report re-runs and the nightly reconciliation it once
+ran went with their tabs (22 Oct 2026).
 Moved out of copilot.py (stage 4 of the 14 October audit); its routes are in
 gizmo/routes/scheduler.py. Read as `scheduler.NAME`.
 """
 import logging
 import os
-import json
 import time
 import asyncio
 import secrets
 from datetime import datetime, timezone
 import httpx
-import recon as recon_engine
-import xero as xero_api
 from gizmo.config import _env_num
 from gizmo import store as jsonstore
 from gizmo import shopify
@@ -291,25 +288,6 @@ async def _watchdog_tick(registry: dict) -> bool:
         return True
 
 
-_recon_nightly_stamp = {"day": ""}
-
-
-async def _recon_nightly() -> None:
-    """One sweep a day, self-stamped like the CRM's. Never raises: a failed
-    sweep is a note in the store, not a dead scheduler."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    if _recon_nightly_stamp["day"] == today:
-        return
-    if not xero_api.connected():
-        return                       # nothing to reconcile against yet
-    _recon_nightly_stamp["day"] = today
-    try:
-        r = await recon_engine.sweep()
-        logger.info("recon nightly: %s", json.dumps(r.get("open_counts") or {}))
-    except Exception:
-        logger.exception("recon nightly sweep failed")
-
-
 async def _connector_watch() -> None:
     """Tell someone when the Xero connector needs attention.
 
@@ -377,10 +355,6 @@ async def _scheduler_loop(registry: dict) -> None:
             await asyncio.to_thread(backup._weekly_snapshot)   # no-op until a week is up
             if shopify_up:
                 await salesdesk._crm_shopify_link_nightly(registry)   # once a day, self-stamped
-            # Xero refresh tokens die after 60 unused days, and the books
-            # drift silently between sweeps: both are the scheduler's problem.
-            await xero_api.keepalive()
-            await _recon_nightly()
             await _connector_watch()
         except Exception:
             logger.exception("scheduler loop error")

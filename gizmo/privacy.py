@@ -738,12 +738,12 @@ def _redact_shop() -> dict:
     archive is what makes a misfire survivable rather than final.
 
     Credentials are not in the archive (the backup builder excludes them). The
-    two Gmail grants are dropped here: with the mailbox store empty, the sync
+    Gmail grant is dropped here: with the mailbox store empty, the sync
     would otherwise rebuild it from Gmail, every customer thread back inside
     a minute of the privacy log recording the erasure, and reconnecting is
-    one sign-in by the master. Xero and the courier stay: neither holds the
-    shop's data, and the courier key is typed in, with nowhere to get it
-    back from after a misfire.
+    one sign-in by the master. The courier stays: it holds none of the
+    shop's data, and its key is typed in, with nowhere to get it back from
+    after a misfire.
 
     No archive, no erasure: {"wiped": 0, "refused": "archive"}. The caller
     has confirmed the uninstall with Shopify first (the webhook is signed
@@ -784,11 +784,10 @@ def _redact_shop() -> dict:
     jsonstore._drop_memory_stores(set(stores))
     for path in stores:
         jsonstore._forget_store(path)
-    for acct in (google_mail.SALES, google_mail.FINANCE):
-        try:
-            google_mail.disconnect(acct)
-        except Exception:
-            logger.exception("shop/redact: could not drop a mailbox grant")
+    try:
+        google_mail.disconnect(google_mail.SALES)
+    except Exception:
+        logger.exception("shop/redact: could not drop the mailbox grant")
     _privacy_note("shop/redact", "", "",
                   f"erased {wiped} store(s); archive at {kept or '(none - see logs)'}; "
                   f"the archive is deleted after {REDACT_ARCHIVE_DAYS} days, and weekly "

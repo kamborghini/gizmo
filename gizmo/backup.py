@@ -9,7 +9,6 @@ import os
 import json
 from datetime import datetime, timedelta, timezone
 import google_mail
-import xero as xero_api
 from gizmo.config import _env_num
 from gizmo import store as jsonstore
 
@@ -41,6 +40,12 @@ _RETIRED_FILES = frozenset(os.path.basename(os.environ.get(k, d)) for k, d in (
     ("GOOGLE_OAUTH_TOKEN_PATH", "/data/google_oauth.json"),
     ("ANALYSIS_CACHE_PATH", "/data/analysis_cache.json"),
     ("SCHEDULE_PATH", "/data/schedule.json"),
+    # Reconciliation, Reactor's own Xero sign-in and the accounts mailbox.
+    ("XERO_TOKEN_PATH", "/data/xero_oauth.json"),
+    ("GMAIL_FINANCE_TOKEN_PATH", "/data/gmail_finance_oauth.json"),
+    ("RECON_PATH", "/data/recon.json"),
+    ("RECON_CACHE_PATH", "/data/recon_cache.json"),
+    ("RECON_DOCS_PATH", "/data/recon_docs.json"),
 ))
 
 
@@ -53,8 +58,6 @@ def _build_backup_zip():
     # repo-seed sheet cannot shadow the live uploaded one on restore.
     secrets_excluded = {
         os.path.basename(getattr(google_mail, "TOKEN_PATH", "gmail_oauth.json")),
-        os.path.basename(getattr(xero_api, "TOKEN_PATH", "xero_oauth.json")),
-        os.path.basename(getattr(google_mail, "FINANCE_TOKEN_PATH", "gmail_finance_oauth.json")),
         os.path.basename(desk.WO_SECRET_PATH),
         # Sessions are transient bearer state: never in a backup. The accounts
         # register IS included, because restoring it is exactly what brings the

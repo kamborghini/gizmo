@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sources  # noqa: E402  (copilot.py and the modules split out of it)
 
 MODULES = ["server", "copilot", "eori", "google_mail", "logdrain",
-           "pipedrive", "recon", "tokenvault", "worldoptions", "xero"]
+           "pipedrive", "tokenvault", "worldoptions"]
 OUT = os.path.join("docs", "ENVIRONMENT.md")
 # The repository is public, and two defaults carry the shop's own domain. The
 # reference prints [shop domain] in its place. The domain is read off the

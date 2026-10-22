@@ -188,7 +188,6 @@ from gizmo import updates
 from gizmo import impact
 from gizmo import backup
 from gizmo import liability
-from gizmo import reconciliation
 from gizmo import xero_sync as xerosync
 from gizmo import forecasting
 from gizmo import rendering
@@ -199,7 +198,6 @@ from gizmo import status as appstatus
 from gizmo import clock
 from gizmo import products as catalog
 from gizmo import config
-import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
 
@@ -5140,13 +5138,10 @@ def t_a_tampered_or_wrongly_keyed_envelope_fails_closed():
 
 @test
 def t_every_stored_refresh_token_goes_through_the_vault():
-    """Four files hold long-lived credentials. Sealing three of them and
-    forgetting the fourth is the whole exposure, so this asserts each module's
-    single read and single write both pass through."""
+    """Files that hold long-lived credentials are sealed: this asserts the
+    mailbox module's single read and single write both pass through."""
     import inspect as _i, google_mail as _gm2
-    import xero as _xr2
-    for mod, writer, reader in ((_xr2, "_write_token", "_load_token"),
-                                (_gm2, "save_connection", "_load_token_file")):
+    for mod, writer, reader in ((_gm2, "save_connection", "_load_token_file"),):
         w = _i.getsource(getattr(mod, writer))
         r = _i.getsource(getattr(mod, reader))
         ok("tokenvault.seal" in w, f"{mod.__name__}.{writer} seals before writing")
@@ -13297,571 +13292,6 @@ def t_the_admin_print_document_never_half_releases():
            f + " tells the merchant the order still needs releasing in gizmo")
 
 
-# ---------------------------------------------------------------------------
-# Reconciliation engine: the auditor must itself be auditable
-# ---------------------------------------------------------------------------
-import recon as _rc
-
-
-def _inv(num, total, contact="Northern Stage Ltd", typ="ACCREC", date="2026-08-10",
-         tax=None, due_p=None, paid_p=None, ref="", status="AUTHORISED", iid=None):
-    return {"id": iid or ("XI-" + num), "number": num, "type": typ, "status": status,
-            "contact": contact, "date": date, "due": "2026-09-10",
-            "total": total, "tax": tax, "due_pence": due_p, "paid_pence": paid_p,
-            "credited_pence": 0, "currency": "GBP", "reference": ref, "updated": ""}
-
-
-def _ord(oid, name, total, date="2026-08-10", fin="paid", company="Northern Stage Ltd",
-         tax=None, refunds=None, cancelled=False, test=False):
-    return {"id": oid, "name": name, "created_at": date, "total": total, "tax": tax,
-            "currency": "GBP", "financial_status": fin, "cancelled": cancelled,
-            "test": test, "customer": "Sarah Fielding", "company": company,
-            "gateways": ["manual"], "refunds": refunds or []}
-
-
-def _bt(tid, pence_, typ="RECEIVE", date="2026-08-11", rec=True, ref="", account="Current"):
-    return {"id": tid, "type": typ, "status": "AUTHORISED", "date": date,
-            "pence": pence_, "currency": "GBP", "contact": "", "reference": ref,
-            "account": account, "is_reconciled": rec}
-
-
-@test
-def t_money_is_pence_and_never_a_float():
-    eq(_rc.pence("12.30"), 1230)
-    eq(_rc.pence("1,234.56"), 123456)
-    eq(_rc.pence("£8,420.00"), 842000)
-    eq(_rc.pence(0.1) + _rc.pence(0.2), 30, "0.1 + 0.2 is 30 pence, not 30.000000004")
-    eq(_rc.pence(""), None, "unparseable is UNKNOWN, not zero")
-    eq(_rc.pence(None), None)
-    eq(_rc.money(842000), "£8420.00")
-    eq(_rc.norm_ref("INV-00142"), _rc.norm_ref("inv 142"),
-       "leading zeros and punctuation are presentation, not identity")
-    ok(_rc.norm_ref("INV-142") != _rc.norm_ref("INV-1420"))
-    eq(_rc.norm_name("Selecon Lighting GmbH"), _rc.norm_name("SELECON LIGHTING"))
-    eq(_rc._day("/Date(1787097600000+0000)/"), "2026-08-19",
-       "Xero's /Date()/ form parses to a day")
-
-
-@test
-def t_a_shopify_sale_missing_from_xero_is_flagged_with_its_arithmetic():
-    cache = {"shopify": {"orders": {"1": _ord(104275, "#104275", 84200)}},
-             "xero": {"invoices": {}}}
-    out = _rc.check_orders_vs_invoices(cache)
-    eq(len(out), 1, out)
-    e = out[0]
-    eq(e["kind"], "shopify_sale_missing")
-    eq(e["severity"], "critical", "£842 is above the £250 materiality line")
-    ok("#104275" in e["title"] and e["amount"] == 84200)
-    ok(e["computed"] and "no match" in e["computed"][0], e["computed"])
-    ok(e["evidence"][0]["system"] == "shopify")
-
-
-@test
-def t_a_sale_found_by_number_or_by_amount_is_not_flagged():
-    cache = {"shopify": {"orders": {
-                "1": _ord(104275, "#104275", 84200),
-                "2": _ord(104276, "#104276", 12000, company="Roundhouse Trust")}},
-             "xero": {"invoices": {
-                "a": _inv("INV-104275", 84200),
-                "b": _inv("SI-0099", 12000, contact="Roundhouse Trust", ref="")}}}
-    out = _rc.check_orders_vs_invoices(cache)
-    eq([e for e in out if e["kind"] == "shopify_sale_missing"], [],
-       "one matched by number, the other by amount+date+name")
-    # And a cancelled or test order never asks for an invoice at all.
-    cache["shopify"]["orders"]["3"] = _ord(9, "#9", 5000, cancelled=True)
-    cache["shopify"]["orders"]["4"] = _ord(10, "#10", 5000, test=True)
-    out2 = _rc.check_orders_vs_invoices(cache)
-    eq([e for e in out2 if e["kind"] == "shopify_sale_missing"], [])
-
-
-@test
-def t_amount_and_vat_mismatches_show_both_sides_of_the_subtraction():
-    cache = {"shopify": {"orders": {"1": _ord(104275, "#104275", 84200, tax=14033)}},
-             "xero": {"invoices": {"a": _inv("INV-104275", 80000, tax=13333)}}}
-    out = _rc.check_orders_vs_invoices(cache)
-    kinds = sorted(e["kind"] for e in out)
-    eq(kinds, ["order_invoice_amount_mismatch", "order_invoice_tax_mismatch"])
-    amt = next(e for e in out if e["kind"] == "order_invoice_amount_mismatch")
-    eq(amt["amount"], 4200, "the diff is Shopify minus Xero, in pence")
-    ok("£842.00" in amt["computed"][0] and "£800.00" in amt["computed"][0], amt["computed"])
-
-
-@test
-def t_a_shopify_refund_needs_a_credit_note_or_a_bank_spend():
-    refund = {"id": 77, "created_at": "2026-08-12", "pence": 15000}
-    cache = {"shopify": {"orders": {"1": _ord(104275, "#104275", 84200, refunds=[refund])}},
-             "xero": {"invoices": {}, "credit_notes": {}, "bank_transactions": {}}}
-    out = _rc.check_refunds(cache)
-    eq(len(out), 1)
-    eq(out[0]["kind"], "shopify_refund_missing")
-    # A matching ACCREC credit note within the window settles it.
-    cache["xero"]["credit_notes"]["c"] = {
-        "id": "c", "number": "CN-1", "type": "ACCRECCREDIT", "status": "AUTHORISED",
-        "contact": "Northern Stage Ltd", "date": "2026-08-13", "total": 15000,
-        "remaining": 0, "currency": "GBP", "reference": ""}
-    eq(_rc.check_refunds(cache), [])
-
-
-@test
-def t_payouts_match_the_bank_once_and_only_once():
-    cache = {"shopify": {"payouts": {
-                "p1": {"id": "p1", "date": "2026-08-14", "pence": 2348172,
-                       "currency": "GBP", "status": "paid"},
-                "p2": {"id": "p2", "date": "2026-08-15", "pence": 2348172,
-                       "currency": "GBP", "status": "paid"}}},
-             "xero": {"bank_transactions": {
-                "b1": _bt("b1", 2348172, date="2026-08-15")}}}
-    out = _rc.check_payouts_vs_bank(cache)
-    eq(len(out), 1, "two identical payouts cannot both claim the one bank line")
-    eq(out[0]["kind"], "payout_missing_from_bank")
-    # An unreconciled match is its own, lesser, finding.
-    cache["shopify"]["payouts"].pop("p2")
-    cache["xero"]["bank_transactions"]["b1"]["is_reconciled"] = False
-    out2 = _rc.check_payouts_vs_bank(cache)
-    eq(out2[0]["kind"], "payout_bank_unreconciled")
-
-
-@test
-def t_duplicate_bills_are_caught_by_number_and_by_shape():
-    cache = {"xero": {"invoices": {
-        "a": _inv("INV-0042", 50000, typ="ACCPAY", contact="Glass Supplies Ltd", iid="a"),
-        "b": _inv("INV 42", 50000, typ="ACCPAY", contact="Glass Supplies Ltd",
-                  date="2026-08-12", iid="b"),
-        "c": _inv("GS-771", 32000, typ="ACCPAY", contact="Glass Supplies Ltd",
-                  date="2026-08-01", iid="c"),
-        "d": _inv("GS-778", 32000, typ="ACCPAY", contact="Glass Supplies Limited",
-                  date="2026-08-04", iid="d")}}}
-    out = _rc.check_duplicates(cache)
-    kinds = sorted(e["kind"] for e in out)
-    eq(kinds, ["duplicate_bill_number", "possible_duplicate_bill"], out)
-    dup = next(e for e in out if e["kind"] == "duplicate_bill_number")
-    ok("INV-0042" in dup["title"] and len(dup["evidence"]) == 2)
-
-
-@test
-def t_an_overpaid_invoice_shows_the_sum_that_proves_it():
-    cache = {"xero": {
-        "invoices": {"a": _inv("INV-9", 50000, iid="a")},
-        "payments": {
-            "p1": {"id": "p1", "date": "2026-08-11", "pence": 50000, "reference": "",
-                   "status": "AUTHORISED", "invoice_id": "a", "invoice_number": "INV-9",
-                   "contact": "N", "account": "090", "is_reconciled": True},
-            "p2": {"id": "p2", "date": "2026-08-18", "pence": 50000, "reference": "",
-                   "status": "AUTHORISED", "invoice_id": "a", "invoice_number": "INV-9",
-                   "contact": "N", "account": "090", "is_reconciled": True}}}}
-    out = _rc.check_overpayments(cache)
-    eq(len(out), 1)
-    eq(out[0]["amount"], 50000, "over by exactly one duplicated payment")
-    ok("£500.00" in out[0]["computed"][0] and "over" in out[0]["computed"][0])
-
-
-@test
-def t_a_remittance_is_taken_apart_line_by_line():
-    doc = {"source_key": "m1:a1", "doc_type": "remittance", "from": "ap@customer.com",
-           "counterparty": "Customer A", "date": "2026-08-19", "currency": "GBP",
-           "total_pence": 842000, "filename": "remit.pdf", "subject": "Remittance",
-           "extracted_by": "text",
-           "invoice_numbers": ["INV-201", "INV-202", "INV-999"],
-           "invoice_lines": [{"number": "INV-201", "pence": 500000},
-                             {"number": "INV-202", "pence": 342000},
-                             {"number": "INV-999", "pence": 100}]}
-    cache = {"xero": {"invoices": {
-        "a": _inv("INV-201", 500000, iid="a", due_p=0, paid_p=500000),
-        "b": _inv("INV-202", 400000, iid="b", due_p=400000, paid_p=0)},
-        "payments": {}}}
-    out = _rc.check_gmail_docs(cache, {"m1:a1": doc})
-    kinds = sorted(e["kind"] for e in out)
-    eq(kinds, ["remittance_amount_mismatch", "remittance_payment_missing",
-               "remittance_unknown_invoice"], kinds)
-    mm = next(e for e in out if e["kind"] == "remittance_amount_mismatch")
-    ok("INV-202" in mm["title"], "the short-paid line is named")
-    # When every line is individually settled, a split payment is NOT flagged.
-    cache["xero"]["payments"] = {
-        "p1": {"id": "p1", "date": "2026-08-20", "pence": 500000, "reference": "",
-               "status": "AUTHORISED", "invoice_id": "a", "invoice_number": "INV-201",
-               "contact": "", "account": "090", "is_reconciled": True},
-        "p2": {"id": "p2", "date": "2026-08-20", "pence": 342000, "reference": "",
-               "status": "AUTHORISED", "invoice_id": "b", "invoice_number": "INV-202",
-               "contact": "", "account": "090", "is_reconciled": True}}
-    doc2 = dict(doc, invoice_numbers=["INV-201", "INV-202"],
-                invoice_lines=[{"number": "INV-201", "pence": 500000},
-                               {"number": "INV-202", "pence": 342000}])
-    out2 = _rc.check_gmail_docs(cache, {"m1:a1": doc2})
-    ok(not any(e["kind"] == "remittance_payment_missing" for e in out2),
-       "split settlement is the normal case, not a finding: %s" % [e["kind"] for e in out2])
-
-
-@test
-def t_document_text_parses_deterministically():
-    text = ("REMITTANCE ADVICE\nFrom: Customer A Ltd\n"
-            "Invoice INV-201  500,000.00\nInvoice INV-202  3,420.00\n"
-            "Total paid: £503,420.00\nRef: BACS-88121")
-    d = _rc.parse_doc_text(text, "Remittance advice", "ap@customer.com")
-    eq(d["doc_type"], "remittance")
-    ok("INV-201" in d["invoice_numbers"] and "INV-202" in d["invoice_numbers"])
-    eq(d["total_pence"], 50342000, "the largest amount is the document total")
-    eq(d["extracted_by"], "text")
-
-
-@test
-def t_ai_extraction_cannot_invent_what_the_text_layer_disproves():
-    """THE safety property for documents: an amount or invoice number the AI
-    reports that does not appear in the text is dropped, recorded, and never
-    reaches the books comparison."""
-    text = "Invoice INV-201 for £500.00 from Glass Supplies"
-    parsed = _rc.parse_doc_text(text)
-    ai = {"doc_type": "supplier_invoice", "counterparty": "Glass Supplies",
-          "total": "9999.99", "invoice_numbers": ["INV-201", "INV-777"],
-          "invoice_lines": [{"number": "INV-201", "amount": "500.00"},
-                            {"number": "INV-777", "amount": "9999.99"}]}
-    out = _rc._merge_extractions(parsed, ai, text)
-    eq([l["number"] for l in out["invoice_lines"]], ["INV-201"],
-       "the invented INV-777 line is dropped")
-    eq(out["invoice_numbers"], ["INV-201"], "and the invented number too")
-    eq(out["total_pence"], 50000, "the invented total is refused; the text's stands")
-    ok("INV-777" in " ".join(out.get("ai_dropped", [])), "the drop is recorded")
-
-
-class _FakeAIResp:
-    def __init__(self, verdict):
-        class B:  # a tool_use block
-            type = "tool_use"
-        b = B(); b.input = verdict
-        self.content = [b]
-        self.model = "claude-test"
-
-
-@test
-def t_an_uncited_ai_verdict_is_downgraded_not_believed():
-    exc = _rc.make_exc("shopify_sale_missing", "high", "t", ["1"], amount=1000,
-                       evidence=[_rc.ev("shopify", "order", "Order #1", {"id": 1}, 1)])
-    async def confident_but_baseless(system, messages, tools, tool_choice):
-        return _FakeAIResp({"classification": "explained", "confidence": 95,
-                            "explanation": "It is fine.", "cites": ["E99"]})
-    _rc.configure(ai_call=confident_but_baseless)
-    try:
-        v = run_async(_rc.investigate(exc, {}))
-    finally:
-        _rc.configure(ai_call=None)
-    eq(v["classification"], "insufficient_evidence",
-       "confidence without valid citations is worth nothing")
-    eq(v["confidence"], 0)
-    ok("human review" in v["explanation"].lower())
-
-
-@test
-def t_a_cited_ai_verdict_is_stored_as_interpretation_with_its_evidence():
-    exc = _rc.make_exc("payout_missing_from_bank", "high", "t", ["p1"], amount=51376,
-                       date="2026-08-14",
-                       evidence=[_rc.ev("shopify", "payout", "Payout p1",
-                                        {"id": "p1", "pence": 2348172}, 1)])
-    async def cites_properly(system, messages, tools, tool_choice):
-        ok("record_verdict" in json.dumps(tools), "the verdict rides a forced tool")
-        ok("Never invent" in system, "the system prompt carries the safety rules")
-        return _FakeAIResp({"classification": "timing_difference", "confidence": 80,
-                            "explanation": "The payout landed a day later.",
-                            "cites": ["E1"], "recommended_action": "Confirm tomorrow."})
-    _rc.configure(ai_call=cites_properly)
-    try:
-        v = run_async(_rc.investigate(exc, {}))
-    finally:
-        _rc.configure(ai_call=None)
-    eq(v["classification"], "timing_difference")
-    eq(v["cites"], ["E1"])
-    eq(v["model"], "claude-test")
-    ok(v.get("evidence_shown"), "the audit trail records what the model was shown")
-
-
-class _FakeXero:
-    """The accounts, as a module-shaped object the engine cannot tell apart."""
-    def __init__(self, invoices=None, payments=None, bank=None, notes_=None):
-        self.invoices, self.payments = invoices or [], payments or []
-        self.bank, self.notes = bank or [], notes_ or []
-    def connected(self): return True
-    async def list_invoices(self, since=None, modified_since=None): return list(self.invoices)
-    async def list_payments(self, since=None, modified_since=None): return list(self.payments)
-    async def list_bank_transactions(self, since=None, modified_since=None): return list(self.bank)
-    async def list_credit_notes(self, since=None, modified_since=None): return list(self.notes)
-
-
-def _recon_world(fx, orders):
-    """Wire the engine to fakes end to end; returns the in-memory stores."""
-    stores = {"store": {"exceptions": {}, "watermarks": {}}, "cache": {}, "docs": {}}
-    async def fake_tool_json(reg, name, args):
-        if name == "shopify_list_orders":
-            if args.get("since_id"):
-                return {"orders": []}
-            return {"orders": list(orders)}
-        if name in ("shopify_list_payouts", "shopify_list_disputes"):
-            # A store not on Shopify Payments refuses both alike.
-            return {"available": False, "reason": "not on Shopify Payments"}
-        return {"_failed": True}
-    import copy as _copy
-    # deepcopy on load, like a real store parsing from disk: a fake that hands
-    # back the same object makes every lost-update bug invisible, which is
-    # exactly how the seen_threads write survived a reload that discarded it.
-    _rc.configure(
-        xero=fx, registry={}, tool_json=fake_tool_json,
-        mail_search=None, mail_thread=None, gmail_bytes=None, ai_call=None,
-        load_store=lambda: _copy.deepcopy(stores["store"]),
-        write_store=lambda d: stores.update(store=d),
-        load_cache=lambda: _copy.deepcopy(stores["cache"]),
-        write_cache=lambda d: stores.update(cache=d),
-        load_docs=lambda: _copy.deepcopy(stores["docs"]),
-        write_docs=lambda d: stores.update(docs=d))
-    return stores
-
-
-def _raw_xinv(num, total, typ="ACCREC", contact="Northern Stage Ltd"):
-    return {"InvoiceID": "XR-" + num, "InvoiceNumber": num, "Type": typ,
-            "Status": "AUTHORISED", "Contact": {"Name": contact},
-            "DateString": "2026-08-10T00:00:00", "DueDateString": "2026-09-10T00:00:00",
-            "Total": total, "TotalTax": 0, "AmountDue": total, "AmountPaid": 0,
-            "AmountCredited": 0, "CurrencyCode": "GBP", "Reference": "",
-            "UpdatedDateUTC": "/Date(1755561600000+0000)/"}
-
-
-def _raw_order(oid, name, total):
-    return {"id": oid, "name": name, "created_at": "2026-08-10T09:00:00Z",
-            "total_price": total, "total_tax": "0.00", "currency": "GBP",
-            "financial_status": "paid", "cancelled_at": None, "test": False,
-            "customer": {"first_name": "Sarah", "last_name": "Fielding",
-                         "default_address": {"company": "Northern Stage Ltd"}},
-            "payment_gateway_names": ["manual"], "refunds": []}
-
-
-@test
-def t_a_full_sweep_finds_the_missing_sale_and_statuses_survive_resweeps():
-    """End to end through sweep(): sync, check, merge. The same facts keep the
-    same exception id, a status set by a person survives the next sweep, and a
-    discrepancy the data no longer shows is marked, never deleted."""
-    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
-    orders = [_raw_order(104275, "#104275", "842.00"),
-              _raw_order(104276, "#104276", "120.00")]
-    stores = _recon_world(fx, orders)
-    try:
-        r = run_async(_rc.sweep())
-        ok(r["ok"], r)
-        exs = stores["store"]["exceptions"]
-        missing = [e for e in exs.values() if e["kind"] == "shopify_sale_missing"]
-        eq(len(missing), 1, "only #104276 is missing")
-        ok("#104276" in missing[0]["title"])
-        ok(_did_not_run(r["notes"], "payout") and _did_not_run(r["notes"], "chargeback"),
-           "a check that could not run says so instead of reading as clean: %s" % r["notes"])
-        xid = missing[0]["id"]
-        # A person marks it explained; the next sweep must not undo that.
-        exs[xid]["status"] = "explained"
-        exs[xid]["status_note"] = "Invoiced under the January consolidation."
-        r2 = run_async(_rc.sweep())
-        ok(r2["ok"])
-        eq(stores["store"]["exceptions"][xid]["status"], "explained",
-           "a human's status outlives the sweep")
-        # The books catch up: the invoice appears. The exception goes stale,
-        # with the disappearance on its history - never silently deleted.
-        fx.invoices.append(_raw_xinv("INV-104276", "120.00"))
-        r3 = run_async(_rc.sweep())
-        ok(r3["ok"])
-        e = stores["store"]["exceptions"][xid]
-        ok(e["stale"], "no longer detected, and it says so")
-        ok(any("No longer detected" in h.get("note", "") for h in e["history"]))
-    finally:
-        _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
-                      mail_thread=None, load_store=None, write_store=None,
-                      load_cache=None, write_cache=None, load_docs=None, write_docs=None)
-
-
-def _did_not_run(notes, check):
-    """The sweep said this check sat it out ("payout", "chargeback")."""
-    return any(check in n and "checks did not run" in n for n in notes)
-
-
-def _raw_btxn(bid, typ, total, day):
-    return {"BankTransactionID": bid, "Type": typ, "Status": "AUTHORISED",
-            "DateString": day + "T00:00:00", "Total": total, "CurrencyCode": "GBP",
-            "IsReconciled": False, "Contact": {"Name": "Shopify"}, "Reference": "",
-            "BankAccount": {"Name": "Current"}}
-
-
-def _payments_world(fx, answers):
-    """_recon_world with Shopify Payments reads that a test switches between
-    answering and not. `answers` maps a tool to its reply, or to a callable for
-    one that raises; a tool left out answers as a failed read."""
-    orders = [_raw_order(104275, "#104275", "842.00")]
-    stores = _recon_world(fx, orders)
-    async def tool_json(reg, name, args):
-        if name == "shopify_list_orders":
-            return {"orders": [] if args.get("since_id") else list(orders)}
-        a = answers.get(name, {"_failed": True})
-        return a() if callable(a) else a
-    _rc.configure(tool_json=tool_json)
-    return stores
-
-
-def _unconfigure_recon():
-    _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
-                  mail_thread=None, load_store=None, write_store=None,
-                  load_cache=None, write_cache=None, load_docs=None, write_docs=None)
-
-
-@test
-def t_a_sweep_that_cannot_read_payouts_leaves_the_payout_findings_alone():
-    """The payouts read was refused and the note said the payout checks did not
-    run, but the check ran anyway on the payouts cached by earlier sweeps and
-    counted as having run. So a sweep that saw no payout at all marked an open
-    payout finding "no longer detected": once when the deposit landed in Xero
-    while the cached payout was the only copy, and again with no copy left."""
-    import copy as _copy
-    day = _rc._cutoff_day(10)
-    payout = {"id": 7001, "date": day, "amount": "312.40", "currency": "GBP", "status": "paid"}
-
-    def missing_tools():
-        raise KeyError("shopify_list_payouts")
-    for how, unreadable in (
-            ("refused", {"available": False, "reason": "The access token lacks the Shopify "
-                                                       "Payments read scopes."}),
-            ("failed", {"_failed": True}),
-            ("not on this build", missing_tools)):
-        fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
-        answers = {"shopify_list_payouts": {"payouts": [payout]},
-                   "shopify_payout_transactions": {"transactions": []},
-                   "shopify_list_disputes": {"disputes": []}}
-        stores = _payments_world(fx, answers)
-        try:
-            run_async(_rc.sweep())
-            exs = stores["store"]["exceptions"]
-            found = [x for x, e in exs.items() if e["kind"] == "payout_missing_from_bank"]
-            eq(len(found), 1, how + ": a paid payout with no deposit is found while payouts read")
-            xid = found[0]
-            exs[xid]["status"] = "investigating"
-            before = _copy.deepcopy(exs[xid])
-            # Payouts stop answering, and meanwhile the deposit lands in Xero.
-            answers["shopify_list_payouts"] = unreadable
-            fx.bank.append(_raw_btxn("BT-7001", "RECEIVE", "312.40", day))
-            r2 = run_async(_rc.sweep())
-            ok(_did_not_run(r2["notes"], "payout"), (how, r2["notes"]))
-            after = stores["store"]["exceptions"][xid]
-            ok(not after.get("stale"), how + ": a sweep that read no payouts did not see it go")
-            eq(after["status"], "investigating", how)
-            eq(after["history"], before["history"], how + ": and wrote nothing on its history")
-            payout_kinds = _rc.CHECK_KINDS["check_payouts_vs_bank"]
-            eq([x for x, e in stores["store"]["exceptions"].items() if e["kind"] in payout_kinds],
-               [xid], how + ": nor raised anything new from the old copy")
-            ok("7001" in stores["cache"]["shopify"]["payouts"],
-               how + ": and the payout it was built from is still held")
-            # Months on and still unreadable: the cached payout is now older
-            # than the window the check matches in, and than the cache keeps.
-            stores["cache"]["shopify"]["payouts"]["7001"]["date"] = _rc._cutoff_day(_rc.CACHE_KEEP_DAYS + 5)
-            run_async(_rc.sweep())
-            ok(not stores["store"]["exceptions"][xid].get("stale"),
-               how + ": an aged copy of payouts that could not be read settles nothing")
-            ok("7001" in stores["cache"]["shopify"]["payouts"],
-               how + ": nor is the record an open finding rests on pruned")
-            # With no cached copy left either, it is still not a reason.
-            stores["cache"]["shopify"]["payouts"] = {}
-            run_async(_rc.sweep())
-            ok(not stores["store"]["exceptions"][xid].get("stale"),
-               how + ": an empty copy of payouts that could not be read settles nothing")
-            # Readable again: the check runs, finds the deposit and settles it.
-            answers["shopify_list_payouts"] = {"payouts": [payout]}
-            r4 = run_async(_rc.sweep())
-            ok(not _did_not_run(r4["notes"], "payout"), (how, r4["notes"]))
-            ok(stores["store"]["exceptions"][xid]["stale"],
-               how + ": a sweep that did read payouts settles it as before")
-        finally:
-            _unconfigure_recon()
-
-
-@test
-def t_a_sweep_that_cannot_read_disputes_leaves_the_chargeback_findings_alone():
-    """The disputes read failed with no word at all, and the chargeback check
-    ran on the disputes cached by earlier sweeps, so a sweep that saw no
-    dispute could settle an open chargeback finding."""
-    import copy as _copy
-    day = _rc._cutoff_day(10)
-    dispute = {"id": 8001, "order_id": 104275, "type": "chargeback", "amount": "95.00",
-               "currency": "GBP", "reason": "fraudulent", "status": "lost", "initiated_at": day}
-    for how, unreadable in (
-            ("refused", {"available": False, "reason": "The access token lacks the Shopify "
-                                                       "Payments read scopes."}),
-            ("failed", {"_failed": True})):
-        fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
-        answers = {"shopify_list_payouts": {"payouts": []},
-                   "shopify_list_disputes": {"disputes": [dispute]}}
-        stores = _payments_world(fx, answers)
-        try:
-            run_async(_rc.sweep())
-            exs = stores["store"]["exceptions"]
-            found = [x for x, e in exs.items() if e["kind"] == "chargeback_missing_from_xero"]
-            eq(len(found), 1, how + ": a chargeback with no Xero record is found while disputes read")
-            xid = found[0]
-            before = _copy.deepcopy(exs[xid])
-            answers["shopify_list_disputes"] = unreadable
-            fx.bank.append(_raw_btxn("BT-8001", "SPEND", "95.00", day))
-            r2 = run_async(_rc.sweep())
-            after = stores["store"]["exceptions"][xid]
-            ok(not after.get("stale"), how + ": a sweep that read no disputes did not see it go")
-            eq(after["history"], before["history"], how)
-            ok(_did_not_run(r2["notes"], "chargeback"), (how, r2["notes"]))
-            answers["shopify_list_disputes"] = {"disputes": [dispute]}
-            r3 = run_async(_rc.sweep())
-            ok(not _did_not_run(r3["notes"], "chargeback"), (how, r3["notes"]))
-            ok(stores["store"]["exceptions"][xid]["stale"],
-               how + ": a sweep that did read disputes settles it as before")
-        finally:
-            _unconfigure_recon()
-
-
-@test
-def t_payout_fees_that_cannot_be_read_are_said_so():
-    """A fee lookup that failed stopped the fee reads with no word, and a
-    deposit short of its payout by the fees then read as a missing deposit."""
-    day = _rc._cutoff_day(10)
-    payout = {"id": 7002, "date": day, "amount": "100.00", "currency": "GBP", "status": "paid"}
-    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
-    answers = {"shopify_list_payouts": {"payouts": [payout]},
-               "shopify_payout_transactions": {"_failed": True},
-               "shopify_list_disputes": {"disputes": []}}
-    _payments_world(fx, answers)
-    try:
-        r = run_async(_rc.sweep())
-        ok(any("fees could not be read" in n for n in r["notes"]), r["notes"])
-        answers["shopify_payout_transactions"] = {"transactions": [{"fee": "2.50"}]}
-        r2 = run_async(_rc.sweep())
-        ok(not any("fees could not be read" in n for n in r2["notes"]),
-           "fees read on a later sweep say nothing: %s" % r2["notes"])
-    finally:
-        _unconfigure_recon()
-
-
-@test
-def t_the_xero_client_is_read_only_by_construction():
-    """No POST, PUT or DELETE ever reaches the accounting API. The one POST in
-    the module is the OAuth token endpoint, which mints credentials, not
-    records."""
-    src = open(os.path.join(HERE, "xero.py"), encoding="utf-8").read()
-    lines = src.split("\n")
-    # POSTs are allowed ONLY to Xero's identity host: minting a token and
-    # revoking one are identity operations, not writes to the books. Anything
-    # that reaches the accounting API must be a GET.
-    # The call and its URL can sit on different lines, so take each POST with
-    # the two lines after it.
-    posts = [" ".join(x.strip() for x in lines[i:i + 3])
-             for i, l in enumerate(lines) if "client.post(" in l]
-    ok(posts, "found the POST call sites")
-    for l in posts:
-        ok("IDENTITY_BASE" in l, "a POST goes somewhere other than the identity host: " + l)
-    joined = " ".join(posts)
-    ok("/connect/revocation" in joined,
-       "revocation exists: a token merely forgotten stays live at Xero for 60 days")
-    ok("/connect/token" in joined, "and the token endpoint is the only other POST")
-    for l in lines:
-        if "client.get(" in l or "client.request(" in l:
-            ok("client.post" not in l, "no disguised write: " + l.strip())
-    for verb in ("client.put", "client.delete", "client.patch"):
-        ok(verb not in src, verb + " must not appear in a read-only client")
-    # The accounting API is reached through _get only, which is a GET.
-    ok('resp = await client.get(url' in src, "the accounting fetcher is a GET")
-
 @test
 def t_the_system_learns_which_source_is_right_from_closed_months():
     """Nobody picks the algorithm. Every run writes down what each source says
@@ -14649,7 +14079,7 @@ def t_a_strangers_email_or_pdf_cannot_hold_the_event_loop():
     Reconciliation's amount pattern did the same on a PDF's '1,111,111...',
     and the erased-address scrub on a long To or Cc. Each is linear now, and
     capped."""
-    import google_mail as _gm, pipedrive as _pd, recon as _rc
+    import google_mail as _gm, pipedrive as _pd
     def secs(fn, *a):
         t0 = time.perf_counter(); fn(*a); return time.perf_counter() - t0
     # Each limit separates linear from quadratic with room for a busy machine
@@ -14661,16 +14091,8 @@ def t_a_strangers_email_or_pdf_cannot_hold_the_event_loop():
     ok(secs(_gm._strip_html, "<p>x</p>" + "<" * 2_000_000) < LIMIT, "a 2 MB run of '<' is stripped at once")
     ok(secs(_gm._strip_html, "<p>" + "<script" * 200_000) < LIMIT, "and a run of unclosed script openings")
     ok(secs(_pd._strip_note, "<p>x</p>" + "<" * 400_000) < LIMIT, "a Pipedrive note the same")
-    ok(secs(_rc._AMOUNT_RE.findall, "1" + ",111" * 100_000) < LIMIT, "a PDF's endless thousands groups")
     eq(_gm._strip_html("<p>Hello <b>there</b></p><script>bad()</script>"), "Hello there", "ordinary mail reads as before")
     eq(_gm._strip_html("<p>left <script>evil()"), "left", "an unclosed script still goes")
-    eq(_rc._AMOUNT_RE.findall("Total 1,234.56 and \u00a399.00 then 12,345,678.90"),
-       ["1,234.56", "99.00", "12,345,678.90"], "amounts are found as before")
-    # Found exactly as the unbounded pattern found them, comma-joined text included.
-    old_rx = re.compile(r"(?<![\d.])(\d{1,3}(?:,\d{3})*\.\d{2})(?!\d)")
-    for text in ("INV-0142,1,234.56", "Paid 1,234.56,2,000.00", "a1,234,56.78", "x,1,234.56",
-                 "999,999,999,999,999.99", "12,34.56", "1.5,234.56"):
-        eq(_rc._AMOUNT_RE.findall(text), old_rx.findall(text), text)
     # An inline picture ahead of the words no longer fills the cap.
     pic = '<img src="data:image/png;base64,' + "QUJD" * 90_000 + '">'
     eq(_gm._strip_html("<p>" + pic + "Please send the invoice.</p>"), "Please send the invoice.",
@@ -14686,9 +14108,6 @@ def t_a_strangers_email_or_pdf_cannot_hold_the_event_loop():
        "and 2.7 MB of 'data:a/b;' is linear too (unbounded, 288 KB of it took 37 seconds)")
     import inspect as _ins
     ok("asyncio.to_thread(_strip_html" in _ins.getsource(_gm.read_thread), "and it is stripped off the loop")
-    ok("DOC_TEXT_CAP" in open(os.path.join(HERE, "recon.py"), encoding="utf-8").read()
-       and "await asyncio.to_thread(parse_doc_text," in open(os.path.join(HERE, "recon.py"), encoding="utf-8").read(),
-       "a document's text is capped and read off the loop")
     gone = {"jo@x.com"}
     head = mail._mail_erased_rx(gone, header=True)
     ok(secs(head.sub, "[erased]", "a" * 20_000 + " <jo@x.com>") < 0.5, "a long header with an erased address")
@@ -16087,766 +15506,10 @@ def t_a_refused_request_says_why_so_the_page_can_answer_it():
     eq(r.json()["reason"], "session", "and so is a session the app no longer holds")
     ok(set(team.AUTH_REFUSALS) == {"token", "session", "inactive", "must_change"}, "four reasons, each with its own words")
 
-@test
-def t_recon_reports_money_at_stake_by_severity():
-    """12 Oct 2026: each severity counter shows the money at stake beside its
-    count. Both are worked out live from the same rule (open: new or
-    investigating, and not stale), so a counter's figure and its money always
-    agree; the count used to be a snapshot from the last sweep."""
-    import copilot as _cp
-    ensure_auth()
-    keep = json.loads(json.dumps(reconciliation._load_recon()))
-    try:
-        d = {"exceptions": {}, "watermarks": {}}
-        n = [0]
-        def put(sev, amount, status="new", stale=False):
-            n[0] += 1
-            e = _rc.make_exc("shopify_sale_missing", sev, "money " + str(n[0]), ["m" + str(n[0])], amount=amount)
-            e["status"] = status; e["stale"] = stale
-            d["exceptions"][e["id"]] = e
-        put("critical", 100000); put("critical", -25000); put("high", 5000, status="investigating")
-        put("high", 9900, status="explained"); put("medium", 700, stale=True); put("low", 1234)
-        put("low", None)
-        reconciliation._write_recon(d)
-        j = post("/api/recon/status", {}).json()
-        eq(j["open_amounts"], {"critical": 125000, "high": 5000, "medium": 0, "low": 1234},
-           "the money at stake: open, live, and the size of each difference whatever its sign")
-        eq(j["open_counts"], {"critical": 2, "high": 1, "medium": 0, "low": 2},
-           "counted by the same rule, so a counter's figure and its money agree")
-    finally:
-        reconciliation._write_recon(keep)
-
-
-@test
-def t_the_ai_counts_open_discrepancies_as_the_page_does():
-    """Final review M-7, 12 Oct 2026: the page counts open discrepancies live,
-    but the AI's reconciliation summary still read the last sweep's snapshot,
-    so after someone marked one Explained, chat could say 3 critical were open
-    while the page said 2."""
-    import asyncio
-    import copilot as _cp
-    keep = json.loads(json.dumps(reconciliation._load_recon()))
-    try:
-        d = {"exceptions": {}, "watermarks": {}, "open_counts": {"critical": 3, "high": 0, "medium": 0, "low": 0}}
-        for i, status in enumerate(("new", "investigating", "explained")):
-            e = _rc.make_exc("shopify_sale_missing", "critical", "ai " + str(i), ["ai" + str(i)], amount=1000)
-            e["status"] = status
-            d["exceptions"][e["id"]] = e
-        reconciliation._write_recon(d)
-        got = json.loads(asyncio.run(reconciliation.recon_summary(reconciliation.ReconEmptyInput())))
-        eq(got["open_counts"], {"critical": 2, "high": 0, "medium": 0, "low": 0}, "the AI's count is the page's, not the sweep's snapshot")
-    finally:
-        reconciliation._write_recon(keep)
-
-
-@test
-def t_a_discrepancy_names_its_record_and_who_it_is_with():
-    """12 Oct 2026: the discrepancies table's Record column, from the evidence
-    the list never sent: the record a person would look up, and who it is with
-    (or the other record it disagrees with)."""
-    import copilot as _cp
-    mk, E = _rc.make_exc, _rc.ev
-    cases = [
-        (mk("order_invoice_amount_mismatch", "high", "x", ["a"], evidence=[
-            E("shopify", "order", "Order #104477", {"name": "#104477", "company": "Okafor Lighting Hire"}, 1),
-            E("xero", "invoice", "Invoice INV-2217", {"number": "INV-2217", "contact": "Okafor Lighting Hire"}, 2)]), ("#104477", "INV-2217")),
-        (mk("shopify_sale_missing", "high", "x", ["b"], evidence=[
-            E("shopify", "order", "Order #104529", {"name": "#104529", "company": "Brightwell Weddings", "customer": "Priya Shah"}, 1)]),
-         ("#104529", "Brightwell Weddings")),
-        (mk("payout_missing_from_bank", "critical", "x", ["c"], evidence=[
-            E("shopify", "payout", "Payout 118340091", {"id": "118340091"}, 1)]), ("Payout 118340091", "")),
-        (mk("duplicate_bill_number", "high", "x", ["d"], evidence=[
-            E("xero", "bill", "Bill DS-7781", {"number": "DS-7781", "contact": "Dichroic Supplies Ltd"}, 1)]), ("DS-7781", "Dichroic Supplies Ltd")),
-        (mk("gmail_doc_missing_from_xero", "medium", "x", ["e"], evidence=[
-            E("gmail", "document", "supplier_invoice file", {"doc_type": "supplier_invoice", "subject": "Invoice LX-30418 from LEDXON Optics"}, 1)]),
-         ("Supplier invoice", "LEDXON Optics")),
-        (mk("remittance_payment_missing", "critical", "x", ["f"], evidence=[
-            E("gmail", "document", "remittance file", {"doc_type": "remittance", "subject": "Remittance advice - Marston Venues"}, 1)]),
-         ("Remittance", "Marston Venues")),
-        (mk("chargeback_missing_from_xero", "high", "x", ["g"], evidence=[
-            E("shopify", "dispute", "Dispute 84221775", {"id": "84221775"}, 1)]), ("Dispute 84221775", "")),
-        (mk("stale_unreconciled", "low", "x", ["h"], evidence=[
-            E("xero", "bank_transaction", "Bank txn e21a", {"contact": "", "date": "2026-09-03"}, 1)]), ("Bank line", "")),
-    ]
-    for e, want in cases:
-        pub = reconciliation._recon_exc_public(e)
-        eq((pub.get("record"), pub.get("counterparty")), want, e["kind"])
-    bare = reconciliation._recon_exc_public(mk("xero_sale_without_shopify", "low", "x", ["i"]))
-    eq((bare.get("record"), bare.get("counterparty")), ("", ""), "no evidence, nothing invented")
-
-
-@test
-def t_recon_routes_enforce_their_rules():
-    def go():
-        ensure_auth()
-        r = post("/api/recon/status", {})
-        eq(r.status_code, 200, r.text[:120])
-        j = r.json()
-        ok("xero" in j and "open_counts" in j, j)
-        # Ignoring without a reason is refused: an unexplained ignore is how a
-        # real discrepancy disappears.
-        import copilot as _cp
-        d = reconciliation._load_recon()
-        e = _rc.make_exc("shopify_sale_missing", "high", "A test discrepancy", ["t1"],
-                         amount=1000)
-        d.setdefault("exceptions", {})[e["id"]] = e
-        reconciliation._write_recon(d)
-        r2 = post("/api/recon/exception", {"id": e["id"], "op": "status",
-                                           "status": "ignored"})
-        eq(r2.status_code, 400, "ignore needs a reason: " + r2.text[:100])
-        r3 = post("/api/recon/exception", {"id": e["id"], "op": "status",
-                                           "status": "ignored", "note": "Test data."})
-        eq(r3.status_code, 200, r3.text[:120])
-        hist = r3.json()["exception"]["history"]
-        ok(hist and hist[-1]["note"] == "Test data.", "the reason is on the record")
-        # A member without the recon tab cannot see the routes at all.
-        rr = post("/api/team/user", {"op": "create", "name": "Norec", "username": "norec",
-                                     "role": "member"})
-        uid, pw = rr.json()["id"], rr.json()["starter_password"]
-        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["labels"]})
-        lg = client.post("/api/auth/login", json={"username": "norec", "password": pw},
-                         headers={"Authorization": "Bearer " + tok()}).json()
-        sess = lg.get("session")
-        ch = post_s(sess, "/api/auth/password", {"current": pw, "new": "norec-pw-8812"})
-        sess = ch.json().get("session") or sess
-        r4 = post_s(sess, "/api/recon/status", {})
-        eq(r4.status_code, 403, "no recon tab, no recon routes: %s" % r4.status_code)
-        r5 = post_s(sess, "/api/recon/sweep", {})
-        ok(r5.status_code in (403,), "and certainly no sweep")
-    with_accounts(go)
-
-
-@test
-def t_recon_chat_tools_are_tab_gated_and_read_only():
-    import copilot as _cp
-    for name in ("recon_summary", "recon_exceptions", "recon_exception"):
-        eq(assistant._TOOL_TABS.get(name), "recon", name + " is gated on the recon tab")
-    src = copilot_source()
-    seg = src.split("async def recon_summary")[1].split("_oauth_states")[0] \
-        if "_oauth_states" in src.split("async def recon_summary")[1][:9000] \
-        else src.split("async def recon_summary")[1][:9000]
-    ok("_write_recon" not in seg.split("async def recon_exception")[1][:1200],
-       "the chat tools only ever read the store")
-
-
-# ---------------------------------------------------------------------------
-# Reconciliation: the adversarial review's confirmed findings, pinned
-# ---------------------------------------------------------------------------
-
-@test
-def t_a_voided_invoice_cannot_hide_a_missing_sale():
-    """THE review's best find: a voided record is an un-happened one. Letting
-    it satisfy a match let an accidentally voided invoice permanently hide the
-    missing revenue it was supposed to reveal."""
-    cache = {"shopify": {"orders": {"1": _ord(104275, "#104275", 84200)}},
-             "xero": {"invoices": {"a": _inv("INV-104275", 84200, status="VOIDED")}}}
-    out = _rc.check_orders_vs_invoices(cache)
-    eq([e["kind"] for e in out], ["shopify_sale_missing"],
-       "the voided invoice explains nothing")
-    cache["xero"]["invoices"]["a"]["status"] = "AUTHORISED"
-    eq(_rc.check_orders_vs_invoices(cache), [], "the live one does")
-    # Same rule for a voided credit note against a refund.
-    refund = {"id": 7, "created_at": "2026-08-12", "pence": 15000}
-    cache2 = {"shopify": {"orders": {"1": _ord(1, "#1", 84200, refunds=[refund])}},
-              "xero": {"invoices": {}, "bank_transactions": {},
-                       "credit_notes": {"c": {"id": "c", "number": "CN-1",
-                           "type": "ACCRECCREDIT", "status": "VOIDED",
-                           "contact": "", "date": "2026-08-13", "total": 15000,
-                           "remaining": 0, "currency": "GBP", "reference": ""}}}}
-    eq([e["kind"] for e in _rc.check_refunds(cache2)], ["shopify_refund_missing"])
-
-
-@test
-def t_a_crashed_check_does_not_resolve_its_own_findings():
-    """'The check did not run' and 'the discrepancy went away' are different
-    facts. A crash must not flip open findings to no-longer-detected."""
-    fx = _FakeXero(invoices=[
-        _raw_xinv("INV-0042", "500.00", typ="ACCPAY"),
-        {**_raw_xinv("INV 42", "500.00", typ="ACCPAY"), "InvoiceID": "XR-dup2"}])
-    stores = _recon_world(fx, [])
-    saved = list(_rc.ALL_CHECKS)
-    try:
-        r = run_async(_rc.sweep())
-        dup = [e for e in stores["store"]["exceptions"].values()
-               if e["kind"] == "duplicate_bill_number"]
-        eq(len(dup), 1, "the duplicate is found")
-        xid = dup[0]["id"]
-
-        def check_duplicates(cache):          # same __name__, always crashes
-            raise RuntimeError("malformed record")
-        idx = next(i for i, c in enumerate(_rc.ALL_CHECKS)
-                   if c.__name__ == "check_duplicates")
-        _rc.ALL_CHECKS[idx] = check_duplicates
-        r2 = run_async(_rc.sweep())
-        ok(any("crashed" in n for n in r2["notes"]), r2["notes"])
-        e = stores["store"]["exceptions"][xid]
-        ok(not e.get("stale"),
-           "the finding survives the crash instead of reading as resolved")
-        _rc.ALL_CHECKS[idx] = saved[idx]
-        run_async(_rc.sweep())
-        ok(not stores["store"]["exceptions"][xid].get("stale"),
-           "and it is still there when the check runs again")
-    finally:
-        _rc.ALL_CHECKS[:] = saved
-        _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
-                      mail_thread=None, load_store=None, write_store=None,
-                      load_cache=None, write_cache=None, load_docs=None, write_docs=None)
-
-
-@test
-def t_every_exception_kind_is_owned_by_exactly_one_check():
-    """The staleness authority: a kind nobody claims would never go stale, and
-    a kind claimed twice would go stale when only one of its checks ran."""
-    src = open(os.path.join(HERE, "recon.py"), encoding="utf-8").read()
-    emitted = set(re.findall(r'make_exc\(\s*\n?\s*"([a-z_]+)"', src))
-    claimed = {}
-    for owner, kinds in _rc.CHECK_KINDS.items():
-        for k in kinds:
-            ok(k not in claimed, f"{k} claimed by both {claimed.get(k)} and {owner}")
-            claimed[k] = owner
-    missing = emitted - set(claimed)
-    eq(missing, set(), "every emitted kind has a staleness owner")
-
-
-@test
-def t_scan_extractions_are_marked_capped_and_whitelisted():
-    """A scan has no text layer to verify against, so nothing from one may be
-    presented as deterministic fact or carry more than MEDIUM."""
-    doc = {"source_key": "m9:a9", "doc_type": "remittance", "verified": False,
-           "extracted_by": "ai", "from": "x@y.com", "date": "2026-08-19",
-           "currency": "GBP", "total_pence": 842000, "filename": "scan.pdf",
-           "subject": "payment", "counterparty": "Customer A",
-           "invoice_numbers": ["INV-9917"],
-           "invoice_lines": [{"number": "INV-9917", "pence": 842000}]}
-    out = _rc.check_gmail_docs({"xero": {"invoices": {}, "credit_notes": {},
-                                         "payments": {}}}, {"m9:a9": doc})
-    ok(out, "the lead is still surfaced")
-    for e in out:
-        ok(e["severity"] in ("medium", "low"),
-           "a scan cannot mint a high: %s is %s" % (e["kind"], e["severity"]))
-        eq(e.get("basis"), "ai_extraction", "and it is labelled as AI-read")
-        ok("SCANNED" in e["why"], "the why says so in words")
-    # The whitelist mapper: model output cannot overwrite provenance keys.
-    mapped = _rc._scan_fields({"doc_type": "remittance", "total": "842.00",
-                               "source_key": "EVIL", "message_id": "EVIL",
-                               "verified": True, "invoice_numbers": ["INV-1"],
-                               "invoice_lines": [], "currency": "GBP"})
-    ok("source_key" not in mapped and "verified" not in mapped
-       and "message_id" not in mapped, "provenance keys cannot be overwritten")
-    eq(mapped["total_pence"], 84200, "amounts are parsed into pence, not trusted")
-
-
-@test
-def t_anchored_validation_rejects_a_number_hiding_inside_another():
-    text = "Invoice INV-142 for a total of 1,500.00 due now"
-    ok(not _rc._text_has_amount(text, 50000), "500.00 is not in '1,500.00'")
-    ok(_rc._text_has_amount(text, 150000), "1,500.00 is")
-    ok(not _rc._text_has_ref(text, "INV-1"), "INV-1 is not a whole token here")
-    ok(_rc._text_has_ref(text, "INV-142"), "INV-142 is")
-    ok(_rc._text_has_ref("Ref: INV 142 enclosed", "INV-142"),
-       "separators inside the reference are allowed")
-
-
-@test
-def t_a_truncated_xero_crawl_advances_its_watermark():
-    """Refetching the same first pages forever means the backlog past the cap
-    is never reached: the watermark must walk forward through it."""
-    rows = [_raw_xinv("INV-%d" % i, "10.00") for i in range(3)]
-    rows[-1]["UpdatedDateUTC"] = "/Date(1787097600000+0000)/"      # 2026-08-19
-    fx = _FakeXero(invoices=rows + [{"_truncated": True}])
-    stores = _recon_world(fx, [])
-    try:
-        r = run_async(_rc.sweep())
-        ok(any("partial" in n for n in r["notes"]), "the truncation is said out loud")
-        mark = stores["store"]["watermarks"].get("invoices", "")
-        ok("19 Aug 2026" in mark,
-           "the watermark advanced to the last row actually received: " + mark)
-    finally:
-        _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
-                      mail_thread=None, load_store=None, write_store=None,
-                      load_cache=None, write_cache=None, load_docs=None, write_docs=None)
-
-
-@test
-def t_the_same_document_twice_is_one_document():
-    docs = {}
-    async def bytes_fake(mid, aid):
-        return b"%PDF-1.4 same content"
-    _rc.configure(gmail_bytes=bytes_fake, ai_call=None,
-                  load_docs=lambda: docs, write_docs=lambda d: None)
-    try:
-        d1 = run_async(_rc.extract_doc({"source_key": "m1:a1", "message_id": "m1",
-                                        "attachment_id": "a1", "filename": "x.pdf",
-                                        "subject": "Invoice", "from": "a@b.c",
-                                        "date": "2026-08-19", "size": 100}))
-        docs["m1:a1"] = d1
-        d2 = run_async(_rc.extract_doc({"source_key": "m2:a2", "message_id": "m2",
-                                        "attachment_id": "a2", "filename": "x.pdf",
-                                        "subject": "Fwd: Invoice", "from": "a@b.c",
-                                        "date": "2026-08-20", "size": 100}))
-        eq(d2.get("duplicate_of"), "m1:a1", "the forward is the same document")
-        ok(d2.get("ignored"), "and produces no second set of discrepancies")
-    finally:
-        _rc.configure(gmail_bytes=None, load_docs=None, write_docs=None)
-
-
-@test
-def t_fees_explain_a_payout_gap_deterministically():
-    """The brief's own worked example: payout minus fees equals the deposit.
-    That is arithmetic, so the deterministic layer says it - as an explained
-    LOW, not a missing-payout alarm."""
-    cache = {"shopify": {"payouts": {"p1": {"id": "p1", "date": "2026-08-14",
-                                            "pence": 2348172, "currency": "GBP",
-                                            "status": "paid", "fees_pence": 51376}}},
-             "xero": {"bank_transactions": {"b1": _bt("b1", 2296796, date="2026-08-15")}}}
-    out = _rc.check_payouts_vs_bank(cache)
-    eq([e["kind"] for e in out], ["payout_explained_by_fees"], out)
-    e = out[0]
-    eq(e["severity"], "low")
-    ok("£513.76" in e["computed"][0] and "£22967.96" in e["computed"][0].replace(",", ""),
-       e["computed"])
-
-
-@test
-def t_a_chargeback_needs_a_record_in_the_books():
-    cache = {"shopify": {"disputes": {"d1": {"id": "d1", "order_id": "9",
-                                             "type": "chargeback", "pence": 84200,
-                                             "currency": "GBP", "reason": "fraudulent",
-                                             "status": "lost", "date": "2026-08-10"}}},
-             "xero": {"bank_transactions": {}, "credit_notes": {}}}
-    out = _rc.check_disputes(cache)
-    eq([e["kind"] for e in out], ["chargeback_missing_from_xero"])
-    cache["xero"]["bank_transactions"]["b"] = _bt("b", 84200, typ="SPEND", date="2026-08-16")
-    eq(_rc.check_disputes(cache), [], "a matching SPEND settles it")
-    cache["shopify"]["disputes"]["d1"]["status"] = "won"
-    cache["xero"]["bank_transactions"] = {}
-    eq(_rc.check_disputes(cache), [], "a won dispute takes nothing")
-
-
-@test
-def t_the_other_direction_a_xero_sale_no_shopify_order_explains():
-    cache = {"shopify": {"orders": {"1": _ord(104275, "#104275", 84200)}},
-             "xero": {"invoices": {
-                 "a": _inv("INV-104275", 84200),
-                 "b": _inv("Q-2201", 55000, contact="Walk-in customer")}}}
-    out = _rc.check_xero_orphan_sales(cache)
-    eq([e["kind"] for e in out], ["xero_sale_without_shopify"])
-    eq(out[0]["severity"], "low", "off-Shopify sales are legitimate; this is a question, not an alarm")
-    # When MOST invoices are unlinked, that is one systemic finding, not noise.
-    for i in range(12):
-        cache["xero"]["invoices"]["q%d" % i] = _inv("Q-%d" % i, 1000 + i)
-    out2 = _rc.check_xero_orphan_sales(cache)
-    eq([e["kind"] for e in out2], ["invoice_numbering_unlinked"])
-
-
-# ---------------------------------------------------------------------------
-# Two mailboxes: the sales inbox and the accounts mailbox must never mix
-# ---------------------------------------------------------------------------
-
-@test
-def t_the_two_mailboxes_have_separate_tokens_and_caches():
-    """They are different Google accounts. Sharing a token file or an access
-    cache would mean reconciliation reading the sales inbox, or the Inbox tab
-    showing finance mail - both wrong, and both silent."""
-    ok(_gm.SALES.token_path != _gm.FINANCE.token_path,
-       "different token files: %s vs %s" % (_gm.SALES.token_path, _gm.FINANCE.token_path))
-    ok(_gm.SALES.access is not _gm.FINANCE.access, "and different access caches")
-    _gm.SALES.access["token"] = "sales-token"
-    _gm.FINANCE.access["token"] = "finance-token"
-    ok(_gm.SALES.access["token"] == "sales-token"
-       and _gm.FINANCE.access["token"] == "finance-token",
-       "setting one does not touch the other")
-    _gm.SALES.access["token"] = ""
-    _gm.FINANCE.access["token"] = ""
-    # The path is read live, so a test or a settings change that moves
-    # TOKEN_PATH still describes the same account.
-    saved = _gm.TOKEN_PATH
-    try:
-        _gm.TOKEN_PATH = SCRATCH + "/moved.json"
-        eq(_gm.SALES.token_path, SCRATCH + "/moved.json",
-           "the account follows its module path rather than a stale copy")
-    finally:
-        _gm.TOKEN_PATH = saved
-
-
-@test
-def t_one_token_file_cannot_serve_two_mailboxes():
-    """A shared token file would point reconciliation at the sales inbox while
-    the screen says it is reading the accounts mailbox: exactly the failure the
-    split exists to prevent, and silent. It is refused instead."""
-    saved = _gm.FINANCE_TOKEN_PATH
-    try:
-        _gm.FINANCE_TOKEN_PATH = _gm.TOKEN_PATH
-        ok(not _gm.FINANCE.usable(), "a colliding account is not usable")
-        ok(not _gm.connected(_gm.FINANCE), "and never reports itself connected")
-        try:
-            run_async(_gm._token(_gm.FINANCE))
-            ok(False, "minting a token for a colliding account must raise")
-        except _gm.GmailError as e:
-            ok("its own token file" in str(e), "and says how to fix it: " + str(e))
-        ok(_gm.SALES.usable(), "the sales inbox is unaffected")
-    finally:
-        _gm.FINANCE_TOKEN_PATH = saved
-    ok(_gm.FINANCE.usable(), "and it recovers once the paths differ again")
-
-
-@test
-def t_every_gmail_call_goes_to_the_account_it_was_asked_for():
-    """The isolation is the routing: if a read defaults to the sales account
-    when handed the finance one, reconciliation quietly audits the wrong post."""
-    seen = []
-
-    async def fake_call(method, path, params=None, body=None, acct=None):
-        seen.append((path.split("/")[0], acct.label if acct else "DEFAULT"))
-        if path == "threads":
-            return {"threads": [{"id": "t1"}]}
-        if path.startswith("threads/"):
-            return {"id": "t1", "messages": []}
-        return {"data": ""}
-
-    saved = _gm._call
-    _gm._call = fake_call
-    try:
-        run_async(_gm.list_thread_ids("q", acct=_gm.FINANCE))
-        run_async(_gm.get_thread("t1", acct=_gm.FINANCE))
-        run_async(_gm.attachment_bytes("m1", "a1", acct=_gm.FINANCE))
-        ok(all(label == "finance" for _p, label in seen),
-           "every finance read reached the finance account: %s" % seen)
-        seen.clear()
-        run_async(_gm.get_thread("t1"))
-        eq(seen[0][1], "sales", "and the default is still the sales inbox")
-    finally:
-        _gm._call = saved
-
-
-@test
-def t_reconciliation_is_wired_to_the_finance_mailbox_only():
-    src = copilot_source()
-    seg = src.split("recon_engine.configure(")[1][:400]
-    ok("mail_store" not in seg,
-       "the engine no longer receives the Inbox tab's store at all")
-    wiring = src.split("_fin = google_mail.FINANCE")[1][:700]
-    for hook in ("attachment_bytes", "list_thread_ids", "get_thread"):
-        call = wiring.split(hook)[1][:120]
-        ok("acct=_fin" in call, hook + " is bound to the finance account: " + call[:60])
-
-
-@test
-def t_connecting_the_sales_mailbox_as_accounts_is_refused():
-    """The likeliest mistake in the whole walk: whoever clicks the link is
-    probably already signed in as the sales mailbox. Agreeing would leave
-    reconciliation reading the wrong post and reporting a clean board."""
-    src = copilot_source()
-    cb = src.split("async def gmail_finance_callback")[1].split("\n    @mcp.custom_route")[0]
-    ok("addr.strip().lower() == sales.strip().lower()" in cb,
-       "the two addresses are compared, tolerant of case and whitespace")
-    ok("disconnect(google_mail.FINANCE)" in cb,
-       "and the wrong connection is thrown away rather than kept")
-    ok(cb.index("disconnect(google_mail.FINANCE)") < cb.index("That is the sales mailbox"),
-       "the token is dropped before the page is returned")
-
-
-@test
-def t_the_finance_token_is_a_credential_not_a_backup_item():
-    src = copilot_source()
-    eq(src.count('getattr(google_mail, "FINANCE_TOKEN_PATH"'), 2,
-       "excluded from the backup AND blocked at restore, like every other token")
-
-
-@test
-def t_a_thread_still_queued_for_reading_is_not_marked_seen():
-    """The seen list is what stops a sweep refetching a year of mail. A thread
-    whose documents did not get read this time must come back, or its invoice
-    is dropped and nothing says so."""
-    stores = {"store": {"exceptions": {}, "watermarks": {}}, "cache": {}, "docs": {}}
-    threads = {("t%d" % i): {"id": "t%d" % i, "subject": "Invoice %d" % i,
-                             "messages": [{"id": "m%d" % i, "at": "2026-08-2%d" % (i % 10),
-                                           "from_email": "ap@supplier.com",
-                                           "files": [{"id": "a%d" % i, "name": "inv.pdf",
-                                                      "size": 100}]}]}
-               for i in range(12)}
-
-    async def search(q, mx=200, out_complete=None):
-        if out_complete is not None:
-            out_complete.append(True)
-        return set(threads)
-
-    async def thread(tid):
-        return threads[tid]
-
-    async def gbytes(mid, aid):
-        return b"%PDF-1.4 tiny"
-
-    fx = _FakeXero(invoices=[_raw_xinv("INV-1", "10.00")])
-    async def fake_tool_json(reg, name, args):
-        return {"orders": []} if name == "shopify_list_orders" else {"available": False}
-    saved_cap = _rc.DOCS_PER_SWEEP
-    _rc.DOCS_PER_SWEEP = 4
-    import copy as _copy
-    _rc.configure(xero=fx, registry={}, tool_json=fake_tool_json,
-                  mail_connected=lambda: True,
-                  mail_search=search, mail_thread=thread, gmail_bytes=gbytes, ai_call=None,
-                  load_store=lambda: _copy.deepcopy(stores["store"]),
-                  write_store=lambda d: stores.update(store=d),
-                  load_cache=lambda: _copy.deepcopy(stores["cache"]),
-                  write_cache=lambda d: stores.update(cache=d),
-                  load_docs=lambda: _copy.deepcopy(stores["docs"]),
-                  write_docs=lambda d: stores.update(docs=d))
-    try:
-        r = run_async(_rc.sweep())
-        ok(r["ok"], r)
-        seen = set(stores["store"].get("seen_threads") or [])
-        read = set(stores["docs"].keys())
-        eq(len(read), 4, "only the per-sweep budget was read: %d" % len(read))
-        ok(len(seen) == 4, "and only those threads are marked seen: %d" % len(seen))
-        ok(any("queued for later sweeps" in n for n in r["notes"]),
-           "the backlog is stated rather than silently dropped: %s" % r["notes"])
-        r2 = run_async(_rc.sweep())
-        ok(len(stores["docs"]) > 4, "the next sweep picks up where it stopped: %d"
-           % len(stores["docs"]))
-    finally:
-        _rc.DOCS_PER_SWEEP = saved_cap
-        _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
-                      mail_connected=None, mail_thread=None, gmail_bytes=None,
-                      load_store=None, write_store=None,
-                      load_cache=None, write_cache=None, load_docs=None, write_docs=None)
-
-
-@test
-def t_no_accounts_mailbox_means_the_sweep_says_so():
-    """A sweep with no finance mail connected has checked no documents at all.
-    Silence there would read as 'no missing invoices'."""
-    fx = _FakeXero(invoices=[_raw_xinv("INV-1", "10.00")])
-    stores = _recon_world(fx, [])
-    try:
-        r = run_async(_rc.sweep())
-        ok(any("accounts mailbox is not connected" in n for n in r["notes"]),
-           "the gap is reported: %s" % r["notes"])
-    finally:
-        _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
-                      mail_thread=None, load_store=None, write_store=None,
-                      load_cache=None, write_cache=None, load_docs=None, write_docs=None)
-
-
-def _mail_world(threads, gbytes=None, search=None, docs_cap=None):
-    """A reconciliation world with a working accounts mailbox behind it."""
-    import copy as _copy
-    stores = {"store": {"exceptions": {}, "watermarks": {}}, "cache": {}, "docs": {}}
-
-    async def default_search(q, mx=200, out_complete=None):
-        if out_complete is not None:
-            out_complete.append(True)
-        return set(threads)
-
-    async def thread(tid):
-        return threads[tid]
-
-    async def default_bytes(mid, aid):
-        return b"%PDF-1.4 tiny"
-
-    async def tools(reg, name, args):
-        return {"orders": []} if name == "shopify_list_orders" else {"available": False}
-
-    _rc.configure(xero=_FakeXero(invoices=[_raw_xinv("INV-1", "10.00")]), registry={},
-                  tool_json=tools, mail_connected=lambda: True,
-                  mail_search=search or default_search, mail_thread=thread,
-                  gmail_bytes=gbytes or default_bytes, ai_call=None,
-                  load_store=lambda: _copy.deepcopy(stores["store"]),
-                  write_store=lambda d: stores.update(store=d),
-                  load_cache=lambda: _copy.deepcopy(stores["cache"]),
-                  write_cache=lambda d: stores.update(cache=d),
-                  load_docs=lambda: _copy.deepcopy(stores["docs"]),
-                  write_docs=lambda d: stores.update(docs=d))
-    return stores
-
-
-def _mail_world_off():
-    _rc.configure(xero=None, registry=None, tool_json=None, mail_connected=None,
-                  mail_search=None, mail_thread=None, gmail_bytes=None,
-                  load_store=None, write_store=None, load_cache=None,
-                  write_cache=None, load_docs=None, write_docs=None)
-
-
 def _thread_with_pdf(i):
     return {"id": "t%d" % i, "subject": "Invoice %d" % i,
             "messages": [{"id": "m%d" % i, "at": "2026-08-20", "from_email": "ap@supplier.com",
                           "files": [{"id": "a%d" % i, "name": "inv.pdf", "size": 100}]}]}
-
-
-@test
-def t_what_the_sweep_learned_survives_its_own_reload():
-    """The sweep reloads the store before merging, to avoid clobbering a status
-    someone set while it ran. Everything it learned has to cross that reload:
-    seen_threads did not, so the mailbox crawl reread its first threads forever
-    and never reached the rest of the mailbox."""
-    threads = {("t%d" % i): _thread_with_pdf(i) for i in range(3)}
-    stores = _mail_world(threads)
-    try:
-        run_async(_rc.sweep())
-        seen = stores["store"].get("seen_threads") or []
-        eq(sorted(seen), ["t0", "t1", "t2"],
-           "the walked threads persisted past the reload: %s" % seen)
-    finally:
-        _mail_world_off()
-
-
-@test
-def t_a_mailbox_that_cannot_be_read_is_never_a_clean_sweep():
-    """The house rule, on the exact read this feature exists for. A search that
-    fails has checked NO documents; silence there reads as 'no missing
-    invoices', which is the one thing this tool must never imply."""
-    async def broken(q, mx=200, out_complete=None):
-        raise RuntimeError("Gmail 503")
-    stores = _mail_world({}, search=broken)
-    try:
-        r = run_async(_rc.sweep())
-        ok(any("could not be read" in n for n in r["notes"]),
-           "the failure is on the report: %s" % r["notes"])
-    finally:
-        _mail_world_off()
-
-
-@test
-def t_a_document_that_could_not_be_read_comes_back_next_sweep():
-    """A thread is only 'seen' once its documents are actually IN the store. A
-    fetch that failed used to mark it seen anyway, so that supplier's
-    remittance became permanently invisible, with nothing said."""
-    calls = {"n": 0}
-
-    async def flaky(mid, aid):
-        calls["n"] += 1
-        if calls["n"] <= 1:
-            raise RuntimeError("Gmail 500 on the attachment")
-        return b"%PDF-1.4 tiny"
-
-    stores = _mail_world({"t1": _thread_with_pdf(1)}, gbytes=flaky)
-    try:
-        r = run_async(_rc.sweep())
-        eq(stores["docs"], {}, "nothing was stored")
-        eq(stores["store"].get("seen_threads") or [], [],
-           "and the thread is NOT written off as seen")
-        ok(any("could not be read" in n and "retried" in n for n in r["notes"]),
-           "the sweep says so: %s" % r["notes"])
-        run_async(_rc.sweep())
-        eq(len(stores["docs"]), 1, "the next sweep picks it up")
-        eq(stores["store"].get("seen_threads") or [], ["t1"], "and only then is it seen")
-    finally:
-        _mail_world_off()
-
-
-@test
-def t_a_disconnected_accounts_mailbox_is_reported_not_assumed():
-    """The note used to be keyed on whether a hook was wired, which in the real
-    app is always. So a disconnected mailbox produced a silent clean sweep."""
-    stores = _mail_world({"t1": _thread_with_pdf(1)})
-    try:
-        _rc.configure(mail_connected=lambda: False)
-        r = run_async(_rc.sweep())
-        ok(any("not connected" in n for n in r["notes"]),
-           "the sweep says the mailbox is not connected: %s" % r["notes"])
-        eq(stores["docs"], {}, "and nothing pretended to be checked")
-    finally:
-        _mail_world_off()
-
-
-@test
-def t_the_newest_mail_is_read_first():
-    """With a per-sweep budget, an unordered set means the newest invoice can
-    sit unread behind a year of old post."""
-    threads = {("t%03d" % i): _thread_with_pdf(i) for i in range(60)}
-    for i in range(60):
-        threads["t%03d" % i]["id"] = "t%03d" % i
-    saved = _rc.THREADS_PER_SWEEP
-    _rc.THREADS_PER_SWEEP = 5
-    stores = _mail_world(threads)
-    try:
-        run_async(_rc.sweep())
-        seen = sorted(stores["store"].get("seen_threads") or [])
-        eq(seen, ["t055", "t056", "t057", "t058", "t059"],
-           "the highest (newest) thread ids were read first: %s" % seen)
-    finally:
-        _rc.THREADS_PER_SWEEP = saved
-        _mail_world_off()
-
-
-@test
-def t_a_shared_token_file_cannot_delete_the_sales_connection():
-    """With colliding paths, a finance connect would write over the sales
-    token and a finance disconnect would delete it: either takes the Inbox tab
-    down with it."""
-    saved = _gm.FINANCE_TOKEN_PATH
-    try:
-        _gm.FINANCE_TOKEN_PATH = _gm.TOKEN_PATH
-        try:
-            _gm.save_connection("rt", "accounts@example.com", _gm.FINANCE)
-            ok(False, "saving a colliding account must raise")
-        except _gm.GmailError as e:
-            ok("its own token file" in str(e), str(e))
-        # And disconnect must not remove the file it would be sharing.
-        os.makedirs(os.path.dirname(_gm.TOKEN_PATH) or ".", exist_ok=True)
-        with open(_gm.TOKEN_PATH, "w", encoding="utf-8") as fh:
-            json.dump({"refresh_token": "sales-rt", "address": "sales@example.com"}, fh)
-        _gm.disconnect(_gm.FINANCE)
-        ok(os.path.exists(_gm.TOKEN_PATH), "the sales token file survived")
-    finally:
-        _gm.FINANCE_TOKEN_PATH = saved
-        try:
-            os.remove(_gm.TOKEN_PATH)
-        except FileNotFoundError:
-            pass
-
-
-@test
-def t_connecting_the_accounts_mailbox_needs_no_secret_in_a_url():
-    """The first attempt handed out /oauth/gmail-finance/start?key=YOUR_CONNECT_SECRET,
-    a literal placeholder, and opening it returned Forbidden. The sales mailbox
-    already had the better answer: a button that mints a single-use ticket."""
-    def go():
-        ensure_auth()
-        saved = (_gm.OAUTH_CLIENT_ID, _gm.OAUTH_CLIENT_SECRET)
-        _gm.OAUTH_CLIENT_ID = _gm.OAUTH_CLIENT_SECRET = "demo"
-        try:
-            _connect_link_body()
-        finally:
-            _gm.OAUTH_CLIENT_ID, _gm.OAUTH_CLIENT_SECRET = saved
-
-    def _connect_link_body():
-        r = post("/api/recon/connect-link", {"address": "accounts@example.com"})
-        eq(r.status_code, 200, r.text[:160])
-        url = r.json()["url"]
-        ok(url.startswith("/oauth/gmail-finance/start?t="), url)
-        ok("YOUR_CONNECT_SECRET" not in url and "key=" not in url,
-           "no server secret travels in the URL")
-        ticket = url.split("t=")[1]
-        ok(ticket in oauth._fin_connect_tickets, "the ticket is live")
-        # It opens the walk once, and only once.
-        h = {"Authorization": "Bearer " + tok()}
-        first = client.get(url, headers=h, follow_redirects=False)
-        ok(first.status_code in (302, 307), "the ticket opens the consent walk: %s" % first.status_code)
-        again = client.get(url, headers=h, follow_redirects=False)
-        eq(again.status_code, 403, "and cannot be replayed")
-        # A ticket for the sales mailbox must not open the accounts one.
-        mail._mail_connect_tickets["borrowed"] = time.time() + 300
-        cross = client.get("/oauth/gmail-finance/start?t=borrowed", headers=h,
-                           follow_redirects=False)
-        eq(cross.status_code, 403, "the two mailboxes do not share tickets")
-    with_accounts(go)
-
-
-@test
-def t_only_the_master_can_connect_the_accounts_mailbox():
-    def go():
-        r = post("/api/team/user", {"op": "create", "name": "Admin Ann", "username": "ann",
-                                    "role": "admin"})
-        uid, pw = r.json()["id"], r.json()["starter_password"]
-        lg = client.post("/api/auth/login", json={"username": "ann", "password": pw},
-                         headers={"Authorization": "Bearer " + tok()}).json()
-        sess = lg.get("session")
-        ch = post_s(sess, "/api/auth/password", {"current": pw, "new": "ann-pw-55120"})
-        sess = ch.json().get("session") or sess
-        rr = post_s(sess, "/api/recon/connect-link", {})
-        eq(rr.status_code, 403, "an admin cannot connect a mailbox: " + rr.text[:120])
-    with_accounts(go)
 
 
 @test
@@ -16875,595 +15538,15 @@ def t_the_consent_walk_names_the_mailbox_it_wants():
 
 
 @test
-def t_a_mailbox_other_than_the_one_asked_for_is_not_saved():
-    """Google can hand back a different account than the one hinted, which is
-    exactly what happens when the browser is signed in elsewhere. Accepting it
-    would leave reconciliation reading whatever mailbox turned up."""
-    def go():
-        ensure_auth()
-        saved = (_gm.OAUTH_CLIENT_ID, _gm.OAUTH_CLIENT_SECRET, _gm.exchange_code)
-        _gm.OAUTH_CLIENT_ID = _gm.OAUTH_CLIENT_SECRET = "demo"
-        try:
-            blank = post("/api/recon/connect-link", {})
-            eq(blank.status_code, 400, "an empty address is refused: " + blank.text[:120])
-            ok("already signed into" in blank.text, "and says why it matters")
-            r = post("/api/recon/connect-link", {"address": "accounts@example.com"})
-            eq(r.status_code, 200, r.text[:140])
-            url = r.json()["url"]
-            h = {"Authorization": "Bearer " + tok()}
-            red = client.get(url, headers=h, follow_redirects=False)
-            eq(red.status_code, 302, "the walk starts")
-            loc = red.headers["location"]
-            ok("AccountChooser" in loc and "Email=accounts%40example.com" in loc,
-               "Google is told which account: " + loc[:120])
-            from urllib.parse import urlparse, parse_qs
-            inner = parse_qs(urlparse(loc).query)["continue"][0]
-            state = parse_qs(urlparse(inner).query)["state"][0]
-
-            # Google comes back having connected the WRONG mailbox.
-            async def wrong(code, redirect_uri, acct=_gm.SALES):
-                _gm.save_connection("rt", "gobo@projectedimage.com", acct)
-                return True
-            _gm.exchange_code = wrong
-            cb = client.get(f"/oauth/gmail-finance/callback?state={state}&code=abc", headers=h)
-            ok("Wrong mailbox" in cb.text, "it is refused: " + cb.text[:200])
-            ok("accounts@example.com" in cb.text and "gobo@projectedimage.com" in cb.text,
-               "and both addresses are named so the mistake is obvious")
-            ok(not _gm.connected(_gm.FINANCE), "nothing was saved")
-        finally:
-            _gm.OAUTH_CLIENT_ID, _gm.OAUTH_CLIENT_SECRET, _gm.exchange_code = saved
-            _gm.disconnect(_gm.FINANCE)
-    with_accounts(go)
-
-
-@test
-def t_xero_connects_by_button_too():
-    """The Xero card had the same placeholder URL the mailbox card did, which
-    returns Forbidden when opened exactly as written."""
-    def go():
-        ensure_auth()
-        saved = (xero_api.CLIENT_ID, xero_api.CLIENT_SECRET)
-        xero_api.CLIENT_ID = xero_api.CLIENT_SECRET = "demo"
-        try:
-            src = copilot_source()
-            ok("YOUR_CONNECT_SECRET" not in src,
-               "no placeholder secret is handed to anyone, for either connection")
-            r = post("/api/recon/xero-link", {})
-            eq(r.status_code, 200, r.text[:140])
-            url = r.json()["url"]
-            ok(url.startswith("/oauth/xero/start?t="), url)
-            h = {"Authorization": "Bearer " + tok()}
-            first = client.get(url, headers=h, follow_redirects=False)
-            eq(first.status_code, 302, "the ticket opens the walk")
-            ok("xero.com" in first.headers["location"], first.headers["location"][:80])
-            again = client.get(url, headers=h, follow_redirects=False)
-            eq(again.status_code, 403, "and cannot be replayed")
-            # A Gmail ticket must not open the Xero walk.
-            oauth._fin_connect_tickets["borrowed"] = {"exp": time.time() + 300, "want": ""}
-            cross = client.get("/oauth/xero/start?t=borrowed", headers=h, follow_redirects=False)
-            eq(cross.status_code, 403, "tickets are not interchangeable between connections")
-        finally:
-            xero_api.CLIENT_ID, xero_api.CLIENT_SECRET = saved
-    with_accounts(go)
-
-
-@test
-def t_the_xero_consent_asks_only_for_what_it_reads():
-    """Xero answered the first attempt with invalid_scope. Two things were
-    wrong: scopes nothing in the client reads, and spaces encoded as '+',
-    which a literal parser sees as one enormous invalid scope."""
-    from urllib.parse import urlparse, parse_qs
-    saved = xero_api.CLIENT_ID
-    xero_api.CLIENT_ID = "demo"
-    try:
-        url = xero_api.consent_url("https://x/cb", "st")
-    finally:
-        xero_api.CLIENT_ID = saved
-    ok("%20" in url and "scope=offline_access%20" in url,
-       "scope separators are %20, not +: " + url[:150])
-    scopes = set(parse_qs(urlparse(url).query)["scope"][0].split())
-    ok("offline_access" in scopes, "the refresh token needs offline_access")
-    # Every scope must correspond to something the client actually calls.
-    src = open(os.path.join(HERE, "xero.py"), encoding="utf-8").read()
-    # Xero's granular scopes, and the endpoints each one actually covers.
-    # The broad accounting.transactions.read is deprecated and is refused
-    # outright for apps created since March 2026, which is what invalid_scope
-    # was: a documented name that new apps are not issued.
-    ok("accounting.transactions" not in " ".join(scopes),
-       "the deprecated broad scope is not asked for: %s" % sorted(scopes))
-    reads = {
-        "accounting.invoices.read": ("Invoices", "CreditNotes"),
-        "accounting.payments.read": ("Payments",),
-        "accounting.banktransactions.read": ("BankTransactions",),
-        "accounting.contacts.read": ("Contacts",),
-        "accounting.settings.read": ("Accounts", "TaxRates", "Organisation"),
-        "accounting.journals.read": ("Journals",),
-    }
-    # Everything the SWEEP reads must be covered. Fetchers no check calls are
-    # deliberately outside the consent: an app is assigned a set of granular
-    # scopes, and asking for one it was not assigned fails the whole
-    # authorization, so an unused scope is not a free extra.
-    covered = {e for sc, eps in reads.items() if sc in scopes for e in eps}
-    for endpoint in ("Invoices", "CreditNotes", "Payments", "BankTransactions"):
-        ok(endpoint in covered, endpoint + " is read every sweep but no scope covers it")
-    src_recon = open(os.path.join(HERE, "recon.py"), encoding="utf-8").read()
-    for scope, endpoints in reads.items():
-        if scope in scopes:
-            continue
-        for fetcher, needed in (("list_contacts", "Contacts"), ("list_accounts", "Accounts"),
-                                ("list_tax_rates", "TaxRates"), ("list_journals", "Journals"),
-                                ("organisation", "Organisation")):
-            if needed in endpoints:
-                ok("_xero." + fetcher + "(" not in src_recon,
-                   fetcher + " is called but its scope is not requested: add " + scope)
-    for scope, endpoints in reads.items():
-        if scope in scopes:
-            ok(any('"' + e + '"' in src for e in endpoints),
-               scope + " is asked for and used")
-    extra = scopes - set(reads) - {"openid", "offline_access", "profile", "email"}
-    eq(extra, set(), "nothing is asked for that no fetcher uses: %s" % extra)
-
-
-@test
-def t_disconnecting_xero_revokes_rather_than_forgets():
-    """A refresh token we merely delete stays valid at Xero for up to 60 days.
-    Disconnect has to end the grant at the provider, or it is housekeeping
-    dressed as a security control."""
-    def go():
-        ensure_auth()
-        saved = (xero_api.CLIENT_ID, xero_api.CLIENT_SECRET, xero_api.httpx.AsyncClient)
-        xero_api.CLIENT_ID = xero_api.CLIENT_SECRET = "demo"
-        called = {}
-
-        class _R:
-            status_code = 200
-            text = ""
-
-        class _C:
-            async def __aenter__(self): return self
-            async def __aexit__(self, *a): return False
-            async def post(self, url, **kw):
-                called["url"] = url
-                called["token"] = (kw.get("data") or {}).get("token")
-                called["auth"] = kw.get("auth")
-                return _R()
-        xero_api.httpx.AsyncClient = lambda *a, **k: _C()
-        try:
-            xero_api._write_token({"refresh_token": "rt-live", "tenant_id": "t1",
-                                   "tenant_name": "Projected Image"})
-            # The cache holds a copy of the books; it must not outlive the consent.
-            import copilot as _cp
-            reconciliation._write_recon_cache({"xero": {"invoices": {"a": {"id": "a"}}},
-                                    "shopify": {"orders": {}}})
-            r = post("/api/recon/disconnect", {"what": "xero"})
-            eq(r.status_code, 200, r.text[:160])
-            ok(called.get("url", "").endswith("/connect/revocation"),
-               "Xero's revocation endpoint was called: %s" % called.get("url"))
-            eq(called.get("token"), "rt-live", "with the live refresh token")
-            ok(called.get("auth"), "authenticated with the client credentials")
-            ok(not xero_api.connected(), "and the local copy is gone")
-            eq(reconciliation._load_recon_cache().get("xero"), None,
-               "the cached accounting records went with it")
-            ok("shopify" in reconciliation._load_recon_cache(),
-               "while the rest of the cache is untouched")
-        finally:
-            xero_api.CLIENT_ID, xero_api.CLIENT_SECRET, xero_api.httpx.AsyncClient = saved
-            xero_api.disconnect()
-    with_accounts(go)
-
-
-@test
-def t_only_the_master_can_disconnect():
-    def go():
-        r = post("/api/team/user", {"op": "create", "name": "Adam", "username": "adamx",
-                                    "role": "admin"})
-        uid, pw = r.json()["id"], r.json()["starter_password"]
-        lg = client.post("/api/auth/login", json={"username": "adamx", "password": pw},
-                         headers={"Authorization": "Bearer " + tok()}).json()
-        sess = lg.get("session")
-        ch = post_s(sess, "/api/auth/password", {"current": pw, "new": "adam-pw-77120"})
-        sess = ch.json().get("session") or sess
-        # Hand this admin the tab explicitly, so what the test proves is the
-        # master-only check and not the opt-in gate in front of it.
-        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": list(team.TAB_KEYS)})
-        for what in ("xero", "mailbox"):
-            rr = post_s(sess, "/api/recon/disconnect", {"what": what})
-            eq(rr.status_code, 403, "an admin cannot disconnect " + what)
-    with_accounts(go)
-
-
-@test
 def t_token_files_are_not_world_readable():
-    """Xero: a leaked refresh token 'would allow anyone to generate new
-    access_tokens for that user with the same permissions'."""
+    """A leaked refresh token would let anyone read the mailbox, so its file
+    is owner-only."""
     import stat
-    xero_api._write_token({"refresh_token": "rt", "tenant_id": "t"})
-    mode = stat.S_IMODE(os.stat(xero_api.TOKEN_PATH).st_mode)
-    eq(mode & 0o077, 0, "the Xero token file is owner-only: %o" % mode)
-    xero_api.disconnect()
-    _gm.save_connection("rt", "accounts@example.com", _gm.FINANCE)
-    mode2 = stat.S_IMODE(os.stat(_gm.FINANCE.token_path).st_mode)
-    eq(mode2 & 0o077, 0, "and so is the mailbox token: %o" % mode2)
-    _gm.disconnect(_gm.FINANCE)
-    # The records those tokens fetched are not less sensitive than the tokens:
-    # the cache is the books, and the docs store is the contents of bank
-    # statements and remittance advices.
-    reconciliation._write_recon_cache({"xero": {"invoices": {}}})
-    reconciliation._write_recon_docs({"t1": {"kind": "remittance"}})
-    reconciliation._write_recon({"exceptions": {}})
-    for path, what in ((reconciliation.RECON_CACHE_PATH, "the accounting cache"),
-                       (reconciliation.RECON_DOCS_PATH, "the extracted documents"),
-                       (reconciliation.RECON_PATH, "the exception list")):
-        m = stat.S_IMODE(os.stat(path).st_mode)
-        eq(m & 0o077, 0, "%s is owner-only: %o" % (what, m))
-
-
-@test
-def t_a_xero_outage_is_not_reported_as_a_dead_token():
-    """A 503 from Xero and a revoked refresh token look nothing alike, and the
-    advice differs completely: one says wait, the other says reconnect, and
-    reconnecting spends a healthy token on a revocation. Only invalid_grant
-    means the credential is gone."""
-    saved = (xero_api.httpx.AsyncClient, xero_api.RETRY_WAITS,
-             xero_api.CLIENT_ID, xero_api.CLIENT_SECRET)
-    xero_api.RETRY_WAITS = (0.0, 0.0)     # the retry policy, without the wait
-    xero_api.CLIENT_ID = xero_api.CLIENT_SECRET = "demo"
-    tries = {"n": 0}
-    body = {"status": 503, "json": {}}
-
-    class _R:
-        @property
-        def status_code(self): return body["status"]
-        text = "upstream"
-        def json(self): return body["json"]
-
-    class _C:
-        async def __aenter__(self): return self
-        async def __aexit__(self, *a): return False
-        async def post(self, url, **kw):
-            tries["n"] += 1
-            return _R()
-    xero_api.httpx.AsyncClient = lambda *a, **k: _C()
-    try:
-        xero_api._write_token({"refresh_token": "rt-healthy", "tenant_id": "t1"})
-        xero_api._state["access"] = ""
-        xero_api._state["access_exp"] = 0.0
-
-        err = None
-        try:
-            run(xero_api._access_token())
-        except Exception as e:
-            err = e
-        ok(isinstance(err, xero_api.XeroTransient),
-           "a 5xx is a transient, not a dead credential: %r" % (err,))
-        eq(tries["n"], 3, "and it was retried rather than given up on at once")
-        ok("reconnect" not in str(err).lower() or "only if it persists" in str(err).lower(),
-           "the advice does not tell them to reconnect: %s" % err)
-        ok(xero_api.connected(), "the healthy refresh token was NOT thrown away")
-
-        # Now Xero actually refuses the credential.
-        body["status"], body["json"] = 400, {"error": "invalid_grant"}
-        xero_api._state["access_exp"] = 0.0
-        err = None
-        try:
-            run(xero_api._access_token())
-        except Exception as e:
-            err = e
-        ok(not isinstance(err, xero_api.XeroTransient), "invalid_grant is not transient")
-        ok("reconnect" in str(err).lower(), "and THAT one says reconnect: %s" % err)
-        # Live fault 2026-10-07: the page kept a green Xero tag and offered no
-        # Reconnect, because the refusal reached it only as a sentence.
-        st = xero_api.status()
-        ok(st.get("needs_reconnect") is True, "the status says so as a flag the page can act on: %r" % st)
-        # A restart (every deploy) empties memory; the refusal must outlive it,
-        # or the page goes back to a green tag over a dead link.
-        xero_api._state["token_error"] = ""
-        st = xero_api.status()
-        ok(st.get("needs_reconnect") is True and "Reconnect" in (st.get("warning") or ""),
-           "the refusal outlives a restart, with its warning: %r" % st)
-        # A fresh consent writes a fresh token file, which carries no refusal.
-        xero_api._write_token({"refresh_token": "rt-fresh", "tenant_id": "t1", "tenant_name": "Projected Image"})
-        ok(xero_api.status().get("needs_reconnect") is False, "and a fresh consent clears it")
-        xero_api.disconnect()
-        ok(xero_api.status().get("needs_reconnect") is False, "as does a disconnect")
-    finally:
-        (xero_api.httpx.AsyncClient, xero_api.RETRY_WAITS,
-         xero_api.CLIENT_ID, xero_api.CLIENT_SECRET) = saved
-        xero_api._state["token_error"] = ""
-        xero_api.disconnect()
-
-
-@test
-def t_a_token_that_could_not_be_saved_retries_inside_xeros_grace():
-    """Xero rotates the refresh token on every use and honours the previous one
-    for about 30 minutes. If the new one cannot be written, that grace is the
-    whole safety margin: cache the access token for minutes rather than half an
-    hour, and put it somewhere a person will see."""
-    saved = (xero_api.httpx.AsyncClient, xero_api._write_token,
-             xero_api.CLIENT_ID, xero_api.CLIENT_SECRET)
-    xero_api.CLIENT_ID = xero_api.CLIENT_SECRET = "demo"
-
-    class _R:
-        status_code = 200
-        text = ""
-        def json(self):
-            return {"access_token": "at-new", "refresh_token": "rt-rotated",
-                    "expires_in": 1800}
-
-    class _C:
-        async def __aenter__(self): return self
-        async def __aexit__(self, *a): return False
-        async def post(self, url, **kw): return _R()
-    try:
-        xero_api._write_token({"refresh_token": "rt-old", "tenant_id": "t1",
-                               "tenant_name": "Projected Image"})
-        xero_api.httpx.AsyncClient = lambda *a, **k: _C()
-        def _boom(d):
-            raise OSError("read-only file system")
-        xero_api._write_token = _boom
-        xero_api._state["access"] = ""
-        xero_api._state["access_exp"] = 0.0
-        at = run(xero_api._access_token())
-        eq(at, "at-new", "the call still worked: the token itself is fine")
-        left = xero_api._state["access_exp"] - time.monotonic()
-        ok(left < 600, "the access token is cached for minutes, not the full 30: %.0fs" % left)
-        st = xero_api.status()
-        ok(st.get("warning"), "and the failure is on the status the tab reads")
-        ok("volume" in st["warning"] or "save" in st["warning"].lower(),
-           "in words that name the actual problem: %s" % st["warning"])
-        ok(st.get("needs_reconnect") is False, "a token that could not be saved still works, so no reconnect yet")
-    finally:
-        (xero_api.httpx.AsyncClient, xero_api._write_token,
-         xero_api.CLIENT_ID, xero_api.CLIENT_SECRET) = saved
-        xero_api._state["save_failed_at"] = 0.0
-        xero_api.disconnect()
-
-
-@test
-def t_xeros_daily_limit_is_said_at_once_not_retried():
-    """Xero allows 1,000 calls a day per organisation on its Starter tier and
-    5,000 above it. A daily 429 asks for a wait of hours: the client spent
-    three retries on it and then showed a bare 429 in the reconciliation notes.
-    It now says what happened, and when it clears, on the first answer."""
-    calls, answers = [], []
-    class _R:
-        def __init__(self, status, headers):
-            self.status_code, self.headers, self.content = status, headers, b"{}"
-        def json(self):
-            return {"Invoices": []}
-        def raise_for_status(self):
-            if self.status_code >= 400:
-                raise RuntimeError(self.status_code)
-    class _C:
-        async def __aenter__(self): return self
-        async def __aexit__(self, *a): return False
-        async def get(self, url, **kw):
-            calls.append(url)
-            return answers.pop(0)
-    async def _tok():
-        return "at"
-    async def _no_pace():
-        return None
-    saved = (xero_api.httpx.AsyncClient, xero_api._access_token, xero_api._pace)
-    xero_api.httpx.AsyncClient = lambda *a, **k: _C()
-    xero_api._access_token, xero_api._pace = _tok, _no_pace
-    try:
-        answers[:] = [_R(429, {"X-Rate-Limit-Problem": "day", "Retry-After": "18000"})]
-        try:
-            run(xero_api._get("Invoices"))
-            ok(False, "a daily 429 must raise")
-        except xero_api.XeroDailyLimit as e:
-            ok("daily limit" in str(e) and "about 5 hours" in str(e), str(e))
-            ok(len(str(e)) <= 120, "and fits the line the reconciliation notes show")
-        eq(len(calls), 1, "asked once, not retried")
-        # A long wait marks the daily limit even if the header's wording changes.
-        calls.clear(); answers[:] = [_R(429, {"Retry-After": "7200"})]
-        try:
-            run(xero_api._get("Invoices"))
-            ok(False, "a two-hour wait must raise")
-        except xero_api.XeroDailyLimit as e:
-            ok("about 2 hours" in str(e), str(e))
-        eq(xero_api._wait_words(600), "10 minutes")
-        # The minute limit is still waited out and retried.
-        calls.clear()
-        answers[:] = [_R(429, {"X-Rate-Limit-Problem": "minute", "Retry-After": "1"}), _R(200, {})]
-        eq(run(xero_api._get("Invoices")), {"Invoices": []})
-        eq(len(calls), 2, "one wait, then the answer")
-    finally:
-        xero_api.httpx.AsyncClient, xero_api._access_token, xero_api._pace = saved
-
-
-@test
-def t_a_failed_revocation_keeps_the_token_rather_than_stranding_it():
-    """Deleting our only copy of a token Xero would not revoke leaves a live
-    credential in their hands with nothing left to kill it with. Keep it, say
-    so, and let the merchant insist."""
-    def go():
-        ensure_auth()
-        saved = (xero_api.CLIENT_ID, xero_api.CLIENT_SECRET, xero_api.httpx.AsyncClient)
-        xero_api.CLIENT_ID = xero_api.CLIENT_SECRET = "demo"
-
-        class _R:
-            status_code = 500
-            text = "boom"
-
-        class _C:
-            async def __aenter__(self): return self
-            async def __aexit__(self, *a): return False
-            async def post(self, url, **kw): return _R()
-        xero_api.httpx.AsyncClient = lambda *a, **k: _C()
-        try:
-            xero_api._write_token({"refresh_token": "rt-live", "tenant_id": "t1"})
-            reconciliation._write_recon_cache({"xero": {"invoices": {"a": {"id": "a"}}}})
-            r = post("/api/recon/disconnect", {"what": "xero"})
-            eq(r.status_code, 502, r.text[:200])
-            ok(r.json().get("can_force"), "the merchant is offered the way out")
-            ok(xero_api.connected(), "the token is still here, so revoking can be retried")
-            ok(reconciliation._load_recon_cache().get("xero"),
-               "and the books were not deleted for a disconnect that did not happen")
-            # Insisting forgets it anyway.
-            r2 = post("/api/recon/disconnect", {"what": "xero", "force": 1})
-            eq(r2.status_code, 200, r2.text[:200])
-            ok(not xero_api.connected(), "forced, it is gone")
-            eq(reconciliation._load_recon_cache().get("xero"), None, "and so are the books")
-        finally:
-            xero_api.CLIENT_ID, xero_api.CLIENT_SECRET, xero_api.httpx.AsyncClient = saved
-            xero_api.disconnect()
-    with_accounts(go)
-
-
-@test
-def t_the_books_are_not_handed_out_with_the_account():
-    """Reconciliation reads the company's accounting records, its bank line and
-    the accounts mailbox. A new dispatch login must not arrive already holding
-    all three: it is granted deliberately, or not at all."""
-    def go():
-        r = post("/api/team/user", {"op": "create", "name": "Nia", "username": "niax",
-                                    "role": "member"})
-        uid, pw = r.json()["id"], r.json()["starter_password"]
-        tabs = team._user_tabs(uid)
-        ok(isinstance(tabs, list), "a member is not given the unrestricted None")
-        ok("recon" not in tabs, "and reconciliation is not in the default grant")
-        ok("labels" in tabs and "mail" in tabs,
-           "while the everyday tabs still are: %r" % (tabs,))
-
-        lg = client.post("/api/auth/login", json={"username": "niax", "password": pw},
-                         headers={"Authorization": "Bearer " + tok()}).json()
-        sess = lg.get("session")
-        ch = post_s(sess, "/api/auth/password", {"current": pw, "new": "nia-pw-88231"})
-        sess = ch.json().get("session") or sess
-        rr = post_s(sess, "/api/recon/status", {})
-        eq(rr.status_code, 403, "and the door is shut, not merely hidden")
-
-        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["labels", "recon"]})
-        rr2 = post_s(sess, "/api/recon/status", {})
-        eq(rr2.status_code, 200, "granted explicitly, it opens")
-    with_accounts(go)
-
-
-@test
-def t_the_xero_double_cannot_drift_from_the_real_client():
-    """This double once fell a parameter behind the real client. Three of the
-    four reads raised TypeError, the sweep's per-source try/except turned each
-    into a note, and the suite went on passing green over a sweep that had read
-    a quarter of the accounts. A fake that no longer matches is not a test."""
-    import inspect
-    for name in ("list_invoices", "list_payments", "list_bank_transactions",
-                 "list_credit_notes"):
-        real = set(inspect.signature(getattr(xero_api, name)).parameters)
-        fake = set(inspect.signature(getattr(_FakeXero, name)).parameters) - {"self"}
-        eq(fake, real, name + ": the double has drifted from the real client")
-
-
-@test
-def t_a_sweep_that_could_not_read_an_account_says_so_out_loud():
-    """The swallow-and-note handler is right, but it is also how a broken read
-    hides. Any sweep in this suite that cannot read one of the four Xero
-    endpoints must fail here rather than quietly check three of them."""
-    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")],
-                   payments=[], bank=[], notes_=[])
-    st = _recon_world(fx, [_raw_order(1, "#104275", "842.00")])
-    r = run(_rc.sweep())
-    ok(r.get("ok"), "the sweep ran: %r" % (r,))
-    bad = [n for n in (r.get("notes") or []) if "could not be read" in n]
-    eq(bad, [], "no account went unread")
-    for bucket in ("invoices", "payments", "bank_transactions", "credit_notes"):
-        ok(bucket in (st["cache"].get("xero") or {}),
-           "every Xero bucket was actually populated, including %s" % bucket)
-
-
-@test
-def t_every_xero_read_is_windowed():
-    """Only invoices were filtered by date, so a first sync pulled the whole
-    history of payments, bank lines and credit notes to reconcile four months
-    of them. The safest copy of a record is the one never made."""
-    sent = []
-
-    async def fake_paged(path, key, params=None, ims=None, max_pages=50):
-        sent.append((path, dict(params or {})))
-        return []
-
-    saved = xero_api._paged
-    xero_api._paged = fake_paged
-    try:
-        run_async(xero_api.list_invoices(since="2026-05-01"))
-        run_async(xero_api.list_payments(since="2026-05-01"))
-        run_async(xero_api.list_bank_transactions(since="2026-05-01"))
-        run_async(xero_api.list_credit_notes(since="2026-05-01"))
-    finally:
-        xero_api._paged = saved
-    eq(len(sent), 4, sent)
-    for path, params in sent:
-        ok("where" in params, path + " is read without a date window")
-        eq(params["where"], "Date >= DateTime(2026,5,1)",
-           path + " uses the shared window: " + params["where"])
-
-
-@test
-def t_the_sweep_asks_for_one_window_not_all_history():
-    """Watch what the sweep actually SENDS. Only invoices were windowed, so a
-    first sync pulled every payment, bank line and credit note the business had
-    ever recorded in order to check four months of them."""
-    asked = {}
-
-    class _Recorder(_FakeXero):
-        async def list_invoices(self, since=None, modified_since=None):
-            asked["invoices"] = since; return []
-        async def list_payments(self, since=None, modified_since=None):
-            asked["payments"] = since; return []
-        async def list_bank_transactions(self, since=None, modified_since=None):
-            asked["bank_transactions"] = since; return []
-        async def list_credit_notes(self, since=None, modified_since=None):
-            asked["credit_notes"] = since; return []
-
-    _recon_world(_Recorder(), [])
-    r = run(_rc.sweep())
-    ok(r.get("ok"), "the sweep ran: %r" % (r,))
-    eq(sorted(asked), ["bank_transactions", "credit_notes", "invoices", "payments"],
-       "all four reads happened")
-    eq(len(set(asked.values())), 1, "and all four asked for the SAME window: %r" % (asked,))
-    # The horizon must be the one we KEEP records to, not the shorter window
-    # the checks use, or a record still in the cache can never be refreshed.
-    eq(list(asked.values())[0], _rc._cutoff_day(_rc.FETCH_DAYS),
-       "the window is the retention horizon")
-    eq(_rc.FETCH_DAYS, _rc.CACHE_KEEP_DAYS,
-       "which is the same number we prune at, by construction")
-
-
-@test
-def t_reconciliation_stores_do_not_keep_records_for_ever():
-    """Every other store in this app prunes. These held third parties'
-    financial records and document text with no expiry at all."""
-    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-    old = (_dt.now(_tz.utc) - _td(days=400)).strftime("%Y-%m-%d")
-    recent = _dt.now(_tz.utc).strftime("%Y-%m-%d")
-    cache = {"xero": {"invoices": {"old": {"id": "old", "date": old},
-                                   "new": {"id": "new", "date": recent}},
-                      "payments": {"po": {"id": "po", "date": old}}},
-             "shopify": {"orders": {"oo": {"id": "oo", "created_at": old},
-                                    "on": {"id": "on", "created_at": recent}}}}
-    docs = {"d_old": {"date": old + "T09:00:00Z", "doc_type": "remittance"},
-            "d_new": {"date": recent + "T09:00:00Z", "doc_type": "remittance"}}
-    settled = _rc.make_exc("duplicate_bill_number", "high", "Settled long ago", ["s1"],
-                           evidence=[_rc.ev("xero", "bill", "Bill 1", {"id": "b"}, 1)])
-    settled["status"] = "explained"
-    settled["updated"] = (_dt.now(_tz.utc) - _td(days=400)).isoformat()
-    live = _rc.make_exc("overpaid_invoice", "high", "Still open", ["s2"],
-                        evidence=[_rc.ev("xero", "invoice", "Invoice 2", {"id": "i"}, 1)])
-    live["updated"] = (_dt.now(_tz.utc) - _td(days=400)).isoformat()
-    store = {"exceptions": {settled["id"]: settled, live["id"]: live}}
-
-    notes = _rc.prune(cache, docs, store)
-    eq(set(cache["xero"]["invoices"]), {"new"}, "records past the window are dropped")
-    eq(cache["xero"]["payments"], {}, "including payments, not just invoices")
-    eq(set(cache["shopify"]["orders"]), {"on"}, "and the Shopify side too")
-    eq(set(docs), {"d_new"}, "old documents go with them")
-    eq(settled["evidence"], [], "a settled discrepancy sheds its copied records")
-    ok(settled.get("evidence_dropped"), "and says that it did")
-    ok(settled["title"] and settled["status"] == "explained",
-       "while keeping what was decided: the audit trail is the point")
-    ok(live["evidence"], "an OPEN discrepancy keeps its evidence however old it is")
-    ok(any("dropped" in n for n in notes), "and the sweep reports the deletions: %s" % notes)
+    import google_mail as _gm
+    _gm.save_connection("rt", "sales@example.com")
+    mode = stat.S_IMODE(os.stat(_gm.SALES.token_path).st_mode)
+    eq(mode & 0o077, 0, "the mailbox token is owner-only: %o" % mode)
+    _gm.disconnect()
 
 
 @test
@@ -18504,7 +16587,7 @@ def t_big_answers_are_compressed_and_streams_are_left_alone():
 def t_granting_every_tab_grants_every_tab():
     """The picker used to send null for a fully ticked panel, meaning 'no list
     of its own'. Once that resolved to the DEFAULT tabs, ticking every box and
-    saving WITHHELD Reconciliation, and the ledger recorded 'can open
+    saving WITHHELD the books, and the ledger recorded 'can open
     everything'. The obvious action did the opposite of its label and said so
     in the permanent record."""
     def go():
@@ -18513,7 +16596,7 @@ def t_granting_every_tab_grants_every_tab():
         uid, pw = r.json()["id"], r.json()["starter_password"]
         # What the tab panel sends when every box is ticked.
         post("/api/team/user", {"op": "tabs", "id": uid, "tabs": list(team.TAB_KEYS)})
-        ok("recon" in (team._user_tabs(uid) or []),
+        ok("connector" in (team._user_tabs(uid) or []),
            "an explicitly complete grant includes the books")
 
         lg = client.post("/api/auth/login", json={"username": "ruthx", "password": pw},
@@ -18521,13 +16604,13 @@ def t_granting_every_tab_grants_every_tab():
         sess = lg.get("session")
         ch = post_s(sess, "/api/auth/password", {"current": pw, "new": "ruth-pw-40217"})
         sess = ch.json().get("session") or sess
-        eq(post_s(sess, "/api/recon/status", {}).status_code, 200,
+        ok(gate._tab_denied(_GateReq("/api/connector", sess)) is None,
            "and the door actually opens")
 
         # And the null form, which means "no list of its own", must not be
         # written into the record as a grant of everything.
         post("/api/team/user", {"op": "tabs", "id": uid, "tabs": None})
-        ok("recon" not in (team._user_tabs(uid) or []), "null falls back to the default set")
+        ok("connector" not in (team._user_tabs(uid) or []), "null falls back to the default set")
         ev = [e for e in activity._load_events()[-12:] if "access" in json.dumps(e).lower()
               or "open" in json.dumps(e).lower()]
         said = json.dumps(ev)
@@ -18535,113 +16618,6 @@ def t_granting_every_tab_grants_every_tab():
            "and the ledger does not claim a grant that was not made: " + said[-260:])
     with_accounts(go)
 
-
-@test
-def t_pruning_never_deletes_the_evidence_of_an_open_discrepancy():
-    """The retention pass and the merge loop knew nothing about each other.
-    Prune the record an open finding was built from and the next sweep cannot
-    re-detect it; the merge sees a check that ran and did not emit it, and
-    writes 'no longer detected'. The discrepancy leaves the board looking
-    resolved while the money is still missing."""
-    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-    old = (_dt.now(_tz.utc) - _td(days=400)).strftime("%Y-%m-%d")
-    cache = {"xero": {"bank_transactions": {
-                 "T-open": {"id": "T-open", "date": old},
-                 "T-settled": {"id": "T-settled", "date": old},
-                 "T-loose": {"id": "T-loose", "date": old}}},
-             "shopify": {"orders": {}}}
-    live = _rc.make_exc("stale_unreconciled", "high", "Still unreconciled", ["T-open"])
-    done = _rc.make_exc("stale_unreconciled", "high", "Dealt with", ["T-settled"])
-    done["status"] = "explained"
-    done["updated"] = (_dt.now(_tz.utc) - _td(days=400)).isoformat()
-    store = {"exceptions": {live["id"]: live, done["id"]: done}}
-
-    _rc.prune(cache, {}, store)
-    rows = cache["xero"]["bank_transactions"]
-    ok("T-open" in rows,
-       "the record an OPEN discrepancy points at survives its own age")
-    ok("T-settled" not in rows and "T-loose" not in rows,
-       "while settled and unreferenced records go: %r" % (sorted(rows),))
-    eq(sorted(store["retention_dropped"]), ["T-loose", "T-settled"],
-       "and what went is remembered, so the next sweep can word it honestly")
-
-
-@test
-def t_a_record_we_deleted_ourselves_is_not_a_resolved_discrepancy():
-    """Two facts that must never share a sentence: 'the discrepancy went away'
-    and 'we deleted our copy of the records behind it'."""
-    fx = _FakeXero()
-    st = _recon_world(fx, [])
-    old = _rc.make_exc("stale_unreconciled", "high", "Was open", ["T-gone"])
-    st["store"]["exceptions"] = {old["id"]: old}
-    st["store"]["retention_dropped"] = ["T-gone"]
-    run(_rc.sweep())
-    e = st["store"]["exceptions"][old["id"]]
-    ok(e.get("stale"), "it did drop off the live board")
-    ok(e.get("retention_dropped"), "flagged as OUR deletion, not their resolution")
-    note = (e["history"] or [])[-1]["note"]
-    ok("retention" in note and "not a sign it was resolved" in note,
-       "and the audit trail says which of the two happened: " + note)
-
-
-@test
-def t_a_payout_older_than_the_bank_lines_is_not_a_missing_deposit():
-    """Shopify hands back payouts with no date window and nothing pruned them,
-    so they outlived the Xero bank lines they are matched against. Every one of
-    them then read as 'no matching bank transaction in Xero' at high severity,
-    for deposits that were in the books the whole time."""
-    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-    ancient = (_dt.now(_tz.utc) - _td(days=300)).strftime("%Y-%m-%d")
-    recent = (_dt.now(_tz.utc) - _td(days=3)).strftime("%Y-%m-%d")
-    cache = {"shopify": {"payouts": {
-                 "P-old": {"id": "P-old", "date": ancient, "pence": 420000,
-                           "currency": "GBP", "status": "paid", "fees_pence": None},
-                 "P-new": {"id": "P-new", "date": recent, "pence": 51000,
-                           "currency": "GBP", "status": "paid", "fees_pence": None}}},
-             "xero": {"bank_transactions": {}}}
-    found = _rc.check_payouts_vs_bank(cache)
-    kinds = [(e["kind"], e["refs"]) for e in found]
-    ok(not any("P-old" in r for _, r in kinds),
-       "the payout older than the bank data is not accused: %r" % (kinds,))
-    ok(any("P-new" in r for _, r in kinds),
-       "while one inside the window still is: %r" % (kinds,))
-
-
-@test
-def t_a_record_with_no_readable_date_is_kept_not_destroyed():
-    """An empty string sorts before every cutoff, so the obvious comparison
-    deletes precisely the records whose age is unknown. Reachable through the
-    Shopify payout and dispute buckets, which carry no API-side date filter the
-    way the four Xero reads do."""
-    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-    old = (_dt.now(_tz.utc) - _td(days=400)).strftime("%Y-%m-%d")
-    cache = {"shopify": {"payouts": {
-        "p-none": {"id": "p-none", "date": ""},
-        "p-junk": {"id": "p-junk", "date": "not a date"},
-        "p-old": {"id": "p-old", "date": old}}}}
-    store = {"exceptions": {}}
-    notes = _rc.prune(cache, {}, store)
-    eq(sorted(cache["shopify"]["payouts"]), ["p-junk", "p-none"],
-       "the datable old one goes; the undatable ones stay")
-    ok(any("no readable date" in n for n in notes),
-       "and the sweep says it kept them rather than silently doing so: %s" % notes)
-    ok("p-none" not in store["retention_dropped"], "nothing undated is recorded as dropped")
-
-
-@test
-def t_payouts_and_disputes_are_pruned_like_everything_else():
-    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-    old = (_dt.now(_tz.utc) - _td(days=400)).strftime("%Y-%m-%d")
-    recent = _dt.now(_tz.utc).strftime("%Y-%m-%d")
-    cache = {"shopify": {
-        "payouts": {"po": {"id": "po", "date": old}, "pn": {"id": "pn", "date": recent}},
-        "disputes": {"do": {"id": "do", "date": old}, "dn": {"id": "dn", "date": recent}}}}
-    _rc.prune(cache, {}, {"exceptions": {}})
-    eq(set(cache["shopify"]["payouts"]), {"pn"}, "payouts are pruned")
-    eq(set(cache["shopify"]["disputes"]), {"dn"}, "and so are disputes")
-
-
-# --- resolving a flagged model from inside the app -------------------------
 
 def _copilot_src(name):
     """The source of a route defined inside add_routes or an area's register(),
@@ -19437,33 +17413,6 @@ def t_claude_is_told_not_to_sign_off_because_the_send_does_it():
 # Everything the browser sends is a suggestion. What actually leaves the shop
 # is what mailmime allows, assembled into one MIME shape every client reads
 # the same way.
-
-
-@test
-def t_nothing_changed_is_not_reported_as_a_half_finished_crawl():
-    """A 304 from Xero means "nothing has changed since you last asked", which
-    is what an incremental sync gets on most sweeps. It was falling through to
-    the page-cap branch, so every quiet sweep logged four PARTIAL warnings and
-    appended four notes claiming the results were incomplete. The report keeps
-    only twelve notes, so a permanent falsehood was pushing out the warnings
-    that matter, like Xero not being connected at all."""
-    import asyncio as _a, xero as _x
-    saved = _x._get
-    try:
-        async def not_modified(path, params=None, if_modified_since=None):
-            return {"_not_modified": True}
-        _x._get = not_modified
-        eq(_a.run(_x._paged("Invoices", "Invoices")), [],
-           "a 304 returns what was collected, with no truncation marker")
-
-        async def always_full(path, params=None, if_modified_since=None):
-            return {"Invoices": [{"i": i} for i in range(100)]}
-        _x._get = always_full
-        out = _a.run(_x._paged("Invoices", "Invoices", max_pages=2))
-        ok(any("_truncated" in r for r in out),
-           "a crawl that genuinely hits the cap still says so")
-    finally:
-        _x._get = saved
 
 
 @test
@@ -20689,11 +18638,12 @@ def t_the_app_can_say_whether_its_secrets_are_encrypted():
     that is exactly the failure worth catching."""
     import tokenvault as _tv
     d = tempfile.mkdtemp(dir=SCRATCH)
-    tok = os.path.join(d, "xero_oauth.json")
+    tok = os.path.join(d, "gmail_oauth.json")
     old_key = os.environ.get("TOKEN_ENCRYPTION_KEY")
-    old_path = copilot.xero_api.TOKEN_PATH
+    import google_mail as _gmv
+    old_path = _gmv.TOKEN_PATH
     try:
-        copilot.xero_api.TOKEN_PATH = tok
+        _gmv.TOKEN_PATH = tok
         with open(tok, "w", encoding="utf-8") as fh:
             json.dump({"refresh_token": "plain-abc"}, fh)
 
@@ -20701,14 +18651,14 @@ def t_the_app_can_say_whether_its_secrets_are_encrypted():
         _tv._key.cache_clear()
         st = appstatus.token_vault_state()
         eq(st["enabled"], False)
-        ok("Xero" in st["plaintext"], "it names what is exposed, not just a count")
+        ok("Gmail, sales" in st["plaintext"], "it names what is exposed, not just a count")
 
         # A key set is NOT the same as the files being encrypted.
         os.environ["TOKEN_ENCRYPTION_KEY"] = "a-long-random-key-for-the-test"
         _tv._key.cache_clear()
         st = appstatus.token_vault_state()
         eq(st["enabled"], True, "the key is set")
-        ok("Xero" in st["plaintext"],
+        ok("Gmail, sales" in st["plaintext"],
            "but the file is still plaintext, and saying otherwise would be the lie")
 
         eq(_tv.reseal_file(tok, ("refresh_token",)), 1)
@@ -20716,10 +18666,10 @@ def t_the_app_can_say_whether_its_secrets_are_encrypted():
         # Scoped to the store this test owns: the suite's scratch volume holds
         # other stores from other tests, and asserting the whole list is empty
         # would be asserting something this test never arranged.
-        ok("Xero" not in st["plaintext"], "the sealed one drops off the exposed list")
+        ok("Gmail, sales" not in st["plaintext"], "the sealed one drops off the exposed list")
         ok(st["sealed"] >= 1, "and counts as sealed")
     finally:
-        copilot.xero_api.TOKEN_PATH = old_path
+        _gmv.TOKEN_PATH = old_path
         if old_key is None:
             os.environ.pop("TOKEN_ENCRYPTION_KEY", None)
         else:
@@ -21259,14 +19209,6 @@ def t_only_an_admin_can_delete_files_for_good():
         eq(post_s(sess, "/api/files/file", {"op": "trash", "id": up["id"]}).status_code, 200)
         eq(post("/api/files/file", {"op": "destroy", "id": up["id"]}).status_code, 200, "an admin's call")
     with_accounts(lambda: with_files(go))
-
-
-@test
-def t_payout_tools_belong_to_the_recon_tab():
-    src = open(os.path.join(HERE, "server.py"), encoding="utf-8").read()
-    for name in ("shopify_list_payouts", "shopify_payout_transactions", "shopify_list_disputes"):
-        ok("def " + name in src, name + " is a tool")
-        eq(assistant._TOOL_TABS.get(name), "recon", name + " is the books, so it is gated on the recon tab")
 
 
 @test
@@ -21907,8 +19849,8 @@ def t_add_routes_holds_routes_and_nothing_it_could_have_shared():
     # an area's register(mcp, registry): the desk's _finish_cancel and the
     # inbox's _mail_orders_for; dispatch_for became the chat module's own, the
     # registry handed to it once (piece 15).
-    eq({h.name for h in helpers}, {"_fin_search", "_fin_thread", "_fin_bytes"},
-       "a nested helper appeared that is not one of the registry-bound three")
+    eq({h.name for h in helpers}, set(),
+       "a nested helper appeared (the registry-bound three went with Reconciliation)")
     regs = [n for n in tree.body if getattr(n, "name", "") == "register"]
     eq({h.name for r in regs for h in r.body if isinstance(h, (_ast.FunctionDef, _ast.AsyncFunctionDef))
         and not any("route" in _ast.unparse(d) for d in h.decorator_list)},
@@ -21961,21 +19903,8 @@ def t_every_signed_in_route_goes_through_the_one_door():
 
 
 @test
-def t_the_door_checks_rank_before_it_spends_an_ai_slot():
-    def go():
-        ensure_auth()
-        owen, sess, _pw = ready_user("Owen", "owen")
-        eq(post("/api/team/user", {"op": "tabs", "id": owen, "tabs": ["recon"]}).status_code, 200)
-        r = post_s(sess, "/api/recon/sweep", {})
-        eq(r.status_code, 403, r.text)
-        ok("admin" in r.json()["error"], r.text)
-        eq(len(gate._rl_global), 0, "a member's refused sweep did not spend an AI slot")
-    with_accounts(go)
-
-
-@test
 def t_the_environment_reference_is_generated_from_the_code():
-    """Two hundred variables are read; the hand-written example documented
+    """About 180 variables are read; the hand-written example documented
     thirty-nine and carried another project's defaults. The reference is
     built from the syntax tree, and this fails when it has not been rebuilt."""
     import importlib.util
@@ -21984,7 +19913,7 @@ def t_the_environment_reference_is_generated_from_the_code():
     spec.loader.exec_module(mod)
     rows = mod.collect(HERE)
     names = {r[0] for r in rows}
-    ok(len(names) >= 200, "every variable the code reads is collected: %d" % len(names))
+    ok(len(names) >= 180, "every variable the code reads is collected: %d" % len(names))
     ok({"SHOPIFY_STORE", "TOKEN_ENCRYPTION_KEY", "GOBO_OVERRIDES_LIVE", "DISPATCH_ARCHIVE_PATH"} <= names)
     eq(mod.render(HERE), open(os.path.join(HERE, "docs", "ENVIRONMENT.md"), encoding="utf-8").read(),
        "docs/ENVIRONMENT.md is stale: run `make env-doc`")
@@ -22277,91 +20206,6 @@ def t_a_files_attachment_is_named_whole():
     eq(mail._mail_part_name("mail/u1/0123456789abcdef-proof-v2.pdf"), "proof-v2.pdf",
        "an upload's own prefix still comes off")
     eq(mail._mail_part_name("mail/u1/not-hex-prefix.pdf"), "not-hex-prefix.pdf")
-
-
-@test
-def t_the_same_pdf_twice_in_one_batch_is_read_once():
-    """B44. The duplicate check read the documents on disk, which the sweep
-    writes at its end, so two copies of one invoice in the same batch were
-    both read and both raised."""
-    async def same_bytes(message_id, attachment_id):
-        return b"not really a pdf, identical in both messages"
-    _rc.configure(gmail_bytes=same_bytes)
-    try:
-        first = run_async(_rc.extract_doc({"source_key": "m1:a1", "message_id": "m1", "attachment_id": "a1",
-                                           "size": 10}, {}))
-        ok(first and first.get("sha1"), "the first copy is read")
-        second = run_async(_rc.extract_doc({"source_key": "m2:a2", "message_id": "m2", "attachment_id": "a2",
-                                            "size": 10}, {"m1:a1": first}))
-        ok(second and second.get("ignored") and second.get("duplicate_of") == "m1:a1",
-           "the second, in the same batch, is recognised as the first: " + json.dumps(second)[:160])
-    finally:
-        _rc.configure(gmail_bytes=None)
-
-
-@test
-def t_a_capped_order_read_says_the_newest_were_not_checked():
-    """B45. The crawl stopped at 1500 orders, oldest first, with no note, so
-    past that the newest sales were never checked and the sweep read clean."""
-    # An invoice for an order the capped read never reaches: it must not be
-    # flagged as a Xero sale with no Shopify order.
-    # (An amount no order has: one that matches any order is not an orphan.)
-    fx = _FakeXero(invoices=[_raw_xinv("INV-900001", "987.65")])
-    stores = _recon_world(fx, [])
-    async def endless(reg, name, args):
-        if name == "shopify_list_orders":
-            start = int(args.get("since_id") or 0)
-            return {"orders": [_raw_order(start + i + 1, f"#{start + i + 1}", "10.00") for i in range(250)]}
-        if name == "shopify_list_payouts":
-            return {"available": False, "reason": "not on Shopify Payments"}
-        return {"_failed": True}
-    saved = _rc.ORDER_FETCH_CAP
-    _rc.ORDER_FETCH_CAP = 500
-    _rc.configure(tool_json=endless)
-    try:
-        r = run_async(_rc.sweep())
-        ok(any("stopped at its limit of 500 orders" in n for n in r["notes"]), r["notes"])
-        ok(not any(e["kind"] == "xero_sale_without_shopify" for e in stores["store"]["exceptions"].values()),
-           "and the Xero-sales check sat it out rather than flag invoices for orders it never read")
-        stores2 = _recon_world(fx, [_raw_order(1, "#1", "10.00")])
-        r2 = run_async(_rc.sweep())
-        ok(not any("stopped at its limit" in n for n in r2["notes"]), "a read that finished says nothing")
-        # A page that fails part way leaves the same hole as the cap.
-        async def breaks(reg, name, args):
-            if name == "shopify_list_orders":
-                start = int(args.get("since_id") or 0)
-                if start >= 250:
-                    return {"_failed": True}
-                return {"orders": [_raw_order(start + i + 1, f"#{start + i + 1}", "10.00") for i in range(250)]}
-            if name == "shopify_list_payouts":
-                return {"available": False, "reason": "not on Shopify Payments"}
-            return {"_failed": True}
-        stores3 = _recon_world(fx, [])
-        _rc.configure(tool_json=breaks)
-        run_async(_rc.sweep())
-        ok(not any(e["kind"] == "xero_sale_without_shopify" for e in stores3["store"]["exceptions"].values()),
-           "a failed page skips the Xero-sales check too")
-        # Exactly the cap, and nothing after it: the read was whole.
-        async def exact(reg, name, args):
-            if name == "shopify_list_orders":
-                start = int(args.get("since_id") or 0)
-                if start >= 500:
-                    return {"orders": []}
-                return {"orders": [_raw_order(start + i + 1, f"#{start + i + 1}", "10.00") for i in range(250)]}
-            if name == "shopify_list_payouts":
-                return {"available": False, "reason": "not on Shopify Payments"}
-            return {"_failed": True}
-        stores4 = _recon_world(fx, [])
-        _rc.configure(tool_json=exact)
-        r4 = run_async(_rc.sweep())
-        ok(not any("stopped at its limit" in n for n in r4["notes"]), "a window of exactly the cap is whole")
-        ok(any(e["kind"] == "xero_sale_without_shopify" for e in stores4["store"]["exceptions"].values()),
-           "and the Xero-sales check runs on it")
-    finally:
-        _rc.ORDER_FETCH_CAP = saved
-        _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
-                      mail_thread=None, load_store=None, write_store=None,
-                      load_cache=None, write_cache=None, load_docs=None, write_docs=None)
 
 
 @test
@@ -22858,84 +20702,6 @@ def t_a_pipedrive_preview_leaves_the_live_crm_alone():
 
 
 @test
-def t_a_xero_record_explains_one_refund_and_one_chargeback_only():
-    """B7, B30. Neither check claimed what it matched, so one credit note
-    satisfied every same-amount refund in its window and one SPEND line every
-    same-amount chargeback; the unrecorded ones read as clean."""
-    r1 = {"id": 77, "created_at": "2026-08-12", "pence": 15000}
-    r2 = {"id": 78, "created_at": "2026-08-14", "pence": 15000}
-    note = {"id": "c", "number": "CN-1", "type": "ACCRECCREDIT", "status": "AUTHORISED",
-            "contact": "Northern Stage Ltd", "date": "2026-08-13", "total": 15000,
-            "remaining": 0, "currency": "GBP", "reference": ""}
-    cache = {"shopify": {"orders": {"1": _ord(104275, "#104275", 84200, refunds=[r1]),
-                                    "2": _ord(104276, "#104276", 30000, refunds=[r2])}},
-             "xero": {"invoices": {}, "credit_notes": {"c": note}, "bank_transactions": {}}}
-    out = _rc.check_refunds(cache)
-    eq([(e["kind"], e["amount"], e["date"]) for e in out],
-       [("shopify_refund_missing", 15000, "2026-08-14")],
-       "the earlier refund takes the note; the later one has no record")
-    from datetime import date as _date, timedelta as _td
-    day = lambda n: (_date.today() - _td(days=n)).isoformat()
-    def dispute(i, when):
-        return {"id": i, "status": "lost", "pence": 5000, "date": when, "currency": "GBP",
-                "reason": "fraudulent", "type": "chargeback"}
-    cache2 = {"shopify": {"disputes": {"d1": dispute("d1", day(12)), "d2": dispute("d2", day(10))}},
-              "xero": {"bank_transactions": {"b1": _bt("b1", 5000, typ="SPEND", date=day(9))},
-                       "credit_notes": {}}}
-    out2 = _rc.check_disputes(cache2)
-    eq([(e["kind"], e["date"]) for e in out2], [("chargeback_missing_from_xero", day(10))],
-       "one SPEND line covers one chargeback, the earlier one")
-    # Not first-come, not nearest-first: an ASSIGNMENT. Note N1 (the 9th)
-    # fits both refunds and comes first in the dictionary; N2 (the 2nd) fits
-    # only the first. Taking N1 for the first refund flagged the second.
-    ra = {"id": 1, "created_at": "2026-08-01", "pence": 15000}
-    rb = {"id": 2, "created_at": "2026-08-15", "pence": 15000}
-    n1, n2 = dict(note, id="n1", number="CN-9", date="2026-08-09"), dict(note, id="n2", number="CN-2", date="2026-08-02")
-    cache3 = {"shopify": {"orders": {"1": _ord(1, "#1", 84200, refunds=[ra]),
-                                     "2": _ord(2, "#2", 30000, refunds=[rb])}},
-              "xero": {"invoices": {}, "credit_notes": {"n1": n1, "n2": n2}, "bank_transactions": {}}}
-    eq(_rc.check_refunds(cache3), [], "both refunds are recorded, whichever note the sweep meets first")
-    # And where the nearest record for the first chargeback is the only one
-    # that fits the second: b1 sits a day from both, b2 twenty days from d1.
-    cache4 = {"shopify": {"disputes": {"d1": dispute("d1", day(12)), "d2": dispute("d2", day(10))}},
-              "xero": {"bank_transactions": {"b1": _bt("b1", 5000, typ="SPEND", date=day(11)),
-                                             "b2": _bt("b2", 5000, typ="SPEND", date=day(32))},
-                       "credit_notes": {}}}
-    eq(_rc.check_disputes(cache4), [], "the pairing that covers both is the one taken")
-
-
-@test
-def t_an_invoice_named_for_one_order_is_not_reused_by_amount_for_another():
-    """B28, B48. A reference hit was never claimed, so the invoice for
-    #104300 also explained #104301 (same customer, same total, two days
-    later) by amount; and an invoice with no contact matched anything of its
-    amount, because an empty name is a substring of every name."""
-    a = _ord(104300, "#104300", 84200, date="2026-08-10")
-    b = _ord(104301, "#104301", 84200, date="2026-08-12")
-    inv = _inv("INV-104300", 84200, date="2026-08-11")
-    for orders in ({"1": a, "2": b}, {"2": b, "1": a}):
-        out = _rc.check_orders_vs_invoices({"shopify": {"orders": orders},
-                                            "xero": {"invoices": {"x": inv}}})
-        missing = [e for e in out if e["kind"] == "shopify_sale_missing"]
-        eq(len(missing), 1, "whichever order the sweep meets first: " + str([e["title"] for e in out]))
-        ok("#104301" in missing[0]["title"], missing[0]["title"])
-    nobody = _inv("SI-0099", 12000, contact="", ref="", date="2026-08-11")
-    out = _rc.check_orders_vs_invoices(
-        {"shopify": {"orders": {"1": _ord(104276, "#104276", 12000, company="Roundhouse Trust")}},
-         "xero": {"invoices": {"n": nobody}}})
-    eq([e["kind"] for e in out], ["shopify_sale_missing"],
-       "an invoice with nobody on it explains nothing by name")
-    nameless = _ord(104277, "#104277", 12000, company="")
-    nameless["customer"] = ""
-    out = _rc.check_orders_vs_invoices(
-        {"shopify": {"orders": {"1": nameless}},
-         "xero": {"invoices": {"r": _inv("SI-0100", 12000, contact="Roundhouse Trust", ref="",
-                                         date="2026-08-11")}}})
-    eq([e["kind"] for e in out], ["shopify_sale_missing"],
-       "and an order with nobody on it is not explained by any invoice of its amount")
-
-
-@test
 def t_a_send_whose_answer_is_lost_keeps_its_stamp():
     """B5. A timeout after the upload left the machine was handled like a
     refusal: stamp cleared, "did not send", Send re-armed, and the retry gave
@@ -23429,71 +21195,6 @@ def t_a_purged_deals_tasks_stay_gone_through_the_next_import():
 
 
 @test
-def t_a_payout_still_inside_shopify_is_not_missing_from_the_bank():
-    """B29. The payouts feed carries tomorrow's scheduled payout and the one
-    in transit; each was raised as missing from the bank at high every night
-    and went stale when the deposit landed, so real gaps hid in the noise."""
-    from datetime import date as _date, timedelta as _td
-    tomorrow = (_date.today() + _td(days=1)).isoformat()
-    yesterday = (_date.today() - _td(days=1)).isoformat()
-    cache = {"shopify": {"payouts": {
-                "p1": {"id": "p1", "date": tomorrow, "pence": 123456, "currency": "GBP", "status": "scheduled"},
-                "p2": {"id": "p2", "date": yesterday, "pence": 5000, "currency": "GBP", "status": "in_transit"},
-                "p3": {"id": "p3", "date": yesterday, "pence": 7000, "currency": "GBP", "status": "paid"}}},
-             "xero": {"bank_transactions": {}}}
-    out = _rc.check_payouts_vs_bank(cache)
-    eq([(e["kind"], e["amount"]) for e in out], [("payout_missing_from_bank", 7000)],
-       "only money that has left Shopify can be missing from the bank")
-
-
-@test
-def t_a_segmented_invoice_number_is_one_number():
-    """B31. INV-2026-0142 was read as INV-2026 and 0142, neither of which is
-    in Xero, so a bill that WAS there was reported missing at critical."""
-    found = _rc._INVNUM_RE.findall("Invoice INV-2026-0142 dated 12/09/2026, total 1,500.00, ref SI/24/0088")
-    ok("INV-2026-0142" in found and "SI/24/0088" in found, str(found))
-    ok("INV-2026" not in found, "the year is not a number of its own: " + str(found))
-    doc = {"doc_type": "supplier_invoice", "invoice_numbers": ["INV-2026-0142"], "total_pence": 150000,
-           "amounts": [150000], "currency": "GBP", "invoice_lines": [], "counterparty": "",
-           "extracted_by": "text", "verified": True, "source_key": "m1:a1", "filename": "inv.pdf",
-           "from": "acme", "date": "2026-09-12"}
-    books = {"xero": {"invoices": {"b": _inv("INV-2026-0142", 150000, typ="ACCPAY", contact="Acme Glass")},
-                      "credit_notes": {}, "payments": {}}}
-    eq(_rc.check_gmail_docs(books, {"m1:a1": doc}), [], "the bill is in Xero under the same number")
-    eq(_rc.check_gmail_docs(books, {"m1:a1": dict(doc, invoice_numbers=["2026-0142"])}), [],
-       "and under its bare digits")
-    eq([e["kind"] for e in _rc.check_gmail_docs(books, {"m1:a1": dict(doc, invoice_numbers=["INV-2026-0999"])})],
-       ["gmail_doc_missing_from_xero"], "a number that really is not there still is")
-    # Only a SEGMENTED number is matched by its digits: a bare "1500" in the
-    # document (an amount, half a sort code) must not satisfy INV-1500 and
-    # hide the bill that is missing beside it.
-    books2 = {"xero": {"invoices": {"b": _inv("INV-1500", 150000, typ="ACCPAY", contact="Acme Glass")},
-                       "credit_notes": {}, "payments": {}}}
-    eq([e["kind"] for e in _rc.check_gmail_docs(books2, {"m1:a1": dict(doc, invoice_numbers=["INV-2026-0999", "1500"])})],
-       ["gmail_doc_missing_from_xero"], "a bare digit run explains nothing")
-    ok("in 24" not in _rc._INVNUM_RE.findall("dispatched in 24 hours, ref IN-00312"),
-       "prose is not a number")
-
-
-@test
-def t_a_disconnect_waits_for_a_running_sweep():
-    """B32. A sweep loads the books at its start and writes them back whole
-    at its end; disconnecting in between deleted the Xero cache and then
-    watched the sweep's tail put every invoice and the old watermarks back."""
-    def go():
-        ensure_auth()
-        _rc._sweeping["on"] = True
-        try:
-            r = post("/api/recon/disconnect", {"what": "xero"})
-            eq(r.status_code, 409, r.text)
-            ok("sweep is running" in r.json()["error"], r.text)
-        finally:
-            _rc._sweeping["on"] = False
-    with_accounts(go)
-
-
-
-@test
 def t_a_broken_mailbox_file_still_raises_the_inbox_alarm():
     """Review of B39. The loop read the sync's error back out of the mailbox
     store, so when that store was the thing that broke, the sync's write of
@@ -23584,168 +21285,6 @@ def t_a_made_orders_reprint_undo_and_ready_to_make_leave_it_made():
     finally:
         ORDER["tags"] = saved_tags
         reset_prod()
-
-
-@test
-def t_a_walked_finance_thread_is_read_again_when_it_grows():
-    """A3. The reconciliation skipped any thread it had walked, so next month's
-    invoice sent as a reply on last month's conversation was never read."""
-    import types as _types
-    day = lambda n: (datetime.now(timezone.utc) - timedelta(days=n)).strftime("%Y-%m-%d") + "T09:00:00+00:00"
-    threads = {"t1": {"id": "t1", "subject": "Invoice from Glassworks", "messages": [
-        {"id": "m1", "at": day(40), "from_email": "accounts@glassworks.co.uk",
-         "files": [{"id": "a1", "name": "SI-1001.pdf", "size": 4000}]}]}}
-    hist = {"t1": "100"}
-    async def search(q, mx=200, out_complete=None):
-        if out_complete is not None:
-            out_complete.append(True)
-        return dict(hist)             # {thread id: historyId}, as the finance search gives
-    read = []
-    async def gbytes(mid, aid):
-        read.append(mid); return b"%PDF-1.4 scan of " + mid.encode()   # two documents, two contents
-    class Block:
-        type = "tool_use"
-        def __init__(self, num):
-            self.input = {"doc_type": "supplier_invoice", "currency": "GBP", "total": "100.00",
-                          "invoice_numbers": [num], "invoice_lines": []}
-    async def ai(system, messages, tools, tool_choice):
-        return _types.SimpleNamespace(content=[Block("SI-1001" if len(read) == 1 else "SI-1002")],
-                                      model="claude-test")
-    stores = _mail_world(threads, gbytes=gbytes, search=search)
-    _rc.configure(ai_call=ai)
-    try:
-        run_async(_rc.sweep())
-        eq(read, ["m1"])
-        threads["t1"]["messages"].append({"id": "m2", "at": day(2), "from_email": "accounts@glassworks.co.uk",
-                                          "files": [{"id": "a2", "name": "SI-1002.pdf", "size": 4000}]})
-        run_async(_rc.sweep())
-        eq(read, ["m1"], "an unchanged thread is not walked again")
-        hist["t1"] = "205"            # Gmail moves the thread's historyId when a message arrives
-        run_async(_rc.sweep())
-        eq(read, ["m1", "m2"], "a thread that has grown is walked again, and only the new PDF is read")
-        titles = [e["title"] for e in stores["store"]["exceptions"].values()
-                  if e["kind"] == "gmail_doc_missing_from_xero"]
-        ok(any("SI-1002" in t for t in titles), "and the new invoice is reported: " + str(titles))
-        # A message older than documents are kept is not read again when the
-        # thread moves: retention dropped it, and the Xero side of it too.
-        threads["t1"]["messages"].insert(0, {"id": "m0", "at": day(_rc.DOCS_KEEP_DAYS + 5),
-                                             "from_email": "accounts@glassworks.co.uk",
-                                             "files": [{"id": "a0", "name": "SI-0900.pdf", "size": 4000}]})
-        hist["t1"] = "300"
-        run_async(_rc.sweep())
-        ok("m0" not in read, "a PDF older than the retention window is never read again: " + str(read))
-        # A thread walked before history was kept is not walked again on the
-        # first sweep after the upgrade: the listing's word is taken for it.
-        st = stores["store"]; st["seen_history"] = {}
-        hist["t1"] = "400"; before = list(read)
-        run_async(_rc.sweep())
-        eq(read, before, "no mass re-walk of the backlog after the upgrade")
-        eq(stores["store"]["seen_history"].get("t1"), "400", "its history is simply recorded")
-        async def broken(q, mx=200, out_complete=None):
-            raise RuntimeError("Gmail is down")
-        _rc.configure(mail_search=broken)
-        r = run_async(_rc.sweep())
-        ok(not any("part-way" in n for n in r["notes"]), "a failed search says so once, cleanly: " + str(r["notes"]))
-    finally:
-        _mail_world_off()
-
-
-@test
-def t_a_scan_read_while_the_ai_is_down_is_read_when_it_is_back():
-    """A4. A scan read on a night the AI call failed was stored as ignored and
-    its thread marked seen, so it was never read again."""
-    import types as _types
-    day = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d")
-    threads = {"t1": {"id": "t1", "subject": "Invoice SI-88812", "messages": [{
-        "id": "m1", "at": day + "T09:00:00+00:00", "from_email": "accounts@glassworks.co.uk",
-        "files": [{"id": "a1", "name": "SI-88812.pdf", "size": 4000}]}]}}
-    stores = _mail_world(threads)
-    async def ai_down(system, messages, tools, tool_choice):
-        raise RuntimeError("The daily AI spending limit has been reached.")
-    calls = []
-    class Block:
-        type = "tool_use"
-        input = {"doc_type": "supplier_invoice", "counterparty": "Glassworks", "currency": "GBP",
-                 "total": "1,840.00", "invoice_numbers": ["SI-88812"], "invoice_lines": []}
-    async def ai_up(system, messages, tools, tool_choice):
-        calls.append(1)
-        return _types.SimpleNamespace(content=[Block()], model="claude-test")
-    try:
-        _rc.configure(ai_call=ai_down)
-        r1 = run_async(_rc.sweep())
-        ok("m1:a1" not in stores["docs"], "an unread scan is not stored as read")
-        ok(any("retried" in n for n in r1["notes"]), r1["notes"])
-        _rc.configure(ai_call=ai_up)
-        run_async(_rc.sweep())
-        eq(len(calls), 0, "not again the same day: a retry on every sweep billed the AI each time")
-        stores["store"]["doc_tries"]["m1:a1"]["day"] = "2000-01-01"     # the next night
-        run_async(_rc.sweep())
-        eq(len(calls), 1, "the next day's sweep reads it")
-        ok(any(e["kind"] == "gmail_doc_missing_from_xero" for e in stores["store"]["exceptions"].values()),
-           "and the bill missing from Xero is reported")
-        # Tries are counted per day: Sweep now pressed five times on a day the
-        # spend cap was reached must not use them all up.
-        stores2 = _mail_world({"t9": dict(threads["t1"], id="t9")})
-        _rc.configure(ai_call=ai_down)
-        for _ in range(_rc.DOC_READ_TRIES + 1):
-            run_async(_rc.sweep())
-        ok("m1:a1" not in stores2["docs"], "five sweeps in one day are one try, not five")
-        eq(stores2["store"]["doc_tries"]["m1:a1"]["n"], 1)
-        # One that can never be read, on day after day, is filed as unreadable.
-        days = 1
-        while "m1:a1" in (stores2["store"].get("doc_tries") or {}) and days < 20:
-            stores2["store"]["doc_tries"]["m1:a1"]["day"] = "2000-01-%02d" % days   # a day gone by
-            run_async(_rc.sweep())
-            days += 1
-        eq(days, _rc.DOC_READ_TRIES, "one try a day, and filed on the last")
-        doc = stores2["docs"].get("m1:a1") or {}
-        ok(doc.get("ignored") and "different days" in (doc.get("note") or ""),
-           "after the last day it is filed as unreadable, saying so: " + str(doc))
-    finally:
-        _mail_world_off()
-
-
-@test
-def t_a_failed_xero_read_does_not_check_new_orders_against_yesterdays_books():
-    """A5. With a copy cached by the last good sweep, a failed Xero read ran the
-    sale checks on it, and every order since read as a sale missing from Xero."""
-    day = lambda n: (datetime.now(timezone.utc) - timedelta(days=n)).strftime("%Y-%m-%d")
-    def xi(num, total, d):
-        r = _raw_xinv(num, total); r["DateString"] = d + "T00:00:00"; r["Reference"] = num.split("-")[1]
-        return r
-    def od(oid, name, total, d):
-        o = _raw_order(oid, name, total); o["created_at"] = d + "T09:00:00Z"; return o
-    fx = _FakeXero(invoices=[xi("INV-104300", "120.00", day(3))])
-    orders = [od(104300, "#104300", "120.00", day(3))]
-    stores = _recon_world(fx, orders)
-    try:
-        run_async(_rc.sweep(deep_docs=False))
-        class Dead(_FakeXero):
-            async def list_invoices(self, since=None, modified_since=None):
-                raise RuntimeError("Xero refused the refresh token.")
-            list_payments = list_bank_transactions = list_credit_notes = list_invoices
-        orders.append(od(104301, "#104301", "95.00", day(1)))
-        orders.append(od(104302, "#104302", "480.00", day(0)))
-        _rc.configure(xero=Dead())
-        r2 = run_async(_rc.sweep(deep_docs=False))
-        live = [e for e in stores["store"]["exceptions"].values()
-                if not e.get("stale") and e["kind"] == "shopify_sale_missing"]
-        eq(live, [], "no sale is called missing from books that could not be read")
-        ok(any("could not be read this sweep" in n for n in r2["notes"]), r2["notes"])
-        # Only the bank refused (a scope not granted, say): invoices read fine,
-        # so a sale really missing from Xero is still reported.
-        class NoBank(_FakeXero):
-            async def list_bank_transactions(self, since=None, modified_since=None):
-                raise RuntimeError("insufficient scope")
-        _rc.configure(xero=NoBank(invoices=[xi("INV-104300", "120.00", day(3))]))
-        run_async(_rc.sweep(deep_docs=False))
-        live = [e for e in stores["store"]["exceptions"].values()
-                if not e.get("stale") and e["kind"] == "shopify_sale_missing"]
-        ok(live, "with only the bank unreadable, the sale checks still run and report")
-    finally:
-        _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
-                      mail_thread=None, load_store=None, write_store=None,
-                      load_cache=None, write_cache=None, load_docs=None, write_docs=None)
 
 
 def _ws_stores():
@@ -24381,7 +21920,6 @@ def t_what_chat_read_is_shown_in_words():
     eq(assistant._tool_label("shopify_list_orders", {"created_at_min": "2026-08-01T00:00:00Z",
                                                    "created_at_max": "2026-08-31T00:00:00Z"}),
        "Orders, 1 Aug 2026 to 31 Aug 2026")
-    eq(assistant._tool_label("recon_summary"), "Reconciliation summary")
     eq(assistant._tool_label("shopify_list_fulfillments"), "Fulfilments")
     eq(assistant._step_word("Orders"), "orders")
 
@@ -24458,89 +21996,6 @@ def t_a_preference_switch_saves_only_the_switches():
     _uid, sess, _pw = ready_user("Pref Member", "prefmember")
     eq(post_s(sess, "/api/profile", {"prefs": {"concise": False}}).status_code, 403, "a member cannot change them")
     eq(post("/api/profile", {}).json()["profile"]["prefs"]["concise"], True)
-
-
-@test
-def t_the_sweep_notes_are_sentences_said_once():
-    """The Reconciliation page lists the sweep's notes as they are written. A
-    Xero read refused for one reason put four near-identical lines on screen,
-    one per collection, and then a fifth naming them as bank_transactions and
-    credit_notes; a crashed check was named by its Python function."""
-    eq(_rc._words(["bank_transactions", "credit_notes"]), "bank transactions and credit notes")
-    eq(_rc._words(["invoices", "payments", "credit_notes"]), "invoices, payments and credit notes")
-    eq(_rc._check_words("check_orders_vs_invoices"), "orders against invoices")
-    fx = _FakeXero(invoices=[])
-    stores = _recon_world(fx, [])
-    try:
-        class Dead(_FakeXero):
-            async def list_invoices(self, since=None, modified_since=None):
-                raise RuntimeError("Xero refused the refresh token.")
-            list_payments = list_bank_transactions = list_credit_notes = list_invoices
-        _rc.configure(xero=Dead())
-        r = run_async(_rc.sweep(deep_docs=False))
-        said = [n for n in r["notes"] if "could not be read" in n and "Xero" in n]
-        eq(len(said), 1, "one reason, one line: %s" % r["notes"])
-        ok("invoices, payments, bank transactions and credit notes" in said[0], said[0])
-        ok(not any(re.search(r"[a-z]_[a-z]", n) for n in r["notes"]), "no code names: %s" % r["notes"])
-        ok(not any("SKIPPED" in n for n in r["notes"]), "and nothing shouted")
-        # What the failure meant is said in the same note, not a second one.
-        ok("The checks that read them were skipped" in said[0], said[0])
-        ok(not any(n.startswith("The checks that read Xero's") for n in r["notes"]),
-           "one failure, one note: %s" % r["notes"])
-    finally:
-        _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
-                      mail_thread=None, load_store=None, write_store=None,
-                      load_cache=None, write_cache=None, load_docs=None, write_docs=None)
-
-
-@test
-def t_a_remittance_is_satisfied_only_by_a_live_receipt_of_its_own():
-    """A6. A deleted payment, a payment to a supplier, or one another
-    remittance already used all hid a missing receipt."""
-    d0 = (datetime.now(timezone.utc) - timedelta(days=5)).strftime("%Y-%m-%d")
-    def inv(i, num, total, contact, typ="ACCREC"):
-        return {"id": i, "number": num, "type": typ, "status": "AUTHORISED", "contact": contact,
-                "date": d0, "due": d0, "total": total, "tax": 0, "due_pence": total, "paid_pence": 0,
-                "credited_pence": 0, "currency": "GBP", "reference": "", "updated": ""}
-    def pay(i, p, status, inv_num, typ=""):
-        return {"id": i, "date": d0, "pence": p, "reference": "", "status": status, "type": typ,
-                "invoice_id": "", "invoice_number": inv_num, "contact": "", "account": "090",
-                "is_reconciled": True}
-    def remit(key, num):
-        return {"source_key": key, "doc_type": "remittance", "from": key, "counterparty": key,
-                "date": d0, "total_pence": 50000, "currency": "GBP", "invoice_numbers": [num],
-                "invoice_lines": [{"number": num, "pence": 50000}], "verified": True}
-    def flagged(payments, docs):
-        cache = {"xero": {"invoices": {"a": inv("a", "INV-0142", 50000, "Northern Stage"),
-                                       "b": inv("b", "INV-0143", 50000, "Leeds Playhouse"),
-                                       "s": inv("s", "GW-77", 50000, "Glassworks", "ACCPAY")},
-                          "payments": payments, "credit_notes": {}, "bank_transactions": {}}}
-        return sorted(e["refs"][0] for e in _rc.check_gmail_docs(cache, docs)
-                      if e["kind"] == "remittance_payment_missing")
-    one = {"r1": remit("r1", "INV-0142")}
-    eq(flagged({"p1": pay("p1", 50000, "AUTHORISED", "INV-0142")}, one), [], "a real receipt satisfies it")
-    eq(flagged({"p1": pay("p1", 50000, "DELETED", "INV-0142")}, one), ["r1"], "a deleted one does not")
-    eq(flagged({"p2": pay("p2", 50000, "AUTHORISED", "GW-77")}, one), ["r1"],
-       "nor does our payment to a supplier, known by the bill it pays")
-    eq(flagged({"p3": pay("p3", 50000, "AUTHORISED", "", "ACCPAYPAYMENT")}, one), ["r1"],
-       "or by its own type")
-    two = {"r2": remit("r2", "INV-0143"), "r1": remit("r1", "INV-0142")}
-    eq(flagged({"p4": pay("p4", 50000, "AUTHORISED", "INV-0142")}, two), ["r2"],
-       "one receipt explains one remittance, the one whose invoice it pays")
-    for kind in ("ARCREDITPAYMENT", "AROVERPAYMENTPAYMENT", "ARPREPAYMENTPAYMENT"):
-        eq(flagged({"p5": pay("p5", 50000, "AUTHORISED", "", kind)}, one), ["r1"],
-           kind + " is a refund paid out, not a receipt")
-    eq(flagged({"p6": pay("p6", 50000, "AUTHORISED", "", "ACCRECPAYMENT")}, one), [], "ACCRECPAYMENT is")
-    # r1 was paid line by line (300 + 200 against its own invoices); r2, for
-    # 300, has no receipt. The 300 is r1's, never r2's by amount.
-    split = {"r1": dict(remit("r1", "INV-0142"), total_pence=50000, invoice_numbers=["INV-0142", "INV-0143"],
-                        invoice_lines=[{"number": "INV-0142", "pence": 30000},
-                                       {"number": "INV-0143", "pence": 20000}]),
-             "r2": dict(remit("r2", "INV-0999"), total_pence=30000,
-                        invoice_lines=[{"number": "INV-0999", "pence": 30000}])}
-    eq(flagged({"q1": pay("q1", 30000, "AUTHORISED", "INV-0142"),
-                "q2": pay("q2", 20000, "AUTHORISED", "INV-0143")}, split), ["r2"],
-       "a remittance's line payments are its own, and the one with no receipt is the one flagged")
 
 
 @test
@@ -24789,71 +22244,6 @@ def t_a_filter_that_assigns_and_archives_does_not_close_the_email():
 
 
 @test
-def t_documents_read_without_the_ai_are_read_again_when_it_is_there():
-    """Review of A4. A remittance with a text layer whose allocation lines the
-    AI could not read lost its line checks for good; and a scan waiting for the
-    AI, forwarded once, came back as a duplicate of its own copy."""
-    import types as _types
-    day = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d") + "T09:00:00+00:00"
-    remit_text = ("REMITTANCE ADVICE  Northern Stage Ltd  Payment reference NS-7781  "
-                  "We have paid the following invoices: INV-0142 500.00  Total paid 500.00 GBP  "
-                  "Date 19/09/2026  Please allocate accordingly. Thank you.")
-    class Block:
-        type = "tool_use"
-        def __init__(self, inp): self.input = inp
-    calls = []
-    async def ai_up(system, messages, tools, tool_choice):
-        calls.append(1)
-        text = str(messages[0]["content"][0].get("text") or "")
-        if "REMITTANCE" in text:
-            return _types.SimpleNamespace(content=[Block({"doc_type": "remittance", "currency": "GBP",
-                "total": "500.00", "invoice_numbers": ["INV-0142"],
-                "invoice_lines": [{"number": "INV-0142", "amount": "500.00"}]})], model="t")
-        return _types.SimpleNamespace(content=[Block({"doc_type": "supplier_invoice", "currency": "GBP",
-            "total": "1,840.00", "invoice_numbers": ["SI-88812"], "invoice_lines": []})], model="t")
-    async def ai_down(system, messages, tools, tool_choice):
-        raise RuntimeError("The AI service is overloaded.")
-    saved_text = _rc._pdf_text
-    _rc._pdf_text = lambda data: remit_text if b"remit" in data else ""
-    async def gbytes(mid, aid):
-        return b"%PDF-1.4 remit" if mid == "r1" else b"%PDF-1.4 same scan"
-    threads = {"tr": {"id": "tr", "subject": "Remittance", "messages": [
-                  {"id": "r1", "at": day, "from_email": "ap@northernstage.org",
-                   "files": [{"id": "a1", "name": "remittance.pdf", "size": 4000}]}]},
-               "ts": {"id": "ts", "subject": "Invoice SI-88812", "messages": [
-                  {"id": "s1", "at": day, "from_email": "accounts@glassworks.co.uk",
-                   "files": [{"id": "a1", "name": "SI-88812.pdf", "size": 4000}]}]},
-               "tf": {"id": "tf", "subject": "Fwd: Invoice SI-88812", "messages": [
-                  {"id": "s2", "at": day, "from_email": "boss@test-store.co.uk",
-                   "files": [{"id": "a1", "name": "SI-88812.pdf", "size": 4000}]}]}}
-    stores = _mail_world(threads, gbytes=gbytes)
-    try:
-        _rc.configure(ai_call=ai_down)           # the AI is failing: the remittance is read by text
-        run_async(_rc.sweep())
-        doc = stores["docs"].get("r1:a1") or {}
-        ok(doc.get("doc_type") == "remittance" and doc.get("needs_ai"),
-           "the remittance keeps its text reading and is marked to be read again: " + str(doc))
-        _rc.configure(ai_call=None)              # and a night with no AI configured: the scans wait
-        stores["store"]["doc_tries"] = {}
-        run_async(_rc.sweep())
-        ok(stores["docs"].get("s1:a1", {}).get("needs_ai") or stores["docs"].get("s2:a1", {}).get("needs_ai"),
-           "the scan waits for the AI: " + str({k: v.get("note") for k, v in stores["docs"].items()}))
-        _rc.configure(ai_call=ai_up)
-        for k in list(stores["store"].get("doc_tries") or {}):
-            stores["store"]["doc_tries"][k]["day"] = "2000-01-01"   # the waiting was yesterday
-        run_async(_rc.sweep())
-        run_async(_rc.sweep())
-        doc = stores["docs"].get("r1:a1") or {}
-        ok(doc.get("invoice_lines") and not doc.get("needs_ai"), "the remittance is read again, lines and all: " + str(doc))
-        kinds = [e["kind"] for e in stores["store"]["exceptions"].values() if not e.get("stale")]
-        ok("gmail_doc_missing_from_xero" in kinds,
-           "and the scan is read, not filed as a duplicate of its own forwarded copy: " + str(kinds))
-    finally:
-        _rc._pdf_text = saved_text
-        _mail_world_off()
-
-
-@test
 def t_a_logo_drawn_by_a_second_html_part_is_still_a_logo():
     """Review of A10. Apple Mail splits a message into several HTML parts
     around its images; the cids of only the first were read."""
@@ -24879,40 +22269,6 @@ def t_a_logo_drawn_by_a_second_html_part_is_still_a_logo():
         eq([f["name"] for f in t["messages"][0]["files"]], ["quote.pdf"])
     finally:
         _gm._call = saved
-
-
-@test
-def t_an_invoice_paid_in_instalments_flags_no_paid_remittance():
-    """Review of A6. Holding back every payment that COULD settle another
-    remittance's lines, instead of the one it used, flagged a remittance that
-    was paid whenever an invoice was paid in instalments."""
-    day = lambda n: (datetime.now(timezone.utc) - timedelta(days=n)).strftime("%Y-%m-%d")
-    def inv(i, num, total):
-        return {"id": i, "number": num, "type": "ACCREC", "status": "AUTHORISED", "contact": "NS",
-                "date": day(90), "due": day(60), "total": total, "tax": 0, "due_pence": 0,
-                "paid_pence": total, "credited_pence": 0, "currency": "GBP", "reference": "", "updated": ""}
-    def pay(i, p, num, d):
-        return {"id": i, "date": d, "pence": p, "reference": "", "status": "AUTHORISED",
-                "type": "ACCRECPAYMENT", "invoice_id": "", "invoice_number": num, "contact": "",
-                "account": "090", "is_reconciled": True}
-    def remit(key, d, total, lines, nums=None):
-        return {"source_key": key, "doc_type": "remittance", "from": key, "counterparty": "NS", "date": d,
-                "total_pence": total, "currency": "GBP", "invoice_numbers": nums or [n for n, _ in lines],
-                "invoice_lines": [{"number": n, "pence": p} for n, p in lines], "verified": True}
-    cache = {"xero": {"invoices": {"a": inv("a", "INV-0142", 100000), "b": inv("b", "INV-0143", 20000)},
-                      "payments": {"p1": pay("p1", 50000, "INV-0142", day(40)),
-                                   "p2": pay("p2", 50000, "INV-0142", day(9)),
-                                   "p3": pay("p3", 20000, "INV-0143", day(40))},
-                      "credit_notes": {}, "bank_transactions": {}}}
-    def flagged(docs):
-        return sorted(e["refs"][0] for e in _rc.check_gmail_docs(cache, docs)
-                      if e["kind"] == "remittance_payment_missing")
-    eq(flagged({"r1": remit("r1", day(40), 70000, [("INV-0142", 50000), ("INV-0143", 20000)]),
-                "r2": remit("r2", day(9), 50000, [("INV-0142", 50000)])}), [],
-       "two instalments of one invoice, each remitted and each paid")
-    eq(flagged({"r1": remit("r1", day(40), 50000, [("INV-0142", 50000)]),
-                "r3": remit("r3", day(9), 50000, [], nums=["INV-0142"])}), [],
-       "and a remittance read without its lines takes the instalment the other did not")
 
 
 @test
@@ -25501,42 +22857,6 @@ def t_an_erasure_and_every_import_clean_every_field_that_can_name_them():
         finally:
             _pd.export, _pd.API_TOKEN = saved
     with_mail(go)
-
-
-@test
-def t_a_remittance_waiting_for_the_ai_keeps_its_figures():
-    """Review of A4. A text remittance marked to be read again with the AI
-    was removed before it was re-read, and lost for good when its thread was
-    not walked again that sweep."""
-    import types as _types
-    day = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d") + "T09:00:00+00:00"
-    remit_text = ("REMITTANCE ADVICE  Northern Stage Ltd  Payment reference NS-7781  "
-                  "We have paid the following invoices: INV-0142 500.00  Total paid 500.00 GBP  "
-                  "Date 19/09/2026  Please allocate accordingly. Thank you.")
-    threads = {"tr": {"id": "tr", "subject": "Remittance", "messages": [
-        {"id": "r1", "at": day, "from_email": "ap@ns.org", "files": [{"id": "a1", "name": "remittance.pdf", "size": 4000}]}]}}
-    listed = {"tr": "1"}
-    async def search(q, mx=200, out_complete=None):
-        if out_complete is not None:
-            out_complete.append(True)
-        return dict(listed)
-    async def ai_down(system, messages, tools, tool_choice):
-        raise RuntimeError("overloaded")
-    saved = _rc._pdf_text
-    _rc._pdf_text = lambda data: remit_text
-    stores = _mail_world(threads, search=search)
-    try:
-        _rc.configure(ai_call=ai_down)
-        run_async(_rc.sweep())
-        ok(stores["docs"].get("r1:a1", {}).get("needs_ai"), "read by its text, waiting for the AI")
-        listed.clear()                                   # the thread is not listed on day two
-        stores["store"]["doc_tries"]["r1:a1"]["day"] = "2000-01-01"
-        run_async(_rc.sweep())
-        ok(stores["docs"].get("r1:a1", {}).get("doc_type") == "remittance",
-           "its figures are kept until a new reading replaces them")
-    finally:
-        _rc._pdf_text = saved
-        _mail_world_off()
 
 
 # ---------------------------------------------------------------------------
@@ -27198,54 +24518,6 @@ def t_turning_auto_run_on_records_the_interval_the_connector_uses():
 
 
 
-@test
-def t_a_refusal_never_overwrites_a_reconnect_that_landed_meanwhile():
-    """Review N2, 2026-10-07: recording a refused refresh token in the token
-    file must not write over a fresh consent that landed while the refresh was
-    in flight (the consent callback writes outside the refresh lock), or the
-    new token is lost and the page goes red again after saying connected."""
-    saved = (xero_api.httpx.AsyncClient, xero_api.RETRY_WAITS,
-             xero_api.CLIENT_ID, xero_api.CLIENT_SECRET)
-    xero_api.RETRY_WAITS = (0.0, 0.0)
-    xero_api.CLIENT_ID = xero_api.CLIENT_SECRET = "demo"
-
-    class _R:
-        status_code = 400
-        text = "refused"
-        def json(self): return {"error": "invalid_grant"}
-
-    class _C:
-        async def __aenter__(self): return self
-        async def __aexit__(self, *a): return False
-        async def post(self, url, **kw):
-            # The consent walk lands while Xero is answering the old refresh.
-            xero_api._write_token({"refresh_token": "rt-fresh", "tenant_id": "t1",
-                                   "tenant_name": "Projected Image", "connected_at": time.time()})
-            return _R()
-    xero_api.httpx.AsyncClient = lambda *a, **k: _C()
-    try:
-        xero_api._write_token({"refresh_token": "rt-dead", "tenant_id": "t1"})
-        xero_api._state["access"] = ""
-        xero_api._state["access_exp"] = 0.0
-        xero_api._state["token_error"] = ""
-        err = None
-        try:
-            run(xero_api._access_token())
-        except Exception as e:
-            err = e
-        ok(err is not None, "the refresh with the old token still fails")
-        d = xero_api._load_token()
-        eq(d.get("refresh_token"), "rt-fresh", "the fresh consent's token is kept")
-        ok("refused_at" not in d, "and is not marked refused")
-        ok(xero_api.status().get("needs_reconnect") is False, "so the page shows the link as good: %r" % xero_api.status())
-    finally:
-        (xero_api.httpx.AsyncClient, xero_api.RETRY_WAITS,
-         xero_api.CLIENT_ID, xero_api.CLIENT_SECRET) = saved
-        xero_api._state["token_error"] = ""
-        xero_api.disconnect()
-
-
-
 DOOR_WITH_SHOPS_XML = """<Envelope><Body><GetAllServicesAndRatesResponse>
 <GetAllServicesAndRatesResult><Message/><NotificationtType>SUCCESS</NotificationtType><wsRateService>
  <wsAvailableServicesAndRates>
@@ -27896,217 +25168,6 @@ def _left_as_it_was(stores, xid, before, why):
     eq(e["status"], before["status"], why)
     eq(e["history"], before["history"], why + ": and nothing written on its history")
 
-
-@test
-def t_an_open_payout_finding_is_not_settled_by_ageing_past_the_window():
-    """Every read answered, and still an open payout finding was marked "No
-    longer detected" once its payout aged past the window the check matches
-    in. The check leaves out a payout older than the bank lines it holds, and
-    the merge read that as the discrepancy going away. It keeps watching the
-    payout an open finding rests on instead, so the finding closes only when a
-    sweep sees the deposit."""
-    import copy as _copy
-    payout = {"id": 7101, "date": _rc._cutoff_day(10), "amount": "312.40",
-              "currency": "GBP", "status": "paid"}
-    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
-    answers = {"shopify_list_payouts": {"payouts": [payout]},
-               "shopify_payout_transactions": {"transactions": []},
-               "shopify_list_disputes": {"disputes": []}}
-    stores = _payments_world(fx, answers)
-    try:
-        run_async(_rc.sweep())
-        exs = stores["store"]["exceptions"]
-        found = [x for x, e in exs.items() if e["kind"] == "payout_missing_from_bank"]
-        eq(len(found), 1, "a paid payout with no deposit is found")
-        xid = found[0]
-        exs[xid]["status"] = "investigating"
-        before = _copy.deepcopy(exs[xid])
-        # Months on, the deposit never found, and Shopify still lists the payout.
-        aged = _rc._cutoff_day(_rc.FETCH_DAYS + 5)
-        payout["date"] = aged
-        for n in (1, 2):
-            r = run_async(_rc.sweep())
-            ok(not _did_not_run(r["notes"], "payout"), "every read answered: %s" % r["notes"])
-            _left_as_it_was(stores, xid, before, "sweep %d: a payout past the window is not a "
-                                                  "deposit found" % n)
-            ok("7101" in stores["cache"]["shopify"]["payouts"], "the payout it rests on is still held")
-        # Still watched: the deposit turns up, and the sweep that sees it settles it.
-        fx.bank.append(_raw_btxn("BT-7101", "RECEIVE", "312.40", aged))
-        run_async(_rc.sweep())
-        e = stores["store"]["exceptions"][xid]
-        ok(e["stale"] and _written_off(e), "a sweep that sees the deposit settles it")
-    finally:
-        _unconfigure_recon()
-
-
-@test
-def t_an_open_chargeback_finding_is_not_settled_by_ageing_past_the_window():
-    """The chargeback check leaves out disputes older than the books it holds,
-    by the same rule as payouts, with the same result for an open finding."""
-    import copy as _copy
-    dispute = {"id": 8101, "order_id": 104275, "type": "chargeback", "amount": "95.00",
-               "currency": "GBP", "reason": "fraudulent", "status": "lost",
-               "initiated_at": _rc._cutoff_day(10)}
-    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
-    answers = {"shopify_list_payouts": {"payouts": []},
-               "shopify_list_disputes": {"disputes": [dispute]}}
-    stores = _payments_world(fx, answers)
-    try:
-        run_async(_rc.sweep())
-        exs = stores["store"]["exceptions"]
-        found = [x for x, e in exs.items() if e["kind"] == "chargeback_missing_from_xero"]
-        eq(len(found), 1, "a chargeback with no Xero record is found")
-        xid = found[0]
-        exs[xid]["status"] = "investigating"
-        before = _copy.deepcopy(exs[xid])
-        aged = _rc._cutoff_day(_rc.FETCH_DAYS + 5)
-        dispute["initiated_at"] = aged
-        for n in (1, 2):
-            r = run_async(_rc.sweep())
-            ok(not _did_not_run(r["notes"], "chargeback"), "every read answered: %s" % r["notes"])
-            _left_as_it_was(stores, xid, before, "sweep %d: a dispute past the window is not one "
-                                                  "recorded" % n)
-            ok("8101" in stores["cache"]["shopify"]["disputes"], "the dispute it rests on is still held")
-        fx.bank.append(_raw_btxn("BT-8101", "SPEND", "95.00", aged))
-        run_async(_rc.sweep())
-        e = stores["store"]["exceptions"][xid]
-        ok(e["stale"] and _written_off(e), "a sweep that sees it recorded settles it")
-    finally:
-        _unconfigure_recon()
-
-
-@test
-def t_an_open_xero_sale_finding_is_not_settled_by_ageing_past_the_window():
-    """The check for Xero sales with no Shopify order looks only at the last
-    WINDOW_DAYS of invoices, a shorter horizon than the cache keeps, so an
-    open finding went "no longer detected" two months before retention could
-    even have touched its invoice."""
-    import copy as _copy
-    stray = dict(_raw_xinv("INV-9001", "77.00", contact="Walk-in Trade"),
-                 DateString=_rc._cutoff_day(10) + "T00:00:00")
-    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00"), stray])
-    stores = _payments_world(fx, {})
-    try:
-        run_async(_rc.sweep())
-        exs = stores["store"]["exceptions"]
-        found = [x for x, e in exs.items() if e["kind"] == "xero_sale_without_shopify"]
-        eq(len(found), 1, "an invoice no order explains is found")
-        xid = found[0]
-        exs[xid]["status"] = "investigating"
-        before = _copy.deepcopy(exs[xid])
-        stray["DateString"] = _rc._cutoff_day(_rc.WINDOW_DAYS + 5) + "T00:00:00"
-        for n in (1, 2):
-            run_async(_rc.sweep())
-            _left_as_it_was(stores, xid, before, "sweep %d: an invoice past the window is not "
-                                                  "one explained" % n)
-            ok("XR-INV-9001" in stores["cache"]["xero"]["invoices"], "the invoice it rests on is still held")
-        stray["Status"] = "VOIDED"
-        run_async(_rc.sweep())
-        e = stores["store"]["exceptions"][xid]
-        ok(e["stale"] and _written_off(e), "a sweep that sees it voided settles it")
-    finally:
-        _unconfigure_recon()
-
-
-@test
-def t_an_open_xero_sale_past_the_window_does_not_tip_the_numbering_finding():
-    """An invoice watched past the window only for its own open finding is not
-    one of the recent invoices the numbering finding is a share of: eleven old
-    ones must not turn one recent, properly referenced invoice into "most
-    invoices reference no Shopify order"."""
-    orders = {"1": _ord(104275, "#104275", 84200, date=_rc._cutoff_day(10))}
-    xinv = {"XI-INV-104275": _inv("INV-104275", 84200, date=_rc._cutoff_day(10))}
-    old = _rc._cutoff_day(_rc.WINDOW_DAYS + 5)
-    for i in range(11):
-        v = _inv("INV-90%02d" % i, 7700 + i, contact="Walk-in Trade", date=old)
-        xinv[v["id"]] = v
-    cache = {"shopify": {"orders": orders}, "xero": {"invoices": xinv}}
-    eq(_rc.check_xero_orphan_sales(cache), [], "past the window and watched by nothing: not looked at")
-    watched = frozenset(v["id"] for v in xinv.values() if v["contact"] == "Walk-in Trade")
-    kinds = [e["kind"] for e in _rc.check_xero_orphan_sales(cache, open_refs=watched)]
-    eq(kinds, ["xero_sale_without_shopify"] * 11, "each watched invoice is its own finding still")
-
-
-@test
-def t_an_open_mailbox_finding_is_not_settled_by_its_document_ageing_out():
-    """Retention keeps the Xero and Shopify records an open finding rests on,
-    but not the mailbox document behind one: the document was dropped, and the
-    next sweep, finding nothing, wrote the finding off as no longer detected."""
-    import copy as _copy
-    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
-    stores = _recon_world(fx, [_raw_order(104275, "#104275", "842.00")])
-    stores["docs"]["m9:a9"] = {
-        "doc_type": "supplier_invoice", "invoice_numbers": ["SUP-4410"], "total_pence": 48000,
-        "amounts": [48000], "currency": "GBP", "invoice_lines": [], "counterparty": "Acme Glass",
-        "extracted_by": "text", "verified": True, "source_key": "m9:a9", "filename": "sup.pdf",
-        "from": "accounts@acmeglass.example", "date": _rc._cutoff_day(10)}
-    stores["docs"]["m8:a8"] = dict(stores["docs"]["m9:a9"], source_key="m8:a8",
-                                   invoice_numbers=["INV-104275"])
-    try:
-        run_async(_rc.sweep())
-        exs = stores["store"]["exceptions"]
-        found = [x for x, e in exs.items() if e["kind"] == "gmail_doc_missing_from_xero"]
-        eq(len(found), 1, "a bill in the mailbox and not in Xero is found")
-        xid = found[0]
-        exs[xid]["status"] = "investigating"
-        before = _copy.deepcopy(exs[xid])
-        for k in ("m9:a9", "m8:a8"):
-            stores["docs"][k]["date"] = _rc._cutoff_day(_rc.DOCS_KEEP_DAYS + 5)
-        for n in (1, 2, 3):
-            run_async(_rc.sweep())
-            _left_as_it_was(stores, xid, before, "sweep %d: a document past retention is not a "
-                                                  "bill entered" % n)
-            ok("m9:a9" in stores["docs"], "the document it rests on is still held")
-        ok("m8:a8" not in stores["docs"], "one no open finding rests on is dropped as before")
-        fx.invoices.append(_raw_xinv("SUP-4410", "480.00", typ="ACCPAY", contact="Acme Glass"))
-        run_async(_rc.sweep())
-        e = stores["store"]["exceptions"][xid]
-        ok(e["stale"] and _written_off(e), "a sweep that sees the bill in Xero settles it")
-    finally:
-        _unconfigure_recon()
-
-
-@test
-def t_an_open_sale_or_refund_finding_outlives_the_window():
-    """The sale and refund checks have no date horizon of their own, and
-    retention keeps the order an open finding rests on, so an order older than
-    the window Shopify is read for is still checked from the copy held."""
-    refunded = dict(_raw_order(104275, "#104275", "842.00"),
-                    refunds=[{"id": 5501, "created_at": _rc._cutoff_day(10),
-                              "transactions": [{"kind": "refund", "status": "success",
-                                                "amount": "20.00"}]}])
-    orders = [refunded, _raw_order(104276, "#104276", "120.00")]
-    fx = _FakeXero(invoices=[_raw_xinv("INV-104275", "842.00")])
-    stores = _recon_world(fx, orders)
-    try:
-        run_async(_rc.sweep())
-        exs = stores["store"]["exceptions"]
-        kinds = ("shopify_sale_missing", "shopify_refund_missing")
-        found = sorted(x for x, e in exs.items() if e["kind"] in kinds)
-        eq(len(found), 2, "the missing sale and the unrecorded refund are both found")
-        for xid in found:
-            exs[xid]["status"] = "investigating"
-        # Both orders pass the window: Shopify no longer lists them, the cache
-        # still holds them.
-        old = _rc._cutoff_day(_rc.FETCH_DAYS + 5)
-        for o in stores["cache"]["shopify"]["orders"].values():
-            o["created_at"] = old
-        orders.clear()
-        run_async(_rc.sweep())
-        for xid in found:
-            e = stores["store"]["exceptions"][xid]
-            ok(not e.get("stale") and not _written_off(e), e["kind"] + " stays open")
-        ok({"104275", "104276"} <= set(stores["cache"]["shopify"]["orders"]), "both orders are held")
-    finally:
-        _unconfigure_recon()
-
-
-# =========================== speed: the order snapshot survives a known change ==
-# The second speed pull request (the 2026-10-12 audit, X1). Every write this
-# app made, and Shopify's webhook echoing it, retired every cached sweep, so
-# one Production Manager action cost two full sweeps of the store. An order
-# the app knows has changed is now read again by itself; _bust_orders stays as
-# blunt as it was for everything else (Refresh, an unreadable event).
 
 class _FakeShop:
     """Orders as Shopify keeps them, answering shopify_list_orders with its
@@ -29166,7 +26227,7 @@ def t_no_hosting_or_setting_name_reaches_a_person_from_the_server():
             bad.append("%s:%d %s" % (name, node.lineno, node.value[:80]))
         for k in kids:
             visit(k, name, fn, hush)
-    for name in COPILOT_FILES + ["server.py", "recon.py", "xero.py", "google_mail.py",
+    for name in COPILOT_FILES + ["server.py", "google_mail.py",
                                  "pipedrive.py", "tokenvault.py", "worldoptions.py", "eori.py"]:
         visit(ast.parse(open(os.path.join(root, name), encoding="utf-8").read()), name, "", False)
     ok(not bad, "%d strings a person reads name the hosting, the code name or a setting: %s"
@@ -29981,14 +27042,14 @@ def t_either_module_imports_first():
                         ("gizmo.scheduler", "copilot"), ("gizmo.updates", "copilot"), ("gizmo.impact", "copilot"),
                         ("gizmo.backup", "copilot"), ("gizmo.routes.scheduler", "copilot"), ("gizmo.routes.updates", "copilot"),
                         ("gizmo.routes.impact", "copilot"), ("gizmo.routes.backup", "copilot"),
-                        ("gizmo.liability", "copilot"), ("gizmo.reconciliation", "copilot"), ("gizmo.xero_sync", "copilot"),
+                        ("gizmo.liability", "copilot"), ("gizmo.xero_sync", "copilot"),
                         ("gizmo.forecasting", "copilot"), ("gizmo.routes.liability", "copilot"),
-                        ("gizmo.routes.reconciliation", "copilot"), ("gizmo.routes.xero_sync", "copilot"),
+                        ("gizmo.routes.xero_sync", "copilot"),
                         ("gizmo.routes.forecasting", "copilot"),
                         ("gizmo.rendering", "copilot"), ("gizmo.profile", "copilot"), ("gizmo.layouts", "copilot"),
                         ("gizmo.oauth", "copilot"), ("gizmo.status", "copilot"), ("gizmo.routes.rendering", "copilot"),
                         ("gizmo.routes.profile", "copilot"), ("gizmo.routes.layouts", "copilot"),
-                        ("gizmo.routes.oauth", "copilot"), ("gizmo.routes.status", "copilot"),
+                        ("gizmo.routes.status", "copilot"),
                         ("gizmo.clock", "copilot"), ("gizmo.products", "copilot"),
                         ("gizmo.routes.chat", "copilot")):
         r = _sp.run([sys.executable, "-c", f"import {first}, {then}; import gizmo.dispatch as d, copilot as c; "
@@ -30625,41 +27686,40 @@ def t_the_scheduler_updates_and_backup_routes_are_gathered():
 
 @test
 def t_the_finance_routes_are_gathered():
-    """Liability's, reconciliation's (with the Xero connect pair), the Xero sync
-    settings' and the forecast hooks' routes, each group registered by one
-    call in add_routes."""
+    """Liability's, the Xero sync settings' and the forecast hooks' routes,
+    each group registered by one call in add_routes (Reconciliation's went
+    on 22 Oct 2026)."""
     import inspect
     from gizmo.routes import forecasting as routes_forecasting, liability as routes_liability
-    from gizmo.routes import reconciliation as routes_reconciliation, xero_sync as routes_xero_sync
+    from gizmo.routes import xero_sync as routes_xero_sync
     src = inspect.getsource(copilot.add_routes)
-    for call in ("routes_liability.register(mcp, registry)", "routes_reconciliation.register(mcp, registry)",
+    for call in ("routes_liability.register(mcp, registry)",
                  "routes_xero_sync.register(mcp, registry)", "routes_forecasting.register(mcp, registry)"):
         eq(src.count(call), 1, call)
-    for path in ('"/api/liability', '"/api/recon/', '"/oauth/xero/', '"/api/connector"', '"/hooks/forecast/', '"/api/forecast'):
+    for path in ('"/api/liability', '"/api/connector"', '"/hooks/forecast/', '"/api/forecast'):
         ok(path not in src, path + " is registered by its area's routes")
     eq([inspect.getsource(m).count("@mcp.custom_route(")
-        for m in (routes_liability, routes_reconciliation, routes_xero_sync, routes_forecasting)], [2, 9, 1, 6],
-       "2 liability routes, 7 reconciliation routes and the Xero connect pair, the connector route, 6 forecast routes")
+        for m in (routes_liability, routes_xero_sync, routes_forecasting)], [2, 1, 6],
+       "2 liability routes, the connector route, 6 forecast routes")
 
 @test
 def t_the_page_profile_oauth_and_status_routes_are_gathered():
-    """The page's own route and its assets, the profile's, the layouts', the
-    accounts-mailbox sign-in walk's and the status page's routes,
-    each group registered by one call in add_routes."""
+    """The page's own route and its assets, the profile's, the layouts' and
+    the status page's routes, each group registered by one call in
+    add_routes (the sign-in walks' went on 22 Oct 2026)."""
     import inspect
-    from gizmo.routes import layouts as routes_layouts, oauth as routes_oauth, profile as routes_profile
+    from gizmo.routes import layouts as routes_layouts, profile as routes_profile
     from gizmo.routes import rendering as routes_rendering, status as routes_status
     src = inspect.getsource(copilot.add_routes)
     for call in ("routes_rendering.register(mcp, registry)", "routes_profile.register(mcp, registry)",
-                 "routes_layouts.register(mcp, registry)", "routes_oauth.register(mcp, registry)",
-                 "routes_status.register(mcp, registry)"):
+                 "routes_layouts.register(mcp, registry)", "routes_status.register(mcp, registry)"):
         eq(src.count(call), 1, call)
     for path in ('custom_route("/",', '"/assets/', '"/api/profile"', '"/api/layouts"',
-                 '"/oauth/gmail-finance/', '"/api/status"', '"/healthz"'):
+                 '"/api/status"', '"/healthz"'):
         ok(path not in src, path + " is registered by its area's routes")
     eq([inspect.getsource(m).count("@mcp.custom_route(")
-        for m in (routes_rendering, routes_profile, routes_layouts, routes_oauth, routes_status)], [4, 1, 1, 2, 2],
-       "the page and its 3 assets, the profile, the layouts, the accounts mailbox walk's 2 routes, status and healthz")
+        for m in (routes_rendering, routes_profile, routes_layouts, routes_status)], [4, 1, 1, 2],
+       "the page and its 3 assets, the profile, the layouts, status and healthz")
 
 @test
 def t_the_leftovers_are_home():
@@ -30898,17 +27958,15 @@ def _wrong_kinds_refused(cases, send=None):
 
 @test
 def t_a_wrong_type_is_refused_by_name_not_a_server_error():
-    """The seven routes a stray script could break with a field of the wrong
+    """The routes a stray script could break with a field of the wrong
     kind (an object where an id or a number belongs) refuse it at the door
     with a 400 naming the field, before the route reads it (stage 5)."""
-    from gizmo.routes import memory as r_memory, reconciliation as r_recon, dispatch as r_dispatch
+    from gizmo.routes import memory as r_memory, dispatch as r_dispatch
     from gizmo.routes import impact as r_impact, production as r_production, skills as r_skills
     from gizmo.routes import updates as r_updates
     for path, body, words in (
             ("/api/memory", {"op": "delete", "id": {"wrong": 1}}, "The id sent must be text or a number."),
             ("/api/memory", {"op": "set_status", "id": {"wrong": 1}}, "The id sent must be text or a number."),
-            ("/api/recon/exceptions", {"limit": {"wrong": 1}}, "The limit sent must be a whole number."),
-            ("/api/recon/exceptions", {"min_pence": {"wrong": 1}}, "The min pence sent must be a whole number."),
             ("/api/shipping/config", {"op": "set", "boxes": {"wrong": 1}}, "The boxes sent must be a list."),
             ("/api/impact", {"op": "add", "text": {"wrong": 1}}, "The text sent must be text."),
             ("/api/production-state", {"op": "made", "id": {"wrong": 1}}, "The id sent must be a whole number."),
@@ -30918,7 +27976,6 @@ def t_a_wrong_type_is_refused_by_name_not_a_server_error():
         eq((r.status_code, r.json().get("error")), (400, words), "%s %r" % (path, body))
     n = _wrong_kinds_refused([
         ("/api/memory", "delete", r_memory.MemoryBody),
-        ("/api/recon/exceptions", None, r_recon.ReconFilterBody),
         ("/api/shipping/config", "set", r_dispatch.ShippingBody),
         ("/api/impact", "add", r_impact.ImpactBody),
         ("/api/production-state", "made", r_production.ProductionStateBody),
@@ -30992,7 +28049,7 @@ def t_the_accounts_routes_refuse_a_wrong_kind():
     list, is a 400 in the model's words before the route reads it."""
     from gizmo.routes import scheduler as r_sched, team as r_team, chat as r_chat, xero_sync as r_xs
     from gizmo.routes import orderbook as r_ob
-    from gizmo.routes import profile as r_prof, reconciliation as r_rec, backup as r_bk, skills as r_sk
+    from gizmo.routes import profile as r_prof, backup as r_bk, skills as r_sk
     from gizmo.routes import work as r_work, forecasting as r_fc
     n = _wrong_kinds_refused([
         ("/api/alerts", "dismiss", r_sched.AlertBody),
@@ -31009,8 +28066,6 @@ def t_the_accounts_routes_refuse_a_wrong_kind():
         ("/api/customer-history", None, r_ob.CustomerHistoryBody),
         ("/api/order/edit", "read", r_ob.OrderEditBody),
         ("/api/profile", None, r_prof.ProfileBody),
-        ("/api/recon/disconnect", None, r_rec.ReconDisconnectBody),
-        ("/api/recon/exception", None, r_rec.ReconExceptionBody),
         ("/api/restore", None, r_bk.RestoreBody),
         ("/api/skills/read", None, r_sk.SkillReadBody),
         ("/api/work/report", None, r_work.WorkReportBody),
@@ -31106,7 +28161,7 @@ def t_the_routes_the_first_count_missed_refuse_a_wrong_kind():
     orders, the accounts mailbox link, card layouts and the forecast's store
     reads. Each now names its fields, and the count sees them all."""
     from gizmo.routes import crm as r_crm, files as r_files, dispatch as r_disp, liability as r_liab
-    from gizmo.routes import mail as r_mail, reconciliation as r_rec, layouts as r_lay
+    from gizmo.routes import mail as r_mail, layouts as r_lay
     from gizmo.routes import forecasting as r_fc
     n = _wrong_kinds_refused([
         ("/api/crm/board", None, r_crm.CrmBoardBody),
@@ -31117,7 +28172,6 @@ def t_the_routes_the_first_count_missed_refuse_a_wrong_kind():
         ("/api/liability", None, r_liab.LiabilityBody),
         ("/api/mail/claim", None, r_mail.MailClaimBody),
         ("/api/mail/orders", None, r_mail.MailOrdersBody),
-        ("/api/recon/connect-link", None, r_rec.ReconConnectLinkBody),
         ("/api/layouts", None, r_lay.LayoutBody)])
     ok(n > 20, "every field each model names was tried (%d refusals)" % n)
     gate._rl_hits.clear(); gate._rl_global.clear()
@@ -31196,8 +28250,8 @@ def t_write_routes_check_their_bodies():
     eq(by["/webhooks/privacy"]["body"], "", "a route with no model has none")
     first = ["/api/crm/activity", "/api/crm/contact", "/api/files/folder", "/api/gobo-sizes/rule", "/api/impact",
         "/api/learn", "/api/liability/chase", "/api/loans", "/api/mail/settings", "/api/memory", "/api/privacy",
-        "/api/production-state", "/api/recon/exceptions", "/api/shipping/config", "/api/skills", "/api/updates"]
-    eq([p for p in first if not by[p]["body"]], [], "the sixteen routes given a model first (piece 1) keep it")
+        "/api/production-state", "/api/shipping/config", "/api/skills", "/api/updates"]
+    eq([p for p in first if not by[p]["body"]], [], "the routes given a model first (piece 1) keep it")
     unchecked = sorted(r["path"] for r in rows if "POST" in r["methods"] and r["fields"] and not r["body"])
     eq([p for p in unchecked if p not in UNCHECKED_BODIES], [],
        "a new write route reads fields with no model: give it one (gizmo/bodies.py)")
@@ -31368,6 +28422,67 @@ def t_backups_never_carry_the_google_data_token_or_the_report_stores():
             os.path.basename(os.environ.get("ANALYSIS_CACHE_PATH", "/data/analysis_cache.json")): '{"customers_segments": {}}',
             os.path.basename(scheduler.SCHEDULE_PATH): '{"enabled": true}',
         }
+        in_backup, written = _retired_files_round_trip(planted)
+        eq(in_backup, set(), "none of them is in the backup")
+        eq(written, set(), "and a restore writes none of them back")
+    with_accounts(go)
+
+
+@test
+def t_payouts_in_chat_need_the_xero_sync_permission():
+    """Payouts and disputes are the books. They were gated on Reconciliation's
+    tab, which goes; they move to Xero sync's, the other opt-in finance tab,
+    so they are never handed to an account by default."""
+    for name in ("shopify_list_payouts", "shopify_payout_transactions", "shopify_list_disputes"):
+        eq(assistant._TOOL_TABS.get(name), "connector", name + " is gated on the Xero sync tab")
+    ok("connector" in team.OPT_IN_TABS and "connector" not in team.DEFAULT_TABS, "which is opt-in")
+    calls = []
+
+    async def _reg(payload):
+        calls.append(payload)
+        return "the payouts"
+
+    who = {"uid": ""}
+    dispatch = assistant._build_dispatch({"shopify_list_payouts": (_reg, dict)}, lambda: who["uid"])
+
+    def go():
+        ensure_auth()
+        uid, _sess, _ = ready_user("Pia", "pia")
+        who["uid"] = uid
+        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["chat"]})
+        out = run_async(dispatch("shopify_list_payouts", {}))
+        ok(not calls and "Refused" in out, "without Xero sync: refused, " + out[:120])
+        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["chat", "connector"]})
+        eq(run_async(dispatch("shopify_list_payouts", {})), "the payouts", "with Xero sync: answered")
+    with_accounts(go)
+
+
+@test
+def t_a_saved_tab_list_naming_reconciliation_still_loads():
+    """An account handed Reconciliation before the trim keeps signing in;
+    the key is dropped as its list is read."""
+    ensure_auth()
+    uid, _sess, _ = ready_user("Rex", "rex")
+    d = team._load_users()
+    d["users"][uid]["tabs"] = ["recon", "labels"]
+    team._write_users(d)
+    eq(team._user_tabs(uid), ["labels"])
+
+
+@test
+def t_backups_never_carry_the_xero_or_accounts_mailbox_token_or_the_reconciliation_stores():
+    """Reconciliation, Reactor's own Xero sign-in and the accounts mailbox go,
+    but their files stay on the volume until somebody deletes them: a backup
+    never carries the two refresh tokens, and neither a backup nor a restore
+    carries the reconciliation stores, which nothing reads or scrubs any more."""
+    def go():
+        ensure_auth()
+        planted = {os.path.basename(os.environ.get(k, d)): '{"refresh_token": "old"}' for k, d in (
+            ("XERO_TOKEN_PATH", "/data/xero_oauth.json"),
+            ("GMAIL_FINANCE_TOKEN_PATH", "/data/gmail_finance_oauth.json"),
+            ("RECON_PATH", "/data/recon.json"),
+            ("RECON_CACHE_PATH", "/data/recon_cache.json"),
+            ("RECON_DOCS_PATH", "/data/recon_docs.json"))}
         in_backup, written = _retired_files_round_trip(planted)
         eq(in_backup, set(), "none of them is in the backup")
         eq(written, set(), "and a restore writes none of them back")

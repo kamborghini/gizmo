@@ -35,8 +35,7 @@ _TOOL_LABELS = {
     "shopify_get_inventory_levels": "Inventory levels", "shopify_list_fulfillments": "Fulfilments",
     "shopify_get_variant": "Variant details", "shopify_get_inventory_items": "Inventory items",
     "shopify_list_payouts": "Payouts", "shopify_payout_transactions": "Payout details",
-    "shopify_list_disputes": "Disputes", "recon_summary": "Reconciliation summary",
-    "recon_exceptions": "Reconciliation exceptions", "recon_exception": "Reconciliation exception",
+    "shopify_list_disputes": "Disputes",
 }
 
 
@@ -375,10 +374,10 @@ _TOOL_TABS = {
     # list_orders takes any `fields`: without these the Customers gate was
     # one tool call wide (audit R-004).
     "shopify_list_orders": "customers", "shopify_get_order": "customers",
-    "recon_summary": "recon", "recon_exceptions": "recon", "recon_exception": "recon",
-    # Payouts and disputes are the books: the same tab as reconciliation.
-    "shopify_list_payouts": "recon", "shopify_payout_transactions": "recon",
-    "shopify_list_disputes": "recon",
+    # Payouts and disputes are the books. They followed Reconciliation's tab
+    # until it went (22 Oct 2026); Xero sync is the other opt-in finance tab.
+    "shopify_list_payouts": "connector", "shopify_payout_transactions": "connector",
+    "shopify_list_disputes": "connector",
 }
 
 
@@ -411,7 +410,7 @@ def _build_dispatch(registry: dict, uid_of: Optional[Callable] = None) -> Callab
 
 
 # Set once by add_routes from the registry the app is handed (the Shopify
-# tools and the reconciliation tools): what the chat may call.
+# tools): what the chat may call.
 _chat_registry: dict = {}
 _chat_tools: list = []
 

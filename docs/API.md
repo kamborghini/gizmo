@@ -3,7 +3,7 @@
 Generated from the code by `tools/route_reference.py`; do not edit by hand.
 `make api-doc` rewrites it, and CI fails when it is stale.
 
-138 routes. **Tab** is the tab that opens a route (`_TAB_ROUTES`); an `/api/` route no tab claims is refused unless it is on `_OPEN_API`. **Door** is the guard the handler opens with (`_guard` is the one door: rate window, tab, session, rank, AI slot, body); `own check` means the route authenticates itself (a hook, a webhook, OAuth, print, assets). **Body** is the model that checks the fields the route reads (`gizmo/bodies.py`); `unchecked` means it reads fields no model checks yet. **Checks** are the permission helpers the handler calls itself.
+127 routes. **Tab** is the tab that opens a route (`_TAB_ROUTES`); an `/api/` route no tab claims is refused unless it is on `_OPEN_API`. **Door** is the guard the handler opens with (`_guard` is the one door: rate window, tab, session, rank, AI slot, body); `own check` means the route authenticates itself (a hook, a webhook, OAuth, print, assets). **Body** is the model that checks the fields the route reads (`gizmo/bodies.py`); `unchecked` means it reads fields no model checks yet. **Checks** are the permission helpers the handler calls itself.
 
 ## `/`
 
@@ -231,18 +231,6 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 |---|---|---|---|---|---|---|---|---|
 | `/api/profile` | POST | any account | `_guard` |  | `ProfileBody` | `_team_level` | `gizmo.routes.profile.profile_route` |  |
 
-## `/api/recon`
-
-| Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
-|---|---|---|---|---|---|---|---|---|
-| `/api/recon/connect-link` | POST | recon | `_guard` | reads its own body | `ReconConnectLinkBody` | `_team_role` | `gizmo.routes.reconciliation.recon_connect_link_route` | Master-only: mint a single-use ticket for the accounts-mailbox consent walk, so nobody has to paste a server secret into a URL. |
-| `/api/recon/disconnect` | POST | recon | `_guard` | reads its own body | `ReconDisconnectBody` | `_team_role` | `gizmo.routes.reconciliation.recon_disconnect_route` | Disconnect Xero or the accounts mailbox, and mean it. |
-| `/api/recon/exception` | POST | recon | `_guard` |  | `ReconExceptionBody` |  | `gizmo.routes.reconciliation.recon_exception_route` |  |
-| `/api/recon/exceptions` | POST | recon | `_guard` |  | `ReconFilterBody` |  | `gizmo.routes.reconciliation.recon_exceptions_route` |  |
-| `/api/recon/status` | POST | recon | `_guard` |  |  | `_team_role` | `gizmo.routes.reconciliation.recon_status_route` |  |
-| `/api/recon/sweep` | POST | recon | `_guard` | rank admin, AI slot |  |  | `gizmo.routes.reconciliation.recon_sweep_route` |  |
-| `/api/recon/xero-link` | POST | recon | `_guard` | reads its own body |  | `_team_role` | `gizmo.routes.reconciliation.recon_xero_link_route` | Master-only: a single-use ticket for the Xero consent walk. |
-
 ## `/api/restore`
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
@@ -352,12 +340,8 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/oauth/gmail-finance/callback` | GET | outside the tab map | own check |  |  |  | `gizmo.routes.oauth.gmail_finance_callback` |  |
-| `/oauth/gmail-finance/start` | GET | outside the tab map | own check |  |  | `_secret_ok` | `gizmo.routes.oauth.gmail_finance_start` |  |
 | `/oauth/gmail/callback` | GET | outside the tab map | own check |  |  |  | `gizmo.routes.mail.gmail_callback` |  |
 | `/oauth/gmail/start` | GET | outside the tab map | own check |  |  |  | `gizmo.routes.mail.gmail_start` |  |
-| `/oauth/xero/callback` | GET | outside the tab map | own check |  |  |  | `gizmo.routes.reconciliation.xero_callback` |  |
-| `/oauth/xero/start` | GET | outside the tab map | own check |  |  | `_secret_ok` | `gizmo.routes.reconciliation.xero_start` |  |
 
 ## `/print`
 

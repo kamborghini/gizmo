@@ -3,7 +3,7 @@
 Generated from the code by `tools/env_reference.py`; do not edit by hand.
 `make env-doc` rewrites it, and CI fails when it is stale.
 
-210 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document. `[shop domain]` stands for the shop's own website domain, which those defaults carry.
+184 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document. `[shop domain]` stands for the shop's own website domain, which those defaults carry.
 
 ## server.py
 
@@ -301,15 +301,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `PROFILE_FIELD_CAP` | `"6000"` | gizmo.profile |  |
 | `PROFILE_PATH` | `"/data/store_profile.json"` | gizmo.profile |  |
 
-## gizmo/reconciliation.py - Reconciliation stores + the read-only tools the chat is give
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `ANTHROPIC_MODEL_RECON` | `None` | gizmo.reconciliation |  |
-| `RECON_CACHE_PATH` | `"/data/recon_cache.json"` | gizmo.reconciliation |  |
-| `RECON_DOCS_PATH` | `"/data/recon_docs.json"` | gizmo.reconciliation |  |
-| `RECON_PATH` | `"/data/recon.json"` | gizmo.reconciliation |  |
-
 ## gizmo/routes/files.py - top
 
 | Variable | Default | Read by | Notes |
@@ -416,7 +407,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
 | `GMAIL_API_BASE` | `"https://gmail.googleapis.com"` | google_mail |  |
-| `GMAIL_FINANCE_TOKEN_PATH` | `"/data/gmail_finance_oauth.json"` | google_mail |  |
 | `GMAIL_TOKEN_PATH` | `"/data/gmail_oauth.json"` | google_mail |  |
 | `GMAIL_TOKEN_URL` | `"https://oauth2.googleapis.com/token"` | google_mail |  |
 | `GOOGLE_OAUTH_CLIENT_ID` | `""` | google_mail |  |
@@ -437,25 +427,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `PIPEDRIVE_API_TOKEN` | `""` | pipedrive |  |
 | `PIPEDRIVE_DOMAIN` | `""` | pipedrive |  |
 
-## recon.py
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `RECON_CACHE_KEEP_DAYS` | `str(WINDOW_DAYS + 60)` | recon |  |
-| `RECON_CLOSED_KEEP_DAYS` | `"365"` | recon |  |
-| `RECON_DOCS_KEEP_DAYS` | `str(WINDOW_DAYS + 60)` | recon |  |
-| `RECON_DOCS_PER_SWEEP` | `"8"` | recon |  |
-| `RECON_DOC_BYTES_MAX` | `str(8 * 1024 * 1024)` | recon |  |
-| `RECON_DOC_READ_TRIES` | `"5"` | recon |  |
-| `RECON_GMAIL_QUERY` | `"(has:attachment OR remittance OR invoice OR statement OR...` | recon |  |
-| `RECON_MATERIAL_PENCE` | `"25000"` | recon | 250.00 |
-| `RECON_ORDER_CAP` | `"1500"` | recon |  |
-| `RECON_SEEN_CAP` | `"4000"` | recon |  |
-| `RECON_STALE_DAYS` | `"21"` | recon |  |
-| `RECON_THREADS_PER_SWEEP` | `"40"` | recon |  |
-| `RECON_TOLERANCE_PENCE` | `"100"` | recon | 1.00 |
-| `RECON_WINDOW_DAYS` | `"120"` | recon |  |
-
 ## tokenvault.py
 
 | Variable | Default | Read by | Notes |
@@ -472,15 +443,3 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `WO_METER_NUMBER` | `""` | worldoptions |  |
 | `WO_PASSWORD` | `""` | worldoptions |  |
 | `WO_PLUGIN_CODE` | `"Web_Service"` | worldoptions |  |
-
-## xero.py
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `XERO_API_BASE` | `"https://api.xero.com"` | xero |  |
-| `XERO_CLIENT_ID` | `""` | xero |  |
-| `XERO_CLIENT_SECRET` | `""` | xero |  |
-| `XERO_IDENTITY_BASE` | `"https://identity.xero.com"` | xero |  |
-| `XERO_LOGIN_BASE` | `"https://login.xero.com"` | xero |  |
-| `XERO_SCOPES` | `"offline_access accounting.invoices.read " "accounting.pa...` | xero |  |
-| `XERO_TOKEN_PATH` | `"/data/xero_oauth.json"` | xero |  |
