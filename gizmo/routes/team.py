@@ -171,9 +171,9 @@ def register(mcp, registry):
         # business at the door.
         vague = gate._json({"error": "That username and password do not match."}, 401)
         if not u:
-            # Spend what an existing account would: three of the four failure
-            # paths returned before _check_pw ran, so the response TIME answered
-            # the question the vague body refuses to. One dummy verify levels it.
+            # Spend what an existing account would: the response TIME must not
+            # answer the question the vague body refuses to. One dummy verify
+            # levels it.
             team._check_pw(pw, team._PW_DUMMY)
             # Coalesced, not one row per attempt. The ledger is a fixed-size
             # FIFO, and this endpoint is reachable by any Shopify staff user of
@@ -181,6 +181,12 @@ def register(mcp, registry):
             # a burst of bad logins flush the whole audit history out of it.
             activity._track_login_noise(username)
             return vague
+        # Verified BEFORE the lock, the switch and the expiry are looked at, so
+        # every real account costs one verify as a made-up name does. They
+        # used to answer before any scrypt ran: five wrong guesses pause any
+        # real account, and from then on the clock told it from a made-up one.
+        # The result is read only once all three have let the account through.
+        pw_ok = team._check_pw(pw, u.get("pw") or team._PW_DUMMY)
         if str(u.get("lock_until") or "") > now.isoformat():
             # Locked answers exactly like wrong: a different reply would tell
             # a guesser which usernames exist.
@@ -196,7 +202,7 @@ def register(mcp, registry):
             # accounts exist or which are mid-reset.
             activity._track_login_refusal(uid, "the temporary password had expired")
             return vague
-        if not team._check_pw(pw, u.get("pw") or ""):
+        if not pw_ok:
             team._note_wrong_password(d, u, uid, now=now)
             activity._track_login_refusal(uid, "wrong password")
             return vague

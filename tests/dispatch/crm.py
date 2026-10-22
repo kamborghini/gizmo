@@ -975,3 +975,34 @@ def t_the_bin_lists_what_it_holds():
     eq(r["trash_items"][0]["id"], deal, "the bin is a list the browser can render")
     ok(r["trash_items"][0]["deleted_at"])
 
+
+@test
+def t_an_import_that_fails_partway_leaves_no_half_import_behind():
+    """_crm_import_apply writes into the cached CRM as it goes, and the route
+    wrote nothing back when it raised partway: the half-made import stayed in
+    memory, served to every board, and the next unrelated CRM write put it on
+    disk. A failure now forgets the cached store, as an erasure that raises
+    does (#23), and says nothing was saved."""
+    def go():
+        ensure_auth()
+        crm_wipe()
+
+        async def full(progress=None):
+            return dict(PD_EXPORT)
+
+        def half(d, data, dry=False):
+            d["deals"]["d_half"] = {"id": "d_half", "title": "Half made", "status": "open"}
+            raise RuntimeError("the import fell over partway")
+        saved = (pipedrive.export, pipedrive.API_TOKEN, salesdesk._crm_import_apply)
+        pipedrive.export, pipedrive.API_TOKEN, salesdesk._crm_import_apply = full, "t", half
+        try:
+            r = post("/api/crm/import", {"go": True})
+            eq(r.status_code, 500, r.text)
+            ok("nothing was saved" in r.json().get("error", ""), r.text)
+            ok("d_half" not in salesdesk._load_crm()["deals"], "the half-made import is not served")
+            eq(post("/api/crm/contact", {"op": "org_add", "name": "Unrelated write"}).status_code, 200)
+            jsonstore._forget_store(salesdesk.CRM_PATH)
+            ok("d_half" not in salesdesk._load_crm()["deals"], "nor put on disk by the next save")
+        finally:
+            pipedrive.export, pipedrive.API_TOKEN, salesdesk._crm_import_apply = saved
+    with_accounts(go)
