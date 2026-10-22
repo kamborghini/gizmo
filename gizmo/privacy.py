@@ -24,6 +24,7 @@ from gizmo import shopify
 import base64
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
+from gizmo import background
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
@@ -1170,7 +1171,7 @@ def _redact_unrecorded() -> None:
     if last is not None and now - last < 3600:
         return
     _redact_hold_said["unrecorded"] = now
-    core._spawn_bg(scheduler._send_alert_email(
+    background.spawn(scheduler._send_alert_email(
         "Reactor: could not record a customer erasure request",
         ["Shopify asked Reactor to erase a customer's records, but Reactor could not record the",
          "request, so it was sent back for Shopify to try again (it does, for a few hours). Check",
@@ -1261,7 +1262,7 @@ def _privacy_mail(reminder: bool = False) -> None:
                   "did, stop it: only someone holding the app's secret can send one Shopify did not."]
     held_ids, ask_ids = {h["id"] for h in held}, {a["id"] for a in asks}
     subject = "Reactor: privacy requests " + ("still waiting" if reminder else "waiting")
-    core._spawn_bg(_privacy_mail_send(subject, lines, held_ids, ask_ids))
+    background.spawn(_privacy_mail_send(subject, lines, held_ids, ask_ids))
 
 
 async def _privacy_mail_send(subject: str, lines: list, held_ids: set, ask_ids: set) -> None:
@@ -1313,7 +1314,7 @@ async def _redact_hold_due(check: bool = True) -> int:
         last = _redact_hold_said.get("unreadable")
         if last is None or time.monotonic() - last >= 24 * 3600:
             _redact_hold_said["unreadable"] = time.monotonic()
-            core._spawn_bg(scheduler._send_alert_email(
+            background.spawn(scheduler._send_alert_email(
                 "Reactor: the privacy requests cannot be read",
                 ["Reactor keeps the customer erasure and data requests Shopify sends in a file it cannot",
                  "read just now, so none of them can be shown or reminded about. Check the server's",
@@ -1531,7 +1532,7 @@ def _shop_redact_settle(outcome: str) -> None:
     _shop_redact_said[outcome] = now
     logger.warning("shop/redact: %s", outcome)
     _privacy_note("shop/redact", "", "", words[0])
-    core._spawn_bg(scheduler._send_alert_email(words[1], words[2]))
+    background.spawn(scheduler._send_alert_email(words[1], words[2]))
 
 
 async def _shop_redact_checked(delivery: str) -> Response:
@@ -1738,13 +1739,12 @@ async def _webhook_body(request: Request):
 
 # Last, so this module is whole before copilot.py or a sibling runs: copilot.py
 # takes names from these modules as it loads, and any of them may be imported
-# first. Read as core.NAME and sibling.NAME, never a copied name.
+# first. Read as sibling.NAME, never a copied name.
 from gizmo import dispatch as desk  # noqa: E402
 from gizmo import files as fileserver  # noqa: E402
 from gizmo import mail  # noqa: E402
 from gizmo import production  # noqa: E402
 from gizmo import crm as salesdesk  # noqa: E402
-import copilot as core  # noqa: E402
 from gizmo import config  # noqa: E402
 from gizmo import liability  # noqa: E402
 from gizmo import backup  # noqa: E402

@@ -6,7 +6,6 @@ import time
 import secrets
 from starlette.requests import Request
 
-import copilot as core
 from gizmo import impact
 from gizmo import gate
 from gizmo import memory

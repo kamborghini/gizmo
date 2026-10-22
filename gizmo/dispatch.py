@@ -3,12 +3,10 @@ cancelling, collections, customs, pasted and one-off addresses, the shipping
 settings, and the margin report built on what couriers charged.
 
 Moved whole out of copilot.py (stage 4 of the 14 October audit); its routes
-are in gizmo/routes/dispatch.py. What it still needs from copilot.py it reads
-as core.NAME, never a copied name, so a test that patches copilot.NAME
-reaches it here too; t_what_dispatch_borrows lists those names. copilot.py
-reads the desk as desk.NAME (two names its frozen print route reads it takes
-by name). The desk reads nothing from copilot.py as it loads and imports it
-last, so either module can be imported first.
+are in gizmo/routes/dispatch.py. It reads nothing from copilot.py (stage 6).
+copilot.py reads the desk as desk.NAME (two names its frozen print route
+reads it takes by name), and nothing is read across as either loads, so
+either module can be imported first.
 """
 import logging
 import glob
@@ -2769,7 +2767,6 @@ EORI_MAX_PER_MIN = 20
 
 # Last, so the whole desk is defined before copilot.py runs: copilot.py takes
 # two names from it as it loads, and either module may be imported first.
-import copilot as core  # noqa: E402
 from gizmo import clock  # noqa: E402
 from gizmo import orderbook  # noqa: E402
 from gizmo import production  # noqa: E402

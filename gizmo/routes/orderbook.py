@@ -11,7 +11,6 @@ import hashlib
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
-import copilot as core
 from gizmo import config
 from gizmo import activity
 from gizmo import gate

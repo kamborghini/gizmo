@@ -13,7 +13,6 @@ import xero as xero_api
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
-import copilot as core
 from gizmo import oauth
 from gizmo import activity
 from gizmo import gate

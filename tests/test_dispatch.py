@@ -170,6 +170,7 @@ from gizmo import store as jsonstore
 from gizmo import errors
 from gizmo import ai as claude
 from gizmo import activity, gate, team
+from gizmo import background
 from gizmo import orderbook, production, shopify, size_list
 from gizmo import crm as salesdesk, mail
 from gizmo import files as fileserver
@@ -7028,7 +7029,7 @@ def t_coverage_counts_gobos_sold_with_a_projector():
         return await fake_tool_json(registry, name, args)
     shopify._tool_json = tj
     try:
-        r = run_async(copilot.run_label_coverage({}, 10))
+        r = run_async(production.run_label_coverage({}, 10))
     finally:
         shopify._tool_json = fake_tool_json
     eq((r["gobo_items"], r["sized"], r["skipped_no_model"]), (3, 1, 2),
@@ -8903,7 +8904,8 @@ def t_the_order_webhook_never_writes_the_crm_from_a_thread():
     ok("run_in_executor" not in hook,
        "the order webhook does not push CRM work onto a thread")
     ok("_crm_link_order_soon" in hook, "it defers onto the event loop instead")
-    ok("_crm_bg_tasks" in src, "and holds a reference so the task cannot be collected")
+    ok("background.spawn(_crm_link_order_later(" in src,
+       "and hands it to background.spawn, which holds a reference so it cannot be collected")
 
 @test
 def t_the_bare_token_print_route_demands_a_live_account():
@@ -15133,7 +15135,7 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
     so forgeries cannot flood the privacy log or the email allowance."""
     from datetime import datetime, timedelta, timezone
     orderbook._webhook_seen.clear()
-    saved = (shopify._install_checker, copilot._spawn_bg, backup._build_backup_zip)
+    saved = (shopify._install_checker, background.spawn, backup._build_backup_zip)
     spawned = []
 
     def spawn(coro):
@@ -15144,7 +15146,7 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
 
     async def checker():
         return verdict["v"]
-    shopify._install_checker, copilot._spawn_bg = checker, spawn
+    shopify._install_checker, background.spawn = checker, spawn
     privacy._shop_redact_said.clear()
     saved_watch = scheduler._load_watch()
     raw = json.dumps({"shop_id": 1, "shop_domain": "test-store.myshopify.com"}).encode()
@@ -15253,7 +15255,7 @@ def t_a_signed_shop_redact_erases_nothing_until_shopify_confirms_the_uninstall()
             jsonstore._json_cache.clear()
             jsonstore._poisoned_stores.discard(privacy.PRIVACY_LOG_PATH)
     finally:
-        shopify._install_checker, copilot._spawn_bg, backup._build_backup_zip = saved
+        shopify._install_checker, background.spawn, backup._build_backup_zip = saved
         orderbook._webhook_seen.clear()
         privacy._shop_redact_said.clear()
         privacy._shop_owed_set(None)
@@ -15778,7 +15780,7 @@ def t_a_signed_customer_redact_waits_for_an_admin():
     run out. Nothing is erased without an admin."""
     from datetime import datetime, timedelta, timezone
     orderbook._webhook_seen.clear()
-    saved = (shopify._customer_checker, copilot._spawn_bg, scheduler._send_alert_email)
+    saved = (shopify._customer_checker, background.spawn, scheduler._send_alert_email)
     spawned, sent_mail, queued = [], {"ok": True}, []
 
     def spawn(coro):
@@ -15804,7 +15806,7 @@ def t_a_signed_customer_redact_waits_for_an_admin():
 
     async def checker(cid, email):
         return "live" if email in live_for["addrs"] else ("unknown" if email == "unsure@example.com" else "gone")
-    copilot._spawn_bg, shopify._customer_checker, scheduler._send_alert_email = spawn, checker, send
+    background.spawn, shopify._customer_checker, scheduler._send_alert_email = spawn, checker, send
     privacy._redact_hold_said.clear()
 
     def held():
@@ -16036,7 +16038,7 @@ def t_a_signed_customer_redact_waits_for_an_admin():
     finally:
         for c in queued:
             c.close()
-        shopify._customer_checker, copilot._spawn_bg, scheduler._send_alert_email = saved
+        shopify._customer_checker, background.spawn, scheduler._send_alert_email = saved
         for k in ("held", "stopped", "asks"):
             privacy._redact_hold_write(lambda xs: [], key=k)
         privacy._redact_hold_said.clear()
@@ -18816,7 +18818,7 @@ def t_ruling_a_model_out_actually_stops_it_being_reported():
     assert "excludes" in sheet, "the exclude set reaches the coverage scan at all"
     assert isinstance(sheet.get("excludes"), set), "as a set of (manufacturer, model) keys"
     import inspect as _i
-    cov = _i.getsource(copilot.run_label_coverage)
+    cov = _i.getsource(production.run_label_coverage)
     assert 'sheet.get("excludes")' in cov, "and the scan consults it before flagging"
     assert "ruled_out" in cov, "counting a ruled-out item apart from a miss"
 
@@ -22879,11 +22881,11 @@ def t_the_watchdog_clears_the_outage_flag_when_shopify_is_back():
     async def skip(*a, **k):
         return {"error": "skip"}
     saved = (shopify._tool_json, scheduler._send_alert_email, copilot._zeta_drain,
-             copilot._zeta_configured, fileserver._files_tick, copilot.run_label_coverage,
+             copilot._zeta_configured, fileserver._files_tick, production.run_label_coverage,
              shopify._webhook_ensurer, scheduler._watch_last_tick)
     shopify._tool_json, scheduler._send_alert_email = probe, alert
     copilot._zeta_drain, copilot._zeta_configured = noop, (lambda: False)
-    fileserver._files_tick, copilot.run_label_coverage, shopify._webhook_ensurer = (lambda: None), skip, None
+    fileserver._files_tick, production.run_label_coverage, shopify._webhook_ensurer = (lambda: None), skip, None
     def clean():
         w = scheduler._load_watch()
         w.pop("shopify_down", None)
@@ -22908,7 +22910,7 @@ def t_the_watchdog_clears_the_outage_flag_when_shopify_is_back():
         ok(run_async(scheduler._watchdog_tick({})), "the between-hours answer is up too")
     finally:
         (shopify._tool_json, scheduler._send_alert_email, copilot._zeta_drain,
-         copilot._zeta_configured, fileserver._files_tick, copilot.run_label_coverage,
+         copilot._zeta_configured, fileserver._files_tick, production.run_label_coverage,
          shopify._webhook_ensurer, scheduler._watch_last_tick) = saved
         clean()
 
@@ -25953,17 +25955,17 @@ def t_a_redact_a_store_refused_is_said_and_retried():
         async def skip(*a, **k):
             return {"error": "skip"}
         saved = (shopify._tool_json, scheduler._send_alert_email, copilot._zeta_drain, copilot._zeta_configured,
-                 fileserver._files_tick, copilot.run_label_coverage, shopify._webhook_ensurer,
+                 fileserver._files_tick, production.run_label_coverage, shopify._webhook_ensurer,
                  scheduler._watch_last_tick, privacy._redact_retry_pending)
         shopify._tool_json, scheduler._send_alert_email, copilot._zeta_drain = probe, noop, noop
         copilot._zeta_configured, fileserver._files_tick = (lambda: False), (lambda: None)
-        copilot.run_label_coverage, shopify._webhook_ensurer, scheduler._watch_last_tick = skip, None, 0.0
+        production.run_label_coverage, shopify._webhook_ensurer, scheduler._watch_last_tick = skip, None, 0.0
         privacy._redact_retry_pending = lambda: ran.append(1) or saved[-1]()
         try:
             run_async(scheduler._watchdog_tick({}))
         finally:
             (shopify._tool_json, scheduler._send_alert_email, copilot._zeta_drain, copilot._zeta_configured,
-             fileserver._files_tick, copilot.run_label_coverage, shopify._webhook_ensurer,
+             fileserver._files_tick, production.run_label_coverage, shopify._webhook_ensurer,
              scheduler._watch_last_tick, privacy._redact_retry_pending) = saved
         eq(ran, [1], "the hourly tick runs the retry")
         eq(desk._load_dispatch()["4242"].get("redacted_request_at"), asked,
@@ -27991,16 +27993,16 @@ def t_an_attachment_is_measured_off_the_event_loop():
 
 
 def _capture_spawn():
-    """Swap _spawn_bg for a recorder. Returns (coroutines, restore)."""
-    got, saved = [], copilot._spawn_bg
+    """Swap background.spawn for a recorder. Returns (coroutines, restore)."""
+    got, saved = [], background.spawn
 
     def spawn(coro):
         got.append(coro)
         return True
-    copilot._spawn_bg = spawn
+    background.spawn = spawn
 
     def restore():
-        copilot._spawn_bg = saved
+        background.spawn = saved
         for c in got:
             c.close()
     return got, restore
@@ -30354,28 +30356,8 @@ def t_the_security_scans_cover_every_app_module():
 # ---- Dispatch in its own module (stage 4, piece 1) -------------------------
 # The desk moved whole out of copilot.py into gizmo/dispatch.py and its routes
 # into gizmo/routes/dispatch.py. Each side reaches the other through the
-# module's name (dispatch.NAME, core.NAME), never a copied name.
-
-# What dispatch still reads from copilot.py. Each area that moves out (the
-# store, the request check, orders, the AI client) took names off this list;
-# piece 13 took the last (the answers' check to the way to Shopify, the EORI
-# checker's rate window to the desk, the clock to gizmo/clock.py).
-BORROWED: set = set()
-
-def _core_reads(rel):
-    """The names a module reads as core.NAME."""
-    import ast as _ast
-    from tools import sources
-    tree = _ast.parse(open(os.path.join(sources.ROOT, rel), encoding="utf-8").read())
-    return {x.attr for x in _ast.walk(tree) if isinstance(x, _ast.Attribute)
-            and isinstance(x.value, _ast.Name) and x.value.id == "core"}
-
-@test
-def t_what_dispatch_borrows():
-    """The exact set of copilot.py names the desk and its routes read."""
-    got = _core_reads("gizmo/dispatch.py") | _core_reads("gizmo/routes/dispatch.py")
-    eq(sorted(got - BORROWED), [], "dispatch reads core names BORROWED does not list")
-    eq(sorted(BORROWED - got), [], "BORROWED lists names dispatch no longer reads")
+# module's name, never a copied name; since stage 6 the desk reads nothing
+# from copilot.py at all (t_only_the_stock_bridge_reads_copilot).
 
 @test
 def t_the_split_modules_read_no_unbound_name():
@@ -30404,45 +30386,24 @@ def t_the_split_modules_read_no_unbound_name():
     eq(sorted(set(bad)), [], "names read but bound nowhere")
 
 @test
-def t_either_module_imports_first():
-    """Nothing is read across at import time: the desk and copilot.py can each
-    be imported first (a tool or a test may start from either)."""
+def t_any_module_imports_first():
+    """Nothing is read across at import time: any module of the app can be
+    imported first, then the rest (copilot.py brings in every area). Each in
+    an interpreter of its own, over every module the app has, found rather
+    than listed by hand as stage 4 did, side by side (stage 6)."""
     import subprocess as _sp
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for first, then in (("gizmo.dispatch", "copilot"), ("copilot", "gizmo.dispatch"),
-                        ("gizmo.routes.dispatch", "copilot"), ("gizmo.team", "copilot"),
-                        ("gizmo.gate", "copilot"), ("gizmo.activity", "copilot"),
-                        ("gizmo.routes.team", "copilot"), ("gizmo.orderbook", "copilot"),
-                        ("gizmo.production", "copilot"), ("gizmo.size_list", "copilot"),
-                        ("gizmo.shopify", "copilot"), ("gizmo.crm", "copilot"), ("gizmo.mail", "copilot"),
-                        ("gizmo.routes.crm", "copilot"), ("gizmo.routes.mail", "copilot"),
-                        ("gizmo.files", "copilot"), ("gizmo.webdav", "copilot"), ("gizmo.routes.files", "copilot"),
-                        ("gizmo.privacy", "copilot"), ("gizmo.loans", "copilot"), ("gizmo.work", "copilot"),
-                        ("gizmo.routes.privacy", "copilot"), ("gizmo.routes.loans", "copilot"),
-                        ("gizmo.routes.work", "copilot"), ("gizmo.routes.production", "copilot"),
-                        ("gizmo.routes.size_list", "copilot"), ("gizmo.routes.orderbook", "copilot"),
-                        ("gizmo.skills", "copilot"), ("gizmo.memory", "copilot"), ("gizmo.knowledge", "copilot"),
-                        ("gizmo.chat", "copilot"), ("gizmo.routes.skills", "copilot"),
-                        ("gizmo.routes.memory", "copilot"), ("gizmo.routes.knowledge", "copilot"),
-                        ("gizmo.prompts", "copilot"), ("gizmo.seo", "copilot"), ("gizmo.analytics", "copilot"),
-                        ("gizmo.routes.seo", "copilot"), ("gizmo.routes.analytics", "copilot"),
-                        ("gizmo.scheduler", "copilot"), ("gizmo.updates", "copilot"), ("gizmo.impact", "copilot"),
-                        ("gizmo.backup", "copilot"), ("gizmo.routes.scheduler", "copilot"), ("gizmo.routes.updates", "copilot"),
-                        ("gizmo.routes.impact", "copilot"), ("gizmo.routes.backup", "copilot"),
-                        ("gizmo.liability", "copilot"), ("gizmo.reconciliation", "copilot"), ("gizmo.xero_sync", "copilot"),
-                        ("gizmo.forecasting", "copilot"), ("gizmo.routes.liability", "copilot"),
-                        ("gizmo.routes.reconciliation", "copilot"), ("gizmo.routes.xero_sync", "copilot"),
-                        ("gizmo.routes.forecasting", "copilot"),
-                        ("gizmo.rendering", "copilot"), ("gizmo.profile", "copilot"), ("gizmo.layouts", "copilot"),
-                        ("gizmo.oauth", "copilot"), ("gizmo.status", "copilot"), ("gizmo.routes.rendering", "copilot"),
-                        ("gizmo.routes.profile", "copilot"), ("gizmo.routes.layouts", "copilot"),
-                        ("gizmo.routes.oauth", "copilot"), ("gizmo.routes.status", "copilot"),
-                        ("gizmo.clock", "copilot"), ("gizmo.products", "copilot"), ("gizmo.routes.products", "copilot"),
-                        ("gizmo.routes.chat", "copilot")):
-        r = _sp.run([sys.executable, "-c", f"import {first}, {then}; import gizmo.dispatch as d, copilot as c; "
-                     "assert c.desk is d and d.core is c; print('ok')"],
-                    cwd=root, env=dict(os.environ), capture_output=True, text=True, timeout=120)
-        eq((r.returncode, r.stdout.strip()), (0, "ok"), f"{first} first: {r.stderr[-600:]}")
+    from concurrent.futures import ThreadPoolExecutor
+    mods = sorted(_app_module_files())
+    ok(len(mods) > 70 and "copilot" in mods and "gizmo.background" in mods, "every module: %d" % len(mods))
+
+    def first(m):
+        return m, _sp.run([sys.executable, "-c", f"import {m}; import copilot as c, gizmo.dispatch as d; "
+                           "assert c.desk is d; print('ok')"],
+                          cwd=HERE, env=dict(os.environ), capture_output=True, text=True, timeout=180)
+    with ThreadPoolExecutor(max_workers=max(4, (os.cpu_count() or 8) - 2)) as pool:
+        bad = ["%s first: %s" % (m, r.stderr[-500:]) for m, r in pool.map(first, mods)
+               if (r.returncode, r.stdout.strip()) != (0, "ok")]
+    eq(bad, [], "modules that cannot be imported first")
 
 @test
 def t_dispatch_routes_register_in_place():
@@ -30542,7 +30503,7 @@ def t_move_proof_is_wired():
 # The store, the error log and the AI client sit beneath every area: they
 # import nothing from copilot.py, so an area can import them directly.
 
-FLOOR = ["gizmo/config.py", "gizmo/store.py", "gizmo/errors.py", "gizmo/ai.py", "gizmo/shopify.py", "gizmo/prompts.py", "gizmo/clock.py", "gizmo/bodies.py"]
+FLOOR = ["gizmo/config.py", "gizmo/store.py", "gizmo/errors.py", "gizmo/ai.py", "gizmo/shopify.py", "gizmo/prompts.py", "gizmo/clock.py", "gizmo/bodies.py", "gizmo/background.py"]
 
 @test
 def t_no_module_looks_itself_up_by_name():
@@ -31677,6 +31638,53 @@ def t_write_routes_check_their_bodies():
        "a new write route reads fields with no model: give it one (gizmo/bodies.py)")
     eq([p for p in UNCHECKED_BODIES if p not in unchecked], [],
        "these now have a model: take them off UNCHECKED_BODIES")
+
+@test
+def t_only_the_stock_bridge_reads_copilot():
+    """Stage 4 left every area importing copilot.py, to read it as core.NAME;
+    by its end almost none did. Only the stock bridge's readers import it now
+    (the bridge stays in copilot.py, hands off), and they read nothing else
+    from it (stage 6)."""
+    import ast as _ast
+    importers = {}
+    for mod, rel in _app_module_files().items():
+        if mod in ("copilot", "server"):
+            continue
+        t = _ast.parse(open(os.path.join(HERE, rel), encoding="utf-8").read())
+        if any((isinstance(n, _ast.Import) and any(a.name == "copilot" for a in n.names))
+               or (isinstance(n, _ast.ImportFrom) and n.module == "copilot") for n in _ast.walk(t)):
+            importers[rel] = sorted({n.attr for n in _ast.walk(t) if isinstance(n, _ast.Attribute)
+                                     and isinstance(n.value, _ast.Name) and n.value.id == "core"})
+    eq(sorted(importers), ["gizmo/routes/production.py", "gizmo/routes/status.py", "gizmo/scheduler.py"],
+       "the modules that import copilot.py")
+    for rel, reads in importers.items():
+        eq([r for r in reads if "zeta" not in r], [], rel + " reads only the stock bridge from it")
+
+@test
+def t_background_work_has_its_own_home():
+    """gizmo/background.py, on the floor: spawn(coro) runs a coroutine after
+    the request and holds a reference until it is done (a bare create_task can
+    be collected before it runs); with no loop it answers False and closes the
+    coroutine, so the caller can do the work inline. Until stage 6 it lived in
+    copilot.py and kept its tasks in the CRM's own set."""
+    from gizmo import background
+    ran = []
+
+    async def job():
+        ran.append(1)
+
+    async def go():
+        ok(background.spawn(job()), "spawned")
+        eq(len(background._tasks), 1, "held while it waits to run")
+        for _ in range(3):
+            await asyncio.sleep(0)
+    run(go())
+    eq((ran, len(background._tasks)), ([1], 0), "it ran, and was let go")
+    c = job()
+    eq(background.spawn(c), False, "no loop: the caller does the work inline")
+    eq(c.cr_frame, None, "and the coroutine is closed, never left unawaited")
+    ok(not hasattr(salesdesk, "_crm_bg_tasks"), "the CRM no longer keeps everyone's tasks")
+    ok("gizmo/background.py" in FLOOR, "on the floor")
 
 @test
 def t_the_moved_areas_routes_follow_them():

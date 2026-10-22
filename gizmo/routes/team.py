@@ -3,7 +3,7 @@ password, and the team's me, board and user.
 
 Moved whole out of copilot.add_routes (stage 4 of the 14 October audit).
 add_routes calls register() where they stood, so the route table keeps its
-order. They read the team as team.NAME and copilot.py as core.NAME.
+order. They read the team as team.NAME.
 """
 import logging
 from starlette.requests import Request
@@ -13,7 +13,6 @@ from datetime import datetime, timedelta, timezone
 import tokenvault
 import totp
 
-import copilot as core
 from gizmo import scheduler
 from gizmo import work
 from gizmo import webdav

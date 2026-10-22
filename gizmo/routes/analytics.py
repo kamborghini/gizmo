@@ -8,7 +8,6 @@ import anthropic
 from starlette.requests import Request
 from gizmo import ai as claude
 
-import copilot as core
 from gizmo import profile as store_profile
 from gizmo import analytics
 from gizmo import gate

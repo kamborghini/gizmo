@@ -11,7 +11,6 @@ from starlette.responses import Response
 from gizmo import store as jsonstore
 from gizmo import shopify
 
-import copilot as core
 from gizmo import forecasting
 from gizmo import gate
 from gizmo import team

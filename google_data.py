@@ -144,10 +144,6 @@ def ga4_enabled() -> bool:
     return bool(GA4_PROPERTY_ID)
 
 
-def is_configured() -> bool:
-    return gsc_configured() or ga4_configured()
-
-
 def status() -> dict:
     return {
         "oauth_client": oauth_client_configured(),

@@ -11,7 +11,6 @@ from starlette.requests import Request
 from starlette.responses import StreamingResponse
 from gizmo import ai as claude
 
-import copilot as core
 from gizmo import chat as assistant
 from gizmo import gate
 from gizmo import knowledge

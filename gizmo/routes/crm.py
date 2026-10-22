@@ -10,7 +10,6 @@ import pipedrive
 from gizmo import store as jsonstore
 from gizmo import shopify
 
-import copilot as core
 from gizmo import backup
 from gizmo import privacy
 from gizmo import activity

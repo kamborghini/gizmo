@@ -1,6 +1,17 @@
 {
  "releases": [
   {
+   "date": "2026-10-22",
+   "title": "The last ties to the old core",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "Each part of the app now stands on its own: work that runs after a request has a home of its own, the size coverage check lives with production, and nothing but the stock bridge still leans on the old core. Nothing looks different."
+    }
+   ]
+  },
+  {
    "date": "2026-10-21",
    "title": "More requests checked at the door: shipping and production",
    "items": [

@@ -678,6 +678,5 @@ def _gobo_check(q: str) -> dict:
 
 # Last, so this module is whole before copilot.py or a sibling runs: copilot.py
 # takes names from these modules as it loads, and any of them may be imported
-# first. Read as core.NAME and sibling.NAME, never a copied name.
-import copilot as core  # noqa: E402
+# first. Read as sibling.NAME, never a copied name.
 from gizmo import team  # noqa: E402

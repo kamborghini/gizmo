@@ -15,7 +15,6 @@ from starlette.requests import Request
 from starlette.responses import Response, StreamingResponse
 from gizmo import store as jsonstore
 
-import copilot as core
 from gizmo import files as fileserver
 from gizmo import activity
 from gizmo import gate
