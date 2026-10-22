@@ -20,11 +20,15 @@ export), stock_orders (orders, suppliers, receiving), stock_quarters
 nightly job). Stores only through stock_store; figures only through
 stock_figures.
 """
+import json
 import logging
+import os
+import re
 import threading
 from datetime import datetime, timezone
 
-from gizmo import stock_store
+from gizmo import stock_figures, stock_store
+from gizmo import store as jsonstore
 
 logger = logging.getLogger("shopify_mcp.copilot")
 
@@ -33,6 +37,10 @@ logger = logging.getLogger("shopify_mcp.copilot")
 _lock = threading.RLock()
 
 DOCS = ("items", "periods", "alerts", "suppliers", "settings", "bridge", "orders")
+ALERTS_CAP = 1000          # warnings kept in the live list; older ones are archived first
+# The invoice number on a receipt's history line, as the stock app writes and
+# reads it: compared whole, so INV-1 is never mistaken for INV-10.
+_INVOICE = re.compile(r"·\s*inv\s+(.*?)(?:\s*·|$)")
 
 
 class Refused(Exception):
@@ -137,6 +145,133 @@ def commit(st: dict, *, changed: set, history=(), snapshot: dict = None) -> list
         _finish(journal)
         stock_store.clear_journal()
         return [r["id"] for r in rows]
+
+
+# ---- snapshots and warnings ------------------------------------------------
+
+def _add_alert(alerts: dict, alert: dict) -> None:
+    alerts.setdefault("alerts", []).append({
+        "id": alerts.get("next_id") or 1, "at": now_iso(), "kind": alert["kind"],
+        "severity": alert["severity"], "message": alert["message"], "item_key": alert.get("item_key") or "",
+        "dismissed": False, "dismissed_by": ""})
+    alerts["next_id"] = (alerts.get("next_id") or 1) + 1
+
+
+def _raise_warnings(alerts: dict, raised: list) -> None:
+    """A warning about a line is raised once: again only when it becomes a
+    different warning, or after the line recovered (no warning in a pass)
+    and fell back. A swing in the whole stock's value is raised as before."""
+    standing = alerts.setdefault("standing", {})
+    warned = set()
+    for alert in raised:
+        key = alert.get("item_key") or ""
+        if key:
+            warned.add(key)
+            if standing.get(key) == alert["kind"]:
+                continue
+            standing[key] = alert["kind"]
+        _add_alert(alerts, alert)
+    for key in [k for k in standing if k not in warned]:
+        del standing[key]
+    rows = sorted(alerts.get("alerts") or [], key=lambda a: a["id"])
+    if len(rows) > ALERTS_CAP:
+        over = rows[:len(rows) - ALERTS_CAP]
+        stock_store.append_alerts_archive(over)       # kept first, then trimmed
+        rows = rows[len(over):]
+    alerts["alerts"] = rows
+
+
+def take_snapshot(st: dict, reason: str, who: dict, note: str) -> dict:
+    """The snapshot of the lines as `st` holds them, its warnings raised into
+    `st["alerts"]`. Pass it to commit() with "alerts" among the changes."""
+    items = items_in_order(st["items"])
+    snap = {"taken_at": now_iso(), "reason": reason, "by_user": who["user"], "note": str(note)[:300],
+            "totals": stock_figures.totals_for_snapshot(items),
+            "items": [{"item_key": i["key"], "category": i["category"], "written_off": i["written_off"],
+                       "current": i["current"], "used": i["used"], "current_value": stock_figures.current_value(i)}
+                      for i in items]}
+    prev = stock_store.last_snapshot()
+    prev_totals = (prev.get("totals") if isinstance(prev.get("totals"), dict) else {}) if prev else None
+    meta = (st.get("settings") or {}).get("meta") or {}
+    _raise_warnings(st["alerts"], stock_figures.detect_anomalies(items, meta, prev_totals))
+    return snap
+
+
+# ---- the history, indexed ----------------------------------------------------
+
+def detail_invoice(detail: str) -> str:
+    m = _INVOICE.search(detail or "")
+    return m.group(1).strip() if m else ""
+
+
+class HistoryIndex:
+    """Every history line in file order, and where to find them: by the line
+    of stock they name, by invoice number (any case) and by action."""
+
+    def __init__(self, path: str, ino: int):
+        self.path, self.ino, self.offset, self.full_reads = path, ino, 0, 0
+        self.rows, self.by_key, self.by_invoice, self.by_action = [], {}, {}, {}
+
+    def _take(self, row: dict) -> None:
+        n = len(self.rows)
+        self.rows.append(row)
+        if row.get("item_key"):
+            self.by_key.setdefault(row["item_key"], []).append(n)
+        inv = detail_invoice(row.get("detail") or "").casefold()
+        if inv:
+            self.by_invoice.setdefault(inv, []).append(n)
+        self.by_action.setdefault(row.get("action") or "", []).append(n)
+
+    def read_on(self) -> None:
+        """Read the lines added since the last read, up to the last complete one."""
+        with open(self.path, "rb") as fh:
+            fh.seek(self.offset)
+            chunk = fh.read()
+        end = chunk.rfind(b"\n") + 1                 # a torn last line waits until it is closed off
+        for raw in chunk[:end].split(b"\n"):
+            if not raw.strip():
+                continue
+            try:
+                row = json.loads(raw)
+            except ValueError:
+                continue                               # stock_store.read_history says so once
+            if isinstance(row, dict):
+                self._take(row)
+        self.offset += end
+
+
+_mem: dict = {}              # "history": the HistoryIndex, while its file is the one it read
+
+
+def history_index() -> HistoryIndex:
+    with _lock:
+        path = stock_store.STOCK_HISTORY_PATH
+        try:
+            st = os.stat(path)
+        except FileNotFoundError:
+            idx = HistoryIndex(path, 0)
+            _mem["history"] = idx
+            return idx
+        idx = _mem.get("history")
+        if idx is None or idx.path != path or idx.ino != st.st_ino or st.st_size < idx.offset:
+            idx = HistoryIndex(path, st.st_ino)       # a new or replaced file: read it whole
+            idx.full_reads += 1
+            _mem["history"] = idx
+        if st.st_size > idx.offset:
+            idx.read_on()
+        return idx
+
+
+def _let_go_of_stock_in_memory(paths):
+    """A restore or a redact replaced the history under us: read it afresh."""
+    idx = _mem.get("history")
+    if idx is not None and (paths is None or idx.path in paths):
+        _mem.pop("history", None)
+        return [idx.path]
+    return []
+
+
+jsonstore.holds_in_memory(_let_go_of_stock_in_memory)
 
 
 # Last, so this module is whole before copilot.py or a sibling runs: copilot.py
