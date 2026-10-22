@@ -234,6 +234,9 @@ _TAB_ROUTES = (
     ("/api/order/", "labels"),
     ("/api/dispatch/", "labels"), ("/api/custom/", "labels"),
     ("/api/stock-usage", "labels"), ("/api/margin", "labels"),
+    # The stock sheet (the stock move). Its tab joins the Team page with the
+    # Stock screens; until then only the master account holds it.
+    ("/api/stock/", "stock"),
     # The size sheet and its rulings serve the Production Manager's size check
     # and the Size list tab alike; the rule route keeps its own edit grant.
     ("/api/gobo-sizes", ("labels", "sizes")),

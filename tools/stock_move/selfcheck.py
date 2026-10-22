@@ -104,6 +104,21 @@ def build(db, url: str) -> None:
     history = [{"id": n * 2 + 1, "at": t0 + timedelta(hours=n), "user": rng.choice(("alice", "system", "gizmo", "?")),
                 "action": "update", "item_key": rng.choice(list(keys)), "field": "current",
                 "old_value": str(n), "new_value": str(n - 1), "detail": ""} for n in range(60)]
+    # Orders as the stock app recorded them: an "ordered" line per item, some
+    # placed together, one cleared later, and on-order figures to match or not.
+    hid = max(h["id"] for h in history)
+    for n, i in enumerate(i for i in items if i["on_order"]):
+        for k, (qty, ref, minutes) in enumerate(((15, f"PO-{n}", 0), (10, f"PO-{n + 100}", 60 * 24 * 3))):
+            hid += 1
+            history.append({"id": hid, "at": t0 + timedelta(minutes=minutes, seconds=n), "user": "alice",
+                            "action": "ordered", "item_key": i["key"], "field": "on_order", "old_value": "0",
+                            "new_value": str(qty), "detail": f"ordered {qty} from Invented Glass Co · ref {ref}"})
+    first_ordered = next((h for h in history if h["action"] == "ordered"), None)
+    if first_ordered:
+        hid += 1
+        history.append({"id": hid, "at": t0 + timedelta(days=5), "user": "alice", "action": "ordered",
+                        "item_key": first_ordered["item_key"], "field": "on_order", "old_value": "25",
+                        "new_value": "0", "detail": "cleared outstanding order"})
     alerts = [{"id": 1, "at": t0, "kind": "stockout", "severity": "warning", "message": "Out", "item_key": items[0]["key"],
                "dismissed": True, "dismissed_by": "alice"},
               {"id": 2, "at": t0, "kind": "low_stock", "severity": "warning", "message": "Low", "item_key": "",

@@ -369,21 +369,36 @@ def _linreg(ys: list) -> float:
 def forecast(items: list, snapshots: list) -> dict:
     """Days to stock-out for each line from how fast `current` fell across the
     snapshots, or the quarter's run rate (used / 90) when history is thin."""
-    live = {i["key"]: i for i in items if not i["written_off"]}
     snaps = _oldest_first(snapshots)
-
     series = {}
     for sn in snaps:
         at = _instant(sn["taken_at"])
         for si in sn.get("items") or []:
-            series.setdefault(si["item_key"], []).append((at, si["current"]))
+            note_point(series, si["item_key"], at, si["current"])
+    return forecast_from(items, series, [_totals(sn).get("active_value_gbp", 0) for sn in snaps])
 
+
+def note_point(series: dict, key: str, at, current) -> None:
+    """A line's count at a snapshot, kept as all the forecast reads of it:
+    its first point, its last, and how many there were."""
+    s = series.get(key)
+    if s is None:
+        series[key] = [at, current, at, current, 1]
+    else:
+        s[2], s[3], s[4] = at, current, s[4] + 1
+
+
+def forecast_from(items: list, series: dict, vals: list) -> dict:
+    """The forecast from each line's first and last snapshot point and the
+    snapshots' values in time order (what forecast() gathers)."""
+    live = {i["key"]: i for i in items if not i["written_off"]}
     out = []
     for key, it in live.items():
         daily = None
-        pts = series.get(key, [])
-        if len(pts) >= 2:
-            (t0, c0), (t1, c1) = pts[0], pts[-1]
+        s = series.get(key)
+        points = s[4] if s else 0
+        if points >= 2:
+            (t0, c0), (t1, c1) = (s[0], s[1]), (s[2], s[3])
             days = max((t1 - t0).total_seconds() / 86400.0, 1e-6)
             drop = c0 - c1
             if days >= 1 and drop > 0:
@@ -395,24 +410,45 @@ def forecast(items: list, snapshots: list) -> dict:
             "key": key, "item": _label(it), "current": it["current"],
             "daily_use": round(daily, 3),
             "days_to_stockout": round(dts, 1) if dts is not None else None,
-            "value_gbp": current_value(it), "basis": "history" if len(pts) >= 2 else "run-rate",
+            "value_gbp": current_value(it), "basis": "history" if points >= 2 else "run-rate",
         })
     runs_out = sorted([o for o in out if o["days_to_stockout"] is not None],
                       key=lambda x: x["days_to_stockout"])
 
-    vals = [_totals(sn).get("active_value_gbp", 0) for sn in snaps]
     slope = _linreg(vals)
     # Only projected once there is enough history; a couple of points would
     # extrapolate a single edit into a meaningless number.
-    projected_30 = round(vals[-1] + slope * 30, 2) if len(snaps) >= 5 else None
+    projected_30 = round(vals[-1] + slope * 30, 2) if len(vals) >= 5 else None
 
     return {
         "items": out, "soonest_stockouts": runs_out[:20],
         "value_trend_per_step_gbp": round(slope, 2),
         "value_now_gbp": vals[-1] if vals else None,
         "value_projected_next_30_steps_gbp": projected_30,
-        "history_points": len(snaps),
+        "history_points": len(vals),
     }
+
+
+def outlook(snapshots: list, days: int = 30):
+    """Where the stock's value is heading, in real days (flaw 8: the stock
+    app projected snapshot steps, which a busy day crowds and a quiet week
+    stretches): the least squares line of value against days since the
+    first snapshot, carried `days` past the last. None with fewer than five
+    snapshots or under a day between the first and the last."""
+    snaps = _oldest_first(snapshots)
+    if len(snaps) < 5:
+        return None
+    t0 = _instant(snaps[0]["taken_at"])
+    xs = [(_instant(s["taken_at"]) - t0).total_seconds() / 86400.0 for s in snaps]
+    if xs[-1] - xs[0] < 1:
+        return None
+    ys = [_totals(s).get("active_value_gbp", 0) for s in snaps]
+    n = len(xs)
+    mx, my = sum(xs) / n, sum(ys) / n
+    denom = sum((x - mx) ** 2 for x in xs)
+    slope = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / denom if denom else 0.0
+    return {"value_now": ys[-1], "per_day": round(slope, 2), "projected": round(ys[-1] + slope * days, 2),
+            "days": days}
 
 
 def detect_anomalies(items: list, meta: dict, prev_totals: dict = None) -> list:

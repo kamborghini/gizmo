@@ -53,6 +53,14 @@ account it becomes: `{"username": "reactor account id"}`. The converter
 refuses a history that names anyone without a mapping (`system`, `gizmo` and
 `?` need none).
 
+The stock app kept no orders, only each line's on-order figure and an
+"ordered" history line per order placed. The converter rebuilds the orders
+still outstanding from those lines (lines by one person for one supplier
+and reference within a minute are one order; the newest await first) and
+puts whatever on-order figure no line accounts for into one order per
+supplier, marked as ordered before the move. The proof checks every line's
+on-order figure equals what its rebuilt orders await.
+
 An older copy may lack tables the stock app added later (the four tables of
 the order link, the supplier contacts); the export marks them `missing` and
 the figures fill any column it lacks the way the stock app's own upgrade

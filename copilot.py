@@ -110,6 +110,8 @@ from gizmo import work
 from gizmo.routes import privacy as routes_privacy
 from gizmo.routes import loans as routes_loans
 from gizmo.routes import work as routes_work
+# The stock sheet (the stock move, plan 2a), with its routes.
+from gizmo.routes import stock as routes_stock
 # Moved out of this file (stage 4): the routes of production, the Size list and the order book, following their areas.
 from gizmo.routes import production as routes_production
 from gizmo.routes import size_list as routes_size_list
@@ -690,6 +692,7 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
 
     # The work sessions' routes (gizmo/routes/work.py), gathered where the first stood.
     routes_work.register(mcp, registry)
+    routes_stock.register(mcp, registry)
 
     @mcp.custom_route("/api/stock-usage", methods=["POST"])
     async def stock_usage_route(request: Request):

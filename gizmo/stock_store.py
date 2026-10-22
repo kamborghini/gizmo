@@ -39,21 +39,24 @@ STOCK_SETTINGS_PATH = os.environ.get("STOCK_SETTINGS_PATH", "/data/stock_setting
 STOCK_BRIDGE_PATH = os.environ.get("STOCK_BRIDGE_PATH", "/data/stock_bridge.json")  # glass booked from made orders, day sheets, parked lines, aliases
 STOCK_BACKUP_PREFIX = os.environ.get("STOCK_BACKUP_PREFIX", "/data/stock_backup_")  # stock sheet backups, a file each (prefix + YYYYmmdd-HHMMSS-id.json)
 STOCK_PEOPLE_PATH = os.environ.get("STOCK_PEOPLE_PATH", "/data/stock_people.json")  # the stock app's usernames and the Reactor accounts they became
+STOCK_ORDERS_PATH = os.environ.get("STOCK_ORDERS_PATH", "/data/stock_orders.json")  # orders placed with suppliers and what has been received against them
+STOCK_JOURNAL_PATH = os.environ.get("STOCK_JOURNAL_PATH", "/data/stock_journal.json")  # a stock change in flight, finished by the next read after a crash
+STOCK_ALERTS_ARCHIVE_PATH = os.environ.get("STOCK_ALERTS_ARCHIVE_PATH", "/data/stock_alerts_archive.jsonl")  # stock warnings trimmed from the live list, append-only
 
 
 def _paths() -> tuple:
     return (STOCK_ITEMS_PATH, STOCK_HISTORY_PATH, STOCK_SNAPSHOTS_SCHEDULED_PATH, STOCK_SNAPSHOTS_CHANGES_PREFIX,
             STOCK_PERIODS_PATH, STOCK_ALERTS_PATH, STOCK_SUPPLIERS_PATH, STOCK_SETTINGS_PATH, STOCK_BRIDGE_PATH,
-            STOCK_BACKUP_PREFIX, STOCK_PEOPLE_PATH)
+            STOCK_BACKUP_PREFIX, STOCK_PEOPLE_PATH, STOCK_ORDERS_PATH, STOCK_JOURNAL_PATH, STOCK_ALERTS_ARCHIVE_PATH)
 
 
 def _set_paths(paths: tuple) -> None:
     global STOCK_ITEMS_PATH, STOCK_HISTORY_PATH, STOCK_SNAPSHOTS_SCHEDULED_PATH, STOCK_SNAPSHOTS_CHANGES_PREFIX
     global STOCK_PERIODS_PATH, STOCK_ALERTS_PATH, STOCK_SUPPLIERS_PATH, STOCK_SETTINGS_PATH, STOCK_BRIDGE_PATH
-    global STOCK_BACKUP_PREFIX, STOCK_PEOPLE_PATH
+    global STOCK_BACKUP_PREFIX, STOCK_PEOPLE_PATH, STOCK_ORDERS_PATH, STOCK_JOURNAL_PATH, STOCK_ALERTS_ARCHIVE_PATH
     (STOCK_ITEMS_PATH, STOCK_HISTORY_PATH, STOCK_SNAPSHOTS_SCHEDULED_PATH, STOCK_SNAPSHOTS_CHANGES_PREFIX,
      STOCK_PERIODS_PATH, STOCK_ALERTS_PATH, STOCK_SUPPLIERS_PATH, STOCK_SETTINGS_PATH, STOCK_BRIDGE_PATH,
-     STOCK_BACKUP_PREFIX, STOCK_PEOPLE_PATH) = paths
+     STOCK_BACKUP_PREFIX, STOCK_PEOPLE_PATH, STOCK_ORDERS_PATH, STOCK_JOURNAL_PATH, STOCK_ALERTS_ARCHIVE_PATH) = paths
 
 
 @contextmanager
@@ -138,6 +141,32 @@ def write_people(doc: dict) -> None:
     jsonstore._write_json_store(STOCK_PEOPLE_PATH, None, doc)
 
 
+def load_orders() -> dict:
+    return _load(STOCK_ORDERS_PATH, {"orders": [], "next_id": 1})
+
+
+def write_orders(doc: dict) -> None:
+    jsonstore._write_json_store(STOCK_ORDERS_PATH, None, doc)
+
+
+def load_journal():
+    """The change in flight, or None when there is none."""
+    doc = jsonstore._load_json_store(STOCK_JOURNAL_PATH, None, None)
+    return doc if isinstance(doc, dict) else None
+
+
+def write_journal(doc: dict) -> None:
+    jsonstore._write_json_store(STOCK_JOURNAL_PATH, None, doc)
+
+
+def clear_journal() -> None:
+    try:
+        os.remove(STOCK_JOURNAL_PATH)
+    except FileNotFoundError:
+        pass
+    jsonstore._forget_store(STOCK_JOURNAL_PATH)
+
+
 # ---- append-only lines ----------------------------------------------------
 
 def _read_lines(path: str) -> list:
@@ -167,15 +196,15 @@ def _read_lines(path: str) -> list:
     return out
 
 
-def _last_id(path: str) -> int:
-    """The id on the file's last complete line: lines are only ever appended
-    in id order, so that is the highest. Read backwards from the end a block
-    at a time, so a long line (a snapshot of hundreds of lines) or a torn
-    end costs a few blocks, never the whole file."""
+def _last_row(path: str):
+    """The file's last complete line: lines are only ever appended in id
+    order, so it holds the highest id. Read backwards from the end a block at
+    a time, so a long line (a snapshot of hundreds of lines) or a torn end
+    costs a few blocks, never the whole file."""
     try:
         fh = open(path, "rb")
     except FileNotFoundError:
-        return 0
+        return None
     with fh:
         pos = fh.seek(0, os.SEEK_END)
         head = b""                 # the start of a line whose beginning is further back
@@ -191,8 +220,12 @@ def _last_id(path: str) -> int:
                 except ValueError:
                     continue
                 if isinstance(row, dict) and isinstance(row.get("id"), int):
-                    return row["id"]
-    return 0
+                    return row
+    return None
+
+
+def _last_id(path: str) -> int:
+    return (_last_row(path) or {}).get("id", 0)
 
 
 def _number(rows: list, last: int) -> list:
@@ -244,6 +277,10 @@ def read_history() -> list:
     return _read_lines(STOCK_HISTORY_PATH)
 
 
+def last_history_id() -> int:
+    return _last_id(STOCK_HISTORY_PATH)
+
+
 def _instant(iso: str) -> datetime:
     t = datetime.fromisoformat(iso)
     return (t if t.tzinfo else t.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
@@ -272,14 +309,53 @@ def read_snapshots() -> list:
     return sorted(out, key=lambda s: s.get("id", 0))
 
 
+def last_snapshot_id() -> int:
+    return max((_last_id(p) for p in _snapshot_files()), default=0)
+
+
+def last_snapshot():
+    """The latest snapshot by when it was taken, or None."""
+    rows = [r for r in (_last_row(p) for p in _snapshot_files()) if r and r.get("taken_at")]
+    return max(rows, key=lambda r: (_instant(r["taken_at"]), r["id"])) if rows else None
+
+
+def prune_change_snapshots(before: str) -> int:
+    """Remove the files of snapshots taken on a change before the UTC day
+    `before` (YYYY-MM-DD), whole; the nightly ones are never removed."""
+    gone = 0
+    for path in glob.glob(STOCK_SNAPSHOTS_CHANGES_PREFIX + "*.jsonl"):
+        day = path[len(STOCK_SNAPSHOTS_CHANGES_PREFIX):-len(".jsonl")]
+        if day < before:
+            os.remove(path)
+            gone += 1
+    return gone
+
+
+def append_alerts_archive(rows: list) -> None:
+    """Warnings trimmed from the live list, kept: appended before the trim."""
+    with _append_lock:
+        if rows:
+            _append_stock_lines(STOCK_ALERTS_ARCHIVE_PATH, rows)
+
+
 # ---- backups --------------------------------------------------------------
 
 def write_backup(backup: dict) -> str:
     """One backup, one file; returns its path."""
     stamp = _instant(backup["at"]).strftime("%Y%m%d-%H%M%S")
     path = f"{STOCK_BACKUP_PREFIX}{stamp}-{backup['id']}.json"
-    jsonstore._write_json_store(path, None, backup)
+    # Owner-only: a backup holds the supplier contacts, which are kept so.
+    jsonstore._write_json_store(path, None, backup, private=True)
     return path
+
+
+def delete_backup(backup_id: int) -> bool:
+    gone = False
+    for path in glob.glob(f"{STOCK_BACKUP_PREFIX}*-{int(backup_id)}.json"):
+        os.remove(path)
+        jsonstore._forget_store(path)
+        gone = True
+    return gone
 
 
 def list_backups() -> list:

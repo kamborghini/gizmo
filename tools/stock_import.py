@@ -25,6 +25,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 from collections import Counter
 from datetime import datetime, timezone
@@ -80,6 +81,9 @@ FIGURES = ["compute_current", "reorder_suggestions", "suggest_reorder_points", "
            "fx_revaluation", "totals_for_snapshot", "trends", "forecast", "detect_anomalies", "compare"]
 MOVER_KEYS = {"top_value_movers": "value_delta", "top_unit_movers": "cur_delta"}
 _MISSING = object()
+# "ordered 5 from Supplier · ref PO-1", as the stock app wrote an order placed.
+_ORDERED = re.compile(r"^ordered (\d+)(?: from (.*?))?(?: · ref (.*))?$")
+ORDER_GROUP_SECONDS = 60     # lines placed together are written moments apart
 
 
 # ---- values ----------------------------------------------------------------
@@ -214,8 +218,79 @@ def convert(export: dict, people: dict, out_dir: str) -> None:
         for r in _rows(export, "backups"):
             stock_store.write_backup(dict(_record("backups", r, present), format="legacy-fernet", token=r["blob"]))
         present = _present(export, "users")
+        orders = rebuild_orders(export, items, people)
+        stock_store.write_orders({"orders": orders, "next_id": len(orders) + 1})
         stock_store.write_people({"people": dict(people), "logins": {
             r["username"]: _record("users", r, present) for r in logins}})
+
+
+# ---- the orders still outstanding, rebuilt -------------------------------------
+
+def _when(v):
+    t = datetime.fromisoformat(str(v))
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def rebuild_orders(export: dict, items: list, people: dict) -> list:
+    """The orders still outstanding, from the stock app's "ordered" history
+    lines (it kept no orders, only the on-order figures and those lines).
+    Lines by one person, for one supplier and reference, placed within a
+    minute of each other are one order; a "cleared outstanding order" line
+    ends what was awaited for its item. Each item's on-order figure is
+    attributed to its lines newest first (the oldest were received first);
+    what no line accounts for is one order per supplier, ordered before the
+    move. Orders awaiting nothing are not rebuilt."""
+    by_key = {it["key"]: it for it in items}
+    groups, live = [], {}
+    for row in _rows(export, "audit_log"):
+        if row.get("action") != "ordered":
+            continue
+        key = row.get("item_key") or ""
+        if (row.get("detail") or "") == "cleared outstanding order":
+            live[key] = []
+            continue
+        m = _ORDERED.match(row.get("detail") or "")
+        if not m or key not in by_key:
+            continue
+        at = _when(row["at"])
+        supplier, reference = m.group(2) or "", m.group(3) or ""
+        group = next((g for g in reversed(groups) if g["user"] == row.get("user") and g["supplier"] == supplier
+                      and g["reference"] == reference
+                      and 0 <= (at - g["first"]).total_seconds() <= ORDER_GROUP_SECONDS), None)
+        if group is None:
+            group = {"user": row.get("user"), "supplier": supplier, "reference": reference, "first": at,
+                     "at": row["at"], "lines": []}
+            groups.append(group)
+        line = {"item_key": key, "qty": int(m.group(1)), "outstanding": 0}
+        group["lines"].append(line)
+        live.setdefault(key, []).append(line)
+    extra = {}
+    for it in items:
+        left = it.get("on_order") or 0
+        for line in reversed(live.get(it["key"], [])):
+            line["outstanding"] = min(line["qty"], left)
+            left -= line["outstanding"]
+        if left > 0:
+            extra.setdefault(it["supplier"] or "Unknown", []).append({"item_key": it["key"], "qty": left,
+                                                                    "outstanding": left})
+    orders = []
+
+    def add(group, before_move):
+        orders.append({
+            "id": len(orders) + 1, "supplier": group["supplier"], "reference": group["reference"], "currency": "",
+            "at": _utc_iso(group["at"]), "by": group["user"] or "", "person": people.get(group["user"] or ""),
+            "before_move": before_move,
+            "lines": [{"item_id": by_key[l["item_key"]]["id"], "item_key": l["item_key"], "qty": l["qty"],
+                       "unit_cost": None, "unit_cost_gbp": by_key[l["item_key"]]["unit_cost_gbp"],
+                       "received": l["qty"] - l["outstanding"], "cleared": 0, "receipts": []}
+                      for l in group["lines"]]})
+
+    for g in groups:
+        if any(l["outstanding"] for l in g["lines"]):
+            add(g, False)
+    for supplier, lines in extra.items():
+        add({"supplier": supplier, "reference": "", "at": export.get("now"), "user": "", "lines": lines}, True)
+    return orders
 
 
 # ---- prove -----------------------------------------------------------------
@@ -384,6 +459,7 @@ def prove(export: dict, out_dir: str) -> list:
         bridge = stock_store.load_bridge()
         backups = stock_store.list_backups()
         people_doc = stock_store.load_people()
+        orders = stock_store.load_orders().get("orders") or []
     people, logins = people_doc.get("people", {}), people_doc.get("logins", {})
     items = sorted(items_doc.get("items", {}).values(), key=lambda i: i["id"])
     _match_rows(found, export, "items", items)
@@ -431,6 +507,12 @@ def prove(export: dict, out_dir: str) -> list:
     for name, table in BRIDGE.items():
         if bridge.get("next_ids", {}).get(name, 0) <= _floor(export, table, bridge.get(name, [])):
             found.append(f"{table}: the next id would reuse one the stock app gave")
+    for it in items:
+        awaited = sum(max(0, l["qty"] - l.get("received", 0) - l.get("cleared", 0))
+                      for o in orders for l in o["lines"] if l["item_id"] == it["id"])
+        if awaited != (it.get("on_order") or 0):
+            found.append(f"orders: line {it['id']}: on order {it.get('on_order') or 0}, "
+                         f"the rebuilt orders await {awaited}")
     _labels(found, items)
     _figures(found, export, items, settings.get("meta", {}), snapshots, periods.get("periods", []),
              suppliers.get("suppliers", []))

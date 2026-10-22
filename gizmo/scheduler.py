@@ -351,6 +351,10 @@ async def _scheduler_loop(registry: dict) -> None:
         try:
             shopify_up = await _watchdog_tick(registry)
             await asyncio.to_thread(backup._weekly_snapshot)   # no-op until a week is up
+            try:
+                await asyncio.to_thread(stock_backups.nightly_tick)   # once a London day, after midnight
+            except Exception:
+                logger.exception("stock: the nightly snapshot failed")
             if shopify_up:
                 await salesdesk._crm_shopify_link_nightly(registry)   # once a day, self-stamped
             await _connector_watch()
@@ -394,6 +398,7 @@ def _ensure_scheduler(registry: dict) -> None:
 # takes names from these modules as it loads, and any of them may be imported
 # first. Read as core.NAME and sibling.NAME, never a copied name.
 from gizmo import backup  # noqa: E402
+from gizmo import stock_backups  # noqa: E402
 from gizmo import activity  # noqa: E402
 from gizmo import files as fileserver  # noqa: E402
 from gizmo import mail  # noqa: E402
