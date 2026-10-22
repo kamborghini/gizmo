@@ -90,8 +90,15 @@ def run_async(coro):
     try:
         return loop.run_until_complete(coro)
     finally:
-        loop.close()
-        _a.set_event_loop(prev)
+        try:
+            # What asyncio.run() does before it closes: close the async
+            # generators the loop still holds. A stream left at a cap (the
+            # keyword scan's) otherwise had its close dropped with the loop,
+            # and every run warned of a coroutine never awaited.
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        finally:
+            loop.close()
+            _a.set_event_loop(prev)
 
 
 def with_files(fn, configured=True, s3=None):

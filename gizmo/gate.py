@@ -144,11 +144,12 @@ async def _guard(request: Request, *, ai: bool = False, min_level: int = 0,
     window, session, body - and five helpers wrapped those lines again, each
     returning a different tuple. One of the copies spent an AI slot before it
     had checked the session. The order here is the order: anonymous checks,
-    then who is asking, then what rank they hold, then the paid window, then
-    the body. `body=False` is for a route that reads its own body later, after
-    a check the caller wants to make first. `model` (gizmo/bodies.py) checks
-    the fields the route reads, last of all: a field of the wrong kind is a
-    400 naming it, heard only by a caller the door has let in."""
+    then who is asking, then what rank they hold, then the body, then the paid
+    window, so a slot is spent only on a request that will run. `body=False`
+    is for a route that reads its own body later, after a check the caller
+    wants to make first. `model` (gizmo/bodies.py) checks the fields the route
+    reads as the body is read: a field of the wrong kind is a 400 naming it,
+    heard only by a caller the door has let in."""
     pre = _pre_checks(request, max_body=max_body)
     if pre:
         return pre, None, ""
@@ -161,19 +162,20 @@ async def _guard(request: Request, *, ai: bool = False, min_level: int = 0,
         perf.no_record()    # a Claude answer is long by design
     if min_level and team._team_level(uid) < min_level:
         return _json({"error": "Only an admin can do that."}, 403), None, ""
+    parsed: dict = {}
+    if body:
+        parsed = await _read_json_capped(request, cap=cap)
+        if parsed is None:
+            return _json({"error": "Request too large."}, 413), None, ""
+        if model is not None:
+            refused = _body_refusal(model, parsed)
+            if refused:
+                return refused, None, ""
     if ai:
+        # Last: a body the door refuses must not spend a slot of the AI window.
         busy = _ai_slot()
         if busy:
             return busy, None, ""
-    if not body:
-        return None, {}, uid
-    parsed = await _read_json_capped(request, cap=cap)
-    if parsed is None:
-        return _json({"error": "Request too large."}, 413), None, ""
-    if model is not None:
-        refused = _body_refusal(model, parsed)
-        if refused:
-            return refused, None, ""
     return None, parsed, uid
 
 
