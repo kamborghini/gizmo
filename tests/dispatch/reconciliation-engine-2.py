@@ -397,7 +397,14 @@ def t_a_strangers_email_or_pdf_cannot_hold_the_event_loop():
        "a document's text is capped and read off the loop")
     gone = {"jo@x.com"}
     head = mail._mail_erased_rx(gone, header=True)
-    ok(secs(head.sub, "[erased]", "a" * 20_000 + " <jo@x.com>") < 0.5, "a long header with an erased address")
+    # Timed at two sizes, the best of three each: linear grows about 4x with 4x
+    # the header, quadratic 16x, and a busy machine slows both runs alike (a
+    # single limit of half a second failed on a loaded machine at 160 ms idle).
+    def best(n):
+        return min(secs(head.sub, "[erased]", "a" * n + " <jo@x.com>") for _ in range(3))
+    small, large = best(20_000), best(80_000)
+    ok(large < small * 8 + 0.05,
+       "a long header with an erased address grows with its length, not its square: %.3fs, %.3fs" % (small, large))
     store = {"threads": {}, "redacted": ["jo@x.com"]}
     msg = {"id": "m1", "from_email": "ann@z.com", "to": "a" * 30_000 + " <jo@x.com>", "cc": "", "snippet": "hi",
            "at": "2026-09-29T10:00:00+00:00", "subject": "s"}
