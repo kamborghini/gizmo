@@ -2098,5 +2098,80 @@
    "supplier": "Invented Glass Co"
   },
   "source": "tests/dispatch/stock-buying.py:102"
+ },
+ {
+  "path": "/api/stock/receive",
+  "body": {
+   "op": "one",
+   "id": 3,
+   "qty": 2,
+   "invoice_no": "A-8",
+   "date": "2026-10-20"
+  },
+  "source": "tests/dispatch/stock-buying.py:128"
+ },
+ {
+  "path": "/api/stock/receive",
+  "body": {
+   "op": "delivery",
+   "invoice_no": "D-1",
+   "date": "2026-10-21",
+   "lines": [
+    {
+     "id": 3,
+     "qty": 7
+    }
+   ]
+  },
+  "source": "tests/dispatch/stock-buying.py:149"
+ },
+ {
+  "path": "/api/stock/receive",
+  "body": {
+   "op": "delivery",
+   "invoice_no": "D-2",
+   "lines": [
+    {
+     "id": 3,
+     "qty": 4,
+     "order_id": 2
+    }
+   ]
+  },
+  "source": "tests/dispatch/stock-buying.py:162"
+ },
+ {
+  "path": "/api/stock/receive",
+  "body": {
+   "op": "delivery",
+   "invoice_no": "D-7",
+   "lines": [
+    {
+     "id": 7,
+     "qty": 1,
+     "unit_cost": 10,
+     "update_cost": true
+    }
+   ]
+  },
+  "source": "tests/dispatch/stock-buying.py:209"
+ },
+ {
+  "path": "/api/stock/receive",
+  "body": {
+   "op": "rematch",
+   "invoice_no": "D-3",
+   "id": 3,
+   "order_id": 2
+  },
+  "source": "tests/dispatch/stock-buying.py:172"
+ },
+ {
+  "path": "/api/stock/receive",
+  "body": {
+   "op": "undo",
+   "invoice_no": "d-4"
+  },
+  "source": "tests/dispatch/stock-buying.py:184"
  }
 ]

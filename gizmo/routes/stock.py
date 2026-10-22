@@ -55,6 +55,17 @@ class StockSuppliersBody(bodies.Body):
     contacts: bodies.Records = None
 
 
+class StockReceiveBody(bodies.Body):
+    """What /api/stock/receive reads: one line or a whole delivery taken
+    in, a delivery undone, a received line counted against another order."""
+    id: bodies.Id = None
+    qty: bodies.Number = None
+    invoice_no: bodies.Text = None
+    date: bodies.Text = None
+    order_id: bodies.Id = None
+    lines: bodies.Records = None
+
+
 _CONTACT_FIELDS = ("supplier", "email", "cc", "contact_name", "subject", "body", "lead_days", "min_order")
 
 
@@ -125,6 +136,27 @@ def register(mcp, registry):
             return _answer(stock_orders.suggest, "suggested levels")
         if op == "levels":
             return _answer(lambda: stock_orders.set_levels(who, body.get("levels")), "reorder levels")
+        return gate._json({"error": "Unknown op."}, 400)
+
+    @mcp.custom_route("/api/stock/receive", methods=["POST"])
+    async def stock_receive_route(request: Request):
+        """Taking stock in: one line with its invoice, or a whole delivery,
+        each counted against the orders it fills; undoing a delivery."""
+        err, body, who = await gate._guard(request, model=StockReceiveBody)
+        if err:
+            return err
+        op = str(body.get("op") or "")
+        if op == "one":
+            return _answer(lambda: stock_orders.receive_one(who, body.get("id"), body.get("qty"), body.get("invoice_no"),
+                                                            body.get("date"), body.get("order_id")), "a receipt")
+        if op == "delivery":
+            return _answer(lambda: stock_orders.receive_delivery(who, body.get("lines"), body.get("invoice_no"),
+                                                                 body.get("date")), "a delivery")
+        if op == "rematch":
+            return _answer(lambda: stock_orders.rematch(who, body.get("invoice_no"), body.get("id"),
+                                                        body.get("order_id")), "changing an order")
+        if op == "undo":
+            return _answer(lambda: stock_orders.undo_delivery(who, body.get("invoice_no")), "undoing a delivery")
         return gate._json({"error": "Unknown op."}, 400)
 
     @mcp.custom_route("/api/stock/suppliers", methods=["POST"])

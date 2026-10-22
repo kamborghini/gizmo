@@ -281,3 +281,232 @@ def delete_supplier(uid: str, supplier) -> dict:
                                  detail=f"removed email contact for {name}")
         stock.commit(st, changed={"suppliers"}, history=[line])
         return {"ok": True}
+
+
+# ---- receiving ---------------------------------------------------------------------
+
+DELIVERY_MAX = 200
+
+
+def _received_before(st_key: str, invoice: str, keys=None) -> str:
+    """The line an invoice was already received for, or "": the stock app's
+    rule, read from the history (its own rows included), compared whole and
+    in any case, so INV-1 is never INV-10."""
+    want = (invoice or "").strip().casefold()
+    if not want:
+        return ""
+    idx = stock.history_index()
+    for n in idx.by_invoice.get(want, []):
+        row = idx.rows[n]
+        if row.get("action") == "receive" and row.get("item_key") and (
+                row["item_key"] == st_key if keys is None else row["item_key"] in keys):
+            return row["item_key"]
+    return ""
+
+
+def _fill_orders(st: dict, item_id: int, qty: int, invoice: str, prefer=None) -> list:
+    """Count a received quantity against the item's open order lines, the
+    named order first, then oldest first. Returns [{order_id, qty}]."""
+    open_lines = [(o, l) for o in st["orders"].get("orders") or [] for l in o["lines"]
+                  if l["item_id"] == item_id and outstanding(l)]
+    open_lines.sort(key=lambda ol: (str(ol[0]["id"]) != str(prefer), ol[0]["at"], ol[0]["id"]))
+    filled, left, now = [], qty, stock.now_iso()
+    for order, line in open_lines:
+        if not left:
+            break
+        take = min(left, outstanding(line))
+        line["received"] = line.get("received", 0) + take
+        line.setdefault("receipts", []).append({"invoice": invoice, "qty": take, "at": now})
+        filled.append({"order_id": order["id"], "qty": take})
+        left -= take
+    return filled
+
+
+def _take_in(st: dict, who: dict, it: dict, qty: int, invoice: str, date: str, suffix: str, prefer=None) -> tuple:
+    """Stock arrives on the shelf: current and received up, on order down
+    (never below 0), the open orders filled. Returns (history row, fills)."""
+    old = it["current"]
+    it["current"] += qty
+    it["received"] += qty
+    it["on_order"] = max(0, (it["on_order"] or 0) - qty)
+    it["updated_at"] = stock.now_iso()
+    fills = _fill_orders(st, it["id"], qty, invoice, prefer)
+    detail = (f"received {qty}" + (f" · inv {invoice}" if invoice else "") + (f" · {date}" if date else "") + suffix)
+    return stock.history_row(who, "receive", item_key=it["key"], field="current", old=old, new=it["current"],
+                             detail=detail[:480]), fills
+
+
+def _receipt(who: dict, invoice: str, lines: list, repriced: int) -> dict:
+    return {"received_at": stock.now_iso(), "by": who["user"], "invoice_no": invoice, "repriced": repriced,
+            "lines": [{"id": it["id"], "name": stock_figures.item_name(it), "qty": qty, "orders": fills}
+                      for it, qty, fills in lines]}
+
+
+def receive_one(uid: str, item_id, qty, invoice_no, date, order_id=None) -> dict:
+    qty = _qty(qty)
+    invoice, date = stock.clean_text(invoice_no, 60), stock.clean_text(date, 40)
+    with stock._lock:
+        st = stock.state()
+        it = _line(st, item_id)
+        if it["current"] + qty > stock.INT_MAX or it["received"] + qty > stock.INT_MAX:
+            raise stock.Refused(400, "That quantity is too large.")
+        if _received_before(it["key"], invoice):
+            raise stock.Refused(409, f"Invoice {invoice} has already been received for this line.")
+        who = stock.actor(uid)
+        row, fills = _take_in(st, who, it, qty, invoice, date, "", order_id)
+        snap = stock.take_snapshot(st, "edit", who, f"received {qty} {it['category']} {it['size']}")
+        stock.commit(st, changed={"items", "orders", "alerts"}, history=[row], snapshot=snap)
+        return {"item": stock_figures.item_view(it), "summary": _summary(st),
+                "receipt": _receipt(who, invoice, [(it, qty, fills)], 0)}
+
+
+def receive_delivery(uid: str, lines, invoice_no, date) -> dict:
+    """A whole delivery: every line checked before any is taken in."""
+    if not isinstance(lines, list) or not lines or len(lines) > DELIVERY_MAX:
+        raise stock.Refused(400, "A delivery needs between 1 and 200 lines.")
+    invoice, date = stock.clean_text(invoice_no, 60), stock.clean_text(date, 40)
+    with stock._lock:
+        st = stock.state()
+        wanted, costs, prefer = {}, {}, {}
+        for ln in lines:
+            if not isinstance(ln, dict):
+                raise stock.Refused(400, "Every delivery line needs a stock line and a quantity.")
+            it = _line(st, ln.get("id"))
+            wanted[it["id"]] = wanted.get(it["id"], 0) + _qty(ln.get("qty"))
+            if ln.get("order_id") not in (None, "") and it["id"] not in prefer:
+                prefer[it["id"]] = ln.get("order_id")
+            if stock.to_bool(ln.get("update_cost") or False) and ln.get("unit_cost") not in (None, ""):
+                try:
+                    costs[it["id"]] = stock.coerce("unit_cost", ln.get("unit_cost"))
+                except ValueError:
+                    pass                     # a price that cannot be read leaves the cost as it was, as the stock app did
+        items = st["items"]["items"]
+        seen = _received_before("", invoice, keys={items[str(i)]["key"] for i in wanted})
+        if seen:
+            name = stock_figures.item_name(next(it for it in items.values() if it["key"] == seen))
+            raise stock.Refused(409, f"Invoice {invoice} has already been received for {name}.")
+        if any(items[str(i)]["current"] + q > stock.INT_MAX or items[str(i)]["received"] + q > stock.INT_MAX
+               for i, q in wanted.items()):
+            raise stock.Refused(400, "That quantity is too large.")
+        who = stock.actor(uid)
+        fx = stock_figures.fx_rates(stock.items_in_order(st["items"]), st["settings"].get("meta") or {})
+        history, taken, repriced = [], [], 0
+        for item_id, qty in wanted.items():
+            it = items[str(item_id)]
+            row, fills = _take_in(st, who, it, qty, invoice, date, " · delivery", prefer.get(item_id))
+            if item_id in costs:
+                price = costs[item_id]
+                cur = (it["currency"] or "GBP").upper()
+                gbp = price if cur == "GBP" else round(price * fx.get(cur, 1.0), 4)
+                if it["unit_cost"] != price or it["unit_cost_gbp"] != gbp:
+                    history.append(stock.history_row(who, "update", item_key=it["key"], field="unit_cost",
+                                                     old=it["unit_cost"], new=price,
+                                                     detail=f"price from invoice{(' ' + invoice) if invoice else ''}"))
+                    it["unit_cost"], it["unit_cost_gbp"] = price, gbp
+                    repriced += 1
+            history.append(row)
+            taken.append((it, qty, fills))
+        units = sum(wanted.values())
+        history.append(stock.history_row(
+            who, "receive", detail=(f"accepted delivery · {len(wanted)} lines · {units} units"
+                                    + (f" · inv {invoice}" if invoice else ""))[:480]))
+        snap = stock.take_snapshot(st, "edit", who, f"received delivery{' inv ' + invoice if invoice else ''} · "
+                                                    f"{len(wanted)} lines")
+        stock.commit(st, changed={"items", "orders", "alerts"}, history=history, snapshot=snap)
+        receipt = _receipt(who, invoice, taken, repriced)
+        return {"applied": len(wanted), "units": units, "by": who["user"], "repriced": repriced,
+                "invoice_no": invoice, "received_at": receipt["received_at"],
+                "items": [stock_figures.item_view(items[str(i)]) for i in wanted], "summary": _summary(st),
+                "receipt": receipt}
+
+
+def _unfill(st: dict, invoice: str, item_id=None) -> dict:
+    """Take a delivery's receipts off the orders; returns {item_id: qty}."""
+    want, back = invoice.strip().casefold(), {}
+    for order in st["orders"].get("orders") or []:
+        for line in order["lines"]:
+            if item_id is not None and line["item_id"] != item_id:
+                continue
+            mine = [r for r in line.get("receipts") or [] if (r.get("invoice") or "").casefold() == want]
+            if mine:
+                q = sum(r["qty"] for r in mine)
+                line["received"] = max(0, line.get("received", 0) - q)
+                line["receipts"] = [r for r in line["receipts"] if r not in mine]
+                back[line["item_id"]] = back.get(line["item_id"], 0) + q
+    return back
+
+
+def rematch(uid: str, invoice_no, item_id, order_id) -> dict:
+    """Count a received line against another order, as chosen on the receipt."""
+    invoice = stock.clean_text(invoice_no, 60)
+    with stock._lock:
+        st = stock.state()
+        it = _line(st, item_id)
+        if not any(str(o["id"]) == str(order_id) for o in st["orders"].get("orders") or []):
+            raise stock.Refused(404, "That order was not found.")
+        moved = _unfill(st, invoice, it["id"]).get(it["id"], 0)
+        if not moved:
+            raise stock.Refused(404, f"Nothing from invoice {invoice} was counted against an order for this line.")
+        fills = _fill_orders(st, it["id"], moved, invoice, order_id)
+        row = stock.history_row(stock.actor(uid), "ordered", item_key=it["key"], field="order",
+                                detail=f"delivery inv {invoice} counted against order {order_id}")
+        stock.commit(st, changed={"orders"}, history=[row])
+        return {"item": stock_figures.item_view(it), "orders": fills}
+
+
+def undo_delivery(uid: str, invoice_no) -> dict:
+    """Undo a whole delivery by its invoice number: the stock app's rules,
+    and the orders it filled await it again."""
+    invoice = stock.clean_text(invoice_no, 60)
+    if not invoice:
+        raise stock.Refused(400, "Which delivery? Give its invoice number to undo it.")
+    want = invoice.casefold()
+    with stock._lock:
+        st = stock.state()
+        idx = stock.history_index()
+        rows = [idx.rows[n] for n in idx.by_invoice.get(want, [])]
+        if any(r.get("action") == "receive_undo" for r in rows):
+            raise stock.Refused(409, f"Delivery {invoice} has already been undone.")
+        received = [r for r in rows if r.get("action") == "receive" and r.get("item_key")]
+        if not received:
+            raise stock.Refused(404, f"No delivery was found for invoice {invoice}.")
+        by_key = {}
+        for r in received:
+            try:
+                q = int(r["new_value"]) - int(r["old_value"])
+            except (TypeError, ValueError):
+                continue
+            if q > 0:
+                by_key[r["item_key"]] = by_key.get(r["item_key"], 0) + q
+        if not by_key:
+            raise stock.Refused(400, "That delivery has no quantities that can be undone.")
+        items = {it["key"]: it for it in st["items"]["items"].values()}
+        missing = [k for k in by_key if k not in items]
+        if missing:
+            raise stock.Refused(404, "A line from that delivery no longer exists: " + missing[0].replace("|", " ").strip())
+        short = [k for k, q in by_key.items() if items[k]["current"] < q]
+        if short:
+            k = short[0]
+            raise stock.Refused(409, f"This cannot be undone: only {items[k]['current']} of "
+                                     f"{stock_figures.item_name(items[k])} remain, fewer than the {by_key[k]} "
+                                     "received. Correct that count first.")
+        who = stock.actor(uid)
+        history = []
+        for key, q in by_key.items():
+            it = items[key]
+            old = it["current"]
+            it["current"] -= q
+            it["received"] = max(0, it["received"] - q)
+            it["updated_at"] = stock.now_iso()
+            history.append(stock.history_row(who, "receive_undo", item_key=key, field="current", old=old,
+                                             new=it["current"], detail=f"undid delivery · inv {invoice} · -{q}"))
+        for item_id, q in _unfill(st, invoice).items():
+            it = st["items"]["items"].get(str(item_id))
+            if it:
+                old = it["on_order"] or 0
+                it["on_order"] = old + q
+                history.append(stock.history_row(who, "ordered", item_key=it["key"], field="on_order", old=old,
+                                                 new=it["on_order"], detail=f"undid delivery · inv {invoice} · awaited again"))
+        snap = stock.take_snapshot(st, "edit", who, f"undid delivery inv {invoice}")
+        stock.commit(st, changed={"items", "orders", "alerts"}, history=history, snapshot=snap)
+        return {"undone": len(by_key), "units": sum(by_key.values()), "invoice_no": invoice, "summary": _summary(st)}
