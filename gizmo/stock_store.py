@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from gizmo import store as jsonstore
@@ -38,6 +39,34 @@ STOCK_SETTINGS_PATH = os.environ.get("STOCK_SETTINGS_PATH", "/data/stock_setting
 STOCK_BRIDGE_PATH = os.environ.get("STOCK_BRIDGE_PATH", "/data/stock_bridge.json")  # glass booked from made orders, day sheets, parked lines, aliases
 STOCK_BACKUP_PREFIX = os.environ.get("STOCK_BACKUP_PREFIX", "/data/stock_backup_")  # stock sheet backups, a file each (prefix + YYYYmmdd-HHMMSS-id.json)
 STOCK_PEOPLE_PATH = os.environ.get("STOCK_PEOPLE_PATH", "/data/stock_people.json")  # the stock app's usernames and the Reactor accounts they became
+
+
+def _paths() -> tuple:
+    return (STOCK_ITEMS_PATH, STOCK_HISTORY_PATH, STOCK_SNAPSHOTS_SCHEDULED_PATH, STOCK_SNAPSHOTS_CHANGES_PREFIX,
+            STOCK_PERIODS_PATH, STOCK_ALERTS_PATH, STOCK_SUPPLIERS_PATH, STOCK_SETTINGS_PATH, STOCK_BRIDGE_PATH,
+            STOCK_BACKUP_PREFIX, STOCK_PEOPLE_PATH)
+
+
+def _set_paths(paths: tuple) -> None:
+    global STOCK_ITEMS_PATH, STOCK_HISTORY_PATH, STOCK_SNAPSHOTS_SCHEDULED_PATH, STOCK_SNAPSHOTS_CHANGES_PREFIX
+    global STOCK_PERIODS_PATH, STOCK_ALERTS_PATH, STOCK_SUPPLIERS_PATH, STOCK_SETTINGS_PATH, STOCK_BRIDGE_PATH
+    global STOCK_BACKUP_PREFIX, STOCK_PEOPLE_PATH
+    (STOCK_ITEMS_PATH, STOCK_HISTORY_PATH, STOCK_SNAPSHOTS_SCHEDULED_PATH, STOCK_SNAPSHOTS_CHANGES_PREFIX,
+     STOCK_PERIODS_PATH, STOCK_ALERTS_PATH, STOCK_SUPPLIERS_PATH, STOCK_SETTINGS_PATH, STOCK_BRIDGE_PATH,
+     STOCK_BACKUP_PREFIX, STOCK_PEOPLE_PATH) = paths
+
+
+@contextmanager
+def rooted(folder: str):
+    """Every stock store in `folder` for the length of the block (the
+    converter writes and proves a move there), then back where they were."""
+    saved = _paths()
+    _set_paths(tuple(os.path.join(folder, os.path.basename(p)) for p in saved))
+    try:
+        yield
+    finally:
+        _set_paths(saved)
+
 
 # One append at a time: the highest id is read and the new lines written
 # under it, so two appends can never number a line the same.

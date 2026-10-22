@@ -273,3 +273,238 @@ def t_stock_trends_read_the_snapshots_oldest_first():
     eq(t["points"][0]["at"], "2026-10-01T00:00:00+00:00")
     eq(sfig.totals_for_snapshot([_stock_item(1, "Glass|Blue|20|", current=4, unit_cost_gbp=1.0)])["by_category"],
        {"Glass": 4.0})
+
+# ---- the converter and its proof ---------------------------------------------
+
+import subprocess as _subprocess
+from tools import stock_import
+
+_STOCK_COLUMNS = {
+    "items": ["id", "key", "category", "sub_category", "size", "notes", "written_off", "barcode", "supplier",
+              "currency", "unit_cost", "unit_cost_gbp", "start", "received", "used", "current", "reorder_point",
+              "reorder_qty", "on_order", "created_at", "updated_at"],
+    "snapshots": ["id", "taken_at", "reason", "by_user", "note", "totals"],
+    "snapshot_items": ["id", "snapshot_id", "item_key", "category", "written_off", "current", "used", "current_value"],
+    "audit_log": ["id", "at", "user", "action", "item_key", "field", "old_value", "new_value", "detail"],
+    "alerts": ["id", "at", "kind", "severity", "message", "item_key", "dismissed", "dismissed_by"],
+    "backups": ["id", "at", "filename", "size_bytes", "item_count", "blob"],
+    "meta": ["key", "value"],
+    "periods": ["id", "label", "opened_at", "closed_at", "closing_value", "closing_units", "closing_skus",
+                "closing_used_value", "note", "closing_data"],
+    "users": ["id", "username", "created_at", "last_login", "prev_login", "session_epoch"],
+    "gizmo_bookings": ["id", "order_id", "order_name", "at", "lines"],
+    "gizmo_usage_sheets": ["id", "day", "at", "lines", "applied"],
+    "gizmo_parked": ["id", "order_id", "order_name", "alias", "qty", "note", "at"],
+    "gizmo_aliases": ["id", "alias", "item_id", "item_key", "at"],
+    "supplier_contacts": ["id", "supplier", "email", "cc", "contact_name", "subject", "body", "lead_days",
+                          "min_order", "updated_at"],
+}
+
+def _stock_export(history_user="someone", reorder_point_9=0):
+    """An invented export in the exporter's shape, with the stock app's figures for it."""
+    def row(table, **values):
+        return {c: values.get(c) for c in _STOCK_COLUMNS[table]}
+    def item(id, key, **over):
+        base = {k: v for k, v in _stock_item(id, key).items()}
+        base.update(over)
+        return row("items", **base)
+    items = [item(3, "Glass|Blue|20|", start=10, used=4, current=6, unit_cost_gbp=1.25, barcode="5012345678900",
+                  supplier="Invented Glass Co", created_at="2026-07-01T10:00:00"),
+             item(7, "Glass|Blue|20||#2", start=5, current=2, unit_cost_gbp=2.0,
+                  created_at="2026-07-01T11:00:00+01:00"),
+             item(9, "Glass|Red|30|", barcode=None, on_order=None, unit_cost=None, unit_cost_gbp=0.5,
+                  reorder_point=reorder_point_9),
+             item(11, "Glass|Grey|20|", current=3, unit_cost_gbp=4.0, written_off=True)]
+    snap_items = [row("snapshot_items", id=1, snapshot_id=1, item_key="Glass|Blue|20|", category="Glass",
+                      written_off=False, current=8, used=2, current_value=10.0),
+                  row("snapshot_items", id=2, snapshot_id=1, item_key="Glass|Blue|20||#2", category="Glass",
+                      written_off=False, current=2, used=0, current_value=4.0),
+                  row("snapshot_items", id=5, snapshot_id=2, item_key="Glass|Blue|20|", category="Glass",
+                      written_off=False, current=6, used=4, current_value=7.5)]
+    snaps = [row("snapshots", id=1, taken_at="2026-10-01T00:05:00+00:00", reason="scheduled", by_user="system",
+                 note="", totals=json.dumps({"active_value_gbp": 14.0})),
+             row("snapshots", id=2, taken_at="2026-10-02T09:30:00+00:00", reason="edit", by_user="someone",
+                 note="", totals=json.dumps({"active_value_gbp": 11.5}))]
+    closing = [sfig.item_view(_stock_item(3, "Glass|Blue|20|", current=12, unit_cost_gbp=1.25))]
+    periods = [row("periods", id=1, label="Quarter one", opened_at="2026-04-01T00:00:00+00:00",
+                   closed_at="2026-06-30T23:00:00+00:00", closing_value=15.0, closing_units=12, closing_skus=1,
+                   closing_used_value=0.0, note="", closing_data=json.dumps(closing)),
+               row("periods", id=2, label="Quarter two", opened_at="2026-07-01T00:00:00+00:00", closed_at=None,
+                   closing_value=0.0, closing_units=0, closing_skus=0, closing_used_value=0.0, note="",
+                   closing_data="")]
+    tables = {
+        "items": items, "snapshots": snaps, "snapshot_items": snap_items,
+        "audit_log": [row("audit_log", id=4, at="2026-10-01T09:00:00+00:00", user=history_user, action="update",
+                          item_key="Glass|Navy|20|", field="current", old_value="7", new_value="6", detail=""),
+                      row("audit_log", id=6, at="2026-10-01T09:01:00", user="system", action="snapshot",
+                          item_key="", field="", old_value="", new_value="", detail="edit snapshot #2"),
+                      row("audit_log", id=8, at="2026-10-01T09:02:00+00:00", user="gizmo", action="book",
+                          item_key="Glass|Blue|20|", field="current", old_value="6", new_value="5", detail="")],
+        "alerts": [row("alerts", id=2, at="2026-10-02T09:30:00+00:00", kind="low_stock", severity="warning",
+                       message="Low stock", item_key="Glass|Blue|20|", dismissed=True, dismissed_by="someone")],
+        "backups": [row("backups", id=1, at="2026-10-02T02:00:00+00:00", filename="stock-20261002-020000.json.enc",
+                        size_bytes=11, item_count=4, blob=base64.b64encode(b"gAAAAABfake").decode())],
+        "meta": [row("meta", key="low_stock_days", value="21"), row("meta", key="schema", value="3")],
+        "periods": periods,
+        "users": [row("users", id=1, username="someone", created_at="2026-06-01T00:00:00+00:00",
+                      last_login=None, prev_login="2026-10-01T08:00:00", session_epoch=0)],
+        "gizmo_bookings": [row("gizmo_bookings", id=1, order_id="1001", order_name="#1001",
+                               at="2026-10-01T09:02:00+00:00",
+                               lines=json.dumps([{"item_key": "Glass|Blue|20|", "qty": 1, "current_delta": -1}]))],
+        "gizmo_usage_sheets": [row("gizmo_usage_sheets", id=1, day="2026-10-01", at="2026-10-01T18:00:00+00:00",
+                                   lines="[]", applied=json.dumps([{"item_key": "Glass|Blue|20|", "delta": 1}]))],
+        "gizmo_parked": [row("gizmo_parked", id=3, order_id="1002", order_name="#1002", alias="Colour|20", qty=1,
+                             note="", at="2026-10-01T09:03:00+00:00")],
+        "gizmo_aliases": [row("gizmo_aliases", id=1, alias="Mono|20", item_id=3, item_key="Glass|Blue|20|",
+                              at="2026-10-01T09:04:00+00:00")],
+        "supplier_contacts": [row("supplier_contacts", id=1, supplier="Invented Glass Co", email="orders@example.com",
+                                  cc="", contact_name="", subject="Order", body="Please send", lead_days=7,
+                                  min_order="", updated_at="2026-10-01T09:05:00+00:00")],
+    }
+    export = {"format": "stock-export-1", "exported_at": "2026-10-22T12:00:00+00:00",
+              "now": "2026-10-22T12:00:00+00:00", "source_head": "0000000",
+              "tables": {n: {"columns": _STOCK_COLUMNS[n], "count": len(rows), "rows": rows, "missing": False}
+                         for n, rows in tables.items()}}
+    # The stock app's figures for this data, worked out the way the exporter
+    # asks the stock app for them (the port stands in for it here).
+    if reorder_point_9 is None:
+        return export      # the stock app's reorder page fails on a NULL point, so it has no figures
+    live = [dict(i) for i in items]
+    snapshots = [dict(s, totals=json.loads(s["totals"]),
+                      items=[x for x in snap_items if x["snapshot_id"] == s["id"]]) for s in snaps]
+    plain_periods = [dict(p, closing_data=json.loads(p["closing_data"]) if p["closing_data"] else None)
+                     for p in periods]
+    meta = {"low_stock_days": "21", "schema": "3"}
+    leads = {"Invented Glass Co": 7}
+    export["expected"] = {
+        "compute_current": sfig.compute_current(live), "reorder_suggestions": sfig.reorder_suggestions(live),
+        "suggest_reorder_points": sfig.suggest_reorder_points(live, leads), "lead_by_supplier": leads,
+        "fx_rates": sfig.fx_rates(live, meta), "fx_revaluation": sfig.fx_revaluation(live, meta),
+        "totals_for_snapshot": sfig.totals_for_snapshot(live), "trends": sfig.trends(snapshots),
+        "forecast": sfig.forecast(live, snapshots),
+        "detect_anomalies": {"prev_snapshot_id": 2, "alerts": sfig.detect_anomalies(live, meta, {"active_value_gbp": 11.5})},
+        "compare": [{"left": 1, "right": "current",
+                     "result": sfig.compare(sfig.side_period(plain_periods[0]), sfig.side_live(live, plain_periods))}],
+    }
+    return export
+
+def _stock_out(name):
+    out = os.path.join(SCRATCH, "stock-move-" + name)
+    shutil.rmtree(out, ignore_errors=True)
+    os.makedirs(out)
+    return out
+
+PEOPLE = {"someone": "acct-1"}
+
+@test
+def t_the_stock_converter_keeps_every_record():
+    export = _stock_export()
+    eq(export["expected"]["compute_current"]["headline"],
+       {"active_stock_value_gbp": 11.5, "active_units": 8, "active_skus": 3, "start_units": 15, "used_units": 4,
+        "cogs_used_value_gbp": 5.0, "sell_through_pct": 26.67}, "the headline, worked out by hand")
+    out = _stock_out("keeps")
+    stock_import.convert(export, PEOPLE, out)
+    eq(stock_import.prove(export, out), [], "the proof finds nothing")
+    with stock_store.rooted(out):
+        items = stock_store.load_items()
+        eq(sorted(items["items"]), ["11", "3", "7", "9"], "ids kept")
+        eq(items["next_id"], 12)
+        eq(items["items"]["7"]["key"], "Glass|Blue|20||#2", "a de-duplicated key kept verbatim")
+        eq(items["items"]["9"]["barcode"], None, "NULL stays NULL")
+        eq(items["items"]["3"]["created_at"], items["items"]["7"]["created_at"], "a naive time is UTC")
+        history = stock_store.read_history()
+        eq([h["id"] for h in history], [4, 6, 8], "history ids kept, gaps and all")
+        eq(history[0]["item_key"], "Glass|Navy|20|", "a row keeps the key it was written with")
+        eq([h["person"] for h in history], ["acct-1", None, None], "people mapped; system and gizmo are nobody")
+        eq([s["id"] for s in stock_store.read_snapshots()], [1, 2])
+        eq(stock_store.load_periods()["periods"][0]["closing_data"][0]["current"], 12)
+        eq(stock_store.load_bridge()["bookings"][0]["lines"][0]["qty"], 1, "JSON text decoded")
+        eq(stock_store.list_backups()[0]["token"], base64.b64encode(b"gAAAAABfake").decode())
+        eq(stock_store.load_people(), {"people": PEOPLE})
+        eq(stock_store.load_settings(), {"meta": {"low_stock_days": "21", "schema": "3"}})
+    out = _stock_out("null-point")
+    stock_import.convert(_stock_export(reorder_point_9=None), PEOPLE, out)
+    with stock_store.rooted(out):
+        eq(stock_store.load_items()["items"]["9"]["reorder_point"], None, "a NULL reorder point is kept as NULL")
+
+@test
+def t_the_stock_proof_names_a_changed_field():
+    export = _stock_export()
+    out = _stock_out("changed")
+    stock_import.convert(export, PEOPLE, out)
+    with stock_store.rooted(out):
+        doc = stock_store.load_items()
+        doc["items"]["7"]["on_order"] = 5          # a line with no reorder point: no figure moves
+        stock_store.write_items(doc)
+    found = stock_import.prove(export, out)
+    eq(len(found), 1, found)
+    ok("items" in found[0] and "7" in found[0] and "on_order" in found[0], found[0])
+
+@test
+def t_the_stock_proof_notices_a_dropped_history_line():
+    export = _stock_export()
+    out = _stock_out("dropped")
+    stock_import.convert(export, PEOPLE, out)
+    with stock_store.rooted(out):
+        path = stock_store.STOCK_HISTORY_PATH
+    lines = open(path, encoding="utf-8").read().splitlines(True)
+    open(path, "w", encoding="utf-8").write("".join(lines[:1] + lines[2:]))
+    found = " | ".join(stock_import.prove(export, out))
+    ok("audit_log" in found and "3 rows" in found, found)
+    ok("checksum" in found, found)
+
+@test
+def t_a_stock_person_without_a_mapping_is_refused():
+    try:
+        stock_import.convert(_stock_export(history_user="stranger"), PEOPLE, _stock_out("stranger"))
+        ok(False, "an unmapped person must be refused")
+    except ValueError as e:
+        ok("stranger" in str(e), str(e))
+        ok("system" not in str(e) and "gizmo" not in str(e), "system and gizmo need no mapping")
+    eq(glob.glob(os.path.join(SCRATCH, "stock-move-stranger", "*")), [], "nothing written")
+
+@test
+def t_the_stock_proof_compares_the_figures():
+    export = _stock_export()
+    out = _stock_out("figures")
+    stock_import.convert(export, PEOPLE, out)
+    export["expected"]["compute_current"]["headline"]["active_stock_value_gbp"] = 11.51
+    found = stock_import.prove(export, out)
+    eq(len(found), 1, found)
+    ok("compute_current" in found[0] and "active_stock_value_gbp" in found[0], found[0])
+
+@test
+def t_the_stock_converter_never_writes_inside_the_repository():
+    root = os.path.dirname(os.path.dirname(os.path.abspath(stock_store.__file__)))
+    export_file, people_file = os.path.join(SCRATCH, "stock-export.json"), os.path.join(SCRATCH, "stock-people.json")
+    json.dump(_stock_export(), open(export_file, "w"))
+    json.dump(PEOPLE, open(people_file, "w"))
+    inside = os.path.join(root, "stock-move-test-out")
+    tool = os.path.join(root, "tools", "stock_import.py")
+    r = _subprocess.run([sys.executable, tool, "--export", export_file, "--people", people_file, "--out", inside],
+                        capture_output=True, text=True)
+    ok(r.returncode != 0, "refused")
+    ok(not os.path.exists(inside), "nothing written inside the repository")
+    r = _subprocess.run([sys.executable, tool, "--export", export_file, "--people", people_file,
+                         "--out", _stock_out("cli"), "--report", os.path.join(root, "stock-proof.txt")],
+                        capture_output=True, text=True)
+    ok(r.returncode != 0 and not os.path.exists(os.path.join(root, "stock-proof.txt")), "a report inside is refused too")
+    r = _subprocess.run([sys.executable, tool, "--export", export_file, "--people", people_file,
+                         "--out", _stock_out("cli")], capture_output=True, text=True)
+    eq(r.returncode, 0, r.stdout + r.stderr)
+
+@test
+def t_stock_movers_tied_on_size_prove_in_either_order():
+    """The stock app takes a comparison's movers out of a set: lines tied on
+    the size of their move come out in no fixed order."""
+    export = _stock_export()
+    out = _stock_out("movers")
+    stock_import.convert(export, PEOPLE, out)
+    movers = export["expected"]["compare"][0]["result"]["top_value_movers"]
+    eq([abs(m["value_delta"]) for m in movers][-2:], [0, 0], "the last two are tied")
+    movers[-2], movers[-1] = movers[-1], movers[-2]
+    eq(stock_import.prove(export, out), [], "either order of a tie proves")
+    movers[-1] = dict(movers[-1], item="Glass / Nowhere 99")
+    found = stock_import.prove(export, out)
+    eq(len(found), 1, found)
+    ok("Nowhere" in found[0], found[0])
