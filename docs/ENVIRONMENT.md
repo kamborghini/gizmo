@@ -3,7 +3,7 @@
 Generated from the code by `tools/env_reference.py`; do not edit by hand.
 `make env-doc` rewrites it, and CI fails when it is stale.
 
-184 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document. `[shop domain]` stands for the shop's own website domain, which those defaults carry.
+195 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document. `[shop domain]` stands for the shop's own website domain, which those defaults carry.
 
 ## server.py
 
@@ -354,6 +354,22 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 |---|---|---|---|
 | `RAILWAY_ENVIRONMENT` | `None` | gizmo.status | set by Railway; the volume check runs only there |
 | `RAILWAY_PROJECT_ID` | `None` | gizmo.status | set by Railway; the volume check runs only there |
+
+## gizmo/stock_store.py - top
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `STOCK_ALERTS_PATH` | `"/data/stock_alerts.json"` | gizmo.stock_store | the stock sheet's warnings |
+| `STOCK_BACKUP_PREFIX` | `"/data/stock_backup_"` | gizmo.stock_store | stock sheet backups, a file each (prefix + YYYYmmdd-HHMMSS-id.json) |
+| `STOCK_BRIDGE_PATH` | `"/data/stock_bridge.json"` | gizmo.stock_store | glass booked from made orders, day sheets, parked lines, aliases |
+| `STOCK_HISTORY_PATH` | `"/data/stock_history.jsonl"` | gizmo.stock_store | every change to the stock sheet, append-only |
+| `STOCK_ITEMS_PATH` | `"/data/stock_items.json"` | gizmo.stock_store | the stock sheet's lines, by id |
+| `STOCK_PEOPLE_PATH` | `"/data/stock_people.json"` | gizmo.stock_store | the stock app's usernames and the Reactor accounts they became |
+| `STOCK_PERIODS_PATH` | `"/data/stock_periods.json"` | gizmo.stock_store | the stock sheet's quarters, open and closed |
+| `STOCK_SETTINGS_PATH` | `"/data/stock_settings.json"` | gizmo.stock_store | the stock sheet's own settings, as the stock app kept them |
+| `STOCK_SNAPSHOTS_CHANGES_PREFIX` | `"/data/stock_snap_changes_"` | gizmo.stock_store | the other stock snapshots, a file per UTC day (prefix + YYYY-MM-DD.jsonl) |
+| `STOCK_SNAPSHOTS_SCHEDULED_PATH` | `"/data/stock_snap_scheduled.jsonl"` | gizmo.stock_store | the nightly stock snapshots, append-only |
+| `STOCK_SUPPLIERS_PATH` | `"/data/stock_suppliers.json"` | gizmo.stock_store | supplier contacts and order templates (owner-only) |
 
 ## gizmo/team.py - Team colours, who may edit the Size list or send mail, first
 
