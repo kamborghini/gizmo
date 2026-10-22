@@ -439,17 +439,26 @@ def _unfill(st: dict, invoice: str, item_id=None) -> dict:
 def rematch(uid: str, invoice_no, item_id, order_id) -> dict:
     """Count a received line against another order, as chosen on the receipt."""
     invoice = stock.clean_text(invoice_no, 60)
+    if not invoice:
+        raise stock.Refused(400, "Which delivery? Give its invoice number.")
     with stock._lock:
         st = stock.state()
         it = _line(st, item_id)
-        if not any(str(o["id"]) == str(order_id) for o in st["orders"].get("orders") or []):
+        order = next((o for o in st["orders"].get("orders") or [] if str(o["id"]) == str(order_id)), None)
+        if not order:
             raise stock.Refused(404, "That order was not found.")
+        if not any(l["item_id"] == it["id"] for l in order["lines"]):
+            raise stock.Refused(400, "That order has no line for this stock.")
         moved = _unfill(st, invoice, it["id"]).get(it["id"], 0)
         if not moved:
             raise stock.Refused(404, f"Nothing from invoice {invoice} was counted against an order for this line.")
-        fills = _fill_orders(st, it["id"], moved, invoice, order_id)
+        if not any(outstanding(l) for l in order["lines"] if l["item_id"] == it["id"]):
+            raise stock.Refused(409, "That order is not awaiting any more of this line.")
+        fills = _fill_orders(st, it["id"], moved, invoice, order["id"])
+        # The line says where the delivery now counts, as it now does.
+        where = ", ".join(f"order {f['order_id']} ({f['qty']})" for f in fills)
         row = stock.history_row(stock.actor(uid), "ordered", item_key=it["key"], field="order",
-                                detail=f"delivery inv {invoice} counted against order {order_id}")
+                                detail=f"delivery inv {invoice} now counted against {where}")
         stock.commit(st, changed={"orders"}, history=[row])
         return {"item": stock_figures.item_view(it), "orders": fills}
 

@@ -214,3 +214,19 @@ def t_stock_invoice_prices_update_costs_through_the_rate():
     items = stock_store.load_items()["items"]
     eq((items["7"]["unit_cost"], items["7"]["unit_cost_gbp"]), (10.0, 8.0), "dollars at the rate set")
     eq(items["9"]["unit_cost_gbp"], 10.0, "a currency with no rate is taken at 1, as the stock app took it")
+
+# ---- the final review's findings, pinned ---------------------------------------------
+
+@test
+def t_a_stock_rematch_never_records_a_move_that_did_not_happen():
+    _stock_live()
+    _stock_buy("orders", "place", supplier="First", lines=[{"id": 3, "qty": 5}])
+    other = _stock_buy("orders", "place", supplier="Other", lines=[{"id": 9, "qty": 5}])[1]["order"]["id"]
+    _stock_buy("receive", "delivery", invoice_no="D-8", lines=[{"id": 3, "qty": 2}])
+    rows = len(stock_store.read_history())
+    r, d = _stock_buy("receive", "rematch", invoice_no="D-8", id=3, order_id=other)
+    eq(r.status_code, 400, "that order has no line for it")
+    r, d = _stock_buy("receive", "rematch", invoice_no="", id=3, order_id=other)
+    eq(r.status_code, 400, "which delivery?")
+    eq(len(stock_store.read_history()), rows, "no history line for a move that did not happen")
+    eq(_stock_order_lines(3), [("First", 2, [2])], "the receipt stays where it was")
