@@ -304,8 +304,13 @@
         $('crumb-chev').innerHTML = I.chev;
         $('side-user-more').innerHTML = I.moreH;
         $('side-user').onclick = userMenu;
-        $('topbar-search').append(ico(I.search), el('span', 'ts-label', 'Search'),
-            el('kbd', null, /Mac|iPhone|iPad/.test(navigator.platform || '') ? '\u2318J' : 'Ctrl J'));
+        /* Named by what it shows, "Search", so voice control finds it by the
+           word on it (WCAG 2.5.3); what it searches is its description (the
+           shell). The shortcut is drawn for the eye and announced through the
+           button's aria-keyshortcuts, so the drawing is hidden from the name. */
+        const searchKey = el('kbd', null, /Mac|iPhone|iPad/.test(navigator.platform || '') ? '\u2318J' : 'Ctrl J');
+        searchKey.setAttribute('aria-hidden', 'true');
+        $('topbar-search').append(ico(I.search), el('span', 'ts-label', 'Search'), searchKey);
         $('topbar-search').onclick = openSearch;
         $('send').innerHTML = I.send;
         $('settings-btn').innerHTML = I.settings;
