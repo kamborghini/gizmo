@@ -288,7 +288,7 @@
         $('nav-skills').append(ico(I.book), document.createTextNode('Skills'));
         $('nav-chat').append(ico(I.chat), document.createTextNode('Chat'));
         $('nav-guide').append(ico(I.helpCircle), document.createTextNode('Guide'));
-        $('brand-home').onclick = () => setView('labels');
+        $('brand-home').onclick = () => setView(homeView());
         $('new-convo').innerHTML = I.plus;
         /* The top bar's button: the panel glyph beside a sidebar that can hide, the menu glyph while the sidebar is a drawer (900 and under). */
         $('menu-btn').innerHTML = I.panelLeft + I.menu;

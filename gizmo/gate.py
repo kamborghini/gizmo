@@ -249,8 +249,8 @@ def _tab_denied(request: Request) -> Optional[JSONResponse]:
     """The central lock. Only ever a 403: a 401 here would read as a dead
     session and bounce the person to the login screen in a loop."""
     path = request.url.path
-    # Longest prefix wins: /api/production-labels must map to labels, not
-    # fall to the shorter /api/product entry.
+    # Longest prefix wins: /api/gobo-sizes/rule must map by its own entry
+    # if it has one, not fall to a shorter one that starts the same way.
     tab, best = None, 0
     for p, t in _TAB_ROUTES:
         if path.startswith(p) and len(p) > best:

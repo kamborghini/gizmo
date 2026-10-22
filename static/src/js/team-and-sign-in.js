@@ -41,6 +41,23 @@
             if (TAB_KEYS.indexOf(v) < 0) return true;   // guide and team are governed elsewhere
             return teamMe.tabs.indexOf(v) >= 0;
         }
+        /* The page an account opens on: the Production Manager when it may
+           open it, else the first page it can (customers is a permission, not
+           a page, so it never qualifies), else the Guide, which everyone has. */
+        function homeView() {
+            if (tabAllowed('labels')) return 'labels';
+            return TAB_KEYS.filter(k => APP_VIEWS.indexOf(k) >= 0).find(tabAllowed) || 'guide';
+        }
+        /* Set at boot when no deep link chose a page. The home page waits for
+           the account: opened before it, the Production Manager read its
+           orders signed out and showed the failure once the sign-in card went,
+           and an account without that page was refused one read every start. */
+        let bootHomePending = false;
+        function openHome() {
+            if (!bootHomePending) return;
+            bootHomePending = false;
+            setView(homeView());
+        }
         function applyRoleChrome() {
             const lvl = teamMe ? ({ master: 3, admin: 2, member: 1 }[teamMe.role] || 1) : 1;
             $('nav-team').style.display = lvl >= 2 ? '' : 'none';
@@ -63,10 +80,7 @@
             syncNavGroups();
             const av = document.querySelector('.view.active');
             const cur = av ? av.id.replace('view-', '') : '';
-            if (cur && !tabAllowed(cur)) {
-                const first = TAB_KEYS.find(tabAllowed);
-                setView(first || 'guide');
-            }
+            if (cur && !tabAllowed(cur)) setView(homeView());
         }
         function authOverlay() {
             let ov = $('auth-overlay');
@@ -165,6 +179,7 @@
                 claimLocalCache(p.me && p.me.id);
                 if (p.me && p.me.must_change) { authShow('change'); return; }
                 ov.style.display = 'none'; ov.dataset.mode = ''; appBehind(false); renderSidebar();
+                openHome();
                 applyRoleChrome();
                 updatesBadge();
                 loadAlerts();       // the boot-time read ran signed out, and read nothing
@@ -211,6 +226,7 @@
                         setAppSession(r.session);
                         if (teamMe) teamMe.must_change = false;
                         ov.style.display = 'none'; ov.dataset.mode = ''; appBehind(false); renderSidebar();
+                        openHome();
                         applyRoleChrome();
                         /* The layouts were refused while the password was a
                            starter; read them now, or Customize stays off for
@@ -278,6 +294,7 @@
                 claimLocalCache(st.me && st.me.id);
                 if (st.me.must_change) { authShow('change'); return; }
                 const ov = $('auth-overlay'); if (ov) { ov.style.display = 'none'; ov.dataset.mode = ''; appBehind(false); renderSidebar(); }
+                openHome();
                 applyRoleChrome();
                 updatesBadge();
                 loadAlerts();

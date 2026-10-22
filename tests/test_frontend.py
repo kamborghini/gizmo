@@ -15355,9 +15355,9 @@ def t_the_app_opens_on_the_production_manager():
     It went with the report tabs (22 Oct 2026); the Production Manager is the
     page the team opens first, so the app starts there."""
     ok("setView(bootLabels ? 'labels' : 'overview')" not in SCRIPT, "the boot no longer opens Overview")
-    ok("setView('labels');" in SCRIPT.split("renderSidebar(); renderChat(); authBoot();", 1)[1][:40],
-       "the boot opens the Production Manager")
-    ok("$('brand-home').onclick = () => setView('labels');" in SCRIPT, "and so does the logo")
+    ok("if (tabAllowed('labels')) return 'labels';" in fn_src("function homeView("),
+       "the home page is the Production Manager for everyone who may open it")
+    ok("$('brand-home').onclick = () => setView(homeView());" in SCRIPT, "and the logo goes there")
     ok(re.search(r'class="nav-item active" data-view="labels"', HTML), "its nav item starts active")
     ok(re.search(r'<section class="view active" id="view-labels">', HTML), "and its section starts shown")
     ok('<h1 id="view-title">Production Manager</h1>' in HTML, "under its own title")
@@ -15393,6 +15393,55 @@ def t_no_page_calls_a_removed_report():
     ok(not left, "names of removed pages still in the app's script: %s" % left)
     for view in ("overview", "seo", "keywords", "products", "customers", "recon"):
         ok('id="view-' + view + '"' not in HTML and 'id="nav-' + view + '"' not in HTML, view + " has no page or nav item")
+
+
+@test
+def t_the_home_page_waits_for_the_account_and_is_one_it_can_open():
+    """Final review, 22 Oct 2026: with the Production Manager as the opening
+    page, the boot read the orders before anyone had signed in, so after the
+    sign-in card the page showed "Your sign-in has expired", and an account
+    without that page was refused one read on every start. The fallback for
+    an account that cannot open the current page picked 'customers', which
+    is a permission, not a page, and left nothing on the screen. The home page
+    is now the first page the account can open, chosen once it is known."""
+    boot = SCRIPT.split("renderSidebar(); renderChat(); authBoot();", 1)[1][:400]
+    ok("if (bootLabels) setView('labels'); else bootHomePending = true;" in boot,
+       "the boot opens no page before the account is known, unless a deep link names its order")
+    for where, body in (("authBoot", fn_src("async function authBoot(")), ("finish", fn_src("async function finish("))):
+        ok("openHome();" in body and body.index("openHome();") < body.index("applyRoleChrome();"),
+           where + " opens the home page once it knows the account, before the chrome hides pages")
+    change = SCRIPT.split("const r = await authApi('/api/auth/password'", 1)[1][:900]
+    ok("openHome();" in change, "and so does choosing your own password")
+    ok("setView(homeView())" in fn_src("function applyRoleChrome(") and "TAB_KEYS.find(tabAllowed)" not in SCRIPT,
+       "a page the account cannot open falls back to its home page, never to a permission")
+    ok("$('brand-home').onclick = () => setView(homeView());" in SCRIPT, "the logo goes home too")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    keys = re.search(r"const TAB_KEYS = \[[^\]]*\];", SCRIPT).group(0)
+    views = re.search(r"const APP_VIEWS = \[[^\]]*\];", SCRIPT).group(0)
+    js = keys + "\n" + views + "\nlet teamMe = null;\n" + fn_src("function tabAllowed(") + "\n" + fn_src("function homeView(") + r"""
+const out = {};
+teamMe = { tabs: ['customers', 'liability', 'chat'] }; out.noLabels = homeView();
+teamMe = { tabs: ['labels', 'customers'] }; out.labels = homeView();
+teamMe = { tabs: ['customers'] }; out.onlyCustomers = homeView();
+teamMe = null; out.master = homeView();
+console.log(JSON.stringify(out));
+"""
+    got = _run_node(js)
+    eq(got, {"noLabels": "liability", "labels": "labels", "onlyCustomers": "guide", "master": "labels"},
+       "home is Labels when allowed, else the first page the account can open, else the Guide")
+
+
+@test
+def t_the_guide_names_every_ai_cost():
+    """Final review, 22 Oct 2026: the Guide's "What costs money" said all but
+    four things were free, while reading a pasted address for a courier
+    booking asks the AI when the local reading cannot place it."""
+    body = re.search(r"\['What costs money', '([^']*)'\]", SCRIPT)
+    ok(body, "the Guide has its line on costs")
+    for thing in ("Chat", "Learn my store", "skill", "reply drafts", "address"):
+        ok(thing in body.group(1), "it names " + thing + ": " + body.group(1))
 
 
 if __name__ == "__main__":

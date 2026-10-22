@@ -20,9 +20,7 @@ from gizmo import shopify
 logger = logging.getLogger("shopify_mcp.copilot")
 
 
-# The schedule this file held went with the report tabs; the path stays as
-# the volume's anchor: backup, status and privacy find /data beside it.
-SCHEDULE_PATH      = os.environ.get("SCHEDULE_PATH", "/data/schedule.json")
+SCHEDULE_PATH      = os.environ.get("SCHEDULE_PATH", "/data/schedule.json")  # its folder is the volume: backups, status and privacy read /data from it
 ALERTS_PATH        = os.environ.get("ALERTS_PATH", "/data/alerts.json")      # alerts the app raises
 ALERTS_MAX         = _env_num(int, os.environ.get("ALERTS_MAX", "60"), "60", "ALERTS_MAX")
 SCHEDULE_CHECK_SECS = _env_num(int, os.environ.get("SCHEDULE_CHECK_SECS", "900"), "900", "SCHEDULE_CHECK_SECS")       # how often the scheduler wakes to check

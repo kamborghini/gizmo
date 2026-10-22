@@ -323,7 +323,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `ALERT_EMAIL_TO` | `""` | gizmo.scheduler |  |
 | `RESEND_API_KEY` | `""` | gizmo.scheduler |  |
 | `SCHEDULE_CHECK_SECS` | `"900"` | gizmo.scheduler | how often the scheduler wakes to check |
-| `SCHEDULE_PATH` | `"/data/schedule.json"` | gizmo.scheduler |  |
+| `SCHEDULE_PATH` | `"/data/schedule.json"` | gizmo.scheduler | its folder is the volume: backups, status and privacy read /data from it |
 | `WATCH_PATH` | `"/data/watch.json"` | gizmo.scheduler |  |
 
 ## gizmo/size_list.py - top

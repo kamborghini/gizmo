@@ -27,7 +27,8 @@
         if (bootOrderId) window.__pendingAdminLink = { id: bootOrderId, dispatch: bootQP.get('dispatch') === '1' };
         // Every content root is arranged from here on, whoever renders into it.
         WG_VIEWS.forEach(v => wgWatch(v));
-        renderSidebar(); renderChat(); authBoot(); setView('labels');
+        renderSidebar(); renderChat(); authBoot();
+        if (bootLabels) setView('labels'); else bootHomePending = true;
         if (bootOrderId) (bootQP.get('dispatch') === '1' ? dispatchFromAdminLink : printFromAdminLink)(bootOrderId);
         loadProfile();  // pull the saved store profile from the server (for the Settings modal)
         /* The alerts are not read here: authBoot reads them once it knows

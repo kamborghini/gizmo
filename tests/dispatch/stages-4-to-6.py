@@ -1336,7 +1336,10 @@ def t_customer_history_still_answers_the_customers_permission():
 
 def _retired_files_round_trip(planted):
     """Plant files on the volume, build a backup, then restore a zip holding
-    them: (names in the backup, names the restore wrote back)."""
+    them: (names in the backup, names the restore wrote back). A store the
+    restore keeps rides in the zip beside them and must come back, so the
+    restore really ran: a zip of refused names alone is turned away whole,
+    which would prove nothing about any one of them."""
     import zipfile as zz, io as iio, base64 as b64
     data_dir = os.path.dirname(scheduler.SCHEDULE_PATH)
     for n, body in planted.items():
@@ -1348,11 +1351,15 @@ def _retired_files_round_trip(planted):
     finally:
         for n in planted:
             os.remove(os.path.join(data_dir, n))
+    kept = os.path.basename(liability.CHASE_LOG_PATH)
     z = iio.BytesIO()
     with zz.ZipFile(z, "w") as w:
         for n, body in planted.items():
             w.writestr("volume/" + n, body)
-    post("/api/restore", {"zip": b64.b64encode(z.getvalue()).decode()})
+        w.writestr("volume/" + kept, '{"accounts": {}}')
+    r = post("/api/restore", {"zip": b64.b64encode(z.getvalue()).decode()})
+    eq(r.status_code, 200, r.text[:300])
+    ok(kept in (r.json().get("files") or []), "the kept store came back, so the restore ran: " + r.text[:300])
     written = {n for n in planted if os.path.exists(os.path.join(data_dir, n))}
     for n in written:
         os.remove(os.path.join(data_dir, n))
@@ -1402,7 +1409,8 @@ def t_payouts_in_chat_need_the_xero_sync_permission():
         who["uid"] = uid
         post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["chat"]})
         out = run_async(dispatch("shopify_list_payouts", {}))
-        ok(not calls and "Refused" in out, "without Xero sync: refused, " + out[:120])
+        ok(not calls and "Refused" in out and "Xero sync" in out and "connector" not in out,
+           "without Xero sync: refused, in the Team page's words, " + out[:120])
         post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["chat", "connector"]})
         eq(run_async(dispatch("shopify_list_payouts", {})), "the payouts", "with Xero sync: answered")
     with_accounts(go)
@@ -1418,6 +1426,52 @@ def t_a_saved_tab_list_naming_reconciliation_still_loads():
     d["users"][uid]["tabs"] = ["recon", "labels"]
     team._write_users(d)
     eq(team._user_tabs(uid), ["labels"])
+
+
+@test
+def t_the_door_checks_rank_before_it_spends_an_ai_slot():
+    """The door checks who is asking, then their rank, then the paid window,
+    so a member refused an admin's AI run never uses up a slot the next real
+    run needs. It was pinned on Reconciliation's sweep, which went on 22 Oct
+    2026; Learn my store is an admin's AI run behind the same door."""
+    def go():
+        ensure_auth()
+        owen, sess, _pw = ready_user("Owen", "owen")
+        eq(post("/api/team/user", {"op": "tabs", "id": owen, "tabs": ["memory"]}).status_code, 200)
+        gate._rl_global.clear()
+        r = post_s(sess, "/api/learn/run", {})
+        eq(r.status_code, 403, r.text)
+        ok("admin" in r.json()["error"], r.text)
+        eq(len(gate._rl_global), 0, "a member's refused run did not spend an AI slot")
+    with_accounts(go)
+
+
+@test
+def t_the_skill_reader_promises_only_what_reactor_still_does():
+    """Final review, 22 Oct 2026: the skill reader still told the model it
+    writes the reports and reads search and analytics data, both gone with
+    the report tabs, so a skill could be read as steering work nobody does."""
+    s = skillbook.SKILL_READING_SYSTEM
+    for gone in ("write the reports", "analytics", "search and"):
+        ok(gone not in s, "the skill reader no longer says %r" % gone)
+    ok("answer questions in chat" in s and "draft email replies" in s, "and still names what is left")
+
+
+@test
+def t_a_retired_file_is_refused_by_its_default_name_and_its_set_one():
+    """Final review, 22 Oct 2026: the retired files were named only by the
+    path their setting gave, so while a setting was overridden the default
+    name was let through, and once the after-deploy steps remove the setting,
+    the overridden name would be. Both names are refused, whatever the
+    settings say on the day."""
+    for k, d in (("ANALYSIS_CACHE_PATH", "/data/analysis_cache.json"), ("GOOGLE_OAUTH_TOKEN_PATH", "/data/google_oauth.json"),
+                 ("XERO_TOKEN_PATH", "/data/xero_oauth.json"), ("GMAIL_FINANCE_TOKEN_PATH", "/data/gmail_finance_oauth.json"),
+                 ("RECON_PATH", "/data/recon.json"), ("RECON_CACHE_PATH", "/data/recon_cache.json"),
+                 ("RECON_DOCS_PATH", "/data/recon_docs.json"), ("SCHEDULE_PATH", "/data/schedule.json")):
+        ok(os.path.basename(d) in backup._RETIRED_FILES, "%s's default name %s is refused" % (k, os.path.basename(d)))
+        ok(os.path.basename(os.environ.get(k, d)) in backup._RETIRED_FILES, "and the name %s gives it" % k)
+    ok(os.environ.get("ANALYSIS_CACHE_PATH", "").endswith("/analysis.json"),
+       "the suite overrides one, so the two names differ here: " + os.environ.get("ANALYSIS_CACHE_PATH", ""))
 
 
 @test

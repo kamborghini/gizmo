@@ -364,9 +364,10 @@ def _build_tools(registry: dict) -> list[dict]:
     return tools
 
 
-# Which tab a read tool belongs to. The AI is read-only, but "read-only" is
-# not "everyone may read everything": an account denied the Customers tab is
-# refused at /api/customers and must not walk in through Chat instead.
+# Which permission a read tool needs. The AI is read-only, but "read-only" is
+# not "everyone may read everything": an account without Customer details is
+# refused customers' order history on Labels and must not walk in through
+# Chat instead.
 _TOOL_TABS = {
     "shopify_list_customers": "customers", "shopify_search_customers": "customers",
     "shopify_get_customer": "customers", "shopify_get_customer_orders": "customers",
@@ -381,6 +382,12 @@ _TOOL_TABS = {
 }
 
 
+# What a refusal calls each permission, in the Team page's own words: the
+# customers key has been a permission with no page since 22 Oct 2026, and
+# "connector" is Xero sync to everyone but the code.
+_TAB_WORDS = {"customers": "Customer details", "connector": "the Xero sync page"}
+
+
 def _build_dispatch(registry: dict, uid_of: Optional[Callable] = None) -> Callable:
     async def dispatch(name: str, args: dict) -> str:
         entry = registry.get(name)
@@ -393,8 +400,8 @@ def _build_dispatch(registry: dict, uid_of: Optional[Callable] = None) -> Callab
             if tabs is not None and need not in tabs:
                 # Answered to the MODEL, not raised: it reports the refusal in
                 # words instead of the turn dying, and no data crosses.
-                return (f"Refused: this account cannot open the {need} tab, so "
-                        f"{name} is not available. Tell the user to ask an admin.")
+                return (f"Refused: this account does not have {_TAB_WORDS.get(need, 'the ' + need + ' page')}, "
+                        f"so {name} is not available. Tell the user to ask an admin.")
         func, model = entry
         try:
             payload = model(**(args or {}))

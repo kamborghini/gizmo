@@ -89,7 +89,7 @@
                 ['The finance pages', 'Forecast and Xero sync hold the company’s books, so nobody has them by default. An admin gives them to a person on the Team page.'],
             ]},
             { id: 'reports', h: 'AI credits and your pages', tab: 'chat', body: [
-                ['What costs money', 'Chat, Learn my store on Memory, reading a skill and the Inbox’s reply drafts ask the AI and use credits. Everything else reads Shopify and Reactor’s own records at no cost.'],
+                ['What costs money', 'Chat, Learn my store on Memory, reading a skill, the Inbox’s reply drafts and, now and then, reading a pasted courier address ask the AI and use credits. Everything else reads Shopify and Reactor’s own records at no cost.'],
                 ['Customise', 'The button in a page header lets you drag its cards into the order you want and hide the ones you do not use. The arrangement is kept on your own account.'],
                 ['Printing a conversation', 'Download as PDF, in the top bar, prints the conversation you are looking at.'],
             ]},

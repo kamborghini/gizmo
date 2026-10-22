@@ -33,9 +33,10 @@ BACKUP_FILE_MAX = _env_num(int, os.environ.get("BACKUP_FILE_MAX", str(60 * 1024 
 # Files of removed features that can still sit on the volume until somebody
 # deletes them: old sign-ins' refresh tokens (never in a backup, like every
 # credential) and stores nothing reads or scrubs any more. A backup leaves
-# them out and a restore refuses them. Named from the settings the removed
-# code read, with its defaults, so an overridden path is still caught.
-_RETIRED_FILES = frozenset(os.path.basename(os.environ.get(k, d)) for k, d in (
+# them out and a restore refuses them. Each by its default name AND by the
+# name its setting gives today: removing a setting after the deploy must not
+# let a file kept under the other name through.
+_RETIRED_FILES = frozenset(n for k, d in (
     # The report tabs and the Google data sign-in (22 Oct 2026).
     ("GOOGLE_OAUTH_TOKEN_PATH", "/data/google_oauth.json"),
     ("ANALYSIS_CACHE_PATH", "/data/analysis_cache.json"),
@@ -46,7 +47,7 @@ _RETIRED_FILES = frozenset(os.path.basename(os.environ.get(k, d)) for k, d in (
     ("RECON_PATH", "/data/recon.json"),
     ("RECON_CACHE_PATH", "/data/recon_cache.json"),
     ("RECON_DOCS_PATH", "/data/recon_docs.json"),
-))
+) for n in (os.path.basename(d), os.path.basename(os.environ.get(k, d))))
 
 
 def _build_backup_zip():
