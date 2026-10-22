@@ -45,6 +45,17 @@ the order link, the supplier contacts); the export marks them `missing` and
 the figures fill any column it lacks the way the stock app's own upgrade
 does.
 
+### What the rehearsal showed (22 October 2026)
+
+Run on a local copy of the stock app's database from July: the export, the
+conversion and the proof all passed at the first attempt, every record,
+field, label and figure matching. That copy predates the order link, so its
+four tables were marked `missing`, and it had no closed quarter, so the
+quarter comparison was proven only on the invented data in the tests. As a
+check that the proof bites, one line's count was changed by one in a copy of
+the converted stores: the proof named that line and field, and the figures
+it moves.
+
 ## The real move
 
 The same commands against a copy of the production database (a Postgres
