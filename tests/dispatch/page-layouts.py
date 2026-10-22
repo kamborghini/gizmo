@@ -27,18 +27,18 @@ def t_a_layout_belongs_to_the_account_that_saved_it():
         ensure_auth()
         master = APP_AUTH["master"]
         owen, sess, _pw = ready_user("Owen", "owen")
-        r = post("/api/layouts", {"view": "overview", "order": ["trend", "alerts"],
+        r = post("/api/layouts", {"view": "forecast", "order": ["trend", "alerts"],
                                   "hidden": ["drivers"], "uid": owen, "user": owen})
         eq(r.status_code, 200, r.text)
-        eq(r.json()["layouts"], {"overview": {"order": ["trend", "alerts"], "hidden": ["drivers"]}},
+        eq(r.json()["layouts"], {"forecast": {"order": ["trend", "alerts"], "hidden": ["drivers"]}},
            "the save answers with the caller's own map")
-        r = post_s(sess, "/api/layouts", {"view": "overview", "order": ["alerts"], "hidden": []})
+        r = post_s(sess, "/api/layouts", {"view": "forecast", "order": ["alerts"], "hidden": []})
         eq(r.status_code, 200, r.text)
         eq(post("/api/layouts", {}).json()["layouts"],
-           {"overview": {"order": ["trend", "alerts"], "hidden": ["drivers"]}},
+           {"forecast": {"order": ["trend", "alerts"], "hidden": ["drivers"]}},
            "the master reads back only the master's")
         eq(post_s(sess, "/api/layouts", {}).json()["layouts"],
-           {"overview": {"order": ["alerts"], "hidden": []}},
+           {"forecast": {"order": ["alerts"], "hidden": []}},
            "and Owen only Owen's, although the master's body named him")
         on_disk = json.load(open(layouts.LAYOUTS_PATH))["layouts"]
         eq(sorted(on_disk), sorted([master, owen]), "one entry per account, keyed by the session's account")
@@ -63,13 +63,13 @@ def t_a_layout_the_page_could_not_have_made_is_refused_and_nothing_is_written():
     store starts empty here, so any write at all would leave a file behind."""
     def go():
         ensure_auth()
-        good = {"view": "overview", "order": ["trend"], "hidden": []}
+        good = {"view": "forecast", "order": ["trend"], "hidden": []}
         bad = [
             ({**good, "view": "nowhere"}, "an unknown view"),
             ({**good, "view": "chat"}, "chat, which has no cards to arrange"),
             ({"order": ["trend"], "hidden": []}, "no view at all"),
             ({**good, "order": "trend"}, "an order that is not a list"),
-            ({"view": "overview", "order": ["trend"]}, "a missing hidden list"),
+            ({"view": "forecast", "order": ["trend"]}, "a missing hidden list"),
             ({**good, "order": ["c%d" % i for i in range(65)]}, "65 ids"),
             ({**good, "hidden": ["c%d" % i for i in range(65)]}, "65 hidden ids"),
             ({**good, "order": ["two words"]}, "an id with a space"),
@@ -78,8 +78,8 @@ def t_a_layout_the_page_could_not_have_made_is_refused_and_nothing_is_written():
             ({**good, "order": ["-trend"]}, "an id that starts with a hyphen"),
             ({**good, "order": ["x" * 49]}, "an id longer than 48 characters"),
             ({**good, "order": [7]}, "an id that is not a string"),
-            ({"view": "overview", "reset": "yes"}, "reset that is not exactly true"),
-            ({"view": "overview", "reset": False}, "reset false"),
+            ({"view": "forecast", "reset": "yes"}, "reset that is not exactly true"),
+            ({"view": "forecast", "reset": False}, "reset false"),
         ]
         for body, why in bad:
             r = post("/api/layouts", body)
@@ -94,7 +94,7 @@ def t_a_layout_the_page_could_not_have_made_is_refused_and_nothing_is_written():
         eq(post("/api/layouts", big).status_code, 413, "a body past 8KB is refused before it is read")
         # The door hands a handler {} for a body that is not a JSON object, so
         # a list arrives as a read of the caller's own layouts, never a write.
-        r = post("/api/layouts", ["overview", "trend"])
+        r = post("/api/layouts", ["forecast", "trend"])
         eq(r.status_code, 200, r.text)
         eq(r.json()["layouts"], {}, "a body that is not an object reads, it does not save")
         ok(not os.path.exists(layouts.LAYOUTS_PATH), "and neither of those wrote a thing")
@@ -107,17 +107,17 @@ def t_resetting_a_screen_forgets_only_that_screen_for_that_person():
     def go():
         ensure_auth()
         _owen, sess, _pw = ready_user("Owen", "owen")
-        post("/api/layouts", {"view": "overview", "order": ["trend"], "hidden": []})
+        post("/api/layouts", {"view": "forecast", "order": ["trend"], "hidden": []})
         post("/api/layouts", {"view": "crm", "order": ["board", "stats"], "hidden": []})
-        post_s(sess, "/api/layouts", {"view": "overview", "order": ["alerts"], "hidden": ["trend"]})
-        r = post("/api/layouts", {"view": "overview", "reset": True})
+        post_s(sess, "/api/layouts", {"view": "forecast", "order": ["alerts"], "hidden": ["trend"]})
+        r = post("/api/layouts", {"view": "forecast", "reset": True})
         eq(r.status_code, 200, r.text)
         eq(r.json()["layouts"], {"crm": {"order": ["board", "stats"], "hidden": []}},
            "the caller's other screen stays")
         eq(post_s(sess, "/api/layouts", {}).json()["layouts"],
-           {"overview": {"order": ["alerts"], "hidden": ["trend"]}},
+           {"forecast": {"order": ["alerts"], "hidden": ["trend"]}},
            "and the other account's Overview is untouched")
-        r = post("/api/layouts", {"view": "overview", "reset": True})
+        r = post("/api/layouts", {"view": "forecast", "reset": True})
         eq(r.status_code, 200, "resetting a screen with nothing saved is not an error")
         eq(r.json()["layouts"], {"crm": {"order": ["board", "stats"], "hidden": []}})
         post("/api/layouts", {"view": "crm", "reset": True})
@@ -144,10 +144,10 @@ def t_a_card_named_twice_keeps_its_first_place():
     refused, keeping the place it was first given."""
     def go():
         ensure_auth()
-        r = post("/api/layouts", {"view": "seo", "order": ["trend", "alerts", "trend", "drivers", "alerts"],
+        r = post("/api/layouts", {"view": "forecast", "order": ["trend", "alerts", "trend", "drivers", "alerts"],
                                   "hidden": ["kpi-score", "kpi-score"]})
         eq(r.status_code, 200, r.text)
-        eq(r.json()["layouts"]["seo"], {"order": ["trend", "alerts", "drivers"], "hidden": ["kpi-score"]})
+        eq(r.json()["layouts"]["forecast"], {"order": ["trend", "alerts", "drivers"], "hidden": ["kpi-score"]})
     with_layouts(go)
 
 @test
@@ -158,11 +158,11 @@ def t_the_layouts_file_is_owner_only_and_keyed_by_account():
     def go():
         ensure_auth()
         master = APP_AUTH["master"]
-        eq(post("/api/layouts", {"view": "overview", "order": ["trend", "alerts"],
+        eq(post("/api/layouts", {"view": "forecast", "order": ["trend", "alerts"],
                                  "hidden": ["drivers"]}).status_code, 200)
         eq(os.stat(layouts.LAYOUTS_PATH).st_mode & 0o777, 0o600, "a new file is owner-only")
         eq(json.load(open(layouts.LAYOUTS_PATH)),
-           {"layouts": {master: {"overview": {"order": ["trend", "alerts"], "hidden": ["drivers"]}}}})
+           {"layouts": {master: {"forecast": {"order": ["trend", "alerts"], "hidden": ["drivers"]}}}})
         os.chmod(layouts.LAYOUTS_PATH, 0o644)
         eq(post("/api/layouts", {"view": "mail", "order": ["inbox"], "hidden": []}).status_code, 200)
         eq(os.stat(layouts.LAYOUTS_PATH).st_mode & 0o777, 0o600, "and a readable one is made owner-only again")
@@ -177,7 +177,7 @@ def t_a_layout_that_could_not_be_saved_is_never_answered_as_saved():
         ensure_auth()
         with open(layouts.LAYOUTS_PATH, "w") as fh:
             fh.write('{"layouts": {"broken')
-        r = post("/api/layouts", {"view": "overview", "order": ["trend"], "hidden": []})
+        r = post("/api/layouts", {"view": "forecast", "order": ["trend"], "hidden": []})
         eq(r.status_code, 500, r.text)
         ok("The layout could not be saved" in r.json()["error"], r.text)
         eq(open(layouts.LAYOUTS_PATH).read(), '{"layouts": {"broken', "the unreadable file is left as it was")
@@ -360,11 +360,6 @@ def t_audit_tab_gate_covers_cache_print_and_shipping():
         post_s(sess, "/api/auth/password", {"current": starter, "new": "owens-own-pw-1"})
         sess = login("owen", "owens-own-pw-1").json()["session"]
         post("/api/team/user", {"op": "tabs", "id": owen, "tabs": ["files"]})
-        # /api/cache filters to allowed tabs
-        r = post_s(sess, "/api/cache", {})
-        eq(r.status_code, 200)
-        ok(all(k not in r.json() for k in ("overview", "seo", "keywords", "customers_segments")),
-           "cache leaks nothing for a files-only account")
         # shipping is labels-gated now
         eq(post_s(sess, "/api/shipping/config", {}).status_code, 403, "shipping read is labels-gated")
         # print doc refuses a labels-denied app session

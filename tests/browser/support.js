@@ -15,10 +15,10 @@ const FONT_URL = 'https://fonts.gstatic.com/reactor-suite/inter.woff2';
 // fields reads, with fields it saves.
 const R = (op, ...keys) => ({ op: op || null, keys });
 const READS = {
-  '/api/alerts': [R()], '/api/auth/state': [R()], '/api/cache': [R()], '/api/profile': [R()], '/api/memory': [R()],
+  '/api/alerts': [R()], '/api/auth/state': [R()], '/api/profile': [R()], '/api/memory': [R()],
   '/api/learn': [R()], '/api/impact': [R()], '/api/skills': [R()], '/api/forecast': [R()], '/api/files/tree': [R()],
   '/api/mail/board': [R()], '/api/crm/board': [R()], '/api/team/board': [R()], '/api/work/board': [R()],
-  '/api/customer-tags': [R()], '/api/reorder-radar': [R()], '/api/recon/status': [R()], '/api/gobo-sizes/list': [R()],
+  '/api/gobo-sizes/list': [R()],
   '/api/gobo-sizes/rules': [R()], '/api/production-labels/missing': [R()], '/api/layouts': [R()],
   '/api/updates': [R(), R('version')],
   '/api/connector': ['status', 'runs', 'quarantine', 'ledger', 'health', 'autorun', 'settings'].map(op => R(op)),
@@ -27,11 +27,8 @@ const READS = {
   '/api/custom/list': [R(null, 'limit')],
   '/api/customer-history': [R(null, 'customer_id')],
   '/api/liability': [R(null, 'fresh')],
-  '/api/products': [R(null, 'months', 'fresh')],
   '/api/production-labels': [R(null, 'tag', 'fresh')],
   '/api/production-labels/coverage': [R(null, 'orders')],
-  '/api/recon/exceptions': [R(null, 'q', 'severity', 'status')],
-  '/api/recon/exception': [R(null, 'id')],
   // The windows the keyboard journeys open (windows.js), each read checked in copilot.py on 15 Oct 2026.
   '/api/margin': [R(null, 'days')],
   '/api/dispatch/manifest': [R(null, 'date')],
@@ -154,7 +151,7 @@ async function settle(page, w) {
 
 async function open(page, w) {
   await page.goto('/');
-  await page.waitForSelector('#nav-overview', { state: 'attached', timeout: 60000 });
+  await page.waitForSelector('#nav-labels', { state: 'attached', timeout: 60000 });
   await settle(page, w);
 }
 

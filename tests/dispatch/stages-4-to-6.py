@@ -516,24 +516,6 @@ def t_the_workspace_routes_are_gathered():
     ok('"/api/chat' not in src, "the chat routes went too, once add_routes handed the chat module its tools (piece 15)")
 
 @test
-def t_the_report_routes_are_gathered():
-    """The SEO and keyword routes, and the overview's and customer reports',
-    each group registered by one call in add_routes. The product page's route
-    stays: gathered by path prefix, it would take /api/products with it."""
-    import inspect
-    from gizmo.routes import analytics as routes_analytics, seo as routes_seo
-    src = inspect.getsource(copilot.add_routes)
-    for call in ("routes_seo.register(mcp, registry)", "routes_analytics.register(mcp, registry)"):
-        eq(src.count(call), 1, call)
-    for path in ('"/api/seo"', '"/api/keyword', '"/api/overview"', '"/api/cache"', '"/api/reorder-radar"',
-                 '"/api/customers"', '"/api/customer-tags"'):
-        ok(path not in src, path + " is registered by its area's routes")
-    eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_seo, routes_analytics)], [3, 5],
-       "3 SEO and keyword routes, 5 report routes")
-    ok('"/api/product"' not in src and '"/api/products"' not in src,
-       "the product page's routes went with the Products tab (piece 14), once routes could be named exactly")
-
-@test
 def t_the_scheduler_updates_and_backup_routes_are_gathered():
     """The scheduler's, the release notes', impact's and the backup's routes,
     each group registered by one call in add_routes."""
@@ -544,48 +526,47 @@ def t_the_scheduler_updates_and_backup_routes_are_gathered():
     for call in ("routes_scheduler.register(mcp, registry)", "routes_updates.register(mcp, registry)",
                  "routes_impact.register(mcp, registry)", "routes_backup.register(mcp, registry)"):
         eq(src.count(call), 1, call)
-    for path in ('"/api/schedule"', '"/api/alerts"', '"/api/updates"', '"/api/impact"', '"/api/backup"', '"/api/restore"'):
+    for path in ('"/api/alerts"', '"/api/updates"', '"/api/impact"', '"/api/backup"', '"/api/restore"'):
         ok(path not in src, path + " is registered by its area's routes")
     eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_scheduler, routes_updates, routes_impact, routes_backup)],
-       [2, 1, 1, 2], "2 schedule and alert routes, the updates route, the impact route, backup and restore")
+       [1, 1, 1, 2], "the alerts route, the updates route, the impact route, backup and restore")
 
 @test
 def t_the_finance_routes_are_gathered():
-    """Liability's, reconciliation's (with the Xero connect pair), the Xero sync
-    settings' and the forecast hooks' routes, each group registered by one
-    call in add_routes."""
+    """Liability's, the Xero sync settings' and the forecast hooks' routes,
+    each group registered by one call in add_routes (Reconciliation's went
+    on 22 Oct 2026)."""
     import inspect
     from gizmo.routes import forecasting as routes_forecasting, liability as routes_liability
-    from gizmo.routes import reconciliation as routes_reconciliation, xero_sync as routes_xero_sync
+    from gizmo.routes import xero_sync as routes_xero_sync
     src = inspect.getsource(copilot.add_routes)
-    for call in ("routes_liability.register(mcp, registry)", "routes_reconciliation.register(mcp, registry)",
+    for call in ("routes_liability.register(mcp, registry)",
                  "routes_xero_sync.register(mcp, registry)", "routes_forecasting.register(mcp, registry)"):
         eq(src.count(call), 1, call)
-    for path in ('"/api/liability', '"/api/recon/', '"/oauth/xero/', '"/api/connector"', '"/hooks/forecast/', '"/api/forecast'):
+    for path in ('"/api/liability', '"/api/connector"', '"/hooks/forecast/', '"/api/forecast'):
         ok(path not in src, path + " is registered by its area's routes")
     eq([inspect.getsource(m).count("@mcp.custom_route(")
-        for m in (routes_liability, routes_reconciliation, routes_xero_sync, routes_forecasting)], [2, 9, 1, 6],
-       "2 liability routes, 7 reconciliation routes and the Xero connect pair, the connector route, 6 forecast routes")
+        for m in (routes_liability, routes_xero_sync, routes_forecasting)], [2, 1, 6],
+       "2 liability routes, the connector route, 6 forecast routes")
 
 @test
 def t_the_page_profile_oauth_and_status_routes_are_gathered():
-    """The page's own route and its assets, the profile's, the layouts', the
-    Google and accounts-mailbox sign-in walks' and the status page's routes,
-    each group registered by one call in add_routes."""
+    """The page's own route and its assets, the profile's, the layouts' and
+    the status page's routes, each group registered by one call in
+    add_routes (the sign-in walks' went on 22 Oct 2026)."""
     import inspect
-    from gizmo.routes import layouts as routes_layouts, oauth as routes_oauth, profile as routes_profile
+    from gizmo.routes import layouts as routes_layouts, profile as routes_profile
     from gizmo.routes import rendering as routes_rendering, status as routes_status
     src = inspect.getsource(copilot.add_routes)
     for call in ("routes_rendering.register(mcp, registry)", "routes_profile.register(mcp, registry)",
-                 "routes_layouts.register(mcp, registry)", "routes_oauth.register(mcp, registry)",
-                 "routes_status.register(mcp, registry)"):
+                 "routes_layouts.register(mcp, registry)", "routes_status.register(mcp, registry)"):
         eq(src.count(call), 1, call)
-    for path in ('custom_route("/",', '"/assets/', '"/api/profile"', '"/api/layouts"', '"/oauth/google/',
-                 '"/oauth/gmail-finance/', '"/api/status"', '"/healthz"'):
+    for path in ('custom_route("/",', '"/assets/', '"/api/profile"', '"/api/layouts"',
+                 '"/api/status"', '"/healthz"'):
         ok(path not in src, path + " is registered by its area's routes")
     eq([inspect.getsource(m).count("@mcp.custom_route(")
-        for m in (routes_rendering, routes_profile, routes_layouts, routes_oauth, routes_status)], [4, 1, 1, 4, 2],
-       "the page and its 3 assets, the profile, the layouts, the 2 sign-in walks' 4 routes, status and healthz")
+        for m in (routes_rendering, routes_profile, routes_layouts, routes_status)], [4, 1, 1, 2],
+       "the page and its 3 assets, the profile, the layouts, status and healthz")
 
 @test
 def t_the_leftovers_are_home():
@@ -603,8 +584,7 @@ def t_the_leftovers_are_home():
         "gizmo.mail": "_gmail_redirect_uri",
         "gizmo.dispatch": "_eori_hits EORI_MAX_PER_MIN",
         "gizmo.orderbook": "_orders_28d _month_key _order_counts _order_revenue _month_axis",
-        "gizmo.chat": "_build_tools _TOOL_TABS _build_dispatch TOOL_RESULT_CAP _usage_summary _coerce_structured "
-                      "_page_context_to_system _PAGE_LABELS CHAT_CONTEXT_CAP",
+        "gizmo.chat": "_build_tools _TOOL_TABS _build_dispatch TOOL_RESULT_CAP _usage_summary _coerce_structured",
         "gizmo.shopify": "_ok",
         "gizmo.clock": "_london_today _london_day _london_hm",
         "gizmo.gate": "_secret_ok",
@@ -643,25 +623,24 @@ def t_the_customer_history_route_counts_the_orders():
 @test
 def t_the_ai_settings_products_and_history_have_moved():
     """The AI's effort settings live with the AI client, the chat's limits with
-    the chat, the Products tab in gizmo/products.py with its two routes, and a
-    label's order history with the order book's routes (piece 14)."""
+    the chat, the catalogue reader in gizmo/products.py, and a label's order
+    history with the order book's routes (piece 14; the Products tab and its
+    two routes went on 22 Oct 2026)."""
     import importlib, inspect
-    from gizmo.routes import orderbook as routes_orderbook, products as routes_products
+    from gizmo.routes import orderbook as routes_orderbook
     homes = {"gizmo.ai": "ANTHROPIC_EFFORT ANTHROPIC_EFFORT_DEEP THINKING_MODE _effort_for",
              "gizmo.chat": "MAX_MESSAGES MAX_CHAT_CHARS",
-             "gizmo.products": "run_products_list _all_products LOW_STOCK_THRESHOLD PRODUCT_TREND_MONTHS",
-             "gizmo.analytics": "_CURRENCY_SIGNS"}
+             "gizmo.products": "_all_products",
+             "gizmo.liability": "_CURRENCY_SIGNS"}
     for mod, names in homes.items():
         m = importlib.import_module(mod)
         for n in names.split():
             ok(n not in vars(copilot), n + " is no longer in copilot.py")
             ok(n in vars(m), n + " lives in " + mod)
     src = inspect.getsource(copilot.add_routes)
-    eq(src.count("routes_products.register(mcp, registry)"), 1, "the products routes, one call")
-    for path in ('"/api/products"', '"/api/product"', '"/api/customer-history"'):
-        ok(path not in src, path + " is registered by its area's routes")
-    eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_products, routes_orderbook)], [2, 3],
-       "the Products tab's two routes; the order book's two and customer history")
+    ok('"/api/customer-history"' not in src, "customer history is registered by its area's routes")
+    eq(inspect.getsource(routes_orderbook).count("@mcp.custom_route("), 3,
+       "the order book's two routes and customer history")
 
 @test
 def t_the_chat_routes_and_shop_settings_have_moved():
@@ -831,17 +810,15 @@ def _wrong_kinds_refused(cases, send=None):
 
 @test
 def t_a_wrong_type_is_refused_by_name_not_a_server_error():
-    """The seven routes a stray script could break with a field of the wrong
+    """The routes a stray script could break with a field of the wrong
     kind (an object where an id or a number belongs) refuse it at the door
     with a 400 naming the field, before the route reads it (stage 5)."""
-    from gizmo.routes import memory as r_memory, reconciliation as r_recon, dispatch as r_dispatch
+    from gizmo.routes import memory as r_memory, dispatch as r_dispatch
     from gizmo.routes import impact as r_impact, production as r_production, skills as r_skills
     from gizmo.routes import updates as r_updates
     for path, body, words in (
             ("/api/memory", {"op": "delete", "id": {"wrong": 1}}, "The id sent must be text or a number."),
             ("/api/memory", {"op": "set_status", "id": {"wrong": 1}}, "The id sent must be text or a number."),
-            ("/api/recon/exceptions", {"limit": {"wrong": 1}}, "The limit sent must be a whole number."),
-            ("/api/recon/exceptions", {"min_pence": {"wrong": 1}}, "The min pence sent must be a whole number."),
             ("/api/shipping/config", {"op": "set", "boxes": {"wrong": 1}}, "The boxes sent must be a list."),
             ("/api/impact", {"op": "add", "text": {"wrong": 1}}, "The text sent must be text."),
             ("/api/production-state", {"op": "made", "id": {"wrong": 1}}, "The id sent must be a whole number."),
@@ -851,7 +828,6 @@ def t_a_wrong_type_is_refused_by_name_not_a_server_error():
         eq((r.status_code, r.json().get("error")), (400, words), "%s %r" % (path, body))
     n = _wrong_kinds_refused([
         ("/api/memory", "delete", r_memory.MemoryBody),
-        ("/api/recon/exceptions", None, r_recon.ReconFilterBody),
         ("/api/shipping/config", "set", r_dispatch.ShippingBody),
         ("/api/impact", "add", r_impact.ImpactBody),
         ("/api/production-state", "made", r_production.ProductionStateBody),
@@ -924,12 +900,11 @@ def t_the_accounts_routes_refuse_a_wrong_kind():
     edits each name the fields they read. Every one, sent as an object and as a
     list, is a 400 in the model's words before the route reads it."""
     from gizmo.routes import scheduler as r_sched, team as r_team, chat as r_chat, xero_sync as r_xs
-    from gizmo.routes import orderbook as r_ob, analytics as r_an, seo as r_seo, products as r_prod
-    from gizmo.routes import profile as r_prof, reconciliation as r_rec, backup as r_bk, skills as r_sk
+    from gizmo.routes import orderbook as r_ob
+    from gizmo.routes import profile as r_prof, backup as r_bk, skills as r_sk
     from gizmo.routes import work as r_work, forecasting as r_fc
     n = _wrong_kinds_refused([
         ("/api/alerts", "dismiss", r_sched.AlertBody),
-        ("/api/schedule", None, r_sched.ScheduleBody),
         ("/api/auth/login", None, r_team.LoginBody),
         ("/api/auth/mfa", "status", r_team.MfaBody),
         ("/api/auth/mfa-verify", None, r_team.MfaVerifyBody),
@@ -942,13 +917,7 @@ def t_the_accounts_routes_refuse_a_wrong_kind():
         ("/api/connector", "status", r_xs.ConnectorBody),
         ("/api/customer-history", None, r_ob.CustomerHistoryBody),
         ("/api/order/edit", "read", r_ob.OrderEditBody),
-        ("/api/customers", None, r_an.CustomersBody),
-        ("/api/keyword-scan", None, r_seo.KeywordScanBody),
-        ("/api/product", None, r_prod.ProductBody),
-        ("/api/products", None, r_prod.ProductsBody),
         ("/api/profile", None, r_prof.ProfileBody),
-        ("/api/recon/disconnect", None, r_rec.ReconDisconnectBody),
-        ("/api/recon/exception", None, r_rec.ReconExceptionBody),
         ("/api/restore", None, r_bk.RestoreBody),
         ("/api/skills/read", None, r_sk.SkillReadBody),
         ("/api/work/report", None, r_work.WorkReportBody),
@@ -1044,7 +1013,7 @@ def t_the_routes_the_first_count_missed_refuse_a_wrong_kind():
     orders, the accounts mailbox link, card layouts and the forecast's store
     reads. Each now names its fields, and the count sees them all."""
     from gizmo.routes import crm as r_crm, files as r_files, dispatch as r_disp, liability as r_liab
-    from gizmo.routes import analytics as r_an, mail as r_mail, reconciliation as r_rec, layouts as r_lay
+    from gizmo.routes import mail as r_mail, layouts as r_lay
     from gizmo.routes import forecasting as r_fc
     n = _wrong_kinds_refused([
         ("/api/crm/board", None, r_crm.CrmBoardBody),
@@ -1053,10 +1022,8 @@ def t_the_routes_the_first_count_missed_refuse_a_wrong_kind():
         ("/api/dispatch/manifest", None, r_disp.DispatchManifestBody),
         ("/api/margin", None, r_disp.MarginBody),
         ("/api/liability", None, r_liab.LiabilityBody),
-        ("/api/overview", None, r_an.OverviewBody),
         ("/api/mail/claim", None, r_mail.MailClaimBody),
         ("/api/mail/orders", None, r_mail.MailOrdersBody),
-        ("/api/recon/connect-link", None, r_rec.ReconConnectLinkBody),
         ("/api/layouts", None, r_lay.LayoutBody)])
     ok(n > 20, "every field each model names was tried (%d refusals)" % n)
     gate._rl_hits.clear(); gate._rl_global.clear()
@@ -1135,8 +1102,8 @@ def t_write_routes_check_their_bodies():
     eq(by["/webhooks/privacy"]["body"], "", "a route with no model has none")
     first = ["/api/crm/activity", "/api/crm/contact", "/api/files/folder", "/api/gobo-sizes/rule", "/api/impact",
         "/api/learn", "/api/liability/chase", "/api/loans", "/api/mail/settings", "/api/memory", "/api/privacy",
-        "/api/production-state", "/api/recon/exceptions", "/api/shipping/config", "/api/skills", "/api/updates"]
-    eq([p for p in first if not by[p]["body"]], [], "the sixteen routes given a model first (piece 1) keep it")
+        "/api/production-state", "/api/shipping/config", "/api/skills", "/api/updates"]
+    eq([p for p in first if not by[p]["body"]], [], "the routes given a model first (piece 1) keep it")
     unchecked = sorted(r["path"] for r in rows if "POST" in r["methods"] and r["fields"] and not r["body"])
     eq([p for p in unchecked if p not in UNCHECKED_BODIES], [],
        "a new write route reads fields with no model: give it one (gizmo/bodies.py)")
@@ -1291,6 +1258,246 @@ def t_a_passing_test_prints_its_name_and_nothing_else():
     v = child(VERBOSE="1")
     ok("a passing test's line" in v.stdout + v.stderr, "VERBOSE=1 streams them as they come")
 
+# ---------------------------------------------------------------------------
+# The trim (22 Oct 2026): the report tabs and Reconciliation leave, and what
+# kept pages borrowed from their files moves to kept homes first.
+# ---------------------------------------------------------------------------
+
+@test
+def t_learn_my_store_fetches_through_the_storefront_guard():
+    """Learn my store reads the shop's own site through the guarded fetch,
+    which lived in the SEO report's file. It lives in gizmo/storefront.py now,
+    so removing the SEO tab cannot take Memory's crawler with it."""
+    seen = []
+    async def fake_get(url, allowed_hosts=None):
+        seen.append((url, allowed_hosts))
+        return 200, "<urlset></urlset>"
+    saved = storefront._http_get
+    storefront._http_get = fake_get
+    try:
+        run_async(knowledge._discover_content_urls("shop.example", {"shop.example"}, 3))
+    finally:
+        storefront._http_get = saved
+    ok(seen and seen[0] == ("https://shop.example/sitemap.xml", {"shop.example"}),
+       "the sitemap is read through storefront._http_get: %r" % (seen,))
+
+
+@test
+def t_the_connect_secret_lives_in_config():
+    """The recovery key for the sign-in walks was defined in the Google data
+    module, which goes. The Inbox's mailbox connect still needs it until the
+    Inbox goes, so it reads it from gizmo/config.py."""
+    eq(config.CONNECT_SECRET, os.environ.get("GOOGLE_CONNECT_SECRET", ""))
+    src = open(os.path.join(HERE, "gizmo", "routes", "mail.py"), encoding="utf-8").read()
+    ok("config.CONNECT_SECRET" in src and "google_data" not in src,
+       "the Inbox's connect walk reads config.CONNECT_SECRET, not google_data")
+
+
+@test
+def t_liability_keeps_its_own_currency_signs():
+    """The chase emails write amounts with a currency sign the Liability page
+    borrowed from the report module, which goes. Liability keeps its own."""
+    eq(liability._CURRENCY_SIGNS, {"GBP": "\u00a3", "USD": "$", "EUR": "\u20ac"})
+    src = open(os.path.join(HERE, "gizmo", "liability.py"), encoding="utf-8").read()
+    ok("analytics" not in src, "liability.py no longer reads the report module")
+
+
+class _GateReq:
+    """Just enough of a request for gate._tab_denied: a path and a session."""
+    def __init__(self, path, sess):
+        self.url = type("U", (), {"path": path})(); self.headers = {"x-app-session": sess}
+
+
+@test
+def t_a_saved_tab_list_naming_a_removed_report_tab_still_loads():
+    """Accounts saved before the trim may still list overview, seo, keywords
+    or products. Those keys are dropped as the list is read, never an error,
+    and the tabs that remain still open."""
+    ensure_auth()
+    uid, sess, _ = ready_user("Rae", "rae")
+    d = team._load_users()
+    d["users"][uid]["tabs"] = ["overview", "seo", "keywords", "products", "labels", "customers"]
+    team._write_users(d)
+    eq(team._user_tabs(uid), ["labels", "customers"])
+    ok(gate._tab_denied(_GateReq("/api/production-state", sess)) is None, "Labels still opens")
+    eq(login("rae", "chosen-pw-123456").status_code, 200, "and the account still signs in")
+
+
+@test
+def t_customer_history_still_answers_the_customers_permission():
+    """Labels' order-history line reads /api/customer-history. The Customers
+    tab goes but its permission stays (Customer details on the Team page), so
+    the line opens for exactly the accounts it opened for before: those with
+    customers or crm, never labels alone."""
+    ensure_auth()
+    ok("customers" in team.TAB_KEYS and "customers" in team.DEFAULT_TABS,
+       "the customers permission stays and is still given by default")
+    uid, sess, _ = ready_user("Cy", "cy")
+    for tabs, allowed in ((["labels"], False), (["labels", "customers"], True), (["crm"], True)):
+        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": tabs})
+        r = gate._tab_denied(_GateReq("/api/customer-history", sess))
+        eq(r is None, allowed, "customer history for %s" % tabs)
+
+
+def _retired_files_round_trip(planted):
+    """Plant files on the volume, build a backup, then restore a zip holding
+    them: (names in the backup, names the restore wrote back). A store the
+    restore keeps rides in the zip beside them and must come back, so the
+    restore really ran: a zip of refused names alone is turned away whole,
+    which would prove nothing about any one of them."""
+    import zipfile as zz, io as iio, base64 as b64
+    data_dir = os.path.dirname(scheduler.SCHEDULE_PATH)
+    for n, body in planted.items():
+        with open(os.path.join(data_dir, n), "w", encoding="utf-8") as fh:
+            fh.write(body)
+    try:
+        buf, _ = backup._build_backup_zip()
+        in_backup = {os.path.basename(n) for n in zz.ZipFile(buf).namelist()} & set(planted)
+    finally:
+        for n in planted:
+            os.remove(os.path.join(data_dir, n))
+    kept = os.path.basename(liability.CHASE_LOG_PATH)
+    z = iio.BytesIO()
+    with zz.ZipFile(z, "w") as w:
+        for n, body in planted.items():
+            w.writestr("volume/" + n, body)
+        w.writestr("volume/" + kept, '{"accounts": {}}')
+    r = post("/api/restore", {"zip": b64.b64encode(z.getvalue()).decode()})
+    eq(r.status_code, 200, r.text[:300])
+    ok(kept in (r.json().get("files") or []), "the kept store came back, so the restore ran: " + r.text[:300])
+    written = {n for n in planted if os.path.exists(os.path.join(data_dir, n))}
+    for n in written:
+        os.remove(os.path.join(data_dir, n))
+    return in_backup, written
+
+
+@test
+def t_backups_never_carry_the_google_data_token_or_the_report_stores():
+    """The Google data sign-in and the report caches leave with the report
+    tabs, but their files stay on the volume until somebody deletes them. A
+    backup never carries the old refresh token, and neither a backup nor a
+    restore carries the report stores, which nothing reads or scrubs any more
+    (the customer report cache can hold customer details)."""
+    def go():
+        ensure_auth()
+        planted = {
+            os.path.basename(os.environ.get("GOOGLE_OAUTH_TOKEN_PATH", "/data/google_oauth.json")): '{"refresh_token": "old"}',
+            os.path.basename(os.environ.get("ANALYSIS_CACHE_PATH", "/data/analysis_cache.json")): '{"customers_segments": {}}',
+            os.path.basename(scheduler.SCHEDULE_PATH): '{"enabled": true}',
+        }
+        in_backup, written = _retired_files_round_trip(planted)
+        eq(in_backup, set(), "none of them is in the backup")
+        eq(written, set(), "and a restore writes none of them back")
+    with_accounts(go)
+
+
+@test
+def t_payouts_in_chat_need_the_xero_sync_permission():
+    """Payouts and disputes are the books. They were gated on Reconciliation's
+    tab, which goes; they move to Xero sync's, the other opt-in finance tab,
+    so they are never handed to an account by default."""
+    for name in ("shopify_list_payouts", "shopify_payout_transactions", "shopify_list_disputes"):
+        eq(assistant._TOOL_TABS.get(name), "connector", name + " is gated on the Xero sync tab")
+    ok("connector" in team.OPT_IN_TABS and "connector" not in team.DEFAULT_TABS, "which is opt-in")
+    calls = []
+
+    async def _reg(payload):
+        calls.append(payload)
+        return "the payouts"
+
+    who = {"uid": ""}
+    dispatch = assistant._build_dispatch({"shopify_list_payouts": (_reg, dict)}, lambda: who["uid"])
+
+    def go():
+        ensure_auth()
+        uid, _sess, _ = ready_user("Pia", "pia")
+        who["uid"] = uid
+        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["chat"]})
+        out = run_async(dispatch("shopify_list_payouts", {}))
+        ok(not calls and "Refused" in out and "Xero sync" in out and "connector" not in out,
+           "without Xero sync: refused, in the Team page's words, " + out[:120])
+        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": ["chat", "connector"]})
+        eq(run_async(dispatch("shopify_list_payouts", {})), "the payouts", "with Xero sync: answered")
+    with_accounts(go)
+
+
+@test
+def t_a_saved_tab_list_naming_reconciliation_still_loads():
+    """An account handed Reconciliation before the trim keeps signing in;
+    the key is dropped as its list is read."""
+    ensure_auth()
+    uid, _sess, _ = ready_user("Rex", "rex")
+    d = team._load_users()
+    d["users"][uid]["tabs"] = ["recon", "labels"]
+    team._write_users(d)
+    eq(team._user_tabs(uid), ["labels"])
+
+
+@test
+def t_the_door_checks_rank_before_it_spends_an_ai_slot():
+    """The door checks who is asking, then their rank, then the paid window,
+    so a member refused an admin's AI run never uses up a slot the next real
+    run needs. It was pinned on Reconciliation's sweep, which went on 22 Oct
+    2026; Learn my store is an admin's AI run behind the same door."""
+    def go():
+        ensure_auth()
+        owen, sess, _pw = ready_user("Owen", "owen")
+        eq(post("/api/team/user", {"op": "tabs", "id": owen, "tabs": ["memory"]}).status_code, 200)
+        gate._rl_global.clear()
+        r = post_s(sess, "/api/learn/run", {})
+        eq(r.status_code, 403, r.text)
+        ok("admin" in r.json()["error"], r.text)
+        eq(len(gate._rl_global), 0, "a member's refused run did not spend an AI slot")
+    with_accounts(go)
+
+
+@test
+def t_the_skill_reader_promises_only_what_reactor_still_does():
+    """Final review, 22 Oct 2026: the skill reader still told the model it
+    writes the reports and reads search and analytics data, both gone with
+    the report tabs, so a skill could be read as steering work nobody does."""
+    s = skillbook.SKILL_READING_SYSTEM
+    for gone in ("write the reports", "analytics", "search and"):
+        ok(gone not in s, "the skill reader no longer says %r" % gone)
+    ok("answer questions in chat" in s and "draft email replies" in s, "and still names what is left")
+
+
+@test
+def t_a_retired_file_is_refused_by_its_default_name_and_its_set_one():
+    """Final review, 22 Oct 2026: the retired files were named only by the
+    path their setting gave, so while a setting was overridden the default
+    name was let through, and once the after-deploy steps remove the setting,
+    the overridden name would be. Both names are refused, whatever the
+    settings say on the day."""
+    for k, d in (("ANALYSIS_CACHE_PATH", "/data/analysis_cache.json"), ("GOOGLE_OAUTH_TOKEN_PATH", "/data/google_oauth.json"),
+                 ("XERO_TOKEN_PATH", "/data/xero_oauth.json"), ("GMAIL_FINANCE_TOKEN_PATH", "/data/gmail_finance_oauth.json"),
+                 ("RECON_PATH", "/data/recon.json"), ("RECON_CACHE_PATH", "/data/recon_cache.json"),
+                 ("RECON_DOCS_PATH", "/data/recon_docs.json"), ("SCHEDULE_PATH", "/data/schedule.json")):
+        ok(os.path.basename(d) in backup._RETIRED_FILES, "%s's default name %s is refused" % (k, os.path.basename(d)))
+        ok(os.path.basename(os.environ.get(k, d)) in backup._RETIRED_FILES, "and the name %s gives it" % k)
+    ok(os.environ.get("ANALYSIS_CACHE_PATH", "").endswith("/analysis.json"),
+       "the suite overrides one, so the two names differ here: " + os.environ.get("ANALYSIS_CACHE_PATH", ""))
+
+
+@test
+def t_backups_never_carry_the_xero_or_accounts_mailbox_token_or_the_reconciliation_stores():
+    """Reconciliation, Reactor's own Xero sign-in and the accounts mailbox go,
+    but their files stay on the volume until somebody deletes them: a backup
+    never carries the two refresh tokens, and neither a backup nor a restore
+    carries the reconciliation stores, which nothing reads or scrubs any more."""
+    def go():
+        ensure_auth()
+        planted = {os.path.basename(os.environ.get(k, d)): '{"refresh_token": "old"}' for k, d in (
+            ("XERO_TOKEN_PATH", "/data/xero_oauth.json"),
+            ("GMAIL_FINANCE_TOKEN_PATH", "/data/gmail_finance_oauth.json"),
+            ("RECON_PATH", "/data/recon.json"),
+            ("RECON_CACHE_PATH", "/data/recon_cache.json"),
+            ("RECON_DOCS_PATH", "/data/recon_docs.json"))}
+        in_backup, written = _retired_files_round_trip(planted)
+        eq(in_backup, set(), "none of them is in the backup")
+        eq(written, set(), "and a restore writes none of them back")
+    with_accounts(go)
+
 
 @test
 def t_a_body_the_door_refuses_spends_no_ai_slot():
@@ -1305,5 +1512,5 @@ def t_a_body_the_door_refuses_spends_no_ai_slot():
         r = client.post("/api/chat", json={"messages": "not a list"}, headers=h)
         eq(r.status_code, 400, r.text)
     eq(len(gate._rl_global), 0, "no AI slot spent on a body the door refused")
-    r = client.post("/api/customers", json={"segment": {"wrong": 1}}, headers=h)
-    eq((r.status_code, len(gate._rl_global)), (400, 0), "nor on a report's")
+    r = client.post("/api/skills/read", json={"id": {"wrong": 1}}, headers=h)
+    eq((r.status_code, len(gate._rl_global)), (400, 0), "nor on reading a skill")

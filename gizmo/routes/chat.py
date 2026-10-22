@@ -15,7 +15,6 @@ from gizmo import chat as assistant
 from gizmo import gate
 from gizmo import knowledge
 from gizmo import memory
-from gizmo import seo
 from gizmo import skills as skillbook
 from gizmo import profile as store_profile
 from gizmo import team
@@ -27,11 +26,10 @@ logger = logging.getLogger("shopify_mcp.copilot")
 
 
 class ChatBody(bodies.Body):
-    """What /api/chat and /api/chat/stream read (gizmo/bodies.py): the conversation so far (or one message), the Deep switch, the page's context and the skills picked."""
+    """What /api/chat and /api/chat/stream read (gizmo/bodies.py): the conversation so far (or one message), the Deep switch and the skills picked."""
     messages: bodies.Records = None
     message: bodies.Text = None
     deep: bodies.Flag = None
-    context: bodies.Fields = None
     skills: bodies.Items = None
 
 
@@ -64,9 +62,6 @@ def register(mcp, registry):
         model = claude._pick_model(deep)
         extra = (store_profile._profile_to_system(store_profile._load_profile()) + memory._memory_to_system() + knowledge._knowledge_to_system()
                  + skillbook._skills_to_system(assistant._chat_question(history), assistant._picked_skills(body), can_read=True))
-        if seo._is_seo(history):
-            extra += "\n\n" + seo.SEO_KNOWLEDGE
-        extra += assistant._page_context_to_system(body.get("context"))
         try:
             result = await assistant.run_chat(history, assistant.dispatch_for(_who), assistant._chat_tools, model, extra,
                                     effort=claude._effort_for(model, deep), deep=deep)
@@ -104,9 +99,6 @@ def register(mcp, registry):
         model = claude._pick_model(deep)
         extra = (store_profile._profile_to_system(store_profile._load_profile()) + memory._memory_to_system() + knowledge._knowledge_to_system()
                  + skillbook._skills_to_system(assistant._chat_question(history), assistant._picked_skills(body), can_read=True))
-        if seo._is_seo(history):
-            extra += "\n\n" + seo.SEO_KNOWLEDGE
-        extra += assistant._page_context_to_system(body.get("context"))
 
         q: asyncio.Queue = asyncio.Queue()
 

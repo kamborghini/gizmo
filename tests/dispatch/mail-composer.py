@@ -5,33 +5,6 @@
 
 
 @test
-def t_nothing_changed_is_not_reported_as_a_half_finished_crawl():
-    """A 304 from Xero means "nothing has changed since you last asked", which
-    is what an incremental sync gets on most sweeps. It was falling through to
-    the page-cap branch, so every quiet sweep logged four PARTIAL warnings and
-    appended four notes claiming the results were incomplete. The report keeps
-    only twelve notes, so a permanent falsehood was pushing out the warnings
-    that matter, like Xero not being connected at all."""
-    import asyncio as _a, xero as _x
-    saved = _x._get
-    try:
-        async def not_modified(path, params=None, if_modified_since=None):
-            return {"_not_modified": True}
-        _x._get = not_modified
-        eq(_a.run(_x._paged("Invoices", "Invoices")), [],
-           "a 304 returns what was collected, with no truncation marker")
-
-        async def always_full(path, params=None, if_modified_since=None):
-            return {"Invoices": [{"i": i} for i in range(100)]}
-        _x._get = always_full
-        out = _a.run(_x._paged("Invoices", "Invoices", max_pages=2))
-        ok(any("_truncated" in r for r in out),
-           "a crawl that genuinely hits the cap still says so")
-    finally:
-        _x._get = saved
-
-
-@test
 def t_a_dropped_tag_takes_its_subtree_and_not_the_rest_of_the_email():
     """The sanitiser is the last thing that touches an outgoing message, so a
     bug here is invisible: nobody sees the email that was sent.

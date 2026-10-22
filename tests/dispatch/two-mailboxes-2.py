@@ -60,85 +60,6 @@ def t_only_the_configured_store_can_frame_the_app():
 
 
 @test
-def t_every_oauth_token_file_is_written_private():
-    """Five files hold third-party refresh tokens that outlive any session.
-    Four were created 0600; google_data.py wrote its one at the default 0644."""
-    import google_data as _gd, tempfile, stat
-    d = tempfile.mkdtemp(dir=SCRATCH)
-    real = _gd.OAUTH_TOKEN_PATH
-    _gd.OAUTH_TOKEN_PATH = os.path.join(d, "google_oauth.json")
-    try:
-        _gd.save_refresh_token("test-refresh-token")
-        mode = stat.S_IMODE(os.stat(_gd.OAUTH_TOKEN_PATH).st_mode)
-        eq(oct(mode), oct(0o600), "the Google refresh token file is owner-only")
-        # Was "the token is in the file". That is now the thing that must not
-        # be true when a key is configured, so the honest check is that the
-        # module can read back what it wrote.
-        eq(_gd._load_refresh_token(), "test-refresh-token", "and it did write")
-    finally:
-        _gd.OAUTH_TOKEN_PATH = real
-
-
-@test
-def t_a_google_connection_says_which_permission_was_left_unticked():
-    """Google's consent screen lets a person untick Search Console or Analytics
-    and still hands back a refresh token. The connection was saved as working
-    and the unticked side failed later with Google's 403. What was granted is
-    kept with the token now: the connect page and Settings say which side is
-    missing, that side is not offered as ready, and a connection granted
-    neither is not saved at all, since it could read nothing."""
-    gd = _google_data
-    real = (gd.OAUTH_TOKEN_PATH, gd.httpx, gd.GSC_SITE_URL, gd.GA4_PROPERTY_ID)
-    gd.OAUTH_TOKEN_PATH = os.path.join(tempfile.mkdtemp(dir=SCRATCH), "google_oauth.json")
-    gd.GSC_SITE_URL, gd.GA4_PROPERTY_ID = "sc-domain:example.com", "123456789"
-    answer = {}
-    gd.httpx = _RoutedHttpx(lambda request: _httpx.Response(
-        answer.get("_status", 200), json={k: v for k, v in answer.items() if k != "_status"}))
-    try:
-        answer.update(refresh_token="rt-1", access_token="at", scope=gd.SCOPES[0])
-        eq(run(gd.exchange_code("c", "https://app.test/cb")),
-           {"ok": True, "granted": {"gsc": True, "ga4": False}})
-        eq(gd.granted(), {"gsc": True, "ga4": False}, "kept with the token")
-        ok(gd.gsc_configured() and not gd.ga4_configured(), "only the granted side is ready")
-        eq(gd.status()["granted"], {"gsc": True, "ga4": False}, "and Settings is told")
-        # A connection made before this was kept reads exactly as it did.
-        gd.save_refresh_token("rt-old")
-        eq(gd.granted(), {"gsc": None, "ga4": None})
-        ok(gd.ga4_configured() and gd.gsc_configured(), "unknown is not refused")
-        # Granted neither: nothing is saved.
-        os.remove(gd.OAUTH_TOKEN_PATH)
-        answer.update(scope="openid")
-        eq(run(gd.exchange_code("c", "https://app.test/cb"))["ok"], False)
-        ok(not gd.oauth_connected(), "a connection that could read nothing is not kept")
-        oauth._oauth_states["st-neither"] = time.time() + 60
-        page = client.get("/oauth/google/callback?state=st-neither&code=c").text
-        ok("Nothing was linked" in page and "both left unticked" in page, page[-500:])
-        # The connect page names the side left unticked.
-        answer.update(scope=gd.SCOPES[1])
-        oauth._oauth_states["st-ga4-only"] = time.time() + 60
-        page = client.get("/oauth/google/callback?state=st-ga4-only&code=c").text
-        ok("without Search Console" in page and "left unticked" in page, page[-500:])
-        # And the chat says the same, rather than that Google is not connected.
-        said = json.loads(seo._google_not_ready("gsc"))["error"]
-        ok("without permission to read Search Console" in said, said)
-        # A failure that is not about the boxes (a used code, a wrong secret)
-        # says the connection failed, not that both were unticked.
-        os.remove(gd.OAUTH_TOKEN_PATH)
-        answer.clear(); answer.update(_status=400, error="invalid_grant")
-        eq(run(gd.exchange_code("c", "https://app.test/cb")), {"ok": False, "granted": {}})
-        oauth._oauth_states["st-bad-code"] = time.time() + 60
-        page = client.get("/oauth/google/callback?state=st-bad-code&code=c").text
-        ok("Connection failed" in page and "unticked" not in page, page[-500:])
-        eq(json.loads(seo._google_not_ready("gsc"))["error"],
-           "Google isn't connected yet. Connect it in Settings.", "with no connection, it says so")
-    finally:
-        gd.OAUTH_TOKEN_PATH, gd.httpx, gd.GSC_SITE_URL, gd.GA4_PROPERTY_ID = real
-    page = pagesource.join(HERE)
-    ok("g.granted.ga4 === false" in page and "g.granted.gsc === false" in page,
-       "Settings' Google rows say which permission is missing")
-
-
-@test
 def t_the_connector_tab_is_a_guarded_proxy():
     """The Shopify->Xero connector writes to the accounting ledger, so gizmo
     only ever proxies it: its token never reaches a browser, the tab is opt-in
@@ -1008,7 +929,7 @@ def t_big_answers_are_compressed_and_streams_are_left_alone():
 def t_granting_every_tab_grants_every_tab():
     """The picker used to send null for a fully ticked panel, meaning 'no list
     of its own'. Once that resolved to the DEFAULT tabs, ticking every box and
-    saving WITHHELD Reconciliation, and the ledger recorded 'can open
+    saving WITHHELD the books, and the ledger recorded 'can open
     everything'. The obvious action did the opposite of its label and said so
     in the permanent record."""
     def go():
@@ -1017,7 +938,7 @@ def t_granting_every_tab_grants_every_tab():
         uid, pw = r.json()["id"], r.json()["starter_password"]
         # What the tab panel sends when every box is ticked.
         post("/api/team/user", {"op": "tabs", "id": uid, "tabs": list(team.TAB_KEYS)})
-        ok("recon" in (team._user_tabs(uid) or []),
+        ok("connector" in (team._user_tabs(uid) or []),
            "an explicitly complete grant includes the books")
 
         lg = client.post("/api/auth/login", json={"username": "ruthx", "password": pw},
@@ -1025,123 +946,17 @@ def t_granting_every_tab_grants_every_tab():
         sess = lg.get("session")
         ch = post_s(sess, "/api/auth/password", {"current": pw, "new": "ruth-pw-40217"})
         sess = ch.json().get("session") or sess
-        eq(post_s(sess, "/api/recon/status", {}).status_code, 200,
+        ok(gate._tab_denied(_GateReq("/api/connector", sess)) is None,
            "and the door actually opens")
 
         # And the null form, which means "no list of its own", must not be
         # written into the record as a grant of everything.
         post("/api/team/user", {"op": "tabs", "id": uid, "tabs": None})
-        ok("recon" not in (team._user_tabs(uid) or []), "null falls back to the default set")
+        ok("connector" not in (team._user_tabs(uid) or []), "null falls back to the default set")
         ev = [e for e in activity._load_events()[-12:] if "access" in json.dumps(e).lower()
               or "open" in json.dumps(e).lower()]
         said = json.dumps(ev)
         ok("can open everything" not in said,
            "and the ledger does not claim a grant that was not made: " + said[-260:])
     with_accounts(go)
-
-
-@test
-def t_pruning_never_deletes_the_evidence_of_an_open_discrepancy():
-    """The retention pass and the merge loop knew nothing about each other.
-    Prune the record an open finding was built from and the next sweep cannot
-    re-detect it; the merge sees a check that ran and did not emit it, and
-    writes 'no longer detected'. The discrepancy leaves the board looking
-    resolved while the money is still missing."""
-    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-    old = (_dt.now(_tz.utc) - _td(days=400)).strftime("%Y-%m-%d")
-    cache = {"xero": {"bank_transactions": {
-                 "T-open": {"id": "T-open", "date": old},
-                 "T-settled": {"id": "T-settled", "date": old},
-                 "T-loose": {"id": "T-loose", "date": old}}},
-             "shopify": {"orders": {}}}
-    live = _rc.make_exc("stale_unreconciled", "high", "Still unreconciled", ["T-open"])
-    done = _rc.make_exc("stale_unreconciled", "high", "Dealt with", ["T-settled"])
-    done["status"] = "explained"
-    done["updated"] = (_dt.now(_tz.utc) - _td(days=400)).isoformat()
-    store = {"exceptions": {live["id"]: live, done["id"]: done}}
-
-    _rc.prune(cache, {}, store)
-    rows = cache["xero"]["bank_transactions"]
-    ok("T-open" in rows,
-       "the record an OPEN discrepancy points at survives its own age")
-    ok("T-settled" not in rows and "T-loose" not in rows,
-       "while settled and unreferenced records go: %r" % (sorted(rows),))
-    eq(sorted(store["retention_dropped"]), ["T-loose", "T-settled"],
-       "and what went is remembered, so the next sweep can word it honestly")
-
-
-@test
-def t_a_record_we_deleted_ourselves_is_not_a_resolved_discrepancy():
-    """Two facts that must never share a sentence: 'the discrepancy went away'
-    and 'we deleted our copy of the records behind it'."""
-    fx = _FakeXero()
-    st = _recon_world(fx, [])
-    old = _rc.make_exc("stale_unreconciled", "high", "Was open", ["T-gone"])
-    st["store"]["exceptions"] = {old["id"]: old}
-    st["store"]["retention_dropped"] = ["T-gone"]
-    run(_rc.sweep())
-    e = st["store"]["exceptions"][old["id"]]
-    ok(e.get("stale"), "it did drop off the live board")
-    ok(e.get("retention_dropped"), "flagged as OUR deletion, not their resolution")
-    note = (e["history"] or [])[-1]["note"]
-    ok("retention" in note and "not a sign it was resolved" in note,
-       "and the audit trail says which of the two happened: " + note)
-
-
-@test
-def t_a_payout_older_than_the_bank_lines_is_not_a_missing_deposit():
-    """Shopify hands back payouts with no date window and nothing pruned them,
-    so they outlived the Xero bank lines they are matched against. Every one of
-    them then read as 'no matching bank transaction in Xero' at high severity,
-    for deposits that were in the books the whole time."""
-    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-    ancient = (_dt.now(_tz.utc) - _td(days=300)).strftime("%Y-%m-%d")
-    recent = (_dt.now(_tz.utc) - _td(days=3)).strftime("%Y-%m-%d")
-    cache = {"shopify": {"payouts": {
-                 "P-old": {"id": "P-old", "date": ancient, "pence": 420000,
-                           "currency": "GBP", "status": "paid", "fees_pence": None},
-                 "P-new": {"id": "P-new", "date": recent, "pence": 51000,
-                           "currency": "GBP", "status": "paid", "fees_pence": None}}},
-             "xero": {"bank_transactions": {}}}
-    found = _rc.check_payouts_vs_bank(cache)
-    kinds = [(e["kind"], e["refs"]) for e in found]
-    ok(not any("P-old" in r for _, r in kinds),
-       "the payout older than the bank data is not accused: %r" % (kinds,))
-    ok(any("P-new" in r for _, r in kinds),
-       "while one inside the window still is: %r" % (kinds,))
-
-
-@test
-def t_a_record_with_no_readable_date_is_kept_not_destroyed():
-    """An empty string sorts before every cutoff, so the obvious comparison
-    deletes precisely the records whose age is unknown. Reachable through the
-    Shopify payout and dispute buckets, which carry no API-side date filter the
-    way the four Xero reads do."""
-    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-    old = (_dt.now(_tz.utc) - _td(days=400)).strftime("%Y-%m-%d")
-    cache = {"shopify": {"payouts": {
-        "p-none": {"id": "p-none", "date": ""},
-        "p-junk": {"id": "p-junk", "date": "not a date"},
-        "p-old": {"id": "p-old", "date": old}}}}
-    store = {"exceptions": {}}
-    notes = _rc.prune(cache, {}, store)
-    eq(sorted(cache["shopify"]["payouts"]), ["p-junk", "p-none"],
-       "the datable old one goes; the undatable ones stay")
-    ok(any("no readable date" in n for n in notes),
-       "and the sweep says it kept them rather than silently doing so: %s" % notes)
-    ok("p-none" not in store["retention_dropped"], "nothing undated is recorded as dropped")
-
-
-@test
-def t_payouts_and_disputes_are_pruned_like_everything_else():
-    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-    old = (_dt.now(_tz.utc) - _td(days=400)).strftime("%Y-%m-%d")
-    recent = _dt.now(_tz.utc).strftime("%Y-%m-%d")
-    cache = {"shopify": {
-        "payouts": {"po": {"id": "po", "date": old}, "pn": {"id": "pn", "date": recent}},
-        "disputes": {"do": {"id": "do", "date": old}, "dn": {"id": "dn", "date": recent}}}}
-    _rc.prune(cache, {}, {"exceptions": {}})
-    eq(set(cache["shopify"]["payouts"]), {"pn"}, "payouts are pruned")
-    eq(set(cache["shopify"]["disputes"]), {"dn"}, "and so are disputes")
-
 

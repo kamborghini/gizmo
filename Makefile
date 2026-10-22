@@ -80,7 +80,7 @@ sweep:
 # The same files and threshold as CI's blocking step, so a scan failure is
 # seen before a push rather than after a deploy (a SHA-1 fingerprint once
 # reached main this way). Installs the pinned scanner if it is missing.
-SAST_FILES = copilot.py pagesource.py server.py google_mail.py google_data.py xero.py worldoptions.py recon.py mailmime.py eori.py tokenvault.py logdrain.py totp.py pipedrive.py perf.py gizmo
+SAST_FILES = copilot.py pagesource.py server.py google_mail.py worldoptions.py mailmime.py eori.py tokenvault.py logdrain.py totp.py pipedrive.py perf.py gizmo
 sast:
 	@$(PY) -m bandit --version >/dev/null 2>&1 || $(PY) -m pip install --quiet bandit==1.9.4
 	$(PY) -m bandit -q -lll -iii -r $(SAST_FILES)

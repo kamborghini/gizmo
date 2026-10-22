@@ -59,7 +59,6 @@
             const host = $('connections'); host.innerHTML = '';
             let s;
             try { s = await api('/api/status', {}); } catch (e) { host.append(el('div', 'setting-sub', 'Could not check connections.')); return; }
-            const g = s.google || {};
             /* Secrets at rest. Named first because it is the one row here that
                cannot be inferred from anything else working: every connection
                behaves identically whether or not its token is encrypted. */
@@ -166,24 +165,6 @@
             }
             // AI: which model answers, and the latest failure in words
             host.append(aiConnRow(s.ai || {}));
-            // GA4
-            host.append(connRow('Google Analytics 4',
-                g.ga4_ready ? 'on' : (g.connected || g.oauth_client) ? 'mid' : 'off',
-                g.ga4_ready ? ('Connected' + (g.ga4_property ? ' (property ' + g.ga4_property + ')' : '')) :
-                    (g.granted && g.granted.ga4 === false) ? 'Connected without permission to read Analytics. Connect Google again and leave Analytics ticked.' :
-                    g.connected ? 'Connected, but no Analytics property is chosen.' :
-                        g.oauth_client ? 'Connect Google via the one-time setup link.' : 'Set up the Google connection to add traffic and revenue data.'));
-            // Search Console
-            host.append(connRow('Google Search Console',
-                g.gsc_ready ? 'on' : (g.connected || g.oauth_client) ? 'mid' : 'off',
-                g.gsc_ready ? ('Connected' + (g.gsc_site ? ' (' + g.gsc_site + ')' : '')) :
-                    (g.granted && g.granted.gsc === false) ? 'Connected without permission to read Search Console. Connect Google again and leave Search Console ticked.' :
-                    g.connected ? 'Connected, but no Search Console site is chosen.' :
-                        g.oauth_client ? 'Connect Google via the one-time setup link.' : 'Set up the Google connection to add keyword and search data.'));
-            // Google Ads (CPC) rides on GA4
-            host.append(connRow('Google Ads (CPC)', g.ga4_ready ? 'mid' : 'off',
-                g.ga4_ready ? 'Link Google Ads to your GA4 property to see paid CPC and ROAS.' : 'Needs GA4 connected, then a Google Ads link in GA4.',
-                ['Connected', 'Needs a link', 'Not connected']));
             // Data volume
             host.append(connRow('Data storage', s.volume && s.volume.ok ? 'on' : 'off',
                 s.volume && s.volume.ok ? 'The data disk is healthy. Download a backup now and then (Backups, above).'
@@ -480,7 +461,6 @@
             prefToggles().forEach(t => { if (canEdit) t.removeAttribute('aria-disabled'); else t.setAttribute('aria-disabled', 'true'); });
             $('settings-save').hidden = !canEdit;
             $('settings-readonly').hidden = canEdit;
-            settingsAtOpen = profileKey(profile);
             dialogShow($('settings-modal'));
             /* The profile's boxes grow to fit their text (12 Oct 2026): on a
                phone two lines held a paragraph, scrolling inside the box. */
@@ -490,7 +470,6 @@
             });
             (canEdit ? $('pf-voice') : $('settings-close')).focus();
             loadConnections();
-            loadSchedule();
             loadUsage();
             loadPrivacy();
         }
@@ -612,26 +591,9 @@
             }
         }
         /* One way to save in the whole window: every switch saves the moment
-           it is changed, and each block of text has its own Save under it.
-           The four preference switches used to wait for a footer 'Save
-           profile' while the Auto-refresh switch beside them saved at once,
-           so the footer's Cancel undid one and not the other. A change that
-           alters the Overview recomputes it once, when the window closes. */
-        /* The profile as it was when the window opened, to tell a real change
-           from a switch flicked and put back. */
-        let settingsAtOpen = '';
-        const profileKey = (p) => JSON.stringify([p.brand_voice || '', p.business_goals || '', p.strategy || '', p.notes || '',
-            Object.keys(DEFAULT_PREFS).map(k => !!(p.prefs || {})[k])]);
+           it is changed, and each block of text has its own Save under it. */
         function closeSettings() {
             dialogHide($('settings-modal'));
-            const changed = settingsAtOpen && profileKey(profile) !== settingsAtOpen;
-            settingsAtOpen = '';
-            /* Only an Overview that has been run is run again: one still on
-               its Run button stays there, because a paid run starts only when
-               someone presses Run. */
-            if (!changed || !overviewCache) return;
-            overviewCache = null; // profile changed, recompute the Overview
-            if ($('view-overview').classList.contains('active')) loadOverview(true);
         }
         async function savePrefToggle(t) {
             if (t.getAttribute('aria-disabled') === 'true') return;
@@ -703,49 +665,6 @@
                 }
             }).catch(() => { box.innerHTML = '<div class="setting-sub">Usage unavailable.</div>'; });
         }
-        /* This switch says whether an unattended run happens overnight, so it
-           must never show a setting the server did not accept. It used to flip
-           its own class first and then discard every error, which left the
-           merchant looking at "on" while nothing had been enabled and nothing
-           would ever say so. The class now follows the WRITE: it moves when
-           the server agrees, and moves back when it does not. */
-        function paintSchedule(on, hours) {
-            setSwitch($('sched-toggle'), !!on);
-            if (hours) $('sched-freq').value = String(hours);
-            $('sched-freq-row').style.display = on ? '' : 'none';
-        }
-        function loadSchedule() {
-            api('/api/schedule', {}).then(d => {
-                const s = (d && d.schedule) || {};
-                paintSchedule(!!s.enabled, s.every_hours);
-            }).catch(e => {
-                /* A failed READ must not be painted as "off" either: that is
-                   the same lie in the other direction, so say so rather than
-                   leaving the switch showing whatever it happened to hold. */
-                toastError('The schedule could not be read. ' + (e.message || ''));
-            });
-        }
-        $('sched-toggle').onclick = async function () {
-            const was = this.classList.contains('on');
-            const on = !was;
-            const hours = parseInt($('sched-freq').value, 10) || 168;
-            paintSchedule(on, hours);
-            try {
-                await api('/api/schedule', { config: { enabled: on, every_hours: hours } });
-            } catch (e) {
-                paintSchedule(was, hours);
-                toastError('The schedule was not changed. ' + (e.message || ''));
-            }
-        };
-        $('sched-freq').onchange = async function () {
-            const hours = parseInt(this.value, 10) || 168;
-            try {
-                await api('/api/schedule', { config: { every_hours: hours } });
-            } catch (e) {
-                loadSchedule();
-                toastError('The frequency was not changed. ' + (e.message || ''));
-            }
-        };
         /* The X is the only way out, like every other modal here (user rule:
            a misclick must not wipe a filled form, and Settings IS a form).
            This was the one modal that still closed on backdrop and Escape. */

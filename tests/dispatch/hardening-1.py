@@ -862,11 +862,12 @@ def t_the_app_can_say_whether_its_secrets_are_encrypted():
     that is exactly the failure worth catching."""
     import tokenvault as _tv
     d = tempfile.mkdtemp(dir=SCRATCH)
-    tok = os.path.join(d, "xero_oauth.json")
+    tok = os.path.join(d, "gmail_oauth.json")
     old_key = os.environ.get("TOKEN_ENCRYPTION_KEY")
-    old_path = copilot.xero_api.TOKEN_PATH
+    import google_mail as _gmv
+    old_path = _gmv.TOKEN_PATH
     try:
-        copilot.xero_api.TOKEN_PATH = tok
+        _gmv.TOKEN_PATH = tok
         with open(tok, "w", encoding="utf-8") as fh:
             json.dump({"refresh_token": "plain-abc"}, fh)
 
@@ -874,14 +875,14 @@ def t_the_app_can_say_whether_its_secrets_are_encrypted():
         _tv._key.cache_clear()
         st = appstatus.token_vault_state()
         eq(st["enabled"], False)
-        ok("Xero" in st["plaintext"], "it names what is exposed, not just a count")
+        ok("Gmail, sales" in st["plaintext"], "it names what is exposed, not just a count")
 
         # A key set is NOT the same as the files being encrypted.
         os.environ["TOKEN_ENCRYPTION_KEY"] = "a-long-random-key-for-the-test"
         _tv._key.cache_clear()
         st = appstatus.token_vault_state()
         eq(st["enabled"], True, "the key is set")
-        ok("Xero" in st["plaintext"],
+        ok("Gmail, sales" in st["plaintext"],
            "but the file is still plaintext, and saying otherwise would be the lie")
 
         eq(_tv.reseal_file(tok, ("refresh_token",)), 1)
@@ -889,10 +890,10 @@ def t_the_app_can_say_whether_its_secrets_are_encrypted():
         # Scoped to the store this test owns: the suite's scratch volume holds
         # other stores from other tests, and asserting the whole list is empty
         # would be asserting something this test never arranged.
-        ok("Xero" not in st["plaintext"], "the sealed one drops off the exposed list")
+        ok("Gmail, sales" not in st["plaintext"], "the sealed one drops off the exposed list")
         ok(st["sealed"] >= 1, "and counts as sealed")
     finally:
-        copilot.xero_api.TOKEN_PATH = old_path
+        _gmv.TOKEN_PATH = old_path
         if old_key is None:
             os.environ.pop("TOKEN_ENCRYPTION_KEY", None)
         else:

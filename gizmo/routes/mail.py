@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 import anthropic
 import httpx
 import perf
-import google_data
 import mailmime
 import google_mail
 from starlette.responses import PlainTextResponse
@@ -27,6 +26,7 @@ from gizmo import files as fileserver
 from gizmo import activity
 from gizmo import crm as salesdesk
 from gizmo import dispatch as desk
+from gizmo import config
 from gizmo import gate
 from gizmo import mail
 from gizmo import orderbook
@@ -1990,8 +1990,8 @@ def register(mcp, registry):
         ticket = request.query_params.get("t", "")
         exp = mail._mail_connect_tickets.pop(ticket, None) if ticket else None
         key = request.query_params.get("key", "")
-        by_secret = (google_data.CONNECT_SECRET and key and
-                     secrets.compare_digest(key, google_data.CONNECT_SECRET))
+        by_secret = (config.CONNECT_SECRET and key and
+                     secrets.compare_digest(key, config.CONNECT_SECRET))
         if not ((exp is not None and exp > time.time()) or by_secret):
             return PlainTextResponse("Forbidden", status_code=403, headers=gate._API_HEADERS)
         now = time.time()
@@ -2024,16 +2024,6 @@ def register(mcp, registry):
         if not ok:
             return oauth._oauth_page("Connection failed", "Couldn't complete the connection. Please try again.")
         addr = google_mail.address() or "the mailbox"
-        fin_addr = google_mail.address(google_mail.FINANCE)
-        if fin_addr and addr.strip().lower() == fin_addr.strip().lower():
-            # The mirror of the guard on the accounts walk. Whichever order the
-            # two are connected in, one address cannot be both mailboxes: that
-            # would put finance mail on the shared board and leave
-            # reconciliation reading the inbox the team triages.
-            google_mail.disconnect()
-            return oauth._oauth_page("That is the accounts mailbox",
-                               f"{addr} is already connected to Reconciliation. Sign in as "
-                               "the shared sales mailbox for the Inbox tab instead.")
         return oauth._oauth_page("✅ Mailbox connected", f"{addr} is now linked. The Inbox tab will "
                            "fill on its next refresh. You can close this tab.")
 

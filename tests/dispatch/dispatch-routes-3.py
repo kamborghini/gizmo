@@ -640,19 +640,6 @@ def t_every_image_is_pinned_by_digest_and_runs_the_tested_python():
 
 
 @test
-def t_the_google_service_account_transport_is_installed():
-    """requests was dropped on 2026-09-07 as unused, but google-auth reaches
-    Google through it, imported only when the service-account sign-in runs:
-    a fresh deploy could not sign in that way, and the local environment hid
-    it. CI installs from the lock alone, so this import is the check."""
-    from google.auth.transport.requests import Request
-    ok(Request, "google-auth's requests transport imports")
-    pins = open(os.path.join(HERE, "requirements.in"), encoding="utf-8").read()
-    ok(re.search(r"^google-auth\[requests\]==", pins, re.M), "and requirements.in asks for it by name")
-    lock = open(os.path.join(HERE, "requirements.txt"), encoding="utf-8").read()
-    ok(re.search(r"^requests==", lock, re.M), "so the lock carries requests")
-
-@test
 def t_app_errors_are_recorded_and_surfaced():
     # A 500 in the dispatch flow used to be invisible unless somebody was watching
     # the server log, which at a dispatch desk means never.

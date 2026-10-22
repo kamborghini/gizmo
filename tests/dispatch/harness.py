@@ -195,14 +195,12 @@ from gizmo import memory
 from gizmo import knowledge
 from gizmo import chat as assistant
 from gizmo import prompts
-from gizmo import seo
-from gizmo import analytics
+from gizmo import storefront
 from gizmo import scheduler
 from gizmo import updates
 from gizmo import impact
 from gizmo import backup
 from gizmo import liability
-from gizmo import reconciliation
 from gizmo import xero_sync as xerosync
 from gizmo import forecasting
 from gizmo import rendering
@@ -213,7 +211,6 @@ from gizmo import status as appstatus
 from gizmo import clock
 from gizmo import products as catalog
 from gizmo import config
-import xero as xero_api
 REAL_SOAP_CALL = worldoptions._soap_call
 from starlette.testclient import TestClient
 
@@ -408,7 +405,7 @@ shopify._product_meta_reader = _product_meta_refused
 # that wants Gmail to answer stubs _call or _token as before, and a test that
 # swaps httpx.AsyncClient for its own transport still wins.
 import httpx as _httpx
-import google_mail as _google_mail, google_data as _google_data
+import google_mail as _google_mail
 def _google_offline(request):
     if request.url.host == "oauth2.googleapis.com" and request.url.path == "/token":
         return _httpx.Response(400, json={"error": "invalid_request",
@@ -423,7 +420,7 @@ class _RoutedHttpx:
     def AsyncClient(self, *a, **k):
         k.setdefault("transport", _httpx.MockTransport(self._handler))
         return _httpx.AsyncClient(*a, **k)
-_google_mail.httpx = _google_data.httpx = _RoutedHttpx(_google_offline)
+_google_mail.httpx = _RoutedHttpx(_google_offline)
 APP_AUTH = {"session": "", "master": ""}
 MASTER_PW = "test-password-123"
 def ensure_auth():

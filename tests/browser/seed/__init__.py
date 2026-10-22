@@ -1,8 +1,8 @@
 """Fill every screen of the browser suite's world with invented data.
 
 Three recipes, each proven on 14 Oct 2026 against the dispatch setup, run in
-this order: dashboards (the fake Shopify store, the saved reports,
-reconciliation, the forecast, the Xero connector), workspace (accounts, the
+this order: dashboards (the fake Shopify store, the forecast, the Xero
+connector), workspace (accounts, the
 work clock, the activity ledger, memory, skills, requests, chat), operations
 (the Production Manager's orders joined to the same store, custom shipments,
 the CRM, loan units, the Inbox, Files).

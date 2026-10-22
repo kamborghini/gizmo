@@ -2,10 +2,9 @@
 """
 Gmail connector for the shared-inbox board.
 
-A SEPARATE Google connection from google_data (GSC/GA4): the analytics account
-is the merchant's own, the mailbox is the shared address (sales@...), so each
-keeps its own refresh token. Same OAuth client, different scope, different
-token file.
+One Google account: the shared address (sales@...), with its own refresh
+token. The accounts mailbox Reconciliation read through here, and the Search
+Console and Analytics connection beside it, went on 22 Oct 2026.
 
 Scope is gmail.modify: read threads, create labels, apply/remove labels, save
 drafts and send (verified against the users.labels.create, threads.modify and
@@ -16,7 +15,7 @@ grant an admin hands over, and a durable note of the intention written to the
 board before the message is handed to Google.
 
 Env:
-  GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET   shared with google_data
+  GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET   the OAuth client
   GMAIL_TOKEN_PATH     refresh-token file (default /data/gmail_oauth.json)
   GMAIL_API_BASE       test override for the API host (like R2_ENDPOINT)
   GMAIL_TOKEN_URL      test override for the token endpoint
@@ -43,11 +42,6 @@ logger = logging.getLogger("shopify_mcp.gmail")
 OAUTH_CLIENT_ID     = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
 OAUTH_CLIENT_SECRET = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
 TOKEN_PATH          = os.environ.get("GMAIL_TOKEN_PATH", "/data/gmail_oauth.json")
-# The accounts mailbox is a DIFFERENT Google account from the sales inbox, so
-# it gets its own refresh token and its own access cache. Same OAuth client,
-# same scope; nothing else is shared, because the whole point of the split is
-# that reconciliation reads the finance mail and the Inbox tab does not.
-FINANCE_TOKEN_PATH  = os.environ.get("GMAIL_FINANCE_TOKEN_PATH", "/data/gmail_finance_oauth.json")
 API_BASE            = os.environ.get("GMAIL_API_BASE", "https://gmail.googleapis.com").rstrip("/")
 TOKEN_ENDPOINT      = os.environ.get("GMAIL_TOKEN_URL", "https://oauth2.googleapis.com/token")
 AUTH_ENDPOINT       = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -75,27 +69,10 @@ class Account:
     def token_path(self) -> str:
         return self._path_fn()
 
-    def usable(self) -> bool:
-        """False when this account's token file would collide with another's.
-
-        Two accounts sharing one token file is not a small misconfiguration:
-        it silently points reconciliation at the sales inbox while the screen
-        says it is reading the accounts mailbox, which is the exact failure
-        this whole split exists to prevent. Refuse rather than guess."""
-        if self is SALES:
-            return True
-        if os.path.abspath(self.token_path) == os.path.abspath(SALES.token_path):
-            logger.error("gmail: the %s mailbox is configured with the same token file as "
-                         "the sales inbox (%s). Set GMAIL_FINANCE_TOKEN_PATH to its own "
-                         "path; refusing to use it until then.", self.label, self.token_path)
-            return False
-        return True
-
 
 # SALES keeps the original module-level access dict, so anything that reached
 # in and cleared `_access` directly still clears the right cache.
 SALES = Account(lambda: TOKEN_PATH, "sales", _access)
-FINANCE = Account(lambda: FINANCE_TOKEN_PATH, "finance")
 
 
 class GmailError(Exception):
@@ -120,7 +97,7 @@ def _load_token_file(acct: Account = SALES) -> dict:
 
 
 def connected(acct: Account = SALES) -> bool:
-    return bool(acct.usable() and _load_token_file(acct).get("refresh_token"))
+    return bool(_load_token_file(acct).get("refresh_token"))
 
 
 def address(acct: Account = SALES) -> str:
@@ -129,11 +106,6 @@ def address(acct: Account = SALES) -> str:
 
 
 def save_connection(refresh_token: str, addr: str, acct: Account = SALES) -> None:
-    if not acct.usable():
-        # Writing here would land ON TOP of the sales inbox's token and take
-        # that connection down with it. Refuse loudly.
-        raise GmailError("The accounts mailbox shares a token file with the sales inbox. "
-                         "Give it its own token file in the app's hosting settings before connecting.")
     os.makedirs(os.path.dirname(acct.token_path) or ".", exist_ok=True)
     tmp = acct.token_path + ".tmp"
     # 0600, like the Xero token beside it: a refresh token in a world-readable
@@ -151,11 +123,6 @@ def save_connection(refresh_token: str, addr: str, acct: Account = SALES) -> Non
 
 
 def disconnect(acct: Account = SALES) -> None:
-    if not acct.usable():
-        # With colliding paths this would delete the SALES token and take the
-        # Inbox tab down with it. Clearing the cache is safe; the file is not.
-        acct.access["token"], acct.access["exp"] = "", 0.0
-        return
     try:
         os.remove(acct.token_path)
     except OSError:
@@ -250,9 +217,6 @@ async def exchange_code(code: str, redirect_uri: str, acct: Account = SALES) -> 
 
 
 async def _token(acct: Account = SALES) -> str:
-    if not acct.usable():
-        raise GmailError("The accounts mailbox shares a token file with the sales inbox. "
-                         "Give it its own token file in the app's hosting settings.")
     rt = _load_token_file(acct).get("refresh_token", "")
     if not rt:
         raise GmailError("Gmail is not connected."

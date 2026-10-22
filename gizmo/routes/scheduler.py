@@ -1,13 +1,11 @@
-"""The scheduler's routes: the schedule and the change alerts. Gathered from
+"""The scheduler's routes: the alerts. Gathered from
 add_routes (stage 4 of the 14 October audit) where the first stood; their
 paths are literal, so no request changes hands.
 """
 import logging
 from starlette.requests import Request
 
-from gizmo import activity
 from gizmo import gate
-from gizmo import team
 from gizmo import scheduler
 from gizmo import bodies
 
@@ -22,34 +20,8 @@ class AlertBody(bodies.Body):
 
 
 
-class ScheduleBody(bodies.Body):
-    """What /api/schedule reads (gizmo/bodies.py): the schedule's settings."""
-    config: bodies.Fields = None
-
-
 def register(mcp, registry):
-    """Add the schedule and alert routes to the app."""
-
-    @mcp.custom_route("/api/schedule", methods=["POST"])
-    async def schedule_route(request: Request):
-        # Get or set the automatic-refresh config (off by default).
-        err, body, _who = await gate._guard(request, model=ScheduleBody)
-        if err:
-            return err
-        try:
-            if isinstance(body.get("config"), dict):
-                if team._team_level(_who) < team.ROLE_LEVELS["admin"]:
-                    return gate._json({"error": "Only an admin can change the schedule."}, 403)
-                cfg = scheduler._save_schedule(body["config"])
-                activity._track(_who, "settings", "changed the audit schedule")
-                if cfg.get("enabled"):
-                    scheduler._ensure_scheduler(registry)
-            else:
-                cfg = scheduler._load_schedule()
-        except Exception:
-            logger.exception("schedule op failed")
-            return gate._json({"error": "The schedule could not be saved. Try again, or tell Cameron if it keeps happening."}, 500)
-        return gate._json({"schedule": cfg})
+    """Add the alert routes to the app."""
 
     @mcp.custom_route("/api/alerts", methods=["POST"])
     async def alerts_route(request: Request):

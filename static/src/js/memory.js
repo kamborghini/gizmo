@@ -250,7 +250,6 @@
                 const d = await api('/api/memory', payload);
                 if (d && Array.isArray(d.memories)) memories = d.memories;
                 paintNotes();
-                if ($('view-overview').classList.contains('active') && overviewCache) renderOverview(overviewCache);
                 return d || {};
             } catch (e) {
                 if (quiet) throw e;

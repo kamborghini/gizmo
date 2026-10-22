@@ -23,19 +23,40 @@
             if (data.error) throw new Error(data.error);
             return data;
         }
-        const TAB_KEYS = ['overview', 'seo', 'keywords', 'products', 'customers', 'liability',
-                          'crm', 'loans', 'mail', 'files', 'labels', 'sizes', 'memory', 'skills', 'chat', 'recon',
+        /* 'customers' is no longer a page: it is the Customer details
+           permission (Labels' order history, Chat's order reads), kept when
+           the Customers report went on 22 Oct 2026. */
+        const TAB_KEYS = ['customers', 'liability',
+                          'crm', 'loans', 'mail', 'files', 'labels', 'sizes', 'memory', 'skills', 'chat',
                           'forecast', 'connector'];
-        /* Reconciliation is not part of the default grant: it holds the books,
-           the bank line and the accounts mailbox, so it is handed over on
-           purpose rather than inherited by having an account. Mirrors
-           OPT_IN_TABS on the server, which is the side that actually decides. */
-        const OPT_IN_TABS = ['recon', 'connector', 'forecast'];
+        /* The books are not part of the default grant: Xero sync writes to
+           the ledger and the forecast holds the cash flow plan, so they are
+           handed over on purpose rather than inherited by having an account.
+           Mirrors OPT_IN_TABS on the server, which is the side that actually
+           decides. */
+        const OPT_IN_TABS = ['connector', 'forecast'];
         const DEFAULT_TABS = TAB_KEYS.filter(k => OPT_IN_TABS.indexOf(k) < 0);
         function tabAllowed(v) {
             if (!teamMe || !Array.isArray(teamMe.tabs)) return true;
             if (TAB_KEYS.indexOf(v) < 0) return true;   // guide and team are governed elsewhere
             return teamMe.tabs.indexOf(v) >= 0;
+        }
+        /* The page an account opens on: the Production Manager when it may
+           open it, else the first page it can (customers is a permission, not
+           a page, so it never qualifies), else the Guide, which everyone has. */
+        function homeView() {
+            if (tabAllowed('labels')) return 'labels';
+            return TAB_KEYS.filter(k => APP_VIEWS.indexOf(k) >= 0).find(tabAllowed) || 'guide';
+        }
+        /* Set at boot when no deep link chose a page. The home page waits for
+           the account: opened before it, the Production Manager read its
+           orders signed out and showed the failure once the sign-in card went,
+           and an account without that page was refused one read every start. */
+        let bootHomePending = false;
+        function openHome() {
+            if (!bootHomePending) return;
+            bootHomePending = false;
+            setView(homeView());
         }
         function applyRoleChrome() {
             const lvl = teamMe ? ({ master: 3, admin: 2, member: 1 }[teamMe.role] || 1) : 1;
@@ -59,10 +80,7 @@
             syncNavGroups();
             const av = document.querySelector('.view.active');
             const cur = av ? av.id.replace('view-', '') : '';
-            if (cur && !tabAllowed(cur)) {
-                const first = TAB_KEYS.find(tabAllowed);
-                setView(first || 'guide');
-            }
+            if (cur && !tabAllowed(cur)) setView(homeView());
         }
         function authOverlay() {
             let ov = $('auth-overlay');
@@ -161,6 +179,7 @@
                 claimLocalCache(p.me && p.me.id);
                 if (p.me && p.me.must_change) { authShow('change'); return; }
                 ov.style.display = 'none'; ov.dataset.mode = ''; appBehind(false); renderSidebar();
+                openHome();
                 applyRoleChrome();
                 updatesBadge();
                 loadAlerts();       // the boot-time read ran signed out, and read nothing
@@ -207,6 +226,7 @@
                         setAppSession(r.session);
                         if (teamMe) teamMe.must_change = false;
                         ov.style.display = 'none'; ov.dataset.mode = ''; appBehind(false); renderSidebar();
+                        openHome();
                         applyRoleChrome();
                         /* The layouts were refused while the password was a
                            starter; read them now, or Customize stays off for
@@ -274,6 +294,7 @@
                 claimLocalCache(st.me && st.me.id);
                 if (st.me.must_change) { authShow('change'); return; }
                 const ov = $('auth-overlay'); if (ov) { ov.style.display = 'none'; ov.dataset.mode = ''; appBehind(false); renderSidebar(); }
+                openHome();
                 applyRoleChrome();
                 updatesBadge();
                 loadAlerts();
@@ -362,15 +383,16 @@
            its own group names; the colour still saves as it is picked. */
         function teamTabsPanel(u, manageable) {
         const panel = el('div', 'tm-panel');
-        const NAMES = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords',
-            products: 'Products', customers: 'Customers', liability: 'Liability',
+        const NAMES = { customers: 'Customer details', liability: 'Liability',
             crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', labels: 'Production Manager',
             memory: 'Memory', skills: 'Skills', chat: 'Chat',
-            recon: 'Reconciliation', forecast: 'Forecast', connector: 'Xero sync',
+            forecast: 'Forecast', connector: 'Xero sync',
             sizes: 'Size list' };
-        const GROUPS = [['Dashboards', ['overview', 'seo', 'keywords', 'products', 'customers']],
-                        ['Finance', ['liability', 'recon', 'forecast', 'connector']],
-                        ['Operations', ['labels', 'sizes', 'crm', 'loans', 'mail', 'files']],
+        /* Customer details is a permission, not a page: who may read customers'
+           names, contacts and order histories (Labels' order history, Chat's
+           order and customer reads, the CRM's and the Inbox's Shopify look-ups). */
+        const GROUPS = [['Finance', ['liability', 'forecast', 'connector']],
+                        ['Operations', ['labels', 'sizes', 'crm', 'loans', 'mail', 'files', 'customers']],
                         ['Workspace', ['memory', 'skills', 'chat']]];
         const chosen = new Set(Array.isArray(u.tabs) ? u.tabs : DEFAULT_TABS);
         const boxes = [];
@@ -490,8 +512,8 @@
             try {
                 /* Always the explicit list. This used to collapse a fully
                    ticked panel to null, meaning "no list of its own", which the
-                   server now reads as the DEFAULT tabs. Since Reconciliation is
-                   not in the default set, ticking every box and saving withheld
+                   server now reads as the DEFAULT tabs. Since the finance pages
+                   are not in the default set, ticking every box and saving withheld
                    the one tab the admin had just ticked, and the activity
                    ledger recorded the opposite. */
                 await api('/api/team/user', { op: 'tabs', id: u.id, tabs: picked });

@@ -13,6 +13,27 @@
   },
   {
    "date": "2026-10-22",
+   "title": "A smaller Reactor: the reports and Reconciliation are gone",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "Overview, SEO, Keywords, Products, Customers and Reconciliation have been removed, and Reactor no longer connects to Google Analytics, Search Console, the accounts mailbox or its own Xero sign-in, so there are fewer keys to look after. Xero sync is unchanged: it has its own connection."
+    },
+    {
+     "kind": "changed",
+     "tab": "labels",
+     "text": "Reactor now opens on the Production Manager, and alerts (Shopify down, size list gaps, Xero sync runs that need a look, privacy requests) show at the top of every page instead of on Overview."
+    },
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "Who may see customer details is now its own tick on the Team page, Customer details, and everyone keeps exactly the access they had. Chat answers questions about payouts and disputes only for accounts that can open Xero sync, and it no longer checks the website's SEO."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-22",
    "title": "Voice control can find search and the deals",
    "items": [
     {
@@ -568,27 +589,27 @@
     },
     {
      "kind": "changed",
-     "tab": "overview",
+     "tab": null,
      "text": "Overview sets its summary beside What changed and Sales by sector beside Traffic by channel, and the counts with no trend are one group of figures. On a phone the trend figures pair up two across."
     },
     {
      "kind": "changed",
-     "tab": "seo",
+     "tab": null,
      "text": "SEO shows its score as the first of its checks, all on one line."
     },
     {
      "kind": "changed",
-     "tab": "keywords",
+     "tab": null,
      "text": "Keywords shows your first 15 keywords, most clicks first, beside paid search, with Show all for the rest. On a phone Scan stays beside its address box."
     },
     {
      "kind": "changed",
-     "tab": "products",
+     "tab": null,
      "text": "Products sets its totals beside Top products by revenue and lists the catalogue as one table, with Stock and Status in columns of their own. A search that finds nothing offers Clear search."
     },
     {
      "kind": "changed",
-     "tab": "customers",
+     "tab": null,
      "text": "Customers sets its figures beside the new customers chart, the trade radar's two lists side by side, and Sector comparison beside the segments."
     },
     {
@@ -598,7 +619,7 @@
     },
     {
      "kind": "changed",
-     "tab": "recon",
+     "tab": null,
      "text": "Reconciliation's severity counters show the money at stake beside the sources, the discrepancies are a table with a short name for each kind, and an opened one reads in two columns."
     },
     {
@@ -844,12 +865,12 @@
    "items": [
     {
      "kind": "fixed",
-     "tab": "recon",
+     "tab": null,
      "text": "Reconciliation no longer marks an open payout, chargeback or Xero sale as no longer detected just because it has grown older than the months a sweep looks back over. Each sweep keeps checking anything still open, however old, so it stays open until a sweep sees it put right or you close it. A payout or chargeback that old will rarely clear by itself, because its bank line is older than the sweep reads, so close it once you have checked it."
     },
     {
      "kind": "fixed",
-     "tab": "recon",
+     "tab": null,
      "text": "A bill or remittance from the accounts mailbox that an open discrepancy rests on is now kept until the discrepancy is closed. Before, it was cleared out once it was old enough, and the next sweep then marked the discrepancy no longer detected."
     }
    ]
@@ -876,12 +897,12 @@
    "items": [
     {
      "kind": "fixed",
-     "tab": "recon",
+     "tab": null,
      "text": "When Shopify will not let Reactor read your payouts, a sweep now leaves the payout checks out, as its note always said. Before, it checked the copies it had read on earlier days, so a payout discrepancy could be marked no longer detected by a sweep that never saw a payout. It now stays open until a sweep can read payouts again."
     },
     {
      "kind": "fixed",
-     "tab": "recon",
+     "tab": null,
      "text": "Chargebacks work the same way: when Shopify's disputes cannot be read, the chargeback check sits that sweep out and the sweep says so, where before it ran on old copies without a word. A sweep that cannot read a payout's fees now says so too, as a deposit short of its payout by the fees may show as missing until they are read."
     }
    ]
@@ -935,22 +956,22 @@
    "items": [
     {
      "kind": "fixed",
-     "tab": "recon",
+     "tab": null,
      "text": "An opened discrepancy showed its figures 100 times too big: an order of £3,960 read £396,000, and its VAT £66,000. Every figure in it now reads in pounds."
     },
     {
      "kind": "fixed",
-     "tab": "recon",
+     "tab": null,
      "text": "When Xero stops accepting Reactor's connection, Reconciliation says so in red and offers Reconnect Xero as its main button. It used to stay green, and told you to reconnect from a tab with no way to."
     },
     {
      "kind": "fixed",
-     "tab": "recon",
+     "tab": null,
      "text": "When filters or a search hide everything, the list says nothing matches and offers to clear them, rather than saying nothing needs attention."
     },
     {
      "kind": "fixed",
-     "tab": "recon",
+     "tab": null,
      "text": "Search filters as you type, and clearing it clears the list. A sweep running in the background now shows when it has finished, instead of saying Sweeping for good."
     },
     {
@@ -1347,7 +1368,7 @@
     },
     {
      "kind": "fixed",
-     "tab": "overview",
+     "tab": null,
      "text": "On a tablet or a narrower window, a page's heading no longer squeezes its introduction into a thin column beside Updated, Refresh all and Customise, and those no longer hang out of the heading: they move under the introduction when there is no room beside it."
     },
     {
@@ -1357,7 +1378,7 @@
     },
     {
      "kind": "fixed",
-     "tab": "products",
+     "tab": null,
      "text": "The Products header keeps its buttons on one line whenever there is room, with its count straight under its title. On some tablet and laptop sizes the buttons wrapped onto two lines with room to spare and pushed the count down, the count sat lower than it should on every screen, as it did on Xero sync's Connection card, and on a phone the buttons had moved above the title."
     },
     {
@@ -1367,7 +1388,7 @@
     },
     {
      "kind": "improved",
-     "tab": "overview",
+     "tab": null,
      "text": "An iPad held upright, and any window up to 900 pixels wide, now gets the whole screen, with the sidebar opening from the menu button as it does on a phone, and closing by itself if the iPad is turned. With the sidebar fixed open, every page had less room on an iPad than in a small window."
     },
     {
@@ -1434,7 +1455,7 @@
     },
     {
      "kind": "fixed",
-     "tab": "overview",
+     "tab": null,
      "text": "A report that runs out of room while Reactor is thinking, or that Reactor declines, now says so and keeps the last good report, instead of saving a one line placeholder such as \"Keyword analysis ready.\" over it."
     },
     {
@@ -1600,7 +1621,7 @@
    "items": [
     {
      "kind": "added",
-     "tab": "overview",
+     "tab": null,
      "text": "Customise, in the page header of the Overview and thirteen other pages: drag the cards into the order you want, hide the ones you do not use, and the arrangement is kept on your own account, on any computer."
     },
     {

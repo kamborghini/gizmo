@@ -83,41 +83,6 @@ def t_a_size_that_is_not_a_number_neither_crashes_nor_uploads():
 
 
 @test
-def t_the_products_tab_says_so_when_shopify_does_not_answer():
-    """B38. One unchecked page: a throttled answer showed as a store with no
-    products, and a store past 250 lost the rest, from the search as well."""
-    async def failed(registry, name, args):
-        if name == "shopify_list_products":
-            return {"_failed": True}
-        return {} if name != "shopify_list_orders" else {"orders": []}
-    saved = shopify._tool_json
-    shopify._tool_json = failed
-    try:
-        res = run_async(catalog.run_products_list({}, 1))
-    finally:
-        shopify._tool_json = saved
-    ok("did not answer" in res.get("error", ""), "an error, not an empty catalogue: " + json.dumps(res)[:160])
-    seen = []
-    async def paged(registry, name, args):
-        if name == "shopify_list_products":
-            seen.append(args.get("since_id"))
-            start = int(args.get("since_id") or 0)
-            n = 250 if start < 500 else 3
-            return {"products": [{"id": start + i + 1, "title": f"P{start + i + 1}", "variants": []} for i in range(n)]}
-        if name == "shopify_list_orders":
-            return {"orders": []}
-        return {}
-    shopify._tool_json = paged
-    try:
-        res = run_async(catalog.run_products_list({}, 1))
-    finally:
-        shopify._tool_json = saved
-    eq(len(res["products"]), 503, "every product, not the first 250")
-    eq(seen, [0, 250, 500], "paged by since_id")
-    eq(res["truncated"], False)
-
-
-@test
 def t_the_mail_loop_says_when_the_inbox_has_stopped():
     """B39. The sync files its own errors under sync_error, so the loop's
     except branch never ran and a dead Gmail grant stopped the inbox, the
@@ -153,91 +118,6 @@ def t_a_files_attachment_is_named_whole():
     eq(mail._mail_part_name("mail/u1/0123456789abcdef-proof-v2.pdf"), "proof-v2.pdf",
        "an upload's own prefix still comes off")
     eq(mail._mail_part_name("mail/u1/not-hex-prefix.pdf"), "not-hex-prefix.pdf")
-
-
-@test
-def t_the_same_pdf_twice_in_one_batch_is_read_once():
-    """B44. The duplicate check read the documents on disk, which the sweep
-    writes at its end, so two copies of one invoice in the same batch were
-    both read and both raised."""
-    async def same_bytes(message_id, attachment_id):
-        return b"not really a pdf, identical in both messages"
-    _rc.configure(gmail_bytes=same_bytes)
-    try:
-        first = run_async(_rc.extract_doc({"source_key": "m1:a1", "message_id": "m1", "attachment_id": "a1",
-                                           "size": 10}, {}))
-        ok(first and first.get("sha1"), "the first copy is read")
-        second = run_async(_rc.extract_doc({"source_key": "m2:a2", "message_id": "m2", "attachment_id": "a2",
-                                            "size": 10}, {"m1:a1": first}))
-        ok(second and second.get("ignored") and second.get("duplicate_of") == "m1:a1",
-           "the second, in the same batch, is recognised as the first: " + json.dumps(second)[:160])
-    finally:
-        _rc.configure(gmail_bytes=None)
-
-
-@test
-def t_a_capped_order_read_says_the_newest_were_not_checked():
-    """B45. The crawl stopped at 1500 orders, oldest first, with no note, so
-    past that the newest sales were never checked and the sweep read clean."""
-    # An invoice for an order the capped read never reaches: it must not be
-    # flagged as a Xero sale with no Shopify order.
-    # (An amount no order has: one that matches any order is not an orphan.)
-    fx = _FakeXero(invoices=[_raw_xinv("INV-900001", "987.65")])
-    stores = _recon_world(fx, [])
-    async def endless(reg, name, args):
-        if name == "shopify_list_orders":
-            start = int(args.get("since_id") or 0)
-            return {"orders": [_raw_order(start + i + 1, f"#{start + i + 1}", "10.00") for i in range(250)]}
-        if name == "shopify_list_payouts":
-            return {"available": False, "reason": "not on Shopify Payments"}
-        return {"_failed": True}
-    saved = _rc.ORDER_FETCH_CAP
-    _rc.ORDER_FETCH_CAP = 500
-    _rc.configure(tool_json=endless)
-    try:
-        r = run_async(_rc.sweep())
-        ok(any("stopped at its limit of 500 orders" in n for n in r["notes"]), r["notes"])
-        ok(not any(e["kind"] == "xero_sale_without_shopify" for e in stores["store"]["exceptions"].values()),
-           "and the Xero-sales check sat it out rather than flag invoices for orders it never read")
-        stores2 = _recon_world(fx, [_raw_order(1, "#1", "10.00")])
-        r2 = run_async(_rc.sweep())
-        ok(not any("stopped at its limit" in n for n in r2["notes"]), "a read that finished says nothing")
-        # A page that fails part way leaves the same hole as the cap.
-        async def breaks(reg, name, args):
-            if name == "shopify_list_orders":
-                start = int(args.get("since_id") or 0)
-                if start >= 250:
-                    return {"_failed": True}
-                return {"orders": [_raw_order(start + i + 1, f"#{start + i + 1}", "10.00") for i in range(250)]}
-            if name == "shopify_list_payouts":
-                return {"available": False, "reason": "not on Shopify Payments"}
-            return {"_failed": True}
-        stores3 = _recon_world(fx, [])
-        _rc.configure(tool_json=breaks)
-        run_async(_rc.sweep())
-        ok(not any(e["kind"] == "xero_sale_without_shopify" for e in stores3["store"]["exceptions"].values()),
-           "a failed page skips the Xero-sales check too")
-        # Exactly the cap, and nothing after it: the read was whole.
-        async def exact(reg, name, args):
-            if name == "shopify_list_orders":
-                start = int(args.get("since_id") or 0)
-                if start >= 500:
-                    return {"orders": []}
-                return {"orders": [_raw_order(start + i + 1, f"#{start + i + 1}", "10.00") for i in range(250)]}
-            if name == "shopify_list_payouts":
-                return {"available": False, "reason": "not on Shopify Payments"}
-            return {"_failed": True}
-        stores4 = _recon_world(fx, [])
-        _rc.configure(tool_json=exact)
-        r4 = run_async(_rc.sweep())
-        ok(not any("stopped at its limit" in n for n in r4["notes"]), "a window of exactly the cap is whole")
-        ok(any(e["kind"] == "xero_sale_without_shopify" for e in stores4["store"]["exceptions"].values()),
-           "and the Xero-sales check runs on it")
-    finally:
-        _rc.ORDER_FETCH_CAP = saved
-        _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
-                      mail_thread=None, load_store=None, write_store=None,
-                      load_cache=None, write_cache=None, load_docs=None, write_docs=None)
 
 
 @test
@@ -290,9 +170,9 @@ def t_the_mail_loop_itself_raises_the_alarm_and_never_floods():
 
 @test
 def t_every_product_reader_reads_the_whole_catalogue_or_says_it_could_not():
-    """Review of B38. The Products tab was one of four readers that took a
-    single page of 250: the SEO audit (whose failed read reported no thin
-    descriptions), the Overview's low-stock count and the loan-unit picker."""
+    """Review of B38. Four readers took a single page of 250; the loan-unit
+    picker is the one left (the Products tab, the SEO audit and the Overview
+    went on 22 Oct 2026)."""
     def catalogue(n, fail_after=None):
         calls = []
         async def tools(registry, name, args):
@@ -314,25 +194,6 @@ def t_every_product_reader_reads_the_whole_catalogue_or_says_it_could_not():
         eq((len(prods), okd, cut), (260, True, False))
         shopify._tool_json, _c = catalogue(600, fail_after=1)
         eq(run_async(catalog._all_products({}, "id"))[1], False, "a failed page is a failed read")
-        sig = run_async(seo._seo_product_signals({}))
-        ok(sig.get("unavailable"), "the SEO audit knows its read failed")
-        _score, kpis = seo._seo_scorecard(sig, 200, 200, [], "shop.test")
-        thin = next(k for k in kpis if k["label"] == "Thin descriptions")
-        eq(thin["value"], "n/a", "and says so rather than reporting none")
-        ok("did not answer" in thin["detail"]["empty"], thin["detail"])
-        eq(_score, None, "no headline score: a number would read as passing the checks that never ran, "
-                         "and the change alert would compare it with the last whole one")
-        head = next(k for k in kpis if k["label"] == "SEO score")
-        eq(head["value"], "n/a")
-        # A check that did not run says so in its words and keeps the figure
-        # column for figures: a sentence sat among the -10s and -5s.
-        notes = [i["note"] for i in (head.get("detail") or {}).get("items", [])]
-        ok(notes and all(n == "not scored" or re.fullmatch(r"-\d+", n) for n in notes), notes)
-        labels = [i["label"] for i in head["detail"]["items"]]
-        ok(any(l.startswith("page checks not run: the storefront could not be crawled") for l in labels), labels)
-        ok(any(l.startswith("product checks not run: Shopify did not answer") for l in labels), labels)
-        eq(analytics._metric_snapshot({"score": _score, "metrics": kpis})["metrics"].get("SEO score"),
-           None, "so nothing is saved for the alert to compare")
         loans._loan_products.update({"at": 0.0, "rows": []})
         raised = False
         try:

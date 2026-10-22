@@ -25,12 +25,12 @@ browser ──► server.build_app()
               ├─► _load_x() / _write_json_store()   a JSON store on /data
               ├─► registry["shopify_*"]            reads, through the tool registry
               ├─► an injected writer                update_order_tags, create_order_fulfillment ...
-              └─► an integration module            worldoptions, xero, google_mail, pipedrive, eori
+              └─► an integration module            worldoptions, google_mail, pipedrive, eori
 ```
 
 Two background loops start from the first `/healthz`: the scheduler (every
-15 minutes: watchdog, weekly snapshot, CRM linking, Xero keepalive,
-reconciliation, connector watch, the paid audits when due) and the mail loop
+15 minutes: watchdog, weekly snapshot, CRM linking, connector watch) and the
+mail loop
 (every minute: Gmail sync). Each isolates its own exceptions and emails at
 most once a day when it keeps failing.
 
@@ -38,8 +38,8 @@ most once a day when it keeps failing.
 
 ```
 server ──► copilot ──► gizmo/routes/<area> ──► gizmo/<area> ──► the floor
-                              integrations (worldoptions, xero, google_mail, google_data,
-                                            pipedrive, eori, recon, mailmime)
+                              integrations (worldoptions, google_mail, pipedrive, eori,
+                                            mailmime)
                               libraries    (tokenvault, totp, logdrain)
 ```
 
@@ -77,18 +77,19 @@ drive (`gizmo/webdav.py`), customer-data erasure (`gizmo/privacy.py`), the
 loan register (`gizmo/loans.py`), work sessions (`gizmo/work.py`), skills
 (`gizmo/skills.py`, read as `skillbook`), memory (`gizmo/memory.py`), store
 knowledge (`gizmo/knowledge.py`) and the chat loop (`gizmo/chat.py`, read as
-`assistant`), SEO and keywords (`gizmo/seo.py`), the overview and customer
-reports (`gizmo/analytics.py`), the scheduler and its alerts
+`assistant`), the guarded read of the shop's own website
+(`gizmo/storefront.py`), the scheduler and its alerts
 (`gizmo/scheduler.py`), release notes and requests (`gizmo/updates.py`),
 impact tracking (`gizmo/impact.py`), backup and restore (`gizmo/backup.py`),
-Liability and the chase desk (`gizmo/liability.py`), reconciliation with the
-Xero connect walk (`gizmo/reconciliation.py`), the Xero sync settings
+Liability and the chase desk (`gizmo/liability.py`), the Xero sync settings
 (`gizmo/xero_sync.py`, read as `xerosync`), the forecast's hooks
 (`gizmo/forecasting.py`), the page and its assets (`gizmo/rendering.py`), the
 store profile (`gizmo/profile.py`, read as `store_profile`), layouts
 (`gizmo/layouts.py`), the sign-in walks (`gizmo/oauth.py`), the status page
-(`gizmo/status.py`, read as `appstatus`) and the Products tab
-(`gizmo/products.py`, read as `catalog`). They read each other through the
+(`gizmo/status.py`, read as `appstatus`) and the catalogue reader the
+loan-unit picker uses (`gizmo/products.py`, read as `catalog`). (The report
+tabs, Reconciliation, Reactor's own Xero link and the Google data connection
+went on 22 Oct 2026.) They read each other through the
 module's name, never a copied name, and import another area last, so nothing
 is read across as a module loads and any module can be imported first
 (`t_any_module_imports_first`).
@@ -96,7 +97,7 @@ is read across as a module loads and any module can be imported first
 `copilot.py` (about 1,250 lines) keeps, on purpose: `add_routes`, which hands
 the capabilities `server.py` passes in to the modules that use them (the
 Shopify writers to `gizmo/shopify.py`, the chat's tools to `gizmo/chat.py`),
-sets up reconciliation and registers every area's routes; the frozen print
+and registers every area's routes; the frozen print
 routes with their font, logo and CORS helpers, which keep their bytes; and the
 stock bridge (the stock merge project's, hands off). Nothing reads
 `copilot.py` but the stock bridge's readers: the scheduler, production's
@@ -120,7 +121,7 @@ travels the same way, which is why the AI is read-only by construction.
 | decides what should happen to an order, a person, a thread, a file | a **domain function** at module level, in its section | reads `request`, returns a `JSONResponse`, or calls `_json` |
 | reads or writes a store | the store's **`_load_x` / `_write_x` pair**, over `_load_json_store` and `_write_json_store` | opens a file anywhere else |
 | talks to Shopify | the **tool registry** for reads; an **injected writer** for writes | reaches `server.py` directly |
-| talks to Google, Xero, the courier, Pipedrive, HMRC | that system's **integration module** | knows the app's stores or routes exist |
+| talks to Gmail, the courier, Pipedrive, HMRC | that system's **integration module** | knows the app's stores or routes exist |
 | runs on a timer | a **tick** called from `_scheduler_loop` or `_mail_loop` | starts its own thread or loop |
 | runs after the request that asked for it | `background.spawn(coro)` | calls `asyncio.create_task` bare |
 | records that a person did something | `_track(uid, area, action, detail)` | logs it to stdout instead |

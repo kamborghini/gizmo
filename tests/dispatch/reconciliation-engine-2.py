@@ -355,7 +355,7 @@ def t_a_strangers_email_or_pdf_cannot_hold_the_event_loop():
     Reconciliation's amount pattern did the same on a PDF's '1,111,111...',
     and the erased-address scrub on a long To or Cc. Each is linear now, and
     capped."""
-    import google_mail as _gm, pipedrive as _pd, recon as _rc
+    import google_mail as _gm, pipedrive as _pd
     def secs(fn, *a):
         t0 = time.perf_counter(); fn(*a); return time.perf_counter() - t0
     # Each limit separates linear from quadratic with room for a busy machine
@@ -367,16 +367,8 @@ def t_a_strangers_email_or_pdf_cannot_hold_the_event_loop():
     ok(secs(_gm._strip_html, "<p>x</p>" + "<" * 2_000_000) < LIMIT, "a 2 MB run of '<' is stripped at once")
     ok(secs(_gm._strip_html, "<p>" + "<script" * 200_000) < LIMIT, "and a run of unclosed script openings")
     ok(secs(_pd._strip_note, "<p>x</p>" + "<" * 400_000) < LIMIT, "a Pipedrive note the same")
-    ok(secs(_rc._AMOUNT_RE.findall, "1" + ",111" * 100_000) < LIMIT, "a PDF's endless thousands groups")
     eq(_gm._strip_html("<p>Hello <b>there</b></p><script>bad()</script>"), "Hello there", "ordinary mail reads as before")
     eq(_gm._strip_html("<p>left <script>evil()"), "left", "an unclosed script still goes")
-    eq(_rc._AMOUNT_RE.findall("Total 1,234.56 and \u00a399.00 then 12,345,678.90"),
-       ["1,234.56", "99.00", "12,345,678.90"], "amounts are found as before")
-    # Found exactly as the unbounded pattern found them, comma-joined text included.
-    old_rx = re.compile(r"(?<![\d.])(\d{1,3}(?:,\d{3})*\.\d{2})(?!\d)")
-    for text in ("INV-0142,1,234.56", "Paid 1,234.56,2,000.00", "a1,234,56.78", "x,1,234.56",
-                 "999,999,999,999,999.99", "12,34.56", "1.5,234.56"):
-        eq(_rc._AMOUNT_RE.findall(text), old_rx.findall(text), text)
     # An inline picture ahead of the words no longer fills the cap.
     pic = '<img src="data:image/png;base64,' + "QUJD" * 90_000 + '">'
     eq(_gm._strip_html("<p>" + pic + "Please send the invoice.</p>"), "Please send the invoice.",
@@ -392,9 +384,6 @@ def t_a_strangers_email_or_pdf_cannot_hold_the_event_loop():
        "and 2.7 MB of 'data:a/b;' is linear too (unbounded, 288 KB of it took 37 seconds)")
     import inspect as _ins
     ok("asyncio.to_thread(_strip_html" in _ins.getsource(_gm.read_thread), "and it is stripped off the loop")
-    ok("DOC_TEXT_CAP" in open(os.path.join(HERE, "recon.py"), encoding="utf-8").read()
-       and "await asyncio.to_thread(parse_doc_text," in open(os.path.join(HERE, "recon.py"), encoding="utf-8").read(),
-       "a document's text is capped and read off the loop")
     gone = {"jo@x.com"}
     head = mail._mail_erased_rx(gone, header=True)
     # Timed at two sizes, the best of three each: linear grows about 4x with 4x

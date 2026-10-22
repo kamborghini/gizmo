@@ -1,7 +1,7 @@
 """Encryption at rest for the third-party refresh tokens.
 
-Five files on the data volume hold long-lived credentials - two Gmail mailboxes,
-Google's data API, and Xero. They are 0600, which stops another user on the box
+Two files on the data volume hold long-lived credentials - the Gmail mailbox
+and the courier's. They are 0600, which stops another user on the box
 reading them, and does nothing at all about a volume snapshot, a backup that
 escapes, or anyone who gets a shell as the app.
 

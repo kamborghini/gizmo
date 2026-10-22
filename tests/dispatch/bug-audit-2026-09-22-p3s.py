@@ -810,31 +810,6 @@ def t_an_address_changed_in_the_shopify_admin_stops_mark_made():
 
 
 @test
-def t_a_failed_customer_read_is_not_analysed_as_no_customers():
-    """A27. It showed zeros, paid the AI to explain them, and saved them as the
-    baseline for the next run's changes."""
-    async def tools(registry, name, args):
-        if name == "shopify_list_customers":
-            return {"_failed": True}
-        if name == "shopify_get_shop":
-            return dict(SHOP)
-        return {"orders": []} if name == "shopify_list_orders" else {}
-    called = []
-    async def xc(client, **kw):
-        called.append(1); raise AssertionError("no AI call")
-    saved = (shopify._tool_json, claude._xcreate)
-    shopify._tool_json, claude._xcreate = tools, xc
-    try:
-        r = post("/api/customers", {})
-        eq(r.status_code, 502, r.text[:200])
-        eq(called, [], "no AI credits spent")
-        eq((analytics._load_analysis_cache().get("customers_segments") or {}).get("__all__", {}).get("snapshot", {}).get("metrics", {}).get("Customers"),
-           None, "and no zero baseline saved")
-    finally:
-        shopify._tool_json, claude._xcreate = saved
-
-
-@test
 def t_a_handover_that_failed_once_moves_the_gmail_label_whole():
     """A28. The retry added the new owner's label and never removed the old
     one, whose id the failure had evicted."""
@@ -874,34 +849,6 @@ def t_an_ai_draft_waits_its_turn_in_the_ai_window():
     src = copilot_source()
     seg = src.split("async def mail_draft_route(")[1].split("resp = await claude._xcreate(claude._anthropic(), model=claude.MODEL_DEEP")[0]
     ok("gate._window_ok(gate._rl_global, gate.RATE_MAX_GLOBAL" in seg, "the compose checks the AI window before the call")
-
-
-@test
-def t_the_keyword_scan_reads_no_more_than_it_keeps():
-    """A40. The whole body was read into memory before 600 KB were kept."""
-    import httpx as _hx
-    read = {"n": 0}
-    chunk = b"x" * (1024 * 1024)
-    class Body(_hx.AsyncByteStream):
-        async def __aiter__(self):
-            for _ in range(80):
-                read["n"] += len(chunk)
-                yield chunk
-        async def aclose(self):
-            pass
-    Real = copilot.httpx.AsyncClient
-    class Client(Real):
-        def __init__(self, *a, **k):
-            k["transport"] = _hx.MockTransport(lambda rq: _hx.Response(200, headers={"content-type": "text/html"}, stream=Body()))
-            super().__init__(*a, **k)
-    saved = (copilot.httpx.AsyncClient, seo._host_is_public)
-    copilot.httpx.AsyncClient, seo._host_is_public = Client, (lambda h: True)
-    try:
-        st, _u, text = run_async(seo._fetch_external("https://competitor.example/catalogue"))
-        eq(len(text), seo.EXTERNAL_FETCH_MAX)
-        ok(read["n"] <= 2 * 1024 * 1024, "stopped reading near the cap, not after 80 MB: %d" % read["n"])
-    finally:
-        copilot.httpx.AsyncClient, seo._host_is_public = saved
 
 
 @test
@@ -999,39 +946,39 @@ def t_a_long_thread_lists_its_newest_attachments():
 
 @test
 def t_a_capped_page_read_closes_what_it_left():
-    """The keyword scan stops reading a page at its cap by leaving the loop over
-    the response's bytes; the running loop closes what is left. The suite's
-    run_async closed its own loop without doing so (asyncio.run does), so that
-    close was dropped and every suite run warned of a coroutine never awaited:
-    the last line of noise the quiet suite left. run_async now closes the
-    loop's async generators first, as asyncio.run does."""
-    import gc, warnings, httpx as _hx
-    chunk = b"x" * (1024 * 1024)
+    """A read that stops at its cap leaves the loop over a stream's chunks; the
+    running loop closes what is left. The suite's run_async closed its own loop
+    without doing so (asyncio.run does), so that close was dropped and every
+    suite run warned of a coroutine never awaited: the last line of noise the
+    quiet suite left. run_async now closes the loop's async generators first,
+    as asyncio.run does. The keyword scan that first showed it went with the
+    report tabs (22 Oct 2026), so a stream of the same shape stands in."""
+    import gc, warnings
+    closed = []
 
-    class Body(_hx.AsyncByteStream):
-        async def __aiter__(self):
+    async def chunks():
+        try:
             for _ in range(8):
-                yield chunk
+                yield b"x" * 1024
+        finally:
+            await asyncio.sleep(0)      # a close that needs the loop, as a response's does
+            closed.append(True)
 
-        async def aclose(self):
-            pass
-    Real = copilot.httpx.AsyncClient
+    async def read_capped(cap):
+        got = b""
+        async for c in chunks():
+            got += c
+            if len(got) >= cap:
+                break                   # the cap: what is left is the loop's to close
+        return got
 
-    class Client(Real):
-        def __init__(self, *a, **k):
-            k["transport"] = _hx.MockTransport(lambda rq: _hx.Response(200, headers={"content-type": "text/html"}, stream=Body()))
-            super().__init__(*a, **k)
-    saved = (copilot.httpx.AsyncClient, seo._host_is_public)
-    copilot.httpx.AsyncClient, seo._host_is_public = Client, (lambda h: True)
-    try:
-        with warnings.catch_warnings(record=True) as seen:
-            warnings.simplefilter("always")
-            _st, _u, text = run_async(seo._fetch_external("https://competitor.example/catalogue"))
-            gc.collect()
-            run_async(asyncio.sleep(0))
-            gc.collect()
-        eq(len(text), seo.EXTERNAL_FETCH_MAX)
-        eq([str(w.message) for w in seen if "never awaited" in str(w.message)], [],
-           "nothing is left for the loop to finalise")
-    finally:
-        copilot.httpx.AsyncClient, seo._host_is_public = saved
+    with warnings.catch_warnings(record=True) as seen:
+        warnings.simplefilter("always")
+        text = run_async(read_capped(2048))
+        eq(closed, [True], "the stream's close ran before run_async gave its loop up")
+        gc.collect()
+        run_async(asyncio.sleep(0))
+        gc.collect()
+    eq(len(text), 2048)
+    eq([str(w.message) for w in seen if "never awaited" in str(w.message)], [],
+       "nothing is left for the loop to finalise")

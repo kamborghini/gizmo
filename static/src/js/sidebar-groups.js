@@ -48,7 +48,7 @@
             const b = document.querySelector('.side-body');
             if (b) b.classList.toggle('more-below', b.scrollTop + b.clientHeight < b.scrollHeight - 4);
         }
-        const BETA_TABS = ['recon', 'forecast', 'crm', 'connector'];
+        const BETA_TABS = ['forecast', 'crm', 'connector'];
         function setView(v) {
             document.querySelectorAll('.nav-item').forEach(n => {
                 const on = n.dataset.view === v; n.classList.toggle('active', on);
@@ -58,15 +58,15 @@
             // Leaving a view while customizing it counts as Done.
             if (wgEdit && wgEdit.view !== v) wgCommit(wgEdit.view, true);
             APP_VIEWS.forEach(name => $('view-' + name).classList.toggle('active', v === name));
-            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers', liability: 'Liability', recon: 'Reconciliation', forecast: 'Forecast', sizes: 'Size list', connector: 'Xero sync', crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
+            const titles = { liability: 'Liability', forecast: 'Forecast', sizes: 'Size list', connector: 'Xero sync', crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
             setViewTitle(titles[v] || 'Chat');
             setViewCrumb(v);
             document.body.dataset.view = v;
             const act = $('topbar-action'); act.innerHTML = '';
             if (v === 'guide') renderGuide();
-            // Only offer the PDF when there is actually a report to print: the print
-            // stylesheet hides the Run gate, so printing an un-run tab yields a blank page.
-            $('print-btn').style.display = (['overview', 'seo', 'keywords', 'products', 'customers', 'chat'].indexOf(v) >= 0 && printableCache(v)) ? '' : 'none';
+            // Only offer the PDF when there is something to print: a conversation
+            // with at least one turn (the report pages that also printed are gone).
+            $('print-btn').style.display = (v === 'chat' && printableCache(v)) ? '' : 'none';
             /* The app's header carries only what is global, as the reference's
                does: each report's Refresh sits in its own page header now,
                beside the stamp it renews (heroAct). Chat's New chat stays. */
@@ -93,13 +93,6 @@
                with an empty 26px button sitting in the corner. */
             act.style.display = act.innerHTML ? '' : 'none';
             closeSidebar();
-            // Tabs render cached results if present, otherwise an idle "Run" gate.
-            // Nothing fetches or spends tokens until the user starts the task.
-            if (v === 'overview') showOverviewView();
-            if (v === 'seo') showSeoView();
-            if (v === 'customers') showCustomersView();
-            if (v === 'keywords') showKeywordsView();
-            if (v === 'products') showProductsView();
             if (v === 'liability') showLiabilityView();
             if (v === 'crm') showCRMView();
             if (v === 'loans') showLoansView();
@@ -109,7 +102,6 @@
             if (v === 'labels') showLabelsView();
             if (v === 'memory') loadMemory();
             if (v === 'skills') loadSkills();
-            if (v === 'recon') showReconView();
             if (v === 'forecast') showForecastView();
             if (v === 'sizes') showSizesView();
             if (v === 'connector') showConnectorView();

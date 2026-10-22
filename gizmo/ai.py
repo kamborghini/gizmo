@@ -414,9 +414,7 @@ _ai_fell_back: "contextvars.ContextVar[Optional[dict]]" = contextvars.ContextVar
 
 # What each kind of AI call is, in the words Settings shows.
 _AI_KIND_WORDS = {"chat": "answering in Chat", "skill_read": "reading a skill", "learn": "learning the store",
-                  "overview": "the overview", "seo": "the SEO audit", "keywords": "the keyword analysis",
-                  "keyword_scan": "the keyword scan", "customers": "the customer analysis",
-                  "product": "a product plan", "recon": "checking the accounts", "address": "reading an address",
+                  "address": "reading an address",
                   "draft": "drafting an email reply"}
 
 

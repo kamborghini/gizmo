@@ -21,6 +21,14 @@
            on a 2000px screen that stretched a KPI strip and a pair of charts
            past anything the reference draws. --wrap is the one page-width
            token; print and a handful of narrow panels also read it. */
+        /* The alerts banner's host, above every page since the Overview it sat
+           in went (22 Oct 2026): the page's own width and gutters, so the
+           banner lines up with the content under it, and nothing at all when
+           there is no alert. */
+        .alerts-host { flex: none; width: 100%; padding-top: var(--sp-3);
+            padding-inline: max(var(--wrap-pad), calc((100% - var(--wrap)) / 2 + var(--wrap-pad))); }
+        .alerts-host:empty { display: none; }
+        .alerts-host > * { margin-bottom: 0; }
         .ov-wrap { max-width: var(--wrap); margin: 0 auto; width: 100%;
             /* The page gutter (--wrap-pad: 40, 16 on a phone) on each side and 12
                under the top bar. The bottom keeps 48 so a long scroll does not
@@ -175,6 +183,7 @@
         @media (max-width: 640px) {
             /* 32px gutters spend 64px of a 390px screen on nothing. */
             .ov-wrap { padding: var(--sp-5) var(--sp-4) var(--sp-7); --page-rhythm: var(--panel-gap); }
+            .alerts-host { padding: var(--sp-5) var(--sp-4) 0; }
             .ov-hero { flex-wrap: wrap; gap: var(--sp-4); }
             .ov-hero h2 { font-size: var(--text-2xl); }
             /* The actions take a row of their own under the title, sharing it. */
