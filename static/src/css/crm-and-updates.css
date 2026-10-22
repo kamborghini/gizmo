@@ -260,7 +260,9 @@
         .crm-av { width: var(--box-sm); height: var(--box-sm); border-radius: var(--radius-circle); background: var(--surface-sunken);
             color: var(--text-secondary); font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-medium); display: grid;
             place-items: center; flex: none; }
-        .crm-ai { margin-left: auto; display: inline-flex; }
+        /* Relative so the state's words (.sr-only inside) stay in the card, not
+           out past the board's own scroll, where they widened the page. */
+        .crm-ai { margin-left: auto; display: inline-flex; position: relative; }
         .crm-ai svg { width: var(--icon-md); height: var(--icon-md); }
         .crm-ai.overdue { color: var(--error); }
         .crm-ai.today { color: var(--success); }

@@ -27,7 +27,8 @@
             body[data-view="chat"] :is(#view-crumb, #crumb-chev) { display: none; }
             .topbar :is(.icon-btn, .topbar-search) { color: var(--nav-text); background: transparent; }
             .topbar-search { width: var(--control-h); padding: 0; justify-content: center; }
-            .topbar-search :is(.ts-label, kbd) { display: none; }
+            .topbar-search kbd { display: none; }
+            .topbar-search .ts-label { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
             @media (hover: hover) { .topbar :is(.icon-btn, .topbar-search):hover { background: var(--chrome-fill); color: var(--text-on-chrome); } }
             .topbar :is(.icon-btn, .topbar-search):active { background: var(--chrome-press); }
         }
