@@ -64,7 +64,8 @@
         .topbar-search kbd { display: inline-grid; place-items: center; height: var(--tag-h); min-width: var(--tag-h); padding: 0 var(--sp-1);
             border: 0; border-radius: var(--radius-tag); background: var(--surface-primary); box-shadow: var(--ring-default);
             font-family: inherit; font-size: var(--text-micro); line-height: var(--lh-caption); font-weight: var(--weight-medium); color: var(--text-tertiary); }
-        @media (max-width: 640px) { .topbar-search .ts-label, .topbar-search kbd { display: none; }
+        /* On a phone the word is clipped, not removed: it is the button's name (WCAG 2.5.3). */
+        @media (max-width: 640px) { .topbar-search kbd { display: none; } .topbar-search .ts-label { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
             /* The page's gutter steps down on a phone, and the top bar, which
                takes the same token, steps with it, so its controls line up
                with the page under them. */

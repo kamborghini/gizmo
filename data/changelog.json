@@ -23,6 +23,17 @@
   },
   {
    "date": "2026-10-22",
+   "title": "Voice control can find search and the deals",
+   "items": [
+    {
+     "kind": "improved",
+     "tab": null,
+     "text": "The search button and the deals on the CRM board now go by the words they show, so someone using voice control can pick them by saying what is on the screen. A deal still tells a screen reader when its next activity is overdue or missing. Nothing looks different."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-22",
    "title": "Sign-in timing, and an import that stops partway",
    "items": [
     {
