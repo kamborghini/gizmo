@@ -7,6 +7,17 @@
     {
      "kind": "changed",
      "tab": null,
+     "text": "Reactor can now keep the stock sheet itself, ready for the move: counting, orders, deliveries, quarters and stock backups, with every change recorded beside who made it. Nothing you see changes yet."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-22",
+   "title": "Behind the scenes",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
      "text": "Reactor can now hold the stock sheet's records and work out its figures, ready for the stock sheet to move in. Nothing you see changes yet."
     }
    ]

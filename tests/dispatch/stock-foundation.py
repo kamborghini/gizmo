@@ -434,11 +434,11 @@ def t_the_stock_proof_names_a_changed_field():
     stock_import.convert(export, PEOPLE, out)
     with stock_store.rooted(out):
         doc = stock_store.load_items()
-        doc["items"]["7"]["on_order"] = 5          # a line with no reorder point: no figure moves
+        doc["items"]["7"]["barcode"] = "LABEL-7"   # no figure, order or other label moves with it
         stock_store.write_items(doc)
     found = stock_import.prove(export, out)
     eq(len(found), 1, found)
-    ok("items" in found[0] and "7" in found[0] and "on_order" in found[0], found[0])
+    ok("items" in found[0] and "7" in found[0] and "barcode" in found[0], found[0])
 
 @test
 def t_the_stock_proof_notices_a_dropped_history_line():
@@ -627,3 +627,64 @@ def t_stock_ids_carry_on_from_the_old_sequence():
     found = stock_import.prove(export, out)
     eq(len(found), 1, found)
     ok("suppliers" in found[0] and "next id" in found[0], found[0])
+
+# ---- the converter rebuilds the orders still outstanding (plan 2a) --------------
+
+def _stock_export_with_orders(on_order, ordered):
+    """The invented export, with on-order figures and "ordered" history lines
+    as the stock app wrote them."""
+    export = _stock_export()
+    for row in export["tables"]["items"]["rows"]:
+        row["on_order"] = on_order.get(row["id"], 0)
+    hist = export["tables"]["audit_log"]
+    next_id = max(r["id"] for r in hist["rows"]) + 1
+    for n, (at, key, detail) in enumerate(ordered):
+        hist["rows"].append({"id": next_id + n, "at": at, "user": "someone", "action": "ordered", "item_key": key,
+                             "field": "on_order", "old_value": "0", "new_value": "0", "detail": detail})
+    hist["count"] = len(hist["rows"])
+    return export
+
+@test
+def t_the_stock_converter_rebuilds_outstanding_orders_from_ordered_lines():
+    export = _stock_export_with_orders({3: 8, 7: 0}, [
+        ("2026-09-01T10:00:00", "Glass|Blue|20|", "ordered 5 from Invented Glass Co · ref PO-1"),
+        ("2026-09-01T10:00:01", "Glass|Blue|20||#2", "ordered 2 from Invented Glass Co · ref PO-1"),
+        ("2026-09-08T10:00:00", "Glass|Blue|20|", "ordered 6 from Invented Glass Co · ref PO-2")])
+    out = _stock_out("orders")
+    stock_import.convert(export, PEOPLE, out)
+    eq(stock_import.prove(export, out), [])
+    with stock_store.rooted(out):
+        orders = stock_store.load_orders()["orders"]
+    eq([(o["reference"], o["person"]) for o in orders], [("PO-1", "acct-1"), ("PO-2", "acct-1")],
+       "lines placed together a second apart are one order")
+    eq([(l["item_id"], l["qty"], l["received"]) for l in orders[0]["lines"]], [(3, 5, 3), (7, 2, 2)],
+       "the newest order awaits first; what the older one is not awaiting was received")
+    eq([(l["item_id"], l["qty"], l["received"]) for l in orders[1]["lines"]], [(3, 6, 0)])
+
+@test
+def t_stock_on_order_without_an_ordered_line_becomes_ordered_before_the_move():
+    export = _stock_export_with_orders({3: 4}, [
+        ("2026-09-01T10:00:00", "Glass|Blue|20|", "ordered 5 from Invented Glass Co · ref PO-1"),
+        ("2026-09-02T10:00:00", "Glass|Blue|20|", "cleared outstanding order")])
+    out = _stock_out("before-move")
+    stock_import.convert(export, PEOPLE, out)
+    eq(stock_import.prove(export, out), [])
+    with stock_store.rooted(out):
+        orders = stock_store.load_orders()["orders"]
+    eq([(o["before_move"], o["supplier"], [(l["item_id"], l["qty"], l["received"]) for l in o["lines"]])
+        for o in orders], [(True, "Invented Glass Co", [(3, 4, 0)])],
+       "a cleared order awaits nothing; what is on order with no line left is ordered before the move")
+
+@test
+def t_the_stock_proof_checks_outstanding_orders_match_on_order():
+    export = _stock_export_with_orders({3: 6}, [
+        ("2026-09-08T10:00:00", "Glass|Blue|20|", "ordered 6 from Invented Glass Co · ref PO-2")])
+    out = _stock_out("orders-proof")
+    stock_import.convert(export, PEOPLE, out)
+    with stock_store.rooted(out):
+        doc = stock_store.load_orders()
+        doc["orders"][0]["lines"][0]["received"] = 1
+        stock_store.write_orders(doc)
+    found = stock_import.prove(export, out)
+    eq(len(found), 1, found)
+    ok("orders" in found[0] and "6" in found[0] and "5" in found[0], found[0])
