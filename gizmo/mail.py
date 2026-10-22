@@ -19,6 +19,7 @@ import mailmime
 import google_mail
 from gizmo.config import _env_num
 from gizmo import store as jsonstore
+from gizmo import background
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
@@ -1481,7 +1482,7 @@ def _mail_sync_soon() -> bool:
     if now - _mail_bg_sync["t"] < MAIL_BG_SYNC_GAP:
         return False
     _mail_bg_sync["t"] = now
-    return core._spawn_bg(_mail_sync_now())
+    return background.spawn(_mail_sync_now())
 
 
 _mail_read_lock = asyncio.Lock()    # read-state changes, one at a time
@@ -1517,7 +1518,7 @@ MAIL_LABEL_LOCK_WAIT = 2.0     # seconds a relabel waits for a running sync
 
 def _mail_labels_soon(tid: str) -> None:
     if google_mail.connected():
-        core._spawn_bg(_mail_labels_later(tid))
+        background.spawn(_mail_labels_later(tid))
 
 
 async def _mail_labels_later(tid: str) -> None:
@@ -2053,13 +2054,12 @@ def _gmail_redirect_uri(request: Request) -> str:
 
 # Last, so this module is whole before copilot.py or a sibling runs: copilot.py
 # takes names from these modules as it loads, and any of them may be imported
-# first. Read as core.NAME and sibling.NAME, never a copied name.
+# first. Read as sibling.NAME, never a copied name.
 from gizmo import activity  # noqa: E402
 from gizmo import crm as salesdesk  # noqa: E402
 from gizmo import dispatch as desk  # noqa: E402
 from gizmo import gate  # noqa: E402
 from gizmo import team  # noqa: E402
-import copilot as core  # noqa: E402
 from gizmo import config  # noqa: E402
 from gizmo import scheduler  # noqa: E402
 from gizmo import files as fileserver  # noqa: E402

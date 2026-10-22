@@ -6,7 +6,6 @@ import logging
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, PlainTextResponse, Response
 
-import copilot as core
 from gizmo import config
 from gizmo import gate
 from gizmo import scheduler

@@ -22,6 +22,28 @@
    ]
   },
   {
+   "date": "2026-10-22",
+   "title": "Libraries brought up to date",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "The library behind Claude's direct connection to the store and the file storage library are on their newest releases, and the forecast's image library has this month's security fixes, as the rest of the app already did. Nothing looks different."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-22",
+   "title": "The last ties to the old core",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "Each part of the app now stands on its own: work that runs after a request has a home of its own, the size coverage check lives with production, and nothing but the stock bridge still leans on the old core. Nothing looks different."
+    }
+   ]
+  },
+  {
    "date": "2026-10-21",
    "title": "More requests checked at the door: shipping and production",
    "items": [

@@ -14,7 +14,6 @@ from starlette.requests import Request
 from starlette.responses import Response
 from gizmo import store as jsonstore
 
-import copilot as core
 from gizmo import backup
 from gizmo import activity
 from gizmo import dispatch as desk

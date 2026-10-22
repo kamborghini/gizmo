@@ -185,7 +185,7 @@ async def _watchdog_tick(registry: dict) -> bool:
             except Exception:  # an unreadable stamp means the check is due
                 due = True
         if up and due:
-            cov = await core.run_label_coverage(registry, 200)
+            cov = await production.run_label_coverage(registry, 200)
             if not cov.get("error"):
                 keys = sorted(f"{f['manufacturer']}|{f['model']}|{f['reason']}" for f in cov.get("flagged", []))
                 prev = set(state.get("coverage_flagged") or [])
@@ -405,4 +405,5 @@ from gizmo import crm as salesdesk  # noqa: E402
 from gizmo import team  # noqa: E402
 from gizmo import work  # noqa: E402
 import copilot as core  # noqa: E402
+from gizmo import production  # noqa: E402
 from gizmo import xero_sync as xerosync  # noqa: E402

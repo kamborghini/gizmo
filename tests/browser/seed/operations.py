@@ -3,7 +3,7 @@
 # Shopify store the same day: see the note above ops_shopify.)
 # Size list (rule dialog), CRM, Loan units, Inbox and Files.
 #
-# Runs AFTER the harness prelude of tests/test_dispatch.py, in the prelude's own
+# Runs AFTER the dispatch suite's harness (tests/dispatch/harness.py), in the prelude's own
 # globals (post, copilot, worldoptions, SCRATCH, OPT, BOX, _RoutedHttpx, ...),
 # exactly where launch.py would run it before serving. Every person, company,
 # address, email and phone number here is invented (example.com/.org, Ofcom
@@ -554,7 +554,7 @@ team._write_users(_ud)
 
 # ============================ FILES (R2 stand-in, c) =========================
 # The bucket is the in-process FakeS3 the tests use (copied from
-# tests/test_dispatch.py, class FakeS3), configured the way with_files() does;
+# tests/dispatch/, class FakeS3), configured the way with_files() does;
 # folders and files are then made through the real routes (a): /api/files/folder
 # op add, /api/files/upload-url + the object landing + /api/files/complete, and
 # /api/files/file op trash (t_files_upload_flow..., t_files_trash_restore...).

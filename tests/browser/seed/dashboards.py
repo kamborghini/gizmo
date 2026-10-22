@@ -1,5 +1,5 @@
 # Dashboards seed for the browser suite. Proven 14 Oct 2026 against the
-# dispatch setup. Runs AFTER the test_dispatch.py prelude, in its own copy of
+# dispatch setup. Runs AFTER the dispatch suite's prelude (tests/dispatch/harness.py), in its own copy of
 # the prelude's names (seed/__init__.py: copilot, server, client,
 # post, ensure_auth, tok, SCRATCH ...), never in the prelude's globals. Everything is invented:
 # people, companies, emails at example.com / example.org, phones 01632 960xxx.

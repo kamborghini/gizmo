@@ -20,7 +20,6 @@ from starlette.responses import PlainTextResponse
 from gizmo import ai as claude
 from gizmo import shopify
 
-import copilot as core
 from gizmo import oauth
 from gizmo import skills as skillbook
 from gizmo import files as fileserver
@@ -34,6 +33,7 @@ from gizmo import orderbook
 from gizmo import production
 from gizmo import team
 from gizmo import bodies
+from gizmo import background
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
@@ -303,7 +303,7 @@ def register(mcp, registry):
         # Gmail hiccup must not stop somebody looking at their email.
         if t.get("unread") and not body.get("peek"):
             t["unread"] = False    # what the person now sees; put back if Gmail refuses
-            core._spawn_bg(mail._mail_mark_read_later(t["id"]))
+            background.spawn(mail._mail_mark_read_later(t["id"]))
         now = time.monotonic()
         v = mail._mail_viewers.setdefault(t["id"], {})
         v[who] = now

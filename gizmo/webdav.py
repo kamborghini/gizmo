@@ -218,7 +218,6 @@ def _dav_entry_xml(href: str, name: str, is_dir: bool, size: int = 0, mtime: str
 
 # Last, so this module is whole before copilot.py or a sibling runs: copilot.py
 # takes names from these modules as it loads, and any of them may be imported
-# first. Read as core.NAME and sibling.NAME, never a copied name.
+# first. Read as sibling.NAME, never a copied name.
 from gizmo import activity  # noqa: E402
 from gizmo import team  # noqa: E402
-import copilot as core  # noqa: E402

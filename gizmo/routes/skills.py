@@ -8,7 +8,6 @@ from starlette.requests import Request
 from gizmo import store as jsonstore
 from gizmo import ai as claude
 
-import copilot as core
 from gizmo import activity
 from gizmo import gate
 from gizmo import team

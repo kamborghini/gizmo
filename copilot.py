@@ -53,6 +53,7 @@ import pagesource
 import mailmime
 import google_mail
 import pipedrive
+from gizmo import background
 try:
     import worldoptions
 except Exception:                     # keep the app booting if the connector is unavailable
@@ -512,80 +513,6 @@ async def run_stock_usage(registry: dict, date_str: str) -> dict:
             "stock": [{"name": k, "qty": v} for k, v in sorted(stock.items())]}
 
 
-async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
-    """Do recent orders' gobo items resolve to a production size? The last N orders
-    (any status, newest first), every Model run through the exact lookup the labels
-    print with, failures grouped by model + reason. A plain Shopify read, no AI."""
-    n = max(1, min(int(orders_count or 200), 250))
-    data = await shopify._tool_json(registry, "shopify_list_orders",
-                            {"status": "any", "limit": n,
-                             "fields": "id,order_number,name,created_at,email,customer,line_items"})
-    if not shopify._ok(data):
-        # A throttled or failed fetch must never read as "everything matches".
-        return {"error": "Couldn't read your orders from Shopify. Try again in a moment."}
-    orders = (data.get("orders") or [])[:n]
-    sheet = size_list._gobo_sizes()   # one snapshot for the whole scan
-    items_seen = gobo_items = sized = no_model = ruled_out = 0
-    flagged: dict = {}
-    def flag(o, oname, mfr, model, reason, order_problem=False):
-        f = flagged.setdefault((mfr, model, reason), {"manufacturer": mfr, "model": model or "(blank)",
-                                                      "reason": reason, "count": 0, "orders": []})
-        if order_problem:
-            # Not a gap in the size list: the order itself has to be looked at,
-            # so the page offers no size rule for it.
-            f["order_problem"] = True
-        f["count"] += 1
-        if oname not in [x["name"] for x in f["orders"]] and len(f["orders"]) < 3:
-            f["orders"].append({"name": oname, "admin_url": orderbook._admin_order_url(o.get("id"))})
-
-    for o in orders:
-        oname = str(o.get("name") or "").strip() or ("#" + str(o.get("order_number") or ""))
-        domain = size_list._order_email_domain(o)
-        with_projector = None
-        for li in (o.get("line_items") or []):
-            items_seen += 1
-            mfr = production._strip_price(production._item_prop(li, "Manufacturer"))
-            model = production._strip_price(production._item_model(li, mfr))
-            if not model and not mfr and production._sold_with_projector(li):
-                # A gobo sold with a projector names no fixture but is a gobo,
-                # sized by the projector on its order exactly as its label is.
-                gobo_items += 1
-                if with_projector is None:
-                    with_projector = production._projector_size(o, sheet)
-                if with_projector.get("size"):
-                    sized += 1
-                else:
-                    fix = with_projector.get("fix")
-                    flag(o, oname, *(fix or ("", "Sold with a projector")), with_projector["reason"],
-                         order_problem=not fix)
-                continue
-            if not model and not mfr:
-                # No gobo options at all: an accessory or plain product, not a miss.
-                no_model += 1
-                continue
-            if (size_list._norm_key(mfr), size_list._norm_key(model)) in (sheet.get("excludes") or set()):
-                # The merchant has ruled this is not a gobo. Counted apart from
-                # both the sized and the flagged: it is not being made, and it is
-                # not a gap in the list either.
-                ruled_out += 1
-                continue
-            gobo_items += 1
-            entry, reason = size_list._gobo_lookup(mfr, model, cache=sheet)
-            if reason and size_list._gobo_domain_size(mfr, model, entry, domain, cache=sheet):
-                reason = None
-            if not reason:
-                sized += 1
-                continue
-            flag(o, oname, mfr, model, reason)
-    rows = sorted(flagged.values(), key=lambda r: -r["count"])[:100]
-    return {"orders_scanned": len(orders), "items_seen": items_seen,
-            "gobo_items": gobo_items, "sized": sized,
-            "flagged_items": gobo_items - sized, "skipped_no_model": no_model,
-            "ruled_out": ruled_out,
-            "pct": (round(sized * 100.0 / gobo_items, 1) if gobo_items else 100.0),
-            "flagged": rows}
-
-
 # ---------------------------------------------------------------------------
 # Work after a request: a coroutine run once the answer has gone, holding a
 # reference so it is not collected before it runs.
@@ -593,17 +520,10 @@ async def run_label_coverage(registry: dict, orders_count: int = 200) -> dict:
 
 
 def _spawn_bg(coro) -> bool:
-    """Run a coroutine after this request, and HOLD A REFERENCE: a bare
-    create_task can be garbage-collected before it ever runs. False when
-    there is no loop to defer to, so the caller can do the work inline."""
-    try:
-        t = asyncio.get_running_loop().create_task(coro)
-    except RuntimeError:
-        coro.close()
-        return False
-    salesdesk._crm_bg_tasks.add(t)
-    t.add_done_callback(salesdesk._crm_bg_tasks.discard)
-    return True
+    """The printed-label route's name for background.spawn (gizmo/background.py):
+    that route's source is frozen, so it keeps calling this, which hands on."""
+    return background.spawn(coro)
+
 # ---------------------------------------------------------------------------
 # Route registration (mounted onto the existing MCP server app)
 # ---------------------------------------------------------------------------

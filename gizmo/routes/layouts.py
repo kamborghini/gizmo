@@ -4,7 +4,6 @@ where it stood.
 import logging
 from starlette.requests import Request
 
-import copilot as core
 from gizmo import layouts
 from gizmo import gate
 from gizmo import team

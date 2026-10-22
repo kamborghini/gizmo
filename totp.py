@@ -86,10 +86,6 @@ def verify(secret: str, given: str, at: float = None, last_counter=None) -> bool
     return verify_counter(secret, given, at, last_counter) >= 0
 
 
-def used_counter(at: float = None) -> int:
-    return int((at if at is not None else time.time()) // STEP)
-
-
 # --- recovery codes ---------------------------------------------------------
 
 def recovery_codes(n: int = 8) -> list:

@@ -17,6 +17,7 @@ from gizmo import mail
 from gizmo import orderbook
 from gizmo import production
 from gizmo import bodies
+from gizmo import background
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
@@ -125,7 +126,7 @@ def register(mcp, registry):
                         terms_notes.append(tn["note"])
                     if tn["account"] and not tn["ok"]:
                         terms_bad = True
-                queued = len(tail) if tail and core._spawn_bg(production._release_bg(registry, tail)) else 0
+                queued = len(tail) if tail and background.spawn(production._release_bg(registry, tail)) else 0
                 if tail and not queued:
                     # No loop to defer to (never true in a route, but say so
                     # rather than promise a pass that never started).
@@ -340,7 +341,7 @@ def register(mcp, registry):
         except (TypeError, ValueError, OverflowError):
             n = 200
         try:
-            res = await core.run_label_coverage(registry, n)
+            res = await production.run_label_coverage(registry, n)
             return gate._json(res, 502 if res.get("error") else 200)
         except Exception:
             logger.exception("Label coverage failed")

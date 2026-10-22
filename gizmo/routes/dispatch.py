@@ -4,7 +4,7 @@ book, label, manifest, margin and cancel.
 
 Moved whole out of copilot.add_routes (stage 4 of the 14 October audit).
 add_routes calls register() where they stood, so the route table keeps its
-order. They read the desk as desk.NAME and copilot.py as core.NAME.
+order. They read the desk as desk.NAME.
 """
 import logging
 import re
@@ -19,7 +19,6 @@ except Exception:                     # keep the app booting if the connector is
     worldoptions = None
 from starlette.requests import Request
 
-import copilot as core
 from gizmo import orderbook
 from gizmo import production
 from gizmo import shopify
