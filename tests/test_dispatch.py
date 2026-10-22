@@ -31687,6 +31687,35 @@ def t_background_work_has_its_own_home():
     ok("gizmo/background.py" in FLOOR, "on the floor")
 
 @test
+def t_the_docs_name_only_what_exists():
+    """The living docs describe the code as it is (stage 6): every file or
+    folder they name in backticks exists, every test they name is a test, and
+    none says the backend is still being split. A rename that leaves a doc
+    pointing at nothing fails here, not in a reader's hands."""
+    import glob as _glob
+    docs = ["docs/ARCHITECTURE.md", "README.md", "docs/README.md", "tools/moves/README.md", "docs/DESIGN.md"]
+    tests = set()
+    for suite in _glob.glob(os.path.join(HERE, "tests", "**", "*.py"), recursive=True):
+        tests |= set(re.findall(r"^def (t_\w+)\(", open(suite, encoding="utf-8").read(), re.M))
+    missing, unknown, stale = [], [], []
+    for doc in docs:
+        text = open(os.path.join(HERE, doc), encoding="utf-8").read()
+        for tick in re.findall(r"`([^`\n]+)`", text):
+            word = tick.split(":")[0].strip()
+            if re.fullmatch(r"t_\w+", word):
+                if word not in tests:
+                    unknown.append(f"{doc}: {word}")
+            elif re.fullmatch(r"[\w.-]+(/[\w.*<>-]+)+/?|[\w-]+\.(py|md|json|js|css|html|toml|txt)", word) \
+                    and "<" not in word and "*" not in word:
+                if not os.path.exists(os.path.join(HERE, word)) and not os.path.exists(os.path.join(HERE, "docs", word)):
+                    missing.append(f"{doc}: {word}")
+        if re.search(r"being split|is split one area at a time|moved out so far", text):
+            stale.append(doc)
+    eq(missing, [], "paths the docs name that do not exist")
+    eq(unknown, [], "tests the docs name that do not exist")
+    eq(stale, [], "docs that still describe the split as under way")
+
+@test
 def t_the_moved_areas_routes_follow_them():
     """Production's, the Size list's and the order book's routes follow their
     areas into gizmo/routes/, each group registered by one call. The two
