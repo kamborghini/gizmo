@@ -185,7 +185,18 @@ def register(mcp, registry):
             # CRM write put that on disk.
             import copy as _copy
             d = _copy.deepcopy(d)
-        report = salesdesk._crm_import_apply(d, data, dry=not go)
+        try:
+            report = salesdesk._crm_import_apply(d, data, dry=not go)
+        except Exception:
+            # The apply writes into the cached store as it goes (a preview
+            # works on a copy). One that raised partway left a half-made import
+            # in memory, which every board served and the next CRM write put on
+            # disk: forgotten, as an erasure that raises is (#23).
+            logger.exception("pipedrive import failed partway")
+            if go:
+                jsonstore._forget_store(salesdesk.CRM_PATH)
+            return gate._json({"error": "The import stopped partway, so nothing was saved and the CRM "
+                                   "is as it was. Try again, or tell Cameron if it keeps happening."}, 500)
         if go:
             salesdesk._write_crm(d)
             activity._track(who, "crm", "imported from Pipedrive",
