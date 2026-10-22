@@ -20,9 +20,12 @@ older than 30 days removed.
 """
 import base64
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 
 from gizmo import clock, stock, stock_store
+
+logger = logging.getLogger("shopify_mcp.copilot")
 
 KEEP_NEWEST = 30           # always kept, however old
 KEEP_DAYS = 7              # past the newest thirty, kept while this young
@@ -259,22 +262,61 @@ def _reapply_since(st: dict, who: dict, since, history: list) -> int:
     return done
 
 
+def _nightly_stamp(field: str, today: str) -> None:
+    with stock._lock:
+        st = stock.state()
+        st["settings"]["nightly"] = dict(st["settings"].get("nightly") or {}, **{field: today})
+        stock.commit(st, changed={"settings"})
+
+
+def _report_failure(stage: str, error: Exception) -> None:
+    """The stock app raised a critical warning when its nightly job failed;
+    so does this, once while it stands."""
+    words = (f"The nightly stock {stage} did not run ({type(error).__name__}). "
+             "It will be tried again on the next check.")
+    try:
+        with stock._lock:
+            st = stock.state()
+            if not any(a.get("message") == words and not a.get("dismissed") for a in st["alerts"].get("alerts") or []):
+                stock._add_alert(st["alerts"], {"kind": "job_fail", "severity": "critical", "message": words})
+                stock.commit(st, changed={"alerts"})
+    except Exception:
+        logger.exception("stock: the nightly failure could not be recorded as a warning")
+
+
 def nightly_tick(now: datetime = None) -> bool:
-    """The first tick of each London day: one snapshot, one backup, old change
-    snapshots removed. True when it ran."""
+    """The first tick of each London day: one snapshot, then one backup and
+    old change snapshots removed, each stamped once done, so a backup that
+    failed is tried again on the next tick without a second snapshot. True
+    when it did anything."""
     now = now or datetime.now(timezone.utc)
     if not stock.is_live():
         return False
     today = clock._london_day(now.isoformat())
-    with stock._lock:
-        st = stock.state()
-        if (st["settings"].get("nightly") or {}).get("date") == today:
-            return False
-        snap = stock.take_snapshot(st, "scheduled", SYSTEM, "nightly")
-        st["settings"]["nightly"] = {"date": today, "at": stock.now_iso()}
-        stock.commit(st, changed={"settings", "alerts"}, snapshot=snap)
-    make_backup(SYSTEM)
-    stock_store.prune_change_snapshots((now - timedelta(days=CHANGE_SNAPSHOT_DAYS)).date().isoformat())
+    ran = False
+    try:
+        with stock._lock:
+            st = stock.state()
+            nightly = st["settings"].get("nightly") or {}
+            if nightly.get("date") != today:
+                snap = stock.take_snapshot(st, "scheduled", SYSTEM, "nightly")
+                st["settings"]["nightly"] = dict(nightly, date=today, at=stock.now_iso())
+                stock.commit(st, changed={"settings", "alerts"}, snapshot=snap)
+                ran = True
+    except Exception as e:
+        logger.exception("stock: the nightly snapshot failed")
+        _report_failure("snapshot", e)
+        return False
+    if (stock_store.load_settings().get("nightly") or {}).get("backup_date") == today:
+        return ran
+    try:
+        make_backup(SYSTEM)
+        stock_store.prune_change_snapshots((now - timedelta(days=CHANGE_SNAPSHOT_DAYS)).date().isoformat())
+        _nightly_stamp("backup_date", today)
+    except Exception as e:
+        logger.exception("stock: the nightly backup failed")
+        _report_failure("backup", e)
+        return ran
     return True
 
 

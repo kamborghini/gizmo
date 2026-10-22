@@ -207,3 +207,21 @@ def t_a_refused_stock_restore_writes_nothing():
     eq(r.status_code, 409, r.text)
     eq((len(stock_store.list_backups()), len(stock_store.read_history())), (backups, rows),
        "no safety backup, no history line: nothing")
+
+@test
+def t_a_failed_nightly_stock_backup_is_retried_and_reported():
+    from datetime import datetime as _dt
+    _stock_with_details()
+    real = stock_backups.make_backup
+    def broken(who):
+        raise OSError("the disk is full")
+    stock_backups.make_backup = broken
+    try:
+        stock_backups.nightly_tick(_dt.fromisoformat("2026-07-01T01:00:00+00:00"))
+    finally:
+        stock_backups.make_backup = real
+    failed = [a for a in stock_store.load_alerts()["alerts"] if a["kind"] == "job_fail"]
+    eq([a["severity"] for a in failed], ["critical"], "the failure is said, on the warnings")
+    ok(stock_backups.nightly_tick(_dt.fromisoformat("2026-07-01T01:15:00+00:00")), "the next tick tries the backup again")
+    eq(len([b for b in stock_store.list_backups() if b["format"] == "stock-1"]), 1, "and it is made")
+    eq([s["reason"] for s in stock_store.read_snapshots()].count("scheduled"), 1, "the snapshot is not taken twice")
