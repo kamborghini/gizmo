@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 import anthropic
 import httpx
 import perf
-import google_data
 import mailmime
 import google_mail
 from starlette.responses import PlainTextResponse
@@ -28,6 +27,7 @@ from gizmo import files as fileserver
 from gizmo import activity
 from gizmo import crm as salesdesk
 from gizmo import dispatch as desk
+from gizmo import config
 from gizmo import gate
 from gizmo import mail
 from gizmo import orderbook
@@ -1990,8 +1990,8 @@ def register(mcp, registry):
         ticket = request.query_params.get("t", "")
         exp = mail._mail_connect_tickets.pop(ticket, None) if ticket else None
         key = request.query_params.get("key", "")
-        by_secret = (google_data.CONNECT_SECRET and key and
-                     secrets.compare_digest(key, google_data.CONNECT_SECRET))
+        by_secret = (config.CONNECT_SECRET and key and
+                     secrets.compare_digest(key, config.CONNECT_SECRET))
         if not ((exp is not None and exp > time.time()) or by_secret):
             return PlainTextResponse("Forbidden", status_code=403, headers=gate._API_HEADERS)
         now = time.time()

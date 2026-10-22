@@ -103,6 +103,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
 | `APP_BASE_URL` | `""` | gizmo.config |  |
+| `GOOGLE_CONNECT_SECRET` | `""` | gizmo.config, google_data |  |
 | `SHOPIFY_API_KEY` | `None` | gizmo.config |  |
 | `SHOPIFY_API_SECRET` | `None` | gizmo.config |  |
 | `SHOPIFY_CLIENT_ID` | `""` | gizmo.config, server |  |
@@ -448,7 +449,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
 | `GA4_PROPERTY_ID` | `""` | google_data |  |
-| `GOOGLE_CONNECT_SECRET` | `""` | google_data |  |
 | `GOOGLE_OAUTH_CLIENT_ID` | `""` | google_data, google_mail |  |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | `""` | google_data, google_mail |  |
 | `GOOGLE_OAUTH_TOKEN_PATH` | `"/data/google_oauth.json"` | google_data |  |

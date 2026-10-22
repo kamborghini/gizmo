@@ -311,3 +311,55 @@
         $('settings-btn').innerHTML = I.settings;
         $('logout-btn').innerHTML = I.logOut;
         $('logout-btn').onclick = () => authLogout();
+        /* ---------- money (every page that shows an amount) ---------- */
+        /* One currency formatter for the whole app. There were two, and they
+           disagreed: this one printed "12,480 GBP" while the Liability page
+           printed "£18,620" from a hand-written symbol map that knew GBP, USD
+           and EUR and nothing else - so a yen or krona order read as
+           "JPY 1,234.00". Intl knows every code, and where the symbol goes.
+
+           Cached per code+precision because a NumberFormat is expensive to
+           build and these run per row. An unknown or malformed code makes the
+           constructor THROW, so that is caught once and remembered as null:
+           a bad code from an order must not take the page down, it just falls
+           back to the plain number and the code beside it. */
+        const _moneyFmts = {};
+        function moneyFmt(cur, dp) {
+            const code = String(cur || '').trim().toUpperCase();
+            const key = code + '|' + dp;
+            if (!(key in _moneyFmts)) {
+                let f = null;
+                try {
+                    f = new Intl.NumberFormat('en-GB', Object.assign(
+                        { minimumFractionDigits: dp, maximumFractionDigits: dp },
+                        /^[A-Z]{3}$/.test(code) ? { style: 'currency', currency: code } : {}));
+                } catch (e) { f = null; }
+                _moneyFmts[key] = f;
+            }
+            return _moneyFmts[key];
+        }
+        function money(n, cur, dp) {
+            const v = Number(n) || 0;
+            dp = dp === 0 ? 0 : (dp == null ? 0 : dp);
+            const f = moneyFmt(cur, dp);
+            if (f) return f.format(v);
+            return v.toLocaleString('en-GB', { minimumFractionDigits: dp, maximumFractionDigits: dp })
+                + (cur ? (' ' + cur) : '');
+        }
+        const fmtMoney = (n, cur) => money(n, cur, 0);
+        /* The compact form for a chart's headline: '£29k', from the same rule,
+           rather than fmtCompact with the code stuck on the end ('29k GBP'). */
+        const _moneyShortFmts = {};
+        function moneyShort(n, cur) {
+            const code = String(cur || '').trim().toUpperCase();
+            const v = Number(n) || 0;
+            if (Math.abs(v) < 1000 || !/^[A-Z]{3}$/.test(code)) return Math.abs(v) < 1000 ? money(v, cur, 0) : fmtCompact(v);
+            if (!(code in _moneyShortFmts)) {
+                try { _moneyShortFmts[code] = new Intl.NumberFormat('en-GB', { style: 'currency', currency: code,
+                        notation: 'compact', maximumFractionDigits: 1 }); }
+                catch (e) { _moneyShortFmts[code] = null; }
+            }
+            const f = _moneyShortFmts[code];
+            /* Lower-case k, as the axis under it writes thousands. */
+            return f ? f.format(v).replace('K', 'k') : fmtCompact(v);
+        }

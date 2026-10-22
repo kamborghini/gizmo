@@ -16242,6 +16242,20 @@ def t_nothing_opens_a_page_file_but_the_reader():
     ok(not bad, "these still open the page file: %s" % bad)
 
 
+@test
+def t_the_money_formatters_live_with_the_formats():
+    """money, moneyShort and fmtMoney were defined in the Products tab's file
+    and called by Forecast, Liability, Loans, Xero sync, Dispatch, Labels and
+    the charts. The Products tab goes (22 Oct 2026 trim), so they live in
+    icons-and-formats.js, with the other formats every page loads."""
+    formats = open(os.path.join(ROOT, "static", "src", "js", "icons-and-formats.js"), encoding="utf-8").read()
+    for decl in ("function moneyFmt(", "function money(", "const fmtMoney", "function moneyShort("):
+        ok(decl in formats, decl + " is in icons-and-formats.js")
+    prods = os.path.join(ROOT, "static", "src", "js", "products.js")
+    if os.path.exists(prods):
+        ok("function money(" not in open(prods, encoding="utf-8").read(), "products.js no longer defines money")
+
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

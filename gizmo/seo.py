@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from gizmo.config import _env_num
 from gizmo import ai as claude
 from gizmo import shopify
+from gizmo import storefront
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
@@ -88,46 +89,6 @@ def _is_seo(messages: list[dict]) -> bool:
             text = c if isinstance(c, str) else json.dumps(c)
             return any(h in text.lower() for h in _SEO_HINTS)
     return False
-
-
-_domains_cache: dict = {}
-
-
-async def _resolve_domains(registry: dict) -> tuple[str, set]:
-    """Return (primary_domain, allowed_hosts) for the store. Cached per process."""
-    if _domains_cache.get("primary"):
-        return _domains_cache["primary"], _domains_cache["hosts"]
-    shop = await shopify._tool_json(registry, "shopify_get_shop", {})
-    myshop = shop.get("myshopify_domain") or (f"{config.SHOPIFY_STORE}.myshopify.com" if config.SHOPIFY_STORE else "")
-    primary = shop.get("domain") or myshop
-    hosts = {h.lower() for h in (primary, myshop) if h}
-    if primary:
-        _domains_cache["primary"], _domains_cache["hosts"] = primary, hosts
-    return primary, hosts
-
-
-async def _http_get(url: str, allowed_hosts: Optional[set] = None) -> tuple[Optional[int], str]:
-    """Fetch a URL, following redirects MANUALLY (max 4 hops). When allowed_hosts
-    is given, every hop — including the initial URL — must be on that allow-list,
-    which blocks redirect-based SSRF (e.g. a page 302-ing to an internal/metadata
-    address). Returns (status, text); ("blocked" hops yield the redirect status, "")."""
-    try:
-        if allowed_hosts is not None and urlparse(url).netloc.lower() not in allowed_hosts:
-            return None, ""
-        async with httpx.AsyncClient(follow_redirects=False, timeout=15.0,
-                                     headers={"User-Agent": "Reactor-SEO/1.0"}) as c:
-            for _ in range(4):
-                r = await c.get(url)
-                if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("location"):
-                    nxt = urljoin(url, r.headers["location"])
-                    if allowed_hosts is not None and urlparse(nxt).netloc.lower() not in allowed_hosts:
-                        return r.status_code, ""  # refuse to follow off-allowlist redirect
-                    url = nxt
-                    continue
-                return r.status_code, r.text
-            return None, ""  # too many redirects
-    except Exception:
-        return None, ""
 
 
 def _parse_seo(html: str) -> dict:
@@ -450,7 +411,7 @@ def _build_seo_tools(registry: dict) -> dict:
         """Fetch a page on THIS store's storefront and return its on-page SEO signals: title,
         meta description, canonical, meta robots/noindex, JSON-LD types, H1 count, image alt
         coverage, and word count. Accepts a path like '/products/handle' or a full store URL."""
-        primary, hosts = await _resolve_domains(registry)
+        primary, hosts = await storefront._resolve_domains(registry)
         if not primary:
             return json.dumps({"error": "Could not resolve the store domain."})
         raw = (params.path_or_url or "").strip()
@@ -460,7 +421,7 @@ def _build_seo_tools(registry: dict) -> dict:
             url = raw
         else:
             url = f"https://{primary}/{raw.lstrip('/')}"
-        status, html = await _http_get(url, allowed_hosts=hosts)
+        status, html = await storefront._http_get(url, allowed_hosts=hosts)
         if not status:
             return json.dumps({"error": f"Could not fetch {url}"})
         return json.dumps({"url": url, "status": status, **_parse_seo(html)}, default=str)
@@ -468,9 +429,9 @@ def _build_seo_tools(registry: dict) -> dict:
     async def seo_check_robots_sitemap(params: SeoEmptyInput) -> str:
         """Fetch this store's robots.txt and sitemap.xml and summarize their health
         (found, whether robots references the sitemap, risky Disallow rules, sitemap size)."""
-        primary, hosts = await _resolve_domains(registry)
-        rs, rtext = await _http_get(f"https://{primary}/robots.txt", allowed_hosts=hosts)
-        ss, stext = await _http_get(f"https://{primary}/sitemap.xml", allowed_hosts=hosts)
+        primary, hosts = await storefront._resolve_domains(registry)
+        rs, rtext = await storefront._http_get(f"https://{primary}/robots.txt", allowed_hosts=hosts)
+        ss, stext = await storefront._http_get(f"https://{primary}/sitemap.xml", allowed_hosts=hosts)
         return json.dumps({
             "robots_txt": {"status": rs, "found": rs == 200,
                            "references_sitemap": "sitemap" in (rtext or "").lower(),
@@ -535,7 +496,7 @@ def _build_google_tools() -> dict:
 
 async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
     claude._ai_kind.set("seo")
-    primary, hosts = await _resolve_domains(registry)
+    primary, hosts = await storefront._resolve_domains(registry)
     if not primary:
         raise RuntimeError("Could not resolve the store's domain to audit.")
     gsc_on, ga4_on = google_data.gsc_configured(), google_data.ga4_configured()
@@ -544,8 +505,8 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
     # sample for page audits, Search Console + Analytics, shop, and 28-day orders).
     signals, robots, sitemap, sample, gsc_ov, gsc_tq, ga_sum, shop, o28r = await asyncio.gather(
         _seo_product_signals(registry),
-        _http_get(f"https://{primary}/robots.txt", allowed_hosts=hosts),
-        _http_get(f"https://{primary}/sitemap.xml", allowed_hosts=hosts),
+        storefront._http_get(f"https://{primary}/robots.txt", allowed_hosts=hosts),
+        storefront._http_get(f"https://{primary}/sitemap.xml", allowed_hosts=hosts),
         shopify._tool_json(registry, "shopify_list_products", {"limit": SEO_SAMPLE_PAGES, "fields": "handle"}),
         google_data.gsc_overview(28) if gsc_on else analytics._ret({}),
         google_data.gsc_top_queries(28) if gsc_on else analytics._ret({}),
@@ -560,7 +521,7 @@ async def run_seo_audit(registry: dict, extra_system: str = "") -> dict:
                                       for p in sample.get("products", []) if p.get("handle")]
     urls = urls[:SEO_SAMPLE_PAGES + 1]
     # Second wave: fetch the sampled pages concurrently.
-    fetched = await asyncio.gather(*[_http_get(u, allowed_hosts=hosts) for u in urls])
+    fetched = await asyncio.gather(*[storefront._http_get(u, allowed_hosts=hosts) for u in urls])
     pages = [{"url": u, "status": st, **_parse_seo(html)} for u, (st, html) in zip(urls, fetched) if st]
 
     score, metrics = _seo_scorecard(signals, rs, ss, pages, domain=primary,
@@ -736,11 +697,11 @@ async def run_product_audit(registry: dict, product_id: int, extra_system: str =
                                                               str(p.get("product_type") or ""), str(p.get("tags") or "")]))
     handle = p.get("handle") or ""
     path = f"/products/{handle}"
-    primary, hosts = await _resolve_domains(registry)
+    primary, hosts = await storefront._resolve_domains(registry)
 
     page = {}
     if primary and handle:
-        st, html = await _http_get(f"https://{primary}{path}", allowed_hosts=hosts)
+        st, html = await storefront._http_get(f"https://{primary}{path}", allowed_hosts=hosts)
         if st and html:
             page = {"url": f"https://{primary}{path}", "status": st, **_parse_seo(html)}
 

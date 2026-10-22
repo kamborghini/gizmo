@@ -675,9 +675,9 @@ def _ok(r, what):
 def seed_reports():
     ensure_auth()
     g_saved = _swap(_dgoogle, _GOOGLE_FAKES)
-    c_saved = _swap(seo, {"_http_get": _dash_http_get})
+    c_saved = _swap(storefront, {"_http_get": _dash_http_get})
     ai_saved = _swap(claude, {"_xcreate": _dash_xcreate})
-    seo._domains_cache.clear()
+    storefront._domains_cache.clear()
     try:
         # Overview twice: the first run's snapshot is moved back a week and nudged,
         # so the second run carries a "What changed since" strip, as a real week would.
@@ -697,9 +697,9 @@ def seed_reports():
         DASH["r_customers_events"] = _ok(post("/api/customers", {"segment": "Events"}), "customers Events")
     finally:
         _swap(_dgoogle, g_saved)
-        _swap(seo, c_saved)
+        _swap(storefront, c_saved)
         _swap(claude, ai_saved)
-        seo._domains_cache.clear()
+        storefront._domains_cache.clear()
 
 
 # =============================================================================

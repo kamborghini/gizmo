@@ -183,6 +183,7 @@ from gizmo import knowledge
 from gizmo import chat as assistant
 from gizmo import prompts
 from gizmo import seo
+from gizmo import storefront
 from gizmo import analytics
 from gizmo import scheduler
 from gizmo import updates
@@ -30256,6 +30257,9 @@ SHARED_COPIES = {
     ("gizmo.xero_sync", "httpx", "gizmo.seo"):
         "SEO reads the store's site and outside pages with its own client; "
         "the connector settings test reads no page",
+    ("gizmo.xero_sync", "httpx", "gizmo.storefront"):
+        "the storefront fetch reads the store's own site with its own client; "
+        "the connector settings test reads no page",
     ("gizmo.xero_sync", "httpx", "gizmo.scheduler"):
         "the scheduler sends alert email and watches the connector with its own client; "
         "the connector settings test runs no tick",
@@ -31721,6 +31725,50 @@ def t_a_passing_test_prints_its_name_and_nothing_else():
     ok("a failing test's line" in after, "a failing test's are, under its FAIL line: " + after[:400])
     v = child(VERBOSE="1")
     ok("a passing test's line" in v.stdout + v.stderr, "VERBOSE=1 streams them as they come")
+
+# ---------------------------------------------------------------------------
+# The trim (22 Oct 2026): the report tabs and Reconciliation leave, and what
+# kept pages borrowed from their files moves to kept homes first.
+# ---------------------------------------------------------------------------
+
+@test
+def t_learn_my_store_fetches_through_the_storefront_guard():
+    """Learn my store reads the shop's own site through the guarded fetch,
+    which lived in the SEO report's file. It lives in gizmo/storefront.py now,
+    so removing the SEO tab cannot take Memory's crawler with it."""
+    seen = []
+    async def fake_get(url, allowed_hosts=None):
+        seen.append((url, allowed_hosts))
+        return 200, "<urlset></urlset>"
+    saved = storefront._http_get
+    storefront._http_get = fake_get
+    try:
+        run_async(knowledge._discover_content_urls("shop.example", {"shop.example"}, 3))
+    finally:
+        storefront._http_get = saved
+    ok(seen and seen[0] == ("https://shop.example/sitemap.xml", {"shop.example"}),
+       "the sitemap is read through storefront._http_get: %r" % (seen,))
+
+
+@test
+def t_the_connect_secret_lives_in_config():
+    """The recovery key for the sign-in walks was defined in the Google data
+    module, which goes. The Inbox's mailbox connect still needs it until the
+    Inbox goes, so it reads it from gizmo/config.py."""
+    eq(config.CONNECT_SECRET, os.environ.get("GOOGLE_CONNECT_SECRET", ""))
+    src = open(os.path.join(HERE, "gizmo", "routes", "mail.py"), encoding="utf-8").read()
+    ok("config.CONNECT_SECRET" in src and "google_data" not in src,
+       "the Inbox's connect walk reads config.CONNECT_SECRET, not google_data")
+
+
+@test
+def t_liability_keeps_its_own_currency_signs():
+    """The chase emails write amounts with a currency sign the Liability page
+    borrowed from the report module, which goes. Liability keeps its own."""
+    eq(liability._CURRENCY_SIGNS, {"GBP": "\u00a3", "USD": "$", "EUR": "\u20ac"})
+    src = open(os.path.join(HERE, "gizmo", "liability.py"), encoding="utf-8").read()
+    ok("analytics" not in src, "liability.py no longer reads the report module")
+
 
 if os.environ.get("SUITE_SELFTEST"):
     @test
