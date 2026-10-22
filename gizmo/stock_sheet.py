@@ -156,7 +156,7 @@ def new_item(uid: str, fields: dict) -> dict:
 # third, then a row per line, a Totals row at the end. Its columns, by place:
 SHEET_HEADER = ["Category", "Colour / Type", "Size", "Notes", "Start", "Received", "Used", "Current",
                 "Used Value", "Start Value", "Current Value", "Unit Cost", "Currency", "Supplier",
-                "Unit Cost GBP", "Stock Purchased", "Delivered", "Invoice No", "Date", "Written off"]
+                "Unit Cost GBP", "Stock Purchased", "Delivered", "Invoice No", "Date", "Written off", "Line id"]
 IMPORT_MAX = 5000
 _LEADING_NUMBER = re.compile(r"\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)")
 
@@ -227,13 +227,17 @@ def _parse_csv(text: str) -> list:
 
 
 def read_csv(text: str) -> list:
-    """The lines of a stock sheet, read as the stock app read them. A written
-    off line is the last column's yes when the sheet has that column (export
-    writes it), else "written off" in its notes, as the shop's sheet says it."""
+    """The lines of a stock sheet, read as the stock app read them. Two
+    columns export adds are found by their headings: "Written off" (else a
+    line is written off when its notes say so, as the shop's sheet does) and
+    "Line id", which names the line a row came from."""
     raw = _parse_csv(text or "")
     if len(raw) < 4:
         raise stock.Refused(400, "That file is not the stock sheet: it needs a quarter label, a header, "
                                  "then a row for each line.")
+    heading = [c.strip().lower() for c in raw[2]]
+    flag_col = heading.index("written off") if "written off" in heading else None
+    id_col = heading.index("line id") if "line id" in heading else None
     out = []
     for r in raw[3:]:
         if not r or not (r[0] or "").strip():
@@ -242,11 +246,12 @@ def read_csv(text: str) -> list:
             continue
 
         def cell(n):
-            return _unguard(r[n] if n < len(r) else "")
+            return _unguard(r[n] if n is not None and n < len(r) else "")
         notes = cell(3).strip()
-        flag = cell(19).strip().lower()
+        flag = cell(flag_col).strip().lower() if flag_col is not None else ""
+        line_id = cell(id_col).strip() if id_col is not None else ""
         out.append({
-            "category": cell(0).strip(), "sub_category": cell(1).strip(), "size": cell(2).strip(), "notes": notes,
+            "id": int(line_id) if line_id.isdigit() else None, "category": cell(0).strip(), "sub_category": cell(1).strip(), "size": cell(2).strip(), "notes": notes,
             "written_off": flag in ("yes", "y", "true", "1") if flag else bool(re.search("written off", notes, re.I)),
             "start": _whole(cell(4)), "received": _whole(cell(5)), "used": _whole(cell(6)), "current": _whole(cell(7)),
             "unit_cost": _number(cell(11)), "currency": cell(12).strip(), "supplier": cell(13).strip(),
@@ -275,6 +280,7 @@ def _plan_import(st: dict, rows: list):
     if len(rows) > IMPORT_MAX:
         raise stock.Refused(400, "A sheet can have at most 5,000 lines.")
     existing = {it["key"]: it for it in st["items"]["items"].values()}
+    by_id = st["items"]["items"]
     batch, creates, changes = set(), [], []
     for r in rows:
         def text(f):
@@ -282,10 +288,7 @@ def _plan_import(st: dict, rows: list):
         if not text("category"):
             continue
         base = stock.item_key(text("category"), text("sub_category"), text("size"), text("notes"))
-        key, n = base, 2
-        while key in batch:                      # the same line twice in one sheet stays two lines
-            key, n = f"{base}|#{n}", n + 1
-        batch.add(key)
+        named = by_id.get(str(r.get("id"))) if r.get("id") else None
         fields = {"category": text("category"), "sub_category": text("sub_category"), "size": text("size"),
                   "notes": text("notes"), "written_off": stock.to_bool(r.get("written_off")),
                   "supplier": text("supplier"), "currency": text("currency"),
@@ -293,12 +296,34 @@ def _plan_import(st: dict, rows: list):
                   "unit_cost_gbp": _cost_field("unit_cost_gbp", r.get("unit_cost_gbp")) or 0.0,
                   "start": _whole_field("start", r.get("start")), "received": _whole_field("received", r.get("received")),
                   "used": _whole_field("used", r.get("used")), "current": _whole_field("current", r.get("current"))}
+        if named is not None:
+            _plan_named_line(named, fields, base, existing, batch, changes)
+            continue
+        key, n = base, 2
+        while key in batch:                      # the same line twice in one sheet stays two lines
+            key, n = f"{base}|#{n}", n + 1
+        batch.add(key)
         it = existing.get(key)
         if it is None:
             creates.append((key, fields))
         else:
             changes.extend((it, f, it[f], v) for f, v in fields.items() if it[f] != v)
     return creates, changes
+
+
+def _plan_named_line(it: dict, fields: dict, base: str, existing: dict, batch: set, changes: list) -> None:
+    """A row that names its line (export's Line id column) changes that line
+    and no other, whatever its name: two lines can share one ("|#2")."""
+    if it["key"] in batch:
+        raise stock.Refused(400, "The sheet has the same line twice.")
+    renamed = any(fields[f] != it[f] for f in stock.IDENTITY)
+    new_key = base if renamed else it["key"]
+    if renamed and ((new_key in existing and existing[new_key]["id"] != it["id"]) or new_key in batch):
+        raise stock.Refused(409, "A row renames a line to the name another line already has.")
+    batch.add(new_key)
+    changes.extend((it, f, it[f], v) for f, v in fields.items() if it[f] != v)
+    if new_key != it["key"]:
+        changes.append((it, "key", it["key"], new_key))
 
 
 def import_preview(text: str) -> dict:
@@ -327,7 +352,9 @@ def import_apply(uid: str, text: str) -> dict:
         for it, field, old, new in changes:
             it[field] = new
             it["updated_at"] = now
-            history.append(stock.history_row(who, "import", item_key=it["key"], field=field, old=old, new=new))
+            history.append(stock.history_row(who, "import", item_key=new if field == "key" else it["key"],
+                                             field=field, old=old, new=new,
+                                             detail="renamed" if field == "key" else ""))
         snap = stock.take_snapshot(st, "import", who, f"{len(creates)} created, {len(changes)} fields updated")
         stock.commit(st, changed={"items", "alerts"}, history=history, snapshot=snap)
         return {"created": len(creates), "updated_fields": len(changes),
@@ -363,7 +390,7 @@ def export_csv(ids) -> dict:
         rows.append([_guard_cell(it["category"]), _guard_cell(it["sub_category"]), _guard_cell(it["size"]),
                      _guard_cell(it["notes"])] + figures +
                     [it["unit_cost"], _guard_cell(it["currency"] or ""), _guard_cell(it["supplier"] or ""),
-                     it["unit_cost_gbp"], "", "", "", "", "yes" if it["written_off"] else "no"])
+                     it["unit_cost_gbp"], "", "", "", "", "yes" if it["written_off"] else "no", it["id"]])
     rows.append(["Totals", "", "", ""] + totals[:4] + [round(t, 2) for t in totals[4:]])
     return {"csv": "\n".join(",".join(_csv_cell(c) for c in r) for r in rows) + "\n",
             "filename": "stock_export.csv"}

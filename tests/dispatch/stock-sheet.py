@@ -384,3 +384,30 @@ def t_a_stock_edit_carrying_its_unchanged_size_is_not_refused():
     r, d = _stock("edit", id=7, changes={"current": 1, "size": "20", "category": "Glass"})
     eq(r.status_code, 200, r.text)
     eq((d["item"]["current"], d["item"]["key"]), (1, "Glass|Blue|20||#2"))
+
+@test
+def t_importing_a_filtered_stock_export_writes_only_its_own_lines():
+    """Two lines share a name ("|#2"); an export of the second, imported back,
+    must never touch the first."""
+    _stock_live(items=_stock_sheet_lines())
+    csv = _stock("export", ids=[7])[1]["csv"]
+    eq((_stock("import_preview", csv=csv)[1]["changes"]), [], "unchanged, it changes nothing")
+    lines = csv.split("\n")
+    i = next(n for n, l in enumerate(lines) if l.startswith("Glass,Blue,20,"))
+    cells = lines[i].split(",")
+    cells[7] = "5"                                    # its count
+    lines[i] = ",".join(cells)
+    d = _stock("import_preview", csv="\n".join(lines))[1]
+    eq([(c["id"], c["field"], c["to"]) for c in d["changes"]], [(7, "current", 5)], "the line it came from")
+    eq(_stock("import_apply", csv="\n".join(lines))[0].status_code, 200)
+    items = stock_store.load_items()["items"]
+    eq((items["7"]["current"], items["3"]["current"]), (5, 6), "and nothing else")
+
+@test
+def t_stock_import_reads_written_off_only_from_its_own_column():
+    _stock_live(items=_stock_sheet_lines())
+    sheet = ("Quarter one\n\nCategory,Colour,Size,Notes,Start,Received,Used,Current,UV,SV,CV,Unit Cost,Currency,"
+             "Supplier,Unit GBP,P,D,I,Date,Comment\n"
+             "Glass,Blue,20,,10,0,4,6,,,,,GBP,Invented Glass Co,1.25,,,,,yes\n")
+    d = _stock("import_preview", csv=sheet)[1]
+    eq([c["field"] for c in d["changes"] if c["id"] == 3], [], "a column headed Comment is not the written-off flag")
