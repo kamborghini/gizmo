@@ -308,7 +308,7 @@ def _stock_export(history_user="someone", reorder_point_9=0):
         base = {k: v for k, v in _stock_item(id, key).items()}
         base.update(over)
         return row("items", **base)
-    items = [item(3, "Glass|Blue|20|", start=10, used=4, current=6, unit_cost_gbp=1.25, barcode="5012345678900",
+    items = [item(3, "Glass|Blue|20|", start=10, used=4, current=6, unit_cost_gbp=1.25, barcode="TEST-CODE-3",
                   supplier="Invented Glass Co", created_at="2026-07-01T10:00:00"),
              item(7, "Glass|Blue|20||#2", start=5, current=2, unit_cost_gbp=2.0,
                   created_at="2026-07-01T11:00:00+01:00"),
