@@ -7,7 +7,6 @@ import os
 from datetime import datetime, timezone
 from starlette.requests import Request
 
-import copilot as core
 from gizmo import activity
 from gizmo import gate
 from gizmo import size_list

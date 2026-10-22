@@ -4,7 +4,6 @@ audit) where it stood.
 import logging
 from starlette.requests import Request
 
-import copilot as core
 from gizmo import activity
 from gizmo import gate
 from gizmo import team

@@ -11,7 +11,6 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 from gizmo import store as jsonstore
 
-import copilot as core
 from gizmo import scheduler
 from gizmo import activity
 from gizmo import gate
@@ -20,6 +19,7 @@ from gizmo import crm as salesdesk
 from gizmo import team
 from gizmo import privacy
 from gizmo import bodies
+from gizmo import background
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
@@ -79,7 +79,7 @@ def register(mcp, registry):
                     privacy._redact_unrecorded()
                     return PlainTextResponse("retry", status_code=503)
                 if held and held.get("new"):
-                    core._spawn_bg(privacy._redact_hold_check(held["id"]))
+                    background.spawn(privacy._redact_hold_check(held["id"]))
             elif topic == "customers/data_request":
                 # Supplying the data is a human step on a 30-day clock. The
                 # app's job is to receive the request and not lose it.
@@ -127,7 +127,7 @@ def register(mcp, registry):
                     n += 1
             activity._track(who, "privacy", "stopped every waiting erasure request", str(n))
             notice = ("Stopped " + str(n) + (" request." if n == 1 else " requests.")) + " Nothing was erased."
-            core._spawn_bg(scheduler._send_alert_email(
+            background.spawn(scheduler._send_alert_email(
                 "Reactor: every waiting erasure request was stopped",
                 [name + " stopped every waiting request to erase customers' records (" + str(n) + "), as",
                  "nobody asked for them. Change the app's secret, and give Reactor the new one."]))
@@ -162,7 +162,7 @@ def register(mcp, registry):
                 last = privacy._redact_hold_said.get("stopped")
                 if last is None or time.monotonic() - last >= 6 * 3600:
                     privacy._redact_hold_said["stopped"] = time.monotonic()
-                    core._spawn_bg(scheduler._send_alert_email(
+                    background.spawn(scheduler._send_alert_email(
                         "Reactor: an erasure request was stopped as not asked for",
                         [name + " stopped a request to erase a customer's records, as nobody asked for it.",
                          "Only someone holding the app's secret can send one that did not come from",

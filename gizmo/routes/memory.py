@@ -5,7 +5,6 @@ import logging
 from starlette.requests import Request
 from gizmo import store as jsonstore
 
-import copilot as core
 from gizmo import memory
 from gizmo import activity
 from gizmo import gate

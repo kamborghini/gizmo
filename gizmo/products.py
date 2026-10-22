@@ -139,6 +139,5 @@ async def run_products_list(registry: dict, months_window: Optional[int] = None)
 
 # Last, so this module is whole before copilot.py or a sibling runs: copilot.py
 # takes names from these modules as it loads, and any of them may be imported
-# first. Read as core.NAME and sibling.NAME, never a copied name.
+# first. Read as sibling.NAME, never a copied name.
 from gizmo import orderbook  # noqa: E402
-import copilot as core  # noqa: E402

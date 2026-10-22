@@ -738,9 +738,8 @@ _CURRENCY_SIGNS = {"GBP": "£", "USD": "$", "EUR": "€"}
 
 # Last, so this module is whole before copilot.py or a sibling runs: copilot.py
 # takes names from these modules as it loads, and any of them may be imported
-# first. Read as core.NAME and sibling.NAME, never a copied name.
+# first. Read as sibling.NAME, never a copied name.
 from gizmo import production  # noqa: E402
 from gizmo import prompts  # noqa: E402
-import copilot as core  # noqa: E402
 from gizmo import products as catalog  # noqa: E402
 from gizmo import chat as assistant  # noqa: E402

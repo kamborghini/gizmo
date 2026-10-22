@@ -322,10 +322,10 @@ can leave a test testing nothing. The guards below make that a failure, and
    split out of it; every check that reads the code reads it through there
    (`t_nothing_reads_copilot_py_by_name`), and both security scans cover the
    package. `t_the_split_modules_read_no_unbound_name` catches a name left
-   behind on a path no test drives; `t_either_module_imports_first` the
-   import order; each area's borrowed list (`t_what_dispatch_borrows`) names
-   exactly what it still reads from `copilot.py`, and each later move
-   shortens it. A check that walks module names (the backup's reach,
+   behind on a path no test drives; `t_any_module_imports_first` the
+   import order; `t_only_the_stock_bridge_reads_copilot` that nothing but
+   the stock bridge's readers still reads `copilot.py`. A check that walks
+   module names (the backup's reach,
    `t_backup_is_exhaustive_by_construction`; the clocks, `_every_clock`)
    walks every module in `tools/sources.py`, or each move quietly takes
    names out of it.

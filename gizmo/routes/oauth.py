@@ -10,7 +10,6 @@ import google_mail
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
-import copilot as core
 from gizmo import gate
 from gizmo import oauth
 

@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from gizmo.config import _env_num
 from gizmo import store as jsonstore
 from gizmo import shopify
+from gizmo import background
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
@@ -744,8 +745,6 @@ def _crm_link_order_customer(order: dict) -> None:
         jsonstore._forget_store(CRM_PATH)   # a half-made change must not be served
 
 
-_crm_bg_tasks: set = set()
-
 
 async def _crm_link_order_later(body_txt: str) -> None:
     """Link an arriving order's customer AFTER the webhook has been answered,
@@ -767,7 +766,7 @@ async def _crm_link_order_later(body_txt: str) -> None:
 
 
 def _crm_link_order_soon(body_txt: str) -> None:
-    core._spawn_bg(_crm_link_order_later(body_txt))
+    background.spawn(_crm_link_order_later(body_txt))
 
 
 def _crm_erase_links(d: dict, pids: set, orgs_touched=()) -> tuple:
@@ -1275,10 +1274,9 @@ def _crm_import_apply(d: dict, data: dict, dry: bool) -> dict:
 
 # Last, so this module is whole before copilot.py or a sibling runs: copilot.py
 # takes names from these modules as it loads, and any of them may be imported
-# first. Read as core.NAME and sibling.NAME, never a copied name.
+# first. Read as sibling.NAME, never a copied name.
 from gizmo import activity  # noqa: E402
 from gizmo import gate  # noqa: E402
 from gizmo import mail  # noqa: E402
 from gizmo import team  # noqa: E402
-import copilot as core  # noqa: E402
 from gizmo import privacy  # noqa: E402
