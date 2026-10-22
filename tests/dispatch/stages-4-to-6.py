@@ -723,6 +723,11 @@ def t_a_body_model_checks_only_what_it_names():
         eq(bd.refusal(M, {k: 10 ** 400}), "The %s sent must be %s." % (k, words[k]),
            "a number past any float is refused, not raised as a server error")
     eq(bd.refusal(M, {"amount": "1" * 400}), "The amount sent must be a number.", "and so is its text")
+    for v in (2 ** 53 + 1, -(2 ** 53) - 1, 1e300, "9" * 17):
+        eq(bd.refusal(M, {"count": v}), "The count sent must be a whole number.",
+           "a whole number past what a browser can send exactly is refused: %r" % (v,))
+    for v in (2 ** 53, 6123456789012, "9007199254740992", 7.5):
+        eq(bd.refusal(M, {"count": v}), None, "and one it can send is taken: %r" % (v,))
 
     class R(bd.Body):
         messages: bd.Records = None
@@ -1494,3 +1499,18 @@ def t_backups_never_carry_the_xero_or_accounts_mailbox_token_or_the_reconciliati
     with_accounts(go)
 
 
+@test
+def t_a_body_the_door_refuses_spends_no_ai_slot():
+    """The AI window is the app's dearest shared resource, and the door takes a
+    slot only for a request that will run. It took one before reading the body,
+    so a request refused for a field of the wrong kind still spent a slot
+    (stage 5's review): enough of them would keep the assistant busy for
+    everyone. The body is now read and checked first."""
+    h = {"Authorization": "Bearer " + tok(), "X-App-Session": ensure_auth()}
+    gate._rl_hits.clear(); gate._rl_global.clear()
+    for _ in range(3):
+        r = client.post("/api/chat", json={"messages": "not a list"}, headers=h)
+        eq(r.status_code, 400, r.text)
+    eq(len(gate._rl_global), 0, "no AI slot spent on a body the door refused")
+    r = client.post("/api/skills/read", json={"id": {"wrong": 1}}, headers=h)
+    eq((r.status_code, len(gate._rl_global)), (400, 0), "nor on reading a skill")

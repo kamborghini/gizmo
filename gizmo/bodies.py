@@ -61,12 +61,24 @@ def _number_text(v) -> bool:
 
 
 _WHOLE_TEXT = re.compile(r"\s*[+-]?\d{1,30}\s*")      # int() refuses text past 4,300 digits
+# The largest whole number a browser sends exactly: JSON.stringify of a bigger
+# one is already rounded, and a route that does sums or dates with one (a
+# number of months, a number of days) overflows on the way.
+_SAFE_WHOLE = 2 ** 53
+
+
+def _whole(v) -> bool:
+    if v == "":
+        return True          # an empty box: the route reads it as nothing
+    if isinstance(v, str):
+        return bool(_WHOLE_TEXT.fullmatch(v)) and abs(int(v)) <= _SAFE_WHOLE
+    return _number(v) and abs(v) <= _SAFE_WHOLE
 
 # The kinds. Each takes what the page sends today: a number typed in a box
 # arrives as text, and an id may be text or a number (Shopify's are numbers).
 Text = _kind("text", lambda v: isinstance(v, str))
 Id = _kind("text or a number", lambda v: isinstance(v, str) or (_number(v) and float(v).is_integer()))
-Whole = _kind("a whole number", lambda v: _number(v) or v == "" or (isinstance(v, str) and bool(_WHOLE_TEXT.fullmatch(v))))
+Whole = _kind("a whole number", _whole)
 Number = _kind("a number", lambda v: _number(v) or _number_text(v))
 Flag = _kind("yes or no", lambda v: isinstance(v, bool) or (isinstance(v, int) and v in (0, 1)))
 Items = _kind("a list", lambda v: isinstance(v, list))

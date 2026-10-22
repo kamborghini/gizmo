@@ -942,3 +942,43 @@ def t_a_long_thread_lists_its_newest_attachments():
     ok("proof-v6-4.pdf" in names and "proof-v1-1.pdf" not in names, names[-3:])
 
 
+
+
+@test
+def t_a_capped_page_read_closes_what_it_left():
+    """A read that stops at its cap leaves the loop over a stream's chunks; the
+    running loop closes what is left. The suite's run_async closed its own loop
+    without doing so (asyncio.run does), so that close was dropped and every
+    suite run warned of a coroutine never awaited: the last line of noise the
+    quiet suite left. run_async now closes the loop's async generators first,
+    as asyncio.run does. The keyword scan that first showed it went with the
+    report tabs (22 Oct 2026), so a stream of the same shape stands in."""
+    import gc, warnings
+    closed = []
+
+    async def chunks():
+        try:
+            for _ in range(8):
+                yield b"x" * 1024
+        finally:
+            await asyncio.sleep(0)      # a close that needs the loop, as a response's does
+            closed.append(True)
+
+    async def read_capped(cap):
+        got = b""
+        async for c in chunks():
+            got += c
+            if len(got) >= cap:
+                break                   # the cap: what is left is the loop's to close
+        return got
+
+    with warnings.catch_warnings(record=True) as seen:
+        warnings.simplefilter("always")
+        text = run_async(read_capped(2048))
+        eq(closed, [True], "the stream's close ran before run_async gave its loop up")
+        gc.collect()
+        run_async(asyncio.sleep(0))
+        gc.collect()
+    eq(len(text), 2048)
+    eq([str(w.message) for w in seen if "never awaited" in str(w.message)], [],
+       "nothing is left for the loop to finalise")

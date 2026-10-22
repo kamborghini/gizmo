@@ -17,8 +17,8 @@ browser ──► server.build_app()
             gizmo/routes/<area>.py   register(mcp, registry): the area's routes
               │
               │  _guard(request)     the one door: rate window, tab gate, session,
-              │                      rank, the AI slot, the body, the body's
-              │                      fields (model=) - in that order
+              │                      rank, the body and its fields (model=),
+              │                      the AI slot - in that order
               ▼
             a domain function       decides; never parses a request, never talks HTTP
               │
