@@ -141,3 +141,21 @@ def t_the_nightly_stock_job_waits_for_the_move():
     _stock_live(live=False)
     ok(not stock_backups.nightly_tick(_dt.fromisoformat("2026-07-01T01:00:00+00:00")))
     eq(stock_store.read_snapshots(), [])
+
+# ---- the final review's findings, pinned ---------------------------------------------
+
+@test
+def t_no_stock_backup_is_made_before_the_move():
+    _stock_live(live=False)
+    r, d = _stock_backup("make")
+    eq(r.status_code, 409, r.text)
+    eq(glob.glob(SCRATCH + "/stock_backup_*"), [], "nothing written that could meet the converted backups")
+
+@test
+def t_stock_backups_are_owner_only():
+    """They hold the supplier contacts, which are kept owner-only."""
+    _stock_with_details()
+    _stock_backup("make")
+    paths = glob.glob(SCRATCH + "/stock_backup_*")
+    ok(paths, "a backup was written")
+    eq({os.stat(p).st_mode & 0o777 for p in paths}, {0o600})

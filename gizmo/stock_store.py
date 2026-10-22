@@ -344,7 +344,8 @@ def write_backup(backup: dict) -> str:
     """One backup, one file; returns its path."""
     stamp = _instant(backup["at"]).strftime("%Y%m%d-%H%M%S")
     path = f"{STOCK_BACKUP_PREFIX}{stamp}-{backup['id']}.json"
-    jsonstore._write_json_store(path, None, backup)
+    # Owner-only: a backup holds the supplier contacts, which are kept so.
+    jsonstore._write_json_store(path, None, backup, private=True)
     return path
 
 

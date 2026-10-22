@@ -59,6 +59,10 @@ def _prune(now: datetime) -> int:
 def make_backup(who: dict) -> dict:
     with stock._lock:
         st = stock.state()
+        if not st["settings"].get("live_since"):
+            # Checked before anything is written: a backup made ahead of the
+            # move would take a number the converted backups need.
+            raise stock.Refused(409, "Stock has not moved into Reactor yet.")
         items = stock.items_in_order(st["items"])
         now = datetime.now(timezone.utc)
         content = {"items": items, "suppliers": st["suppliers"].get("suppliers") or [],

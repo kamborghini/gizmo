@@ -62,9 +62,10 @@ def edit(uid: str, item_id, changes: dict, seen: dict, as_count: bool) -> dict:
                     409, f"{stock.FIELD_WORDS[field]} on this line was changed to {it[field]} since you "
                          "opened it, by someone else or another screen. Check it and save again.",
                     {"item": _view(it)})
-        rows, before = [], it["current"]
+        rows, before, renamed = [], it["current"], False
         for field, value in wanted.items():
             if it[field] != value:
+                renamed = renamed or field in stock.IDENTITY
                 rows.append(stock.history_row(
                     who, "update", item_key=it["key"], field=field, old=it[field], new=value,
                     detail="counted" if (as_count and field == "current") else "manual edit"))
@@ -74,7 +75,9 @@ def edit(uid: str, item_id, changes: dict, seen: dict, as_count: bool) -> dict:
             if drop > 0 and it["used"] + drop <= stock.INT_MAX:
                 rows.append(_usage_row(who, it, drop))
         new_key = stock.item_key(*(it[f] for f in stock.IDENTITY))
-        if any(f in wanted for f in stock.IDENTITY) and new_key != it["key"]:
+        # Only a real change to its name renames a line: an unchanged size sent
+        # with the row would otherwise "rename" a |#2 line onto its twin.
+        if renamed and new_key != it["key"]:
             if any(o["key"] == new_key and o["id"] != it["id"] for o in st["items"]["items"].values()):
                 raise stock.Refused(409, "Another stock line already has that category, colour, size and notes.")
             rows.append(stock.history_row(who, "update", item_key=new_key, field="key", old=it["key"],

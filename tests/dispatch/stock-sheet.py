@@ -373,3 +373,14 @@ def t_stock_export_guards_against_spreadsheet_formulas():
     csv = _stock("export", ids=[9])[1]["csv"]
     ok(",'=SUM(A1)," in csv, csv)
     eq(len([l for l in csv.split("\n") if l.startswith("Glass")]), 1, "only the lines asked for")
+
+# ---- the final review's findings, pinned ---------------------------------------------
+
+@test
+def t_a_stock_edit_carrying_its_unchanged_size_is_not_refused():
+    """A page that sends the whole row sends the size unchanged; a line whose
+    key carries "|#2" must still save."""
+    _stock_live()
+    r, d = _stock("edit", id=7, changes={"current": 1, "size": "20", "category": "Glass"})
+    eq(r.status_code, 200, r.text)
+    eq((d["item"]["current"], d["item"]["key"]), (1, "Glass|Blue|20||#2"))
