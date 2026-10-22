@@ -478,7 +478,10 @@ def _master_reset_check(d: dict) -> None:
 # Tab access: which parts of the app an account may open. None means all.
 # The master is never restricted. Enforcement is central (in _pre_checks) via
 # this path map, so hiding a tab in the page is never the only lock.
-TAB_KEYS = ("overview", "seo", "keywords", "products", "customers", "liability",
+# "customers" is no longer a tab (the Customers report went on 22 Oct 2026):
+# it is the customer-details permission, which Labels' order history, Chat's
+# order and customer reads and the CRM's and Inbox's Shopify lookups check.
+TAB_KEYS = ("customers", "liability",
             "crm", "loans", "mail", "files", "labels", "sizes", "memory", "skills", "chat",
             "recon", "forecast", "connector")
 

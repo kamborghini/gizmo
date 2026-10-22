@@ -8,7 +8,6 @@ import glob
 import os
 import json
 from datetime import datetime, timedelta, timezone
-import google_data
 import google_mail
 import xero as xero_api
 from gizmo.config import _env_num
@@ -32,6 +31,18 @@ BACKUP_KEEP = 4
 # must not be the thing that quietly stops including it.
 BACKUP_FILE_MAX = _env_num(int, os.environ.get("BACKUP_FILE_MAX", str(60 * 1024 * 1024)), str(60 * 1024 * 1024), "BACKUP_FILE_MAX")
 
+# Files of removed features that can still sit on the volume until somebody
+# deletes them: old sign-ins' refresh tokens (never in a backup, like every
+# credential) and stores nothing reads or scrubs any more. A backup leaves
+# them out and a restore refuses them. Named from the settings the removed
+# code read, with its defaults, so an overridden path is still caught.
+_RETIRED_FILES = frozenset(os.path.basename(os.environ.get(k, d)) for k, d in (
+    # The report tabs and the Google data sign-in (22 Oct 2026).
+    ("GOOGLE_OAUTH_TOKEN_PATH", "/data/google_oauth.json"),
+    ("ANALYSIS_CACHE_PATH", "/data/analysis_cache.json"),
+    ("SCHEDULE_PATH", "/data/schedule.json"),
+))
+
 
 def _build_backup_zip():
     """(BytesIO, files_added). Everything restorable, credentials excluded."""
@@ -41,7 +52,6 @@ def _build_backup_zip():
     # Never export credentials, and give the two roots distinct prefixes so the
     # repo-seed sheet cannot shadow the live uploaded one on restore.
     secrets_excluded = {
-        os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json")),
         os.path.basename(getattr(google_mail, "TOKEN_PATH", "gmail_oauth.json")),
         os.path.basename(getattr(xero_api, "TOKEN_PATH", "xero_oauth.json")),
         os.path.basename(getattr(google_mail, "FINANCE_TOKEN_PATH", "gmail_finance_oauth.json")),
@@ -56,7 +66,7 @@ def _build_backup_zip():
         # the CRM and the inbox, and a restore without it would leave the
         # forecast without its cash flow until somebody uploaded it again.
         os.path.basename(team.SESSIONS_PATH),
-    }
+    } | _RETIRED_FILES
     buf = io.BytesIO()
     added = 0
     included, skipped = [], []

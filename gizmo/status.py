@@ -7,7 +7,6 @@ import logging
 import os
 import json
 import time
-import google_data
 import google_mail
 import xero as xero_api
 import tokenvault
@@ -70,7 +69,6 @@ def token_vault_state() -> dict:
     stores = [
         ("Gmail, sales", google_mail.TOKEN_PATH, "refresh_token"),
         ("Gmail, finance", google_mail.FINANCE_TOKEN_PATH, "refresh_token"),
-        ("Google data", google_data.OAUTH_TOKEN_PATH, "refresh_token"),
         ("Xero", xero_api.TOKEN_PATH, "refresh_token"),
     ]
     sealed, plain, present = [], [], 0
@@ -121,7 +119,6 @@ def reseal_secrets_at_rest() -> dict:
     files = [
         ("gmail_sales", google_mail.TOKEN_PATH, ("refresh_token",)),
         ("gmail_finance", google_mail.FINANCE_TOKEN_PATH, ("refresh_token",)),
-        ("google_data", google_data.OAUTH_TOKEN_PATH, ("refresh_token",)),
         ("xero", xero_api.TOKEN_PATH, ("refresh_token",)),
         ("world_options", desk.WO_SECRET_PATH, ("meter", "key", "password")),
     ]

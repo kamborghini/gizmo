@@ -50,7 +50,6 @@ import jwt
 import eori
 import perf
 import pagesource
-import google_data
 import mailmime
 import google_mail
 import recon as recon_engine
@@ -124,12 +123,8 @@ from gizmo import chat as assistant
 from gizmo.routes import skills as routes_skills
 from gizmo.routes import memory as routes_memory
 from gizmo.routes import knowledge as routes_knowledge
-# Moved out of this file (stage 4): the AI's instructions, SEO and keywords, and the overview and customer reports, with their routes.
+# Moved out of this file (stage 4): the AI's instructions. (SEO and keywords and the overview and customer reports were removed on 22 Oct 2026.)
 from gizmo import prompts
-from gizmo import seo
-from gizmo import analytics
-from gizmo.routes import seo as routes_seo
-from gizmo.routes import analytics as routes_analytics
 # Moved out of this file (stage 4): the scheduler and alerts, release notes and requests, impact tracking and backup, with their routes.
 from gizmo import scheduler
 from gizmo import updates
@@ -161,9 +156,6 @@ from gizmo.routes import oauth as routes_oauth
 from gizmo.routes import status as routes_status
 # Moved out of this file (stage 4): the London clock, which the whole app reads.
 from gizmo import clock
-# Moved out of this file (stage 4): the Products tab.
-from gizmo import products as catalog
-from gizmo.routes import products as routes_products
 # Moved out of this file (stage 4): the chat's, the stream's and the usage panel's routes.
 from gizmo import config
 from gizmo.routes import chat as routes_chat
@@ -679,8 +671,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     shopify._payment_terms_writer = payment_terms_writer
     shopify._order_writer = order_writer
     desk._wo_boot()
-    # Shopify tools + live SEO tools + Google data tools (the last only if configured)
-    chat_registry = {**registry, **seo._build_seo_tools(registry), **seo._build_google_tools(),
+    # The Shopify tools and the reconciliation's.
+    chat_registry = {**registry,
                      "recon_summary": (reconciliation.recon_summary, reconciliation.ReconEmptyInput),
                      "recon_exceptions": (reconciliation.recon_exceptions, reconciliation.ReconExceptionsInput),
                      "recon_exception": (reconciliation.recon_exception, reconciliation.ReconExceptionInput)}
@@ -753,17 +745,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     # The chat's routes (gizmo/routes/chat.py), gathered where the first stood.
     routes_chat.register(mcp, registry)
 
-    # The report routes (gizmo/routes/analytics.py), gathered where the first stood.
-    routes_analytics.register(mcp, registry)
-
     # The store profile's route (gizmo/routes/profile.py).
     routes_profile.register(mcp, registry)
 
     # The layouts route (gizmo/routes/layouts.py).
     routes_layouts.register(mcp, registry)
-
-    # The SEO and keyword routes (gizmo/routes/seo.py), gathered where the first stood.
-    routes_seo.register(mcp, registry)
 
     # The memory route (gizmo/routes/memory.py).
     routes_memory.register(mcp, registry)
@@ -1317,9 +1303,6 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                "new Promise(function(r){setTimeout(r,2000);})]).then(fit,fit);}})();</script>"
                + "</body></html>")
         return HTMLResponse(doc, headers=doc_headers)
-
-    # The Products tab's routes (gizmo/routes/products.py), gathered where the first stood.
-    routes_products.register(mcp, registry)
 
     # The reconciliation routes and the Xero connect pair (gizmo/routes/reconciliation.py), gathered where the first stood.
     routes_reconciliation.register(mcp, registry)

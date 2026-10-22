@@ -15,25 +15,6 @@
   "source": "static/src/js/alerts.js:34"
  },
  {
-  "path": "/api/schedule",
-  "body": {
-   "config": {
-    "enabled": true,
-    "every_hours": 24
-   }
-  },
-  "source": "static/src/js/settings.js:734"
- },
- {
-  "path": "/api/schedule",
-  "body": {
-   "config": {
-    "every_hours": 168
-   }
-  },
-  "source": "static/src/js/settings.js:743"
- },
- {
   "path": "/api/auth/login",
   "body": {
    "username": "cameron",
@@ -235,36 +216,6 @@
    "confirm_booked": true
   },
   "source": "static/src/js/dispatch.js:516"
- },
- {
-  "path": "/api/customers",
-  "body": {
-   "segment": "trade",
-   "fresh": false
-  },
-  "source": "static/src/js/customers.js:182"
- },
- {
-  "path": "/api/keyword-scan",
-  "body": {
-   "url": "https://www.The Shop.com/products/led-gobo-projector"
-  },
-  "source": "static/src/js/keywords.js:137"
- },
- {
-  "path": "/api/products",
-  "body": {
-   "months": 24,
-   "fresh": true
-  },
-  "source": "static/src/js/products.js:67"
- },
- {
-  "path": "/api/product",
-  "body": {
-   "product_id": 8123456789012
-  },
-  "source": "static/src/js/products.js:350"
  },
  {
   "path": "/api/profile",
@@ -1755,13 +1706,6 @@
    "status": "done"
   },
   "source": "static/src/js/memory.js:545"
- },
- {
-  "path": "/api/overview",
-  "body": {
-   "fresh": true
-  },
-  "source": "static/src/js/overview.js:48"
  },
  {
   "path": "/api/privacy",

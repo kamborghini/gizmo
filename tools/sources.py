@@ -33,7 +33,7 @@ def copilot_files(root=ROOT):
 COPILOT_FILES = copilot_files()
 
 APP_MODULES = ["server.py", "copilot.py", "pagesource.py", "perf.py",
-               "google_mail.py", "google_data.py", "xero.py", "worldoptions.py",
+               "google_mail.py", "xero.py", "worldoptions.py",
                "recon.py", "mailmime.py", "eori.py", "pipedrive.py",
                "tokenvault.py", "logdrain.py", "totp.py"] + _package()
 

@@ -3,7 +3,7 @@
 Generated from the code by `tools/route_reference.py`; do not edit by hand.
 `make api-doc` rewrites it, and CI fails when it is stale.
 
-151 routes. **Tab** is the tab that opens a route (`_TAB_ROUTES`); an `/api/` route no tab claims is refused unless it is on `_OPEN_API`. **Door** is the guard the handler opens with (`_guard` is the one door: rate window, tab, session, rank, AI slot, body); `own check` means the route authenticates itself (a hook, a webhook, OAuth, print, assets). **Body** is the model that checks the fields the route reads (`gizmo/bodies.py`); `unchecked` means it reads fields no model checks yet. **Checks** are the permission helpers the handler calls itself.
+138 routes. **Tab** is the tab that opens a route (`_TAB_ROUTES`); an `/api/` route no tab claims is refused unless it is on `_OPEN_API`. **Door** is the guard the handler opens with (`_guard` is the one door: rate window, tab, session, rank, AI slot, body); `own check` means the route authenticates itself (a hook, a webhook, OAuth, print, assets). **Body** is the model that checks the fields the route reads (`gizmo/bodies.py`); `unchecked` means it reads fields no model checks yet. **Checks** are the permission helpers the handler calls itself.
 
 ## `/`
 
@@ -34,12 +34,6 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
 | `/api/backup` | POST | any account | `_guard` | reads its own body |  | `_team_role` | `gizmo.routes.backup.backup_route` | Everything the app has learned lives as files on one volume; this hands the merchant a zip of it. |
-
-## `/api/cache`
-
-| Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
-|---|---|---|---|---|---|---|---|---|
-| `/api/cache` | POST | any account | `_guard` | reads its own body |  | `_user_tabs` | `gizmo.routes.analytics.cache_route` |  |
 
 ## `/api/chat`
 
@@ -81,18 +75,6 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
 | `/api/customer-history` | POST | customers or crm | `_guard` |  | `CustomerHistoryBody` |  | `gizmo.routes.orderbook.customer_history_route` |  |
-
-## `/api/customer-tags`
-
-| Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
-|---|---|---|---|---|---|---|---|---|
-| `/api/customer-tags` | POST | customers | `_guard` | reads its own body |  |  | `gizmo.routes.analytics.customer_tags_route` |  |
-
-## `/api/customers`
-
-| Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
-|---|---|---|---|---|---|---|---|---|
-| `/api/customers` | POST | customers | `_guard` | AI slot | `CustomersBody` |  | `gizmo.routes.analytics.customers_route` |  |
 
 ## `/api/dispatch`
 
@@ -148,18 +130,6 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
 | `/api/impact` | POST | memory | `_guard` |  | `ImpactBody` | `_team_level` | `gizmo.routes.impact.impact_route` |  |
-
-## `/api/keyword-scan`
-
-| Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
-|---|---|---|---|---|---|---|---|---|
-| `/api/keyword-scan` | POST | keywords | `_guard` | AI slot | `KeywordScanBody` |  | `gizmo.routes.seo.keyword_scan_route` |  |
-
-## `/api/keywords`
-
-| Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
-|---|---|---|---|---|---|---|---|---|
-| `/api/keywords` | POST | keywords | `_guard` | AI slot |  |  | `gizmo.routes.seo.keywords_route` |  |
 
 ## `/api/layouts`
 
@@ -234,23 +204,11 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 |---|---|---|---|---|---|---|---|---|
 | `/api/order/edit` | POST | labels | `_guard` | reads its own body | `OrderEditBody` | `_live_uid`, `_team_level` | `gizmo.routes.orderbook.order_edit_route` | Read or change the delivery address and contact details on a placed order. |
 
-## `/api/overview`
-
-| Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
-|---|---|---|---|---|---|---|---|---|
-| `/api/overview` | POST | overview | `_guard` | AI slot | `OverviewBody` |  | `gizmo.routes.analytics.overview` |  |
-
 ## `/api/privacy`
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
 | `/api/privacy` | POST | any account | `_guard` | rank admin | `PrivacyBody` |  | `gizmo.routes.privacy.privacy_requests_route` | Settings, Privacy requests: the customer erasures Shopify asked for, each waiting for an admin to erase or stop (see _redact_hold), and the data requests to ... |
-
-## `/api/product`
-
-| Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
-|---|---|---|---|---|---|---|---|---|
-| `/api/product` | POST | products | `_guard` | AI slot | `ProductBody` |  | `gizmo.routes.products.product_route` |  |
 
 ## `/api/production-labels`
 
@@ -266,12 +224,6 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
 | `/api/production-state` | POST | labels | `_guard` |  | `ProductionStateBody` |  | `gizmo.routes.production.production_state_route` |  |
-
-## `/api/products`
-
-| Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
-|---|---|---|---|---|---|---|---|---|
-| `/api/products` | POST | products | `_guard` |  | `ProductsBody` |  | `gizmo.routes.products.products_route` |  |
 
 ## `/api/profile`
 
@@ -291,29 +243,11 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 | `/api/recon/sweep` | POST | recon | `_guard` | rank admin, AI slot |  |  | `gizmo.routes.reconciliation.recon_sweep_route` |  |
 | `/api/recon/xero-link` | POST | recon | `_guard` | reads its own body |  | `_team_role` | `gizmo.routes.reconciliation.recon_xero_link_route` | Master-only: a single-use ticket for the Xero consent walk. |
 
-## `/api/reorder-radar`
-
-| Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
-|---|---|---|---|---|---|---|---|---|
-| `/api/reorder-radar` | POST | customers | `_guard` |  |  |  | `gizmo.routes.analytics.reorder_radar_route` |  |
-
 ## `/api/restore`
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
 | `/api/restore` | POST | any account | `_guard` | max body big, reads its own body | `RestoreBody` | `_team_role` | `gizmo.routes.backup.restore_route` | Master-only: put a downloaded backup zip back onto the volume. |
-
-## `/api/schedule`
-
-| Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
-|---|---|---|---|---|---|---|---|---|
-| `/api/schedule` | POST | any account | `_guard` |  | `ScheduleBody` | `_team_level` | `gizmo.routes.scheduler.schedule_route` |  |
-
-## `/api/seo`
-
-| Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
-|---|---|---|---|---|---|---|---|---|
-| `/api/seo` | POST | seo | `_guard` | AI slot |  |  | `gizmo.routes.seo.seo_route` |  |
 
 ## `/api/shipping`
 
@@ -333,7 +267,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
-| `/api/status` | POST | any account | `_guard` | reads its own body |  | `_team_role` | `gizmo.routes.status.status_route` | Connection-health summary for the Settings panel: Shopify, AI, and Google. |
+| `/api/status` | POST | any account | `_guard` | reads its own body |  | `_team_role` | `gizmo.routes.status.status_route` | Connection-health summary for the Settings panel: Shopify, AI, the mailbox and more. |
 
 ## `/api/stock-usage`
 
@@ -422,8 +356,6 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 | `/oauth/gmail-finance/start` | GET | outside the tab map | own check |  |  | `_secret_ok` | `gizmo.routes.oauth.gmail_finance_start` |  |
 | `/oauth/gmail/callback` | GET | outside the tab map | own check |  |  |  | `gizmo.routes.mail.gmail_callback` |  |
 | `/oauth/gmail/start` | GET | outside the tab map | own check |  |  |  | `gizmo.routes.mail.gmail_start` |  |
-| `/oauth/google/callback` | GET | outside the tab map | own check |  |  |  | `gizmo.routes.oauth.google_callback` |  |
-| `/oauth/google/start` | GET | outside the tab map | own check |  |  |  | `gizmo.routes.oauth.google_start` |  |
 | `/oauth/xero/callback` | GET | outside the tab map | own check |  |  |  | `gizmo.routes.reconciliation.xero_callback` |  |
 | `/oauth/xero/start` | GET | outside the tab map | own check |  |  | `_secret_ok` | `gizmo.routes.reconciliation.xero_start` |  |
 

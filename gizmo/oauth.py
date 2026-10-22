@@ -1,7 +1,7 @@
-"""The sign-in walks: the one-time states, the redirect address and the page
+"""The sign-in walks: the one-time states and the page
 every walk answers with (the inbox's and Xero's walks read them from here),
 and the accounts mailbox's tickets. Moved out of copilot.py (stage 4 of the
-14 October audit); the Google and accounts-mailbox walks' routes are in
+14 October audit); the accounts-mailbox walk's routes are in
 gizmo/routes/oauth.py. Read as `oauth.NAME`.
 """
 import logging
@@ -18,19 +18,10 @@ _oauth_states: dict[str, float] = {}
 
 # ---------------------------------------------------------------------------
 # The sign-in walks: the accounts mailbox's tickets and states, held in memory,
-# the redirect address and the page every walk answers with.
+# and the page every walk answers with.
 # ---------------------------------------------------------------------------
 _fin_connect_tickets: dict = {}      # ticket -> its expiry and the address asked for (the ACCOUNTS mailbox)
 _fin_expect: dict = {}               # state nonce -> the address that was asked for
-
-# ----- Google OAuth connect flow (one-time, secret-gated) -------------
-def _redirect_uri(request: Request) -> str:
-    # Prefer a configured public base URL (must match the URI registered in
-    # Google Cloud) over the attacker-controllable Host header.
-    if config.APP_BASE_URL:
-        return config.APP_BASE_URL.rstrip("/") + "/oauth/google/callback"
-    host = request.headers.get("host", "")
-    return f"https://{host}/oauth/google/callback"
 
 def _oauth_page(title: str, msg: str) -> HTMLResponse:
     # Escape both inputs (any reflected query value is neutralized) and ship a

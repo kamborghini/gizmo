@@ -6,7 +6,6 @@ import logging
 import time
 import secrets
 from datetime import datetime, timezone
-import google_data
 import google_mail
 import recon as recon_engine
 import xero as xero_api
@@ -16,6 +15,7 @@ from starlette.responses import PlainTextResponse
 import copilot as core
 from gizmo import oauth
 from gizmo import activity
+from gizmo import config
 from gizmo import gate
 from gizmo import mail
 from gizmo import orderbook
@@ -78,7 +78,7 @@ def register(mcp, registry):
         # secret into a browser bar never was either.
         ticket = request.query_params.get("t", "")
         tx = reconciliation._xero_connect_tickets.pop(ticket, None) if ticket else None
-        by_secret = gate._secret_ok(request.query_params.get("key", ""), google_data.CONNECT_SECRET)
+        by_secret = gate._secret_ok(request.query_params.get("key", ""), config.CONNECT_SECRET)
         if not ((tx is not None and tx > time.time()) or by_secret):
             return PlainTextResponse("Forbidden", status_code=403, headers=gate._API_HEADERS)
         now = time.time()

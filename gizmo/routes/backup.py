@@ -9,7 +9,6 @@ import base64
 import asyncio
 from datetime import datetime, timezone
 import perf
-import google_data
 import google_mail
 import xero as xero_api
 from starlette.requests import Request
@@ -73,11 +72,10 @@ def register(mcp, registry):
         # Only what the backup itself writes, and never live credentials or
         # sessions: the same exclusions the backup applies, applied again.
         blocked = {os.path.basename(desk.WO_SECRET_PATH), os.path.basename(team.SESSIONS_PATH),
-                   os.path.basename(getattr(google_data, "OAUTH_TOKEN_PATH", "google_oauth.json")),
                    os.path.basename(getattr(google_mail, "TOKEN_PATH", "gmail_oauth.json")),
                    os.path.basename(getattr(xero_api, "TOKEN_PATH", "xero_oauth.json")),
                    os.path.basename(getattr(google_mail, "FINANCE_TOKEN_PATH",
-                                            "gmail_finance_oauth.json"))}
+                                            "gmail_finance_oauth.json"))} | backup._RETIRED_FILES
         # (name, target_dir) for every restorable entry; everything else named
         # in the manifest as skipped, so nothing ever vanishes silently.
         todo, skipped = [], []

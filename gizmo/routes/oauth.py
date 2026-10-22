@@ -1,16 +1,16 @@
-"""The Google and accounts-mailbox sign-in walks: start and callback for each.
+"""The accounts-mailbox sign-in walk: start and callback.
 Gathered from add_routes (stage 4 of the 14 October audit) where the first
 stood; their paths are literal, so no request changes hands.
 """
 import logging
 import time
 import secrets
-import google_data
 import google_mail
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
 import copilot as core
+from gizmo import config
 from gizmo import gate
 from gizmo import oauth
 
@@ -19,61 +19,7 @@ logger = logging.getLogger("shopify_mcp.copilot")
 
 
 def register(mcp, registry):
-    """Add the Google and accounts-mailbox sign-in walks to the app."""
-
-    @mcp.custom_route("/oauth/google/start", methods=["GET"])
-    async def google_start(request: Request):
-        if not gate._window_ok(gate._rl_hits.setdefault("oauth:" + gate._client_key(request), []), gate.RATE_MAX_CLIENT, time.monotonic()):
-            return PlainTextResponse("Too many requests", status_code=429, headers=gate._API_HEADERS)
-        if not google_data.oauth_client_configured():
-            return oauth._oauth_page("Not configured", "Add Google's client ID and secret in the app's hosting settings first.")
-        key = request.query_params.get("key", "")
-        if not (google_data.CONNECT_SECRET and key and
-                secrets.compare_digest(key, google_data.CONNECT_SECRET)):
-            return PlainTextResponse("Forbidden", status_code=403, headers=gate._API_HEADERS)
-        now = time.time()
-        for s, exp in list(oauth._oauth_states.items()):  # prune expired
-            if exp < now:
-                oauth._oauth_states.pop(s, None)
-        state = secrets.token_urlsafe(24)
-        oauth._oauth_states[state] = now + 900  # 15-minute TTL
-        from starlette.responses import RedirectResponse
-        return RedirectResponse(google_data.consent_url(oauth._redirect_uri(request), state), status_code=302)
-
-    @mcp.custom_route("/oauth/google/callback", methods=["GET"])
-    async def google_callback(request: Request):
-        qp = request.query_params
-        if qp.get("error"):
-            return oauth._oauth_page("Connection cancelled", f"Google returned: {qp.get('error')}")
-        state = qp.get("state", "")
-        exp = oauth._oauth_states.pop(state, None)  # single-use
-        if not state or exp is None or exp < time.time():
-            return oauth._oauth_page("Link expired", "That connect link expired or was already used. Start again.")
-        code = qp.get("code", "")
-        if not code:
-            return oauth._oauth_page("Connection failed", "No authorization code returned.")
-        try:
-            got = await google_data.exchange_code(code, oauth._redirect_uri(request))
-        except Exception:
-            logger.exception("Google OAuth exchange error")
-            got = {"ok": False, "granted": {}}
-        granted = got.get("granted") or {}
-        names = {"gsc": "Search Console", "ga4": "Analytics"}
-        left = [names[k] for k in ("gsc", "ga4") if granted.get(k) is False]
-        if not got.get("ok"):
-            if granted and len(left) == len(names):
-                return oauth._oauth_page("Nothing was linked",
-                                   "Search Console and Analytics were both left unticked on Google's "
-                                   "screen, so Reactor could read neither. Connect again and leave them ticked.")
-            return oauth._oauth_page("Connection failed", "Couldn't complete the connection. Please try again.")
-        if left:
-            kept = [n for k, n in names.items() if granted.get(k)]
-            return oauth._oauth_page("✅ Connected to Google, without " + left[0],
-                               kept[0] + " is linked. " + left[0] + " was left unticked on Google's screen, "
-                               "so Reactor can't read it: connect again and leave it ticked.")
-        return oauth._oauth_page("✅ Connected to Google", "Search Console & Analytics are now linked. "
-                           "You can close this tab and return to Reactor.")
-
+    """Add the accounts-mailbox sign-in walk to the app."""
 
     @mcp.custom_route("/oauth/gmail-finance/start", methods=["GET"])
     async def gmail_finance_start(request: Request):
@@ -92,7 +38,7 @@ def register(mcp, registry):
         # secret, kept so the mailbox is recoverable when nobody can sign in.
         ticket = request.query_params.get("t", "")
         tx = oauth._fin_connect_tickets.pop(ticket, None) if ticket else None
-        by_secret = gate._secret_ok(request.query_params.get("key", ""), google_data.CONNECT_SECRET)
+        by_secret = gate._secret_ok(request.query_params.get("key", ""), config.CONNECT_SECRET)
         live = isinstance(tx, dict) and tx.get("exp", 0) > time.time()
         if not (live or by_secret):
             return PlainTextResponse("Forbidden", status_code=403, headers=gate._API_HEADERS)

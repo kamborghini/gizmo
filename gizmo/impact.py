@@ -6,7 +6,6 @@ gizmo/routes/impact.py. Read as `impact.NAME`.
 import logging
 import os
 from datetime import datetime, timezone
-import google_data
 from gizmo.config import _env_num
 from gizmo import store as jsonstore
 
@@ -36,8 +35,8 @@ def _write_impact(items: list[dict]) -> list[dict]:
 
 
 async def _impact_snapshot(registry: dict) -> dict:
-    """A light 28-day headline-metric snapshot (revenue, orders, sessions, search
-    clicks). Each source degrades to absent on error, so this never raises."""
+    """A light 28-day headline-metric snapshot (revenue and orders). A failed
+    read is left out, never a zero, so this never raises."""
     snap: dict = {"at": datetime.now(timezone.utc).isoformat()}
     try:
         m28: dict = {}
@@ -47,27 +46,12 @@ async def _impact_snapshot(registry: dict) -> dict:
             snap["orders_28d"] = len(orders)
     except Exception as e:
         logger.warning("impact snapshot: the orders figures were left out (%s)", type(e).__name__)
-    try:
-        if google_data.ga4_configured():
-            ga = await google_data.ga4_summary(28)
-            if ga and not ga.get("error") and ga.get("sessions") is not None:
-                snap["sessions_28d"] = ga["sessions"]
-    except Exception as e:
-        logger.warning("impact snapshot: the sessions figure was left out (%s)", type(e).__name__)
-    try:
-        if google_data.gsc_configured():
-            g = await google_data.gsc_overview(28)
-            if g and not g.get("error") and g.get("clicks") is not None:
-                snap["clicks_28d"] = g["clicks"]
-    except Exception as e:
-        logger.warning("impact snapshot: the clicks figure was left out (%s)", type(e).__name__)
     return snap
 
 
 _impact_snap_cache: dict = {}
 
-_IMPACT_METRICS = [("revenue_28d", "Revenue", True), ("orders_28d", "Orders", False),
-                   ("sessions_28d", "Sessions", False), ("clicks_28d", "Search clicks", False)]
+_IMPACT_METRICS = [("revenue_28d", "Revenue", True), ("orders_28d", "Orders", False)]
 
 
 def _impact_with_deltas(items: list[dict], current: dict) -> list[dict]:

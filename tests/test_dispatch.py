@@ -182,9 +182,7 @@ from gizmo import memory
 from gizmo import knowledge
 from gizmo import chat as assistant
 from gizmo import prompts
-from gizmo import seo
 from gizmo import storefront
-from gizmo import analytics
 from gizmo import scheduler
 from gizmo import updates
 from gizmo import impact
@@ -396,7 +394,7 @@ shopify._product_meta_reader = _product_meta_refused
 # that wants Gmail to answer stubs _call or _token as before, and a test that
 # swaps httpx.AsyncClient for its own transport still wins.
 import httpx as _httpx
-import google_mail as _google_mail, google_data as _google_data
+import google_mail as _google_mail
 def _google_offline(request):
     if request.url.host == "oauth2.googleapis.com" and request.url.path == "/token":
         return _httpx.Response(400, json={"error": "invalid_request",
@@ -411,7 +409,7 @@ class _RoutedHttpx:
     def AsyncClient(self, *a, **k):
         k.setdefault("transport", _httpx.MockTransport(self._handler))
         return _httpx.AsyncClient(*a, **k)
-_google_mail.httpx = _google_data.httpx = _RoutedHttpx(_google_offline)
+_google_mail.httpx = _RoutedHttpx(_google_offline)
 APP_AUTH = {"session": "", "master": ""}
 MASTER_PW = "test-password-123"
 def ensure_auth():
@@ -441,50 +439,6 @@ def post_s(session, path, body):
                                                  "X-App-Session": session})
 
 # =========================== unit: envelope construction ====================
-@test
-def t_every_seo_kpi_carries_the_list_behind_its_number():
-    """The SEO checks used to be counts a card could only show. Each KPI now
-    carries a `detail`: the sampled pages or products that made the number,
-    with a storefront url per item, so the card can open them. The model's
-    context keeps the counts only (the handler strips the lists)."""
-    signals = {"products_sampled": 4, "thin_descriptions": 2, "missing_descriptions": 1,
-               "duplicate_titles": 1, "images": 6, "images_missing_alt": 3, "alt_coverage_pct": 50,
-               "thin_items": [{"title": "Holder", "handle": "holder", "words": 12},
-                              {"title": "Lens", "handle": "lens", "words": 40}],
-               "missing_items": [{"title": "Frame", "handle": "frame", "words": 0}],
-               "alt_items": [{"title": "Gobo", "handle": "gobo", "missing": 3, "images": 4}],
-               "duplicate_groups": [{"title": "Gobo", "count": 2, "handles": ["gobo", "gobo-2"]}]}
-    pages = [{"url": "https://shop.test/", "noindex": False, "meta_description": "x", "jsonld_types": ["Organization"]},
-             {"url": "https://shop.test/products/gobo", "noindex": True, "meta_robots": "noindex, follow",
-              "meta_description": "", "jsonld_types": ["Product"]}]
-    score, metrics = seo._seo_scorecard(signals, 200, 200, pages, domain="shop.test", sitemap_locs=3)
-    by = {m["label"]: m for m in metrics}
-    ok(all(isinstance(m.get("detail"), dict) and "items" in m["detail"] for m in metrics),
-       "every KPI carries a detail with items")
-    ok([i["label"] for i in by["Thin descriptions"]["detail"]["items"]] == ["Frame", "Holder", "Lens"],
-       "thin descriptions list the missing ones first, then the thin ones")
-    ok(by["Thin descriptions"]["detail"]["items"][0]["note"] == "no description"
-       and by["Thin descriptions"]["detail"]["items"][1]["note"] == "12 words", "each with why it is listed")
-    ok(by["Thin descriptions"]["detail"]["items"][1]["url"] == "https://shop.test/products/holder",
-       "and the storefront page to fix")
-    ok(by["Thin descriptions"]["detail"]["total"] == 3, "the total is the count, not the capped list")
-    ok(by["Indexable"]["detail"]["items"] == [{"label": "https://shop.test/products/gobo", "note": "noindex, follow",
-                                               "url": "https://shop.test/products/gobo"}],
-       "indexable lists the blocked pages with their robots directive")
-    ok(by["Duplicate titles"]["detail"]["items"][0]["note"] == "2 products", "duplicates list the group size")
-    ok(by["Image alt"]["detail"]["items"][0]["note"] == "3 of 4 images without alt", "alt lists the gap per product")
-    ok(by["Sitemap"]["detail"]["items"][0]["note"] == "HTTP 200 · 3 locations", "the sitemap row carries its size")
-    ok(by["Meta descriptions"]["detail"]["items"][0]["url"] == "https://shop.test/products/gobo",
-       "meta descriptions list the pages without one")
-    ok(any(i["note"] == "-25" for i in by["SEO score"]["detail"]["items"]), "the score explains its deductions")
-    _, m2 = seo._seo_scorecard({"alt_coverage_pct": 100}, 200, 200,
-                                   [{"url": "u", "meta_description": "x", "jsonld_types": ["Product"]}])
-    by2 = {m["label"]: m for m in m2}
-    ok(by2["Indexable"]["detail"]["items"] == [] and by2["Indexable"]["detail"]["empty"].startswith("All 1 sampled"),
-       "a clean check lists nothing and says so")
-    ok(by2["Thin descriptions"]["detail"]["items"][0:0] == [] and by2["Thin descriptions"]["detail"]["items"][0]["url"] is None
-       if by2["Thin descriptions"]["detail"]["items"] else True, "no domain, no url")
-
 @test
 def t_envelope_wellformed_and_ordered():
     worldoptions.set_credentials(meter="M1", key="K1", password="P1", plugin="Web_Service")
@@ -3496,19 +3450,6 @@ def t_every_image_is_pinned_by_digest_and_runs_the_tested_python():
 
 
 @test
-def t_the_google_service_account_transport_is_installed():
-    """requests was dropped on 2026-09-07 as unused, but google-auth reaches
-    Google through it, imported only when the service-account sign-in runs:
-    a fresh deploy could not sign in that way, and the local environment hid
-    it. CI installs from the lock alone, so this import is the check."""
-    from google.auth.transport.requests import Request
-    ok(Request, "google-auth's requests transport imports")
-    pins = open(os.path.join(HERE, "requirements.in"), encoding="utf-8").read()
-    ok(re.search(r"^google-auth\[requests\]==", pins, re.M), "and requirements.in asks for it by name")
-    lock = open(os.path.join(HERE, "requirements.txt"), encoding="utf-8").read()
-    ok(re.search(r"^requests==", lock, re.M), "so the lock carries requests")
-
-@test
 def t_app_errors_are_recorded_and_surfaced():
     # A 500 in the dispatch flow used to be invisible unless somebody was watching
     # the server log, which at a dispatch desk means never.
@@ -5202,10 +5143,9 @@ def t_every_stored_refresh_token_goes_through_the_vault():
     """Four files hold long-lived credentials. Sealing three of them and
     forgetting the fourth is the whole exposure, so this asserts each module's
     single read and single write both pass through."""
-    import inspect as _i, google_mail as _gm2, google_data as _gd2
+    import inspect as _i, google_mail as _gm2
     import xero as _xr2
     for mod, writer, reader in ((_xr2, "_write_token", "_load_token"),
-                                (_gd2, "save_refresh_token", "_load_refresh_token"),
                                 (_gm2, "save_connection", "_load_token_file")):
         w = _i.getsource(getattr(mod, writer))
         r = _i.getsource(getattr(mod, reader))
@@ -8192,18 +8132,18 @@ def t_a_layout_belongs_to_the_account_that_saved_it():
         ensure_auth()
         master = APP_AUTH["master"]
         owen, sess, _pw = ready_user("Owen", "owen")
-        r = post("/api/layouts", {"view": "overview", "order": ["trend", "alerts"],
+        r = post("/api/layouts", {"view": "forecast", "order": ["trend", "alerts"],
                                   "hidden": ["drivers"], "uid": owen, "user": owen})
         eq(r.status_code, 200, r.text)
-        eq(r.json()["layouts"], {"overview": {"order": ["trend", "alerts"], "hidden": ["drivers"]}},
+        eq(r.json()["layouts"], {"forecast": {"order": ["trend", "alerts"], "hidden": ["drivers"]}},
            "the save answers with the caller's own map")
-        r = post_s(sess, "/api/layouts", {"view": "overview", "order": ["alerts"], "hidden": []})
+        r = post_s(sess, "/api/layouts", {"view": "forecast", "order": ["alerts"], "hidden": []})
         eq(r.status_code, 200, r.text)
         eq(post("/api/layouts", {}).json()["layouts"],
-           {"overview": {"order": ["trend", "alerts"], "hidden": ["drivers"]}},
+           {"forecast": {"order": ["trend", "alerts"], "hidden": ["drivers"]}},
            "the master reads back only the master's")
         eq(post_s(sess, "/api/layouts", {}).json()["layouts"],
-           {"overview": {"order": ["alerts"], "hidden": []}},
+           {"forecast": {"order": ["alerts"], "hidden": []}},
            "and Owen only Owen's, although the master's body named him")
         on_disk = json.load(open(layouts.LAYOUTS_PATH))["layouts"]
         eq(sorted(on_disk), sorted([master, owen]), "one entry per account, keyed by the session's account")
@@ -8228,13 +8168,13 @@ def t_a_layout_the_page_could_not_have_made_is_refused_and_nothing_is_written():
     store starts empty here, so any write at all would leave a file behind."""
     def go():
         ensure_auth()
-        good = {"view": "overview", "order": ["trend"], "hidden": []}
+        good = {"view": "forecast", "order": ["trend"], "hidden": []}
         bad = [
             ({**good, "view": "nowhere"}, "an unknown view"),
             ({**good, "view": "chat"}, "chat, which has no cards to arrange"),
             ({"order": ["trend"], "hidden": []}, "no view at all"),
             ({**good, "order": "trend"}, "an order that is not a list"),
-            ({"view": "overview", "order": ["trend"]}, "a missing hidden list"),
+            ({"view": "forecast", "order": ["trend"]}, "a missing hidden list"),
             ({**good, "order": ["c%d" % i for i in range(65)]}, "65 ids"),
             ({**good, "hidden": ["c%d" % i for i in range(65)]}, "65 hidden ids"),
             ({**good, "order": ["two words"]}, "an id with a space"),
@@ -8243,8 +8183,8 @@ def t_a_layout_the_page_could_not_have_made_is_refused_and_nothing_is_written():
             ({**good, "order": ["-trend"]}, "an id that starts with a hyphen"),
             ({**good, "order": ["x" * 49]}, "an id longer than 48 characters"),
             ({**good, "order": [7]}, "an id that is not a string"),
-            ({"view": "overview", "reset": "yes"}, "reset that is not exactly true"),
-            ({"view": "overview", "reset": False}, "reset false"),
+            ({"view": "forecast", "reset": "yes"}, "reset that is not exactly true"),
+            ({"view": "forecast", "reset": False}, "reset false"),
         ]
         for body, why in bad:
             r = post("/api/layouts", body)
@@ -8259,7 +8199,7 @@ def t_a_layout_the_page_could_not_have_made_is_refused_and_nothing_is_written():
         eq(post("/api/layouts", big).status_code, 413, "a body past 8KB is refused before it is read")
         # The door hands a handler {} for a body that is not a JSON object, so
         # a list arrives as a read of the caller's own layouts, never a write.
-        r = post("/api/layouts", ["overview", "trend"])
+        r = post("/api/layouts", ["forecast", "trend"])
         eq(r.status_code, 200, r.text)
         eq(r.json()["layouts"], {}, "a body that is not an object reads, it does not save")
         ok(not os.path.exists(layouts.LAYOUTS_PATH), "and neither of those wrote a thing")
@@ -8272,17 +8212,17 @@ def t_resetting_a_screen_forgets_only_that_screen_for_that_person():
     def go():
         ensure_auth()
         _owen, sess, _pw = ready_user("Owen", "owen")
-        post("/api/layouts", {"view": "overview", "order": ["trend"], "hidden": []})
+        post("/api/layouts", {"view": "forecast", "order": ["trend"], "hidden": []})
         post("/api/layouts", {"view": "crm", "order": ["board", "stats"], "hidden": []})
-        post_s(sess, "/api/layouts", {"view": "overview", "order": ["alerts"], "hidden": ["trend"]})
-        r = post("/api/layouts", {"view": "overview", "reset": True})
+        post_s(sess, "/api/layouts", {"view": "forecast", "order": ["alerts"], "hidden": ["trend"]})
+        r = post("/api/layouts", {"view": "forecast", "reset": True})
         eq(r.status_code, 200, r.text)
         eq(r.json()["layouts"], {"crm": {"order": ["board", "stats"], "hidden": []}},
            "the caller's other screen stays")
         eq(post_s(sess, "/api/layouts", {}).json()["layouts"],
-           {"overview": {"order": ["alerts"], "hidden": ["trend"]}},
+           {"forecast": {"order": ["alerts"], "hidden": ["trend"]}},
            "and the other account's Overview is untouched")
-        r = post("/api/layouts", {"view": "overview", "reset": True})
+        r = post("/api/layouts", {"view": "forecast", "reset": True})
         eq(r.status_code, 200, "resetting a screen with nothing saved is not an error")
         eq(r.json()["layouts"], {"crm": {"order": ["board", "stats"], "hidden": []}})
         post("/api/layouts", {"view": "crm", "reset": True})
@@ -8309,10 +8249,10 @@ def t_a_card_named_twice_keeps_its_first_place():
     refused, keeping the place it was first given."""
     def go():
         ensure_auth()
-        r = post("/api/layouts", {"view": "seo", "order": ["trend", "alerts", "trend", "drivers", "alerts"],
+        r = post("/api/layouts", {"view": "forecast", "order": ["trend", "alerts", "trend", "drivers", "alerts"],
                                   "hidden": ["kpi-score", "kpi-score"]})
         eq(r.status_code, 200, r.text)
-        eq(r.json()["layouts"]["seo"], {"order": ["trend", "alerts", "drivers"], "hidden": ["kpi-score"]})
+        eq(r.json()["layouts"]["forecast"], {"order": ["trend", "alerts", "drivers"], "hidden": ["kpi-score"]})
     with_layouts(go)
 
 @test
@@ -8323,11 +8263,11 @@ def t_the_layouts_file_is_owner_only_and_keyed_by_account():
     def go():
         ensure_auth()
         master = APP_AUTH["master"]
-        eq(post("/api/layouts", {"view": "overview", "order": ["trend", "alerts"],
+        eq(post("/api/layouts", {"view": "forecast", "order": ["trend", "alerts"],
                                  "hidden": ["drivers"]}).status_code, 200)
         eq(os.stat(layouts.LAYOUTS_PATH).st_mode & 0o777, 0o600, "a new file is owner-only")
         eq(json.load(open(layouts.LAYOUTS_PATH)),
-           {"layouts": {master: {"overview": {"order": ["trend", "alerts"], "hidden": ["drivers"]}}}})
+           {"layouts": {master: {"forecast": {"order": ["trend", "alerts"], "hidden": ["drivers"]}}}})
         os.chmod(layouts.LAYOUTS_PATH, 0o644)
         eq(post("/api/layouts", {"view": "mail", "order": ["inbox"], "hidden": []}).status_code, 200)
         eq(os.stat(layouts.LAYOUTS_PATH).st_mode & 0o777, 0o600, "and a readable one is made owner-only again")
@@ -8342,7 +8282,7 @@ def t_a_layout_that_could_not_be_saved_is_never_answered_as_saved():
         ensure_auth()
         with open(layouts.LAYOUTS_PATH, "w") as fh:
             fh.write('{"layouts": {"broken')
-        r = post("/api/layouts", {"view": "overview", "order": ["trend"], "hidden": []})
+        r = post("/api/layouts", {"view": "forecast", "order": ["trend"], "hidden": []})
         eq(r.status_code, 500, r.text)
         ok("The layout could not be saved" in r.json()["error"], r.text)
         eq(open(layouts.LAYOUTS_PATH).read(), '{"layouts": {"broken', "the unreadable file is left as it was")
@@ -8525,11 +8465,6 @@ def t_audit_tab_gate_covers_cache_print_and_shipping():
         post_s(sess, "/api/auth/password", {"current": starter, "new": "owens-own-pw-1"})
         sess = login("owen", "owens-own-pw-1").json()["session"]
         post("/api/team/user", {"op": "tabs", "id": owen, "tabs": ["files"]})
-        # /api/cache filters to allowed tabs
-        r = post_s(sess, "/api/cache", {})
-        eq(r.status_code, 200)
-        ok(all(k not in r.json() for k in ("overview", "seo", "keywords", "customers_segments")),
-           "cache leaks nothing for a files-only account")
         # shipping is labels-gated now
         eq(post_s(sess, "/api/shipping/config", {}).status_code, 403, "shipping read is labels-gated")
         # print doc refuses a labels-denied app session
@@ -17700,85 +17635,6 @@ def t_only_the_configured_store_can_frame_the_app():
 
 
 @test
-def t_every_oauth_token_file_is_written_private():
-    """Five files hold third-party refresh tokens that outlive any session.
-    Four were created 0600; google_data.py wrote its one at the default 0644."""
-    import google_data as _gd, tempfile, stat
-    d = tempfile.mkdtemp(dir=SCRATCH)
-    real = _gd.OAUTH_TOKEN_PATH
-    _gd.OAUTH_TOKEN_PATH = os.path.join(d, "google_oauth.json")
-    try:
-        _gd.save_refresh_token("test-refresh-token")
-        mode = stat.S_IMODE(os.stat(_gd.OAUTH_TOKEN_PATH).st_mode)
-        eq(oct(mode), oct(0o600), "the Google refresh token file is owner-only")
-        # Was "the token is in the file". That is now the thing that must not
-        # be true when a key is configured, so the honest check is that the
-        # module can read back what it wrote.
-        eq(_gd._load_refresh_token(), "test-refresh-token", "and it did write")
-    finally:
-        _gd.OAUTH_TOKEN_PATH = real
-
-
-@test
-def t_a_google_connection_says_which_permission_was_left_unticked():
-    """Google's consent screen lets a person untick Search Console or Analytics
-    and still hands back a refresh token. The connection was saved as working
-    and the unticked side failed later with Google's 403. What was granted is
-    kept with the token now: the connect page and Settings say which side is
-    missing, that side is not offered as ready, and a connection granted
-    neither is not saved at all, since it could read nothing."""
-    gd = _google_data
-    real = (gd.OAUTH_TOKEN_PATH, gd.httpx, gd.GSC_SITE_URL, gd.GA4_PROPERTY_ID)
-    gd.OAUTH_TOKEN_PATH = os.path.join(tempfile.mkdtemp(dir=SCRATCH), "google_oauth.json")
-    gd.GSC_SITE_URL, gd.GA4_PROPERTY_ID = "sc-domain:example.com", "123456789"
-    answer = {}
-    gd.httpx = _RoutedHttpx(lambda request: _httpx.Response(
-        answer.get("_status", 200), json={k: v for k, v in answer.items() if k != "_status"}))
-    try:
-        answer.update(refresh_token="rt-1", access_token="at", scope=gd.SCOPES[0])
-        eq(run(gd.exchange_code("c", "https://app.test/cb")),
-           {"ok": True, "granted": {"gsc": True, "ga4": False}})
-        eq(gd.granted(), {"gsc": True, "ga4": False}, "kept with the token")
-        ok(gd.gsc_configured() and not gd.ga4_configured(), "only the granted side is ready")
-        eq(gd.status()["granted"], {"gsc": True, "ga4": False}, "and Settings is told")
-        # A connection made before this was kept reads exactly as it did.
-        gd.save_refresh_token("rt-old")
-        eq(gd.granted(), {"gsc": None, "ga4": None})
-        ok(gd.ga4_configured() and gd.gsc_configured(), "unknown is not refused")
-        # Granted neither: nothing is saved.
-        os.remove(gd.OAUTH_TOKEN_PATH)
-        answer.update(scope="openid")
-        eq(run(gd.exchange_code("c", "https://app.test/cb"))["ok"], False)
-        ok(not gd.oauth_connected(), "a connection that could read nothing is not kept")
-        oauth._oauth_states["st-neither"] = time.time() + 60
-        page = client.get("/oauth/google/callback?state=st-neither&code=c").text
-        ok("Nothing was linked" in page and "both left unticked" in page, page[-500:])
-        # The connect page names the side left unticked.
-        answer.update(scope=gd.SCOPES[1])
-        oauth._oauth_states["st-ga4-only"] = time.time() + 60
-        page = client.get("/oauth/google/callback?state=st-ga4-only&code=c").text
-        ok("without Search Console" in page and "left unticked" in page, page[-500:])
-        # And the chat says the same, rather than that Google is not connected.
-        said = json.loads(seo._google_not_ready("gsc"))["error"]
-        ok("without permission to read Search Console" in said, said)
-        # A failure that is not about the boxes (a used code, a wrong secret)
-        # says the connection failed, not that both were unticked.
-        os.remove(gd.OAUTH_TOKEN_PATH)
-        answer.clear(); answer.update(_status=400, error="invalid_grant")
-        eq(run(gd.exchange_code("c", "https://app.test/cb")), {"ok": False, "granted": {}})
-        oauth._oauth_states["st-bad-code"] = time.time() + 60
-        page = client.get("/oauth/google/callback?state=st-bad-code&code=c").text
-        ok("Connection failed" in page and "unticked" not in page, page[-500:])
-        eq(json.loads(seo._google_not_ready("gsc"))["error"],
-           "Google isn't connected yet. Connect it in Settings.", "with no connection, it says so")
-    finally:
-        gd.OAUTH_TOKEN_PATH, gd.httpx, gd.GSC_SITE_URL, gd.GA4_PROPERTY_ID = real
-    page = pagesource.join(HERE)
-    ok("g.granted.ga4 === false" in page and "g.granted.gsc === false" in page,
-       "Settings' Google rows say which permission is missing")
-
-
-@test
 def t_the_connector_tab_is_a_guarded_proxy():
     """The Shopify->Xero connector writes to the accounting ledger, so gizmo
     only ever proxies it: its token never reaches a browser, the tab is opt-in
@@ -22386,41 +22242,6 @@ def t_a_size_that_is_not_a_number_neither_crashes_nor_uploads():
 
 
 @test
-def t_the_products_tab_says_so_when_shopify_does_not_answer():
-    """B38. One unchecked page: a throttled answer showed as a store with no
-    products, and a store past 250 lost the rest, from the search as well."""
-    async def failed(registry, name, args):
-        if name == "shopify_list_products":
-            return {"_failed": True}
-        return {} if name != "shopify_list_orders" else {"orders": []}
-    saved = shopify._tool_json
-    shopify._tool_json = failed
-    try:
-        res = run_async(catalog.run_products_list({}, 1))
-    finally:
-        shopify._tool_json = saved
-    ok("did not answer" in res.get("error", ""), "an error, not an empty catalogue: " + json.dumps(res)[:160])
-    seen = []
-    async def paged(registry, name, args):
-        if name == "shopify_list_products":
-            seen.append(args.get("since_id"))
-            start = int(args.get("since_id") or 0)
-            n = 250 if start < 500 else 3
-            return {"products": [{"id": start + i + 1, "title": f"P{start + i + 1}", "variants": []} for i in range(n)]}
-        if name == "shopify_list_orders":
-            return {"orders": []}
-        return {}
-    shopify._tool_json = paged
-    try:
-        res = run_async(catalog.run_products_list({}, 1))
-    finally:
-        shopify._tool_json = saved
-    eq(len(res["products"]), 503, "every product, not the first 250")
-    eq(seen, [0, 250, 500], "paged by since_id")
-    eq(res["truncated"], False)
-
-
-@test
 def t_the_mail_loop_says_when_the_inbox_has_stopped():
     """B39. The sync files its own errors under sync_error, so the loop's
     except branch never ran and a dead Gmail grant stopped the inbox, the
@@ -22593,9 +22414,9 @@ def t_the_mail_loop_itself_raises_the_alarm_and_never_floods():
 
 @test
 def t_every_product_reader_reads_the_whole_catalogue_or_says_it_could_not():
-    """Review of B38. The Products tab was one of four readers that took a
-    single page of 250: the SEO audit (whose failed read reported no thin
-    descriptions), the Overview's low-stock count and the loan-unit picker."""
+    """Review of B38. Four readers took a single page of 250; the loan-unit
+    picker is the one left (the Products tab, the SEO audit and the Overview
+    went on 22 Oct 2026)."""
     def catalogue(n, fail_after=None):
         calls = []
         async def tools(registry, name, args):
@@ -22617,25 +22438,6 @@ def t_every_product_reader_reads_the_whole_catalogue_or_says_it_could_not():
         eq((len(prods), okd, cut), (260, True, False))
         shopify._tool_json, _c = catalogue(600, fail_after=1)
         eq(run_async(catalog._all_products({}, "id"))[1], False, "a failed page is a failed read")
-        sig = run_async(seo._seo_product_signals({}))
-        ok(sig.get("unavailable"), "the SEO audit knows its read failed")
-        _score, kpis = seo._seo_scorecard(sig, 200, 200, [], "shop.test")
-        thin = next(k for k in kpis if k["label"] == "Thin descriptions")
-        eq(thin["value"], "n/a", "and says so rather than reporting none")
-        ok("did not answer" in thin["detail"]["empty"], thin["detail"])
-        eq(_score, None, "no headline score: a number would read as passing the checks that never ran, "
-                         "and the change alert would compare it with the last whole one")
-        head = next(k for k in kpis if k["label"] == "SEO score")
-        eq(head["value"], "n/a")
-        # A check that did not run says so in its words and keeps the figure
-        # column for figures: a sentence sat among the -10s and -5s.
-        notes = [i["note"] for i in (head.get("detail") or {}).get("items", [])]
-        ok(notes and all(n == "not scored" or re.fullmatch(r"-\d+", n) for n in notes), notes)
-        labels = [i["label"] for i in head["detail"]["items"]]
-        ok(any(l.startswith("page checks not run: the storefront could not be crawled") for l in labels), labels)
-        ok(any(l.startswith("product checks not run: Shopify did not answer") for l in labels), labels)
-        eq(analytics._metric_snapshot({"score": _score, "metrics": kpis})["metrics"].get("SEO score"),
-           None, "so nothing is saved for the alert to compare")
         loans._loan_products.update({"at": 0.0, "rows": []})
         raised = False
         try:
@@ -23597,125 +23399,6 @@ def t_a_finder_rename_keeps_the_sidecar_a_sidecar():
 
 
 @test
-def t_the_overview_counts_only_sales_that_happened():
-    """B25. The KPIs summed every order the sweep returned: a cancelled
-    £2,000 order sat in Revenue (7d) and Orders (7d), tripped the change
-    alert, and fell out a week later as a drop; a test order and a voided
-    one counted too, and a refund never came off."""
-    eq(orderbook._order_counts({"total_price": "10"}), True)
-    for bad in ({"cancelled_at": "2026-09-01T00:00:00Z"}, {"test": True},
-                {"financial_status": "voided"}, {"financial_status": "refunded"}):
-        eq(orderbook._order_counts(bad), False, str(bad))
-    eq(orderbook._order_revenue({"total_price": "100.00", "current_total_price": "60.00"}), 60.0,
-       "what the order is worth after a partial refund")
-    eq(orderbook._order_revenue({"total_price": "100.00"}), 100.0)
-    orders = [{"id": 1, "total_price": "100.00", "financial_status": "paid"},
-              {"id": 2, "total_price": "2000.00", "cancelled_at": "2026-09-18T00:00:00Z"},
-              {"id": 3, "total_price": "50.00", "test": True},
-              {"id": 4, "total_price": "80.00", "financial_status": "voided"}]
-    async def tools(registry, name, args):
-        if name == "shopify_get_shop":
-            return dict(SHOP)
-        if name == "shopify_list_orders":
-            return {"orders": [] if args.get("created_at_max") else orders}
-        if name == "shopify_list_customers":
-            return {"customers": []}
-        if name == "shopify_count_products":
-            return {"count": 0}
-        return {}
-    saved = shopify._tool_json; shopify._tool_json = tools
-    try:
-        metrics, _extra = run_async(analytics._compute_metrics({}, track_inventory=False))
-    finally:
-        shopify._tool_json = saved
-    by = {m["label"]: m["value"] for m in metrics}
-    eq(by.get("Revenue (7d)"), analytics._money(100.0, "GBP"), by)
-    eq(by.get("Orders (7d)"), "1", by)
-    # The Products page's monthly buckets follow the same rule.
-    month = "2026-09"
-    rows = [{"created_at": month + "-10T10:00:00Z", "line_items": [{"product_id": 5, "quantity": 2, "price": "10.00"}]},
-            {"created_at": month + "-11T10:00:00Z", "cancelled_at": month + "-11T11:00:00Z",
-             "line_items": [{"product_id": 5, "quantity": 9, "price": "10.00"}]}]
-    eq(orderbook._orders_product_monthly(rows, [month])[5]["units"][month], 2, "the cancelled order's units are not sold")
-
-
-@test
-def t_the_reports_ask_with_their_instructions():
-    """Each report sends the model its own instructions, the house writing
-    style and the context it was handed. Pinned before the reports and the
-    instructions moved out of copilot.py: a report reaching for a prompt that
-    moved, or sending none, fails here."""
-    seen = []
-
-    class Answer:
-        type, name, input = "tool_use", "present_response", {"summary": "Fine."}
-
-    class Reply:
-        content, stop_reason = [Answer()], "tool_use"
-
-    async def fake_call(client, **kw):
-        seen.append(kw.get("system") or "")
-        return Reply()
-
-    async def tools(registry, name, args):
-        if name == "shopify_get_shop":
-            return dict(SHOP)
-        if name == "shopify_list_orders":
-            return {"orders": []}
-        if name == "shopify_list_customers":
-            return {"customers": []}
-        if name == "shopify_count_products":
-            return {"count": 0}
-        return {}
-    saved = (claude._xcreate, claude._anthropic, shopify._tool_json)
-    claude._xcreate, claude._anthropic, shopify._tool_json = fake_call, (lambda: object()), tools
-    try:
-        run_async(analytics.run_overview({}, "\n\nCONTEXT FOR THE OVERVIEW", track_inventory=False))
-        run_async(seo.run_keywords({}, "\n\nCONTEXT FOR THE KEYWORDS"))
-    finally:
-        claude._xcreate, claude._anthropic, shopify._tool_json = saved
-    eq(len(seen), 2, "one model call each")
-    overview, keywords = seen
-    ok("executive overview" in overview and "Never use em dashes" in overview
-       and overview.endswith("CONTEXT FOR THE OVERVIEW"), "the overview's instructions: " + overview[-300:])
-    ok("money-ranked plan" in keywords and "executive overview" in keywords and "Never use em dashes" in keywords
-       and keywords.endswith("CONTEXT FOR THE KEYWORDS"), "the keywords' instructions: " + keywords[-300:])
-
-@test
-def t_the_scan_refuses_what_answered_from_the_inside():
-    """B26. The guard resolved the name once and let the client resolve it
-    again to connect; a name whose records alternate answered the second
-    lookup with a private address, and the inside answered. The address
-    actually connected to is now checked before a byte of the body is read."""
-    eq(seo._ip_is_public("8.8.8.8"), True)
-    for bad in ("10.0.0.5", "127.0.0.1", "169.254.169.254", "::1", "fe80::1%en0", "0.0.0.0"):
-        eq(seo._ip_is_public(bad), False, bad)
-    import http.server, threading
-    class Inside(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):
-            body = b"<html><title>inside</title></html>"
-            self.send_response(200)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-        def log_message(self, *a):
-            pass
-    srv = http.server.HTTPServer(("127.0.0.1", 0), Inside)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    saved = seo._host_is_public
-    seo._host_is_public = lambda h: True      # the name check passed, as a rebinding name would
-    try:
-        try:
-            run_async(seo._fetch_external(f"http://127.0.0.1:{srv.server_port}/"))
-            ok(False, "a fetch that connected to a private address must be refused")
-        except RuntimeError as e:
-            ok("not allowed" in str(e), str(e))
-    finally:
-        seo._host_is_public = saved
-        srv.shutdown(); srv.server_close()
-
-
-@test
 def t_a_purged_deals_tasks_stay_gone_through_the_next_import():
     """B27. The bin emptying tombstoned the deal but not its activities, so
     the next Pipedrive import refused the deal and recreated every task
@@ -24236,50 +23919,6 @@ def t_memory_and_skills_routes_edit_refuse_and_fail_honestly():
         _ws_restore(saved)
 
 @test
-def t_the_scheduled_audits_carry_memory_knowledge_and_skills():
-    """The scheduled audits write the four reports with the context a person's
-    run has: memory, what was learned from the store's site, and the saved
-    skills that fit a report. Each report's run is faked to see it."""
-    saved = _ws_stores()
-    saved_k = knowledge.KNOWLEDGE_PATH
-    knowledge.KNOWLEDGE_PATH = SCRATCH + "/ws_knowledge_" + secrets.token_hex(3) + ".json"
-    names = ((impact, "_impact_snapshot"), (analytics, "run_overview"), (seo, "run_seo_audit"), (seo, "run_keywords"),
-             (analytics, "run_customers"), (analytics, "_save_analysis"), (analytics, "_save_customer_segment"))
-    real = {(m, n): getattr(m, n) for m, n in names}
-    seen = {}
-
-    async def no_snap(registry):
-        return {}
-
-    def faked(kind):
-        async def run(registry, extra, *rest):
-            seen[kind] = extra
-            return {"changes": []}
-        return run
-    try:
-        impact._impact_snapshot = no_snap
-        analytics.run_overview, seo.run_seo_audit = faked("overview"), faked("seo")
-        seo.run_keywords, analytics.run_customers = faked("keywords"), faked("customers")
-        analytics._save_analysis = lambda kind, res: res
-        analytics._save_customer_segment = lambda segment, res: res
-        assistant._chat_after({"structured": {"summary": "Noted.", "remember": [
-            {"type": "fact", "text": "Trade orders ship on Tuesdays."}]}},
-            [{"role": "user", "content": "remember that trade orders ship on Tuesdays"}])
-        knowledge._save_knowledge("Glass gobos are etched in the Leeds workshop.", ["https://example.com/about"])
-        skillbook._add_skill("Overview report rules", "Lead every overview report with trade revenue.")
-        asyncio.run(scheduler._run_scheduled_audits({}))
-        eq(sorted(seen), ["customers", "keywords", "overview", "seo"], "all four reports ran")
-        for kind, extra in sorted(seen.items()):
-            ok("Trade orders ship on Tuesdays." in extra, kind + " reads memory")
-            ok("Glass gobos are etched in the Leeds workshop." in extra, kind + " reads the store knowledge")
-            ok("Lead every overview report with trade revenue." in extra, kind + " reads the skill that fits")
-    finally:
-        for (m, n), f in real.items():
-            setattr(m, n, f)
-        knowledge.KNOWLEDGE_PATH = saved_k
-        _ws_restore(saved)
-
-@test
 def t_reading_the_store_knowledge_takes_no_ai_slot_and_it_can_be_corrected():
     saved = (knowledge.KNOWLEDGE_PATH,)
     knowledge.KNOWLEDGE_PATH = SCRATCH + "/ws_knowledge_" + secrets.token_hex(3) + ".json"
@@ -24661,7 +24300,6 @@ def t_the_reading_message_and_the_product_plan_carry_what_they_need():
         claude._xcreate = sx
         _ws_restore(saved)
     src = copilot_source()
-    ok('_skills_to_system(" ".join(["product plan", str(p.get("title") or "")' in src, "a product plan picks skills by the product itself")
     ok('"\\n".join((m.get("text") or "")[:3900] for m in msgs[-2:])' in src, "a draft picks skills by what was written, not the labelled transcript")
     ok('plain = re.sub(r"\\A<skill[^>]*>\\n|\\n</skill>\\Z", "", content)' in src, "What Reactor read shows the skill's own text")
 
@@ -24745,7 +24383,6 @@ def t_what_chat_read_is_shown_in_words():
        "Orders, 1 Aug 2026 to 31 Aug 2026")
     eq(assistant._tool_label("recon_summary"), "Reconciliation summary")
     eq(assistant._tool_label("shopify_list_fulfillments"), "Fulfilments")
-    eq(assistant._step_word("Google Analytics 4"), "Google Analytics 4")
     eq(assistant._step_word("Orders"), "orders")
 
 
@@ -26714,31 +26351,6 @@ def t_an_address_changed_in_the_shopify_admin_stops_mark_made():
 
 
 @test
-def t_a_failed_customer_read_is_not_analysed_as_no_customers():
-    """A27. It showed zeros, paid the AI to explain them, and saved them as the
-    baseline for the next run's changes."""
-    async def tools(registry, name, args):
-        if name == "shopify_list_customers":
-            return {"_failed": True}
-        if name == "shopify_get_shop":
-            return dict(SHOP)
-        return {"orders": []} if name == "shopify_list_orders" else {}
-    called = []
-    async def xc(client, **kw):
-        called.append(1); raise AssertionError("no AI call")
-    saved = (shopify._tool_json, claude._xcreate)
-    shopify._tool_json, claude._xcreate = tools, xc
-    try:
-        r = post("/api/customers", {})
-        eq(r.status_code, 502, r.text[:200])
-        eq(called, [], "no AI credits spent")
-        eq((analytics._load_analysis_cache().get("customers_segments") or {}).get("__all__", {}).get("snapshot", {}).get("metrics", {}).get("Customers"),
-           None, "and no zero baseline saved")
-    finally:
-        shopify._tool_json, claude._xcreate = saved
-
-
-@test
 def t_a_handover_that_failed_once_moves_the_gmail_label_whole():
     """A28. The retry added the new owner's label and never removed the old
     one, whose id the failure had evicted."""
@@ -26778,34 +26390,6 @@ def t_an_ai_draft_waits_its_turn_in_the_ai_window():
     src = copilot_source()
     seg = src.split("async def mail_draft_route(")[1].split("resp = await claude._xcreate(claude._anthropic(), model=claude.MODEL_DEEP")[0]
     ok("gate._window_ok(gate._rl_global, gate.RATE_MAX_GLOBAL" in seg, "the compose checks the AI window before the call")
-
-
-@test
-def t_the_keyword_scan_reads_no_more_than_it_keeps():
-    """A40. The whole body was read into memory before 600 KB were kept."""
-    import httpx as _hx
-    read = {"n": 0}
-    chunk = b"x" * (1024 * 1024)
-    class Body(_hx.AsyncByteStream):
-        async def __aiter__(self):
-            for _ in range(80):
-                read["n"] += len(chunk)
-                yield chunk
-        async def aclose(self):
-            pass
-    Real = copilot.httpx.AsyncClient
-    class Client(Real):
-        def __init__(self, *a, **k):
-            k["transport"] = _hx.MockTransport(lambda rq: _hx.Response(200, headers={"content-type": "text/html"}, stream=Body()))
-            super().__init__(*a, **k)
-    saved = (copilot.httpx.AsyncClient, seo._host_is_public)
-    copilot.httpx.AsyncClient, seo._host_is_public = Client, (lambda h: True)
-    try:
-        st, _u, text = run_async(seo._fetch_external("https://competitor.example/catalogue"))
-        eq(len(text), seo.EXTERNAL_FETCH_MAX)
-        ok(read["n"] <= 2 * 1024 * 1024, "stopped reading near the cap, not after 80 MB: %d" % read["n"])
-    finally:
-        copilot.httpx.AsyncClient, seo._host_is_public = saved
 
 
 @test
@@ -27149,7 +26733,7 @@ def t_an_ai_failure_says_what_it_was():
     eq(claude._model_name("claude-haiku-4-5-20251001"), "Claude Haiku 4.5")
     eq(claude._model_name("anthropic.claude-opus-4-8"), "Claude Opus 4.8")
     src = copilot_source()
-    ok('"The AI service returned an error. Please try again."}' not in src and src.count("_ai_error_words(e)}") >= 11,
+    ok('"The AI service returned an error. Please try again."}' not in src and src.count("_ai_error_words(e)}") >= 5,
        "every AI route says the reason")
 
 
@@ -27409,41 +26993,6 @@ def t_the_close_read_sees_all_of_a_long_skill():
 
 
 # The second review of the Opus 5.5 change, and the review of the larger skills.
-
-@test
-def t_a_report_that_did_not_finish_keeps_the_last_one_and_says_why():
-    """Opus 5.5 cannot be made to call present_response and its thinking
-    counts toward the limit: a report that stopped without it saved "Keyword
-    analysis ready." over the last good one, and the page showed no error."""
-    good = _OpusResp([_OpusBlock("thinking", thinking="", signature="s"),
-                      _OpusBlock("tool_use", name="present_response", id="t1",
-                                 input={"summary": "Three keywords carry 60% of clicks."})], "tool_use")
-    saved = (claude._client, claude._spend_guard)
-    claude._spend_guard = lambda *a, **k: None
-    def go():
-        ensure_auth()
-        _a, sess, _p = ready_user("Kay Words", "kayw", role="admin")
-        claude._client = _OpusFake([good])
-        eq(post_s(sess, "/api/keywords", {}).status_code, 200)
-        for stop, words in (("max_tokens", "ran out of room"), ("refusal", "declined"), ("end_turn", "did not finish")):
-            claude._client = _OpusFake([_OpusResp([_OpusBlock("thinking", thinking="", signature="s")], stop)] * 2)
-            r = post_s(sess, "/api/keywords", {})
-            ok(r.status_code == 500 and words in r.json()["error"] and "last one is kept" in r.json()["error"], (stop, r.text[:200]))
-            cache = json.load(open(analytics.ANALYSIS_CACHE_PATH)).get("keywords", {})
-            eq(cache.get("result", {}).get("structured", {}).get("summary"), "Three keywords carry 60% of clicks.",
-               "the last good report is kept")
-        # A budget refusal is said as it is on the keyword and customer reports too.
-        def spent(*a, **k):
-            raise RuntimeError("Reactor has used today's AI budget.")
-        claude._spend_guard = spent
-        for path in ("/api/keywords", "/api/customers"):
-            r = post_s(sess, path, {})
-            ok("today's AI budget" in r.json().get("error", ""), (path, r.text[:200]))
-    try:
-        with_accounts(go)
-    finally:
-        claude._client, claude._spend_guard = saved
-
 
 @test
 def t_the_fallback_is_asked_as_it_can_be_and_a_failed_nudge_is_noted():
@@ -29617,7 +29166,7 @@ def t_no_hosting_or_setting_name_reaches_a_person_from_the_server():
             bad.append("%s:%d %s" % (name, node.lineno, node.value[:80]))
         for k in kids:
             visit(k, name, fn, hush)
-    for name in COPILOT_FILES + ["server.py", "recon.py", "xero.py", "google_mail.py", "google_data.py",
+    for name in COPILOT_FILES + ["server.py", "recon.py", "xero.py", "google_mail.py",
                                  "pipedrive.py", "tokenvault.py", "worldoptions.py", "eori.py"]:
         visit(ast.parse(open(os.path.join(root, name), encoding="utf-8").read()), name, "", False)
     ok(not bad, "%d strings a person reads name the hosting, the code name or a setting: %s"
@@ -30428,8 +29977,7 @@ def t_either_module_imports_first():
                         ("gizmo.skills", "copilot"), ("gizmo.memory", "copilot"), ("gizmo.knowledge", "copilot"),
                         ("gizmo.chat", "copilot"), ("gizmo.routes.skills", "copilot"),
                         ("gizmo.routes.memory", "copilot"), ("gizmo.routes.knowledge", "copilot"),
-                        ("gizmo.prompts", "copilot"), ("gizmo.seo", "copilot"), ("gizmo.analytics", "copilot"),
-                        ("gizmo.routes.seo", "copilot"), ("gizmo.routes.analytics", "copilot"),
+                        ("gizmo.prompts", "copilot"), ("gizmo.storefront", "copilot"),
                         ("gizmo.scheduler", "copilot"), ("gizmo.updates", "copilot"), ("gizmo.impact", "copilot"),
                         ("gizmo.backup", "copilot"), ("gizmo.routes.scheduler", "copilot"), ("gizmo.routes.updates", "copilot"),
                         ("gizmo.routes.impact", "copilot"), ("gizmo.routes.backup", "copilot"),
@@ -30441,7 +29989,7 @@ def t_either_module_imports_first():
                         ("gizmo.oauth", "copilot"), ("gizmo.status", "copilot"), ("gizmo.routes.rendering", "copilot"),
                         ("gizmo.routes.profile", "copilot"), ("gizmo.routes.layouts", "copilot"),
                         ("gizmo.routes.oauth", "copilot"), ("gizmo.routes.status", "copilot"),
-                        ("gizmo.clock", "copilot"), ("gizmo.products", "copilot"), ("gizmo.routes.products", "copilot"),
+                        ("gizmo.clock", "copilot"), ("gizmo.products", "copilot"),
                         ("gizmo.routes.chat", "copilot")):
         r = _sp.run([sys.executable, "-c", f"import {first}, {then}; import gizmo.dispatch as d, copilot as c; "
                      "assert c.desk is d and d.core is c; print('ok')"],
@@ -31060,24 +30608,6 @@ def t_the_workspace_routes_are_gathered():
     ok('"/api/chat' not in src, "the chat routes went too, once add_routes handed the chat module its tools (piece 15)")
 
 @test
-def t_the_report_routes_are_gathered():
-    """The SEO and keyword routes, and the overview's and customer reports',
-    each group registered by one call in add_routes. The product page's route
-    stays: gathered by path prefix, it would take /api/products with it."""
-    import inspect
-    from gizmo.routes import analytics as routes_analytics, seo as routes_seo
-    src = inspect.getsource(copilot.add_routes)
-    for call in ("routes_seo.register(mcp, registry)", "routes_analytics.register(mcp, registry)"):
-        eq(src.count(call), 1, call)
-    for path in ('"/api/seo"', '"/api/keyword', '"/api/overview"', '"/api/cache"', '"/api/reorder-radar"',
-                 '"/api/customers"', '"/api/customer-tags"'):
-        ok(path not in src, path + " is registered by its area's routes")
-    eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_seo, routes_analytics)], [3, 5],
-       "3 SEO and keyword routes, 5 report routes")
-    ok('"/api/product"' not in src and '"/api/products"' not in src,
-       "the product page's routes went with the Products tab (piece 14), once routes could be named exactly")
-
-@test
 def t_the_scheduler_updates_and_backup_routes_are_gathered():
     """The scheduler's, the release notes', impact's and the backup's routes,
     each group registered by one call in add_routes."""
@@ -31088,10 +30618,10 @@ def t_the_scheduler_updates_and_backup_routes_are_gathered():
     for call in ("routes_scheduler.register(mcp, registry)", "routes_updates.register(mcp, registry)",
                  "routes_impact.register(mcp, registry)", "routes_backup.register(mcp, registry)"):
         eq(src.count(call), 1, call)
-    for path in ('"/api/schedule"', '"/api/alerts"', '"/api/updates"', '"/api/impact"', '"/api/backup"', '"/api/restore"'):
+    for path in ('"/api/alerts"', '"/api/updates"', '"/api/impact"', '"/api/backup"', '"/api/restore"'):
         ok(path not in src, path + " is registered by its area's routes")
     eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_scheduler, routes_updates, routes_impact, routes_backup)],
-       [2, 1, 1, 2], "2 schedule and alert routes, the updates route, the impact route, backup and restore")
+       [1, 1, 1, 2], "the alerts route, the updates route, the impact route, backup and restore")
 
 @test
 def t_the_finance_routes_are_gathered():
@@ -31114,7 +30644,7 @@ def t_the_finance_routes_are_gathered():
 @test
 def t_the_page_profile_oauth_and_status_routes_are_gathered():
     """The page's own route and its assets, the profile's, the layouts', the
-    Google and accounts-mailbox sign-in walks' and the status page's routes,
+    accounts-mailbox sign-in walk's and the status page's routes,
     each group registered by one call in add_routes."""
     import inspect
     from gizmo.routes import layouts as routes_layouts, oauth as routes_oauth, profile as routes_profile
@@ -31124,12 +30654,12 @@ def t_the_page_profile_oauth_and_status_routes_are_gathered():
                  "routes_layouts.register(mcp, registry)", "routes_oauth.register(mcp, registry)",
                  "routes_status.register(mcp, registry)"):
         eq(src.count(call), 1, call)
-    for path in ('custom_route("/",', '"/assets/', '"/api/profile"', '"/api/layouts"', '"/oauth/google/',
+    for path in ('custom_route("/",', '"/assets/', '"/api/profile"', '"/api/layouts"',
                  '"/oauth/gmail-finance/', '"/api/status"', '"/healthz"'):
         ok(path not in src, path + " is registered by its area's routes")
     eq([inspect.getsource(m).count("@mcp.custom_route(")
-        for m in (routes_rendering, routes_profile, routes_layouts, routes_oauth, routes_status)], [4, 1, 1, 4, 2],
-       "the page and its 3 assets, the profile, the layouts, the 2 sign-in walks' 4 routes, status and healthz")
+        for m in (routes_rendering, routes_profile, routes_layouts, routes_oauth, routes_status)], [4, 1, 1, 2, 2],
+       "the page and its 3 assets, the profile, the layouts, the accounts mailbox walk's 2 routes, status and healthz")
 
 @test
 def t_the_leftovers_are_home():
@@ -31147,8 +30677,7 @@ def t_the_leftovers_are_home():
         "gizmo.mail": "_gmail_redirect_uri",
         "gizmo.dispatch": "_eori_hits EORI_MAX_PER_MIN",
         "gizmo.orderbook": "_orders_28d _month_key _order_counts _order_revenue _month_axis",
-        "gizmo.chat": "_build_tools _TOOL_TABS _build_dispatch TOOL_RESULT_CAP _usage_summary _coerce_structured "
-                      "_page_context_to_system _PAGE_LABELS CHAT_CONTEXT_CAP",
+        "gizmo.chat": "_build_tools _TOOL_TABS _build_dispatch TOOL_RESULT_CAP _usage_summary _coerce_structured",
         "gizmo.shopify": "_ok",
         "gizmo.clock": "_london_today _london_day _london_hm",
         "gizmo.gate": "_secret_ok",
@@ -31187,25 +30716,24 @@ def t_the_customer_history_route_counts_the_orders():
 @test
 def t_the_ai_settings_products_and_history_have_moved():
     """The AI's effort settings live with the AI client, the chat's limits with
-    the chat, the Products tab in gizmo/products.py with its two routes, and a
-    label's order history with the order book's routes (piece 14)."""
+    the chat, the catalogue reader in gizmo/products.py, and a label's order
+    history with the order book's routes (piece 14; the Products tab and its
+    two routes went on 22 Oct 2026)."""
     import importlib, inspect
-    from gizmo.routes import orderbook as routes_orderbook, products as routes_products
+    from gizmo.routes import orderbook as routes_orderbook
     homes = {"gizmo.ai": "ANTHROPIC_EFFORT ANTHROPIC_EFFORT_DEEP THINKING_MODE _effort_for",
              "gizmo.chat": "MAX_MESSAGES MAX_CHAT_CHARS",
-             "gizmo.products": "run_products_list _all_products LOW_STOCK_THRESHOLD PRODUCT_TREND_MONTHS",
-             "gizmo.analytics": "_CURRENCY_SIGNS"}
+             "gizmo.products": "_all_products",
+             "gizmo.liability": "_CURRENCY_SIGNS"}
     for mod, names in homes.items():
         m = importlib.import_module(mod)
         for n in names.split():
             ok(n not in vars(copilot), n + " is no longer in copilot.py")
             ok(n in vars(m), n + " lives in " + mod)
     src = inspect.getsource(copilot.add_routes)
-    eq(src.count("routes_products.register(mcp, registry)"), 1, "the products routes, one call")
-    for path in ('"/api/products"', '"/api/product"', '"/api/customer-history"'):
-        ok(path not in src, path + " is registered by its area's routes")
-    eq([inspect.getsource(m).count("@mcp.custom_route(") for m in (routes_products, routes_orderbook)], [2, 3],
-       "the Products tab's two routes; the order book's two and customer history")
+    ok('"/api/customer-history"' not in src, "customer history is registered by its area's routes")
+    eq(inspect.getsource(routes_orderbook).count("@mcp.custom_route("), 3,
+       "the order book's two routes and customer history")
 
 @test
 def t_the_chat_routes_and_shop_settings_have_moved():
@@ -31463,12 +30991,11 @@ def t_the_accounts_routes_refuse_a_wrong_kind():
     edits each name the fields they read. Every one, sent as an object and as a
     list, is a 400 in the model's words before the route reads it."""
     from gizmo.routes import scheduler as r_sched, team as r_team, chat as r_chat, xero_sync as r_xs
-    from gizmo.routes import orderbook as r_ob, analytics as r_an, seo as r_seo, products as r_prod
+    from gizmo.routes import orderbook as r_ob
     from gizmo.routes import profile as r_prof, reconciliation as r_rec, backup as r_bk, skills as r_sk
     from gizmo.routes import work as r_work, forecasting as r_fc
     n = _wrong_kinds_refused([
         ("/api/alerts", "dismiss", r_sched.AlertBody),
-        ("/api/schedule", None, r_sched.ScheduleBody),
         ("/api/auth/login", None, r_team.LoginBody),
         ("/api/auth/mfa", "status", r_team.MfaBody),
         ("/api/auth/mfa-verify", None, r_team.MfaVerifyBody),
@@ -31481,10 +31008,6 @@ def t_the_accounts_routes_refuse_a_wrong_kind():
         ("/api/connector", "status", r_xs.ConnectorBody),
         ("/api/customer-history", None, r_ob.CustomerHistoryBody),
         ("/api/order/edit", "read", r_ob.OrderEditBody),
-        ("/api/customers", None, r_an.CustomersBody),
-        ("/api/keyword-scan", None, r_seo.KeywordScanBody),
-        ("/api/product", None, r_prod.ProductBody),
-        ("/api/products", None, r_prod.ProductsBody),
         ("/api/profile", None, r_prof.ProfileBody),
         ("/api/recon/disconnect", None, r_rec.ReconDisconnectBody),
         ("/api/recon/exception", None, r_rec.ReconExceptionBody),
@@ -31583,7 +31106,7 @@ def t_the_routes_the_first_count_missed_refuse_a_wrong_kind():
     orders, the accounts mailbox link, card layouts and the forecast's store
     reads. Each now names its fields, and the count sees them all."""
     from gizmo.routes import crm as r_crm, files as r_files, dispatch as r_disp, liability as r_liab
-    from gizmo.routes import analytics as r_an, mail as r_mail, reconciliation as r_rec, layouts as r_lay
+    from gizmo.routes import mail as r_mail, reconciliation as r_rec, layouts as r_lay
     from gizmo.routes import forecasting as r_fc
     n = _wrong_kinds_refused([
         ("/api/crm/board", None, r_crm.CrmBoardBody),
@@ -31592,7 +31115,6 @@ def t_the_routes_the_first_count_missed_refuse_a_wrong_kind():
         ("/api/dispatch/manifest", None, r_disp.DispatchManifestBody),
         ("/api/margin", None, r_disp.MarginBody),
         ("/api/liability", None, r_liab.LiabilityBody),
-        ("/api/overview", None, r_an.OverviewBody),
         ("/api/mail/claim", None, r_mail.MailClaimBody),
         ("/api/mail/orders", None, r_mail.MailOrdersBody),
         ("/api/recon/connect-link", None, r_rec.ReconConnectLinkBody),
@@ -31768,6 +31290,88 @@ def t_liability_keeps_its_own_currency_signs():
     eq(liability._CURRENCY_SIGNS, {"GBP": "\u00a3", "USD": "$", "EUR": "\u20ac"})
     src = open(os.path.join(HERE, "gizmo", "liability.py"), encoding="utf-8").read()
     ok("analytics" not in src, "liability.py no longer reads the report module")
+
+
+class _GateReq:
+    """Just enough of a request for gate._tab_denied: a path and a session."""
+    def __init__(self, path, sess):
+        self.url = type("U", (), {"path": path})(); self.headers = {"x-app-session": sess}
+
+
+@test
+def t_a_saved_tab_list_naming_a_removed_report_tab_still_loads():
+    """Accounts saved before the trim may still list overview, seo, keywords
+    or products. Those keys are dropped as the list is read, never an error,
+    and the tabs that remain still open."""
+    ensure_auth()
+    uid, sess, _ = ready_user("Rae", "rae")
+    d = team._load_users()
+    d["users"][uid]["tabs"] = ["overview", "seo", "keywords", "products", "labels", "customers"]
+    team._write_users(d)
+    eq(team._user_tabs(uid), ["labels", "customers"])
+    ok(gate._tab_denied(_GateReq("/api/production-state", sess)) is None, "Labels still opens")
+    eq(login("rae", "chosen-pw-123456").status_code, 200, "and the account still signs in")
+
+
+@test
+def t_customer_history_still_answers_the_customers_permission():
+    """Labels' order-history line reads /api/customer-history. The Customers
+    tab goes but its permission stays (Customer details on the Team page), so
+    the line opens for exactly the accounts it opened for before: those with
+    customers or crm, never labels alone."""
+    ensure_auth()
+    ok("customers" in team.TAB_KEYS and "customers" in team.DEFAULT_TABS,
+       "the customers permission stays and is still given by default")
+    uid, sess, _ = ready_user("Cy", "cy")
+    for tabs, allowed in ((["labels"], False), (["labels", "customers"], True), (["crm"], True)):
+        post("/api/team/user", {"op": "tabs", "id": uid, "tabs": tabs})
+        r = gate._tab_denied(_GateReq("/api/customer-history", sess))
+        eq(r is None, allowed, "customer history for %s" % tabs)
+
+
+def _retired_files_round_trip(planted):
+    """Plant files on the volume, build a backup, then restore a zip holding
+    them: (names in the backup, names the restore wrote back)."""
+    import zipfile as zz, io as iio, base64 as b64
+    data_dir = os.path.dirname(scheduler.SCHEDULE_PATH)
+    for n, body in planted.items():
+        with open(os.path.join(data_dir, n), "w", encoding="utf-8") as fh:
+            fh.write(body)
+    try:
+        buf, _ = backup._build_backup_zip()
+        in_backup = {os.path.basename(n) for n in zz.ZipFile(buf).namelist()} & set(planted)
+    finally:
+        for n in planted:
+            os.remove(os.path.join(data_dir, n))
+    z = iio.BytesIO()
+    with zz.ZipFile(z, "w") as w:
+        for n, body in planted.items():
+            w.writestr("volume/" + n, body)
+    post("/api/restore", {"zip": b64.b64encode(z.getvalue()).decode()})
+    written = {n for n in planted if os.path.exists(os.path.join(data_dir, n))}
+    for n in written:
+        os.remove(os.path.join(data_dir, n))
+    return in_backup, written
+
+
+@test
+def t_backups_never_carry_the_google_data_token_or_the_report_stores():
+    """The Google data sign-in and the report caches leave with the report
+    tabs, but their files stay on the volume until somebody deletes them. A
+    backup never carries the old refresh token, and neither a backup nor a
+    restore carries the report stores, which nothing reads or scrubs any more
+    (the customer report cache can hold customer details)."""
+    def go():
+        ensure_auth()
+        planted = {
+            os.path.basename(os.environ.get("GOOGLE_OAUTH_TOKEN_PATH", "/data/google_oauth.json")): '{"refresh_token": "old"}',
+            os.path.basename(os.environ.get("ANALYSIS_CACHE_PATH", "/data/analysis_cache.json")): '{"customers_segments": {}}',
+            os.path.basename(scheduler.SCHEDULE_PATH): '{"enabled": true}',
+        }
+        in_backup, written = _retired_files_round_trip(planted)
+        eq(in_backup, set(), "none of them is in the backup")
+        eq(written, set(), "and a restore writes none of them back")
+    with_accounts(go)
 
 
 if os.environ.get("SUITE_SELFTEST"):

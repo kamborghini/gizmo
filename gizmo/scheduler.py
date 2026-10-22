@@ -1,7 +1,7 @@
-"""The scheduler and change alerts: the schedule (off by default, since an
-automatic run spends tokens), the alerts and the email that sends them, the
+"""The scheduler and alerts: the alerts and the email that sends them, the
 watch, the hourly watchdog, the nightly reconciliation and connector watch,
-and the loop that runs the paid audits and drives the stock bridge's send.
+and the background loop that runs them. The paid report re-runs it once
+scheduled went with the report tabs (22 Oct 2026).
 Moved out of copilot.py (stage 4 of the 14 October audit); its routes are in
 gizmo/routes/scheduler.py. Read as `scheduler.NAME`.
 """
@@ -17,60 +17,18 @@ import recon as recon_engine
 import xero as xero_api
 from gizmo.config import _env_num
 from gizmo import store as jsonstore
-from gizmo import ai as claude
 from gizmo import shopify
 
 # The same logger as copilot.py's, so these log lines read as before.
 logger = logging.getLogger("shopify_mcp.copilot")
 
 
-SCHEDULE_PATH      = os.environ.get("SCHEDULE_PATH", "/data/schedule.json")  # auto-refresh config (off by default)
-ALERTS_PATH        = os.environ.get("ALERTS_PATH", "/data/alerts.json")      # change alerts from scheduled runs
+# The schedule this file held went with the report tabs; the path stays as
+# the volume's anchor: backup, status and privacy find /data beside it.
+SCHEDULE_PATH      = os.environ.get("SCHEDULE_PATH", "/data/schedule.json")
+ALERTS_PATH        = os.environ.get("ALERTS_PATH", "/data/alerts.json")      # alerts the app raises
 ALERTS_MAX         = _env_num(int, os.environ.get("ALERTS_MAX", "60"), "60", "ALERTS_MAX")
 SCHEDULE_CHECK_SECS = _env_num(int, os.environ.get("SCHEDULE_CHECK_SECS", "900"), "900", "SCHEDULE_CHECK_SECS")       # how often the scheduler wakes to check
-
-
-# ---------------------------------------------------------------------------
-# Scheduled refresh + change alerts. Off by default (automatic token spend is
-# opt-in). When enabled, a background loop periodically re-runs the audits
-# server-side and records notable metric moves as in-app alerts.
-# ---------------------------------------------------------------------------
-
-_SCHEDULE_DEFAULT = {"enabled": False, "every_hours": 168, "threshold_pct": 15, "last_run": None}
-
-
-def _load_schedule() -> dict:
-    data = jsonstore._load_json_store(SCHEDULE_PATH, None, {})
-    return {**_SCHEDULE_DEFAULT, **(data if isinstance(data, dict) else {})}
-
-
-def _save_schedule(cfg: dict, _internal: bool = False) -> dict:
-    cur = _load_schedule()
-    if "enabled" in cfg:
-        was = bool(cur.get("enabled"))
-        cur["enabled"] = bool(cfg["enabled"])
-        # Turning it on should not fire a full paid run within the next tick; start the
-        # clock now so the first automatic run lands one interval later.
-        if cur["enabled"] and not was and not cur.get("last_run"):
-            cur["last_run"] = datetime.now(timezone.utc).isoformat()
-    if "every_hours" in cfg:
-        try:
-            cur["every_hours"] = max(1, min(744, int(cfg["every_hours"])))
-        except (TypeError, ValueError):
-            pass
-    if "threshold_pct" in cfg:
-        try:
-            cur["threshold_pct"] = max(1, min(100, int(cfg["threshold_pct"])))
-        except (TypeError, ValueError):
-            pass
-    # last_run is server-owned. Accepting it from a client allowed an unparseable value
-    # to make every tick look "due", which would run paid audits every check interval.
-    if _internal and "last_run" in cfg:
-        cur["last_run"] = cfg["last_run"]
-    if not jsonstore._store_writable(SCHEDULE_PATH):
-        return cur
-    jsonstore._write_json_store(SCHEDULE_PATH, None, cur)
-    return cur
 
 
 def _load_alerts() -> list:
@@ -152,76 +110,6 @@ def _update_alert(aid: str, status: str) -> list:
     return _write_alerts(alerts)
 
 
-async def _run_scheduled_audits(registry: dict) -> list:
-    """Re-run the audits server-side (no session needed) and record notable metric
-    moves as alerts. Returns the new alerts. Never raises."""
-    # Gate: when the store's headline numbers have not moved since the last
-    # scheduled run, skip the paid rewrite of four identical reports. A real run
-    # still happens at least every 14 days regardless.
-    try:
-        snap = await impact._impact_snapshot(registry)
-        state = _load_watch()
-        prev, prev_at = state.get("sched_snapshot") or {}, state.get("sched_snapshot_at")
-        fresh = False
-        if prev_at:
-            try:
-                fresh = (datetime.now(timezone.utc) - datetime.fromisoformat(prev_at)).days < 14
-            except Exception:  # an unreadable stamp is not fresh: a new snapshot is taken
-                fresh = False
-
-        def _close(a, b):
-            try:
-                a, b = float(a), float(b)
-            except (TypeError, ValueError):
-                return a == b
-            return abs(a - b) / max(abs(a), abs(b), 1.0) < 0.01
-
-        if snap and prev and fresh and all(_close(snap.get(k), prev.get(k)) for k in set(prev) | set(snap)):
-            cfg = _load_schedule()
-            cfg["last_run"] = datetime.now(timezone.utc).isoformat()
-            _save_schedule(cfg, _internal=True)
-            logger.info("scheduler: headline metrics unchanged; skipped paid audits")
-            return []
-        if snap:
-            state["sched_snapshot"] = snap
-            state["sched_snapshot_at"] = datetime.now(timezone.utc).isoformat()
-            _save_watch(state)
-    except Exception:
-        logger.exception("scheduler gate failed; running audits anyway")
-    extra = (store_profile._profile_to_system(store_profile._load_profile()) + memory._memory_to_system()
-             + knowledge._knowledge_to_system() + skillbook._skills_to_system("overview SEO search keywords customers report"))
-    threshold = _load_schedule().get("threshold_pct", 15)
-    track = (store_profile._load_profile().get("prefs") or {}).get("track_inventory", True)
-    jobs = [
-        ("Overview", "overview", lambda: analytics.run_overview(registry, extra, bool(track))),
-        ("SEO", "seo", lambda: seo.run_seo_audit(registry, extra)),
-        ("Keywords", "keywords", lambda: seo.run_keywords(registry, extra)),
-        ("Customers", "customers", lambda: analytics.run_customers(registry, extra)),
-    ]
-    found = []
-    for label, kind, run in jobs:
-        try:
-            res = await run()
-            res = analytics._save_customer_segment("__all__", res) if kind == "customers" else analytics._save_analysis(kind, res)
-            for ch in (res.get("changes") or []):
-                if ch.get("pct") is not None and abs(ch["pct"]) >= threshold:
-                    found.append({"tab": kind, "tab_label": label, "metric": ch["label"],
-                                  "pct": ch["pct"], "prev": ch["prev"], "cur": ch["cur"]})
-        except Exception:
-            logger.exception("scheduled audit failed: %s", kind)
-    cfg = _load_schedule()
-    cfg["last_run"] = datetime.now(timezone.utc).isoformat()
-    _save_schedule(cfg, _internal=True)
-    if found:
-        _add_alerts(found)
-        await _send_alert_email(
-            "Reactor: " + str(len(found)) + (" change alert" if len(found) == 1 else " change alerts"),
-            [f"{a['tab_label']}: {a['metric']} moved {a['pct']}% ({a['prev']} -> {a['cur']})" for a in found]
-            + ["", "Open the app for details."])
-    logger.info("scheduler: ran audits, %d alert(s)", len(found))
-    return found
-
-
 _scheduler_started = False
 _watch_last_tick = 0.0
 
@@ -266,13 +154,13 @@ async def _watchdog_tick(registry: dict) -> bool:
             else:
                 await _send_alert_email("Reactor: Shopify connection is failing",
                                         ["The app has not been able to read your store for 3 hours.",
-                                         "Data and labels may be stale, and scheduled audits are paused",
-                                         "until the connection recovers (this usually means the access",
-                                         "token was rotated or Shopify had an outage)."])
+                                         "Data and labels may be stale until the connection recovers",
+                                         "(this usually means the access token was rotated or Shopify",
+                                         "had an outage)."])
         if up and state.get("shopify_down"):
             state.pop("shopify_down", None)
             await _send_alert_email("Reactor: Shopify connection recovered",
-                                    ["Reads are working again; scheduled audits resume."])
+                                    ["Reads are working again."])
         # The privacy duties first, each on its own: anything later in this
         # tick that raises (the size-list check did, every hour) skipped them.
         # A shop/redact still owed is tried against this tick's own record of
@@ -494,28 +382,6 @@ async def _scheduler_loop(registry: dict) -> None:
             await xero_api.keepalive()
             await _recon_nightly()
             await _connector_watch()
-            cfg = _load_schedule()
-            if not shopify_up:
-                logger.warning("scheduler: Shopify unreachable; skipping paid audits this tick")
-            elif cfg.get("enabled") and claude.ANTHROPIC_API_KEY:
-                last = cfg.get("last_run")
-                due = True
-                if last:
-                    try:
-                        prev = datetime.fromisoformat(last)
-                        if prev.tzinfo is None:                      # tolerate a naive stamp
-                            prev = prev.replace(tzinfo=timezone.utc)
-                        elapsed = (datetime.now(timezone.utc) - prev).total_seconds()
-                        due = elapsed >= max(1, cfg.get("every_hours", 168)) * 3600
-                    except Exception:
-                        # Fail CLOSED: an unreadable timestamp must not make every tick
-                        # "due" and spend money in a loop. Re-stamp and wait a full cycle.
-                        logger.warning("scheduler: unreadable last_run %r; re-stamping", last)
-                        cfg["last_run"] = datetime.now(timezone.utc).isoformat()
-                        _save_schedule(cfg, _internal=True)
-                        due = False
-                if due:
-                    await _run_scheduled_audits(registry)
         except Exception:
             logger.exception("scheduler loop error")
             try:
@@ -556,20 +422,13 @@ def _ensure_scheduler(registry: dict) -> None:
 # takes names from these modules as it loads, and any of them may be imported
 # first. Read as core.NAME and sibling.NAME, never a copied name.
 from gizmo import backup  # noqa: E402
-from gizmo import impact  # noqa: E402
 from gizmo import activity  # noqa: E402
-from gizmo import analytics  # noqa: E402
 from gizmo import files as fileserver  # noqa: E402
-from gizmo import knowledge  # noqa: E402
 from gizmo import mail  # noqa: E402
-from gizmo import memory  # noqa: E402
 from gizmo import orderbook  # noqa: E402
 from gizmo import privacy  # noqa: E402
 from gizmo import crm as salesdesk  # noqa: E402
-from gizmo import seo  # noqa: E402
-from gizmo import skills as skillbook  # noqa: E402
 from gizmo import team  # noqa: E402
 from gizmo import work  # noqa: E402
 import copilot as core  # noqa: E402
-from gizmo import profile as store_profile  # noqa: E402
 from gizmo import xero_sync as xerosync  # noqa: E402
