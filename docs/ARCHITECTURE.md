@@ -176,8 +176,12 @@ and what each turns off. Everything else defaults to "that feature is off".
   New stores use `created_at` / `updated_at`; old ones keep their names.
 - **Comments** say why, not what. The house style is a paragraph on the
   decision above the code that makes it.
-- **Tests** are `@test` functions in `tests/test_dispatch.py`, run in file
-  order by the runner at the bottom. A test that needs accounts wraps itself
+- **Tests** are `@test` functions in the dispatch suite's sections
+  (`tests/dispatch/`, a file per stretch of the suite), run in the order
+  `tests/test_dispatch.py` lists them, in one namespace, by the runner in the
+  last; a new test goes at the end of the section whose subject it shares.
+  The harness (`tests/dispatch/harness.py`) is everything they share. A test
+  that needs accounts wraps itself
   in `with_accounts(go)`; one that needs the file store in `with_files(go)`.
   A run prints one line per test; what the app logged during a test is shown
   under its FAIL line only. `VERBOSE=1` streams every log line as it comes,
@@ -188,7 +192,7 @@ and what each turns off. Everything else defaults to "that feature is off".
 
 | Suite | What it sees | What it cannot see |
 |---|---|---|
-| `tests/test_dispatch.py` | The server through its routes, built as it is served, against scratch stores and stand-ins for every outside system | Anything the page does with an answer |
+| `tests/test_dispatch.py` (its sections in `tests/dispatch/`) | The server through its routes, built as it is served, against scratch stores and stand-ins for every outside system | Anything the page does with an answer |
 | `tests/test_frontend.py` | The page's source as text, and its logic run in node | Layout, rendering, a selector that matches nothing |
 | `tests/test_forecast.py` | The forecast package | The app |
 | `tests/browser/` | Every screen in Chromium at phone, laptop and wide sizes, in a world seeded through the app's own code: script errors, failed or outside requests, writes, sideways scroll, spill, the panel rules, accessibility (axe, WCAG 2.2 AA) and three windows by keyboard | Firefox and Safari; the Shopify admin frame itself |

@@ -761,15 +761,18 @@ def run(spec_path, root, write):
                 text = add_routes_to_existing(group_of[rel], text)
         elif rel == "server.py":
             pass                      # it reads the moved names through copilot (above)
-        elif rel.endswith("test_dispatch.py") and "seed" not in rel:
+        elif (rel.endswith("test_dispatch.py") or rel.endswith("dispatch/harness.py")) and "seed" not in rel:
             # after the prelude's last top-level gizmo import (or its copilot
-            # import): found by the parser, so never inside a string
+            # import): found by the parser, so never inside a string. The suite
+            # in sections keeps its prelude in tests/dispatch/harness.py; the
+            # file that joins them imports nothing, so it takes nothing.
             ttop = [n for n in ast.parse(text).body if isinstance(n, (ast.Import, ast.ImportFrom))]
             last = next((n for n in reversed(ttop) if isinstance(n, ast.ImportFrom) and (n.module or "").startswith("gizmo")),
                         next((n for n in reversed(ttop) if isinstance(n, ast.Import) and any(a.name == "copilot" for a in n.names)), None))
-            tl = text.splitlines(keepends=True)
-            tl[last.end_lineno:last.end_lineno] = [new_imports]
-            text = "".join(tl)
+            if last is not None:
+                tl = text.splitlines(keepends=True)
+                tl[last.end_lineno:last.end_lineno] = [new_imports]
+                text = "".join(tl)
         open(P(rel), "w", encoding="utf-8").write(text)
     report.append("written")
     return 0, report

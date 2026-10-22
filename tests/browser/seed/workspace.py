@@ -20,7 +20,7 @@ WS_SEED = {}
 
 # ---------------------------------------------------------------- prerequisite
 # The harness leaves Memory and Skills at their production /data default (see
-# _ws_stores in tests/test_dispatch.py, which redirects them per test). On a Mac
+# _ws_stores in the dispatch suite (tests/dispatch/), which redirects them per test). On a Mac
 # /data cannot be made, so every note or skill write answers 500. Same redirect,
 # to the run's scratch dir, done once before anything is written.
 memory.MEMORY_PATH = SCRATCH + "/store_memory.json"
@@ -32,7 +32,7 @@ ensure_auth()
 _WS_MASTER = APP_AUTH["master"]
 
 # ---------------------------------------------------------------- Team: accounts (a)
-# make_user / ready_user copied from tests/test_dispatch.py (they sit after the
+# make_user / ready_user copied from the dispatch suite (tests/dispatch/; they sit after the
 # prelude, so they are not in it): /api/team/user op=create, then the forced
 # first-password change through /api/auth/password, then a fresh sign-in.
 def _make_user(name, username, role="member"):

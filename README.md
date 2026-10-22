@@ -35,7 +35,7 @@ where Railway injects the variables — never has one.
 ## Test it
 
 ```bash
-make test            # the dispatch suite: a thousand tests through the real app, under three minutes
+make test            # the dispatch suite: a thousand tests through the real app, about three minutes
 make test-frontend   # the static guards on the single-page app, about two minutes
 make test-browser    # every screen in a real browser at three sizes, a few minutes
 make check           # everything CI runs that needs no network
@@ -45,7 +45,8 @@ make api-doc         # regenerate docs/API.md after adding or changing a route
 The browser suite needs its node modules and Chromium once:
 `npm ci && npx playwright install chromium`. See `tests/browser/README.md`.
 
-`tests/test_dispatch.py` builds the app exactly as it is served
+`tests/test_dispatch.py` (its tests are in sections in `tests/dispatch/`)
+builds the app exactly as it is served
 (`server.build_app()`, real middleware) and drives it with a test client
 against scratch stores; nothing touches `/data` or the network. It prints one
 line per test, and a failing test's log lines under it (`VERBOSE=1` for all).

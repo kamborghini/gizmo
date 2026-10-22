@@ -1,5 +1,5 @@
 # Dashboards seed for the browser suite. Proven 14 Oct 2026 against the
-# dispatch setup. Runs AFTER the test_dispatch.py prelude, in its own copy of
+# dispatch setup. Runs AFTER the dispatch suite's prelude (tests/dispatch/harness.py), in its own copy of
 # the prelude's names (seed/__init__.py: copilot, server, xero_api, client,
 # post, ensure_auth, tok, SCRATCH ...), never in the prelude's globals. Everything is invented:
 # people, companies, emails at example.com / example.org, phones 01632 960xxx.
@@ -708,7 +708,7 @@ def seed_reports():
 # Shopify; two statuses set through the route a person uses (a).
 # =============================================================================
 class DashFakeXero:
-    """Module-shaped, like tests/test_dispatch.py's _FakeXero."""
+    """Module-shaped, like the dispatch suite's _FakeXero (tests/dispatch/)."""
     def __init__(self, invoices, payments, bank, notes):
         self.invoices, self.payments, self.bank, self.notes = invoices, payments, bank, notes
     def connected(self): return True
