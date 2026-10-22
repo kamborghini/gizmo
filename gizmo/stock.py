@@ -363,26 +363,102 @@ class HistoryIndex:
         self.offset += end
 
 
-_mem: dict = {}              # "history": the HistoryIndex; "snapshots": (file versions, the snapshots read)
+_mem: dict = {}              # "history": the HistoryIndex; "snapshots": the SnapshotSummary
+
+
+def _complete_lines(path: str, offset: int) -> tuple:
+    """The records on the complete lines after `offset`, and where they end."""
+    with open(path, "rb") as fh:
+        fh.seek(offset)
+        chunk = fh.read()
+    end = chunk.rfind(b"\n") + 1
+    rows = []
+    for raw in chunk[:end].split(b"\n"):
+        if raw.strip():
+            try:
+                row = json.loads(raw)
+            except ValueError:
+                continue                               # stock_store.read_snapshots says so once
+            if isinstance(row, dict):
+                rows.append(row)
+    return rows, offset + end
+
+
+class SnapshotSummary:
+    """What the figures over time read of every snapshot, and no more: each
+    snapshot's time, reason and totals in time order, and for each line its
+    first and last count (stock_figures.note_point). A year of snapshots of
+    every line is tens of megabytes; this is a few hundred kilobytes."""
+
+    def __init__(self):
+        self.heads, self.series, self.files, self.full_reads = [], {}, {}, 0
+        self._last = None
+
+    def take(self, snap: dict) -> bool:
+        """Add a snapshot taken no earlier than the last; False when it was."""
+        at = _instant(snap.get("taken_at"))
+        if at is None or (self._last is not None and at < self._last):
+            return False
+        self._last = at
+        self.heads.append({k: snap.get(k) for k in ("id", "taken_at", "reason", "by_user", "note", "totals")})
+        for si in snap.get("items") or []:
+            stock_figures.note_point(self.series, si.get("item_key"), at, si.get("current"))
+        return True
+
+    def values(self) -> list:
+        return [(h.get("totals") if isinstance(h.get("totals"), dict) else {}).get("active_value_gbp", 0)
+                for h in self.heads]
+
+
+def _read_snapshots_afresh(files: dict) -> SnapshotSummary:
+    summary = SnapshotSummary()
+    rows = []
+    for path, ino in files.items():
+        got, end = _complete_lines(path, 0)
+        rows.extend(got)
+        summary.files[path] = (ino, end)
+    rows.sort(key=lambda s: s.get("id", 0))
+    rows.sort(key=lambda s: _instant(s.get("taken_at")) or datetime.min.replace(tzinfo=timezone.utc))
+    for row in rows:
+        summary.take(row)
+    summary.full_reads = (_mem.get("snapshot_reads") or 0) + 1
+    _mem["snapshot_reads"] = summary.full_reads
+    return summary
+
+
+def snapshot_summary() -> SnapshotSummary:
+    """The snapshots as the figures need them, read on from where the last
+    read stopped; read afresh only when a file went or was replaced, or a
+    snapshot arrived out of time order."""
+    with _lock:
+        files = {}
+        for path in stock_store._snapshot_files():
+            try:
+                files[path] = os.stat(path).st_ino
+            except FileNotFoundError:
+                continue
+        kept = _mem.get("snapshots")
+        if (kept is None or set(kept.files) - set(files)
+                or any(path in kept.files and kept.files[path][0] != ino for path, ino in files.items())
+                or any(os.path.getsize(p) < kept.files[p][1] for p in kept.files if p in files)):
+            kept = _read_snapshots_afresh(files)
+        else:
+            new = []
+            for path, ino in files.items():
+                got, end = _complete_lines(path, kept.files.get(path, (ino, 0))[1])
+                new.extend(got)
+                kept.files[path] = (ino, end)
+            new.sort(key=lambda s: s.get("id", 0))
+            new.sort(key=lambda s: _instant(s.get("taken_at")) or datetime.min.replace(tzinfo=timezone.utc))
+            if not all(kept.take(row) for row in new):
+                kept = _read_snapshots_afresh(files)
+        _mem["snapshots"] = kept
+        return kept
 
 
 def snapshots() -> list:
-    """Every snapshot, read again only when a snapshot file changed: the
-    trends, the forecast and "since you were last here" read them all."""
-    with _lock:
-        files = []
-        for path in stock_store._snapshot_files():
-            try:
-                st = os.stat(path)
-            except FileNotFoundError:
-                continue
-            files.append((path, st.st_ino, st.st_size, st.st_mtime_ns))
-        version = tuple(files)
-        kept = _mem.get("snapshots")
-        if kept is None or kept[0] != version:
-            kept = (version, stock_store.read_snapshots())
-            _mem["snapshots"] = kept
-        return kept[1]
+    """Every snapshot's time, reason and totals, oldest first (no lines)."""
+    return snapshot_summary().heads
 
 
 def history_index() -> HistoryIndex:
@@ -413,7 +489,7 @@ def _let_go_of_stock_in_memory(paths):
         gone.append(idx.path)
     kept = _mem.get("snapshots")
     if kept is not None:
-        held = [f[0] for f in kept[0]]
+        held = list(kept.files)
         if paths is None or any(p in paths for p in held):
             _mem.pop("snapshots", None)
             gone.extend(held)

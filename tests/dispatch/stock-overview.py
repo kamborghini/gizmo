@@ -171,3 +171,29 @@ def t_closing_a_stock_quarter_raises_no_false_value_swing():
     _stock_view("quarters", "close", new_label="Quarter two")
     eq([a["kind"] for a in stock_store.load_alerts()["alerts"] if not a["item_key"]], ["large_change"],
        "the swing since the last snapshot, once")
+
+def _stock_snap_line(taken_at, reason, value, counts):
+    stock_store.append_snapshot({"taken_at": taken_at, "reason": reason, "by_user": "system", "note": "",
+                                 "totals": {"active_value_gbp": value},
+                                 "items": [{"item_key": k, "category": "Glass", "written_off": False, "current": c,
+                                            "used": 0, "current_value": 0.0} for k, c in counts.items()]})
+
+@test
+def t_the_stock_snapshot_cache_reads_on_and_keeps_only_what_the_figures_need():
+    _stock_live()
+    _stock_snap_line("2026-10-01T00:00:00+00:00", "scheduled", 20.0, {"Glass|Blue|20|": 30, "Glass|Red|30|": 14})
+    _stock_snap_line("2026-10-01T00:00:00+00:00", "edit", 19.0, {"Glass|Blue|20|": 28})      # the same moment
+    _stock_snap_line("2026-10-04T12:00:00+00:00", "edit", 18.0, {"Glass|Blue|20|": 25, "Glass|Red|30|": 12})
+    kept = stock.snapshot_summary()
+    reads = kept.full_reads
+    _stock_snap_line("2026-10-11T00:00:00+00:00", "scheduled", 17.5, {"Glass|Blue|20|": 20, "Glass|Red|30|": 12})
+    again = stock.snapshot_summary()
+    ok(again is kept, "the same summary, read on")
+    eq((len(again.heads), again.full_reads), (4, reads), "one more snapshot without reading the files again")
+    ok(all("items" not in h for h in again.heads), "only what the figures need is kept")
+    items = stock.items_in_order(stock_store.load_items())
+    eq(sfig.forecast_from(items, again.series, again.values()),
+       sfig.forecast(items, stock_store.read_snapshots()), "the forecast, exactly as from every snapshot")
+    eq(sfig.trends(again.heads), sfig.trends(stock_store.read_snapshots()), "and the trends")
+    stock_store.prune_change_snapshots("2026-10-05")
+    ok(stock.snapshot_summary() is not kept, "a pruned file means a fresh read")

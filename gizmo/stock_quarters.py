@@ -353,7 +353,9 @@ def item_sheet(item_id) -> dict:
     if not it:
         raise stock.Refused(404, "That stock line was not found.")
     items = stock.items_in_order(st["items"])
-    row = next((f for f in stock_figures.forecast(items, stock.snapshots())["items"] if f["key"] == it["key"]), None)
+    kept = stock.snapshot_summary()
+    row = next((f for f in stock_figures.forecast_from(items, kept.series, kept.values())["items"]
+                if f["key"] == it["key"]), None)
     contact = next((c for c in st["suppliers"].get("suppliers") or [] if c["supplier"] == (it["supplier"] or "")), None)
     return {"item": stock_figures.item_view(it), "forecast": row, "lead_days": (contact or {}).get("lead_days") or 0,
             "history": history(item_id=it["id"], limit=200)["rows"]}
@@ -366,7 +368,8 @@ def trends() -> dict:
 
 
 def forecast() -> dict:
-    return stock_figures.forecast(stock.items_in_order(stock.state()["items"]), stock.snapshots())
+    kept = stock.snapshot_summary()
+    return stock_figures.forecast_from(stock.items_in_order(stock.state()["items"]), kept.series, kept.values())
 
 
 def outlook() -> dict:
