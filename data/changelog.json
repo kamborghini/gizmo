@@ -1,6 +1,27 @@
 {
  "releases": [
   {
+   "date": "2026-10-22",
+   "title": "A smaller Reactor: the reports and Reconciliation are gone",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "Overview, SEO, Keywords, Products, Customers and Reconciliation have been removed, and Reactor no longer connects to Google Analytics, Search Console, the accounts mailbox or its own Xero sign-in, so there are fewer keys to look after. Xero sync is unchanged: it has its own connection."
+    },
+    {
+     "kind": "changed",
+     "tab": "labels",
+     "text": "Reactor now opens on Labels, and alerts (Shopify down, size list gaps, Xero sync runs that need a look, privacy requests) show at the top of every page instead of on Overview."
+    },
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "Who may see customer details is now its own tick on the Team page, Customer details, and everyone keeps exactly the access they had. Chat answers questions about payouts and disputes only for accounts that can open Xero sync, and it no longer checks the website's SEO."
+    }
+   ]
+  },
+  {
    "date": "2026-10-21",
    "title": "More requests checked at the door: shipping and production",
    "items": [
