@@ -150,9 +150,9 @@ def _finish(journal: dict) -> None:
     rows = [r for r in journal.get("history") or [] if r["id"] > stock_store.last_history_id()]
     if rows:
         stock_store.append_history(rows)
-    snap = journal.get("snapshot")
-    if snap and snap["id"] > stock_store.last_snapshot_id():
-        stock_store.append_snapshot(snap)
+    for snap in journal.get("snapshots") or []:
+        if snap["id"] > stock_store.last_snapshot_id():
+            stock_store.append_snapshot(snap)
     for name, doc in (journal.get("docs") or {}).items():
         _write(name, doc)
 
@@ -195,10 +195,11 @@ def history_row(who: dict, action: str, *, item_key: str = "", field: str = "", 
             "person": who["person"]}
 
 
-def commit(st: dict, *, changed: set, history=(), snapshot: dict = None) -> list:
+def commit(st: dict, *, changed: set, history=(), snapshot: dict = None, snapshots=()) -> list:
     """Write a change worked out from `st`: its history lines, its snapshot
-    and the documents named in `changed`, through the journal. Returns the
-    history lines' numbers. The caller holds `_lock` from `state()` to here."""
+    (or snapshots, in order: a quarter's close takes two) and the documents
+    named in `changed`, through the journal. Returns the history lines'
+    numbers. The caller holds `_lock` from `state()` to here."""
     with _lock:
         if not (st.get("settings") or {}).get("live_since"):
             raise Refused(409, "Stock has not moved into Reactor yet.")
@@ -210,8 +211,9 @@ def commit(st: dict, *, changed: set, history=(), snapshot: dict = None) -> list
         for row in history:
             last += 1
             rows.append(dict(row, id=last))
-        snap = dict(snapshot, id=stock_store.last_snapshot_id() + 1) if snapshot else None
-        journal = {"history": rows, "snapshot": snap, "docs": {name: st[name] for name in sorted(changed)}}
+        last_snap = stock_store.last_snapshot_id()
+        snaps = [dict(s, id=last_snap + n) for n, s in enumerate(([snapshot] if snapshot else []) + list(snapshots), 1)]
+        journal = {"history": rows, "snapshots": snaps, "docs": {name: st[name] for name in sorted(changed)}}
         stock_store.write_journal(journal)
         _finish(journal)
         stock_store.clear_journal()
@@ -252,16 +254,18 @@ def _raise_warnings(alerts: dict, raised: list) -> None:
     alerts["alerts"] = rows
 
 
-def take_snapshot(st: dict, reason: str, who: dict, note: str) -> dict:
+def take_snapshot(st: dict, reason: str, who: dict, note: str, prev: dict = None) -> dict:
     """The snapshot of the lines as `st` holds them, its warnings raised into
-    `st["alerts"]`. Pass it to commit() with "alerts" among the changes."""
+    `st["alerts"]`. Pass it to commit() with "alerts" among the changes. The
+    value is compared with `prev` when given (a snapshot taken earlier in the
+    same change), else with the latest one written."""
     items = items_in_order(st["items"])
     snap = {"taken_at": now_iso(), "reason": reason, "by_user": who["user"], "note": str(note)[:300],
             "totals": stock_figures.totals_for_snapshot(items),
             "items": [{"item_key": i["key"], "category": i["category"], "written_off": i["written_off"],
                        "current": i["current"], "used": i["used"], "current_value": stock_figures.current_value(i)}
                       for i in items]}
-    prev = stock_store.last_snapshot()
+    prev = prev if prev is not None else stock_store.last_snapshot()
     prev_totals = (prev.get("totals") if isinstance(prev.get("totals"), dict) else {}) if prev else None
     meta = (st.get("settings") or {}).get("meta") or {}
     _raise_warnings(st["alerts"], stock_figures.detect_anomalies(items, meta, prev_totals))
@@ -311,7 +315,26 @@ class HistoryIndex:
         self.offset += end
 
 
-_mem: dict = {}              # "history": the HistoryIndex, while its file is the one it read
+_mem: dict = {}              # "history": the HistoryIndex; "snapshots": (file versions, the snapshots read)
+
+
+def snapshots() -> list:
+    """Every snapshot, read again only when a snapshot file changed: the
+    trends, the forecast and "since you were last here" read them all."""
+    with _lock:
+        files = []
+        for path in stock_store._snapshot_files():
+            try:
+                st = os.stat(path)
+            except FileNotFoundError:
+                continue
+            files.append((path, st.st_ino, st.st_size, st.st_mtime_ns))
+        version = tuple(files)
+        kept = _mem.get("snapshots")
+        if kept is None or kept[0] != version:
+            kept = (version, stock_store.read_snapshots())
+            _mem["snapshots"] = kept
+        return kept[1]
 
 
 def history_index() -> HistoryIndex:
@@ -334,12 +357,19 @@ def history_index() -> HistoryIndex:
 
 
 def _let_go_of_stock_in_memory(paths):
-    """A restore or a redact replaced the history under us: read it afresh."""
+    """A restore or a redact replaced files under us: read them afresh."""
+    gone = []
     idx = _mem.get("history")
     if idx is not None and (paths is None or idx.path in paths):
         _mem.pop("history", None)
-        return [idx.path]
-    return []
+        gone.append(idx.path)
+    kept = _mem.get("snapshots")
+    if kept is not None:
+        held = [f[0] for f in kept[0]]
+        if paths is None or any(p in paths for p in held):
+            _mem.pop("snapshots", None)
+            gone.extend(held)
+    return gone
 
 
 jsonstore.holds_in_memory(_let_go_of_stock_in_memory)

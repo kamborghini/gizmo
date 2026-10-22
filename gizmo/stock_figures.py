@@ -415,6 +415,28 @@ def forecast(items: list, snapshots: list) -> dict:
     }
 
 
+def outlook(snapshots: list, days: int = 30):
+    """Where the stock's value is heading, in real days (flaw 8: the stock
+    app projected snapshot steps, which a busy day crowds and a quiet week
+    stretches): the least squares line of value against days since the
+    first snapshot, carried `days` past the last. None with fewer than five
+    snapshots or under a day between the first and the last."""
+    snaps = _oldest_first(snapshots)
+    if len(snaps) < 5:
+        return None
+    t0 = _instant(snaps[0]["taken_at"])
+    xs = [(_instant(s["taken_at"]) - t0).total_seconds() / 86400.0 for s in snaps]
+    if xs[-1] - xs[0] < 1:
+        return None
+    ys = [_totals(s).get("active_value_gbp", 0) for s in snaps]
+    n = len(xs)
+    mx, my = sum(xs) / n, sum(ys) / n
+    denom = sum((x - mx) ** 2 for x in xs)
+    slope = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / denom if denom else 0.0
+    return {"value_now": ys[-1], "per_day": round(slope, 2), "projected": round(ys[-1] + slope * days, 2),
+            "days": days}
+
+
 def detect_anomalies(items: list, meta: dict, prev_totals: dict = None) -> list:
     """Stock-outs, low stock and negative stock on each line, and a large
     swing in value since the previous snapshot."""

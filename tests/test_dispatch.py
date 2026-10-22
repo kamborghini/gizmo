@@ -82,6 +82,7 @@ SECTIONS = [
     'stock-foundation.py',               # Stock in Reactor: the stores, the figures, the move (plan 1 of 4)
     'stock-sheet.py',                    # Stock in Reactor: the sheet, served (plan 2a)
     'stock-buying.py',                   # Stock in Reactor: buying, orders and deliveries (plan 2a)
+    'stock-overview.py',                 # Stock in Reactor: quarters, settings, warnings, history (plan 2a)
     'runner.py',                         # the runner's own toy tests, and the runner
 ]
 

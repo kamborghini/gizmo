@@ -2173,5 +2173,121 @@
    "invoice_no": "d-4"
   },
   "source": "tests/dispatch/stock-buying.py:184"
+ },
+ {
+  "path": "/api/stock/quarters",
+  "body": {
+   "op": "close",
+   "new_label": "Quarter two"
+  },
+  "source": "tests/dispatch/stock-overview.py:14"
+ },
+ {
+  "path": "/api/stock/quarters",
+  "body": {
+   "op": "csv",
+   "id": 1
+  },
+  "source": "tests/dispatch/stock-overview.py:40"
+ },
+ {
+  "path": "/api/stock/quarters",
+  "body": {
+   "op": "compare"
+  },
+  "source": "tests/dispatch/stock-overview.py:60"
+ },
+ {
+  "path": "/api/stock/quarters",
+  "body": {
+   "op": "compare",
+   "left": 1,
+   "right": "current"
+  },
+  "source": "tests/dispatch/stock-overview.py:60"
+ },
+ {
+  "path": "/api/stock/quarters",
+  "body": {
+   "op": "list"
+  },
+  "source": "tests/dispatch/stock-overview.py:64"
+ },
+ {
+  "path": "/api/stock/quarters",
+  "body": {
+   "op": "rename",
+   "label": "Quarter two"
+  },
+  "source": "tests/dispatch/stock-overview.py:64"
+ },
+ {
+  "path": "/api/stock/overview",
+  "body": {
+   "op": "save_settings",
+   "fx_usd_gbp": 0.8
+  },
+  "source": "tests/dispatch/stock-overview.py:73"
+ },
+ {
+  "path": "/api/stock/overview",
+  "body": {
+   "op": "briefing"
+  },
+  "source": "tests/dispatch/stock-overview.py:91"
+ },
+ {
+  "path": "/api/stock/overview",
+  "body": {
+   "op": "ack"
+  },
+  "source": "tests/dispatch/stock-overview.py:94"
+ },
+ {
+  "path": "/api/stock/overview",
+  "body": {
+   "op": "alerts"
+  },
+  "source": "tests/dispatch/stock-overview.py:105"
+ },
+ {
+  "path": "/api/stock/overview",
+  "body": {
+   "op": "dismiss",
+   "id": 4
+  },
+  "source": "tests/dispatch/stock-overview.py:106"
+ },
+ {
+  "path": "/api/stock/overview",
+  "body": {
+   "op": "outlook"
+  },
+  "source": "tests/dispatch/stock-overview.py:161"
+ },
+ {
+  "path": "/api/stock/history",
+  "body": {
+   "op": "search",
+   "action": "receive"
+  },
+  "source": "tests/dispatch/stock-overview.py:123"
+ },
+ {
+  "path": "/api/stock/history",
+  "body": {
+   "op": "search",
+   "limit": 2,
+   "before": 4
+  },
+  "source": "tests/dispatch/stock-overview.py:129"
+ },
+ {
+  "path": "/api/stock/history",
+  "body": {
+   "op": "item",
+   "id": 9
+  },
+  "source": "tests/dispatch/stock-overview.py:140"
  }
 ]

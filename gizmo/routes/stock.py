@@ -5,7 +5,7 @@ claimed by the "stock" tab in gate._TAB_ROUTES.
 import logging
 from starlette.requests import Request
 
-from gizmo import stock, stock_orders, stock_sheet
+from gizmo import stock, stock_orders, stock_quarters, stock_sheet
 from gizmo import gate
 from gizmo import bodies
 
@@ -64,6 +64,35 @@ class StockReceiveBody(bodies.Body):
     date: bodies.Text = None
     order_id: bodies.Id = None
     lines: bodies.Records = None
+
+
+class StockQuartersBody(bodies.Body):
+    """What /api/stock/quarters reads: a name for the open quarter or the
+    next, a quarter to download, two to compare."""
+    label: bodies.Text = None
+    new_label: bodies.Text = None
+    id: bodies.Id = None
+    left: bodies.Id = None
+    right: bodies.Id = None
+
+
+class StockOverviewBody(bodies.Body):
+    """What /api/stock/overview reads: a warning to dismiss; the settings
+    (low_stock_days and the two rates are checked by the rule, which takes
+    an empty box as no change, as the stock app did)."""
+    id: bodies.Id = None
+
+
+class StockHistoryBody(bodies.Body):
+    """What /api/stock/history reads: what to search for, and a line."""
+    q: bodies.Text = None
+    action: bodies.Text = None
+    person: bodies.Id = None
+    id: bodies.Id = None
+    start: bodies.Text = None
+    end: bodies.Text = None
+    before: bodies.Whole = None
+    limit: bodies.Whole = None
 
 
 _CONTACT_FIELDS = ("supplier", "email", "cc", "contact_name", "subject", "body", "lead_days", "min_order")
@@ -157,6 +186,65 @@ def register(mcp, registry):
                                                         body.get("order_id")), "changing an order")
         if op == "undo":
             return _answer(lambda: stock_orders.undo_delivery(who, body.get("invoice_no")), "undoing a delivery")
+        return gate._json({"error": "Unknown op."}, 400)
+
+    @mcp.custom_route("/api/stock/quarters", methods=["POST"])
+    async def stock_quarters_route(request: Request):
+        """Quarters: the open one and the closed ones, renaming, closing,
+        a closed quarter's list to download, and comparing two."""
+        err, body, who = await gate._guard(request, model=StockQuartersBody)
+        if err:
+            return err
+        op = str(body.get("op") or "list")
+        if op == "list":
+            return _answer(stock_quarters.quarters, "the quarters")
+        if op == "rename":
+            return _answer(lambda: stock_quarters.rename(who, body.get("label")), "renaming the quarter")
+        if op == "close":
+            return _answer(lambda: stock_quarters.close(who, body.get("new_label")), "closing the quarter")
+        if op == "csv":
+            return _answer(lambda: stock_quarters.quarter_csv(body.get("id")), "a quarter's list")
+        if op == "compare":
+            return _answer(lambda: stock_quarters.compare(body.get("left"), body.get("right") or "current"),
+                           "comparing quarters")
+        return gate._json({"error": "Unknown op."}, 400)
+
+    @mcp.custom_route("/api/stock/overview", methods=["POST"])
+    async def stock_overview_route(request: Request):
+        """The overview: "since you were last here", warnings, the figures
+        over time, the settings and the exchange rates."""
+        err, body, who = await gate._guard(request, model=StockOverviewBody)
+        if err:
+            return err
+        op = str(body.get("op") or "briefing")
+        reads = {"briefing": lambda: stock_quarters.briefing(who), "alerts": stock_quarters.alerts,
+                 "trends": stock_quarters.trends, "forecast": stock_quarters.forecast,
+                 "outlook": stock_quarters.outlook, "settings": stock_quarters.settings, "fx": stock_quarters.fx}
+        if op in reads:
+            return _answer(reads[op], op)
+        if op == "ack":
+            return _answer(lambda: stock_quarters.acknowledge(who), "acknowledging")
+        if op == "dismiss":
+            return _answer(lambda: stock_quarters.dismiss(who, body.get("id")), "dismissing a warning")
+        if op == "save_settings":
+            return _answer(lambda: stock_quarters.save_settings(who, body.get("low_stock_days"), body.get("fx_usd_gbp"),
+                                                                body.get("fx_eur_gbp")), "the settings")
+        return gate._json({"error": "Unknown op."}, 400)
+
+    @mcp.custom_route("/api/stock/history", methods=["POST"])
+    async def stock_history_route(request: Request):
+        """The history of who changed what: searched, or one line's own with
+        its forecast and its supplier's delivery time."""
+        err, body, who = await gate._guard(request, model=StockHistoryBody)
+        if err:
+            return err
+        op = str(body.get("op") or "search")
+        if op == "search":
+            return _answer(lambda: stock_quarters.history(body.get("q"), body.get("action"), body.get("person"),
+                                                          None, body.get("start"), body.get("end"), body.get("before"),
+                                                          body.get("limit")), "the history")
+        if op == "item":
+            return _answer(lambda: stock_quarters.item_sheet(body.get("id")), "a line's sheet")
         return gate._json({"error": "Unknown op."}, 400)
 
     @mcp.custom_route("/api/stock/suppliers", methods=["POST"])

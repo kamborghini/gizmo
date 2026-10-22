@@ -3,7 +3,7 @@
 Generated from the code by `tools/route_reference.py`; do not edit by hand.
 `make api-doc` rewrites it, and CI fails when it is stale.
 
-131 routes. **Tab** is the tab that opens a route (`_TAB_ROUTES`); an `/api/` route no tab claims is refused unless it is on `_OPEN_API`. **Door** is the guard the handler opens with (`_guard` is the one door: rate window, tab, session, rank, AI slot, body); `own check` means the route authenticates itself (a hook, a webhook, OAuth, print, assets). **Body** is the model that checks the fields the route reads (`gizmo/bodies.py`); `unchecked` means it reads fields no model checks yet. **Checks** are the permission helpers the handler calls itself.
+134 routes. **Tab** is the tab that opens a route (`_TAB_ROUTES`); an `/api/` route no tab claims is refused unless it is on `_OPEN_API`. **Door** is the guard the handler opens with (`_guard` is the one door: rate window, tab, session, rank, AI slot, body); `own check` means the route authenticates itself (a hook, a webhook, OAuth, print, assets). **Body** is the model that checks the fields the route reads (`gizmo/bodies.py`); `unchecked` means it reads fields no model checks yet. **Checks** are the permission helpers the handler calls itself.
 
 ## `/`
 
@@ -261,7 +261,10 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 
 | Route | Methods | Tab | Door | Terms | Body | Checks | Handler | What it does |
 |---|---|---|---|---|---|---|---|---|
+| `/api/stock/history` | POST | stock | `_guard` |  | `StockHistoryBody` |  | `gizmo.routes.stock.stock_history_route` | The history of who changed what: searched, or one line's own with its forecast and its supplier's delivery time. |
 | `/api/stock/orders` | POST | stock | `_guard` |  | `StockOrdersBody` |  | `gizmo.routes.stock.stock_orders_route` | Orders placed with suppliers, kept with what is received against them; what needs reordering, suggested levels, and setting levels. |
+| `/api/stock/overview` | POST | stock | `_guard` |  | `StockOverviewBody` |  | `gizmo.routes.stock.stock_overview_route` | The overview: "since you were last here", warnings, the figures over time, the settings and the exchange rates. |
+| `/api/stock/quarters` | POST | stock | `_guard` |  | `StockQuartersBody` |  | `gizmo.routes.stock.stock_quarters_route` | Quarters: the open one and the closed ones, renaming, closing, a closed quarter's list to download, and comparing two. |
 | `/api/stock/receive` | POST | stock | `_guard` |  | `StockReceiveBody` |  | `gizmo.routes.stock.stock_receive_route` | Taking stock in: one line with its invoice, or a whole delivery, each counted against the orders it fills; undoing a delivery. |
 | `/api/stock/sheet` | POST | stock | `_guard` | max body SHEET_CAP, cap SHEET_CAP | `StockSheetBody` |  | `gizmo.routes.stock.stock_sheet_route` | The stock list: every line with the sheet's figures, editing a line, counting, and adding a line. |
 | `/api/stock/suppliers` | POST | stock | `_guard` |  | `StockSuppliersBody` |  | `gizmo.routes.stock.stock_suppliers_route` | Suppliers: their contacts, delivery times, minimum orders and message templates, one at a time or all together. |
