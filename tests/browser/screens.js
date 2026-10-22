@@ -31,18 +31,7 @@ const crmBefore = async (p, h) => { await h.nav('crm'); await p.waitForSelector(
 const labelsBefore = async (p, h) => { await h.nav('labels'); await h.waitText('#labels-content', '#210388'); };
 
 module.exports = [
-  page('overview', 'overview', async (p, h) => { await h.nav('overview'); }, { seeded: 'Revenue is up on last week' }),
-  page('seo', 'seo', async (p, h) => { await h.nav('seo'); }, { seeded: 'The store is indexable' }),
-  page('keywords', 'keywords', async (p, h) => { await h.nav('keywords'); }, { seeded: 'Custom gobo terms lead' }),
-  // 'Load products' is a read: POST /api/products {months, fresh}, no AI, no store write.
-  page('products', 'products', async (p, h) => { await h.nav('products'); await h.click('#products-content .run-gate .btn-primary'); },
-    { seeded: 'Walkway Safety Sign Gobo' }),
-  page('customers', 'customers', async (p, h) => {
-    await h.nav('customers');
-    await h.waitFor(() => { const s = document.querySelector('#trade-radar-slot'); return s && s.innerText.trim().length > 20; });
-  }, { seeded: 'Champions' }),
   page('liability', 'liability', async (p, h) => { await h.nav('liability'); }, { seeded: 'Kestrel Logistics Ltd' }),
-  page('recon', 'recon', async (p, h) => { await h.nav('recon'); }, { seeded: 'Kilnworth Glass Supplies Ltd' }),
   page('forecast', 'forecast', async (p, h) => { await h.nav('forecast'); }, { seeded: 'Algorithm 2' }),
   page('connector', 'connector', async (p, h) => { await h.nav('connector'); }, { seeded: 'test-store.myshopify.com' }),
   page('labels', 'labels', labelsBefore, { seeded: 'Hartwell Events Ltd' }),
@@ -88,16 +77,11 @@ module.exports = [
   page('guide~design', 'guide', async (p, h) => { await h.nav('guide'); await h.tab('design'); await h.waitFor(() => !!document.querySelector('#guide-content .ds-page')); },
     { static: 'the Design page draws the page\'s own parts with sample content written into the page' }),
   // Customise saves a layout as it closes; prepare() swallows that write.
-  page('customers~customise', 'customers', async (p, h) => {
-    await h.nav('customers'); await h.waitText('#customers-content', 'Champions');
-    await h.waitFor(() => { const b = document.querySelector('#view-customers [data-wg-customize]'); return b && !b.disabled; });
-    await h.click('#view-customers [data-wg-customize]'); await h.waitFor(() => !!document.querySelector('#customers-content.wg-editing'));
-  }, { seeded: 'Champions' }),
-  page('overview~customise', 'overview', async (p, h) => {
-    await h.nav('overview'); await h.waitText('#ov-content', 'Revenue is up on last week');
-    await h.waitFor(() => { const b = document.querySelector('#view-overview [data-wg-customize]'); return b && !b.disabled; });
-    await h.click('#view-overview [data-wg-customize]'); await h.waitFor(() => !!document.querySelector('#ov-content.wg-editing'));
-  }, { seeded: 'Revenue is up on last week' }),
+  page('liability~customise', 'liability', async (p, h) => {
+    await h.nav('liability'); await h.waitText('#liability-content', 'Kestrel Logistics Ltd');
+    await h.waitFor(() => { const b = document.querySelector('#view-liability [data-wg-customize]'); return b && !b.disabled; });
+    await h.click('#view-liability [data-wg-customize]'); await h.waitFor(() => !!document.querySelector('#liability-content.wg-editing'));
+  }, { seeded: 'Kestrel Logistics Ltd' }),
   dialog('crm~deal', 'crm', async (p, h) => { await crmBefore(p, h); await h.tab('deals'); await h.waitText('#crm-content', 'Fernhill walkway safety signs'); },
     { sel: '#crm-content .crm-card' }, { seeded: 'Fernhill walkway safety signs' }),
   dialog('loans~unit', 'loans', async (p, h) => { await h.nav('loans'); await h.waitText('#loans-content', 'Quayside Exhibitions'); },

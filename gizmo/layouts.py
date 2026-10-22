@@ -25,8 +25,8 @@ LAYOUTS_PATH       = os.environ.get("LAYOUTS_PATH", "/data/layouts.json")    # e
 
 # Every view the page's setView shows except Chat, which is a log and a
 # composer with no cards to arrange.
-LAYOUT_VIEWS = ("overview", "seo", "keywords", "products", "customers", "liability",
-                "recon", "forecast", "connector", "crm", "loans", "mail", "files", "team",
+LAYOUT_VIEWS = ("liability",
+                "forecast", "connector", "crm", "loans", "mail", "files", "team",
                 "labels", "sizes", "memory", "skills", "guide")
 # The page's own card id pattern, matched with fullmatch: with re.match a `$`
 # would also accept an id that ends in a newline.

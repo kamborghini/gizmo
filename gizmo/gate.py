@@ -214,21 +214,19 @@ async def _read_json_capped(request: Request, cap: Optional[int] = None) -> Opti
 # the sign-in flow, a person's own clock, profile and card layouts, and the admin routes,
 # which refuse non-admins themselves. Anything else under /api/ that is not in
 # _TAB_ROUTES is refused (see _tab_denied).
-_OPEN_API = ("/api/auth/", "/api/team/", "/api/work/", "/api/google/status", "/api/alerts",
-             "/api/usage", "/api/cache", "/api/profile", "/api/layouts", "/api/status", "/api/updates",
-             "/api/schedule", "/api/backup", "/api/restore", "/api/privacy")
+_OPEN_API = ("/api/auth/", "/api/team/", "/api/work/", "/api/alerts",
+             "/api/usage", "/api/profile", "/api/layouts", "/api/status", "/api/updates",
+             "/api/backup", "/api/restore", "/api/privacy")
 
 _TAB_ROUTES = (
-    ("/api/overview", "overview"), ("/api/seo", "seo"), ("/api/keyword", "keywords"),
-    ("/api/recon", "recon"),
     ("/api/forecast", "forecast"),
     ("/api/eori/", "labels"),
     ("/api/connector", "connector"),
-    ("/api/products", "products"), ("/api/product", "products"),
-    # customer-history also serves the CRM's deal modal (the Shopify card on a
-    # linked person), so either tab opens it.
-    ("/api/customers", "customers"), ("/api/customer-history", ("customers", "crm")),
-    ("/api/customer-tags", "customers"), ("/api/reorder-radar", "customers"),
+    # customer-history serves Labels' order-history line and the CRM's deal
+    # modal (the Shopify card on a linked person). The Customers tab is gone
+    # but its key stays as the customer-details permission, so the same
+    # accounts open it as before: that permission, or the CRM.
+    ("/api/customer-history", ("customers", "crm")),
     ("/api/liability", "liability"),
     ("/api/crm/", "crm"), ("/api/loans", "loans"),
     ("/api/mail/", "mail"), ("/api/files/", "files"),
@@ -253,8 +251,8 @@ def _tab_denied(request: Request) -> Optional[JSONResponse]:
     """The central lock. Only ever a 403: a 401 here would read as a dead
     session and bounce the person to the login screen in a loop."""
     path = request.url.path
-    # Longest prefix wins: /api/production-labels must map to labels, not
-    # fall to the shorter /api/product entry.
+    # Longest prefix wins: /api/gobo-sizes/rule must map by its own entry
+    # if it has one, not fall to a shorter one that starts the same way.
     tab, best = None, 0
     for p, t in _TAB_ROUTES:
         if path.startswith(p) and len(p) > best:

@@ -1,14 +1,3 @@
-        /* ==================================================================
-           Reconciliation: an independent auditor over Shopify + Xero + Gmail.
-           Everything on this tab is READ from the three systems and never
-           written back; the only thing that changes is the exception list's
-           statuses. Facts, arithmetic and AI interpretation are visually
-           separate, because a guess dressed as a fact is how a wrong number
-           survives an audit.
-           ================================================================== */
-        let reconCache = null, reconFilter = { severity: '', status: '', q: '' }, reconOpen = null;
-        /* The search box's text and cursor, carried across the redraw a search makes. */
-        let reconSearchKeep = null;
         /* ---------------- Shopify -> Xero connector ----------------
            A separate, audited service turns orders into Xero invoices and
            refunds into credit notes; this tab drives it through the server.

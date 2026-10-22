@@ -1,23 +1,21 @@
 # Dashboards seed for the browser suite. Proven 14 Oct 2026 against the
 # dispatch setup. Runs AFTER the dispatch suite's prelude (tests/dispatch/harness.py), in its own copy of
-# the prelude's names (seed/__init__.py: copilot, server, xero_api, client,
+# the prelude's names (seed/__init__.py: copilot, server, client,
 # post, ensure_auth, tok, SCRATCH ...), never in the prelude's globals. Everything is invented:
 # people, companies, emails at example.com / example.org, phones 01632 960xxx.
-# Nothing reaches the network: the outside systems (Shopify, Google, the AI, the
-# store website, Xero, the connector service) are stood in for in process.
+# Nothing reaches the network: the outside systems (Shopify and the connector
+# service) are stood in for in process.
 #
 # Sections (each a function, called in order by seed_dashboards()):
-#   SHARED  fake Shopify store (c), fake Google (c), fake AI (c), fake storefront (c)
-#   overview / seo / keywords / customers   real report routes, results land in the analysis cache
-#   recon       Xero token by its own writer (b), real sweep over a fake Xero (c), statuses by route (a)
+#   SHARED      the fake Shopify store (c)
 #   forecast    workbook by route (a), the forecast package's own nightly maths, run posted to the hook (a)
 #   connector   a fake connector HTTP service on 127.0.0.1 (c), CONNECTOR_URL pointed at it
-#   liability / products  nothing extra: they read the fake Shopify live on every page load
+#   liability   nothing extra: it reads the fake Shopify live on every page load
+# (The report tabs and Reconciliation, seeded here until 22 Oct 2026, are gone.)
 import copy as _dcopy, io as _dio, json as _djson, os as _dos, random as _drandom, re as _dre
 import tempfile as _dtemp, threading as _dthreading, time as _dtime, zipfile as _dzip
 from datetime import datetime as _ddt, timedelta as _dtd, timezone as _dtz, date as _ddate
 from http.server import BaseHTTPRequestHandler as _DHandler, ThreadingHTTPServer as _DServer
-import google_data as _dgoogle
 
 DASH = {"log": []}
 _NOW = _ddt.now(_dtz.utc).replace(microsecond=0)
@@ -33,9 +31,9 @@ def _p(x):
 
 
 # =============================================================================
-# SHARED 1/4: the fake Shopify store (c). Installed as copilot._tool_json and
-# LEFT INSTALLED while serving: Overview's KPIs were computed through it, and
-# Products, Liability, Customers' trade radar and sector picker read it live.
+# SHARED: the fake Shopify store (c). Installed as copilot._tool_json and
+# LEFT INSTALLED while serving: Liability and the Production Manager read it
+# live, and Chat's payout reads answer from it.
 # Anything it does not hold goes to the prelude's fake (ORDER 12345, SHOP).
 # =============================================================================
 _VENDORS = ["Lumenworks", "Brightline Optics", "Northlight Supply"]
@@ -418,390 +416,10 @@ async def dash_tool_json(registry, name, args):
 shopify._tool_json = dash_tool_json
 
 
-# =============================================================================
-# SHARED 2/4: fake Google (c), installed only while the reports run, then put
-# back: the served app is not "connected to Google"; the saved reports are.
-# =============================================================================
-_QUERIES = [("custom gobo", 612, 9800, 3.1), ("gobo projector", 488, 14200, 6.4), ("logo projector", 301, 11800, 8.9),
-            ("outdoor gobo projector", 214, 6100, 5.2), ("glass gobo uk", 190, 2400, 2.3), ("steel gobo", 132, 3900, 7.7),
-            ("wedding monogram light", 121, 5200, 9.6), ("walkway projection sign", 97, 2300, 4.1),
-            ("projected safety signs", 88, 4100, 11.8), ("gobo holder size", 81, 1900, 3.4), ("led gobo projector", 77, 6400, 12.6),
-            ("projected logo for events", 66, 3300, 10.2), ("personalised gobo", 59, 1500, 2.9), ("gobo light", 54, 9100, 15.3),
-            ("window projection christmas", 41, 4800, 13.7), ("forklift warning light projector", 37, 2900, 14.4),
-            ("virtual safety signs", 33, 2100, 9.1), ("gobo rotator", 29, 1200, 6.0), ("full colour gobo", 26, 1700, 7.3),
-            ("gobo lens 36 degree", 21, 800, 5.5), ("shop window logo light", 18, 2600, 17.9), ("snowflake gobo", 15, 1400, 12.1),
-            ("floor sign projector", 12, 1900, 18.6), ("gobo sizes explained", 11, 2200, 16.2), ("ip65 gobo projector", 9, 1100, 13.0)]
-
-
-def _months_back(n):
-    y, m, out = _NOW.year, _NOW.month, []
-    for _ in range(n):
-        out.append(f"{y:04d}-{m:02d}")
-        m -= 1
-        if m == 0:
-            y, m = y - 1, 12
-    return out[::-1]
-
-
-async def _g_gsc_overview(days=28):
-    k = days / 90
-    return {"clicks": int(3120 * k), "impressions": int(141800 * k), "ctr": 2.2, "position": 11.4, "range_days": days}
-
-
-async def _g_gsc_top_queries(days=28, limit=15):
-    k = days / 90
-    rows = [{"query": q, "clicks": int(c * k), "impressions": int(i * k), "ctr": round(c / i * 100, 2), "position": p}
-            for q, c, i, p in _QUERIES]
-    return {"queries": rows[:limit], "range_days": days}
-
-
-async def _g_ga4_summary(days=28):
-    return {"sessions": 9840, "revenue": 38120.55, "engaged_sessions": 6120, "range_days": days,
-            "top_channels": [{"channel": "Organic Search", "sessions": 4410}, {"channel": "Direct", "sessions": 2380},
-                             {"channel": "Paid Search", "sessions": 1640}, {"channel": "Referral", "sessions": 820},
-                             {"channel": "Email", "sessions": 590}]}
-
-
-async def _g_ga4_timeseries(days=760):
-    ms = _months_back(24)
-    sess = [int(6200 + 160 * i + 1800 * _SEASON[int(m[5:])] - 1800) for i, m in enumerate(ms)]
-    return {"sessions": [{"label": m, "value": s} for m, s in zip(ms, sess)],
-            "pageviews": [{"label": m, "value": int(s * 2.7)} for m, s in zip(ms, sess)],
-            "engaged": [{"label": m, "value": int(s * 0.62)} for m, s in zip(ms, sess)],
-            "revenue": [{"label": m, "value": round(s * 3.9, 2)} for m, s in zip(ms, sess)],
-            "channels": [{"label": "Organic Search", "value": 98000}, {"label": "Direct", "value": 51000},
-                         {"label": "Paid Search", "value": 36000}, {"label": "Referral", "value": 17500},
-                         {"label": "Email", "value": 12100}, {"label": "Organic Social", "value": 8800}]}
-
-
-async def _g_gsc_timeseries(days=480):
-    ms = _months_back(16)
-    clk = [int(780 + 30 * i + 260 * (_SEASON[int(m[5:])] - 1)) for i, m in enumerate(ms)]
-    imp = [int(c * 44) for c in clk]
-    return {"clicks": [{"label": m, "value": c} for m, c in zip(ms, clk)],
-            "impressions": [{"label": m, "value": v} for m, v in zip(ms, imp)],
-            "ctr": [{"label": m, "value": round(c / v * 100, 2)} for m, c, v in zip(ms, clk, imp)],
-            "position": [{"label": m, "value": round(13.2 - i * 0.12, 1)} for i, m in enumerate(ms)]}
-
-
-async def _g_ga4_ads(days=90):
-    return {"totals": {"cost": 2846.30, "clicks": 3410, "impressions": 118400, "cpc": 0.83, "conversions": 96.0,
-                       "revenue": 11930.40, "roas": 4.19},
-            "has_ads": True, "range_days": days,
-            "campaigns": [{"campaign": "Search - Custom gobos", "cost": 1210.55, "clicks": 1480, "cpc": 0.82, "conversions": 51.0, "roas": 5.6},
-                          {"campaign": "Search - Projectors", "cost": 942.10, "clicks": 1020, "cpc": 0.92, "conversions": 28.0, "roas": 3.9},
-                          {"campaign": "Search - Safety signs", "cost": 488.65, "clicks": 640, "cpc": 0.76, "conversions": 13.0, "roas": 2.7},
-                          {"campaign": "Brand", "cost": 205.00, "clicks": 270, "cpc": 0.76, "conversions": 4.0, "roas": 1.9}]}
-
-
-_GOOGLE_FAKES = {"gsc_configured": lambda: True, "ga4_configured": lambda: True,
-                 "gsc_overview": _g_gsc_overview, "gsc_top_queries": _g_gsc_top_queries,
-                 "ga4_summary": _g_ga4_summary, "ga4_timeseries": _g_ga4_timeseries,
-                 "gsc_timeseries": _g_gsc_timeseries, "ga4_ads": _g_ga4_ads}
-
-
-# =============================================================================
-# SHARED 3/4: fake AI (c). claude._xcreate answers present_response with an
-# invented report for the kind of run (claude._ai_kind); put back afterwards.
-# =============================================================================
-_REPORTS = {
-    "overview": {
-        "summary": "Revenue is up on last week on the back of two large trade orders, while unfulfilled orders "
-                   "and two low-stock projectors need attention before the weekend.",
-        "insights": [
-            {"type": "win", "title": "Trade orders carried the week", "detail": "Events and Warehouse accounts placed over half of this week's revenue, led by repeat gobo orders."},
-            {"type": "warning", "title": "Outdoor projector stock is low", "detail": "Three Outdoor Gobo Projector 80W units left and the Wall Mount Bracket is down to two."},
-            {"type": "opportunity", "title": "Search clicks are rising", "detail": "Search Console clicks grew month on month; 'logo projector' sits on page one but below position 8."},
-            {"type": "insight", "title": "Average order value holds", "detail": "Average order value is steady even as order count grows, so the growth is volume, not price."},
-        ],
-        "actions": [
-            {"text": "Reorder the Outdoor Gobo Projector 80W before the October event season peaks.", "priority": "high"},
-            {"text": "Ship the unfulfilled orders from this week; two are trade accounts with event dates.", "priority": "high"},
-            {"text": "Rewrite the title and meta description of the logo projector page to lift its click-through.", "priority": "medium"},
-            {"text": "Offer the Mini Gobo Projector 15W as back in stock to the customers who asked.", "priority": "low"},
-        ],
-        "sections": [
-            {"title": "Where the revenue came from", "body": "- Custom glass gobos were the largest line by revenue.\n- LED Gobo Projector 30W was the top projector.\n- Accessories rode along on about a third of orders."},
-            {"title": "What to watch next week", "body": "October is historically the strongest month. Keep projector stock ahead of demand and watch fulfilment times on trade orders."},
-        ],
-        "followups": ["Which trade accounts have not ordered this quarter?", "How did last October compare?", "What is low on stock?"],
-    },
-    "seo": {
-        "summary": "The store is indexable and well structured; the biggest wins are titles on high-impression "
-                   "pages and alt text on product images.",
-        "insights": [
-            {"type": "warning", "title": "Product images missing alt text", "detail": "A third of product images carry no alt text, mostly on accessories."},
-            {"type": "opportunity", "title": "High impressions, low clicks", "detail": "'gobo light' shows 9,100 times at position 15 with under 1% CTR."},
-            {"type": "win", "title": "Structured data in place", "detail": "Product and BreadcrumbList JSON-LD are present on every sampled product page."},
-            {"type": "insight", "title": "Thin accessory descriptions", "detail": "Four accessories have under 50 words of description and one has none."},
-        ],
-        "actions": [
-            {"text": "Add alt text to the Gobo Holder, Steel Gobo and Wall Mount Bracket images.", "priority": "high"},
-            {"text": "Retitle the gobo projector collection page around 'LED gobo projector' to win clicks already shown.", "priority": "high"},
-            {"text": "Write a 150 word description for the Wall Mount Bracket, which has none.", "priority": "medium"},
-            {"text": "Link the safety sign gobo from the projector pages to build that topic.", "priority": "low"},
-        ],
-        "sections": [
-            {"title": "Indexation", "body": "robots.txt allows crawling, the sitemap lists four child sitemaps and no sampled page is noindex."},
-            {"title": "Metadata", "body": "- Two sampled pages have meta descriptions under 70 characters.\n- One page title is over 65 characters and is cut in results."},
-        ],
-        "followups": ["Which pages lose the most clicks?", "What should the projector page title be?"],
-    },
-    "keywords": {
-        "summary": "Organic search brings most clicks from five gobo and projector terms; paid search returns "
-                   "about four times its cost, led by the custom gobo campaign.",
-        "actions": [
-            {"text": "Move budget from Brand to 'Search - Custom gobos', which converts at the best return.", "priority": "high"},
-            {"text": "Target 'gobo light' with a guide page: 9,100 impressions at position 15.", "priority": "high"},
-            {"text": "Add 'projected safety signs' copy to the walkway gobo page, currently position 11.8.", "priority": "medium"},
-            {"text": "Pause 'shop window logo light' broad match; it spends without converting.", "priority": "low"},
-        ],
-        "insights": [
-            {"type": "win", "title": "Custom gobo terms lead", "detail": "'custom gobo' and 'glass gobo uk' rank in the top 3 and bring a third of clicks."},
-            {"type": "opportunity", "title": "Page two terms", "detail": "Six terms sit between positions 11 and 20 with over 15,000 impressions between them."},
-            {"type": "warning", "title": "Brand campaign return is low", "detail": "Brand returns 1.9x, under half the account average."},
-        ],
-        "sections": [
-            {"title": "How the figures were read", "body": "Search Console over 90 days, Google Ads through the GA4 link over the same window."},
-        ],
-        "followups": ["Which keywords should get a new page?", "What does a click cost on projector terms?"],
-    },
-    "customers": {
-        "summary": "Events and Warehouse accounts are the most valuable sectors; repeat buyers who have gone "
-                   "quiet are the clearest money to win back.",
-        "insights": [
-            {"type": "win", "title": "Events has the best retention", "detail": "Events accounts repeat more often and spend more per account than any other sector."},
-            {"type": "warning", "title": "Quiet repeat buyers", "detail": "Several repeat accounts have not ordered in over 90 days."},
-            {"type": "opportunity", "title": "An untagged trade account", "detail": "Larkspur Theatre Company orders like a trade account but carries no sector tag."},
-        ],
-        "actions": [
-            {"text": "Call the at-risk repeat accounts this week with a reorder offer on their last gobo.", "priority": "high"},
-            {"text": "Tag Larkspur Theatre Company so it is counted in the sector figures.", "priority": "medium"},
-            {"text": "Send one-time buyers a care guide for their projector with a lens upgrade.", "priority": "low"},
-        ],
-        "sections": [
-            {"title": "Sector by sector", "body": "- Events: highest lifetime value.\n- Warehouse: steady repeat orders of safety gobos.\n- Education: buys once a term."},
-        ],
-        "followups": ["Which accounts are at risk?", "What do Events accounts buy first?"],
-    },
-}
-_SECTOR_REPORT = {
-    "summary": "The {s} sector repeats well; its best accounts reorder custom gobos every few months and the "
-               "quiet ones are worth a call.",
-    "insights": [{"type": "win", "title": "Strong repeat rate", "detail": "Most {s} accounts have ordered more than once."},
-                 {"type": "opportunity", "title": "Projector upgrades", "detail": "{s} accounts that bought a 30W projector often add a lens later."}],
-    "actions": [{"text": "Offer {s} accounts a reorder of their last design before the season.", "priority": "high"},
-                {"text": "Bundle a lens with projector quotes for {s} accounts.", "priority": "medium"}],
-    "followups": ["Which {s} accounts have gone quiet?"],
-}
-
-
-class _DBlk:
-    def __init__(self, inp):
-        self.type, self.name, self.input, self.id = "tool_use", "present_response", inp, "toolu_dash_seed"
-
-
-class _DResp:
-    def __init__(self, inp):
-        self.content, self.stop_reason, self.usage, self.model = [_DBlk(inp)], "tool_use", None, "seed-fake-model"
-
-
-async def _dash_xcreate(client, **kw):
-    kind = claude._ai_kind.get()
-    msg = str(((kw.get("messages") or [{}])[0]).get("content") or "")
-    m = _dre.search(r"for the '([^']+)' customer sector", msg)
-    if kind == "customers" and m:
-        s = m.group(1)
-        rep = _djson.loads(_djson.dumps(_SECTOR_REPORT).replace("{s}", s))
-    else:
-        rep = _dcopy.deepcopy(_REPORTS[kind])
-    DASH["log"].append(("ai", kind, m.group(1) if m else ""))
-    return _DResp(rep)
-
-
-# =============================================================================
-# SHARED 4/4: the storefront the SEO audit crawls (c): robots.txt, sitemap and
-# five product pages, answered in process instead of over the network.
-# =============================================================================
-def _page_html(p, i):
-    desc = "" if i == 3 else ("Order a " + p["title"].lower() + " made to your artwork." if i == 1 else
-                              "Shop " + p["title"] + ": made to order, proofed by a person and sent tracked across the UK.")
-    alt = "" if i in (2, 4) else p["title"]
-    title = p["title"] + (" | Gobo and Projector Specialists for Events, Retail and Safety Signage" if i == 0 else " | Test Store")
-    ld = _djson.dumps([{"@type": "Product", "name": p["title"]}, {"@type": "BreadcrumbList"}])
-    return (f"<html><head><title>{title}</title><meta name='description' content='{desc}'>"
-            f"<link rel='canonical' href='https://test-store.myshopify.com/products/{p['handle']}'>"
-            f"<script type='application/ld+json'>{ld}</script></head><body><h1>{p['title']}</h1>"
-            f"<img src='a.jpg' alt='{alt}'><img src='b.jpg' alt='{p['title']}'>{p['body_html']}</body></html>")
-
-
-async def _dash_http_get(url, allowed_hosts=None):
-    from urllib.parse import urlparse
-    path = urlparse(url).path
-    if path == "/robots.txt":
-        return 200, "User-agent: *\nDisallow: /cart\nDisallow: /checkout\nSitemap: https://test-store.myshopify.com/sitemap.xml\n"
-    if path == "/sitemap.xml":
-        return 200, "<sitemapindex>" + "".join(f"<sitemap><loc>https://test-store.myshopify.com/sitemap_{k}.xml</loc></sitemap>"
-                                               for k in ("products_1", "pages_1", "collections_1", "blogs_1")) + "</sitemapindex>"
-    if path == "/":
-        return 200, ("<html><head><title>Test Store: custom gobos and gobo projectors</title>"
-                     "<meta name='description' content='Custom glass and steel gobos, LED gobo projectors and projected signs, made to order.'>"
-                     "<script type='application/ld+json'>{\"@type\": \"Organization\"}</script></head>"
-                     "<body><h1>Custom gobos</h1><img src='h.jpg' alt='A projected logo'></body></html>")
-    for i, p in enumerate(DASH["products"]):
-        if path == "/products/" + p["handle"]:
-            return 200, _page_html(p, i)
-    return 404, ""
-
-
-def _swap(obj, fakes):
-    saved = {k: getattr(obj, k) for k in fakes}
-    for k, v in fakes.items():
-        setattr(obj, k, v)
-    return saved
-
-
 def _ok(r, what):
     if r.status_code != 200:
         raise RuntimeError(what + " -> " + str(r.status_code) + " " + r.text[:300])
     return r.json()
-
-
-# =============================================================================
-# overview / seo / keywords / customers: the real report routes, through the
-# fakes above; each result is saved to the analysis cache by the route itself
-# (_save_analysis / _save_customer_segment), which /api/cache hands the page.
-# =============================================================================
-def seed_reports():
-    ensure_auth()
-    g_saved = _swap(_dgoogle, _GOOGLE_FAKES)
-    c_saved = _swap(seo, {"_http_get": _dash_http_get})
-    ai_saved = _swap(claude, {"_xcreate": _dash_xcreate})
-    seo._domains_cache.clear()
-    try:
-        # Overview twice: the first run's snapshot is moved back a week and nudged,
-        # so the second run carries a "What changed since" strip, as a real week would.
-        _ok(post("/api/overview", {"fresh": True}), "overview run 1")
-        cache = analytics._load_analysis_cache()
-        snap = cache["overview"]["snapshot"]
-        nudge = {"Revenue (7d)": 0.82, "Orders (7d)": 0.88, "Average order value (7d)": 0.95,
-                 "Sessions (GA4, 28d)": 0.93, "Search clicks (28d)": 0.9, "New customers (7d)": 1.5}
-        snap["metrics"] = {k: round(v * nudge.get(k, 1.0), 2) for k, v in snap["metrics"].items()}
-        snap["at"] = (_NOW - _dtd(days=7)).isoformat()
-        jsonstore._write_json_store(analytics.ANALYSIS_CACHE_PATH, None, cache)
-        ov = _ok(post("/api/overview", {"fresh": True}), "overview run 2")
-        DASH["r_overview"] = ov
-        DASH["r_seo"] = _ok(post("/api/seo", {}), "seo")
-        DASH["r_keywords"] = _ok(post("/api/keywords", {}), "keywords")
-        DASH["r_customers"] = _ok(post("/api/customers", {}), "customers all")
-        DASH["r_customers_events"] = _ok(post("/api/customers", {"segment": "Events"}), "customers Events")
-    finally:
-        _swap(_dgoogle, g_saved)
-        _swap(seo, c_saved)
-        _swap(claude, ai_saved)
-        seo._domains_cache.clear()
-
-
-# =============================================================================
-# recon: Xero linked by the token store's own writer (b), as the tests do;
-# the real sweep (POST /api/recon/sweep) over a fake Xero (c) and the fake
-# Shopify; two statuses set through the route a person uses (a).
-# =============================================================================
-class DashFakeXero:
-    """Module-shaped, like the dispatch suite's _FakeXero (tests/dispatch/)."""
-    def __init__(self, invoices, payments, bank, notes):
-        self.invoices, self.payments, self.bank, self.notes = invoices, payments, bank, notes
-    def connected(self): return True
-    async def list_invoices(self, since=None, modified_since=None): return list(self.invoices)
-    async def list_payments(self, since=None, modified_since=None): return list(self.payments)
-    async def list_bank_transactions(self, since=None, modified_since=None): return list(self.bank)
-    async def list_credit_notes(self, since=None, modified_since=None): return list(self.notes)
-
-
-def _xd(day):
-    return day + "T00:00:00"
-
-
-def _build_xero():
-    rc = copilot.recon_engine
-    cutoff = rc._cutoff_day(rc.FETCH_DAYS)
-    inv, notes, bank = [], [], []
-    window = [o for o in DASH["orders"] if o["created_at"][:10] >= cutoff and not o.get("cancelled_at")]
-    # The two sales that never reached the books: the largest recent trade order and one small one.
-    recent = [o for o in window if (_NOW - _ddt.fromisoformat(o["created_at"])).days < 40 and not o["tags"]]
-    big = max(recent, key=lambda o: float(o["total_price"]))
-    skip = {big["id"]}
-    mismatch = [o for o in sorted(window, key=lambda o: o["id"]) if float(o["total_price"]) > 250 and not o["tags"]][len(window) // 8]["id"]
-    for o in window:
-        if o["id"] in skip:
-            continue
-        total = float(o["total_price"]) - (33.50 if o["id"] == mismatch else 0)
-        co = (o["customer"].get("default_address") or {}).get("company") or (o["customer"]["first_name"] + " " + o["customer"]["last_name"])
-        paid = o["financial_status"] in ("paid", "partially_refunded")
-        inv.append({"InvoiceID": f"XI-{o['order_number']}", "InvoiceNumber": f"INV-{o['order_number']}", "Type": "ACCREC",
-                    "Status": "PAID" if paid else "AUTHORISED", "Contact": {"Name": co},
-                    "DateString": _xd(o["created_at"][:10]), "DueDateString": _xd(o["created_at"][:10]),
-                    "Total": _p(total), "TotalTax": o["total_tax"],
-                    "AmountDue": "0.00" if paid else _p(total), "AmountPaid": _p(total) if paid else "0.00",
-                    "AmountCredited": "0.00", "CurrencyCode": "GBP", "Reference": o["name"],
-                    "UpdatedDateUTC": "/Date(1760000000000+0000)/"})
-    # Refunds: credit notes for all but the newest one.
-    refunded = [o for o in window if o.get("refunds")]
-    for k, o in enumerate(refunded):
-        r = o["refunds"][0]
-        if k == len(refunded) - 1:
-            continue
-        notes.append({"CreditNoteID": f"XC-{o['order_number']}", "CreditNoteNumber": f"CN-{o['order_number']}",
-                      "Type": "ACCRECCREDIT", "Status": "AUTHORISED", "Contact": {"Name": "Shopify customer"},
-                      "DateString": _xd(r["created_at"][:10]), "Total": r["transactions"][0]["amount"],
-                      "RemainingCredit": "0.00", "CurrencyCode": "GBP", "Reference": o["name"]})
-    # Two supplier bills carrying the same number.
-    for k, day in enumerate((22, 9)):
-        d = (_NOW - _dtd(days=day)).date().isoformat()
-        inv.append({"InvoiceID": f"XB-LS4471-{k}", "InvoiceNumber": "LS-4471", "Type": "ACCPAY", "Status": "AUTHORISED",
-                    "Contact": {"Name": "Kilnworth Glass Supplies Ltd"}, "DateString": _xd(d), "DueDateString": _xd(d),
-                    "Total": "186.00", "TotalTax": "31.00", "AmountDue": "186.00", "AmountPaid": "0.00",
-                    "AmountCredited": "0.00", "CurrencyCode": "GBP", "Reference": "Glass blanks",
-                    "UpdatedDateUTC": "/Date(1760000000000+0000)/"})
-    # Payout deposits: every paid payout lands, one short by exactly its fees, one not yet reconciled.
-    paid = [p for p in DASH["payouts"] if p["status"] == "paid"]
-    for k, p in enumerate(paid):
-        amt = float(p["amount"])
-        if k == 2:
-            amt = round(amt - (round(amt * 0.019 + 0.2, 2)), 2)
-        day = (_ddate.fromisoformat(p["date"]) + _dtd(days=1)).isoformat()
-        bank.append({"BankTransactionID": f"BT-{p['id']}", "Type": "RECEIVE", "Status": "AUTHORISED",
-                     "DateString": _xd(day), "Total": _p(amt), "CurrencyCode": "GBP",
-                     "IsReconciled": k != 1, "Contact": {"Name": "Shopify"}, "Reference": f"Payout {p['id']}",
-                     "BankAccount": {"Name": "Business Current"}})
-    # A card terminal fee nobody has matched for five weeks.
-    d = (_NOW - _dtd(days=36)).date().isoformat()
-    bank.append({"BankTransactionID": "BT-STALE-01", "Type": "SPEND", "Status": "AUTHORISED", "DateString": _xd(d),
-                 "Total": "86.40", "CurrencyCode": "GBP", "IsReconciled": False, "Contact": {"Name": "Card terminal rental"},
-                 "Reference": "TERM-0925", "BankAccount": {"Name": "Business Current"}})
-    return DashFakeXero(inv, [], bank, notes), {"skipped_sale": big["name"], "mismatch": mismatch}
-
-
-def seed_recon():
-    rc = copilot.recon_engine
-    xero_api._write_token({"refresh_token": "seed-refresh-not-a-real-token", "tenant_id": "tenant-seed-0001",
-                           "tenant_name": "Gobo Test Co Ltd", "last_refresh": _dtime.time()})
-    fx, info = _build_xero()
-    DASH["recon_info"] = info
-    rc.configure(xero=fx, tool_json=dash_tool_json)
-    try:
-        sw = _ok(post("/api/recon/sweep", {}), "recon sweep")
-    finally:
-        rc.configure(xero=xero_api, tool_json=shopify._tool_json)
-    DASH["recon_sweep"] = sw
-    ex = _ok(post("/api/recon/exceptions", {}), "recon exceptions")["exceptions"]
-    by_kind = {e["kind"]: e for e in ex}
-    if "stale_unreconciled" in by_kind:
-        _ok(post("/api/recon/exception", {"id": by_kind["stale_unreconciled"]["id"], "op": "status",
-                                          "status": "investigating", "note": "Asked the bank for the terminal statement."}), "recon status")
-    if "payout_explained_by_fees" in by_kind:
-        _ok(post("/api/recon/exception", {"id": by_kind["payout_explained_by_fees"]["id"], "op": "status",
-                                          "status": "explained", "note": "Fees posted to bank charges."}), "recon status 2")
 
 
 # =============================================================================
@@ -1052,11 +670,10 @@ def seed_connector():
 
 
 # =============================================================================
-# The background scheduler would, 60 s after the first page load, call Xero's
-# keepalive (it reached for identity.xero.com, refused by the harness), start a
-# nightly re-sweep with the real xero module (its Xero reads fail), and poll the
-# connector into alerts. Seen in a control run on 14 Oct 2026. The suite keeps
-# it off: marked as started, it never starts.
+# The background scheduler would, 60 s after the first page load, poll the
+# connector into alerts and run the watchdog against the fake store (in a
+# control run on 14 Oct 2026 it also reached for Xero, which it no longer
+# does). The suite keeps it off: marked as started, it never starts.
 # =============================================================================
 def seed_scheduler_off():
     scheduler._scheduler_started = True
@@ -1065,8 +682,6 @@ def seed_scheduler_off():
 def seed_dashboards():
     t0 = _dtime.time()
     seed_scheduler_off()
-    seed_reports()
-    seed_recon()
     seed_forecast()
     seed_connector()
     DASH["seconds"] = round(_dtime.time() - t0, 1)

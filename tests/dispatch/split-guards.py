@@ -143,8 +143,8 @@ SHARED_COPIES = {
     ("gizmo.xero_sync", "httpx", "gizmo.routes.files"):
         "the Finder drive streams downloads from the bucket with its own client; "
         "the connector settings test reaches no file route",
-    ("gizmo.xero_sync", "httpx", "gizmo.seo"):
-        "SEO reads the store's site and outside pages with its own client; "
+    ("gizmo.xero_sync", "httpx", "gizmo.storefront"):
+        "the storefront fetch reads the store's own site with its own client; "
         "the connector settings test reads no page",
     ("gizmo.xero_sync", "httpx", "gizmo.scheduler"):
         "the scheduler sends alert email and watches the connector with its own client; "

@@ -3,16 +3,6 @@
             ['repeat rate', 'The share of your purchasing customers who have ordered more than once. Higher means stronger retention.'],
             ['lifetime value', 'Average total a purchasing customer has spent with you across all their orders.'],
             ['order value', 'Average amount spent per order (revenue divided by orders).'],
-            ['conversion', 'Share of sessions that resulted in an order.'],
-            ['sessions', 'Visits to your store, from Google Analytics.'],
-            ['pageview', 'Pages viewed across all sessions, from Google Analytics.'],
-            ['impression', 'How many times your store appeared in Google search results.'],
-            ['ctr', 'Click-through rate: clicks divided by impressions in search.'],
-            ['position', 'Your average ranking position in Google search. Lower is better.'],
-            ['clicks', 'Clicks to your store from Google search results.'],
-            ['ad spend', 'Total spent on Google Ads in the period.'],
-            ['cpc', 'Average cost per click on your paid ads.'],
-            ['roas', 'Return on ad spend: revenue divided by ad cost. Above 1 covers the ad cost.'],
             ['revenue', 'Total sales in the period, from Shopify orders.'],
             ['orders', 'Number of orders placed in the period.'],
             ['unfulfilled', 'Orders that still need to be shipped.'],
@@ -337,26 +327,6 @@
                 if (d.total > items.length) body.append(el('p', 'drill-more', 'Showing the first ' + items.length + ' of ' + d.total + '.'));
             }
         }
-        // Attach a 12-point sparkline to each KPI by matching its label to a trend series.
-        function sparkFor(label, trends) {
-            if (!trends) return null;
-            const l = (label || '').toLowerCase();
-            const pick = (k) => (trends[k] && trends[k].length) ? tail(trends[k], 12).map(p => +p.value || 0) : null;
-            if (l.includes('order value') || l.includes('aov')) return pick('aov');
-            if (l.includes('revenue')) return pick('revenue');
-            if (l.includes('order')) return pick('orders');
-            if (l.includes('session')) return pick('sessions');
-            if (l.includes('pageview')) return pick('pageviews');
-            if (l.includes('impression')) return pick('impressions');
-            if (l.includes('click')) return pick('clicks');
-            if (l.includes('ctr')) return pick('ctr');
-            if (l.includes('position')) return pick('position');
-            return null;
-        }
-        const withSparks = (metrics, trends) => (metrics || []).map(m => {
-            const s = sparkFor(m.label, trends);
-            return (s && s.length > 1) ? Object.assign({}, m, { spark: s }) : m;
-        });
         function metricsGrid(metrics) {
             const g = el('div', 'metrics');
             metrics.forEach((m, i) => g.append(statCard(m, i)));

@@ -263,14 +263,6 @@ def t_only_an_admin_can_delete_files_for_good():
 
 
 @test
-def t_payout_tools_belong_to_the_recon_tab():
-    src = open(os.path.join(HERE, "server.py"), encoding="utf-8").read()
-    for name in ("shopify_list_payouts", "shopify_payout_transactions", "shopify_list_disputes"):
-        ok("def " + name in src, name + " is a tool")
-        eq(assistant._TOOL_TABS.get(name), "recon", name + " is the books, so it is gated on the recon tab")
-
-
-@test
 def t_a_session_ends_after_thirty_days_however_active():
     """The sliding window alone let a session used once a day live forever,
     and a stolen one with it."""
@@ -908,8 +900,8 @@ def t_add_routes_holds_routes_and_nothing_it_could_have_shared():
     # an area's register(mcp, registry): the desk's _finish_cancel and the
     # inbox's _mail_orders_for; dispatch_for became the chat module's own, the
     # registry handed to it once (piece 15).
-    eq({h.name for h in helpers}, {"_fin_search", "_fin_thread", "_fin_bytes"},
-       "a nested helper appeared that is not one of the registry-bound three")
+    eq({h.name for h in helpers}, set(),
+       "a nested helper appeared (the registry-bound three went with Reconciliation)")
     regs = [n for n in tree.body if getattr(n, "name", "") == "register"]
     eq({h.name for r in regs for h in r.body if isinstance(h, (_ast.FunctionDef, _ast.AsyncFunctionDef))
         and not any("route" in _ast.unparse(d) for d in h.decorator_list)},
@@ -962,21 +954,8 @@ def t_every_signed_in_route_goes_through_the_one_door():
 
 
 @test
-def t_the_door_checks_rank_before_it_spends_an_ai_slot():
-    def go():
-        ensure_auth()
-        owen, sess, _pw = ready_user("Owen", "owen")
-        eq(post("/api/team/user", {"op": "tabs", "id": owen, "tabs": ["recon"]}).status_code, 200)
-        r = post_s(sess, "/api/recon/sweep", {})
-        eq(r.status_code, 403, r.text)
-        ok("admin" in r.json()["error"], r.text)
-        eq(len(gate._rl_global), 0, "a member's refused sweep did not spend an AI slot")
-    with_accounts(go)
-
-
-@test
 def t_the_environment_reference_is_generated_from_the_code():
-    """Two hundred variables are read; the hand-written example documented
+    """About 180 variables are read; the hand-written example documented
     thirty-nine and carried another project's defaults. The reference is
     built from the syntax tree, and this fails when it has not been rebuilt."""
     import importlib.util
@@ -985,7 +964,7 @@ def t_the_environment_reference_is_generated_from_the_code():
     spec.loader.exec_module(mod)
     rows = mod.collect(HERE)
     names = {r[0] for r in rows}
-    ok(len(names) >= 200, "every variable the code reads is collected: %d" % len(names))
+    ok(len(names) >= 180, "every variable the code reads is collected: %d" % len(names))
     ok({"SHOPIFY_STORE", "TOKEN_ENCRYPTION_KEY", "GOBO_OVERRIDES_LIVE", "DISPATCH_ARCHIVE_PATH"} <= names)
     eq(mod.render(HERE), open(os.path.join(HERE, "docs", "ENVIRONMENT.md"), encoding="utf-8").read(),
        "docs/ENVIRONMENT.md is stale: run `make env-doc`")

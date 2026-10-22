@@ -4,7 +4,7 @@
 
 The back office for a Shopify store: the dispatch desk,
 production labels, the sales records, the shared inbox, the file drive, the
-team, loan units, reconciliation against Xero, and an assistant that can read
+team, loan units, the Xero sync, the forecast, and an assistant that can read
 the store and never write to it. It runs embedded inside Shopify admin and as
 its own page on Railway, and it also serves a Model Context Protocol endpoint
 so Claude can be pointed at the store directly.
@@ -63,7 +63,7 @@ accessibility, the keyboard. All of them run on every push.
 | `server.py` | The entrypoint: Shopify client, the MCP tools, app assembly, and the write capabilities it hands to the app |
 | `gizmo/` | The app: the floor (settings, the stores, the AI client, the way to Shopify, the door's body checks) and the areas above it, each a module with its routes in `gizmo/routes/` |
 | `copilot.py` | `add_routes`, which assembles every area's routes, the frozen print routes, and the stock bridge |
-| `worldoptions.py` `xero.py` `google_mail.py` `google_data.py` `pipedrive.py` `eori.py` `recon.py` | One module per external system. None of them knows about the app |
+| `worldoptions.py` `google_mail.py` `pipedrive.py` `eori.py` | One module per external system. None of them knows about the app |
 | `tokenvault.py` `totp.py` `logdrain.py` `mailmime.py` | Small libraries: secrets at rest, one-time codes, off-box logging, mail parsing |
 | `static/src/` `static/composer.js` | The single-page app: a shell and its stylesheet's and script's sections (`static/src/manifest.json`), joined by `pagesource.py` at start-up and split into hashed assets at serve time |
 | `data/` | Seed files that ship with the code: the size sheet, the rule files, the changelog, a font |

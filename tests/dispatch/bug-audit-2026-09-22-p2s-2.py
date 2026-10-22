@@ -244,71 +244,6 @@ def t_a_filter_that_assigns_and_archives_does_not_close_the_email():
 
 
 @test
-def t_documents_read_without_the_ai_are_read_again_when_it_is_there():
-    """Review of A4. A remittance with a text layer whose allocation lines the
-    AI could not read lost its line checks for good; and a scan waiting for the
-    AI, forwarded once, came back as a duplicate of its own copy."""
-    import types as _types
-    day = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d") + "T09:00:00+00:00"
-    remit_text = ("REMITTANCE ADVICE  Northern Stage Ltd  Payment reference NS-7781  "
-                  "We have paid the following invoices: INV-0142 500.00  Total paid 500.00 GBP  "
-                  "Date 19/09/2026  Please allocate accordingly. Thank you.")
-    class Block:
-        type = "tool_use"
-        def __init__(self, inp): self.input = inp
-    calls = []
-    async def ai_up(system, messages, tools, tool_choice):
-        calls.append(1)
-        text = str(messages[0]["content"][0].get("text") or "")
-        if "REMITTANCE" in text:
-            return _types.SimpleNamespace(content=[Block({"doc_type": "remittance", "currency": "GBP",
-                "total": "500.00", "invoice_numbers": ["INV-0142"],
-                "invoice_lines": [{"number": "INV-0142", "amount": "500.00"}]})], model="t")
-        return _types.SimpleNamespace(content=[Block({"doc_type": "supplier_invoice", "currency": "GBP",
-            "total": "1,840.00", "invoice_numbers": ["SI-88812"], "invoice_lines": []})], model="t")
-    async def ai_down(system, messages, tools, tool_choice):
-        raise RuntimeError("The AI service is overloaded.")
-    saved_text = _rc._pdf_text
-    _rc._pdf_text = lambda data: remit_text if b"remit" in data else ""
-    async def gbytes(mid, aid):
-        return b"%PDF-1.4 remit" if mid == "r1" else b"%PDF-1.4 same scan"
-    threads = {"tr": {"id": "tr", "subject": "Remittance", "messages": [
-                  {"id": "r1", "at": day, "from_email": "ap@northernstage.org",
-                   "files": [{"id": "a1", "name": "remittance.pdf", "size": 4000}]}]},
-               "ts": {"id": "ts", "subject": "Invoice SI-88812", "messages": [
-                  {"id": "s1", "at": day, "from_email": "accounts@glassworks.co.uk",
-                   "files": [{"id": "a1", "name": "SI-88812.pdf", "size": 4000}]}]},
-               "tf": {"id": "tf", "subject": "Fwd: Invoice SI-88812", "messages": [
-                  {"id": "s2", "at": day, "from_email": "boss@test-store.co.uk",
-                   "files": [{"id": "a1", "name": "SI-88812.pdf", "size": 4000}]}]}}
-    stores = _mail_world(threads, gbytes=gbytes)
-    try:
-        _rc.configure(ai_call=ai_down)           # the AI is failing: the remittance is read by text
-        run_async(_rc.sweep())
-        doc = stores["docs"].get("r1:a1") or {}
-        ok(doc.get("doc_type") == "remittance" and doc.get("needs_ai"),
-           "the remittance keeps its text reading and is marked to be read again: " + str(doc))
-        _rc.configure(ai_call=None)              # and a night with no AI configured: the scans wait
-        stores["store"]["doc_tries"] = {}
-        run_async(_rc.sweep())
-        ok(stores["docs"].get("s1:a1", {}).get("needs_ai") or stores["docs"].get("s2:a1", {}).get("needs_ai"),
-           "the scan waits for the AI: " + str({k: v.get("note") for k, v in stores["docs"].items()}))
-        _rc.configure(ai_call=ai_up)
-        for k in list(stores["store"].get("doc_tries") or {}):
-            stores["store"]["doc_tries"][k]["day"] = "2000-01-01"   # the waiting was yesterday
-        run_async(_rc.sweep())
-        run_async(_rc.sweep())
-        doc = stores["docs"].get("r1:a1") or {}
-        ok(doc.get("invoice_lines") and not doc.get("needs_ai"), "the remittance is read again, lines and all: " + str(doc))
-        kinds = [e["kind"] for e in stores["store"]["exceptions"].values() if not e.get("stale")]
-        ok("gmail_doc_missing_from_xero" in kinds,
-           "and the scan is read, not filed as a duplicate of its own forwarded copy: " + str(kinds))
-    finally:
-        _rc._pdf_text = saved_text
-        _mail_world_off()
-
-
-@test
 def t_a_logo_drawn_by_a_second_html_part_is_still_a_logo():
     """Review of A10. Apple Mail splits a message into several HTML parts
     around its images; the cids of only the first were read."""
@@ -334,40 +269,6 @@ def t_a_logo_drawn_by_a_second_html_part_is_still_a_logo():
         eq([f["name"] for f in t["messages"][0]["files"]], ["quote.pdf"])
     finally:
         _gm._call = saved
-
-
-@test
-def t_an_invoice_paid_in_instalments_flags_no_paid_remittance():
-    """Review of A6. Holding back every payment that COULD settle another
-    remittance's lines, instead of the one it used, flagged a remittance that
-    was paid whenever an invoice was paid in instalments."""
-    day = lambda n: (datetime.now(timezone.utc) - timedelta(days=n)).strftime("%Y-%m-%d")
-    def inv(i, num, total):
-        return {"id": i, "number": num, "type": "ACCREC", "status": "AUTHORISED", "contact": "NS",
-                "date": day(90), "due": day(60), "total": total, "tax": 0, "due_pence": 0,
-                "paid_pence": total, "credited_pence": 0, "currency": "GBP", "reference": "", "updated": ""}
-    def pay(i, p, num, d):
-        return {"id": i, "date": d, "pence": p, "reference": "", "status": "AUTHORISED",
-                "type": "ACCRECPAYMENT", "invoice_id": "", "invoice_number": num, "contact": "",
-                "account": "090", "is_reconciled": True}
-    def remit(key, d, total, lines, nums=None):
-        return {"source_key": key, "doc_type": "remittance", "from": key, "counterparty": "NS", "date": d,
-                "total_pence": total, "currency": "GBP", "invoice_numbers": nums or [n for n, _ in lines],
-                "invoice_lines": [{"number": n, "pence": p} for n, p in lines], "verified": True}
-    cache = {"xero": {"invoices": {"a": inv("a", "INV-0142", 100000), "b": inv("b", "INV-0143", 20000)},
-                      "payments": {"p1": pay("p1", 50000, "INV-0142", day(40)),
-                                   "p2": pay("p2", 50000, "INV-0142", day(9)),
-                                   "p3": pay("p3", 20000, "INV-0143", day(40))},
-                      "credit_notes": {}, "bank_transactions": {}}}
-    def flagged(docs):
-        return sorted(e["refs"][0] for e in _rc.check_gmail_docs(cache, docs)
-                      if e["kind"] == "remittance_payment_missing")
-    eq(flagged({"r1": remit("r1", day(40), 70000, [("INV-0142", 50000), ("INV-0143", 20000)]),
-                "r2": remit("r2", day(9), 50000, [("INV-0142", 50000)])}), [],
-       "two instalments of one invoice, each remitted and each paid")
-    eq(flagged({"r1": remit("r1", day(40), 50000, [("INV-0142", 50000)]),
-                "r3": remit("r3", day(9), 50000, [], nums=["INV-0142"])}), [],
-       "and a remittance read without its lines takes the instalment the other did not")
 
 
 @test
@@ -956,41 +857,5 @@ def t_an_erasure_and_every_import_clean_every_field_that_can_name_them():
         finally:
             _pd.export, _pd.API_TOKEN = saved
     with_mail(go)
-
-
-@test
-def t_a_remittance_waiting_for_the_ai_keeps_its_figures():
-    """Review of A4. A text remittance marked to be read again with the AI
-    was removed before it was re-read, and lost for good when its thread was
-    not walked again that sweep."""
-    import types as _types
-    day = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d") + "T09:00:00+00:00"
-    remit_text = ("REMITTANCE ADVICE  Northern Stage Ltd  Payment reference NS-7781  "
-                  "We have paid the following invoices: INV-0142 500.00  Total paid 500.00 GBP  "
-                  "Date 19/09/2026  Please allocate accordingly. Thank you.")
-    threads = {"tr": {"id": "tr", "subject": "Remittance", "messages": [
-        {"id": "r1", "at": day, "from_email": "ap@ns.org", "files": [{"id": "a1", "name": "remittance.pdf", "size": 4000}]}]}}
-    listed = {"tr": "1"}
-    async def search(q, mx=200, out_complete=None):
-        if out_complete is not None:
-            out_complete.append(True)
-        return dict(listed)
-    async def ai_down(system, messages, tools, tool_choice):
-        raise RuntimeError("overloaded")
-    saved = _rc._pdf_text
-    _rc._pdf_text = lambda data: remit_text
-    stores = _mail_world(threads, search=search)
-    try:
-        _rc.configure(ai_call=ai_down)
-        run_async(_rc.sweep())
-        ok(stores["docs"].get("r1:a1", {}).get("needs_ai"), "read by its text, waiting for the AI")
-        listed.clear()                                   # the thread is not listed on day two
-        stores["store"]["doc_tries"]["r1:a1"]["day"] = "2000-01-01"
-        run_async(_rc.sweep())
-        ok(stores["docs"].get("r1:a1", {}).get("doc_type") == "remittance",
-           "its figures are kept until a new reading replaces them")
-    finally:
-        _rc._pdf_text = saved
-        _mail_world_off()
 
 

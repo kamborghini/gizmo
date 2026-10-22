@@ -1,9 +1,3 @@
-# =========================== speed: the order snapshot survives a known change ==
-# The second speed pull request (the 2026-10-12 audit, X1). Every write this
-# app made, and Shopify's webhook echoing it, retired every cached sweep, so
-# one Production Manager action cost two full sweeps of the store. An order
-# the app knows has changed is now read again by itself; _bust_orders stays as
-# blunt as it was for everything else (Refresh, an unreadable event).
 
 class _FakeShop:
     """Orders as Shopify keeps them, answering shopify_list_orders with its

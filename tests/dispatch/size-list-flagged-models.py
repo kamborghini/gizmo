@@ -1,4 +1,3 @@
-# --- resolving a flagged model from inside the app -------------------------
 
 def _copilot_src(name):
     """The source of a route defined inside add_routes or an area's register(),

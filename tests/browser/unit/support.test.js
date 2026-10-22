@@ -9,7 +9,7 @@ test('a POST whose op names a change is a write', () => {
 });
 test('the reads the screens send are not writes', () => {
   const reads = [['/api/loans', { op: 'board' }], ['/api/crm/deal', { op: 'detail', id: 'd1' }], ['/api/loans', { op: 'history', unit_id: 'u1' }],
-    ['/api/products', { months: 24, fresh: true }], ['/api/updates', { op: 'version' }], ['/api/profile', {}], ['/api/recon/exceptions', { status: 'open', q: '', severity: '' }]];
+    ['/api/liability', { fresh: true }], ['/api/updates', { op: 'version' }], ['/api/profile', {}], ['/api/forecast', {}]];
   for (const [url, body] of reads) assert.ok(!isWrite(url, 'POST', JSON.stringify(body)), url + ' ' + JSON.stringify(body));
   assert.ok(!isWrite('/api/x', 'GET', null), 'a GET reads');
 });

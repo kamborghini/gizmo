@@ -19,7 +19,7 @@ test('the page signs in and its fonts load without the internet', async ({ page,
   const seen = await S.prepare(context, baseURL);
   const w = S.watch(page, baseURL);
   await S.open(page, w);
-  await expect(page.locator('#nav-overview')).toBeAttached();
+  await expect(page.locator('#nav-labels')).toBeAttached();
   expect(await page.evaluate(() => document.fonts.check('16px Inter'))).toBe(true);
   expect(seen.outside).toEqual([]);
   expect(w.errors).toEqual([]);

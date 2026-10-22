@@ -44,15 +44,10 @@
             const av = document.querySelector('.view.active');
             const v = av ? av.id.replace('view-', '') : '';
             const b = $('print-btn'); if (!b) return;
-            b.style.display = (['overview', 'seo', 'keywords', 'products', 'customers', 'chat'].indexOf(v) >= 0 && printableCache(v)) ? '' : 'none';
+            b.style.display = (v === 'chat' && printableCache(v)) ? '' : 'none';
         }
         // Which cache backs the printable report for a view (null = nothing to print yet).
         function printableCache(v) {
-            if (v === 'overview') return overviewCache;
-            if (v === 'seo') return seoCache;
-            if (v === 'keywords') return keywordsCache;
-            if (v === 'customers') return customersCache[customersSeg];
-            if (v === 'products') return productList ? { at: productListAt || Date.now() } : null;
             /* A conversation prints as it reads, dated by its last answer. */
             if (v === 'chat') { const c = active(); return c && c.turns.length ? { at: c.updated || c.ts || Date.now() } : null; }
             return null;
@@ -61,10 +56,8 @@
         $('print-btn').onclick = function () {
             const av = document.querySelector('.view.active');
             const v = av ? av.id.replace('view-', '') : '';
-            const titles = { overview: 'Overview', seo: 'SEO', keywords: 'Keywords', products: 'Products', customers: 'Customers' };
-            let label = titles[v] || 'Report';
+            let label = 'Report';
             if (v === 'chat' && active()) label = 'Chat: ' + (active().title || 'Conversation');
-            if (v === 'customers' && typeof customersSeg !== 'undefined' && customersSeg && customersSeg !== SEG_ALL) label = customersSeg + ' sector';
             // Stamp when the DATA was computed, not when the PDF was printed. The
             // on-screen "Updated ..." line is hidden in print, so this is the only
             // freshness signal the reader gets.

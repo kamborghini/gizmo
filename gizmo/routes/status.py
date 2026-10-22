@@ -5,7 +5,6 @@ request changes hands.
 import logging
 import os
 import perf
-import google_data
 import google_mail
 try:
     import worldoptions
@@ -46,7 +45,7 @@ def register(mcp, registry):
 
     @mcp.custom_route("/api/status", methods=["POST"])
     async def status_route(request: Request):
-        """Connection-health summary for the Settings panel: Shopify, AI, and Google.
+        """Connection-health summary for the Settings panel: Shopify, AI, the mailbox and more.
         Admin+ only: the health detail carries internal error strings (the R2
         endpoint with the account id, the stock-app URL, the /data path), which
         a restricted part-time member has no business reading."""
@@ -101,7 +100,6 @@ def register(mcp, registry):
                                                       or claude._fallback_for(claude.MODEL_FAST, Exception())) if (
                                   claude._fallback_for(claude.MODEL_DEEP, Exception()) or claude._fallback_for(claude.MODEL_FAST, Exception())) else ""},
                    "last_failure": dict(claude._AI_LAST_FAIL) or None},
-            "google": google_data.status(),
             "gmail": google_mail.status(),
             "shipping": {"ok": bool(worldoptions and worldoptions.configured()),
                          "available": bool(worldoptions),

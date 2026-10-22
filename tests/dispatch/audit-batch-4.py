@@ -34,7 +34,7 @@ def t_chat_cannot_read_customers_a_tab_denies():
         eq(team._user_tabs(who["uid"]), ["chat", "labels"], "no customers tab")
         out = run_async(dispatch("shopify_get_customer", {"customer_id": 1}))
         ok(not calls, "the tool never ran")
-        ok("Refused" in out and "customers" in out, "and the model was told why: " + out[:140])
+        ok("Refused" in out and "Customer details" in out, "and the model was told why, in the Team page's words: " + out[:140])
         who["uid"] = ""      # the master, and anyone unmapped, is unaffected
         run_async(dispatch("shopify_get_customer", {"customer_id": 1}))
         eq(len(calls), 1, "an unrestricted asker still reads")
@@ -85,7 +85,7 @@ def t_a_chat_turn_runs_the_askers_tools_only():
         finally:
             assistant.run_chat = saved
         out, n_tools = seen[-1]
-        ok("Refused" in out and "customers" in out, "the member's own turn refused the tool: " + out[:160])
+        ok("Refused" in out and "Customer details" in out, "the member's own turn refused the tool: " + out[:160])
         ok(n_tools > 0, "and the turn was handed the chat's tools")
     with_accounts(go)
 

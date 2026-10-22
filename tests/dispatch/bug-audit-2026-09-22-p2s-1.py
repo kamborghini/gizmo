@@ -28,168 +28,6 @@ def t_a_made_orders_reprint_undo_and_ready_to_make_leave_it_made():
         reset_prod()
 
 
-@test
-def t_a_walked_finance_thread_is_read_again_when_it_grows():
-    """A3. The reconciliation skipped any thread it had walked, so next month's
-    invoice sent as a reply on last month's conversation was never read."""
-    import types as _types
-    day = lambda n: (datetime.now(timezone.utc) - timedelta(days=n)).strftime("%Y-%m-%d") + "T09:00:00+00:00"
-    threads = {"t1": {"id": "t1", "subject": "Invoice from Glassworks", "messages": [
-        {"id": "m1", "at": day(40), "from_email": "accounts@glassworks.co.uk",
-         "files": [{"id": "a1", "name": "SI-1001.pdf", "size": 4000}]}]}}
-    hist = {"t1": "100"}
-    async def search(q, mx=200, out_complete=None):
-        if out_complete is not None:
-            out_complete.append(True)
-        return dict(hist)             # {thread id: historyId}, as the finance search gives
-    read = []
-    async def gbytes(mid, aid):
-        read.append(mid); return b"%PDF-1.4 scan of " + mid.encode()   # two documents, two contents
-    class Block:
-        type = "tool_use"
-        def __init__(self, num):
-            self.input = {"doc_type": "supplier_invoice", "currency": "GBP", "total": "100.00",
-                          "invoice_numbers": [num], "invoice_lines": []}
-    async def ai(system, messages, tools, tool_choice):
-        return _types.SimpleNamespace(content=[Block("SI-1001" if len(read) == 1 else "SI-1002")],
-                                      model="claude-test")
-    stores = _mail_world(threads, gbytes=gbytes, search=search)
-    _rc.configure(ai_call=ai)
-    try:
-        run_async(_rc.sweep())
-        eq(read, ["m1"])
-        threads["t1"]["messages"].append({"id": "m2", "at": day(2), "from_email": "accounts@glassworks.co.uk",
-                                          "files": [{"id": "a2", "name": "SI-1002.pdf", "size": 4000}]})
-        run_async(_rc.sweep())
-        eq(read, ["m1"], "an unchanged thread is not walked again")
-        hist["t1"] = "205"            # Gmail moves the thread's historyId when a message arrives
-        run_async(_rc.sweep())
-        eq(read, ["m1", "m2"], "a thread that has grown is walked again, and only the new PDF is read")
-        titles = [e["title"] for e in stores["store"]["exceptions"].values()
-                  if e["kind"] == "gmail_doc_missing_from_xero"]
-        ok(any("SI-1002" in t for t in titles), "and the new invoice is reported: " + str(titles))
-        # A message older than documents are kept is not read again when the
-        # thread moves: retention dropped it, and the Xero side of it too.
-        threads["t1"]["messages"].insert(0, {"id": "m0", "at": day(_rc.DOCS_KEEP_DAYS + 5),
-                                             "from_email": "accounts@glassworks.co.uk",
-                                             "files": [{"id": "a0", "name": "SI-0900.pdf", "size": 4000}]})
-        hist["t1"] = "300"
-        run_async(_rc.sweep())
-        ok("m0" not in read, "a PDF older than the retention window is never read again: " + str(read))
-        # A thread walked before history was kept is not walked again on the
-        # first sweep after the upgrade: the listing's word is taken for it.
-        st = stores["store"]; st["seen_history"] = {}
-        hist["t1"] = "400"; before = list(read)
-        run_async(_rc.sweep())
-        eq(read, before, "no mass re-walk of the backlog after the upgrade")
-        eq(stores["store"]["seen_history"].get("t1"), "400", "its history is simply recorded")
-        async def broken(q, mx=200, out_complete=None):
-            raise RuntimeError("Gmail is down")
-        _rc.configure(mail_search=broken)
-        r = run_async(_rc.sweep())
-        ok(not any("part-way" in n for n in r["notes"]), "a failed search says so once, cleanly: " + str(r["notes"]))
-    finally:
-        _mail_world_off()
-
-
-@test
-def t_a_scan_read_while_the_ai_is_down_is_read_when_it_is_back():
-    """A4. A scan read on a night the AI call failed was stored as ignored and
-    its thread marked seen, so it was never read again."""
-    import types as _types
-    day = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d")
-    threads = {"t1": {"id": "t1", "subject": "Invoice SI-88812", "messages": [{
-        "id": "m1", "at": day + "T09:00:00+00:00", "from_email": "accounts@glassworks.co.uk",
-        "files": [{"id": "a1", "name": "SI-88812.pdf", "size": 4000}]}]}}
-    stores = _mail_world(threads)
-    async def ai_down(system, messages, tools, tool_choice):
-        raise RuntimeError("The daily AI spending limit has been reached.")
-    calls = []
-    class Block:
-        type = "tool_use"
-        input = {"doc_type": "supplier_invoice", "counterparty": "Glassworks", "currency": "GBP",
-                 "total": "1,840.00", "invoice_numbers": ["SI-88812"], "invoice_lines": []}
-    async def ai_up(system, messages, tools, tool_choice):
-        calls.append(1)
-        return _types.SimpleNamespace(content=[Block()], model="claude-test")
-    try:
-        _rc.configure(ai_call=ai_down)
-        r1 = run_async(_rc.sweep())
-        ok("m1:a1" not in stores["docs"], "an unread scan is not stored as read")
-        ok(any("retried" in n for n in r1["notes"]), r1["notes"])
-        _rc.configure(ai_call=ai_up)
-        run_async(_rc.sweep())
-        eq(len(calls), 0, "not again the same day: a retry on every sweep billed the AI each time")
-        stores["store"]["doc_tries"]["m1:a1"]["day"] = "2000-01-01"     # the next night
-        run_async(_rc.sweep())
-        eq(len(calls), 1, "the next day's sweep reads it")
-        ok(any(e["kind"] == "gmail_doc_missing_from_xero" for e in stores["store"]["exceptions"].values()),
-           "and the bill missing from Xero is reported")
-        # Tries are counted per day: Sweep now pressed five times on a day the
-        # spend cap was reached must not use them all up.
-        stores2 = _mail_world({"t9": dict(threads["t1"], id="t9")})
-        _rc.configure(ai_call=ai_down)
-        for _ in range(_rc.DOC_READ_TRIES + 1):
-            run_async(_rc.sweep())
-        ok("m1:a1" not in stores2["docs"], "five sweeps in one day are one try, not five")
-        eq(stores2["store"]["doc_tries"]["m1:a1"]["n"], 1)
-        # One that can never be read, on day after day, is filed as unreadable.
-        days = 1
-        while "m1:a1" in (stores2["store"].get("doc_tries") or {}) and days < 20:
-            stores2["store"]["doc_tries"]["m1:a1"]["day"] = "2000-01-%02d" % days   # a day gone by
-            run_async(_rc.sweep())
-            days += 1
-        eq(days, _rc.DOC_READ_TRIES, "one try a day, and filed on the last")
-        doc = stores2["docs"].get("m1:a1") or {}
-        ok(doc.get("ignored") and "different days" in (doc.get("note") or ""),
-           "after the last day it is filed as unreadable, saying so: " + str(doc))
-    finally:
-        _mail_world_off()
-
-
-@test
-def t_a_failed_xero_read_does_not_check_new_orders_against_yesterdays_books():
-    """A5. With a copy cached by the last good sweep, a failed Xero read ran the
-    sale checks on it, and every order since read as a sale missing from Xero."""
-    day = lambda n: (datetime.now(timezone.utc) - timedelta(days=n)).strftime("%Y-%m-%d")
-    def xi(num, total, d):
-        r = _raw_xinv(num, total); r["DateString"] = d + "T00:00:00"; r["Reference"] = num.split("-")[1]
-        return r
-    def od(oid, name, total, d):
-        o = _raw_order(oid, name, total); o["created_at"] = d + "T09:00:00Z"; return o
-    fx = _FakeXero(invoices=[xi("INV-104300", "120.00", day(3))])
-    orders = [od(104300, "#104300", "120.00", day(3))]
-    stores = _recon_world(fx, orders)
-    try:
-        run_async(_rc.sweep(deep_docs=False))
-        class Dead(_FakeXero):
-            async def list_invoices(self, since=None, modified_since=None):
-                raise RuntimeError("Xero refused the refresh token.")
-            list_payments = list_bank_transactions = list_credit_notes = list_invoices
-        orders.append(od(104301, "#104301", "95.00", day(1)))
-        orders.append(od(104302, "#104302", "480.00", day(0)))
-        _rc.configure(xero=Dead())
-        r2 = run_async(_rc.sweep(deep_docs=False))
-        live = [e for e in stores["store"]["exceptions"].values()
-                if not e.get("stale") and e["kind"] == "shopify_sale_missing"]
-        eq(live, [], "no sale is called missing from books that could not be read")
-        ok(any("could not be read this sweep" in n for n in r2["notes"]), r2["notes"])
-        # Only the bank refused (a scope not granted, say): invoices read fine,
-        # so a sale really missing from Xero is still reported.
-        class NoBank(_FakeXero):
-            async def list_bank_transactions(self, since=None, modified_since=None):
-                raise RuntimeError("insufficient scope")
-        _rc.configure(xero=NoBank(invoices=[xi("INV-104300", "120.00", day(3))]))
-        run_async(_rc.sweep(deep_docs=False))
-        live = [e for e in stores["store"]["exceptions"].values()
-                if not e.get("stale") and e["kind"] == "shopify_sale_missing"]
-        ok(live, "with only the bank unreadable, the sale checks still run and report")
-    finally:
-        _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
-                      mail_thread=None, load_store=None, write_store=None,
-                      load_cache=None, write_cache=None, load_docs=None, write_docs=None)
-
-
 def _ws_stores():
     """Memory and skills on scratch files of their own for one test (the
     harness leaves both at their production /data default)."""
@@ -358,50 +196,6 @@ def t_memory_and_skills_routes_edit_refuse_and_fail_honestly():
         eq(post("/api/skills", {"op": "add", "title": "New", "content": "y"}).status_code, 503, "and takes no writes")
         ok("/data" not in r.text, "no server path reaches the page")
     finally:
-        _ws_restore(saved)
-
-@test
-def t_the_scheduled_audits_carry_memory_knowledge_and_skills():
-    """The scheduled audits write the four reports with the context a person's
-    run has: memory, what was learned from the store's site, and the saved
-    skills that fit a report. Each report's run is faked to see it."""
-    saved = _ws_stores()
-    saved_k = knowledge.KNOWLEDGE_PATH
-    knowledge.KNOWLEDGE_PATH = SCRATCH + "/ws_knowledge_" + secrets.token_hex(3) + ".json"
-    names = ((impact, "_impact_snapshot"), (analytics, "run_overview"), (seo, "run_seo_audit"), (seo, "run_keywords"),
-             (analytics, "run_customers"), (analytics, "_save_analysis"), (analytics, "_save_customer_segment"))
-    real = {(m, n): getattr(m, n) for m, n in names}
-    seen = {}
-
-    async def no_snap(registry):
-        return {}
-
-    def faked(kind):
-        async def run(registry, extra, *rest):
-            seen[kind] = extra
-            return {"changes": []}
-        return run
-    try:
-        impact._impact_snapshot = no_snap
-        analytics.run_overview, seo.run_seo_audit = faked("overview"), faked("seo")
-        seo.run_keywords, analytics.run_customers = faked("keywords"), faked("customers")
-        analytics._save_analysis = lambda kind, res: res
-        analytics._save_customer_segment = lambda segment, res: res
-        assistant._chat_after({"structured": {"summary": "Noted.", "remember": [
-            {"type": "fact", "text": "Trade orders ship on Tuesdays."}]}},
-            [{"role": "user", "content": "remember that trade orders ship on Tuesdays"}])
-        knowledge._save_knowledge("Glass gobos are etched in the Leeds workshop.", ["https://example.com/about"])
-        skillbook._add_skill("Overview report rules", "Lead every overview report with trade revenue.")
-        asyncio.run(scheduler._run_scheduled_audits({}))
-        eq(sorted(seen), ["customers", "keywords", "overview", "seo"], "all four reports ran")
-        for kind, extra in sorted(seen.items()):
-            ok("Trade orders ship on Tuesdays." in extra, kind + " reads memory")
-            ok("Glass gobos are etched in the Leeds workshop." in extra, kind + " reads the store knowledge")
-            ok("Lead every overview report with trade revenue." in extra, kind + " reads the skill that fits")
-    finally:
-        for (m, n), f in real.items():
-            setattr(m, n, f)
-        knowledge.KNOWLEDGE_PATH = saved_k
         _ws_restore(saved)
 
 @test
@@ -786,7 +580,6 @@ def t_the_reading_message_and_the_product_plan_carry_what_they_need():
         claude._xcreate = sx
         _ws_restore(saved)
     src = copilot_source()
-    ok('_skills_to_system(" ".join(["product plan", str(p.get("title") or "")' in src, "a product plan picks skills by the product itself")
     ok('"\\n".join((m.get("text") or "")[:3900] for m in msgs[-2:])' in src, "a draft picks skills by what was written, not the labelled transcript")
     ok('plain = re.sub(r"\\A<skill[^>]*>\\n|\\n</skill>\\Z", "", content)' in src, "What Reactor read shows the skill's own text")
 
@@ -868,9 +661,7 @@ def t_what_chat_read_is_shown_in_words():
     eq(assistant._tool_label("shopify_list_orders", {"created_at_min": "2026-08-01T00:00:00Z",
                                                    "created_at_max": "2026-08-31T00:00:00Z"}),
        "Orders, 1 Aug 2026 to 31 Aug 2026")
-    eq(assistant._tool_label("recon_summary"), "Reconciliation summary")
     eq(assistant._tool_label("shopify_list_fulfillments"), "Fulfilments")
-    eq(assistant._step_word("Google Analytics 4"), "Google Analytics 4")
     eq(assistant._step_word("Orders"), "orders")
 
 
@@ -946,88 +737,5 @@ def t_a_preference_switch_saves_only_the_switches():
     _uid, sess, _pw = ready_user("Pref Member", "prefmember")
     eq(post_s(sess, "/api/profile", {"prefs": {"concise": False}}).status_code, 403, "a member cannot change them")
     eq(post("/api/profile", {}).json()["profile"]["prefs"]["concise"], True)
-
-
-@test
-def t_the_sweep_notes_are_sentences_said_once():
-    """The Reconciliation page lists the sweep's notes as they are written. A
-    Xero read refused for one reason put four near-identical lines on screen,
-    one per collection, and then a fifth naming them as bank_transactions and
-    credit_notes; a crashed check was named by its Python function."""
-    eq(_rc._words(["bank_transactions", "credit_notes"]), "bank transactions and credit notes")
-    eq(_rc._words(["invoices", "payments", "credit_notes"]), "invoices, payments and credit notes")
-    eq(_rc._check_words("check_orders_vs_invoices"), "orders against invoices")
-    fx = _FakeXero(invoices=[])
-    stores = _recon_world(fx, [])
-    try:
-        class Dead(_FakeXero):
-            async def list_invoices(self, since=None, modified_since=None):
-                raise RuntimeError("Xero refused the refresh token.")
-            list_payments = list_bank_transactions = list_credit_notes = list_invoices
-        _rc.configure(xero=Dead())
-        r = run_async(_rc.sweep(deep_docs=False))
-        said = [n for n in r["notes"] if "could not be read" in n and "Xero" in n]
-        eq(len(said), 1, "one reason, one line: %s" % r["notes"])
-        ok("invoices, payments, bank transactions and credit notes" in said[0], said[0])
-        ok(not any(re.search(r"[a-z]_[a-z]", n) for n in r["notes"]), "no code names: %s" % r["notes"])
-        ok(not any("SKIPPED" in n for n in r["notes"]), "and nothing shouted")
-        # What the failure meant is said in the same note, not a second one.
-        ok("The checks that read them were skipped" in said[0], said[0])
-        ok(not any(n.startswith("The checks that read Xero's") for n in r["notes"]),
-           "one failure, one note: %s" % r["notes"])
-    finally:
-        _rc.configure(xero=None, registry=None, tool_json=None, mail_search=None,
-                      mail_thread=None, load_store=None, write_store=None,
-                      load_cache=None, write_cache=None, load_docs=None, write_docs=None)
-
-
-@test
-def t_a_remittance_is_satisfied_only_by_a_live_receipt_of_its_own():
-    """A6. A deleted payment, a payment to a supplier, or one another
-    remittance already used all hid a missing receipt."""
-    d0 = (datetime.now(timezone.utc) - timedelta(days=5)).strftime("%Y-%m-%d")
-    def inv(i, num, total, contact, typ="ACCREC"):
-        return {"id": i, "number": num, "type": typ, "status": "AUTHORISED", "contact": contact,
-                "date": d0, "due": d0, "total": total, "tax": 0, "due_pence": total, "paid_pence": 0,
-                "credited_pence": 0, "currency": "GBP", "reference": "", "updated": ""}
-    def pay(i, p, status, inv_num, typ=""):
-        return {"id": i, "date": d0, "pence": p, "reference": "", "status": status, "type": typ,
-                "invoice_id": "", "invoice_number": inv_num, "contact": "", "account": "090",
-                "is_reconciled": True}
-    def remit(key, num):
-        return {"source_key": key, "doc_type": "remittance", "from": key, "counterparty": key,
-                "date": d0, "total_pence": 50000, "currency": "GBP", "invoice_numbers": [num],
-                "invoice_lines": [{"number": num, "pence": 50000}], "verified": True}
-    def flagged(payments, docs):
-        cache = {"xero": {"invoices": {"a": inv("a", "INV-0142", 50000, "Northern Stage"),
-                                       "b": inv("b", "INV-0143", 50000, "Leeds Playhouse"),
-                                       "s": inv("s", "GW-77", 50000, "Glassworks", "ACCPAY")},
-                          "payments": payments, "credit_notes": {}, "bank_transactions": {}}}
-        return sorted(e["refs"][0] for e in _rc.check_gmail_docs(cache, docs)
-                      if e["kind"] == "remittance_payment_missing")
-    one = {"r1": remit("r1", "INV-0142")}
-    eq(flagged({"p1": pay("p1", 50000, "AUTHORISED", "INV-0142")}, one), [], "a real receipt satisfies it")
-    eq(flagged({"p1": pay("p1", 50000, "DELETED", "INV-0142")}, one), ["r1"], "a deleted one does not")
-    eq(flagged({"p2": pay("p2", 50000, "AUTHORISED", "GW-77")}, one), ["r1"],
-       "nor does our payment to a supplier, known by the bill it pays")
-    eq(flagged({"p3": pay("p3", 50000, "AUTHORISED", "", "ACCPAYPAYMENT")}, one), ["r1"],
-       "or by its own type")
-    two = {"r2": remit("r2", "INV-0143"), "r1": remit("r1", "INV-0142")}
-    eq(flagged({"p4": pay("p4", 50000, "AUTHORISED", "INV-0142")}, two), ["r2"],
-       "one receipt explains one remittance, the one whose invoice it pays")
-    for kind in ("ARCREDITPAYMENT", "AROVERPAYMENTPAYMENT", "ARPREPAYMENTPAYMENT"):
-        eq(flagged({"p5": pay("p5", 50000, "AUTHORISED", "", kind)}, one), ["r1"],
-           kind + " is a refund paid out, not a receipt")
-    eq(flagged({"p6": pay("p6", 50000, "AUTHORISED", "", "ACCRECPAYMENT")}, one), [], "ACCRECPAYMENT is")
-    # r1 was paid line by line (300 + 200 against its own invoices); r2, for
-    # 300, has no receipt. The 300 is r1's, never r2's by amount.
-    split = {"r1": dict(remit("r1", "INV-0142"), total_pence=50000, invoice_numbers=["INV-0142", "INV-0143"],
-                        invoice_lines=[{"number": "INV-0142", "pence": 30000},
-                                       {"number": "INV-0143", "pence": 20000}]),
-             "r2": dict(remit("r2", "INV-0999"), total_pence=30000,
-                        invoice_lines=[{"number": "INV-0999", "pence": 30000}])}
-    eq(flagged({"q1": pay("q1", 30000, "AUTHORISED", "INV-0142"),
-                "q2": pay("q2", 20000, "AUTHORISED", "INV-0143")}, split), ["r2"],
-       "a remittance's line payments are its own, and the one with no receipt is the one flagged")
 
 

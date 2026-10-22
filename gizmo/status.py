@@ -7,9 +7,7 @@ import logging
 import os
 import json
 import time
-import google_data
 import google_mail
-import xero as xero_api
 import tokenvault
 from gizmo import store as jsonstore
 
@@ -69,9 +67,6 @@ def token_vault_state() -> dict:
     """
     stores = [
         ("Gmail, sales", google_mail.TOKEN_PATH, "refresh_token"),
-        ("Gmail, finance", google_mail.FINANCE_TOKEN_PATH, "refresh_token"),
-        ("Google data", google_data.OAUTH_TOKEN_PATH, "refresh_token"),
-        ("Xero", xero_api.TOKEN_PATH, "refresh_token"),
     ]
     sealed, plain, present = [], [], 0
     for name, path, field in stores:
@@ -102,7 +97,7 @@ def token_vault_state() -> dict:
 def reseal_secrets_at_rest() -> dict:
     """Encrypt the long-lived secrets already sitting on the volume.
 
-    Setting TOKEN_ENCRYPTION_KEY only changes what is written NEXT. A Xero
+    Setting TOKEN_ENCRYPTION_KEY only changes what is written NEXT. A
     refresh token that is not due to rotate, or an MFA secret that never
     rotates at all, would stay in plaintext indefinitely while the key made it
     look solved - which is worse than knowing it is unencrypted, because
@@ -120,9 +115,6 @@ def reseal_secrets_at_rest() -> dict:
         return out
     files = [
         ("gmail_sales", google_mail.TOKEN_PATH, ("refresh_token",)),
-        ("gmail_finance", google_mail.FINANCE_TOKEN_PATH, ("refresh_token",)),
-        ("google_data", google_data.OAUTH_TOKEN_PATH, ("refresh_token",)),
-        ("xero", xero_api.TOKEN_PATH, ("refresh_token",)),
         ("world_options", desk.WO_SECRET_PATH, ("meter", "key", "password")),
     ]
     for name, path, fields in files:

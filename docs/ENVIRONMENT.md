@@ -3,7 +3,7 @@
 Generated from the code by `tools/env_reference.py`; do not edit by hand.
 `make env-doc` rewrites it, and CI fails when it is stale.
 
-222 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document. `[shop domain]` stands for the shop's own website domain, which those defaults carry.
+184 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document. `[shop domain]` stands for the shop's own website domain, which those defaults carry.
 
 ## server.py
 
@@ -67,14 +67,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `USAGE_MAX` | `"5000"` | gizmo.ai | max usage events retained |
 | `USAGE_PATH` | `"/data/usage.json"` | gizmo.ai | AI token-usage + cost log (measurement) |
 
-## gizmo/analytics.py - top
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `ANALYSIS_CACHE_MAX_BYTES` | `"800000"` | gizmo.analytics | per-entry size guard |
-| `ANALYSIS_CACHE_PATH` | `"/data/analysis_cache.json"` | gizmo.analytics | last result per AI tab |
-| `TREND_MONTHS` | `"24"` | gizmo.analytics |  |
-
 ## gizmo/backup.py - top
 
 | Variable | Default | Read by | Notes |
@@ -94,7 +86,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
-| `CHAT_CONTEXT_CAP` | `"12000"` | gizmo.chat | max chars of page-report context injected into chat |
 | `COPILOT_MAX_TOOL_ROUNDS` | `"12"` | gizmo.chat |  |
 | `COPILOT_TOOL_RESULT_CAP` | `"50000"` | gizmo.chat |  |
 
@@ -103,6 +94,7 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
 | `APP_BASE_URL` | `""` | gizmo.config |  |
+| `GOOGLE_CONNECT_SECRET` | `""` | gizmo.config |  |
 | `SHOPIFY_API_KEY` | `None` | gizmo.config |  |
 | `SHOPIFY_API_SECRET` | `None` | gizmo.config |  |
 | `SHOPIFY_CLIENT_ID` | `""` | gizmo.config, server |  |
@@ -302,28 +294,12 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `PRODUCTION_STATE_MAX` | `"1000"` | gizmo.production |  |
 | `PRODUCTION_STATE_PATH` | `"/data/production_state.json"` | gizmo.production |  |
 
-## gizmo/products.py - top
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `LOW_STOCK_THRESHOLD` | `"5"` | gizmo.products |  |
-| `PRODUCT_TREND_MONTHS` | `"12"` | gizmo.products |  |
-
 ## gizmo/profile.py - top
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
 | `PROFILE_FIELD_CAP` | `"6000"` | gizmo.profile |  |
 | `PROFILE_PATH` | `"/data/store_profile.json"` | gizmo.profile |  |
-
-## gizmo/reconciliation.py - Reconciliation stores + the read-only tools the chat is give
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `ANTHROPIC_MODEL_RECON` | `None` | gizmo.reconciliation |  |
-| `RECON_CACHE_PATH` | `"/data/recon_cache.json"` | gizmo.reconciliation |  |
-| `RECON_DOCS_PATH` | `"/data/recon_docs.json"` | gizmo.reconciliation |  |
-| `RECON_PATH` | `"/data/recon.json"` | gizmo.reconciliation |  |
 
 ## gizmo/routes/files.py - top
 
@@ -337,35 +313,18 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 |---|---|---|---|
 | `RAILWAY_GIT_COMMIT_SHA` | `None` | gizmo.routes.status, gizmo.updates, server |  |
 
-## gizmo/scheduler.py - Scheduled refresh + change alerts. Off by default (automatic
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `ALERT_EMAIL_FROM` | `"Reactor <onboarding@resend.dev>"` | gizmo.scheduler |  |
-| `ALERT_EMAIL_TO` | `""` | gizmo.scheduler |  |
-| `RESEND_API_KEY` | `""` | gizmo.scheduler |  |
-| `WATCH_PATH` | `"/data/watch.json"` | gizmo.scheduler |  |
-
 ## gizmo/scheduler.py - top
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
 | `ALERTS_MAX` | `"60"` | gizmo.scheduler |  |
-| `ALERTS_PATH` | `"/data/alerts.json"` | gizmo.scheduler | change alerts from scheduled runs |
+| `ALERTS_PATH` | `"/data/alerts.json"` | gizmo.scheduler | alerts the app raises |
+| `ALERT_EMAIL_FROM` | `"Reactor <onboarding@resend.dev>"` | gizmo.scheduler |  |
+| `ALERT_EMAIL_TO` | `""` | gizmo.scheduler |  |
+| `RESEND_API_KEY` | `""` | gizmo.scheduler |  |
 | `SCHEDULE_CHECK_SECS` | `"900"` | gizmo.scheduler | how often the scheduler wakes to check |
-| `SCHEDULE_PATH` | `"/data/schedule.json"` | gizmo.scheduler | auto-refresh config (off by default) |
-
-## gizmo/seo.py - Keyword scraper for arbitrary external URLs (SSRF-guarded) +
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `EXTERNAL_FETCH_MAX` | `str(600 * 1024)` | gizmo.seo | bytes of text kept |
-
-## gizmo/seo.py - SEO — knowledge layer + live technical audit
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `SEO_SAMPLE_PAGES` | `"5"` | gizmo.seo |  |
+| `SCHEDULE_PATH` | `"/data/schedule.json"` | gizmo.scheduler | its folder is the volume: backups, status and privacy read /data from it |
+| `WATCH_PATH` | `"/data/watch.json"` | gizmo.scheduler |  |
 
 ## gizmo/size_list.py - top
 
@@ -443,26 +402,15 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 |---|---|---|---|
 | `EORI_CACHE_PATH` | `"/data/eori_cache.json"` | eori |  |
 
-## google_data.py
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `GA4_PROPERTY_ID` | `""` | google_data |  |
-| `GOOGLE_CONNECT_SECRET` | `""` | google_data |  |
-| `GOOGLE_OAUTH_CLIENT_ID` | `""` | google_data, google_mail |  |
-| `GOOGLE_OAUTH_CLIENT_SECRET` | `""` | google_data, google_mail |  |
-| `GOOGLE_OAUTH_TOKEN_PATH` | `"/data/google_oauth.json"` | google_data |  |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | `""` | google_data |  |
-| `GSC_SITE_URL` | `""` | google_data |  |
-
 ## google_mail.py
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
 | `GMAIL_API_BASE` | `"https://gmail.googleapis.com"` | google_mail |  |
-| `GMAIL_FINANCE_TOKEN_PATH` | `"/data/gmail_finance_oauth.json"` | google_mail |  |
 | `GMAIL_TOKEN_PATH` | `"/data/gmail_oauth.json"` | google_mail |  |
 | `GMAIL_TOKEN_URL` | `"https://oauth2.googleapis.com/token"` | google_mail |  |
+| `GOOGLE_OAUTH_CLIENT_ID` | `""` | google_mail |  |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | `""` | google_mail |  |
 
 ## logdrain.py
 
@@ -478,25 +426,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `PIPEDRIVE_API_BASE` | `""` | pipedrive |  |
 | `PIPEDRIVE_API_TOKEN` | `""` | pipedrive |  |
 | `PIPEDRIVE_DOMAIN` | `""` | pipedrive |  |
-
-## recon.py
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `RECON_CACHE_KEEP_DAYS` | `str(WINDOW_DAYS + 60)` | recon |  |
-| `RECON_CLOSED_KEEP_DAYS` | `"365"` | recon |  |
-| `RECON_DOCS_KEEP_DAYS` | `str(WINDOW_DAYS + 60)` | recon |  |
-| `RECON_DOCS_PER_SWEEP` | `"8"` | recon |  |
-| `RECON_DOC_BYTES_MAX` | `str(8 * 1024 * 1024)` | recon |  |
-| `RECON_DOC_READ_TRIES` | `"5"` | recon |  |
-| `RECON_GMAIL_QUERY` | `"(has:attachment OR remittance OR invoice OR statement OR...` | recon |  |
-| `RECON_MATERIAL_PENCE` | `"25000"` | recon | 250.00 |
-| `RECON_ORDER_CAP` | `"1500"` | recon |  |
-| `RECON_SEEN_CAP` | `"4000"` | recon |  |
-| `RECON_STALE_DAYS` | `"21"` | recon |  |
-| `RECON_THREADS_PER_SWEEP` | `"40"` | recon |  |
-| `RECON_TOLERANCE_PENCE` | `"100"` | recon | 1.00 |
-| `RECON_WINDOW_DAYS` | `"120"` | recon |  |
 
 ## tokenvault.py
 
@@ -514,15 +443,3 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 | `WO_METER_NUMBER` | `""` | worldoptions |  |
 | `WO_PASSWORD` | `""` | worldoptions |  |
 | `WO_PLUGIN_CODE` | `"Web_Service"` | worldoptions |  |
-
-## xero.py
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `XERO_API_BASE` | `"https://api.xero.com"` | xero |  |
-| `XERO_CLIENT_ID` | `""` | xero |  |
-| `XERO_CLIENT_SECRET` | `""` | xero |  |
-| `XERO_IDENTITY_BASE` | `"https://identity.xero.com"` | xero |  |
-| `XERO_LOGIN_BASE` | `"https://login.xero.com"` | xero |  |
-| `XERO_SCOPES` | `"offline_access accounting.invoices.read " "accounting.pa...` | xero |  |
-| `XERO_TOKEN_PATH` | `"/data/xero_oauth.json"` | xero |  |

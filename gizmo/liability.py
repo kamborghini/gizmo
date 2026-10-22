@@ -105,8 +105,13 @@ def _mark_chased(key: str, by: str = "") -> dict:
     return accounts[str(key)]
 
 
+# The signs a chase email writes before an amount; any other currency is
+# written as its code after the number.
+_CURRENCY_SIGNS = {"GBP": "£", "USD": "$", "EUR": "€"}
+
+
 def _chase_money(amount: float, currency: str) -> str:
-    sym = analytics._CURRENCY_SIGNS.get((currency or "").upper())
+    sym = _CURRENCY_SIGNS.get((currency or "").upper())
     return (f"{sym}{amount:,.2f}" if sym else f"{amount:,.2f} {currency}".strip())
 
 
@@ -330,4 +335,3 @@ async def run_liability(registry: dict) -> dict:
 from gizmo import orderbook  # noqa: E402
 from gizmo import production  # noqa: E402
 from gizmo import config  # noqa: E402
-from gizmo import analytics  # noqa: E402

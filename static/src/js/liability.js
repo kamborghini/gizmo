@@ -74,12 +74,11 @@
             }
             return true;
         }
-        /* The strip that makes Liability and Reconciliation one area rather
-           than two destinations, built exactly like the reference's Finance
+        /* The strip that makes the finance pages one area rather than
+           separate destinations, built exactly like the reference's Finance
            tabs: a segmented control on the left, a muted "updated" line and
-           any actions on the right. Reconciliation is only offered to an
-           account that may open it, so the tab cannot become a door round the
-           permission. */
+           any actions on the right. A page is only offered to an account that
+           may open it, so the tab cannot become a door round the permission. */
         function financeTabs(active, updated, actions) {
             const row = el('div', 'page-tabs');
             /* The reference's page strip: ink alone marks where you are. The
@@ -92,7 +91,7 @@
             /* No Beta on the tabs: the sidebar and the top-bar title say it, and
                a Finance screen carried it seven times at once. */
             const tab = (key, label) => ({ key, label });
-            const seg = tabStrip([tab('liability', 'Liability'), tabAllowed('recon') && tab('recon', 'Reconciliation'),
+            const seg = tabStrip([tab('liability', 'Liability'),
                                   tabAllowed('forecast') && tab('forecast', 'Forecast'), tabAllowed('connector') && tab('connector', 'Xero sync')],
                                  active, (k) => setView(k), { nav: true, label: 'Finance pages' });
             row.append(seg);

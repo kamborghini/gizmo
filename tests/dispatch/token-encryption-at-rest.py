@@ -79,14 +79,10 @@ def t_a_tampered_or_wrongly_keyed_envelope_fails_closed():
 
 @test
 def t_every_stored_refresh_token_goes_through_the_vault():
-    """Four files hold long-lived credentials. Sealing three of them and
-    forgetting the fourth is the whole exposure, so this asserts each module's
-    single read and single write both pass through."""
-    import inspect as _i, google_mail as _gm2, google_data as _gd2
-    import xero as _xr2
-    for mod, writer, reader in ((_xr2, "_write_token", "_load_token"),
-                                (_gd2, "save_refresh_token", "_load_refresh_token"),
-                                (_gm2, "save_connection", "_load_token_file")):
+    """Files that hold long-lived credentials are sealed: this asserts the
+    mailbox module's single read and single write both pass through."""
+    import inspect as _i, google_mail as _gm2
+    for mod, writer, reader in ((_gm2, "save_connection", "_load_token_file"),):
         w = _i.getsource(getattr(mod, writer))
         r = _i.getsource(getattr(mod, reader))
         ok("tokenvault.seal" in w, f"{mod.__name__}.{writer} seals before writing")

@@ -50,11 +50,8 @@ import jwt
 import eori
 import perf
 import pagesource
-import google_data
 import mailmime
 import google_mail
-import recon as recon_engine
-import xero as xero_api
 import pipedrive
 from gizmo import background
 try:
@@ -125,12 +122,8 @@ from gizmo import chat as assistant
 from gizmo.routes import skills as routes_skills
 from gizmo.routes import memory as routes_memory
 from gizmo.routes import knowledge as routes_knowledge
-# Moved out of this file (stage 4): the AI's instructions, SEO and keywords, and the overview and customer reports, with their routes.
+# Moved out of this file (stage 4): the AI's instructions. (SEO and keywords and the overview and customer reports were removed on 22 Oct 2026.)
 from gizmo import prompts
-from gizmo import seo
-from gizmo import analytics
-from gizmo.routes import seo as routes_seo
-from gizmo.routes import analytics as routes_analytics
 # Moved out of this file (stage 4): the scheduler and alerts, release notes and requests, impact tracking and backup, with their routes.
 from gizmo import scheduler
 from gizmo import updates
@@ -140,16 +133,14 @@ from gizmo.routes import scheduler as routes_scheduler
 from gizmo.routes import updates as routes_updates
 from gizmo.routes import impact as routes_impact
 from gizmo.routes import backup as routes_backup
-# Moved out of this file (stage 4): the chase desk and credit terms, reconciliation and the Xero sync settings, and the forecast hooks, with their routes.
+# Moved out of this file (stage 4): the chase desk and credit terms, the Xero sync settings and the forecast hooks, with their routes. (Reconciliation was removed on 22 Oct 2026.)
 from gizmo import liability
-from gizmo import reconciliation
 from gizmo import xero_sync as xerosync
 from gizmo import forecasting
 from gizmo.routes import liability as routes_liability
-from gizmo.routes import reconciliation as routes_reconciliation
 from gizmo.routes import xero_sync as routes_xero_sync
 from gizmo.routes import forecasting as routes_forecasting
-# Moved out of this file (stage 4): the page and its assets, the store profile and layouts, the Google and accounts-mailbox sign-in walks, and the status page, with their routes.
+# Moved out of this file (stage 4): the page and its assets, the store profile and layouts, the sign-in walks' states and page, and the status page, with their routes.
 from gizmo import rendering
 from gizmo import profile as store_profile
 from gizmo import layouts
@@ -158,13 +149,9 @@ from gizmo import status as appstatus
 from gizmo.routes import rendering as routes_rendering
 from gizmo.routes import profile as routes_profile
 from gizmo.routes import layouts as routes_layouts
-from gizmo.routes import oauth as routes_oauth
 from gizmo.routes import status as routes_status
 # Moved out of this file (stage 4): the London clock, which the whole app reads.
 from gizmo import clock
-# Moved out of this file (stage 4): the Products tab.
-from gizmo import products as catalog
-from gizmo.routes import products as routes_products
 # Moved out of this file (stage 4): the chat's, the stream's and the usage panel's routes.
 from gizmo import config
 from gizmo.routes import chat as routes_chat
@@ -599,41 +586,8 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     shopify._payment_terms_writer = payment_terms_writer
     shopify._order_writer = order_writer
     desk._wo_boot()
-    # Shopify tools + live SEO tools + Google data tools (the last only if configured)
-    chat_registry = {**registry, **seo._build_seo_tools(registry), **seo._build_google_tools(),
-                     "recon_summary": (reconciliation.recon_summary, reconciliation.ReconEmptyInput),
-                     "recon_exceptions": (reconciliation.recon_exceptions, reconciliation.ReconExceptionsInput),
-                     "recon_exception": (reconciliation.recon_exception, reconciliation.ReconExceptionInput)}
-    # The reconciliation engine gets its IO here and only here: the Shopify
-    # registry (reads), Gmail attachment bytes, the mail store, the stores,
-    # and one AI entry point. It has no other way to reach the world.
-    # Every Gmail hook here is bound to the FINANCE account. The Inbox tab's
-    # mailbox is a different Google account and the reconciliation engine has
-    # no way to reach it: the binding is the isolation.
-    _fin = google_mail.FINANCE
-
-    async def _fin_bytes(message_id, attachment_id):
-        return await google_mail.attachment_bytes(message_id, attachment_id, acct=_fin)
-
-    async def _fin_search(query, max_results=200, out_complete=None):
-        # {thread id: historyId}: the reconciliation walks a thread again when
-        # it has grown, so a new invoice on last month's thread is read.
-        hist: dict = {}
-        await google_mail.list_thread_ids(query, max_results=max_results, acct=_fin,
-                                          out_complete=out_complete, history=hist)
-        return hist
-
-    async def _fin_thread(thread_id):
-        return await google_mail.get_thread(thread_id, acct=_fin)
-
-    recon_engine.configure(
-        registry=registry, tool_json=shopify._tool_json,
-        mail_connected=lambda: google_mail.connected(_fin),
-        gmail_bytes=_fin_bytes, mail_search=_fin_search, mail_thread=_fin_thread,
-        ai_call=reconciliation._recon_ai_call, xero=xero_api,
-        load_store=reconciliation._load_recon, write_store=reconciliation._write_recon,
-        load_cache=reconciliation._load_recon_cache, write_cache=reconciliation._write_recon_cache,
-        load_docs=reconciliation._load_recon_docs, write_docs=reconciliation._write_recon_docs)
+    # The Shopify tools: the registry this app was handed.
+    chat_registry = dict(registry)
     tools = assistant._build_tools(chat_registry)
     # The chat's tools, from the registry this app was handed, kept on the chat
     # module as the write capabilities are kept on shopify: the chat routes read
@@ -673,17 +627,11 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
     # The chat's routes (gizmo/routes/chat.py), gathered where the first stood.
     routes_chat.register(mcp, registry)
 
-    # The report routes (gizmo/routes/analytics.py), gathered where the first stood.
-    routes_analytics.register(mcp, registry)
-
     # The store profile's route (gizmo/routes/profile.py).
     routes_profile.register(mcp, registry)
 
     # The layouts route (gizmo/routes/layouts.py).
     routes_layouts.register(mcp, registry)
-
-    # The SEO and keyword routes (gizmo/routes/seo.py), gathered where the first stood.
-    routes_seo.register(mcp, registry)
 
     # The memory route (gizmo/routes/memory.py).
     routes_memory.register(mcp, registry)
@@ -1238,14 +1186,6 @@ def add_routes(mcp, registry: dict, order_tag_writer=None, fulfillment_writer=No
                + "</body></html>")
         return HTMLResponse(doc, headers=doc_headers)
 
-    # The Products tab's routes (gizmo/routes/products.py), gathered where the first stood.
-    routes_products.register(mcp, registry)
-
-    # The reconciliation routes and the Xero connect pair (gizmo/routes/reconciliation.py), gathered where the first stood.
-    routes_reconciliation.register(mcp, registry)
-
     # The Xero sync settings route (gizmo/routes/xero_sync.py).
     routes_xero_sync.register(mcp, registry)
 
-    # The Google and accounts-mailbox sign-in walks (gizmo/routes/oauth.py), gathered where the first stood.
-    routes_oauth.register(mcp, registry)

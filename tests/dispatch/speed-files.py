@@ -399,7 +399,7 @@ def t_no_hosting_or_setting_name_reaches_a_person_from_the_server():
             bad.append("%s:%d %s" % (name, node.lineno, node.value[:80]))
         for k in kids:
             visit(k, name, fn, hush)
-    for name in COPILOT_FILES + ["server.py", "recon.py", "xero.py", "google_mail.py", "google_data.py",
+    for name in COPILOT_FILES + ["server.py", "google_mail.py",
                                  "pipedrive.py", "tokenvault.py", "worldoptions.py", "eori.py"]:
         visit(ast.parse(open(os.path.join(root, name), encoding="utf-8").read()), name, "", False)
     ok(not bad, "%d strings a person reads name the hosting, the code name or a setting: %s"

@@ -15,12 +15,6 @@ uvicorn==0.54.0
 anthropic==1.15.0
 PyJWT==2.15.1
 beautifulsoup4==4.15.0
-# [requests]: the service-account sign-in (google_data._sa_refresh_sync) reaches
-# Google through google.auth.transport.requests, imported only when it runs.
-# requests was dropped on 2026-09-07 as unused, which no import scan could see
-# and the local environment hid (pip-audit pulls it in there): a fresh deploy
-# could not sign in that way at all. Same trap as Pillow below.
-google-auth[requests]==2.62.0
 pypdfium2==5.14.0
 # Nothing here imports PIL, and removing this pin broke the label printer in
 # CI: pypdfium2 rasterises a page through Pillow (page.render().to_pil()) and
@@ -29,7 +23,7 @@ pypdfium2==5.14.0
 pillow==13.0.0
 
 # Transitive dependencies pinned to their security floors. These are pulled in by
-# mcp / uvicorn / google-auth rather than named by us, so nothing constrained them
+# mcp / uvicorn rather than named by us, so nothing constrained them
 # and each deploy resolved whatever was current: a moving, unaudited set under the
 # app. Pinned after `pip-audit` found live advisories in every one of them.
 #   starlette         request.url rebuilt from an unvalidated path; form() limits
@@ -38,12 +32,10 @@ pillow==13.0.0
 #                     read-until-EOF; querystring parsing flaws (PYSEC-2026-3036/37/40)
 #   cryptography      statically linked OpenSSL fix, cert-chain blowup, wildcard
 #                     name-constraint bypass (GHSA-537c-gmf6-5ccf and others)
-#   pyasn1            quadratic OID decoding and unbounded tag ids (PYSEC-2026-3455/56/57)
 #   certifi           PYSEC-2026-4320 (21 Oct 2026); fixed in 2026.10.19
 starlette==1.8.0
 python-multipart==0.0.32
 cryptography==50.0.2
-pyasn1==0.6.4
 certifi==2026.10.19
 boto3==1.43.114
 

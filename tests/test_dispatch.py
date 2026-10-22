@@ -53,7 +53,6 @@ SECTIONS = [
     'reconciliation-engine-1.py',        # Reconciliation engine: the auditor must itself be auditable (part 1 of 3)
     'reconciliation-engine-2.py',        # Reconciliation engine: the auditor must itself be auditable (part 2 of 3)
     'reconciliation-engine-3.py',        # Reconciliation engine: the auditor must itself be auditable (part 3 of 3)
-    'reconciliation-review-findings.py', # Reconciliation: the adversarial review's confirmed findings, pinned
     'two-mailboxes-1.py',                # Two mailboxes: the sales inbox and the accounts mailbox must never mix (part 1 of 2)
     'two-mailboxes-2.py',                # Two mailboxes: the sales inbox and the accounts mailbox must never mix (part 2 of 2)
     'size-list-flagged-models.py',       # resolving a flagged model from inside the app

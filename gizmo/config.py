@@ -25,3 +25,6 @@ SHOPIFY_STORE      = os.environ.get("SHOPIFY_STORE", "")        # used to pin se
 # Public base URL (e.g. https://your-app.up.railway.app). When set, the Google
 # OAuth redirect URI is derived from it rather than the request Host header.
 APP_BASE_URL       = os.environ.get("APP_BASE_URL", "").strip()
+# The recovery key for a one-time connect link (the Inbox's mailbox walk):
+# a link carrying it may start the walk without a signed-in admin.
+CONNECT_SECRET     = os.environ.get("GOOGLE_CONNECT_SECRET", "")
