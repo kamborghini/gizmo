@@ -1,7 +1,7 @@
 # Stock in Reactor: the stock app folded in, with nothing lost
 
-**Draft for approval, 22 Oct 2026.** Nothing is built until Cameron approves
-this document. It covers folding the separate stock app (repository `zeta`)
+**Approved 22 Oct 2026.** Cameron approved this document, the calls marked
+as mine included. It covers folding the separate stock app (repository `zeta`)
 into Reactor as a Stock tab, moving every record across, and switching the
 stock app off.
 
