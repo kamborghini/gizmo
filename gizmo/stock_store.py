@@ -169,25 +169,30 @@ def _read_lines(path: str) -> list:
 
 def _last_id(path: str) -> int:
     """The id on the file's last complete line: lines are only ever appended
-    in id order, so that is the highest. Reads the tail, not the whole file."""
+    in id order, so that is the highest. Read backwards from the end a block
+    at a time, so a long line (a snapshot of hundreds of lines) or a torn
+    end costs a few blocks, never the whole file."""
     try:
-        size = os.path.getsize(path)
+        fh = open(path, "rb")
     except FileNotFoundError:
         return 0
-    start = max(0, size - 65536)
-    with open(path, "rb") as fh:
-        fh.seek(start)
-        lines = fh.read().split(b"\n")
-    if start:
-        lines = lines[1:]          # the first is likely the end of a line cut by the seek
-    for raw in reversed(lines):
-        try:
-            row = json.loads(raw)
-        except ValueError:
-            continue
-        if isinstance(row, dict) and isinstance(row.get("id"), int):
-            return row["id"]
-    return max((r["id"] for r in _read_lines(path) if isinstance(r.get("id"), int)), default=0) if start else 0
+    with fh:
+        pos = fh.seek(0, os.SEEK_END)
+        head = b""                 # the start of a line whose beginning is further back
+        while pos > 0:
+            step = min(65536, pos)
+            pos -= step
+            fh.seek(pos)
+            lines = (fh.read(step) + head).split(b"\n")
+            head = lines.pop(0) if pos > 0 else b""
+            for raw in reversed(lines):
+                try:
+                    row = json.loads(raw)
+                except ValueError:
+                    continue
+                if isinstance(row, dict) and isinstance(row.get("id"), int):
+                    return row["id"]
+    return 0
 
 
 def _number(rows: list, last: int) -> list:
@@ -217,11 +222,11 @@ def _append_stock_lines(path: str, rows: list) -> None:
                 torn = fh.read(1) != b"\n"
     except FileNotFoundError:
         pass
+    # Every row is made into text before the file is opened: a row that
+    # cannot be (NaN is not JSON) refuses the batch with nothing written.
+    payload = ("\n" if torn else "") + "".join(json.dumps(row, allow_nan=False) + "\n" for row in rows)
     with open(path, "a", encoding="utf-8") as fh:
-        if torn:
-            fh.write("\n")     # close the torn line off, so the new rows stand on their own
-        for row in rows:
-            fh.write(json.dumps(row, allow_nan=False) + "\n")
+        fh.write(payload)      # a torn line is closed off first, so the new rows stand on their own
         fh.flush()
         os.fsync(fh.fileno())
 

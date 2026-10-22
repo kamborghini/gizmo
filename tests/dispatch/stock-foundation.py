@@ -508,3 +508,41 @@ def t_stock_movers_tied_on_size_prove_in_either_order():
     found = stock_import.prove(export, out)
     eq(len(found), 1, found)
     ok("Nowhere" in found[0], found[0])
+
+# ---- the final review's findings, pinned --------------------------------------
+
+@test
+def t_a_refused_stock_history_batch_writes_nothing():
+    """A row that cannot be written (NaN is not JSON) refuses the whole batch:
+    nothing of it reaches the file, so a retry cannot write a line twice."""
+    _stock_clean()
+    try:
+        stock_store.append_history([_history_row(), _history_row(new_value=float("nan"))])
+        ok(False, "a NaN must be refused")
+    except ValueError:
+        pass
+    eq(stock_store.read_history(), [], "nothing of the refused batch is on disk")
+    eq(stock_store.append_history([_history_row()]), [1], "the retry is numbered from the start")
+
+@test
+def t_a_long_stock_snapshot_line_does_not_make_appends_read_whole_files():
+    """A snapshot of several hundred lines is one long line; the next number
+    is still read from the end of the file, never by reading all of it."""
+    _stock_clean()
+    big = [{"id": n, "item_key": "Glass|Blue|%d|" % n, "category": "Glass", "written_off": False,
+            "current": n, "used": 1, "current_value": 1.25} for n in range(1, 2500)]
+    stock_store.append_snapshot({"taken_at": "2026-10-22T00:05:00+00:00", "reason": "scheduled",
+                                 "by_user": "system", "note": "", "totals": {}, "items": big})
+    ok(os.path.getsize(stock_store.STOCK_SNAPSHOTS_SCHEDULED_PATH) > 3 * 65536, "a line longer than the tail read")
+    stock_store.append_history([_history_row(detail="x" * 200000)])
+    real = stock_store._read_lines
+    def whole(path):
+        raise AssertionError("read the whole of " + os.path.basename(path))
+    stock_store._read_lines = whole
+    try:
+        stock_store.append_snapshot({"taken_at": "2026-10-22T09:00:00+00:00", "reason": "scheduled",
+                                     "by_user": "system", "note": "", "totals": {}, "items": []})
+        eq(stock_store.append_history([_history_row()]), [2])
+    finally:
+        stock_store._read_lines = real
+    eq([s["id"] for s in stock_store.read_snapshots()], [1, 2])
