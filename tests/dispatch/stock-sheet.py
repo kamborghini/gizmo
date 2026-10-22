@@ -295,3 +295,81 @@ def t_stock_is_closed_to_an_account_without_the_tab():
         r = post_s(session, "/api/stock/sheet", {"op": "list"})
         eq(r.status_code, 403, r.text)
     with_accounts(go)
+
+# ---- import and export in the sheet's own layout (flaw 5) ---------------------------
+
+def _stock_sheet_lines():
+    return [_stock_item(3, "Glass|Blue|20|", start=10, used=4, current=6, unit_cost_gbp=1.25, supplier="Invented Glass Co",
+                        currency="GBP"),
+            _stock_item(7, "Glass|Blue|20||#2", start=5, current=2, unit_cost_gbp=0.7865, currency="USD", unit_cost=1.01),
+            _stock_item(9, "Glass|Red|30|=SUM(A1)", current=12, used=30, unit_cost_gbp=0.5, notes="=SUM(A1)"),
+            _stock_item(11, "Glass|Grey|20|", current=3, unit_cost_gbp=4.0, written_off=True)]
+
+def _stock_sheet_csv(rows):
+    """A stock sheet as the shop's spreadsheet lays it out: a quarter label,
+    a blank row, a header, then lines (19 columns, no written-off column)."""
+    head = "Quarter one\n\nCategory,Colour,Size,Notes,Start,Received,Used,Current,UV,SV,CV,Unit Cost,Currency,Supplier,Unit GBP,P,D,I,Date\n"
+    return head + "\n".join(",".join(str(c) for c in r) for r in rows) + "\nTotals,,,,1,1,1,1\n"
+
+@test
+def t_stock_export_then_import_changes_nothing():
+    _stock_live(items=_stock_sheet_lines())
+    r, d = _stock("export")
+    eq(r.status_code, 200, r.text)
+    eq(d["filename"], "stock_export.csv")
+    r, d = _stock("import_preview", csv=d["csv"])
+    eq(r.status_code, 200, r.text)
+    eq((d["rows"], d["creates"], d["changes"]), (4, [], []), "export then import changes nothing")
+
+@test
+def t_the_stock_import_preview_names_every_field():
+    _stock_live(items=_stock_sheet_lines())
+    csv = _stock("export")[1]["csv"]
+    lines = csv.split("\n")
+    i = next(n for n, l in enumerate(lines) if l.startswith("Glass,Blue,20,,10"))
+    cells = lines[i].split(",")
+    cells[11], cells[12], cells[13], cells[19] = "2.5", "EUR", "Made Up Metals", "yes"
+    lines[i] = ",".join(cells)
+    r, d = _stock("import_preview", csv="\n".join(lines))
+    eq(r.status_code, 200, r.text)
+    eq(sorted(c["field"] for c in d["changes"] if c["id"] == 3), ["currency", "supplier", "unit_cost", "written_off"])
+
+@test
+def t_the_original_stock_sheet_still_imports():
+    _stock_live(items=_stock_sheet_lines())
+    sheet = _stock_sheet_csv([["Glass", "Blue", "20", "", 10, 0, 4, 6, "", "", "", "", "GBP", "Invented Glass Co", '"£1,062.72"'],
+                              ["Film", "Clear", "A4", "Written off 2025", 2, 0, 0, 2, "", "", "", "", "", "", "3"]])
+    r, d = _stock("import_preview", csv=sheet)
+    eq(r.status_code, 200, r.text)
+    eq([c["field"] for c in d["changes"] if c["id"] == 3], ["unit_cost_gbp"], "money read as the sheet writes it")
+    eq(d["changes"][0]["to"], 1062.72)
+    eq(d["creates"], [{"category": "Film", "sub_category": "Clear", "size": "A4", "written_off": True}],
+       "written off read from the notes when the sheet has no column for it")
+    r, d = _stock("import_apply", csv=sheet)
+    eq(r.status_code, 200, r.text)
+    eq((d["created"], d["updated_fields"]), (1, 1))
+    eq(stock_store.load_items()["items"]["12"]["key"], "Film|Clear|A4|Written off 2025")
+
+@test
+def t_a_stock_import_is_all_or_nothing():
+    _stock_live(items=_stock_sheet_lines())
+    sheet = _stock_sheet_csv([["Glass", "Blue", "20", "", 10, 0, 4, 9],
+                              ["Glass", "Red", "30", "=SUM(A1)", 1, 0, 0, -5]])
+    r, d = _stock("import_apply", csv=sheet)
+    eq(r.status_code, 400, r.text)
+    ok("Current" in d["error"], d["error"])
+    eq(stock_store.load_items()["items"]["3"]["current"], 6, "the good row was not written either")
+    eq(stock_store.read_history(), [])
+    r, d = _stock("import_preview", csv=_stock_sheet_csv([["Glass", "Pink", str(n), "", 0, 0, 0, 1] for n in range(5001)]))
+    eq(r.status_code, 400, "more than 5,000 lines")
+    ok("5,000" in d["error"], d["error"])
+    r, d = _stock("import_preview", csv="Category,Size\nGlass,20\n")
+    eq(r.status_code, 400, "not the stock sheet")
+    ok("stock sheet" in d["error"], d["error"])
+
+@test
+def t_stock_export_guards_against_spreadsheet_formulas():
+    _stock_live(items=_stock_sheet_lines())
+    csv = _stock("export", ids=[9])[1]["csv"]
+    ok(",'=SUM(A1)," in csv, csv)
+    eq(len([l for l in csv.split("\n") if l.startswith("Glass")]), 1, "only the lines asked for")

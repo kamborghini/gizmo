@@ -1960,5 +1960,38 @@
    }
   },
   "source": "tests/dispatch/stock-sheet.py:270"
+ },
+ {
+  "path": "/api/stock/sheet",
+  "body": {
+   "op": "export"
+  },
+  "source": "tests/dispatch/stock-sheet.py:317"
+ },
+ {
+  "path": "/api/stock/sheet",
+  "body": {
+   "op": "export",
+   "ids": [
+    9
+   ]
+  },
+  "source": "tests/dispatch/stock-sheet.py:373"
+ },
+ {
+  "path": "/api/stock/sheet",
+  "body": {
+   "op": "import_preview",
+   "csv": "Quarter one\n\nCategory,Colour,Size\nGlass,Blue,20,,10,0,4,6\n"
+  },
+  "source": "tests/dispatch/stock-sheet.py:342"
+ },
+ {
+  "path": "/api/stock/sheet",
+  "body": {
+   "op": "import_apply",
+   "csv": "Quarter one\n\nCategory,Colour,Size\nGlass,Blue,20,,10,0,4,6\n"
+  },
+  "source": "tests/dispatch/stock-sheet.py:348"
  }
 ]

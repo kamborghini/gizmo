@@ -67,4 +67,10 @@ def register(mcp, registry):
                            "a count")
         if op == "new":
             return _answer(lambda: stock_sheet.new_item(who, body.get("fields") or {}), "a new line")
+        if op == "export":
+            return _answer(lambda: stock_sheet.export_csv(body.get("ids") or []), "an export")
+        if op == "import_preview":
+            return _answer(lambda: stock_sheet.import_preview(str(body.get("csv") or "")), "an import preview")
+        if op == "import_apply":
+            return _answer(lambda: stock_sheet.import_apply(who, str(body.get("csv") or "")), "an import")
         return gate._json({"error": "Unknown op."}, 400)
