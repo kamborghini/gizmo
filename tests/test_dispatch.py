@@ -80,6 +80,7 @@ SECTIONS = [
     'split-dispatch-module.py',          # Dispatch in its own module (stage 4, piece 1)
     'stages-4-to-6.py',                  # the floor (stage 4, piece 2), and the stages 4 to 6 tests after it
     'stock-foundation.py',               # Stock in Reactor: the stores, the figures, the move (plan 1 of 4)
+    'stock-sheet.py',                    # Stock in Reactor: the sheet, served (plan 2a)
     'runner.py',                         # the runner's own toy tests, and the runner
 ]
 

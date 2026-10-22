@@ -119,7 +119,7 @@ def t_stock_files_sit_at_the_top_of_the_data_folder():
     """Reactor's backup takes only the files at the top of the data folder."""
     import ast as _ast
     names = [n for n in dir(stock_store) if n.startswith("STOCK_") and (n.endswith("_PATH") or n.endswith("_PREFIX"))]
-    eq(len(names), 11, "every stock path")
+    eq(len(names), 14, "every stock path")
     data_dir = os.path.dirname(scheduler.SCHEDULE_PATH)
     for n in names:
         eq(os.path.dirname(getattr(stock_store, n)), data_dir, n)

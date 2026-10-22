@@ -88,6 +88,9 @@ os.environ.update({
     "STOCK_BRIDGE_PATH": SCRATCH + "/stock_bridge.json",
     "STOCK_BACKUP_PREFIX": SCRATCH + "/stock_backup_",
     "STOCK_PEOPLE_PATH": SCRATCH + "/stock_people.json",
+    "STOCK_ORDERS_PATH": SCRATCH + "/stock_orders.json",
+    "STOCK_JOURNAL_PATH": SCRATCH + "/stock_journal.json",
+    "STOCK_ALERTS_ARCHIVE_PATH": SCRATCH + "/stock_alerts_archive.jsonl",
     # The two size-rule files decide the glass an order is cut from, and
     # they live in the REPO data dir rather than on the volume. Without
     # these redirects any test that saved a rule would edit the

@@ -3,7 +3,7 @@
 Generated from the code by `tools/env_reference.py`; do not edit by hand.
 `make env-doc` rewrites it, and CI fails when it is stale.
 
-195 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document. `[shop domain]` stands for the shop's own website domain, which those defaults carry.
+198 variables are read. Every one has a default unless marked **(required)**; the defaults below are the code's own expressions, so a path like `/data/...` means the Railway volume. Set a variable in Railway, never in the code, and never paste a secret into chat or a document. `[shop domain]` stands for the shop's own website domain, which those defaults carry.
 
 ## server.py
 
@@ -359,11 +359,14 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 
 | Variable | Default | Read by | Notes |
 |---|---|---|---|
+| `STOCK_ALERTS_ARCHIVE_PATH` | `"/data/stock_alerts_archive.jsonl"` | gizmo.stock_store | stock warnings trimmed from the live list, append-only |
 | `STOCK_ALERTS_PATH` | `"/data/stock_alerts.json"` | gizmo.stock_store | the stock sheet's warnings |
 | `STOCK_BACKUP_PREFIX` | `"/data/stock_backup_"` | gizmo.stock_store | stock sheet backups, a file each (prefix + YYYYmmdd-HHMMSS-id.json) |
 | `STOCK_BRIDGE_PATH` | `"/data/stock_bridge.json"` | gizmo.stock_store | glass booked from made orders, day sheets, parked lines, aliases |
 | `STOCK_HISTORY_PATH` | `"/data/stock_history.jsonl"` | gizmo.stock_store | every change to the stock sheet, append-only |
 | `STOCK_ITEMS_PATH` | `"/data/stock_items.json"` | gizmo.stock_store | the stock sheet's lines, by id |
+| `STOCK_JOURNAL_PATH` | `"/data/stock_journal.json"` | gizmo.stock_store | a stock change in flight, finished by the next read after a crash |
+| `STOCK_ORDERS_PATH` | `"/data/stock_orders.json"` | gizmo.stock_store | orders placed with suppliers and what has been received against them |
 | `STOCK_PEOPLE_PATH` | `"/data/stock_people.json"` | gizmo.stock_store | the stock app's usernames and the Reactor accounts they became |
 | `STOCK_PERIODS_PATH` | `"/data/stock_periods.json"` | gizmo.stock_store | the stock sheet's quarters, open and closed |
 | `STOCK_SETTINGS_PATH` | `"/data/stock_settings.json"` | gizmo.stock_store | the stock sheet's own settings, as the stock app kept them |
