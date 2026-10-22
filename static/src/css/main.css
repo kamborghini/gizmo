@@ -25,6 +25,8 @@
            the bar is the ink frame (below). */
         @media screen { .topbar { background: transparent; } }
         @media screen and (min-width: 901px) { body:has(#view-chat.active) .topbar { background: var(--surface-primary); } }
+        /* The alerts under the bar sit on the same white as Chat's bar and sheet. */
+        @media screen and (min-width: 901px) { body:has(#view-chat.active) .alerts-host { background: var(--surface-primary); } }
         /* Where you are: the section in ink-3, a 14 chevron, the page in ink. */
         .crumbs { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-1); color: var(--text-tertiary);
             font-size: var(--text-body); line-height: var(--lh-control); }

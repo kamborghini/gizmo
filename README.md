@@ -4,7 +4,7 @@
 
 The back office for a Shopify store: the dispatch desk,
 production labels, the sales records, the shared inbox, the file drive, the
-team, loan units, reconciliation against Xero, and an assistant that can read
+team, loan units, the Xero sync, the forecast, and an assistant that can read
 the store and never write to it. It runs embedded inside Shopify admin and as
 its own page on Railway, and it also serves a Model Context Protocol endpoint
 so Claude can be pointed at the store directly.

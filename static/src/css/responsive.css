@@ -20,6 +20,11 @@
         @media screen and (max-width: 900px) {
             .main { margin: 0; border-radius: 0; background: transparent; overflow: visible; }
             .view.active { background: var(--surface-canvas); border-radius: var(--radius-sheet) var(--radius-sheet) 0 0; overflow: hidden; }
+            /* The alerts above the page are the top of the same sheet, not a
+               banner floating on the ink frame: the host takes the corners and
+               the page under it runs on square. */
+            .alerts-host { background: var(--surface-canvas); border-radius: var(--radius-sheet) var(--radius-sheet) 0 0; }
+            .alerts-host:not(:empty) ~ .view.active { border-radius: 0; }
             .topbar { background: transparent; padding: 0 var(--sp-1); }
             .crumbs { color: var(--nav-text); font-size: var(--text-body); }
             .topbar h1 { color: var(--nav-text); font-size: var(--text-body); }

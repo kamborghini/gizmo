@@ -26,16 +26,15 @@ browser ──► server.build_app()
 ```
 
 Two background loops start from the first `/healthz`: the scheduler (every
-15 minutes: watchdog, weekly snapshot, CRM linking, Xero keepalive,
-reconciliation, connector watch, the paid audits when due) and the mail loop
+15 minutes: watchdog, weekly snapshot, CRM linking, connector watch) and the mail loop
 (every minute: Gmail sync). Each isolates its own exceptions and emails at
 most once a day when it keeps failing.
 
 ### Dependency direction
 
 ```
-server ──► copilot ──► integrations (worldoptions, xero, google_mail, google_data,
-                                     pipedrive, eori, recon, mailmime)
+server ──► copilot ──► integrations (worldoptions, google_mail, pipedrive, eori,
+                                     mailmime)
                    ──► libraries    (tokenvault, totp, logdrain)
 ```
 
@@ -80,18 +79,18 @@ shared inbox (`gizmo/mail.py`), Files (`gizmo/files.py`, read as
 (`gizmo/privacy.py`), the loan register (`gizmo/loans.py`), work sessions
 (`gizmo/work.py`), skills (`gizmo/skills.py`, read as `skillbook`), memory
 (`gizmo/memory.py`), store knowledge (`gizmo/knowledge.py`) and the chat loop
-(`gizmo/chat.py`, read as `assistant`), SEO and keywords (`gizmo/seo.py`),
-the overview and customer reports (`gizmo/analytics.py`), the scheduler and
+(`gizmo/chat.py`, read as `assistant`), the guarded read of the shop's own
+website (`gizmo/storefront.py`), the scheduler and
 its alerts (`gizmo/scheduler.py`), release notes and requests
 (`gizmo/updates.py`), impact tracking (`gizmo/impact.py`), backup and
 restore (`gizmo/backup.py`), Liability and the chase desk
-(`gizmo/liability.py`), reconciliation with the Xero connect walk
-(`gizmo/reconciliation.py`), the Xero sync settings (`gizmo/xero_sync.py`,
+(`gizmo/liability.py`), the Xero sync settings (`gizmo/xero_sync.py`,
 read as `xerosync`), the forecast's hooks (`gizmo/forecasting.py`), the page
 and its assets (`gizmo/rendering.py`), the store profile (`gizmo/profile.py`,
 read as `store_profile`), layouts (`gizmo/layouts.py`), the sign-in walks
 (`gizmo/oauth.py`), the status page (`gizmo/status.py`, read as
-`appstatus`) and the Products tab (`gizmo/products.py`, read as `catalog`),
+`appstatus`) and the catalogue reader the loan-unit picker uses
+(`gizmo/products.py`, read as `catalog`),
 each with its routes in
 `gizmo/routes/` (production's, the Size list's and the order book's too; the
 printed-label routes stay in `add_routes`, their bytes pinned, and so do the
@@ -107,8 +106,9 @@ from 28,623 lines to about 1,330): the stock bridge (the stock merge
 project's), the frozen print routes with their font, logo and CORS helpers and
 `_spawn_bg` (which one of them reads), and `add_routes`, which hands the
 capabilities `server.py` passes in to the modules that use them (the Shopify
-writers to `gizmo/shopify.py`, the chat's tools to `gizmo/chat.py`), sets up
-reconciliation, and registers every area's routes. It keeps the shop secret
+writers to `gizmo/shopify.py`, the chat's tools to `gizmo/chat.py`) and
+registers every area's routes. (The report tabs, Reconciliation, Reactor's
+own Xero link and the Google data connection went on 22 Oct 2026.) It keeps the shop secret
 and the public base address only as copies of `gizmo/config.py`'s, for the
 frozen print routes.
 

@@ -25,8 +25,8 @@
            in went (22 Oct 2026): the page's own width and gutters, so the
            banner lines up with the content under it, and nothing at all when
            there is no alert. */
-        .alerts-host { flex: none; max-width: var(--wrap); margin: 0 auto; width: 100%;
-            padding: var(--sp-3) var(--wrap-pad) 0; }
+        .alerts-host { flex: none; width: 100%; padding-top: var(--sp-3);
+            padding-inline: max(var(--wrap-pad), calc((100% - var(--wrap)) / 2 + var(--wrap-pad))); }
         .alerts-host:empty { display: none; }
         .alerts-host > * { margin-bottom: 0; }
         .ov-wrap { max-width: var(--wrap); margin: 0 auto; width: 100%;

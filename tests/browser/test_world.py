@@ -44,11 +44,7 @@ def t_the_setup_is_found_or_the_server_refuses_to_start():
 
 @test
 def t_the_dashboards_are_filled():
-    has("/api/cache", {}, "Revenue is up on last week", "The store is indexable", "custom gobo", "Champions",
-        "Custom gobo terms lead")
-    has("/api/products", {"months": 24, "fresh": True}, "Walkway Safety Sign Gobo")
     has("/api/liability", {"fresh": True}, "Kestrel Logistics Ltd")
-    has("/api/recon/exceptions", {}, "Kilnworth Glass Supplies Ltd")
     has("/api/forecast", {}, "Algorithm 1", "Algorithm 2", "Cash Flow plan.xlsx")
     has("/api/connector", {"op": "status"}, "test-store.myshopify.com")
 

@@ -70,8 +70,11 @@
                 } else {
                     metric = el('span', 'a-metric', label);
                 }
-                row.append(el('span', 'adot ' + dir), el('span', 'a-tab', a.tab_label || a.kind || ''), metric,
-                    el('span', 'a-pct ' + dir, a.pct == null ? '~' : ((a.pct > 0 ? '+' : '') + a.pct + '%')));
+                row.append(el('span', 'adot ' + dir), el('span', 'a-tab', a.tab_label || a.kind || ''), metric);
+                /* A change has its percentage; an alert that is not a change
+                   (Shopify down, a size list gap, a Xero sync run) has none,
+                   rather than a tilde standing in for one. */
+                if (a.pct != null) row.append(el('span', 'a-pct ' + dir, (a.pct > 0 ? '+' : '') + a.pct + '%'));
                 const x = iconButton(I.x, 'Dismiss', { size: 'small' }); x.onclick = () => alertOp({ op: 'dismiss', id: a.id });
                 row.append(x); wrap.append(row);
             });
