@@ -54,7 +54,13 @@ COLUMNS = {
     "gizmo_aliases": ["id", "alias", "item_id", "item_key", "at"],
     "supplier_contacts": ["id", "supplier", "email", "cc", "contact_name", "subject", "body", "lead_days",
                           "min_order", "updated_at"],
+    # Kept as each person's sign-in times; the password and the stock app's
+    # session counter (it only ends the stock app's own sessions) stay behind.
+    "users": ["id", "created_at", "last_login", "prev_login"],
 }
+NOT_CARRIED = {"users": {"password_hash", "session_epoch"}}
+# The store each whole-store table becomes, for the next ids.
+NEXT_IDS = {"items": "items", "periods": "periods", "alerts": "alerts", "suppliers": "supplier_contacts"}
 # Columns the stock app added after it first ran, with the value its own
 # upgrade gives a row that predates them.
 ADDED_LATER = {"items": {"reorder_point": 0, "reorder_qty": 0, "barcode": "", "on_order": 0},
@@ -145,8 +151,10 @@ def inside_git_tree(path: str) -> bool:
 
 # ---- convert ---------------------------------------------------------------
 
-def _next(records) -> int:
-    return max((r["id"] for r in records), default=0) + 1
+def _floor(export, table, records) -> int:
+    """The highest id the stock app ever gave in this table: the highest left,
+    or its database's sequence where rows were deleted at the top."""
+    return max(max((r["id"] for r in records), default=0), int((export.get("sequences") or {}).get(table) or 0))
 
 
 def convert(export: dict, people: dict, out_dir: str) -> None:
@@ -159,6 +167,10 @@ def convert(export: dict, people: dict, out_dir: str) -> None:
     unmapped = sorted({str(r.get("user")) for r in history} - set(people) - NOBODY)
     if unmapped:
         raise ValueError("the history names people with no Reactor account: " + ", ".join(unmapped))
+    logins = _rows(export, "users")
+    unmapped = sorted({str(r.get("username")) for r in logins} - set(people))
+    if unmapped:
+        raise ValueError("people who can sign in to the stock app have no Reactor account: " + ", ".join(unmapped))
     snapshots = _rows(export, "snapshots")
     ids = {s["id"] for s in snapshots}
     orphans = [r["id"] for r in _rows(export, "snapshot_items") if r.get("snapshot_id") not in ids]
@@ -172,9 +184,12 @@ def convert(export: dict, people: dict, out_dir: str) -> None:
         present = _present(export, table)
         return [_record(table, r, present) for r in _rows(export, table)]
 
+    def next_id(table, rows):
+        return _floor(export, table, rows) + 1
+
     with stock_store.rooted(out_dir):
         items = records("items")
-        stock_store.write_items({"items": {str(i["id"]): i for i in items}, "next_id": _next(items)})
+        stock_store.write_items({"items": {str(i["id"]): i for i in items}, "next_id": next_id("items", items)})
         rows = records("audit_log")
         for r in rows:
             r["person"] = people.get(r["user"])
@@ -186,19 +201,21 @@ def convert(export: dict, people: dict, out_dir: str) -> None:
         for s in records("snapshots"):
             stock_store.append_snapshot(dict(s, items=lines.get(s["id"], [])))
         periods = records("periods")
-        stock_store.write_periods({"periods": periods, "next_id": _next(periods)})
+        stock_store.write_periods({"periods": periods, "next_id": next_id("periods", periods)})
         alerts = records("alerts")
-        stock_store.write_alerts({"alerts": alerts, "next_id": _next(alerts)})
+        stock_store.write_alerts({"alerts": alerts, "next_id": next_id("alerts", alerts)})
         suppliers = records("supplier_contacts")
-        stock_store.write_suppliers({"suppliers": suppliers, "next_id": _next(suppliers)})
+        stock_store.write_suppliers({"suppliers": suppliers, "next_id": next_id("supplier_contacts", suppliers)})
         stock_store.write_settings({"meta": {r["key"]: r["value"] for r in _rows(export, "meta")}})
         bridge = {name: records(table) for name, table in BRIDGE.items()}
-        bridge["next_ids"] = {name: _next(bridge[name]) for name in BRIDGE}
+        bridge["next_ids"] = {name: next_id(table, bridge[name]) for name, table in BRIDGE.items()}
         stock_store.write_bridge(bridge)
         present = _present(export, "backups")
         for r in _rows(export, "backups"):
             stock_store.write_backup(dict(_record("backups", r, present), format="legacy-fernet", token=r["blob"]))
-        stock_store.write_people({"people": dict(people)})
+        present = _present(export, "users")
+        stock_store.write_people({"people": dict(people), "logins": {
+            r["username"]: _record("users", r, present) for r in logins}})
 
 
 # ---- prove -----------------------------------------------------------------
@@ -219,6 +236,8 @@ def _match_rows(found, export, table, records, key="id", rename=None):
             found.append(f"{table}: {key} {k} is missing")
             continue
         for c in src["columns"]:
+            if c in NOT_CARRIED.get(table, ()):
+                continue
             got = rec.get(rename.get(c, c), _MISSING)
             if got is _MISSING:
                 found.append(f"{table}: {key} {k}: {c} is missing")
@@ -230,8 +249,10 @@ def _match_rows(found, export, table, records, key="id", rename=None):
 
 
 def _checksum(table, columns, rows) -> str:
+    """Over the rows in the order given: the source's in id order, the
+    history's in file order, so lines out of order change it."""
     h = hashlib.sha256()
-    for r in sorted(rows, key=lambda r: r["id"]):
+    for r in rows:
         h.update(json.dumps({c: _canon(table, c, r.get(c)) for c in columns}, sort_keys=True).encode() + b"\n")
     return h.hexdigest()
 
@@ -362,14 +383,25 @@ def prove(export: dict, out_dir: str) -> list:
         settings = stock_store.load_settings()
         bridge = stock_store.load_bridge()
         backups = stock_store.list_backups()
-        people = stock_store.load_people().get("people", {})
+        people_doc = stock_store.load_people()
+    people, logins = people_doc.get("people", {}), people_doc.get("logins", {})
     items = sorted(items_doc.get("items", {}).values(), key=lambda i: i["id"])
     _match_rows(found, export, "items", items)
     _match_rows(found, export, "audit_log", history)
     src_history = (export["tables"].get("audit_log") or {})
     columns = src_history.get("columns") or []
-    if _checksum("audit_log", columns, src_history.get("rows") or []) != _checksum("audit_log", columns, history):
+    source_rows = sorted(src_history.get("rows") or [], key=lambda r: r["id"])
+    if _checksum("audit_log", columns, source_rows) != _checksum("audit_log", columns, history):
         found.append("audit_log: the history's checksum differs from the source's")
+    with stock_store.rooted(out_dir):
+        files = [stock_store.STOCK_HISTORY_PATH] + stock_store._snapshot_files()
+        in_files = [(os.path.basename(f), stock_store._read_lines(f)) for f in files]
+    for name, rows in in_files:
+        ids = [r.get("id") for r in rows]
+        for a, b in zip(ids, ids[1:]):
+            if not (isinstance(a, int) and isinstance(b, int) and b > a):
+                found.append(f"{name}: lines out of order ({b} after {a}); the next number is read from the last line")
+                break
     for row in history:
         if row.get("person") != people.get(row.get("user")):
             found.append(f"audit_log: id {row.get('id')}: person is {row.get('person')!r}, "
@@ -384,14 +416,21 @@ def prove(export: dict, out_dir: str) -> list:
     for name, table in BRIDGE.items():
         _match_rows(found, export, table, bridge.get(name, []))
     _match_rows(found, export, "backups", backups, rename={"blob": "token"})
+    _match_rows(found, export, "users", [dict(v, username=k) for k, v in logins.items()])
+    for row in (export["tables"].get("users") or {}).get("rows") or []:
+        if row.get("username") not in people:
+            found.append(f"users: {row.get('username')} has no Reactor account")
+    for name, count in sorted((export.get("unknown_tables") or {}).items()):
+        if count:
+            found.append(f"{name}: a table the move does not know holds {count} rows, and none of them was carried")
     for name, doc, records in (("items", items_doc, items), ("periods", periods, periods.get("periods", [])),
                                ("alerts", alerts, alerts.get("alerts", [])),
                                ("suppliers", suppliers, suppliers.get("suppliers", []))):
-        if doc.get("next_id", 0) <= max((r["id"] for r in records), default=0):
-            found.append(f"{name}: the next id {doc.get('next_id')} would reuse one")
-    for name in BRIDGE:
-        if bridge.get("next_ids", {}).get(name, 0) <= max((r["id"] for r in bridge.get(name, [])), default=0):
-            found.append(f"{BRIDGE[name]}: the next id would reuse one")
+        if doc.get("next_id", 0) <= _floor(export, NEXT_IDS[name], records):
+            found.append(f"{name}: the next id {doc.get('next_id')} would reuse one the stock app gave")
+    for name, table in BRIDGE.items():
+        if bridge.get("next_ids", {}).get(name, 0) <= _floor(export, table, bridge.get(name, [])):
+            found.append(f"{table}: the next id would reuse one the stock app gave")
     _labels(found, items)
     _figures(found, export, items, settings.get("meta", {}), snapshots, periods.get("periods", []),
              suppliers.get("suppliers", []))

@@ -420,7 +420,7 @@ def t_the_stock_converter_keeps_every_record():
         eq(stock_store.load_periods()["periods"][0]["closing_data"][0]["current"], 12)
         eq(stock_store.load_bridge()["bookings"][0]["lines"][0]["qty"], 1, "JSON text decoded")
         eq(stock_store.list_backups()[0]["token"], base64.b64encode(b"gAAAAABfake").decode())
-        eq(stock_store.load_people(), {"people": PEOPLE})
+        eq(stock_store.load_people()["people"], PEOPLE)
         eq(stock_store.load_settings(), {"meta": {"low_stock_days": "21", "schema": "3"}})
     out = _stock_out("null-point")
     stock_import.convert(_stock_export(reorder_point_9=None), PEOPLE, out)
@@ -546,3 +546,84 @@ def t_a_long_stock_snapshot_line_does_not_make_appends_read_whole_files():
     finally:
         stock_store._read_lines = real
     eq([s["id"] for s in stock_store.read_snapshots()], [1, 2])
+
+@test
+def t_the_stock_proof_notices_a_history_out_of_order():
+    """The next history number is read from the last line, so the order of
+    the lines is part of what must be proven, not only their content."""
+    export = _stock_export()
+    out = _stock_out("order")
+    stock_import.convert(export, PEOPLE, out)
+    with stock_store.rooted(out):
+        path = stock_store.STOCK_HISTORY_PATH
+    lines = open(path, encoding="utf-8").read().splitlines(True)
+    open(path, "w", encoding="utf-8").write("".join([lines[-1]] + lines[1:-1] + [lines[0]]))
+    found = " | ".join(stock_import.prove(export, out))
+    ok("out of order" in found, found)
+    ok("checksum" in found, found)
+
+@test
+def t_every_stock_login_needs_an_account():
+    """Someone who can sign in to the stock app but has never changed
+    anything still needs their Reactor account named."""
+    export = _stock_export()
+    export["tables"]["users"]["rows"].append({"id": 2, "username": "colleague", "created_at": "2026-06-02T00:00:00+00:00",
+                                              "last_login": None, "prev_login": None, "session_epoch": 1})
+    export["tables"]["users"]["count"] = 2
+    try:
+        stock_import.convert(export, PEOPLE, _stock_out("colleague"))
+        ok(False, "an unmapped login must be refused")
+    except ValueError as e:
+        ok("colleague" in str(e), str(e))
+    out = _stock_out("colleague-mapped")
+    stock_import.convert(export, dict(PEOPLE, colleague="acct-2"), out)
+    eq(stock_import.prove(export, out), [])
+
+@test
+def t_stock_logins_are_carried_and_proven():
+    """The sign-in times stay with each person (a time without a zone is
+    UTC); the password and the stock app's session counter stay behind."""
+    export = _stock_export()
+    out = _stock_out("logins")
+    stock_import.convert(export, PEOPLE, out)
+    with stock_store.rooted(out):
+        doc = stock_store.load_people()
+        eq(doc["logins"]["someone"], {"id": 1, "created_at": "2026-06-01T00:00:00+00:00", "last_login": None,
+                                      "prev_login": "2026-10-01T08:00:00+00:00"})
+        doc["logins"]["someone"]["prev_login"] = "2026-09-01T08:00:00+00:00"
+        stock_store.write_people(doc)
+    found = stock_import.prove(export, out)
+    eq(len(found), 1, found)
+    ok("users" in found[0] and "prev_login" in found[0], found[0])
+
+@test
+def t_a_table_the_stock_move_does_not_know_is_reported():
+    export = _stock_export()
+    export["unknown_tables"] = {"purchase_orders": 3, "scratch": 0}
+    out = _stock_out("unknown")
+    stock_import.convert(export, PEOPLE, out)
+    found = stock_import.prove(export, out)
+    eq(len(found), 1, found)
+    ok("purchase_orders" in found[0] and "3" in found[0], found[0])
+
+@test
+def t_stock_ids_carry_on_from_the_old_sequence():
+    """A supplier contact or a link row deleted at the top leaves the stock
+    app's sequence ahead of the highest id left; its number is never reused."""
+    export = _stock_export()
+    export["sequences"] = {"supplier_contacts": 5, "gizmo_parked": 9, "items": 11, "alerts": 1}
+    out = _stock_out("sequence")
+    stock_import.convert(export, PEOPLE, out)
+    with stock_store.rooted(out):
+        eq(stock_store.load_suppliers()["next_id"], 6, "after the sequence")
+        eq(stock_store.load_bridge()["next_ids"]["parked"], 10)
+        eq(stock_store.load_items()["next_id"], 12, "the sequence and the highest agree")
+        eq(stock_store.load_alerts()["next_id"], 3, "after the highest when the sequence is behind it")
+    eq(stock_import.prove(export, out), [])
+    with stock_store.rooted(out):
+        doc = stock_store.load_suppliers()
+        doc["next_id"] = 2
+        stock_store.write_suppliers(doc)
+    found = stock_import.prove(export, out)
+    eq(len(found), 1, found)
+    ok("suppliers" in found[0] and "next id" in found[0], found[0])
