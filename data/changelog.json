@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-22",
+   "title": "Refused requests cost the assistant nothing",
+   "items": [
+    {
+     "kind": "fixed",
+     "tab": null,
+     "text": "A request refused for a field of the wrong kind no longer takes a turn of the assistant's shared capacity, so a stray script cannot keep it busy for everyone, and a whole number larger than a browser can send exactly is refused with a reason instead of reaching a report. Nothing looks different."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-22",
    "title": "The last ties to the old core",
    "items": [
     {
