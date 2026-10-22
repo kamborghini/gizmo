@@ -1287,7 +1287,11 @@ def t_the_deal_board_can_be_worked_without_a_mouse():
     ok("card.draggable = true" in fn, "it is still a draggable div, not a button")
     ok("setAttribute('role', 'button')" in fn, "and it announces itself as a button")
     ok("card.tabIndex = 0" in fn, "and it can be tabbed to")
-    ok("aria-label" in fn, "and it says which deal it is, plus the state the colour encodes")
+    # Named by what it shows (a voice user says what they see, WCAG 2.5.3), and
+    # the state the colour and icon encode is in words for a screen reader.
+    ok("aria-label" not in fn, "it says which deal it is by what it shows, not a sentence of its own")
+    ok("el('span', 'sr-only'" in fn and "'Next activity overdue'" in fn and "'No next activity scheduled'" in fn,
+       "plus the state the colour encodes, in words")
     ok("e.key === 'Enter' || e.key === ' '" in fn, "Enter and Space open it")
 
 

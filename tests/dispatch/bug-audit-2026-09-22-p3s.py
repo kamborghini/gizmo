@@ -995,3 +995,43 @@ def t_a_long_thread_lists_its_newest_attachments():
     ok("proof-v6-4.pdf" in names and "proof-v1-1.pdf" not in names, names[-3:])
 
 
+
+
+@test
+def t_a_capped_page_read_closes_what_it_left():
+    """The keyword scan stops reading a page at its cap by leaving the loop over
+    the response's bytes; the running loop closes what is left. The suite's
+    run_async closed its own loop without doing so (asyncio.run does), so that
+    close was dropped and every suite run warned of a coroutine never awaited:
+    the last line of noise the quiet suite left. run_async now closes the
+    loop's async generators first, as asyncio.run does."""
+    import gc, warnings, httpx as _hx
+    chunk = b"x" * (1024 * 1024)
+
+    class Body(_hx.AsyncByteStream):
+        async def __aiter__(self):
+            for _ in range(8):
+                yield chunk
+
+        async def aclose(self):
+            pass
+    Real = copilot.httpx.AsyncClient
+
+    class Client(Real):
+        def __init__(self, *a, **k):
+            k["transport"] = _hx.MockTransport(lambda rq: _hx.Response(200, headers={"content-type": "text/html"}, stream=Body()))
+            super().__init__(*a, **k)
+    saved = (copilot.httpx.AsyncClient, seo._host_is_public)
+    copilot.httpx.AsyncClient, seo._host_is_public = Client, (lambda h: True)
+    try:
+        with warnings.catch_warnings(record=True) as seen:
+            warnings.simplefilter("always")
+            _st, _u, text = run_async(seo._fetch_external("https://competitor.example/catalogue"))
+            gc.collect()
+            run_async(asyncio.sleep(0))
+            gc.collect()
+        eq(len(text), seo.EXTERNAL_FETCH_MAX)
+        eq([str(w.message) for w in seen if "never awaited" in str(w.message)], [],
+           "nothing is left for the loop to finalise")
+    finally:
+        copilot.httpx.AsyncClient, seo._host_is_public = saved

@@ -687,6 +687,11 @@
             }
             const ai = el('span', 'crm-ai ' + x.activity_state);
             ai.append(ico(x.activity_state === 'none' ? I.warning : I.send));
+            /* The state the icon draws, in words for a screen reader: the card
+               is named by what it shows (below), and the icon shows no words. */
+            if (x.activity_state === 'none' || x.activity_state === 'overdue')
+                ai.append(el('span', 'sr-only', x.activity_state === 'none'
+                    ? 'No next activity scheduled' : 'Next activity overdue'));
             ai.title = x.activity_state === 'none' ? 'No next activity scheduled'
                 : x.activity_state === 'overdue' ? 'Next activity is overdue: ' + fmtDate(x.next_activity)
                 : x.activity_state === 'today' ? 'Next activity is due today'
@@ -700,9 +705,9 @@
                board was otherwise mouse-only. */
             card.setAttribute('role', 'button');
             card.tabIndex = 0;
-            card.setAttribute('aria-label', x.title + ', ' + crmMoney(x.value)
-                + (x.activity_state === 'none' ? ', no next activity scheduled'
-                   : x.activity_state === 'overdue' ? ', next activity overdue' : ''));
+            /* Named by what it shows (title, who, value, label, owner) rather
+               than a sentence of its own: a voice user says what they see, and
+               a name that did not contain it could not be spoken (WCAG 2.5.3). */
             card.onkeydown = (e) => {
                 if (e.target !== card) return;
                 if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); crmDealModal(x.id); }

@@ -51,6 +51,13 @@ updates:
     open-pull-requests-limit: 5
     cooldown:
       default-days: 5
+    # Preact 11's JSX types do not know Shopify's admin elements (s-stack,
+    # s-admin-print-action ...), so the extensions stop type-checking on it
+    # (#6, closed). The print extensions are frozen and work on 10: a new
+    # major waits until Shopify's own types cover it.
+    ignore:
+      - dependency-name: preact
+        update-types: ["version-update:semver-major"]
     groups:
       security:
         applies-to: security-updates
