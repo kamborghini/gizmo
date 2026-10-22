@@ -76,6 +76,18 @@ os.environ.update({
     "PRIVACY_LOG_PATH": SCRATCH + "/privacy_log.json",
     "EORI_CACHE_PATH": SCRATCH + "/eori_cache.json",
     "LOANS_PATH": SCRATCH + "/loans.json",
+    # The stock sheet's stores, one file each at the top of the data folder.
+    "STOCK_ITEMS_PATH": SCRATCH + "/stock_items.json",
+    "STOCK_HISTORY_PATH": SCRATCH + "/stock_history.jsonl",
+    "STOCK_SNAPSHOTS_SCHEDULED_PATH": SCRATCH + "/stock_snap_scheduled.jsonl",
+    "STOCK_SNAPSHOTS_CHANGES_PREFIX": SCRATCH + "/stock_snap_changes_",
+    "STOCK_PERIODS_PATH": SCRATCH + "/stock_periods.json",
+    "STOCK_ALERTS_PATH": SCRATCH + "/stock_alerts.json",
+    "STOCK_SUPPLIERS_PATH": SCRATCH + "/stock_suppliers.json",
+    "STOCK_SETTINGS_PATH": SCRATCH + "/stock_settings.json",
+    "STOCK_BRIDGE_PATH": SCRATCH + "/stock_bridge.json",
+    "STOCK_BACKUP_PREFIX": SCRATCH + "/stock_backup_",
+    "STOCK_PEOPLE_PATH": SCRATCH + "/stock_people.json",
     # The two size-rule files decide the glass an order is cut from, and
     # they live in the REPO data dir rather than on the volume. Without
     # these redirects any test that saved a rule would edit the

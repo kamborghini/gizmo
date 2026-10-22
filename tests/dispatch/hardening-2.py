@@ -801,9 +801,11 @@ def t_every_json_store_reaches_disk_through_the_one_writer():
     eq(owners('+ ".tmp"'), {"_write_json_store", "_write_gobo_rule_rows", "_weekly_snapshot",
                              "gobo_sizes_upload_route", "restore_route"},
        "a new temp-and-replace writer appeared; use _write_json_store")
-    # JSON serialised straight into a file handle: only the primitive and the two
-    # append-only archives, which are lines added to a log, not a store rewritten.
-    eq(owners("fh.write(json.dumps"), {"_archive_dispatch_rows", "_write_prod_state", "_work_trim"},
+    # JSON serialised straight into a file handle: only the primitive and the
+    # append-only logs, which are lines added to a log, not a store rewritten
+    # (the stock history and snapshots are the third).
+    eq(owners("fh.write(json.dumps"), {"_archive_dispatch_rows", "_write_prod_state", "_work_trim",
+                                       "_append_stock_lines"},
        "JSON is being written to disk outside the primitive")
     ok("allow_nan=False" in src.split("def _write_json_store")[1][:1500], "NaN is refused for every store")
 
