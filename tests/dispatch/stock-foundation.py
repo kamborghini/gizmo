@@ -158,3 +158,118 @@ def t_stock_backups_are_a_file_each():
     eq(os.path.dirname(a), os.path.dirname(stock_store.STOCK_ITEMS_PATH))
     eq([x["id"] for x in stock_store.list_backups()], [2, 3], "listed by id")
     eq(stock_store.list_backups()[1]["items"][0]["key"], "Glass|Blue|20|")
+
+# ---- the figures, ported from the stock app --------------------------------
+
+from gizmo import stock_figures as sfig
+
+@test
+def t_a_written_off_stock_line_is_worth_nothing():
+    eq(sfig.current_value({"current": 3, "unit_cost_gbp": 2.5, "written_off": True}), 0)
+    eq(sfig.current_value({"current": 3, "unit_cost_gbp": 2.5, "written_off": False}), 7.5)
+
+@test
+def t_stock_money_rounds_as_python_rounds():
+    """2.675 is 2.67499999... as a binary float: Python's round gives 2.67,
+    and so must the port, or a value drifts by a penny from the stock app's."""
+    eq(sfig.current_value({"current": 1, "unit_cost_gbp": 2.675, "written_off": False}), 2.67)
+
+@test
+def t_stock_sell_through_and_dead_stock():
+    items = [_stock_item(1, "Glass|Blue|20|", start=10, used=5, current=5, unit_cost_gbp=1.0),
+             _stock_item(2, "Glass|Red|20|", start=10, used=0, current=10, unit_cost_gbp=2.0),
+             _stock_item(3, "Glass|Green|20|", start=0, used=0, current=0, unit_cost_gbp=2.0),
+             _stock_item(4, "Glass|Grey|20|", start=10, used=0, current=3, unit_cost_gbp=4.0, written_off=True)]
+    c = sfig.compute_current(items)
+    eq(c["headline"]["sell_through_pct"], 25.0, "5 used of 20 started, written-off lines left out")
+    eq([d["key"] for d in c["dead_stock"]["top"]], ["Glass|Red|20|"], "only the unused line with a value")
+    eq(c["write_offs"]["estimated_sunk_cost_gbp"], 12.0, "a written-off line's cost is reported apart")
+    eq(c["headline"]["active_stock_value_gbp"], 25.0)
+
+@test
+def t_a_stock_line_is_reordered_at_its_point():
+    listed = sfig.reorder_suggestions([_stock_item(1, "Glass|Blue|20|", reorder_point=10, current=6, on_order=4)])
+    eq(listed["total_lines"], 1, "6 on hand and 4 coming is still at the point of 10")
+    line = listed["suppliers"][0]["items"][0]
+    eq(line["suggested_qty"], 14, "with no order quantity: max(2 x 10 - 6, 10)")
+    eq(listed["suppliers"][0]["supplier"], "Unknown", "no supplier is grouped as Unknown")
+    eq(sfig.reorder_suggestions([_stock_item(1, "Glass|Blue|20|", reorder_point=10, current=6, on_order=5)])["total_lines"],
+       0, "6 on hand and 5 coming is above the point")
+
+@test
+def t_stock_suggested_levels_cover_the_lead_time():
+    one = _stock_item(1, "Glass|Blue|20|", used=90, supplier="Invented Glass Co")
+    s = sfig.suggest_reorder_points([one], {"Invented Glass Co": 7})["suggestions"][0]
+    eq((s["cover_days"], s["reorder_point"], s["reorder_qty"]), (21, 21, 90), "7 days' lead and 14 of safety")
+    s = sfig.suggest_reorder_points([one])["suggestions"][0]
+    eq((s["cover_days"], s["reorder_point"]), (21, 21), "no lead time: 21 days' cover")
+    s = sfig.suggest_reorder_points([_stock_item(2, "Glass|Red|20|", used=13)])["suggestions"][0]
+    eq(s["reorder_qty"], 20, "a quantity of 13 is rounded up to the next ten")
+
+@test
+def t_null_stock_columns_count_as_the_stock_app_counts_them():
+    item = _stock_item(1, "Glass|Blue|20|", current=6, reorder_point=10, reorder_qty=0, on_order=None,
+                       unit_cost=None, unit_cost_gbp=None)
+    r = sfig.reorder_suggestions([item])
+    eq(r["total_lines"], 1)
+    line = r["suppliers"][0]["items"][0]
+    eq((line["on_order"], line["suggested_qty"], line["order_value_gbp"]), (0, 14, 0.0))
+    eq(sfig.current_value(item), 0)
+
+@test
+def t_stock_days_to_stockout_by_history_or_run_rate():
+    item = _stock_item(1, "Glass|Blue|20|", current=20, used=45)
+    def snap(id, at, current):
+        return {"id": id, "taken_at": at, "reason": "scheduled", "by_user": "system", "note": "",
+                "totals": {"active_value_gbp": 0}, "items": [{"id": id * 10, "item_key": "Glass|Blue|20|",
+                "category": "Glass", "written_off": False, "current": current, "used": 0, "current_value": 0}]}
+    f = sfig.forecast([item], [snap(1, "2026-10-01T00:00:00+00:00", 30), snap(2, "2026-10-11T00:00:00+00:00", 20)])
+    row = f["items"][0]
+    eq((row["daily_use"], row["days_to_stockout"], row["basis"]), (1.0, 20.0, "history"))
+    row = sfig.forecast([item], [snap(1, "2026-10-01T00:00:00+00:00", 30)])["items"][0]
+    eq((row["daily_use"], row["basis"]), (0.5, "run-rate"), "45 used over a 90-day quarter")
+    eq(sfig.forecast([item], [snap(1, "2026-10-01T00:00:00", 30), snap(2, "2026-10-11T00:00:00+00:00", 20)])
+       ["items"][0]["daily_use"], 1.0, "a naive timestamp is UTC")
+
+@test
+def t_low_stock_alert_uses_the_days_setting():
+    meta = {"low_stock_days": "21"}
+    def kinds(**over):
+        return [(a["kind"], a["severity"]) for a in sfig.detect_anomalies([_stock_item(1, "Glass|Blue|20|", **over)], meta, None)]
+    eq(kinds(current=10, used=90), [("low_stock", "warning")], "10 days of cover against 21")
+    eq(kinds(current=30, used=90), [], "30 days of cover")
+    eq(kinds(current=0, used=5), [("stockout", "warning")])
+    eq(kinds(current=-1, used=5), [("anomaly", "critical")])
+    eq([a["kind"] for a in sfig.detect_anomalies([_stock_item(1, "Glass|Blue|20|", current=30, used=90)],
+                                                 {"low_stock_days": "40"}, None)], ["low_stock"], "the setting is read")
+
+@test
+def t_stock_compare_live_against_a_closed_quarter():
+    items = [_stock_item(1, "Glass|Blue|20|", current=4, unit_cost_gbp=1.0)]
+    closed = {"id": 1, "label": "Quarter one", "closed_at": "2026-06-30T23:00:00+00:00",
+              "opened_at": "2026-04-01T00:00:00+00:00",
+              "closing_data": [dict(sfig.item_view(_stock_item(1, "Glass|Blue|20|", current=10, unit_cost_gbp=1.0)))]}
+    open_ = {"id": 2, "label": "Quarter two", "closed_at": None, "opened_at": "2026-07-01T00:00:00+00:00",
+             "closing_data": None}
+    c = sfig.compare(sfig.side_period(closed), sfig.side_live(items, [closed, open_]))
+    eq((c["left"]["label"], c["right"]["label"]), ("Quarter one (closed)", "Quarter two (live)"))
+    eq(c["by_category"], [{"category": "Glass", "left": 10.0, "right": 4.0, "delta": -6.0}])
+    eq(c["top_unit_movers"][0]["cur_delta"], -6)
+    eq(sfig.side_live(items)["label"], "Current (live)", "no open quarter")
+
+@test
+def t_stock_foreign_costs_restated_at_todays_rate():
+    items = [_stock_item(1, "Glass|Blue|20|", current=10, currency="USD", unit_cost=1.0, unit_cost_gbp=0.75)]
+    eq(sfig.fx_rates(items, {})["USD"], 0.75, "with no rate set, the rate the costs were booked at")
+    r = sfig.fx_revaluation(items, {"fx_usd_gbp": "0.8"})
+    eq((r["total_booked_gbp"], r["total_today_gbp"], r["total_drift_gbp"]), (7.5, 8.0, 0.5))
+
+@test
+def t_stock_trends_read_the_snapshots_oldest_first():
+    snaps = [{"id": 2, "taken_at": "2026-10-02T00:00:00+00:00", "reason": "edit", "totals": {"active_units": 3}},
+             {"id": 1, "taken_at": "2026-10-01T00:00:00+00:00", "reason": "scheduled", "totals": {"active_units": 5}}]
+    t = sfig.trends(snaps)
+    eq([p["active_units"] for p in t["points"]], [5, 3])
+    eq(t["points"][0]["at"], "2026-10-01T00:00:00+00:00")
+    eq(sfig.totals_for_snapshot([_stock_item(1, "Glass|Blue|20|", current=4, unit_cost_gbp=1.0)])["by_category"],
+       {"Glass": 4.0})
