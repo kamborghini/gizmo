@@ -3,7 +3,7 @@
 Generated from the code by `tools/route_reference.py`; do not edit by hand.
 `make api-doc` rewrites it, and CI fails when it is stale.
 
-137 routes. **Tab** is the tab that opens a route (`_TAB_ROUTES`); an `/api/` route no tab claims is refused unless it is on `_OPEN_API`. **Door** is the guard the handler opens with (`_guard` is the one door: rate window, tab, session, rank, AI slot, body); `own check` means the route authenticates itself (a hook, a webhook, OAuth, print, assets). **Body** is the model that checks the fields the route reads (`gizmo/bodies.py`); `unchecked` means it reads fields no model checks yet. **Checks** are the permission helpers the handler calls itself.
+138 routes. **Tab** is the tab that opens a route (`_TAB_ROUTES`); an `/api/` route no tab claims is refused unless it is on `_OPEN_API`. **Door** is the guard the handler opens with (`_guard` is the one door: rate window, tab, session, rank, AI slot, body); `own check` means the route authenticates itself (a hook, a webhook, OAuth, print, assets). **Body** is the model that checks the fields the route reads (`gizmo/bodies.py`); `unchecked` means it reads fields no model checks yet. **Checks** are the permission helpers the handler calls itself.
 
 ## `/`
 
@@ -316,6 +316,7 @@ Generated from the code by `tools/route_reference.py`; do not edit by hand.
 | `/assets/app.css` | GET | outside the tab map | own check |  |  |  | `gizmo.routes.rendering.app_css` |  |
 | `/assets/app.js` | GET | outside the tab map | own check |  |  |  | `gizmo.routes.rendering.app_js` |  |
 | `/assets/composer.js` | GET | outside the tab map | own check |  |  |  | `gizmo.routes.rendering.composer_js` |  |
+| `/assets/reader.js` | GET | outside the tab map | own check |  |  |  | `gizmo.routes.rendering.reader_js` | The bundled label reader, for a phone whose browser has none. |
 
 ## `/brand`
 

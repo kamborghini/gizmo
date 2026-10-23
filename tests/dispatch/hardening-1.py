@@ -30,6 +30,31 @@ def t_the_composer_script_is_served_by_hash_like_the_app_script():
 
 
 @test
+def t_the_bundled_label_reader_is_served_by_hash_and_only_when_asked():
+    """The label reader a phone without one of its own needs (the stock app's
+    own, @zxing/library 0.20.0, vendored with its licence): a hashed asset like
+    the composer, but never loaded up front: the shell only names its URL, and
+    the camera loads it when a phone has no reader. Its bytes are the ones the
+    vendor note records, so a changed file cannot slip in unnoticed."""
+    import hashlib as _hl
+    ensure_auth()
+    rendering._page_cache = None
+    shell, assets = rendering._page_parts()
+    ok("reader" in assets, "the reader is one of the hashed assets")
+    h = rendering._asset_hashes["reader"]
+    ok(f'<meta name="label-reader" content="/assets/reader.js?v={h}">' in shell, "the shell names its URL")
+    ok("<script src=\"/assets/reader.js" not in shell, "and does not load it up front")
+    r = client.get(f"/assets/reader.js?v={h}")
+    eq(r.status_code, 200)
+    ok(r.headers["content-type"].startswith("text/javascript"), r.headers["content-type"])
+    ok(b"Code39Reader" in r.content)
+    note = open(os.path.join(rendering._STATIC_DIR, "vendor", "zxing", "README.md"), encoding="utf-8").read()
+    ok(_hl.sha256(r.content).hexdigest() in note, "the bytes are the ones the vendor note records")
+    ok(os.path.exists(os.path.join(rendering._STATIC_DIR, "vendor", "zxing", "LICENSE")), "with its licence")
+    eq(client.get("/assets/reader.js?v=wrong").status_code, 404, "a stale or guessed hash gets nothing")
+
+
+@test
 def t_an_api_route_nobody_mapped_is_refused_not_allowed():
     """Deny by default. _TAB_ROUTES says who may open what; a route under /api/
     that is on neither that map nor the short open list is refused for

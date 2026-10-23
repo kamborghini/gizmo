@@ -1367,6 +1367,7 @@ def t_a_write_that_failed_is_never_shown_as_a_write_that_worked():
         "labelFontReady",        # documented: a broken font must still print
         "authApi",               # falls through to the normal sign-in card
         "crmOp",                 # marks a lead seen; the lead opens regardless
+        "wake.release",          # lets the phone's screen sleep again; nothing on the server
     }
     bad = []
     src_lines = SCRIPT.splitlines()
@@ -8405,6 +8406,28 @@ def t_the_camera_test_is_the_owners_and_lets_the_camera_go():
     ok("if (!teamMe || teamMe.role === 'master') {" in SCRIPT[i - 900:i], "the row is the owner's alone, like the backup buttons")
     import json as _json
     ok("js/camera-test.js" in _json.load(open(os.path.join(ROOT, "static", "src", "manifest.json")))["js"], "the section is in the page")
+
+
+@test
+def t_the_camera_test_tries_the_bundled_reader_the_buzz_and_keeping_awake():
+    """The second camera test (the stock design, section 6), before the
+    scanner is built: the reader the page brings for a phone without one
+    (the stock app's own, loaded only when asked), the beep and buzz a label
+    gives, and keeping the screen awake while the camera is open. Still
+    nothing leaves the phone, and closing lets the screen sleep again."""
+    fn = fn_src("function openCameraTest(")
+    ok("document.querySelector('meta[name=\"label-reader\"]')" in SCRIPT, "the reader's URL comes from the page")
+    ok("document.createElement('script')" in SCRIPT, "and it is loaded only when asked")
+    ok("Z.Code39Reader" in SCRIPT and "Z.GlobalHistogramBinarizer" in SCRIPT and "Z.HybridBinarizer" in SCRIPT,
+       "read the way the stock sheet reads labels today: both binarizers, Code 39")
+    ok("Use the bundled reader" in fn, "a phone that has a reader of its own can try the bundled one too")
+    ok("if (navigator.vibrate)" in SCRIPT and "navigator.vibrate(" in SCRIPT, "a buzz where the phone allows it")
+    ok("AudioContext" in SCRIPT, "and a beep")
+    ok("navigator.wakeLock.request('screen')" in fn, "the screen kept awake while the camera is open")
+    ok(".release()" in fn, "and let go when it stops")
+    ok("api(" not in fn and "fetch(" not in fn and "XMLHttpRequest" not in fn, "still nothing is sent anywhere")
+    for fact in ("Buzz offered by this browser", "Keeping the screen awake offered"):
+        ok(fact in fn, fact)
 
 
 @test

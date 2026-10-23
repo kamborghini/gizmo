@@ -107,6 +107,20 @@ def _page_parts() -> tuple:
                 app_tag = '<script src="/assets/app.js?v=' + _asset_hashes["js"] + '"></script>'
                 shell = shell.replace(app_tag, app_tag + '<script src="/assets/composer.js?v='
                                       + _asset_hashes["composer"] + '"></script>', 1)
+            # The label reader a phone without one of its own needs (vendored,
+            # see static/vendor/zxing/README.md). Hashed like the composer but
+            # never loaded up front: the shell names its URL and the camera
+            # loads it only on a phone that has no barcode reader.
+            try:
+                with open(os.path.join(_STATIC_DIR, "vendor", "zxing", "index.min.js"), "rb") as fh:
+                    reader = fh.read()
+            except OSError:
+                reader = b""
+            if reader:
+                _asset_hashes["reader"] = hashlib.sha256(reader).hexdigest()[:12]
+                assets["reader"] = ("text/javascript; charset=utf-8", reader)
+                shell = shell.replace("</head>", '<meta name="label-reader" content="/assets/reader.js?v='
+                                      + _asset_hashes["reader"] + '">\n</head>', 1)
             logger.info("page split: shell %d KB, css %d KB, js %d KB",
                         len(shell) // 1024, len(css) // 1024, len(js) // 1024)
         _page_cache, _page_assets = shell, assets
