@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-23",
+   "title": "A second camera test",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "The camera test in Settings, for the account owner only, now also tries the label reader Reactor brings for a phone that has none of its own, the beep and buzz each label gives, and keeping the screen awake while the camera is open. Nothing it reads is saved or sent."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-23",
    "title": "The stock link, ready to move in",
    "items": [
     {

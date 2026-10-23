@@ -52,3 +52,9 @@ def register(mcp, registry):
     async def composer_js(request: Request):
         return rendering._asset_response("composer", request.query_params.get("v", ""),
                                request.headers.get("accept-encoding", ""))
+
+    @mcp.custom_route("/assets/reader.js", methods=["GET"])
+    async def reader_js(request: Request):
+        """The bundled label reader, for a phone whose browser has none."""
+        return rendering._asset_response("reader", request.query_params.get("v", ""),
+                               request.headers.get("accept-encoding", ""))

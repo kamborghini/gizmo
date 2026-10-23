@@ -7,14 +7,87 @@
            - the page opening the camera itself (getUserMedia), reading labels
              with the browser's own barcode reader where it has one, the way
              the stock sheet's tally scanning works today.
+           The second round (23 Oct, the stock design's section 6) adds what
+           the scanner will lean on: the reader the page brings for a phone
+           without one (the stock app's own, loaded only when asked), the beep
+           and buzz a label gives, and keeping the screen awake while the
+           camera is open.
            Nothing is saved or sent. Delete this section, its row in Settings,
            its styles and its tests once phone scanning is decided. */
         function cameraTestReason(e) {
             if (!e) return 'no reason given';
             return ((e.name ? e.name + ': ' : '') + (e.message || '')).trim() || String(e);
         }
+        /* The bundled reader, fetched the first time a phone needs it: the
+           shell names its URL, so the page never carries it up front. */
+        let labelReaderLoad = null;
+        function loadLabelReader() {
+            if (window.ZXing) return Promise.resolve(window.ZXing);
+            if (labelReaderLoad) return labelReaderLoad;
+            const meta = document.querySelector('meta[name="label-reader"]');
+            if (!meta) return Promise.reject(new Error('this page names no reader'));
+            labelReaderLoad = new Promise((resolve, reject) => {
+                const s = document.createElement('script');
+                s.src = meta.content;
+                s.onload = () => {
+                    if (window.ZXing) { resolve(window.ZXing); return; }
+                    labelReaderLoad = null;
+                    reject(new Error('the reader did not start'));
+                };
+                s.onerror = () => { labelReaderLoad = null; reject(new Error('the reader did not load')); };
+                document.head.append(s);
+            });
+            return labelReaderLoad;
+        }
+        /* One frame read the way the stock sheet reads labels today: Code 39,
+           with both binarizers (even light, then uneven), over the whole frame
+           and then the middle band where a label is usually held. */
+        function readLabelFrame(Z, video, canvas, cx) {
+            const tryRead = () => {
+                for (const Bin of [Z.GlobalHistogramBinarizer, Z.HybridBinarizer]) {
+                    try {
+                        const r = new Z.Code39Reader().decode(new Z.BinaryBitmap(new Bin(new Z.HTMLCanvasElementLuminanceSource(canvas))));
+                        if (r && r.getText()) return r.getText();
+                    } catch (e) { /* nothing in this frame */ }
+                }
+                return null;
+            };
+            const vw = video.videoWidth || 0, vh = video.videoHeight || 0;
+            if (!vw || !vh) return null;
+            canvas.width = vw; canvas.height = vh;
+            cx.drawImage(video, 0, 0, vw, vh);
+            const whole = tryRead();
+            if (whole) return whole;
+            const cw = Math.max(2, (vw * 0.9) | 0), ch = Math.max(2, (vh * 0.5) | 0);
+            canvas.width = cw; canvas.height = ch;
+            cx.drawImage(video, ((vw - cw) / 2) | 0, ((vh - ch) / 2) | 0, cw, ch, 0, 0, cw, ch);
+            return tryRead();
+        }
+        /* The beep and the buzz a read label gives, as the stock sheet does:
+           in a workshop nobody is looking at the screen. Says which happened. */
+        function labelBeep(good) {
+            let buzzed = false, beeped = false;
+            try { if (navigator.vibrate) buzzed = navigator.vibrate(good ? 35 : [40, 70, 40]); } catch (e) { /* no buzz */ }
+            try {
+                const C = window.AudioContext || window.webkitAudioContext;
+                if (C) {
+                    const ctx = labelBeep.ctx || (labelBeep.ctx = new C());
+                    if (ctx.state === 'suspended') ctx.resume();
+                    const o = ctx.createOscillator(), g = ctx.createGain(), t = ctx.currentTime;
+                    o.type = 'sine';
+                    o.frequency.value = good ? 880 : 200;
+                    g.gain.setValueAtTime(0.0001, t);
+                    g.gain.exponentialRampToValueAtTime(good ? 0.22 : 0.3, t + 0.012);
+                    g.gain.exponentialRampToValueAtTime(0.0001, t + (good ? 0.14 : 0.3));
+                    o.connect(g); g.connect(ctx.destination);
+                    o.start(t); o.stop(t + (good ? 0.15 : 0.31));
+                    beeped = true;
+                }
+            } catch (e) { /* no sound */ }
+            return { buzzed: !!buzzed, beeped: beeped };
+        }
         function openCameraTest(opener) {
-            let stream = null, timer = null;
+            let stream = null, timer = null, wake = null;
             const video = document.createElement('video');
             video.className = 'camera-test-video';
             video.setAttribute('playsinline', '');   // an iPhone plays it in place, not full screen
@@ -27,6 +100,7 @@
                 stream = null;
                 video.srcObject = null;
                 video.hidden = true;
+                if (wake) { wake.release().catch(() => {}); wake = null; }
             };
             const win = dialog({ title: 'Camera test', opener: opener, onClose: stopCamera });
             const body = win.body;
@@ -41,6 +115,8 @@
                 ['Camera offered by this browser', navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? 'yes' : 'no'],
                 ['Barcode reader built into this browser', 'BarcodeDetector' in window ? 'yes' : 'no'],
                 ["Shopify's scanner offered", sh && sh.scanner && sh.scanner.capture ? 'yes' : 'no'],
+                ['Buzz offered by this browser', navigator.vibrate ? 'yes' : 'no'],
+                ['Keeping the screen awake offered', navigator.wakeLock ? 'yes' : 'no'],
             ];
             const factList = el('ul', 'camera-test-lines');
             facts.forEach(f => factList.append(el('li', null, f[0] + ': ' + f[1])));
@@ -62,50 +138,94 @@
                 shopifyBtn.disabled = false;
             };
             const liveBtn = textButton('Try the live camera');
-            liveBtn.onclick = async () => {
-                if (stream) { stopCamera(); liveBtn.textContent = 'Try the live camera'; note('Live camera: stopped.'); return; }
+            const bundledBtn = textButton('Use the bundled reader');
+            const camButtons = [liveBtn, bundledBtn];
+            const label = (btn) => btn === liveBtn ? 'Try the live camera' : 'Use the bundled reader';
+            const stopped = () => { stopCamera(); camButtons.forEach(b => { b.textContent = label(b); }); note('Live camera: stopped.'); };
+            /* Each label held still counts once, then beeps and buzzes. */
+            const seen = {};
+            const heard = (how, code) => {
+                const now = Date.now();
+                if (seen[code] && now - seen[code] <= 1400) return;   // one label held still counts once
+                seen[code] = now;
+                const fb = labelBeep(true);
+                note('Live camera (' + how + '): read ' + code + '.' + (fb.buzzed ? '' : ' No buzz on this phone.'));
+            };
+            const startCamera = async (btn, bundled) => {
+                if (stream) { stopped(); return; }
                 if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
                     note('Live camera: this browser offers no camera to the page.'); return;
                 }
-                liveBtn.disabled = true;
+                camButtons.forEach(b => { b.disabled = true; });
                 try {
-                    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+                    // A label's thin bars read better from a sharper picture, as the stock sheet asks.
+                    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' },
+                        width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
                 } catch (e) {
-                    liveBtn.disabled = false;
-                    note('Live camera: did not open (' + cameraTestReason(e) + ').');
-                    return;
+                    const refused = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
+                    try {
+                        if (refused) throw e;
+                        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                        note('Live camera: opened only without the sharper picture (' + cameraTestReason(e) + ').');
+                    } catch (e2) {
+                        camButtons.forEach(b => { b.disabled = false; });
+                        note('Live camera: did not open (' + cameraTestReason(e2) + ').');
+                        return;
+                    }
                 }
-                liveBtn.disabled = false;
+                camButtons.forEach(b => { b.disabled = false; });
                 video.srcObject = stream;
                 video.hidden = false;
                 try { await video.play(); } catch (e) { /* muted inline video: the frames still arrive */ }
-                liveBtn.textContent = 'Stop the camera';
+                btn.textContent = 'Stop the camera';
                 note('Live camera: opened.');
-                if (!('BarcodeDetector' in window)) {
-                    note('Live camera: this browser has no barcode reader of its own, so labels are not read here '
-                        + '(the stock sheet brings its own reader for this).');
+                if (navigator.wakeLock) {
+                    try {
+                        wake = await navigator.wakeLock.request('screen');
+                        note('Keeping the screen awake: yes, while the camera is open.');
+                    } catch (e) { note('Keeping the screen awake: did not work (' + cameraTestReason(e) + ').'); }
+                } else {
+                    note('Keeping the screen awake: not offered here.');
+                }
+                if (!stream) return;
+                if (!bundled && 'BarcodeDetector' in window) {
+                    let reader;
+                    try {
+                        const can = BarcodeDetector.getSupportedFormats ? await BarcodeDetector.getSupportedFormats() : [];
+                        const want = ['code_39', 'code_128', 'ean_13', 'qr_code'].filter(f => !can.length || can.indexOf(f) >= 0);
+                        reader = new BarcodeDetector(want.length ? { formats: want } : undefined);
+                    } catch (e) { note('Live camera: the barcode reader would not start (' + cameraTestReason(e) + ').'); return; }
+                    timer = setInterval(async () => {
+                        if (!stream) return;
+                        try {
+                            const found = await reader.detect(video);
+                            found.forEach(c => heard('built-in reader', c.rawValue));
+                        } catch (e) { /* a frame not ready yet */ }
+                    }, 250);
                     return;
                 }
-                let reader;
+                if (!bundled) note('Live camera: this browser has no barcode reader of its own, so the bundled one is used.');
+                let Z;
                 try {
-                    const can = BarcodeDetector.getSupportedFormats ? await BarcodeDetector.getSupportedFormats() : [];
-                    const want = ['code_39', 'code_128', 'ean_13', 'qr_code'].filter(f => !can.length || can.indexOf(f) >= 0);
-                    reader = new BarcodeDetector(want.length ? { formats: want } : undefined);
-                } catch (e) { note('Live camera: the barcode reader would not start (' + cameraTestReason(e) + ').'); return; }
-                const seen = {};
-                timer = setInterval(async () => {
+                    Z = await loadLabelReader();
+                } catch (e) { note('Bundled reader: did not load (' + cameraTestReason(e) + ').'); return; }
+                if (!stream) return;
+                note('Bundled reader: loaded. Hold a shelf label in the middle of the picture.');
+                const canvas = document.createElement('canvas');
+                const cx = canvas.getContext('2d', { willReadFrequently: true });
+                timer = setInterval(() => {
                     if (!stream) return;
-                    try {
-                        const found = await reader.detect(video);
-                        found.forEach(c => {
-                            const now = Date.now();
-                            if (!seen[c.rawValue] || now - seen[c.rawValue] > 1400) {   // one label held still counts once
-                                seen[c.rawValue] = now;
-                                note('Live camera: read ' + c.rawValue + '.');
-                            }
-                        });
-                    } catch (e) { /* a frame not ready yet */ }
-                }, 250);
+                    const code = readLabelFrame(Z, video, canvas, cx);
+                    if (code) heard('bundled reader', code);
+                }, 130);
+            };
+            liveBtn.onclick = () => startCamera(liveBtn, false);
+            bundledBtn.onclick = () => startCamera(bundledBtn, true);
+            const beepBtn = textButton('Try the beep and buzz');
+            beepBtn.onclick = () => {
+                const fb = labelBeep(true);
+                note('Beep: ' + (fb.beeped ? 'played (turn the sound up to hear it).' : 'this browser offers no sound.')
+                    + ' Buzz: ' + (fb.buzzed ? 'asked the phone to buzz.' : "this phone's web pages cannot buzz."));
             };
             const copyBtn = textButton('Copy the results');
             copyBtn.onclick = async () => {
@@ -113,6 +233,6 @@
                 try { await navigator.clipboard.writeText(text); addToast('Copied. Paste it into your message.', 'good'); }
                 catch (e) { toastError('Copying did not work here: read the lines out instead.'); }
             };
-            acts.append(shopifyBtn, liveBtn, copyBtn);
+            acts.append(shopifyBtn, liveBtn, bundledBtn, beepBtn, copyBtn);
             body.append(acts, video, results);
         }

@@ -565,8 +565,8 @@ def t_the_page_profile_oauth_and_status_routes_are_gathered():
                  '"/api/status"', '"/healthz"'):
         ok(path not in src, path + " is registered by its area's routes")
     eq([inspect.getsource(m).count("@mcp.custom_route(")
-        for m in (routes_rendering, routes_profile, routes_layouts, routes_status)], [4, 1, 1, 2],
-       "the page and its 3 assets, the profile, the layouts, status and healthz")
+        for m in (routes_rendering, routes_profile, routes_layouts, routes_status)], [5, 1, 1, 2],
+       "the page and its 4 assets (the label reader since 23 Oct), the profile, the layouts, status and healthz")
 
 @test
 def t_the_leftovers_are_home():
