@@ -9,7 +9,7 @@ import re
 from starlette.requests import Request
 from gizmo import store as jsonstore
 
-import copilot as core
+from gizmo import stock_link
 from gizmo import activity
 from gizmo import dispatch as desk
 from gizmo import gate
@@ -252,7 +252,7 @@ def register(mcp, registry):
                 # The shelf's ledger: made books the glass at the stock app,
                 # un-made returns it. Local state is already saved, so a bridge
                 # failure only queues a retry, never blocks the workbench.
-                stock_note = await core._zeta_push(registry, oid, "book" if on else "reverse")
+                stock_note = await stock_link._zeta_push(registry, oid, "book" if on else "reverse", _who)
                 return gate._json({"ok": True, "state": {str(oid): state.get(str(oid), {})},
                               "dispatch": {str(oid): desk._load_dispatch().get(str(oid), {})},
                               "fulfilled": fulfilled, "notified": notified,

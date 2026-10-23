@@ -2319,5 +2319,74 @@
    "id": 1
   },
   "source": "tests/dispatch/stock-backups.py:92"
+ },
+ {
+  "path": "/api/stock/mapping",
+  "body": {
+   "op": "mapping"
+  },
+  "source": "tests/dispatch/stock-link.py:337"
+ },
+ {
+  "path": "/api/stock/mapping",
+  "body": {
+   "op": "parked"
+  },
+  "source": "tests/dispatch/stock-link.py:340"
+ },
+ {
+  "path": "/api/stock/mapping",
+  "body": {
+   "op": "map",
+   "alias": "Mono|17",
+   "id": 25
+  },
+  "source": "tests/dispatch/stock-link.py:342"
+ },
+ {
+  "path": "/api/stock/mapping",
+  "body": {
+   "op": "map",
+   "alias": "Colour|20",
+   "id": 27,
+   "parked_id": 999
+  },
+  "source": "tests/dispatch/stock-link.py:349"
+ },
+ {
+  "path": "/api/stock/ai",
+  "body": {
+   "op": "insights"
+  },
+  "source": "tests/dispatch/stock-ai.py:40"
+ },
+ {
+  "path": "/api/stock/overview",
+  "body": {
+   "op": "insights"
+  },
+  "source": "tests/dispatch/stock-ai.py:48"
+ },
+ {
+  "path": "/api/stock/ai",
+  "body": {
+   "op": "read_invoice",
+   "pdf_base64": "JVBERi0xLjQgaW52ZW50ZWQ="
+  },
+  "source": "tests/dispatch/stock-ai.py:214"
+ },
+ {
+  "path": "/api/stock/ai",
+  "body": {
+   "op": "po_note",
+   "supplier": "Invented Glass Co",
+   "lines": [
+    {
+     "item": "Blue 20",
+     "qty": 20
+    }
+   ]
+  },
+  "source": "tests/dispatch/stock-ai.py:219"
  }
 ]

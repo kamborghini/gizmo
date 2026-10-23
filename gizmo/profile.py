@@ -61,7 +61,8 @@ def _profile_to_system(p: dict) -> str:
     prefs = p.get("prefs") or {}
     rules = []
     if prefs.get("track_inventory") is False:
-        rules.append("We carry unlimited stock — never give inventory, stock-level, or restock advice.")
+        rules.append("Our Shopify products carry unlimited stock: give no inventory or restock advice about them. "
+                     "The glass stock sheet is tracked separately and its tools may be used.")
     if prefs.get("concise"):
         rules.append("Keep answers concise and skimmable; favor short bullets over prose.")
     if prefs.get("proactive", True):

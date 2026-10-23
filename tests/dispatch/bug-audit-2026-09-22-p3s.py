@@ -49,17 +49,17 @@ def t_a_redact_a_store_refused_is_said_and_retried():
             return None
         async def skip(*a, **k):
             return {"error": "skip"}
-        saved = (shopify._tool_json, scheduler._send_alert_email, copilot._zeta_drain, copilot._zeta_configured,
+        saved = (shopify._tool_json, scheduler._send_alert_email, stock_link._zeta_drain, stock_link._zeta_configured,
                  fileserver._files_tick, production.run_label_coverage, shopify._webhook_ensurer,
                  scheduler._watch_last_tick, privacy._redact_retry_pending)
-        shopify._tool_json, scheduler._send_alert_email, copilot._zeta_drain = probe, noop, noop
-        copilot._zeta_configured, fileserver._files_tick = (lambda: False), (lambda: None)
+        shopify._tool_json, scheduler._send_alert_email, stock_link._zeta_drain = probe, noop, noop
+        stock_link._zeta_configured, fileserver._files_tick = (lambda: False), (lambda: None)
         production.run_label_coverage, shopify._webhook_ensurer, scheduler._watch_last_tick = skip, None, 0.0
         privacy._redact_retry_pending = lambda: ran.append(1) or saved[-1]()
         try:
             run_async(scheduler._watchdog_tick({}))
         finally:
-            (shopify._tool_json, scheduler._send_alert_email, copilot._zeta_drain, copilot._zeta_configured,
+            (shopify._tool_json, scheduler._send_alert_email, stock_link._zeta_drain, stock_link._zeta_configured,
              fileserver._files_tick, production.run_label_coverage, shopify._webhook_ensurer,
              scheduler._watch_last_tick, privacy._redact_retry_pending) = saved
         eq(ran, [1], "the hourly tick runs the retry")
@@ -288,9 +288,9 @@ def t_a_stock_sheet_with_unread_orders_is_not_sent_as_final():
     sent = []
     async def sheet(payload):
         sent.append(payload); return {"ok": True}
-    saved = (shopify._tool_json, copilot._zeta_send_sheet, copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN)
-    shopify._tool_json, copilot._zeta_send_sheet = tools, sheet
-    copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN = "https://zeta.test", "tok"
+    saved = (shopify._tool_json, stock_link._zeta_send_sheet, stock_link.ZETA_URL, stock_link.ZETA_SYNC_TOKEN)
+    shopify._tool_json, stock_link._zeta_send_sheet = tools, sheet
+    stock_link.ZETA_URL, stock_link.ZETA_SYNC_TOKEN = "https://zeta.test", "tok"
     try:
         today = datetime.now(ZoneInfo("Europe/London")).date().isoformat()
         r = post("/api/stock-usage/send", {"date": today, "lines": [
@@ -316,7 +316,7 @@ def t_a_stock_sheet_with_unread_orders_is_not_sent_as_final():
             eq(sent[0]["order_ids"], ["12345"], "the gone order is not in the FINAL sheet")
             ok("777" in r.json()["note"] and "stays booked" in r.json()["note"], r.text)
     finally:
-        shopify._tool_json, copilot._zeta_send_sheet, copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN = saved
+        shopify._tool_json, stock_link._zeta_send_sheet, stock_link.ZETA_URL, stock_link.ZETA_SYNC_TOKEN = saved
         reset_prod()
 
 

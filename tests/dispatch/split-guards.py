@@ -129,8 +129,8 @@ SHARED_COPIES = {
     # client is one that test never reaches.
     ("gizmo.xero_sync", "httpx", "server"):
         "server's client talks to Shopify, which the connector settings test never reaches",
-    ("gizmo.xero_sync", "httpx", "copilot"):
-        "copilot.py's own client is the stock bridge's, which the connector settings test never reaches",
+    ("gizmo.xero_sync", "httpx", "gizmo.stock_link"):
+        "the stock link's own client is the stock bridge's, which the connector settings test never reaches",
     ("gizmo.xero_sync", "httpx", "gizmo.routes.xero_sync"):
         "the connector route uses httpx only to name the errors it catches (HTTPError, the timeouts, "
         "ConnectError); the routed client raises the real ones",

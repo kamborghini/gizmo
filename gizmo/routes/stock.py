@@ -3,10 +3,12 @@ of the sheet, each a flat body model and an `op`, all under /api/stock/,
 claimed by the "stock" tab in gate._TAB_ROUTES.
 """
 import logging
+import anthropic
 from starlette.requests import Request
 from starlette.responses import Response
 
-from gizmo import stock, stock_backups, stock_orders, stock_quarters, stock_sheet
+from gizmo import stock, stock_ai, stock_backups, stock_bridge, stock_orders, stock_quarters, stock_sheet
+from gizmo import ai as claude
 from gizmo import gate
 from gizmo import bodies
 
@@ -14,6 +16,7 @@ from gizmo import bodies
 logger = logging.getLogger("shopify_mcp.copilot")
 
 SHEET_CAP = 2 * 1024 * 1024      # an imported sheet of 5,000 rows fits well inside
+INVOICE_CAP = 12 * 1024 * 1024   # a 9 MB PDF, as base64 in its JSON
 
 
 class StockSheetBody(bodies.Body):
@@ -99,6 +102,25 @@ class StockHistoryBody(bodies.Body):
 class StockBackupsBody(bodies.Body):
     """What /api/stock/backups reads: the backup to download or restore."""
     id: bodies.Id = None
+
+
+class StockMappingBody(bodies.Body):
+    """What /api/stock/mapping reads: a production line (its alias, such as
+    "Mono|17"), the stock line it books as, and the parked line chosen."""
+    alias: bodies.Text = None
+    id: bodies.Id = None
+    parked_id: bodies.Id = None
+
+
+class StockAiBody(bodies.Body):
+    """What /api/stock/ai reads: a PDF to read, or an order to write a
+    note for (only these fields reach the model)."""
+    pdf_base64: bodies.Text = None
+    supplier: bodies.Text = None
+    currency: bodies.Text = None
+    native_total: bodies.Number = None
+    gbp_total: bodies.Number = None
+    lines: bodies.Records = None
 
 
 _CONTACT_FIELDS = ("supplier", "email", "cc", "contact_name", "subject", "body", "lead_days", "min_order")
@@ -224,6 +246,7 @@ def register(mcp, registry):
             return err
         op = str(body.get("op") or "briefing")
         reads = {"briefing": lambda: stock_quarters.briefing(who), "alerts": stock_quarters.alerts,
+                 "insights": stock_ai.last_insights,
                  "trends": stock_quarters.trends, "forecast": stock_quarters.forecast,
                  "outlook": stock_quarters.outlook, "settings": stock_quarters.settings, "fx": stock_quarters.fx}
         if op in reads:
@@ -279,6 +302,49 @@ def register(mcp, registry):
             return Response(data, media_type="application/octet-stream",
                             headers={**gate._API_HEADERS, "Content-Disposition": f'attachment; filename="{safe}"'})
         return gate._json({"error": "Unknown op."}, 400)
+
+    @mcp.custom_route("/api/stock/mapping", methods=["POST"])
+    async def stock_mapping_route(request: Request):
+        """Matching production's gobo lines to stock lines: the whole
+        translation, the lines waiting for a ruling, and making one."""
+        err, body, who = await gate._guard(request, model=StockMappingBody)
+        if err:
+            return err
+        op = str(body.get("op") or "mapping")
+        if op == "mapping":
+            return _answer(stock_bridge.mapping, "the mapping")
+        if op == "parked":
+            return _answer(stock_bridge.parked, "the parked lines")
+        if op == "map":
+            return _answer(lambda: stock_bridge.map_line(who, body.get("alias"), body.get("id"), body.get("parked_id")),
+                           "a ruling")
+        return gate._json({"error": "Unknown op."}, 400)
+
+    @mcp.custom_route("/api/stock/ai", methods=["POST"])
+    async def stock_ai_route(request: Request):
+        """The stock sheet's AI: insights, a PDF invoice read into delivery
+        lines (never booked), and a purchase order's note."""
+        err, body, who = await gate._guard(request, ai=True, model=StockAiBody, max_body=INVOICE_CAP, cap=INVOICE_CAP)
+        if err:
+            return err
+        op = str(body.get("op") or "")
+        work = {"insights": lambda: stock_ai.insights(who),
+                "read_invoice": lambda: stock_ai.read_invoice(body.get("pdf_base64")),
+                "po_note": lambda: stock_ai.po_note(body)}.get(op)
+        if work is None:
+            return gate._json({"error": "Unknown op."}, 400)
+        try:
+            return gate._json(await work())
+        except stock.Refused as e:
+            return gate._json({"error": e.words}, e.status)
+        except RuntimeError as e:
+            return gate._json({"error": str(e), "hard": True}, 429)
+        except anthropic.APIError as e:
+            logger.exception("stock: an AI request failed")
+            return gate._json({"error": claude._ai_error_words(e)}, 502)
+        except Exception:
+            logger.exception("stock: an AI request failed")
+            return gate._json({"error": "That could not be done just now. Try again."}, 500)
 
     @mcp.custom_route("/api/stock/suppliers", methods=["POST"])
     async def stock_suppliers_route(request: Request):

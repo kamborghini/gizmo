@@ -282,7 +282,7 @@ def t_a_model_ruled_not_a_gobo_prints_no_size_on_its_label():
     ok(ruled["not_gobo"] is True and ruled["size_note"] == "Not a gobo", "said, on the label, under its name")
     eq(ruled["quantity"], 2, "the line is still on the label")
     ok(plain["not_gobo"] is False and plain["production_size"] == hit["production_size"], "its neighbour keeps its own size")
-    lines = copilot._usage_lines({"items": [ruled, plain]})
+    lines = stock_link._usage_lines({"items": [ruled, plain]})
     eq(lines, [{"size": plain["production_size"], "family": "(type not recorded)", "qty": 1}],
        "no glass used, and nothing 'to resolve', on the day sheets or in the stock app")
     # A size for one customer does not undo the ruling.

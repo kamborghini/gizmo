@@ -35,7 +35,8 @@ _TOOL_LABELS = {
     "shopify_get_inventory_levels": "Inventory levels", "shopify_list_fulfillments": "Fulfilments",
     "shopify_get_variant": "Variant details", "shopify_get_inventory_items": "Inventory items",
     "shopify_list_payouts": "Payouts", "shopify_payout_transactions": "Payout details",
-    "shopify_list_disputes": "Disputes",
+    "shopify_list_disputes": "Disputes", "stock_levels": "Stock levels", "stock_item_history": "A stock line's history",
+    "stock_movements": "Stock movements", "stock_reorder": "Stock to reorder",
 }
 
 
@@ -379,13 +380,15 @@ _TOOL_TABS = {
     # until it went (22 Oct 2026); Xero sync is the other opt-in finance tab.
     "shopify_list_payouts": "connector", "shopify_payout_transactions": "connector",
     "shopify_list_disputes": "connector",
+    # The stock sheet is its own tab: its tools follow it.
+    "stock_levels": "stock", "stock_item_history": "stock", "stock_movements": "stock", "stock_reorder": "stock",
 }
 
 
 # What a refusal calls each permission, in the Team page's own words: the
 # customers key has been a permission with no page since 22 Oct 2026, and
 # "connector" is Xero sync to everyone but the code.
-_TAB_WORDS = {"customers": "Customer details", "connector": "the Xero sync page"}
+_TAB_WORDS = {"customers": "Customer details", "connector": "the Xero sync page", "stock": "the stock sheet"}
 
 
 def _build_dispatch(registry: dict, uid_of: Optional[Callable] = None) -> Callable:

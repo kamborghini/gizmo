@@ -26,18 +26,6 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 |---|---|---|---|
 | `STORE_CONTEXT_CAP` | `"4000"` | copilot |  |
 
-## copilot.py - Stock bridge: the glass a Mark made consumes flows into the 
-
-| Variable | Default | Read by | Notes |
-|---|---|---|---|
-| `USAGE_SHEETS_PATH` | `"/data/usage_sheets.json"` | copilot |  |
-| `ZETA_DRAIN_MAX` | `"40"` | copilot | retries per tick |
-| `ZETA_DRAIN_SECONDS` | `"45"` | copilot | and its deadline |
-| `ZETA_MAX_TRIES` | `"20"` | copilot | then park for a human |
-| `ZETA_SYNC_PATH` | `"/data/zeta_sync.json"` | copilot |  |
-| `ZETA_SYNC_TOKEN` | `""` | copilot |  |
-| `ZETA_URL` | `""` | copilot |  |
-
 ## gizmo/activity.py - top
 
 | Variable | Default | Read by | Notes |
@@ -354,6 +342,18 @@ Generated from the code by `tools/env_reference.py`; do not edit by hand.
 |---|---|---|---|
 | `RAILWAY_ENVIRONMENT` | `None` | gizmo.status | set by Railway; the volume check runs only there |
 | `RAILWAY_PROJECT_ID` | `None` | gizmo.status | set by Railway; the volume check runs only there |
+
+## gizmo/stock_link.py - Stock bridge: the glass a Mark made consumes flows into the 
+
+| Variable | Default | Read by | Notes |
+|---|---|---|---|
+| `USAGE_SHEETS_PATH` | `"/data/usage_sheets.json"` | gizmo.stock_link |  |
+| `ZETA_DRAIN_MAX` | `"40"` | gizmo.stock_link | retries per tick |
+| `ZETA_DRAIN_SECONDS` | `"45"` | gizmo.stock_link | and its deadline |
+| `ZETA_MAX_TRIES` | `"20"` | gizmo.stock_link | then park for a human |
+| `ZETA_SYNC_PATH` | `"/data/zeta_sync.json"` | gizmo.stock_link |  |
+| `ZETA_SYNC_TOKEN` | `""` | gizmo.stock_link |  |
+| `ZETA_URL` | `""` | gizmo.stock_link |  |
 
 ## gizmo/stock_store.py - top
 

@@ -122,8 +122,8 @@ a failure, and `make move-proof` proves a move moved code and changed nothing.
    (`t_nothing_reads_copilot_py_by_name`), and both security scans cover the
    package. `t_the_split_modules_read_no_unbound_name` catches a name left
    behind on a path no test drives; `t_any_module_imports_first` the
-   import order; `t_only_the_stock_bridge_reads_copilot` that nothing but
-   the stock bridge's readers still reads `copilot.py`. A check that walks
+   import order; `t_nothing_but_the_server_reads_copilot` that nothing but
+   `server.py` reads `copilot.py`. A check that walks
    module names (the backup's reach,
    `t_backup_is_exhaustive_by_construction`; the clocks, `_every_clock`)
    walks every module in `tools/sources.py`, or each move quietly takes

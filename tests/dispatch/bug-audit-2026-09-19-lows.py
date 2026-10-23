@@ -35,18 +35,18 @@ def t_the_stock_bridge_counts_each_failed_attempt_once():
     async def down(op, order_id, order_name, lines, sent):
         raise RuntimeError("zeta is down")
     def go(sent):
-        run_async(copilot._zeta_push_locked({}, 12345, "book"))
-        eq(copilot._load_zeta_pending()["12345"]["tries"], 1, "the first failure counts one")
+        run_async(stock_link._zeta_push_locked({}, 12345, "book"))
+        eq(stock_link._load_zeta_pending()["12345"]["tries"], 1, "the first failure counts one")
         for n in (2, 3, 4):
-            run_async(copilot._zeta_drain({}))
-            eq(copilot._load_zeta_pending()["12345"]["tries"], n, "one per retry, not two")
-        pend = copilot._load_zeta_pending()
-        pend["12345"]["tries"] = copilot.ZETA_MAX_TRIES
-        copilot._write_zeta_pending(pend)
-        run_async(copilot._zeta_drain({}))
-        entry = copilot._load_zeta_pending()["12345"]
+            run_async(stock_link._zeta_drain({}))
+            eq(stock_link._load_zeta_pending()["12345"]["tries"], n, "one per retry, not two")
+        pend = stock_link._load_zeta_pending()
+        pend["12345"]["tries"] = stock_link.ZETA_MAX_TRIES
+        stock_link._write_zeta_pending(pend)
+        run_async(stock_link._zeta_drain({}))
+        entry = stock_link._load_zeta_pending()["12345"]
         ok(entry.get("stuck"), "parked after exactly ZETA_MAX_TRIES failures")
-        eq(entry["tries"], copilot.ZETA_MAX_TRIES, "and not tried again once parked")
+        eq(entry["tries"], stock_link.ZETA_MAX_TRIES, "and not tried again once parked")
     with_zeta(go, send=down)
 
 
@@ -58,7 +58,7 @@ def t_a_size_that_is_not_a_number_neither_crashes_nor_uploads():
     rows = {("TBC", "Mono"): {"size": "TBC", "glass": "Mono", "qty": 1},
             ("37.5", "Mono"): {"size": "37.5", "glass": "Mono", "qty": 2},
             ("64.9", "Colour"): {"size": "64.9", "glass": "Colour", "qty": 1}}
-    eq([r["size"] for r in sorted(rows.values(), key=copilot._usage_row_order)], ["64.9", "37.5", "TBC"],
+    eq([r["size"] for r in sorted(rows.values(), key=stock_link._usage_row_order)], ["64.9", "37.5", "TBC"],
        "largest first, and a size that is not one goes last instead of raising")
     def go():
         ensure_auth()
@@ -129,7 +129,7 @@ def t_a_size_cell_is_read_as_the_number_the_bench_uses():
     for raw, want in (("86 mm", "86"), ("86.0", "86"), ("37.5", "37.5"), (" 64.9 ", "64.9"),
                       ("TBC", "TBC"), ("", "")):
         eq(size_list._sheet_size(raw), want, repr(raw))
-    ok(size_list._sheet_size("86 mm") in copilot._BEZEL_UP, "and it is the key the bezel rule knows")
+    ok(size_list._sheet_size("86 mm") in stock_link._BEZEL_UP, "and it is the key the bezel rule knows")
 
 
 @test

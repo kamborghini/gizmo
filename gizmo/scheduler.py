@@ -225,12 +225,12 @@ async def _watchdog_tick(registry: dict) -> bool:
         # Stock-bridge retries: bookings that failed to reach the stock app.
         # Not gated on Shopify being up: reversals need no Shopify read, and a
         # book retry just fails and stays parked if Shopify is still down.
-        await core._zeta_drain(registry)
+        await stock_link._zeta_drain(registry)
         # And the catalogue, so the stock app's mapping view stays complete as
         # the size sheet evolves. Cheap, idempotent, best-effort.
-        if core._zeta_configured():
+        if stock_link._zeta_configured():
             try:
-                await core._zeta_send_catalog()
+                await stock_link._zeta_send_catalog()
             except Exception:
                 logger.warning("stock bridge: catalogue push failed; next tick retries")
         # The accounts vanishing after setup means the register was LOST
@@ -396,7 +396,7 @@ def _ensure_scheduler(registry: dict) -> None:
 
 # Last, so this module is whole before copilot.py or a sibling runs: copilot.py
 # takes names from these modules as it loads, and any of them may be imported
-# first. Read as core.NAME and sibling.NAME, never a copied name.
+# first. Read as sibling.NAME, never a copied name.
 from gizmo import backup  # noqa: E402
 from gizmo import stock_backups  # noqa: E402
 from gizmo import activity  # noqa: E402
@@ -407,6 +407,6 @@ from gizmo import privacy  # noqa: E402
 from gizmo import crm as salesdesk  # noqa: E402
 from gizmo import team  # noqa: E402
 from gizmo import work  # noqa: E402
-import copilot as core  # noqa: E402
+from gizmo import stock_link  # noqa: E402
 from gizmo import production  # noqa: E402
 from gizmo import xero_sync as xerosync  # noqa: E402

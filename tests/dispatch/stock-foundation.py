@@ -364,7 +364,8 @@ def _stock_export(history_user="someone", reorder_point_9=0):
     export = {"format": "stock-export-1", "exported_at": "2026-10-22T12:00:00+00:00",
               "now": "2026-10-22T12:00:00+00:00", "source_head": "0000000",
               "tables": {n: {"columns": _STOCK_COLUMNS[n], "count": len(rows), "rows": rows, "missing": False}
-                         for n, rows in tables.items()}}
+                         for n, rows in tables.items()},
+              "bridge_rules": {"glass_families": {"mono": "Clear Etch", "hm": "Heavy Matt"}}}
     # The stock app's figures for this data, worked out the way the exporter
     # asks the stock app for them (the port stands in for it here).
     if reorder_point_9 is None:
@@ -421,7 +422,9 @@ def t_the_stock_converter_keeps_every_record():
         eq(stock_store.load_bridge()["bookings"][0]["lines"][0]["qty"], 1, "JSON text decoded")
         eq(stock_store.list_backups()[0]["token"], base64.b64encode(b"gAAAAABfake").decode())
         eq(stock_store.load_people()["people"], PEOPLE)
-        eq(stock_store.load_settings(), {"meta": {"low_stock_days": "21", "schema": "3"}})
+        eq(stock_store.load_settings(), {"meta": {"low_stock_days": "21", "schema": "3"},
+                                         "glass_families": {"mono": "Clear Etch", "hm": "Heavy Matt"}},
+           "and the glass the production link matches Mono and HM lines to, from the stock app's own code")
     out = _stock_out("null-point")
     stock_import.convert(_stock_export(reorder_point_9=None), PEOPLE, out)
     with stock_store.rooted(out):
@@ -439,6 +442,33 @@ def t_the_stock_proof_names_a_changed_field():
     found = stock_import.prove(export, out)
     eq(len(found), 1, found)
     ok("items" in found[0] and "7" in found[0] and "barcode" in found[0], found[0])
+
+@test
+def t_the_stock_proof_needs_the_glass_the_link_matches_to():
+    export = _stock_export()
+    out = _stock_out("glass")
+    stock_import.convert(export, PEOPLE, out)
+    with stock_store.rooted(out):
+        doc = stock_store.load_settings(); doc["glass_families"]["hm"] = "Something Else"; stock_store.write_settings(doc)
+    found = stock_import.prove(export, out)
+    ok(len(found) == 1 and "HM" in found[0], found)
+    del export["bridge_rules"]                       # an export from before the exporter read it
+    out = _stock_out("no-glass")
+    stock_import.convert(export, PEOPLE, out)
+    found = stock_import.prove(export, out)
+    ok(len(found) == 1 and "export again" in found[0], found)
+
+@test
+def t_the_stock_exporter_reads_the_link_glass_without_running_the_app():
+    from tools.stock_move import export_from_stock_app as exporter
+    app = os.path.join(SCRATCH, "stock-app-src")
+    os.makedirs(app, exist_ok=True)
+    with open(os.path.join(app, "app.py"), "w", encoding="utf-8") as fh:
+        fh.write('raise SystemExit("never run")\n_GIZMO_FAMILY = {"mono": "Clear Etch", "hm": "Heavy Matt"}\n')
+    eq(exporter.glass_families(app), {"mono": "Clear Etch", "hm": "Heavy Matt"})
+    with open(os.path.join(app, "app.py"), "w", encoding="utf-8") as fh:
+        fh.write("x = 1\n")
+    eq(exporter.glass_families(app), None, "an app without the rule says so")
 
 @test
 def t_the_stock_proof_notices_a_dropped_history_line():

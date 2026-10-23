@@ -55,11 +55,11 @@ def t_the_watchdog_clears_the_outage_flag_when_shopify_is_back():
         return None
     async def skip(*a, **k):
         return {"error": "skip"}
-    saved = (shopify._tool_json, scheduler._send_alert_email, copilot._zeta_drain,
-             copilot._zeta_configured, fileserver._files_tick, production.run_label_coverage,
+    saved = (shopify._tool_json, scheduler._send_alert_email, stock_link._zeta_drain,
+             stock_link._zeta_configured, fileserver._files_tick, production.run_label_coverage,
              shopify._webhook_ensurer, scheduler._watch_last_tick)
     shopify._tool_json, scheduler._send_alert_email = probe, alert
-    copilot._zeta_drain, copilot._zeta_configured = noop, (lambda: False)
+    stock_link._zeta_drain, stock_link._zeta_configured = noop, (lambda: False)
     fileserver._files_tick, production.run_label_coverage, shopify._webhook_ensurer = (lambda: None), skip, None
     def clean():
         w = scheduler._load_watch()
@@ -84,8 +84,8 @@ def t_the_watchdog_clears_the_outage_flag_when_shopify_is_back():
         scheduler._watch_last_tick = time.time()
         ok(run_async(scheduler._watchdog_tick({})), "the between-hours answer is up too")
     finally:
-        (shopify._tool_json, scheduler._send_alert_email, copilot._zeta_drain,
-         copilot._zeta_configured, fileserver._files_tick, production.run_label_coverage,
+        (shopify._tool_json, scheduler._send_alert_email, stock_link._zeta_drain,
+         stock_link._zeta_configured, fileserver._files_tick, production.run_label_coverage,
          shopify._webhook_ensurer, scheduler._watch_last_tick) = saved
         clean()
 
