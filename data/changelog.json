@@ -2,6 +2,17 @@
  "releases": [
   {
    "date": "2026-10-23",
+   "title": "The Stock tab, ready to move in",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "Reactor now has the stock sheet's own screens: the overview, the stock list with counting and scanning on a phone, reordering, suppliers, deliveries, trends and the history. The Stock tab appears once the stock sheet moves in; nothing changes until then."
+    }
+   ]
+  },
+  {
+   "date": "2026-10-23",
    "title": "A second camera test",
    "items": [
     {

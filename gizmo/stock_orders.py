@@ -14,7 +14,7 @@ every field the request leaves out).
 """
 import re
 
-from gizmo import stock, stock_figures
+from gizmo import stock, stock_figures, team
 
 LINES_MAX = 300
 LEVELS_MAX = 1000
@@ -116,7 +116,9 @@ def clear(uid: str, item_id) -> dict:
 
 def _shown(order: dict) -> dict:
     lines = [dict(l, outstanding=outstanding(l)) for l in order["lines"]]
-    return dict(order, lines=lines, open=any(l["outstanding"] for l in lines))
+    # Who placed it, by the account's name; an order from before the move has none.
+    who = team._team_name(order["person"]) if order.get("person") else ""
+    return dict(order, lines=lines, open=any(l["outstanding"] for l in lines), who=who)
 
 
 def orders(open_only: bool = False) -> dict:

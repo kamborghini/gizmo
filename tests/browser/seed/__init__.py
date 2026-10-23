@@ -1,11 +1,11 @@
 """Fill every screen of the browser suite's world with invented data.
 
-Three recipes, each proven on 14 Oct 2026 against the dispatch setup, run in
+Four recipes, the first three proven on 14 Oct 2026 against the dispatch setup, run in
 this order: dashboards (the fake Shopify store, the forecast, the Xero
 connector), workspace (accounts, the
 work clock, the activity ledger, memory, skills, requests, chat), operations
 (the Production Manager's orders joined to the same store, custom shipments,
-the CRM, loan units, the Inbox, Files).
+the CRM, loan units, the Inbox, Files), stock (the stock sheet, moved in).
 
 Each recipe runs in its own copy of the setup's names, never in the setup's
 own globals: their helpers share names (_p, _iso, _NOW, _when ...), and a
@@ -34,6 +34,7 @@ def seed(world):
     dash["seed_dashboards"]()          # dashboards.py defines it; the other two run as they load
     _run(world, "workspace")
     ops = _run(world, "operations", DASH=dash["DASH"])
+    _run(world, "stock")            # the stock sheet, moved in (every Stock screen)
     world["DASH"], world["OPS_ORDERS"] = dash["DASH"], ops["OPS_ORDERS"]
     with open(os.path.join(world["SCRATCH"], "workspace_browser_seed.json"), encoding="utf-8") as fh:
         browser = json.load(fh)

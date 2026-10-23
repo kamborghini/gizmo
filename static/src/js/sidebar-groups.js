@@ -50,6 +50,7 @@
         }
         const BETA_TABS = ['forecast', 'crm', 'connector'];
         function setView(v) {
+            if (v === 'stock' && !stockNavShown()) v = homeView();   // not before the move
             document.querySelectorAll('.nav-item').forEach(n => {
                 const on = n.dataset.view === v; n.classList.toggle('active', on);
                 if (on) n.setAttribute('aria-current', 'page'); else n.removeAttribute('aria-current');
@@ -58,7 +59,7 @@
             // Leaving a view while customizing it counts as Done.
             if (wgEdit && wgEdit.view !== v) wgCommit(wgEdit.view, true);
             APP_VIEWS.forEach(name => $('view-' + name).classList.toggle('active', v === name));
-            const titles = { liability: 'Liability', forecast: 'Forecast', sizes: 'Size list', connector: 'Xero sync', crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
+            const titles = { liability: 'Liability', forecast: 'Forecast', sizes: 'Size list', stock: 'Stock', connector: 'Xero sync', crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', team: 'Team', labels: 'Production Manager', memory: 'Memory', skills: 'Skills', guide: 'Guide' };
             setViewTitle(titles[v] || 'Chat');
             setViewCrumb(v);
             document.body.dataset.view = v;
@@ -104,6 +105,7 @@
             if (v === 'skills') loadSkills();
             if (v === 'forecast') showForecastView();
             if (v === 'sizes') showSizesView();
+            if (v === 'stock') showStockView();
             if (v === 'connector') showConnectorView();
             /* A hidden view has no width, so its columns are measured now it
                shows. A render that is still on its way is arranged by the

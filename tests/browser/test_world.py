@@ -75,6 +75,24 @@ def t_the_workspace_screens_are_filled():
 
 
 @test
+def t_the_stock_sheet_is_filled():
+    has("/api/stock/sheet", {"op": "list"}, "Clear Etch", "Heavy Matt", "Northbeam Optics", "Lumen Colour Works", "Lens hood")
+    has("/api/stock/mapping", {"op": "parked"}, "Mono|17", "Colour|20")
+    has("/api/stock/overview", {"op": "insights"}, "health_score", "hold most of the idle money")
+    has("/api/stock/quarters", {"op": "list"}, "Q3 2026", "Q4 2026")
+    has("/api/stock/orders", {"op": "list"}, "PO-1027")
+    has("/api/stock/history", {"op": "search"}, "INV-24")
+    # Reorder: two suppliers' lines at their level, the levels usage proposes, every supplier's email.
+    has("/api/stock/orders", {"op": "reorder"}, "Brightway Lighting", "LED80 White", "Amber 21")
+    has("/api/stock/orders", {"op": "suggest"}, "Lens hood")
+    has("/api/stock/suppliers", {"op": "list"}, "orders@northbeam.example", "Brightway Lighting")
+    # Trends' soonest to run out, Compare's movers (the last closed quarter against now), a backup to restore.
+    has("/api/stock/overview", {"op": "forecast"}, "Mains adaptor 24V")
+    has("/api/stock/quarters", {"op": "compare", "left": "2", "right": "current"}, "Q3 2026", "LED300 Black")
+    has("/api/stock/backups", {"op": "list"}, "stock-1")
+
+
+@test
 def t_the_two_shopify_stores_are_one():
     s = world()["SEEDED"]
     ok(s["ops_orders"] == 12, "the Production Manager's twelve orders are in the store: %s" % s["ops_orders"])

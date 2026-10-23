@@ -496,7 +496,7 @@ def _master_reset_check(d: dict) -> None:
 # it is the customer-details permission, which Labels' order history, Chat's
 # order and customer reads and the CRM's and Inbox's Shopify lookups check.
 TAB_KEYS = ("customers", "liability",
-            "crm", "loans", "mail", "files", "labels", "sizes", "memory", "skills", "chat",
+            "crm", "loans", "mail", "files", "labels", "sizes", "stock", "memory", "skills", "chat",
             "forecast", "connector")
 
 
@@ -506,8 +506,9 @@ TAB_KEYS = ("customers", "liability",
 # ledger, and Chat's payout and dispute reads follow it. The forecast holds
 # the cash flow plan and where the company stands against it, which is the
 # books' own kind of secret. (Reconciliation was the first of these; it went
-# on 22 Oct 2026.)
-OPT_IN_TABS = ("connector", "forecast")
+# on 22 Oct 2026.) The stock sheet is handed to the two people who keep it,
+# at the switch.
+OPT_IN_TABS = ("connector", "forecast", "stock")
 DEFAULT_TABS = tuple(k for k in TAB_KEYS if k not in OPT_IN_TABS)
 
 
@@ -707,7 +708,14 @@ def _auth_me(uid: str, u: dict) -> dict:
             # must not offer a switch that would revoke nothing.
             "can_send": bool(u.get("can_send")),
             "send_by_rank": (ROLE_LEVELS.get(u.get("role") or "member", 0)
-                             >= ROLE_LEVELS["admin"])}
+                             >= ROLE_LEVELS["admin"]),
+            # The Stock tab shows only once the stock sheet has moved in.
+            "stock_live": _stock_live()}
+
+
+def _stock_live() -> bool:
+    from gizmo import stock    # read when asked: the stock area reads the team for its names
+    return stock.is_live()
 
 # ---- Team management --------------------------------------------------
 async def _team_guard(request: Request, min_level: int, model=None):

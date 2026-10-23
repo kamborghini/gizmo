@@ -27,7 +27,7 @@ LAYOUTS_PATH       = os.environ.get("LAYOUTS_PATH", "/data/layouts.json")    # e
 # composer with no cards to arrange.
 LAYOUT_VIEWS = ("liability",
                 "forecast", "connector", "crm", "loans", "mail", "files", "team",
-                "labels", "sizes", "memory", "skills", "guide")
+                "labels", "sizes", "stock", "memory", "skills", "guide")
 # The page's own card id pattern, matched with fullmatch: with re.match a `$`
 # would also accept an id that ends in a newline.
 _LAYOUT_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")

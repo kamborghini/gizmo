@@ -1,0 +1,25 @@
+        /* ---------- Stock: what its tabs share ---------- */
+        /* The colour dot beside a stock line: its glass's colour family, or its category's. */
+        .stock-dot { display: inline-block; flex: none; width: var(--sp-2); height: var(--sp-2); border-radius: var(--radius-circle); background: var(--ink-4); }
+        /* A glass's dot is its own colour (the owner colours, named as the glass is); a category's is the stock app's. */
+        .stock-dot[data-tone="blue"] { background: var(--owner-blue); }
+        .stock-dot[data-tone="green"] { background: var(--owner-green); }
+        .stock-dot[data-tone="amber"], .stock-dot[data-tone="yellow"] { background: var(--owner-yellow); }
+        .stock-dot[data-tone="orange"], .stock-dot[data-tone="accessories"] { background: var(--owner-orange); }
+        .stock-dot[data-tone="red"] { background: var(--owner-red); }
+        .stock-dot[data-tone="pink"] { background: var(--owner-pink); }
+        .stock-dot[data-tone="purple"], .stock-dot[data-tone="projector"] { background: var(--owner-purple); }
+        .stock-dot[data-tone="rings"] { background: var(--chart-1); }
+        /* Every Stock tab lays its panels out the page's distance apart: the tab's host is a holder (no class). */
+        #stock-content > div:not([class]) { display: flex; flex-direction: column; gap: var(--page-rhythm); min-width: 0; }
+        #stock-content > div:not([class]) > * { margin: 0; min-width: 0; }
+        #stock-content > div:not([class]) > div:not([class]) { display: flex; flex-direction: column; gap: var(--page-rhythm); }
+        #stock-content > div:not([class]) > div:not([class]) > * { margin: 0; min-width: 0; }
+        #stock-content > div:not([class]) > div:not([class]):empty { display: none; }
+        /* A sheet printed on its own (stockPrintFrame): the frame takes no room, its page is paper. */
+        body.stk-print-doc { margin: 0; background: var(--paper); }
+        .stk-print-frame { position: absolute; left: 0; top: 0; width: 0; height: 0; border: 0; opacity: 0; }
+        .stock-line-name { display: block; }
+        .stock-line-cat, .stock-was { color: var(--text-secondary); font-size: var(--text-xs); line-height: var(--lh-caption); }
+        .stock-line-cat { display: block; }
+        .stock-was { margin-left: var(--sp-2); }

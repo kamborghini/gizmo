@@ -54,6 +54,9 @@
             globe: SV('<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>'),
             users: SV('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
             rotate: SV('<polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>'),
+            minus: SV('<path d="M5 12h14"/>'),
+            camera: SV('<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>'),
+            clipboardCheck: SV('<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/>'),
             box: SV('<path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><path d="m3.3 7 7.703 4.734a2 2 0 0 0 1.994 0L20.7 7"/><path d="m7.5 4.27 9 5.15"/>'),
             /* One glyph per section, from the same lucide set: two sections
                shared a tick, two a box, Forecast wore an 'info' circle, and
@@ -277,6 +280,7 @@
         $('nav-connector').append(ico(I.arrowsLR), document.createTextNode('Xero sync'),
             el('span', 'beta-tag', 'Beta'));
         $('nav-sizes').append(ico(I.ruler), document.createTextNode('Size list'));
+        $('nav-stock').append(ico(I.box), document.createTextNode('Stock'));
         $('nav-crm').append(ico(I.briefcase), document.createTextNode('CRM'),
             el('span', 'beta-tag', 'Beta'));
         $('nav-loans').append(ico(I.projector), document.createTextNode('Loan units'));

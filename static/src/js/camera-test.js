@@ -12,79 +12,13 @@
            without one (the stock app's own, loaded only when asked), the beep
            and buzz a label gives, and keeping the screen awake while the
            camera is open.
-           Nothing is saved or sent. Delete this section, its row in Settings,
-           its styles and its tests once phone scanning is decided. */
+           The reader, the beep and the buzz live with the Stock tab's scanner
+           (stock-scan.js), which this test calls. Nothing is saved or sent.
+           Delete this section, its row in Settings, its styles and its tests
+           once phone scanning is decided. */
         function cameraTestReason(e) {
             if (!e) return 'no reason given';
             return ((e.name ? e.name + ': ' : '') + (e.message || '')).trim() || String(e);
-        }
-        /* The bundled reader, fetched the first time a phone needs it: the
-           shell names its URL, so the page never carries it up front. */
-        let labelReaderLoad = null;
-        function loadLabelReader() {
-            if (window.ZXing) return Promise.resolve(window.ZXing);
-            if (labelReaderLoad) return labelReaderLoad;
-            const meta = document.querySelector('meta[name="label-reader"]');
-            if (!meta) return Promise.reject(new Error('this page names no reader'));
-            labelReaderLoad = new Promise((resolve, reject) => {
-                const s = document.createElement('script');
-                s.src = meta.content;
-                s.onload = () => {
-                    if (window.ZXing) { resolve(window.ZXing); return; }
-                    labelReaderLoad = null;
-                    reject(new Error('the reader did not start'));
-                };
-                s.onerror = () => { labelReaderLoad = null; reject(new Error('the reader did not load')); };
-                document.head.append(s);
-            });
-            return labelReaderLoad;
-        }
-        /* One frame read the way the stock sheet reads labels today: Code 39,
-           with both binarizers (even light, then uneven), over the whole frame
-           and then the middle band where a label is usually held. */
-        function readLabelFrame(Z, video, canvas, cx) {
-            const tryRead = () => {
-                for (const Bin of [Z.GlobalHistogramBinarizer, Z.HybridBinarizer]) {
-                    try {
-                        const r = new Z.Code39Reader().decode(new Z.BinaryBitmap(new Bin(new Z.HTMLCanvasElementLuminanceSource(canvas))));
-                        if (r && r.getText()) return r.getText();
-                    } catch (e) { /* nothing in this frame */ }
-                }
-                return null;
-            };
-            const vw = video.videoWidth || 0, vh = video.videoHeight || 0;
-            if (!vw || !vh) return null;
-            canvas.width = vw; canvas.height = vh;
-            cx.drawImage(video, 0, 0, vw, vh);
-            const whole = tryRead();
-            if (whole) return whole;
-            const cw = Math.max(2, (vw * 0.9) | 0), ch = Math.max(2, (vh * 0.5) | 0);
-            canvas.width = cw; canvas.height = ch;
-            cx.drawImage(video, ((vw - cw) / 2) | 0, ((vh - ch) / 2) | 0, cw, ch, 0, 0, cw, ch);
-            return tryRead();
-        }
-        /* The beep and the buzz a read label gives, as the stock sheet does:
-           in a workshop nobody is looking at the screen. Says which happened. */
-        function labelBeep(good) {
-            let buzzed = false, beeped = false;
-            try { if (navigator.vibrate) buzzed = navigator.vibrate(good ? 35 : [40, 70, 40]); } catch (e) { /* no buzz */ }
-            try {
-                const C = window.AudioContext || window.webkitAudioContext;
-                if (C) {
-                    const ctx = labelBeep.ctx || (labelBeep.ctx = new C());
-                    if (ctx.state === 'suspended') ctx.resume();
-                    const o = ctx.createOscillator(), g = ctx.createGain(), t = ctx.currentTime;
-                    o.type = 'sine';
-                    o.frequency.value = good ? 880 : 200;
-                    g.gain.setValueAtTime(0.0001, t);
-                    g.gain.exponentialRampToValueAtTime(good ? 0.22 : 0.3, t + 0.012);
-                    g.gain.exponentialRampToValueAtTime(0.0001, t + (good ? 0.14 : 0.3));
-                    o.connect(g); g.connect(ctx.destination);
-                    o.start(t); o.stop(t + (good ? 0.15 : 0.31));
-                    beeped = true;
-                }
-            } catch (e) { /* no sound */ }
-            return { buzzed: !!buzzed, beeped: beeped };
         }
         function openCameraTest(opener) {
             let stream = null, timer = null, wake = null;

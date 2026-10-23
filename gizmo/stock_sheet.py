@@ -32,7 +32,9 @@ def listing() -> dict:
     items = stock.items_in_order(st["items"])
     rows = sorted(items, key=lambda i: (i["category"], i["sub_category"], i["id"]))
     return {"items": [_view(i) for i in rows], "summary": stock_figures.compute_current(items),
-            "live": bool(st["settings"].get("live_since"))}
+            "live": bool(st["settings"].get("live_since")),
+            # Which glass Mono and HM lines are (the move writes it): the list puts them first.
+            "glass_families": dict(st["settings"].get("glass_families") or {})}
 
 
 def _usage_row(who: dict, it: dict, drop: int) -> dict:
@@ -92,17 +94,27 @@ def edit(uid: str, item_id, changes: dict, seen: dict, as_count: bool) -> dict:
 
 
 def counts(uid: str, counts: list, as_count: bool = True) -> dict:
-    """A screenful of counts in one go: one change, one snapshot."""
+    """A screenful of counts in one go: one change, one snapshot. A count may
+    say what the shelf showed when it began (`seen`): a phone keeps its counts
+    across reloads, so one begun before a delivery would put the shelf back to
+    before it. A line changed since is refused by name, and nothing of the
+    save is written."""
     if not isinstance(counts, list) or not counts or len(counts) > 500:
         raise stock.Refused(400, "Send between 1 and 500 counts at a time.")
     with stock._lock:
         st = stock.state()
         who = stock.actor(uid)
-        wanted = {}
+        wanted, moved = {}, []
         for c in counts:
             if not isinstance(c, dict):
                 raise stock.Refused(400, "Every count needs a stock line and a figure.")
-            wanted[_line(st, c.get("id"))["id"]] = stock.coerce("current", c.get("current"))
+            it = _line(st, c.get("id"))
+            wanted[it["id"]] = stock.coerce("current", c.get("current"))
+            if c.get("seen") is not None and stock.coerce("current", c.get("seen")) != it["current"]:
+                moved.append(f"{stock_figures.item_name(it)} (now {it['current']})")
+        if moved:
+            raise stock.Refused(409, "Changed since you started counting, by someone else or another screen: "
+                                     + ", ".join(moved) + ". Count those again if you need to.")
         rows, saved = [], 0
         for item_id, value in wanted.items():
             it = st["items"]["items"][str(item_id)]

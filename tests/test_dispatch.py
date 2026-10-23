@@ -86,6 +86,7 @@ SECTIONS = [
     'stock-backups.py',                  # Stock in Reactor: stock backups and the nightly job (plan 2a)
     'stock-link.py',                     # Stock in Reactor: the link moved in (plan 2b)
     'stock-ai.py',                       # Stock in Reactor: AI and the chat (plan 2b)
+    'stock-screens.py',                  # plan 3: what the Stock tab's screens read, and the tab waiting for the move
     'runner.py',                         # the runner's own toy tests, and the runner
 ]
 
