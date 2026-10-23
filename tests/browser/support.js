@@ -43,6 +43,15 @@ const READS = {
   '/api/privacy': [R()],
   '/api/auth/mfa': [R('status')],
   '/api/mail/settings': [R('get')],
+  // The Stock tab's reads (plan 3, 23 Oct 2026): every op here only reads.
+  '/api/stock/sheet': [R('list'), R('export')],
+  '/api/stock/overview': ['briefing', 'alerts', 'insights', 'trends', 'forecast', 'outlook', 'settings', 'fx'].map(op => R(op)),
+  '/api/stock/orders': [R('list', 'open_only'), R('reorder'), R('suggest')],
+  '/api/stock/quarters': [R('list'), R('compare', 'left', 'right')],
+  '/api/stock/history': [R('search', 'q', 'action', 'person', 'item_id', 'start', 'end', 'before', 'limit'), R('item', 'id')],
+  '/api/stock/backups': [R('list')],
+  '/api/stock/mapping': [R('mapping'), R('parked')],
+  '/api/stock/suppliers': [R('list')],
 };
 
 function isRead(route, b) {

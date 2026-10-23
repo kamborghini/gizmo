@@ -2,9 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert');
 const SCREENS = require('../screens');
 
-test('29 states, each named once', () => {
-  assert.strictEqual(SCREENS.length, 29);
-  assert.strictEqual(new Set(SCREENS.map(s => s.id)).size, 29);
+test('51 states, each named once', () => {
+  assert.strictEqual(SCREENS.length, 51);
+  assert.strictEqual(new Set(SCREENS.map(s => s.id)).size, 51);
 });
 const fs = require('fs');
 const path = require('path');

@@ -220,7 +220,7 @@
            reading order, tab order and screen reader order are the order you
            see, and print can overrule it. The arithmetic is the pure block
            above; the design is docs/superpowers/specs/2026-09-17-draggable-widget-grid-design.md. */
-        const APP_VIEWS = ['liability', 'forecast', 'connector', 'crm', 'loans', 'mail', 'files', 'team', 'labels', 'sizes', 'memory', 'skills', 'chat', 'guide'];
+        const APP_VIEWS = ['liability', 'forecast', 'connector', 'crm', 'loans', 'mail', 'files', 'team', 'labels', 'sizes', 'stock', 'memory', 'skills', 'chat', 'guide'];
         // Chat is a log and a composer, not a page of cards, which is also why the server's LAYOUT_VIEWS leaves it out.
         const WG_VIEWS = APP_VIEWS.filter(v => v !== 'chat');
         const wgRoot = (view) => $(view + '-content');

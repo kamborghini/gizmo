@@ -1,0 +1,203 @@
+        /* ---------- Stock: Inventory ---------- */
+        /* The head's six actions: words on a desk, the same six as icons on a phone. */
+        @media (min-width: 641px) { .stk-acts > .stk-act-icon { display: none; } }
+        @media (max-width: 640px) {
+            .stk-acts > .stk-act-word { display: none; }
+            .stk-acts { flex-wrap: nowrap; gap: var(--sp-1); }
+        }
+        /* The search, with the camera beside it on a phone or a tablet: shelf
+           labels are scanned on a phone, and a line is found by hand at a desk. */
+        .stk-find { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+        @media (min-width: 901px) { .stk-find > .stk-scan-btn { display: none; } }
+        @media (max-width: 640px) {
+            .stk-find { flex: 1 1 100%; }
+            .stk-find > .tbl-search { flex: 1 1 0; min-width: 0; }
+            .stk-cats { flex: 1 1 100%; display: flex; min-width: 0; }
+            /* The categories scroll sideways on one line, as the stock app's do. */
+            .stk-cats > .segmented:has(> :nth-child(4)) { flex-wrap: nowrap; overflow-x: auto; }
+            .stk-cats > .segmented:has(> :nth-child(4)) > * { flex: 1 0 auto; }
+        }
+        /* Count cards are always grouped, so the layout choice goes while they show. */
+        .stk-inv.stk-workshop .stk-layout { display: none; }
+        .stk-pending { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); }
+
+        /* The list: a figure reads as text until it is pointed at or changed. */
+        .stk-inv-table td { white-space: nowrap; }
+        /* Fourteen columns on a laptop's width: 8 between them, not 12. */
+        .stk-inv-table :is(th, td):not(:first-child, :last-child) { padding-inline: var(--sp-1); }
+        .stk-inv-table .stk-cell-in { height: var(--control-h); min-height: var(--control-h); padding-block: 0; padding-inline: var(--sp-1-5);
+            width: calc(var(--field-w-xs) - var(--sp-2)); font-size: var(--text-body); text-align: right; }
+        .stk-inv-table .stk-cell-in.stk-txt { width: var(--field-w-sm); text-align: left; }
+        .stk-inv-table .stk-cell-in.stk-in-currency { width: var(--field-w-xs); }
+        /* A supplier's whole name fits its box; the long heads wrap onto two lines to make the room. */
+        .stk-inv-table .stk-cell-in.stk-in-supplier { width: var(--field-w-lg); }
+        .stk-inv-table thead th { white-space: normal; }
+        .stk-inv-table .stk-cell-in:not(:focus, .stk-edited, [aria-invalid="true"]) { border-color: transparent; background: transparent; box-shadow: none; }
+        @media (hover: hover) { .stk-inv-table .stk-cell-in:not(:focus, .stk-edited, [aria-invalid="true"]):hover { border-color: var(--border-default); } }
+        /* An edited box is marked, and its row's Save shows. */
+        .stk-inv-table .stk-cell-in.stk-edited { background: var(--warning-bg); border-color: var(--warning); }
+        .stk-inv-table .toggle.stk-edited .sw { box-shadow: 0 0 0 var(--bw-strong) var(--warning); }
+        .stk-inv-table .stk-cell-in[aria-invalid="true"] { background: var(--error-bg); }
+        .stk-inv-table tr.stk-grp > td { background: var(--surface-secondary); height: var(--control-h); }
+        .stk-grp-line { display: flex; align-items: center; gap: var(--sp-2); }
+        .stk-grp-name { font-weight: var(--weight-semibold); }
+        .stk-grp-stat { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .stk-size { font-weight: var(--weight-semibold); }
+        .stk-size-sub { display: block; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .stk-wo-tag { margin-left: var(--sp-2); }
+        .stk-inv-table tr.stk-wo > td, .stk-muted { color: var(--text-tertiary); }
+        .stk-inv-table td.stk-acts-cell { width: 1%; }
+        .stk-row-acts { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-1); }
+        /* A long head wraps before a figure is cut. */
+        .stk-inv-table th { white-space: normal; }
+        /* A head that sorts reads as a head, with its arrow. */
+        .ktable th .btn.stk-sort { height: auto; min-height: 0; padding: 0; border: 0; background: none; box-shadow: none;
+            font-size: inherit; font-weight: inherit; line-height: inherit; color: inherit; gap: var(--sp-1); white-space: normal; text-align: inherit; }
+        .ktable th .btn.stk-sort.on { color: var(--text-primary); }
+        .ktable th .btn.stk-sort svg { width: var(--icon-xs); height: var(--icon-xs); }
+        .stk-up { transform: rotate(180deg); }
+        @media (max-width: 640px) {
+            .stk-inv-table .stk-cell-in { height: var(--control-h-lg); }
+            .stk-inv-table tr.stk-grp > td { padding-block: var(--sp-1); }
+            /* A row's Save, Receive and History take a line of their own, clear of the written-off switch. */
+            .stk-inv-table td.stk-acts-cell { flex: 1 1 100%; width: auto; }
+            .stk-inv-table td.stk-acts-cell > .stk-row-acts { justify-content: flex-start; }
+        }
+
+        /* Workshop mode's count cards, and the stock-take's: the sizes and the
+           behaviour the stock app's have, under sticky group heads. */
+        .stk-count { display: flex; flex-direction: column; }
+        .stk-count-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: var(--sp-2);
+            margin-inline: calc(-1 * var(--panel-pad-x)); padding: var(--sp-2) var(--panel-pad-x);
+            background: var(--surface-secondary); border-block: var(--bw-hairline) solid var(--border-soft);
+            font-size: var(--text-xs); line-height: var(--lh-caption); font-weight: var(--weight-semibold); }
+        .stk-count-n { margin-left: auto; font-weight: var(--weight-regular); color: var(--text-tertiary); }
+        .stk-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--sp-3);
+            min-height: var(--sp-10); margin-inline: calc(-1 * var(--panel-pad-x)); padding: var(--sp-2) var(--panel-pad-x);
+            border-bottom: var(--bw-hairline) solid var(--border-soft); }
+        .stk-card-name { font-size: var(--text-sm); line-height: var(--lh-control); font-weight: var(--weight-semibold); }
+        .stk-card-sub { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .stk-card.stk-wo .stk-card-name { color: var(--text-tertiary); }
+        .stk-stepper { display: flex; align-items: center; gap: var(--sp-1-5); }
+        .stk-stepper > .icon-btn.stk-step { width: var(--control-h-lg); height: var(--control-h-lg); min-width: var(--control-h-lg);
+            border: var(--bw-hairline) solid var(--border-default); background: var(--surface-secondary); color: var(--text-primary); touch-action: manipulation; }
+        .stk-stepper > .stk-val { width: var(--field-w-xs); height: var(--control-h-lg); min-height: var(--control-h-lg); padding: 0;
+            text-align: center; font-size: var(--text-head); line-height: var(--lh-control); font-weight: var(--weight-semibold); }
+        /* An unsaved count, and in a stock-take a line counted short or over, is amber; counted right, green. */
+        .stk-card:is(.stk-dirty, .stk-var) { background: var(--warning-bg); }
+        .stk-card:is(.stk-dirty, .stk-var) .stk-val { border-color: var(--warning); }
+        .stk-card.stk-ok { background: var(--success-bg); }
+        .stk-inv.stk-workshop .stk-count { max-width: calc(var(--measure) + 2 * var(--panel-pad-x)); }
+        /* Save N counts and Discard, held at the foot of the screen while there are any. */
+        .stk-savebar { position: sticky; bottom: 0; z-index: 2; display: flex; justify-content: flex-end; gap: var(--sp-2);
+            margin: 0 calc(-1 * var(--panel-pad-x)) calc(-1 * var(--panel-pad-y)); padding: var(--sp-3) var(--panel-pad-x);
+            background: var(--surface-primary); border-top: var(--bw-hairline) solid var(--border-default);
+            border-radius: 0 0 var(--radius-card) var(--radius-card); box-shadow: var(--shadow-raise); }
+        .stk-savebar[hidden] { display: none; }
+        @media (max-width: 640px) {
+            .stk-savebar > .btn { flex: 1 1 0; min-height: var(--control-h-lg); }
+            .stk-savebar > .stk-save-counts { flex: 2 1 0; }
+        }
+
+        /* The camera window: the picture with its frame on the dark of the
+           sidebar, what to do, and the last label read. Full screen on a phone. */
+        .modal.stk-scan { max-width: 480px; overflow: hidden; }
+        .modal-body.stk-scan-body { padding: 0; background: var(--surface-chrome); color: var(--text-on-chrome); display: flex; flex-direction: column; }
+        .stk-scan-view { position: relative; aspect-ratio: 3 / 4; overflow: hidden; background: var(--surface-chrome); }
+        .stk-scan-video { display: block; width: 100%; height: 100%; object-fit: cover; }
+        .stk-scan-frame { position: absolute; inset: 32% 10%; border: var(--bw-strong) solid var(--text-on-chrome); border-radius: var(--radius-inset); }
+        .stk-scan-hint { margin: 0; padding: var(--sp-3) var(--sp-4); text-align: center; font-size: var(--text-sm); line-height: var(--lh-control); }
+        .stk-scan-log { margin: 0 var(--sp-4) var(--sp-4); padding: var(--sp-2-5) var(--sp-3); border-radius: var(--radius-inset);
+            background: var(--success-bg); color: var(--success); text-align: center; font-size: var(--text-sm); line-height: var(--lh-control); font-weight: var(--weight-semibold); }
+        .stk-scan-log.stk-miss { background: var(--error-bg); color: var(--error); }
+        .stk-scan-log[hidden] { display: none; }
+        @media (max-width: 640px) {
+            .modal-overlay.stk-scan-ov { padding: 0; }
+            .modal.stk-scan { max-width: none; height: 100%; max-height: none; border-radius: 0; }
+            .modal-body.stk-scan-body { flex: 1 1 auto; }
+            .stk-scan-view { flex: 1 1 auto; aspect-ratio: auto; }
+            .modal.stk-scan .modal-foot > .btn { flex: 1 1 auto; min-height: var(--control-h-lg); }
+        }
+        /* The help when the camera is refused, with the diagnostics line to pass on. */
+        .modal.stk-help { max-width: 520px; }
+        .stk-help-sub { margin: 0 0 var(--sp-3); font-size: var(--text-body); line-height: var(--lh-prose); color: var(--text-secondary); }
+        .stk-help-steps { margin: 0 0 var(--sp-3); padding-left: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-2);
+            font-size: var(--text-sm); line-height: var(--lh-prose); }
+        .modal-foot.stk-help-foot { align-items: center; flex-wrap: wrap; }
+        .stk-diag { margin-right: auto; font-size: var(--text-micro); line-height: var(--lh-caption); color: var(--text-tertiary); }
+
+        /* Add item. */
+        .modal.stk-add { max-width: 520px; }
+        .stk-form { display: flex; flex-direction: column; gap: var(--sp-3); }
+        .stk-form .pfield > input { width: 100%; }
+        .stk-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-3); }
+        .stk-pair .pfield > input { width: 100%; }
+        .stk-bc-row { display: flex; gap: var(--sp-2); }
+        .stk-bc-row > input { flex: 1 1 auto; min-width: 0; }
+        .stk-form .segmented { align-self: flex-start; }
+        @media (max-width: 640px) { .stk-form .segmented:has(> :nth-child(4)) { display: grid; grid-template-columns: 1fr 1fr; align-self: stretch; } }
+
+        /* The figures a window leads with (the import preview, the stock-take review). */
+        .stk-figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(6rem, 1fr)); gap: var(--sp-4); margin-bottom: var(--sp-4); }
+        .stk-fig-v { font-size: var(--fig-s); line-height: var(--lh-none); font-weight: var(--weight-semibold); color: var(--text-primary); }
+        .stk-fig-l { margin-top: var(--sp-1-5); font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .stk-import-file { margin: 0 0 var(--sp-3); font-size: var(--text-body); color: var(--text-secondary); }
+        .stk-to { font-weight: var(--weight-semibold); }
+        .stk-diff { font-weight: var(--weight-semibold); }
+        .stk-up-n { color: var(--success); }
+        .stk-down-n { color: var(--error); }
+        .stk-more, .stk-new { margin: var(--sp-3) 0 0; font-size: var(--text-body); line-height: var(--lh-prose); color: var(--text-secondary); }
+        .modal-body > .ktable-wrap { margin-bottom: 0; }
+        .modal.stk-import .modal-body > .field-help { margin: var(--sp-4) 0 0; }
+        .modal.stk-review { max-width: 600px; }
+        .modal.stk-review .pfield { margin-top: var(--sp-4); }
+        @media (max-width: 640px) { .stk-cause { flex: 1 1 100%; } }
+
+        /* The stock-take: a full window of count cards, its progress held at the top. */
+        .modal.stk-take { max-width: 720px; height: 90vh; }
+        .modal-body.stk-take-body { padding-top: 0; flex: 1 1 auto; }
+        .stk-take-prog { position: sticky; top: 0; z-index: 2; margin: 0 calc(-1 * var(--sp-4)); padding: var(--sp-2-5) var(--sp-4);
+            background: var(--surface-primary); border-bottom: var(--bw-hairline) solid var(--border-default);
+            font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }
+        .stk-take-list .stk-count-head { top: calc(var(--lh-control) + 2 * var(--sp-2-5) + var(--bw-hairline)); margin-inline: calc(-1 * var(--sp-4)); padding-inline: var(--sp-4); border-top: 0; }
+        .stk-take-list .stk-card { margin-inline: calc(-1 * var(--sp-4)); padding-inline: var(--sp-4); }
+        @media (max-width: 640px) {
+            .modal-overlay.stk-take-ov { padding: 0; }
+            .modal.stk-take { max-width: none; height: 100%; max-height: none; border-radius: 0; }
+            .modal.stk-take .modal-foot > .btn { flex: 1 1 auto; }
+        }
+
+        /* Shelf labels: paper, Avery J8160 (A4, 3 by 7 labels of 63.5 by 38.1 mm,
+           15.15 mm top and 7.2 mm side margins, 2.5 mm between columns). On
+           screen a white A4 page on grey; printed from a frame holding the sheet
+           alone, where the label edges and the shadow are not drawn. */
+        .modal.stk-labels { max-width: calc(210mm + 2 * var(--sp-6)); }
+        .modal-body.stk-labels-body { background: var(--surface-secondary); padding: var(--sp-6); }
+        .stk-labels-body .stk-a4 { margin-inline: auto; box-shadow: var(--shadow-panel); }
+        .stk-labels-body .stk-a4 + .stk-a4 { margin-top: var(--sp-6); }
+        .stk-labels-body .stk-lbl { outline: 0.3mm solid var(--paper-rule); outline-offset: -0.3mm; }
+        .modal-foot.stk-labels-foot { align-items: center; }
+        .stk-labels-n { margin-right: auto; font-size: var(--text-body); color: var(--text-tertiary); }
+        .stk-a4 { box-sizing: border-box; width: 210mm; min-height: 297mm; padding: 15.15mm 7.2mm 0; display: grid;
+            grid-template-columns: repeat(3, 63.5mm); grid-auto-rows: 38.1mm; column-gap: 2.5mm; align-content: start;
+            background: var(--paper); color: var(--paper-ink); font-family: var(--font-sans); }
+        .stk-a4 + .stk-a4 { break-before: page; }
+        .stk-lbl { box-sizing: border-box; display: flex; flex-direction: column; min-width: 0; overflow: hidden; padding: 2.4mm 3mm 2mm; break-inside: avoid; }
+        .stk-lbl-logo { align-self: flex-start; max-width: 65%; margin: 0 0 1.2mm; }
+        .stk-lbl-logo > svg { display: block; height: 4.6mm; width: auto; max-width: 100%; }
+        .stk-lbl-title { display: flex; align-items: flex-start; gap: 1.6mm; font-size: var(--text-sm); line-height: var(--lh-control); font-weight: var(--weight-semibold); }
+        .stk-lbl-title > span:last-child { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+        .stk-lbl-title > .stock-dot { width: 3.4mm; height: 3.4mm; margin-top: 0.8mm; border-radius: var(--radius-swatch); }
+        /* A label's swatch is the glass's own colour, as today's are (the screen's dots are the
+           chart palette, where amber reads blue): the named colours the CRM's owners wear. */
+        .stk-lbl-title > .stock-dot:is([data-tone="blue"]) { background: var(--owner-blue); }
+        .stk-lbl-title > .stock-dot:is([data-tone="green"]) { background: var(--owner-green); }
+        .stk-lbl-title > .stock-dot:is([data-tone="amber"], [data-tone="yellow"]) { background: var(--owner-yellow); }
+        .stk-lbl-title > .stock-dot:is([data-tone="orange"], [data-tone="accessories"]) { background: var(--owner-orange); }
+        .stk-lbl-title > .stock-dot:is([data-tone="red"]) { background: var(--owner-red); }
+        .stk-lbl-title > .stock-dot:is([data-tone="pink"]) { background: var(--owner-pink); }
+        .stk-lbl-title > .stock-dot:is([data-tone="purple"], [data-tone="projector"]) { background: var(--owner-purple); }
+        .stk-lbl-title > .stock-dot:is([data-tone="rings"]) { background: var(--chart-1); }
+        .stk-lbl-cat { margin: 0 0 0 5mm; font-size: var(--text-micro); line-height: var(--lh-caption); color: var(--paper-ink-4); }
+        .stk-lbl-bc { display: block; width: 100%; height: 8mm; margin-top: auto; fill: var(--paper-ink); }
+        .stk-lbl-code { font-family: var(--font-mono); font-size: var(--text-micro); line-height: var(--lh-caption); text-align: center; }

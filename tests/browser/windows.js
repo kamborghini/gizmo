@@ -8,6 +8,9 @@ const labels = async (p, h) => { await h.nav('labels'); await h.waitText('#label
 const loans = async (p, h) => { await h.nav('loans'); await h.waitText('#loans-content', 'Quayside Exhibitions'); };
 const mail = async (p, h) => { await h.nav('mail'); await h.waitText('#mail-content', 'Artwork for the autumn tour gobos'); };
 const more = item => ({ sel: '#labels-content .more-btn', item });
+const stockSuppliers = async (p, h) => { await h.nav('stock'); await h.tab('suppliers'); await h.waitText('.view.active', 'orders@northbeam.example'); };
+const stockActivity = async (p, h) => { await h.nav('stock'); await h.tab('activity'); await h.waitText('.view.active', 'INV-24'); };
+const stockInventory = async (p, h) => { await h.nav('stock'); await h.tab('inventory'); await h.waitText('.view.active', 'Clear Etch'); };
 
 module.exports = [
   { id: 'pm~size-rules', before: labels, menu: more('Size rules') },
@@ -21,4 +24,9 @@ module.exports = [
   { id: 'loans~add-unit', before: loans, opener: { sel: '#loans-content button', text: 'Add a unit' } },
   { id: 'settings', before: labels, menu: { sel: '#side-user', item: 'Settings' } },
   { id: 'inbox~compose', before: mail, opener: { sel: '#mail-content button', text: 'Compose' } },
+  { id: 'stock~add-item', before: stockInventory, opener: { sel: '.view.active button', text: 'Add item' } },
+  { id: 'stock~receive', before: stockInventory, opener: { sel: '.view.active button', text: 'Receive stock' } },
+  { id: 'stock~rename-quarter', before: stockActivity, opener: { sel: '.view.active button', text: 'Rename' } },
+  { id: 'stock~undo-delivery', before: stockActivity, opener: { sel: '.view.active button', text: 'Undo a delivery' } },
+  { id: 'stock~suppliers-all', before: stockSuppliers, opener: { sel: '.view.active button', text: 'Add or edit all at once' } },
 ];

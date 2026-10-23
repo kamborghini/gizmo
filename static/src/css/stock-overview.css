@@ -1,0 +1,79 @@
+        /* ---------- Stock: overview ---------- */
+        /* The tab's blocks sit one page rhythm apart, as a page root's own children do (the
+           tab's host is a classless holder, so the page's rule does not reach them). */
+        /* Since you were last here: the one notice, tinted as information, its words then its cross. */
+        .resp-note.stock-ov-news { display: flex; flex-wrap: nowrap; align-items: flex-start; justify-content: flex-start; gap: var(--sp-2-5);
+            background: var(--info-bg); color: var(--text-primary); margin: 0; }
+        .stock-ov-news > .ic { flex: none; color: var(--info); margin-top: var(--sp-0-5); }
+        .stock-ov-news > .ic svg { width: var(--icon-md); height: var(--icon-md); }
+        .stock-ov-news > p { flex: 1; margin: 0; }
+        /* The live warnings: Reactor's alerts banner, a dot by severity, a row that opens its line. */
+        .stock-ov-warn > .alerts-head > .stock-ov-more { margin-left: auto; }
+        .alert-row > .adot:is(.sev-critical) { background: var(--error); }
+        .alert-row > .adot:is(.sev-warning) { background: var(--warning); }
+        .alert-row > .adot:is(.sev-info) { background: var(--text-tertiary); }
+        .stock-ov-alert > .a-tab { flex: none; min-width: var(--field-w-md); }
+        .stock-ov-alert.opens { cursor: pointer; }
+        @media (hover: hover) { .stock-ov-alert.opens:hover > .a-metric { text-decoration: underline; text-decoration-color: var(--link-underline); text-underline-offset: var(--sp-1); } }
+        .stock-ov-alert:has(> .row-open:focus-visible) { box-shadow: var(--ring-action-2); border-radius: var(--radius-row); }
+        /* On a phone the kind and the cross share the first line and the message runs under them. */
+        @media (max-width: 640px) {
+            .stock-ov-alert { flex-wrap: wrap; row-gap: var(--sp-1); }
+            .stock-ov-alert > .a-tab { min-width: 0; }
+            .stock-ov-alert > .icon-btn { margin-left: auto; }
+            .stock-ov-alert > .a-metric { flex: 1 1 100%; order: 3; padding-left: calc(var(--dot-md) + var(--sp-2)); }
+        }
+        /* The quarter's five figures, two across on a phone: three across left 93 for a figure in pounds and pence. */
+        @media (max-width: 640px) { .ov-wrap .metrics.metrics-strip.stock-ov-quarter { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        /* Gobo production to match: the line made, the stock line it is, its button. */
+        .dt-stock-gobo { --dt-cols: minmax(10rem, 1fr) minmax(12rem, 18rem) max-content; }
+        .dt-stock-gobo .choice-select { width: 100%; }
+        /* The stock mapping window: a family's heading over its lines. */
+        .stock-ov-map > h4.card-title:first-child { margin-top: 0; }
+        .stock-ov-map .choice-select { width: 100%; max-width: var(--field-w-lg); }
+        /* Currency exposure: today's figure with its drift beside it. */
+        .stock-ov-fx .card-desc { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+        /* Action needed: the cover tag, the line, the money; rows open their item sheet. */
+        .dt-stock-low { --dt-cols: max-content minmax(0, 1fr) max-content; }
+        .dt-stock-dead { --dt-cols: minmax(0, 1fr) max-content max-content; }
+        .dt-stock-low .lbl-chip { min-width: var(--box-3xl); justify-content: center; font-variant-numeric: tabular-nums; }
+        :is(.dt-stock-low, .dt-stock-dead) > .dt-row:has(.row-open:focus-visible) { box-shadow: var(--ring-action-2); }
+        /* Insights: the score and the headline, the findings, the actions. */
+        .stock-ov-aitop { display: flex; align-items: flex-start; gap: var(--sp-6); margin-top: var(--sp-3); }
+        .stock-ov-score { flex: none; width: var(--field-w-lg); display: flex; flex-direction: column; gap: var(--sp-1); }
+        .stock-ov-score > .fb-meter { margin-top: var(--sp-1); background: var(--surface-sunken); }
+        .stock-ov-headline { margin: 0; font-size: var(--text-head); line-height: var(--lh-control); font-weight: var(--weight-medium); color: var(--text-primary); max-width: var(--measure); align-self: center; }
+        .stock-ov-sub { margin: var(--sp-5) 0 var(--sp-1); font-size: var(--text-body); line-height: var(--lh-control); font-weight: var(--weight-semibold); color: var(--text-secondary); }
+        .stock-ov-finds > .insight.critical .ico { background: var(--error-bg); color: var(--error); }
+        .stock-ov-finds .t { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: var(--sp-2); }
+        .stock-ov-metric { font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; color: var(--text-primary); }
+        .dt-stock-acts { --dt-cols: minmax(0, 1fr) max-content; }
+        .dt-stock-acts .pill { min-width: var(--box-3xl); justify-content: center; }
+        @media (max-width: 640px) {
+            .stock-ov-aitop { flex-direction: column; gap: var(--sp-3); }
+            .stock-ov-score { width: 100%; }
+        }
+        /* A small group of figures (the item sheet's, the health score): the figure first, its label under it. */
+        .stock-ov-figs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--sp-3); margin-bottom: var(--sp-4); }
+        .stock-ov-fig { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-3) var(--sp-4); background: var(--surface-secondary); border-radius: var(--radius-inset); }
+        .stock-ov-fign { font-size: var(--fig-m); line-height: var(--lh-none); font-weight: var(--weight-semibold); letter-spacing: var(--tr-fig); font-variant-numeric: tabular-nums; color: var(--text-primary); }
+        .stock-ov-figof { font-size: var(--text-body); font-weight: var(--weight-regular); letter-spacing: normal; color: var(--text-tertiary); }
+        .stock-ov-figl { font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }
+        .stock-ov-score > .stock-ov-figl { order: -1; font-weight: var(--weight-medium); }
+        /* The item sheet: the question and its live answer, then the facts. */
+        .stock-item-ask { margin-bottom: var(--sp-4); }
+        .stock-item-askrow { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
+        input.stock-item-q { width: var(--field-w-md); }
+        .stock-item-ans { font-size: var(--text-body); line-height: var(--lh-control); font-weight: var(--weight-medium); color: var(--text-tertiary); }
+        .stock-item-ans.ok { color: var(--success); }
+        .stock-item-ans.warn { color: var(--warning-text); }
+        .stock-item-ans.no { color: var(--error); }
+        .stock-item-facts td:first-child { color: var(--text-secondary); }
+        .stock-item-facts td.num { white-space: normal; }
+        /* On a phone the sheet's three buttons wrap, each as wide as its row allows, rather than run off the window. */
+        @media (max-width: 640px) {
+            .stock-item-win > .modal-foot { flex-wrap: wrap; }
+            .stock-item-win > .modal-foot > .btn { flex: 1 1 auto; }
+        }
+        /* A line's history: the why may be long, so it wraps. */
+        .stock-hist-why { color: var(--text-secondary); white-space: normal; overflow-wrap: anywhere; }

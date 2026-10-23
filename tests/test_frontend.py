@@ -15471,6 +15471,633 @@ def t_the_guide_names_every_ai_cost():
         ok(thing in body.group(1), "it names " + thing + ": " + body.group(1))
 
 
+
+@test
+def t_the_stock_nav_shows_only_once_moved_in():
+    """Plan 3: the Stock tab is built before the stock sheet moves in, and
+    nobody sees it until it has: an account with the stock tab sees its nav
+    item only once the server says the sheet is live, and setView sends a
+    link to it elsewhere until then."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    keys = re.search(r"const TAB_KEYS = \[[^\]]*\];", SCRIPT).group(0)
+    js = keys + "\nlet teamMe = null;\n" + fn_src("function tabAllowed(") + "\n" + fn_src("function stockLive(") \
+        + "\n" + fn_src("function stockNavShown(") + r"""
+const out = {};
+teamMe = { role: 'master', tabs: null, stock_live: false }; out.masterBefore = stockNavShown();
+teamMe = { role: 'master', tabs: null, stock_live: true }; out.masterAfter = stockNavShown();
+teamMe = { role: 'member', tabs: ['labels'], stock_live: true }; out.withoutTab = stockNavShown();
+teamMe = { role: 'member', tabs: ['labels', 'stock'], stock_live: true }; out.withTab = stockNavShown();
+console.log(JSON.stringify(out));
+"""
+    got = _run_node(js)
+    eq(got, {"masterBefore": False, "masterAfter": True, "withoutTab": False, "withTab": True}, "shown only with the tab, once moved in")
+    ok("'stock'" in keys, "the tab is one of the page's tabs")
+    chrome = fn_src("function applyRoleChrome(")
+    ok("stockNavShown()" in chrome, "the sidebar asks before showing it")
+    ok("if (v === 'stock' && !stockNavShown()) v = homeView();" in fn_src("function setView("), "a link to it goes home until then")
+
+
+STOCK_RULES_START = "/* ---------- stock rules ----------"
+STOCK_RULES_END = "/* ---------- stock rules end ---------- */"
+
+
+def stock_rules_js(extra=""):
+    """The Stock page's shared rules (static/src/js/stock.js) with the few
+    page parts they call, stood in for node."""
+    i, j = SCRIPT.index(STOCK_RULES_START), SCRIPT.index(STOCK_RULES_END)
+    stubs = r"""
+const money = (n, cur, dp) => '£' + Number(n).toLocaleString('en-GB', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+const el = (tag, cls, text) => ({ tag: tag, className: cls || '', textContent: text || '', dataset: {}, children: [],
+    setAttribute() {}, append(...k) { this.children.push(...k); } });
+const document = { createDocumentFragment: () => el('frag'), createTextNode: (t) => ({ text: t }) };
+const changeChip = (trend, text, tone) => ({ trend: trend, text: text, tone: tone });
+const stockSeen = {};
+"""
+    return stubs + SCRIPT[i:j] + "\n" + extra
+
+
+@test
+def t_a_stock_line_has_one_name_on_every_tab():
+    """The same line read four ways across the tabs ('86 64.9' on one, '86 mm
+    ring' on the next) looked like two lines: one name, everywhere."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    got = _run_node(stock_rules_js(r"""
+const it = (category, sub_category, size) => ({ category, sub_category, size, notes: '' });
+console.log(JSON.stringify({ glass: stockName(it('Glass', 'Clear Etch', '20')), ring: stockName(it('Rings', '86', '64.9')),
+  proj: stockName(it('Projector', 'LED80', 'White')), acc: stockName(it('Accessories', 'Lens', '30 degree')),
+  key: stockKeyName('Rings|86|64.9|'), glassKey: stockKeyName('Glass|Blue 12|37.5|') }));"""))
+    eq(got, {"glass": "Clear Etch 20", "ring": "86 mm ring", "proj": "LED80 White", "acc": "Lens 30 degree",
+             "key": "86 mm ring", "glassKey": "Blue 12 37.5"})
+
+
+@test
+def t_stock_groups_put_mono_then_hm_glass_first():
+    """The stock app ranked its two glasses by name; Reactor ranks them by
+    the stock sheet's own setting (which glass is Mono, which is HM)."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    got = _run_node(stock_rules_js(r"""
+const it = (category, sub_category, size) => ({ category, sub_category, size, notes: '' });
+const items = [it('Glass', 'Amber 21', '20'), it('Glass', 'Heavy Matt', '20'), it('Glass', 'Clear Etch', '37.5'),
+  it('Glass', 'Clear Etch', '20'), it('Glass', 'Blue 12', '20'), it('Projector', 'LED80', 'White'),
+  it('Projector', 'LED300', 'Black'), it('Rings', '86', '64.9'), it('Rings', '100', '86')];
+const g = stockGroups(items, { mono: 'Clear Etch', hm: 'Heavy Matt' });
+console.log(JSON.stringify({ labels: g.map(x => x.label), etch: g[0].items.map(i => i.size) }));"""))
+    eq(got["labels"], ["Clear Etch", "Heavy Matt", "Amber 21", "Blue 12", "300W", "80W", "Gobo rings"])
+    eq(got["etch"], ["20", "37.5"], "smallest size first within a group")
+
+
+@test
+def t_a_whole_label_code_finds_one_line():
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    got = _run_node(stock_rules_js(r"""
+const items = [2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29].map(id => ({ id, barcode: id === 25 ? 'DEMO-1' : '' }));
+console.log(JSON.stringify({ cl2: (stockByCode(items, 'cl2') || {}).id, demo: (stockByCode(items, ' demo-1 ') || {}).id,
+  none: stockByCode(items, 'CL99'), code: stockCode(items[6]), plain: stockCode(items[0]) }));"""))
+    eq(got, {"cl2": 2, "demo": 25, "none": None, "code": "DEMO-1", "plain": "CL2"})
+
+
+@test
+def t_a_stock_warning_says_its_line_once():
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    got = _run_node(stock_rules_js(r"""
+stockSeen.sheet = { items: [{ key: 'Glass|Heavy Matt|37.5|', category: 'Glass', sub_category: 'Heavy Matt', size: '37.5', notes: '' }] };
+console.log(JSON.stringify({
+  low: stockWarningText({ kind: 'low_stock', item_key: 'Glass|Heavy Matt|37.5|', message: 'Low stock: Glass / Heavy Matt 37.5 ~10 days left (3 on hand)' }),
+  out: stockWarningText({ kind: 'stockout', item_key: 'Glass|Heavy Matt|37.5|', message: 'Out of stock: Glass / Heavy Matt 37.5 (used 27 this period)' }),
+  all: stockWarningText({ kind: 'large_change', item_key: '', message: 'Active stock value dropped 16%' }) }));"""))
+    eq(got, {"low": "Heavy Matt 37.5 ~10 days left (3 on hand)", "out": "Out of stock: Heavy Matt 37.5 (used 27 this period)",
+             "all": "Active stock value dropped 16%"})
+
+
+@test
+def t_a_stock_change_carries_its_sign_and_share():
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    got = _run_node(stock_rules_js(r"""
+const gbp = (n) => '£' + n.toLocaleString('en-GB');
+console.log(JSON.stringify({ down: stockSigned(-1426, 12350, gbp), up: stockSigned(5, null, String), flat: stockSigned(0, 10, String),
+  chip: stockChange(-1426, 12350, gbp, 'bad') }));"""))
+    eq(got["down"], "-£1,426 (12%)"); eq(got["up"], "+5"); eq(got["flat"], "0 (0%)")
+    eq(got["chip"], {"trend": "down", "text": "-£1,426 (12%)", "tone": "bad"}, "the house chip carries it")
+
+
+@test
+def t_stock_people_keep_their_old_name():
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    got = _run_node(stock_rules_js(r"""
+console.log(JSON.stringify({ moved: stockWho({ who: 'Owen Castellano', user: 'sam' }), link: stockWho({ user: 'gizmo' }),
+  same: stockWho({ who: 'Cameron', user: 'cameron' }) }));"""))
+    eq(got, {"moved": {"name": "Owen Castellano", "was": "sam"}, "link": {"name": "Production", "was": ""},
+             "same": {"name": "Cameron", "was": ""}})
+
+
+@test
+def t_the_stock_overview_keeps_todays_order():
+    """The stock app's Dashboard, in its order: the news, the warnings, the gobo
+    lines to match, the quarter's figures, where the value sits, currency,
+    reorder soon beside dead capital, the insights. The warnings and the
+    matching are drawn whatever the news says (flaw 4.3: they vanished when
+    the news had nothing to say)."""
+    fn = fn_src("function renderStockOverview(")
+    order = ["stockOvNews(", "stockOvWarnings(", "stockOvGobo(", "stockOvFigures(", "stockOvValue(", "stockOvCurrency(",
+             "stockOvAction(", "stockOvInsightsPanel("]
+    at = [fn.index(c) for c in order]
+    eq(at, sorted(at), "today's order")
+    body = fn[fn.index("stockOvNews("):]
+    ok("if (news)" in body and "briefing" not in body[body.index("stockOvWarnings("):], "only the news waits for news")
+
+
+@test
+def t_the_stock_mapping_opens_on_the_family_with_a_parked_line():
+    """Call 9: the mapping lists every line production can make (71), so it
+    has a tab per family and opens on the first with a line waiting."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = fn_src("function stockOvMapFamily(") + r"""
+const r = (family, parked) => ({ family, parked });
+console.log(JSON.stringify({ hm: stockOvMapFamily([r('Colour', 0), r('HM', 2), r('Mono', 1)]),
+  none: stockOvMapFamily([r('Colour', 0), r('Mono', 0)]), empty: stockOvMapFamily([]) }));"""
+    eq(_run_node(js), {"hm": "HM", "none": "Colour", "empty": None})
+    ok("tabStrip(" in fn_src("async function stockOvMapping("), "one family at a time, by tabs")
+
+
+STOCK_INV_STANDINS = r"""
+const window = {};
+let toasts = [], painted = 0, reloaded = 0;
+const STOCK_INV_COL = { current: { head: 'Current', edit: 'int' }, supplier: { head: 'Supplier', edit: 'text' } };
+const STOCK_INV_KEEP = { workshop: 'w', counts: 'c', take: 't', from: 'f' };
+const store = {};
+const localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } };
+const setBusy = () => {}, markInvalid = () => {};
+const addToast = (t) => toasts.push(t), toastError = (t) => toasts.push('ERR ' + t);
+const stockInvPaint = () => { painted++; };
+function stockInvChanged() { painted++; }
+function stockInvReload() { reloaded++; }
+let answer = null;
+const stockRead = async (route, op, body) => answer(route, op, body);
+"""
+
+
+@test
+def t_saving_one_stock_row_keeps_the_others():
+    """Design 4.1: saving one row redrew the whole table and threw away the
+    other rows' unsaved edits. Each line's typing is kept by its id and only
+    the saved line's is let go; a refused save keeps it all and says why in
+    the server's own words (two people at once)."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = STOCK_INV_STANDINS + "const stockInv = { edits: { 3: { current: '7' }, 7: { supplier: 'New Co' } }, pane: { sheet: { summary: {} } } };\n" \
+        + fn_src("function stockInvNumber(") + "\n" + fn_src("async function stockInvSave(") + r"""
+(async () => {
+  const out = {}, it3 = { id: 3, current: 5 }, tr = { querySelector: () => null };
+  answer = () => ({ item: { id: 3, current: 7 } });
+  await stockInvSave(it3, tr, {});
+  out.other = stockInv.edits[7]; out.cleared = !stockInv.edits[3]; out.said = toasts[0];
+  stockInv.edits[3] = { current: '9' }; toasts = [];
+  answer = () => { throw new Error('Someone changed Current since you opened it.'); };
+  await stockInvSave(it3, tr, {});
+  out.kept = stockInv.edits[3]; out.refused = toasts[0];
+  console.log(JSON.stringify(out));
+})();"""
+    got = _run_node(js)
+    eq(got["other"], {"supplier": "New Co"}, "another row's typing survives a save")
+    ok(got["cleared"] and got["said"].startswith("Saved · Current"), got)
+    eq(got["kept"], {"current": "9"}, "a refused save keeps the typing")
+    eq(got["refused"], "ERR Someone changed Current since you opened it.", "and says why in the server's words")
+
+
+@test
+def t_unsaved_stock_counts_survive_a_reload():
+    """Counting on a phone: what is counted and not saved is kept in this
+    browser, comes back with a toast after a reload or lost signal, stays
+    when a save fails, and goes once it is saved."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = STOCK_INV_STANDINS + "const stockInv = { counts: null, told: false };\n" + fn_src("function stockInvKeep(") + "\n" \
+        + fn_src("function stockInvKept(") + "\n" + fn_src("function stockInvCounts(") + "\n" + fn_src("async function stockInvSaveCounts(") + r"""
+(async () => {
+  const out = {};
+  store.c = JSON.stringify({ 3: 4, 9: 1 });
+  out.back = stockInvCounts({ items: [{ id: 3, current: 6 }, { id: 9, current: 1 }] });
+  out.told = toasts[0];
+  answer = () => { const e = new Error('No signal.'); e.noReply = true; throw e; };
+  await stockInvSaveCounts({});
+  out.afterFail = JSON.parse(store.c); out.failSaid = toasts[1];
+  answer = () => ({ saved: 1 });
+  await stockInvSaveCounts({});
+  out.afterSave = store.c === undefined; out.reloaded = reloaded;
+  console.log(JSON.stringify(out));
+})();"""
+    got = _run_node(js)
+    eq(got["back"], {"3": 4}, "a count equal to the shelf is not pending")
+    eq(got["told"], "1 unsaved count restored")
+    eq(got["afterFail"], {"3": 4}, "a failed save keeps them")
+    ok("Your counts are still here" in got["failSaid"], got["failSaid"])
+    ok(got["afterSave"] and got["reloaded"] == 1, "a save lets them go and reads the sheet again")
+
+
+@test
+def t_the_stock_row_save_is_an_ordinary_button():
+    """Call 6: Reactor's one teal button per screen; several edited rows no
+    longer show several teal Saves."""
+    fn = fn_src("function stockInvRow(")
+    ok("textButton('Save', { cls: 'stk-save' })" in fn and "kind: 'primary'" not in fn, fn[:300])
+
+
+@test
+def t_the_stock_search_finds_a_whole_code_exactly():
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = stock_rules_js("const stockInv = { q: '', status: 'all', cat: 'all', watt: 'all' };\n" + fn_src("function stockInvRows(") + r"""
+const items = [2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29].map(id => ({ id, category: 'Glass', sub_category: 'Blue 12', size: '20', notes: '', barcode: '', supplier: '', currency: '', written_off: false }));
+stockInv.q = 'CL2'; const whole = stockInvRows(items).map(i => i.id);
+stockInv.q = 'cl'; const part = stockInvRows(items).length;
+console.log(JSON.stringify({ whole, part }));""")
+    eq(_run_node(js), {"whole": [2], "part": 11})
+
+
+@test
+def t_a_stock_count_box_never_takes_focus_back():
+    """A count box selects its number to be typed over a moment after it is
+    focused; in Chromium select() also focuses, so a box left by Tab or by a
+    click on the window's X took focus back and the X's Enter went into the
+    box (the keyboard journey failed one run in four)."""
+    fn = fn_src("function stockInvCard(")
+    ok("if (document.activeElement === val) val.select();" in fn, "selects only while it still has focus")
+
+
+@test
+def t_the_stock_scanner_counts_a_held_label_once_a_beat():
+    """One label held in view counts once every 1.4 seconds, as today; a
+    different label counts at once."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = fn_src("function stockScanCounts(") + r"""
+const seen = { code: '', at: 0 };
+console.log(JSON.stringify([stockScanCounts(seen, 'CL3', 1000), stockScanCounts(seen, 'CL3', 1500),
+  stockScanCounts(seen, 'CL9', 1600), stockScanCounts(seen, 'CL9', 2900), stockScanCounts(seen, 'CL9', 3100)]));"""
+    eq(_run_node(js), [True, False, True, False, True])
+
+
+@test
+def t_the_stock_scanner_lets_the_camera_go():
+    """Closing the scanner stops every camera track, the reader's loop and
+    the wake lock, so the camera light goes off and the screen may sleep."""
+    fn = fn_src("function stockScanWindow(")
+    ok("stream.getTracks().forEach(t => t.stop())" in fn, "every track stopped")
+    ok("clearInterval(timer)" in fn, "the reader's loop stopped")
+    ok("stockScanWake(false)" in fn and "onClose: stop" in fn, "the screen let go, when the window closes")
+    ok("function stockScanWake(" in SCRIPT and "navigator.wakeLock.request('screen')" in fn_src("async function stockScanWake("),
+       "the screen kept awake while it is open")
+    for name in ("function loadLabelReader(", "function readLabelFrame(", "function labelBeep("):
+        i = SCRIPT.index(name)
+        ok(SCRIPT.rfind("---------- Stock: scanning shelf labels", 0, i) > SCRIPT.rfind("---------- camera test", 0, i),
+           name + " lives with the scanner now, and the camera test calls it there")
+
+
+@test
+def t_the_stock_scanner_helps_when_the_camera_is_refused():
+    """Each way the camera is refused gets its own words and steps, a Try
+    again and the grey line to pass on: inside the Shopify app, another app's
+    browser, blocked, allowed but refused, and a prompt closed."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = "let shopify;\n" + fn_src("function stockScanHelpModel(") + r"""
+const android = 'Mozilla/5.0 (Linux; Android 14) Chrome/130.0 Mobile Safari/537.36';
+const out = {};
+shopify = { environment: { mobile: true } }; out.shopify = stockScanHelpModel('prompt', 'NotAllowedError', android);
+shopify = undefined;
+out.inApp = stockScanHelpModel('prompt', 'NotAllowedError', 'Mozilla/5.0 (Linux; Android 14; wv) Instagram');
+out.denied = stockScanHelpModel('denied', 'NotAllowedError', android);
+out.granted = stockScanHelpModel('granted', 'NotAllowedError', android);
+out.prompt = stockScanHelpModel('prompt', 'NotAllowedError', android);
+console.log(JSON.stringify(out));"""
+    got = _run_node(js)
+    titles = {k: v["title"] for k, v in got.items()}
+    eq(titles, {"shopify": "Allow the camera for the Shopify app", "inApp": "Open this in your own browser",
+                "denied": "Camera access is blocked", "granted": "Camera allowed, but still refused", "prompt": "Allow camera access"})
+    for k, v in got.items():
+        ok(len(v["steps"]) >= 2 and "permission: " in v["diag"], k + " has steps and the grey line")
+        ok("Cameron" not in json.dumps(v), k + ": the page names nobody")
+
+
+@test
+def t_an_unknown_stock_label_says_no_line_matches():
+    ok("'No line matches “' + code + '”'" in fn_src("function stockInvScanToCount("), "a label that is no line says so")
+
+
+STOCK_DEL_STANDINS = r"""
+const window = {};
+let toasts = [], made = [], said = [], busy = [];
+const addToast = (t) => toasts.push(t), toastError = (t) => toasts.push('ERR ' + t), toastOk = (t) => toasts.push('OK ' + t);
+const setBusy = (b, on) => busy.push(on);
+const el = (tag, cls, text) => ({ tag, cls, text, kids: [], append(...k) { this.kids.push(...k); }, classList: { add() {} } });
+const formField = (label, input) => ({ label, input });
+const textButton = (t) => ({ t, type: '' });
+const dialog = () => ({ body: el('div'), foot: () => el('div'), close() { said.push('closed'); } });
+const stockDelInput = (type, value, label, ph) => { const i = { type, value: value == null ? '' : String(value), placeholder: ph, focus() {}, select() {} }; made.push(i); return i; };
+let answer = null, asked = [];
+const stockRead = async (route, op, body) => { asked.push([route, op, body]); return answer(route, op, body); };
+const uiConfirm = async () => true;
+"""
+
+
+@test
+def t_mark_as_ordered_starts_with_the_printed_number():
+    """Call 8: Mark as ordered's reference starts as the purchase order's
+    own number, PO-YYYYMMDD-HHMM, the one the printed order carries. The
+    number is made once, as the draft opens, so the print and the order a
+    minute later still agree."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = STOCK_DEL_STANDINS + fn_src("function stockDelPoNumber(") + "\n" \
+        + "const stockDelPlural = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));\n" \
+        + fn_src("function stockDelPlace(") + r"""
+const number = stockDelPoNumber(new Date(2026, 9, 23, 9, 5));
+stockDelPlace('Brightway Lighting', 'USD', [{ id: 4, qty: 2, unit_cost: 230.38 }], { close() {} }, null, number);
+console.log(JSON.stringify({ number, first: made[0].value }));"""
+    eq(_run_node(js), {"number": "PO-20261023-0905", "first": "PO-20261023-0905"})
+    draft = fn_src("function stockDelDraftOrder(")
+    ok(draft.count("stockDelPoNumber(") == 1, "the draft makes its number once")
+    ok("stockDelPoSheet(s.supplier, cur, l, sums(), print, number)" in draft
+       and "stockDelPlace(s.supplier, cur, l, win, placed, number)" in draft, "and both the print and the order use it")
+
+
+@test
+def t_a_long_stock_email_warns_before_opening():
+    """Over 1800 characters an email app may open a reorder email blank; the
+    compose window says so while the message is that long, before Open is
+    pressed (the stock app's toast came as the mail app took the screen)."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = fn_src("function stockDelLongMail(") + r"""
+console.log(JSON.stringify([stockDelLongMail('x'.repeat(1800)), stockDelLongMail('x'.repeat(1801))]));"""
+    got = _run_node(js)
+    eq(got[0], "", "1800 characters is fine")
+    ok(got[1].startswith("A long message") and "Copy email" in got[1], got[1])
+    compose = fn_src("async function stockDelCompose(")
+    ok("stockDelLongMail(body.value)" in compose and "body.addEventListener('input'" in compose,
+       "the warning follows the message as it is written and typed")
+    ok("addToast('A long message" not in compose, "not a toast as the mail app opens")
+
+
+@test
+def t_a_stock_invoice_received_twice_is_said_in_the_window():
+    """A delivery whose invoice was already received for a line is refused
+    by the route (409); the window says it in the route's own words and
+    keeps every line, so the number or the line can be put right."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = STOCK_DEL_STANDINS + "const stockDelQty = (v) => { const n = parseInt(v, 10); return isFinite(n) && n > 0 ? n : 0; };\n" \
+        + "const stockDelPlural = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));\n" \
+        + fn_src("async function stockDelAccept(") + r"""
+(async () => {
+  const rows = [{ sel: { value: '3' }, qty: { value: '20' }, upd: null, ln: { unit_cost: 4 } },
+                { sel: { value: '9' }, qty: { value: '5' }, upd: { checked: true }, ln: { unit_cost: 2.5 } }];
+  const ui = { busy: (on) => busy.push(on), say: (m) => said.push(m) };
+  answer = () => { const e = new Error('Invoice INV-2410 has already been received for Glass / Amber 21 37.5.'); e.status = 409; throw e; };
+  const got = await stockDelAccept(rows, { invoice_no: 'INV-2410', date: '' }, ui);
+  console.log(JSON.stringify({ got, said, busy, rows: rows.length, sent: asked[0] }));
+})();"""
+    got = _run_node(js)
+    eq(got["got"], None, "nothing received")
+    eq(got["said"][-1], "Invoice INV-2410 has already been received for Glass / Amber 21 37.5.", "the route's own words")
+    eq(got["rows"], 2, "every line kept")
+    eq(got["busy"], [True, False], "and the button is free again")
+    eq(got["sent"][:2], ["receive", "delivery"])
+    eq([l["id"] for l in got["sent"][2]["lines"]], [3, 9])
+    ok("stockDelAccept(rows" in fn_src("async function stockDelDelivery("), "the delivery window accepts through it")
+
+
+@test
+def t_compare_opens_on_the_last_closed_quarter_against_now():
+    """Compare opens on the quarter closed last against the live one; a
+    choice kept from before stays while it still exists, and one that no
+    longer does falls back to the same pair."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = fn_src("function stockRecComparePair(") + r"""
+const closed = [{ id: 2, label: 'Q3 2026' }, { id: 1, label: 'Q2 2026' }];   // as the route gives them, last closed first
+const opts = [['current', 'Q4 2026 (live)'], ['2', 'Q3 2026 (closed)'], ['1', 'Q2 2026 (closed)']];
+console.log(JSON.stringify([stockRecComparePair(closed, opts, null, 'current'), stockRecComparePair(closed, opts, '1', '2'),
+  stockRecComparePair(closed, opts, '9', 'gone')]));"""
+    eq(_run_node(js), [["2", "current"], ["1", "2"], ["2", "current"]])
+    ok("stockRecComparePair(closed, opts, stockRecLeft, stockRecRight)" in fn_src("function stockRecCompare("), "Compare starts from it")
+
+
+@test
+def t_the_stock_history_pages_back_by_its_last_entry():
+    """Show older entries asks the route for the entries before the last one
+    shown and adds them below; a new search starts again. The route's own
+    order is kept (it pages by id), so a page never skips or repeats an
+    entry that a re-sort by time would have moved."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = "const stockRecPage = () => 100;\n" + fn_src("function stockRecHistBody(") + "\n" + fn_src("function stockRecHistMerge(") + r"""
+const st = { q: 'INV', action: '', person: '', start: '', end: '', rows: [{ id: 90, at: '2026-10-21' }, { id: 61, at: '2026-10-20' }], more: true };
+const first = stockRecHistBody(st, false), older = stockRecHistBody(st, true);
+stockRecHistMerge(st, { rows: [{ id: 60, at: '2026-10-01' }, { id: 12, at: '2026-10-19' }], more: false }, true);
+const ids = st.rows.map(r => r.id), more = st.more;
+stockRecHistMerge(st, { rows: [{ id: 99, at: '2026-10-22' }], more: true }, false);
+console.log(JSON.stringify({ first, older, ids, more, fresh: st.rows.map(r => r.id) }));"""
+    got = _run_node(js)
+    eq(got["first"], {"limit": 100, "q": "INV"})
+    eq(got["older"], {"limit": 100, "q": "INV", "before": 61}, "older entries: before the last one shown")
+    eq(got["ids"], [90, 61, 60, 12], "added below, in the route's order")
+    ok(got["more"] is False and got["fresh"] == [99], got)
+    load = fn_src("async function stockRecHistLoad(")
+    ok("stockRecHistBody(st, older)" in load and "stockRecHistMerge(st, d, older)" in load, "the history reads through both")
+
+
+@test
+def t_close_quarter_is_an_ordinary_button():
+    """Call 10: closing the quarter is an ordinary button on Activity, not
+    the page's teal one; the window it opens keeps the one-way button."""
+    fn = fn_src("function stockRecQuarter(")
+    ok("textButton('Close quarter and start new')" in fn and "kind: 'primary'" not in fn, fn[:400])
+    ok("textButton('Close and start new', { kind: 'danger' })" in fn_src("function stockRecClose("), "the window's own button is the one-way kind")
+
+
+@test
+def t_stock_labels_fill_an_avery_j8160():
+    """Avery J8160, as the stock app prints it today: A4, three across and
+    seven down, 63.5 by 38.1 mm, 15.15 mm from the top and 7.2 mm from the
+    sides, 2.5 mm between the columns. Call 7: each label carries the black
+    mark (the production label's own logo, drawn rather than loaded), then
+    the glass's swatch and title, its category, a Code 39 barcode of its
+    code and the code as text."""
+    a4 = next(b for sel, b in _rules(CSS) if sel == ".stk-a4")
+    for want in ("width: 210mm", "min-height: 297mm", "padding: 15.15mm 7.2mm 0", "grid-template-columns: repeat(3, 63.5mm)",
+                 "grid-auto-rows: 38.1mm", "column-gap: 2.5mm"):
+        ok(want in a4, ".stk-a4 has " + want)
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+const LABEL_LOGO = '<svg class="lg">the black mark</svg>';
+const stockCode = (it) => 'CL' + it.id, stockDot = () => el('span', 'stock-dot'), stockInvTitle = (it) => 'Clear Etch ' + it.id;
+const stockInvCode39 = (v) => { const s = el('svg', 'stk-lbl-bc'); s.code = v; return s; };
+""" + fn_src("function stockInvLabelSheet(") + r"""
+const rows = Array.from({ length: 23 }, (_, i) => ({ id: i + 1, category: 'Glass' }));
+const paper = stockInvLabelSheet(rows), first = paper.children[0].children[0];
+console.log(JSON.stringify({ pages: paper.children.map(p => p.children.length), parts: first.children.map(c => c.className),
+  logo: first.children[0].innerHTML, title: first.children[1].textContent, cat: first.children[2].textContent,
+  bc: first.children[3].code, code: first.children[4].textContent }));"""
+    eq(_run_node(js), {"pages": [21, 2], "parts": ["stk-lbl-logo", "stk-lbl-title", "stk-lbl-cat", "stk-lbl-bc", "stk-lbl-code"],
+                       "logo": '<svg class="lg">the black mark</svg>', "title": "Clear Etch 1", "cat": "Glass", "bc": "CL1", "code": "CL1"})
+
+
+@test
+def t_a_stock_label_barcode_is_code_39():
+    """A label's barcode is Code 39 between its * start and stop marks, each
+    character five bars and four spaces, a wide one three narrow ones, a
+    narrow space between characters; lower case is read as upper case. The
+    expected bars come from the published table, not the page's own."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    i = SCRIPT.index("        const STOCK_INV_C39 = {")
+    table = SCRIPT[i:SCRIPT.index("};", i) + 2]
+    js = MINIDOM + "document.createElementNS = (ns, t) => document.createElement(t);\n" + table + "\n" + fn_src("function stockInvCode39(") + r"""
+const svg = stockInvCode39('cl12');
+console.log(JSON.stringify({ bars: svg.children.map(r => [+r.getAttribute('x'), +r.getAttribute('width')]), box: svg.getAttribute('viewBox') }));"""
+    std = {"*": "nwnnwnwnn", "C": "wnwnnwnnn", "L": "nnwnnnnww", "1": "wnnwnnnnw", "2": "nnwwnnnnw"}
+    bars, x = [], 0
+    for ch in "*CL12*":
+        for e, kind in enumerate(std[ch]):
+            w = 3 if kind == "w" else 1
+            if e % 2 == 0:
+                bars.append([x, w])
+            x += w
+        x += 1
+    eq(_run_node(js), {"bars": bars, "box": "0 0 %d 100" % x})
+
+
+@test
+def t_the_purchase_order_prints_on_its_own():
+    """Printing the purchase order prints the order alone, as the labels do:
+    a frame holding only the order's page, with the page's styles and an A4
+    page of its own, so nothing behind it prints and no print rule of the
+    page's is added or changed. It carries the black mark."""
+    po = fn_src("function stockDelPoSheet(")
+    ok("window.print()" not in po and "stockPrintFrame(page, 'Purchase order ' + number" in po, "the order alone, not the page")
+    ok("LABEL_LOGO" in po, "with the black mark")
+    ok("stockPrintFrame(paper, 'Shelf labels'" in fn_src("function stockInvLabels("), "the labels print the same way")
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = MINIDOM + r"""
+const inline = el('style'); inline.textContent = '.page { }';
+const linked = el('link'); linked.tagName = 'LINK'; linked.href = 'http://127.0.0.1/assets/app.css?v=1';
+document.querySelectorAll = (sel) => sel === 'link[rel="stylesheet"], style' ? [linked, inline] : [];
+let printed = 0, made = null;
+const toastError = () => {};
+const frameDoc = () => { const d = new Node_('#document'); d.head = el('head'); d.body = el('body'); d.images = [];
+  d.createElement = (t) => el(t); d.importNode = (n) => { const c = el(n.tagName.toLowerCase()); c.tagName = n.tagName; c.className = n.className; c.textContent = n.textContent; return c; }; return d; };
+const realEl = el;
+el = function (tag, cls, text) { const n = realEl(tag, cls, text); if (tag === 'iframe') { made = n; n.contentDocument = frameDoc(); n.contentWindow = { focus() {}, print() { printed++; } }; } return n; };
+""" + fn_src("function stockPrintFrame(") + r"""
+(async () => {
+  const order = el('div', 'sd-po-page');
+  stockPrintFrame(order, 'Purchase order PO-20261023-0905', '@page { size: A4; margin: 14mm; }');
+  made.onload();
+  await new Promise(r => setTimeout(r, 20));
+  const before = printed, d = made.contentDocument, link = d.head.children[0];
+  link.onload();
+  await new Promise(r => setTimeout(r, 20));
+  console.log(JSON.stringify({ title: made.title, body: d.body.children.map(c => c.className),
+    head: d.head.children.map(c => c.tagName === 'LINK' ? 'link ' + c.href : c.textContent), before, printed, inPage: made.parentNode === document.body }));
+  process.exit(0);
+})();"""
+    js = js.replace("function el(tag, cls, text)", "let el = function (tag, cls, text)", 1)
+    got = _run_node(js)
+    eq(got["body"], ["sd-po-page"], "the frame holds the order alone")
+    eq(got["head"], ["link http://127.0.0.1/assets/app.css?v=1", ".page { }", "@page { size: A4; margin: 14mm; }"],
+       "with the page's stylesheets, linked and inline (the page's CSS is a linked file), and its own A4 page")
+    ok(got["before"] == 0, "nothing prints before the linked stylesheet has loaded (it printed unstyled)")
+    ok(got["printed"] == 1 and got["inPage"] and got["title"].startswith("Purchase order"), got)
+
+
+@test
+def t_the_stock_sheets_bring_no_print_rules():
+    """The labels and the purchase order print from a frame of their own,
+    so the page's print rules stay the eighty t_the_printed_sheets_do_not_change
+    pins, and no stock rule sits under @media print or @page."""
+    stock = [sel for sel, _b in _rules(CSS) if re.search(r"@media print|@page", sel) and re.search(r"stk-|sd-|stock", sel)]
+    eq(stock, [], "stock print rules")
+
+
+@test
+def t_a_phone_count_says_what_the_shelf_showed():
+    """A count remembers the figure the shelf showed when it began, kept with
+    the count across a reload, and sends it, so the server can refuse a count
+    of a line someone changed since (a delivery received meanwhile). After a
+    refusal the counts stay as typed and the lines that moved take the
+    shelf's figure now, so a second Save keeps them, having been told; a
+    dropped connection takes nothing new."""
+    if not _node_ok():
+        print("       (node unavailable, skipped)")
+        return
+    js = STOCK_INV_STANDINS + "const stockInv = { counts: null, told: false };\nlet sheetNow = null;\n" \
+        + "const stockForget = () => {}, stockSheet = async () => sheetNow;\n" \
+        + fn_src("function stockInvKeep(") + "\n" + fn_src("function stockInvKept(") + "\n" + fn_src("function stockInvCounts(") + "\n" \
+        + fn_src("function stockInvSetCount(") + "\n" + fn_src("async function stockInvSaveCounts(") + "\n" + fn_src("async function stockInvRebase(") + r"""
+(async () => {
+  const out = {};
+  const a = { id: 3, current: 6 }, b = { id: 9, current: 12 };
+  stockInvCounts({ items: [a, b] });
+  stockInvSetCount(a, 5); stockInvSetCount(a, 4); stockInvSetCount(b, 10);
+  out.kept = JSON.parse(store.f);
+  stockInvSetCount(b, 12); out.backToShelf = JSON.parse(store.f);
+  stockInvSetCount(b, 10);
+  let sent = null;
+  answer = (route, op, body) => { sent = body.counts; const e = new Error('Someone changed Red 30 since you started counting: it is now 50.'); throw e; };
+  sheetNow = { items: [{ id: 3, current: 6 }, { id: 9, current: 50 }] };
+  await stockInvSaveCounts({});
+  out.sent = sent; out.after = JSON.parse(store.f); out.counts = JSON.parse(store.c); out.reloaded = reloaded;
+  answer = (route, op, body) => { sent = body.counts; const e = new Error('The connection dropped.'); e.noReply = true; throw e; };
+  sheetNow = { items: [{ id: 3, current: 7 }, { id: 9, current: 50 }] };
+  await stockInvSaveCounts({});
+  out.dropped = JSON.parse(store.f);
+  answer = (route, op, body) => { sent = body.counts; return { saved: 2 }; };
+  await stockInvSaveCounts({});
+  out.second = sent; out.cleared = store.f === undefined && store.c === undefined;
+  console.log(JSON.stringify(out));
+})();"""
+    got = _run_node(js)
+    eq(got["kept"], {"3": 6, "9": 12}, "each count keeps the figure it began from, the first one")
+    eq(got["backToShelf"], {"3": 6}, "a count put back to the shelf's figure is no count")
+    eq(got["sent"], [{"id": 3, "current": 4, "seen": 6}, {"id": 9, "current": 10, "seen": 12}], "and says it")
+    eq((got["after"], got["counts"]), ({"3": 6, "9": 50}, {"3": 4, "9": 10}), "after a refusal: the counts as typed, the moved line at the shelf's figure now")
+    ok(got["reloaded"] == 1, "and the list is drawn again")
+    eq(got["dropped"], {"3": 6, "9": 50}, "a dropped connection takes nothing new")
+    eq(got["second"], [{"id": 3, "current": 4, "seen": 6}, {"id": 9, "current": 10, "seen": 50}], "so the second Save keeps them")
+    ok(got["cleared"], "and a save lets them go")
+
 if __name__ == "__main__":
     print("frontend regressions")
     print()

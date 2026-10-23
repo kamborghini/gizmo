@@ -1,0 +1,76 @@
+        /* ---------- Stock: Trends (with Compare), Activity and the stock settings ---------- */
+        /* The panels' spacing is the Stock page's own (stock.css). */
+        [data-stock-rec] > .seg-row { margin-bottom: var(--sp-1); }
+        /* The Trends or Compare choice sits on the grey page, so its track takes the grey's deeper shade, as a page's own does. */
+        @media screen { [data-stock-rec] > .seg-row > .segmented { background: var(--surface-sunken); } }
+        /* Compare's two quarters, beside the Trends or Compare choice. */
+        .stock-rec-pick { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; }
+        .stock-rec-pick > .ic { color: var(--text-tertiary); }
+        .stock-rec-pick > .ic svg { width: var(--icon-md); height: var(--icon-md); }
+        .stock-rec-pick > select { max-width: 100%; }
+        /* A cell's name and its grey second line. */
+        .stock-rec-name { display: block; font-weight: var(--weight-medium); color: var(--text-primary); }
+        .stock-rec-sub { display: block; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .stock-rec-line { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+        .stock-rec-line > .stock-dot { flex: none; }
+        .stock-rec-table td { padding-block: var(--sp-1-5); height: var(--row-h); }
+        .stock-rec-table td.num .delta { justify-content: flex-end; }
+        .stock-rec-act { white-space: nowrap; }
+        .stock-rec-acts { display: inline-flex; gap: var(--control-gap); justify-content: flex-end; flex-wrap: wrap; }
+        .stock-rec-nowrap { white-space: nowrap; }
+        /* The time and the person stay on one line; the line, the field and the detail wrap, so the history fits its panel on a laptop. */
+        .stock-rec-detail { color: var(--text-secondary); min-width: 10rem; }
+        .stock-rec-file { color: var(--text-secondary); overflow-wrap: anywhere; }
+        /* A row that opens its line. */
+        .stock-rec-opens { cursor: pointer; }
+        .stock-rec-opens:has(.row-open:focus-visible) { outline: none; box-shadow: var(--ring-action-2); }
+        @media (hover: hover) { .stock-rec-opens:hover > td { background: var(--surface-secondary); } }
+        /* The quarter panel: the closed quarters under their own small heading. */
+        .stock-rec-subhead { margin: var(--sp-5) 0 var(--sp-1); font-size: var(--text-body); font-weight: var(--weight-semibold); color: var(--text-primary); }
+        /* Warnings: one ruled list running to the panel's edges, its words on the panel's inset. */
+        .stock-rec-warn-list { list-style: none; margin: 0 calc(-1 * var(--panel-pad-x)); padding: 0; }
+        .stock-rec-warn { display: flex; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-3) var(--panel-pad-x);
+            border-top: var(--bw-hairline) solid var(--border-default); }
+        .stock-rec-warn:last-child { padding-bottom: 0; }
+        .stock-rec-warn-text { flex: 1 1 auto; min-width: 0; }
+        .stock-rec-warn-text > .stock-rec-sub { font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }
+        .stock-rec-sev { flex: none; color: var(--info); padding-top: var(--sp-0-5); }
+        .stock-rec-sev svg { width: var(--icon-md); height: var(--icon-md); }
+        .stock-rec-sev[data-sev="warn"] { color: var(--warning); }
+        .stock-rec-sev[data-sev="bad"] { color: var(--error); }
+        /* The history's filters. */
+        .stock-rec-day { min-width: 0; }
+        [data-hist-out] > .tbl-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
+        /* The stock settings: three captioned fields in a row, Save beside them. */
+        .stock-rec-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-4) var(--sp-6); }
+        .stock-rec-field { flex: 0 1 var(--field-w-lg); min-width: var(--field-w-md); }
+        .stock-rec-field > .field-help { margin: 0; }
+        .stock-rec-fields > .btn { margin-bottom: var(--sp-5); }
+        /* Words in a window, spaced from the field under them. */
+        .stock-rec-say { margin-bottom: var(--sp-4); }
+        .modal-body > .pfield + .stock-rec-say { margin: var(--sp-4) 0 0; }
+        @media (max-width: 640px) {
+            /* A history line with no stock line (a quarter, a backup) leads with its time. */
+            .stock-rec-hist > tbody > tr:has(> td.kt-main:empty) > td:first-child { flex: 1 1 100%; order: -1; font-weight: var(--weight-medium); }
+            .stock-rec-hist > tbody > tr:has(> td.kt-main:empty) > td:first-child::before { content: none; }
+            .stock-rec-detail { min-width: 0; }
+            .stock-rec-nowrap { white-space: normal; }
+            /* The two quarters one above the other, the arrow turned to point from the first to the second. */
+            .stock-rec-pick { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: var(--sp-3); }
+            .stock-rec-pick > select { width: 100%; }
+            .stock-rec-pick > .ic { justify-self: center; transform: rotate(90deg); }
+            /* The history's dates share a line. */
+            .stock-rec-span { flex: 1 1 100%; flex-wrap: nowrap; }
+            .stock-rec-span > .stock-rec-day { flex: 1 1 0; }
+            .stock-rec-fields > .btn { margin-bottom: 0; }
+            .stock-rec-field { flex: 1 1 100%; }
+        }
+        /* The old username beside the person's name, and the history's date span. */
+        .stock-rec-was { margin-left: var(--sp-1-5); color: var(--text-tertiary); }
+        .stock-rec-span { display: inline-flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+        .stock-rec-cap { font-size: var(--text-body); color: var(--text-tertiary); }
+        /* On a phone the two dates take a row each, so neither box cuts its own date short. */
+        @media (max-width: 640px) {
+            .stock-rec-span { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--sp-2); width: 100%; }
+            .stock-rec-span > .stock-rec-day { width: 100%; min-width: 0; }
+        }

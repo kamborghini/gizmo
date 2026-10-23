@@ -1,0 +1,100 @@
+        /* ---------- Stock: deliveries ----------
+           Reorder, Suppliers and the receiving windows. Values from the tokens only. */
+        /* A line's name and its quiet second words, side by side in a cell. */
+        .sd-name { color: var(--text-primary); font-weight: var(--weight-medium); }
+        .sd-sub { margin-left: var(--sp-1-5); font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .sd-desc { margin-top: var(--sp-1); font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .sd-mono { font-family: var(--font-mono); font-size: var(--text-xs); line-height: var(--lh-caption); }
+        /* Run-out: red under 14 days, amber under 45, as the stock app colours it. */
+        .sd-run { font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+        .sd-run.warn { color: var(--warning-text); }
+        .sd-run.bad { color: var(--error); font-weight: var(--weight-medium); }
+        /* The house tick, at the box step, teal when ticked. */
+        :is(.sd-tick, .sd-update) > input { width: var(--box-xs); height: var(--box-xs); flex: none; margin: 0; accent-color: var(--control-accent); cursor: pointer; }
+        /* The figures sit under the panel's head. */
+        .sd-top > .metrics { margin-top: var(--sp-4); }
+        .sd-top > .empty-state { margin-top: var(--sp-5); }
+        /* A row's own button, and figures typed into a row. */
+        .ktable td.sd-act { width: 1%; }
+        .ktable td.sd-x { width: 1%; }
+        .sd-num-in { width: calc(var(--sp-10) + var(--sp-4)); text-align: right; font-variant-numeric: tabular-nums; }
+        .sd-tick-cell { width: 1%; }
+        .sd-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
+        .sd-total td { font-weight: var(--weight-semibold); }
+        /* The four match tags and the due tag: the one tag, tinted by what it says. */
+        .pill.sd-tag-ok { background: var(--success-bg); color: var(--success); }
+        .pill.sd-tag-warn { background: var(--warning-bg); color: var(--warning-text); }
+        .pill.sd-tag-bad { background: var(--error-bg); color: var(--error); }
+        .pill.sd-tag-info { background: var(--info-bg); color: var(--info); }
+        .card-title > .pill { margin-left: var(--sp-2); }
+        /* Windows: a lead line, forms in two columns, a footer that wraps. */
+        .sd-lead { margin: 0 0 var(--sp-4); font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }
+        .sd-lead b { color: var(--text-primary); font-weight: var(--weight-medium); }
+        .sd-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); }
+        .sd-form.sd-form-one { grid-template-columns: minmax(0, 1fr); }
+        .sd-form > .sd-wide { grid-column: 1 / -1; }
+        .sd-form [hidden] { display: none; }
+        .sd-form textarea, .sd-bulk-ta { width: 100%; resize: vertical; }
+        .sd-template, .sd-message { line-height: var(--lh-prose); }
+        :is(.sd-form, .sd-choices) + .field-help { margin: var(--sp-3) 0 0; }
+        .sd-into { font-weight: var(--weight-semibold); font-size: var(--text-sm); }
+        .modal-foot.sd-wrap-foot { flex-wrap: wrap; }
+        .modal-foot > .sd-foot-start { margin-right: auto; }
+        .modal-foot > .sd-totals { margin-right: auto; align-self: center; font-size: var(--text-body); color: var(--text-secondary); }
+        .modal-body h4.card-title + .sd-compose-lines { margin-top: var(--sp-2); }
+        .sd-addrow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: var(--sp-3) 0 var(--sp-5); }
+        .sd-pick { max-width: 100%; }
+        .sd-compose-win .sd-form { margin-top: var(--sp-2); }
+        .sd-bulk-ta { font-family: var(--font-mono); font-size: var(--text-xs); line-height: var(--lh-caption); }
+        .sd-bulk-status { margin: var(--sp-3) 0 0; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }
+        .sd-bulk-status:empty { display: none; }
+        .sd-bulk-status.bad { color: var(--error); }
+        /* The draft order's cover note, and the wait for it. */
+        .sd-po-note:not(:empty) { margin-top: var(--sp-4); }
+        .sd-wait, .sd-reading { display: flex; align-items: center; gap: var(--sp-2); margin: 0; font-size: var(--text-body); color: var(--text-secondary); }
+        .sd-note-box { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4);
+            background: var(--surface-secondary); border-radius: var(--radius-inset); }
+        .sd-note-text { margin: 0; white-space: pre-wrap; font-size: var(--text-body); line-height: var(--lh-prose); color: var(--text-primary); }
+        /* Receiving: the two ways in, the delivery's head, its lines. */
+        .sd-choices { display: flex; flex-direction: column; gap: var(--sp-2); }
+        .sd-choices > .btn { min-height: var(--control-h-lg); justify-content: flex-start; }
+        .sd-dl-head { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-4); margin-bottom: var(--sp-4); }
+        .sd-dl-pick { width: 100%; }
+        .ktable td.sd-dl-item { min-width: 40%; padding-block: var(--sp-2); height: auto; }
+        .ktable td.sd-cost { padding-block: var(--sp-2); height: auto; }
+        .sd-update { justify-content: flex-end; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); }
+        .sd-who { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-2) 0 0; font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-secondary); }
+        .sd-who b { color: var(--text-primary); font-weight: var(--weight-medium); }
+        .sd-who svg { width: var(--icon-sm); height: var(--icon-sm); }
+        .sd-who + div > .msg { margin-top: var(--sp-3); }
+        /* The long-email line: said in the window, in the warning's colour. */
+        .sd-long { margin: var(--sp-3) 0 0; font-size: var(--text-body); line-height: var(--lh-control); color: var(--warning-text); }
+        .sd-long[hidden] { display: none; }
+        .sd-receipt-win .metrics { margin-bottom: var(--sp-4); }
+        /* The purchase order: a white page with the logo, as the stock app prints it. */
+        .sd-po-page { background: var(--white); color: var(--ink); border: var(--bw-hairline) solid var(--border-default); border-radius: var(--radius-inset);
+            padding: var(--sp-8); max-width: 210mm; margin: 0 auto; }
+        .sd-po-top { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-6); }
+        .sd-po-logo svg { height: var(--sp-9); width: auto; display: block; }
+        .sd-po-meta { text-align: right; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }
+        .sd-po-h { font-size: var(--text-2xl); font-weight: var(--weight-semibold); color: var(--ink); line-height: var(--lh-title); }
+        .sd-po-to { margin: var(--sp-7) 0 var(--sp-5); }
+        .sd-po-cap { font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        .sd-po-sup { font-size: var(--text-head); line-height: var(--lh-control); font-weight: var(--weight-semibold); }
+        /* Printed on its own (stockPrintFrame): the page's own margins, no card around it. */
+        body.stk-print-doc .sd-po-page { border: 0; border-radius: 0; padding: 0; max-width: none; }
+        .sd-po-foot { margin-top: var(--sp-7); padding-top: var(--sp-3); border-top: var(--bw-hairline) solid var(--border-default);
+            font-size: var(--text-xs); line-height: var(--lh-caption); color: var(--text-tertiary); }
+        @media (max-width: 640px) {
+            /* A supplier's count goes under its name rather than squeezing beside it. */
+            :is(.sd-supplier, .sd-supcard, .sd-onorder, .sd-levels) .card-title { flex-wrap: wrap; row-gap: 0; }
+            :is(.sd-supplier, .sd-supcard) .card-title > :is(.card-n, .pill) { flex-basis: 100%; margin-left: 0; }
+            :is(.sd-supcard) .card-title > .pill { flex-basis: auto; margin-top: var(--sp-1); }
+            .sd-form, .sd-dl-head { grid-template-columns: minmax(0, 1fr); }
+            /* On a phone the unit cost goes, as the stock app drops it. */
+            .ktable.sd-dl-table :is(th, td).sd-cost { display: none; }
+            .ktable td.sd-dl-item { flex: 1 1 100%; }
+            .sd-po-page { padding: var(--sp-4); }
+            .sd-po-top { flex-direction: column; }
+            .sd-po-meta { text-align: left; }
+        }

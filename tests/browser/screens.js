@@ -17,7 +17,7 @@ const dialog = (id, view, before, opener, o) => ({
     await before(p, h);
     await p.evaluate(({ sel, text }) => {
       const e = [...document.querySelectorAll(sel)].filter(x => x.offsetParent || x.getClientRects().length)
-        .find(x => !text || (x.innerText || '').trim().startsWith(text));
+        .find(x => !text || (x.innerText || x.getAttribute('aria-label') || '').trim().startsWith(text));
       if (!e) throw new Error('no opener ' + sel + ' ' + (text || ''));
       e.setAttribute('data-suite-opener', '');
       e.click();
@@ -27,6 +27,17 @@ const dialog = (id, view, before, opener, o) => ({
   },
 });
 
+/* The stock list, read and drawn, as the table or (workshop) the count cards.
+   A phone opens on the count cards, a desk on the table. */
+const stockList = async (p, h, workshop) => {
+  await h.nav('stock'); await h.tab('inventory'); await h.waitText('.view.active', 'Clear Etch');
+  if (workshop !== h.phone) await h.clickText('.view.active', 'Workshop mode');
+};
+/* A stock tab, read and drawn: its text from the seed is showing. */
+const stockTab = (tab, text) => async (p, h) => { await h.nav('stock'); await h.tab(tab); await h.waitText(ACTIVE, text); };
+const stockReorder = stockTab('reorder', 'Amber 21');
+const stockSuppliers = stockTab('suppliers', 'orders@northbeam.example');
+const stockActivity = stockTab('activity', 'INV-24');
 const crmBefore = async (p, h) => { await h.nav('crm'); await p.waitForSelector('#crm-content .tabs'); };
 const labelsBefore = async (p, h) => { await h.nav('labels'); await h.waitText('#labels-content', '#210388'); };
 
@@ -50,6 +61,32 @@ module.exports = [
   // Never open a thread here: opening one marks it read, a Gmail write.
   page('mail', 'mail', async (p, h) => { await h.nav('mail'); }, { seeded: 'Artwork for the autumn tour gobos' }),
   page('files', 'files', async (p, h) => { await h.nav('files'); }, { seeded: 'price-list-2026.pdf' }),
+  page('stock', 'stock', async (p, h) => { await h.nav('stock'); }, { seeded: 'Q4 2026' }),
+  page('stock~overview', 'stock', async (p, h) => { await h.nav('stock'); }, { seeded: 'hold most of the idle money' }),
+  page('stock~inventory', 'stock', async (p, h) => { await stockList(p, h, false); }, { seeded: 'Clear Etch' }),
+  page('stock~inventory-flat', 'stock', async (p, h) => { await stockList(p, h, false); await h.clickText('.view.active', 'Flat'); },
+    { seeded: 'Lens hood' }),
+  page('stock~workshop', 'stock', async (p, h) => { await stockList(p, h, true); }, { seeded: 'Clear Etch' }),
+  page('stock~reorder', 'stock', stockReorder, { seeded: 'LED80 White' }),
+  page('stock~reorder-levels', 'stock', async (p, h) => { await stockReorder(p, h); await h.clickText(ACTIVE, 'Set reorder levels from usage'); },
+    { seeded: 'Lens hood' }),
+  page('stock~suppliers', 'stock', stockSuppliers, { seeded: 'Brightway Lighting' }),
+  page('stock~trends', 'stock', stockTab('trends', 'Mains adaptor 24V'), { seeded: 'Mains adaptor 24V' }),
+  page('stock~compare', 'stock', async (p, h) => { await h.nav('stock'); await h.tab('trends'); await h.clickText(ACTIVE, 'Compare'); },
+    { seeded: 'LED300 Black' }),
+  page('stock~activity', 'stock', stockActivity, { seeded: 'INV-24' }),
+  // Restoring a backup asks first; the question, unanswered. A question has no
+  // X and Escape answers it No, so it is measured here, not journeyed.
+  page('stock~restore', 'stock', async (p, h) => {
+    await stockActivity(p, h); await h.clickText(ACTIVE, 'Restore');
+    await h.waitFor(() => !!document.querySelector('.confirm-overlay.show'));
+  }, { seeded: 'INV-24' }),
+  // A delivery entered by hand: a window opened through another, measured here
+  // because its opener goes with the first window, so it has no keyboard journey.
+  page('stock~receive-delivery', 'stock', async (p, h) => {
+    await stockList(p, h, h.phone); await h.clickText(ACTIVE, 'Receive stock');
+    await h.clickText(WINDOW, 'Enter it by hand'); await h.waitFor(() => !!document.querySelector('.modal-overlay.show .sd-dl-win'));
+  }, { seeded: 'Clear Etch' }),
   page('team~people', 'team', async (p, h) => { await h.nav('team'); await h.tab('people'); }, { seeded: 'Hattie Brennan' }),
   // A session an admin corrected; the page composes the line from the seeded correction.
   page('team~work', 'team', async (p, h) => { await h.nav('team'); await h.tab('work'); },
@@ -87,6 +124,19 @@ module.exports = [
   dialog('loans~unit', 'loans', async (p, h) => { await h.nav('loans'); await h.waitText('#loans-content', 'Quayside Exhibitions'); },
     { sel: '#loans-content [title="Edit this unit"]' }, { seeded: 'Edit Loan 1', proof: 'Loan 1' }),
   // The size rule window opens only from the Production Manager's Size check.
+  dialog('stock~mapping', 'stock', async (p, h) => { await h.nav('stock'); await h.waitText('.view.active', 'Stock mapping'); },
+    { sel: 'button', text: 'Stock mapping' }, { seeded: '1 parked', proof: 'Colour|20' }),
+  dialog('stock~item', 'stock', async (p, h) => { await h.nav('stock'); await h.waitText('.view.active', 'Reorder soon'); },
+    { sel: '.dt-stock-low .row-open' }, { seeded: 'Lumen Colour Works' }),
+  dialog('stock~item-history', 'stock', async (p, h) => { await stockList(p, h, false); },
+    { sel: 'button[aria-label="History: Heavy Matt 37.5"]' }, { seeded: 'ref PO-1027', proof: 'PO-1027' }),
+  dialog('stock~stocktake', 'stock', async (p, h) => { await stockList(p, h, false); },
+    { sel: '.view.active button', text: 'Stock-take' }, { seeded: 'Clear Etch' }),
+  dialog('stock~draft-order', 'stock', stockReorder, { sel: '.view.active button', text: 'Draft order' }, { seeded: 'Brightway Lighting' }),
+  dialog('stock~receive-one', 'stock', stockReorder, { sel: '.view.active button', text: 'Receive' }, { seeded: 'LED80 White' }),
+  dialog('stock~supplier-edit', 'stock', stockSuppliers, { sel: '.view.active button', text: 'Edit details' }, { seeded: 'Brightway Lighting' }),
+  dialog('stock~compose', 'stock', stockSuppliers, { sel: '.view.active button', text: 'Compose reorder email' }, { seeded: 'LED80 White' }),
+  dialog('stock~close-quarter', 'stock', stockActivity, { sel: '.view.active button', text: 'Close quarter and start new' }, { seeded: 'Q4 2026' }),
   dialog('sizes~rule', 'labels', async (p, h) => {
     await labelsBefore(p, h); await h.queue('make'); await h.click('#labels-content .more-btn');
     await h.clickText('.dmenu', 'Size check'); await h.waitText('#labels-content', 'Moonbeam Profile 300');

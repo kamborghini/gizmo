@@ -27,20 +27,24 @@
            permission (Labels' order history, Chat's order reads), kept when
            the Customers report went on 22 Oct 2026. */
         const TAB_KEYS = ['customers', 'liability',
-                          'crm', 'loans', 'mail', 'files', 'labels', 'sizes', 'memory', 'skills', 'chat',
+                          'crm', 'loans', 'mail', 'files', 'labels', 'sizes', 'stock', 'memory', 'skills', 'chat',
                           'forecast', 'connector'];
         /* The books are not part of the default grant: Xero sync writes to
            the ledger and the forecast holds the cash flow plan, so they are
            handed over on purpose rather than inherited by having an account.
            Mirrors OPT_IN_TABS on the server, which is the side that actually
            decides. */
-        const OPT_IN_TABS = ['connector', 'forecast'];
+        const OPT_IN_TABS = ['connector', 'forecast', 'stock'];
         const DEFAULT_TABS = TAB_KEYS.filter(k => OPT_IN_TABS.indexOf(k) < 0);
         function tabAllowed(v) {
             if (!teamMe || !Array.isArray(teamMe.tabs)) return true;
             if (TAB_KEYS.indexOf(v) < 0) return true;   // guide and team are governed elsewhere
             return teamMe.tabs.indexOf(v) >= 0;
         }
+        /* The stock sheet has moved into Reactor (the server says so with the account). */
+        function stockLive() { return !!(teamMe && teamMe.stock_live); }
+        /* The Stock tab: an account's own grant, and only once the stock sheet has moved in. */
+        function stockNavShown() { return tabAllowed('stock') && stockLive(); }
         /* The page an account opens on: the Production Manager when it may
            open it, else the first page it can (customers is a permission, not
            a page, so it never qualifies), else the Guide, which everyone has. */
@@ -70,7 +74,7 @@
             if (avEl) avEl.textContent = teamMe ? sideInitials(teamMe.name) : '';
             TAB_KEYS.forEach(v => {
                 const n = $('nav-' + v);
-                if (n) n.style.display = tabAllowed(v) ? '' : 'none';
+                if (n) n.style.display = (v === 'stock' ? stockNavShown() : tabAllowed(v)) ? '' : 'none';
             });
             /* Without the Chat tab there are no conversations to list, and
                a question asked from one would be refused. */
@@ -387,12 +391,12 @@
             crm: 'CRM', loans: 'Loan units', mail: 'Inbox', files: 'Files', labels: 'Production Manager',
             memory: 'Memory', skills: 'Skills', chat: 'Chat',
             forecast: 'Forecast', connector: 'Xero sync',
-            sizes: 'Size list' };
+            sizes: 'Size list', stock: 'Stock' };
         /* Customer details is a permission, not a page: who may read customers'
            names, contacts and order histories (Labels' order history, Chat's
            order and customer reads, the CRM's and the Inbox's Shopify look-ups). */
         const GROUPS = [['Finance', ['liability', 'forecast', 'connector']],
-                        ['Operations', ['labels', 'sizes', 'crm', 'loans', 'mail', 'files', 'customers']],
+                        ['Operations', ['labels', 'sizes', 'stock', 'crm', 'loans', 'mail', 'files', 'customers']],
                         ['Workspace', ['memory', 'skills', 'chat']]];
         const chosen = new Set(Array.isArray(u.tabs) ? u.tabs : DEFAULT_TABS);
         const boxes = [];
