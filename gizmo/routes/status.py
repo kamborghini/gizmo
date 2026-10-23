@@ -17,7 +17,7 @@ from gizmo import errors
 from gizmo import ai as claude
 from gizmo import shopify
 
-import copilot as core
+from gizmo import stock_link
 from gizmo import backup
 from gizmo import gate
 from gizmo import orderbook
@@ -130,10 +130,10 @@ def register(mcp, registry):
                          "events": orderbook._webhook_state["count"]},
             # The stock bridge: glass booked at the stock app when orders are
             # marked made. Pending = bookings still waiting on a retry.
-            "stock_bridge": {"configured": core._zeta_configured(),
-                             "pending": len(core._load_zeta_pending()),
-                             "last_ok_at": (core._zeta_last["ok_at"] or None),
-                             "error": core._zeta_last["error"]},
+            "stock_bridge": {"configured": stock_link._zeta_configured(),
+                             "pending": len(stock_link._load_zeta_pending()),
+                             "last_ok_at": (stock_link._zeta_last["ok_at"] or None),
+                             "error": stock_link._zeta_last["error"]},
             "backup": (lambda b: {"snapshot_at": b.get("snapshot_at"),
                                   "download_at": b.get("download_at")})(
                 jsonstore._load_json_store(backup.BACKUP_STATE_PATH, "backup", {}) or {}),

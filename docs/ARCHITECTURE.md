@@ -94,14 +94,15 @@ module's name, never a copied name, and import another area last, so nothing
 is read across as a module loads and any module can be imported first
 (`t_any_module_imports_first`).
 
-`copilot.py` (about 1,250 lines) keeps, on purpose: `add_routes`, which hands
+`copilot.py` (about 750 lines) keeps, on purpose: `add_routes`, which hands
 the capabilities `server.py` passes in to the modules that use them (the
 Shopify writers to `gizmo/shopify.py`, the chat's tools to `gizmo/chat.py`),
 and registers every area's routes; the frozen print
-routes with their font, logo and CORS helpers, which keep their bytes; and the
-stock bridge (the stock merge project's, hands off). Nothing reads
-`copilot.py` but the stock bridge's readers: the scheduler, production's
-routes and the status page (`t_only_the_stock_bridge_reads_copilot`). It
+routes with their font, logo and CORS helpers, which keep their bytes. The
+stock bridge moved into the stock area with the stock move
+(`gizmo/stock_link.py`, its day-sheet routes in `gizmo/routes/stock_link.py`),
+and nothing reads `copilot.py` now but `server.py`
+(`t_nothing_but_the_server_reads_copilot`). It
 reads the areas as everyone does, except names it takes by their own: `_guard`
 and `_json` for its own routes, and what the frozen print route reads (two of
 the desk's, the shop secret and the public base address from
@@ -262,14 +263,14 @@ assistant gets tools for it — those tools in `_TOOL_TABS`.
 `add_routes` of 8,684 lines and 150 routes. Stage 4 of the 14 October audit
 moved it into the `gizmo` package an area at a time, each a pure move proven
 by `make move-proof`; stage 6 cut the last reads back. The recipe and the move
-tool (`tools/move_area.py`) are in `tools/moves/README.md`, kept for the stock
-bridge's move.
+tool (`tools/move_area.py`) are in `tools/moves/README.md`; the stock
+bridge's move (`tools/moves/stock-link.json`) was the last.
 
 ## What is deliberately the way it is
 
 - **A package of areas, not services.** One process, one page, the areas
-  in `gizmo/` as the September audit designed them (§6). The stock bridge
-  stays in `copilot.py` until the stock merge project moves it.
+  in `gizmo/` as the September audit designed them (§6), the stock area
+  among them (the stock link moved in from `copilot.py` with the stock move).
 - **JSON stores, not a database.** The trade-off is written down in the
   audit (§4). The trigger to revisit is a measured slow save.
 - **The page is one script in sections.** `static/src/` holds the shell, the

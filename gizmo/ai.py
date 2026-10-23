@@ -415,7 +415,8 @@ _ai_fell_back: "contextvars.ContextVar[Optional[dict]]" = contextvars.ContextVar
 # What each kind of AI call is, in the words Settings shows.
 _AI_KIND_WORDS = {"chat": "answering in Chat", "skill_read": "reading a skill", "learn": "learning the store",
                   "address": "reading an address",
-                  "draft": "drafting an email reply"}
+                  "draft": "drafting an email reply", "stock_insights": "reading the stock sheet's figures",
+                  "stock_invoice": "reading a supplier's invoice", "stock_po_note": "writing a purchase order note"}
 
 
 def _note_ai_failure(model: str, e: Exception, answered_by: str = "") -> None:

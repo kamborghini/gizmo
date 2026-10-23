@@ -17,6 +17,11 @@ What it writes ("stock-export-1"):
   out: logins are not carried over.
 - `unknown_tables`: any other table in the database, with its count, so the
   proof can say so rather than leave it behind unnoticed.
+- `bridge_rules`: the glass the production link matches Mono and HM lines
+  to, which is a rule in the stock app's code rather than its data
+  (`_GIZMO_FAMILY` in its app.py), read from the source as a literal, never
+  by running it. Reactor keeps it in the stock sheet's settings, so this
+  public repository names no glass or supplier.
 - `sequences` (Postgres): the last id each table's sequence gave, which is
   ahead of the highest id left where rows were deleted at the top; the
   converter carries on after it.
@@ -34,6 +39,7 @@ only. The export holds real stock, prices and supplier contacts, so it is
 written owner-only and refused anywhere inside a git working tree.
 """
 import argparse
+import ast
 import base64
 import json
 import os
@@ -198,6 +204,26 @@ def figures(db, analytics, raw, now: datetime) -> dict:
         analytics.select = real_select
 
 
+def glass_families(stock_app: str):
+    """The stock app's `_GIZMO_FAMILY` ({"mono": glass, "hm": glass}) as
+    its app.py assigns it, read as a literal without running anything;
+    None when the app has no such rule."""
+    try:
+        with open(os.path.join(stock_app, "app.py"), encoding="utf-8") as fh:
+            tree = ast.parse(fh.read())
+    except (OSError, SyntaxError, ValueError):
+        return None
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "_GIZMO_FAMILY"
+                                                for t in node.targets):
+            try:
+                value = ast.literal_eval(node.value)
+            except ValueError:
+                return None
+            return {str(k): str(v) for k, v in value.items()} if isinstance(value, dict) else None
+    return None
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--stock-app", required=True, help="the stock app's folder (its db.py and analytics.py)")
@@ -221,6 +247,7 @@ def main(argv=None) -> int:
     export = {"format": "stock-export-1", "exported_at": datetime.now(timezone.utc).isoformat(),
               "now": now.isoformat(), "source_head": head, "tables": tables,
               "unknown_tables": unknown, "sequences": seqs,
+              "bridge_rules": {"glass_families": glass_families(args.stock_app)},
               "expected": figures(db, analytics, raw, now)}
     text = json.dumps(export, allow_nan=False, default=to_json_value)
     fd = os.open(args.out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -228,7 +255,8 @@ def main(argv=None) -> int:
         fh.write(text)
     counts = ", ".join("%s %d" % (n, t["count"]) for n, t in tables.items() if not t["missing"])
     missing = ", ".join(n for n, t in tables.items() if t["missing"]) or "none"
-    print(f"exported: {counts}; missing: {missing}" + (f"; NOT KNOWN: {unknown}" if unknown else ""))
+    print(f"exported: {counts}; missing: {missing}" + (f"; NOT KNOWN: {unknown}" if unknown else "")
+          + ("" if export["bridge_rules"]["glass_families"] else "; NO GLASS RULE for Mono and HM lines"))
     return 0
 
 

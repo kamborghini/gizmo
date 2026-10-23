@@ -203,6 +203,7 @@ from gizmo import scheduler
 from gizmo import updates
 from gizmo import impact
 from gizmo import backup
+from gizmo import stock_link
 from gizmo import liability
 from gizmo import xero_sync as xerosync
 from gizmo import forecasting

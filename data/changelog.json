@@ -1,6 +1,17 @@
 {
  "releases": [
   {
+   "date": "2026-10-23",
+   "title": "The stock link, ready to move in",
+   "items": [
+    {
+     "kind": "changed",
+     "tab": null,
+     "text": "When the stock sheet moves into Reactor, glass used on each order will be booked here as it is now booked in the stock sheet, and the stock sheet's insights, invoice reading and order notes will come with it. Nothing changes until then."
+    }
+   ]
+  },
+  {
    "date": "2026-10-22",
    "title": "More behind the scenes",
    "items": [

@@ -1,0 +1,16 @@
+{
+  "note": "the stock link (glass made, booked at the stock sheet; the day sheet; the catalogue), with its routes",
+  "areas": [
+    {"name": "stock_link", "file": "gizmo/stock_link.py", "alias": "stock_link",
+     "prefix": "^(_zeta|ZETA_|_ZETA|_usage_|USAGE_SHEETS|_BEZEL_UP)",
+     "extra": ["run_stock_usage", "_load_zeta_pending", "_write_zeta_pending"], "exclude": [], "floor": false,
+     "doc": "The stock link: the glass a Mark made consumes, booked at the stock sheet; the day's usage sheet; the glass catalogue; and the retry queue that keeps a booking the stock sheet could not take. Moved out of copilot.py with the stock move (the stock area holds it now); its routes (the day sheet) are in gizmo/routes/stock_link.py. Read as `stock_link.NAME`."}
+  ],
+  "routes": [
+    {"name": "routes_stock_link", "file": "gizmo/routes/stock_link.py", "area": "stock_link",
+     "paths": ["/api/stock-usage"], "helpers": [],
+     "doc": "The day's stock usage sheet: what the bench used, reviewed and sent to the stock sheet. Gathered from add_routes with the stock move where the first stood; their paths are literal, so no request changes hands.",
+     "register_doc": "Add the stock usage sheet's routes to the app.",
+     "comment": "The stock usage sheet's routes (gizmo/routes/stock_link.py), gathered where the first stood."}
+  ]
+}

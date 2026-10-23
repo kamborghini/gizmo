@@ -9,20 +9,20 @@ def with_zeta(fn, send=None):
             return await send(op, order_id, order_name, lines, sent)
         sent.append({"op": op, "order_id": str(order_id), "order_name": order_name, "lines": lines})
         return {"ok": True}
-    saved = (copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN, copilot.ZETA_SYNC_PATH, copilot._zeta_send)
-    copilot.ZETA_URL = "https://zeta.test"
-    copilot.ZETA_SYNC_TOKEN = "tok"
-    copilot.ZETA_SYNC_PATH = SCRATCH + "/zeta_sync.json"
-    copilot._zeta_send = fake_send
+    saved = (stock_link.ZETA_URL, stock_link.ZETA_SYNC_TOKEN, stock_link.ZETA_SYNC_PATH, stock_link._zeta_send)
+    stock_link.ZETA_URL = "https://zeta.test"
+    stock_link.ZETA_SYNC_TOKEN = "tok"
+    stock_link.ZETA_SYNC_PATH = SCRATCH + "/zeta_sync.json"
+    stock_link._zeta_send = fake_send
     try:
-        os.remove(copilot.ZETA_SYNC_PATH)
+        os.remove(stock_link.ZETA_SYNC_PATH)
     except FileNotFoundError:
         pass
     try:
         fn(sent)
         return sent
     finally:
-        (copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN, copilot.ZETA_SYNC_PATH, copilot._zeta_send) = saved
+        (stock_link.ZETA_URL, stock_link.ZETA_SYNC_TOKEN, stock_link.ZETA_SYNC_PATH, stock_link._zeta_send) = saved
 
 @test
 def t_marking_made_books_the_glass_at_the_stock_app():
@@ -38,7 +38,7 @@ def t_marking_made_books_the_glass_at_the_stock_app():
         r2 = mark_made(12345, False)
         eq(r2.status_code, 200, r2.text)
         eq(sent[1]["op"], "reverse", "un-making pushes the reversal")
-        eq(copilot._load_zeta_pending(), {}, "nothing left queued")
+        eq(stock_link._load_zeta_pending(), {}, "nothing left queued")
     with_zeta(go)
 
 @test
@@ -54,12 +54,12 @@ def t_a_dead_stock_app_queues_the_booking_and_the_drain_retries_it():
         r = mark_made(12345, True)
         eq(r.status_code, 200, "the workbench is never blocked by the bridge")
         ok("retrying" in r.json().get("stock_note", ""), r.json().get("stock_note"))
-        pend = copilot._load_zeta_pending()
+        pend = stock_link._load_zeta_pending()
         eq(pend.get("12345", {}).get("op"), "book", "the booking is parked")
         state["up"] = True
-        run(copilot._zeta_drain({}))
+        run(stock_link._zeta_drain({}))
         eq(len(sent), 1, "the drain delivered it")
-        eq(copilot._load_zeta_pending(), {}, "and the queue emptied")
+        eq(stock_link._load_zeta_pending(), {}, "and the queue emptied")
     with_zeta(go, send=send)
 
 @test
@@ -76,24 +76,24 @@ def t_made_then_unmade_while_zeta_is_down_ends_as_a_reversal():
     def go(sent):
         mark_made(12345, True)
         mark_made(12345, False)
-        eq(copilot._load_zeta_pending().get("12345", {}).get("op"), "reverse",
+        eq(stock_link._load_zeta_pending().get("12345", {}).get("op"), "reverse",
            "the queue holds the reversal, not the stale booking")
         state["up"] = True
-        run(copilot._zeta_drain({}))
+        run(stock_link._zeta_drain({}))
         eq([s["op"] for s in sent], ["reverse"], "only the reversal was sent")
     with_zeta(go, send=send)
 
 @test
 def t_an_unconfigured_bridge_stays_silent():
     reset_dispatch(); reset_prod()
-    saved = (copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN)
-    copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN = "", ""
+    saved = (stock_link.ZETA_URL, stock_link.ZETA_SYNC_TOKEN)
+    stock_link.ZETA_URL, stock_link.ZETA_SYNC_TOKEN = "", ""
     try:
         r = mark_made(12345, True)
         eq(r.status_code, 200, r.text)
         eq(r.json().get("stock_note"), "", "no nagging when the bridge is off")
     finally:
-        (copilot.ZETA_URL, copilot.ZETA_SYNC_TOKEN) = saved
+        (stock_link.ZETA_URL, stock_link.ZETA_SYNC_TOKEN) = saved
 
 @test
 def t_a_stock_gobo_prints_its_name_not_a_check():
@@ -132,17 +132,17 @@ def t_a_stock_gobo_prints_its_name_not_a_check():
 
     # The consumption lines carry it by name, and the stock app gets the
     # exact row shape it has always had.
-    lines = copilot._usage_lines({"items": [stock]})
+    lines = stock_link._usage_lines({"items": [stock]})
     eq(len(lines), 1, "one line")
     eq(lines[0]["note"], "stock gobo: Smoke & Mirrors Gobo", "named, not 'no size resolved'")
     eq(lines[0]["stock"], "Smoke & Mirrors Gobo", "and flagged as stock for this app's screens")
-    eq(set(copilot._zeta_lines(lines)[0]), {"size", "family", "qty", "note"},
+    eq(set(stock_link._zeta_lines(lines)[0]), {"size", "family", "qty", "note"},
        "the stock app never sees a key it did not already accept")
-    plain_lines = copilot._usage_lines({"items": [{"quantity": 1, "glass_type": "Mono - Original",
+    plain_lines = stock_link._usage_lines({"items": [{"quantity": 1, "glass_type": "Mono - Original",
                                                    "production_size": "26.5"}]})
-    eq(copilot._zeta_lines(plain_lines), plain_lines, "an ordinary line reaches the stock app unchanged")
+    eq(stock_link._zeta_lines(plain_lines), plain_lines, "an ordinary line reaches the stock app unchanged")
     import inspect as _insp
-    ok("_zeta_lines(_usage_lines(o))" in _insp.getsource(copilot._zeta_push_locked),
+    ok("_zeta_lines(_usage_lines(o))" in _insp.getsource(stock_link._zeta_push_locked),
        "and the book push actually goes through the contract, not around it")
 
 
@@ -186,7 +186,7 @@ def t_a_gobo_sold_with_a_projector_is_cut_for_that_projector():
        ("", "", "Projected Image 40 Watt LED Weatherproof Gobo Projector"),
        "the projector prints by name, with no CHECK and no size")
     ok(p["projector"] is True and p["not_gobo"] is True, "it is marked a projector, and not a gobo")
-    eq(copilot._usage_lines({"items": [g, p]}), [{"size": "53.3", "family": "Colour", "qty": 1}],
+    eq(stock_link._usage_lines({"items": [g, p]}), [{"size": "53.3", "family": "Colour", "qty": 1}],
        "only the gobo uses glass: the projector is neither a blank nor a CHECK line")
 
     # #104196: the projector's variant says it comes with a rain hood.
@@ -358,7 +358,7 @@ def t_the_push_lines_match_the_day_sheet_resolution():
         {"quantity": 1, "glass_type": "Colour - Original", "production_size": "48"},
         {"quantity": 3, "glass_type": "", "production_size": "", "review_reason": "no model matched"},
     ]}
-    lines = copilot._usage_lines(shaped)
+    lines = stock_link._usage_lines(shaped)
     eq(len(lines), 4, "every item becomes a line")
     eq(lines[0]["family"], "Mono", "Original and Copy share a family")
     ok("note" in lines[3] and lines[3]["note"] == "no model matched",
@@ -373,11 +373,11 @@ def t_the_drain_pushes_the_current_intent_not_its_snapshot():
     reset_dispatch(); reset_prod()
     def go(sent):
         pend = {"12345": {"op": "book", "at": "2026-08-17T10:00:00+00:00", "tries": 1}}
-        copilot._write_zeta_pending(pend)
+        stock_link._write_zeta_pending(pend)
         # The intent changes before the drain gets to it.
         pend["12345"]["op"] = "reverse"
-        copilot._write_zeta_pending(pend)
-        run(copilot._zeta_drain({}))
+        stock_link._write_zeta_pending(pend)
+        run(stock_link._zeta_drain({}))
         eq([s["op"] for s in sent], ["reverse"], "the drain read the store, not a snapshot")
     with_zeta(go)
 
@@ -389,9 +389,9 @@ def t_a_booking_that_cannot_even_be_queued_says_so_honestly():
     async def send(op, order_id, order_name, lines, sent):
         raise RuntimeError("zeta down")
     def go(sent):
-        with open(copilot.ZETA_SYNC_PATH, "w") as fh:
+        with open(stock_link.ZETA_SYNC_PATH, "w") as fh:
             fh.write("{corrupt")
-        copilot._load_zeta_pending()      # poisons the store, as in production
+        stock_link._load_zeta_pending()      # poisons the store, as in production
         r = mark_made(12345, True)
         eq(r.status_code, 200, "the workbench still works")
         note = r.json().get("stock_note", "")

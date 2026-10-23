@@ -16,7 +16,9 @@ the export:
 - every line is found by its label code (CL and its id) and its barcode,
   and by nothing else, by the stock app's own matching rule;
 - every figure the stock app gave for this data equals Reactor's, value for
-  value, money exactly.
+  value, money exactly;
+- the glass the production link matches Mono and HM lines to (a rule in
+  the stock app's code, which the export carries) is the stock sheet's.
 
 Exit 0 only when the proof is empty. The output holds real data, so DIR and
 the report are refused anywhere inside a git working tree.
@@ -210,7 +212,11 @@ def convert(export: dict, people: dict, out_dir: str) -> None:
         stock_store.write_alerts({"alerts": alerts, "next_id": next_id("alerts", alerts)})
         suppliers = records("supplier_contacts")
         stock_store.write_suppliers({"suppliers": suppliers, "next_id": next_id("supplier_contacts", suppliers)})
-        stock_store.write_settings({"meta": {r["key"]: r["value"] for r in _rows(export, "meta")}})
+        settings = {"meta": {r["key"]: r["value"] for r in _rows(export, "meta")}}
+        families = (export.get("bridge_rules") or {}).get("glass_families")
+        if families:
+            settings["glass_families"] = dict(families)
+        stock_store.write_settings(settings)
         bridge = {name: records(table) for name, table in BRIDGE.items()}
         bridge["next_ids"] = {name: next_id(table, bridge[name]) for name, table in BRIDGE.items()}
         stock_store.write_bridge(bridge)
@@ -513,6 +519,16 @@ def prove(export: dict, out_dir: str) -> list:
         if awaited != (it.get("on_order") or 0):
             found.append(f"orders: line {it['id']}: on order {it.get('on_order') or 0}, "
                          f"the rebuilt orders await {awaited}")
+    want = (export.get("bridge_rules") or {}).get("glass_families")
+    if not want:
+        found.append("bridge: the export does not say which glass the production link matches Mono and HM "
+                     "lines to; export again with the current exporter")
+    else:
+        got = settings.get("glass_families") or {}
+        for family in sorted(set(want) | set(got)):
+            if want.get(family) != got.get(family):
+                found.append(f"bridge: {family.upper()} lines are matched to {got.get(family)!r}; "
+                             f"the stock app matches them to {want.get(family)!r}")
     _labels(found, items)
     _figures(found, export, items, settings.get("meta", {}), snapshots, periods.get("periods", []),
              suppliers.get("suppliers", []))

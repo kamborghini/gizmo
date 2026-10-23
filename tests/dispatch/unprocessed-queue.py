@@ -39,14 +39,14 @@ def t_the_glass_catalogue_covers_every_sheet_size_in_every_family():
     # The stock app's mapping view is only trustworthy if it shows the WHOLE
     # translation, so the catalogue must be the sheet's sizes times the three
     # families, with nothing invented and nothing dropped.
-    combos = copilot._zeta_catalog_combos()
+    combos = stock_link._zeta_catalog_combos()
     glass = [c for c in combos if c["family"] != "Ring"]
     rings = [c for c in combos if c["family"] == "Ring"]
     gsizes = {c["size"] for c in glass}
     ok(len(gsizes) >= 20, "the live sheet's sizes are all there: " + str(len(gsizes)))
     eq({c["family"] for c in glass}, {"Mono", "HM", "Colour"}, "three glass families")
     eq(len(glass), len(gsizes) * 3, "every glass size appears once per family")
-    eq({c["size"] for c in rings}, set(copilot._BEZEL_UP), "one ring line per bezelled size")
+    eq({c["size"] for c in rings}, set(stock_link._BEZEL_UP), "one ring line per bezelled size")
     ok(all(c["size"] for c in combos), "no blank sizes")
     seen = set()
     for c in combos:
@@ -65,7 +65,7 @@ def t_a_bezelled_gobo_consumes_its_blank_and_its_ring():
         {"quantity": 1, "glass_type": "Colour - Original", "production_size": "100"},
         {"quantity": 3, "glass_type": "Mono - Original", "production_size": "26.5"},
     ]}
-    lines = copilot._usage_lines(shaped)
+    lines = stock_link._usage_lines(shaped)
     eq(len(lines), 5, "two bezelled items become four lines, the plain one stays one")
     eq(lines[0], {"size": "64.9", "family": "Mono", "qty": 2}, "the 86 order's glass")
     eq(lines[1], {"size": "86", "family": "Ring", "qty": 2}, "and its ring")
@@ -73,7 +73,7 @@ def t_a_bezelled_gobo_consumes_its_blank_and_its_ring():
     eq(lines[3], {"size": "100", "family": "Ring", "qty": 1}, "with the 100 ring")
     eq(lines[4], {"size": "26.5", "family": "Mono", "qty": 3}, "plain sizes are untouched")
     # And the published catalogue matches what will actually be sent.
-    combos = copilot._zeta_catalog_combos()
+    combos = stock_link._zeta_catalog_combos()
     keys = {(c["family"], c["size"]) for c in combos}
     ok(("Ring", "86") in keys and ("Ring", "100") in keys, "ring lines are in the catalogue")
     ok(("Mono", "86") not in keys and ("Mono", "100") not in keys,

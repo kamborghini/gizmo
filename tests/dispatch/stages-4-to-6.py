@@ -1111,11 +1111,11 @@ def t_write_routes_check_their_bodies():
        "these now have a model: take them off UNCHECKED_BODIES")
 
 @test
-def t_only_the_stock_bridge_reads_copilot():
+def t_nothing_but_the_server_reads_copilot():
     """Stage 4 left every area importing copilot.py, to read it as core.NAME;
-    by its end almost none did. Only the stock bridge's readers import it now
-    (the bridge stays in copilot.py, hands off), and they read nothing else
-    from it (stage 6)."""
+    by its end only the stock bridge's readers did, and the stock move took
+    the bridge into the stock area (gizmo/stock_link.py). Nothing imports
+    copilot.py now but server.py, which calls add_routes."""
     import ast as _ast
     importers = {}
     for mod, rel in _app_module_files().items():
@@ -1126,10 +1126,7 @@ def t_only_the_stock_bridge_reads_copilot():
                or (isinstance(n, _ast.ImportFrom) and n.module == "copilot") for n in _ast.walk(t)):
             importers[rel] = sorted({n.attr for n in _ast.walk(t) if isinstance(n, _ast.Attribute)
                                      and isinstance(n.value, _ast.Name) and n.value.id == "core"})
-    eq(sorted(importers), ["gizmo/routes/production.py", "gizmo/routes/status.py", "gizmo/scheduler.py"],
-       "the modules that import copilot.py")
-    for rel, reads in importers.items():
-        eq([r for r in reads if "zeta" not in r], [], rel + " reads only the stock bridge from it")
+    eq(sorted(importers), [], "the modules that import copilot.py")
 
 @test
 def t_background_work_has_its_own_home():
