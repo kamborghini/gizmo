@@ -310,7 +310,7 @@ def _execute(run: dict) -> None:
 
 def _go_live(run: dict) -> None:
     """After the converter has installed what it proved: the moment of going
-    live, last of the stores. The remaining steps are _finish's."""
+    live, last of the stores. The remaining steps are _finish_move's."""
     with stock._lock:
         stock.forget_memory()
         settings = stock_store.load_settings()
@@ -360,7 +360,7 @@ def _step(name: str, moved: dict) -> None:
                                         f"{counts.get('history', 0)} history entries")])
 
 
-def _finish(run) -> None:
+def _finish_move(run) -> None:
     """The last steps of a move that has gone live, each recorded as it is
     done, so a restart or a failing step is finished by a later look. Then
     the export goes."""
@@ -410,7 +410,7 @@ def status(uid: str) -> dict:
         _write_run(run)
     moved = stock_store.load_settings().get("moved_in")
     if isinstance(moved, dict) and set(STEPS) - set(moved.get("done") or []) and not alive:
-        _finish(run if run and run.get("kind") == "move" else None)
+        _finish_move(run if run and run.get("kind") == "move" else None)
         run = _read("run.json")
     meta = _read("upload.json")
     done = bool(meta and meta.get("done"))

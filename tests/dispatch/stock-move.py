@@ -335,13 +335,13 @@ def _move_through_install(people):
     _move_upload()
     _move("check", people=people)
     eq(_move_wait()["run"]["state"], "passed")
-    saved = stock_move._finish
+    saved = stock_move._finish_move
     try:
-        stock_move._finish = lambda *a, **k: None
+        stock_move._finish_move = lambda *a, **k: None
         _move("move", people=people)
         stock_move._worker.join(120)
     finally:
-        stock_move._finish = saved
+        stock_move._finish_move = saved
     stock_move._worker = None
 
 @test
