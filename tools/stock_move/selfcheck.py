@@ -2,7 +2,8 @@
 """Check the whole move on an invented database, end to end, with both apps' code.
 
     <stock app>/.venv/bin/python tools/stock_move/selfcheck.py \\
-        --stock-app <stock app folder> --reactor-python <Reactor's python>
+        --stock-app <stock app folder> --reactor-python <Reactor's python> \\
+        [--database-url postgresql://...an EMPTY throwaway database...]
 
 The suite cannot run the exporter (it needs the stock app's Python and
 SQLAlchemy), and the suite's own test export has its figures worked out by
@@ -16,6 +17,11 @@ rows, a login with no history and a table the move does not know; exports it
 with the stock app's analytics; and converts and proves it with Reactor's.
 Exit 0 when the proof is empty. Everything is made up and written to a
 temporary folder outside every repository, which is removed afterwards.
+
+With --database-url the invented database is built in that database instead
+of a SQLite file, so the exporter's Postgres path (a read-only session, one
+snapshot, the sequences) runs as it will on the evening. It must be an empty
+database made for this: the check creates the stock app's tables in it.
 """
 import argparse
 import json
@@ -158,23 +164,29 @@ def main(argv=None) -> int:
     ap.add_argument("--stock-app", required=True)
     ap.add_argument("--reactor-python", required=True)
     ap.add_argument("--keep", action="store_true", help="leave the temporary folder behind and print it")
+    ap.add_argument("--database-url", help="an EMPTY throwaway database to build the invented data in (default: a SQLite file)")
     args = ap.parse_args(argv)
     os.environ["DATABASE_URL"] = "sqlite://"
     sys.path.insert(0, os.path.abspath(args.stock_app))
     import db
     tmp = tempfile.mkdtemp(prefix="stock-selfcheck-")
     try:
-        source = os.path.join(tmp, "invented.db")
-        build(db, "sqlite:///" + source)
+        url = args.database_url or "sqlite:///" + os.path.join(tmp, "invented.db")
+        build(db, url)
         export = os.path.join(tmp, "export.json")
         r = subprocess.run([sys.executable, EXPORTER, "--stock-app", args.stock_app, "--database-url",
-                            "sqlite:///" + source, "--out", export, "--now", "2026-07-20T12:00:00+00:00"],
+                            url, "--out", export, "--now", "2026-07-20T12:00:00+00:00"],
                            capture_output=True, text=True)
         if r.returncode:
             print("the export failed:\n" + r.stdout + r.stderr)
             return 1
         with open(export, encoding="utf-8") as fh:
-            unknown = json.load(fh).get("unknown_tables")
+            got = json.load(fh)
+        unknown = got.get("unknown_tables")
+        if url.startswith(("postgres://", "postgresql")) and got.get("source_session") != {"isolation": "repeatable read",
+                                                                                          "read_only": "on"}:
+            print(f"the export was not read in one read-only snapshot: {got.get('source_session')!r}")
+            return 1
         if unknown != {"extra_notes": 0}:
             print(f"the export did not record the table it does not know: {unknown!r}")
             return 1

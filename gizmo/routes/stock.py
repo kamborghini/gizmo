@@ -7,7 +7,9 @@ import anthropic
 from starlette.requests import Request
 from starlette.responses import Response
 
-from gizmo import stock, stock_ai, stock_backups, stock_bridge, stock_orders, stock_quarters, stock_sheet
+import asyncio
+
+from gizmo import stock, stock_ai, stock_backups, stock_bridge, stock_move, stock_orders, stock_quarters, stock_sheet
 from gizmo import ai as claude
 from gizmo import gate
 from gizmo import bodies
@@ -17,6 +19,7 @@ logger = logging.getLogger("shopify_mcp.copilot")
 
 SHEET_CAP = 2 * 1024 * 1024      # an imported sheet of 5,000 rows fits well inside
 INVOICE_CAP = 12 * 1024 * 1024   # a 9 MB PDF, as base64 in its JSON
+MOVE_CAP = 6 * 1024 * 1024       # a part of the stock app's export: 4 MB of text, escaped in its JSON
 
 
 class StockSheetBody(bodies.Body):
@@ -31,6 +34,17 @@ class StockSheetBody(bodies.Body):
     fields: bodies.Fields = None
     csv: bodies.Text = None
     ids: bodies.Items = None
+
+
+class StockMoveBody(bodies.Body):
+    """What /api/stock/move reads: a part of the stock app's export, or the
+    stock app's names matched to Reactor accounts for a check or the move."""
+    upload: bodies.Text = None
+    index: bodies.Whole = None
+    total: bodies.Whole = None
+    text: bodies.Text = None
+    sha256: bodies.Text = None
+    people: bodies.Fields = None
 
 
 class StockOrdersBody(bodies.Body):
@@ -363,4 +377,23 @@ def register(mcp, registry):
             return _answer(lambda: stock_orders.save_suppliers(who, body.get("contacts")), "the suppliers")
         if op == "delete":
             return _answer(lambda: stock_orders.delete_supplier(who, body.get("supplier")), "removing a supplier")
+        return gate._json({"error": "Unknown op."}, 400)
+
+    @mcp.custom_route("/api/stock/move", methods=["POST"])
+    async def stock_move_route(request: Request):
+        """Moving the stock sheet in, the owner's: the stock app's export in
+        parts, a check that proves it and changes nothing, then the move."""
+        err, body, who = await gate._guard(request, model=StockMoveBody, max_body=MOVE_CAP, cap=MOVE_CAP)
+        if err:
+            return err
+        op = str(body.get("op") or "status")
+        if op == "status":
+            return _answer(lambda: stock_move.status(who), "the move's status")
+        if op == "part":
+            # The last part reads the whole export: off the loop.
+            return await asyncio.to_thread(_answer, lambda: stock_move.receive_part(
+                who, body.get("upload"), body.get("index"), body.get("total"), body.get("text"), body.get("sha256")),
+                "a part of the export")
+        if op in ("check", "move"):
+            return _answer(lambda: stock_move.start(who, op, body.get("people") or {}), "a " + op)
         return gate._json({"error": "Unknown op."}, 400)

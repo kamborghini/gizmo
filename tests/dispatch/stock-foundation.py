@@ -300,8 +300,9 @@ _STOCK_COLUMNS = {
                           "min_order", "updated_at"],
 }
 
-def _stock_export(history_user="someone", reorder_point_9=0):
-    """An invented export in the exporter's shape, with the stock app's figures for it."""
+def _stock_export(history_user="someone", reorder_point_9=0, low_lines=False):
+    """An invented export in the exporter's shape, with the stock app's figures for it.
+    low_lines: lines 3 and 7 below their level (line 3 carries a warning for it)."""
     def row(table, **values):
         return {c: values.get(c) for c in _STOCK_COLUMNS[table]}
     def item(id, key, **over):
@@ -315,6 +316,9 @@ def _stock_export(history_user="someone", reorder_point_9=0):
              item(9, "Glass|Red|30|", barcode=None, on_order=None, unit_cost=None, unit_cost_gbp=0.5,
                   reorder_point=reorder_point_9),
              item(11, "Glass|Grey|20|", current=3, unit_cost_gbp=4.0, written_off=True)]
+    if low_lines:
+        items[0].update(current=1, used=9)
+        items[1].update(current=1, used=30)
     snap_items = [row("snapshot_items", id=1, snapshot_id=1, item_key="Glass|Blue|20|", category="Glass",
                       written_off=False, current=8, used=2, current_value=10.0),
                   row("snapshot_items", id=2, snapshot_id=1, item_key="Glass|Blue|20||#2", category="Glass",
@@ -718,3 +722,33 @@ def t_the_stock_proof_checks_outstanding_orders_match_on_order():
     found = stock_import.prove(export, out)
     eq(len(found), 1, found)
     ok("orders" in found[0] and "6" in found[0] and "5" in found[0], found[0])
+
+@test
+def t_the_stock_export_reads_one_moment():
+    """On the evening the export reads the production database itself, read
+    only. Every table must come from the same moment, or a change landing
+    between two tables' reads shows up as a difference the proof cannot
+    explain (or, worse, as two halves that agree with each other).
+
+    A session-wide SET run when psycopg2 connects lands inside a transaction
+    that the pool rolls back, so it never took (review, 26 Oct 2026): the
+    snapshot is set as the first statement of the one transaction every
+    table is read in, and the exporter asks Postgres what it got and refuses
+    to export otherwise. The suite cannot run the exporter (it needs the
+    stock app's Python and code), so the words are checked; selfcheck.py
+    --database-url runs it on a real Postgres and checks what it recorded."""
+    src = open(os.path.join(HERE, "tools", "stock_move", "export_from_stock_app.py"), encoding="utf-8").read()
+    ok("SET SESSION CHARACTERISTICS" not in src, "no session-wide SET that a rollback undoes")
+    body = src[src.index("def dump_tables("):src.index("def figures(")]
+    eq(body.count("engine.connect()"), 1, "every table is read on one connection, in one transaction")
+    block = body[body.index("with engine.connect() as conn:"):]
+    first = block.index("conn.exec_driver_sql(")
+    ok(block[first:].startswith('conn.exec_driver_sql("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")'),
+       "the snapshot is the transaction's first statement")
+    ok(first < block.index("inspect(conn)") < block.index("for name in TABLES:") < block.index("seqs = sequences(conn"),
+       "then the table names, the tables and the sequences, all inside it")
+    ok("SHOW transaction_isolation" in body and "SHOW transaction_read_only" in body and "SystemExit" in body,
+       "and it checks what Postgres gave it, refusing otherwise")
+    check = open(os.path.join(HERE, "tools", "stock_move", "selfcheck.py"), encoding="utf-8").read()
+    ok('add_argument("--database-url"' in check and "source_session" in check,
+       "the selfcheck can build its invented data in a real Postgres and checks the session the export recorded")

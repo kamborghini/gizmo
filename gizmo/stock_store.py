@@ -20,6 +20,7 @@ import glob
 import json
 import logging
 import os
+import shutil
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -69,6 +70,58 @@ def rooted(folder: str):
         yield
     finally:
         _set_paths(saved)
+
+
+# ---- moving in ------------------------------------------------------------
+
+def _prefixes() -> tuple:
+    return (STOCK_SNAPSHOTS_CHANGES_PREFIX, STOCK_BACKUP_PREFIX)
+
+
+def _live_files() -> list:
+    """Every stock store file where the stock sheet reads it."""
+    found = []
+    for p in _paths():
+        if p in _prefixes():
+            found += sorted(glob.glob(p + "*"))
+        elif os.path.exists(p):
+            found.append(p)
+    return found
+
+
+def install_from(folder: str) -> dict:
+    """Put a converted, proven set of stores (the converter wrote them into
+    `folder`) where the stock sheet reads them. Whatever stock store is
+    already there is set aside inside `folder`, never deleted; each store is
+    copied in whole and replaces its file in one step, keeping its
+    permissions (the suppliers and the backups stay owner-only). The moment
+    of going live (`live_since`) is not written here: the move sets it last."""
+    live = _live_files()
+    aside = None
+    if live:
+        aside = os.path.join(folder, "set-aside-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S"))
+        os.makedirs(aside, exist_ok=True)
+        for p in live:
+            shutil.move(p, os.path.join(aside, os.path.basename(p)))
+            jsonstore._forget_store(p)
+    installed = []
+    for p in _paths():
+        if p == STOCK_JOURNAL_PATH:
+            continue
+        name = os.path.basename(p)
+        if p in _prefixes():
+            pairs = [(src, os.path.join(os.path.dirname(p), os.path.basename(src)))
+                     for src in sorted(glob.glob(os.path.join(folder, name + "*")))]
+        else:
+            src = os.path.join(folder, name)
+            pairs = [(src, p)] if os.path.exists(src) else []
+        for src, dst in pairs:
+            tmp = dst + ".installing"
+            shutil.copy2(src, tmp)
+            os.replace(tmp, dst)
+            jsonstore._forget_store(dst)
+            installed.append(os.path.basename(dst))
+    return {"installed": installed, "set_aside": aside}
 
 
 # One append at a time: the highest id is read and the new lines written

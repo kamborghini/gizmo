@@ -2388,5 +2388,44 @@
    ]
   },
   "source": "tests/dispatch/stock-ai.py:219"
+ },
+ {
+  "path": "/api/stock/move",
+  "body": {
+   "op": "status"
+  },
+  "source": "static/src/js/stock-move.js:134"
+ },
+ {
+  "path": "/api/stock/move",
+  "body": {
+   "op": "part",
+   "upload": "u1",
+   "index": 0,
+   "total": 3,
+   "text": "{\"format\": \"stock-export-1\"",
+   "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "source": "static/src/js/stock-move.js:156"
+ },
+ {
+  "path": "/api/stock/move",
+  "body": {
+   "op": "check",
+   "people": {
+    "someone": "acct-1"
+   }
+  },
+  "source": "static/src/js/stock-move.js:165"
+ },
+ {
+  "path": "/api/stock/move",
+  "body": {
+   "op": "move",
+   "people": {
+    "someone": "acct-1"
+   }
+  },
+  "source": "static/src/js/stock-move.js:165"
  }
 ]

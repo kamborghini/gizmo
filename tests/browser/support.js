@@ -52,6 +52,7 @@ const READS = {
   '/api/stock/backups': [R('list')],
   '/api/stock/mapping': [R('mapping'), R('parked')],
   '/api/stock/suppliers': [R('list')],
+  '/api/stock/move': [R('status')],
 };
 
 function isRead(route, b) {

@@ -80,7 +80,7 @@ def to_json_value(v):
 
 
 def read_only_engine(url: str):
-    from sqlalchemy import create_engine, event
+    from sqlalchemy import create_engine
     from sqlalchemy.engine import make_url
     u = make_url(url)
     if u.get_backend_name() == "sqlite":
@@ -90,14 +90,10 @@ def read_only_engine(url: str):
         return create_engine("sqlite://", creator=lambda: sqlite3.connect(f"file:{path}?mode=ro", uri=True))
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql://", 1)
-    engine = create_engine(url)
-
-    @event.listens_for(engine, "connect")
-    def _read_only(dbapi_conn, _record):
-        cur = dbapi_conn.cursor()
-        cur.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
-        cur.close()
-    return engine
+    # Read only and one moment are set on the transaction itself, in
+    # dump_tables: a session-wide SET run as psycopg2 connects lands inside a
+    # transaction the pool rolls back, and never takes.
+    return create_engine(url)
 
 
 def sequences(conn, present) -> dict:
@@ -119,11 +115,21 @@ def sequences(conn, present) -> dict:
 
 def dump_tables(engine):
     """(the export's tables, the raw rows by table for the replica, the
-    tables it does not know with their counts, the sequences)."""
+    tables it does not know with their counts, the sequences, the session
+    they were read in). Every table is read in one transaction: on Postgres
+    one REPEATABLE READ, READ ONLY snapshot, set as its first statement and
+    then confirmed, so a change landing during the export cannot split it
+    and nothing can be written."""
     from sqlalchemy import MetaData, Table, func, inspect, select
-    present = set(inspect(engine).get_table_names())
-    out, raw, unknown = {}, {}, {}
+    out, raw, unknown, session = {}, {}, {}, {}
     with engine.connect() as conn:
+        if conn.dialect.name == "postgresql":
+            conn.exec_driver_sql("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+            session = {"isolation": conn.exec_driver_sql("SHOW transaction_isolation").scalar(),
+                       "read_only": conn.exec_driver_sql("SHOW transaction_read_only").scalar()}
+            if session != {"isolation": "repeatable read", "read_only": "on"}:
+                raise SystemExit(f"refused: the database did not give one read-only snapshot ({session}); nothing exported")
+        present = set(inspect(conn).get_table_names())
         for name in sorted(present - set(TABLES)):
             t = Table(name, MetaData(), autoload_with=conn)
             unknown[name] = conn.execute(select(func.count()).select_from(t)).scalar_one()
@@ -142,7 +148,7 @@ def dump_tables(engine):
                          "rows": [{c: to_json_value(r[c]) for c in cols} for r in rows],
                          "missing": False}
         seqs = sequences(conn, present)
-    return out, raw, unknown, seqs
+    return out, raw, unknown, seqs, session
 
 
 def figures(db, analytics, raw, now: datetime) -> dict:
@@ -243,10 +249,10 @@ def main(argv=None) -> int:
     import analytics
     head = subprocess.run(["git", "-C", args.stock_app, "rev-parse", "HEAD"],
                           capture_output=True, text=True).stdout.strip()
-    tables, raw, unknown, seqs = dump_tables(read_only_engine(args.database_url))
+    tables, raw, unknown, seqs, session = dump_tables(read_only_engine(args.database_url))
     export = {"format": "stock-export-1", "exported_at": datetime.now(timezone.utc).isoformat(),
               "now": now.isoformat(), "source_head": head, "tables": tables,
-              "unknown_tables": unknown, "sequences": seqs,
+              "unknown_tables": unknown, "sequences": seqs, "source_session": session,
               "bridge_rules": {"glass_families": glass_families(args.stock_app)},
               "expected": figures(db, analytics, raw, now)}
     text = json.dumps(export, allow_nan=False, default=to_json_value)

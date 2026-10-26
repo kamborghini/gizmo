@@ -1751,7 +1751,7 @@
                             if (!lines.length) { toastError('The sheet has no lines left.'); return; }
                             if (lines.some(l => !(l.final >= 0))) { toastError('Every line needs a final quantity.'); return; }
                             if (!(await uiConfirm('Send ' + lines.length + ' line(s) for ' + d.date
-                                + ' to the stock app? Stock adjusts to these final figures'
+                                + (stockLive() ? ' to the Stock tab?' : ' to the stock app?') + ' Stock adjusts to these final figures'
                                 + (d.sent ? ', replacing the sheet sent earlier' : '') + '.',
                                 { title: 'Send the stock sheet', okText: 'Send' }))) return;
                             send.disabled = true;
@@ -1777,7 +1777,8 @@
                                 } else if (rr.status === 'matched') {
                                     txt += 'already right (auto-booked ' + rr.already_booked + ')';
                                 } else if (rr.status === 'no_item') {
-                                    txt += 'No stock item: map this line in the stock app, then send again';
+                                    txt += stockLive() ? 'No stock item: map this line in the stock mapping on the Stock tab, then send again'
+                                        : 'No stock item: map this line in the stock app, then send again';
                                 } else {
                                     txt += 'the quantity was not readable';
                                 }

@@ -330,7 +330,8 @@
         function stockInvRow(it, cols) {
             const tr = el('tr', it.written_off ? 'stk-wo' : null);
             tr.dataset.id = String(it.id);
-            const save = textButton('Save', { cls: 'stk-save' });
+            // Teal, as the stock sheet's Save is today (Cameron's call 6, 26 Oct 2026).
+            const save = textButton('Save', { kind: 'primary', cls: 'stk-save' });
             save.type = 'button';
             save.onclick = () => stockInvSave(it, tr, save);
             cols.forEach(k => tr.append(stockInvCell(it, k, tr, save)));

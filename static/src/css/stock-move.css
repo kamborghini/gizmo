@@ -1,0 +1,22 @@
+        /* ---------- Stock: moving the stock sheet in (the owner's window) ---------- */
+        .stock-move-step + .stock-move-step { margin-top: var(--sp-5); }
+        .stock-move-step > .card-title { margin: 0 0 var(--sp-1); }
+        .stock-move-step > .field-help { margin: 0 0 var(--sp-3); }
+        .stock-move-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+        .stock-move-line { margin: var(--sp-2) 0 0; font-size: var(--text-body); line-height: var(--lh-control); color: var(--text-secondary); }
+        .stock-move-line:empty { display: none; }
+        .stock-move-people { display: flex; flex-direction: column; gap: var(--sp-2); }
+        .stock-move-people > .field-help { margin: 0; }
+        /* A stock app name beside the account it becomes; one above the other on a phone. */
+        .stock-move-person { display: grid; grid-template-columns: minmax(0, 12rem) minmax(0, 1fr); gap: var(--sp-3); align-items: center; }
+        .stock-move-name { font-family: var(--font-mono); font-size: var(--text-sm); line-height: var(--lh-control); }
+        .stock-move-result > p { margin: 0; font-size: var(--text-body); line-height: var(--lh-control); }
+        .stock-move-result > p + p { margin-top: var(--sp-2); }
+        .stock-move-good { color: var(--success); }
+        .stock-move-bad { color: var(--error); }
+        .stock-move-wait { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-secondary); }
+        .stock-move-diffs { margin: var(--sp-2) 0 0; padding-left: var(--sp-5); max-height: 16rem; overflow: auto;
+            font-size: var(--text-sm); line-height: var(--lh-control); color: var(--text-primary); }
+        @media (max-width: 640px) {
+            .stock-move-person { grid-template-columns: minmax(0, 1fr); }
+        }

@@ -44,6 +44,7 @@
   "css/stock-inventory.css",
   "css/stock-deliveries.css",
   "css/stock-records.css",
+  "css/stock-move.css",
   "css/recipes.css",
   "css/panels.css"
  ],
@@ -82,6 +83,7 @@
   "js/stock-scan.js",
   "js/stock-deliveries.js",
   "js/stock-records.js",
+  "js/stock-move.js",
   "js/production-manager.js",
   "js/dispatch.js",
   "js/guide.js",
