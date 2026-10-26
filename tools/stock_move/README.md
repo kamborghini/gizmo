@@ -108,3 +108,40 @@ app's folder and its `.venv`:
 The export is then moved in from Reactor itself (Settings, Move the stock
 sheet in), which converts and proves it again on arrival. The steps of the
 evening are under "The switch" below.
+
+## The switch
+
+On an evening agreed with the colleague, in this order. Steps marked
+**Cameron** need the stock app's hosting or its database, which only he can
+reach.
+
+1. **Rehearse first, any day before.** Make the export (above) and, in
+   Reactor, Settings, Stock sheet, **Move the stock sheet in**: send the
+   export, match each stock app name to the person's Reactor account, and
+   press **Check**. It converts the export into a folder of its own and
+   proves every line, history entry, snapshot, quarter, warning, supplier,
+   order and figure against the stock app's own; nothing changes. A
+   difference is listed; fix the cause before the evening. Close the
+   window: nothing is moved until **Move in**.
+2. **Both stop editing stock.** Any counts on a phone are saved first (the
+   workshop list's Save).
+3. **Cameron: stop the stock app** in its hosting, leaving its database
+   running. Nothing can change after this. Orders marked made in Reactor
+   from now on wait in Reactor's queue for the stock sheet; they are booked
+   into it once it has moved in (a booking applied twice changes nothing).
+4. **Cameron: make the final export** (above), from the stopped app's
+   database.
+5. **In Reactor: Move the stock sheet in.** Send the final export, check the
+   names, press **Check**, and once it says **Proven**, **Move in**. It
+   converts and proves the same export again, puts exactly what it proved in
+   place, and only then puts the stock sheet live: the Stock tab opens for
+   the people matched, the queued orders are booked, and the first stock
+   backup is made.
+6. **Look.** Scan a few shelf labels on a phone, and check the Overview
+   against the stock app's last screen.
+7. **Afterwards.** Leave the stock app switched off and keep its database
+   (and the final export, outside every repository) until the next quarter
+   close; switching back is possible only in the first few days, re-entering
+   by hand anything done in Reactor since. Delete the export and the
+   converted folders from the Mac. Once the phones scan well on the Stock
+   tab, the camera test in Settings comes out.
